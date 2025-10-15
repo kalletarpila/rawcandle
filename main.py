@@ -27,7 +27,8 @@ class RawCandleApp:
                 self.page.update()
                 return
             results = []
-            for ticker in tickers:
+            import time
+            for idx, ticker in enumerate(tickers):
                 self.loading_text.value = f"🔄 Haetaan dataa: {ticker}..."
                 self.loading_text.color = ft.Colors.BLUE_600
                 self.page.update()
@@ -58,6 +59,13 @@ class RawCandleApp:
                     try:
                         with open(file_path, 'a', encoding='utf-8') as f:
                             f.write(csv_string)
+                        # Kirjoita lokiin
+                        loki_path = os.path.join(data_dir, "loki.txt")
+                        from datetime import datetime
+                        log_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        log_entry = f"{log_date}, {ticker}, {len(df)} päivää\n"
+                        with open(loki_path, 'a', encoding='utf-8') as loki:
+                            loki.write(log_entry)
                         msg = f"{ticker}: OK ({len(df)} päivää) - Tallennus OK"
                         self.loading_text.value = msg
                         self.loading_text.color = ft.Colors.GREEN_600
@@ -75,6 +83,14 @@ class RawCandleApp:
                     self.loading_text.color = ft.Colors.RED_600
                     self.page.update()
                     results.append(msg)
+                # 1 sekunnin tauko jokaisen osakkeen jälkeen
+                time.sleep(1)
+                # 1 minuutin tauko joka 100. osakkeen jälkeen
+                if (idx + 1) % 100 == 0:
+                    self.loading_text.value = f"⏳ 100 osaketta luettu, pidetään minuutin tauko..."
+                    self.loading_text.color = ft.Colors.ORANGE_600
+                    self.page.update()
+                    time.sleep(60)
             self.loading_text.value = "\n".join(results)
             self.loading_text.color = ft.Colors.GREEN_600
         except Exception as ex:
@@ -347,6 +363,13 @@ class RawCandleApp:
             # Lisää uusi rivi tiedoston loppuun
             with open(file_path, 'a', encoding='utf-8') as f:
                 f.write(csv_string)
+            # Kirjoita lokiin
+            loki_path = os.path.join(data_dir, "loki.txt")
+            from datetime import datetime
+            log_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            log_entry = f"{log_date}, {ticker}, {len(df)} päivää\n"
+            with open(loki_path, 'a', encoding='utf-8') as loki:
+                loki.write(log_entry)
             save_msg = f"✅ Rivi lisätty tiedostoon: {file_path}"
             save_color = ft.Colors.GREEN_600
         except Exception as ex:
