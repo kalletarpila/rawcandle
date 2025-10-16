@@ -8,8 +8,8 @@ import base64
 class RawCandleApp:
     def fetch_and_save_from_file(self, e):
         import os
-        tickers_file = os.path.join(os.path.dirname(__file__), "tickers.txt")
         data_dir = os.path.join(os.path.dirname(__file__), "data")
+        tickers_file = os.path.join(data_dir, "tickers.txt")
         file_path = os.path.join(data_dir, "osakedata.csv")
         if not os.path.exists(tickers_file):
             self.loading_text.value = f"❌ Tiedostoa ei löytynyt: {tickers_file}"
@@ -165,6 +165,12 @@ class RawCandleApp:
                     tooltip="Settings", 
                     on_click=lambda _: self.page.go("/settings")
                 ),
+                ft.IconButton(
+                    ft.Icons.EXIT_TO_APP,
+                    tooltip="Lopeta ohjelma",
+                    on_click=self.quit_app,
+                    style=ft.ButtonStyle(bgcolor=ft.Colors.RED_400, color=ft.Colors.WHITE),
+                ),
             ],
         )
 
@@ -253,6 +259,13 @@ class RawCandleApp:
                                 icon=ft.Icons.HOME,
                                 on_click=lambda _: self.page.go("/")
                             ),
+                            ft.ElevatedButton(
+                                "Lopeta ohjelma",
+                                icon=ft.Icons.EXIT_TO_APP,
+                                on_click=self.quit_app,
+                                bgcolor=ft.Colors.RED_400,
+                                color=ft.Colors.WHITE,
+                            ),
                         ],
                         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                         spacing=20,
@@ -264,6 +277,22 @@ class RawCandleApp:
             vertical_alignment=ft.MainAxisAlignment.START,
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
         )
+    def quit_app(self, e):
+        import sys
+        self.page.snack_bar = ft.SnackBar(
+            ft.Text("Ohjelma lopetettu", color=ft.Colors.WHITE),
+            bgcolor=ft.Colors.RED_400,
+            duration=1500
+        )
+        self.page.overlay.append(self.page.snack_bar)
+        self.page.snack_bar.open = True
+        self.page.update()
+        import threading
+        def delayed_exit():
+            import time
+            time.sleep(1.5)
+            sys.exit(0)
+        threading.Thread(target=delayed_exit).start()
 
     def route_change(self, route):
         """Käsittelee reitityksen muutokset"""
