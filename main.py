@@ -10,7 +10,162 @@ from pathlib import Path
 
 
 class RawCandleApp:
+
+
     def create_settings_view(self):
+        """Palauttaa placeholder-näkymän asetuksille"""
+        return ft.View(
+            "/settings",
+            [
+                self.create_appbar(),
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text("Asetukset", size=28, weight=ft.FontWeight.BOLD, color=ft.Colors.ORANGE_700),
+                        ft.Text("Tämä on asetukset-sivu (toteutus puuttuu)", color=ft.Colors.GREY_600),
+                    ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=20),
+                    padding=40,
+                    expand=True,
+                ),
+            ],
+            vertical_alignment=ft.MainAxisAlignment.START,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+
+    def create_candles_view(self):
+        """Luo Candles-sivun näkymän kuudella analyysivalinnalla ja osakevalinnalla"""
+        self.candles_checkboxes = [
+            ft.Checkbox(label="Hammer", value=False),
+            ft.Checkbox(label="Bullish Engulfing", value=False),
+            ft.Checkbox(label="Piercing Pattern", value=False),
+            ft.Checkbox(label="Three White Soldiers", value=False),
+            ft.Checkbox(label="Morning Star", value=False),
+            ft.Checkbox(label="Dragonfly Doji", value=False),
+        ]
+        self.candles_ticker_field = ft.TextField(
+            label="Osakkeen ticker (esim. AAPL)",
+            width=250,
+            hint_text="Jätä tyhjäksi analysoidaksesi kaikki",
+        )
+        self.candles_radio_group = ft.RadioGroup(
+            content=ft.Row([
+                ft.Radio(label="Analysoi annettu ticker", value="single"),
+                ft.Radio(label="Analysoi kaikki osakkeet", value="all"),
+            ], spacing=20),
+            value="single"
+        )
+        # Uusi kortti: aikavälin valinta
+        self.candles_date_radio_group = ft.RadioGroup(
+            content=ft.Row([
+                ft.Radio(label="Kaikki päivät", value="all"),
+                ft.Radio(label="Valitse aikaväli", value="range"),
+            ], spacing=20),
+            value="all"
+        )
+        self.candles_start_date = ft.TextField(
+            label="Alkupäivä (YYYY-MM-DD)",
+            width=180,
+            hint_text="2023-01-01",
+            disabled=True
+        )
+        self.candles_end_date = ft.TextField(
+            label="Loppupäivä (YYYY-MM-DD)",
+            width=180,
+            hint_text="2023-12-31",
+            disabled=True
+        )
+        def on_date_radio_change(e):
+            is_range = self.candles_date_radio_group.value == "range"
+            self.candles_start_date.disabled = not is_range
+            self.candles_end_date.disabled = not is_range
+            self.candles_start_date.update()
+            self.candles_end_date.update()
+        self.candles_date_radio_group.on_change = on_date_radio_change
+
+        return ft.View(
+            "/candles",
+            [
+                self.create_appbar(),
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text(
+                            "Candlestick-analyysit",
+                            size=32,
+                            weight=ft.FontWeight.BOLD,
+                            color=ft.Colors.ORANGE_700
+                        ),
+                        ft.Text(
+                            "Valitse haluamasi analyysit ja osakkeet.",
+                            size=16,
+                            color=ft.Colors.GREY_600
+                        ),
+                        ft.Container(height=16),
+                        ft.ElevatedButton(
+                            "Käynnistä analyysi",
+                            icon=ft.Icons.PLAY_ARROW,
+                            bgcolor=ft.Colors.ORANGE_400,
+                            color=ft.Colors.WHITE,
+                            on_click=self.start_candles_analysis if hasattr(self, 'start_candles_analysis') else None,
+                            width=220,
+                        ),
+                        ft.Divider(height=30, color=ft.Colors.TRANSPARENT),
+                        ft.Row([
+                            ft.Card(
+                                content=ft.Container(
+                                    content=ft.Column([
+                                        ft.Text("Analyysityypit", size=18, weight=ft.FontWeight.BOLD, color=ft.Colors.ORANGE_600),
+                                        ft.Column(self.candles_checkboxes, spacing=12),
+                                    ], horizontal_alignment=ft.CrossAxisAlignment.START),
+                                    padding=20,
+                                    bgcolor=ft.Colors.GREY_50,
+                                    border_radius=8,
+                                    width=320,
+                                ),
+                                elevation=2,
+                            ),
+                            ft.Column([
+                                ft.Card(
+                                    content=ft.Container(
+                                        content=ft.Column([
+                                            ft.Text("Osakevalinta", size=18, weight=ft.FontWeight.BOLD, color=ft.Colors.ORANGE_600),
+                                            self.candles_radio_group,
+                                            self.candles_ticker_field,
+                                        ], horizontal_alignment=ft.CrossAxisAlignment.START, spacing=10),
+                                        padding=20,
+                                        bgcolor=ft.Colors.GREY_50,
+                                        border_radius=8,
+                                        width=420,
+                                    ),
+                                    elevation=2,
+                                ),
+                                ft.Container(height=16),
+                                ft.Card(
+                                    content=ft.Container(
+                                        content=ft.Column([
+                                            ft.Text("Aikaväli", size=18, weight=ft.FontWeight.BOLD, color=ft.Colors.ORANGE_600),
+                                            self.candles_date_radio_group,
+                                            ft.Row([
+                                                self.candles_start_date,
+                                                self.candles_end_date,
+                                            ], spacing=20),
+                                        ], horizontal_alignment=ft.CrossAxisAlignment.START, spacing=10),
+                                        padding=20,
+                                        bgcolor=ft.Colors.GREY_50,
+                                        border_radius=8,
+                                        width=420,
+                                    ),
+                                    elevation=2,
+                                ),
+                            ])
+                        ], alignment=ft.MainAxisAlignment.CENTER, spacing=40),
+                        # ...painonappi siirretty ylös...
+                    ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=30),
+                    padding=40,
+                    expand=True,
+                ),
+            ],
+            vertical_alignment=ft.MainAxisAlignment.START,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        )
         """Palauttaa placeholder-näkymän asetuksille"""
         return ft.View(
             "/settings",
@@ -493,6 +648,11 @@ class RawCandleApp:
                     on_click=lambda _: self.page.go("/database")
                 ),
                 ft.IconButton(
+                    ft.Icons.FLARE,
+                    tooltip="Candles",
+                    on_click=lambda _: self.page.go("/candles")
+                ),
+                ft.IconButton(
                     ft.Icons.EXIT_TO_APP,
                     tooltip="Lopeta ohjelma",
                     on_click=self.quit_app,
@@ -695,7 +855,6 @@ class RawCandleApp:
     def route_change(self, route):
         """Käsittelee reitityksen muutokset"""
         self.page.views.clear()
-        
         # Lisää näkymä reitin perusteella
         if self.page.route == "/" or self.page.route == "/home":
             self.page.views.append(self.create_home_view())
@@ -703,10 +862,11 @@ class RawCandleApp:
             self.page.views.append(self.create_settings_view())
         elif self.page.route == "/database":
             self.page.views.append(self.create_database_view())
+        elif self.page.route == "/candles":
+            self.page.views.append(self.create_candles_view())
         else:
             # 404 - palaa etusivulle
             self.page.go("/")
-            
         self.page.update()
 
     def toggle_theme(self, e):
