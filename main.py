@@ -1,3 +1,4 @@
+
 import flet as ft
 import yfinance as yf
 import datetime
@@ -104,7 +105,6 @@ class RawCandleApp:
                             icon=ft.Icons.PLAY_ARROW,
                             bgcolor=ft.Colors.ORANGE_400,
                             color=ft.Colors.WHITE,
-                            on_click=self.start_candles_analysis if hasattr(self, 'start_candles_analysis') else None,
                             width=220,
                         ),
                         ft.Divider(height=30, color=ft.Colors.TRANSPARENT),
