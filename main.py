@@ -63,11 +63,28 @@ class RawCandleApp:
             value="all"
         )
         # DatePickers for better UX (some Flet versions don't accept label in DatePicker)
+        # Start hidden/disabled; we'll toggle both disabled and visible when radio changes
         self.candles_start_date = ft.DatePicker(
             disabled=True,
+            visible=False,
         )
         self.candles_end_date = ft.DatePicker(
             disabled=True,
+            visible=False,
+        )
+        # TextField fallbacks: some clients don't open the native DatePicker popup.
+        # These allow manual YYYY-MM-DD input and are kept in sync with the DatePicker.
+        self.candles_start_date_text = ft.TextField(
+            label="Alkupäivä (YYYY-MM-DD)",
+            width=200,
+            visible=False,
+            hint_text="esim. 2025-01-31",
+        )
+        self.candles_end_date_text = ft.TextField(
+            label="Loppupäivä (YYYY-MM-DD)",
+            width=200,
+            visible=False,
+            hint_text="esim. 2025-06-30",
         )
 
         # helper to control start button enabled state
@@ -92,14 +109,76 @@ class RawCandleApp:
         # hook date fields to update button state
         self.candles_start_date.on_change = lambda e: update_start_button_enabled()
         self.candles_end_date.on_change = lambda e: update_start_button_enabled()
+        # Text fallback handlers: parse ISO date and push into DatePicker.value when valid
+        def try_parse_date(s: str):
+            if not s:
+                return None
+            try:
+                # allow both date and datetime iso formats
+                d = datetime.date.fromisoformat(s)
+                return d
+            except Exception:
+                try:
+                    # try parsing common format
+                    return datetime.datetime.strptime(s, '%Y-%m-%d').date()
+                except Exception:
+                    return None
+
+        def on_start_text_change(e):
+            v = self.candles_start_date_text.value.strip() if self.candles_start_date_text.value else ''
+            d = try_parse_date(v)
+            if d:
+                try:
+                    self.candles_start_date.value = d
+                    self.candles_start_date.update()
+                except Exception:
+                    pass
+            update_start_button_enabled()
+
+        def on_end_text_change(e):
+            v = self.candles_end_date_text.value.strip() if self.candles_end_date_text.value else ''
+            d = try_parse_date(v)
+            if d:
+                try:
+                    self.candles_end_date.value = d
+                    self.candles_end_date.update()
+                except Exception:
+                    pass
+            update_start_button_enabled()
+
+        self.candles_start_date_text.on_change = on_start_text_change
+        self.candles_end_date_text.on_change = on_end_text_change
 
         def on_date_radio_change(e):
+            # Called when user toggles date mode. Some Flet clients may not re-render
+            # disabled->enabled correctly unless we also toggle visibility.
             is_range = self.candles_date_radio_group.value == "range"
+            # enable/disable
             self.candles_start_date.disabled = not is_range
             self.candles_end_date.disabled = not is_range
+            # show/hide for better compatibility
+            self.candles_start_date.visible = is_range
+            self.candles_end_date.visible = is_range
+            # show/hide fallback text fields
+            self.candles_start_date_text.visible = is_range
+            self.candles_end_date_text.visible = is_range
             update_start_button_enabled()
-            self.candles_start_date.update()
-            self.candles_end_date.update()
+            try:
+                self.candles_start_date.update()
+            except Exception:
+                pass
+            try:
+                self.candles_end_date.update()
+            except Exception:
+                pass
+            try:
+                self.candles_start_date_text.update()
+            except Exception:
+                pass
+            try:
+                self.candles_end_date_text.update()
+            except Exception:
+                pass
         self.candles_date_radio_group.on_change = on_date_radio_change
 
         # create buttons and keep reference to start button for enabling/disabling
@@ -180,11 +259,24 @@ class RawCandleApp:
                                     content=ft.Container(
                                         content=ft.Column([
                                             ft.Text("Aikaväli", size=18, weight=ft.FontWeight.BOLD, color=ft.Colors.ORANGE_600),
-                                            self.candles_date_radio_group,
-                                            ft.Row([
-                                                    ft.Column([ft.Text('Alkupäivä'), self.candles_start_date]),
-                                                    ft.Column([ft.Text('Loppupäivä'), self.candles_end_date]),
-                                                ], spacing=20),
+                                                self.candles_date_radio_group,
+                                                # Fallback button: some clients don't trigger RadioGroup change properly;
+                                                # provide an explicit enable button that sets the radio and calls the handler.
+                                                ft.Row([
+                                                    ft.ElevatedButton(
+                                                        "Ota aikaväli käyttöön",
+                                                        on_click=lambda e: (setattr(self.candles_date_radio_group, 'value', 'range'),
+                                                                           self.candles_date_radio_group.on_change(None),
+                                                                           self.page.update()),
+                                                        width=220,
+                                                        bgcolor=ft.Colors.ORANGE_300,
+                                                        color=ft.Colors.WHITE,
+                                                    ),
+                                                ], alignment=ft.MainAxisAlignment.START),
+                                                ft.Row([
+                                                        ft.Column([ft.Text('Alkupäivä'), self.candles_start_date, self.candles_start_date_text]),
+                                                        ft.Column([ft.Text('Loppupäivä'), self.candles_end_date, self.candles_end_date_text]),
+                                                    ], spacing=20),
                                         ], horizontal_alignment=ft.CrossAxisAlignment.START, spacing=10),
                                         padding=20,
                                         bgcolor=ft.Colors.GREY_50,
@@ -309,14 +401,19 @@ class RawCandleApp:
             self.page.update()
             return
 
-        # Ticker
+        # Ticker: respect radio selection (single or all)
+        ticker_mode = self.candles_radio_group.value
         ticker = self.candles_ticker_field.value.strip().upper()
-        if not ticker:
-            dlg = ft.AlertDialog(title=ft.Text("Syötä osakkeen ticker!"))
-            self.page.dialog = dlg
-            dlg.open = True
-            self.page.update()
-            return
+        if ticker_mode == 'single':
+            if not ticker:
+                dlg = ft.AlertDialog(title=ft.Text("Syötä osakkeen ticker!"))
+                self.page.dialog = dlg
+                dlg.open = True
+                self.page.update()
+                return
+        else:
+            # analyze all tickers if radio group set to 'all'
+            ticker = None
 
         # Aikaväli
         date_mode = self.candles_date_radio_group.value
@@ -379,15 +476,26 @@ class RawCandleApp:
                             self.page.update()
                     except Exception:
                         pass
-
-                results = run_candlestick_analysis(
-                    os.path.join(os.path.dirname(__file__), 'data', 'osakedata.db'),
-                    ticker,
-                    selected_patterns,
-                    start_date,
-                    end_date,
-                    progress_callback=progress_cb,
-                )
+                db_path = os.path.join(os.path.dirname(__file__), 'data', 'osakedata.db')
+                results = {}
+                if ticker is None:
+                    # analyze all tickers in DB and aggregate results
+                    with sqlite3.connect(db_path) as conn:
+                        cur = conn.cursor()
+                        cur.execute("SELECT DISTINCT osake FROM osakedata ORDER BY osake")
+                        rows = [r[0] for r in cur.fetchall()]
+                    total_tickers = len(rows)
+                    for idx, t in enumerate(rows):
+                        # map per-ticker fraction into overall progress
+                        def per_ticker_progress(fraction: float, idx=idx, total=total_tickers):
+                            overall = (idx + fraction) / max(1, total)
+                            progress_cb(overall)
+                        res = run_candlestick_analysis(db_path, t, selected_patterns, start_date, end_date, progress_callback=per_ticker_progress)
+                        # merge results
+                        for k, v in res.items():
+                            results[k] = results.get(k, []) + v
+                else:
+                    results = run_candlestick_analysis(db_path, ticker, selected_patterns, start_date, end_date, progress_callback=progress_cb)
                 # tallenna ja muodosta viesti
                 msg = print_analysis_results(results, ticker, output_path)
                 # päivitykset UI:hin
