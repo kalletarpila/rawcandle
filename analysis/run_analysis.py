@@ -85,38 +85,38 @@ def run_candlestick_analysis(
             ok = is_hammer(row)
             if ok:
                 found.append("Hammer")
-            if logger:
-                logger.info(f"{ticker} {row['pvm'].date().isoformat()} Hammer checked - {'FOUND' if ok else 'not found'}")
-        if i > 0 and "Bullish Engulfing" in patterns and is_bullish_engulfing(df.iloc[i-1], row):
+                if logger:
+                    logger.info(f"{ticker} {row['pvm'].date().isoformat()} Hammer checked - FOUND")
+        if i > 0 and "Bullish Engulfing" in patterns:
             ok = is_bullish_engulfing(df.iloc[i-1], row)
             if ok:
                 found.append("Bullish Engulfing")
-            if logger:
-                logger.info(f"{ticker} {row['pvm'].date().isoformat()} Bullish Engulfing checked - {'FOUND' if ok else 'not found'}")
-        if i > 0 and "Piercing Pattern" in patterns and is_piercing_pattern(df.iloc[i-1], row):
+                if logger:
+                    logger.info(f"{ticker} {row['pvm'].date().isoformat()} Bullish Engulfing checked - FOUND")
+        if i > 0 and "Piercing Pattern" in patterns:
             ok = is_piercing_pattern(df.iloc[i-1], row)
             if ok:
                 found.append("Piercing Pattern")
-            if logger:
-                logger.info(f"{ticker} {row['pvm'].date().isoformat()} Piercing Pattern checked - {'FOUND' if ok else 'not found'}")
-        if i >= 2 and "Three White Soldiers" in patterns and is_three_white_soldiers(df, i):
+                if logger:
+                    logger.info(f"{ticker} {row['pvm'].date().isoformat()} Piercing Pattern checked - FOUND")
+        if i >= 2 and "Three White Soldiers" in patterns:
             ok = is_three_white_soldiers(df, i)
             if ok:
                 found.append("Three White Soldiers")
-            if logger:
-                logger.info(f"{ticker} {row['pvm'].date().isoformat()} Three White Soldiers checked - {'FOUND' if ok else 'not found'}")
-        if i >= 2 and "Morning Star" in patterns and is_morning_star(df, i):
+                if logger:
+                    logger.info(f"{ticker} {row['pvm'].date().isoformat()} Three White Soldiers checked - FOUND")
+        if i >= 2 and "Morning Star" in patterns:
             ok = is_morning_star(df, i)
             if ok:
                 found.append("Morning Star")
-            if logger:
-                logger.info(f"{ticker} {row['pvm'].date().isoformat()} Morning Star checked - {'FOUND' if ok else 'not found'}")
-        if "Dragonfly Doji" in patterns and is_dragonfly_doji(row):
+                if logger:
+                    logger.info(f"{ticker} {row['pvm'].date().isoformat()} Morning Star checked - FOUND")
+        if "Dragonfly Doji" in patterns:
             ok = is_dragonfly_doji(row)
             if ok:
                 found.append("Dragonfly Doji")
-            if logger:
-                logger.info(f"{ticker} {row['pvm'].date().isoformat()} Dragonfly Doji checked - {'FOUND' if ok else 'not found'}")
+                if logger:
+                    logger.info(f"{ticker} {row['pvm'].date().isoformat()} Dragonfly Doji checked - FOUND")
         if found:
             # store date as ISO string YYYY-MM-DD for consistency with other outputs
             results[row['pvm'].date().isoformat()] = found
