@@ -25,7 +25,16 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
         header = f"Analyysitulokset ({now}) — {target}"
         lines = [header]
         lines += [f"{k}: {v} kpl" for k, v in count.items()]
-        msg = "\n".join(lines)
+        # Add a compact per-date listing after the summary
+        msg_lines = lines
+        # results is a dict {date: [patterns]}
+        if results:
+            msg_lines.append("")
+            msg_lines.append("Löydetyt tapahtumat (päivämäärä: kuviot):")
+            for d in sorted(results.keys()):
+                pats = ", ".join(results[d])
+                msg_lines.append(f"{d}: {pats}")
+        msg = "\n".join(msg_lines)
 
     if output_path:
         try:

@@ -363,10 +363,37 @@ class RawCandleApp:
             self.page.snack_bar.open = True
             self.page.update()
             return
+        # Dialog content: display the file content (selectable) and add a download button
+        content_control = ft.Text(content, selectable=True)
+
+        def on_save_analysis_result(e: ft.FilePickerResultEvent):
+            # event.path contains the destination path the user chose
+            try:
+                if not e.path:
+                    return
+                with open(output_path, 'r', encoding='utf-8') as src:
+                    data = src.read()
+                with open(e.path, 'w', encoding='utf-8') as dst:
+                    dst.write(data)
+                self.page.snack_bar = ft.SnackBar(ft.Text(f"✅ Tiedosto tallennettu: {e.path}"), bgcolor=ft.Colors.GREEN_600, duration=2000)
+                if self.page.snack_bar not in self.page.overlay:
+                    self.page.overlay.append(self.page.snack_bar)
+                self.page.snack_bar.open = True
+                self.page.update()
+            except Exception as ex:
+                logger.exception("Virhe tallennettaessa analyysitulosta käyttäjän valitsemaan polkuun")
+                self.page.snack_bar = ft.SnackBar(ft.Text(f"❌ Virhe tallennuksessa: {ex}"), bgcolor=ft.Colors.RED_600, duration=3000)
+                if self.page.snack_bar not in self.page.overlay:
+                    self.page.overlay.append(self.page.snack_bar)
+                self.page.snack_bar.open = True
+                self.page.update()
+
+        save_button = ft.ElevatedButton("Lataa tiedosto", icon=ft.icons.FILE_DOWNLOAD, on_click=lambda _: self.file_picker.save_file(on_result=on_save_analysis_result))
+
         dlg = ft.AlertDialog(
             title=ft.Text('Analyysin tulokset'),
-            content=ft.Text(content, selectable=True),
-            actions=[ft.TextButton('Sulje', on_click=lambda _: self.close_dialog(dlg))],
+            content=ft.Column([content_control], tight=True),
+            actions=[save_button, ft.TextButton('Sulje', on_click=lambda _: self.close_dialog(dlg))],
         )
         self.page.dialog = dlg
         dlg.open = True
