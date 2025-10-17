@@ -10,6 +10,7 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
     """
     from collections import Counter
     import datetime as _dt
+    import os
 
     all_found = []
     for pats in results.values():
@@ -61,4 +62,22 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
             # append error note to returned message so UI can show it
             msg = msg + f"\n\n❌ Virhe tiedostoon kirjoitettaessa: {ex}"
 
-    return msg
+    # Also write CSV file next to the text output if output_path provided
+    csv_path = None
+    if output_path:
+        try:
+            csv_path = os.path.splitext(output_path)[0] + '.csv'
+            with open(csv_path, 'w', encoding='utf-8') as cf:
+                cf.write('ticker,date,pattern\n')
+                for key in sorted(results.keys()):
+                    if '|' in key:
+                        t, d = key.split('|', 1)
+                    else:
+                        t = ticker or ''
+                        d = key
+                    for p in results[key]:
+                        cf.write(f"{t},{d},{p}\n")
+        except Exception:
+            csv_path = None
+
+    return msg, csv_path

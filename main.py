@@ -388,7 +388,11 @@ class RawCandleApp:
                 self.page.snack_bar.open = True
                 self.page.update()
 
-        save_button = ft.ElevatedButton("Lataa tiedosto", icon=ft.icons.FILE_DOWNLOAD, on_click=lambda _: self.file_picker.save_file(on_result=on_save_analysis_result))
+        save_button = ft.ElevatedButton(
+            "Lataa tiedosto",
+            icon=ft.Icons.FILE_DOWNLOAD,
+            on_click=lambda _: self.file_picker.save_file(on_result=on_save_analysis_result),
+        )
 
         dlg = ft.AlertDialog(
             title=ft.Text('Analyysin tulokset'),
