@@ -49,8 +49,23 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
 
     if output_path:
         try:
-            with open(output_path, "w", encoding="utf-8") as f:
+            # create timestamped filename next to the provided output_path
+            base_dir = os.path.dirname(output_path)
+            base_name = os.path.splitext(os.path.basename(output_path))[0]
+            ts = _dt.datetime.now().strftime('%Y%m%d_%H%M%S')
+            timestamped_txt = os.path.join(base_dir, f"{base_name}_{ts}.txt")
+            with open(timestamped_txt, "w", encoding="utf-8") as f:
                 f.write(msg + "\n")
+            # also update the canonical (non-timestamped) output file so UI can keep using it
+            canonical_txt = os.path.join(base_dir, f"{base_name}.txt")
+            try:
+                with open(canonical_txt, "w", encoding="utf-8") as cf:
+                    cf.write(msg + "\n")
+            except Exception:
+                # non-fatal
+                pass
+            # expose timestamped path to caller via output_path variable
+            output_path = timestamped_txt
         except Exception as ex:
             # try to log via available logger, but don't require it
             try:
@@ -66,7 +81,11 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
     csv_path = None
     if output_path:
         try:
+            # write CSV with the same timestamped base name
             csv_path = os.path.splitext(output_path)[0] + '.csv'
+            # if output_path ended with .txt, replace .txt with .csv
+            if csv_path.lower().endswith('.txt.csv'):
+                csv_path = csv_path[:-4]
             with open(csv_path, 'w', encoding='utf-8') as cf:
                 cf.write('ticker,date,pattern\n')
                 for key in sorted(results.keys()):
@@ -77,6 +96,21 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
                         d = key
                     for p in results[key]:
                         cf.write(f"{t},{d},{p}\n")
+            # also update canonical CSV
+            try:
+                canonical_csv = os.path.join(base_dir, f"{base_name}.csv")
+                with open(canonical_csv, 'w', encoding='utf-8') as bcf:
+                    bcf.write('ticker,date,pattern\n')
+                    for key in sorted(results.keys()):
+                        if '|' in key:
+                            t, d = key.split('|', 1)
+                        else:
+                            t = ticker or ''
+                            d = key
+                        for p in results[key]:
+                            bcf.write(f"{t},{d},{p}\n")
+            except Exception:
+                pass
         except Exception:
             csv_path = None
 
