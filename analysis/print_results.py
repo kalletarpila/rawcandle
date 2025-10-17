@@ -53,6 +53,25 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
             base_dir = os.path.dirname(output_path)
             base_name = os.path.splitext(os.path.basename(output_path))[0]
             ts = _dt.datetime.now().strftime('%Y%m%d_%H%M%S')
+            # archive existing analysis_results files
+            try:
+                archive_dir = os.path.join(base_dir, 'archive')
+                os.makedirs(archive_dir, exist_ok=True)
+                for fname in os.listdir(base_dir):
+                    if fname.startswith(base_name):
+                        src = os.path.join(base_dir, fname)
+                        dst = os.path.join(archive_dir, fname)
+                        # if destination exists, add a suffix to avoid overwrite
+                        if os.path.exists(dst):
+                            dst = os.path.join(archive_dir, f"{fname}.{ts}")
+                        try:
+                            os.replace(src, dst)
+                        except Exception:
+                            # best-effort: ignore move failure
+                            pass
+            except Exception:
+                # non-fatal if archiving fails
+                pass
             timestamped_txt = os.path.join(base_dir, f"{base_name}_{ts}.txt")
             with open(timestamped_txt, "w", encoding="utf-8") as f:
                 f.write(msg + "\n")

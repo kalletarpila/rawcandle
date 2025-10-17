@@ -1,5 +1,15 @@
 
 import flet as ft
+# Compatibility shim: older code used `ft.Colors` but newer flet exposes `ft.colors`.
+# Provide an alias so existing references to `ft.Colors` keep working.
+try:
+    ft.Colors = ft.colors
+except Exception:
+    pass
+try:
+    ft.Icons = ft.icons
+except Exception:
+    pass
 import yfinance as yf
 import datetime
 import pandas as pd
@@ -21,8 +31,8 @@ class RawCandleApp:
                 self.create_appbar(),
                 ft.Container(
                     content=ft.Column([
-                        ft.Text("Asetukset", size=28, weight=ft.FontWeight.BOLD, color=ft.Colors.ORANGE_700),
-                        ft.Text("Tämä on asetukset-sivu (toteutus puuttuu)", color=ft.Colors.GREY_600),
+                        ft.Text("Asetukset", size=28, weight=ft.FontWeight.BOLD, color=ft.colors.ORANGE_700),
+                        ft.Text("Tämä on asetukset-sivu (toteutus puuttuu)", color=ft.colors.GREY_600),
                     ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=20),
                     padding=40,
                     expand=True,
@@ -185,16 +195,18 @@ class RawCandleApp:
         self.candles_start_button = ft.ElevatedButton(
             "Käynnistä analyysi",
             icon=ft.Icons.PLAY_ARROW,
-            bgcolor=ft.Colors.ORANGE_400,
-            color=ft.Colors.WHITE,
+            bgcolor=ft.colors.ORANGE_400,
+            color=ft.colors.WHITE,
             on_click=self.start_candles_analysis,
             width=220,
         )
+        # Result banner (mirrors main page `loading_text` style)
+        self.candles_result_text = ft.Text(value="", color=ft.colors.BLUE_600)
         self.candles_show_button = ft.ElevatedButton(
             "Näytä tulokset",
             icon=ft.Icons.VISIBILITY,
-            bgcolor=ft.Colors.BLUE_600,
-            color=ft.Colors.WHITE,
+            bgcolor=ft.colors.BLUE_600,
+            color=ft.colors.WHITE,
             on_click=self.show_analysis_results if hasattr(self, 'show_analysis_results') else None,
             width=220,
         )
@@ -224,6 +236,7 @@ class RawCandleApp:
                             self.candles_start_button,
                             self.candles_show_button,
                         ], alignment=ft.MainAxisAlignment.CENTER, spacing=20),
+                        ft.Container(content=self.candles_result_text),
                         ft.Divider(height=30, color=ft.Colors.TRANSPARENT),
                         ft.Row([
                             ft.Card(
@@ -302,14 +315,14 @@ class RawCandleApp:
         data_dir = Path(__file__).parent / "data"
         db_path = data_dir / "osakedata.db"
         if not db_path.exists():
-            self.page.snack_bar = ft.SnackBar(
+            sb = ft.SnackBar(
                 ft.Text("❌ Tietokantaa ei löytynyt!", color=ft.Colors.WHITE),
                 bgcolor=ft.Colors.RED_600,
                 duration=2000
             )
-            if self.page.snack_bar not in self.page.overlay:
-                self.page.overlay.append(self.page.snack_bar)
-            self.page.snack_bar.open = True
+            if sb not in self.page.overlay:
+                self.page.overlay.append(sb)
+            sb.open = True
             self.page.update()
             return
         try:
@@ -337,14 +350,14 @@ class RawCandleApp:
         logger = setup_logger()
         output_path = os.path.join(os.path.dirname(__file__), 'analysis', 'analysis_results.txt')
         if not os.path.exists(output_path):
-            self.page.snack_bar = ft.SnackBar(
+            sb = ft.SnackBar(
                 ft.Text("ℹ️ Tulostiedostoa ei löytynyt.", color=ft.Colors.WHITE),
                 bgcolor=ft.Colors.ORANGE_600,
                 duration=2000
             )
-            if self.page.snack_bar not in self.page.overlay:
-                self.page.overlay.append(self.page.snack_bar)
-            self.page.snack_bar.open = True
+            if sb not in self.page.overlay:
+                self.page.overlay.append(sb)
+            sb.open = True
             self.page.update()
             logger.info("analysis_results.txt not found when attempting to show results")
             return
@@ -353,14 +366,14 @@ class RawCandleApp:
                 content = f.read()
         except Exception as ex:
             logger.exception("Virhe avattaessa analyysitulostiedostoa")
-            self.page.snack_bar = ft.SnackBar(
+            sb = ft.SnackBar(
                 ft.Text(f"❌ Virhe tiedostoa avattaessa: {ex}", color=ft.Colors.WHITE),
                 bgcolor=ft.Colors.RED_600,
                 duration=3000
             )
-            if self.page.snack_bar not in self.page.overlay:
-                self.page.overlay.append(self.page.snack_bar)
-            self.page.snack_bar.open = True
+            if sb not in self.page.overlay:
+                self.page.overlay.append(sb)
+            sb.open = True
             self.page.update()
             return
         # Dialog content: display the file content (selectable) and add a download button
@@ -375,23 +388,23 @@ class RawCandleApp:
                     data = src.read()
                 with open(e.path, 'w', encoding='utf-8') as dst:
                     dst.write(data)
-                self.page.snack_bar = ft.SnackBar(ft.Text(f"✅ Tiedosto tallennettu: {e.path}"), bgcolor=ft.Colors.GREEN_600, duration=2000)
-                if self.page.snack_bar not in self.page.overlay:
-                    self.page.overlay.append(self.page.snack_bar)
-                self.page.snack_bar.open = True
+                sb = ft.SnackBar(ft.Text(f"✅ Tiedosto tallennettu: {e.path}"), bgcolor=ft.Colors.GREEN_600, duration=2000)
+                if sb not in self.page.overlay:
+                    self.page.overlay.append(sb)
+                sb.open = True
                 self.page.update()
             except Exception as ex:
                 logger.exception("Virhe tallennettaessa analyysitulosta käyttäjän valitsemaan polkuun")
-                self.page.snack_bar = ft.SnackBar(ft.Text(f"❌ Virhe tallennuksessa: {ex}"), bgcolor=ft.Colors.RED_600, duration=3000)
-                if self.page.snack_bar not in self.page.overlay:
-                    self.page.overlay.append(self.page.snack_bar)
-                self.page.snack_bar.open = True
+                sb = ft.SnackBar(ft.Text(f"❌ Virhe tallennuksessa: {ex}"), bgcolor=ft.Colors.RED_600, duration=3000)
+                if sb not in self.page.overlay:
+                    self.page.overlay.append(sb)
+                sb.open = True
                 self.page.update()
 
         save_button = ft.ElevatedButton(
             "Lataa tiedosto",
             icon=ft.Icons.FILE_DOWNLOAD,
-            on_click=lambda _: self.file_picker.save_file(on_result=on_save_analysis_result),
+            on_click=lambda _: (setattr(self.file_picker, 'on_result', on_save_analysis_result), self.file_picker.save_file()),
         )
 
         dlg = ft.AlertDialog(
@@ -404,7 +417,9 @@ class RawCandleApp:
                 ft.TextButton('Sulje', on_click=lambda e: on_close_and_ack(dlg)),
             ],
         )
-        self.page.dialog = dlg
+        # Use Page.overlay for dialogs (dialog property deprecated)
+        if dlg not in self.page.overlay:
+            self.page.overlay.append(dlg)
         dlg.open = True
         self.page.update()
 
@@ -422,16 +437,17 @@ class RawCandleApp:
                     actions=[ft.TextButton('OK', on_click=lambda _: self.close_dialog(ack_dlg))],
                     modal=True,
                 )
-                self.page.dialog = ack_dlg
+                if ack_dlg not in self.page.overlay:
+                    self.page.overlay.append(ack_dlg)
                 ack_dlg.open = True
                 self.page.update()
             except Exception:
                 # fallback: show a normal snackbar that times out if dialog creation fails
                 try:
-                    self.page.snack_bar = ft.SnackBar(ft.Text('Analyysitulokset kirjoitettu.'), bgcolor=ft.Colors.BLUE_600, duration=3000)
-                    if self.page.snack_bar not in self.page.overlay:
-                        self.page.overlay.append(self.page.snack_bar)
-                    self.page.snack_bar.open = True
+                    sb = ft.SnackBar(ft.Text('Analyysitulokset kirjoitettu.'), bgcolor=ft.Colors.BLUE_600, duration=3000)
+                    if sb not in self.page.overlay:
+                        self.page.overlay.append(sb)
+                    sb.open = True
                     self.page.update()
                 except Exception:
                     pass
@@ -446,21 +462,22 @@ class RawCandleApp:
 
         logger.info("start_candles_analysis called")
         # immediate user feedback
-        self.page.snack_bar = ft.SnackBar(
+        sb = ft.SnackBar(
             ft.Text("🔄 Analyysi käynnistyy...", color=ft.Colors.WHITE),
             bgcolor=ft.Colors.BLUE_600,
             duration=1500
         )
-        if self.page.snack_bar not in self.page.overlay:
-            self.page.overlay.append(self.page.snack_bar)
-        self.page.snack_bar.open = True
+        if sb not in self.page.overlay:
+            self.page.overlay.append(sb)
+        sb.open = True
         self.page.update()
 
         # Kerää valitut analyysit
         selected_patterns = [cb.label for cb in self.candles_checkboxes if cb.value]
         if not selected_patterns:
             dlg = ft.AlertDialog(title=ft.Text("Valitse vähintään yksi analyysi!"))
-            self.page.dialog = dlg
+            if dlg not in self.page.overlay:
+                self.page.overlay.append(dlg)
             dlg.open = True
             self.page.update()
             return
@@ -471,7 +488,8 @@ class RawCandleApp:
         if ticker_mode == 'single':
             if not ticker:
                 dlg = ft.AlertDialog(title=ft.Text("Syötä osakkeen ticker!"))
-                self.page.dialog = dlg
+                if dlg not in self.page.overlay:
+                    self.page.overlay.append(dlg)
                 dlg.open = True
                 self.page.update()
                 return
@@ -487,14 +505,16 @@ class RawCandleApp:
             ed = self.candles_end_date.value
             if sd is None or ed is None:
                 dlg = ft.AlertDialog(title=ft.Text("Täytä sekä alkupäivä että loppupäivä."))
-                self.page.dialog = dlg
+                if dlg not in self.page.overlay:
+                    self.page.overlay.append(dlg)
                 dlg.open = True
                 self.page.update()
                 return
             # ensure start <= end
             if sd > ed:
                 dlg = ft.AlertDialog(title=ft.Text("Alkupäivä ei voi olla myöhemmin kuin loppupäivä."))
-                self.page.dialog = dlg
+                if dlg not in self.page.overlay:
+                    self.page.overlay.append(dlg)
                 dlg.open = True
                 self.page.update()
                 return
@@ -513,7 +533,8 @@ class RawCandleApp:
             actions=[ft.TextButton("Sulje", on_click=lambda _: self.close_dialog(dialog))],
             modal=True
         )
-        self.page.dialog = dialog
+        if dialog not in self.page.overlay:
+            self.page.overlay.append(dialog)
         dialog.open = True
         self.page.update()
 
@@ -576,6 +597,19 @@ class RawCandleApp:
                 logger.info(f"Analyysi valmis: {ticker} - {safe_msg}")
                 if csv_path:
                     logger.info(f"Analysis CSV written: {csv_path}")
+                # Update Candles result banner: show analyzed ticker(s) and total matches
+                try:
+                    total_matches = sum(len(v) for v in results.values())
+                    if ticker is None:
+                        banner = f"Analyysi valmis: kaikki tickereitä, löydetty yhteensä {total_matches} tapahtumaa."
+                    else:
+                        banner = f"Analyysi valmis: {ticker}, löydetty yhteensä {total_matches} tapahtumaa."
+                    self.candles_result_text.value = banner
+                    # green on success
+                    self.candles_result_text.color = ft.Colors.GREEN_600
+                    self.page.update()
+                except Exception:
+                    pass
                 # Näytä yhteenveto-ikkuna: montako matchia ja montako tickeriä sisältää tuloksia
                 try:
                     total_matches = sum(len(v) for v in results.values())
@@ -589,7 +623,8 @@ class RawCandleApp:
                             ft.TextButton('Sulje', on_click=lambda _: self.close_dialog(summary_dlg)),
                         ],
                     )
-                    self.page.dialog = summary_dlg
+                    if summary_dlg not in self.page.overlay:
+                        self.page.overlay.append(summary_dlg)
                     summary_dlg.open = True
                     self.page.update()
                 except Exception:
@@ -600,14 +635,14 @@ class RawCandleApp:
                 self.page.update()
                 logger.exception("Virhe analyysissä")
                 # Näytä snack bar käyttäjälle
-                self.page.snack_bar = ft.SnackBar(
+                sb = ft.SnackBar(
                     ft.Text(f"❌ Virhe analyysissä: {str(ex)}", color=ft.Colors.WHITE),
                     bgcolor=ft.Colors.RED_600,
                     duration=3000
                 )
-                if self.page.snack_bar not in self.page.overlay:
-                    self.page.overlay.append(self.page.snack_bar)
-                self.page.snack_bar.open = True
+                if sb not in self.page.overlay:
+                    self.page.overlay.append(sb)
+                sb.open = True
                 self.page.update()
 
         # startataan worker-säie
@@ -900,14 +935,14 @@ class RawCandleApp:
         db_path = data_dir / "osakedata.db"
 
         if not db_path.exists():
-            self.page.snack_bar = ft.SnackBar(
+            sb = ft.SnackBar(
                 ft.Text("❌ Tietokantaa ei löytynyt!", color=ft.Colors.WHITE),
                 bgcolor=ft.Colors.RED_600,
                 duration=2000
             )
-            if self.page.snack_bar not in self.page.overlay:
-                self.page.overlay.append(self.page.snack_bar)
-            self.page.snack_bar.open = True
+            if sb not in self.page.overlay:
+                self.page.overlay.append(sb)
+            sb.open = True
             self.page.update()
             return
 
@@ -931,14 +966,14 @@ class RawCandleApp:
                     tulokset.extend(rivit)
 
             if not tulokset:
-                self.page.snack_bar = ft.SnackBar(
+                sb = ft.SnackBar(
                     ft.Text("ℹ️ Ei tietoja näytettäväksi. Tietokanta on tyhjä.", color=ft.Colors.WHITE),
                     bgcolor=ft.Colors.ORANGE_500,
                     duration=2000
                 )
-                if self.page.snack_bar not in self.page.overlay:
-                    self.page.overlay.append(self.page.snack_bar)
-                self.page.snack_bar.open = True
+                if sb not in self.page.overlay:
+                    self.page.overlay.append(sb)
+                sb.open = True
                 self.page.update()
                 return
 
@@ -1000,14 +1035,14 @@ class RawCandleApp:
             self.page.update()
 
         except Exception as ex:
-            self.page.snack_bar = ft.SnackBar(
+            sb = ft.SnackBar(
                 ft.Text(f"❌ Virhe tietojen hakemisessa: {str(ex)}", color=ft.Colors.WHITE),
                 bgcolor=ft.Colors.RED_600,
                 duration=2500
             )
-            if self.page.snack_bar not in self.page.overlay:
-                self.page.overlay.append(self.page.snack_bar)
-            self.page.snack_bar.open = True
+            if sb not in self.page.overlay:
+                self.page.overlay.append(sb)
+            sb.open = True
             self.page.update()
 
 
@@ -1015,8 +1050,14 @@ class RawCandleApp:
         """Asettaa sivun perusasetukset"""
         self.page.title = "RawCandle - Flet Web App"
         self.page.theme_mode = ft.ThemeMode.LIGHT
-        self.page.window_width = 800
-        self.page.window_height = 600
+        try:
+            # Page.window was introduced in newer Flet; set width/height when available
+            if hasattr(self.page, 'window') and self.page.window is not None:
+                self.page.window.width = 800
+                self.page.window.height = 600
+        except Exception:
+            # fallback - ignore if attribute not present
+            pass
         
     def setup_routing(self):
         """Asettaa reitityksen"""
@@ -1095,6 +1136,18 @@ class RawCandleApp:
                         ],
                         alignment=ft.MainAxisAlignment.CENTER,
                         spacing=20),
+                        ft.Container(height=12),
+                        # Ticker input for database view (same behavior as home page)
+                        ft.Row([
+                            ft.TextField(label="Osakkeen ticker (esim. AAPL)", width=300, key="db_ticker_field"),
+                        ], alignment=ft.MainAxisAlignment.CENTER),
+                        ft.Row([
+                            ft.ElevatedButton(
+                                "Näytä osake",
+                                icon=ft.Icons.SEARCH,
+                                on_click=self.db_show_stock
+                            ),
+                        ], alignment=ft.MainAxisAlignment.CENTER),
                     ],
                     horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                     spacing=20),
@@ -1117,18 +1170,56 @@ class RawCandleApp:
             msg = f"❌ Virhe tietokannan käsittelyssä: {str(ex)}"
             color = ft.Colors.RED_600
 
-        self.page.snack_bar = ft.SnackBar(
+        sb = ft.SnackBar(
             ft.Text(msg, color=ft.Colors.WHITE),
             bgcolor=color,
             duration=2000
         )
-
         # varmista, ettei lisätä monta kertaa overlayhin
-        if self.page.snack_bar not in self.page.overlay:
-            self.page.overlay.append(self.page.snack_bar)
-
-        self.page.snack_bar.open = True
+        if sb not in self.page.overlay:
+            self.page.overlay.append(sb)
+        sb.open = True
         self.page.update()
+
+    def db_show_stock(self, e):
+        """Handler for database view 'Näytä osake' button: uses a local ticker field if present."""
+        # Try to get the ticker field from the page (we set key 'db_ticker_field')
+        try:
+            db_ticker_ctrl = None
+            # safe lookup from page controls (some Flet versions expose controls differently)
+            for c in getattr(self.page, 'controls', []) or []:
+                if getattr(c, 'key', None) == 'db_ticker_field':
+                    db_ticker_ctrl = c
+                    break
+            # fallback: try attributes we added to self earlier
+            if db_ticker_ctrl is None:
+                # sometimes controls are nested; try to use self.ticker_field
+                ticker = getattr(self, 'ticker_field', None).value.strip().upper() if getattr(self, 'ticker_field', None) else ''
+            else:
+                ticker = db_ticker_ctrl.value.strip().upper() if getattr(db_ticker_ctrl, 'value', None) else ''
+
+            if not ticker:
+                sb = ft.SnackBar(ft.Text('❌ Syötä osakkeen ticker!'), bgcolor=ft.Colors.RED_600, duration=2000)
+                if sb not in self.page.overlay:
+                    self.page.overlay.append(sb)
+                sb.open = True
+                self.page.update()
+                return
+
+            # set the main ticker_field so existing fetch/show logic uses it
+            if hasattr(self, 'ticker_field') and getattr(self.ticker_field, 'value', None) is not None:
+                self.ticker_field.value = ticker
+            # call existing fetch and show
+            self.fetch_stock_data(None)
+            # If fetch succeeded, show it
+            if getattr(self, 'stock_data', None) is not None:
+                self.show_stock_data(None)
+        except Exception as ex:
+            sb = ft.SnackBar(ft.Text(f'❌ Virhe: {ex}'), bgcolor=ft.Colors.RED_600, duration=2000)
+            if sb not in self.page.overlay:
+                self.page.overlay.append(sb)
+            sb.open = True
+            self.page.update()
   
 
     def create_home_view(self):
@@ -1156,7 +1247,7 @@ class RawCandleApp:
                                 content=ft.Container(
                                     content=ft.Column([
                                         ft.Text("📈 Yahoo Finance Data", size=20, weight=ft.FontWeight.BOLD),
-                                        ft.Text("Hae osakkeen tiedot syyskuulta 2024", size=14, color=ft.Colors.GREY_600),
+                                        ft.Text("Hae osakkeen tiedot alkaen heinäkuusta 2023", size=14, color=ft.Colors.GREY_600),
                                         ft.Row([
                                             self.ticker_field,
                                             ft.ElevatedButton(
@@ -1231,18 +1322,20 @@ class RawCandleApp:
                     expand=True,
                 ),
             ],
+            scroll=ft.ScrollMode.AUTO,
             vertical_alignment=ft.MainAxisAlignment.START,
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
         )
     def quit_app(self, e):
         import sys
-        self.page.snack_bar = ft.SnackBar(
+        sb = ft.SnackBar(
             ft.Text("Ohjelma lopetettu", color=ft.Colors.WHITE),
             bgcolor=ft.Colors.RED_400,
             duration=1500
         )
-        self.page.overlay.append(self.page.snack_bar)
-        self.page.snack_bar.open = True
+        if sb not in self.page.overlay:
+            self.page.overlay.append(sb)
+        sb.open = True
         self.page.update()
         import threading
         def delayed_exit():
@@ -1299,7 +1392,7 @@ class RawCandleApp:
             hist = stock.history(start=start_date, end=end_date)
             
             if hist.empty:
-                self.loading_text.value = f"❌ Ei dataa löytynyt tickerille {ticker} syyskuulta 2024"
+                self.loading_text.value = f"❌ Ei dataa löytynyt tickerille {ticker} Sori! "
                 self.loading_text.color = ft.Colors.RED_600
                 self.stock_data = None
             else:
