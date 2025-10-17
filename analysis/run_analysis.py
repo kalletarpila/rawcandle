@@ -118,8 +118,10 @@ def run_candlestick_analysis(
                 if logger:
                     logger.info(f"{ticker} {row['pvm'].date().isoformat()} Dragonfly Doji checked - FOUND")
         if found:
-            # store date as ISO string YYYY-MM-DD for consistency with other outputs
-            results[row['pvm'].date().isoformat()] = found
+            # store with ticker prefix so aggregated results across tickers keep identity
+            # key format: TICKER|YYYY-MM-DD
+            key = f"{ticker}|{row['pvm'].date().isoformat()}"
+            results[key] = found
         # Call progress callback with fraction (0.0-1.0)
         if progress_callback is not None and total > 0:
             try:

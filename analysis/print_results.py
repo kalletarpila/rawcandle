@@ -25,15 +25,25 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
         header = f"Analyysitulokset ({now}) — {target}"
         lines = [header]
         lines += [f"{k}: {v} kpl" for k, v in count.items()]
-        # Add a compact per-date listing after the summary
+
+        # Add CSV-style per-finding lines: ticker,date,pattern
+        csv_lines = []
+        for key in sorted(results.keys()):
+            # expecting key format: 'TICKER|YYYY-MM-DD' from runner
+            if '|' in key:
+                t, d = key.split('|', 1)
+            else:
+                # backward compatibility: key might be just date
+                t = ticker or ''
+                d = key
+            pats = results[key]
+            for p in pats:
+                csv_lines.append(f"{t},{d},{p}")
+
         msg_lines = lines
-        # results is a dict {date: [patterns]}
-        if results:
-            msg_lines.append("")
-            msg_lines.append("Löydetyt tapahtumat (päivämäärä: kuviot):")
-            for d in sorted(results.keys()):
-                pats = ", ".join(results[d])
-                msg_lines.append(f"{d}: {pats}")
+        msg_lines.append("")
+        msg_lines.append("Löydetyt tapahtumat (yhden rivin CSV: ticker,päivä,kuvio):")
+        msg_lines.extend(csv_lines)
         msg = "\n".join(msg_lines)
 
     if output_path:
