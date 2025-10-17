@@ -1,9 +1,0 @@
-Analyysitulokset (2025-10-17 13:53:14) — tickerille SFM
-Hammer: 1 kpl
-Bullish Engulfing: 1 kpl
-Dragonfly Doji: 1 kpl
-
-Löydetyt tapahtumat (yhden rivin CSV: ticker,päivä,kuvio):
-ABC,2025-02-02,Dragonfly Doji
-SFM,2025-01-01,Hammer
-SFM,2025-01-01,Bullish Engulfing

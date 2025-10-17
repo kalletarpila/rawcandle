@@ -1,31 +1,18 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
-*$py.class
-
-# Virtual environments
-venv/
+# Virtual environment
 .venv/
-env/
-ENV/
-/.venv/
 
-# Logs
-analysis/*.log
-analysis/*.log.bak
+# Analysis outputs
+analysis/analysis_results*.txt
+analysis/analysis_results*.csv
+analysis/archive/
+analysis/analysis.log
 
-# Database files
+# Data files and DB
 data/*.db
+data/osakedata.csv
+data/loki.txt
 
-# Distribution / packaging
-build/
-dist/
-*.egg-info/
-
-# IDEs
+# Editor and OS
 .vscode/
-.idea/
-
-# OS files
-.DS_Store
-Thumbs.db
+__pycache__/
+*.pyc
