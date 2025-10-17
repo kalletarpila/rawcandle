@@ -397,11 +397,44 @@ class RawCandleApp:
         dlg = ft.AlertDialog(
             title=ft.Text('Analyysin tulokset'),
             content=ft.Column([content_control], tight=True),
-            actions=[save_button, ft.TextButton('Sulje', on_click=lambda _: self.close_dialog(dlg))],
+            # replace simple close with a handler that closes the results dialog and
+            # opens a modal acknowledgement dialog that requires explicit OK
+            actions=[
+                save_button,
+                ft.TextButton('Sulje', on_click=lambda e: on_close_and_ack(dlg)),
+            ],
         )
         self.page.dialog = dlg
         dlg.open = True
         self.page.update()
+
+        def on_close_and_ack(results_dialog):
+            try:
+                # close the results dialog
+                self.close_dialog(results_dialog)
+            except Exception:
+                pass
+            try:
+                # create a modal acknowledgement dialog that user must click OK to dismiss
+                ack_dlg = ft.AlertDialog(
+                    title=ft.Text('Huom!'),
+                    content=ft.Text('Analyysitulokset ovat tallennettu. Paina OK kuittaaksesi.'),
+                    actions=[ft.TextButton('OK', on_click=lambda _: self.close_dialog(ack_dlg))],
+                    modal=True,
+                )
+                self.page.dialog = ack_dlg
+                ack_dlg.open = True
+                self.page.update()
+            except Exception:
+                # fallback: show a normal snackbar that times out if dialog creation fails
+                try:
+                    self.page.snack_bar = ft.SnackBar(ft.Text('Analyysitulokset kirjoitettu.'), bgcolor=ft.Colors.BLUE_600, duration=3000)
+                    if self.page.snack_bar not in self.page.overlay:
+                        self.page.overlay.append(self.page.snack_bar)
+                    self.page.snack_bar.open = True
+                    self.page.update()
+                except Exception:
+                    pass
 
     def start_candles_analysis(self, e):
         import os
@@ -528,13 +561,21 @@ class RawCandleApp:
                 else:
                     results = run_candlestick_analysis(db_path, ticker, selected_patterns, start_date, end_date, progress_callback=progress_cb)
                 # tallenna ja muodosta viesti
-                msg = print_analysis_results(results, ticker, output_path)
+                result = print_analysis_results(results, ticker, output_path)
+                # print_analysis_results may return (msg, csv_path) or a plain string
+                if isinstance(result, tuple):
+                    text_msg, csv_path = result
+                else:
+                    text_msg = result
+                    csv_path = None
                 # päivitykset UI:hin
                 status.value = "Analyysi tehty"
                 progress.value = 1.0
                 self.page.update()
-                safe_msg = msg.replace("\n", " | ")
+                safe_msg = str(text_msg).replace("\n", " | ")
                 logger.info(f"Analyysi valmis: {ticker} - {safe_msg}")
+                if csv_path:
+                    logger.info(f"Analysis CSV written: {csv_path}")
                 # Näytä yhteenveto-ikkuna: montako matchia ja montako tickeriä sisältää tuloksia
                 try:
                     total_matches = sum(len(v) for v in results.values())
