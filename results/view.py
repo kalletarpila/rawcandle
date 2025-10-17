@@ -112,15 +112,28 @@ def create_results_view(app) -> ft.View:
 
     # Buttons
     # Buttons are currently inactive; handlers removed until user specifies behavior.
-    generate_btn = ft.ElevatedButton(
-        "Generoi CSV",
-        icon=ft.Icons.FILE_UPLOAD,
-        bgcolor=ft.colors.ORANGE_400,
-        color=ft.colors.WHITE,
-        disabled=True,
-        tooltip="Ei vielä käytössä",
-        width=220,
-    )
+    # wire the generate button to the implementation in results.generate_results
+    try:
+        from results.generate_results import paivita_results_csv_click
+        generate_btn = ft.ElevatedButton(
+            "Generoi CSV",
+            icon=ft.Icons.FILE_UPLOAD,
+            bgcolor=ft.colors.ORANGE_400,
+            color=ft.colors.WHITE,
+            disabled=False,
+            on_click=paivita_results_csv_click,
+            width=220,
+        )
+    except Exception:
+        generate_btn = ft.ElevatedButton(
+            "Generoi CSV",
+            icon=ft.Icons.FILE_UPLOAD,
+            bgcolor=ft.colors.ORANGE_400,
+            color=ft.colors.WHITE,
+            disabled=True,
+            tooltip="Ei vielä käytössä",
+            width=220,
+        )
     show_btn = ft.ElevatedButton(
         "Näytä CSV",
         icon=ft.Icons.VISIBILITY,

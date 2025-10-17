@@ -46,14 +46,43 @@ def paivita_results_csv(page: ft.Page):
                 page.update()
                 return
 
-            # Read analysis rows
+            # Read analysis rows. Try common table/column name variants.
             with sqlite3.connect(analysis_db) as aconn:
                 acur = aconn.cursor()
-                try:
-                    acur.execute("SELECT date, ticker, kynttila FROM analysis")
-                except Exception:
-                    # try table/column name variants
-                    acur.execute("SELECT date, ticker, kynttila FROM analysis")
+                # find a suitable table name
+                tbls = [r[0] for r in acur.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+                candidates = ['analysis', 'analysis_findings', 'findings', 'analysis_rows']
+                table_name = None
+                for c in candidates:
+                    if c in tbls:
+                        table_name = c
+                        break
+                if table_name is None:
+                    # fallback: pick first table that looks like it has date and ticker-like columns
+                    for t in tbls:
+                        info = acur.execute(f"PRAGMA table_info({t})").fetchall()
+                        cols = [r[1].lower() for r in info]
+                        if any(x in cols for x in ('date', 'pvm')) and any(x in cols for x in ('ticker', 'osake', 'symbol')):
+                            table_name = t
+                            break
+                if table_name is None:
+                    raise RuntimeError('analysis table not found in analysis.db')
+
+                # introspect columns to pick date, ticker and pattern columns
+                info = acur.execute(f"PRAGMA table_info({table_name})").fetchall()
+                col_names = [r[1] for r in info]
+                lower = {c.lower(): c for c in col_names}
+                date_col = lower.get('date') or lower.get('pvm') or lower.get('pvm')
+                ticker_col_a = lower.get('ticker') or lower.get('osake') or lower.get('symbol')
+                pattern_col = lower.get('kynttila') or lower.get('pattern') or lower.get('pattern_name') or lower.get('kyntti')
+                if not date_col or not ticker_col_a:
+                    raise RuntimeError(f'Cannot find date/ticker columns in table {table_name}: {col_names}')
+
+                q = f"SELECT \"{date_col}\", \"{ticker_col_a}\""
+                if pattern_col:
+                    q += f", \"{pattern_col}\""
+                q += f" FROM \"{table_name}\""
+                acur.execute(q)
                 rows = acur.fetchall()
 
             if not rows:
@@ -66,10 +95,18 @@ def paivita_results_csv(page: ft.Page):
 
             # group by ticker for per-ticker DB reads
             by_ticker = {}
-            for date, ticker, kynttila in rows:
+            for rec in rows:
+                if len(rec) == 3:
+                    date, ticker, kynttila = rec
+                elif len(rec) == 2:
+                    date, ticker = rec
+                    kynttila = ''
+                else:
+                    # unexpected shape
+                    continue
                 if not ticker:
                     continue
-                by_ticker.setdefault(ticker, []).append((date, kynttila))
+                by_ticker.setdefault(str(ticker), []).append((str(date), kynttila))
 
             output_rows = []
 
