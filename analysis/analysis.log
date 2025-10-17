@@ -1002,3 +1002,127 @@
 2025-10-17 15:57:04,964 INFO: ^IXIC 2025-09-17 Hammer checked - FOUND
 2025-10-17 15:57:04,980 INFO: Analyysi valmis: None - Analyysitulokset (2025-10-17 15:57:04) — kaikille tickereille | Hammer: 135 kpl | Bullish Engulfing: 58 kpl |  | Löydetyt tapahtumat (yhden rivin CSV: ticker,päivä,kuvio): | ABNB,2023-07-06,Hammer | ABNB,2023-08-07,Hammer | ABNB,2023-08-08,Hammer | ABNB,2023-08-11,Hammer | ABNB,2023-08-14,Hammer | ABNB,2023-09-25,Bullish Engulfing | ABNB,2023-10-05,Hammer | ABNB,2023-10-23,Bullish Engulfing | ABNB,2023-12-01,Bullish Engulfing | ABNB,2024-02-06,Hammer | ABNB,2024-03-14,Hammer | ABNB,2024-05-02,Hammer | ABNB,2024-05-20,Hammer | ABNB,2024-05-31,Hammer | ABNB,2024-06-14,Hammer | ABNB,2024-07-01,Hammer | ABNB,2024-07-02,Bullish Engulfing | ABNB,2024-07-15,Bullish Engulfing | ABNB,2024-07-25,Hammer | ABNB,2024-08-15,Hammer | ABNB,2024-08-21,Hammer | ABNB,2024-09-11,Hammer | ABNB,2024-09-16,Hammer | ABNB,2024-10-18,Hammer | ABNB,2024-10-21,Bullish Engulfing | ABNB,2024-10-29,Bullish Engulfing | ABNB,2024-12-24,Hammer | ABNB,2025-01-23,Bullish Engulfing | ABNB,2025-02-05,Hammer | ABNB,2025-02-12,Bullish Engulfing | ABNB,2025-03-05,Hammer | ABNB,2025-03-07,Hammer | ABNB,2025-03-31,Hammer | ABNB,2025-04-30,Hammer | ABNB,2025-06-23,Hammer | ABNB,2025-06-27,Hammer | ABNB,2025-07-01,Bullish Engulfing | ABNB,2025-07-14,Bullish Engulfing | ABNB,2025-07-16,Hammer | ABNB,2025-07-22,Hammer | ABNB,2025-08-28,Hammer | ABNB,2025-09-04,Hammer | SFM,2023-07-05,Bullish Engulfing | SFM,2023-07-24,Hammer | SFM,2023-08-22,Hammer | SFM,2023-08-31,Bullish Engulfing | SFM,2023-09-08,Bullish Engulfing | SFM,2023-09-11,Hammer | SFM,2023-09-15,Hammer | SFM,2023-10-23,Bullish Engulfing | SFM,2023-10-31,Hammer | SFM,2023-11-10,Hammer | SFM,2023-11-20,Bullish Engulfing | SFM,2023-12-06,Bullish Engulfing | SFM,2023-12-13,Bullish Engulfing | SFM,2024-01-11,Hammer | SFM,2024-01-19,Hammer | SFM,2024-02-22,Bullish Engulfing | SFM,2024-03-08,Hammer | SFM,2024-03-15,Bullish Engulfing | SFM,2024-03-22,Bullish Engulfing | SFM,2024-03-27,Hammer | SFM,2024-04-10,Bullish Engulfing | SFM,2024-04-11,Hammer | SFM,2024-06-10,Hammer | SFM,2024-08-09,Hammer | SFM,2024-08-29,Bullish Engulfing | SFM,2024-10-07,Hammer | SFM,2024-10-10,Hammer | SFM,2024-10-29,Hammer | SFM,2024-11-19,Bullish Engulfing | SFM,2024-11-20,Hammer | SFM,2024-12-04,Bullish Engulfing | SFM,2024-12-24,Bullish Engulfing | SFM,2025-01-08,Hammer | SFM,2025-01-15,Hammer | SFM,2025-01-21,Bullish Engulfing | SFM,2025-01-24,Hammer | SFM,2025-01-31,Bullish Engulfing | SFM,2025-02-12,Bullish Engulfing | SFM,2025-02-25,Hammer | SFM,2025-03-11,Bullish Engulfing | SFM,2025-03-19,Bullish Engulfing | SFM,2025-03-28,Hammer | SFM,2025-03-31,Bullish Engulfing | SFM,2025-04-25,Hammer | SFM,2025-05-05,Hammer | SFM,2025-05-15,Bullish Engulfing | SFM,2025-05-29,Hammer | SFM,2025-06-06,Hammer | SFM,2025-08-13,Hammer | SFM,2025-09-03,Hammer | SFM,2025-09-23,Hammer | ^GSPC,2023-07-06,Hammer | ^GSPC,2023-07-10,Bullish Engulfing | ^GSPC,2023-08-25,Hammer | ^GSPC,2023-09-11,Hammer | ^GSPC,2023-09-28,Bullish Engulfing | ^GSPC,2023-10-06,Bullish Engulfing | ^GSPC,2023-10-11,Hammer | ^GSPC,2023-11-16,Bullish Engulfing | ^GSPC,2023-11-28,Bullish Engulfing | ^GSPC,2023-12-04,Hammer | ^GSPC,2024-01-11,Hammer | ^GSPC,2024-01-25,Hammer | ^GSPC,2024-02-06,Hammer | ^GSPC,2024-02-08,Hammer | ^GSPC,2024-02-13,Hammer | ^GSPC,2024-02-27,Hammer | ^GSPC,2024-02-29,Hammer | ^GSPC,2024-03-19,Bullish Engulfing | ^GSPC,2024-05-02,Hammer | ^GSPC,2024-05-14,Bullish Engulfing | ^GSPC,2024-05-28,Hammer | ^GSPC,2024-06-03,Hammer | ^GSPC,2024-06-06,Hammer | ^GSPC,2024-06-13,Hammer | ^GSPC,2024-06-14,Hammer | ^GSPC,2024-08-14,Hammer | ^GSPC,2024-09-10,Hammer | ^GSPC,2024-09-20,Hammer | ^GSPC,2024-09-24,Hammer | ^GSPC,2024-09-30,Bullish Engulfing | ^GSPC,2024-10-02,Hammer | ^GSPC,2024-10-04,Hammer | ^GSPC,2024-10-24,Hammer | ^GSPC,2024-12-20,Bullish Engulfing | ^GSPC,2025-01-14,Hammer | ^GSPC,2025-02-06,Hammer | ^GSPC,2025-02-18,Hammer | ^GSPC,2025-03-12,Hammer | ^GSPC,2025-04-09,Bullish Engulfing | ^GSPC,2025-04-11,Bullish Engulfing | ^GSPC,2025-04-29,Bullish Engulfing | ^GSPC,2025-05-15,Bullish Engulfing | ^GSPC,2025-07-16,Hammer | ^GSPC,2025-08-20,Hammer | ^GSPC,2025-08-26,Bullish Engulfing | ^GSPC,2025-09-02,Hammer | ^GSPC,2025-09-09,Hammer | ^IXIC,2023-07-06,Hammer | ^IXIC,2023-07-10,Bullish Engulfing | ^IXIC,2023-08-07,Hammer | ^IXIC,2023-09-11,Hammer | ^IXIC,2023-09-14,Hammer | ^IXIC,2023-09-19,Hammer | ^IXIC,2023-09-28,Bullish Engulfing | ^IXIC,2023-10-06,Bullish Engulfing | ^IXIC,2023-11-30,Hammer | ^IXIC,2023-12-01,Bullish Engulfing | ^IXIC,2023-12-04,Hammer | ^IXIC,2023-12-21,Hammer | ^IXIC,2024-01-11,Hammer | ^IXIC,2024-01-17,Hammer | ^IXIC,2024-02-06,Hammer | ^IXIC,2024-02-15,Hammer | ^IXIC,2024-02-27,Hammer | ^IXIC,2024-02-29,Hammer | ^IXIC,2024-03-19,Bullish Engulfing | ^IXIC,2024-03-27,Hammer | ^IXIC,2024-04-09,Hammer | ^IXIC,2024-04-29,Hammer | ^IXIC,2024-05-09,Hammer | ^IXIC,2024-05-13,Hammer | ^IXIC,2024-05-17,Hammer | ^IXIC,2024-05-22,Hammer | ^IXIC,2024-05-28,Hammer | ^IXIC,2024-05-31,Hammer | ^IXIC,2024-06-13,Hammer | ^IXIC,2024-08-14,Hammer | ^IXIC,2024-08-30,Hammer | ^IXIC,2024-09-09,Hammer | ^IXIC,2024-09-20,Hammer | ^IXIC,2024-09-24,Hammer | ^IXIC,2024-10-16,Hammer | ^IXIC,2024-10-24,Hammer | ^IXIC,2024-11-20,Hammer | ^IXIC,2024-11-21,Hammer | ^IXIC,2024-12-20,Bullish Engulfing | ^IXIC,2025-01-29,Hammer | ^IXIC,2025-02-18,Hammer | ^IXIC,2025-02-20,Hammer | ^IXIC,2025-04-11,Bullish Engulfing | ^IXIC,2025-04-29,Bullish Engulfing | ^IXIC,2025-05-12,Hammer | ^IXIC,2025-06-02,Bullish Engulfing | ^IXIC,2025-06-27,Hammer | ^IXIC,2025-07-02,Bullish Engulfing | ^IXIC,2025-07-14,Hammer | ^IXIC,2025-08-20,Hammer | ^IXIC,2025-08-26,Bullish Engulfing | ^IXIC,2025-09-09,Hammer | ^IXIC,2025-09-17,Hammer
 2025-10-17 15:57:04,981 INFO: Analysis CSV written: /home/kalle/projects/rawcandle/analysis/analysis_results_20251017_155704.csv
+2025-10-17 16:28:12,181 INFO: ABC,2025-10-15,Hammer
+2025-10-17 16:28:12,181 INFO: ABC,2025-10-15,Hammer
+2025-10-17 16:28:12,181 INFO: XYZ,2025-10-16,Dragonfly Doji
+2025-10-17 16:37:30,628 INFO: start_candles_analysis called
+2025-10-17 16:37:30,637 INFO: Analyysi valmis: NMRK - Analyysi 2025-10-17 16:37:30 — Ei yhtään valittua kynttiläkuviota löytynyt tickerille NMRK.
+2025-10-17 16:37:30,637 INFO: Analysis CSV written: /home/kalle/projects/rawcandle/analysis/analysis_results_20251017_163730.csv
+2025-10-17 16:38:14,202 INFO: start_candles_analysis called
+2025-10-17 16:38:14,239 INFO: NMRK 2023-08-01 Hammer checked - FOUND
+2025-10-17 16:38:14,240 INFO: NMRK 2023-08-01 Hammer checked - FOUND
+2025-10-17 16:38:14,250 INFO: NMRK 2023-08-23 Piercing Pattern checked - FOUND
+2025-10-17 16:38:14,257 INFO: NMRK 2023-09-12 Bullish Engulfing checked - FOUND
+2025-10-17 16:38:14,276 INFO: NMRK 2023-10-25 Hammer checked - FOUND
+2025-10-17 16:38:14,276 INFO: NMRK 2023-10-25 Hammer checked - FOUND
+2025-10-17 16:38:14,287 INFO: NMRK 2023-11-17 Hammer checked - FOUND
+2025-10-17 16:38:14,287 INFO: NMRK 2023-11-17 Hammer checked - FOUND
+2025-10-17 16:38:14,292 INFO: NMRK 2023-12-01 Bullish Engulfing checked - FOUND
+2025-10-17 16:38:14,300 INFO: NMRK 2023-12-22 Hammer checked - FOUND
+2025-10-17 16:38:14,301 INFO: NMRK 2023-12-22 Hammer checked - FOUND
+2025-10-17 16:38:14,309 INFO: NMRK 2024-01-19 Hammer checked - FOUND
+2025-10-17 16:38:14,311 INFO: NMRK 2024-01-19 Hammer checked - FOUND
+2025-10-17 16:38:14,314 INFO: NMRK 2024-01-29 Bullish Engulfing checked - FOUND
+2025-10-17 16:38:14,321 INFO: NMRK 2024-02-07 Hammer checked - FOUND
+2025-10-17 16:38:14,322 INFO: NMRK 2024-02-07 Hammer checked - FOUND
+2025-10-17 16:38:14,328 INFO: NMRK 2024-02-26 Piercing Pattern checked - FOUND
+2025-10-17 16:38:14,330 INFO: NMRK 2024-02-29 Morning Star checked - FOUND
+2025-10-17 16:38:14,334 INFO: NMRK 2024-03-07 Morning Star checked - FOUND
+2025-10-17 16:38:14,336 INFO: NMRK 2024-03-11 Hammer checked - FOUND
+2025-10-17 16:38:14,336 INFO: NMRK 2024-03-11 Hammer checked - FOUND
+2025-10-17 16:38:14,337 INFO: NMRK 2024-03-12 Piercing Pattern checked - FOUND
+2025-10-17 16:38:14,338 INFO: NMRK 2024-03-14 Bullish Engulfing checked - FOUND
+2025-10-17 16:38:14,339 INFO: NMRK 2024-03-19 Bullish Engulfing checked - FOUND
+2025-10-17 16:38:14,345 INFO: NMRK 2024-04-03 Bullish Engulfing checked - FOUND
+2025-10-17 16:38:14,346 INFO: NMRK 2024-04-05 Piercing Pattern checked - FOUND
+2025-10-17 16:38:14,368 INFO: NMRK 2024-05-31 Hammer checked - FOUND
+2025-10-17 16:38:14,370 INFO: NMRK 2024-05-31 Hammer checked - FOUND
+2025-10-17 16:38:14,373 INFO: NMRK 2024-06-10 Bullish Engulfing checked - FOUND
+2025-10-17 16:38:14,384 INFO: NMRK 2024-07-09 Bullish Engulfing checked - FOUND
+2025-10-17 16:38:14,392 INFO: NMRK 2024-07-26 Hammer checked - FOUND
+2025-10-17 16:38:14,393 INFO: NMRK 2024-07-26 Hammer checked - FOUND
+2025-10-17 16:38:14,395 INFO: NMRK 2024-08-02 Hammer checked - FOUND
+2025-10-17 16:38:14,395 INFO: NMRK 2024-08-02 Hammer checked - FOUND
+2025-10-17 16:38:14,410 INFO: NMRK 2024-09-09 Bullish Engulfing checked - FOUND
+2025-10-17 16:38:14,414 INFO: NMRK 2024-09-19 Hammer checked - FOUND
+2025-10-17 16:38:14,415 INFO: NMRK 2024-09-19 Hammer checked - FOUND
+2025-10-17 16:38:14,438 INFO: NMRK 2024-11-13 Morning Star checked - FOUND
+2025-10-17 16:38:14,448 INFO: NMRK 2024-12-11 Morning Star checked - FOUND
+2025-10-17 16:38:14,451 INFO: NMRK 2024-12-16 Morning Star checked - FOUND
+2025-10-17 16:38:14,454 INFO: NMRK 2024-12-20 Piercing Pattern checked - FOUND
+2025-10-17 16:38:14,461 INFO: NMRK 2025-01-13 Hammer checked - FOUND
+2025-10-17 16:38:14,462 INFO: NMRK 2025-01-13 Hammer checked - FOUND
+2025-10-17 16:38:14,464 INFO: NMRK 2025-01-23 Hammer checked - FOUND
+2025-10-17 16:38:14,466 INFO: NMRK 2025-01-23 Hammer checked - FOUND
+2025-10-17 16:38:14,469 INFO: NMRK 2025-01-30 Morning Star checked - FOUND
+2025-10-17 16:38:14,478 INFO: NMRK 2025-02-25 Morning Star checked - FOUND
+2025-10-17 16:38:14,487 INFO: NMRK 2025-03-14 Morning Star checked - FOUND
+2025-10-17 16:38:14,494 INFO: NMRK 2025-04-02 Piercing Pattern checked - FOUND
+2025-10-17 16:38:14,496 INFO: NMRK 2025-04-09 Piercing Pattern checked - FOUND
+2025-10-17 16:38:14,502 INFO: NMRK 2025-04-22 Morning Star checked - FOUND
+2025-10-17 16:38:14,503 INFO: NMRK 2025-04-25 Hammer checked - FOUND
+2025-10-17 16:38:14,503 INFO: NMRK 2025-04-25 Hammer checked - FOUND
+2025-10-17 16:38:14,508 INFO: NMRK 2025-05-06 Hammer checked - FOUND
+2025-10-17 16:38:14,508 INFO: NMRK 2025-05-06 Hammer checked - FOUND
+2025-10-17 16:38:14,518 INFO: NMRK 2025-06-04 Bullish Engulfing checked - FOUND
+2025-10-17 16:38:14,523 INFO: NMRK 2025-06-12 Bullish Engulfing checked - FOUND
+2025-10-17 16:38:14,524 INFO: NMRK 2025-06-16 Morning Star checked - FOUND
+2025-10-17 16:38:14,529 INFO: NMRK 2025-07-01 Piercing Pattern checked - FOUND
+2025-10-17 16:38:14,531 INFO: NMRK 2025-07-09 Dragonfly Doji checked - FOUND
+2025-10-17 16:38:14,532 INFO: NMRK 2025-07-09 Morning Star checked - FOUND
+2025-10-17 16:38:14,532 INFO: NMRK 2025-07-09 Dragonfly Doji checked - FOUND
+2025-10-17 16:38:14,545 INFO: NMRK 2025-07-31 Morning Star checked - FOUND
+2025-10-17 16:38:14,547 INFO: NMRK 2025-08-06 Hammer checked - FOUND
+2025-10-17 16:38:14,547 INFO: NMRK 2025-08-06 Hammer checked - FOUND
+2025-10-17 16:38:14,565 INFO: NMRK 2025-09-23 Bullish Engulfing checked - FOUND
+2025-10-17 16:38:14,571 INFO: NMRK,2023-08-01,Hammer
+2025-10-17 16:38:14,571 INFO: NMRK,2023-08-23,Piercing Pattern
+2025-10-17 16:38:14,571 INFO: NMRK,2023-09-12,Bullish Engulfing
+2025-10-17 16:38:14,571 INFO: NMRK,2023-10-25,Hammer
+2025-10-17 16:38:14,571 INFO: NMRK,2023-11-17,Hammer
+2025-10-17 16:38:14,571 INFO: NMRK,2023-12-01,Bullish Engulfing
+2025-10-17 16:38:14,571 INFO: NMRK,2023-12-22,Hammer
+2025-10-17 16:38:14,571 INFO: NMRK,2024-01-19,Hammer
+2025-10-17 16:38:14,571 INFO: NMRK,2024-01-29,Bullish Engulfing
+2025-10-17 16:38:14,571 INFO: NMRK,2024-02-07,Hammer
+2025-10-17 16:38:14,571 INFO: NMRK,2024-02-26,Piercing Pattern
+2025-10-17 16:38:14,571 INFO: NMRK,2024-02-29,Morning Star
+2025-10-17 16:38:14,571 INFO: NMRK,2024-03-07,Morning Star
+2025-10-17 16:38:14,571 INFO: NMRK,2024-03-11,Hammer
+2025-10-17 16:38:14,571 INFO: NMRK,2024-03-12,Piercing Pattern
+2025-10-17 16:38:14,571 INFO: NMRK,2024-03-14,Bullish Engulfing
+2025-10-17 16:38:14,571 INFO: NMRK,2024-03-19,Bullish Engulfing
+2025-10-17 16:38:14,571 INFO: NMRK,2024-04-03,Bullish Engulfing
+2025-10-17 16:38:14,571 INFO: NMRK,2024-04-05,Piercing Pattern
+2025-10-17 16:38:14,571 INFO: NMRK,2024-05-31,Hammer
+2025-10-17 16:38:14,571 INFO: NMRK,2024-06-10,Bullish Engulfing
+2025-10-17 16:38:14,571 INFO: NMRK,2024-07-09,Bullish Engulfing
+2025-10-17 16:38:14,571 INFO: NMRK,2024-07-26,Hammer
+2025-10-17 16:38:14,571 INFO: NMRK,2024-08-02,Hammer
+2025-10-17 16:38:14,571 INFO: NMRK,2024-09-09,Bullish Engulfing
+2025-10-17 16:38:14,571 INFO: NMRK,2024-09-19,Hammer
+2025-10-17 16:38:14,571 INFO: NMRK,2024-11-13,Morning Star
+2025-10-17 16:38:14,571 INFO: NMRK,2024-12-11,Morning Star
+2025-10-17 16:38:14,571 INFO: NMRK,2024-12-16,Morning Star
+2025-10-17 16:38:14,571 INFO: NMRK,2024-12-20,Piercing Pattern
+2025-10-17 16:38:14,571 INFO: NMRK,2025-01-13,Hammer
+2025-10-17 16:38:14,571 INFO: NMRK,2025-01-23,Hammer
+2025-10-17 16:38:14,571 INFO: NMRK,2025-01-30,Morning Star
+2025-10-17 16:38:14,571 INFO: NMRK,2025-02-25,Morning Star
+2025-10-17 16:38:14,571 INFO: NMRK,2025-03-14,Morning Star
+2025-10-17 16:38:14,571 INFO: NMRK,2025-04-02,Piercing Pattern
+2025-10-17 16:38:14,571 INFO: NMRK,2025-04-09,Piercing Pattern
+2025-10-17 16:38:14,571 INFO: NMRK,2025-04-22,Morning Star
+2025-10-17 16:38:14,571 INFO: NMRK,2025-04-25,Hammer
+2025-10-17 16:38:14,571 INFO: NMRK,2025-05-06,Hammer
+2025-10-17 16:38:14,571 INFO: NMRK,2025-06-04,Bullish Engulfing
+2025-10-17 16:38:14,571 INFO: NMRK,2025-06-12,Bullish Engulfing
+2025-10-17 16:38:14,571 INFO: NMRK,2025-06-16,Morning Star
+2025-10-17 16:38:14,571 INFO: NMRK,2025-07-01,Piercing Pattern
+2025-10-17 16:38:14,571 INFO: NMRK,2025-07-09,Morning Star
+2025-10-17 16:38:14,571 INFO: NMRK,2025-07-09,Dragonfly Doji
+2025-10-17 16:38:14,571 INFO: NMRK,2025-07-31,Morning Star
+2025-10-17 16:38:14,571 INFO: NMRK,2025-08-06,Hammer
+2025-10-17 16:38:14,571 INFO: NMRK,2025-09-23,Bullish Engulfing
+2025-10-17 16:38:14,583 INFO: Analyysi valmis: NMRK - Analyysitulokset (2025-10-17 16:38:14) — tickerille NMRK | Hammer: 16 kpl | Piercing Pattern: 8 kpl | Bullish Engulfing: 12 kpl | Morning Star: 12 kpl | Dragonfly Doji: 1 kpl |  | Löydetyt tapahtumat (yhden rivin CSV: ticker,päivä,kuvio): | NMRK,2023-08-01,Hammer | NMRK,2023-08-23,Piercing Pattern | NMRK,2023-09-12,Bullish Engulfing | NMRK,2023-10-25,Hammer | NMRK,2023-11-17,Hammer | NMRK,2023-12-01,Bullish Engulfing | NMRK,2023-12-22,Hammer | NMRK,2024-01-19,Hammer | NMRK,2024-01-29,Bullish Engulfing | NMRK,2024-02-07,Hammer | NMRK,2024-02-26,Piercing Pattern | NMRK,2024-02-29,Morning Star | NMRK,2024-03-07,Morning Star | NMRK,2024-03-11,Hammer | NMRK,2024-03-12,Piercing Pattern | NMRK,2024-03-14,Bullish Engulfing | NMRK,2024-03-19,Bullish Engulfing | NMRK,2024-04-03,Bullish Engulfing | NMRK,2024-04-05,Piercing Pattern | NMRK,2024-05-31,Hammer | NMRK,2024-06-10,Bullish Engulfing | NMRK,2024-07-09,Bullish Engulfing | NMRK,2024-07-26,Hammer | NMRK,2024-08-02,Hammer | NMRK,2024-09-09,Bullish Engulfing | NMRK,2024-09-19,Hammer | NMRK,2024-11-13,Morning Star | NMRK,2024-12-11,Morning Star | NMRK,2024-12-16,Morning Star | NMRK,2024-12-20,Piercing Pattern | NMRK,2025-01-13,Hammer | NMRK,2025-01-23,Hammer | NMRK,2025-01-30,Morning Star | NMRK,2025-02-25,Morning Star | NMRK,2025-03-14,Morning Star | NMRK,2025-04-02,Piercing Pattern | NMRK,2025-04-09,Piercing Pattern | NMRK,2025-04-22,Morning Star | NMRK,2025-04-25,Hammer | NMRK,2025-05-06,Hammer | NMRK,2025-06-04,Bullish Engulfing | NMRK,2025-06-12,Bullish Engulfing | NMRK,2025-06-16,Morning Star | NMRK,2025-07-01,Piercing Pattern | NMRK,2025-07-09,Morning Star | NMRK,2025-07-09,Dragonfly Doji | NMRK,2025-07-31,Morning Star | NMRK,2025-08-06,Hammer | NMRK,2025-09-23,Bullish Engulfing
+2025-10-17 16:38:14,584 INFO: Analysis CSV written: /home/kalle/projects/rawcandle/analysis/analysis_results_20251017_163814.csv

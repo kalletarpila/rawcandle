@@ -115,21 +115,15 @@ class RawCandleApp:
                 self.candles_start_button.update()
             except Exception:
                 pass
-
-        # hook date fields to update button state
-        self.candles_start_date.on_change = lambda e: update_start_button_enabled()
-        self.candles_end_date.on_change = lambda e: update_start_button_enabled()
         # Text fallback handlers: parse ISO date and push into DatePicker.value when valid
         def try_parse_date(s: str):
             if not s:
                 return None
             try:
-                # allow both date and datetime iso formats
                 d = datetime.date.fromisoformat(s)
                 return d
             except Exception:
                 try:
-                    # try parsing common format
                     return datetime.datetime.strptime(s, '%Y-%m-%d').date()
                 except Exception:
                     return None
@@ -220,88 +214,88 @@ class RawCandleApp:
                 self.create_appbar(),
                 ft.Container(
                     content=ft.Column([
-                        ft.Text(
-                            "Candlestick-analyysit",
-                            size=32,
-                            weight=ft.FontWeight.BOLD,
-                            color=ft.Colors.ORANGE_700
-                        ),
-                        ft.Text(
-                            "Valitse haluamasi analyysit ja osakkeet.",
-                            size=16,
-                            color=ft.Colors.GREY_600
-                        ),
-                        ft.Container(height=16),
-                        ft.Row([
-                            self.candles_start_button,
-                            self.candles_show_button,
-                        ], alignment=ft.MainAxisAlignment.CENTER, spacing=20),
-                        ft.Container(content=self.candles_result_text),
-                        ft.Divider(height=30, color=ft.Colors.TRANSPARENT),
-                        ft.Row([
-                            ft.Card(
-                                content=ft.Container(
-                                    content=ft.Column([
-                                        ft.Text("Analyysityypit", size=18, weight=ft.FontWeight.BOLD, color=ft.Colors.ORANGE_600),
-                                        ft.Column(self.candles_checkboxes, spacing=12),
-                                    ], horizontal_alignment=ft.CrossAxisAlignment.START),
-                                    padding=20,
-                                    bgcolor=ft.Colors.GREY_50,
-                                    border_radius=8,
-                                    width=320,
-                                ),
-                                elevation=2,
+                            ft.Text(
+                                "Candlestick-analyysit",
+                                size=32,
+                                weight=ft.FontWeight.BOLD,
+                                color=ft.Colors.ORANGE_700
                             ),
-                            ft.Column([
+                            ft.Text(
+                                "Valitse haluamasi analyysit ja osakkeet.",
+                                size=16,
+                                color=ft.Colors.GREY_600
+                            ),
+                            ft.Container(height=16),
+                            ft.Row([
+                                self.candles_start_button,
+                                self.candles_show_button,
+                            ], alignment=ft.MainAxisAlignment.CENTER, spacing=20),
+                            ft.Container(content=self.candles_result_text),
+                            ft.Divider(height=30, color=ft.Colors.TRANSPARENT),
+                            ft.Row([
                                 ft.Card(
                                     content=ft.Container(
                                         content=ft.Column([
-                                            ft.Text("Osakevalinta", size=18, weight=ft.FontWeight.BOLD, color=ft.Colors.ORANGE_600),
-                                            self.candles_radio_group,
-                                            self.candles_ticker_field,
-                                        ], horizontal_alignment=ft.CrossAxisAlignment.START, spacing=10),
+                                            ft.Text("Analyysityypit", size=18, weight=ft.FontWeight.BOLD, color=ft.Colors.ORANGE_600),
+                                            ft.Column(self.candles_checkboxes, spacing=12),
+                                        ], horizontal_alignment=ft.CrossAxisAlignment.START),
                                         padding=20,
                                         bgcolor=ft.Colors.GREY_50,
                                         border_radius=8,
-                                        width=420,
+                                        width=320,
                                     ),
                                     elevation=2,
                                 ),
-                                ft.Container(height=16),
-                                ft.Card(
-                                    content=ft.Container(
-                                        content=ft.Column([
-                                            ft.Text("Aikaväli", size=18, weight=ft.FontWeight.BOLD, color=ft.Colors.ORANGE_600),
-                                                self.candles_date_radio_group,
-                                                # Fallback button: some clients don't trigger RadioGroup change properly;
-                                                # provide an explicit enable button that sets the radio and calls the handler.
-                                                ft.Row([
-                                                    ft.ElevatedButton(
-                                                        "Ota aikaväli käyttöön",
-                                                        on_click=lambda e: (setattr(self.candles_date_radio_group, 'value', 'range'),
-                                                                           self.candles_date_radio_group.on_change(None),
-                                                                           self.page.update()),
-                                                        width=220,
-                                                        bgcolor=ft.Colors.ORANGE_300,
-                                                        color=ft.Colors.WHITE,
-                                                    ),
-                                                ], alignment=ft.MainAxisAlignment.START),
-                                                ft.Row([
-                                                        ft.Column([ft.Text('Alkupäivä'), self.candles_start_date, self.candles_start_date_text]),
-                                                        ft.Column([ft.Text('Loppupäivä'), self.candles_end_date, self.candles_end_date_text]),
-                                                    ], spacing=20),
-                                        ], horizontal_alignment=ft.CrossAxisAlignment.START, spacing=10),
-                                        padding=20,
-                                        bgcolor=ft.Colors.GREY_50,
-                                        border_radius=8,
-                                        width=420,
+                                ft.Column([
+                                    ft.Card(
+                                        content=ft.Container(
+                                            content=ft.Column([
+                                                ft.Text("Osakevalinta", size=18, weight=ft.FontWeight.BOLD, color=ft.Colors.ORANGE_600),
+                                                self.candles_radio_group,
+                                                self.candles_ticker_field,
+                                            ], horizontal_alignment=ft.CrossAxisAlignment.START, spacing=10),
+                                            padding=20,
+                                            bgcolor=ft.Colors.GREY_50,
+                                            border_radius=8,
+                                            width=420,
+                                        ),
+                                        elevation=2,
                                     ),
-                                    elevation=2,
-                                ),
-                            ])
-                        ], alignment=ft.MainAxisAlignment.CENTER, spacing=40),
-                        # ...painonappi siirretty ylös...
-                    ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=30),
+                                    ft.Container(height=16),
+                                    ft.Card(
+                                        content=ft.Container(
+                                            content=ft.Column([
+                                                ft.Text("Aikaväli", size=18, weight=ft.FontWeight.BOLD, color=ft.Colors.ORANGE_600),
+                                                    self.candles_date_radio_group,
+                                                    # Fallback button: some clients don't trigger RadioGroup change properly;
+                                                    # provide an explicit enable button that sets the radio and calls the handler.
+                                                    ft.Row([
+                                                        ft.ElevatedButton(
+                                                            "Ota aikaväli käyttöön",
+                                                            on_click=lambda e: (setattr(self.candles_date_radio_group, 'value', 'range'),
+                                                                               self.candles_date_radio_group.on_change(None),
+                                                                               self.page.update()),
+                                                            width=220,
+                                                            bgcolor=ft.Colors.ORANGE_300,
+                                                            color=ft.Colors.WHITE,
+                                                        ),
+                                                    ], alignment=ft.MainAxisAlignment.START),
+                                                    ft.Row([
+                                                            ft.Column([ft.Text('Alkupäivä'), self.candles_start_date, self.candles_start_date_text]),
+                                                            ft.Column([ft.Text('Loppupäivä'), self.candles_end_date, self.candles_end_date_text]),
+                                                        ], spacing=20),
+                                            ], horizontal_alignment=ft.CrossAxisAlignment.START, spacing=10),
+                                            padding=20,
+                                            bgcolor=ft.Colors.GREY_50,
+                                            border_radius=8,
+                                            width=420,
+                                        ),
+                                        elevation=2,
+                                    ),
+                                ])
+                            ], alignment=ft.MainAxisAlignment.CENTER, spacing=40),
+                            # ...painonappi siirretty ylös...
+                        ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=30, scroll=ft.ScrollMode.AUTO, expand=True),
                     padding=40,
                     expand=True,
                 ),
@@ -310,6 +304,27 @@ class RawCandleApp:
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
         )
         # (duplicate settings view removed)
+    def create_results_view(self):
+        # Delegates to the standalone results.view module to keep the page
+        # implementation inside the `results` package.
+        try:
+            from results.view import create_results_view as _create
+            return _create(self)
+        except Exception:
+            # On import failure, fall back to a minimal placeholder view so the app doesn't crash.
+            return ft.View(
+                "/tulokset",
+                [
+                    self.create_appbar(),
+                    ft.Container(
+                        content=ft.Column([
+                            ft.Text("Tulokset"),
+                            ft.Text("Tulokset-moduulia ei voitu ladata."),
+                        ], horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                        padding=40,
+                    ),
+                ],
+            )
     def tyhjenna_tietokanta(self, e):
         """Tyhjentää osakedata-taulun tietokannasta"""
         data_dir = Path(__file__).parent / "data"
@@ -647,6 +662,185 @@ class RawCandleApp:
 
         # startataan worker-säie
         threading.Thread(target=worker, daemon=True).start()
+
+    def start_results_generation(self, e):
+        """Starts generating CSV results based on selections in the Tulokset view."""
+        import os
+        import threading
+        from analysis.run_analysis import run_candlestick_analysis
+        from analysis.print_results import print_analysis_results
+        from analysis.logger import setup_logger
+
+        logger = setup_logger()
+        logger.info("start_results_generation called")
+
+        # immediate feedback
+        sb = ft.SnackBar(ft.Text("🔄 Generoidaan CSV...", color=ft.Colors.WHITE), bgcolor=ft.Colors.BLUE_600, duration=1500)
+        if sb not in self.page.overlay:
+            self.page.overlay.append(sb)
+        sb.open = True
+        self.page.update()
+
+        selected_patterns = [cb.label for cb in self.results_checkboxes if cb.value]
+        if not selected_patterns:
+            dlg = ft.AlertDialog(title=ft.Text("Valitse vähintään yksi analyysi!"))
+            if dlg not in self.page.overlay:
+                self.page.overlay.append(dlg)
+            dlg.open = True
+            self.page.update()
+            return
+
+        ticker_mode = self.results_radio_group.value
+        ticker = self.results_ticker_field.value.strip().upper()
+        if ticker_mode == 'single' and not ticker:
+            dlg = ft.AlertDialog(title=ft.Text("Syötä osakkeen ticker!"))
+            if dlg not in self.page.overlay:
+                self.page.overlay.append(dlg)
+            dlg.open = True
+            self.page.update()
+            return
+        if ticker_mode == 'all':
+            ticker = None
+
+        date_mode = self.results_date_radio_group.value
+        if date_mode == 'range':
+            sd = self.results_start_date.value
+            ed = self.results_end_date.value
+            if sd is None or ed is None or sd > ed:
+                dlg = ft.AlertDialog(title=ft.Text("Täytä kelvollinen aikaväli."))
+                if dlg not in self.page.overlay:
+                    self.page.overlay.append(dlg)
+                dlg.open = True
+                self.page.update()
+                return
+            start_date = sd.isoformat()
+            end_date = ed.isoformat()
+        else:
+            start_date = None
+            end_date = None
+
+        def worker():
+            try:
+                db_path = os.path.join(os.path.dirname(__file__), 'data', 'osakedata.db')
+                if ticker is None:
+                    # aggregate across all tickers
+                    with sqlite3.connect(db_path) as conn:
+                        cur = conn.cursor()
+                        cur.execute("SELECT DISTINCT osake FROM osakedata ORDER BY osake")
+                        rows = [r[0] for r in cur.fetchall()]
+                    results = {}
+                    total = len(rows)
+                    for idx, t in enumerate(rows):
+                        res = run_candlestick_analysis(db_path, t, selected_patterns, start_date, end_date)
+                        for k, v in res.items():
+                            results[k] = results.get(k, []) + v
+                else:
+                    results = run_candlestick_analysis(db_path, ticker, selected_patterns, start_date, end_date)
+
+                data_dir = os.path.join(os.path.dirname(__file__), 'analysis')
+                output_path = os.path.join(data_dir, 'analysis_results.txt')
+                result = print_analysis_results(results, ticker, output_path)
+                if isinstance(result, tuple):
+                    text_msg, csv_path = result
+                else:
+                    text_msg = result
+                    csv_path = None
+
+                total_matches = sum(len(v) for v in results.values())
+                if ticker is None:
+                    banner = f"CSV generoitu: kaikki tickereitä, löydetty yhteensä {total_matches} tapahtumaa."
+                else:
+                    banner = f"CSV generoitu: {ticker}, löydetty yhteensä {total_matches} tapahtumaa."
+                try:
+                    self.results_banner.value = banner
+                    self.results_banner.color = ft.Colors.GREEN_600
+                    self.page.update()
+                except Exception:
+                    pass
+
+                logger.info(f"Results generation done: {ticker} - {str(text_msg)[:200]}")
+                if csv_path:
+                    logger.info(f"Results CSV written: {csv_path}")
+
+            except Exception as ex:
+                logger.exception("Virhe generoitaessa tuloksia")
+                sb2 = ft.SnackBar(ft.Text(f"❌ Virhe generoitaessa: {ex}", color=ft.Colors.WHITE), bgcolor=ft.Colors.RED_600, duration=3000)
+                if sb2 not in self.page.overlay:
+                    self.page.overlay.append(sb2)
+                sb2.open = True
+                self.page.update()
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def show_results_csv(self, e):
+        """Opens the canonical analysis CSV if exists or notifies the user."""
+        import os
+        from analysis.logger import setup_logger
+        logger = setup_logger()
+        csv_path = os.path.join(os.path.dirname(__file__), 'analysis', 'analysis_results.csv')
+        if not os.path.exists(csv_path):
+            sb = ft.SnackBar(ft.Text("ℹ️ CSV-tiedostoa ei löytynyt.", color=ft.Colors.WHITE), bgcolor=ft.Colors.ORANGE_600, duration=2000)
+            if sb not in self.page.overlay:
+                self.page.overlay.append(sb)
+            sb.open = True
+            self.page.update()
+            logger.info("analysis_results.csv not found when attempting to show results CSV")
+            return
+        try:
+            with open(csv_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+        except Exception as ex:
+            logger.exception("Virhe avattaessa CSV-tiedostoa")
+            sb = ft.SnackBar(ft.Text(f"❌ Virhe tiedostoa avattaessa: {ex}", color=ft.Colors.WHITE), bgcolor=ft.Colors.RED_600, duration=3000)
+            if sb not in self.page.overlay:
+                self.page.overlay.append(sb)
+            sb.open = True
+            self.page.update()
+            return
+
+        content_control = ft.Text(content, selectable=True)
+
+        save_button = ft.ElevatedButton(
+            "Tallenna CSV",
+            icon=ft.Icons.FILE_DOWNLOAD,
+            on_click=lambda _: (setattr(self.file_picker, 'on_result', lambda ev: self.save_csv_from_analysis(ev, csv_path)), self.file_picker.save_file()),
+        )
+
+        dlg = ft.AlertDialog(
+            title=ft.Text('Analyysin CSV-tulokset'),
+            content=ft.Column([content_control], tight=True),
+            actions=[
+                save_button,
+                ft.TextButton('Sulje', on_click=lambda _: self.close_dialog(dlg)),
+            ],
+        )
+        if dlg not in self.page.overlay:
+            self.page.overlay.append(dlg)
+        dlg.open = True
+        self.page.update()
+
+    def save_csv_from_analysis(self, e: ft.FilePickerResultEvent, src_path: str):
+        if not e.path:
+            return
+        try:
+            with open(src_path, 'r', encoding='utf-8') as src:
+                data = src.read()
+            with open(e.path, 'w', encoding='utf-8') as dst:
+                dst.write(data)
+            sb = ft.SnackBar(ft.Text(f"✅ CSV tallennettu: {e.path}"), bgcolor=ft.Colors.GREEN_600, duration=2000)
+            if sb not in self.page.overlay:
+                self.page.overlay.append(sb)
+            sb.open = True
+            self.page.update()
+        except Exception as ex:
+            from analysis.logger import setup_logger
+            logger = setup_logger()
+            logger.exception("Virhe tallennettaessa CSV:ää")
+            sb = ft.SnackBar(ft.Text(f"❌ Virhe tallennuksessa: {ex}"), bgcolor=ft.Colors.RED_600, duration=3000)
+            if sb not in self.page.overlay:
+                self.page.overlay.append(sb)
+            sb.open = True
+            self.page.update()
     def fetch_and_save_from_file(self, e):
         import os
         data_dir = os.path.join(os.path.dirname(__file__), "data")
@@ -1093,6 +1287,11 @@ class RawCandleApp:
                     on_click=lambda _: self.page.go("/candles")
                 ),
                 ft.IconButton(
+                    ft.Icons.INSIGHTS,
+                    tooltip="Tulokset",
+                    on_click=lambda _: self.page.go("/tulokset")
+                ),
+                ft.IconButton(
                     ft.Icons.EXIT_TO_APP,
                     tooltip="Lopeta ohjelma",
                     on_click=self.quit_app,
@@ -1356,6 +1555,8 @@ class RawCandleApp:
             self.page.views.append(self.create_database_view())
         elif self.page.route == "/candles":
             self.page.views.append(self.create_candles_view())
+        elif self.page.route == "/tulokset":
+            self.page.views.append(self.create_results_view())
         else:
             # 404 - palaa etusivulle
             self.page.go("/")

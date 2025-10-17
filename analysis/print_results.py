@@ -131,6 +131,37 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
             except Exception:
                 # non-fatal if logging fails
                 pass
+            # also persist findings to a small analysis DB (avoid duplicates)
+            try:
+                import sqlite3
+                db_path = os.path.join(os.path.dirname(__file__), 'analysis.db')
+                conn = sqlite3.connect(db_path)
+                cur = conn.cursor()
+                cur.execute('''
+                    CREATE TABLE IF NOT EXISTS analysis_findings (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ticker TEXT,
+                        date TEXT,
+                        pattern TEXT,
+                        UNIQUE(ticker, date, pattern)
+                    )
+                ''')
+                rows = []
+                for key in sorted(results.keys()):
+                    if '|' in key:
+                        t, d = key.split('|', 1)
+                    else:
+                        t = ticker or ''
+                        d = key
+                    for p in results[key]:
+                        rows.append((t, d, p))
+                if rows:
+                    cur.executemany('INSERT OR IGNORE INTO analysis_findings (ticker, date, pattern) VALUES (?, ?, ?)', rows)
+                    conn.commit()
+                conn.close()
+            except Exception:
+                # non-fatal persistence failure
+                pass
             # also update canonical CSV
             try:
                 canonical_csv = os.path.join(base_dir, f"{base_name}.csv")
