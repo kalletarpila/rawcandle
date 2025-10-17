@@ -100,13 +100,24 @@ class RawCandleApp:
                             color=ft.Colors.GREY_600
                         ),
                         ft.Container(height=16),
-                        ft.ElevatedButton(
-                            "Käynnistä analyysi",
-                            icon=ft.Icons.PLAY_ARROW,
-                            bgcolor=ft.Colors.ORANGE_400,
-                            color=ft.Colors.WHITE,
-                            width=220,
-                        ),
+                        ft.Row([
+                            ft.ElevatedButton(
+                                "Käynnistä analyysi",
+                                icon=ft.Icons.PLAY_ARROW,
+                                bgcolor=ft.Colors.ORANGE_400,
+                                color=ft.Colors.WHITE,
+                                on_click=self.start_candles_analysis,
+                                width=220,
+                            ),
+                            ft.ElevatedButton(
+                                "Näytä tulokset",
+                                icon=ft.Icons.VISIBILITY,
+                                bgcolor=ft.Colors.BLUE_600,
+                                color=ft.Colors.WHITE,
+                                on_click=self.show_analysis_results if hasattr(self, 'show_analysis_results') else None,
+                                width=220,
+                            ),
+                        ], alignment=ft.MainAxisAlignment.CENTER, spacing=20),
                         ft.Divider(height=30, color=ft.Colors.TRANSPARENT),
                         ft.Row([
                             ft.Card(
@@ -217,6 +228,132 @@ class RawCandleApp:
             self.page.overlay.append(self.page.snack_bar)
         self.page.snack_bar.open = True
         self.page.update()
+    def show_analysis_results(self, e):
+        import os
+        from analysis.logger import setup_logger
+        logger = setup_logger()
+        output_path = os.path.join(os.path.dirname(__file__), 'analysis', 'analysis_results.txt')
+        if not os.path.exists(output_path):
+            self.page.snack_bar = ft.SnackBar(
+                ft.Text("ℹ️ Tulostiedostoa ei löytynyt.", color=ft.Colors.WHITE),
+                bgcolor=ft.Colors.ORANGE_600,
+                duration=2000
+            )
+            if self.page.snack_bar not in self.page.overlay:
+                self.page.overlay.append(self.page.snack_bar)
+            self.page.snack_bar.open = True
+            self.page.update()
+            logger.info("analysis_results.txt not found when attempting to show results")
+            return
+        try:
+            with open(output_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+        except Exception as ex:
+            logger.exception("Virhe avattaessa analyysitulostiedostoa")
+            self.page.snack_bar = ft.SnackBar(
+                ft.Text(f"❌ Virhe tiedostoa avattaessa: {ex}", color=ft.Colors.WHITE),
+                bgcolor=ft.Colors.RED_600,
+                duration=3000
+            )
+            if self.page.snack_bar not in self.page.overlay:
+                self.page.overlay.append(self.page.snack_bar)
+            self.page.snack_bar.open = True
+            self.page.update()
+            return
+        dlg = ft.AlertDialog(
+            title=ft.Text('Analyysin tulokset'),
+            content=ft.Text(content, selectable=True),
+            actions=[ft.TextButton('Sulje', on_click=lambda _: self.close_dialog(dlg))],
+        )
+        self.page.dialog = dlg
+        dlg.open = True
+        self.page.update()
+
+    def start_candles_analysis(self, e):
+        import os
+        import threading
+        from analysis.run_analysis import run_candlestick_analysis
+        from analysis.print_results import print_analysis_results
+        from analysis.logger import setup_logger
+        logger = setup_logger()
+
+        # Kerää valitut analyysit
+        selected_patterns = [cb.label for cb in self.candles_checkboxes if cb.value]
+        if not selected_patterns:
+            dlg = ft.AlertDialog(title=ft.Text("Valitse vähintään yksi analyysi!"))
+            self.page.dialog = dlg
+            dlg.open = True
+            self.page.update()
+            return
+
+        # Ticker
+        ticker = self.candles_ticker_field.value.strip().upper()
+        if not ticker:
+            dlg = ft.AlertDialog(title=ft.Text("Syötä osakkeen ticker!"))
+            self.page.dialog = dlg
+            dlg.open = True
+            self.page.update()
+            return
+
+        # Aikaväli
+        date_mode = self.candles_date_radio_group.value
+        start_date = self.candles_start_date.value.strip() if date_mode == "range" else None
+        end_date = self.candles_end_date.value.strip() if date_mode == "range" else None
+
+        # Progress dialog
+        progress = ft.ProgressBar(width=400)
+        status = ft.Text("Aloitetaan analyysi...")
+        dialog = ft.AlertDialog(
+            title=ft.Text("Analyysi käynnissä"),
+            content=ft.Column([status, progress]),
+            actions=[ft.TextButton("Sulje", on_click=lambda _: self.close_dialog(dialog))],
+            modal=True
+        )
+        self.page.dialog = dialog
+        dialog.open = True
+        self.page.update()
+
+        data_dir = os.path.join(os.path.dirname(__file__), 'analysis')
+        output_path = os.path.join(data_dir, 'analysis_results.txt')
+
+        def worker():
+            try:
+                # suorita analyysi
+                results = run_candlestick_analysis(os.path.join(os.path.dirname(__file__), 'data', 'osakedata.db'), ticker, selected_patterns, start_date, end_date)
+                # tallenna ja muodosta viesti
+                msg = print_analysis_results(results, ticker, output_path)
+                # päivitykset UI:hin
+                status.value = "Analyysi tehty"
+                progress.value = 1.0
+                self.page.update()
+                safe_msg = msg.replace("\n", " | ")
+                logger.info(f"Analyysi valmis: {ticker} - {safe_msg}")
+            except Exception as ex:
+                status.value = f"Virhe: {ex}"
+                self.page.update()
+                logger.exception("Virhe analyysissä")
+                # Näytä snack bar käyttäjälle
+                self.page.snack_bar = ft.SnackBar(
+                    ft.Text(f"❌ Virhe analyysissä: {str(ex)}", color=ft.Colors.WHITE),
+                    bgcolor=ft.Colors.RED_600,
+                    duration=3000
+                )
+                if self.page.snack_bar not in self.page.overlay:
+                    self.page.overlay.append(self.page.snack_bar)
+                self.page.snack_bar.open = True
+                self.page.update()
+
+        def progress_updater():
+            # Simppeli progress-simulaatio kunnes worker asettaa progressin 1.0
+            import time
+            while not progress.value >= 1.0:
+                progress.value = min(0.95, progress.value + 0.05)
+                self.page.update()
+                time.sleep(0.3)
+
+        # startataan worker ja progress updater säikeet
+        threading.Thread(target=worker, daemon=True).start()
+        threading.Thread(target=progress_updater, daemon=True).start()
     def fetch_and_save_from_file(self, e):
         import os
         data_dir = os.path.join(os.path.dirname(__file__), "data")
