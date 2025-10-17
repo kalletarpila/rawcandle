@@ -1,0 +1,1242 @@
+2025-10-17 09:37:46,078 INFO: analysis_results.txt not found when attempting to show results
+2025-10-17 10:13:19,945 INFO: start_candles_analysis called
+2025-10-17 10:13:19,954 INFO: Analyysi valmis: SFM - Ei yhtään valittua kynttiläkuviota löytynyt.
+2025-10-17 10:13:53,381 INFO: start_candles_analysis called
+2025-10-17 10:13:53,388 INFO: Analyysi valmis: SFM - Ei yhtään valittua kynttiläkuviota löytynyt.
+2025-10-17 10:16:37,174 INFO: start_candles_analysis called
+2025-10-17 10:16:37,181 INFO: Analyysi valmis: SFM - Ei yhtään valittua kynttiläkuviota löytynyt.
+2025-10-17 10:17:11,117 INFO: SFM 2025-09-29 Hammer checked - not found
+2025-10-17 10:18:26,024 INFO: ABNB 2025-09-29 Hammer checked - not found
+2025-10-17 10:20:19,786 INFO: ^IXIC 2025-09-29 Hammer checked - not found
+2025-10-17 10:20:19,787 INFO: ^GSPC 2025-09-29 Hammer checked - not found
+2025-10-17 10:20:19,788 INFO: SFM 2025-09-29 Hammer checked - not found
+2025-10-17 10:20:19,789 INFO: ABNB 2025-09-29 Hammer checked - not found
+2025-10-17 10:37:42,424 INFO: SFM 2023-07-03 Hammer checked - not found
+2025-10-17 10:37:42,424 INFO: SFM 2023-07-05 Hammer checked - not found
+2025-10-17 10:37:42,424 INFO: SFM 2023-07-05 Bullish Engulfing checked - FOUND
+2025-10-17 10:37:42,424 INFO: SFM 2023-07-06 Hammer checked - not found
+2025-10-17 10:37:42,424 INFO: SFM 2023-07-07 Hammer checked - not found
+2025-10-17 10:37:42,425 INFO: SFM 2023-07-10 Hammer checked - not found
+2025-10-17 10:37:42,425 INFO: SFM 2023-07-11 Hammer checked - not found
+2025-10-17 10:37:42,425 INFO: SFM 2023-07-11 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,425 INFO: SFM 2023-07-12 Hammer checked - not found
+2025-10-17 10:37:42,425 INFO: SFM 2023-07-13 Hammer checked - not found
+2025-10-17 10:37:42,425 INFO: SFM 2023-07-14 Hammer checked - not found
+2025-10-17 10:37:42,425 INFO: SFM 2023-07-17 Hammer checked - not found
+2025-10-17 10:37:42,426 INFO: SFM 2023-07-18 Hammer checked - not found
+2025-10-17 10:37:42,426 INFO: SFM 2023-07-19 Hammer checked - not found
+2025-10-17 10:37:42,426 INFO: SFM 2023-07-19 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,426 INFO: SFM 2023-07-20 Hammer checked - not found
+2025-10-17 10:37:42,426 INFO: SFM 2023-07-20 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,426 INFO: SFM 2023-07-21 Hammer checked - not found
+2025-10-17 10:37:42,426 INFO: SFM 2023-07-21 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,426 INFO: SFM 2023-07-24 Hammer checked - FOUND
+2025-10-17 10:37:42,427 INFO: SFM 2023-07-25 Hammer checked - not found
+2025-10-17 10:37:42,427 INFO: SFM 2023-07-26 Hammer checked - not found
+2025-10-17 10:37:42,427 INFO: SFM 2023-07-27 Hammer checked - not found
+2025-10-17 10:37:42,427 INFO: SFM 2023-07-28 Hammer checked - not found
+2025-10-17 10:37:42,427 INFO: SFM 2023-07-31 Hammer checked - not found
+2025-10-17 10:37:42,427 INFO: SFM 2023-08-01 Hammer checked - not found
+2025-10-17 10:37:42,427 INFO: SFM 2023-08-02 Hammer checked - not found
+2025-10-17 10:37:42,428 INFO: SFM 2023-08-03 Hammer checked - not found
+2025-10-17 10:37:42,428 INFO: SFM 2023-08-04 Hammer checked - not found
+2025-10-17 10:37:42,428 INFO: SFM 2023-08-07 Hammer checked - not found
+2025-10-17 10:37:42,428 INFO: SFM 2023-08-08 Hammer checked - not found
+2025-10-17 10:37:42,428 INFO: SFM 2023-08-09 Hammer checked - not found
+2025-10-17 10:37:42,428 INFO: SFM 2023-08-10 Hammer checked - not found
+2025-10-17 10:37:42,429 INFO: SFM 2023-08-11 Hammer checked - not found
+2025-10-17 10:37:42,429 INFO: SFM 2023-08-14 Hammer checked - not found
+2025-10-17 10:37:42,429 INFO: SFM 2023-08-15 Hammer checked - not found
+2025-10-17 10:37:42,429 INFO: SFM 2023-08-16 Hammer checked - not found
+2025-10-17 10:37:42,429 INFO: SFM 2023-08-17 Hammer checked - not found
+2025-10-17 10:37:42,429 INFO: SFM 2023-08-18 Hammer checked - not found
+2025-10-17 10:37:42,429 INFO: SFM 2023-08-21 Hammer checked - not found
+2025-10-17 10:37:42,430 INFO: SFM 2023-08-21 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,430 INFO: SFM 2023-08-22 Hammer checked - FOUND
+2025-10-17 10:37:42,430 INFO: SFM 2023-08-23 Hammer checked - not found
+2025-10-17 10:37:42,430 INFO: SFM 2023-08-24 Hammer checked - not found
+2025-10-17 10:37:42,430 INFO: SFM 2023-08-25 Hammer checked - not found
+2025-10-17 10:37:42,430 INFO: SFM 2023-08-28 Hammer checked - not found
+2025-10-17 10:37:42,430 INFO: SFM 2023-08-29 Hammer checked - not found
+2025-10-17 10:37:42,431 INFO: SFM 2023-08-29 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,431 INFO: SFM 2023-08-30 Hammer checked - not found
+2025-10-17 10:37:42,431 INFO: SFM 2023-08-31 Hammer checked - not found
+2025-10-17 10:37:42,431 INFO: SFM 2023-08-31 Bullish Engulfing checked - FOUND
+2025-10-17 10:37:42,431 INFO: SFM 2023-09-01 Hammer checked - not found
+2025-10-17 10:37:42,431 INFO: SFM 2023-09-05 Hammer checked - not found
+2025-10-17 10:37:42,431 INFO: SFM 2023-09-06 Hammer checked - not found
+2025-10-17 10:37:42,431 INFO: SFM 2023-09-07 Hammer checked - not found
+2025-10-17 10:37:42,432 INFO: SFM 2023-09-08 Hammer checked - not found
+2025-10-17 10:37:42,432 INFO: SFM 2023-09-08 Bullish Engulfing checked - FOUND
+2025-10-17 10:37:42,432 INFO: SFM 2023-09-11 Hammer checked - FOUND
+2025-10-17 10:37:42,432 INFO: SFM 2023-09-12 Hammer checked - not found
+2025-10-17 10:37:42,432 INFO: SFM 2023-09-13 Hammer checked - not found
+2025-10-17 10:37:42,432 INFO: SFM 2023-09-14 Hammer checked - not found
+2025-10-17 10:37:42,432 INFO: SFM 2023-09-15 Hammer checked - FOUND
+2025-10-17 10:37:42,433 INFO: SFM 2023-09-15 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,433 INFO: SFM 2023-09-18 Hammer checked - not found
+2025-10-17 10:37:42,433 INFO: SFM 2023-09-19 Hammer checked - not found
+2025-10-17 10:37:42,433 INFO: SFM 2023-09-20 Hammer checked - not found
+2025-10-17 10:37:42,433 INFO: SFM 2023-09-21 Hammer checked - not found
+2025-10-17 10:37:42,433 INFO: SFM 2023-09-22 Hammer checked - not found
+2025-10-17 10:37:42,434 INFO: SFM 2023-09-25 Hammer checked - not found
+2025-10-17 10:37:42,434 INFO: SFM 2023-09-26 Hammer checked - not found
+2025-10-17 10:37:42,434 INFO: SFM 2023-09-27 Hammer checked - not found
+2025-10-17 10:37:42,434 INFO: SFM 2023-09-28 Hammer checked - not found
+2025-10-17 10:37:42,434 INFO: SFM 2023-09-29 Hammer checked - not found
+2025-10-17 10:37:42,434 INFO: SFM 2023-10-02 Hammer checked - not found
+2025-10-17 10:37:42,435 INFO: SFM 2023-10-03 Hammer checked - not found
+2025-10-17 10:37:42,435 INFO: SFM 2023-10-04 Hammer checked - not found
+2025-10-17 10:37:42,435 INFO: SFM 2023-10-05 Hammer checked - not found
+2025-10-17 10:37:42,435 INFO: SFM 2023-10-06 Hammer checked - not found
+2025-10-17 10:37:42,435 INFO: SFM 2023-10-09 Hammer checked - not found
+2025-10-17 10:37:42,435 INFO: SFM 2023-10-10 Hammer checked - not found
+2025-10-17 10:37:42,435 INFO: SFM 2023-10-11 Hammer checked - not found
+2025-10-17 10:37:42,436 INFO: SFM 2023-10-12 Hammer checked - not found
+2025-10-17 10:37:42,436 INFO: SFM 2023-10-13 Hammer checked - not found
+2025-10-17 10:37:42,436 INFO: SFM 2023-10-16 Hammer checked - not found
+2025-10-17 10:37:42,436 INFO: SFM 2023-10-17 Hammer checked - not found
+2025-10-17 10:37:42,436 INFO: SFM 2023-10-18 Hammer checked - not found
+2025-10-17 10:37:42,436 INFO: SFM 2023-10-19 Hammer checked - not found
+2025-10-17 10:37:42,436 INFO: SFM 2023-10-20 Hammer checked - not found
+2025-10-17 10:37:42,437 INFO: SFM 2023-10-23 Hammer checked - not found
+2025-10-17 10:37:42,437 INFO: SFM 2023-10-23 Bullish Engulfing checked - FOUND
+2025-10-17 10:37:42,437 INFO: SFM 2023-10-24 Hammer checked - not found
+2025-10-17 10:37:42,437 INFO: SFM 2023-10-25 Hammer checked - not found
+2025-10-17 10:37:42,437 INFO: SFM 2023-10-25 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,437 INFO: SFM 2023-10-26 Hammer checked - not found
+2025-10-17 10:37:42,437 INFO: SFM 2023-10-27 Hammer checked - not found
+2025-10-17 10:37:42,437 INFO: SFM 2023-10-30 Hammer checked - not found
+2025-10-17 10:37:42,438 INFO: SFM 2023-10-31 Hammer checked - FOUND
+2025-10-17 10:37:42,438 INFO: SFM 2023-11-01 Hammer checked - not found
+2025-10-17 10:37:42,438 INFO: SFM 2023-11-02 Hammer checked - not found
+2025-10-17 10:37:42,438 INFO: SFM 2023-11-03 Hammer checked - not found
+2025-10-17 10:37:42,438 INFO: SFM 2023-11-06 Hammer checked - not found
+2025-10-17 10:37:42,438 INFO: SFM 2023-11-07 Hammer checked - not found
+2025-10-17 10:37:42,439 INFO: SFM 2023-11-08 Hammer checked - not found
+2025-10-17 10:37:42,439 INFO: SFM 2023-11-09 Hammer checked - not found
+2025-10-17 10:37:42,439 INFO: SFM 2023-11-10 Hammer checked - FOUND
+2025-10-17 10:37:42,439 INFO: SFM 2023-11-13 Hammer checked - not found
+2025-10-17 10:37:42,439 INFO: SFM 2023-11-13 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,439 INFO: SFM 2023-11-14 Hammer checked - not found
+2025-10-17 10:37:42,439 INFO: SFM 2023-11-15 Hammer checked - not found
+2025-10-17 10:37:42,439 INFO: SFM 2023-11-16 Hammer checked - not found
+2025-10-17 10:37:42,440 INFO: SFM 2023-11-17 Hammer checked - not found
+2025-10-17 10:37:42,440 INFO: SFM 2023-11-20 Hammer checked - not found
+2025-10-17 10:37:42,440 INFO: SFM 2023-11-20 Bullish Engulfing checked - FOUND
+2025-10-17 10:37:42,440 INFO: SFM 2023-11-21 Hammer checked - not found
+2025-10-17 10:37:42,440 INFO: SFM 2023-11-22 Hammer checked - not found
+2025-10-17 10:37:42,440 INFO: SFM 2023-11-24 Hammer checked - not found
+2025-10-17 10:37:42,440 INFO: SFM 2023-11-27 Hammer checked - not found
+2025-10-17 10:37:42,441 INFO: SFM 2023-11-27 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,441 INFO: SFM 2023-11-28 Hammer checked - not found
+2025-10-17 10:37:42,441 INFO: SFM 2023-11-29 Hammer checked - not found
+2025-10-17 10:37:42,441 INFO: SFM 2023-11-30 Hammer checked - not found
+2025-10-17 10:37:42,441 INFO: SFM 2023-12-01 Hammer checked - not found
+2025-10-17 10:37:42,441 INFO: SFM 2023-12-04 Hammer checked - not found
+2025-10-17 10:37:42,441 INFO: SFM 2023-12-04 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,441 INFO: SFM 2023-12-05 Hammer checked - not found
+2025-10-17 10:37:42,442 INFO: SFM 2023-12-06 Hammer checked - not found
+2025-10-17 10:37:42,442 INFO: SFM 2023-12-06 Bullish Engulfing checked - FOUND
+2025-10-17 10:37:42,442 INFO: SFM 2023-12-07 Hammer checked - not found
+2025-10-17 10:37:42,442 INFO: SFM 2023-12-08 Hammer checked - not found
+2025-10-17 10:37:42,442 INFO: SFM 2023-12-11 Hammer checked - not found
+2025-10-17 10:37:42,442 INFO: SFM 2023-12-12 Hammer checked - not found
+2025-10-17 10:37:42,442 INFO: SFM 2023-12-13 Hammer checked - not found
+2025-10-17 10:37:42,442 INFO: SFM 2023-12-13 Bullish Engulfing checked - FOUND
+2025-10-17 10:37:42,443 INFO: SFM 2023-12-14 Hammer checked - not found
+2025-10-17 10:37:42,443 INFO: SFM 2023-12-15 Hammer checked - not found
+2025-10-17 10:37:42,443 INFO: SFM 2023-12-18 Hammer checked - not found
+2025-10-17 10:37:42,443 INFO: SFM 2023-12-19 Hammer checked - not found
+2025-10-17 10:37:42,443 INFO: SFM 2023-12-20 Hammer checked - not found
+2025-10-17 10:37:42,443 INFO: SFM 2023-12-21 Hammer checked - not found
+2025-10-17 10:37:42,443 INFO: SFM 2023-12-22 Hammer checked - not found
+2025-10-17 10:37:42,444 INFO: SFM 2023-12-26 Hammer checked - not found
+2025-10-17 10:37:42,444 INFO: SFM 2023-12-27 Hammer checked - not found
+2025-10-17 10:37:42,444 INFO: SFM 2023-12-28 Hammer checked - not found
+2025-10-17 10:37:42,444 INFO: SFM 2023-12-29 Hammer checked - not found
+2025-10-17 10:37:42,444 INFO: SFM 2024-01-02 Hammer checked - not found
+2025-10-17 10:37:42,444 INFO: SFM 2024-01-03 Hammer checked - not found
+2025-10-17 10:37:42,444 INFO: SFM 2024-01-04 Hammer checked - not found
+2025-10-17 10:37:42,445 INFO: SFM 2024-01-05 Hammer checked - not found
+2025-10-17 10:37:42,445 INFO: SFM 2024-01-08 Hammer checked - not found
+2025-10-17 10:37:42,445 INFO: SFM 2024-01-08 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,445 INFO: SFM 2024-01-09 Hammer checked - not found
+2025-10-17 10:37:42,445 INFO: SFM 2024-01-10 Hammer checked - not found
+2025-10-17 10:37:42,445 INFO: SFM 2024-01-11 Hammer checked - FOUND
+2025-10-17 10:37:42,445 INFO: SFM 2024-01-12 Hammer checked - not found
+2025-10-17 10:37:42,446 INFO: SFM 2024-01-16 Hammer checked - not found
+2025-10-17 10:37:42,446 INFO: SFM 2024-01-16 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,446 INFO: SFM 2024-01-17 Hammer checked - not found
+2025-10-17 10:37:42,446 INFO: SFM 2024-01-17 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,446 INFO: SFM 2024-01-18 Hammer checked - not found
+2025-10-17 10:37:42,446 INFO: SFM 2024-01-18 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,446 INFO: SFM 2024-01-19 Hammer checked - FOUND
+2025-10-17 10:37:42,446 INFO: SFM 2024-01-22 Hammer checked - not found
+2025-10-17 10:37:42,447 INFO: SFM 2024-01-23 Hammer checked - not found
+2025-10-17 10:37:42,447 INFO: SFM 2024-01-24 Hammer checked - not found
+2025-10-17 10:37:42,447 INFO: SFM 2024-01-25 Hammer checked - not found
+2025-10-17 10:37:42,447 INFO: SFM 2024-01-26 Hammer checked - not found
+2025-10-17 10:37:42,447 INFO: SFM 2024-01-29 Hammer checked - not found
+2025-10-17 10:37:42,447 INFO: SFM 2024-01-30 Hammer checked - not found
+2025-10-17 10:37:42,447 INFO: SFM 2024-01-31 Hammer checked - not found
+2025-10-17 10:37:42,448 INFO: SFM 2024-02-01 Hammer checked - not found
+2025-10-17 10:37:42,448 INFO: SFM 2024-02-02 Hammer checked - not found
+2025-10-17 10:37:42,448 INFO: SFM 2024-02-05 Hammer checked - not found
+2025-10-17 10:37:42,448 INFO: SFM 2024-02-06 Hammer checked - not found
+2025-10-17 10:37:42,448 INFO: SFM 2024-02-07 Hammer checked - not found
+2025-10-17 10:37:42,448 INFO: SFM 2024-02-08 Hammer checked - not found
+2025-10-17 10:37:42,449 INFO: SFM 2024-02-09 Hammer checked - not found
+2025-10-17 10:37:42,449 INFO: SFM 2024-02-12 Hammer checked - not found
+2025-10-17 10:37:42,449 INFO: SFM 2024-02-12 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,449 INFO: SFM 2024-02-13 Hammer checked - not found
+2025-10-17 10:37:42,449 INFO: SFM 2024-02-14 Hammer checked - not found
+2025-10-17 10:37:42,449 INFO: SFM 2024-02-15 Hammer checked - not found
+2025-10-17 10:37:42,449 INFO: SFM 2024-02-16 Hammer checked - not found
+2025-10-17 10:37:42,450 INFO: SFM 2024-02-16 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,450 INFO: SFM 2024-02-20 Hammer checked - not found
+2025-10-17 10:37:42,450 INFO: SFM 2024-02-21 Hammer checked - not found
+2025-10-17 10:37:42,450 INFO: SFM 2024-02-22 Hammer checked - not found
+2025-10-17 10:37:42,450 INFO: SFM 2024-02-22 Bullish Engulfing checked - FOUND
+2025-10-17 10:37:42,450 INFO: SFM 2024-02-23 Hammer checked - not found
+2025-10-17 10:37:42,450 INFO: SFM 2024-02-26 Hammer checked - not found
+2025-10-17 10:37:42,451 INFO: SFM 2024-02-26 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,451 INFO: SFM 2024-02-27 Hammer checked - not found
+2025-10-17 10:37:42,451 INFO: SFM 2024-02-28 Hammer checked - not found
+2025-10-17 10:37:42,451 INFO: SFM 2024-02-29 Hammer checked - not found
+2025-10-17 10:37:42,451 INFO: SFM 2024-03-01 Hammer checked - not found
+2025-10-17 10:37:42,451 INFO: SFM 2024-03-01 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,451 INFO: SFM 2024-03-04 Hammer checked - not found
+2025-10-17 10:37:42,452 INFO: SFM 2024-03-05 Hammer checked - not found
+2025-10-17 10:37:42,452 INFO: SFM 2024-03-06 Hammer checked - not found
+2025-10-17 10:37:42,452 INFO: SFM 2024-03-07 Hammer checked - not found
+2025-10-17 10:37:42,452 INFO: SFM 2024-03-08 Hammer checked - FOUND
+2025-10-17 10:37:42,452 INFO: SFM 2024-03-11 Hammer checked - not found
+2025-10-17 10:37:42,452 INFO: SFM 2024-03-12 Hammer checked - not found
+2025-10-17 10:37:42,452 INFO: SFM 2024-03-13 Hammer checked - not found
+2025-10-17 10:37:42,453 INFO: SFM 2024-03-14 Hammer checked - not found
+2025-10-17 10:37:42,453 INFO: SFM 2024-03-15 Hammer checked - not found
+2025-10-17 10:37:42,453 INFO: SFM 2024-03-15 Bullish Engulfing checked - FOUND
+2025-10-17 10:37:42,453 INFO: SFM 2024-03-18 Hammer checked - not found
+2025-10-17 10:37:42,453 INFO: SFM 2024-03-19 Hammer checked - not found
+2025-10-17 10:37:42,453 INFO: SFM 2024-03-20 Hammer checked - not found
+2025-10-17 10:37:42,453 INFO: SFM 2024-03-21 Hammer checked - not found
+2025-10-17 10:37:42,454 INFO: SFM 2024-03-22 Hammer checked - not found
+2025-10-17 10:37:42,454 INFO: SFM 2024-03-22 Bullish Engulfing checked - FOUND
+2025-10-17 10:37:42,454 INFO: SFM 2024-03-25 Hammer checked - not found
+2025-10-17 10:37:42,454 INFO: SFM 2024-03-26 Hammer checked - not found
+2025-10-17 10:37:42,454 INFO: SFM 2024-03-27 Hammer checked - FOUND
+2025-10-17 10:37:42,454 INFO: SFM 2024-03-28 Hammer checked - not found
+2025-10-17 10:37:42,454 INFO: SFM 2024-04-01 Hammer checked - not found
+2025-10-17 10:37:42,454 INFO: SFM 2024-04-02 Hammer checked - not found
+2025-10-17 10:37:42,455 INFO: SFM 2024-04-03 Hammer checked - not found
+2025-10-17 10:37:42,455 INFO: SFM 2024-04-04 Hammer checked - not found
+2025-10-17 10:37:42,455 INFO: SFM 2024-04-05 Hammer checked - not found
+2025-10-17 10:37:42,455 INFO: SFM 2024-04-08 Hammer checked - not found
+2025-10-17 10:37:42,455 INFO: SFM 2024-04-09 Hammer checked - not found
+2025-10-17 10:37:42,455 INFO: SFM 2024-04-10 Hammer checked - not found
+2025-10-17 10:37:42,455 INFO: SFM 2024-04-10 Bullish Engulfing checked - FOUND
+2025-10-17 10:37:42,456 INFO: SFM 2024-04-11 Hammer checked - FOUND
+2025-10-17 10:37:42,456 INFO: SFM 2024-04-12 Hammer checked - not found
+2025-10-17 10:37:42,456 INFO: SFM 2024-04-15 Hammer checked - not found
+2025-10-17 10:37:42,456 INFO: SFM 2024-04-16 Hammer checked - not found
+2025-10-17 10:37:42,456 INFO: SFM 2024-04-17 Hammer checked - not found
+2025-10-17 10:37:42,456 INFO: SFM 2024-04-18 Hammer checked - not found
+2025-10-17 10:37:42,456 INFO: SFM 2024-04-19 Hammer checked - not found
+2025-10-17 10:37:42,457 INFO: SFM 2024-04-22 Hammer checked - not found
+2025-10-17 10:37:42,457 INFO: SFM 2024-04-22 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,457 INFO: SFM 2024-04-23 Hammer checked - not found
+2025-10-17 10:37:42,457 INFO: SFM 2024-04-24 Hammer checked - not found
+2025-10-17 10:37:42,457 INFO: SFM 2024-04-25 Hammer checked - not found
+2025-10-17 10:37:42,457 INFO: SFM 2024-04-25 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,457 INFO: SFM 2024-04-26 Hammer checked - not found
+2025-10-17 10:37:42,458 INFO: SFM 2024-04-26 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,458 INFO: SFM 2024-04-29 Hammer checked - not found
+2025-10-17 10:37:42,458 INFO: SFM 2024-04-29 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,458 INFO: SFM 2024-04-30 Hammer checked - not found
+2025-10-17 10:37:42,458 INFO: SFM 2024-05-01 Hammer checked - not found
+2025-10-17 10:37:42,458 INFO: SFM 2024-05-02 Hammer checked - not found
+2025-10-17 10:37:42,458 INFO: SFM 2024-05-03 Hammer checked - not found
+2025-10-17 10:37:42,458 INFO: SFM 2024-05-06 Hammer checked - not found
+2025-10-17 10:37:42,459 INFO: SFM 2024-05-06 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,459 INFO: SFM 2024-05-07 Hammer checked - not found
+2025-10-17 10:37:42,459 INFO: SFM 2024-05-08 Hammer checked - not found
+2025-10-17 10:37:42,459 INFO: SFM 2024-05-09 Hammer checked - not found
+2025-10-17 10:37:42,459 INFO: SFM 2024-05-10 Hammer checked - not found
+2025-10-17 10:37:42,459 INFO: SFM 2024-05-13 Hammer checked - not found
+2025-10-17 10:37:42,459 INFO: SFM 2024-05-14 Hammer checked - not found
+2025-10-17 10:37:42,460 INFO: SFM 2024-05-15 Hammer checked - not found
+2025-10-17 10:37:42,460 INFO: SFM 2024-05-16 Hammer checked - not found
+2025-10-17 10:37:42,460 INFO: SFM 2024-05-16 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,460 INFO: SFM 2024-05-17 Hammer checked - not found
+2025-10-17 10:37:42,460 INFO: SFM 2024-05-17 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,460 INFO: SFM 2024-05-20 Hammer checked - not found
+2025-10-17 10:37:42,460 INFO: SFM 2024-05-20 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,461 INFO: SFM 2024-05-21 Hammer checked - not found
+2025-10-17 10:37:42,461 INFO: SFM 2024-05-22 Hammer checked - not found
+2025-10-17 10:37:42,461 INFO: SFM 2024-05-23 Hammer checked - not found
+2025-10-17 10:37:42,461 INFO: SFM 2024-05-24 Hammer checked - not found
+2025-10-17 10:37:42,461 INFO: SFM 2024-05-24 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,461 INFO: SFM 2024-05-28 Hammer checked - not found
+2025-10-17 10:37:42,461 INFO: SFM 2024-05-29 Hammer checked - not found
+2025-10-17 10:37:42,462 INFO: SFM 2024-05-30 Hammer checked - not found
+2025-10-17 10:37:42,462 INFO: SFM 2024-05-31 Hammer checked - not found
+2025-10-17 10:37:42,462 INFO: SFM 2024-06-03 Hammer checked - not found
+2025-10-17 10:37:42,462 INFO: SFM 2024-06-04 Hammer checked - not found
+2025-10-17 10:37:42,462 INFO: SFM 2024-06-05 Hammer checked - not found
+2025-10-17 10:37:42,462 INFO: SFM 2024-06-06 Hammer checked - not found
+2025-10-17 10:37:42,462 INFO: SFM 2024-06-07 Hammer checked - not found
+2025-10-17 10:37:42,463 INFO: SFM 2024-06-10 Hammer checked - FOUND
+2025-10-17 10:37:42,463 INFO: SFM 2024-06-11 Hammer checked - not found
+2025-10-17 10:37:42,463 INFO: SFM 2024-06-12 Hammer checked - not found
+2025-10-17 10:37:42,463 INFO: SFM 2024-06-13 Hammer checked - not found
+2025-10-17 10:37:42,463 INFO: SFM 2024-06-14 Hammer checked - not found
+2025-10-17 10:37:42,463 INFO: SFM 2024-06-17 Hammer checked - not found
+2025-10-17 10:37:42,463 INFO: SFM 2024-06-18 Hammer checked - not found
+2025-10-17 10:37:42,464 INFO: SFM 2024-06-20 Hammer checked - not found
+2025-10-17 10:37:42,464 INFO: SFM 2024-06-21 Hammer checked - not found
+2025-10-17 10:37:42,464 INFO: SFM 2024-06-24 Hammer checked - not found
+2025-10-17 10:37:42,464 INFO: SFM 2024-06-25 Hammer checked - not found
+2025-10-17 10:37:42,464 INFO: SFM 2024-06-25 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,464 INFO: SFM 2024-06-26 Hammer checked - not found
+2025-10-17 10:37:42,464 INFO: SFM 2024-06-26 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,464 INFO: SFM 2024-06-27 Hammer checked - not found
+2025-10-17 10:37:42,465 INFO: SFM 2024-06-28 Hammer checked - not found
+2025-10-17 10:37:42,465 INFO: SFM 2024-07-01 Hammer checked - not found
+2025-10-17 10:37:42,465 INFO: SFM 2024-07-02 Hammer checked - not found
+2025-10-17 10:37:42,465 INFO: SFM 2024-07-03 Hammer checked - not found
+2025-10-17 10:37:42,465 INFO: SFM 2024-07-05 Hammer checked - not found
+2025-10-17 10:37:42,465 INFO: SFM 2024-07-08 Hammer checked - not found
+2025-10-17 10:37:42,466 INFO: SFM 2024-07-09 Hammer checked - not found
+2025-10-17 10:37:42,466 INFO: SFM 2024-07-10 Hammer checked - not found
+2025-10-17 10:37:42,466 INFO: SFM 2024-07-11 Hammer checked - not found
+2025-10-17 10:37:42,466 INFO: SFM 2024-07-12 Hammer checked - not found
+2025-10-17 10:37:42,466 INFO: SFM 2024-07-15 Hammer checked - not found
+2025-10-17 10:37:42,466 INFO: SFM 2024-07-16 Hammer checked - not found
+2025-10-17 10:37:42,466 INFO: SFM 2024-07-17 Hammer checked - not found
+2025-10-17 10:37:42,467 INFO: SFM 2024-07-18 Hammer checked - not found
+2025-10-17 10:37:42,467 INFO: SFM 2024-07-19 Hammer checked - not found
+2025-10-17 10:37:42,467 INFO: SFM 2024-07-22 Hammer checked - not found
+2025-10-17 10:37:42,467 INFO: SFM 2024-07-23 Hammer checked - not found
+2025-10-17 10:37:42,467 INFO: SFM 2024-07-24 Hammer checked - not found
+2025-10-17 10:37:42,467 INFO: SFM 2024-07-25 Hammer checked - not found
+2025-10-17 10:37:42,468 INFO: SFM 2024-07-26 Hammer checked - not found
+2025-10-17 10:37:42,468 INFO: SFM 2024-07-29 Hammer checked - not found
+2025-10-17 10:37:42,468 INFO: SFM 2024-07-30 Hammer checked - not found
+2025-10-17 10:37:42,468 INFO: SFM 2024-07-31 Hammer checked - not found
+2025-10-17 10:37:42,468 INFO: SFM 2024-08-01 Hammer checked - not found
+2025-10-17 10:37:42,468 INFO: SFM 2024-08-02 Hammer checked - not found
+2025-10-17 10:37:42,468 INFO: SFM 2024-08-05 Hammer checked - not found
+2025-10-17 10:37:42,469 INFO: SFM 2024-08-06 Hammer checked - not found
+2025-10-17 10:37:42,469 INFO: SFM 2024-08-07 Hammer checked - not found
+2025-10-17 10:37:42,469 INFO: SFM 2024-08-08 Hammer checked - not found
+2025-10-17 10:37:42,469 INFO: SFM 2024-08-09 Hammer checked - FOUND
+2025-10-17 10:37:42,469 INFO: SFM 2024-08-12 Hammer checked - not found
+2025-10-17 10:37:42,469 INFO: SFM 2024-08-13 Hammer checked - not found
+2025-10-17 10:37:42,469 INFO: SFM 2024-08-14 Hammer checked - not found
+2025-10-17 10:37:42,470 INFO: SFM 2024-08-15 Hammer checked - not found
+2025-10-17 10:37:42,470 INFO: SFM 2024-08-16 Hammer checked - not found
+2025-10-17 10:37:42,470 INFO: SFM 2024-08-19 Hammer checked - not found
+2025-10-17 10:37:42,470 INFO: SFM 2024-08-19 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,470 INFO: SFM 2024-08-20 Hammer checked - not found
+2025-10-17 10:37:42,470 INFO: SFM 2024-08-21 Hammer checked - not found
+2025-10-17 10:37:42,470 INFO: SFM 2024-08-22 Hammer checked - not found
+2025-10-17 10:37:42,471 INFO: SFM 2024-08-23 Hammer checked - not found
+2025-10-17 10:37:42,471 INFO: SFM 2024-08-26 Hammer checked - not found
+2025-10-17 10:37:42,471 INFO: SFM 2024-08-27 Hammer checked - not found
+2025-10-17 10:37:42,471 INFO: SFM 2024-08-27 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,471 INFO: SFM 2024-08-28 Hammer checked - not found
+2025-10-17 10:37:42,471 INFO: SFM 2024-08-29 Hammer checked - not found
+2025-10-17 10:37:42,471 INFO: SFM 2024-08-29 Bullish Engulfing checked - FOUND
+2025-10-17 10:37:42,471 INFO: SFM 2024-08-30 Hammer checked - not found
+2025-10-17 10:37:42,472 INFO: SFM 2024-09-03 Hammer checked - not found
+2025-10-17 10:37:42,472 INFO: SFM 2024-09-04 Hammer checked - not found
+2025-10-17 10:37:42,472 INFO: SFM 2024-09-05 Hammer checked - not found
+2025-10-17 10:37:42,472 INFO: SFM 2024-09-06 Hammer checked - not found
+2025-10-17 10:37:42,472 INFO: SFM 2024-09-09 Hammer checked - not found
+2025-10-17 10:37:42,472 INFO: SFM 2024-09-10 Hammer checked - not found
+2025-10-17 10:37:42,472 INFO: SFM 2024-09-11 Hammer checked - not found
+2025-10-17 10:37:42,473 INFO: SFM 2024-09-12 Hammer checked - not found
+2025-10-17 10:37:42,473 INFO: SFM 2024-09-13 Hammer checked - not found
+2025-10-17 10:37:42,473 INFO: SFM 2024-09-16 Hammer checked - not found
+2025-10-17 10:37:42,473 INFO: SFM 2024-09-17 Hammer checked - not found
+2025-10-17 10:37:42,473 INFO: SFM 2024-09-18 Hammer checked - not found
+2025-10-17 10:37:42,473 INFO: SFM 2024-09-19 Hammer checked - not found
+2025-10-17 10:37:42,473 INFO: SFM 2024-09-20 Hammer checked - not found
+2025-10-17 10:37:42,474 INFO: SFM 2024-09-23 Hammer checked - not found
+2025-10-17 10:37:42,474 INFO: SFM 2024-09-24 Hammer checked - not found
+2025-10-17 10:37:42,474 INFO: SFM 2024-09-25 Hammer checked - not found
+2025-10-17 10:37:42,474 INFO: SFM 2024-09-26 Hammer checked - not found
+2025-10-17 10:37:42,474 INFO: SFM 2024-09-27 Hammer checked - not found
+2025-10-17 10:37:42,474 INFO: SFM 2024-09-30 Hammer checked - not found
+2025-10-17 10:37:42,474 INFO: SFM 2024-10-01 Hammer checked - not found
+2025-10-17 10:37:42,475 INFO: SFM 2024-10-02 Hammer checked - not found
+2025-10-17 10:37:42,475 INFO: SFM 2024-10-03 Hammer checked - not found
+2025-10-17 10:37:42,475 INFO: SFM 2024-10-04 Hammer checked - not found
+2025-10-17 10:37:42,475 INFO: SFM 2024-10-04 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,475 INFO: SFM 2024-10-07 Hammer checked - FOUND
+2025-10-17 10:37:42,475 INFO: SFM 2024-10-07 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,475 INFO: SFM 2024-10-08 Hammer checked - not found
+2025-10-17 10:37:42,476 INFO: SFM 2024-10-08 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,476 INFO: SFM 2024-10-09 Hammer checked - not found
+2025-10-17 10:37:42,476 INFO: SFM 2024-10-10 Hammer checked - FOUND
+2025-10-17 10:37:42,476 INFO: SFM 2024-10-11 Hammer checked - not found
+2025-10-17 10:37:42,476 INFO: SFM 2024-10-14 Hammer checked - not found
+2025-10-17 10:37:42,476 INFO: SFM 2024-10-15 Hammer checked - not found
+2025-10-17 10:37:42,476 INFO: SFM 2024-10-16 Hammer checked - not found
+2025-10-17 10:37:42,476 INFO: SFM 2024-10-17 Hammer checked - not found
+2025-10-17 10:37:42,477 INFO: SFM 2024-10-18 Hammer checked - not found
+2025-10-17 10:37:42,477 INFO: SFM 2024-10-21 Hammer checked - not found
+2025-10-17 10:37:42,477 INFO: SFM 2024-10-22 Hammer checked - not found
+2025-10-17 10:37:42,477 INFO: SFM 2024-10-23 Hammer checked - not found
+2025-10-17 10:37:42,477 INFO: SFM 2024-10-24 Hammer checked - not found
+2025-10-17 10:37:42,477 INFO: SFM 2024-10-25 Hammer checked - not found
+2025-10-17 10:37:42,477 INFO: SFM 2024-10-28 Hammer checked - not found
+2025-10-17 10:37:42,478 INFO: SFM 2024-10-29 Hammer checked - FOUND
+2025-10-17 10:37:42,478 INFO: SFM 2024-10-30 Hammer checked - not found
+2025-10-17 10:37:42,478 INFO: SFM 2024-10-31 Hammer checked - not found
+2025-10-17 10:37:42,478 INFO: SFM 2024-11-01 Hammer checked - not found
+2025-10-17 10:37:42,478 INFO: SFM 2024-11-04 Hammer checked - not found
+2025-10-17 10:37:42,478 INFO: SFM 2024-11-05 Hammer checked - not found
+2025-10-17 10:37:42,478 INFO: SFM 2024-11-06 Hammer checked - not found
+2025-10-17 10:37:42,479 INFO: SFM 2024-11-06 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,479 INFO: SFM 2024-11-07 Hammer checked - not found
+2025-10-17 10:37:42,479 INFO: SFM 2024-11-08 Hammer checked - not found
+2025-10-17 10:37:42,479 INFO: SFM 2024-11-11 Hammer checked - not found
+2025-10-17 10:37:42,479 INFO: SFM 2024-11-12 Hammer checked - not found
+2025-10-17 10:37:42,479 INFO: SFM 2024-11-13 Hammer checked - not found
+2025-10-17 10:37:42,479 INFO: SFM 2024-11-14 Hammer checked - not found
+2025-10-17 10:37:42,480 INFO: SFM 2024-11-15 Hammer checked - not found
+2025-10-17 10:37:42,480 INFO: SFM 2024-11-18 Hammer checked - not found
+2025-10-17 10:37:42,480 INFO: SFM 2024-11-19 Hammer checked - not found
+2025-10-17 10:37:42,480 INFO: SFM 2024-11-19 Bullish Engulfing checked - FOUND
+2025-10-17 10:37:42,480 INFO: SFM 2024-11-20 Hammer checked - FOUND
+2025-10-17 10:37:42,480 INFO: SFM 2024-11-21 Hammer checked - not found
+2025-10-17 10:37:42,480 INFO: SFM 2024-11-22 Hammer checked - not found
+2025-10-17 10:37:42,480 INFO: SFM 2024-11-25 Hammer checked - not found
+2025-10-17 10:37:42,481 INFO: SFM 2024-11-26 Hammer checked - not found
+2025-10-17 10:37:42,481 INFO: SFM 2024-11-27 Hammer checked - not found
+2025-10-17 10:37:42,481 INFO: SFM 2024-11-29 Hammer checked - not found
+2025-10-17 10:37:42,481 INFO: SFM 2024-12-02 Hammer checked - not found
+2025-10-17 10:37:42,481 INFO: SFM 2024-12-03 Hammer checked - not found
+2025-10-17 10:37:42,481 INFO: SFM 2024-12-04 Hammer checked - not found
+2025-10-17 10:37:42,481 INFO: SFM 2024-12-04 Bullish Engulfing checked - FOUND
+2025-10-17 10:37:42,482 INFO: SFM 2024-12-05 Hammer checked - not found
+2025-10-17 10:37:42,482 INFO: SFM 2024-12-06 Hammer checked - not found
+2025-10-17 10:37:42,482 INFO: SFM 2024-12-09 Hammer checked - not found
+2025-10-17 10:37:42,482 INFO: SFM 2024-12-10 Hammer checked - not found
+2025-10-17 10:37:42,482 INFO: SFM 2024-12-11 Hammer checked - not found
+2025-10-17 10:37:42,483 INFO: SFM 2024-12-12 Hammer checked - not found
+2025-10-17 10:37:42,483 INFO: SFM 2024-12-12 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,483 INFO: SFM 2024-12-13 Hammer checked - not found
+2025-10-17 10:37:42,483 INFO: SFM 2024-12-16 Hammer checked - not found
+2025-10-17 10:37:42,483 INFO: SFM 2024-12-17 Hammer checked - not found
+2025-10-17 10:37:42,483 INFO: SFM 2024-12-18 Hammer checked - not found
+2025-10-17 10:37:42,483 INFO: SFM 2024-12-19 Hammer checked - not found
+2025-10-17 10:37:42,484 INFO: SFM 2024-12-20 Hammer checked - not found
+2025-10-17 10:37:42,484 INFO: SFM 2024-12-23 Hammer checked - not found
+2025-10-17 10:37:42,484 INFO: SFM 2024-12-24 Hammer checked - not found
+2025-10-17 10:37:42,484 INFO: SFM 2024-12-24 Bullish Engulfing checked - FOUND
+2025-10-17 10:37:42,484 INFO: SFM 2024-12-26 Hammer checked - not found
+2025-10-17 10:37:42,484 INFO: SFM 2024-12-27 Hammer checked - not found
+2025-10-17 10:37:42,485 INFO: SFM 2024-12-30 Hammer checked - not found
+2025-10-17 10:37:42,485 INFO: SFM 2024-12-31 Hammer checked - not found
+2025-10-17 10:37:42,485 INFO: SFM 2025-01-02 Hammer checked - not found
+2025-10-17 10:37:42,485 INFO: SFM 2025-01-03 Hammer checked - not found
+2025-10-17 10:37:42,485 INFO: SFM 2025-01-06 Hammer checked - not found
+2025-10-17 10:37:42,485 INFO: SFM 2025-01-06 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,485 INFO: SFM 2025-01-07 Hammer checked - not found
+2025-10-17 10:37:42,485 INFO: SFM 2025-01-08 Hammer checked - FOUND
+2025-10-17 10:37:42,486 INFO: SFM 2025-01-10 Hammer checked - not found
+2025-10-17 10:37:42,486 INFO: SFM 2025-01-13 Hammer checked - not found
+2025-10-17 10:37:42,486 INFO: SFM 2025-01-14 Hammer checked - not found
+2025-10-17 10:37:42,486 INFO: SFM 2025-01-15 Hammer checked - FOUND
+2025-10-17 10:37:42,486 INFO: SFM 2025-01-16 Hammer checked - not found
+2025-10-17 10:37:42,486 INFO: SFM 2025-01-17 Hammer checked - not found
+2025-10-17 10:37:42,487 INFO: SFM 2025-01-21 Hammer checked - not found
+2025-10-17 10:37:42,487 INFO: SFM 2025-01-21 Bullish Engulfing checked - FOUND
+2025-10-17 10:37:42,487 INFO: SFM 2025-01-22 Hammer checked - not found
+2025-10-17 10:37:42,487 INFO: SFM 2025-01-23 Hammer checked - not found
+2025-10-17 10:37:42,487 INFO: SFM 2025-01-24 Hammer checked - FOUND
+2025-10-17 10:37:42,487 INFO: SFM 2025-01-27 Hammer checked - not found
+2025-10-17 10:37:42,487 INFO: SFM 2025-01-28 Hammer checked - not found
+2025-10-17 10:37:42,488 INFO: SFM 2025-01-29 Hammer checked - not found
+2025-10-17 10:37:42,488 INFO: SFM 2025-01-29 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,488 INFO: SFM 2025-01-30 Hammer checked - not found
+2025-10-17 10:37:42,488 INFO: SFM 2025-01-31 Hammer checked - not found
+2025-10-17 10:37:42,488 INFO: SFM 2025-01-31 Bullish Engulfing checked - FOUND
+2025-10-17 10:37:42,488 INFO: SFM 2025-02-03 Hammer checked - not found
+2025-10-17 10:37:42,488 INFO: SFM 2025-02-04 Hammer checked - not found
+2025-10-17 10:37:42,488 INFO: SFM 2025-02-05 Hammer checked - not found
+2025-10-17 10:37:42,489 INFO: SFM 2025-02-05 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,489 INFO: SFM 2025-02-06 Hammer checked - not found
+2025-10-17 10:37:42,489 INFO: SFM 2025-02-07 Hammer checked - not found
+2025-10-17 10:37:42,489 INFO: SFM 2025-02-10 Hammer checked - not found
+2025-10-17 10:37:42,489 INFO: SFM 2025-02-11 Hammer checked - not found
+2025-10-17 10:37:42,489 INFO: SFM 2025-02-12 Hammer checked - not found
+2025-10-17 10:37:42,489 INFO: SFM 2025-02-12 Bullish Engulfing checked - FOUND
+2025-10-17 10:37:42,489 INFO: SFM 2025-02-13 Hammer checked - not found
+2025-10-17 10:37:42,490 INFO: SFM 2025-02-14 Hammer checked - not found
+2025-10-17 10:37:42,490 INFO: SFM 2025-02-14 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,490 INFO: SFM 2025-02-18 Hammer checked - not found
+2025-10-17 10:37:42,490 INFO: SFM 2025-02-19 Hammer checked - not found
+2025-10-17 10:37:42,490 INFO: SFM 2025-02-20 Hammer checked - not found
+2025-10-17 10:37:42,490 INFO: SFM 2025-02-21 Hammer checked - not found
+2025-10-17 10:37:42,490 INFO: SFM 2025-02-24 Hammer checked - not found
+2025-10-17 10:37:42,491 INFO: SFM 2025-02-25 Hammer checked - FOUND
+2025-10-17 10:37:42,491 INFO: SFM 2025-02-26 Hammer checked - not found
+2025-10-17 10:37:42,491 INFO: SFM 2025-02-26 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,491 INFO: SFM 2025-02-27 Hammer checked - not found
+2025-10-17 10:37:42,491 INFO: SFM 2025-02-28 Hammer checked - not found
+2025-10-17 10:37:42,491 INFO: SFM 2025-03-03 Hammer checked - not found
+2025-10-17 10:37:42,491 INFO: SFM 2025-03-04 Hammer checked - not found
+2025-10-17 10:37:42,491 INFO: SFM 2025-03-05 Hammer checked - not found
+2025-10-17 10:37:42,492 INFO: SFM 2025-03-06 Hammer checked - not found
+2025-10-17 10:37:42,492 INFO: SFM 2025-03-07 Hammer checked - not found
+2025-10-17 10:37:42,492 INFO: SFM 2025-03-10 Hammer checked - not found
+2025-10-17 10:37:42,492 INFO: SFM 2025-03-11 Hammer checked - not found
+2025-10-17 10:37:42,492 INFO: SFM 2025-03-11 Bullish Engulfing checked - FOUND
+2025-10-17 10:37:42,492 INFO: SFM 2025-03-12 Hammer checked - not found
+2025-10-17 10:37:42,492 INFO: SFM 2025-03-13 Hammer checked - not found
+2025-10-17 10:37:42,493 INFO: SFM 2025-03-14 Hammer checked - not found
+2025-10-17 10:37:42,493 INFO: SFM 2025-03-17 Hammer checked - not found
+2025-10-17 10:37:42,493 INFO: SFM 2025-03-18 Hammer checked - not found
+2025-10-17 10:37:42,493 INFO: SFM 2025-03-19 Hammer checked - not found
+2025-10-17 10:37:42,493 INFO: SFM 2025-03-19 Bullish Engulfing checked - FOUND
+2025-10-17 10:37:42,493 INFO: SFM 2025-03-20 Hammer checked - not found
+2025-10-17 10:37:42,493 INFO: SFM 2025-03-21 Hammer checked - not found
+2025-10-17 10:37:42,494 INFO: SFM 2025-03-24 Hammer checked - not found
+2025-10-17 10:37:42,494 INFO: SFM 2025-03-25 Hammer checked - not found
+2025-10-17 10:37:42,494 INFO: SFM 2025-03-25 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,494 INFO: SFM 2025-03-26 Hammer checked - not found
+2025-10-17 10:37:42,494 INFO: SFM 2025-03-26 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,494 INFO: SFM 2025-03-27 Hammer checked - not found
+2025-10-17 10:37:42,494 INFO: SFM 2025-03-28 Hammer checked - FOUND
+2025-10-17 10:37:42,494 INFO: SFM 2025-03-31 Hammer checked - not found
+2025-10-17 10:37:42,495 INFO: SFM 2025-03-31 Bullish Engulfing checked - FOUND
+2025-10-17 10:37:42,495 INFO: SFM 2025-04-01 Hammer checked - not found
+2025-10-17 10:37:42,495 INFO: SFM 2025-04-02 Hammer checked - not found
+2025-10-17 10:37:42,495 INFO: SFM 2025-04-02 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,495 INFO: SFM 2025-04-03 Hammer checked - not found
+2025-10-17 10:37:42,495 INFO: SFM 2025-04-04 Hammer checked - not found
+2025-10-17 10:37:42,495 INFO: SFM 2025-04-07 Hammer checked - not found
+2025-10-17 10:37:42,495 INFO: SFM 2025-04-08 Hammer checked - not found
+2025-10-17 10:37:42,496 INFO: SFM 2025-04-09 Hammer checked - not found
+2025-10-17 10:37:42,496 INFO: SFM 2025-04-10 Hammer checked - not found
+2025-10-17 10:37:42,496 INFO: SFM 2025-04-11 Hammer checked - not found
+2025-10-17 10:37:42,496 INFO: SFM 2025-04-11 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,496 INFO: SFM 2025-04-14 Hammer checked - not found
+2025-10-17 10:37:42,496 INFO: SFM 2025-04-14 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,496 INFO: SFM 2025-04-15 Hammer checked - not found
+2025-10-17 10:37:42,497 INFO: SFM 2025-04-16 Hammer checked - not found
+2025-10-17 10:37:42,497 INFO: SFM 2025-04-17 Hammer checked - not found
+2025-10-17 10:37:42,497 INFO: SFM 2025-04-21 Hammer checked - not found
+2025-10-17 10:37:42,497 INFO: SFM 2025-04-22 Hammer checked - not found
+2025-10-17 10:37:42,497 INFO: SFM 2025-04-23 Hammer checked - not found
+2025-10-17 10:37:42,497 INFO: SFM 2025-04-24 Hammer checked - not found
+2025-10-17 10:37:42,497 INFO: SFM 2025-04-25 Hammer checked - FOUND
+2025-10-17 10:37:42,498 INFO: SFM 2025-04-28 Hammer checked - not found
+2025-10-17 10:37:42,498 INFO: SFM 2025-04-28 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,498 INFO: SFM 2025-04-29 Hammer checked - not found
+2025-10-17 10:37:42,498 INFO: SFM 2025-04-29 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,498 INFO: SFM 2025-04-30 Hammer checked - not found
+2025-10-17 10:37:42,498 INFO: SFM 2025-05-01 Hammer checked - not found
+2025-10-17 10:37:42,498 INFO: SFM 2025-05-02 Hammer checked - not found
+2025-10-17 10:37:42,499 INFO: SFM 2025-05-05 Hammer checked - FOUND
+2025-10-17 10:37:42,499 INFO: SFM 2025-05-06 Hammer checked - not found
+2025-10-17 10:37:42,499 INFO: SFM 2025-05-07 Hammer checked - not found
+2025-10-17 10:37:42,499 INFO: SFM 2025-05-08 Hammer checked - not found
+2025-10-17 10:37:42,499 INFO: SFM 2025-05-09 Hammer checked - not found
+2025-10-17 10:37:42,499 INFO: SFM 2025-05-12 Hammer checked - not found
+2025-10-17 10:37:42,499 INFO: SFM 2025-05-13 Hammer checked - not found
+2025-10-17 10:37:42,500 INFO: SFM 2025-05-14 Hammer checked - not found
+2025-10-17 10:37:42,500 INFO: SFM 2025-05-15 Hammer checked - not found
+2025-10-17 10:37:42,500 INFO: SFM 2025-05-15 Bullish Engulfing checked - FOUND
+2025-10-17 10:37:42,500 INFO: SFM 2025-05-16 Hammer checked - not found
+2025-10-17 10:37:42,500 INFO: SFM 2025-05-19 Hammer checked - not found
+2025-10-17 10:37:42,500 INFO: SFM 2025-05-19 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,501 INFO: SFM 2025-05-20 Hammer checked - not found
+2025-10-17 10:37:42,501 INFO: SFM 2025-05-21 Hammer checked - not found
+2025-10-17 10:37:42,501 INFO: SFM 2025-05-22 Hammer checked - not found
+2025-10-17 10:37:42,501 INFO: SFM 2025-05-23 Hammer checked - not found
+2025-10-17 10:37:42,501 INFO: SFM 2025-05-27 Hammer checked - not found
+2025-10-17 10:37:42,501 INFO: SFM 2025-05-28 Hammer checked - not found
+2025-10-17 10:37:42,501 INFO: SFM 2025-05-28 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,501 INFO: SFM 2025-05-29 Hammer checked - FOUND
+2025-10-17 10:37:42,502 INFO: SFM 2025-05-30 Hammer checked - not found
+2025-10-17 10:37:42,502 INFO: SFM 2025-06-02 Hammer checked - not found
+2025-10-17 10:37:42,502 INFO: SFM 2025-06-03 Hammer checked - not found
+2025-10-17 10:37:42,502 INFO: SFM 2025-06-04 Hammer checked - not found
+2025-10-17 10:37:42,502 INFO: SFM 2025-06-05 Hammer checked - not found
+2025-10-17 10:37:42,502 INFO: SFM 2025-06-06 Hammer checked - FOUND
+2025-10-17 10:37:42,503 INFO: SFM 2025-06-09 Hammer checked - not found
+2025-10-17 10:37:42,503 INFO: SFM 2025-06-10 Hammer checked - not found
+2025-10-17 10:37:42,503 INFO: SFM 2025-06-11 Hammer checked - not found
+2025-10-17 10:37:42,503 INFO: SFM 2025-06-12 Hammer checked - not found
+2025-10-17 10:37:42,503 INFO: SFM 2025-06-13 Hammer checked - not found
+2025-10-17 10:37:42,503 INFO: SFM 2025-06-16 Hammer checked - not found
+2025-10-17 10:37:42,503 INFO: SFM 2025-06-17 Hammer checked - not found
+2025-10-17 10:37:42,504 INFO: SFM 2025-06-17 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,504 INFO: SFM 2025-06-18 Hammer checked - not found
+2025-10-17 10:37:42,504 INFO: SFM 2025-06-20 Hammer checked - not found
+2025-10-17 10:37:42,504 INFO: SFM 2025-06-23 Hammer checked - not found
+2025-10-17 10:37:42,504 INFO: SFM 2025-06-24 Hammer checked - not found
+2025-10-17 10:37:42,504 INFO: SFM 2025-06-25 Hammer checked - not found
+2025-10-17 10:37:42,504 INFO: SFM 2025-06-26 Hammer checked - not found
+2025-10-17 10:37:42,505 INFO: SFM 2025-06-27 Hammer checked - not found
+2025-10-17 10:37:42,505 INFO: SFM 2025-06-30 Hammer checked - not found
+2025-10-17 10:37:42,505 INFO: SFM 2025-07-01 Hammer checked - not found
+2025-10-17 10:37:42,505 INFO: SFM 2025-07-02 Hammer checked - not found
+2025-10-17 10:37:42,505 INFO: SFM 2025-07-03 Hammer checked - not found
+2025-10-17 10:37:42,505 INFO: SFM 2025-07-07 Hammer checked - not found
+2025-10-17 10:37:42,505 INFO: SFM 2025-07-08 Hammer checked - not found
+2025-10-17 10:37:42,506 INFO: SFM 2025-07-09 Hammer checked - not found
+2025-10-17 10:37:42,506 INFO: SFM 2025-07-10 Hammer checked - not found
+2025-10-17 10:37:42,506 INFO: SFM 2025-07-11 Hammer checked - not found
+2025-10-17 10:37:42,506 INFO: SFM 2025-07-14 Hammer checked - not found
+2025-10-17 10:37:42,506 INFO: SFM 2025-07-15 Hammer checked - not found
+2025-10-17 10:37:42,506 INFO: SFM 2025-07-15 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,506 INFO: SFM 2025-07-16 Hammer checked - not found
+2025-10-17 10:37:42,507 INFO: SFM 2025-07-16 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,507 INFO: SFM 2025-07-17 Hammer checked - not found
+2025-10-17 10:37:42,507 INFO: SFM 2025-07-17 Three White Soldiers checked - FOUND
+2025-10-17 10:37:42,507 INFO: SFM 2025-07-18 Hammer checked - not found
+2025-10-17 10:37:42,507 INFO: SFM 2025-07-21 Hammer checked - not found
+2025-10-17 10:37:42,507 INFO: SFM 2025-07-22 Hammer checked - not found
+2025-10-17 10:37:42,507 INFO: SFM 2025-07-23 Hammer checked - not found
+2025-10-17 10:37:42,507 INFO: SFM 2025-07-24 Hammer checked - not found
+2025-10-17 10:37:42,507 INFO: SFM 2025-07-25 Hammer checked - not found
+2025-10-17 10:37:42,508 INFO: SFM 2025-07-28 Hammer checked - not found
+2025-10-17 10:37:42,508 INFO: SFM 2025-07-29 Hammer checked - not found
+2025-10-17 10:37:42,508 INFO: SFM 2025-07-30 Hammer checked - not found
+2025-10-17 10:37:42,508 INFO: SFM 2025-07-31 Hammer checked - not found
+2025-10-17 10:37:42,508 INFO: SFM 2025-08-01 Hammer checked - not found
+2025-10-17 10:37:42,508 INFO: SFM 2025-08-04 Hammer checked - not found
+2025-10-17 10:37:42,508 INFO: SFM 2025-08-05 Hammer checked - not found
+2025-10-17 10:37:42,509 INFO: SFM 2025-08-06 Hammer checked - not found
+2025-10-17 10:37:42,509 INFO: SFM 2025-08-07 Hammer checked - not found
+2025-10-17 10:37:42,509 INFO: SFM 2025-08-08 Hammer checked - not found
+2025-10-17 10:37:42,509 INFO: SFM 2025-08-11 Hammer checked - not found
+2025-10-17 10:37:42,509 INFO: SFM 2025-08-12 Hammer checked - not found
+2025-10-17 10:37:42,509 INFO: SFM 2025-08-13 Hammer checked - FOUND
+2025-10-17 10:37:42,509 INFO: SFM 2025-08-14 Hammer checked - not found
+2025-10-17 10:37:42,510 INFO: SFM 2025-08-15 Hammer checked - not found
+2025-10-17 10:37:42,510 INFO: SFM 2025-08-18 Hammer checked - not found
+2025-10-17 10:37:42,510 INFO: SFM 2025-08-19 Hammer checked - not found
+2025-10-17 10:37:42,510 INFO: SFM 2025-08-20 Hammer checked - not found
+2025-10-17 10:37:42,510 INFO: SFM 2025-08-21 Hammer checked - not found
+2025-10-17 10:37:42,510 INFO: SFM 2025-08-22 Hammer checked - not found
+2025-10-17 10:37:42,510 INFO: SFM 2025-08-25 Hammer checked - not found
+2025-10-17 10:37:42,511 INFO: SFM 2025-08-26 Hammer checked - not found
+2025-10-17 10:37:42,511 INFO: SFM 2025-08-27 Hammer checked - not found
+2025-10-17 10:37:42,511 INFO: SFM 2025-08-28 Hammer checked - not found
+2025-10-17 10:37:42,511 INFO: SFM 2025-08-29 Hammer checked - not found
+2025-10-17 10:37:42,511 INFO: SFM 2025-09-02 Hammer checked - not found
+2025-10-17 10:37:42,511 INFO: SFM 2025-09-03 Hammer checked - FOUND
+2025-10-17 10:37:42,511 INFO: SFM 2025-09-04 Hammer checked - not found
+2025-10-17 10:37:42,512 INFO: SFM 2025-09-05 Hammer checked - not found
+2025-10-17 10:37:42,512 INFO: SFM 2025-09-08 Hammer checked - not found
+2025-10-17 10:37:42,512 INFO: SFM 2025-09-09 Hammer checked - not found
+2025-10-17 10:37:42,512 INFO: SFM 2025-09-10 Hammer checked - not found
+2025-10-17 10:37:42,512 INFO: SFM 2025-09-11 Hammer checked - not found
+2025-10-17 10:37:42,512 INFO: SFM 2025-09-12 Hammer checked - not found
+2025-10-17 10:37:42,512 INFO: SFM 2025-09-15 Hammer checked - not found
+2025-10-17 10:37:42,513 INFO: SFM 2025-09-16 Hammer checked - not found
+2025-10-17 10:37:42,513 INFO: SFM 2025-09-17 Hammer checked - not found
+2025-10-17 10:37:42,513 INFO: SFM 2025-09-18 Hammer checked - not found
+2025-10-17 10:37:42,513 INFO: SFM 2025-09-19 Hammer checked - not found
+2025-10-17 10:37:42,513 INFO: SFM 2025-09-22 Hammer checked - not found
+2025-10-17 10:37:42,513 INFO: SFM 2025-09-23 Hammer checked - FOUND
+2025-10-17 10:37:42,513 INFO: SFM 2025-09-24 Hammer checked - not found
+2025-10-17 10:37:42,514 INFO: SFM 2025-09-25 Hammer checked - not found
+2025-10-17 10:37:42,514 INFO: SFM 2025-09-26 Hammer checked - not found
+2025-10-17 10:37:42,514 INFO: SFM 2025-09-29 Hammer checked - not found
+2025-10-17 10:40:32,578 INFO: start_candles_analysis called
+2025-10-17 10:40:32,589 INFO: SFM 2023-07-03 Hammer checked - not found
+2025-10-17 10:40:32,592 INFO: SFM 2023-07-05 Hammer checked - not found
+2025-10-17 10:40:32,592 INFO: SFM 2023-07-06 Hammer checked - not found
+2025-10-17 10:40:32,592 INFO: SFM 2023-07-07 Hammer checked - not found
+2025-10-17 10:40:32,592 INFO: SFM 2023-07-10 Hammer checked - not found
+2025-10-17 10:40:32,592 INFO: SFM 2023-07-11 Hammer checked - not found
+2025-10-17 10:40:32,592 INFO: SFM 2023-07-12 Hammer checked - not found
+2025-10-17 10:40:32,592 INFO: SFM 2023-07-13 Hammer checked - not found
+2025-10-17 10:40:32,592 INFO: SFM 2023-07-14 Hammer checked - not found
+2025-10-17 10:40:32,593 INFO: SFM 2023-07-17 Hammer checked - not found
+2025-10-17 10:40:32,593 INFO: SFM 2023-07-18 Hammer checked - not found
+2025-10-17 10:40:32,593 INFO: SFM 2023-07-19 Hammer checked - not found
+2025-10-17 10:40:32,593 INFO: SFM 2023-07-20 Hammer checked - not found
+2025-10-17 10:40:32,595 INFO: SFM 2023-07-21 Hammer checked - not found
+2025-10-17 10:40:32,595 INFO: SFM 2023-07-24 Hammer checked - FOUND
+2025-10-17 10:40:32,595 INFO: SFM 2023-07-25 Hammer checked - not found
+2025-10-17 10:40:32,595 INFO: SFM 2023-07-26 Hammer checked - not found
+2025-10-17 10:40:32,595 INFO: SFM 2023-07-27 Hammer checked - not found
+2025-10-17 10:40:32,595 INFO: SFM 2023-07-28 Hammer checked - not found
+2025-10-17 10:40:32,595 INFO: SFM 2023-07-31 Hammer checked - not found
+2025-10-17 10:40:32,596 INFO: SFM 2023-08-01 Hammer checked - not found
+2025-10-17 10:40:32,596 INFO: SFM 2023-08-02 Hammer checked - not found
+2025-10-17 10:40:32,596 INFO: SFM 2023-08-03 Hammer checked - not found
+2025-10-17 10:40:32,596 INFO: SFM 2023-08-04 Hammer checked - not found
+2025-10-17 10:40:32,596 INFO: SFM 2023-08-07 Hammer checked - not found
+2025-10-17 10:40:32,598 INFO: SFM 2023-08-08 Hammer checked - not found
+2025-10-17 10:40:32,598 INFO: SFM 2023-08-09 Hammer checked - not found
+2025-10-17 10:40:32,598 INFO: SFM 2023-08-10 Hammer checked - not found
+2025-10-17 10:40:32,598 INFO: SFM 2023-08-11 Hammer checked - not found
+2025-10-17 10:40:32,598 INFO: SFM 2023-08-14 Hammer checked - not found
+2025-10-17 10:40:32,598 INFO: SFM 2023-08-15 Hammer checked - not found
+2025-10-17 10:40:32,598 INFO: SFM 2023-08-16 Hammer checked - not found
+2025-10-17 10:40:32,598 INFO: SFM 2023-08-17 Hammer checked - not found
+2025-10-17 10:40:32,598 INFO: SFM 2023-08-18 Hammer checked - not found
+2025-10-17 10:40:32,599 INFO: SFM 2023-08-21 Hammer checked - not found
+2025-10-17 10:40:32,599 INFO: SFM 2023-08-22 Hammer checked - FOUND
+2025-10-17 10:40:32,599 INFO: SFM 2023-08-23 Hammer checked - not found
+2025-10-17 10:40:32,601 INFO: SFM 2023-08-24 Hammer checked - not found
+2025-10-17 10:40:32,601 INFO: SFM 2023-08-25 Hammer checked - not found
+2025-10-17 10:40:32,601 INFO: SFM 2023-08-28 Hammer checked - not found
+2025-10-17 10:40:32,601 INFO: SFM 2023-08-29 Hammer checked - not found
+2025-10-17 10:40:32,601 INFO: SFM 2023-08-30 Hammer checked - not found
+2025-10-17 10:40:32,601 INFO: SFM 2023-08-31 Hammer checked - not found
+2025-10-17 10:40:32,601 INFO: SFM 2023-09-01 Hammer checked - not found
+2025-10-17 10:40:32,601 INFO: SFM 2023-09-05 Hammer checked - not found
+2025-10-17 10:40:32,601 INFO: SFM 2023-09-06 Hammer checked - not found
+2025-10-17 10:40:32,601 INFO: SFM 2023-09-07 Hammer checked - not found
+2025-10-17 10:40:32,601 INFO: SFM 2023-09-08 Hammer checked - not found
+2025-10-17 10:40:32,601 INFO: SFM 2023-09-11 Hammer checked - FOUND
+2025-10-17 10:40:32,604 INFO: SFM 2023-09-12 Hammer checked - not found
+2025-10-17 10:40:32,604 INFO: SFM 2023-09-13 Hammer checked - not found
+2025-10-17 10:40:32,604 INFO: SFM 2023-09-14 Hammer checked - not found
+2025-10-17 10:40:32,604 INFO: SFM 2023-09-15 Hammer checked - FOUND
+2025-10-17 10:40:32,604 INFO: SFM 2023-09-18 Hammer checked - not found
+2025-10-17 10:40:32,604 INFO: SFM 2023-09-19 Hammer checked - not found
+2025-10-17 10:40:32,604 INFO: SFM 2023-09-20 Hammer checked - not found
+2025-10-17 10:40:32,604 INFO: SFM 2023-09-21 Hammer checked - not found
+2025-10-17 10:40:32,604 INFO: SFM 2023-09-22 Hammer checked - not found
+2025-10-17 10:40:32,604 INFO: SFM 2023-09-25 Hammer checked - not found
+2025-10-17 10:40:32,604 INFO: SFM 2023-09-26 Hammer checked - not found
+2025-10-17 10:40:32,604 INFO: SFM 2023-09-27 Hammer checked - not found
+2025-10-17 10:40:32,607 INFO: SFM 2023-09-28 Hammer checked - not found
+2025-10-17 10:40:32,607 INFO: SFM 2023-09-29 Hammer checked - not found
+2025-10-17 10:40:32,607 INFO: SFM 2023-10-02 Hammer checked - not found
+2025-10-17 10:40:32,607 INFO: SFM 2023-10-03 Hammer checked - not found
+2025-10-17 10:40:32,607 INFO: SFM 2023-10-04 Hammer checked - not found
+2025-10-17 10:40:32,607 INFO: SFM 2023-10-05 Hammer checked - not found
+2025-10-17 10:40:32,607 INFO: SFM 2023-10-06 Hammer checked - not found
+2025-10-17 10:40:32,607 INFO: SFM 2023-10-09 Hammer checked - not found
+2025-10-17 10:40:32,607 INFO: SFM 2023-10-10 Hammer checked - not found
+2025-10-17 10:40:32,607 INFO: SFM 2023-10-11 Hammer checked - not found
+2025-10-17 10:40:32,607 INFO: SFM 2023-10-12 Hammer checked - not found
+2025-10-17 10:40:32,607 INFO: SFM 2023-10-13 Hammer checked - not found
+2025-10-17 10:40:32,610 INFO: SFM 2023-10-16 Hammer checked - not found
+2025-10-17 10:40:32,610 INFO: SFM 2023-10-17 Hammer checked - not found
+2025-10-17 10:40:32,610 INFO: SFM 2023-10-18 Hammer checked - not found
+2025-10-17 10:40:32,611 INFO: SFM 2023-10-19 Hammer checked - not found
+2025-10-17 10:40:32,611 INFO: SFM 2023-10-20 Hammer checked - not found
+2025-10-17 10:40:32,611 INFO: SFM 2023-10-23 Hammer checked - not found
+2025-10-17 10:40:32,611 INFO: SFM 2023-10-24 Hammer checked - not found
+2025-10-17 10:40:32,611 INFO: SFM 2023-10-25 Hammer checked - not found
+2025-10-17 10:40:32,611 INFO: SFM 2023-10-26 Hammer checked - not found
+2025-10-17 10:40:32,611 INFO: SFM 2023-10-27 Hammer checked - not found
+2025-10-17 10:40:32,611 INFO: SFM 2023-10-30 Hammer checked - not found
+2025-10-17 10:40:32,611 INFO: SFM 2023-10-31 Hammer checked - FOUND
+2025-10-17 10:40:32,614 INFO: SFM 2023-11-01 Hammer checked - not found
+2025-10-17 10:40:32,614 INFO: SFM 2023-11-02 Hammer checked - not found
+2025-10-17 10:40:32,614 INFO: SFM 2023-11-03 Hammer checked - not found
+2025-10-17 10:40:32,614 INFO: SFM 2023-11-06 Hammer checked - not found
+2025-10-17 10:40:32,614 INFO: SFM 2023-11-07 Hammer checked - not found
+2025-10-17 10:40:32,614 INFO: SFM 2023-11-08 Hammer checked - not found
+2025-10-17 10:40:32,614 INFO: SFM 2023-11-09 Hammer checked - not found
+2025-10-17 10:40:32,614 INFO: SFM 2023-11-10 Hammer checked - FOUND
+2025-10-17 10:40:32,615 INFO: SFM 2023-11-13 Hammer checked - not found
+2025-10-17 10:40:32,615 INFO: SFM 2023-11-14 Hammer checked - not found
+2025-10-17 10:40:32,615 INFO: SFM 2023-11-15 Hammer checked - not found
+2025-10-17 10:40:32,615 INFO: SFM 2023-11-16 Hammer checked - not found
+2025-10-17 10:40:32,617 INFO: SFM 2023-11-17 Hammer checked - not found
+2025-10-17 10:40:32,617 INFO: SFM 2023-11-20 Hammer checked - not found
+2025-10-17 10:40:32,618 INFO: SFM 2023-11-21 Hammer checked - not found
+2025-10-17 10:40:32,618 INFO: SFM 2023-11-22 Hammer checked - not found
+2025-10-17 10:40:32,618 INFO: SFM 2023-11-24 Hammer checked - not found
+2025-10-17 10:40:32,618 INFO: SFM 2023-11-27 Hammer checked - not found
+2025-10-17 10:40:32,618 INFO: SFM 2023-11-28 Hammer checked - not found
+2025-10-17 10:40:32,618 INFO: SFM 2023-11-29 Hammer checked - not found
+2025-10-17 10:40:32,618 INFO: SFM 2023-11-30 Hammer checked - not found
+2025-10-17 10:40:32,618 INFO: SFM 2023-12-01 Hammer checked - not found
+2025-10-17 10:40:32,618 INFO: SFM 2023-12-04 Hammer checked - not found
+2025-10-17 10:40:32,618 INFO: SFM 2023-12-05 Hammer checked - not found
+2025-10-17 10:40:32,620 INFO: SFM 2023-12-06 Hammer checked - not found
+2025-10-17 10:40:32,621 INFO: SFM 2023-12-07 Hammer checked - not found
+2025-10-17 10:40:32,621 INFO: SFM 2023-12-08 Hammer checked - not found
+2025-10-17 10:40:32,621 INFO: SFM 2023-12-11 Hammer checked - not found
+2025-10-17 10:40:32,621 INFO: SFM 2023-12-12 Hammer checked - not found
+2025-10-17 10:40:32,621 INFO: SFM 2023-12-13 Hammer checked - not found
+2025-10-17 10:40:32,621 INFO: SFM 2023-12-14 Hammer checked - not found
+2025-10-17 10:40:32,621 INFO: SFM 2023-12-15 Hammer checked - not found
+2025-10-17 10:40:32,621 INFO: SFM 2023-12-18 Hammer checked - not found
+2025-10-17 10:40:32,621 INFO: SFM 2023-12-19 Hammer checked - not found
+2025-10-17 10:40:32,621 INFO: SFM 2023-12-20 Hammer checked - not found
+2025-10-17 10:40:32,621 INFO: SFM 2023-12-21 Hammer checked - not found
+2025-10-17 10:40:32,624 INFO: SFM 2023-12-22 Hammer checked - not found
+2025-10-17 10:40:32,624 INFO: SFM 2023-12-26 Hammer checked - not found
+2025-10-17 10:40:32,624 INFO: SFM 2023-12-27 Hammer checked - not found
+2025-10-17 10:40:32,624 INFO: SFM 2023-12-28 Hammer checked - not found
+2025-10-17 10:40:32,624 INFO: SFM 2023-12-29 Hammer checked - not found
+2025-10-17 10:40:32,624 INFO: SFM 2024-01-02 Hammer checked - not found
+2025-10-17 10:40:32,625 INFO: SFM 2024-01-03 Hammer checked - not found
+2025-10-17 10:40:32,625 INFO: SFM 2024-01-04 Hammer checked - not found
+2025-10-17 10:40:32,625 INFO: SFM 2024-01-05 Hammer checked - not found
+2025-10-17 10:40:32,625 INFO: SFM 2024-01-08 Hammer checked - not found
+2025-10-17 10:40:32,625 INFO: SFM 2024-01-09 Hammer checked - not found
+2025-10-17 10:40:32,625 INFO: SFM 2024-01-10 Hammer checked - not found
+2025-10-17 10:40:32,627 INFO: SFM 2024-01-11 Hammer checked - FOUND
+2025-10-17 10:40:32,627 INFO: SFM 2024-01-12 Hammer checked - not found
+2025-10-17 10:40:32,628 INFO: SFM 2024-01-16 Hammer checked - not found
+2025-10-17 10:40:32,628 INFO: SFM 2024-01-17 Hammer checked - not found
+2025-10-17 10:40:32,628 INFO: SFM 2024-01-18 Hammer checked - not found
+2025-10-17 10:40:32,628 INFO: SFM 2024-01-19 Hammer checked - FOUND
+2025-10-17 10:40:32,628 INFO: SFM 2024-01-22 Hammer checked - not found
+2025-10-17 10:40:32,628 INFO: SFM 2024-01-23 Hammer checked - not found
+2025-10-17 10:40:32,628 INFO: SFM 2024-01-24 Hammer checked - not found
+2025-10-17 10:40:32,628 INFO: SFM 2024-01-25 Hammer checked - not found
+2025-10-17 10:40:32,628 INFO: SFM 2024-01-26 Hammer checked - not found
+2025-10-17 10:40:32,628 INFO: SFM 2024-01-29 Hammer checked - not found
+2025-10-17 10:40:32,630 INFO: SFM 2024-01-30 Hammer checked - not found
+2025-10-17 10:40:32,631 INFO: SFM 2024-01-31 Hammer checked - not found
+2025-10-17 10:40:32,631 INFO: SFM 2024-02-01 Hammer checked - not found
+2025-10-17 10:40:32,631 INFO: SFM 2024-02-02 Hammer checked - not found
+2025-10-17 10:40:32,631 INFO: SFM 2024-02-05 Hammer checked - not found
+2025-10-17 10:40:32,631 INFO: SFM 2024-02-06 Hammer checked - not found
+2025-10-17 10:40:32,631 INFO: SFM 2024-02-07 Hammer checked - not found
+2025-10-17 10:40:32,631 INFO: SFM 2024-02-08 Hammer checked - not found
+2025-10-17 10:40:32,631 INFO: SFM 2024-02-09 Hammer checked - not found
+2025-10-17 10:40:32,631 INFO: SFM 2024-02-12 Hammer checked - not found
+2025-10-17 10:40:32,631 INFO: SFM 2024-02-13 Hammer checked - not found
+2025-10-17 10:40:32,631 INFO: SFM 2024-02-14 Hammer checked - not found
+2025-10-17 10:40:32,634 INFO: SFM 2024-02-15 Hammer checked - not found
+2025-10-17 10:40:32,634 INFO: SFM 2024-02-16 Hammer checked - not found
+2025-10-17 10:40:32,634 INFO: SFM 2024-02-20 Hammer checked - not found
+2025-10-17 10:40:32,634 INFO: SFM 2024-02-21 Hammer checked - not found
+2025-10-17 10:40:32,634 INFO: SFM 2024-02-22 Hammer checked - not found
+2025-10-17 10:40:32,634 INFO: SFM 2024-02-23 Hammer checked - not found
+2025-10-17 10:40:32,634 INFO: SFM 2024-02-26 Hammer checked - not found
+2025-10-17 10:40:32,634 INFO: SFM 2024-02-27 Hammer checked - not found
+2025-10-17 10:40:32,634 INFO: SFM 2024-02-28 Hammer checked - not found
+2025-10-17 10:40:32,634 INFO: SFM 2024-02-29 Hammer checked - not found
+2025-10-17 10:40:32,634 INFO: SFM 2024-03-01 Hammer checked - not found
+2025-10-17 10:40:32,634 INFO: SFM 2024-03-04 Hammer checked - not found
+2025-10-17 10:40:32,637 INFO: SFM 2024-03-05 Hammer checked - not found
+2025-10-17 10:40:32,637 INFO: SFM 2024-03-06 Hammer checked - not found
+2025-10-17 10:40:32,637 INFO: SFM 2024-03-07 Hammer checked - not found
+2025-10-17 10:40:32,637 INFO: SFM 2024-03-08 Hammer checked - FOUND
+2025-10-17 10:40:32,637 INFO: SFM 2024-03-11 Hammer checked - not found
+2025-10-17 10:40:32,637 INFO: SFM 2024-03-12 Hammer checked - not found
+2025-10-17 10:40:32,637 INFO: SFM 2024-03-13 Hammer checked - not found
+2025-10-17 10:40:32,637 INFO: SFM 2024-03-14 Hammer checked - not found
+2025-10-17 10:40:32,637 INFO: SFM 2024-03-15 Hammer checked - not found
+2025-10-17 10:40:32,637 INFO: SFM 2024-03-18 Hammer checked - not found
+2025-10-17 10:40:32,637 INFO: SFM 2024-03-19 Hammer checked - not found
+2025-10-17 10:40:32,637 INFO: SFM 2024-03-20 Hammer checked - not found
+2025-10-17 10:40:32,640 INFO: SFM 2024-03-21 Hammer checked - not found
+2025-10-17 10:40:32,640 INFO: SFM 2024-03-22 Hammer checked - not found
+2025-10-17 10:40:32,640 INFO: SFM 2024-03-25 Hammer checked - not found
+2025-10-17 10:40:32,641 INFO: SFM 2024-03-26 Hammer checked - not found
+2025-10-17 10:40:32,641 INFO: SFM 2024-03-27 Hammer checked - FOUND
+2025-10-17 10:40:32,641 INFO: SFM 2024-03-28 Hammer checked - not found
+2025-10-17 10:40:32,641 INFO: SFM 2024-04-01 Hammer checked - not found
+2025-10-17 10:40:32,641 INFO: SFM 2024-04-02 Hammer checked - not found
+2025-10-17 10:40:32,641 INFO: SFM 2024-04-03 Hammer checked - not found
+2025-10-17 10:40:32,641 INFO: SFM 2024-04-04 Hammer checked - not found
+2025-10-17 10:40:32,641 INFO: SFM 2024-04-05 Hammer checked - not found
+2025-10-17 10:40:32,641 INFO: SFM 2024-04-08 Hammer checked - not found
+2025-10-17 10:40:32,644 INFO: SFM 2024-04-09 Hammer checked - not found
+2025-10-17 10:40:32,644 INFO: SFM 2024-04-10 Hammer checked - not found
+2025-10-17 10:40:32,644 INFO: SFM 2024-04-11 Hammer checked - FOUND
+2025-10-17 10:40:32,644 INFO: SFM 2024-04-12 Hammer checked - not found
+2025-10-17 10:40:32,644 INFO: SFM 2024-04-15 Hammer checked - not found
+2025-10-17 10:40:32,644 INFO: SFM 2024-04-16 Hammer checked - not found
+2025-10-17 10:40:32,644 INFO: SFM 2024-04-17 Hammer checked - not found
+2025-10-17 10:40:32,644 INFO: SFM 2024-04-18 Hammer checked - not found
+2025-10-17 10:40:32,644 INFO: SFM 2024-04-19 Hammer checked - not found
+2025-10-17 10:40:32,644 INFO: SFM 2024-04-22 Hammer checked - not found
+2025-10-17 10:40:32,645 INFO: SFM 2024-04-23 Hammer checked - not found
+2025-10-17 10:40:32,645 INFO: SFM 2024-04-24 Hammer checked - not found
+2025-10-17 10:40:32,647 INFO: SFM 2024-04-25 Hammer checked - not found
+2025-10-17 10:40:32,647 INFO: SFM 2024-04-26 Hammer checked - not found
+2025-10-17 10:40:32,647 INFO: SFM 2024-04-29 Hammer checked - not found
+2025-10-17 10:40:32,647 INFO: SFM 2024-04-30 Hammer checked - not found
+2025-10-17 10:40:32,647 INFO: SFM 2024-05-01 Hammer checked - not found
+2025-10-17 10:40:32,648 INFO: SFM 2024-05-02 Hammer checked - not found
+2025-10-17 10:40:32,648 INFO: SFM 2024-05-03 Hammer checked - not found
+2025-10-17 10:40:32,648 INFO: SFM 2024-05-06 Hammer checked - not found
+2025-10-17 10:40:32,648 INFO: SFM 2024-05-07 Hammer checked - not found
+2025-10-17 10:40:32,648 INFO: SFM 2024-05-08 Hammer checked - not found
+2025-10-17 10:40:32,648 INFO: SFM 2024-05-09 Hammer checked - not found
+2025-10-17 10:40:32,648 INFO: SFM 2024-05-10 Hammer checked - not found
+2025-10-17 10:40:32,650 INFO: SFM 2024-05-13 Hammer checked - not found
+2025-10-17 10:40:32,650 INFO: SFM 2024-05-14 Hammer checked - not found
+2025-10-17 10:40:32,650 INFO: SFM 2024-05-15 Hammer checked - not found
+2025-10-17 10:40:32,650 INFO: SFM 2024-05-16 Hammer checked - not found
+2025-10-17 10:40:32,651 INFO: SFM 2024-05-17 Hammer checked - not found
+2025-10-17 10:40:32,651 INFO: SFM 2024-05-20 Hammer checked - not found
+2025-10-17 10:40:32,651 INFO: SFM 2024-05-21 Hammer checked - not found
+2025-10-17 10:40:32,651 INFO: SFM 2024-05-22 Hammer checked - not found
+2025-10-17 10:40:32,651 INFO: SFM 2024-05-23 Hammer checked - not found
+2025-10-17 10:40:32,651 INFO: SFM 2024-05-24 Hammer checked - not found
+2025-10-17 10:40:32,651 INFO: SFM 2024-05-28 Hammer checked - not found
+2025-10-17 10:40:32,651 INFO: SFM 2024-05-29 Hammer checked - not found
+2025-10-17 10:40:32,653 INFO: SFM 2024-05-30 Hammer checked - not found
+2025-10-17 10:40:32,654 INFO: SFM 2024-05-31 Hammer checked - not found
+2025-10-17 10:40:32,654 INFO: SFM 2024-06-03 Hammer checked - not found
+2025-10-17 10:40:32,654 INFO: SFM 2024-06-04 Hammer checked - not found
+2025-10-17 10:40:32,654 INFO: SFM 2024-06-05 Hammer checked - not found
+2025-10-17 10:40:32,654 INFO: SFM 2024-06-06 Hammer checked - not found
+2025-10-17 10:40:32,654 INFO: SFM 2024-06-07 Hammer checked - not found
+2025-10-17 10:40:32,654 INFO: SFM 2024-06-10 Hammer checked - FOUND
+2025-10-17 10:40:32,654 INFO: SFM 2024-06-11 Hammer checked - not found
+2025-10-17 10:40:32,654 INFO: SFM 2024-06-12 Hammer checked - not found
+2025-10-17 10:40:32,654 INFO: SFM 2024-06-13 Hammer checked - not found
+2025-10-17 10:40:32,654 INFO: SFM 2024-06-14 Hammer checked - not found
+2025-10-17 10:40:32,657 INFO: SFM 2024-06-17 Hammer checked - not found
+2025-10-17 10:40:32,658 INFO: SFM 2024-06-18 Hammer checked - not found
+2025-10-17 10:40:32,658 INFO: SFM 2024-06-20 Hammer checked - not found
+2025-10-17 10:40:32,658 INFO: SFM 2024-06-21 Hammer checked - not found
+2025-10-17 10:40:32,658 INFO: SFM 2024-06-24 Hammer checked - not found
+2025-10-17 10:40:32,658 INFO: SFM 2024-06-25 Hammer checked - not found
+2025-10-17 10:40:32,658 INFO: SFM 2024-06-26 Hammer checked - not found
+2025-10-17 10:40:32,658 INFO: SFM 2024-06-27 Hammer checked - not found
+2025-10-17 10:40:32,658 INFO: SFM 2024-06-28 Hammer checked - not found
+2025-10-17 10:40:32,658 INFO: SFM 2024-07-01 Hammer checked - not found
+2025-10-17 10:40:32,658 INFO: SFM 2024-07-02 Hammer checked - not found
+2025-10-17 10:40:32,658 INFO: SFM 2024-07-03 Hammer checked - not found
+2025-10-17 10:40:32,661 INFO: SFM 2024-07-05 Hammer checked - not found
+2025-10-17 10:40:32,661 INFO: SFM 2024-07-08 Hammer checked - not found
+2025-10-17 10:40:32,661 INFO: SFM 2024-07-09 Hammer checked - not found
+2025-10-17 10:40:32,661 INFO: SFM 2024-07-10 Hammer checked - not found
+2025-10-17 10:40:32,661 INFO: SFM 2024-07-11 Hammer checked - not found
+2025-10-17 10:40:32,661 INFO: SFM 2024-07-12 Hammer checked - not found
+2025-10-17 10:40:32,661 INFO: SFM 2024-07-15 Hammer checked - not found
+2025-10-17 10:40:32,661 INFO: SFM 2024-07-16 Hammer checked - not found
+2025-10-17 10:40:32,661 INFO: SFM 2024-07-17 Hammer checked - not found
+2025-10-17 10:40:32,661 INFO: SFM 2024-07-18 Hammer checked - not found
+2025-10-17 10:40:32,661 INFO: SFM 2024-07-19 Hammer checked - not found
+2025-10-17 10:40:32,662 INFO: SFM 2024-07-22 Hammer checked - not found
+2025-10-17 10:40:32,664 INFO: SFM 2024-07-23 Hammer checked - not found
+2025-10-17 10:40:32,664 INFO: SFM 2024-07-24 Hammer checked - not found
+2025-10-17 10:40:32,664 INFO: SFM 2024-07-25 Hammer checked - not found
+2025-10-17 10:40:32,664 INFO: SFM 2024-07-26 Hammer checked - not found
+2025-10-17 10:40:32,664 INFO: SFM 2024-07-29 Hammer checked - not found
+2025-10-17 10:40:32,664 INFO: SFM 2024-07-30 Hammer checked - not found
+2025-10-17 10:40:32,664 INFO: SFM 2024-07-31 Hammer checked - not found
+2025-10-17 10:40:32,664 INFO: SFM 2024-08-01 Hammer checked - not found
+2025-10-17 10:40:32,664 INFO: SFM 2024-08-02 Hammer checked - not found
+2025-10-17 10:40:32,664 INFO: SFM 2024-08-05 Hammer checked - not found
+2025-10-17 10:40:32,664 INFO: SFM 2024-08-06 Hammer checked - not found
+2025-10-17 10:40:32,664 INFO: SFM 2024-08-07 Hammer checked - not found
+2025-10-17 10:40:32,667 INFO: SFM 2024-08-08 Hammer checked - not found
+2025-10-17 10:40:32,667 INFO: SFM 2024-08-09 Hammer checked - FOUND
+2025-10-17 10:40:32,667 INFO: SFM 2024-08-12 Hammer checked - not found
+2025-10-17 10:40:32,667 INFO: SFM 2024-08-13 Hammer checked - not found
+2025-10-17 10:40:32,667 INFO: SFM 2024-08-14 Hammer checked - not found
+2025-10-17 10:40:32,667 INFO: SFM 2024-08-15 Hammer checked - not found
+2025-10-17 10:40:32,667 INFO: SFM 2024-08-16 Hammer checked - not found
+2025-10-17 10:40:32,668 INFO: SFM 2024-08-19 Hammer checked - not found
+2025-10-17 10:40:32,668 INFO: SFM 2024-08-20 Hammer checked - not found
+2025-10-17 10:40:32,668 INFO: SFM 2024-08-21 Hammer checked - not found
+2025-10-17 10:40:32,668 INFO: SFM 2024-08-22 Hammer checked - not found
+2025-10-17 10:40:32,668 INFO: SFM 2024-08-23 Hammer checked - not found
+2025-10-17 10:40:32,671 INFO: SFM 2024-08-26 Hammer checked - not found
+2025-10-17 10:40:32,671 INFO: SFM 2024-08-27 Hammer checked - not found
+2025-10-17 10:40:32,671 INFO: SFM 2024-08-28 Hammer checked - not found
+2025-10-17 10:40:32,671 INFO: SFM 2024-08-29 Hammer checked - not found
+2025-10-17 10:40:32,671 INFO: SFM 2024-08-30 Hammer checked - not found
+2025-10-17 10:40:32,671 INFO: SFM 2024-09-03 Hammer checked - not found
+2025-10-17 10:40:32,671 INFO: SFM 2024-09-04 Hammer checked - not found
+2025-10-17 10:40:32,671 INFO: SFM 2024-09-05 Hammer checked - not found
+2025-10-17 10:40:32,671 INFO: SFM 2024-09-06 Hammer checked - not found
+2025-10-17 10:40:32,671 INFO: SFM 2024-09-09 Hammer checked - not found
+2025-10-17 10:40:32,671 INFO: SFM 2024-09-10 Hammer checked - not found
+2025-10-17 10:40:32,671 INFO: SFM 2024-09-11 Hammer checked - not found
+2025-10-17 10:40:32,674 INFO: SFM 2024-09-12 Hammer checked - not found
+2025-10-17 10:40:32,675 INFO: SFM 2024-09-13 Hammer checked - not found
+2025-10-17 10:40:32,675 INFO: SFM 2024-09-16 Hammer checked - not found
+2025-10-17 10:40:32,675 INFO: SFM 2024-09-17 Hammer checked - not found
+2025-10-17 10:40:32,675 INFO: SFM 2024-09-18 Hammer checked - not found
+2025-10-17 10:40:32,675 INFO: SFM 2024-09-19 Hammer checked - not found
+2025-10-17 10:40:32,675 INFO: SFM 2024-09-20 Hammer checked - not found
+2025-10-17 10:40:32,675 INFO: SFM 2024-09-23 Hammer checked - not found
+2025-10-17 10:40:32,675 INFO: SFM 2024-09-24 Hammer checked - not found
+2025-10-17 10:40:32,675 INFO: SFM 2024-09-25 Hammer checked - not found
+2025-10-17 10:40:32,675 INFO: SFM 2024-09-26 Hammer checked - not found
+2025-10-17 10:40:32,675 INFO: SFM 2024-09-27 Hammer checked - not found
+2025-10-17 10:40:32,678 INFO: SFM 2024-09-30 Hammer checked - not found
+2025-10-17 10:40:32,679 INFO: SFM 2024-10-01 Hammer checked - not found
+2025-10-17 10:40:32,679 INFO: SFM 2024-10-02 Hammer checked - not found
+2025-10-17 10:40:32,679 INFO: SFM 2024-10-03 Hammer checked - not found
+2025-10-17 10:40:32,679 INFO: SFM 2024-10-04 Hammer checked - not found
+2025-10-17 10:40:32,679 INFO: SFM 2024-10-07 Hammer checked - FOUND
+2025-10-17 10:40:32,679 INFO: SFM 2024-10-08 Hammer checked - not found
+2025-10-17 10:40:32,679 INFO: SFM 2024-10-09 Hammer checked - not found
+2025-10-17 10:40:32,679 INFO: SFM 2024-10-10 Hammer checked - FOUND
+2025-10-17 10:40:32,679 INFO: SFM 2024-10-11 Hammer checked - not found
+2025-10-17 10:40:32,679 INFO: SFM 2024-10-14 Hammer checked - not found
+2025-10-17 10:40:32,679 INFO: SFM 2024-10-15 Hammer checked - not found
+2025-10-17 10:40:32,682 INFO: SFM 2024-10-16 Hammer checked - not found
+2025-10-17 10:40:32,682 INFO: SFM 2024-10-17 Hammer checked - not found
+2025-10-17 10:40:32,682 INFO: SFM 2024-10-18 Hammer checked - not found
+2025-10-17 10:40:32,682 INFO: SFM 2024-10-21 Hammer checked - not found
+2025-10-17 10:40:32,682 INFO: SFM 2024-10-22 Hammer checked - not found
+2025-10-17 10:40:32,682 INFO: SFM 2024-10-23 Hammer checked - not found
+2025-10-17 10:40:32,682 INFO: SFM 2024-10-24 Hammer checked - not found
+2025-10-17 10:40:32,682 INFO: SFM 2024-10-25 Hammer checked - not found
+2025-10-17 10:40:32,682 INFO: SFM 2024-10-28 Hammer checked - not found
+2025-10-17 10:40:32,682 INFO: SFM 2024-10-29 Hammer checked - FOUND
+2025-10-17 10:40:32,682 INFO: SFM 2024-10-30 Hammer checked - not found
+2025-10-17 10:40:32,682 INFO: SFM 2024-10-31 Hammer checked - not found
+2025-10-17 10:40:32,685 INFO: SFM 2024-11-01 Hammer checked - not found
+2025-10-17 10:40:32,686 INFO: SFM 2024-11-04 Hammer checked - not found
+2025-10-17 10:40:32,686 INFO: SFM 2024-11-05 Hammer checked - not found
+2025-10-17 10:40:32,686 INFO: SFM 2024-11-06 Hammer checked - not found
+2025-10-17 10:40:32,686 INFO: SFM 2024-11-07 Hammer checked - not found
+2025-10-17 10:40:32,686 INFO: SFM 2024-11-08 Hammer checked - not found
+2025-10-17 10:40:32,686 INFO: SFM 2024-11-11 Hammer checked - not found
+2025-10-17 10:40:32,686 INFO: SFM 2024-11-12 Hammer checked - not found
+2025-10-17 10:40:32,686 INFO: SFM 2024-11-13 Hammer checked - not found
+2025-10-17 10:40:32,686 INFO: SFM 2024-11-14 Hammer checked - not found
+2025-10-17 10:40:32,686 INFO: SFM 2024-11-15 Hammer checked - not found
+2025-10-17 10:40:32,686 INFO: SFM 2024-11-18 Hammer checked - not found
+2025-10-17 10:40:32,689 INFO: SFM 2024-11-19 Hammer checked - not found
+2025-10-17 10:40:32,689 INFO: SFM 2024-11-20 Hammer checked - FOUND
+2025-10-17 10:40:32,689 INFO: SFM 2024-11-21 Hammer checked - not found
+2025-10-17 10:40:32,689 INFO: SFM 2024-11-22 Hammer checked - not found
+2025-10-17 10:40:32,689 INFO: SFM 2024-11-25 Hammer checked - not found
+2025-10-17 10:40:32,689 INFO: SFM 2024-11-26 Hammer checked - not found
+2025-10-17 10:40:32,689 INFO: SFM 2024-11-27 Hammer checked - not found
+2025-10-17 10:40:32,689 INFO: SFM 2024-11-29 Hammer checked - not found
+2025-10-17 10:40:32,689 INFO: SFM 2024-12-02 Hammer checked - not found
+2025-10-17 10:40:32,689 INFO: SFM 2024-12-03 Hammer checked - not found
+2025-10-17 10:40:32,689 INFO: SFM 2024-12-04 Hammer checked - not found
+2025-10-17 10:40:32,689 INFO: SFM 2024-12-05 Hammer checked - not found
+2025-10-17 10:40:32,692 INFO: SFM 2024-12-06 Hammer checked - not found
+2025-10-17 10:40:32,692 INFO: SFM 2024-12-09 Hammer checked - not found
+2025-10-17 10:40:32,692 INFO: SFM 2024-12-10 Hammer checked - not found
+2025-10-17 10:40:32,692 INFO: SFM 2024-12-11 Hammer checked - not found
+2025-10-17 10:40:32,692 INFO: SFM 2024-12-12 Hammer checked - not found
+2025-10-17 10:40:32,693 INFO: SFM 2024-12-13 Hammer checked - not found
+2025-10-17 10:40:32,693 INFO: SFM 2024-12-16 Hammer checked - not found
+2025-10-17 10:40:32,693 INFO: SFM 2024-12-17 Hammer checked - not found
+2025-10-17 10:40:32,693 INFO: SFM 2024-12-18 Hammer checked - not found
+2025-10-17 10:40:32,693 INFO: SFM 2024-12-19 Hammer checked - not found
+2025-10-17 10:40:32,693 INFO: SFM 2024-12-20 Hammer checked - not found
+2025-10-17 10:40:32,693 INFO: SFM 2024-12-23 Hammer checked - not found
+2025-10-17 10:40:32,696 INFO: SFM 2024-12-24 Hammer checked - not found
+2025-10-17 10:40:32,696 INFO: SFM 2024-12-26 Hammer checked - not found
+2025-10-17 10:40:32,696 INFO: SFM 2024-12-27 Hammer checked - not found
+2025-10-17 10:40:32,696 INFO: SFM 2024-12-30 Hammer checked - not found
+2025-10-17 10:40:32,696 INFO: SFM 2024-12-31 Hammer checked - not found
+2025-10-17 10:40:32,696 INFO: SFM 2025-01-02 Hammer checked - not found
+2025-10-17 10:40:32,696 INFO: SFM 2025-01-03 Hammer checked - not found
+2025-10-17 10:40:32,696 INFO: SFM 2025-01-06 Hammer checked - not found
+2025-10-17 10:40:32,696 INFO: SFM 2025-01-07 Hammer checked - not found
+2025-10-17 10:40:32,696 INFO: SFM 2025-01-08 Hammer checked - FOUND
+2025-10-17 10:40:32,696 INFO: SFM 2025-01-10 Hammer checked - not found
+2025-10-17 10:40:32,696 INFO: SFM 2025-01-13 Hammer checked - not found
+2025-10-17 10:40:32,699 INFO: SFM 2025-01-14 Hammer checked - not found
+2025-10-17 10:40:32,699 INFO: SFM 2025-01-15 Hammer checked - FOUND
+2025-10-17 10:40:32,699 INFO: SFM 2025-01-16 Hammer checked - not found
+2025-10-17 10:40:32,699 INFO: SFM 2025-01-17 Hammer checked - not found
+2025-10-17 10:40:32,699 INFO: SFM 2025-01-21 Hammer checked - not found
+2025-10-17 10:40:32,699 INFO: SFM 2025-01-22 Hammer checked - not found
+2025-10-17 10:40:32,699 INFO: SFM 2025-01-23 Hammer checked - not found
+2025-10-17 10:40:32,699 INFO: SFM 2025-01-24 Hammer checked - FOUND
+2025-10-17 10:40:32,699 INFO: SFM 2025-01-27 Hammer checked - not found
+2025-10-17 10:40:32,699 INFO: SFM 2025-01-28 Hammer checked - not found
+2025-10-17 10:40:32,699 INFO: SFM 2025-01-29 Hammer checked - not found
+2025-10-17 10:40:32,699 INFO: SFM 2025-01-30 Hammer checked - not found
+2025-10-17 10:40:32,701 INFO: SFM 2025-01-31 Hammer checked - not found
+2025-10-17 10:40:32,702 INFO: SFM 2025-02-03 Hammer checked - not found
+2025-10-17 10:40:32,702 INFO: SFM 2025-02-04 Hammer checked - not found
+2025-10-17 10:40:32,702 INFO: SFM 2025-02-05 Hammer checked - not found
+2025-10-17 10:40:32,702 INFO: SFM 2025-02-06 Hammer checked - not found
+2025-10-17 10:40:32,702 INFO: SFM 2025-02-07 Hammer checked - not found
+2025-10-17 10:40:32,702 INFO: SFM 2025-02-10 Hammer checked - not found
+2025-10-17 10:40:32,702 INFO: SFM 2025-02-11 Hammer checked - not found
+2025-10-17 10:40:32,702 INFO: SFM 2025-02-12 Hammer checked - not found
+2025-10-17 10:40:32,702 INFO: SFM 2025-02-13 Hammer checked - not found
+2025-10-17 10:40:32,702 INFO: SFM 2025-02-14 Hammer checked - not found
+2025-10-17 10:40:32,702 INFO: SFM 2025-02-18 Hammer checked - not found
+2025-10-17 10:40:32,704 INFO: SFM 2025-02-19 Hammer checked - not found
+2025-10-17 10:40:32,705 INFO: SFM 2025-02-20 Hammer checked - not found
+2025-10-17 10:40:32,705 INFO: SFM 2025-02-21 Hammer checked - not found
+2025-10-17 10:40:32,705 INFO: SFM 2025-02-24 Hammer checked - not found
+2025-10-17 10:40:32,705 INFO: SFM 2025-02-25 Hammer checked - FOUND
+2025-10-17 10:40:32,705 INFO: SFM 2025-02-26 Hammer checked - not found
+2025-10-17 10:40:32,705 INFO: SFM 2025-02-27 Hammer checked - not found
+2025-10-17 10:40:32,705 INFO: SFM 2025-02-28 Hammer checked - not found
+2025-10-17 10:40:32,705 INFO: SFM 2025-03-03 Hammer checked - not found
+2025-10-17 10:40:32,705 INFO: SFM 2025-03-04 Hammer checked - not found
+2025-10-17 10:40:32,705 INFO: SFM 2025-03-05 Hammer checked - not found
+2025-10-17 10:40:32,705 INFO: SFM 2025-03-06 Hammer checked - not found
+2025-10-17 10:40:32,708 INFO: SFM 2025-03-07 Hammer checked - not found
+2025-10-17 10:40:32,708 INFO: SFM 2025-03-10 Hammer checked - not found
+2025-10-17 10:40:32,708 INFO: SFM 2025-03-11 Hammer checked - not found
+2025-10-17 10:40:32,708 INFO: SFM 2025-03-12 Hammer checked - not found
+2025-10-17 10:40:32,708 INFO: SFM 2025-03-13 Hammer checked - not found
+2025-10-17 10:40:32,708 INFO: SFM 2025-03-14 Hammer checked - not found
+2025-10-17 10:40:32,708 INFO: SFM 2025-03-17 Hammer checked - not found
+2025-10-17 10:40:32,708 INFO: SFM 2025-03-18 Hammer checked - not found
+2025-10-17 10:40:32,708 INFO: SFM 2025-03-19 Hammer checked - not found
+2025-10-17 10:40:32,708 INFO: SFM 2025-03-20 Hammer checked - not found
+2025-10-17 10:40:32,708 INFO: SFM 2025-03-21 Hammer checked - not found
+2025-10-17 10:40:32,708 INFO: SFM 2025-03-24 Hammer checked - not found
+2025-10-17 10:40:32,711 INFO: SFM 2025-03-25 Hammer checked - not found
+2025-10-17 10:40:32,711 INFO: SFM 2025-03-26 Hammer checked - not found
+2025-10-17 10:40:32,711 INFO: SFM 2025-03-27 Hammer checked - not found
+2025-10-17 10:40:32,711 INFO: SFM 2025-03-28 Hammer checked - FOUND
+2025-10-17 10:40:32,711 INFO: SFM 2025-03-31 Hammer checked - not found
+2025-10-17 10:40:32,711 INFO: SFM 2025-04-01 Hammer checked - not found
+2025-10-17 10:40:32,711 INFO: SFM 2025-04-02 Hammer checked - not found
+2025-10-17 10:40:32,711 INFO: SFM 2025-04-03 Hammer checked - not found
+2025-10-17 10:40:32,711 INFO: SFM 2025-04-04 Hammer checked - not found
+2025-10-17 10:40:32,711 INFO: SFM 2025-04-07 Hammer checked - not found
+2025-10-17 10:40:32,711 INFO: SFM 2025-04-08 Hammer checked - not found
+2025-10-17 10:40:32,711 INFO: SFM 2025-04-09 Hammer checked - not found
+2025-10-17 10:40:32,714 INFO: SFM 2025-04-10 Hammer checked - not found
+2025-10-17 10:40:32,714 INFO: SFM 2025-04-11 Hammer checked - not found
+2025-10-17 10:40:32,714 INFO: SFM 2025-04-14 Hammer checked - not found
+2025-10-17 10:40:32,714 INFO: SFM 2025-04-15 Hammer checked - not found
+2025-10-17 10:40:32,714 INFO: SFM 2025-04-16 Hammer checked - not found
+2025-10-17 10:40:32,714 INFO: SFM 2025-04-17 Hammer checked - not found
+2025-10-17 10:40:32,714 INFO: SFM 2025-04-21 Hammer checked - not found
+2025-10-17 10:40:32,714 INFO: SFM 2025-04-22 Hammer checked - not found
+2025-10-17 10:40:32,714 INFO: SFM 2025-04-23 Hammer checked - not found
+2025-10-17 10:40:32,714 INFO: SFM 2025-04-24 Hammer checked - not found
+2025-10-17 10:40:32,714 INFO: SFM 2025-04-25 Hammer checked - FOUND
+2025-10-17 10:40:32,714 INFO: SFM 2025-04-28 Hammer checked - not found
+2025-10-17 10:40:32,717 INFO: SFM 2025-04-29 Hammer checked - not found
+2025-10-17 10:40:32,717 INFO: SFM 2025-04-30 Hammer checked - not found
+2025-10-17 10:40:32,717 INFO: SFM 2025-05-01 Hammer checked - not found
+2025-10-17 10:40:32,717 INFO: SFM 2025-05-02 Hammer checked - not found
+2025-10-17 10:40:32,717 INFO: SFM 2025-05-05 Hammer checked - FOUND
+2025-10-17 10:40:32,717 INFO: SFM 2025-05-06 Hammer checked - not found
+2025-10-17 10:40:32,717 INFO: SFM 2025-05-07 Hammer checked - not found
+2025-10-17 10:40:32,717 INFO: SFM 2025-05-08 Hammer checked - not found
+2025-10-17 10:40:32,717 INFO: SFM 2025-05-09 Hammer checked - not found
+2025-10-17 10:40:32,717 INFO: SFM 2025-05-12 Hammer checked - not found
+2025-10-17 10:40:32,717 INFO: SFM 2025-05-13 Hammer checked - not found
+2025-10-17 10:40:32,717 INFO: SFM 2025-05-14 Hammer checked - not found
+2025-10-17 10:40:32,720 INFO: SFM 2025-05-15 Hammer checked - not found
+2025-10-17 10:40:32,720 INFO: SFM 2025-05-16 Hammer checked - not found
+2025-10-17 10:40:32,720 INFO: SFM 2025-05-19 Hammer checked - not found
+2025-10-17 10:40:32,720 INFO: SFM 2025-05-20 Hammer checked - not found
+2025-10-17 10:40:32,720 INFO: SFM 2025-05-21 Hammer checked - not found
+2025-10-17 10:40:32,720 INFO: SFM 2025-05-22 Hammer checked - not found
+2025-10-17 10:40:32,720 INFO: SFM 2025-05-23 Hammer checked - not found
+2025-10-17 10:40:32,720 INFO: SFM 2025-05-27 Hammer checked - not found
+2025-10-17 10:40:32,720 INFO: SFM 2025-05-28 Hammer checked - not found
+2025-10-17 10:40:32,720 INFO: SFM 2025-05-29 Hammer checked - FOUND
+2025-10-17 10:40:32,720 INFO: SFM 2025-05-30 Hammer checked - not found
+2025-10-17 10:40:32,720 INFO: SFM 2025-06-02 Hammer checked - not found
+2025-10-17 10:40:32,723 INFO: SFM 2025-06-03 Hammer checked - not found
+2025-10-17 10:40:32,723 INFO: SFM 2025-06-04 Hammer checked - not found
+2025-10-17 10:40:32,723 INFO: SFM 2025-06-05 Hammer checked - not found
+2025-10-17 10:40:32,723 INFO: SFM 2025-06-06 Hammer checked - FOUND
+2025-10-17 10:40:32,723 INFO: SFM 2025-06-09 Hammer checked - not found
+2025-10-17 10:40:32,723 INFO: SFM 2025-06-10 Hammer checked - not found
+2025-10-17 10:40:32,723 INFO: SFM 2025-06-11 Hammer checked - not found
+2025-10-17 10:40:32,723 INFO: SFM 2025-06-12 Hammer checked - not found
+2025-10-17 10:40:32,723 INFO: SFM 2025-06-13 Hammer checked - not found
+2025-10-17 10:40:32,723 INFO: SFM 2025-06-16 Hammer checked - not found
+2025-10-17 10:40:32,724 INFO: SFM 2025-06-17 Hammer checked - not found
+2025-10-17 10:40:32,724 INFO: SFM 2025-06-18 Hammer checked - not found
+2025-10-17 10:40:32,727 INFO: SFM 2025-06-20 Hammer checked - not found
+2025-10-17 10:40:32,727 INFO: SFM 2025-06-23 Hammer checked - not found
+2025-10-17 10:40:32,727 INFO: SFM 2025-06-24 Hammer checked - not found
+2025-10-17 10:40:32,727 INFO: SFM 2025-06-25 Hammer checked - not found
+2025-10-17 10:40:32,727 INFO: SFM 2025-06-26 Hammer checked - not found
+2025-10-17 10:40:32,727 INFO: SFM 2025-06-27 Hammer checked - not found
+2025-10-17 10:40:32,727 INFO: SFM 2025-06-30 Hammer checked - not found
+2025-10-17 10:40:32,727 INFO: SFM 2025-07-01 Hammer checked - not found
+2025-10-17 10:40:32,727 INFO: SFM 2025-07-02 Hammer checked - not found
+2025-10-17 10:40:32,727 INFO: SFM 2025-07-03 Hammer checked - not found
+2025-10-17 10:40:32,727 INFO: SFM 2025-07-07 Hammer checked - not found
+2025-10-17 10:40:32,728 INFO: SFM 2025-07-08 Hammer checked - not found
+2025-10-17 10:40:32,730 INFO: SFM 2025-07-09 Hammer checked - not found
+2025-10-17 10:40:32,730 INFO: SFM 2025-07-10 Hammer checked - not found
+2025-10-17 10:40:32,730 INFO: SFM 2025-07-11 Hammer checked - not found
+2025-10-17 10:40:32,730 INFO: SFM 2025-07-14 Hammer checked - not found
+2025-10-17 10:40:32,730 INFO: SFM 2025-07-15 Hammer checked - not found
+2025-10-17 10:40:32,730 INFO: SFM 2025-07-16 Hammer checked - not found
+2025-10-17 10:40:32,730 INFO: SFM 2025-07-17 Hammer checked - not found
+2025-10-17 10:40:32,730 INFO: SFM 2025-07-18 Hammer checked - not found
+2025-10-17 10:40:32,730 INFO: SFM 2025-07-21 Hammer checked - not found
+2025-10-17 10:40:32,730 INFO: SFM 2025-07-22 Hammer checked - not found
+2025-10-17 10:40:32,730 INFO: SFM 2025-07-23 Hammer checked - not found
+2025-10-17 10:40:32,730 INFO: SFM 2025-07-24 Hammer checked - not found
+2025-10-17 10:40:32,733 INFO: SFM 2025-07-25 Hammer checked - not found
+2025-10-17 10:40:32,733 INFO: SFM 2025-07-28 Hammer checked - not found
+2025-10-17 10:40:32,733 INFO: SFM 2025-07-29 Hammer checked - not found
+2025-10-17 10:40:32,733 INFO: SFM 2025-07-30 Hammer checked - not found
+2025-10-17 10:40:32,733 INFO: SFM 2025-07-31 Hammer checked - not found
+2025-10-17 10:40:32,733 INFO: SFM 2025-08-01 Hammer checked - not found
+2025-10-17 10:40:32,733 INFO: SFM 2025-08-04 Hammer checked - not found
+2025-10-17 10:40:32,733 INFO: SFM 2025-08-05 Hammer checked - not found
+2025-10-17 10:40:32,733 INFO: SFM 2025-08-06 Hammer checked - not found
+2025-10-17 10:40:32,733 INFO: SFM 2025-08-07 Hammer checked - not found
+2025-10-17 10:40:32,733 INFO: SFM 2025-08-08 Hammer checked - not found
+2025-10-17 10:40:32,733 INFO: SFM 2025-08-11 Hammer checked - not found
+2025-10-17 10:40:32,736 INFO: SFM 2025-08-12 Hammer checked - not found
+2025-10-17 10:40:32,736 INFO: SFM 2025-08-13 Hammer checked - FOUND
+2025-10-17 10:40:32,736 INFO: SFM 2025-08-14 Hammer checked - not found
+2025-10-17 10:40:32,736 INFO: SFM 2025-08-15 Hammer checked - not found
+2025-10-17 10:40:32,736 INFO: SFM 2025-08-18 Hammer checked - not found
+2025-10-17 10:40:32,736 INFO: SFM 2025-08-19 Hammer checked - not found
+2025-10-17 10:40:32,736 INFO: SFM 2025-08-20 Hammer checked - not found
+2025-10-17 10:40:32,736 INFO: SFM 2025-08-21 Hammer checked - not found
+2025-10-17 10:40:32,736 INFO: SFM 2025-08-22 Hammer checked - not found
+2025-10-17 10:40:32,736 INFO: SFM 2025-08-25 Hammer checked - not found
+2025-10-17 10:40:32,736 INFO: SFM 2025-08-26 Hammer checked - not found
+2025-10-17 10:40:32,736 INFO: SFM 2025-08-27 Hammer checked - not found
+2025-10-17 10:40:32,739 INFO: SFM 2025-08-28 Hammer checked - not found
+2025-10-17 10:40:32,739 INFO: SFM 2025-08-29 Hammer checked - not found
+2025-10-17 10:40:32,739 INFO: SFM 2025-09-02 Hammer checked - not found
+2025-10-17 10:40:32,739 INFO: SFM 2025-09-03 Hammer checked - FOUND
+2025-10-17 10:40:32,739 INFO: SFM 2025-09-04 Hammer checked - not found
+2025-10-17 10:40:32,739 INFO: SFM 2025-09-05 Hammer checked - not found
+2025-10-17 10:40:32,739 INFO: SFM 2025-09-08 Hammer checked - not found
+2025-10-17 10:40:32,739 INFO: SFM 2025-09-09 Hammer checked - not found
+2025-10-17 10:40:32,739 INFO: SFM 2025-09-10 Hammer checked - not found
+2025-10-17 10:40:32,739 INFO: SFM 2025-09-11 Hammer checked - not found
+2025-10-17 10:40:32,739 INFO: SFM 2025-09-12 Hammer checked - not found
+2025-10-17 10:40:32,739 INFO: SFM 2025-09-15 Hammer checked - not found
+2025-10-17 10:40:32,743 INFO: SFM 2025-09-16 Hammer checked - not found
+2025-10-17 10:40:32,743 INFO: SFM 2025-09-17 Hammer checked - not found
+2025-10-17 10:40:32,743 INFO: SFM 2025-09-18 Hammer checked - not found
+2025-10-17 10:40:32,743 INFO: SFM 2025-09-19 Hammer checked - not found
+2025-10-17 10:40:32,743 INFO: SFM 2025-09-22 Hammer checked - not found
+2025-10-17 10:40:32,744 INFO: SFM 2025-09-23 Hammer checked - FOUND
+2025-10-17 10:40:32,744 INFO: SFM 2025-09-24 Hammer checked - not found
+2025-10-17 10:40:32,744 INFO: SFM 2025-09-25 Hammer checked - not found
+2025-10-17 10:40:32,744 INFO: SFM 2025-09-26 Hammer checked - not found
+2025-10-17 10:40:32,744 INFO: SFM 2025-09-29 Hammer checked - not found
+2025-10-17 10:40:32,749 INFO: Analyysi valmis: SFM - Analyysitulokset tickerille SFM | Hammer: 29 kpl
+2025-10-17 10:41:17,020 INFO: start_candles_analysis called
+2025-10-17 10:41:17,032 INFO: SFM 2023-07-05 Bullish Engulfing checked - FOUND
+2025-10-17 10:41:17,042 INFO: SFM 2023-08-31 Bullish Engulfing checked - FOUND
+2025-10-17 10:41:17,042 INFO: SFM 2023-09-08 Bullish Engulfing checked - FOUND
+2025-10-17 10:41:17,052 INFO: SFM 2023-10-23 Bullish Engulfing checked - FOUND
+2025-10-17 10:41:17,058 INFO: SFM 2023-11-20 Bullish Engulfing checked - FOUND
+2025-10-17 10:41:17,061 INFO: SFM 2023-12-06 Bullish Engulfing checked - FOUND
+2025-10-17 10:41:17,061 INFO: SFM 2023-12-13 Bullish Engulfing checked - FOUND
+2025-10-17 10:41:17,074 INFO: SFM 2024-02-22 Bullish Engulfing checked - FOUND
+2025-10-17 10:41:17,078 INFO: SFM 2024-03-15 Bullish Engulfing checked - FOUND
+2025-10-17 10:41:17,080 INFO: SFM 2024-03-22 Bullish Engulfing checked - FOUND
+2025-10-17 10:41:17,085 INFO: SFM 2024-04-10 Bullish Engulfing checked - FOUND
+2025-10-17 10:41:17,110 INFO: SFM 2024-08-29 Bullish Engulfing checked - FOUND
+2025-10-17 10:41:17,127 INFO: SFM 2024-11-19 Bullish Engulfing checked - FOUND
+2025-10-17 10:41:17,128 INFO: SFM 2024-12-04 Bullish Engulfing checked - FOUND
+2025-10-17 10:41:17,133 INFO: SFM 2024-12-24 Bullish Engulfing checked - FOUND
+2025-10-17 10:41:17,137 INFO: SFM 2025-01-21 Bullish Engulfing checked - FOUND
+2025-10-17 10:41:17,140 INFO: SFM 2025-01-31 Bullish Engulfing checked - FOUND
+2025-10-17 10:41:17,141 INFO: SFM 2025-02-12 Bullish Engulfing checked - FOUND
+2025-10-17 10:41:17,147 INFO: SFM 2025-03-11 Bullish Engulfing checked - FOUND
+2025-10-17 10:41:17,148 INFO: SFM 2025-03-19 Bullish Engulfing checked - FOUND
+2025-10-17 10:41:17,151 INFO: SFM 2025-03-31 Bullish Engulfing checked - FOUND
+2025-10-17 10:41:17,160 INFO: SFM 2025-05-15 Bullish Engulfing checked - FOUND
+2025-10-17 10:41:17,186 INFO: Analyysi valmis: SFM - Analyysitulokset tickerille SFM | Bullish Engulfing: 22 kpl

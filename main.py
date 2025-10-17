@@ -62,25 +62,66 @@ class RawCandleApp:
             ], spacing=20),
             value="all"
         )
-        self.candles_start_date = ft.TextField(
-            label="Alkupäivä (YYYY-MM-DD)",
-            width=180,
-            hint_text="2023-01-01",
-            disabled=True
+        # DatePickers for better UX (some Flet versions don't accept label in DatePicker)
+        self.candles_start_date = ft.DatePicker(
+            disabled=True,
         )
-        self.candles_end_date = ft.TextField(
-            label="Loppupäivä (YYYY-MM-DD)",
-            width=180,
-            hint_text="2023-12-31",
-            disabled=True
+        self.candles_end_date = ft.DatePicker(
+            disabled=True,
         )
+
+        # helper to control start button enabled state
+        def update_start_button_enabled():
+            # if date mode is 'range', require both dates filled to enable start
+            if self.candles_date_radio_group.value == 'range':
+                need = bool(self.candles_start_date.value and self.candles_end_date.value)
+                try:
+                    self.candles_start_button.disabled = not need
+                except Exception:
+                    pass
+            else:
+                try:
+                    self.candles_start_button.disabled = False
+                except Exception:
+                    pass
+            try:
+                self.candles_start_button.update()
+            except Exception:
+                pass
+
+        # hook date fields to update button state
+        self.candles_start_date.on_change = lambda e: update_start_button_enabled()
+        self.candles_end_date.on_change = lambda e: update_start_button_enabled()
+
         def on_date_radio_change(e):
             is_range = self.candles_date_radio_group.value == "range"
             self.candles_start_date.disabled = not is_range
             self.candles_end_date.disabled = not is_range
+            update_start_button_enabled()
             self.candles_start_date.update()
             self.candles_end_date.update()
         self.candles_date_radio_group.on_change = on_date_radio_change
+
+        # create buttons and keep reference to start button for enabling/disabling
+        self.candles_start_button = ft.ElevatedButton(
+            "Käynnistä analyysi",
+            icon=ft.Icons.PLAY_ARROW,
+            bgcolor=ft.Colors.ORANGE_400,
+            color=ft.Colors.WHITE,
+            on_click=self.start_candles_analysis,
+            width=220,
+        )
+        self.candles_show_button = ft.ElevatedButton(
+            "Näytä tulokset",
+            icon=ft.Icons.VISIBILITY,
+            bgcolor=ft.Colors.BLUE_600,
+            color=ft.Colors.WHITE,
+            on_click=self.show_analysis_results if hasattr(self, 'show_analysis_results') else None,
+            width=220,
+        )
+
+        # ensure initial button state
+        update_start_button_enabled()
 
         return ft.View(
             "/candles",
@@ -101,22 +142,8 @@ class RawCandleApp:
                         ),
                         ft.Container(height=16),
                         ft.Row([
-                            ft.ElevatedButton(
-                                "Käynnistä analyysi",
-                                icon=ft.Icons.PLAY_ARROW,
-                                bgcolor=ft.Colors.ORANGE_400,
-                                color=ft.Colors.WHITE,
-                                on_click=self.start_candles_analysis,
-                                width=220,
-                            ),
-                            ft.ElevatedButton(
-                                "Näytä tulokset",
-                                icon=ft.Icons.VISIBILITY,
-                                bgcolor=ft.Colors.BLUE_600,
-                                color=ft.Colors.WHITE,
-                                on_click=self.show_analysis_results if hasattr(self, 'show_analysis_results') else None,
-                                width=220,
-                            ),
+                            self.candles_start_button,
+                            self.candles_show_button,
                         ], alignment=ft.MainAxisAlignment.CENTER, spacing=20),
                         ft.Divider(height=30, color=ft.Colors.TRANSPARENT),
                         ft.Row([
@@ -155,9 +182,9 @@ class RawCandleApp:
                                             ft.Text("Aikaväli", size=18, weight=ft.FontWeight.BOLD, color=ft.Colors.ORANGE_600),
                                             self.candles_date_radio_group,
                                             ft.Row([
-                                                self.candles_start_date,
-                                                self.candles_end_date,
-                                            ], spacing=20),
+                                                    ft.Column([ft.Text('Alkupäivä'), self.candles_start_date]),
+                                                    ft.Column([ft.Text('Loppupäivä'), self.candles_end_date]),
+                                                ], spacing=20),
                                         ], horizontal_alignment=ft.CrossAxisAlignment.START, spacing=10),
                                         padding=20,
                                         bgcolor=ft.Colors.GREY_50,
@@ -177,23 +204,7 @@ class RawCandleApp:
             vertical_alignment=ft.MainAxisAlignment.START,
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
         )
-        """Palauttaa placeholder-näkymän asetuksille"""
-        return ft.View(
-            "/settings",
-            [
-                self.create_appbar(),
-                ft.Container(
-                    content=ft.Column([
-                        ft.Text("Asetukset", size=28, weight=ft.FontWeight.BOLD, color=ft.Colors.ORANGE_700),
-                        ft.Text("Tämä on asetukset-sivu (toteutus puuttuu)", color=ft.Colors.GREY_600),
-                    ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=20),
-                    padding=40,
-                    expand=True,
-                ),
-            ],
-            vertical_alignment=ft.MainAxisAlignment.START,
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-        )
+        # (duplicate settings view removed)
     def tyhjenna_tietokanta(self, e):
         """Tyhjentää osakedata-taulun tietokannasta"""
         data_dir = Path(__file__).parent / "data"
@@ -277,6 +288,18 @@ class RawCandleApp:
         from analysis.logger import setup_logger
         logger = setup_logger()
 
+        logger.info("start_candles_analysis called")
+        # immediate user feedback
+        self.page.snack_bar = ft.SnackBar(
+            ft.Text("🔄 Analyysi käynnistyy...", color=ft.Colors.WHITE),
+            bgcolor=ft.Colors.BLUE_600,
+            duration=1500
+        )
+        if self.page.snack_bar not in self.page.overlay:
+            self.page.overlay.append(self.page.snack_bar)
+        self.page.snack_bar.open = True
+        self.page.update()
+
         # Kerää valitut analyysit
         selected_patterns = [cb.label for cb in self.candles_checkboxes if cb.value]
         if not selected_patterns:
@@ -297,8 +320,28 @@ class RawCandleApp:
 
         # Aikaväli
         date_mode = self.candles_date_radio_group.value
-        start_date = self.candles_start_date.value.strip() if date_mode == "range" else None
-        end_date = self.candles_end_date.value.strip() if date_mode == "range" else None
+        # DatePicker.value is either None or a datetime.date
+        if date_mode == "range":
+            sd = self.candles_start_date.value
+            ed = self.candles_end_date.value
+            if sd is None or ed is None:
+                dlg = ft.AlertDialog(title=ft.Text("Täytä sekä alkupäivä että loppupäivä."))
+                self.page.dialog = dlg
+                dlg.open = True
+                self.page.update()
+                return
+            # ensure start <= end
+            if sd > ed:
+                dlg = ft.AlertDialog(title=ft.Text("Alkupäivä ei voi olla myöhemmin kuin loppupäivä."))
+                self.page.dialog = dlg
+                dlg.open = True
+                self.page.update()
+                return
+            start_date = sd.isoformat()
+            end_date = ed.isoformat()
+        else:
+            start_date = None
+            end_date = None
 
         # Progress dialog
         progress = ft.ProgressBar(width=400)
@@ -319,7 +362,32 @@ class RawCandleApp:
         def worker():
             try:
                 # suorita analyysi
-                results = run_candlestick_analysis(os.path.join(os.path.dirname(__file__), 'data', 'osakedata.db'), ticker, selected_patterns, start_date, end_date)
+                import time
+                last_update_time = 0.0
+                last_fraction = 0.0
+
+                def progress_cb(fraction: float):
+                    # Throttle UI updates: update only if fraction increased by >=2% or >0.2s passed
+                    nonlocal last_update_time, last_fraction
+                    try:
+                        now = time.time()
+                        if fraction - last_fraction >= 0.02 or (now - last_update_time) > 0.2 or fraction >= 1.0:
+                            last_fraction = fraction
+                            last_update_time = now
+                            progress.value = max(0.0, min(1.0, fraction))
+                            status.value = f"Käsitelty {int(progress.value * 100)} %"
+                            self.page.update()
+                    except Exception:
+                        pass
+
+                results = run_candlestick_analysis(
+                    os.path.join(os.path.dirname(__file__), 'data', 'osakedata.db'),
+                    ticker,
+                    selected_patterns,
+                    start_date,
+                    end_date,
+                    progress_callback=progress_cb,
+                )
                 # tallenna ja muodosta viesti
                 msg = print_analysis_results(results, ticker, output_path)
                 # päivitykset UI:hin
@@ -328,6 +396,25 @@ class RawCandleApp:
                 self.page.update()
                 safe_msg = msg.replace("\n", " | ")
                 logger.info(f"Analyysi valmis: {ticker} - {safe_msg}")
+                # Näytä yhteenveto-ikkuna: montako matchia ja montako tickeriä sisältää tuloksia
+                try:
+                    total_matches = sum(len(v) for v in results.values())
+                    tickers_with_results = 1 if results else 0
+                    summary = f"Analyysi valmis: {ticker}\nLöydetty yhteensä {total_matches} tapahtumaa.\nTickereitä joissa tuloksia: {tickers_with_results}"
+                    summary_dlg = ft.AlertDialog(
+                        title=ft.Text('Analyysin yhteenveto'),
+                        content=ft.Text(summary),
+                        actions=[
+                            ft.TextButton('Näytä tiedosto', on_click=lambda _: self.show_analysis_results(None)),
+                            ft.TextButton('Sulje', on_click=lambda _: self.close_dialog(summary_dlg)),
+                        ],
+                    )
+                    self.page.dialog = summary_dlg
+                    summary_dlg.open = True
+                    self.page.update()
+                except Exception:
+                    # älä kaada jos yhteenvetonäyttö epäonnistuu
+                    pass
             except Exception as ex:
                 status.value = f"Virhe: {ex}"
                 self.page.update()
@@ -343,17 +430,8 @@ class RawCandleApp:
                 self.page.snack_bar.open = True
                 self.page.update()
 
-        def progress_updater():
-            # Simppeli progress-simulaatio kunnes worker asettaa progressin 1.0
-            import time
-            while not progress.value >= 1.0:
-                progress.value = min(0.95, progress.value + 0.05)
-                self.page.update()
-                time.sleep(0.3)
-
-        # startataan worker ja progress updater säikeet
+        # startataan worker-säie
         threading.Thread(target=worker, daemon=True).start()
-        threading.Thread(target=progress_updater, daemon=True).start()
     def fetch_and_save_from_file(self, e):
         import os
         data_dir = os.path.join(os.path.dirname(__file__), "data")
@@ -484,22 +562,26 @@ class RawCandleApp:
             with open(csv_path, newline='', encoding='utf-8') as f:
                 reader = csv.reader(f)
                 for rivi in reader:
-                    if not rivi or len(rivi) < 8:
+                    if not rivi or len(rivi) < 2:
                         continue
                     osake = rivi[0]
-                    try:
-                        pvm = rivi[1]
-                        open_val = float(rivi[2]) if rivi[2] else None
-                        close_val = float(rivi[3]) if rivi[3] else None
-                        high_val = float(rivi[4]) if rivi[4] else None
-                        low_val = float(rivi[5]) if rivi[5] else None
-                        volume_val = int(rivi[6]) if rivi[6] else None
-                        cur.execute("""
-                            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume)
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
-                        """, (osake, pvm, open_val, high_val, low_val, close_val, volume_val))
-                    except Exception as ex:
-                        print("Ohitettu rivi virheen vuoksi:", ex)
+                    # remaining fields are groups of 6: date, open, close, high, low, volume
+                    idx = 1
+                    while idx + 5 < len(rivi):
+                        try:
+                            pvm = rivi[idx]
+                            open_val = float(rivi[idx+1]) if rivi[idx+1] else None
+                            close_val = float(rivi[idx+2]) if rivi[idx+2] else None
+                            high_val = float(rivi[idx+3]) if rivi[idx+3] else None
+                            low_val = float(rivi[idx+4]) if rivi[idx+4] else None
+                            volume_val = int(rivi[idx+5]) if rivi[idx+5] else None
+                            cur.execute("""
+                                INSERT INTO osakedata (osake, pvm, open, high, low, close, volume)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                            """, (osake, pvm, open_val, high_val, low_val, close_val, volume_val))
+                        except Exception as ex:
+                            print("Ohitettu päiväblokki virheen vuoksi:", ex)
+                        idx += 6
             conn.commit()
         import os
         data_dir = os.path.join(os.path.dirname(__file__), "data")
@@ -1340,4 +1422,8 @@ def main(page: ft.Page):
     """Pääfunktio - luo sovelluksen instanssin"""
     app = RawCandleApp(page)
 
-ft.app(target=main, port=8080, view=None)
+
+if __name__ == "__main__":
+    # Start the Flet app only when executed as a script. This avoids
+    # binding the webserver port during imports (useful for tests/tools).
+    ft.app(target=main, port=8080, view=None)
