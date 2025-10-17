@@ -115,6 +115,22 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
                         d = key
                     for p in results[key]:
                         cf.write(f"{t},{d},{p}\n")
+            # also log each finding as a separate log line (one finding per log row)
+            try:
+                from .logger import setup_logger
+                logger = setup_logger()
+                for key in sorted(results.keys()):
+                    if '|' in key:
+                        t, d = key.split('|', 1)
+                    else:
+                        t = ticker or ''
+                        d = key
+                    for p in results[key]:
+                        # log CSV-style line so it's easy to grep/parse
+                        logger.info(f"{t},{d},{p}")
+            except Exception:
+                # non-fatal if logging fails
+                pass
             # also update canonical CSV
             try:
                 canonical_csv = os.path.join(base_dir, f"{base_name}.csv")
