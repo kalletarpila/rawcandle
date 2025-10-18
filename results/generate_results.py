@@ -44,32 +44,40 @@ def _build_output_rows(analysis_db: Path, osake_db: Path):
         lower = {c.lower(): c for c in col_names}
         date_col = lower.get('date') or lower.get('pvm')
         ticker_col = lower.get('ticker') or lower.get('osake') or lower.get('symbol')
-        pattern_col = lower.get('kynttila') or lower.get('pattern') or lower.get('pattern_name')
+        candle_col = lower.get('candle') or lower.get('kynttila') or lower.get('pattern') or lower.get('pattern_name')
         if not date_col or not ticker_col:
             raise RuntimeError(f'Cannot find date/ticker columns in {table_name}: {col_names}')
 
         q = f"SELECT \"{date_col}\", \"{ticker_col}\""
-        if pattern_col:
-            q += f", \"{pattern_col}\""
+        if candle_col:
+            q += f", \"{candle_col}\""
         q += f" FROM \"{table_name}\""
         acur.execute(q)
         rows = acur.fetchall()
 
+    # Always define header first
+    header = [
+        'osake', 'date', 'kynttilä',
+        't_1_alin', 't_1_ylin', 't_1_bodi', 't_1_bodi_colour',
+        't0_alin', 't0_ylin', 't0_bodi', 't0_bodi_colour',
+        't1_alin', 't1_ylin', 't1_bodi', 't1_bodi_colour',
+    ]
+
     if not rows:
-        return [], []
+        return header, []
 
     by_ticker = {}
     for rec in rows:
         if len(rec) == 3:
-            date, ticker, pattern = rec
+            date, ticker, candle = rec
         elif len(rec) == 2:
             date, ticker = rec
-            pattern = ''
+            candle = ''
         else:
             continue
         if not ticker:
             continue
-        by_ticker.setdefault(str(ticker), []).append((str(date), pattern))
+        by_ticker.setdefault(str(ticker), []).append((str(date), candle))
 
     output_rows = []
 
@@ -125,7 +133,7 @@ def _build_output_rows(analysis_db: Path, osake_db: Path):
                 except Exception:
                     return None
 
-            for date, pattern in items:
+            for date, candle in items:
                 if date not in date_to_idx:
                     continue
                 idx = date_to_idx[date]
@@ -166,7 +174,7 @@ def _build_output_rows(analysis_db: Path, osake_db: Path):
                 out = [
                     ticker,
                     date,
-                    pattern,
+                    candle,
                     (t1_low if t1_low is not None else ''),
                     (t1_high if t1_high is not None else ''),
                     fmt_bodi(t_1_bodi),
@@ -182,13 +190,6 @@ def _build_output_rows(analysis_db: Path, osake_db: Path):
                 ]
 
                 output_rows.append(out)
-
-    header = [
-        'osake', 'date', 'kynttilä',
-        't_1_alin', 't_1_ylin', 't_1_bodi', 't_1_bodi_colour',
-        't0_alin', 't0_ylin', 't0_bodi', 't0_bodi_colour',
-        't1_alin', 't1_ylin', 't1_bodi', 't1_bodi_colour',
-    ]
 
     return header, output_rows
 

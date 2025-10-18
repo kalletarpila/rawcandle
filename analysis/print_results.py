@@ -27,7 +27,7 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
         lines = [header]
         lines += [f"{k}: {v} kpl" for k, v in count.items()]
 
-        # Add CSV-style per-finding lines: ticker,date,pattern
+        # Add CSV-style per-finding lines: ticker,date,candle
         csv_lines = []
         for key in sorted(results.keys()):
             # expecting key format: 'TICKER|YYYY-MM-DD' from runner
@@ -106,7 +106,7 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
             if csv_path.lower().endswith('.txt.csv'):
                 csv_path = csv_path[:-4]
             with open(csv_path, 'w', encoding='utf-8') as cf:
-                cf.write('ticker,date,pattern\n')
+                cf.write('ticker,date,candle\n')
                 for key in sorted(results.keys()):
                     if '|' in key:
                         t, d = key.split('|', 1)
@@ -142,8 +142,8 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         ticker TEXT,
                         date TEXT,
-                        pattern TEXT,
-                        UNIQUE(ticker, date, pattern)
+                        candle TEXT,
+                        UNIQUE(ticker, date, candle)
                     )
                 ''')
                 rows = []
@@ -156,7 +156,7 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
                     for p in results[key]:
                         rows.append((t, d, p))
                 if rows:
-                    cur.executemany('INSERT OR IGNORE INTO analysis_findings (ticker, date, pattern) VALUES (?, ?, ?)', rows)
+                    cur.executemany('INSERT OR IGNORE INTO analysis_findings (ticker, date, candle) VALUES (?, ?, ?)', rows)
                     conn.commit()
                 conn.close()
             except Exception:
@@ -166,7 +166,7 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
             try:
                 canonical_csv = os.path.join(base_dir, f"{base_name}.csv")
                 with open(canonical_csv, 'w', encoding='utf-8') as bcf:
-                    bcf.write('ticker,date,pattern\n')
+                    bcf.write('ticker,date,candle\n')
                     for key in sorted(results.keys()):
                         if '|' in key:
                             t, d = key.split('|', 1)
