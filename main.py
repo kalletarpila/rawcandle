@@ -1,15 +1,23 @@
 
 import flet as ft
-# Compatibility shim: older code used `ft.Colors` but newer flet exposes `ft.colors`.
-# Provide an alias so existing references to `ft.Colors` keep working.
+# Compatibility shim: ensure ft.colors and ft.icons exist for backwards compatibility
 try:
+    # If newer flet version has ft.colors, use it
     ft.Colors = ft.colors
-except Exception:
-    pass
+except AttributeError:
+    # If older flet version, create alias from ft.Colors to ft.colors
+    try:
+        ft.colors = ft.Colors
+    except AttributeError:
+        pass
+
 try:
     ft.Icons = ft.icons
-except Exception:
-    pass
+except AttributeError:
+    try:
+        ft.icons = ft.Icons
+    except AttributeError:
+        pass
 import yfinance as yf
 import datetime
 import pandas as pd
@@ -325,40 +333,6 @@ class RawCandleApp:
                     ),
                 ],
             )
-    def tyhjenna_tietokanta(self, e):
-        """Tyhjentää osakedata-taulun tietokannasta"""
-        data_dir = Path(__file__).parent / "data"
-        db_path = data_dir / "osakedata.db"
-        if not db_path.exists():
-            sb = ft.SnackBar(
-                ft.Text("❌ Tietokantaa ei löytynyt!", color=ft.Colors.WHITE),
-                bgcolor=ft.Colors.RED_600,
-                duration=2000
-            )
-            if sb not in self.page.overlay:
-                self.page.overlay.append(sb)
-            sb.open = True
-            self.page.update()
-            return
-        try:
-            with sqlite3.connect(db_path) as conn:
-                cur = conn.cursor()
-                cur.execute("DELETE FROM osakedata")
-                conn.commit()
-            msg = "✅ Tietokanta tyhjennetty!"
-            color = ft.Colors.GREEN_600
-        except Exception as ex:
-            msg = f"❌ Virhe tietokannan tyhjennyksessä: {str(ex)}"
-            color = ft.Colors.RED_600
-        self.page.snack_bar = ft.SnackBar(
-            ft.Text(msg, color=ft.Colors.WHITE),
-            bgcolor=color,
-            duration=2000
-        )
-        if self.page.snack_bar not in self.page.overlay:
-            self.page.overlay.append(self.page.snack_bar)
-        self.page.snack_bar.open = True
-        self.page.update()
     def show_analysis_results(self, e):
         import os
         from analysis.logger import setup_logger
@@ -932,66 +906,6 @@ class RawCandleApp:
             self.loading_text.value = f"❌ Virhe tiedostoa käsitellessä: {str(ex)}"
             self.loading_text.color = ft.Colors.RED_600
         self.page.update()
-
-    def luo_tietokanta(self):
-        """Luo SQLite-tietokannan ja taulun"""
-        data_dir = Path(__file__).parent / "data"
-        data_dir.mkdir(exist_ok=True)
-        db_path = data_dir / "osakedata.db"
-
-        with sqlite3.connect(db_path) as conn:
-            cur = conn.cursor()
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS osakedata (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    osake TEXT,
-                    pvm TEXT,
-                    open REAL,
-                    high REAL,
-                    low REAL,
-                    close REAL,
-                    volume INTEGER
-                )
-            """)
-            conn.commit()
-
-        return db_path
-
-    def csv_tietokantaan(self):
-        """Lue CSV ja vie tiedot SQLite-tietokantaan"""
-        data_dir = Path(__file__).parent / "data"
-        csv_path = data_dir / "osakedata.csv"
-        db_path = self.luo_tietokanta()
-
-        if not csv_path.exists():
-            raise FileNotFoundError(f"CSV-tiedostoa ei löytynyt: {csv_path}")
-
-        with sqlite3.connect(db_path) as conn:
-            cur = conn.cursor()
-            with open(csv_path, newline='', encoding='utf-8') as f:
-                reader = csv.reader(f)
-                for rivi in reader:
-                    if not rivi or len(rivi) < 2:
-                        continue
-                    osake = rivi[0]
-                    # remaining fields are groups of 6: date, open, close, high, low, volume
-                    idx = 1
-                    while idx + 5 < len(rivi):
-                        try:
-                            pvm = rivi[idx]
-                            open_val = float(rivi[idx+1]) if rivi[idx+1] else None
-                            close_val = float(rivi[idx+2]) if rivi[idx+2] else None
-                            high_val = float(rivi[idx+3]) if rivi[idx+3] else None
-                            low_val = float(rivi[idx+4]) if rivi[idx+4] else None
-                            volume_val = int(rivi[idx+5]) if rivi[idx+5] else None
-                            cur.execute("""
-                                INSERT INTO osakedata (osake, pvm, open, high, low, close, volume)
-                                VALUES (?, ?, ?, ?, ?, ?, ?)
-                            """, (osake, pvm, open_val, high_val, low_val, close_val, volume_val))
-                        except Exception as ex:
-                            print("Ohitettu päiväblokki virheen vuoksi:", ex)
-                        idx += 6
-            conn.commit()
         import os
         data_dir = os.path.join(os.path.dirname(__file__), "data")
         tickers_file = os.path.join(data_dir, "tickers.txt")
@@ -1119,125 +1033,6 @@ class RawCandleApp:
         
         # Aloita etusivulta
         self.page.go("/")
-    
-    def nayta_tietokannan_tiedot(self, e):
-        """Näyttää max 10 osakkeen 5 vanhinta päivää tietokannasta"""
-        from pathlib import Path
-        import sqlite3
-
-        data_dir = Path(__file__).parent / "data"
-        db_path = data_dir / "osakedata.db"
-
-        if not db_path.exists():
-            sb = ft.SnackBar(
-                ft.Text("❌ Tietokantaa ei löytynyt!", color=ft.Colors.WHITE),
-                bgcolor=ft.Colors.RED_600,
-                duration=2000
-            )
-            if sb not in self.page.overlay:
-                self.page.overlay.append(sb)
-            sb.open = True
-            self.page.update()
-            return
-
-        try:
-            with sqlite3.connect(db_path) as conn:
-                cur = conn.cursor()
-                # Hae max 10 eri osaketta
-                cur.execute("SELECT DISTINCT osake FROM osakedata ORDER BY osake LIMIT 10")
-                osakkeet = [r[0] for r in cur.fetchall()]
-
-                tulokset = []
-                for osake in osakkeet:
-                    cur.execute("""
-                        SELECT osake, pvm, open, high, low, close, volume
-                        FROM osakedata
-                        WHERE osake = ?
-                        ORDER BY pvm ASC
-                        LIMIT 5
-                    """, (osake,))
-                    rivit = cur.fetchall()
-                    tulokset.extend(rivit)
-
-            if not tulokset:
-                sb = ft.SnackBar(
-                    ft.Text("ℹ️ Ei tietoja näytettäväksi. Tietokanta on tyhjä.", color=ft.Colors.WHITE),
-                    bgcolor=ft.Colors.ORANGE_500,
-                    duration=2000
-                )
-                if sb not in self.page.overlay:
-                    self.page.overlay.append(sb)
-                sb.open = True
-                self.page.update()
-                return
-
-            # Luo DataTable tiedoista
-            taulu = ft.DataTable(
-                columns=[
-                    ft.DataColumn(ft.Text("Osake", weight=ft.FontWeight.BOLD)),
-                    ft.DataColumn(ft.Text("Päivä", weight=ft.FontWeight.BOLD)),
-                    ft.DataColumn(ft.Text("Open")),
-                    ft.DataColumn(ft.Text("High")),
-                    ft.DataColumn(ft.Text("Low")),
-                    ft.DataColumn(ft.Text("Close")),
-                    ft.DataColumn(ft.Text("Volume")),
-                ],
-                rows=[
-                    ft.DataRow(
-                        cells=[
-                            ft.DataCell(ft.Text(str(r[0]))),
-                            ft.DataCell(ft.Text(str(r[1]))),
-                            ft.DataCell(ft.Text(str(r[2]))),
-                            ft.DataCell(ft.Text(str(r[3]))),
-                            ft.DataCell(ft.Text(str(r[4]))),
-                            ft.DataCell(ft.Text(str(r[5]))),
-                            ft.DataCell(ft.Text(str(r[6]))),
-                        ]
-                    ) for r in tulokset
-                ],
-                border=ft.border.all(1, ft.Colors.GREY_400),
-                border_radius=8,
-                column_spacing=10,
-                horizontal_lines=ft.border.BorderSide(1, ft.Colors.GREY_300),
-                vertical_lines=ft.border.BorderSide(1, ft.Colors.GREY_300),
-            )
-
-            dialog = ft.AlertDialog(
-    title=ft.Text("📊 Ensimmäiset tiedot tietokannasta"),
-    content=ft.Container(
-        content=ft.Column(
-            [
-                ft.Text(f"Näytetään {len(tulokset)} riviä"),
-                ft.Container(
-                    content=ft.Column([taulu], scroll=ft.ScrollMode.AUTO),
-                    height=400,
-                    width=700,
-                )
-            ]
-        )
-    ),
-    actions=[
-        ft.TextButton("Sulje", on_click=lambda _: self.close_dialog(dialog))
-    ],
-    actions_alignment=ft.MainAxisAlignment.END,
-)
-
-
-            if dialog not in self.page.overlay:
-                self.page.overlay.append(dialog)
-            dialog.open = True
-            self.page.update()
-
-        except Exception as ex:
-            sb = ft.SnackBar(
-                ft.Text(f"❌ Virhe tietojen hakemisessa: {str(ex)}", color=ft.Colors.WHITE),
-                bgcolor=ft.Colors.RED_600,
-                duration=2500
-            )
-            if sb not in self.page.overlay:
-                self.page.overlay.append(sb)
-            sb.open = True
-            self.page.update()
 
 
     def setup_page(self):
@@ -1277,11 +1072,6 @@ class RawCandleApp:
                     on_click=lambda _: self.page.go("/settings")
                 ),
                 ft.IconButton(
-                    ft.Icons.STORAGE,
-                    tooltip="Database",
-                    on_click=lambda _: self.page.go("/database")
-                ),
-                ft.IconButton(
                     ft.Icons.FLARE,
                     tooltip="Candles",
                     on_click=lambda _: self.page.go("/candles")
@@ -1299,127 +1089,6 @@ class RawCandleApp:
                 ),
             ],
         )
-    def create_database_view(self):
-        """Luo tietokanta-sivun näkymän"""
-        return ft.View(
-            "/database",
-            [
-                self.create_appbar(),
-                ft.Container(
-                    content=ft.Column([
-                        ft.Text(
-                            "Tietokanta",
-                            size=28,
-                            weight=ft.FontWeight.BOLD,
-                            color=ft.Colors.ORANGE_700
-                        ),
-                        ft.Divider(height=20, color=ft.Colors.TRANSPARENT),
-                        ft.Row([
-                            ft.ElevatedButton(
-                                "Siirrä tietokantaan CSV-file",
-                                icon=ft.Icons.UPLOAD_FILE,
-                                on_click=self.on_database_export_click
-                            ),
-                            ft.ElevatedButton(
-                                "Näytä tietokannan tiedot",
-                                icon=ft.Icons.TABLE_VIEW,
-                                on_click=self.nayta_tietokannan_tiedot
-                            ),
-                            ft.ElevatedButton(
-                                "Tyhjennä tietokanta",
-                                icon=ft.Icons.DELETE_FOREVER,
-                                bgcolor=ft.Colors.RED_400,
-                                color=ft.Colors.WHITE,
-                                on_click=self.tyhjenna_tietokanta
-                            ),
-                        ],
-                        alignment=ft.MainAxisAlignment.CENTER,
-                        spacing=20),
-                        ft.Container(height=12),
-                        # Ticker input for database view (same behavior as home page)
-                        ft.Row([
-                            ft.TextField(label="Osakkeen ticker (esim. AAPL)", width=300, key="db_ticker_field"),
-                        ], alignment=ft.MainAxisAlignment.CENTER),
-                        ft.Row([
-                            ft.ElevatedButton(
-                                "Näytä osake",
-                                icon=ft.Icons.SEARCH,
-                                on_click=self.db_show_stock
-                            ),
-                        ], alignment=ft.MainAxisAlignment.CENTER),
-                    ],
-                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                    spacing=20),
-                    padding=40,
-                    expand=True,
-                ),
-            ],
-            vertical_alignment=ft.MainAxisAlignment.START,
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-        )
-
-    def on_database_export_click(self, e):
-        """Siirtää CSV:n tiedot SQLite-tietokantaan"""
-        try:
-            db_path = self.luo_tietokanta()
-            self.csv_tietokantaan()
-            msg = f"✅ CSV-tiedot tallennettu tietokantaan: {db_path}"
-            color = ft.Colors.GREEN_600
-        except Exception as ex:
-            msg = f"❌ Virhe tietokannan käsittelyssä: {str(ex)}"
-            color = ft.Colors.RED_600
-
-        sb = ft.SnackBar(
-            ft.Text(msg, color=ft.Colors.WHITE),
-            bgcolor=color,
-            duration=2000
-        )
-        # varmista, ettei lisätä monta kertaa overlayhin
-        if sb not in self.page.overlay:
-            self.page.overlay.append(sb)
-        sb.open = True
-        self.page.update()
-
-    def db_show_stock(self, e):
-        """Handler for database view 'Näytä osake' button: uses a local ticker field if present."""
-        # Try to get the ticker field from the page (we set key 'db_ticker_field')
-        try:
-            db_ticker_ctrl = None
-            # safe lookup from page controls (some Flet versions expose controls differently)
-            for c in getattr(self.page, 'controls', []) or []:
-                if getattr(c, 'key', None) == 'db_ticker_field':
-                    db_ticker_ctrl = c
-                    break
-            # fallback: try attributes we added to self earlier
-            if db_ticker_ctrl is None:
-                # sometimes controls are nested; try to use self.ticker_field
-                ticker = getattr(self, 'ticker_field', None).value.strip().upper() if getattr(self, 'ticker_field', None) else ''
-            else:
-                ticker = db_ticker_ctrl.value.strip().upper() if getattr(db_ticker_ctrl, 'value', None) else ''
-
-            if not ticker:
-                sb = ft.SnackBar(ft.Text('❌ Syötä osakkeen ticker!'), bgcolor=ft.Colors.RED_600, duration=2000)
-                if sb not in self.page.overlay:
-                    self.page.overlay.append(sb)
-                sb.open = True
-                self.page.update()
-                return
-
-            # set the main ticker_field so existing fetch/show logic uses it
-            if hasattr(self, 'ticker_field') and getattr(self.ticker_field, 'value', None) is not None:
-                self.ticker_field.value = ticker
-            # call existing fetch and show
-            self.fetch_stock_data(None)
-            # If fetch succeeded, show it
-            if getattr(self, 'stock_data', None) is not None:
-                self.show_stock_data(None)
-        except Exception as ex:
-            sb = ft.SnackBar(ft.Text(f'❌ Virhe: {ex}'), bgcolor=ft.Colors.RED_600, duration=2000)
-            if sb not in self.page.overlay:
-                self.page.overlay.append(sb)
-            sb.open = True
-            self.page.update()
-  
 
     def create_home_view(self):
         """Luo etusivun näkymän"""
@@ -1551,8 +1220,6 @@ class RawCandleApp:
             self.page.views.append(self.create_home_view())
         elif self.page.route == "/settings":
             self.page.views.append(self.create_settings_view())
-        elif self.page.route == "/database":
-            self.page.views.append(self.create_database_view())
         elif self.page.route == "/candles":
             self.page.views.append(self.create_candles_view())
         elif self.page.route == "/tulokset":
