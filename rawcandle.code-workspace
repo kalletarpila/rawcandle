@@ -1,0 +1,30 @@
+{
+    "folders": [
+        {
+            "name": "RawCandle",
+            "path": "."
+        }
+    ],
+    "settings": {
+        // Nämä asetukset ohittavat .vscode/settings.json
+        "python.defaultInterpreterPath": "./venv/bin/python",
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "terminal.integrated.env.linux": {
+            "PYTHONPATH": "${workspaceFolder}"
+        }
+    },
+    "launch": {
+        "version": "0.2.0",
+        "configurations": []
+    },
+    "tasks": {
+        "version": "2.0.0",
+        "tasks": []
+    },
+    "extensions": {
+        "recommendations": [
+            "ms-python.python",
+            "ms-python.debugpy"
+        ]
+    }
+}

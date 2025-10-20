@@ -1,0 +1,94 @@
+{
+  // Python tulkki asetukset - käytä venv-kansiota
+  "python.defaultInterpreterPath": "${workspaceFolder}/venv/bin/python",
+  "python.pythonPath": "${workspaceFolder}/venv/bin/python",
+  // Linting ja koodin laatu - KAIKKI POIS PÄÄLTÄ
+  "python.linting.enabled": false,
+  "python.linting.pylintEnabled": false,
+  "python.linting.flake8Enabled": false,
+  "python.linting.pycodestyleEnabled": false,
+  "python.linting.pep8Enabled": false,
+  "python.linting.mypyEnabled": false,
+  "python.linting.banditEnabled": false,
+  "python.linting.pylamaEnabled": false,
+  "python.linting.prospectorEnabled": false,
+  // Formatointi - käytä vain Blackia
+  "python.formatting.provider": "black",
+  "editor.formatOnSave": true,
+  "editor.formatOnType": false,
+  // Pylance asetukset - poistetaan kaikki style-varoitukset
+  "python.analysis.typeCheckingMode": "off",
+  "python.analysis.diagnosticMode": "openFilesOnly",
+  "python.analysis.ignore": ["**"],
+  "python.analysis.stubPath": "",
+  "python.analysis.useLibraryCodeForTypes": false,
+  // Lisää asetuksia jotka estävät lintingin
+  "editor.defaultFormatter": "ms-python.black-formatter",
+  "python.linting.lintOnSave": false,
+  "python.linting.ignorePatterns": ["**/*"],
+  "python.analysis.diagnosticSeverityOverrides": {
+    "reportGeneralTypeIssues": "none",
+    "reportOptionalSubscript": "none",
+    "reportOptionalMemberAccess": "none",
+    "reportOptionalCall": "none",
+    "reportOptionalIterable": "none",
+    "reportOptionalContextManager": "none",
+    "reportOptionalOperand": "none",
+    "reportTypedDictNotRequiredAccess": "none",
+    "reportConstantRedefinition": "none",
+    "reportDuplicateImport": "none",
+    "reportUnusedImport": "none",
+    "reportUnusedClass": "none",
+    "reportUnusedFunction": "none",
+    "reportUnusedVariable": "none",
+    "reportUndefinedVariable": "error"
+  },
+  // Intellisense ja automaattinen täydennys
+  "python.analysis.autoImportCompletions": true,
+  "python.analysis.completeFunctionParens": true,
+  // Terminal asetukset - aktivoi venv automaattisesti
+  "python.terminal.activateEnvironment": true,
+  "python.terminal.activateEnvInCurrentTerminal": true,
+  // Tiedostopolut ja hakemistot
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}",
+    "${workspaceFolder}/analysis",
+    "${workspaceFolder}/results",
+    "${workspaceFolder}/candles"
+  ],
+  // Git ja versiointi
+  "git.autofetch": true,
+  "git.confirmSync": false,
+  "git.enableSmartCommit": true,
+  // Tiedostojen näyttäminen
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true,
+    "**/.pytest_cache": true,
+    "**/venv": false,
+    "**/.venv": true
+  },
+  // Editori asetukset
+  "editor.rulers": [
+    88,
+    120
+  ],
+  "editor.wordWrap": "on",
+  "editor.minimap.enabled": true,
+  "editor.bracketPairColorization.enabled": true,
+  // JSON tiedostojen formatointi
+  "json.format.enable": true,
+  // Oikeinkirjoitustarkistus pois käytöstä
+  "cSpell.enabled": false,
+  "cSpell.diagnosticLevel": "Hint",
+  "editor.quickSuggestions": {
+    "other": false,
+    "comments": false,
+    "strings": false
+  },
+  // Tekstin spell checker pois
+  "spellright.language": [],
+  "spellright.documentTypes": [],
+  // Kaikki mahdolliset spell checkerit pois
+  "streetsidesoftware.codeSpellChecker.enabled": false
+}

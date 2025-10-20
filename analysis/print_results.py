@@ -8,9 +8,9 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
     - Jos ticker on None, näyttää "kaikille tickereille" sijaan "useille tickereille".
     - Suojaa tiedostokirjoituksen try/except:lla ja kirjaa virheen loggeriin jos saatavilla.
     """
-    from collections import Counter
     import datetime as _dt
     import os
+    from collections import Counter
 
     all_found = []
     for pats in results.values():
@@ -31,11 +31,11 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
         csv_lines = []
         for key in sorted(results.keys()):
             # expecting key format: 'TICKER|YYYY-MM-DD' from runner
-            if '|' in key:
-                t, d = key.split('|', 1)
+            if "|" in key:
+                t, d = key.split("|", 1)
             else:
                 # backward compatibility: key might be just date
-                t = ticker or ''
+                t = ticker or ""
                 d = key
             pats = results[key]
             for p in pats:
@@ -52,10 +52,10 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
             # create timestamped filename next to the provided output_path
             base_dir = os.path.dirname(output_path)
             base_name = os.path.splitext(os.path.basename(output_path))[0]
-            ts = _dt.datetime.now().strftime('%Y%m%d_%H%M%S')
+            ts = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
             # archive existing analysis_results files
             try:
-                archive_dir = os.path.join(base_dir, 'archive')
+                archive_dir = os.path.join(base_dir, "archive")
                 os.makedirs(archive_dir, exist_ok=True)
                 for fname in os.listdir(base_dir):
                     if fname.startswith(base_name):
@@ -89,6 +89,7 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
             # try to log via available logger, but don't require it
             try:
                 from .logger import setup_logger
+
                 logger = setup_logger()
                 logger.exception("Virhe kirjoitettaessa analyysitulostiedostoa")
             except Exception:
@@ -101,29 +102,30 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
     if output_path:
         try:
             # write CSV with the same timestamped base name
-            csv_path = os.path.splitext(output_path)[0] + '.csv'
+            csv_path = os.path.splitext(output_path)[0] + ".csv"
             # if output_path ended with .txt, replace .txt with .csv
-            if csv_path.lower().endswith('.txt.csv'):
+            if csv_path.lower().endswith(".txt.csv"):
                 csv_path = csv_path[:-4]
-            with open(csv_path, 'w', encoding='utf-8') as cf:
-                cf.write('ticker,date,candle\n')
+            with open(csv_path, "w", encoding="utf-8") as cf:
+                cf.write("ticker,date,candle\n")
                 for key in sorted(results.keys()):
-                    if '|' in key:
-                        t, d = key.split('|', 1)
+                    if "|" in key:
+                        t, d = key.split("|", 1)
                     else:
-                        t = ticker or ''
+                        t = ticker or ""
                         d = key
                     for p in results[key]:
                         cf.write(f"{t},{d},{p}\n")
             # also log each finding as a separate log line (one finding per log row)
             try:
                 from .logger import setup_logger
+
                 logger = setup_logger()
                 for key in sorted(results.keys()):
-                    if '|' in key:
-                        t, d = key.split('|', 1)
+                    if "|" in key:
+                        t, d = key.split("|", 1)
                     else:
-                        t = ticker or ''
+                        t = ticker or ""
                         d = key
                     for p in results[key]:
                         # log CSV-style line so it's easy to grep/parse
@@ -134,10 +136,12 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
             # also persist findings to a small analysis DB (avoid duplicates)
             try:
                 import sqlite3
-                db_path = os.path.join(os.path.dirname(__file__), 'analysis.db')
+
+                db_path = os.path.join(os.path.dirname(__file__), "analysis.db")
                 conn = sqlite3.connect(db_path)
                 cur = conn.cursor()
-                cur.execute('''
+                cur.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS analysis_findings (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         ticker TEXT,
@@ -145,18 +149,22 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
                         candle TEXT,
                         UNIQUE(ticker, date, candle)
                     )
-                ''')
+                """
+                )
                 rows = []
                 for key in sorted(results.keys()):
-                    if '|' in key:
-                        t, d = key.split('|', 1)
+                    if "|" in key:
+                        t, d = key.split("|", 1)
                     else:
-                        t = ticker or ''
+                        t = ticker or ""
                         d = key
                     for p in results[key]:
                         rows.append((t, d, p))
                 if rows:
-                    cur.executemany('INSERT OR IGNORE INTO analysis_findings (ticker, date, candle) VALUES (?, ?, ?)', rows)
+                    cur.executemany(
+                        "INSERT OR IGNORE INTO analysis_findings (ticker, date, candle) VALUES (?, ?, ?)",
+                        rows,
+                    )
                     conn.commit()
                 conn.close()
             except Exception:
@@ -165,13 +173,13 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
             # also update canonical CSV
             try:
                 canonical_csv = os.path.join(base_dir, f"{base_name}.csv")
-                with open(canonical_csv, 'w', encoding='utf-8') as bcf:
-                    bcf.write('ticker,date,candle\n')
+                with open(canonical_csv, "w", encoding="utf-8") as bcf:
+                    bcf.write("ticker,date,candle\n")
                     for key in sorted(results.keys()):
-                        if '|' in key:
-                            t, d = key.split('|', 1)
+                        if "|" in key:
+                            t, d = key.split("|", 1)
                         else:
-                            t = ticker or ''
+                            t = ticker or ""
                             d = key
                         for p in results[key]:
                             bcf.write(f"{t},{d},{p}\n")

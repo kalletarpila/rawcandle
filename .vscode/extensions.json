@@ -1,0 +1,24 @@
+{
+    "recommendations": [
+        // Python kehitys
+        "ms-python.python",
+        "ms-python.debugpy",
+        "ms-python.black-formatter",
+        "ms-python.flake8",
+        // Git integraatio
+        "eamodio.gitlens",
+        // Yleishyödylliset
+        "ms-vscode.vscode-json",
+        "redhat.vscode-yaml",
+        "streetsidesoftware.code-spell-checker",
+        // Markdown dokumentaatio
+        "yzhang.markdown-all-in-one",
+        // Teemoja ja UI
+        "pkief.material-icon-theme",
+        // CSV/Excel tiedostot
+        "mechatroner.rainbow-csv"
+    ],
+    "unwantedRecommendations": [
+        "ms-python.pylint"
+    ]
+}

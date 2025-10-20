@@ -1,3 +1,16 @@
-flet==0.24.0
-yfinance
-pandas
+# Web UI framework
+flet>=0.28.0
+
+# Financial data
+yfinance>=0.2.60
+
+# Data analysis
+pandas>=2.3.0
+numpy>=2.2.0
+
+# Technical analysis
+TA-Lib>=0.6.0
+
+# Development tools (optional)
+black>=24.0.0
+pycodestyle>=2.11.0

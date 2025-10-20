@@ -1,8 +1,9 @@
-import flet as ft
 import datetime
 import os
 import sqlite3
 import threading
+
+import flet as ft
 
 # Note: this module implements the whole "Tulokset" page and its handlers
 # as free functions that operate on the main app instance passed as `app`.
@@ -17,7 +18,7 @@ def try_parse_date(s: str):
         return d
     except Exception:
         try:
-            return datetime.datetime.strptime(s, '%Y-%m-%d').date()
+            return datetime.datetime.strptime(s, "%Y-%m-%d").date()
         except Exception:
             return None
 
@@ -36,32 +37,64 @@ def create_results_view(app) -> ft.View:
         ft.Checkbox(label="Morning Star", value=False),
         ft.Checkbox(label="Dragonfly Doji", value=False),
     ]
+
+    # Laskutrendi-suodattimet
+    app.results_downtrend_filter = ft.Checkbox(
+        label="🔻 Suodata vain laskutrendien kynttilät", value=False
+    )
+    app.results_min_decline_percent = ft.TextField(
+        label="Min. lasku (%)", width=120, value="3.0", hint_text="3.0"
+    )
+    app.results_ma_filter = ft.Checkbox(
+        label="Lisää liukuva keskiarvo -suodatin", value=True
+    )
+    app.results_volume_filter = ft.Checkbox(label="Lisää volyymi-suodatin", value=False)
     app.results_ticker_field = ft.TextField(
         label="Osakkeen ticker (esim. AAPL)",
         width=250,
         hint_text="Jätä tyhjäksi analysoidaksesi kaikki",
     )
     app.results_radio_group = ft.RadioGroup(
-        content=ft.Row([
-            ft.Radio(label="Analysoi annettu ticker", value="single"),
-            ft.Radio(label="Analysoi kaikki osakkeet", value="all"),
-        ], spacing=20),
-        value="single"
+        content=ft.Row(
+            [
+                ft.Radio(label="Analysoi annettu ticker", value="single"),
+                ft.Radio(label="Analysoi kaikki osakkeet", value="all"),
+            ],
+            spacing=20,
+        ),
+        value="single",
     )
     app.results_date_radio_group = ft.RadioGroup(
-        content=ft.Row([
-            ft.Radio(label="Kaikki päivät", value="all"),
-            ft.Radio(label="Valitse aikaväli", value="range"),
-        ], spacing=20),
-        value="all"
+        content=ft.Row(
+            [
+                ft.Radio(label="Kaikki päivät", value="all"),
+                ft.Radio(label="Valitse aikaväli", value="range"),
+            ],
+            spacing=20,
+        ),
+        value="all",
     )
     app.results_start_date = ft.DatePicker(disabled=True, visible=False)
     app.results_end_date = ft.DatePicker(disabled=True, visible=False)
-    app.results_start_date_text = ft.TextField(label="Alkupäivä (YYYY-MM-DD)", width=200, visible=False, hint_text="esim. 2025-01-31")
-    app.results_end_date_text = ft.TextField(label="Loppupäivä (YYYY-MM-DD)", width=200, visible=False, hint_text="esim. 2025-06-30")
+    app.results_start_date_text = ft.TextField(
+        label="Alkupäivä (YYYY-MM-DD)",
+        width=200,
+        visible=False,
+        hint_text="esim. 2025-01-31",
+    )
+    app.results_end_date_text = ft.TextField(
+        label="Loppupäivä (YYYY-MM-DD)",
+        width=200,
+        visible=False,
+        hint_text="esim. 2025-06-30",
+    )
 
     def on_start_text_change(e):
-        v = app.results_start_date_text.value.strip() if app.results_start_date_text.value else ''
+        v = (
+            app.results_start_date_text.value.strip()
+            if app.results_start_date_text.value
+            else ""
+        )
         d = try_parse_date(v)
         if d:
             try:
@@ -71,7 +104,11 @@ def create_results_view(app) -> ft.View:
                 pass
 
     def on_end_text_change(e):
-        v = app.results_end_date_text.value.strip() if app.results_end_date_text.value else ''
+        v = (
+            app.results_end_date_text.value.strip()
+            if app.results_end_date_text.value
+            else ""
+        )
         d = try_parse_date(v)
         if d:
             try:
@@ -115,6 +152,7 @@ def create_results_view(app) -> ft.View:
     # wire the generate button to the implementation in results.generate_results
     try:
         from results.generate_results import paivita_results_csv_click
+
         generate_btn = ft.ElevatedButton(
             "Generoi CSV",
             icon=ft.Icons.FILE_UPLOAD,
@@ -150,74 +188,221 @@ def create_results_view(app) -> ft.View:
         [
             app.create_appbar(),
             ft.Container(
-                content=ft.Column([
-                    ft.Text("Tulokset", size=32, weight=ft.FontWeight.BOLD, color=ft.Colors.ORANGE_700),
-                    ft.Text("Generoi analyysitulokset CSV-muotoon ja tarkastele niitä.", size=16, color=ft.Colors.GREY_600),
-                    ft.Container(height=16),
-                    ft.Row([generate_btn, show_btn], alignment=ft.MainAxisAlignment.CENTER, spacing=20),
-                    ft.Container(content=app.results_banner),
-                    ft.Divider(height=30, color=ft.Colors.TRANSPARENT),
-                    ft.Row([
-                        ft.Card(
-                            content=ft.Container(
-                                content=ft.Column([
-                                    ft.Text("Analyysityypit", size=18, weight=ft.FontWeight.BOLD, color=ft.Colors.ORANGE_600),
-                                    ft.Column(app.results_checkboxes, spacing=12),
-                                ], horizontal_alignment=ft.CrossAxisAlignment.START),
-                                padding=20,
-                                bgcolor=ft.Colors.GREY_50,
-                                border_radius=8,
-                                width=320,
-                            ),
-                            elevation=2,
+                content=ft.Column(
+                    [
+                        ft.Text(
+                            "Tulokset",
+                            size=32,
+                            weight=ft.FontWeight.BOLD,
+                            color=ft.Colors.ORANGE_700,
                         ),
-                        ft.Column([
-                            ft.Card(
-                                content=ft.Container(
-                                    content=ft.Column([
-                                        ft.Text("Osakevalinta", size=18, weight=ft.FontWeight.BOLD, color=ft.Colors.ORANGE_600),
-                                        app.results_radio_group,
-                                        app.results_ticker_field,
-                                    ], horizontal_alignment=ft.CrossAxisAlignment.START, spacing=10),
-                                    padding=20,
-                                    bgcolor=ft.Colors.GREY_50,
-                                    border_radius=8,
-                                    width=420,
-                                ),
-                                elevation=2,
-                            ),
-                            ft.Container(height=16),
-                            ft.Card(
-                                content=ft.Container(
-                                    content=ft.Column([
-                                        ft.Text("Aikaväli", size=18, weight=ft.FontWeight.BOLD, color=ft.Colors.ORANGE_600),
-                                            app.results_date_radio_group,
-                                            ft.Row([
-                                                ft.ElevatedButton(
-                                                    "Ota aikaväli käyttöön",
-                                                    on_click=lambda e: (setattr(app.results_date_radio_group, 'value', 'range'),
-                                                                       app.results_date_radio_group.on_change(None),
-                                                                       app.page.update()),
-                                                    width=220,
-                                                    bgcolor=ft.Colors.ORANGE_300,
-                                                    color=ft.Colors.WHITE,
+                        ft.Text(
+                            "Generoi analyysitulokset CSV-muotoon ja tarkastele niitä.",
+                            size=16,
+                            color=ft.Colors.GREY_600,
+                        ),
+                        ft.Container(height=16),
+                        ft.Row(
+                            [generate_btn, show_btn],
+                            alignment=ft.MainAxisAlignment.CENTER,
+                            spacing=20,
+                        ),
+                        ft.Container(content=app.results_banner),
+                        ft.Divider(height=30, color=ft.Colors.TRANSPARENT),
+                        ft.Row(
+                            [
+                                ft.Card(
+                                    content=ft.Container(
+                                        content=ft.Column(
+                                            [
+                                                ft.Text(
+                                                    "Analyysityypit",
+                                                    size=18,
+                                                    weight=ft.FontWeight.BOLD,
+                                                    color=ft.Colors.ORANGE_600,
                                                 ),
-                                            ], alignment=ft.MainAxisAlignment.START),
-                                            ft.Row([
-                                                    ft.Column([ft.Text('Alkupäivä'), app.results_start_date, app.results_start_date_text]),
-                                                    ft.Column([ft.Text('Loppupäivä'), app.results_end_date, app.results_end_date_text]),
-                                                ], spacing=20),
-                                    ], horizontal_alignment=ft.CrossAxisAlignment.START, spacing=10),
-                                    padding=20,
-                                    bgcolor=ft.Colors.GREY_50,
-                                    border_radius=8,
-                                    width=420,
+                                                ft.Column(
+                                                    app.results_checkboxes, spacing=12
+                                                ),
+                                            ],
+                                            horizontal_alignment=ft.CrossAxisAlignment.START,
+                                        ),
+                                        padding=20,
+                                        bgcolor=ft.Colors.GREY_50,
+                                        border_radius=8,
+                                        width=320,
+                                    ),
+                                    elevation=2,
                                 ),
-                                elevation=2,
-                            ),
-                        ])
-                    ], alignment=ft.MainAxisAlignment.CENTER, spacing=40),
-                    ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=30, scroll=ft.ScrollMode.AUTO, expand=True),
+                                ft.Column(
+                                    [
+                                        ft.Card(
+                                            content=ft.Container(
+                                                content=ft.Column(
+                                                    [
+                                                        ft.Text(
+                                                            "Osakevalinta",
+                                                            size=18,
+                                                            weight=ft.FontWeight.BOLD,
+                                                            color=ft.Colors.ORANGE_600,
+                                                        ),
+                                                        app.results_radio_group,
+                                                        app.results_ticker_field,
+                                                    ],
+                                                    horizontal_alignment=ft.CrossAxisAlignment.START,
+                                                    spacing=10,
+                                                ),
+                                                padding=20,
+                                                bgcolor=ft.Colors.GREY_50,
+                                                border_radius=8,
+                                                width=420,
+                                            ),
+                                            elevation=2,
+                                        ),
+                                        ft.Container(height=16),
+                                        ft.Card(
+                                            content=ft.Container(
+                                                content=ft.Column(
+                                                    [
+                                                        ft.Text(
+                                                            "Aikaväli",
+                                                            size=18,
+                                                            weight=ft.FontWeight.BOLD,
+                                                            color=ft.Colors.ORANGE_600,
+                                                        ),
+                                                        app.results_date_radio_group,
+                                                        ft.Row(
+                                                            [
+                                                                ft.ElevatedButton(
+                                                                    "Ota aikaväli käyttöön",
+                                                                    on_click=lambda e: (
+                                                                        setattr(
+                                                                            app.results_date_radio_group,
+                                                                            "value",
+                                                                            "range",
+                                                                        ),
+                                                                        app.results_date_radio_group.on_change(
+                                                                            None
+                                                                        ),
+                                                                        app.page.update(),
+                                                                    ),
+                                                                    width=220,
+                                                                    bgcolor=ft.Colors.ORANGE_300,
+                                                                    color=ft.Colors.WHITE,
+                                                                ),
+                                                            ],
+                                                            alignment=ft.MainAxisAlignment.START,
+                                                        ),
+                                                        ft.Row(
+                                                            [
+                                                                ft.Column(
+                                                                    [
+                                                                        ft.Text(
+                                                                            "Alkupäivä"
+                                                                        ),
+                                                                        app.results_start_date,
+                                                                        app.results_start_date_text,
+                                                                    ]
+                                                                ),
+                                                                ft.Column(
+                                                                    [
+                                                                        ft.Text(
+                                                                            "Loppupäivä"
+                                                                        ),
+                                                                        app.results_end_date,
+                                                                        app.results_end_date_text,
+                                                                    ]
+                                                                ),
+                                                            ],
+                                                            spacing=20,
+                                                        ),
+                                                    ],
+                                                    horizontal_alignment=ft.CrossAxisAlignment.START,
+                                                    spacing=10,
+                                                ),
+                                                padding=20,
+                                                bgcolor=ft.Colors.GREY_50,
+                                                border_radius=8,
+                                                width=420,
+                                            ),
+                                            elevation=2,
+                                        ),
+                                        ft.Container(height=16),
+                                        ft.Card(
+                                            content=ft.Container(
+                                                content=ft.Column(
+                                                    [
+                                                        ft.Text(
+                                                            "Laskutrendi-suodatin",
+                                                            size=18,
+                                                            weight=ft.FontWeight.BOLD,
+                                                            color=ft.Colors.ORANGE_600,
+                                                        ),
+                                                        app.results_downtrend_filter,
+                                                        ft.Container(height=8),
+                                                        ft.Text(
+                                                            "Suodattimen asetukset:",
+                                                            size=14,
+                                                            weight=ft.FontWeight.W_500,
+                                                            color=ft.Colors.GREY_700,
+                                                        ),
+                                                        ft.Row(
+                                                            [
+                                                                ft.Text(
+                                                                    "Min. lasku:",
+                                                                    width=80,
+                                                                ),
+                                                                app.results_min_decline_percent,
+                                                                ft.Text("%", width=20),
+                                                            ],
+                                                            spacing=5,
+                                                        ),
+                                                        app.results_ma_filter,
+                                                        app.results_volume_filter,
+                                                        ft.Container(height=8),
+                                                        ft.Text(
+                                                            "📊 Kriteerit:",
+                                                            size=12,
+                                                            color=ft.Colors.GREY_600,
+                                                        ),
+                                                        ft.Text(
+                                                            "• t-10 > t-5 > t-2 > t0 (porrastava lasku)",
+                                                            size=11,
+                                                            color=ft.Colors.GREY_600,
+                                                        ),
+                                                        ft.Text(
+                                                            "• MA(5) < MA(10) (jos MA-suodatin)",
+                                                            size=11,
+                                                            color=ft.Colors.GREY_600,
+                                                        ),
+                                                        ft.Text(
+                                                            "• Volyymi > 1.2x (jos volyymi-suodatin)",
+                                                            size=11,
+                                                            color=ft.Colors.GREY_600,
+                                                        ),
+                                                    ],
+                                                    horizontal_alignment=ft.CrossAxisAlignment.START,
+                                                    spacing=8,
+                                                ),
+                                                padding=20,
+                                                bgcolor=ft.Colors.GREY_50,
+                                                border_radius=8,
+                                                width=420,
+                                            ),
+                                            elevation=2,
+                                        ),
+                                    ]
+                                ),
+                            ],
+                            alignment=ft.MainAxisAlignment.CENTER,
+                            spacing=40,
+                        ),
+                    ],
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                    spacing=30,
+                    scroll=ft.ScrollMode.AUTO,
+                    expand=True,
+                ),
                 padding=40,
                 expand=True,
             ),
@@ -231,14 +416,18 @@ def create_results_view(app) -> ft.View:
 
 def start_results_generation(app, e):
     # Delegates to the existing analysis runner and print_results module.
-    from analysis.run_analysis import run_candlestick_analysis
-    from analysis.print_results import print_analysis_results
     from analysis.logger import setup_logger
+    from analysis.print_results import print_analysis_results
+    from analysis.run_analysis import run_candlestick_analysis
 
     logger = setup_logger()
     logger.info("start_results_generation called (results.view)")
 
-    sb = ft.SnackBar(ft.Text("🔄 Generoidaan CSV...", color=ft.Colors.WHITE), bgcolor=ft.Colors.BLUE_600, duration=1500)
+    sb = ft.SnackBar(
+        ft.Text("🔄 Generoidaan CSV...", color=ft.Colors.WHITE),
+        bgcolor=ft.Colors.BLUE_600,
+        duration=1500,
+    )
     if sb not in app.page.overlay:
         app.page.overlay.append(sb)
     sb.open = True
@@ -255,18 +444,18 @@ def start_results_generation(app, e):
 
     ticker_mode = app.results_radio_group.value
     ticker = app.results_ticker_field.value.strip().upper()
-    if ticker_mode == 'single' and not ticker:
+    if ticker_mode == "single" and not ticker:
         dlg = ft.AlertDialog(title=ft.Text("Syötä osakkeen ticker!"))
         if dlg not in app.page.overlay:
             app.page.overlay.append(dlg)
         dlg.open = True
         app.page.update()
         return
-    if ticker_mode == 'all':
+    if ticker_mode == "all":
         ticker = None
 
     date_mode = app.results_date_radio_group.value
-    if date_mode == 'range':
+    if date_mode == "range":
         sd = app.results_start_date.value
         ed = app.results_end_date.value
         if sd is None or ed is None or sd > ed:
@@ -284,7 +473,9 @@ def start_results_generation(app, e):
 
     def worker():
         try:
-            db_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'osakedata.db')
+            db_path = os.path.join(
+                os.path.dirname(__file__), "..", "data", "osakedata.db"
+            )
             db_path = os.path.normpath(db_path)
             if ticker is None:
                 with sqlite3.connect(db_path) as conn:
@@ -293,15 +484,19 @@ def start_results_generation(app, e):
                     rows = [r[0] for r in cur.fetchall()]
                 results = {}
                 for idx, t in enumerate(rows):
-                    res = run_candlestick_analysis(db_path, t, selected_patterns, start_date, end_date)
+                    res = run_candlestick_analysis(
+                        db_path, t, selected_patterns, start_date, end_date
+                    )
                     for k, v in res.items():
                         results[k] = results.get(k, []) + v
             else:
-                results = run_candlestick_analysis(db_path, ticker, selected_patterns, start_date, end_date)
+                results = run_candlestick_analysis(
+                    db_path, ticker, selected_patterns, start_date, end_date
+                )
 
-            data_dir = os.path.join(os.path.dirname(__file__), '..', 'analysis')
+            data_dir = os.path.join(os.path.dirname(__file__), "..", "analysis")
             data_dir = os.path.normpath(data_dir)
-            output_path = os.path.join(data_dir, 'analysis_results.txt')
+            output_path = os.path.join(data_dir, "analysis_results.txt")
             result = print_analysis_results(results, ticker, output_path)
             if isinstance(result, tuple):
                 text_msg, csv_path = result
@@ -321,13 +516,19 @@ def start_results_generation(app, e):
             except Exception:
                 pass
 
-            logger.info(f"Results generation done (results.view): {ticker} - {str(text_msg)[:200]}")
+            logger.info(
+                f"Results generation done (results.view): {ticker} - {str(text_msg)[:200]}"
+            )
             if csv_path:
                 logger.info(f"Results CSV written: {csv_path}")
 
         except Exception as ex:
             logger.exception("Virhe generoitaessa tuloksia (results.view)")
-            sb2 = ft.SnackBar(ft.Text(f"❌ Virhe generoitaessa: {ex}", color=ft.Colors.WHITE), bgcolor=ft.Colors.RED_600, duration=3000)
+            sb2 = ft.SnackBar(
+                ft.Text(f"❌ Virhe generoitaessa: {ex}", color=ft.Colors.WHITE),
+                bgcolor=ft.Colors.RED_600,
+                duration=3000,
+            )
             if sb2 not in app.page.overlay:
                 app.page.overlay.append(sb2)
             sb2.open = True
@@ -338,23 +539,36 @@ def start_results_generation(app, e):
 
 def show_results_csv(app, e):
     from analysis.logger import setup_logger
+
     logger = setup_logger()
-    csv_path = os.path.join(os.path.dirname(__file__), '..', 'analysis', 'analysis_results.csv')
+    csv_path = os.path.join(
+        os.path.dirname(__file__), "..", "analysis", "analysis_results.csv"
+    )
     csv_path = os.path.normpath(csv_path)
     if not os.path.exists(csv_path):
-        sb = ft.SnackBar(ft.Text("ℹ️ CSV-tiedostoa ei löytynyt.", color=ft.Colors.WHITE), bgcolor=ft.Colors.ORANGE_600, duration=2000)
+        sb = ft.SnackBar(
+            ft.Text("ℹ️ CSV-tiedostoa ei löytynyt.", color=ft.Colors.WHITE),
+            bgcolor=ft.Colors.ORANGE_600,
+            duration=2000,
+        )
         if sb not in app.page.overlay:
             app.page.overlay.append(sb)
         sb.open = True
         app.page.update()
-        logger.info("analysis_results.csv not found when attempting to show results CSV (results.view)")
+        logger.info(
+            "analysis_results.csv not found when attempting to show results CSV (results.view)"
+        )
         return
     try:
-        with open(csv_path, 'r', encoding='utf-8') as f:
+        with open(csv_path, "r", encoding="utf-8") as f:
             content = f.read()
     except Exception as ex:
         logger.exception("Virhe avattaessa CSV-tiedostoa (results.view)")
-        sb = ft.SnackBar(ft.Text(f"❌ Virhe tiedostoa avattaessa: {ex}", color=ft.Colors.WHITE), bgcolor=ft.Colors.RED_600, duration=3000)
+        sb = ft.SnackBar(
+            ft.Text(f"❌ Virhe tiedostoa avattaessa: {ex}", color=ft.Colors.WHITE),
+            bgcolor=ft.Colors.RED_600,
+            duration=3000,
+        )
         if sb not in app.page.overlay:
             app.page.overlay.append(sb)
         sb.open = True
@@ -366,15 +580,22 @@ def show_results_csv(app, e):
     save_button = ft.ElevatedButton(
         "Tallenna CSV",
         icon=ft.Icons.FILE_DOWNLOAD,
-        on_click=lambda ev: (setattr(app.file_picker, 'on_result', lambda ev2: save_csv_from_analysis(app, ev2, csv_path)), app.file_picker.save_file()),
+        on_click=lambda ev: (
+            setattr(
+                app.file_picker,
+                "on_result",
+                lambda ev2: save_csv_from_analysis(app, ev2, csv_path),
+            ),
+            app.file_picker.save_file(),
+        ),
     )
 
     dlg = ft.AlertDialog(
-        title=ft.Text('Analyysin CSV-tulokset'),
+        title=ft.Text("Analyysin CSV-tulokset"),
         content=ft.Column([content_control], tight=True),
         actions=[
             save_button,
-            ft.TextButton('Sulje', on_click=lambda _: app.close_dialog(dlg)),
+            ft.TextButton("Sulje", on_click=lambda _: app.close_dialog(dlg)),
         ],
     )
     if dlg not in app.page.overlay:
@@ -387,20 +608,29 @@ def save_csv_from_analysis(app, e, src_path: str):
     if not e.path:
         return
     try:
-        with open(src_path, 'r', encoding='utf-8') as src:
+        with open(src_path, "r", encoding="utf-8") as src:
             data = src.read()
-        with open(e.path, 'w', encoding='utf-8') as dst:
+        with open(e.path, "w", encoding="utf-8") as dst:
             dst.write(data)
-        sb = ft.SnackBar(ft.Text(f"✅ CSV tallennettu: {e.path}"), bgcolor=ft.Colors.GREEN_600, duration=2000)
+        sb = ft.SnackBar(
+            ft.Text(f"✅ CSV tallennettu: {e.path}"),
+            bgcolor=ft.Colors.GREEN_600,
+            duration=2000,
+        )
         if sb not in app.page.overlay:
             app.page.overlay.append(sb)
         sb.open = True
         app.page.update()
     except Exception as ex:
         from analysis.logger import setup_logger
+
         logger = setup_logger()
         logger.exception("Virhe tallennettaessa CSV:ää (results.view)")
-        sb = ft.SnackBar(ft.Text(f"❌ Virhe tallennuksessa: {ex}"), bgcolor=ft.Colors.RED_600, duration=3000)
+        sb = ft.SnackBar(
+            ft.Text(f"❌ Virhe tallennuksessa: {ex}"),
+            bgcolor=ft.Colors.RED_600,
+            duration=3000,
+        )
         if sb not in app.page.overlay:
             app.page.overlay.append(sb)
         sb.open = True
