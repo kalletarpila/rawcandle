@@ -16,16 +16,84 @@
 | 2 | `pvm` | Kaannekynttilan paivamaara | Muoto: YYYY-MM-DD |
 | 3 | `kynttila` | Kynttilamallin numero | 1-7 perusmallien mukaan |
 
-### Kynttilamallien selitykset
-| Koodi | Nimi | Kuvaus |
-|-------|------|--------|
-| 1 | Hammer | Pieni bodi, pitka alavarjo, lyhyt ylavarjo (bullish) |
-| 2 | Inverted Hammer | Pieni bodi, pitka ylavarjo, lyhyt alavarjo |
-| 3 | Hanging Man | Hammer lasketrendissa (bearish) |
-| 4 | Shooting Star | Inverted Hammer nousetrendissa (bearish) |
-| 5 | Doji | Avaus = paatos, pieni bodi |
-| 6 | Dragonfly Doji | Doji pitkalla alavarjolla |
-| 7 | Gravestone Doji | Doji pitkalla ylavarjolla |
+### Kynttilä Koodit
+
+1 = Hammer (Vasara)
+2 = Bullish Engulfing (Nouseva Nielaisu)
+3 = Piercing Pattern (Läpäisykuvio)
+4 = Morning Star (Aamutähti)
+5 = Falling Star (Putoava tähti)
+6 = Hanging Man (Ripustettu mies)
+7 = Bearish Engulfing (Laskeva nielaisu)
+
+### Kynttilöiden Laskentasäännöt
+
+**1. Hammer (Vasara) - Nouseva kääntösignaali**
+- Runko: Maksimissaan 30% koko kynttilän pituudesta
+- Ylävarjo: Enintään 10% runko-osasta
+- Alavarjo: Vähintään 2 kertaa runko-osan pituus
+- Ehto: `body_size <= 0.3 * full_range AND upper_shadow <= 0.1 * body_size AND lower_shadow >= 2.0 * body_size`
+
+**2. Bullish Engulfing (Nouseva Nielaisu) - Nouseva kääntösignaali**
+- Edellinen päivä: Laskeva kynttilä (close < open)
+- Nykyinen päivä: Nouseva kynttilä (close > open)
+- Nielaisu: `current_open < previous_close AND current_close > previous_open`
+- Volyymi: Suositeltavaa että nykyinen volyymi > edellisen päivän volyymi
+
+**3. Piercing Pattern (Läpäisykuvio) - Nouseva kääntösignaali**
+- Päivä 1: Laskeva kynttilä
+- Päivä 2: Nouseva kynttilä, avautuu edellisen sulkemisen alapuolelle
+- Läpäisy: Päivä 2 sulkeutuu yli 50% edellisen päivän rungosta
+- Ehto: `day2_close > (day1_open + day1_close) / 2`
+
+**4. Morning Star (Aamutähti) - Nouseva kääntösignaali (3 päivän kuvio)**
+- Päivä 1: Iso laskeva kynttilä
+- Päivä 2: Pieni runko (doji/spinning top) gapeilla alaspäin
+- Päivä 3: Nouseva kynttilä joka sulkeutuu päivän 1 rungon yläpuoliskoon
+- Gap-ehto: Päivien väliset aukot vahvistavat signaalia
+
+**5. Falling Star (Putoava tähti) - Laskeva kääntösignaali**
+- Pieni runko: Maksimissaan 30% koko pituudesta
+- Pitkä ylävarjo: Vähintään 2 kertaa runko-osan pituus
+- Lyhyt alavarjo: Enintään 10% runko-osasta
+- Ehto: `body_size <= 0.3 * full_range AND upper_shadow >= 2.0 * body_size AND lower_shadow <= 0.1 * body_size`
+
+**6. Hanging Man (Ripustettu mies) - Laskeva kääntösignaali**
+- Samat mittasuhteet kuin Hammer, mutta esiintyy nousutrendissä
+- Runko: Maksimissaan 30% koko pituudesta
+- Vahvistus: Seuraavan päivän laskeva kynttilä vahvistaa signaalin
+
+**7. Bearish Engulfing (Laskeva nielaisu) - Laskeva kääntösignaali**
+- Edellinen päivä: Nouseva kynttilä (close > open)
+- Nykyinen päivä: Laskeva kynttilä (close < open)
+- Nielaisu: `current_open > previous_close AND current_close < previous_open`
+- Koko nielaisu: Nykyinen runko peittää kokonaan edellisen rungon
+
+### Laskutrendisuodattimen Säännöt
+
+Laskutrendisuodatin (_is_in_downtrend) käyttää seuraavia kriteerejä:
+
+**1. Peruskriteeri - Porrastava lasku:**
+- t-10 > t-5 > t-2 > t0 (päätöskurssit)
+- Johdonmukainen laskutrendi 10 päivän ajalta
+
+**2. Minimalasku:**
+- Vähintään 3% lasku 10 päivässä
+- Lasketaan: `((t-10 - t0) / t-10) * 100`
+
+**3. Liukuva keskiarvo -suodatin (valinnainen):**
+- MA5 = 5 päivän liukuva keskiarvo
+- MA10 = 10 päivän liukuva keskiarvo
+- Ehdot: `nykyinen_kurssi < MA10 JA MA5 < MA10`
+
+**4. Volyymi-suodatin (valinnainen):**
+- Keskivolyymi viimeisen 5 päivän ajalta
+- Suodattaa pois liian hiljaisia kaupankäyntejä
+
+**Käyttö:**
+- `min_decline_percent`: Minimi laskuprosentti (oletus 3.0%)
+- `use_ma_filter`: Liukuvan keskiarvon käyttö (oletus True)
+- `use_volume_filter`: Volyymisuodattimen käyttö (oletus False)
 
 ---
 

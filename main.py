@@ -1971,4 +1971,16 @@ def main(page: ft.Page):
 if __name__ == "__main__":
     # Start the Flet app only when executed as a script. This avoids
     # binding the webserver port during imports (useful for tests/tools).
-    ft.app(target=main, port=8080, view=None)
+    import socket
+
+    # Find an available port
+    def find_free_port():
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("", 0))
+            return s.getsockname()[1]
+
+    port = find_free_port()
+    print(f"🚀 Käynnistetään RawCandle sovellus portissa {port}")
+    print(f"🌐 Avaa selaimessa: http://localhost:{port}")
+
+    ft.app(target=main, port=port, view=None)

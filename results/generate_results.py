@@ -310,6 +310,7 @@ def _build_output_rows(
     min_decline_percent: float = 3.0,
     use_ma_filter: bool = True,
     use_volume_filter: bool = False,
+    progress_callback=None,
 ):
     """Synchronous builder for output rows according to spec.
 
@@ -320,6 +321,7 @@ def _build_output_rows(
         min_decline_percent: Minimalasku prosentteina
         use_ma_filter: Käytetäänkö liukuva keskiarvo -suodatinta
         use_volume_filter: Käytetäänkö volyymi-suodatinta
+        progress_callback: Callback-funktio edistymisen raportointiin
     """
 
     # Candlestick pattern to integer mapping
@@ -519,10 +521,20 @@ def _build_output_rows(
 
         total_tickers = len(by_ticker)
         for ticker_idx, (ticker, items) in enumerate(by_ticker.items()):
-            # Progress indicator every 10 tickers
+            # Progress indicator
+            progress = (
+                0.2 + (ticker_idx / total_tickers) * 0.6
+            )  # 20% - 80% of total progress
+
             if ticker_idx % 10 == 0:
                 print(
                     f"📊 Käsitellään ticker {ticker_idx + 1}/{total_tickers}: {ticker}"
+                )
+
+            if progress_callback:
+                progress_callback(
+                    f"📊 Käsitellään osake {ticker_idx + 1}/{total_tickers}: {ticker}",
+                    progress,
                 )
 
             try:
@@ -954,6 +966,44 @@ def paivita_results_csv(page: ft.Page, app=None):
             if downtrend_filter:
                 filter_info = f" (🔻 Laskutrendi: {min_decline_percent}%, MA={use_ma_filter}, Vol={use_volume_filter})"
 
+            # Luo progress indicator
+            progress_bar = ft.ProgressBar(value=0, width=400)
+            progress_text = ft.Text("🔍 Aloitetaan analyysi...")
+
+            # Luo progress dialog
+            progress_dlg = ft.AlertDialog(
+                modal=True,
+                title=ft.Text("📊 Generoidaan tuloksia"),
+                content=ft.Container(
+                    ft.Column(
+                        [
+                            progress_text,
+                            progress_bar,
+                        ],
+                        tight=True,
+                    ),
+                    width=400,
+                    height=100,
+                ),
+                actions=[],  # Ei sulje-nappia - pakottaa odottamaan
+            )
+
+            def progress_callback(message, progress):
+                def update_progress():
+                    progress_text.value = message
+                    progress_bar.value = progress
+                    page.update()
+
+                page.run_thread(update_progress)
+
+            # Näytä progress dialog
+            def show_progress():
+                page.overlay.append(progress_dlg)
+                progress_dlg.open = True
+                page.update()
+
+            page.run_thread(show_progress)
+
             header, output_rows = _build_output_rows(
                 analysis_db,
                 osake_db,
@@ -961,7 +1011,17 @@ def paivita_results_csv(page: ft.Page, app=None):
                 min_decline_percent,
                 use_ma_filter,
                 use_volume_filter,
+                progress_callback,
             )
+
+            # Sulje progress dialog
+            def close_progress():
+                progress_dlg.open = False
+                if progress_dlg in page.overlay:
+                    page.overlay.remove(progress_dlg)
+                page.update()
+
+            page.run_thread(close_progress)
 
             csv_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1044,6 +1104,7 @@ def generate_results_now(
     min_decline_percent: float = 3.0,
     use_ma_filter: bool = True,
     use_volume_filter: bool = False,
+    progress_callback=None,
 ):
     """Generoi results.csv tiedosto
 
@@ -1053,6 +1114,7 @@ def generate_results_now(
         min_decline_percent: Minimalasku prosentteina
         use_ma_filter: Käytetäänkö liukuva keskiarvo -suodatinta
         use_volume_filter: Käytetäänkö volyymi-suodatinta
+        progress_callback: Callback-funktio edistymisen raportointiin
     """
     base = Path(__file__).resolve().parents[1]
     analysis_db = base / "analysis" / "analysis.db"
@@ -1062,6 +1124,9 @@ def generate_results_now(
     # Säilytetään myös CSV vanhojen järjestelmien yhteensopivuutta varten
     csv_path = base / "data" / "results.csv"
 
+    if progress_callback:
+        progress_callback("🔍 Analysoidaan tietoja...", 0.1)
+
     header, output_rows = _build_output_rows(
         analysis_db,
         osake_db,
@@ -1069,6 +1134,7 @@ def generate_results_now(
         min_decline_percent,
         use_ma_filter,
         use_volume_filter,
+        progress_callback,
     )
 
     if not output_rows:
@@ -1077,6 +1143,9 @@ def generate_results_now(
     added = len(output_rows)
 
     if write:
+        if progress_callback:
+            progress_callback("📊 Luodaan Excel-tiedostoa...", 0.8)
+
         # Luodaan Excel-tiedosto (pääasiallinen formaatti)
         success = _create_excel_file(header, output_rows, excel_path, downtrend_filter)
 
@@ -1084,6 +1153,9 @@ def generate_results_now(
             print(f"✅ Excel-tiedosto luotu: {excel_path}")
         else:
             print("❌ Excel-tiedoston luonti epäonnistui, luodaan CSV-varakopio")
+
+        if progress_callback:
+            progress_callback("📝 Luodaan CSV-varakopioita...", 0.9)
 
         # Luodaan myös CSV-tiedosto varmuuden vuoksi
         csv_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1096,5 +1168,8 @@ def generate_results_now(
             print(f"✅ CSV-varakopio luotu: {csv_path}")
         except Exception as e:
             print(f"❌ CSV-tiedoston luonti epäonnistui: {e}")
+
+        if progress_callback:
+            progress_callback("✅ Valmis!", 1.0)
 
     return added
