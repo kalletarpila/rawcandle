@@ -1,18 +1,70 @@
-# Virtual environment
+# Virtual environments
 .venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
 # Analysis outputs
 analysis/analysis_results*.txt
 analysis/analysis_results*.csv
 analysis/archive/
-analysis/analysis.log
+analysis/*.log*
 
-# Data files and DB
+# Data files and databases 
 data/*.db
 data/osakedata.csv
 data/loki.txt
+data/results_backup.csv
+data/test_*.txt
 
-# Editor and OS
-.vscode/
-__pycache__/
-*.pyc
+# Large data files
+*.csv
+!data/results.csv
+otherlisted.txt
+nyse_tickers.txt
+
+# Flet specific
+.flet_pid
+flet.out
+
+# VS Code (keep configuration files)
+# .vscode/ - Kommentoitu pois, pidetään asetukset mukana
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Desktop.ini
+Thumbs.db
+
+# Test files
+test_*.py
+*_test.py
+
+# Logs
+*.log
+logs/

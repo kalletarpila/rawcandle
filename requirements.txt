@@ -11,6 +11,10 @@ numpy>=2.2.0
 # Technical analysis
 TA-Lib>=0.6.0
 
+# Excel support
+openpyxl>=3.1.0
+xlsxwriter>=3.2.0
+
 # Development tools (optional)
 black>=24.0.0
 pycodestyle>=2.11.0

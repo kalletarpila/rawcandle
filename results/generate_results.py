@@ -5,10 +5,14 @@ import traceback
 from pathlib import Path
 from statistics import mean, stdev
 from typing import List, Optional, Tuple
+import locale
 
 import flet as ft
 import numpy as np
 import pandas as pd
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.utils.dataframe import dataframe_to_rows
 
 
 def _identify_columns(cur, table_name: str):
@@ -32,6 +36,90 @@ def _calculate_relative_stdev(values: List[float]) -> Optional[float]:
         return (std / avg) * 100.0
     except Exception:
         return None
+
+
+def _format_finnish_number(value):
+    """Muotoilee numeron suomalaiseen muotoon: pilkku desimaalimerkkinä, ei tuhateroittimia"""
+    if value is None or value == "":
+        return ""
+    try:
+        if isinstance(value, (int, float)):
+            # Pyöristetään 4 desimaaliin ja vaihdetaan piste pilkkuun
+            formatted = f"{float(value):.4f}".rstrip("0").rstrip(".")
+            return formatted.replace(".", ",")
+        return str(value).replace(".", ",")
+    except (ValueError, TypeError):
+        return str(value)
+
+
+def _create_excel_file(
+    header: List[str],
+    output_rows: List[List],
+    excel_path: Path,
+    downtrend_filter: bool = False,
+):
+    """Luo Excel-tiedoston suomalaisilla asetuksilla ja kauniilla muotoilulla"""
+    try:
+        # Luodaan DataFrame (säilytetään alkuperäiset numerot)
+        df = pd.DataFrame(output_rows, columns=header)
+
+        # Luodaan workbook ja worksheet
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Kynttilätulokset"
+
+        # Suomalainen numeromuotoilu Excelille
+        finnish_number_format = "#,##0.0000"
+        finnish_number_format = (
+            finnish_number_format.replace(",", " ").replace(".", ",").replace(" ", ".")
+        )
+
+        # Lisätään data
+        for r_idx, row in enumerate(dataframe_to_rows(df, index=False, header=True), 1):
+            for c_idx, value in enumerate(row, 1):
+                cell = ws.cell(row=r_idx, column=c_idx, value=value)
+
+                # Muotoilu otsikoille
+                if r_idx == 1:
+                    cell.font = Font(bold=True, color="FFFFFF")
+                    cell.fill = PatternFill(
+                        start_color="366092", end_color="366092", fill_type="solid"
+                    )
+                    cell.alignment = Alignment(horizontal="center", vertical="center")
+
+                # Numeromuotoilu numerotyyppisille soluille (sarakkeet 4 alkaen)
+                elif r_idx > 1 and c_idx >= 4:  # Data-rivit, numerosarakkeet
+                    if isinstance(value, (int, float)) and value is not None:
+                        cell.number_format = "#,##0.00;[RED]-#,##0.00"
+
+                # Muotoilu trendisarakkeelle jos käytössä
+                elif downtrend_filter and c_idx == 3:  # Kynttilä-sarake
+                    if "downtrend" in str(value).lower():
+                        cell.fill = PatternFill(
+                            start_color="FFE6E6", end_color="FFE6E6", fill_type="solid"
+                        )
+
+        # Automaattinen sarakkeiden leveyden säätö
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 25)  # Max 25 merkkiä
+            ws.column_dimensions[column_letter].width = adjusted_width
+
+        # Tallennetaan
+        excel_path.parent.mkdir(parents=True, exist_ok=True)
+        wb.save(excel_path)
+        return True
+
+    except Exception as e:
+        print(f"Virhe Excel-tiedoston luonnissa: {e}")
+        return False
 
 
 def _calculate_moving_average(
@@ -303,16 +391,26 @@ def _build_output_rows(
         "osake",
         "pvm",
         "kynttila",
-        "t_1",
-        "t0",
-        "t1",  # Existing normalized columns
-        # New historical prices (normalized by stock t0_low)
+        # New detailed candle data
+        "t_1_alin",
+        "t_1_ylin",
+        "t_1_bodi",
+        "t_1_bodi_colour",
+        "t0_alin",
+        "t0_ylin",
+        "t0_bodi",
+        "t0_bodi_colour",
+        "t1_alin",
+        "t1_ylin",
+        "t1_bodi",
+        "t1_bodi_colour",
+        # New historical prices (normalized by stock t0_alin)
         "t_2",
         "t_5",
         "t_10",
         "t_15",
         "t_20",
-        # New future prices (normalized by stock t0_low)
+        # New future prices (normalized by stock t0_alin)
         "t2",
         "t5",
         "t10",
@@ -334,7 +432,7 @@ def _build_output_rows(
         "t5_volyymi",
         "t10_volyymi",
         "t20_volyymi",
-        # Moving averages (normalized by stock t0_low)
+        # Moving averages (normalized by stock t0_alin)
         "t2_5p_liukuva",
         "t2_10p_liukuva",
         "t2_20p_liukuva",
@@ -352,7 +450,7 @@ def _build_output_rows(
         "t20_20p_liukuva",
         "t50_50p_liukuva",
         "t200_200p_liukuva",
-        # S&P 500 index (normalized by ^GSPC t0_low)
+        # S&P 500 index (normalized by ^GSPC t0_alin)
         "SPX_0",
         "SPX_2",
         "SPX_5",
@@ -364,7 +462,7 @@ def _build_output_rows(
         "SPX10",
         "SPX15",
         "SPX20",
-        # Nasdaq 100 index (normalized by ^IXIC t0_low)
+        # Nasdaq 100 index (normalized by ^NDX t0_alin)
         "NDX_0",
         "NDX_2",
         "NDX_5",
@@ -485,27 +583,56 @@ def _build_output_rows(
                 # Get t0 values for normalization
                 r0 = df.loc[idx]
                 t0_low = safe_get(r0, lcol)
-                t0_close = safe_get(
-                    r0, ccol
-                )  # Added: get t0_close for MA normalization
+                t0_high = safe_get(r0, hcol)
+                t0_open = safe_get(r0, ocol)
+                t0_close = safe_get(r0, ccol)
+
                 if t0_low is None or t0_low <= 0 or t0_close is None or t0_close <= 0:
                     continue
 
-                # Calculate existing normalized values (already implemented)
+                # Helper function to calculate body percentage and color
+                def calc_candle_details(row_data):
+                    if row_data is None:
+                        return None, None, None, None
+
+                    low = safe_get(row_data, lcol)
+                    high = safe_get(row_data, hcol)
+                    open_val = safe_get(row_data, ocol)
+                    close_val = safe_get(row_data, ccol)
+
+                    if any(x is None for x in [low, high, open_val, close_val]):
+                        return None, None, None, None
+
+                    # Normalize to t0_low
+                    norm_low = (low / t0_low * 100) if t0_low > 0 else None
+                    norm_high = (high / t0_low * 100) if t0_low > 0 else None
+
+                    # Body percentage of total candle
+                    candle_range = high - low
+                    body_size = abs(close_val - open_val)
+                    body_percent = (
+                        (body_size / candle_range * 100) if candle_range > 0 else 0
+                    )
+
+                    # Color: 1=green (close > open), 0=red (close <= open)
+                    color = 1 if close_val > open_val else 0
+
+                    return norm_low, norm_high, body_percent, color
+
+                # Calculate detailed candle data for t-1, t0, t1
                 r_m1 = df.loc[idx - 1] if idx > 0 else None
                 r1 = df.loc[idx + 1] if idx + 1 < len(df) else None
 
-                t_minus1 = (
-                    (safe_get(r_m1, ccol) / t0_low * 100)
-                    if r_m1 is not None and safe_get(r_m1, ccol)
-                    else None
+                # T-1 (previous day)
+                t_1_alin, t_1_ylin, t_1_bodi, t_1_bodi_colour = calc_candle_details(
+                    r_m1
                 )
-                t0 = 100.0  # t0_low / t0_low * 100 = 100.0 (base normalization as 100%)
-                t_plus1 = (
-                    (safe_get(r1, ccol) / t0_low * 100)
-                    if r1 is not None and safe_get(r1, ccol)
-                    else None
-                )
+
+                # T0 (current day - candle day)
+                t0_alin, t0_ylin, t0_bodi, t0_bodi_colour = calc_candle_details(r0)
+
+                # T1 (next day)
+                t1_alin, t1_ylin, t1_bodi, t1_bodi_colour = calc_candle_details(r1)
 
                 # Calculate new historical prices (normalized)
                 def get_normalized_close(offset):
@@ -642,21 +769,21 @@ def _build_output_rows(
                 SPX20 = get_index_normalized("^GSPC", 20)
 
                 # Nasdaq 100 data
-                NDX_0 = get_index_normalized("^IXIC", 0, "low")
+                NDX_0 = get_index_normalized("^NDX", 0, "low")
                 if NDX_0 is not None:
                     NDX_0 = 100.0  # Force to 100.0 since it's the normalization base
 
-                NDX_2 = get_index_normalized("^IXIC", -2)
-                NDX_5 = get_index_normalized("^IXIC", -5)
-                NDX_10 = get_index_normalized("^IXIC", -10)
-                NDX_15 = get_index_normalized("^IXIC", -15)
-                NDX_20 = get_index_normalized("^IXIC", -20)
+                NDX_2 = get_index_normalized("^NDX", -2)
+                NDX_5 = get_index_normalized("^NDX", -5)
+                NDX_10 = get_index_normalized("^NDX", -10)
+                NDX_15 = get_index_normalized("^NDX", -15)
+                NDX_20 = get_index_normalized("^NDX", -20)
 
-                NDX2 = get_index_normalized("^IXIC", 2)
-                NDX5 = get_index_normalized("^IXIC", 5)
-                NDX10 = get_index_normalized("^IXIC", 10)
-                NDX15 = get_index_normalized("^IXIC", 15)
-                NDX20 = get_index_normalized("^IXIC", 20)
+                NDX2 = get_index_normalized("^NDX", 2)
+                NDX5 = get_index_normalized("^NDX", 5)
+                NDX10 = get_index_normalized("^NDX", 10)
+                NDX15 = get_index_normalized("^NDX", 15)
+                NDX20 = get_index_normalized("^NDX", 20)
 
                 # Convert candle name to integer using mapping
                 candle_int = CANDLE_MAPPING.get(candle, 0)  # 0 for unknown patterns
@@ -674,10 +801,19 @@ def _build_output_rows(
                     ticker,
                     date,
                     candle_int,  # candle as integer
-                    # Existing normalized columns
-                    fmt_val(t_minus1),
-                    fmt_val(t0),
-                    fmt_val(t_plus1),
+                    # New detailed candle data
+                    fmt_val(t_1_alin),
+                    fmt_val(t_1_ylin),
+                    fmt_val(t_1_bodi),
+                    fmt_val(t_1_bodi_colour),
+                    fmt_val(t0_alin),
+                    fmt_val(t0_ylin),
+                    fmt_val(t0_bodi),
+                    fmt_val(t0_bodi_colour),
+                    fmt_val(t1_alin),
+                    fmt_val(t1_ylin),
+                    fmt_val(t1_bodi),
+                    fmt_val(t1_bodi_colour),
                     # New historical prices
                     fmt_val(t_2),
                     fmt_val(t_5),
@@ -763,6 +899,7 @@ def paivita_results_csv(page: ft.Page, app=None):
             base = Path(__file__).resolve().parents[1]
             analysis_db = base / "analysis" / "analysis.db"
             osake_db = base / "data" / "osakedata.db"
+            excel_path = base / "data" / "results.xlsx"
             csv_path = base / "data" / "results.csv"
 
             if not analysis_db.exists():
@@ -828,25 +965,36 @@ def paivita_results_csv(page: ft.Page, app=None):
 
             csv_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # write header if missing
-            if not csv_path.exists():
-                with open(csv_path, "w", newline="", encoding="utf-8") as f:
-                    writer = csv.writer(f)
-                    writer.writerow(header)
+            added = len(output_rows) if output_rows else 0
 
-            added = 0
             if output_rows:
-                with open(csv_path, "a", newline="", encoding="utf-8") as f:
-                    writer = csv.writer(f)
-                    for r in output_rows:
-                        writer.writerow(r)
-                        added += 1
+                # Luo Excel-tiedosto (pääformaatti)
+                excel_success = _create_excel_file(
+                    header, output_rows, excel_path, downtrend_filter
+                )
 
-            sb = ft.SnackBar(
-                ft.Text(f"✅ Lisätty {added} riviä results.csv:ään{filter_info}"),
-                bgcolor=ft.Colors.GREEN_600,
-                duration=4000,
-            )
+                # Luo myös CSV varmuuden vuoksi
+                try:
+                    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+                        writer = csv.writer(f)
+                        writer.writerow(header)
+                        for r in output_rows:
+                            writer.writerow(r)
+                except Exception as csv_error:
+                    print(f"CSV-virhey: {csv_error}")
+
+                file_info = "📊 Excel" if excel_success else "📄 CSV"
+                sb = ft.SnackBar(
+                    ft.Text(f"✅ {file_info}: {added} riviä luotu{filter_info}"),
+                    bgcolor=ft.Colors.GREEN_600,
+                    duration=4000,
+                )
+            else:
+                sb = ft.SnackBar(
+                    ft.Text(f"ℹ️ Ei tuloksia annetuilla kriteereillä{filter_info}"),
+                    bgcolor=ft.Colors.ORANGE_600,
+                    duration=3000,
+                )
             if sb not in page.overlay:
                 page.overlay.append(sb)
             sb.open = True
@@ -909,6 +1057,9 @@ def generate_results_now(
     base = Path(__file__).resolve().parents[1]
     analysis_db = base / "analysis" / "analysis.db"
     osake_db = base / "data" / "osakedata.db"
+    excel_path = base / "data" / "results.xlsx"
+
+    # Säilytetään myös CSV vanhojen järjestelmien yhteensopivuutta varten
     csv_path = base / "data" / "results.csv"
 
     header, output_rows = _build_output_rows(
@@ -923,21 +1074,27 @@ def generate_results_now(
     if not output_rows:
         return 0
 
-    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    added = len(output_rows)
 
-    if write and not csv_path.exists():
-        with open(csv_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow(header)
-
-    added = 0
     if write:
-        with open(csv_path, "a", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            for r in output_rows:
-                writer.writerow(r)
-                added += 1
-    else:
-        added = len(output_rows)
+        # Luodaan Excel-tiedosto (pääasiallinen formaatti)
+        success = _create_excel_file(header, output_rows, excel_path, downtrend_filter)
+
+        if success:
+            print(f"✅ Excel-tiedosto luotu: {excel_path}")
+        else:
+            print("❌ Excel-tiedoston luonti epäonnistui, luodaan CSV-varakopio")
+
+        # Luodaan myös CSV-tiedosto varmuuden vuoksi
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with open(csv_path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(header)
+                for r in output_rows:
+                    writer.writerow(r)
+            print(f"✅ CSV-varakopio luotu: {csv_path}")
+        except Exception as e:
+            print(f"❌ CSV-tiedoston luonti epäonnistui: {e}")
 
     return added
