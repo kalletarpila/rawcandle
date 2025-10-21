@@ -1,4 +1,3 @@
-import csv
 import sqlite3
 import threading
 import traceback
@@ -13,6 +12,9 @@ import pandas as pd
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils.dataframe import dataframe_to_rows
+
+# Uusi optimoitu cache-järjestelmä
+from .excel_cache import ExcelResultsCache
 
 
 def _identify_columns(cur, table_name: str):
@@ -904,7 +906,7 @@ def _build_output_rows(
 
 
 def paivita_results_csv(page: ft.Page, app=None):
-    """Starts a background job that builds/updates data/results.csv and shows a SnackBar when done."""
+    """Starts a background job that builds/updates data/results.xlsx using optimized cache system."""
 
     def worker():
         try:
@@ -912,7 +914,6 @@ def paivita_results_csv(page: ft.Page, app=None):
             analysis_db = base / "analysis" / "analysis.db"
             osake_db = base / "data" / "osakedata.db"
             excel_path = base / "data" / "results.xlsx"
-            csv_path = base / "data" / "results.csv"
 
             if not analysis_db.exists():
                 sb = ft.SnackBar(
@@ -939,43 +940,34 @@ def paivita_results_csv(page: ft.Page, app=None):
                 page.update()
                 return
 
-            # Lue laskutrendi-suodatin asetukset
-            downtrend_filter = False
-            min_decline_percent = 3.0
-            use_ma_filter = True
-            use_volume_filter = False
-
-            if app and hasattr(app, "results_downtrend_filter"):
+            # Lue generointi-asetukset
+            force_rebuild = False
+            if app and hasattr(app, "results_force_rebuild"):
                 try:
-                    downtrend_filter = app.results_downtrend_filter.value or False
-
-                    try:
-                        min_decline_percent = float(
-                            app.results_min_decline_percent.value or "3.0"
-                        )
-                    except (ValueError, AttributeError):
-                        min_decline_percent = 3.0
-
-                    use_ma_filter = getattr(app.results_ma_filter, "value", True)
-                    use_volume_filter = getattr(
-                        app.results_volume_filter, "value", False
-                    )
+                    force_rebuild = app.results_force_rebuild.value or False
                 except Exception:
-                    pass  # Käytä oletusarvoja
+                    force_rebuild = False
 
-            # Näytä käytettävät asetukset
+            # Lue laskutrendi-suodatin asetukset (vaikka nyt teemme kaiken dataan)
             filter_info = ""
-            if downtrend_filter:
-                filter_info = f" (🔻 Laskutrendi: {min_decline_percent}%, MA={use_ma_filter}, Vol={use_volume_filter})"
 
             # Luo progress indicator
             progress_bar = ft.ProgressBar(value=0, width=400)
-            progress_text = ft.Text("🔍 Aloitetaan analyysi...")
+            mode_text = "🔄 Kokonaan uusi" if force_rebuild else "⚡ Inkrementaalinen"
+            progress_text = ft.Text(
+                f"🔍 Aloitetaan optimoitu analyysi ({mode_text})..."
+            )
 
             # Luo progress dialog
+            dialog_title = "🚀 Generoidaan tuloksia (optimoitu)"
+            if force_rebuild:
+                dialog_title += " - Kokonaan uusi"
+            else:
+                dialog_title += " - Inkrementaalinen päivitys"
+
             progress_dlg = ft.AlertDialog(
                 modal=True,
-                title=ft.Text("📊 Generoidaan tuloksia"),
+                title=ft.Text(dialog_title),
                 content=ft.Container(
                     ft.Column(
                         [
@@ -990,10 +982,10 @@ def paivita_results_csv(page: ft.Page, app=None):
                 actions=[],  # Ei sulje-nappia - pakottaa odottamaan
             )
 
-            def progress_callback(message, progress):
+            def progress_callback(message, current, total):
                 def update_progress():
                     progress_text.value = message
-                    progress_bar.value = progress
+                    progress_bar.value = current / total if total > 0 else 0
                     page.update()
 
                 page.run_thread(update_progress)
@@ -1006,20 +998,19 @@ def paivita_results_csv(page: ft.Page, app=None):
 
             page.run_thread(show_progress)
 
-            header, output_rows = _build_output_rows(
-                analysis_db,
-                osake_db,
-                downtrend_filter,
-                min_decline_percent,
-                use_ma_filter,
-                use_volume_filter,
-                progress_callback,
+            # Käytä optimoitua generointi-funktiota
+            added = generate_excel_optimized(
+                excel_path=str(excel_path),
+                progress_callback=progress_callback,
+                analysis_db=str(analysis_db),
+                osake_db=str(osake_db),
+                force_rebuild=force_rebuild,  # Käyttäjän valinta
             )
 
             # Sulje progress dialog ja näytä valmis-dialog
             def show_completion():
                 # Muuta progress dialog valmis-tilaksi
-                progress_text.value = "✅ Analyysi valmis!"
+                progress_text.value = f"✅ Analyysi valmis! ({added} löydöstä)"
                 progress_bar.value = 1.0
 
                 # Lisää OK-nappi
@@ -1035,50 +1026,53 @@ def paivita_results_csv(page: ft.Page, app=None):
 
             page.run_thread(show_completion)
 
-            csv_path.parent.mkdir(parents=True, exist_ok=True)
+            if added > 0:
+                # Näytä onnistumisviesti
+                def show_success():
+                    sb = ft.SnackBar(
+                        ft.Text(
+                            f"✅ Excel-tiedosto luotu: {added} löydöstä{filter_info}"
+                        ),
+                        bgcolor=ft.Colors.GREEN_600,
+                        action="OK",
+                        action_color=ft.Colors.WHITE,
+                    )
+                    if sb not in page.overlay:
+                        page.overlay.append(sb)
+                    sb.open = True
+                    page.update()
 
-            added = len(output_rows) if output_rows else 0
-
-            if output_rows:
-                # Luo Excel-tiedosto (pääformaatti)
-                excel_success = _create_excel_file(
-                    header, output_rows, excel_path, downtrend_filter
-                )
-
-                # Luo myös CSV varmuuden vuoksi
-                try:
-                    with open(csv_path, "w", newline="", encoding="utf-8") as f:
-                        writer = csv.writer(f)
-                        writer.writerow(header)
-                        for r in output_rows:
-                            writer.writerow(r)
-                except Exception as csv_error:
-                    print(f"CSV-virhey: {csv_error}")
-
-                file_info = "📊 Excel" if excel_success else "📄 CSV"
-                sb = ft.SnackBar(
-                    ft.Text(f"✅ {file_info}: {added} riviä luotu{filter_info}"),
-                    bgcolor=ft.Colors.GREEN_600,
-                    action="OK",
-                    action_color=ft.Colors.WHITE,
-                )
+                page.run_thread(show_success)
             else:
-                sb = ft.SnackBar(
-                    ft.Text(f"ℹ️ Ei tuloksia annetuilla kriteereillä{filter_info}"),
-                    bgcolor=ft.Colors.ORANGE_600,
-                    action="OK",
-                    action_color=ft.Colors.WHITE,
-                )
-            if sb not in page.overlay:
-                page.overlay.append(sb)
-            sb.open = True
-            page.update()
+                # Ei tuloksia
+                def show_no_results():
+                    sb = ft.SnackBar(
+                        ft.Text("ℹ️ Ei tuloksia nykyisillä suodattimilla."),
+                        bgcolor=ft.Colors.ORANGE_600,
+                        action="OK",
+                        action_color=ft.Colors.WHITE,
+                    )
+                    if sb not in page.overlay:
+                        page.overlay.append(sb)
+                    sb.open = True
+                    page.update()
 
-        except Exception as ex:
-            tb = traceback.format_exc()
-            try:
+                page.run_thread(show_no_results)
+
+        except Exception as e:
+            # Virhe - näytä virheilmoitus
+            def show_error():
+                # Sulje progress dialog jos auki
+                try:
+                    if progress_dlg.open:
+                        progress_dlg.open = False
+                        if progress_dlg in page.overlay:
+                            page.overlay.remove(progress_dlg)
+                except:
+                    pass
+
                 sb = ft.SnackBar(
-                    ft.Text(f"❌ Virhe: {str(ex)}"),
+                    ft.Text(f"❌ Virhe: {str(e)}"),
                     bgcolor=ft.Colors.RED_600,
                     action="OK",
                     action_color=ft.Colors.WHITE,
@@ -1087,9 +1081,8 @@ def paivita_results_csv(page: ft.Page, app=None):
                     page.overlay.append(sb)
                 sb.open = True
                 page.update()
-            except Exception:
-                pass
-            print(tb)
+
+            page.run_thread(show_error)
 
     threading.Thread(target=worker, daemon=True).start()
 
@@ -1121,7 +1114,7 @@ def generate_results_now(
     use_volume_filter: bool = False,
     progress_callback=None,
 ):
-    """Generoi results.csv tiedosto
+    """Generoi results.xlsx tiedosto
 
     Args:
         write: Kirjoitetaanko tiedostoon vai palautetaanko vain rivimäärä
@@ -1135,9 +1128,6 @@ def generate_results_now(
     analysis_db = base / "analysis" / "analysis.db"
     osake_db = base / "data" / "osakedata.db"
     excel_path = base / "data" / "results.xlsx"
-
-    # Säilytetään myös CSV vanhojen järjestelmien yhteensopivuutta varten
-    csv_path = base / "data" / "results.csv"
 
     if progress_callback:
         progress_callback("🔍 Analysoidaan tietoja...", 0.1)
@@ -1161,30 +1151,112 @@ def generate_results_now(
         if progress_callback:
             progress_callback("📊 Luodaan Excel-tiedostoa...", 0.8)
 
-        # Luodaan Excel-tiedosto (pääasiallinen formaatti)
+        # Luodaan Excel-tiedosto
         success = _create_excel_file(header, output_rows, excel_path, downtrend_filter)
 
         if success:
             print(f"✅ Excel-tiedosto luotu: {excel_path}")
         else:
-            print("❌ Excel-tiedoston luonti epäonnistui, luodaan CSV-varakopio")
-
-        if progress_callback:
-            progress_callback("📝 Luodaan CSV-varakopioita...", 0.9)
-
-        # Luodaan myös CSV-tiedosto varmuuden vuoksi
-        csv_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            with open(csv_path, "w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow(header)
-                for r in output_rows:
-                    writer.writerow(r)
-            print(f"✅ CSV-varakopio luotu: {csv_path}")
-        except Exception as e:
-            print(f"❌ CSV-tiedoston luonti epäonnistui: {e}")
+            print("❌ Excel-tiedoston luonti epäonnistui")
 
         if progress_callback:
             progress_callback("✅ Valmis!", 1.0)
 
     return added
+
+
+def generate_excel_optimized(
+    excel_path: str = "data/results.xlsx",
+    progress_callback=None,
+    analysis_db: str = "analysis/analysis.db",
+    osake_db: str = "data/osakedata.db",
+    force_rebuild: bool = False,
+    limit_rows: int = None,
+) -> int:
+    """
+    Optimoitu Excel-generointi staging-tietokannan avulla.
+
+    Args:
+        excel_path: Polku Excel-tiedostoon
+        progress_callback: Funktio progress-päivityksille
+        analysis_db: Polku analysis.db tietokantaan
+        osake_db: Polku osakedata.db tietokantaan
+        force_rebuild: Pakota staging-taulun uudelleenrakennus
+        limit_rows: Rajoita rivien määrä (None = ei rajoitusta, testikäyttöön)
+
+    Returns:
+        Käsiteltyjen rivien määrä
+    """
+
+    try:
+        # Luo cache-objekti
+        cache = ExcelResultsCache(
+            analysis_db_path=analysis_db,
+            osake_db_path=osake_db,
+            results_db_path="data/results.db",
+        )
+
+        # Tarkista onko cache tuore
+        if not force_rebuild and cache.is_cache_fresh():
+            if progress_callback:
+                progress_callback("📊 Käytetään cache-dataa...", 50, 100)
+
+            # Nopea export staging-taulusta
+            success = cache.export_to_excel_fast(excel_path, limit_rows=limit_rows)
+
+            if success:
+                stats = cache.get_staging_stats()
+                if progress_callback:
+                    progress_callback("✅ Valmis!", 100, 100)
+                return stats.get("total_rows", 0)
+            else:
+                # Jos nopea export epäonnistui, rebuild cache
+                force_rebuild = True
+
+        if force_rebuild or not cache.is_cache_fresh():
+            if progress_callback:
+                progress_callback("🔄 Rakennetaan cache...", 10, 100)
+
+            # Rebuild staging-taulu
+            def cache_progress(step, current, total):
+                # Skaalaa progress 10-90% välille
+                scaled_progress = 10 + int((current / total) * 80)
+                if progress_callback:
+                    progress_callback(step, scaled_progress, 100)
+
+            cache.rebuild_staging_optimized(cache_progress, limit_rows=limit_rows)
+
+            if progress_callback:
+                progress_callback("📊 Luodaan Excel-tiedostoa...", 90, 100)
+
+            # Export Exceliin
+            success = cache.export_to_excel_fast(excel_path, limit_rows=limit_rows)
+
+            if success:
+                stats = cache.get_staging_stats()
+                if progress_callback:
+                    progress_callback("✅ Valmis!", 100, 100)
+                return stats.get("total_rows", 0)
+            else:
+                if progress_callback:
+                    progress_callback("❌ Excel-generointi epäonnistui", 100, 100)
+                return 0
+
+        return 0
+
+    except Exception as e:
+        error_msg = f"❌ Virhe optimoidussa Excel-generoinnissa: {e}"
+        print(error_msg)
+        if progress_callback:
+            progress_callback(error_msg, 100, 100)
+
+        # Fallback: käytä vanhaa algoritmia
+        print("🔄 Yritetään vanhaa algoritmia...")
+        return generate_results_now(
+            write=True,
+            downtrend_filter=True,
+            min_decline_percent=1.0,
+            use_ma_filter=False,
+            use_volume_filter=False,
+            progress_callback=progress_callback,
+        )

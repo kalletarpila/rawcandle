@@ -49,6 +49,13 @@ def create_results_view(app) -> ft.View:
         label="Lisää liukuva keskiarvo -suodatin", value=True
     )
     app.results_volume_filter = ft.Checkbox(label="Lisää volyymi-suodatin", value=False)
+
+    # Generointi-asetukset
+    app.results_force_rebuild = ft.Checkbox(
+        label="🔄 Generoi kokonaan uusi tiedosto (muuten lisää vain uusia rivejä)",
+        value=False,
+        tooltip="Valittuna: Luo uusi Excel-tiedosto alusta.\nEi valittuna: Lisää vain uusia löydöksiä olemassa olevaan tiedostoon.",
+    )
     app.results_ticker_field = ft.TextField(
         label="Osakkeen ticker (esim. AAPL)",
         width=250,
@@ -154,9 +161,9 @@ def create_results_view(app) -> ft.View:
         from results.generate_results import paivita_results_csv_click
 
         generate_btn = ft.ElevatedButton(
-            "Generoi CSV",
-            icon=ft.Icons.FILE_UPLOAD,
-            bgcolor=ft.colors.ORANGE_400,
+            "🚀 Päivitä Results.xlsx",
+            icon=ft.Icons.TABLE_CHART,
+            bgcolor=ft.colors.GREEN_600,
             color=ft.colors.WHITE,
             disabled=False,
             on_click=paivita_results_csv_click,
@@ -164,16 +171,16 @@ def create_results_view(app) -> ft.View:
         )
     except Exception:
         generate_btn = ft.ElevatedButton(
-            "Generoi CSV",
-            icon=ft.Icons.FILE_UPLOAD,
-            bgcolor=ft.colors.ORANGE_400,
+            "🚀 Päivitä Results.xlsx",
+            icon=ft.Icons.TABLE_CHART,
+            bgcolor=ft.colors.GREEN_600,
             color=ft.colors.WHITE,
             disabled=True,
             tooltip="Ei vielä käytössä",
             width=220,
         )
     show_btn = ft.ElevatedButton(
-        "Näytä CSV",
+        "📊 Näytä Excel",
         icon=ft.Icons.VISIBILITY,
         bgcolor=ft.colors.BLUE_600,
         color=ft.colors.WHITE,
@@ -359,6 +366,18 @@ def create_results_view(app) -> ft.View:
                                                         ),
                                                         app.results_ma_filter,
                                                         app.results_volume_filter,
+                                                        ft.Container(height=8),
+                                                        ft.Divider(
+                                                            height=1,
+                                                            color=ft.Colors.GREY_300,
+                                                        ),
+                                                        ft.Text(
+                                                            "⚙️ Generointi:",
+                                                            size=12,
+                                                            weight=ft.FontWeight.BOLD,
+                                                            color=ft.Colors.BLUE_600,
+                                                        ),
+                                                        app.results_force_rebuild,
                                                         ft.Container(height=8),
                                                         ft.Text(
                                                             "📊 Kriteerit:",
