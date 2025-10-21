@@ -948,8 +948,40 @@ def paivita_results_csv(page: ft.Page, app=None):
                 except Exception:
                     force_rebuild = False
 
+            # Lue ticker-filteritieto
+            ticker_filter = None
+            print(f"🔍 Debug ticker-lukeminen: app={app is not None}")
+            if app:
+                print(
+                    f"🔍 Debug: hasattr ticker_field={hasattr(app, 'results_ticker_field')}"
+                )
+                print(
+                    f"🔍 Debug: hasattr radio_group={hasattr(app, 'results_radio_group')}"
+                )
+
+            if (
+                app
+                and hasattr(app, "results_ticker_field")
+                and hasattr(app, "results_radio_group")
+            ):
+                try:
+                    ticker_mode = app.results_radio_group.value
+                    ticker = app.results_ticker_field.value.strip().upper()
+                    print(f"🔍 Debug: ticker_mode={ticker_mode}, ticker='{ticker}'")
+                    if ticker_mode == "single" and ticker:
+                        ticker_filter = ticker
+                        print(f"🎯 Käyttäjä valitsi ticker-filterin: {ticker_filter}")
+                    else:
+                        print("🌐 Käyttäjä valitsi kaikki osakkeet")
+                except Exception as ex:
+                    print(f"Virhe ticker-filterin lukemisessa: {ex}")
+            else:
+                print("❌ App-objekti tai kentät puuttuvat ticker-filtterille")
+
             # Lue laskutrendi-suodatin asetukset (vaikka nyt teemme kaiken dataan)
             filter_info = ""
+            if ticker_filter:
+                filter_info = f" ({ticker_filter})"
 
             # Luo progress indicator
             progress_bar = ft.ProgressBar(value=0, width=400)
@@ -984,87 +1016,115 @@ def paivita_results_csv(page: ft.Page, app=None):
 
             def progress_callback(message, current, total):
                 def update_progress():
-                    progress_text.value = message
-                    progress_bar.value = current / total if total > 0 else 0
-                    page.update()
+                    try:
+                        progress_text.value = message
+                        progress_bar.value = current / total if total > 0 else 0
+                        page.update()
+                    except Exception as ex:
+                        print(f"Virhe progress-päivityksessä: {ex}")
 
-                page.run_thread(update_progress)
+                try:
+                    page.run_thread(update_progress)
+                except Exception as ex:
+                    print(f"Virhe progress-threadin käynnistämisessä: {ex}")
 
             # Näytä progress dialog
             def show_progress():
-                page.overlay.append(progress_dlg)
-                progress_dlg.open = True
-                page.update()
+                try:
+                    page.overlay.append(progress_dlg)
+                    progress_dlg.open = True
+                    page.update()
+                except Exception as ex:
+                    print(f"Virhe progress-dialogin näyttämisessä: {ex}")
 
-            page.run_thread(show_progress)
+            try:
+                page.run_thread(show_progress)
+            except Exception as ex:
+                print(f"Virhe progress-threadin käynnistämisessä: {ex}")
 
-            # Käytä optimoitua generointi-funktiota
-            added = generate_excel_optimized(
-                excel_path=str(excel_path),
-                progress_callback=progress_callback,
-                analysis_db=str(analysis_db),
-                osake_db=str(osake_db),
-                force_rebuild=force_rebuild,  # Käyttäjän valinta
-            )
-
-            # Sulje progress dialog ja näytä valmis-dialog
-            def show_completion():
-                # Muuta progress dialog valmis-tilaksi
-                progress_text.value = f"✅ Analyysi valmis! ({added} löydöstä)"
-                progress_bar.value = 1.0
-
-                # Lisää OK-nappi
-                def close_dialog(e):
+            # Määritä dialogi-sulkija
+            def close_progress_dialog():
+                try:
                     progress_dlg.open = False
                     if progress_dlg in page.overlay:
                         page.overlay.remove(progress_dlg)
                     page.update()
+                except Exception as ex:
+                    print(f"Virhe dialogi-sulkemisessa: {ex}")
 
-                ok_button = ft.TextButton("OK", on_click=close_dialog)
-                progress_dlg.actions = [ok_button]
-                page.update()
-
-            page.run_thread(show_completion)
-
-            if added > 0:
-                # Näytä onnistumisviesti
-                def show_success():
-                    sb = ft.SnackBar(
-                        ft.Text(
-                            f"✅ Excel-tiedosto luotu: {added} löydöstä{filter_info}"
-                        ),
-                        bgcolor=ft.Colors.GREEN_600,
-                        action="OK",
-                        action_color=ft.Colors.WHITE,
+            # Käytä optimoitua generointi-funktiota erillisessä threadissa
+            def run_generation():
+                try:
+                    return generate_excel_optimized(
+                        excel_path=str(excel_path),
+                        progress_callback=progress_callback,
+                        analysis_db=str(analysis_db),
+                        osake_db=str(osake_db),
+                        force_rebuild=force_rebuild,  # Käyttäjän valinta
+                        ticker_filter=ticker_filter,  # Käyttäjän ticker-filtteri
                     )
-                    if sb not in page.overlay:
-                        page.overlay.append(sb)
-                    sb.open = True
+                except Exception as ex:
+                    print(f"Virhe Excel-generoinnissa: {ex}")
+                    return 0
+
+            # Aja generointi taustalla
+            import threading
+
+            result_container = {"added": 0, "done": False, "error": None}
+
+            def generation_thread():
+                try:
+                    result_container["added"] = run_generation()
+                except Exception as ex:
+                    result_container["error"] = ex
+                finally:
+                    result_container["done"] = True
+
+            gen_thread = threading.Thread(target=generation_thread)
+            gen_thread.daemon = True
+            gen_thread.start()
+
+            # Yksinkertainen polling thread
+            def simple_monitor():
+                import time
+
+                timeout = 120  # 2 minuuttia
+                start_time = time.time()
+
+                while (
+                    not result_container["done"]
+                    and (time.time() - start_time) < timeout
+                ):
+                    time.sleep(0.5)
+
+                # UI-päivitys
+                if result_container["error"]:
+                    progress_dlg.open = False
+                    page.update()
+                    print(f"❌ Virhe: {result_container['error']}")
+                elif result_container["done"]:
+                    added = result_container["added"]
+                    progress_text.value = f"✅ Analyysi valmis! ({added} löydöstä)"
+                    progress_bar.value = 1.0
+
+                    def simple_close(e):
+                        progress_dlg.open = False
+                        page.update()
+
+                    ok_button = ft.TextButton("OK", on_click=simple_close)
+                    progress_dlg.actions = [ok_button]
                     page.update()
 
-                page.run_thread(show_success)
-            else:
-                # Ei tuloksia
-                def show_no_results():
-                    sb = ft.SnackBar(
-                        ft.Text("ℹ️ Ei tuloksia nykyisillä suodattimilla."),
-                        bgcolor=ft.Colors.ORANGE_600,
-                        action="OK",
-                        action_color=ft.Colors.WHITE,
-                    )
-                    if sb not in page.overlay:
-                        page.overlay.append(sb)
-                    sb.open = True
-                    page.update()
-
-                page.run_thread(show_no_results)
+            # Käynnistä yksinkertainen monitor
+            monitor_thread = threading.Thread(target=simple_monitor, daemon=True)
+            monitor_thread.start()
 
         except Exception as e:
             # Virhe - näytä virheilmoitus
             def show_error():
                 # Sulje progress dialog jos auki
                 try:
-                    if progress_dlg.open:
+                    if "progress_dlg" in locals() and progress_dlg.open:
                         progress_dlg.open = False
                         if progress_dlg in page.overlay:
                             page.overlay.remove(progress_dlg)
@@ -1082,7 +1142,14 @@ def paivita_results_csv(page: ft.Page, app=None):
                 sb.open = True
                 page.update()
 
-            page.run_thread(show_error)
+            try:
+                page.run_thread(show_error)
+            except Exception as ex:
+                print(f"Virhe error-threadin käynnistämisessä: {ex}")
+
+    # Aja worker thread
+    worker_thread = threading.Thread(target=worker, daemon=True)
+    worker_thread.start()
 
     threading.Thread(target=worker, daemon=True).start()
 
@@ -1095,14 +1162,37 @@ def paivita_results_csv_click(e):
             page = e.control.page
         except Exception:
             page = None
+
     if page is not None:
         # Etsitään app instanssi
         app = None
-        for attr_name in dir(page):
-            attr = getattr(page, attr_name)
-            if hasattr(attr, "results_downtrend_filter"):
-                app = attr
-                break
+        print("🔍 Debug: Etsitään app-objektia page-objektista...")
+
+        # Kokeile ensin page.app (suora tallennus)
+        if hasattr(page, "app") and hasattr(page.app, "results_downtrend_filter"):
+            app = page.app
+            print("🔍 Debug: App löytyi page.app:sta")
+        # Kokeile page.data
+        elif hasattr(page, "data") and hasattr(page.data, "results_downtrend_filter"):
+            app = page.data
+            print("🔍 Debug: App löytyi page.data:sta")
+        else:
+            # Etsi kaikista page-objektin attribuuteista
+            for attr_name in dir(page):
+                try:
+                    attr = getattr(page, attr_name)
+                    if hasattr(attr, "results_downtrend_filter"):
+                        app = attr
+                        print(f"🔍 Debug: App löytyi {attr_name}-attribuutista")
+                        break
+                except Exception:
+                    continue
+
+        if app is None:
+            print("❌ Debug: App-objektia ei löytynyt!")
+        else:
+            print(f"🔍 Debug: App-objekti löytyi: {type(app)}")
+
         paivita_results_csv(page, app)
 
 
@@ -1172,6 +1262,7 @@ def generate_excel_optimized(
     osake_db: str = "data/osakedata.db",
     force_rebuild: bool = False,
     limit_rows: int = None,
+    ticker_filter: str = None,
 ) -> int:
     """
     Optimoitu Excel-generointi staging-tietokannan avulla.
@@ -1183,9 +1274,10 @@ def generate_excel_optimized(
         osake_db: Polku osakedata.db tietokantaan
         force_rebuild: Pakota staging-taulun uudelleenrakennus
         limit_rows: Rajoita rivien määrä (None = ei rajoitusta, testikäyttöön)
+        ticker_filter: Rajoita tiettyyn tickeriin (None = kaikki tickerit)
 
     Returns:
-        Käsiteltyjen rivien määrä
+        int: Löydösten määrä
     """
 
     try:
@@ -1196,13 +1288,29 @@ def generate_excel_optimized(
             results_db_path="data/results.db",
         )
 
-        # Tarkista onko cache tuore
-        if not force_rebuild and cache.is_cache_fresh():
+        # Tarkista onko cache tuore (mutta pakota rebuild jos ticker-filtteri käytössä)
+        cache_is_fresh = not force_rebuild and cache.is_cache_fresh()
+        print(
+            f"🔍 Debug: force_rebuild={force_rebuild}, cache.is_cache_fresh()={cache.is_cache_fresh()}"
+        )
+
+        # Jos ticker-filtteri on käytössä, pakota rebuild
+        if ticker_filter:
+            print(
+                f"🎯 Ticker-filtteri ({ticker_filter}) aktiivinen - pakotetaan rebuild"
+            )
+            cache_is_fresh = False
+
+        print(f"🔍 Debug: cache_is_fresh={cache_is_fresh}")
+
+        if cache_is_fresh:
             if progress_callback:
                 progress_callback("📊 Käytetään cache-dataa...", 50, 100)
 
             # Nopea export staging-taulusta
-            success = cache.export_to_excel_fast(excel_path, limit_rows=limit_rows)
+            success = cache.export_to_excel_fast(
+                excel_path, limit_rows=limit_rows, ticker_filter=ticker_filter
+            )
 
             if success:
                 stats = cache.get_staging_stats()
@@ -1224,13 +1332,17 @@ def generate_excel_optimized(
                 if progress_callback:
                     progress_callback(step, scaled_progress, 100)
 
-            cache.rebuild_staging_optimized(cache_progress, limit_rows=limit_rows)
+            cache.rebuild_staging_optimized(
+                cache_progress, limit_rows=limit_rows, ticker_filter=ticker_filter
+            )
 
             if progress_callback:
                 progress_callback("📊 Luodaan Excel-tiedostoa...", 90, 100)
 
             # Export Exceliin
-            success = cache.export_to_excel_fast(excel_path, limit_rows=limit_rows)
+            success = cache.export_to_excel_fast(
+                excel_path, limit_rows=limit_rows, ticker_filter=ticker_filter
+            )
 
             if success:
                 stats = cache.get_staging_stats()
@@ -1252,11 +1364,20 @@ def generate_excel_optimized(
 
         # Fallback: käytä vanhaa algoritmia
         print("🔄 Yritetään vanhaa algoritmia...")
+
+        # Vanhan algoritmin progress callback on erilainen
+        def old_progress_callback(message, progress):
+            if progress_callback:
+                # Muunna progress (0.0-1.0) -> (current, total) muotoon
+                current = int(progress * 100)
+                total = 100
+                progress_callback(message, current, total)
+
         return generate_results_now(
             write=True,
             downtrend_filter=True,
             min_decline_percent=1.0,
             use_ma_filter=False,
             use_volume_filter=False,
-            progress_callback=progress_callback,
+            progress_callback=old_progress_callback,
         )

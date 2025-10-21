@@ -185,7 +185,9 @@ class ExcelResultsCache:
             logging.warning(f"Cache freshness check failed: {e}")
             return False
 
-    def rebuild_staging_optimized(self, progress_callback=None, limit_rows: int = None):
+    def rebuild_staging_optimized(
+        self, progress_callback=None, limit_rows: int = None, ticker_filter: str = None
+    ):
         """Rakenna staging-taulu optimoidusti SQL:llä"""
 
         def update_progress(step: str, current: int, total: int):
@@ -201,16 +203,29 @@ class ExcelResultsCache:
 
         update_progress("Haetaan löydökset...", 10, 100)
 
-        # Hae kaikki löydökset analysis.db:stä
+        # Hae löydökset analysis.db:stä (ticker-filtterillä jos annettu)
         with sqlite3.connect(self.analysis_db) as analysis_conn:
-            findings = analysis_conn.execute(
+            if ticker_filter:
+                print(f"🎯 Suodatetaan ticker: {ticker_filter}")
+                findings = analysis_conn.execute(
+                    """
+                    SELECT ticker, date, candle 
+                    FROM analysis_findings 
+                    WHERE candle IS NOT NULL AND candle != '' AND ticker = ?
+                    ORDER BY ticker, date
+                """,
+                    (ticker_filter,),
+                ).fetchall()
+            else:
+                print("🌐 Haetaan kaikki tickerit")
+                findings = analysis_conn.execute(
+                    """
+                    SELECT ticker, date, candle 
+                    FROM analysis_findings 
+                    WHERE candle IS NOT NULL AND candle != ''
+                    ORDER BY ticker, date
                 """
-                SELECT ticker, date, candle 
-                FROM analysis_findings 
-                WHERE candle IS NOT NULL AND candle != ''
-                ORDER BY ticker, date
-            """
-            ).fetchall()
+                ).fetchall()
 
         if not findings:
             logging.warning("Ei löydöksiä analysis.db:ssä")
@@ -670,13 +685,16 @@ class ExcelResultsCache:
             return None
 
     def export_to_excel_fast(
-        self, excel_path: str = "data/results.xlsx", limit_rows: int = None
+        self,
+        excel_path: str = "data/results.xlsx",
+        limit_rows: int = None,
+        ticker_filter: str = None,
     ) -> bool:
         """Nopea Excel-export staging-taulusta"""
         try:
             # Lue kaikki data kerralla staging-taulusta
             with sqlite3.connect(self.results_db) as conn:
-                # Rakenna SQL-kysely limit:in kanssa
+                # Rakenna SQL-kysely filttereiden kanssa
                 base_query = """
                     SELECT 
                         ticker, date, candle,
@@ -698,16 +716,30 @@ class ExcelResultsCache:
                         SPX2, SPX5, SPX10, SPX15, SPX20,
                         NDX_0, NDX_2, NDX_5, NDX_10, NDX_15, NDX_20,
                         NDX2, NDX5, NDX10, NDX15, NDX20
-                    FROM excel_staging 
-                    ORDER BY ticker, date
-                """
+                    FROM excel_staging"""
+
+                # Lisää WHERE-lauseke ticker-filtteriä varten
+                conditions = []
+                params = []
+
+                if ticker_filter:
+                    conditions.append("ticker = ?")
+                    params.append(ticker_filter)
+
+                if conditions:
+                    base_query += " WHERE " + " AND ".join(conditions)
+
+                base_query += " ORDER BY ticker, date"
 
                 if limit_rows:
                     query = base_query + f" LIMIT {limit_rows}"
                 else:
                     query = base_query
 
-                df = pd.read_sql(query, conn)
+                if params:
+                    df = pd.read_sql(query, conn, params=params)
+                else:
+                    df = pd.read_sql(query, conn)
 
             if df.empty:
                 logging.warning("Ei dataa staging-taulussa")

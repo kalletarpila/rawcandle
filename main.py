@@ -1967,20 +1967,46 @@ class RawCandleApp:
 def main(page: ft.Page):
     """Pääfunktio - luo sovelluksen instanssin"""
     app = RawCandleApp(page)
+    # Tallenna app-objekti page-objektiin jotta muut moduulit voivat käyttää sitä
+    page.app = app
 
 
 if __name__ == "__main__":
     # Start the Flet app only when executed as a script. This avoids
     # binding the webserver port during imports (useful for tests/tools).
     import socket
+    import sys
+    import os
 
-    # Find an available port
-    def find_free_port():
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind(("", 0))
-            return s.getsockname()[1]
+    # Tarkista ympäristömuuttuja FLET_PORT tai komentoriviparametri --port
+    port = None
 
-    port = find_free_port()
+    # Tarkista ympäristömuuttuja
+    if os.getenv("FLET_PORT"):
+        try:
+            port = int(os.getenv("FLET_PORT"))
+        except ValueError:
+            pass
+
+    # Tarkista komentoriviparametrit
+    if "--port" in sys.argv:
+        try:
+            port_index = sys.argv.index("--port")
+            if port_index + 1 < len(sys.argv):
+                port = int(sys.argv[port_index + 1])
+        except (ValueError, IndexError):
+            pass
+
+    # Jos porttia ei määritelty, etsi vapaa portti
+    if port is None:
+
+        def find_free_port():
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(("", 0))
+                return s.getsockname()[1]
+
+        port = find_free_port()
+
     print(f"🚀 Käynnistetään RawCandle sovellus portissa {port}")
     print(f"🌐 Avaa selaimessa: http://localhost:{port}")
 
