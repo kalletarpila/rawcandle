@@ -918,7 +918,8 @@ def paivita_results_csv(page: ft.Page, app=None):
                 sb = ft.SnackBar(
                     ft.Text("❌ analysis.db ei löytynyt."),
                     bgcolor=ft.Colors.RED_600,
-                    duration=3000,
+                    action="OK",
+                    action_color=ft.Colors.WHITE,
                 )
                 if sb not in page.overlay:
                     page.overlay.append(sb)
@@ -929,7 +930,8 @@ def paivita_results_csv(page: ft.Page, app=None):
                 sb = ft.SnackBar(
                     ft.Text("❌ osakedata.db ei löytynyt."),
                     bgcolor=ft.Colors.RED_600,
-                    duration=3000,
+                    action="OK",
+                    action_color=ft.Colors.WHITE,
                 )
                 if sb not in page.overlay:
                     page.overlay.append(sb)
@@ -1014,14 +1016,24 @@ def paivita_results_csv(page: ft.Page, app=None):
                 progress_callback,
             )
 
-            # Sulje progress dialog
-            def close_progress():
-                progress_dlg.open = False
-                if progress_dlg in page.overlay:
-                    page.overlay.remove(progress_dlg)
+            # Sulje progress dialog ja näytä valmis-dialog
+            def show_completion():
+                # Muuta progress dialog valmis-tilaksi
+                progress_text.value = "✅ Analyysi valmis!"
+                progress_bar.value = 1.0
+
+                # Lisää OK-nappi
+                def close_dialog(e):
+                    progress_dlg.open = False
+                    if progress_dlg in page.overlay:
+                        page.overlay.remove(progress_dlg)
+                    page.update()
+
+                ok_button = ft.TextButton("OK", on_click=close_dialog)
+                progress_dlg.actions = [ok_button]
                 page.update()
 
-            page.run_thread(close_progress)
+            page.run_thread(show_completion)
 
             csv_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1047,13 +1059,15 @@ def paivita_results_csv(page: ft.Page, app=None):
                 sb = ft.SnackBar(
                     ft.Text(f"✅ {file_info}: {added} riviä luotu{filter_info}"),
                     bgcolor=ft.Colors.GREEN_600,
-                    duration=4000,
+                    action="OK",
+                    action_color=ft.Colors.WHITE,
                 )
             else:
                 sb = ft.SnackBar(
                     ft.Text(f"ℹ️ Ei tuloksia annetuilla kriteereillä{filter_info}"),
                     bgcolor=ft.Colors.ORANGE_600,
-                    duration=3000,
+                    action="OK",
+                    action_color=ft.Colors.WHITE,
                 )
             if sb not in page.overlay:
                 page.overlay.append(sb)
@@ -1066,7 +1080,8 @@ def paivita_results_csv(page: ft.Page, app=None):
                 sb = ft.SnackBar(
                     ft.Text(f"❌ Virhe: {str(ex)}"),
                     bgcolor=ft.Colors.RED_600,
-                    duration=4000,
+                    action="OK",
+                    action_color=ft.Colors.WHITE,
                 )
                 if sb not in page.overlay:
                     page.overlay.append(sb)

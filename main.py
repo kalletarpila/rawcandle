@@ -808,7 +808,8 @@ class RawCandleApp:
                 sb = ft.SnackBar(
                     ft.Text(f"❌ Virhe analyysissä: {str(ex)}", color=ft.Colors.WHITE),
                     bgcolor=ft.Colors.RED_600,
-                    duration=3000,
+                    action="OK",
+                    action_color=ft.Colors.WHITE,
                 )
                 if sb not in self.page.overlay:
                     self.page.overlay.append(sb)
