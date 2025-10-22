@@ -404,98 +404,96 @@ def _build_output_rows(
         acur.execute(q)
         rows = acur.fetchall()
 
-    # Define the complete header with all new columns
+    # Define the complete header according to final specification (79 columns)
     header = [
-        "osake",
-        "pvm",
-        "kynttila",
-        "signal_strength",
-        "price",
-        "volume_analysis",
-        "description",
-        # New detailed candle data
-        "t_1_alin",
-        "t_1_ylin",
-        "t_1_bodi",
-        "t_1_bodi_colour",
-        "t0_alin",
-        "t0_ylin",
-        "t0_bodi",
-        "t0_bodi_colour",
-        "t1_alin",
-        "t1_ylin",
-        "t1_bodi",
-        "t1_bodi_colour",
-        # New historical prices (normalized by stock t0_alin)
-        "t_2",
-        "t_5",
-        "t_10",
-        "t_15",
-        "t_20",
-        # New future prices (normalized by stock t0_alin)
-        "t2",
-        "t5",
-        "t10",
-        "t20",
-        # Volatility columns (relative standard deviation, no normalization)
-        "t_2_hajonta",
-        "t_5_hajonta",
-        "t_10_hajonta",
-        "t_15_hajonta",
-        "t_20_hajonta",
-        # Volume columns (relative to 100-day average, no normalization)
-        "t_2_volyymi",
-        "t_5_volyymi",
-        "t_10_volyymi",
-        "t_15_volyymi",
-        "t_20_volyymi",
-        "t0_volyymi",
-        "t2_volyymi",
-        "t5_volyymi",
-        "t10_volyymi",
-        "t20_volyymi",
-        # Moving averages (normalized by stock t0_alin)
-        "t2_5p_liukuva",
-        "t2_10p_liukuva",
-        "t2_20p_liukuva",
-        "t5_5p_liukuva",
-        "t5_10p_liukuva",
-        "t5_20p_liukuva",
-        "t10_5p_liukuva",
-        "t10_10p_liukuva",
-        "t10_20p_liukuva",
-        "t15_5p_liukuva",
-        "t15_10p_liukuva",
-        "t15_20p_liukuva",
-        "t20_5p_liukuva",
-        "t20_10p_liukuva",
-        "t20_20p_liukuva",
-        "t50_50p_liukuva",
-        "t200_200p_liukuva",
-        # S&P 500 index (normalized by ^GSPC t0_alin)
-        "SPX_0",
-        "SPX_2",
-        "SPX_5",
-        "SPX_10",
-        "SPX_15",
-        "SPX_20",
-        "SPX2",
-        "SPX5",
-        "SPX10",
-        "SPX15",
-        "SPX20",
-        # Nasdaq 100 index (normalized by ^NDX t0_alin)
-        "NDX_0",
-        "NDX_2",
-        "NDX_5",
-        "NDX_10",
-        "NDX_15",
-        "NDX_20",
-        "NDX2",
-        "NDX5",
-        "NDX10",
-        "NDX15",
-        "NDX20",
+        # Perustieto (1-4)
+        "osake",  # 1. osake
+        "date",  # 2. date
+        "kynttila",  # 3. kynttila
+        "vahvuus",  # 4. vahvuus (signal_strength)
+        # Kynttilätiedot (5-16)
+        "t_1_alin",  # 5. t_1_alin
+        "t_1_ylin",  # 6. t_1_ylin
+        "t_1_bodi",  # 7. t_1_bodi
+        "t_1_bodi_colour",  # 8. t_1_bodi_colour
+        "t0_alin",  # 9. t0_alin (aina 100)
+        "t0_ylin",  # 10. t0_ylin
+        "t0_bodi",  # 11. t0_bodi
+        "t0_bodi_colour",  # 12. t0_bodi_colour
+        "t1_alin",  # 13. t1_alin
+        "t1_ylin",  # 14. t1_ylin
+        "t1_bodi",  # 15. t1_bodi
+        "t1_bodi_colour",  # 16. t1_bodi_colour
+        # Historialliset päätöskurssit (17-21)
+        "t_2",  # 17. t_2
+        "t_5",  # 18. t_5
+        "t_10",  # 19. t_10
+        "t_15",  # 20. t_15
+        "t_20",  # 21. t_20
+        # Volatiliteetti (22-26)
+        "t_2_hajonta",  # 22. t_2_hajonta
+        "t_5_hajonta",  # 23. t_5_hajonta
+        "t_10_hajonta",  # 24. t_10_hajonta
+        "t_15_hajonta",  # 25. t_15_hajonta
+        "t_20_hajonta",  # 26. t_20_hajonta
+        # Tulevat päätöskurssit (27-30)
+        "t2",  # 27. t2
+        "t5",  # 28. t5
+        "t10",  # 29. t10
+        "t20",  # 30. t20
+        # Volyymit (31-40)
+        "t_2_volyymi",  # 31. t_2_volyymi
+        "t_5_volyymi",  # 32. t_5_volyymi
+        "t_10_volyymi",  # 33. t_10_volyymi
+        "t_15_volyymi",  # 34. t_15_volyymi
+        "t_20_volyymi",  # 35. t_20_volyymi
+        "t0_volyymi",  # 36. t0_volyymi
+        "t2_volyymi",  # 37. t2_volyymi
+        "t5_volyymi",  # 38. t5_volyymi
+        "t10_volyymi",  # 39. t10_volyymi
+        "t20_volyymi",  # 40. t20_volyymi
+        # Liukuvat keskiarvot (41-57)
+        "t2_5p_liukuva",  # 41. t2_5p_liukuva
+        "t2_10p_liukuva",  # 42. t2_10p_liukuva
+        "t2_20p_liukuva",  # 43. t2_20p_liukuva
+        "t5_5p_liukuva",  # 44. t5_5p_liukuva
+        "t5_10p_liukuva",  # 45. t5_10p_liukuva
+        "t5_20p_liukuva",  # 46. t5_20p_liukuva
+        "t10_5p_liukuva",  # 47. t10_5p_liukuva
+        "t10_10p_liukuva",  # 48. t10_10p_liukuva
+        "t10_20p_liukuva",  # 49. t10_20p_liukuva
+        "t15_5p_liukuva",  # 50. t15_5p_liukuva
+        "t15_10p_liukuva",  # 51. t15_10p_liukuva
+        "t15_20p_liukuva",  # 52. t15_20p_liukuva
+        "t20_5p_liukuva",  # 53. t20_5p_liukuva
+        "t20_10p_liukuva",  # 54. t20_10p_liukuva
+        "t20_20p_liukuva",  # 55. t20_20p_liukuva
+        "t0_50p_liukuva",  # 56. t0_50p_liukuva
+        "t0_200p_liukuva",  # 57. t0_200p_liukuva
+        # S&P 500 index (58-68)
+        "SPX_0",  # 58. SPX_0
+        "SPX_2",  # 59. SPX_2
+        "SPX_5",  # 60. SPX_5
+        "SPX_10",  # 61. SPX_10
+        "SPX_15",  # 62. SPX_15
+        "SPX_20",  # 63. SPX_20
+        "SPX2",  # 64. SPX2
+        "SPX5",  # 65. SPX5
+        "SPX10",  # 66. SPX10
+        "SPX15",  # 67. SPX15
+        "SPX20",  # 68. SPX20
+        # Nasdaq 100 index (69-79)
+        "NDX_0",  # 69. NDX_0
+        "NDX_2",  # 70. NDX_2
+        "NDX_5",  # 71. NDX_5
+        "NDX_10",  # 72. NDX_10
+        "NDX_15",  # 73. NDX_15
+        "NDX_20",  # 74. NDX_20
+        "NDX2",  # 75. NDX2
+        "NDX5",  # 76. NDX5
+        "NDX10",  # 77. NDX10
+        "NDX15",  # 78. NDX15
+        "NDX20",  # 79. NDX20
     ]
 
     if not rows:
@@ -504,41 +502,15 @@ def _build_output_rows(
     by_ticker = {}
     for rec in rows:
         # Handle different numbers of columns based on what was selected
-        if len(rec) >= 7:  # Full data with all new columns
-            (
-                date,
-                ticker,
-                candle,
-                signal_strength,
-                price,
-                volume_analysis,
-                description,
-            ) = rec[:7]
-        elif len(rec) >= 6:  # Missing description
-            date, ticker, candle, signal_strength, price, volume_analysis = rec[:6]
-            description = ""
-        elif len(rec) >= 5:  # Missing volume and description
-            date, ticker, candle, signal_strength, price = rec[:5]
-            volume_analysis = None
-            description = ""
-        elif len(rec) >= 4:  # Missing price, volume and description
+        if len(rec) >= 4:  # New format with signal_strength
             date, ticker, candle, signal_strength = rec[:4]
-            price = None
-            volume_analysis = None
-            description = ""
         elif len(rec) == 3:  # Legacy format
             date, ticker, candle = rec
             signal_strength = None
-            price = None
-            volume_analysis = None
-            description = ""
         elif len(rec) == 2:  # Legacy format without candle
             date, ticker = rec
             candle = ""
             signal_strength = None
-            price = None
-            volume_analysis = None
-            description = ""
         else:
             continue
 
@@ -546,7 +518,7 @@ def _build_output_rows(
             continue
 
         by_ticker.setdefault(str(ticker), []).append(
-            (str(date), candle, signal_strength, price, volume_analysis, description)
+            (str(date), candle, signal_strength)
         )
 
     output_rows = []
@@ -608,6 +580,9 @@ def _build_output_rows(
             if df.empty:
                 continue
 
+            # Check if this ticker is an index (starts with ^)
+            is_index = ticker.startswith("^")
+
             try:
                 df[pcol] = pd.to_datetime(df[pcol]).dt.strftime("%Y-%m-%d")
             except Exception:
@@ -625,14 +600,7 @@ def _build_output_rows(
                 except Exception:
                     return None
 
-            for (
-                date,
-                candle,
-                signal_strength,
-                price,
-                volume_analysis,
-                description,
-            ) in items:
+            for date, candle, signal_strength in items:
                 if date not in date_to_idx:
                     continue
                 idx = date_to_idx[date]
@@ -728,16 +696,21 @@ def _build_output_rows(
                 t10 = get_normalized_close(10)
                 t20 = get_normalized_close(20)
 
-                # Calculate volatility (relative standard deviation)
+                # Calculate volatility (standard deviation, NO NORMALIZATION)
                 def calc_volatility(days_back):
-                    if idx - days_back < 0:
+                    if idx - days_back + 1 < 0:
                         return None
-                    start_idx = idx - days_back
-                    end_idx = idx  # Changed: include t0 (not t-1)
+                    start_idx = idx - days_back + 1
+                    end_idx = idx  # Include current day (t0) in volatility calculation
                     subset = df.iloc[start_idx : end_idx + 1]
                     values = [safe_get(row, ccol) for _, row in subset.iterrows()]
                     values = [v for v in values if v is not None]
-                    return _calculate_relative_stdev(values)
+                    if len(values) < 2:
+                        return None
+                    try:
+                        return stdev(values)  # Raw standard deviation, no normalization
+                    except Exception:
+                        return None
 
                 t_2_hajonta = calc_volatility(2)
                 t_5_hajonta = calc_volatility(5)
@@ -745,119 +718,216 @@ def _build_output_rows(
                 t_15_hajonta = calc_volatility(15)
                 t_20_hajonta = calc_volatility(20)
 
-                # Calculate volume ratios
-                def calc_volume_ratio(days_range):
-                    return _calculate_volume_ratio(df, vcol, idx, days_range)
+                # Calculate volume ratios according to specification
+                def calc_volume_ratio_spec(days_count, offset_start):
+                    """
+                    Calculate volume ratio as specified:
+                    - days_count: number of days to average
+                    - offset_start: starting offset from t0 (negative for past, positive for future)
+                    """
+                    try:
+                        # Calculate volume average for the specified period
+                        start_idx = idx + offset_start
+                        end_idx = start_idx + days_count - 1
 
-                t_2_volyymi = calc_volume_ratio((-4, -2))  # 3 days centered at t-3
-                t_5_volyymi = calc_volume_ratio((-7, -3))  # 5 days centered at t-5
-                t_10_volyymi = calc_volume_ratio((-12, -8))  # 5 days centered at t-10
-                t_15_volyymi = calc_volume_ratio((-17, -13))  # 5 days centered at t-15
-                t_20_volyymi = calc_volume_ratio((-22, -18))  # 5 days centered at t-20
+                        if start_idx < 0 or end_idx >= len(df):
+                            return None
 
-                # t0 volume ratio
+                        subset = df.iloc[start_idx : end_idx + 1]
+                        volumes = [safe_get(row, vcol) for _, row in subset.iterrows()]
+                        volumes = [v for v in volumes if v is not None and v > 0]
+
+                        if not volumes:
+                            return None
+
+                        period_avg = mean(volumes)
+
+                        # Calculate 100-day average ending at t-1
+                        hundred_start = max(0, idx - 100)
+                        hundred_end = idx - 1  # End at t-1
+
+                        if hundred_end < hundred_start:
+                            return None
+
+                        hundred_subset = df.iloc[hundred_start : hundred_end + 1]
+                        hundred_volumes = [
+                            safe_get(row, vcol) for _, row in hundred_subset.iterrows()
+                        ]
+                        hundred_volumes = [
+                            v for v in hundred_volumes if v is not None and v > 0
+                        ]
+
+                        if not hundred_volumes:
+                            return None
+
+                        hundred_avg = mean(hundred_volumes)
+
+                        if hundred_avg <= 0:
+                            return None
+
+                        return period_avg / hundred_avg
+
+                    except Exception:
+                        return None
+
+                # Volume ratios according to specification
+                t_2_volyymi = calc_volume_ratio_spec(
+                    2, -2
+                )  # mean(t-2, t-1) / 100-day avg
+                t_5_volyymi = calc_volume_ratio_spec(
+                    5, -5
+                )  # mean(t-5...t-1) / 100-day avg
+                t_10_volyymi = calc_volume_ratio_spec(
+                    10, -10
+                )  # mean(t-10...t-1) / 100-day avg
+                t_15_volyymi = calc_volume_ratio_spec(
+                    15, -15
+                )  # mean(t-15...t-1) / 100-day avg
+                t_20_volyymi = calc_volume_ratio_spec(
+                    20, -20
+                )  # mean(t-20...t-1) / 100-day avg
+
+                # t0 volume ratio (single day)
                 t0_volume = safe_get(r0, vcol)
                 hundred_start = max(0, idx - 100)
-                hundred_subset = df.iloc[hundred_start:idx]
-                hundred_volumes = [
-                    safe_get(row, vcol)
-                    for _, row in hundred_subset.iterrows()
-                    if safe_get(row, vcol)
-                ]
-                hundred_avg = mean(hundred_volumes) if hundred_volumes else None
-                t0_volyymi = (
-                    t0_volume / hundred_avg
-                    if t0_volume and hundred_avg and hundred_avg > 0
-                    else None
-                )
+                hundred_end = idx - 1  # End at t-1
+                if hundred_end >= hundred_start:
+                    hundred_subset = df.iloc[hundred_start : hundred_end + 1]
+                    hundred_volumes = [
+                        safe_get(row, vcol) for _, row in hundred_subset.iterrows()
+                    ]
+                    hundred_volumes = [
+                        v for v in hundred_volumes if v is not None and v > 0
+                    ]
+                    hundred_avg = mean(hundred_volumes) if hundred_volumes else None
+                    t0_volyymi = (
+                        t0_volume / hundred_avg
+                        if t0_volume and hundred_avg and hundred_avg > 0
+                        else None
+                    )
+                else:
+                    t0_volyymi = None
 
-                t2_volyymi = calc_volume_ratio((1, 3))  # 3 days centered at t+2
-                t5_volyymi = calc_volume_ratio((3, 7))  # 5 days centered at t+5
-                t10_volyymi = calc_volume_ratio((8, 12))  # 5 days centered at t+10
-                t20_volyymi = calc_volume_ratio((18, 22))  # 5 days centered at t+20
+                # Future volume ratios
+                t2_volyymi = calc_volume_ratio_spec(
+                    2, 1
+                )  # mean(t+1, t+2) / 100-day avg
+                t5_volyymi = calc_volume_ratio_spec(
+                    5, 1
+                )  # mean(t+1...t+5) / 100-day avg
+                t10_volyymi = calc_volume_ratio_spec(
+                    10, 1
+                )  # mean(t+1...t+10) / 100-day avg
+                t20_volyymi = calc_volume_ratio_spec(
+                    20, 1
+                )  # mean(t+1...t+20) / 100-day avg
 
-                # Calculate moving averages (normalized by t0_close)
-                def calc_ma_normalized(days_offset, ma_period):
+                # Calculate moving averages according to specification
+                def calc_ma_normalized_spec(days_offset, ma_period):
+                    """
+                    Calculate moving average with specification normalization:
+                    - Indices: normalized to t0_close=100
+                    - Stocks: normalized to t0_alin=100
+                    """
                     target_idx = idx + days_offset
                     ma_val = _calculate_moving_average(df, ccol, target_idx, ma_period)
-                    return (ma_val / t0_close * 100) if ma_val is not None else None
 
-                t2_5p_liukuva = calc_ma_normalized(-2, 5)
-                t2_10p_liukuva = calc_ma_normalized(-2, 10)
-                t2_20p_liukuva = calc_ma_normalized(-2, 20)
+                    if ma_val is None:
+                        return None
 
-                t5_5p_liukuva = calc_ma_normalized(-5, 5)
-                t5_10p_liukuva = calc_ma_normalized(-5, 10)
-                t5_20p_liukuva = calc_ma_normalized(-5, 20)
+                    if is_index:
+                        # Indices: normalize to t0_close=100
+                        return (
+                            (ma_val / t0_close * 100)
+                            if t0_close and t0_close > 0
+                            else None
+                        )
+                    else:
+                        # Stocks: normalize to t0_alin=100
+                        # Get the actual t0_low value for normalization
+                        t0_low = safe_get(r0, lcol)
+                        return (
+                            (ma_val / t0_low * 100) if t0_low and t0_low > 0 else None
+                        )
 
-                t10_5p_liukuva = calc_ma_normalized(-10, 5)
-                t10_10p_liukuva = calc_ma_normalized(-10, 10)
-                t10_20p_liukuva = calc_ma_normalized(-10, 20)
+                t2_5p_liukuva = calc_ma_normalized_spec(-2, 5)
+                t2_10p_liukuva = calc_ma_normalized_spec(-2, 10)
+                t2_20p_liukuva = calc_ma_normalized_spec(-2, 20)
 
-                t15_5p_liukuva = calc_ma_normalized(-15, 5)
-                t15_10p_liukuva = calc_ma_normalized(-15, 10)
-                t15_20p_liukuva = calc_ma_normalized(-15, 20)
+                t5_5p_liukuva = calc_ma_normalized_spec(-5, 5)
+                t5_10p_liukuva = calc_ma_normalized_spec(-5, 10)
+                t5_20p_liukuva = calc_ma_normalized_spec(-5, 20)
 
-                t20_5p_liukuva = calc_ma_normalized(-20, 5)
-                t20_10p_liukuva = calc_ma_normalized(-20, 10)
-                t20_20p_liukuva = calc_ma_normalized(-20, 20)
+                t10_5p_liukuva = calc_ma_normalized_spec(-10, 5)
+                t10_10p_liukuva = calc_ma_normalized_spec(-10, 10)
+                t10_20p_liukuva = calc_ma_normalized_spec(-10, 20)
 
-                t50_50p_liukuva = calc_ma_normalized(-50, 50)
+                t15_5p_liukuva = calc_ma_normalized_spec(-15, 5)
+                t15_10p_liukuva = calc_ma_normalized_spec(-15, 10)
+                t15_20p_liukuva = calc_ma_normalized_spec(-15, 20)
+
+                t20_5p_liukuva = calc_ma_normalized_spec(-20, 5)
+                t20_10p_liukuva = calc_ma_normalized_spec(-20, 10)
+                t20_20p_liukuva = calc_ma_normalized_spec(-20, 20)
+
+                t50_50p_liukuva = calc_ma_normalized_spec(-50, 50)
 
                 # Special case for t200_200p_liukuva - set to 0 if not enough data
-                t200_200p_liukuva = calc_ma_normalized(-200, 200)
+                t200_200p_liukuva = calc_ma_normalized_spec(-200, 200)
                 if t200_200p_liukuva is None:
                     t200_200p_liukuva = 0
 
-                # Calculate index data (S&P 500)
-                def get_index_normalized(index_ticker, offset, data_type="close"):
-                    # Get the index's t0_low for normalization
-                    index_t0_low = _get_index_data(oconn, index_ticker, date, 0, "low")
-                    if index_t0_low is None or index_t0_low <= 0:
+                # Calculate index data according to specification
+                def get_index_normalized_spec(index_ticker, offset, data_type="close"):
+                    """
+                    Get index data with specification normalization:
+                    - Indices: normalized to t0_close=100 (not t0_low)
+                    """
+                    # Get the index's t0_close for normalization (not t0_low)
+                    index_t0_close = _get_index_data(
+                        oconn, index_ticker, date, 0, "close"
+                    )
+                    if index_t0_close is None or index_t0_close <= 0:
                         return None
 
                     index_value = _get_index_data(
                         oconn, index_ticker, date, offset, data_type
                     )
                     return (
-                        (index_value / index_t0_low * 100)
+                        (index_value / index_t0_close * 100)
                         if index_value is not None
                         else None
                     )
 
-                # S&P 500 data
-                SPX_0 = get_index_normalized("^GSPC", 0, "low")  # This should be 100.0
-                if SPX_0 is not None:
-                    SPX_0 = 100.0  # Force to 100.0 since it's the normalization base
+                # S&P 500 data (normalized to t0_close=100)
+                SPX_0 = 100.0  # t0_close normalized to 100
 
-                SPX_2 = get_index_normalized("^GSPC", -2)
-                SPX_5 = get_index_normalized("^GSPC", -5)
-                SPX_10 = get_index_normalized("^GSPC", -10)
-                SPX_15 = get_index_normalized("^GSPC", -15)
-                SPX_20 = get_index_normalized("^GSPC", -20)
+                SPX_2 = get_index_normalized_spec("^GSPC", -2)
+                SPX_5 = get_index_normalized_spec("^GSPC", -5)
+                SPX_10 = get_index_normalized_spec("^GSPC", -10)
+                SPX_15 = get_index_normalized_spec("^GSPC", -15)
+                SPX_20 = get_index_normalized_spec("^GSPC", -20)
 
-                SPX2 = get_index_normalized("^GSPC", 2)
-                SPX5 = get_index_normalized("^GSPC", 5)
-                SPX10 = get_index_normalized("^GSPC", 10)
-                SPX15 = get_index_normalized("^GSPC", 15)
-                SPX20 = get_index_normalized("^GSPC", 20)
+                SPX2 = get_index_normalized_spec("^GSPC", 2)
+                SPX5 = get_index_normalized_spec("^GSPC", 5)
+                SPX10 = get_index_normalized_spec("^GSPC", 10)
+                SPX15 = get_index_normalized_spec("^GSPC", 15)
+                SPX20 = get_index_normalized_spec("^GSPC", 20)
 
-                # Nasdaq 100 data
-                NDX_0 = get_index_normalized("^NDX", 0, "low")
-                if NDX_0 is not None:
-                    NDX_0 = 100.0  # Force to 100.0 since it's the normalization base
+                # Nasdaq 100 data (normalized to t0_close=100)
+                NDX_0 = 100.0  # t0_close normalized to 100
 
-                NDX_2 = get_index_normalized("^NDX", -2)
-                NDX_5 = get_index_normalized("^NDX", -5)
-                NDX_10 = get_index_normalized("^NDX", -10)
-                NDX_15 = get_index_normalized("^NDX", -15)
-                NDX_20 = get_index_normalized("^NDX", -20)
+                NDX_2 = get_index_normalized_spec("^NDX", -2)
+                NDX_5 = get_index_normalized_spec("^NDX", -5)
+                NDX_10 = get_index_normalized_spec("^NDX", -10)
+                NDX_15 = get_index_normalized_spec("^NDX", -15)
+                NDX_20 = get_index_normalized_spec("^NDX", -20)
 
-                NDX2 = get_index_normalized("^NDX", 2)
-                NDX5 = get_index_normalized("^NDX", 5)
-                NDX10 = get_index_normalized("^NDX", 10)
-                NDX15 = get_index_normalized("^NDX", 15)
-                NDX20 = get_index_normalized("^NDX", 20)
+                NDX2 = get_index_normalized_spec("^NDX", 2)
+                NDX5 = get_index_normalized_spec("^NDX", 5)
+                NDX10 = get_index_normalized_spec("^NDX", 10)
+                NDX15 = get_index_normalized_spec("^NDX", 15)
+                NDX20 = get_index_normalized_spec("^NDX", 20)
 
                 # Convert candle name to integer using mapping
                 candle_int = CANDLE_MAPPING.get(candle, 0)  # 0 for unknown patterns
@@ -870,47 +940,44 @@ def _build_output_rows(
                         return round(v, decimals)
                     return v
 
-                # Build output row with all columns
+                # Build output row with all 79 columns according to specification
                 out = [
-                    ticker,
-                    date,
-                    candle_int,  # candle as integer
-                    fmt_val(signal_strength) if signal_strength is not None else "",
-                    fmt_val(price) if price is not None else "",
-                    fmt_val(volume_analysis) if volume_analysis is not None else "",
-                    description if description else "",
-                    # New detailed candle data
-                    fmt_val(t_1_alin),
-                    fmt_val(t_1_ylin),
-                    fmt_val(t_1_bodi),
-                    fmt_val(t_1_bodi_colour),
-                    fmt_val(t0_alin),
-                    fmt_val(t0_ylin),
-                    fmt_val(t0_bodi),
-                    fmt_val(t0_bodi_colour),
-                    fmt_val(t1_alin),
-                    fmt_val(t1_ylin),
-                    fmt_val(t1_bodi),
-                    fmt_val(t1_bodi_colour),
-                    # New historical prices
-                    fmt_val(t_2),
-                    fmt_val(t_5),
-                    fmt_val(t_10),
-                    fmt_val(t_15),
-                    fmt_val(t_20),
-                    # New future prices
-                    fmt_val(t2),
-                    fmt_val(t5),
-                    fmt_val(t10),
-                    fmt_val(t20),
+                    ticker,                    # 1. osake
+                    date,                      # 2. date 
+                    candle_int,                # 3. kynttila (as integer)
+                    fmt_val(signal_strength) if signal_strength is not None else "",  # 4. vahvuus
+                    # Detailed candle data
+                    fmt_val(t_1_alin),         # 5. t_1_alin
+                    fmt_val(t_1_ylin),         # 6. t_1_ylin
+                    fmt_val(t_1_bodi),         # 7. t_1_bodi
+                    fmt_val(t_1_bodi_colour),  # 8. t_1_bodi_colour
+                    fmt_val(t0_alin),          # 9. t0_alin
+                    fmt_val(t0_ylin),          # 10. t0_ylin
+                    fmt_val(t0_bodi),          # 11. t0_bodi
+                    fmt_val(t0_bodi_colour),   # 12. t0_bodi_colour
+                    fmt_val(t1_alin),          # 13. t1_alin
+                    fmt_val(t1_ylin),          # 14. t1_ylin
+                    fmt_val(t1_bodi),          # 15. t1_bodi
+                    fmt_val(t1_bodi_colour),   # 16. t1_bodi_colour
+                    # Historical prices
+                    fmt_val(t_2),              # 17. t_2
+                    fmt_val(t_5),              # 18. t_5
+                    fmt_val(t_10),             # 19. t_10
+                    fmt_val(t_15),             # 20. t_15
+                    fmt_val(t_20),             # 21. t_20
+                    # Future prices
+                    fmt_val(t2),               # 22. t2
+                    fmt_val(t5),               # 23. t5
+                    fmt_val(t10),              # 24. t10
+                    fmt_val(t20),              # 25. t20
                     # Volatility
-                    fmt_val(t_2_hajonta),
-                    fmt_val(t_5_hajonta),
-                    fmt_val(t_10_hajonta),
-                    fmt_val(t_15_hajonta),
-                    fmt_val(t_20_hajonta),
+                    fmt_val(t_2_hajonta),      # 26. t_2_hajonta
+                    fmt_val(t_5_hajonta),      # 27. t_5_hajonta
+                    fmt_val(t_10_hajonta),     # 28. t_10_hajonta
+                    fmt_val(t_15_hajonta),     # 29. t_15_hajonta
+                    fmt_val(t_20_hajonta),     # 30. t_20_hajonta
                     # Volume ratios
-                    fmt_val(t_2_volyymi),
+                    fmt_val(t_2_volyymi),      # 31. t_2_volyymi
                     fmt_val(t_5_volyymi),
                     fmt_val(t_10_volyymi),
                     fmt_val(t_15_volyymi),
