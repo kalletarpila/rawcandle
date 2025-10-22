@@ -676,14 +676,31 @@ def _build_output_rows(
                 # T1 (next day)
                 t1_alin, t1_ylin, t1_bodi, t1_bodi_colour = calc_candle_details(r1)
 
-                # Calculate new historical prices (normalized)
+                # Calculate new historical and future prices (normalized)
                 def get_normalized_close(offset):
                     target_idx = idx + offset
                     if target_idx < 0 or target_idx >= len(df):
                         return None
                     target_row = df.loc[target_idx]
                     close_val = safe_get(target_row, ccol)
-                    return (close_val / t0_low * 100) if close_val is not None else None
+
+                    if close_val is None:
+                        return None
+
+                    if is_index:
+                        # Indices: normalize to t0_close=100
+                        return (
+                            (close_val / t0_close * 100)
+                            if t0_close and t0_close > 0
+                            else None
+                        )
+                    else:
+                        # Stocks: normalize to t0_alin=100 (t0_low)
+                        return (
+                            (close_val / t0_low * 100)
+                            if t0_low and t0_low > 0
+                            else None
+                        )
 
                 t_2 = get_normalized_close(-2)
                 t_5 = get_normalized_close(-5)
@@ -967,17 +984,17 @@ def _build_output_rows(
                     fmt_val(t_10),  # 19. t_10
                     fmt_val(t_15),  # 20. t_15
                     fmt_val(t_20),  # 21. t_20
-                    # Future prices
-                    fmt_val(t2),  # 22. t2
-                    fmt_val(t5),  # 23. t5
-                    fmt_val(t10),  # 24. t10
-                    fmt_val(t20),  # 25. t20
-                    # Volatility
-                    fmt_val(t_2_hajonta),  # 26. t_2_hajonta
-                    fmt_val(t_5_hajonta),  # 27. t_5_hajonta
-                    fmt_val(t_10_hajonta),  # 28. t_10_hajonta
-                    fmt_val(t_15_hajonta),  # 29. t_15_hajonta
-                    fmt_val(t_20_hajonta),  # 30. t_20_hajonta
+                    # Volatility (match header order 22-26)
+                    fmt_val(t_2_hajonta),  # 22. t_2_hajonta
+                    fmt_val(t_5_hajonta),  # 23. t_5_hajonta
+                    fmt_val(t_10_hajonta),  # 24. t_10_hajonta
+                    fmt_val(t_15_hajonta),  # 25. t_15_hajonta
+                    fmt_val(t_20_hajonta),  # 26. t_20_hajonta
+                    # Future prices (match header order 27-30)
+                    fmt_val(t2),  # 27. t2
+                    fmt_val(t5),  # 28. t5
+                    fmt_val(t10),  # 29. t10
+                    fmt_val(t20),  # 30. t20
                     # Volume ratios
                     fmt_val(t_2_volyymi),  # 31. t_2_volyymi
                     fmt_val(t_5_volyymi),
