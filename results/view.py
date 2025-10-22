@@ -155,10 +155,166 @@ def create_results_view(app) -> ft.View:
     app.results_date_radio_group.on_change = on_date_radio_change
 
     # Buttons
-    # Buttons are currently inactive; handlers removed until user specifies behavior.
-    # wire the generate button to the implementation in results.generate_results
+    # wire the generate button to the implementation in results.excel_cache
     try:
-        from results.generate_results import paivita_results_csv_click
+        # Käytä uutta optimoitua Excel-cachetä
+        def paivita_excel_cache_click(e):
+            """Päivitä Excel-tiedosto uudella optimoidulla cachellä"""
+
+            # Näytä progress-dialog
+            progress_dialog = None
+            progress_text = ft.Text("Aloitetaan Excel-generointi...")
+            progress_bar = ft.ProgressBar(width=400)
+
+            try:
+                # Luo progress-dialog
+                progress_dialog = ft.AlertDialog(
+                    modal=True,
+                    title=ft.Text("Generoidaan Excel-tiedostoa"),
+                    content=ft.Column(
+                        [
+                            progress_text,
+                            progress_bar,
+                            ft.Text("Tämä voi kestää hetken..."),
+                        ],
+                        tight=True,
+                        height=120,
+                    ),
+                    actions=[],
+                )
+
+                e.page.dialog = progress_dialog
+                progress_dialog.open = True
+                e.page.update()
+
+                def update_progress(step: str, current: int, total: int):
+                    """Päivitä progress-dialog"""
+                    try:
+                        if progress_dialog and progress_dialog.open:
+                            progress_text.value = f"{step} ({current}/{total})"
+                            if total > 0:
+                                progress_bar.value = current / total
+                            else:
+                                progress_bar.value = None
+                            e.page.update()
+                    except:
+                        pass
+
+                from results.excel_cache import ExcelResultsCache
+
+                # Hae ticker-filtteri app-objektista
+                ticker_filter = None
+                try:
+                    # Käytä results-sivun omia kenttiä
+                    ticker_mode = app.results_radio_group.value
+                    ticker = (
+                        app.results_ticker_field.value.strip().upper()
+                        if app.results_ticker_field.value
+                        else ""
+                    )
+
+                    if ticker_mode == "single" and ticker:
+                        ticker_filter = ticker
+                        update_progress(f"Suodatetaan ticker: {ticker_filter}", 10, 100)
+                        print(f"🔍 Ticker-suodatin: {ticker_filter}")
+                    else:
+                        update_progress("Generoidaan kaikille tickereille", 10, 100)
+                        print("🌐 Haetaan kaikki tickerit")
+
+                except Exception as ex:
+                    print(f"Virhe ticker-filterin lukemisessa: {ex}")
+
+                # Luo cache ja generoi Excel
+                update_progress("Käynnistetään Excel-cache", 20, 100)
+                cache = ExcelResultsCache()
+
+                update_progress("Generoidaan Excel-tiedosto", 50, 100)
+                success = cache.export_to_excel_fast(
+                    excel_path="data/results.xlsx",
+                    ticker_filter=ticker_filter,
+                    progress_callback=update_progress,
+                )
+
+                # Sulje progress-dialog
+                if progress_dialog:
+                    progress_dialog.open = False
+                    e.page.update()
+
+                if success:
+                    update_progress("Valmis!", 100, 100)
+                    print("✅ Excel-tiedosto päivitetty onnistuneesti!")
+
+                    # Näytä onnistumisilmoitus
+                    success_dialog = ft.AlertDialog(
+                        modal=True,
+                        title=ft.Text("✅ Onnistui!"),
+                        content=ft.Text(
+                            f"Excel-tiedosto 'data/results.xlsx' päivitetty onnistuneesti!\n\n"
+                            + f"Ticker-filtteri: {ticker_filter or 'Kaikki'}\n"
+                            + "Voit nyt avata tiedoston Excelissä."
+                        ),
+                        actions=[
+                            ft.TextButton(
+                                "OK",
+                                on_click=lambda _: setattr(
+                                    success_dialog, "open", False
+                                )
+                                or e.page.update(),
+                            )
+                        ],
+                    )
+                    e.page.dialog = success_dialog
+                    success_dialog.open = True
+                    e.page.update()
+
+                else:
+                    print("❌ Excel-tiedoston päivitys epäonnistui!")
+
+                    # Näytä virhe-dialog
+                    error_dialog = ft.AlertDialog(
+                        modal=True,
+                        title=ft.Text("❌ Virhe!"),
+                        content=ft.Text(
+                            "Excel-tiedoston päivitys epäonnistui!\n\nTarkista terminaali-output lisätiedoista."
+                        ),
+                        actions=[
+                            ft.TextButton(
+                                "OK",
+                                on_click=lambda _: setattr(error_dialog, "open", False)
+                                or e.page.update(),
+                            )
+                        ],
+                    )
+                    e.page.dialog = error_dialog
+                    error_dialog.open = True
+                    e.page.update()
+
+            except Exception as ex:
+                print(f"Virhe Excel-päivityksessä: {ex}")
+
+                # Sulje progress-dialog jos avoinna
+                if progress_dialog and progress_dialog.open:
+                    progress_dialog.open = False
+                    e.page.update()
+
+                # Näytä virhe-dialog
+                error_dialog = ft.AlertDialog(
+                    modal=True,
+                    title=ft.Text("❌ Kriittinen virhe!"),
+                    content=ft.Text(
+                        f"Excel-generoinnissa tapahtui virhe:\n\n{str(ex)}\n\nTarkista terminaali lisätiedoista."
+                    ),
+                    actions=[
+                        ft.TextButton(
+                            "OK",
+                            on_click=lambda _: setattr(error_dialog, "open", False)
+                            or e.page.update(),
+                        )
+                    ],
+                )
+                e.page.dialog = error_dialog
+                error_dialog.open = True
+                e.page.update()
 
         generate_btn = ft.ElevatedButton(
             "🚀 Päivitä Results.xlsx",
@@ -166,7 +322,7 @@ def create_results_view(app) -> ft.View:
             bgcolor=ft.colors.GREEN_600,
             color=ft.colors.WHITE,
             disabled=False,
-            on_click=paivita_results_csv_click,
+            on_click=paivita_excel_cache_click,  # Käytä uutta funktiota
             width=220,
         )
     except Exception:

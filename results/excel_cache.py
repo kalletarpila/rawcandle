@@ -28,114 +28,120 @@ class ExcelResultsCache:
         with sqlite3.connect(self.results_db) as conn:
             conn.executescript(
                 """
-                -- Staging-taulu Excel-tuloksia varten
+                -- Staging-taulu Excel-tuloksia varten (78 saraketta SARAKKEET_DOKUMENTAATIO.md mukaan)
                 CREATE TABLE IF NOT EXISTS excel_staging (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    ticker TEXT NOT NULL,
-                    date TEXT NOT NULL,
-                    candle TEXT NOT NULL,
                     
-                    -- Kynttilädetaljit
-                    t_1_alin REAL,
-                    t_1_ylin REAL,
-                    t_1_bodi REAL,
-                    t_1_bodi_colour TEXT,
-                    t0_alin REAL,
-                    t0_ylin REAL,
-                    t0_bodi REAL,
-                    t0_bodi_colour TEXT,
-                    t1_alin REAL,
-                    t1_ylin REAL,
-                    t1_bodi REAL,
-                    t1_bodi_colour TEXT,
+                    -- Perustiedot (1-3)
+                    osake TEXT NOT NULL,               -- 1. osake (ticker-symboli)
+                    pvm TEXT NOT NULL,                 -- 2. pvm (YYYY-MM-DD)
+                    kynttila INTEGER NOT NULL,         -- 3. kynttila (1-7)
                     
-                    -- Historialliset hinnat (normalisoitu t0_alin:lla)
-                    t_2 REAL,
-                    t_5 REAL,
-                    t_10 REAL,
-                    t_15 REAL,
-                    t_20 REAL,
+                    -- T-1 Edellinen päivä (4-7)
+                    t_1_alin REAL,                     -- 4. t_1_alin (normalisoitu)
+                    t_1_ylin REAL,                     -- 5. t_1_ylin (normalisoitu)
+                    t_1_bodi REAL,                     -- 6. t_1_bodi (% avaus)
+                    t_1_bodi_colour INTEGER,           -- 7. t_1_bodi_colour (0/1)
                     
-                    -- Tulevat hinnat (normalisoitu t0_alin:lla)
-                    t2 REAL,
-                    t5 REAL,
-                    t10 REAL,
-                    t20 REAL,
+                    -- T0 Käännekynttilä (8-11)
+                    t0_alin REAL,                      -- 8. t0_alin (aina 100.00)
+                    t0_ylin REAL,                      -- 9. t0_ylin (normalisoitu)
+                    t0_bodi REAL,                      -- 10. t0_bodi (% avaus)
+                    t0_bodi_colour INTEGER,            -- 11. t0_bodi_colour (0/1)
                     
-                    -- Volatiliteetti (suhteellinen keskihajonta)
-                    t_2_hajonta REAL,
-                    t_5_hajonta REAL,
-                    t_10_hajonta REAL,
-                    t_15_hajonta REAL,
-                    t_20_hajonta REAL,
+                    -- T1 Seuraava päivä (12-15)
+                    t1_alin REAL,                      -- 12. t1_alin (normalisoitu)
+                    t1_ylin REAL,                      -- 13. t1_ylin (normalisoitu)
+                    t1_bodi REAL,                      -- 14. t1_bodi (% avaus)
+                    t1_bodi_colour INTEGER,            -- 15. t1_bodi_colour (0/1)
                     
-                    -- Volyymit (suhde 100pv keskiarvoon)
-                    t_2_volyymi REAL,
-                    t_5_volyymi REAL,
-                    t_10_volyymi REAL,
-                    t_15_volyymi REAL,
-                    t_20_volyymi REAL,
-                    t0_volyymi REAL,
-                    t2_volyymi REAL,
-                    t5_volyymi REAL,
-                    t10_volyymi REAL,
-                    t20_volyymi REAL,
+                    -- Historialliset hinnat (16-18)
+                    t_5 REAL,                          -- 16. t_5 (5 pv sitten)
+                    t_10 REAL,                         -- 17. t_10 (10 pv sitten)
+                    t_20 REAL,                         -- 18. t_20 (20 pv sitten)
                     
-                    -- Liukuvat keskiarvot (normalisoitu t0_alin:lla)
-                    t2_5p_liukuva REAL,
-                    t2_10p_liukuva REAL,
-                    t2_20p_liukuva REAL,
-                    t5_5p_liukuva REAL,
-                    t5_10p_liukuva REAL,
-                    t5_20p_liukuva REAL,
-                    t10_5p_liukuva REAL,
-                    t10_10p_liukuva REAL,
-                    t10_20p_liukuva REAL,
-                    t15_5p_liukuva REAL,
-                    t15_10p_liukuva REAL,
-                    t15_20p_liukuva REAL,
-                    t20_5p_liukuva REAL,
-                    t20_10p_liukuva REAL,
-                    t20_20p_liukuva REAL,
-                    t50_50p_liukuva REAL,
-                    t200_200p_liukuva REAL,
+                    -- Tulevat hinnat (19-24)
+                    t5 REAL,                           -- 19. t5 (5 pv eteenpäin)
+                    t10 REAL,                          -- 20. t10 (10 pv eteenpäin)
+                    t20 REAL,                          -- 21. t20 (20 pv eteenpäin)
+                    t40 REAL,                          -- 22. t40 (40 pv eteenpäin)
+                    t60 REAL,                          -- 23. t60 (60 pv eteenpäin)
+                    t252 REAL,                         -- 24. t252 (252 pv eteenpäin)
                     
-                    -- S&P 500 indeksi (normalisoitu ^GSPC t0_alin:lla)
-                    SPX_0 REAL,
-                    SPX_2 REAL,
-                    SPX_5 REAL,
-                    SPX_10 REAL,
-                    SPX_15 REAL,
-                    SPX_20 REAL,
-                    SPX2 REAL,
-                    SPX5 REAL,
-                    SPX10 REAL,
-                    SPX15 REAL,
-                    SPX20 REAL,
+                    -- Volatiliteetti (25-29)
+                    vol_5 REAL,                        -- 25. vol_5 (5 pv volatiliteetti)
+                    vol_10 REAL,                       -- 26. vol_10 (10 pv volatiliteetti)
+                    vol_20 REAL,                       -- 27. vol_20 (20 pv volatiliteetti)
+                    vol_60 REAL,                       -- 28. vol_60 (60 pv volatiliteetti)
+                    vol_252 REAL,                      -- 29. vol_252 (252 pv volatiliteetti)
                     
-                    -- Nasdaq 100 indeksi (normalisoitu ^NDX t0_alin:lla)
-                    NDX_0 REAL,
-                    NDX_2 REAL,
-                    NDX_5 REAL,
-                    NDX_10 REAL,
-                    NDX_15 REAL,
-                    NDX_20 REAL,
-                    NDX2 REAL,
-                    NDX5 REAL,
-                    NDX10 REAL,
-                    NDX15 REAL,
-                    NDX20 REAL,
+                    -- Volyymit (30-39)
+                    vol_avg_10 REAL,                   -- 30. vol_avg_10 (10 pv keskivol)
+                    vol_avg_20 REAL,                   -- 31. vol_avg_20 (20 pv keskivol)
+                    vol_avg_60 REAL,                   -- 32. vol_avg_60 (60 pv keskivol)
+                    vol_t_1_vs_avg10 REAL,             -- 33. vol_t_1_vs_avg10
+                    vol_t0_vs_avg10 REAL,              -- 34. vol_t0_vs_avg10
+                    vol_t1_vs_avg10 REAL,              -- 35. vol_t1_vs_avg10
+                    vol_t_1_vs_avg20 REAL,             -- 36. vol_t_1_vs_avg20
+                    vol_t0_vs_avg20 REAL,              -- 37. vol_t0_vs_avg20
+                    vol_t1_vs_avg20 REAL,              -- 38. vol_t1_vs_avg20
+                    vol_spike INTEGER,                 -- 39. vol_spike (0/1)
+                    
+                    -- Liukuvat keskiarvot (40-56)
+                    ma_5 REAL,                         -- 40. ma_5 (5 pv MA)
+                    ma_10 REAL,                        -- 41. ma_10 (10 pv MA)
+                    ma_20 REAL,                        -- 42. ma_20 (20 pv MA)
+                    ma_50 REAL,                        -- 43. ma_50 (50 pv MA)
+                    ma_100 REAL,                       -- 44. ma_100 (100 pv MA)
+                    ma_200 REAL,                       -- 45. ma_200 (200 pv MA)
+                    dist_ma_5 REAL,                    -- 46. dist_ma_5 (etäisyys %)
+                    dist_ma_10 REAL,                   -- 47. dist_ma_10 (etäisyys %)
+                    dist_ma_20 REAL,                   -- 48. dist_ma_20 (etäisyys %)
+                    dist_ma_50 REAL,                   -- 49. dist_ma_50 (etäisyys %)
+                    dist_ma_100 REAL,                  -- 50. dist_ma_100 (etäisyys %)
+                    dist_ma_200 REAL,                  -- 51. dist_ma_200 (etäisyys %)
+                    ma_5_slope REAL,                   -- 52. ma_5_slope (kulmakerroin)
+                    ma_10_slope REAL,                  -- 53. ma_10_slope (kulmakerroin)
+                    ma_20_slope REAL,                  -- 54. ma_20_slope (kulmakerroin)
+                    ma_50_slope REAL,                  -- 55. ma_50_slope (kulmakerroin)
+                    ma_200_slope REAL,                 -- 56. ma_200_slope (kulmakerroin)
+                    
+                    -- S&P 500 tiedot (57-67)
+                    sp500_t_1 REAL,                    -- 57. sp500_t_1
+                    sp500_t0 REAL,                     -- 58. sp500_t0
+                    sp500_t1 REAL,                     -- 59. sp500_t1
+                    sp500_ma_20 REAL,                  -- 60. sp500_ma_20
+                    sp500_ma_50 REAL,                  -- 61. sp500_ma_50
+                    sp500_ma_200 REAL,                 -- 62. sp500_ma_200
+                    sp500_change_t0 REAL,              -- 63. sp500_change_t0 (%)
+                    sp500_change_t1 REAL,              -- 64. sp500_change_t1 (%)
+                    sp500_vs_ma20 REAL,                -- 65. sp500_vs_ma20 (%)
+                    sp500_vs_ma50 REAL,                -- 66. sp500_vs_ma50 (%)
+                    sp500_vs_ma200 REAL,               -- 67. sp500_vs_ma200 (%)
+                    
+                    -- Nasdaq 100 tiedot (68-78)
+                    nasdaq_t_1 REAL,                   -- 68. nasdaq_t_1
+                    nasdaq_t0 REAL,                    -- 69. nasdaq_t0
+                    nasdaq_t1 REAL,                    -- 70. nasdaq_t1
+                    nasdaq_ma_20 REAL,                 -- 71. nasdaq_ma_20
+                    nasdaq_ma_50 REAL,                 -- 72. nasdaq_ma_50
+                    nasdaq_ma_200 REAL,                -- 73. nasdaq_ma_200
+                    nasdaq_change_t0 REAL,             -- 74. nasdaq_change_t0 (%)
+                    nasdaq_change_t1 REAL,             -- 75. nasdaq_change_t1 (%)
+                    nasdaq_vs_ma20 REAL,               -- 76. nasdaq_vs_ma20 (%)
+                    nasdaq_vs_ma50 REAL,               -- 77. nasdaq_vs_ma50 (%)
+                    nasdaq_vs_ma200 REAL,              -- 78. nasdaq_vs_ma200 (%)
                     
                     -- Metadata
                     calculated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     
-                    UNIQUE(ticker, date, candle)
+                    UNIQUE(osake, pvm, kynttila)
                 );
                 
                 -- Indeksit nopeaa hakua varten
-                CREATE INDEX IF NOT EXISTS idx_excel_staging_ticker ON excel_staging(ticker);
-                CREATE INDEX IF NOT EXISTS idx_excel_staging_date ON excel_staging(date);
-                CREATE INDEX IF NOT EXISTS idx_excel_staging_ticker_date ON excel_staging(ticker, date);
+                CREATE INDEX IF NOT EXISTS idx_excel_staging_osake ON excel_staging(osake);
+                CREATE INDEX IF NOT EXISTS idx_excel_staging_pvm ON excel_staging(pvm);
+                CREATE INDEX IF NOT EXISTS idx_excel_staging_osake_pvm ON excel_staging(osake, pvm);
                 
                 -- Cache-metatieto
                 CREATE TABLE IF NOT EXISTS cache_metadata (
@@ -397,17 +403,23 @@ class ExcelResultsCache:
             results_conn.executemany(
                 """
                 INSERT OR REPLACE INTO excel_staging 
-                (ticker, date, candle, t_1_alin, t_1_ylin, t_1_bodi, t_1_bodi_colour,
-                 t0_alin, t0_ylin, t0_bodi, t0_bodi_colour, t1_alin, t1_ylin, t1_bodi, t1_bodi_colour,
-                 t_2, t_5, t_10, t_15, t_20, t2, t5, t10, t20,
-                 t_2_hajonta, t_5_hajonta, t_10_hajonta, t_15_hajonta, t_20_hajonta,
-                 t_2_volyymi, t_5_volyymi, t_10_volyymi, t_15_volyymi, t_20_volyymi,
-                 t0_volyymi, t2_volyymi, t5_volyymi, t10_volyymi, t20_volyymi,
-                 t2_5p_liukuva, t2_10p_liukuva, t2_20p_liukuva, t5_5p_liukuva, t5_10p_liukuva, t5_20p_liukuva,
-                 t10_5p_liukuva, t10_10p_liukuva, t10_20p_liukuva, t15_5p_liukuva, t15_10p_liukuva, t15_20p_liukuva,
-                 t20_5p_liukuva, t20_10p_liukuva, t20_20p_liukuva, t50_50p_liukuva, t200_200p_liukuva,
-                 SPX_0, SPX_2, SPX_5, SPX_10, SPX_15, SPX_20, SPX2, SPX5, SPX10, SPX15, SPX20,
-                 NDX_0, NDX_2, NDX_5, NDX_10, NDX_15, NDX_20, NDX2, NDX5, NDX10, NDX15, NDX20)
+                (osake, pvm, kynttila, 
+                 t_1_alin, t_1_ylin, t_1_bodi, t_1_bodi_colour,
+                 t0_alin, t0_ylin, t0_bodi, t0_bodi_colour, 
+                 t1_alin, t1_ylin, t1_bodi, t1_bodi_colour,
+                 t_5, t_10, t_20, 
+                 t5, t10, t20, t40, t60, t252,
+                 vol_5, vol_10, vol_20, vol_60, vol_252,
+                 vol_avg_10, vol_avg_20, vol_avg_60,
+                 vol_t_1_vs_avg10, vol_t0_vs_avg10, vol_t1_vs_avg10,
+                 vol_t_1_vs_avg20, vol_t0_vs_avg20, vol_t1_vs_avg20, vol_spike,
+                 ma_5, ma_10, ma_20, ma_50, ma_100, ma_200,
+                 dist_ma_5, dist_ma_10, dist_ma_20, dist_ma_50, dist_ma_100, dist_ma_200,
+                 ma_5_slope, ma_10_slope, ma_20_slope, ma_50_slope, ma_200_slope,
+                 sp500_t_1, sp500_t0, sp500_t1, sp500_ma_20, sp500_ma_50, sp500_ma_200,
+                 sp500_change_t0, sp500_change_t1, sp500_vs_ma20, sp500_vs_ma50, sp500_vs_ma200,
+                 nasdaq_t_1, nasdaq_t0, nasdaq_t1, nasdaq_ma_20, nasdaq_ma_50, nasdaq_ma_200,
+                 nasdaq_change_t0, nasdaq_change_t1, nasdaq_vs_ma20, nasdaq_vs_ma50, nasdaq_vs_ma200)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -424,260 +436,390 @@ class ExcelResultsCache:
         spx_df: pd.DataFrame,
         ndx_df: pd.DataFrame,
     ) -> Optional[Tuple]:
-        """Laske kaikki Excel-sarakkeiden arvot yhdellä kertaa"""
+        """Laske kaikki Excel-sarakkeiden arvot SARAKKEET_DOKUMENTAATIO.md mukaan (78 saraketta)"""
 
         try:
             # Etsi rivi DataFramesta
             if date not in df.index:
                 return None
 
-            # Hakemuksen helpoittamiseksi indeksiarvo
+            # Hakemuksen helpottamiseksi indeksiarvo
             date_idx = df.index.get_loc(date)
             total_rows = len(df)
 
-            # Perustiedot
+            # PERUSTIEDOT (1-3)
+            # 1. osake = ticker
+            # 2. pvm = date (string muodossa)
+            # 3. kynttila = candle (integer)
+
+            # T0 perusdata (käännekynttilä)
             row = df.iloc[date_idx]
-            t0_low = row["Low"]
-            t0_high = row["High"]
             t0_open = row["Open"]
+            t0_high = row["High"]
+            t0_low = row["Low"]
             t0_close = row["Close"]
             t0_volume = row["Volume"]
 
             if t0_low is None or t0_low <= 0:
                 return None
 
-            # Kynttilädetaljit t-1, t0, t1
-            def get_candle_data(offset):
+            # KYNTTILÄDETALJIT (4-15)
+            # T-1 Edellinen päivä (4-7)
+            def get_candle_values(offset):
                 idx = date_idx + offset
                 if idx < 0 or idx >= total_rows:
                     return None, None, None, None
                 r = df.iloc[idx]
-                alin = r["Low"]
-                ylin = r["High"]
-                bodi = (
-                    abs(r["Close"] - r["Open"]) / alin * 100
-                    if alin and alin > 0
-                    else None
-                )
-                colour = "green" if r["Close"] > r["Open"] else "red"
-                return alin, ylin, bodi, colour
+                alin_norm = (r["Low"] / t0_low) * 100.0  # Normalisoitu t0_alin:lla
+                ylin_norm = (r["High"] / t0_low) * 100.0  # Normalisoitu t0_alin:lla
+                bodi_pct = (
+                    abs(r["Close"] - r["Open"]) / r["Open"] * 100.0
+                )  # % avauksesta
+                bodi_colour = 1 if r["Close"] > r["Open"] else 0  # 1=vihreä, 0=punainen
+                return alin_norm, ylin_norm, bodi_pct, bodi_colour
 
-            t_1_alin, t_1_ylin, t_1_bodi, t_1_bodi_colour = get_candle_data(-1)
-            t0_alin, t0_ylin, t0_bodi, t0_bodi_colour = (
-                t0_low,
-                t0_high,
-                abs(t0_close - t0_open) / t0_low * 100,
-                "green" if t0_close > t0_open else "red",
-            )
-            t1_alin, t1_ylin, t1_bodi, t1_bodi_colour = get_candle_data(1)
+            # 4-7: T-1 tiedot
+            t_1_alin, t_1_ylin, t_1_bodi, t_1_bodi_colour = get_candle_values(-1)
 
-            # Normalisoidut hinnat
-            def get_normalized_close(offset):
+            # 8-11: T0 tiedot (käännekynttilä)
+            t0_alin_norm = 100.0  # Aina 100.00 (normalisointipohja)
+            t0_ylin_norm = (t0_high / t0_low) * 100.0
+            t0_bodi = abs(t0_close - t0_open) / t0_open * 100.0
+            t0_bodi_colour = 1 if t0_close > t0_open else 0
+
+            # 12-15: T1 tiedot
+            t1_alin, t1_ylin, t1_bodi, t1_bodi_colour = get_candle_values(1)
+
+            # HINNAT (16-24)
+            # Historialliset hinnat (16-18) - normalisoitu t0_alin:lla
+            def get_normalized_price(offset):
                 idx = date_idx + offset
                 if idx < 0 or idx >= total_rows:
                     return None
                 close_val = df.iloc[idx]["Close"]
-                return (close_val / t0_low * 100) if close_val is not None else None
+                return (close_val / t0_low) * 100.0 if close_val is not None else None
 
-            t_2 = get_normalized_close(-2)
-            t_5 = get_normalized_close(-5)
-            t_10 = get_normalized_close(-10)
-            t_15 = get_normalized_close(-15)
-            t_20 = get_normalized_close(-20)
+            t_5 = get_normalized_price(-5)  # 16. t_5
+            t_10 = get_normalized_price(-10)  # 17. t_10
+            t_20 = get_normalized_price(-20)  # 18. t_20
 
-            t2 = get_normalized_close(2)
-            t5 = get_normalized_close(5)
-            t10 = get_normalized_close(10)
-            t20 = get_normalized_close(20)
+            # Tulevaisuuden hinnat (19-24) - normalisoitu t0_alin:lla
+            t5 = get_normalized_price(5)  # 19. t5
+            t10 = get_normalized_price(10)  # 20. t10
+            t20 = get_normalized_price(20)  # 21. t20
+            t40 = get_normalized_price(40)  # 22. t40
+            t60 = get_normalized_price(60)  # 23. t60
+            t252 = get_normalized_price(252)  # 24. t252
 
-            # Volatiliteetti (suhteellinen keskihajonta)
-            def calc_volatility(days_back):
-                start_idx = max(0, date_idx - days_back)
+            # VOLATILITEETTI (25-29) - annualisoitu
+            def calc_volatility(days):
+                start_idx = max(0, date_idx - days + 1)
                 end_idx = date_idx + 1
-                subset = df.iloc[start_idx:end_idx]["Close"].dropna()
-                if len(subset) < 2:
+                prices = df.iloc[start_idx:end_idx]["Close"].dropna()
+                if len(prices) < 2:
                     return None
-                mean_val = subset.mean()
-                if mean_val == 0:
+                returns = prices.pct_change().dropna()
+                if len(returns) < 1:
                     return None
-                std_val = subset.std()
-                return (std_val / mean_val) * 100
+                std_dev = returns.std()
+                # Annualisoi: std * sqrt(252)
+                return std_dev * (252**0.5) * 100.0  # Prosentteina
 
-            t_2_hajonta = calc_volatility(2)
-            t_5_hajonta = calc_volatility(5)
-            t_10_hajonta = calc_volatility(10)
-            t_15_hajonta = calc_volatility(15)
-            t_20_hajonta = calc_volatility(20)
+            vol_5 = calc_volatility(5)  # 25. vol_5
+            vol_10 = calc_volatility(10)  # 26. vol_10
+            vol_20 = calc_volatility(20)  # 27. vol_20
+            vol_60 = calc_volatility(60)  # 28. vol_60
+            vol_252 = calc_volatility(252)  # 29. vol_252
 
-            # Volyymisuhde
-            def calc_volume_ratio(offset_range=None, single_offset=None):
-                if single_offset is not None:
-                    idx = date_idx + single_offset
-                    if idx < 0 or idx >= total_rows:
-                        return None
-                    vol = df.iloc[idx]["Volume"]
-                    avg_vol = df.iloc[idx]["volume_100d_avg"]
-                    return (vol / avg_vol) if avg_vol and avg_vol > 0 else None
-                else:
-                    start_offset, end_offset = offset_range
-                    start_idx = max(0, date_idx + start_offset)
-                    end_idx = min(total_rows, date_idx + end_offset + 1)
-                    subset = df.iloc[start_idx:end_idx]
-                    if subset.empty:
-                        return None
-                    avg_vol = subset["Volume"].mean()
-                    avg_100d = subset["volume_100d_avg"].mean()
-                    return (avg_vol / avg_100d) if avg_100d and avg_100d > 0 else None
+            # VOLYYMIT (30-39)
+            # Keskivolyymit (30-32)
+            def calc_avg_volume(days):
+                start_idx = max(0, date_idx - days + 1)
+                end_idx = date_idx + 1
+                volumes = df.iloc[start_idx:end_idx]["Volume"].dropna()
+                return volumes.mean() if not volumes.empty else None
 
-            t_2_volyymi = calc_volume_ratio((-4, -2))
-            t_5_volyymi = calc_volume_ratio((-7, -3))
-            t_10_volyymi = calc_volume_ratio((-12, -8))
-            t_15_volyymi = calc_volume_ratio((-17, -13))
-            t_20_volyymi = calc_volume_ratio((-22, -18))
+            vol_avg_10 = calc_avg_volume(10)  # 30. vol_avg_10
+            vol_avg_20 = calc_avg_volume(20)  # 31. vol_avg_20
+            vol_avg_60 = calc_avg_volume(60)  # 32. vol_avg_60
 
-            t0_volyymi = calc_volume_ratio(single_offset=0)
-            t2_volyymi = calc_volume_ratio(single_offset=2)
-            t5_volyymi = calc_volume_ratio(single_offset=5)
-            t10_volyymi = calc_volume_ratio(single_offset=10)
-            t20_volyymi = calc_volume_ratio(single_offset=20)
-
-            # Liukuvat keskiarvot (normalisoitu t0_low:lla)
-            def get_normalized_ma(offset, ma_column):
+            # Volyymisuhteet (33-38)
+            def get_volume_ratio(offset, avg_days):
                 idx = date_idx + offset
                 if idx < 0 or idx >= total_rows:
                     return None
-                ma_val = df.iloc[idx][ma_column]
-                return (ma_val / t0_low * 100) if ma_val is not None else None
-
-            t2_5p_liukuva = get_normalized_ma(2, "ma5")
-            t2_10p_liukuva = get_normalized_ma(2, "ma10")
-            t2_20p_liukuva = get_normalized_ma(2, "ma20")
-            t5_5p_liukuva = get_normalized_ma(5, "ma5")
-            t5_10p_liukuva = get_normalized_ma(5, "ma10")
-            t5_20p_liukuva = get_normalized_ma(5, "ma20")
-            t10_5p_liukuva = get_normalized_ma(10, "ma5")
-            t10_10p_liukuva = get_normalized_ma(10, "ma10")
-            t10_20p_liukuva = get_normalized_ma(10, "ma20")
-            t15_5p_liukuva = get_normalized_ma(15, "ma5")
-            t15_10p_liukuva = get_normalized_ma(15, "ma10")
-            t15_20p_liukuva = get_normalized_ma(15, "ma20")
-            t20_5p_liukuva = get_normalized_ma(20, "ma5")
-            t20_10p_liukuva = get_normalized_ma(20, "ma10")
-            t20_20p_liukuva = get_normalized_ma(20, "ma20")
-            t50_50p_liukuva = get_normalized_ma(50, "ma50")
-            t200_200p_liukuva = get_normalized_ma(200, "ma200")
-
-            # Indeksitiedot (normalisoitu vastaavan indeksin t0_low:lla)
-            def get_index_values(index_df, symbol_name):
-                if index_df.empty:
-                    return [None] * 11
-
-                # Etsi t0 arvo indeksistä
-                t0_index_val = None
-                if date in index_df.index:
-                    t0_index_val = index_df.loc[date, "Close"]
-
-                if t0_index_val is None or t0_index_val <= 0:
-                    return [None] * 11
-
-                # Laske suhteelliset arvot
-                def get_index_normalized(offset):
-                    target_date = date + pd.Timedelta(days=offset)
-                    # Etsi lähisin kaupankäyntipäivä
-                    available_dates = index_df.index
-                    if offset < 0:
-                        candidates = available_dates[available_dates <= target_date]
-                        if len(candidates) == 0:
-                            return None
-                        closest_date = candidates.max()
-                    else:
-                        candidates = available_dates[available_dates >= target_date]
-                        if len(candidates) == 0:
-                            return None
-                        closest_date = candidates.min()
-
-                    if closest_date in index_df.index:
-                        val = index_df.loc[closest_date, "Close"]
-                        return (val / t0_index_val * 100) if val is not None else None
+                vol = df.iloc[idx]["Volume"]
+                if avg_days == 10:
+                    avg_vol = vol_avg_10
+                elif avg_days == 20:
+                    avg_vol = vol_avg_20
+                else:
                     return None
+                return vol / avg_vol if avg_vol and avg_vol > 0 else None
 
-                return [
-                    100.0,  # t0 = 100% (self-reference)
-                    get_index_normalized(-2),
-                    get_index_normalized(-5),
-                    get_index_normalized(-10),
-                    get_index_normalized(-15),
-                    get_index_normalized(-20),
-                    get_index_normalized(2),
-                    get_index_normalized(5),
-                    get_index_normalized(10),
-                    get_index_normalized(15),
-                    get_index_normalized(20),
-                ]
+            vol_t_1_vs_avg10 = get_volume_ratio(-1, 10)  # 33. vol_t_1_vs_avg10
+            vol_t0_vs_avg10 = get_volume_ratio(0, 10)  # 34. vol_t0_vs_avg10
+            vol_t1_vs_avg10 = get_volume_ratio(1, 10)  # 35. vol_t1_vs_avg10
+            vol_t_1_vs_avg20 = get_volume_ratio(-1, 20)  # 36. vol_t_1_vs_avg20
+            vol_t0_vs_avg20 = get_volume_ratio(0, 20)  # 37. vol_t0_vs_avg20
+            vol_t1_vs_avg20 = get_volume_ratio(1, 20)  # 38. vol_t1_vs_avg20
 
-            spx_values = get_index_values(spx_df, "SPX")
-            ndx_values = get_index_values(ndx_df, "NDX")
+            # 39. vol_spike (1 jos t0_vol > 2 * avg20, muuten 0)
+            vol_spike = 1 if vol_t0_vs_avg20 and vol_t0_vs_avg20 > 2.0 else 0
 
-            # Palauta tuple kaikista arvoista
+            # LIUKUVAT KESKIARVOT (40-56)
+            # MA:t (40-45) - normalisoitu t0_alin:lla
+            def get_ma_normalized(days):
+                if f"ma{days}" in df.columns:
+                    ma_val = df.iloc[date_idx][f"ma{days}"]
+                    return (ma_val / t0_low) * 100.0 if ma_val is not None else None
+                return None
+
+            ma_5 = get_ma_normalized(5)  # 40. ma_5
+            ma_10 = get_ma_normalized(10)  # 41. ma_10
+            ma_20 = get_ma_normalized(20)  # 42. ma_20
+            ma_50 = get_ma_normalized(50)  # 43. ma_50
+            ma_100 = get_ma_normalized(100)  # 44. ma_100
+            ma_200 = get_ma_normalized(200)  # 45. ma_200
+
+            # MA-etäisyydet (46-51) - prosentteina
+            def calc_ma_distance(days):
+                if f"ma{days}" in df.columns:
+                    ma_val = df.iloc[date_idx][f"ma{days}"]
+                    if ma_val and ma_val > 0:
+                        return ((t0_close - ma_val) / ma_val) * 100.0
+                return None
+
+            dist_ma_5 = calc_ma_distance(5)  # 46. dist_ma_5
+            dist_ma_10 = calc_ma_distance(10)  # 47. dist_ma_10
+            dist_ma_20 = calc_ma_distance(20)  # 48. dist_ma_20
+            dist_ma_50 = calc_ma_distance(50)  # 49. dist_ma_50
+            dist_ma_100 = calc_ma_distance(100)  # 50. dist_ma_100
+            dist_ma_200 = calc_ma_distance(200)  # 51. dist_ma_200
+
+            # MA-kulmakertoimet (52-56)
+            def calc_ma_slope(days):
+                if f"ma{days}" in df.columns and date_idx >= days:
+                    ma_today = df.iloc[date_idx][f"ma{days}"]
+                    ma_past = df.iloc[date_idx - days][f"ma{days}"]
+                    if ma_today is not None and ma_past is not None:
+                        return (ma_today - ma_past) / days
+                return None
+
+            ma_5_slope = calc_ma_slope(5)  # 52. ma_5_slope
+            ma_10_slope = calc_ma_slope(10)  # 53. ma_10_slope
+            ma_20_slope = calc_ma_slope(20)  # 54. ma_20_slope
+            ma_50_slope = calc_ma_slope(50)  # 55. ma_50_slope
+            ma_200_slope = calc_ma_slope(200)  # 56. ma_200_slope
+
+            # S&P 500 TIEDOT (57-67)
+            def get_spx_value(offset):
+                target_date = date + pd.Timedelta(days=offset)
+                if target_date in spx_df.index:
+                    return spx_df.loc[target_date, "Close"]
+                return None
+
+            sp500_t_1 = get_spx_value(-1)  # 57. sp500_t_1
+            sp500_t0 = get_spx_value(0)  # 58. sp500_t0
+            sp500_t1 = get_spx_value(1)  # 59. sp500_t1
+
+            # S&P 500 MA:t (60-62)
+            def calc_spx_ma(days):
+                if len(spx_df) < days:
+                    return None
+                try:
+                    # Etsi nykyinen päivä ja laske MA taaksepäin
+                    if date in spx_df.index:
+                        date_loc = spx_df.index.get_loc(date)
+                        start_idx = max(0, date_loc - days + 1)
+                        end_idx = date_loc + 1
+                        ma_values = spx_df.iloc[start_idx:end_idx]["Close"].dropna()
+                        if len(ma_values) >= days * 0.8:  # Vähintään 80% datasta
+                            return ma_values.mean()
+                except:
+                    pass
+                return None
+
+            sp500_ma_20 = calc_spx_ma(20)  # 60. sp500_ma_20
+            sp500_ma_50 = calc_spx_ma(50)  # 61. sp500_ma_50
+            sp500_ma_200 = calc_spx_ma(200)  # 62. sp500_ma_200
+
+            # S&P 500 muutokset (63-64)
+            sp500_change_t0 = None  # 63. sp500_change_t0
+            sp500_change_t1 = None  # 64. sp500_change_t1
+            if sp500_t_1 and sp500_t0:
+                sp500_change_t0 = ((sp500_t0 - sp500_t_1) / sp500_t_1) * 100.0
+            if sp500_t0 and sp500_t1:
+                sp500_change_t1 = ((sp500_t1 - sp500_t0) / sp500_t0) * 100.0
+
+            # S&P 500 vs MA:t (65-67)
+            sp500_vs_ma20 = None  # 65. sp500_vs_ma20
+            sp500_vs_ma50 = None  # 66. sp500_vs_ma50
+            sp500_vs_ma200 = None  # 67. sp500_vs_ma200
+
+            if sp500_t0 and sp500_ma_20 and sp500_ma_20 > 0:
+                sp500_vs_ma20 = ((sp500_t0 - sp500_ma_20) / sp500_ma_20) * 100.0
+            if sp500_t0 and sp500_ma_50 and sp500_ma_50 > 0:
+                sp500_vs_ma50 = ((sp500_t0 - sp500_ma_50) / sp500_ma_50) * 100.0
+            if sp500_t0 and sp500_ma_200 and sp500_ma_200 > 0:
+                sp500_vs_ma200 = ((sp500_t0 - sp500_ma_200) / sp500_ma_200) * 100.0
+
+            # NASDAQ 100 TIEDOT (68-78)
+            def get_ndx_value(offset):
+                target_date = date + pd.Timedelta(days=offset)
+                if target_date in ndx_df.index:
+                    return ndx_df.loc[target_date, "Close"]
+                return None
+
+            nasdaq_t_1 = get_ndx_value(-1)  # 68. nasdaq_t_1
+            nasdaq_t0 = get_ndx_value(0)  # 69. nasdaq_t0
+            nasdaq_t1 = get_ndx_value(1)  # 70. nasdaq_t1
+
+            # Nasdaq 100 MA:t (71-73)
+            def calc_ndx_ma(days):
+                if len(ndx_df) < days:
+                    return None
+                try:
+                    # Etsi nykyinen päivä ja laske MA taaksepäin
+                    if date in ndx_df.index:
+                        date_loc = ndx_df.index.get_loc(date)
+                        start_idx = max(0, date_loc - days + 1)
+                        end_idx = date_loc + 1
+                        ma_values = ndx_df.iloc[start_idx:end_idx]["Close"].dropna()
+                        if len(ma_values) >= days * 0.8:  # Vähintään 80% datasta
+                            return ma_values.mean()
+                except:
+                    pass
+                return None
+
+            nasdaq_ma_20 = calc_ndx_ma(20)  # 71. nasdaq_ma_20
+            nasdaq_ma_50 = calc_ndx_ma(50)  # 72. nasdaq_ma_50
+            nasdaq_ma_200 = calc_ndx_ma(200)  # 73. nasdaq_ma_200
+
+            # Nasdaq 100 muutokset (74-75)
+            nasdaq_change_t0 = None  # 74. nasdaq_change_t0
+            nasdaq_change_t1 = None  # 75. nasdaq_change_t1
+            if nasdaq_t_1 and nasdaq_t0:
+                nasdaq_change_t0 = ((nasdaq_t0 - nasdaq_t_1) / nasdaq_t_1) * 100.0
+            if nasdaq_t0 and nasdaq_t1:
+                nasdaq_change_t1 = ((nasdaq_t1 - nasdaq_t0) / nasdaq_t0) * 100.0
+
+            # Nasdaq 100 vs MA:t (76-78)
+            nasdaq_vs_ma20 = None  # 76. nasdaq_vs_ma20
+            nasdaq_vs_ma50 = None  # 77. nasdaq_vs_ma50
+            nasdaq_vs_ma200 = None  # 78. nasdaq_vs_ma200
+
+            if nasdaq_t0 and nasdaq_ma_20 and nasdaq_ma_20 > 0:
+                nasdaq_vs_ma20 = ((nasdaq_t0 - nasdaq_ma_20) / nasdaq_ma_20) * 100.0
+            if nasdaq_t0 and nasdaq_ma_50 and nasdaq_ma_50 > 0:
+                nasdaq_vs_ma50 = ((nasdaq_t0 - nasdaq_ma_50) / nasdaq_ma_50) * 100.0
+            if nasdaq_t0 and nasdaq_ma_200 and nasdaq_ma_200 > 0:
+                nasdaq_vs_ma200 = ((nasdaq_t0 - nasdaq_ma_200) / nasdaq_ma_200) * 100.0
+
+            # Palauta kaikki 78 arvoa oikeassa järjestyksessä
+
+            # Muunna kynttilä-string numeroksi SARAKKEET_DOKUMENTAATIO.md mukaan
+            candle_mapping = {
+                "Hammer": 1,
+                "Bullish Engulfing": 2,
+                "Piercing Pattern": 3,
+                "Morning Star": 4,
+                "Falling Star": 5,
+                "Hanging Man": 6,
+                "Bearish Engulfing": 7,
+            }
+            candle_num = candle_mapping.get(candle, 0)  # 0 jos tuntematon
+
             return (
+                # Perustiedot (1-3)
                 ticker,
                 date.strftime("%Y-%m-%d"),
-                candle,
+                candle_num,
+                # T-1 (4-7)
                 t_1_alin,
                 t_1_ylin,
                 t_1_bodi,
                 t_1_bodi_colour,
-                t0_alin,
-                t0_ylin,
+                # T0 (8-11)
+                t0_alin_norm,
+                t0_ylin_norm,
                 t0_bodi,
                 t0_bodi_colour,
+                # T1 (12-15)
                 t1_alin,
                 t1_ylin,
                 t1_bodi,
                 t1_bodi_colour,
-                t_2,
+                # Historialliset hinnat (16-18)
                 t_5,
                 t_10,
-                t_15,
                 t_20,
-                t2,
+                # Tulevat hinnat (19-24)
                 t5,
                 t10,
                 t20,
-                t_2_hajonta,
-                t_5_hajonta,
-                t_10_hajonta,
-                t_15_hajonta,
-                t_20_hajonta,
-                t_2_volyymi,
-                t_5_volyymi,
-                t_10_volyymi,
-                t_15_volyymi,
-                t_20_volyymi,
-                t0_volyymi,
-                t2_volyymi,
-                t5_volyymi,
-                t10_volyymi,
-                t20_volyymi,
-                t2_5p_liukuva,
-                t2_10p_liukuva,
-                t2_20p_liukuva,
-                t5_5p_liukuva,
-                t5_10p_liukuva,
-                t5_20p_liukuva,
-                t10_5p_liukuva,
-                t10_10p_liukuva,
-                t10_20p_liukuva,
-                t15_5p_liukuva,
-                t15_10p_liukuva,
-                t15_20p_liukuva,
-                t20_5p_liukuva,
-                t20_10p_liukuva,
-                t20_20p_liukuva,
-                t50_50p_liukuva,
-                t200_200p_liukuva,
-                *spx_values,  # SPX_0, SPX_2, ..., SPX20
-                *ndx_values,  # NDX_0, NDX_2, ..., NDX20
+                t40,
+                t60,
+                t252,
+                # Volatiliteetti (25-29)
+                vol_5,
+                vol_10,
+                vol_20,
+                vol_60,
+                vol_252,
+                # Volyymit (30-39)
+                vol_avg_10,
+                vol_avg_20,
+                vol_avg_60,
+                vol_t_1_vs_avg10,
+                vol_t0_vs_avg10,
+                vol_t1_vs_avg10,
+                vol_t_1_vs_avg20,
+                vol_t0_vs_avg20,
+                vol_t1_vs_avg20,
+                vol_spike,
+                # Liukuvat keskiarvot (40-56)
+                ma_5,
+                ma_10,
+                ma_20,
+                ma_50,
+                ma_100,
+                ma_200,
+                dist_ma_5,
+                dist_ma_10,
+                dist_ma_20,
+                dist_ma_50,
+                dist_ma_100,
+                dist_ma_200,
+                ma_5_slope,
+                ma_10_slope,
+                ma_20_slope,
+                ma_50_slope,
+                ma_200_slope,
+                # S&P 500 (57-67)
+                sp500_t_1,
+                sp500_t0,
+                sp500_t1,
+                sp500_ma_20,
+                sp500_ma_50,
+                sp500_ma_200,
+                sp500_change_t0,
+                sp500_change_t1,
+                sp500_vs_ma20,
+                sp500_vs_ma50,
+                sp500_vs_ma200,
+                # Nasdaq 100 (68-78)
+                nasdaq_t_1,
+                nasdaq_t0,
+                nasdaq_t1,
+                nasdaq_ma_20,
+                nasdaq_ma_50,
+                nasdaq_ma_200,
+                nasdaq_change_t0,
+                nasdaq_change_t1,
+                nasdaq_vs_ma20,
+                nasdaq_vs_ma50,
+                nasdaq_vs_ma200,
             )
 
         except Exception as e:
@@ -689,33 +831,76 @@ class ExcelResultsCache:
         excel_path: str = "data/results.xlsx",
         limit_rows: int = None,
         ticker_filter: str = None,
+        progress_callback=None,
     ) -> bool:
-        """Nopea Excel-export staging-taulusta"""
+        """Nopea Excel-export staging-taulusta (78 saraketta dokumentaation mukaan)"""
         try:
+
+            def update_progress(step: str, current: int, total: int):
+                if progress_callback:
+                    progress_callback(step, current, total)
+
+            update_progress("Tarkistetaan cache", 10, 100)
+
+            # Tarkista onko cache tuore, jos ei niin rakenna uudelleen
+            if not self.is_cache_fresh():
+                logging.info("Cache ei ole tuore, rakennetaan uudelleen...")
+                update_progress("Rakennetaan cache", 20, 100)
+                self.rebuild_staging_optimized(
+                    limit_rows=limit_rows, ticker_filter=ticker_filter
+                )
+
+            update_progress("Luetaan data tietokannasta", 60, 100)
+
             # Lue kaikki data kerralla staging-taulusta
             with sqlite3.connect(self.results_db) as conn:
-                # Rakenna SQL-kysely filttereiden kanssa
+                # Rakenna SQL-kysely SARAKKEET_DOKUMENTAATIO.md mukaan (78 saraketta)
                 base_query = """
                     SELECT 
-                        ticker, date, candle,
+                        -- Perustiedot (1-3)
+                        osake, pvm, kynttila,
+                        
+                        -- T-1 Edellinen päivä (4-7)
                         t_1_alin, t_1_ylin, t_1_bodi, t_1_bodi_colour,
+                        
+                        -- T0 Käännekynttilä (8-11)
                         t0_alin, t0_ylin, t0_bodi, t0_bodi_colour,
+                        
+                        -- T1 Seuraava päivä (12-15)
                         t1_alin, t1_ylin, t1_bodi, t1_bodi_colour,
-                        t_2, t_5, t_10, t_15, t_20,
-                        t2, t5, t10, t20,
-                        t_2_hajonta, t_5_hajonta, t_10_hajonta, t_15_hajonta, t_20_hajonta,
-                        t_2_volyymi, t_5_volyymi, t_10_volyymi, t_15_volyymi, t_20_volyymi,
-                        t0_volyymi, t2_volyymi, t5_volyymi, t10_volyymi, t20_volyymi,
-                        t2_5p_liukuva, t2_10p_liukuva, t2_20p_liukuva,
-                        t5_5p_liukuva, t5_10p_liukuva, t5_20p_liukuva,
-                        t10_5p_liukuva, t10_10p_liukuva, t10_20p_liukuva,
-                        t15_5p_liukuva, t15_10p_liukuva, t15_20p_liukuva,
-                        t20_5p_liukuva, t20_10p_liukuva, t20_20p_liukuva,
-                        t50_50p_liukuva, t200_200p_liukuva,
-                        SPX_0, SPX_2, SPX_5, SPX_10, SPX_15, SPX_20,
-                        SPX2, SPX5, SPX10, SPX15, SPX20,
-                        NDX_0, NDX_2, NDX_5, NDX_10, NDX_15, NDX_20,
-                        NDX2, NDX5, NDX10, NDX15, NDX20
+                        
+                        -- Historialliset hinnat (16-18)
+                        t_5, t_10, t_20,
+                        
+                        -- Tulevat hinnat (19-24)
+                        t5, t10, t20, t40, t60, t252,
+                        
+                        -- Volatiliteetti (25-29)
+                        vol_5, vol_10, vol_20, vol_60, vol_252,
+                        
+                        -- Volyymit (30-39)
+                        vol_avg_10, vol_avg_20, vol_avg_60,
+                        vol_t_1_vs_avg10, vol_t0_vs_avg10, vol_t1_vs_avg10,
+                        vol_t_1_vs_avg20, vol_t0_vs_avg20, vol_t1_vs_avg20,
+                        vol_spike,
+                        
+                        -- Liukuvat keskiarvot (40-56)
+                        ma_5, ma_10, ma_20, ma_50, ma_100, ma_200,
+                        dist_ma_5, dist_ma_10, dist_ma_20, dist_ma_50, dist_ma_100, dist_ma_200,
+                        ma_5_slope, ma_10_slope, ma_20_slope, ma_50_slope, ma_200_slope,
+                        
+                        -- S&P 500 tiedot (57-67)
+                        sp500_t_1, sp500_t0, sp500_t1,
+                        sp500_ma_20, sp500_ma_50, sp500_ma_200,
+                        sp500_change_t0, sp500_change_t1,
+                        sp500_vs_ma20, sp500_vs_ma50, sp500_vs_ma200,
+                        
+                        -- Nasdaq 100 tiedot (68-78)
+                        nasdaq_t_1, nasdaq_t0, nasdaq_t1,
+                        nasdaq_ma_20, nasdaq_ma_50, nasdaq_ma_200,
+                        nasdaq_change_t0, nasdaq_change_t1,
+                        nasdaq_vs_ma20, nasdaq_vs_ma50, nasdaq_vs_ma200
+                        
                     FROM excel_staging"""
 
                 # Lisää WHERE-lauseke ticker-filtteriä varten
@@ -723,13 +908,13 @@ class ExcelResultsCache:
                 params = []
 
                 if ticker_filter:
-                    conditions.append("ticker = ?")
+                    conditions.append("osake = ?")
                     params.append(ticker_filter)
 
                 if conditions:
                     base_query += " WHERE " + " AND ".join(conditions)
 
-                base_query += " ORDER BY ticker, date"
+                base_query += " ORDER BY osake, pvm"
 
                 if limit_rows:
                     query = base_query + f" LIMIT {limit_rows}"
@@ -745,14 +930,35 @@ class ExcelResultsCache:
                 logging.warning("Ei dataa staging-taulussa")
                 return False
 
-            # Muotoile numerot suomalaiseen muotoon
-            numeric_columns = df.select_dtypes(include=[np.number]).columns
-            for col in numeric_columns:
-                df[col] = df[col].apply(self._format_finnish_number)
+            update_progress("Tallennetaan Excel-tiedosto", 80, 100)
 
-            # Tallenna Excel-tiedostoon
+            # Tallenna Excel-tiedostoon ILMAN suomalaista muotoilua (pidä numerot numeroina)
             Path(excel_path).parent.mkdir(parents=True, exist_ok=True)
             df.to_excel(excel_path, index=False, engine="openpyxl")
+
+            # Muotoile numerosarakkeet (sarakkeet 3-78) kahdella desimaalilla
+            update_progress("Muotoillaan numerosarakkeet", 95, 100)
+
+            import openpyxl
+
+            # Avaa Excel-tiedosto muotoilua varten
+            wb = openpyxl.load_workbook(excel_path)
+            ws = wb.active
+
+            # Muotoile sarakkeet 3-78 (C-??), ohita sarakkeet 1-2 (A-B)
+            for col in range(3, min(79, ws.max_column + 1)):  # Sarakkeet C-??
+                col_letter = openpyxl.utils.get_column_letter(col)
+                for row in range(2, ws.max_row + 1):  # Ohita otsikkorivi
+                    cell = ws[f"{col_letter}{row}"]
+                    if cell.value is not None and isinstance(cell.value, (int, float)):
+                        # Käytä suomalaista muotoilua: pilkku desimaalimerkkinä, ei tuhaterotinta
+                        cell.number_format = "0,00"
+
+            # Tallenna muotoillut muutokset
+            wb.save(excel_path)
+            wb.close()
+
+            update_progress("Valmis!", 100, 100)
 
             logging.info(f"Excel-tiedosto tallennettu: {excel_path} ({len(df)} riviä)")
             return True
