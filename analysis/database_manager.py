@@ -47,7 +47,8 @@ class DatabaseManager:
                     volume INTEGER,
                     description TEXT,
                     analysis_date TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(ticker, date, pattern, signal_strength, price, volume)
                 )
             """
             )
@@ -132,7 +133,7 @@ class DatabaseManager:
 
             cursor.execute(
                 """
-                INSERT INTO analysis_findings 
+                INSERT OR IGNORE INTO analysis_findings 
                 (ticker, pattern, signal_strength, price, volume, description, analysis_date, date)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
