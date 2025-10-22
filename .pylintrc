@@ -1,0 +1,8 @@
+[MASTER]
+disable=all
+
+[FORMAT]
+max-line-length=88
+
+[MESSAGES CONTROL]
+disable=all

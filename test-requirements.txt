@@ -1,0 +1,23 @@
+# Testien ajamista varten tarvittavat paketit
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pytest-mock>=3.10.0
+pytest-asyncio>=0.21.0
+pytest-xdist>=3.0.0  # Parallel test execution
+pytest-html>=3.1.0   # HTML test reports
+
+# Mock ja test utilities
+mock>=4.0.0
+factory-boy>=3.2.0   # Test data factories
+faker>=18.0.0        # Fake data generation
+
+# Coverage
+coverage>=7.0.0
+
+# Performance testing
+pytest-benchmark>=4.0.0
+psutil>=5.9.0           # System monitoring for performance tests
+
+# Database testing
+# pytest-postgresql>=4.0.0  # Jos tarvitaan PostgreSQL testejä (ei käytössä tässä projektissa)
+# SQLite on sisäänrakennettu Pythonissa, ei tarvitse erillistä pakettia
