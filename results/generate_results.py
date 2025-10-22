@@ -932,8 +932,8 @@ def _build_output_rows(
                 # Convert candle name to integer using mapping
                 candle_int = CANDLE_MAPPING.get(candle, 0)  # 0 for unknown patterns
 
-                # Format values for output
-                def fmt_val(v, decimals=6):
+                # Format values for output (2 decimal places for Excel)
+                def fmt_val(v, decimals=2):
                     if v is None:
                         return ""
                     if isinstance(v, (int, float)):
@@ -942,42 +942,44 @@ def _build_output_rows(
 
                 # Build output row with all 79 columns according to specification
                 out = [
-                    ticker,                    # 1. osake
-                    date,                      # 2. date 
-                    candle_int,                # 3. kynttila (as integer)
-                    fmt_val(signal_strength) if signal_strength is not None else "",  # 4. vahvuus
+                    ticker,  # 1. osake
+                    date,  # 2. date
+                    candle_int,  # 3. kynttila (as integer)
+                    (
+                        fmt_val(signal_strength) if signal_strength is not None else ""
+                    ),  # 4. vahvuus
                     # Detailed candle data
-                    fmt_val(t_1_alin),         # 5. t_1_alin
-                    fmt_val(t_1_ylin),         # 6. t_1_ylin
-                    fmt_val(t_1_bodi),         # 7. t_1_bodi
+                    fmt_val(t_1_alin),  # 5. t_1_alin
+                    fmt_val(t_1_ylin),  # 6. t_1_ylin
+                    fmt_val(t_1_bodi),  # 7. t_1_bodi
                     fmt_val(t_1_bodi_colour),  # 8. t_1_bodi_colour
-                    fmt_val(t0_alin),          # 9. t0_alin
-                    fmt_val(t0_ylin),          # 10. t0_ylin
-                    fmt_val(t0_bodi),          # 11. t0_bodi
-                    fmt_val(t0_bodi_colour),   # 12. t0_bodi_colour
-                    fmt_val(t1_alin),          # 13. t1_alin
-                    fmt_val(t1_ylin),          # 14. t1_ylin
-                    fmt_val(t1_bodi),          # 15. t1_bodi
-                    fmt_val(t1_bodi_colour),   # 16. t1_bodi_colour
+                    fmt_val(t0_alin),  # 9. t0_alin
+                    fmt_val(t0_ylin),  # 10. t0_ylin
+                    fmt_val(t0_bodi),  # 11. t0_bodi
+                    fmt_val(t0_bodi_colour),  # 12. t0_bodi_colour
+                    fmt_val(t1_alin),  # 13. t1_alin
+                    fmt_val(t1_ylin),  # 14. t1_ylin
+                    fmt_val(t1_bodi),  # 15. t1_bodi
+                    fmt_val(t1_bodi_colour),  # 16. t1_bodi_colour
                     # Historical prices
-                    fmt_val(t_2),              # 17. t_2
-                    fmt_val(t_5),              # 18. t_5
-                    fmt_val(t_10),             # 19. t_10
-                    fmt_val(t_15),             # 20. t_15
-                    fmt_val(t_20),             # 21. t_20
+                    fmt_val(t_2),  # 17. t_2
+                    fmt_val(t_5),  # 18. t_5
+                    fmt_val(t_10),  # 19. t_10
+                    fmt_val(t_15),  # 20. t_15
+                    fmt_val(t_20),  # 21. t_20
                     # Future prices
-                    fmt_val(t2),               # 22. t2
-                    fmt_val(t5),               # 23. t5
-                    fmt_val(t10),              # 24. t10
-                    fmt_val(t20),              # 25. t20
+                    fmt_val(t2),  # 22. t2
+                    fmt_val(t5),  # 23. t5
+                    fmt_val(t10),  # 24. t10
+                    fmt_val(t20),  # 25. t20
                     # Volatility
-                    fmt_val(t_2_hajonta),      # 26. t_2_hajonta
-                    fmt_val(t_5_hajonta),      # 27. t_5_hajonta
-                    fmt_val(t_10_hajonta),     # 28. t_10_hajonta
-                    fmt_val(t_15_hajonta),     # 29. t_15_hajonta
-                    fmt_val(t_20_hajonta),     # 30. t_20_hajonta
+                    fmt_val(t_2_hajonta),  # 26. t_2_hajonta
+                    fmt_val(t_5_hajonta),  # 27. t_5_hajonta
+                    fmt_val(t_10_hajonta),  # 28. t_10_hajonta
+                    fmt_val(t_15_hajonta),  # 29. t_15_hajonta
+                    fmt_val(t_20_hajonta),  # 30. t_20_hajonta
                     # Volume ratios
-                    fmt_val(t_2_volyymi),      # 31. t_2_volyymi
+                    fmt_val(t_2_volyymi),  # 31. t_2_volyymi
                     fmt_val(t_5_volyymi),
                     fmt_val(t_10_volyymi),
                     fmt_val(t_15_volyymi),
