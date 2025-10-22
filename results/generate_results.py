@@ -378,6 +378,12 @@ def _build_output_rows(
             or lower.get("pattern")
             or lower.get("pattern_name")
         )
+        # Uudet sarakkeet
+        signal_strength_col = lower.get("signal_strength") or lower.get("strength")
+        price_col = lower.get("price") or lower.get("hinta")
+        volume_col = lower.get("volume") or lower.get("volyymi")
+        description_col = lower.get("description") or lower.get("kuvaus")
+
         if not date_col or not ticker_col:
             raise RuntimeError(
                 f"Cannot find date/ticker columns in {table_name}: {col_names}"
@@ -386,6 +392,14 @@ def _build_output_rows(
         q = f'SELECT "{date_col}", "{ticker_col}"'
         if candle_col:
             q += f', "{candle_col}"'
+        if signal_strength_col:
+            q += f', "{signal_strength_col}"'
+        if price_col:
+            q += f', "{price_col}"'
+        if volume_col:
+            q += f', "{volume_col}"'
+        if description_col:
+            q += f', "{description_col}"'
         q += f' FROM "{table_name}"'
         acur.execute(q)
         rows = acur.fetchall()
@@ -395,6 +409,10 @@ def _build_output_rows(
         "osake",
         "pvm",
         "kynttila",
+        "signal_strength",
+        "price",
+        "volume_analysis",
+        "description",
         # New detailed candle data
         "t_1_alin",
         "t_1_ylin",
@@ -485,16 +503,51 @@ def _build_output_rows(
 
     by_ticker = {}
     for rec in rows:
-        if len(rec) == 3:
+        # Handle different numbers of columns based on what was selected
+        if len(rec) >= 7:  # Full data with all new columns
+            (
+                date,
+                ticker,
+                candle,
+                signal_strength,
+                price,
+                volume_analysis,
+                description,
+            ) = rec[:7]
+        elif len(rec) >= 6:  # Missing description
+            date, ticker, candle, signal_strength, price, volume_analysis = rec[:6]
+            description = ""
+        elif len(rec) >= 5:  # Missing volume and description
+            date, ticker, candle, signal_strength, price = rec[:5]
+            volume_analysis = None
+            description = ""
+        elif len(rec) >= 4:  # Missing price, volume and description
+            date, ticker, candle, signal_strength = rec[:4]
+            price = None
+            volume_analysis = None
+            description = ""
+        elif len(rec) == 3:  # Legacy format
             date, ticker, candle = rec
-        elif len(rec) == 2:
+            signal_strength = None
+            price = None
+            volume_analysis = None
+            description = ""
+        elif len(rec) == 2:  # Legacy format without candle
             date, ticker = rec
             candle = ""
+            signal_strength = None
+            price = None
+            volume_analysis = None
+            description = ""
         else:
             continue
+
         if not ticker:
             continue
-        by_ticker.setdefault(str(ticker), []).append((str(date), candle))
+
+        by_ticker.setdefault(str(ticker), []).append(
+            (str(date), candle, signal_strength, price, volume_analysis, description)
+        )
 
     output_rows = []
 
@@ -572,7 +625,14 @@ def _build_output_rows(
                 except Exception:
                     return None
 
-            for date, candle in items:
+            for (
+                date,
+                candle,
+                signal_strength,
+                price,
+                volume_analysis,
+                description,
+            ) in items:
                 if date not in date_to_idx:
                     continue
                 idx = date_to_idx[date]
@@ -815,6 +875,10 @@ def _build_output_rows(
                     ticker,
                     date,
                     candle_int,  # candle as integer
+                    fmt_val(signal_strength) if signal_strength is not None else "",
+                    fmt_val(price) if price is not None else "",
+                    fmt_val(volume_analysis) if volume_analysis is not None else "",
+                    description if description else "",
                     # New detailed candle data
                     fmt_val(t_1_alin),
                     fmt_val(t_1_ylin),

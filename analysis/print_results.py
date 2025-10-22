@@ -159,10 +159,12 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
                         t = ticker or ""
                         d = key
                     for p in results[key]:
-                        rows.append((t, d, p))
+                        # Create new format with signal_strength, price, volume, description
+                        # For now, we use default values since old format doesn't have them
+                        rows.append((t, d, p, 1.0, 0.0, 0, "Legacy finding"))
                 if rows:
                     cur.executemany(
-                        "INSERT OR IGNORE INTO analysis_findings (ticker, date, candle) VALUES (?, ?, ?)",
+                        "INSERT OR IGNORE INTO analysis_findings (ticker, date, pattern, signal_strength, price, volume, description) VALUES (?, ?, ?, ?, ?, ?, ?)",
                         rows,
                     )
                     conn.commit()
