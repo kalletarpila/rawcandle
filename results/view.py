@@ -249,7 +249,7 @@ def create_results_view(app) -> ft.View:
                         modal=True,
                         title=ft.Text("✅ Onnistui!"),
                         content=ft.Text(
-                            f"Excel-tiedosto 'data/results.xlsx' päivitetty onnistuneesti!\n\n"
+                            "Excel-tiedosto 'data/results.xlsx' päivitetty onnistuneesti!\n\n"
                             + f"Ticker-filtteri: {ticker_filter or 'Kaikki'}\n"
                             + "Voit nyt avata tiedoston Excelissä."
                         ),
