@@ -243,6 +243,186 @@ class RawCandleApp:
             width=220,
         )
 
+        # Random events controls for Candles view
+        self.candles_random_checkbox = ft.Checkbox(
+            label="Tee random tapahtumia", value=False
+        )
+
+        self.candles_random_stocks_field = ft.TextField(
+            label="Anna osakkeiden lkm",
+            width=160,
+            value="100",
+            keyboard_type=ft.KeyboardType.NUMBER,
+            visible=False,
+            # validation attached later
+        )
+
+        self.candles_random_events_field = ft.TextField(
+            label="Anna tapahtumien lkm per osake",
+            width=200,
+            value="20",
+            keyboard_type=ft.KeyboardType.NUMBER,
+            visible=False,
+            # validation attached later
+        )
+
+        def _on_candles_random_toggle(e):
+            try:
+                is_checked = bool(self.candles_random_checkbox.value)
+                self.candles_random_stocks_field.visible = is_checked
+                self.candles_random_events_field.visible = is_checked
+                try:
+                    self.candles_generate_random_btn.visible = is_checked
+                except Exception:
+                    pass
+                try:
+                    self.page.update()
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+        self.candles_random_checkbox.on_change = _on_candles_random_toggle
+
+        def _on_candles_generate(e):
+            # perform validation
+            _validate_candles_stocks_field()
+            _validate_candles_events_field()
+
+            def _do_generate(evt):
+                try:
+                    confirm_dlg.open = False
+                    if confirm_dlg in self.page.overlay:
+                        self.page.overlay.remove(confirm_dlg)
+                except Exception:
+                    pass
+                sb = ft.SnackBar(
+                    ft.Text("Generointi hyväksytty — toteutus lisätään myöhemmin"),
+                    bgcolor=ft.Colors.GREEN_700,
+                )
+                if sb not in self.page.overlay:
+                    self.page.overlay.append(sb)
+                sb.open = True
+                try:
+                    self.page.update()
+                except Exception:
+                    pass
+
+            confirm_dlg = ft.AlertDialog(
+                title=ft.Text("Vahvista generointi"),
+                content=ft.Text(
+                    "Haluatko varmasti generoida random-tapahtumia käyttäen annettuja arvoja?"
+                ),
+                actions=[
+                    ft.TextButton(
+                        "Peruuta",
+                        on_click=lambda evt: (
+                            setattr(confirm_dlg, "open", False),
+                            self.page.update(),
+                        ),
+                    ),
+                    ft.TextButton("Kyllä, generoi", on_click=_do_generate),
+                ],
+            )
+
+            if confirm_dlg not in self.page.overlay:
+                self.page.overlay.append(confirm_dlg)
+            confirm_dlg.open = True
+            try:
+                self.page.update()
+            except Exception:
+                pass
+
+        self.candles_generate_random_btn = ft.ElevatedButton(
+            "Generoi random tapahtumat",
+            icon=ft.Icons.PLAY_ARROW,
+            on_click=_on_candles_generate,
+            visible=False,
+            bgcolor=ft.Colors.ORANGE_700,
+            color=ft.Colors.WHITE,
+        )
+
+        # Validation helpers for Candles random inputs
+        def _validate_candles_stocks_field():
+            try:
+                raw = (self.candles_random_stocks_field.value or "").strip()
+                if not raw:
+                    return
+                try:
+                    v = int(float(raw))
+                except Exception:
+                    self.candles_random_stocks_field.error_text = "Anna kokonaisluku"
+                    if hasattr(self.page, "show_snack_bar"):
+                        self.page.show_snack_bar(
+                            ft.SnackBar(
+                                ft.Text("Syötä kelvollinen numero"),
+                                bgcolor=ft.Colors.RED_700,
+                            )
+                        )
+                    try:
+                        self.page.update()
+                    except Exception:
+                        pass
+                    return
+
+                if v < 1:
+                    v = 1
+                if v > 1000:
+                    v = 1000
+                if str(v) != str(self.candles_random_stocks_field.value):
+                    self.candles_random_stocks_field.value = str(v)
+                self.candles_random_stocks_field.error_text = None
+                try:
+                    self.page.update()
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+        def _validate_candles_events_field():
+            try:
+                raw = (self.candles_random_events_field.value or "").strip()
+                if not raw:
+                    return
+                try:
+                    v = int(float(raw))
+                except Exception:
+                    self.candles_random_events_field.error_text = "Anna kokonaisluku"
+                    if hasattr(self.page, "show_snack_bar"):
+                        self.page.show_snack_bar(
+                            ft.SnackBar(
+                                ft.Text("Syötä kelvollinen numero"),
+                                bgcolor=ft.Colors.RED_700,
+                            )
+                        )
+                    try:
+                        self.page.update()
+                    except Exception:
+                        pass
+                    return
+
+                if v < 1:
+                    v = 1
+                if v > 200:
+                    v = 200
+                if str(v) != str(self.candles_random_events_field.value):
+                    self.candles_random_events_field.value = str(v)
+                self.candles_random_events_field.error_text = None
+                try:
+                    self.page.update()
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+        # Attach validation to on_change
+        self.candles_random_stocks_field.on_change = (
+            lambda e: _validate_candles_stocks_field()
+        )
+        self.candles_random_events_field.on_change = (
+            lambda e: _validate_candles_events_field()
+        )
+
         # ensure initial button state
         update_start_button_enabled()
 
@@ -290,6 +470,37 @@ class RawCandleApp:
                                                     ft.Column(
                                                         self.candles_checkboxes,
                                                         spacing=12,
+                                                    ),
+                                                    ft.Container(height=12),
+                                                    # Random tapahtumat card moved here (left column)
+                                                    ft.Card(
+                                                        content=ft.Container(
+                                                            content=ft.Column(
+                                                                [
+                                                                    ft.Text(
+                                                                        "Random tapahtumat",
+                                                                        size=14,
+                                                                        weight=ft.FontWeight.BOLD,
+                                                                    ),
+                                                                    ft.Column(
+                                                                        [
+                                                                            self.candles_random_checkbox,
+                                                                            self.candles_random_stocks_field,
+                                                                            self.candles_random_events_field,
+                                                                            self.candles_generate_random_btn,
+                                                                        ],
+                                                                        spacing=8,
+                                                                        horizontal_alignment=ft.CrossAxisAlignment.START,
+                                                                    ),
+                                                                ],
+                                                                spacing=8,
+                                                            ),
+                                                            padding=12,
+                                                            bgcolor=ft.Colors.GREY_50,
+                                                            border_radius=8,
+                                                            width=300,
+                                                        ),
+                                                        elevation=1,
                                                     ),
                                                 ],
                                                 horizontal_alignment=ft.CrossAxisAlignment.START,
@@ -396,6 +607,8 @@ class RawCandleApp:
                                                 ),
                                                 elevation=2,
                                             ),
+                                            ft.Container(height=16),
+                                            # (Random tapahtumat card removed from right column)
                                         ]
                                     ),
                                 ],

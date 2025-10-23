@@ -125,10 +125,9 @@ class AnalysisView:
             on_click=self._clear_filters,
         )
 
-        return ft.Row(
-            [self.search_field, self.pattern_filter, clear_btn],
-            alignment=ft.MainAxisAlignment.START,
-        )
+        # (no random-event controls on Analysis view)
+
+    # (random generation dialog and handlers removed from Analysis view)
 
     def _create_action_buttons(self) -> ft.Row:
         """Luo toimintopainikkeet."""
@@ -288,6 +287,8 @@ class AnalysisView:
     def _on_filter_change(self, e) -> None:
         """Käsittele suodattimen muutos."""
         self._apply_filters()
+
+    # Random-event handlers removed from Analysis view (moved to Candles)
 
     def _apply_filters(self) -> None:
         """Sovella suodattimet."""
