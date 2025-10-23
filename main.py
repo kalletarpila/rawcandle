@@ -1,4 +1,9 @@
 import flet as ft
+import datetime
+import sqlite3
+
+import pandas as pd
+import yfinance as yf
 
 
 # Compatibility shim: ensure ft.Colors/ft.colors and ft.Icons/ft.icons exist
@@ -115,11 +120,6 @@ try:
         ft.icons = ft.Icons
 except Exception:
     pass
-import datetime
-import sqlite3
-
-import pandas as pd
-import yfinance as yf
 
 
 class RawCandleApp:
@@ -848,6 +848,57 @@ class RawCandleApp:
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
         )
         # (duplicate settings view removed)
+
+    def create_analysis_view(self):
+        """Luo Analysis Dashboard -näkymän"""
+        try:
+            from analysis.view import AnalysisView
+
+            analysis_view = AnalysisView(
+                self.page,
+                analysis_db_path="analysis/analysis.db",
+                stock_db_path="data/osakedata.db",
+            )
+
+            return ft.View(
+                "/analysis",
+                [
+                    self.create_appbar(),
+                    ft.Container(
+                        content=analysis_view.create_view(),
+                        padding=20,
+                        expand=True,
+                    ),
+                ],
+                scroll=ft.ScrollMode.AUTO,
+            )
+        except Exception as e:
+            # On import failure, fall back to a minimal placeholder view
+            import traceback
+
+            traceback.print_exc()
+            return ft.View(
+                "/analysis",
+                [
+                    self.create_appbar(),
+                    ft.Container(
+                        content=ft.Column(
+                            [
+                                ft.Text(
+                                    "Analysis Dashboard",
+                                    size=24,
+                                    weight=ft.FontWeight.BOLD,
+                                ),
+                                ft.Text(
+                                    f"Virhe ladattaessa: {e}", color=ft.Colors.RED_600
+                                ),
+                            ],
+                            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                        padding=40,
+                    ),
+                ],
+            )
 
     def create_results_view(self):
         # Delegates to the standalone results.view module to keep the page
@@ -1882,6 +1933,11 @@ class RawCandleApp:
                     on_click=lambda _: self.page.go("/candles"),
                 ),
                 ft.IconButton(
+                    ft.Icons.ANALYTICS,
+                    tooltip="Analysis Dashboard",
+                    on_click=lambda _: self.page.go("/analysis"),
+                ),
+                ft.IconButton(
                     ft.Icons.INSIGHTS,
                     tooltip="Tulokset",
                     on_click=lambda _: self.page.go("/tulokset"),
@@ -2063,6 +2119,8 @@ class RawCandleApp:
             self.page.views.append(self.create_settings_view())
         elif self.page.route == "/candles":
             self.page.views.append(self.create_candles_view())
+        elif self.page.route == "/analysis":
+            self.page.views.append(self.create_analysis_view())
         elif self.page.route == "/tulokset":
             self.page.views.append(self.create_results_view())
         else:
