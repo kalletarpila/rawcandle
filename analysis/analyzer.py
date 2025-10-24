@@ -604,9 +604,6 @@ class AnalysisEngine:
                     date=pattern.get("date", ""),
                     pattern=pattern.get("pattern", ""),
                     signal_strength=pattern.get("strength", 0.0),
-                    price=pattern.get("close", 0.0),
-                    volume=pattern.get("volume"),
-                    description=f"Detected {pattern.get('pattern', 'unknown')} pattern",
                 )
             return True
         except Exception as e:

@@ -180,30 +180,18 @@ class DowntrendGenerator:
         """
         try:
             cursor = conn.cursor()
-            analysis_date = datetime.now().isoformat()
 
             cursor.execute(
                 """
                 INSERT INTO analysis_findings (
-                    ticker, date, pattern, signal_strength, 
-                    price, volume, description,
-                    open_price, close_price, high_price, low_price,
-                    analysis_date
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ticker, date, pattern, signal_strength
+                ) VALUES (?, ?, ?, ?)
             """,
                 (
                     ticker,
                     price_record["pvm"],
-                    "Random",
+                    "downtrend",
                     1.0,
-                    price_record["close"],
-                    price_record["volume"],
-                    "Auto-generated downtrend event",
-                    price_record["open"],
-                    price_record["close"],
-                    price_record["high"],
-                    price_record["low"],
-                    analysis_date,
                 ),
             )
 

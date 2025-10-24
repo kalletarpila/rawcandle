@@ -396,13 +396,10 @@ class AnalysisView:
             saved_count = 0
             for finding in findings:
                 success = self.db_manager.insert_finding(
-                    symbol=finding["symbol"],
+                    ticker=finding["symbol"],
                     date=finding["date"],
                     pattern=finding["pattern"],
                     signal_strength=finding["signal_strength"],
-                    price=finding["price"],
-                    volume=finding.get("volume"),
-                    description=finding.get("description"),
                 )
                 if success:
                     saved_count += 1
