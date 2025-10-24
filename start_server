@@ -1,0 +1,58 @@
+#!/bin/bash
+
+# RawCandle Server Startup Script
+# Käynnistää sovelluksen virtuaaliympäristössä portissa 8888
+
+set -e  # Lopeta jos jokin komento epäonnistuu
+
+# Projektin hakemisto
+PROJECT_DIR="/home/kalle/projects/rawcandle"
+
+echo "🚀 RawCandle Server Käynnistys"
+echo "=============================="
+
+# Siirry projektin hakemistoon
+cd "$PROJECT_DIR"
+
+# Varmista että olemme oikeassa hakemistossa
+if [ ! -f "main.py" ]; then
+    echo "❌ Virhe: main.py ei löydy hakemistosta $PROJECT_DIR"
+    exit 1
+fi
+
+# Varmista että virtuaaliympäristö on olemassa
+if [ ! -d "venv" ]; then
+    echo "❌ Virhe: Virtuaaliympäristö ei löydy hakemistosta $PROJECT_DIR/venv"
+    exit 1
+fi
+
+echo "📁 Projektihakemisto: $PROJECT_DIR"
+echo "🐍 Virtuaaliympäristö: $PROJECT_DIR/venv"
+
+# Vapaa portti 8888 (tappa kaikki prosessit jotka käyttävät sitä)
+echo "🔌 Vapautetaan portti 8888..."
+if lsof -ti:8888 >/dev/null 2>&1; then
+    echo "   Löydettiin prosesseja portissa 8888, tapetaan ne..."
+    lsof -ti:8888 | xargs kill -9 2>/dev/null || true
+    sleep 2
+    echo "   ✅ Portti 8888 vapautettu"
+else
+    echo "   ✅ Portti 8888 oli jo vapaa"
+fi
+
+# Tappa mahdolliset aiemmat main.py prosessit
+echo "🛑 Tapetaan mahdolliset aiemmat RawCandle prosessit..."
+pkill -f "python.*main.py" 2>/dev/null || true
+sleep 1
+
+# Aktivoi virtuaaliympäristö ja käynnistä sovellus
+echo "🌐 Käynnistetään RawCandle portissa 8888..."
+echo "   Avaa selaimessa: http://localhost:8888"
+echo ""
+
+# Käynnistä sovellus virtuaaliympäristössä
+export FLET_PORT=8888
+"$PROJECT_DIR/venv/bin/python" main.py --port 8888
+
+echo ""
+echo "👋 RawCandle Server sammui"

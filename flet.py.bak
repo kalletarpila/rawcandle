@@ -1,0 +1,297 @@
+"""Minimal flet shim for tests.
+
+This is a lightweight compatibility layer used only in the test
+environment inside this workspace. It intentionally implements minimal
+classes and constants so the rest of the application and tests can import
+`flet` without depending on the real Flet package version.
+
+Do not use this in production.
+"""
+
+from typing import Any
+
+
+class Colors:
+    BLUE = "#2196F3"
+    BLUE_700 = "#1976D2"
+    BLUE_600 = "#1E88E5"
+    ORANGE_700 = "#EF6C00"
+    ORANGE_600 = "#FB8C00"
+    ORANGE_400 = "#FFB74D"
+    ORANGE_300 = "#FFCC80"
+    GREY_600 = "#757575"
+    GREY_400 = "#BDBDBD"
+    GREY_300 = "#E0E0E0"
+    GREY_100 = "#F5F5F5"
+    GREY_50 = "#FAFAFA"
+    GREEN_700 = "#2E7D32"
+    GREEN_600 = "#43A047"
+    RED_600 = "#E53935"
+    RED_700 = "#D32F2F"
+    RED = "#E53935"
+    TRANSPARENT = "transparent"
+    WHITE = "#FFFFFF"
+    BLACK = "#000000"
+
+
+colors = Colors
+
+
+class Icons:
+    PLAY_ARROW = "play"
+    VISIBILITY = "visibility"
+    CLEAR = "clear"
+    ANALYTICS = "analytics"
+    REFRESH = "refresh"
+    DOWNLOAD = "download"
+    DELETE_SWEEP = "delete_sweep"
+    DELETE = "delete"
+
+
+class FontWeight:
+    BOLD = "bold"
+
+
+class KeyboardType:
+    NUMBER = "number"
+
+
+class CrossAxisAlignment:
+    CENTER = "center"
+    START = "start"
+
+
+class MainAxisAlignment:
+    CENTER = "center"
+    START = "start"
+    END = "end"
+
+
+class ScrollMode:
+    AUTO = "auto"
+
+
+class Page:
+    def __init__(self, *args, **kwargs):
+        self.overlay = []
+        self.client_storage = {}
+        self.session = {}
+
+    def update(self):
+        pass
+
+
+class ThemeMode:
+    LIGHT = "light"
+    DARK = "dark"
+
+    def set_clipboard(self, text: str):
+        # tests may mock or replace this
+        self._clipboard = text
+
+
+class Control:
+    def __init__(self, *args, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+    def update(self):
+        pass
+
+
+class Text(Control):
+    def __init__(self, value="", **kwargs):
+        super().__init__(value=value, **kwargs)
+
+
+class TextField(Control):
+    def __init__(self, value="", **kwargs):
+        super().__init__(value=value, **kwargs)
+
+
+class Checkbox(Control):
+    pass
+
+
+class Radio(Control):
+    pass
+
+
+class RadioGroup(Control):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.value = kwargs.get("value", None)
+
+
+class DatePicker(Control):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.value = None
+
+
+class ElevatedButton(Control):
+    pass
+
+
+class TextButton(Control):
+    pass
+
+
+class SnackBar(Control):
+    def __init__(self, content=None, **kwargs):
+        super().__init__(content=content, **kwargs)
+
+
+class AlertDialog(Control):
+    pass
+
+
+class Card(Control):
+    pass
+
+
+class Container(Control):
+    pass
+
+
+class Column(Control):
+    def __init__(self, controls=None, **kwargs):
+        super().__init__(content=self)
+        self.controls = controls or []
+
+
+class Row(Control):
+    def __init__(self, controls=None, **kwargs):
+        super().__init__(content=self)
+        self.controls = controls or []
+
+
+class Row(Control):
+    def __init__(self, controls=None, **kwargs):
+        super().__init__(content=self)
+        self.controls = controls or []
+
+
+class Divider(Control):
+    pass
+
+
+# Data table related minimal stubs
+class DataColumn(Control):
+    def __init__(self, label=None, **kwargs):
+        super().__init__(label=label, **kwargs)
+
+
+class DataCell(Control):
+    def __init__(self, content=None, **kwargs):
+        super().__init__(content=content, **kwargs)
+
+
+class DataRow(Control):
+    def __init__(self, cells=None, **kwargs):
+        super().__init__(cells=cells or [], **kwargs)
+
+
+class DataTable(Control):
+    def __init__(self, columns=None, rows=None, **kwargs):
+        super().__init__(columns=columns or [], rows=rows or [], **kwargs)
+        self.columns = columns or []
+        self.rows = rows or []
+
+
+# border helpers
+class border:
+    @staticmethod
+    def all(width, color):
+        return (width, color)
+
+    class BorderSide:
+        def __init__(self, width, color):
+            self.width = width
+            self.color = color
+
+
+# Dropdown option minimal
+class dropdown:
+    class Option:
+        def __init__(self, value, label=None):
+            self.value = value
+            self.label = label or value
+
+
+class IconButton(Control):
+    def __init__(self, icon=None, **kwargs):
+        super().__init__(icon=icon, **kwargs)
+
+
+class VerticalDivider(Control):
+    pass
+
+
+class Dropdown(Control):
+    def __init__(
+        self, label=None, width=None, options=None, value=None, on_change=None, **kwargs
+    ):
+        super().__init__(
+            label=label,
+            width=width,
+            options=options or [],
+            value=value,
+            on_change=on_change,
+            **kwargs
+        )
+        self.value = value
+
+
+class ElevatedButton(Control):
+    def __init__(self, text=None, icon=None, **kwargs):
+        super().__init__(icon=icon, text=text, **kwargs)
+        self.text = text
+
+
+# FilePickerResultEvent stub used in annotations
+class FilePickerResultEvent:
+    def __init__(self, path=None):
+        self.path = path
+
+
+class FilePicker(Control):
+    def __init__(self, on_result=None, **kwargs):
+        super().__init__(on_result=on_result, **kwargs)
+        self.__result = None
+
+    def pick_files(self):
+        # no-op in tests
+        pass
+
+
+# Backwards compatible names
+colors = Colors
+
+
+__all__ = [
+    "Colors",
+    "colors",
+    "Icons",
+    "FontWeight",
+    "KeyboardType",
+    "CrossAxisAlignment",
+    "MainAxisAlignment",
+    "ScrollMode",
+    "Page",
+    "Text",
+    "TextField",
+    "Checkbox",
+    "Radio",
+    "RadioGroup",
+    "DatePicker",
+    "ElevatedButton",
+    "TextButton",
+    "SnackBar",
+    "AlertDialog",
+    "Card",
+    "Container",
+    "Column",
+    "Row",
+    "Divider",
+]

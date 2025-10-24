@@ -138,6 +138,41 @@ class RawCandleApp:
         except Exception as ex:
             print(f"Error closing dialog: {ex}")
 
+    def on_close_and_ack(self, results_dialog):
+        """Sulkee tulosdialogin ja vahvistaa käyttäjältä kuittauksen."""
+        try:
+            self.close_dialog(results_dialog)
+        except Exception:
+            pass
+        try:
+            ack_dlg = ft.AlertDialog(
+                title=ft.Text("Huom!"),
+                content=ft.Text(
+                    "Analyysitulokset ovat tallennettu. Paina OK kuittaaksesi."
+                ),
+                actions=[
+                    ft.TextButton("OK", on_click=lambda _: self.close_dialog(ack_dlg))
+                ],
+                modal=True,
+            )
+            if ack_dlg not in self.page.overlay:
+                self.page.overlay.append(ack_dlg)
+            ack_dlg.open = True
+            self.page.update()
+        except Exception:
+            try:
+                sb = ft.SnackBar(
+                    ft.Text("Analyysitulokset kirjoitettu."),
+                    bgcolor=ft.Colors.BLUE_600,
+                    duration=3000,
+                )
+                if sb not in self.page.overlay:
+                    self.page.overlay.append(sb)
+                sb.open = True
+                self.page.update()
+            except Exception:
+                pass
+
     def create_settings_view(self):
         """Palauttaa placeholder-näkymän asetuksille"""
         return ft.View(
@@ -341,19 +376,6 @@ class RawCandleApp:
         )
         # Result banner (mirrors main page `loading_text` style)
         self.candles_result_text = ft.Text(value="", color=ft.colors.BLUE_600)
-        self.candles_show_button = ft.ElevatedButton(
-            "Näytä tulokset",
-            icon=ft.Icons.VISIBILITY,
-            bgcolor=ft.colors.BLUE_600,
-            color=ft.colors.WHITE,
-            on_click=(
-                self.show_analysis_results
-                if hasattr(self, "show_analysis_results")
-                else None
-            ),
-            width=220,
-        )
-
         # Random events controls for Candles view
         self.candles_random_checkbox = ft.Checkbox(
             label="Tee random tapahtumia", value=False
@@ -712,7 +734,6 @@ class RawCandleApp:
                             ft.Row(
                                 [
                                     self.candles_start_button,
-                                    self.candles_show_button,
                                 ],
                                 alignment=ft.MainAxisAlignment.CENTER,
                                 spacing=20,
@@ -1061,7 +1082,7 @@ class RawCandleApp:
             # opens a modal acknowledgement dialog that requires explicit OK
             actions=[
                 save_button,
-                ft.TextButton("Sulje", on_click=lambda e: on_close_and_ack(dlg)),
+                ft.TextButton("Sulje", on_click=lambda e: self.on_close_and_ack(dlg)),
             ],
         )
         # Use Page.overlay for dialogs (dialog property deprecated)
@@ -1137,45 +1158,6 @@ class RawCandleApp:
             self.page.snack_bar = ft.SnackBar(
                 ft.Text(f"Virhe tietokannan käsittelyssä: {ex}")
             )
-
-        def on_close_and_ack(results_dialog):
-            try:
-                # close the results dialog
-                self.close_dialog(results_dialog)
-            except Exception:
-                pass
-            try:
-                # create a modal acknowledgement dialog that user must click OK to dismiss
-                ack_dlg = ft.AlertDialog(
-                    title=ft.Text("Huom!"),
-                    content=ft.Text(
-                        "Analyysitulokset ovat tallennettu. Paina OK kuittaaksesi."
-                    ),
-                    actions=[
-                        ft.TextButton(
-                            "OK", on_click=lambda _: self.close_dialog(ack_dlg)
-                        )
-                    ],
-                    modal=True,
-                )
-                if ack_dlg not in self.page.overlay:
-                    self.page.overlay.append(ack_dlg)
-                ack_dlg.open = True
-                self.page.update()
-            except Exception:
-                # fallback: show a normal snackbar that times out if dialog creation fails
-                try:
-                    sb = ft.SnackBar(
-                        ft.Text("Analyysitulokset kirjoitettu."),
-                        bgcolor=ft.Colors.BLUE_600,
-                        duration=3000,
-                    )
-                    if sb not in self.page.overlay:
-                        self.page.overlay.append(sb)
-                    sb.open = True
-                    self.page.update()
-                except Exception:
-                    pass
 
     def start_candles_analysis(self, e):
         import os
