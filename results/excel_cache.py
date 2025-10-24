@@ -215,9 +215,9 @@ class ExcelResultsCache:
                 print(f"🎯 Suodatetaan ticker: {ticker_filter}")
                 findings = analysis_conn.execute(
                     """
-                    SELECT ticker, date, candle 
+                    SELECT ticker, date, pattern 
                     FROM analysis_findings 
-                    WHERE candle IS NOT NULL AND candle != '' AND ticker = ?
+                    WHERE pattern IS NOT NULL AND pattern != '' AND ticker = ?
                     ORDER BY ticker, date
                 """,
                     (ticker_filter,),
@@ -226,9 +226,9 @@ class ExcelResultsCache:
                 print("🌐 Haetaan kaikki tickerit")
                 findings = analysis_conn.execute(
                     """
-                    SELECT ticker, date, candle 
+                    SELECT ticker, date, pattern 
                     FROM analysis_findings 
-                    WHERE candle IS NOT NULL AND candle != ''
+                    WHERE pattern IS NOT NULL AND pattern != ''
                     ORDER BY ticker, date
                 """
                 ).fetchall()

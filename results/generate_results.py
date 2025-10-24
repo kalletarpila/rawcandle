@@ -378,11 +378,7 @@ def _build_output_rows(
             or lower.get("pattern")
             or lower.get("pattern_name")
         )
-        # Uudet sarakkeet
         signal_strength_col = lower.get("signal_strength") or lower.get("strength")
-        price_col = lower.get("price") or lower.get("hinta")
-        volume_col = lower.get("volume") or lower.get("volyymi")
-        description_col = lower.get("description") or lower.get("kuvaus")
 
         if not date_col or not ticker_col:
             raise RuntimeError(
@@ -394,12 +390,6 @@ def _build_output_rows(
             q += f', "{candle_col}"'
         if signal_strength_col:
             q += f', "{signal_strength_col}"'
-        if price_col:
-            q += f', "{price_col}"'
-        if volume_col:
-            q += f', "{volume_col}"'
-        if description_col:
-            q += f', "{description_col}"'
         q += f' FROM "{table_name}"'
         acur.execute(q)
         rows = acur.fetchall()
