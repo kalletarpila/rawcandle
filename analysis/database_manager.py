@@ -53,6 +53,21 @@ class DatabaseManager:
                 )
             """
             )
+            # Poista mahdolliset duplikaatit ennen uniikki-indeksin luontia
+            cursor.execute(
+                """
+                DELETE FROM analysis_findings
+                WHERE rowid NOT IN (
+                    SELECT MIN(rowid)
+                    FROM analysis_findings
+                    GROUP BY ticker, date, pattern
+                )
+                """
+            )
+            # Uniikki indeksi estämään samojen havaintojen tuplaukset
+            cursor.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_finding ON analysis_findings(ticker, date, pattern)"
+            )
 
             # Luo indeksit
             cursor.execute(
@@ -124,7 +139,7 @@ class DatabaseManager:
 
             cursor.execute(
                 """
-                INSERT OR IGNORE INTO analysis_findings 
+                INSERT OR REPLACE INTO analysis_findings 
                 (ticker, date, pattern, signal_strength)
                 VALUES (?, ?, ?, ?)
             """,

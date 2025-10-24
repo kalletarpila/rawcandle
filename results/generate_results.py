@@ -313,6 +313,7 @@ def _build_output_rows(
     use_ma_filter: bool = True,
     use_volume_filter: bool = False,
     progress_callback=None,
+    ticker_filter: Optional[str] = None,
 ):
     """Synchronous builder for output rows according to spec.
 
@@ -324,6 +325,7 @@ def _build_output_rows(
         use_ma_filter: Käytetäänkö liukuva keskiarvo -suodatinta
         use_volume_filter: Käytetäänkö volyymi-suodatinta
         progress_callback: Callback-funktio edistymisen raportointiin
+        ticker_filter: Jos annettu, rajaa tulokset tiettyyn tickeriin
     """
 
     # Candlestick pattern to integer mapping
@@ -394,7 +396,8 @@ def _build_output_rows(
         acur.execute(q)
         rows = acur.fetchall()
 
-    # Define the complete header according to final specification (79 columns)
+    # Define the complete header according to final specification (80 columns)
+    # HUOM: Näitä otsikoita ei saa muuttaa, jotta Excelin sarakejärjestys säilyy.
     header = [
         # Perustieto (1-4)
         "osake",  # 1. osake
@@ -484,11 +487,13 @@ def _build_output_rows(
         "NDX10",  # 77. NDX10
         "NDX15",  # 78. NDX15
         "NDX20",  # 79. NDX20
+        "RSI14_t0",  # 80. RSI14_t0
     ]
 
     if not rows:
         return header, []
 
+    ticker_filter_upper = ticker_filter.upper() if ticker_filter else None
     by_ticker = {}
     for rec in rows:
         # Handle different numbers of columns based on what was selected
@@ -507,7 +512,11 @@ def _build_output_rows(
         if not ticker:
             continue
 
-        by_ticker.setdefault(str(ticker), []).append(
+        ticker_str = str(ticker)
+        if ticker_filter_upper and ticker_str.upper() != ticker_filter_upper:
+            continue
+
+        by_ticker.setdefault(ticker_str, []).append(
             (str(date), candle, signal_strength)
         )
 
@@ -580,6 +589,31 @@ def _build_output_rows(
 
             df = df.reset_index(drop=True)
             date_to_idx = {str(r[pcol]): idx for idx, r in df.iterrows()}
+
+            # Laske 14 päivän RSI koko sarjalle (Wilderin eksponentiaalinen kaava)
+            try:
+                close_series = pd.to_numeric(df[ccol], errors="coerce")
+                delta = close_series.diff()
+                gain = delta.clip(lower=0)
+                loss = (-delta).clip(lower=0)
+
+                avg_gain = gain.ewm(alpha=1 / 14, min_periods=14, adjust=False).mean()
+                avg_loss = loss.ewm(alpha=1 / 14, min_periods=14, adjust=False).mean()
+
+                loss_zero = avg_loss == 0
+                gain_zero = avg_gain == 0
+                both_zero = gain_zero & loss_zero
+
+                avg_loss_safe = avg_loss.replace(0, np.nan)
+                rs = avg_gain / avg_loss_safe
+                rsi_series = 100 - (100 / (1 + rs))
+                rsi_series = rsi_series.mask(both_zero, 50.0)
+                rsi_series = rsi_series.mask(loss_zero & ~both_zero, 100.0)
+                rsi_series = rsi_series.mask(gain_zero & ~both_zero, 0.0)
+
+                df["rsi14"] = rsi_series
+            except Exception:
+                df["rsi14"] = pd.NA
 
             def safe_get(row, col):
                 try:
@@ -936,6 +970,15 @@ def _build_output_rows(
                 NDX15 = get_index_normalized_spec("^NDX", 15)
                 NDX20 = get_index_normalized_spec("^NDX", 20)
 
+                # RSI-14 t0-arvo
+                rsi14_t0 = None
+                try:
+                    rsi_val = df.iloc[idx]["rsi14"]
+                    if pd.notna(rsi_val):
+                        rsi14_t0 = float(rsi_val)
+                except Exception:
+                    rsi14_t0 = None
+
                 # Convert candle name to integer using mapping
                 candle_int = CANDLE_MAPPING.get(candle, 0)  # 0 for unknown patterns
 
@@ -947,7 +990,7 @@ def _build_output_rows(
                         return round(v, decimals)
                     return v
 
-                # Build output row with all 79 columns according to specification
+                # Build output row with all 80 columns according to specification
                 out = [
                     ticker,  # 1. osake
                     date,  # 2. date
@@ -1038,6 +1081,7 @@ def _build_output_rows(
                     fmt_val(NDX10),
                     fmt_val(NDX15),
                     fmt_val(NDX20),
+                    fmt_val(rsi14_t0),
                 ]
 
                 output_rows.append(out)

@@ -12,10 +12,41 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
     import os
     from collections import Counter
 
-    all_found = []
+    def _extract_pattern(entry):
+        value = None
+        if isinstance(entry, dict):
+            value = entry.get("pattern") or entry.get("name")
+        else:
+            value = entry
+        if value is None:
+            return ""
+        name = str(value).strip()
+        if not name:
+            return ""
+        normalized = name.replace("_", " ")
+        # jos kaikki kirjaimet pieniä, nosta otsikkotyyliin
+        if normalized.islower():
+            normalized = normalized.title()
+        return normalized
+
+    def _extract_strength(entry):
+        if isinstance(entry, dict):
+            strength = entry.get("strength")
+            if strength is not None:
+                try:
+                    return float(strength)
+                except Exception:
+                    return None
+        return None
+
+    pattern_list = []
     for pats in results.values():
-        all_found.extend(pats)
-    count = Counter(all_found)
+        for entry in pats:
+            pattern_name = _extract_pattern(entry)
+            if pattern_name:
+                pattern_list.append(pattern_name)
+
+    count = Counter(pattern_list)
 
     now = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     target = f"tickerille {ticker}" if ticker else "kaikille tickereille"
@@ -27,7 +58,7 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
         lines = [header]
         lines += [f"{k}: {v} kpl" for k, v in count.items()]
 
-        # Add CSV-style per-finding lines: ticker,date,candle
+        # Add CSV-style per-finding lines: ticker,date,candle[,signal_strength]
         csv_lines = []
         for key in sorted(results.keys()):
             # expecting key format: 'TICKER|YYYY-MM-DD' from runner
@@ -38,12 +69,19 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
                 t = ticker or ""
                 d = key
             pats = results[key]
-            for p in pats:
-                csv_lines.append(f"{t},{d},{p}")
+            for entry in pats:
+                pattern_name = _extract_pattern(entry)
+                strength = _extract_strength(entry)
+                if strength is not None:
+                    csv_lines.append(f"{t},{d},{pattern_name},{strength:.3f}")
+                else:
+                    csv_lines.append(f"{t},{d},{pattern_name}")
 
         msg_lines = lines
         msg_lines.append("")
-        msg_lines.append("Löydetyt tapahtumat (yhden rivin CSV: ticker,päivä,kuvio):")
+        msg_lines.append(
+            "Löydetyt tapahtumat (CSV: ticker,päivä,kuvio[,signal_strength]):"
+        )
         msg_lines.extend(csv_lines)
         msg = "\n".join(msg_lines)
 
@@ -107,15 +145,18 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
             if csv_path.lower().endswith(".txt.csv"):
                 csv_path = csv_path[:-4]
             with open(csv_path, "w", encoding="utf-8") as cf:
-                cf.write("ticker,date,candle\n")
+                cf.write("ticker,date,candle,signal_strength\n")
                 for key in sorted(results.keys()):
                     if "|" in key:
                         t, d = key.split("|", 1)
                     else:
                         t = ticker or ""
                         d = key
-                    for p in results[key]:
-                        cf.write(f"{t},{d},{p}\n")
+                    for entry in results[key]:
+                        pattern_name = _extract_pattern(entry)
+                        strength = _extract_strength(entry)
+                        strength_str = f"{strength:.3f}" if strength is not None else ""
+                        cf.write(f"{t},{d},{pattern_name},{strength_str}\n")
             # also log each finding as a separate log line (one finding per log row)
             try:
                 from .logger import setup_logger
@@ -127,9 +168,11 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
                     else:
                         t = ticker or ""
                         d = key
-                    for p in results[key]:
-                        # log CSV-style line so it's easy to grep/parse
-                        logger.info(f"{t},{d},{p}")
+                    for entry in results[key]:
+                        pattern_name = _extract_pattern(entry)
+                        strength = _extract_strength(entry)
+                        strength_str = f"{strength:.3f}" if strength is not None else ""
+                        logger.info(f"{t},{d},{pattern_name},{strength_str}")
             except Exception:
                 # non-fatal if logging fails
                 pass
@@ -140,16 +183,33 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
                 db_path = os.path.join(os.path.dirname(__file__), "analysis.db")
                 conn = sqlite3.connect(db_path)
                 cur = conn.cursor()
+                # Yhtenäistä skeema database_managerin kanssa
                 cur.execute(
                     """
                     CREATE TABLE IF NOT EXISTS analysis_findings (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        ticker TEXT,
-                        date TEXT,
-                        candle TEXT,
-                        UNIQUE(ticker, date, candle)
+                        ticker TEXT NOT NULL,
+                        date TEXT NOT NULL,
+                        pattern TEXT,
+                        signal_strength REAL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(ticker, date, pattern)
                     )
                 """
+                )
+                # Poista mahdolliset duplikaatit ennen uniikki-indeksin luontia
+                cur.execute(
+                    """
+                    DELETE FROM analysis_findings
+                    WHERE rowid NOT IN (
+                        SELECT MIN(rowid)
+                        FROM analysis_findings
+                        GROUP BY ticker, date, pattern
+                    )
+                    """
+                )
+                cur.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_finding ON analysis_findings(ticker, date, pattern)"
                 )
                 rows = []
                 for key in sorted(results.keys()):
@@ -158,13 +218,16 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
                     else:
                         t = ticker or ""
                         d = key
-                    for p in results[key]:
-                        # Create new format with signal_strength, price, volume, description
-                        # For now, we use default values since old format doesn't have them
-                        rows.append((t, d, p, 1.0, 0.0, 0, "Legacy finding"))
+                        # ei tietoa muista tickereistä -> fallback tickerille
+                    for entry in results[key]:
+                        pattern_name = _extract_pattern(entry)
+                        if not pattern_name:
+                            continue
+                        strength = _extract_strength(entry)
+                        rows.append((t, d, pattern_name, strength if strength is not None else 1.0))
                 if rows:
                     cur.executemany(
-                        "INSERT OR IGNORE INTO analysis_findings (ticker, date, pattern, signal_strength, price, volume, description) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        "INSERT OR REPLACE INTO analysis_findings (ticker, date, pattern, signal_strength) VALUES (?, ?, ?, ?)",
                         rows,
                     )
                     conn.commit()
@@ -176,15 +239,18 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
             try:
                 canonical_csv = os.path.join(base_dir, f"{base_name}.csv")
                 with open(canonical_csv, "w", encoding="utf-8") as bcf:
-                    bcf.write("ticker,date,candle\n")
+                    bcf.write("ticker,date,candle,signal_strength\n")
                     for key in sorted(results.keys()):
                         if "|" in key:
                             t, d = key.split("|", 1)
                         else:
                             t = ticker or ""
                             d = key
-                        for p in results[key]:
-                            bcf.write(f"{t},{d},{p}\n")
+                        for entry in results[key]:
+                            pattern_name = _extract_pattern(entry)
+                            strength = _extract_strength(entry)
+                            strength_str = f"{strength:.3f}" if strength is not None else ""
+                            bcf.write(f"{t},{d},{pattern_name},{strength_str}\n")
             except Exception:
                 pass
         except Exception:

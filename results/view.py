@@ -2,8 +2,11 @@ import datetime
 import os
 import sqlite3
 import threading
+from pathlib import Path
 
 import flet as ft
+
+from results.generate_results import _build_output_rows, _create_excel_file
 
 # Note: this module implements the whole "Tulokset" page and its handlers
 # as free functions that operate on the main app instance passed as `app`.
@@ -161,16 +164,15 @@ def create_results_view(app) -> ft.View:
         def paivita_excel_cache_click(e):
             """Päivitä Excel-tiedosto uudella optimoidulla cachellä"""
 
-            # Näytä progress-dialog
             progress_dialog = None
+            progress_title = ft.Text("Generoidaan Excel-tiedostoa")
             progress_text = ft.Text("Aloitetaan Excel-generointi...")
             progress_bar = ft.ProgressBar(width=400)
 
             try:
-                # Luo progress-dialog
                 progress_dialog = ft.AlertDialog(
                     modal=True,
-                    title=ft.Text("Generoidaan Excel-tiedostoa"),
+                    title=progress_title,
                     content=ft.Column(
                         [
                             progress_text,
@@ -183,9 +185,28 @@ def create_results_view(app) -> ft.View:
                     actions=[],
                 )
 
+                if progress_dialog not in app.page.overlay:
+                    app.page.overlay.append(progress_dialog)
                 e.page.dialog = progress_dialog
                 progress_dialog.open = True
                 e.page.update()
+
+                def close_progress_dialog():
+                    try:
+                        if progress_dialog:
+                            try:
+                                if hasattr(app, "close_dialog"):
+                                    app.close_dialog(progress_dialog)
+                                    return
+                            except Exception:
+                                pass
+                            progress_dialog.open = False
+                            if progress_dialog in e.page.overlay:
+                                e.page.overlay.remove(progress_dialog)
+                            e.page.dialog = None
+                            e.page.update()
+                    except Exception:
+                        pass
 
                 def update_progress(step: str, current: int, total: int):
                     """Päivitä progress-dialog"""
@@ -197,7 +218,7 @@ def create_results_view(app) -> ft.View:
                             else:
                                 progress_bar.value = None
                             e.page.update()
-                    except:
+                    except Exception:
                         pass
 
                 from results.excel_cache import ExcelResultsCache
@@ -205,7 +226,6 @@ def create_results_view(app) -> ft.View:
                 # Hae ticker-filtteri app-objektista
                 ticker_filter = None
                 try:
-                    # Käytä results-sivun omia kenttiä
                     ticker_mode = app.results_radio_group.value
                     ticker = (
                         app.results_ticker_field.value.strip().upper()
@@ -224,100 +244,194 @@ def create_results_view(app) -> ft.View:
                 except Exception as ex:
                     print(f"Virhe ticker-filterin lukemisessa: {ex}")
 
-                # Luo cache ja generoi Excel
-                update_progress("Käynnistetään Excel-cache", 20, 100)
-                cache = ExcelResultsCache()
+                def show_modal_message(title: str, message: str):
+                    """Näytä modaalinen dialogi tulokset-sivulla"""
+                    try:
+                        dialog = ft.AlertDialog(
+                            modal=True,
+                            title=ft.Text(title),
+                            content=ft.Text(message),
+                            actions=[
+                                ft.TextButton(
+                                    "OK",
+                                    on_click=lambda _: app.close_dialog(dialog),
+                                )
+                            ],
+                        )
+                        if dialog not in app.page.overlay:
+                            app.page.overlay.append(dialog)
+                        dialog.open = True
+                        app.page.update()
+                    except Exception as err:
+                        print(f"Dialogin näyttö epäonnistui: {err}")
 
-                update_progress("Generoidaan Excel-tiedosto", 50, 100)
-                success = cache.export_to_excel_fast(
-                    excel_path="data/results.xlsx",
+                # Varmista että ticker löytyy analysis-tietokannasta ennen jatkamista
+                if ticker_filter:
+                    try:
+                        base = Path(__file__).resolve().parents[1]
+                        analysis_db_path = base / "analysis" / "analysis.db"
+                        ticker_exists = False
+
+                        if analysis_db_path.exists():
+                            with sqlite3.connect(analysis_db_path) as conn:
+                                tables = [
+                                    row[0]
+                                    for row in conn.execute(
+                                        "SELECT name FROM sqlite_master WHERE type='table'"
+                                    ).fetchall()
+                                ]
+                                table_name = next(
+                                    (
+                                        t
+                                        for t in (
+                                            "analysis_findings",
+                                            "analysis",
+                                            "findings",
+                                            "analysis_rows",
+                                        )
+                                        if t in tables
+                                    ),
+                                    None,
+                                )
+
+                                if table_name:
+                                    info = conn.execute(
+                                        f'PRAGMA table_info("{table_name}")'
+                                    ).fetchall()
+                                    lower_cols = {col[1].lower(): col[1] for col in info}
+                                    ticker_col = (
+                                        lower_cols.get("ticker")
+                                        or lower_cols.get("osake")
+                                        or lower_cols.get("symbol")
+                                    )
+
+                                    if ticker_col:
+                                        res = conn.execute(
+                                            f'SELECT 1 FROM "{table_name}" WHERE UPPER("{ticker_col}") = ? LIMIT 1',
+                                            (ticker_filter,),
+                                        ).fetchone()
+                                        ticker_exists = res is not None
+                        if not ticker_exists:
+                            if progress_dialog and progress_dialog.open:
+                                close_progress_dialog()
+
+                            print(f"❌ Tickeri {ticker_filter} puuttuu analysis.db:stä")
+                            show_modal_message(
+                                "⚠️ Ticker puuttuu",
+                                f"Tickeriä {ticker_filter} ei löytynyt analyysidatasta.",
+                            )
+                            return
+                    except Exception as ex:
+                        print(f"Tickerin tarkistus epäonnistui: {ex}")
+                        if progress_dialog and progress_dialog.open:
+                            close_progress_dialog()
+
+                        print(
+                            f"❌ Tickerin {ticker_filter} tarkistus epäonnistui: {ex}"
+                        )
+
+                        show_modal_message(
+                            "❌ Virhe",
+                            f"Tickerin {ticker_filter} tarkistus epäonnistui. Tarkista analysis.db.",
+                        )
+                        return
+                update_progress("Haetaan analyysit", 20, 100)
+
+                base = Path(__file__).resolve().parents[1]
+                analysis_db = base / "analysis" / "analysis.db"
+                osake_db = base / "data" / "osakedata.db"
+                excel_path = base / "data" / "results.xlsx"
+
+                def fallback_progress(message, fraction):
+                    try:
+                        progress_value = min(max(fraction, 0.0), 1.0)
+                        update_progress(message, int(progress_value * 100), 100)
+                    except Exception:
+                        pass
+
+                header, output_rows = _build_output_rows(
+                    analysis_db,
+                    osake_db,
+                    downtrend_filter=False,
+                    min_decline_percent=3.0,
+                    use_ma_filter=True,
+                    use_volume_filter=False,
+                    progress_callback=fallback_progress,
                     ticker_filter=ticker_filter,
-                    progress_callback=update_progress,
                 )
 
-                # Sulje progress-dialog
-                if progress_dialog:
-                    progress_dialog.open = False
-                    e.page.update()
+                update_progress("Generoidaan Excel-tiedostoa", 80, 100)
+                success = _create_excel_file(
+                    header,
+                    output_rows,
+                    excel_path,
+                    downtrend_filter=False,
+                )
 
                 if success:
                     update_progress("Valmis!", 100, 100)
+                    progress_bar.value = 1
+                    progress_title.value = "✅ Valmis!"
+                    progress_text.value = (
+                        "Excel-tiedosto 'data/results.xlsx' päivitetty onnistuneesti.\n"
+                        "Paina OK sulkeaksesi."
+                    )
+                    progress_dialog.actions = [
+                        ft.TextButton("OK", on_click=lambda _: close_progress_dialog())
+                    ]
+                    progress_dialog.actions_alignment = ft.MainAxisAlignment.END
                     print("✅ Excel-tiedosto päivitetty onnistuneesti!")
 
-                    # Näytä onnistumisilmoitus
-                    success_dialog = ft.AlertDialog(
-                        modal=True,
-                        title=ft.Text("✅ Onnistui!"),
-                        content=ft.Text(
-                            "Excel-tiedosto 'data/results.xlsx' päivitetty onnistuneesti!\n\n"
-                            + f"Ticker-filtteri: {ticker_filter or 'Kaikki'}\n"
-                            + "Voit nyt avata tiedoston Excelissä."
-                        ),
-                        actions=[
-                            ft.TextButton(
-                                "OK",
-                                on_click=lambda _: setattr(
-                                    success_dialog, "open", False
-                                )
-                                or e.page.update(),
-                            )
-                        ],
-                    )
-                    e.page.dialog = success_dialog
-                    success_dialog.open = True
-                    e.page.update()
+                    try:
+                        progress_dialog.update()
+                    except Exception:
+                        e.page.update()
+                    else:
+                        e.page.update()
 
                 else:
                     print("❌ Excel-tiedoston päivitys epäonnistui!")
-
-                    # Näytä virhe-dialog
-                    error_dialog = ft.AlertDialog(
-                        modal=True,
-                        title=ft.Text("❌ Virhe!"),
-                        content=ft.Text(
-                            "Excel-tiedoston päivitys epäonnistui!\n\nTarkista terminaali-output lisätiedoista."
-                        ),
-                        actions=[
-                            ft.TextButton(
-                                "OK",
-                                on_click=lambda _: setattr(error_dialog, "open", False)
-                                or e.page.update(),
-                            )
-                        ],
+                    progress_title.value = "❌ Virhe"
+                    progress_text.value = (
+                        "Excel-tiedoston päivitys epäonnistui.\n"
+                        "Tarkista terminaali lisätiedoista ja paina OK sulkeaksesi."
                     )
-                    e.page.dialog = error_dialog
-                    error_dialog.open = True
-                    e.page.update()
+                    progress_bar.value = None
+                    progress_dialog.actions = [
+                        ft.TextButton("OK", on_click=lambda _: close_progress_dialog())
+                    ]
+                    progress_dialog.actions_alignment = ft.MainAxisAlignment.END
+                    try:
+                        progress_dialog.update()
+                    except Exception:
+                        e.page.update()
+                    else:
+                        e.page.update()
 
             except Exception as ex:
                 print(f"Virhe Excel-päivityksessä: {ex}")
 
                 # Sulje progress-dialog jos avoinna
                 if progress_dialog and progress_dialog.open:
-                    progress_dialog.open = False
-                    e.page.update()
-
-                # Näytä virhe-dialog
-                error_dialog = ft.AlertDialog(
-                    modal=True,
-                    title=ft.Text("❌ Kriittinen virhe!"),
-                    content=ft.Text(
-                        f"Excel-generoinnissa tapahtui virhe:\n\n{str(ex)}\n\nTarkista terminaali lisätiedoista."
-                    ),
-                    actions=[
-                        ft.TextButton(
-                            "OK",
-                            on_click=lambda _: setattr(error_dialog, "open", False)
-                            or e.page.update(),
-                        )
-                    ],
-                )
-                e.page.dialog = error_dialog
-                error_dialog.open = True
-                e.page.update()
+                    progress_title.value = "❌ Kriittinen virhe"
+                    progress_text.value = (
+                        f"Excel-generoinnissa tapahtui virhe:\n{str(ex)}\n"
+                        "Tarkista terminaali lisätietoja varten ja paina OK."
+                    )
+                    progress_bar.value = None
+                    progress_dialog.actions = [
+                        ft.TextButton("OK", on_click=lambda _: close_progress_dialog())
+                    ]
+                    progress_dialog.actions_alignment = ft.MainAxisAlignment.END
+                    try:
+                        progress_dialog.update()
+                    except Exception:
+                        e.page.update()
+                    else:
+                        e.page.update()
 
         generate_btn = ft.ElevatedButton(
-            "🚀 Päivitä Results.xlsx",
+            "🚀 Generoi tulokset",
             icon=ft.Icons.TABLE_CHART,
             bgcolor=ft.colors.GREEN_600,
             color=ft.colors.WHITE,
@@ -335,15 +449,6 @@ def create_results_view(app) -> ft.View:
             tooltip="Ei vielä käytössä",
             width=220,
         )
-    show_btn = ft.ElevatedButton(
-        "📊 Näytä Excel",
-        icon=ft.Icons.VISIBILITY,
-        bgcolor=ft.colors.BLUE_600,
-        color=ft.colors.WHITE,
-        disabled=True,
-        tooltip="Ei vielä käytössä",
-        width=220,
-    )
     app.results_banner = ft.Text(value="", color=ft.colors.BLUE_600)
 
     view = ft.View(
@@ -366,7 +471,7 @@ def create_results_view(app) -> ft.View:
                         ),
                         ft.Container(height=16),
                         ft.Row(
-                            [generate_btn, show_btn],
+                            [generate_btn],
                             alignment=ft.MainAxisAlignment.CENTER,
                             spacing=20,
                         ),
