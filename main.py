@@ -124,6 +124,20 @@ except Exception:
 
 class RawCandleApp:
 
+    def _close_dialog(self, dialog):
+        """Helper method to properly close a dialog."""
+        try:
+            dialog.open = False
+            self.page.update()
+            import time
+
+            time.sleep(0.05)
+            if dialog in self.page.overlay:
+                self.page.overlay.remove(dialog)
+            self.page.update()
+        except Exception as ex:
+            print(f"Error closing dialog: {ex}")
+
     def create_settings_view(self):
         """Palauttaa placeholder-näkymän asetuksille"""
         return ft.View(
@@ -387,12 +401,7 @@ class RawCandleApp:
             _validate_candles_events_field()
 
             def _do_generate(evt):
-                try:
-                    confirm_dlg.open = False
-                    if confirm_dlg in self.page.overlay:
-                        self.page.overlay.remove(confirm_dlg)
-                except Exception:
-                    pass
+                self._close_dialog(confirm_dlg)
 
                 # Run generator in a background thread so UI stays responsive
                 import threading
@@ -474,28 +483,69 @@ class RawCandleApp:
                             cancel_check=cancel_check,
                         )
 
-                        # Close progress dialog
+                        # Update progress dialog to show results
                         try:
-                            progress_dlg.open = False
-                            if progress_dlg in self.page.overlay:
-                                self.page.overlay.remove(progress_dlg)
-                        except Exception:
-                            pass
+                            if cancelled["value"]:
+                                result_msg = f"⚠️ Generointi keskeytetty\n\nTallennettu {inserted} tapahtumaa."
+                                result_color = ft.Colors.ORANGE_700
+                            else:
+                                result_msg = f"✅ Generointi valmis!\n\nTallennettu {inserted} laskutrenditapahtumaa tietokantaan."
+                                result_color = ft.Colors.GREEN_700
 
-                        if cancelled["value"]:
-                            msg = f"Generointi keskeytetty. Tallennettu {inserted} tapahtumaa."
-                            sb = ft.SnackBar(ft.Text(msg), bgcolor=ft.Colors.ORANGE_700)
-                        else:
+                            if errors:
+                                error_count = len(errors)
+                                result_msg += (
+                                    f"\n\nHuom: {error_count} virhettä generoinnissa."
+                                )
+
+                            def close_result_dialog(e):
+                                """Close the result dialog."""
+                                self._close_dialog(progress_dlg)
+
+                            # Change dialog to show results with OK button
+                            progress_dlg.title = ft.Text("Generointi valmis")
+                            progress_dlg.content = ft.Column(
+                                [
+                                    ft.Text(result_msg, size=16),
+                                    ft.Divider(),
+                                    ft.Text(
+                                        f"Käsitelty {num_tickers} osaketta",
+                                        size=12,
+                                        color=ft.Colors.GREY_600,
+                                    ),
+                                ],
+                                tight=True,
+                                spacing=10,
+                            )
+                            progress_dlg.actions = [
+                                ft.TextButton("OK", on_click=close_result_dialog)
+                            ]
+                            self.page.update()
+
+                            if errors:
+                                error_msg = "\n".join(errors[:5])  # Show first 5 errors
+                                if len(errors) > 5:
+                                    error_msg += (
+                                        f"\n... ja {len(errors) - 5} muuta virhettä"
+                                    )
+                                print(f"Generointiin liittyi virheitä:\n{error_msg}")
+
+                        except Exception as update_ex:
+                            print(f"Error updating result dialog: {update_ex}")
+                            # Fallback: close dialog and show snackbar
+                            try:
+                                progress_dlg.open = False
+                                if progress_dlg in self.page.overlay:
+                                    self.page.overlay.remove(progress_dlg)
+                            except Exception:
+                                pass
+
                             msg = f"Generointi valmis! Tallennettu {inserted} laskutrenditapahtumaa."
                             sb = ft.SnackBar(ft.Text(msg), bgcolor=ft.Colors.GREEN_700)
-
-                        if errors:
-                            error_msg = "\n".join(errors[:5])  # Show first 5 errors
-                            if len(errors) > 5:
-                                error_msg += (
-                                    f"\n... ja {len(errors) - 5} muuta virhettä"
-                                )
-                            print(f"Generointiin liittyi virheitä:\n{error_msg}")
+                            if sb not in self.page.overlay:
+                                self.page.overlay.append(sb)
+                            sb.open = True
+                            self.page.update()
 
                     except Exception as ex:
                         # Close progress dialog
@@ -510,14 +560,13 @@ class RawCandleApp:
                             ft.Text(f"Generointi epäonnistui: {ex}"),
                             bgcolor=ft.Colors.RED_700,
                         )
-
-                    if sb not in self.page.overlay:
-                        self.page.overlay.append(sb)
-                    sb.open = True
-                    try:
-                        self.page.update()
-                    except Exception:
-                        pass
+                        if sb not in self.page.overlay:
+                            self.page.overlay.append(sb)
+                        sb.open = True
+                        try:
+                            self.page.update()
+                        except Exception:
+                            pass
 
                 threading.Thread(target=worker, daemon=True).start()
 
@@ -534,10 +583,7 @@ class RawCandleApp:
                 actions=[
                     ft.TextButton(
                         "Peruuta",
-                        on_click=lambda evt: (
-                            setattr(confirm_dlg, "open", False),
-                            self.page.update(),
-                        ),
+                        on_click=lambda evt: self._close_dialog(confirm_dlg),
                     ),
                     ft.TextButton("Kyllä, generoi", on_click=_do_generate),
                 ],

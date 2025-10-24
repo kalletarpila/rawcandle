@@ -66,6 +66,33 @@ class AnalysisView:
         # Suodattimet
         filters = self._create_filters()
 
+        # Toimintopainikkeet
+        actions = self._create_action_buttons()
+
+        # Findings taulu
+        self.findings_table = self._create_findings_table()
+
+        # Tilastot
+        stats = self._create_statistics()
+
+        # Päivitä data
+        self.refresh_data()
+
+        return ft.Column(
+            [
+                title,
+                ft.Divider(),
+                filters,
+                ft.Divider(),
+                actions,
+                ft.Divider(),
+                stats,
+                ft.Divider(),
+                self.findings_table,
+            ],
+            spacing=20,
+        )
+
     def build(self) -> ft.Column:
         """Alias create_view:lle testejä varten"""
         return self.create_view()
@@ -126,6 +153,11 @@ class AnalysisView:
         )
 
         # (no random-event controls on Analysis view)
+        return ft.Row(
+            [self.search_field, self.pattern_filter, clear_btn],
+            spacing=10,
+            alignment=ft.MainAxisAlignment.START,
+        )
 
     # (random generation dialog and handlers removed from Analysis view)
 
@@ -217,9 +249,10 @@ class AnalysisView:
         """Päivitä data tietokannasta."""
         try:
             self.all_findings = self.db_manager.get_all_findings()
+            # Load data and then apply any active filters
             self.filtered_findings = self.all_findings.copy()
-            self._update_table()
-            self._update_statistics()
+            # Apply filters (this will update table and statistics)
+            self._apply_filters()
 
         except Exception as e:
             self.logger.error(f"Data refresh failed: {e}")
@@ -294,20 +327,46 @@ class AnalysisView:
         """Sovella suodattimet."""
         self.filtered_findings = self.all_findings.copy()
 
-        # Haku symbolilla
-        if self.search_field and self.search_field.value:
-            search_term = self.search_field.value.lower()
+        # Haku symbolilla: prefer UI control, fall back to test-set attribute
+        search_val = None
+        if self.search_field and getattr(self.search_field, "value", None):
+            search_val = self.search_field.value
+        elif hasattr(self, "selected_ticker") and self.selected_ticker:
+            search_val = self.selected_ticker
+
+        if search_val:
+            search_term = search_val.lower()
             self.filtered_findings = [
                 f
                 for f in self.filtered_findings
                 if search_term in f.get("ticker", "").lower()
             ]
 
-        # Kuviosuodatin
-        if self.pattern_filter and self.pattern_filter.value:
-            pattern = self.pattern_filter.value
+        # Kuviosuodatin: prefer UI control, fall back to test-set attribute
+        pattern_val = None
+        if self.pattern_filter and getattr(self.pattern_filter, "value", None):
+            pattern_val = self.pattern_filter.value
+        elif hasattr(self, "selected_pattern") and self.selected_pattern:
+            pattern_val = self.selected_pattern
+
+        if pattern_val:
             self.filtered_findings = [
-                f for f in self.filtered_findings if f.get("pattern") == pattern
+                f for f in self.filtered_findings if f.get("pattern") == pattern_val
+            ]
+
+        # Min strength filter (tests set min_strength)
+        min_strength = None
+        if hasattr(self, "min_strength") and self.min_strength is not None:
+            try:
+                min_strength = float(self.min_strength)
+            except Exception:
+                min_strength = None
+
+        if min_strength is not None:
+            self.filtered_findings = [
+                f
+                for f in self.filtered_findings
+                if f.get("signal_strength", 0) >= min_strength
             ]
 
         self._update_table()
