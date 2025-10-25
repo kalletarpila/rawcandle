@@ -34,7 +34,7 @@ def _calculate_relative_stdev(values: List[float]) -> Optional[float]:
         avg = mean(values)
         if avg == 0:
             return None
-    std = pstdev(values)
+        std = pstdev(values)
         return (std / avg) * 100.0
     except Exception:
         return None
@@ -919,7 +919,8 @@ def _build_output_rows(
                 t_20_10p_liukuva = calc_ma_normalized_spec(-20, 10)
                 t_20_20p_liukuva = calc_ma_normalized_spec(-20, 20)
 
-                t50_50p_liukuva = calc_ma_normalized_spec(-50, 50)
+                # t0_50p_liukuva: mean([t-49...t0]) / t0_low × 100
+                t0_50p_liukuva = calc_ma_normalized_spec(0, 50)
 
                 # Special case for t200_200p_liukuva - set to 0 if not enough data
                 # Korjattu: etsitään t0:n indeksi päivämäärän perusteella
@@ -1094,7 +1095,7 @@ def _build_output_rows(
                     fmt_val(t_20_5p_liukuva),
                     fmt_val(t_20_10p_liukuva),
                     fmt_val(t_20_20p_liukuva),
-                    fmt_val(t50_50p_liukuva),
+                    fmt_val(t0_50p_liukuva),
                     fmt_val(t200_200p_liukuva),
                     # S&P 500 index
                     fmt_val(SPX_0),

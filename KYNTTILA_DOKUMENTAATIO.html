@@ -1,0 +1,1222 @@
+<!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Kynttil&auml;kuvio-Excel Dokumentaatio</title>
+            <style>
+/* From extension vscode.github */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.vscode-dark img[src$=\#gh-light-mode-only],
+.vscode-light img[src$=\#gh-dark-mode-only],
+.vscode-high-contrast:not(.vscode-high-contrast-light) img[src$=\#gh-light-mode-only],
+.vscode-high-contrast-light img[src$=\#gh-dark-mode-only] {
+	display: none;
+}
+
+</style>
+            <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex/dist/katex.min.css">
+<link href="https://cdn.jsdelivr.net/npm/katex-copytex@latest/dist/katex-copytex.min.css" rel="stylesheet" type="text/css">
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/Microsoft/vscode/extensions/markdown-language-features/media/markdown.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/Microsoft/vscode/extensions/markdown-language-features/media/highlight.css">
+<style>
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe WPC', 'Segoe UI', system-ui, 'Ubuntu', 'Droid Sans', sans-serif;
+                font-size: 14px;
+                line-height: 1.6;
+            }
+        </style>
+        <style>
+.task-list-item {
+    list-style-type: none;
+}
+
+.task-list-item-checkbox {
+    margin-left: -20px;
+    vertical-align: middle;
+    pointer-events: none;
+}
+</style>
+<style>
+:root {
+  --color-note: #0969da;
+  --color-tip: #1a7f37;
+  --color-warning: #9a6700;
+  --color-severe: #bc4c00;
+  --color-caution: #d1242f;
+  --color-important: #8250df;
+}
+
+</style>
+<style>
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-note: #2f81f7;
+    --color-tip: #3fb950;
+    --color-warning: #d29922;
+    --color-severe: #db6d28;
+    --color-caution: #f85149;
+    --color-important: #a371f7;
+  }
+}
+
+</style>
+<style>
+.markdown-alert {
+  padding: 0.5rem 1rem;
+  margin-bottom: 16px;
+  color: inherit;
+  border-left: .25em solid #888;
+}
+
+.markdown-alert>:first-child {
+  margin-top: 0
+}
+
+.markdown-alert>:last-child {
+  margin-bottom: 0
+}
+
+.markdown-alert .markdown-alert-title {
+  display: flex;
+  font-weight: 500;
+  align-items: center;
+  line-height: 1
+}
+
+.markdown-alert .markdown-alert-title .octicon {
+  margin-right: 0.5rem;
+  display: inline-block;
+  overflow: visible !important;
+  vertical-align: text-bottom;
+  fill: currentColor;
+}
+
+.markdown-alert.markdown-alert-note {
+  border-left-color: var(--color-note);
+}
+
+.markdown-alert.markdown-alert-note .markdown-alert-title {
+  color: var(--color-note);
+}
+
+.markdown-alert.markdown-alert-important {
+  border-left-color: var(--color-important);
+}
+
+.markdown-alert.markdown-alert-important .markdown-alert-title {
+  color: var(--color-important);
+}
+
+.markdown-alert.markdown-alert-warning {
+  border-left-color: var(--color-warning);
+}
+
+.markdown-alert.markdown-alert-warning .markdown-alert-title {
+  color: var(--color-warning);
+}
+
+.markdown-alert.markdown-alert-tip {
+  border-left-color: var(--color-tip);
+}
+
+.markdown-alert.markdown-alert-tip .markdown-alert-title {
+  color: var(--color-tip);
+}
+
+.markdown-alert.markdown-alert-caution {
+  border-left-color: var(--color-caution);
+}
+
+.markdown-alert.markdown-alert-caution .markdown-alert-title {
+  color: var(--color-caution);
+}
+
+</style>
+        
+        </head>
+        <body class="vscode-body vscode-light">
+            <h1 id="kynttiläkuvio-excel-dokumentaatio">Kynttiläkuvio-Excel Dokumentaatio</h1>
+<p><strong>Versio:</strong> 1.0<br>
+<strong>Päivämäärä:</strong> 25.10.2025<br>
+<strong>Tekijä:</strong> Rawcandle-järjestelmä</p>
+<hr>
+<h2 id="1-johdanto">1. Johdanto</h2>
+<p>Tämä dokumentaatio selittää <strong>kynttiläkuvio-Excel-tiedoston</strong> sisällön, sarakkeiden merkityksen ja laskentalogiikan. Excel-tiedosto sisältää teknisen analyysin indikaattoreita ja historiadataa osakkeiden kynttiläkuvioiden tunnistamiseen perustuen.</p>
+<p><strong>Tiedoston tarkoitus:</strong></p>
+<ul>
+<li>Tunnistaa tietyt kynttiläkuviot (Hammer, Doji, Shooting Star, Engulfing)</li>
+<li>Laskea signaalin vahvuus kullekin kuviolle</li>
+<li>Tarjota historiallista ja tulevaa hintadataa normalisoituna (t₀ = 100)</li>
+<li>Tarjota volatiliteetti-, volyymi-, liukuvan keskiarvon ja indeksitietoja analyysiä varten</li>
+</ul>
+<hr>
+<h2 id="2-kynttiläkuviot-ja-numerokoodit">2. Kynttiläkuviot ja Numerokoodit</h2>
+<p>Järjestelmä tunnistaa seuraavat <strong>kynttiläkuviot</strong> (Pattern) ja niiden numerokoodit:</p>
+<table>
+<thead>
+<tr>
+<th>Numerokoodi</th>
+<th>Kuvion nimi</th>
+<th>Lyhyt kuvaus</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td><strong>Laskutrendi</strong></td>
+<td>Arvottu osake arvottuna päivänä laskutrendin aikana (suodatettu)</td>
+</tr>
+<tr>
+<td>1</td>
+<td><strong>Hammer</strong></td>
+<td>Nousevan trendin kääntymiskuvio, pitkä alavarjo, pieni runko</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>Bullish Engulfing</strong></td>
+<td>Bullish Engulfing, nykyinen kynttilä &quot;nielee&quot; edellisen laskeva kynttilän</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>Piercing Pattern</strong></td>
+<td>Nousevan kääntymisen kuvio, toinen kynttilä sulkeutuu edellisen rungon yläpuolelle</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>Three White Soldiers</strong></td>
+<td>Kolme peräkkäistä nousevaa kynttilää, vahva noususignaali</td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>Morning Star</strong></td>
+<td>Kolmen kynttilän nouseva kääntymiskuvio (laskeva → doji → nouseva)</td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong>Dragonfly Doji</strong></td>
+<td>Doji-muunnelma, pitkä alavarjo, ei ylävarjoa</td>
+</tr>
+</tbody>
+</table>
+<p><strong>HUOM:</strong> Numerokoodi <strong>0</strong> käytetään kun:</p>
+<ul>
+<li>Laskutrendi-suodatin on käytössä ja osake täyttää laskutrendin kriteerit</li>
+<li>Kynttilä ei kuulu mihinkään tunnettuun kuvioon (tuntematon pattern)</li>
+</ul>
+<h3 id="21-kynttiläkuvioiden-tunnistuslogiikka">2.1 Kynttiläkuvioiden tunnistuslogiikka</h3>
+<p><strong>HUOM:</strong> Kynttiläkuvioiden tunnistus tapahtuu analysis-moduulissa. Alla esimerkkejä tärkeimmistä kuvioista.</p>
+<h4 id="hammer-numerokoodi-1"><strong>Hammer</strong> (Numerokoodi 1)</h4>
+<ul>
+<li>
+<p><strong>Tunnistus:</strong></p>
+<ul>
+<li>Pitkä alavarjo (lower shadow): <code>alavarjo ≥ 2 × runko</code></li>
+<li>Lyhyt ylävarjo (upper shadow): <code>ylävarjo ≤ 0.5 × runko</code></li>
+<li>Pieni runko verrattuna koko kynttiläkuvioon</li>
+</ul>
+</li>
+<li>
+<p><strong>Merkitys:</strong><br>
+Hammer-kuvio voi merkitä <strong>nousevan trendin alkua</strong> tai laskutrendin kääntymistä, erityisesti kun se esiintyy laskevan trendin jälkeen. Kuvio kertoo ostajien vahvasta paluusta.</p>
+</li>
+<li>
+<p><strong>Kuinka tulkita:</strong></p>
+<ul>
+<li>Vahva signaali (lähellä 1.0) tarkoittaa, että alavarjo on huomattavan pitkä ja runko pieni → vahva ostopaine päivän lopussa</li>
+<li>Heikko signaali (lähellä 0.0) tarkoittaa, että kuvio on vain hiukan Hammerin muotoinen</li>
+</ul>
+</li>
+</ul>
+<h4 id="bullish-engulfing-numerokoodi-2"><strong>Bullish Engulfing</strong> (Numerokoodi 2)</h4>
+<ul>
+<li>
+<p><strong>Tunnistus:</strong></p>
+<ul>
+<li>Edellinen kynttilä laskeva (close &lt; open)</li>
+<li>Nykyinen kynttilä nouseva ja &quot;nielee&quot; edellisen</li>
+<li>Nykyinen open &lt; edellinen close JA nykyinen close &gt; edellinen open</li>
+</ul>
+</li>
+<li>
+<p><strong>Merkitys:</strong><br>
+Bullish Engulfing kuvaa <strong>voimakasta nousevan trendin alkua</strong>. Ostajat ottavat selkeän vallan myyjiltä.</p>
+</li>
+</ul>
+<h4 id="morning-star-numerokoodi-5"><strong>Morning Star</strong> (Numerokoodi 5)</h4>
+<ul>
+<li>
+<p><strong>Tunnistus:</strong></p>
+<ul>
+<li>Kolmen kynttilän kuvio</li>
+<li>
+<ol>
+<li>kynttilä: laskeva (pitkä punainen)</li>
+</ol>
+</li>
+<li>
+<ol start="2">
+<li>kynttilä: pieni runko (Doji tai lyhyt kynttilä)</li>
+</ol>
+</li>
+<li>
+<ol start="3">
+<li>kynttilä: nouseva (pitkä vihreä)</li>
+</ol>
+</li>
+</ul>
+</li>
+<li>
+<p><strong>Merkitys:</strong><br>
+Morning Star on vahva <strong>kääntymissignaali laskutrendistä nousutrendiin</strong>.</p>
+</li>
+</ul>
+<h4 id="dragonfly-doji-numerokoodi-6"><strong>Dragonfly Doji</strong> (Numerokoodi 6)</h4>
+<ul>
+<li>
+<p><strong>Tunnistus:</strong></p>
+<ul>
+<li>Hyvin pieni runko (avaus ≈ päätös ≈ ylin)</li>
+<li>Pitkä alavarjo</li>
+<li>Ei käytännössä ylävarjoa</li>
+</ul>
+</li>
+<li>
+<p><strong>Merkitys:</strong><br>
+Dragonfly Doji viittaa mahdolliseen <strong>nousevaan kääntymiseen</strong>. Myyjät painoivat hintaa alas, mutta ostajat nostivat sen takaisin.</p>
+</li>
+</ul>
+<hr>
+<h2 id="3-signaalin-vahvuus-signal-strength">3. Signaalin Vahvuus (Signal Strength)</h2>
+<p>Järjestelmä laskee jokaiselle tunnistetulle kynttiläkuviolle <strong>signaalin vahvuuden</strong> välillä <strong>0.0 – 1.0</strong>. Vahvuus kuvaa, kuinka hyvin kuvio vastaa ideaalia muotoa ja kuinka luotettavana sitä voidaan pitää.</p>
+<h3 id="31-signaalin-vahvuuden-laskentasäännöt-kuvioperusteisesti">3.1 Signaalin vahvuuden laskentasäännöt kuvioperusteisesti</h3>
+<h4 id="hammer--signaalin-vahvuus"><strong>Hammer</strong> – Signaalin vahvuus</h4>
+<ul>
+<li>
+<p><strong>Peruskaava:</strong><br>
+<code>vahvuus = min(0.9, (alavarjon pituus / rungon koko) / 3.0)</code></p>
+</li>
+<li>
+<p><strong>Selitys:</strong><br>
+Mitä pidempi alavarjo suhteessa runkoon, sitä vahvempi signaali. Jos alavarjo on yli 3× runko, vahvuus on lähes maksimi (0.9).</p>
+</li>
+<li>
+<p><strong>Tulkinta:</strong></p>
+<ul>
+<li><strong>Vahva signaali (0.7–1.0):</strong> Alakaarjo selvästi pitkä, runko pieni → luotettava Hammer</li>
+<li><strong>Keskivahva (0.5–0.7):</strong> Alakaarjo kohtalaisen pitkä</li>
+<li><strong>Heikko (0.0–0.5):</strong> Vain osittain Hammer-muotoinen, kuvio epävarma</li>
+</ul>
+</li>
+</ul>
+<h4 id="muut-kuviot--signaalin-vahvuus"><strong>Muut kuviot</strong> – Signaalin vahvuus</h4>
+<p>Muiden kynttiläkuvioiden (Bullish Engulfing, Piercing Pattern, Three White Soldiers, Morning Star, Dragonfly Doji) signaalin vahvuus lasketaan analysis-moduulissa kuviokohtaisten sääntöjen mukaan.</p>
+<p><strong>Yleinen periaate:</strong></p>
+<ul>
+<li>Vahvuus 0.7–1.0 = vahva signaali</li>
+<li>Vahvuus 0.5–0.7 = keskivahva signaali</li>
+<li>Vahvuus 0.0–0.5 = heikko signaali</li>
+</ul>
+<h2 id="4-excel-sarakkeet-ja-niiden-laskentalogiikka">4. Excel-sarakkeet ja niiden laskentalogiikka</h2>
+<p>Excel-tiedostossa on yhteensä <strong>80 saraketta</strong>. Alla on lista sarakkeiden nimistä, numerosta, merkityksestä ja laskentasäännöstä.</p>
+<h3 id="41-perustiedot-sarakkeet-14">4.1 Perustiedot (sarakkeet 1–4)</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Sarake</th>
+<th>Merkitys</th>
+<th>Laskenta/Lähde</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>osake</strong></td>
+<td>Osakkeen tunniste (ticker)</td>
+<td>Haetaan analysis-tietokannasta</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>date</strong></td>
+<td>Kynttiläpäivän päivämäärä (t₀)</td>
+<td>Haetaan analysis-tietokannasta</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>kynttilä</strong></td>
+<td>Kynttiläkuvion nimi (Hammer, Doji, ...)</td>
+<td>Tunnistettu kuvio analysis-tietokannasta</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>vahvuus</strong></td>
+<td>Signaalin vahvuus 0.0–1.0</td>
+<td>Laskettu <code>calculate_signal_strength()</code></td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h3 id="42-kynttiläkomponentit-sarakkeet-516">4.2 Kynttiläkomponentit (sarakkeet 5–16)</h3>
+<p>Kaikki kynttiläkomponentit ovat <strong>normalisoitu</strong> siten, että <strong>t₀ alin hinta = 100</strong>.</p>
+<p><strong>HUOM:</strong> <strong>bodi</strong> tarkoittaa <strong>kynttilän rungon kokoa prosentteina</strong> koko kynttilän vaihteluvälistä (high - low), <strong>EI päätöskurssia</strong>.</p>
+<p><strong>Bodi-laskenta:</strong></p>
+<pre><code>candle_range = high - low
+body_size = |close - open|
+bodi (%) = (body_size / candle_range) × 100
+</code></pre>
+<p>Eli:</p>
+<ul>
+<li><strong>bodi = 0%</strong> → Doji-tyyppinen kynttilä (avaus ≈ päätös)</li>
+<li><strong>bodi = 100%</strong> → Täysin runkoa, ei lainkaan varjoja (low = open JA high = close, tai päinvastoin)</li>
+<li><strong>bodi = 50%</strong> → Runko on puolet kynttilän kokonaispituudesta</li>
+</ul>
+<h4 id="päivän-t-edellinen-päivä"><strong>Päivän t₋₁</strong> (edellinen päivä)</h4>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Sarake</th>
+<th>Merkitys</th>
+<th>Laskenta</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>5</td>
+<td><strong>t_1_alin</strong></td>
+<td>t₋₁ alin hinta (normalisoitu)</td>
+<td><code>(low_t-1 / t0_low) × 100</code></td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong>t_1_ylin</strong></td>
+<td>t₋₁ ylin hinta (normalisoitu)</td>
+<td><code>(high_t-1 / t0_low) × 100</code></td>
+</tr>
+<tr>
+<td>7</td>
+<td><strong>t_1_bodi</strong></td>
+<td>t₋₁ rungon koko (% kynttilästä)</td>
+<td>`(</td>
+</tr>
+<tr>
+<td>8</td>
+<td><strong>t_1_bodi_colour</strong></td>
+<td>t₋₁ kynttilän väri</td>
+<td><code>1</code> jos nouseva (close &gt; open), <code>0</code> jos laskeva</td>
+</tr>
+</tbody>
+</table>
+<h4 id="päivän-t-tarkastelupäivä-kuviopäivä"><strong>Päivän t₀</strong> (tarkastelupäivä, kuviopäivä)</h4>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Sarake</th>
+<th>Merkitys</th>
+<th>Laskenta</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>9</td>
+<td><strong>t0_alin</strong></td>
+<td>t₀ alin hinta (normalisoitu)</td>
+<td><strong>Aina 100</strong> (normalisointiperusta)</td>
+</tr>
+<tr>
+<td>10</td>
+<td><strong>t0_ylin</strong></td>
+<td>t₀ ylin hinta (normalisoitu)</td>
+<td><code>(high_t0 / t0_low) × 100</code></td>
+</tr>
+<tr>
+<td>11</td>
+<td><strong>t0_bodi</strong></td>
+<td>t₀ rungon koko (% kynttilästä)</td>
+<td>`(</td>
+</tr>
+<tr>
+<td>12</td>
+<td><strong>t0_bodi_colour</strong></td>
+<td>t₀ kynttilän väri</td>
+<td><code>1</code> nouseva (close &gt; open), <code>0</code> laskeva</td>
+</tr>
+</tbody>
+</table>
+<h4 id="päivän-t-seuraava-päivä"><strong>Päivän t₁</strong> (seuraava päivä)</h4>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Sarake</th>
+<th>Merkitys</th>
+<th>Laskenta</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>13</td>
+<td><strong>t1_alin</strong></td>
+<td>t₁ alin hinta (normalisoitu)</td>
+<td><code>(low_t1 / t0_low) × 100</code></td>
+</tr>
+<tr>
+<td>14</td>
+<td><strong>t1_ylin</strong></td>
+<td>t₁ ylin hinta (normalisoitu)</td>
+<td><code>(high_t1 / t0_low) × 100</code></td>
+</tr>
+<tr>
+<td>15</td>
+<td><strong>t1_bodi</strong></td>
+<td>t₁ rungon koko (% kynttilästä)</td>
+<td>`(</td>
+</tr>
+<tr>
+<td>16</td>
+<td><strong>t1_bodi_colour</strong></td>
+<td>t₁ kynttilän väri</td>
+<td><code>1</code> nouseva (close &gt; open), <code>0</code> laskeva</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h3 id="43-historialliset-päätöskurssit-sarakkeet-1721">4.3 Historialliset päätöskurssit (sarakkeet 17–21)</h3>
+<p>Kaikki normalisoitu t₀ alin hintaan (t₀ = 100).</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Sarake</th>
+<th>Merkitys</th>
+<th>Laskenta</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>17</td>
+<td><strong>t_2</strong></td>
+<td>Päätöskurssi 2 päivää ennen t₀</td>
+<td><code>(close_t-2 / t0_low) × 100</code></td>
+</tr>
+<tr>
+<td>18</td>
+<td><strong>t_5</strong></td>
+<td>Päätöskurssi 5 päivää ennen t₀</td>
+<td><code>(close_t-5 / t0_low) × 100</code></td>
+</tr>
+<tr>
+<td>19</td>
+<td><strong>t_10</strong></td>
+<td>Päätöskurssi 10 päivää ennen t₀</td>
+<td><code>(close_t-10 / t0_low) × 100</code></td>
+</tr>
+<tr>
+<td>20</td>
+<td><strong>t_15</strong></td>
+<td>Päätöskurssi 15 päivää ennen t₀</td>
+<td><code>(close_t-15 / t0_low) × 100</code></td>
+</tr>
+<tr>
+<td>21</td>
+<td><strong>t_20</strong></td>
+<td>Päätöskurssi 20 päivää ennen t₀</td>
+<td><code>(close_t-20 / t0_low) × 100</code></td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h3 id="44-volatiliteetti-sarakkeet-2226">4.4 Volatiliteetti (sarakkeet 22–26)</h3>
+<p>Volatiliteetti mitataan <strong>standardipoikkeamana</strong> päätöskurssien normalisoiduista arvoista taaksepäin katsottuna (HUOM: EI sisällä t₀-päivää, vaan vain t0:aa edeltävät päivät). Normalisointi: jokainen arvo on (close_t-i / low_t0) * 100.</p>
+<p><strong>HUOM:</strong> Volatiliteetti lasketaan normalisoiduista arvoista: jokainen arvo on (close_t-i / low_t0) * 100. Lopputulos on näiden arvojen standardipoikkeama (ei valuuttayksikköä, vaan prosenttipohjainen hajonta).</p>
+<h4 id="laskentasääntö">Laskentasääntö</h4>
+<p>Volatiliteetti lasketaan käyttäen <strong>Pythonin <code>statistics.pstdev</code>-funktiota</strong>, joka laskee <strong>populaation standardipoikkeaman</strong> (population standard deviation):</p>
+<p class="katex-block"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>σ</mi><mo>=</mo><msqrt><mrow><mfrac><mn>1</mn><mi>n</mi></mfrac><munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>n</mi></munderover><mo stretchy="false">(</mo><msub><mi>x</mi><mi>i</mi></msub><mo>−</mo><mover accent="true"><mi>x</mi><mo>ˉ</mo></mover><msup><mo stretchy="false">)</mo><mn>2</mn></msup></mrow></msqrt></mrow><annotation encoding="application/x-tex">\sigma = \sqrt{\frac{1}{n} \sum_{i=1}^{n} (x_i - \bar{x})^2}
+</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3.1568em;vertical-align:-1.2777em;"></span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.8791em;"><span class="svg-align" style="top:-5.1168em;"><span class="pstrut" style="height:5.1168em;"></span><span class="mord" style="padding-left:1.056em;"><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3214em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal">n</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.686em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.6514em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mrel mtight">=</span><span class="mord mtight">1</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span><span style="top:-4.3em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">n</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.2777em;"><span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.5678em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">x</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.2222em;"><span class="mord">ˉ</span></span></span></span></span></span></span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7401em;"><span style="top:-2.989em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span></span></span><span style="top:-3.8391em;"><span class="pstrut" style="height:5.1168em;"></span><span class="hide-tail" style="min-width:0.742em;height:3.1968em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="3.1968em" viewBox="0 0 400000 3196" preserveAspectRatio="xMinYMin slice"><path d="M702 80H40000040
+H742v3062l-4 4-4 4c-.667.7 -2 1.5-4 2.5s-4.167 1.833-6.5 2.5-5.5 1-9.5 1
+h-12l-28-84c-16.667-52-96.667 -294.333-240-727l-212 -643 -85 170
+c-4-3.333-8.333-7.667-13 -13l-13-13l77-155 77-156c66 199.333 139 419.667
+219 661 l218 661zM702 80H400000v40H742z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.2777em;"><span></span></span></span></span></span></span></span></span></span></p>
+<p>jossa:</p>
+<ul>
+<li><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi></mrow><annotation encoding="application/x-tex">n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span> = päivien lukumäärä (esim. 2, 5, 10, 15 tai 20)</li>
+<li><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>x</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">x_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span> = normalisoitu päätöskurssi päivänä <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>i</mi></mrow><annotation encoding="application/x-tex">i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6595em;"></span><span class="mord mathnormal">i</span></span></span></span> (eli <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mi>c</mi><mi>l</mi><mi>o</mi><mi>s</mi><msub><mi>e</mi><mrow><mi>t</mi><mo>−</mo><mi>i</mi></mrow></msub><mi mathvariant="normal">/</mi><mi>l</mi><mi>o</mi><msub><mi>w</mi><mrow><mi>t</mi><mn>0</mn></mrow></msub><mo stretchy="false">)</mo><mo>∗</mo><mn>100</mn></mrow><annotation encoding="application/x-tex">(close_{t-i}/low_{t0})*100</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord mathnormal">c</span><span class="mord mathnormal" style="margin-right:0.01968em;">l</span><span class="mord mathnormal">os</span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">−</span><span class="mord mathnormal mtight">i</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mord">/</span><span class="mord mathnormal" style="margin-right:0.01968em;">l</span><span class="mord mathnormal">o</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mord mtight">0</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">∗</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">100</span></span></span></span>)</li>
+<li><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mover accent="true"><mi>x</mi><mo>ˉ</mo></mover></mrow><annotation encoding="application/x-tex">\bar{x}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5678em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.5678em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">x</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.2222em;"><span class="mord">ˉ</span></span></span></span></span></span></span></span></span></span> = normalisoitujen päätöskurssien keskiarvo</li>
+</ul>
+<p><strong>HUOM:</strong> Käytetään populaatiohajontaa (n jakajana, ei n−1). Tämä antaa hieman pienemmän arvon kuin otoshajonta.</p>
+<p><strong>Laskentajakso:</strong></p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Sarake</th>
+<th>Merkitys</th>
+<th>Laskenta</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>22</td>
+<td><strong>t_2_hajonta</strong></td>
+<td>Volatiliteetti 2 päivän ajalta</td>
+<td><code>pstdev([(close_t-2/low_t0)*100, (close_t-1/low_t0)*100])</code></td>
+</tr>
+<tr>
+<td>23</td>
+<td><strong>t_5_hajonta</strong></td>
+<td>Volatiliteetti 5 päivän ajalta</td>
+<td><code>pstdev([(close_t-5/low_t0)*100, ..., (close_t-1/low_t0)*100])</code></td>
+</tr>
+<tr>
+<td>24</td>
+<td><strong>t_10_hajonta</strong></td>
+<td>Volatiliteetti 10 päivän ajalta</td>
+<td><code>pstdev([(close_t-10/low_t0)*100, ..., (close_t-1/low_t0)*100])</code></td>
+</tr>
+<tr>
+<td>25</td>
+<td><strong>t_15_hajonta</strong></td>
+<td>Volatiliteetti 15 päivän ajalta</td>
+<td><code>pstdev([(close_t-15/low_t0)*100, ..., (close_t-1/low_t0)*100])</code></td>
+</tr>
+<tr>
+<td>26</td>
+<td><strong>t_20_hajonta</strong></td>
+<td>Volatiliteetti 20 päivän ajalta</td>
+<td><code>pstdev([(close_t-20/low_t0)*100, ..., (close_t-1/low_t0)*100])</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Tulkinta:</strong></p>
+<ul>
+<li><strong>Korkea volatiliteetti:</strong> Osakkeen hinta vaihtelee voimakkaasti → suurempi riski ja mahdollisuus</li>
+<li><strong>Matala volatiliteetti:</strong> Osakkeen hinta pysyy vakaana → vähemmän volatiliteettia, vähemmän riskiä</li>
+</ul>
+<hr>
+<h3 id="45-tulevat-päätöskurssit-sarakkeet-2730">4.5 Tulevat päätöskurssit (sarakkeet 27–30)</h3>
+<p>Normalisoitu t₀ alin hintaan (t₀ = 100).</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Sarake</th>
+<th>Merkitys</th>
+<th>Laskenta</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>27</td>
+<td><strong>t2</strong></td>
+<td>Päätöskurssi 2 päivää t₀:n jälkeen</td>
+<td><code>(close_t+2 / t0_low) × 100</code></td>
+</tr>
+<tr>
+<td>28</td>
+<td><strong>t5</strong></td>
+<td>Päätöskurssi 5 päivää t₀:n jälkeen</td>
+<td><code>(close_t+5 / t0_low) × 100</code></td>
+</tr>
+<tr>
+<td>29</td>
+<td><strong>t10</strong></td>
+<td>Päätöskurssi 10 päivää t₀:n jälkeen</td>
+<td><code>(close_t+10 / t0_low) × 100</code></td>
+</tr>
+<tr>
+<td>30</td>
+<td><strong>t20</strong></td>
+<td>Päätöskurssi 20 päivää t₀:n jälkeen</td>
+<td><code>(close_t+20 / t0_low) × 100</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Käyttö:</strong> Nämä sarakkeet mahdollistavat kynttiläkuvion <strong>ennustearvon tarkistamisen</strong>: jos esim. t₀ oli Hammer (ostosignaali), voidaan tarkistaa nousiko hinta seuraavien 2–20 päivän aikana.</p>
+<hr>
+<h2 id="47-laskutrendi-suodattimet">4.7 Laskutrendi-suodattimet</h2>
+<p>Tulosten generoinnissa voidaan käyttää <strong>laskutrendi-suodattimia</strong>, jotka rajaavat tuloksia vain sellaisiin kynttilöihin, jotka esiintyvät laskutrendin aikana. Tämä on hyödyllistä erityisesti nousevien kääntymiskuvioiden (kuten Hammer) analysoinnissa.</p>
+<h3 id="471-suodattimen-parametrit">4.7.1 Suodattimen parametrit</h3>
+<table>
+<thead>
+<tr>
+<th>Parametri</th>
+<th>Oletusarvo</th>
+<th>Kuvaus</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>downtrend_filter</code></td>
+<td><code>False</code></td>
+<td>Jos <code>True</code>, suodatetaan vain laskutrendien kynttilät</td>
+</tr>
+<tr>
+<td><code>min_decline_percent</code></td>
+<td><code>3.0</code></td>
+<td>Minimalasku prosentteina 10 päivän ajalta</td>
+</tr>
+<tr>
+<td><code>use_ma_filter</code></td>
+<td><code>True</code></td>
+<td>Käytetäänkö liukuva keskiarvo -suodatinta</td>
+</tr>
+<tr>
+<td><code>use_volume_filter</code></td>
+<td><code>False</code></td>
+<td>Käytetäänkö volyymi-suodatinta</td>
+</tr>
+</tbody>
+</table>
+<h3 id="472-laskutrendin-tunnistuskriteerit">4.7.2 Laskutrendin tunnistuskriteerit</h3>
+<p>Kynttilä luokitellaan laskutrendiin kuuluvaksi, jos <strong>kaikki</strong> seuraavat ehdot täyttyvät:</p>
+<h4 id="1-peruskriteeri-porrastava-lasku">1. Peruskriteeri: Porrastava lasku</h4>
+<ul>
+<li><strong>t₋₁₀ &gt; t₋₅ &gt; t₋₂ &gt; t₀</strong></li>
+<li>Eli hinnan tulee laskea johdonmukaisesti ilman merkittäviä nousupiikkejä</li>
+</ul>
+<h4 id="2-minimalasku">2. Minimalasku</h4>
+<ul>
+<li><strong>Laskuprosentti ≥ <code>min_decline_percent</code></strong> (oletuksena 3%)</li>
+<li>Lasketaan: <code>((t₋₁₀ - t₀) / t₋₁₀) × 100</code></li>
+<li>Esimerkki: Jos t₋₁₀ = 100 ja t₀ = 96, lasku = 4% ✅</li>
+</ul>
+<h4 id="3-liukuva-keskiarvo--suodatin-jos-use_ma_filter--true">3. Liukuva keskiarvo -suodatin (jos <code>use_ma_filter = True</code>)</h4>
+<p>Tarkistetaan kaksi ehtoa:</p>
+<ul>
+<li><strong>t₀ &lt; MA(10)</strong> — Nykyinen hinta on alle 10 päivän liukuvan keskiarvon</li>
+<li><strong>MA(5) &lt; MA(10)</strong> — Lyhyempi liukuva keskiarvo on alle pidemmän (vahvistaa laskutrendin)</li>
+</ul>
+<h4 id="4-volyymi-suodatin-jos-use_volume_filter--true">4. Volyymi-suodatin (jos <code>use_volume_filter = True</code>)</h4>
+<ul>
+<li><strong>Viimeisen 5 päivän keskivolyymi &gt; historiallinen keskivolyymi (20 päivää)</strong></li>
+<li>Varmistaa, että lasku tapahtuu korkealla volyymilla (ei pelkkä hiljaisuus)</li>
+<li>Historiallinen volyymi lasketaan päivistä t₋₂₅ ... t₋₅</li>
+</ul>
+<h3 id="473-käyttöesimerkki">4.7.3 Käyttöesimerkki</h3>
+<p>Jos <code>downtrend_filter = True</code>:</p>
+<ul>
+<li>Numerokoodi <strong>0</strong> annetaan kynttilöille, jotka täyttävät laskutrendin kriteerit</li>
+<li>Muut kynttilät (jotka eivät ole laskutrendissä) suodatetaan pois tuloksista</li>
+<li>Tämä auttaa löytämään <strong>kääntymissignaaleja laskutrendin pohjalta</strong></li>
+</ul>
+<p><strong>Tulkinta:</strong></p>
+<ul>
+<li><strong>Hammer laskutrendissä</strong> (koodi 1 + laskutrendi-suodatin täyttyy) = vahva ostosignaali</li>
+<li><strong>Morning Star laskutrendissä</strong> (koodi 5) = kääntyminen nousuun todennäköisempää</li>
+</ul>
+<hr>
+<h2 id="48-volyymit-sarakkeet-3140">4.8 Volyymit (sarakkeet 31–40)</h2>
+<p>Volyymidata sisältää sekä <strong>historialliset</strong> että <strong>tulevat volyymisuhdeluvut prosentteina</strong>.</p>
+<p><strong>HUOM:</strong> Volyymit <strong>EI ole absoluuttisia arvoja</strong>, vaan <strong>prosentteja</strong> verrattuna <strong>100 päivän keskiarvoon</strong> (päättyen t₋₁:een).</p>
+<h4 id="laskentalogiikka">Laskentalogiikka</h4>
+<p>Kaikki volyymisarakkeet lasketaan seuraavasti:</p>
+<ol>
+<li><strong>Jakson keskiarvo</strong>: Lasketaan volyymin keskiarvo tietyllä jaksolla</li>
+<li><strong>100 päivän vertailukeskiarvo</strong>: Lasketaan 100 päivän volyymien keskiarvo <strong>päättyen t₋₁:een</strong> (ei sisällä t₀)</li>
+<li><strong>Prosenttiluku</strong>: Jakson keskiarvo jaetaan 100 päivän keskiarvolla ja kerrotaan 100:lla</li>
+</ol>
+<p><strong>Tulkinta:</strong></p>
+<ul>
+<li><strong>Arvo 100</strong> = jakson volyymi on sama kuin 100 päivän keskiarvo</li>
+<li><strong>Arvo &gt; 100</strong> = jakson volyymi ylittää 100 päivän keskiarvon (esim. 150 = 150%)</li>
+<li><strong>Arvo &lt; 100</strong> = jakson volyymi alittaa 100 päivän keskiarvon (esim. 80 = 80%)</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Sarake</th>
+<th>Merkitys</th>
+<th>Laskenta</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>31</td>
+<td><strong>t_2_volyymi</strong></td>
+<td>Volyymisuhde t₋₂...t₋₁ jaksolla</td>
+<td><code>mean([vol_t-2, vol_t-1]) / 100d_avg</code></td>
+</tr>
+<tr>
+<td>32</td>
+<td><strong>t_5_volyymi</strong></td>
+<td>Volyymisuhde t₋₅...t₋₁ jaksolla</td>
+<td><code>mean([vol_t-5...vol_t-1]) / 100d_avg</code></td>
+</tr>
+<tr>
+<td>33</td>
+<td><strong>t_10_volyymi</strong></td>
+<td>Volyymisuhde t₋₁₀...t₋₁ jaksolla</td>
+<td><code>mean([vol_t-10...vol_t-1]) / 100d_avg</code></td>
+</tr>
+<tr>
+<td>34</td>
+<td><strong>t_15_volyymi</strong></td>
+<td>Volyymisuhde t₋₁₅...t₋₁ jaksolla</td>
+<td><code>mean([vol_t-15...vol_t-1]) / 100d_avg</code></td>
+</tr>
+<tr>
+<td>35</td>
+<td><strong>t_20_volyymi</strong></td>
+<td>Volyymisuhde t₋₂₀...t₋₁ jaksolla</td>
+<td><code>mean([vol_t-20...vol_t-1]) / 100d_avg</code></td>
+</tr>
+<tr>
+<td>36</td>
+<td><strong>t0_volyymi</strong></td>
+<td>Volyymisuhde t₀ (yksittäinen päivä)</td>
+<td><code>vol_t0 / 100d_avg</code></td>
+</tr>
+<tr>
+<td>37</td>
+<td><strong>t2_volyymi</strong></td>
+<td>Volyymisuhde t₊₁...t₊₂ jaksolla</td>
+<td><code>mean([vol_t+1, vol_t+2]) / 100d_avg</code></td>
+</tr>
+<tr>
+<td>38</td>
+<td><strong>t5_volyymi</strong></td>
+<td>Volyymisuhde t₊₁...t₊₅ jaksolla</td>
+<td><code>mean([vol_t+1...vol_t+5]) / 100d_avg</code></td>
+</tr>
+<tr>
+<td>39</td>
+<td><strong>t10_volyymi</strong></td>
+<td>Volyymisuhde t₊₁...t₊₁₀ jaksolla</td>
+<td><code>mean([vol_t+1...vol_t+10]) / 100d_avg</code></td>
+</tr>
+<tr>
+<td>40</td>
+<td><strong>t20_volyymi</strong></td>
+<td>Volyymisuhde t₊₁...t₊₂₀ jaksolla</td>
+<td><code>mean([vol_t+1...vol_t+20]) / 100d_avg</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>HUOM:</strong> 100 päivän keskiarvo lasketaan <strong>aina samalla tavalla</strong> kaikille sarakkeille: päättyen t₋₁:een, joten se ei sisällä t₀ eikä tulevia päiviä.</p>
+<hr>
+<h2 id="49-liukuvat-keskiarvot-sarakkeet-4157">4.9 Liukuvat keskiarvot (sarakkeet 41–57)</h2>
+<p>Liukuvat keskiarvot (sarakkeet 41–55) lasketaan <strong>aina t₀-päivää edeltävältä ajanjaksolta</strong>, eikä t₀-päivää oteta mukaan.</p>
+<p><strong>Laskentalogiikka (esim. t₂_5p_liukuva):</strong></p>
+<ul>
+<li>Ajanhetki: t₊₂ (eli 2 päivää t₀:n jälkeen)</li>
+<li>Keskiarvon pituus: 5 päivää</li>
+<li>Lasketaan: <code>mean([close_t-2, close_t-3, close_t-4, close_t-5, close_t-6])</code></li>
+<li><strong>Normalisointi:</strong> Jaetaan t₀ alin hinnalla ja kerrotaan 100:lla</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Sarake</th>
+<th>Merkitys</th>
+<th>Laskenta</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>41</td>
+<td><strong>t_2_5p_liukuva</strong></td>
+<td>5 päivän liukuva keskiarvo, ajanjakso t-2...t-6</td>
+<td><code>mean([t-2, t-3, t-4, t-5, t-6]) / t0_low × 100</code></td>
+</tr>
+<tr>
+<td>42</td>
+<td><strong>t_2_10p_liukuva</strong></td>
+<td>10 päivän liukuva keskiarvo, ajanjakso t-2...t-11</td>
+<td><code>mean([t-2, ..., t-11]) / t0_low × 100</code></td>
+</tr>
+<tr>
+<td>43</td>
+<td><strong>t_2_20p_liukuva</strong></td>
+<td>20 päivän liukuva keskiarvo, ajanjakso t-2...t-21</td>
+<td><code>mean([t-2, ..., t-21]) / t0_low × 100</code></td>
+</tr>
+<tr>
+<td>44</td>
+<td><strong>t_5_5p_liukuva</strong></td>
+<td>5 päivän liukuva keskiarvo, ajanjakso t-5...t-9</td>
+<td><code>mean([t-5, t-6, t-7, t-8, t-9]) / t0_low × 100</code></td>
+</tr>
+<tr>
+<td>45</td>
+<td><strong>t_5_10p_liukuva</strong></td>
+<td>10 päivän liukuva keskiarvo, ajanjakso t-5...t-14</td>
+<td><code>mean([t-5, ..., t-14]) / t0_low × 100</code></td>
+</tr>
+<tr>
+<td>46</td>
+<td><strong>t_5_20p_liukuva</strong></td>
+<td>20 päivän liukuva keskiarvo, ajanjakso t-5...t-24</td>
+<td><code>mean([t-5, ..., t-24]) / t0_low × 100</code></td>
+</tr>
+<tr>
+<td>47</td>
+<td><strong>t_10_5p_liukuva</strong></td>
+<td>5 päivän liukuva keskiarvo, ajanjakso t-10...t-14</td>
+<td><code>mean([t-10, t-11, t-12, t-13, t-14]) / t0_low × 100</code></td>
+</tr>
+<tr>
+<td>48</td>
+<td><strong>t_10_10p_liukuva</strong></td>
+<td>10 päivän liukuva keskiarvo, ajanjakso t-10...t-19</td>
+<td><code>mean([t-10, ..., t-19]) / t0_low × 100</code></td>
+</tr>
+<tr>
+<td>49</td>
+<td><strong>t_10_20p_liukuva</strong></td>
+<td>20 päivän liukuva keskiarvo, ajanjakso t-10...t-29</td>
+<td><code>mean([t-10, ..., t-29]) / t0_low × 100</code></td>
+</tr>
+<tr>
+<td>50</td>
+<td><strong>t_15_5p_liukuva</strong></td>
+<td>5 päivän liukuva keskiarvo, ajanjakso t-15...t-19</td>
+<td><code>mean([t-15, t-16, t-17, t-18, t-19]) / t0_low × 100</code></td>
+</tr>
+<tr>
+<td>51</td>
+<td><strong>t_15_10p_liukuva</strong></td>
+<td>10 päivän liukuva keskiarvo, ajanjakso t-15...t-24</td>
+<td><code>mean([t-15, ..., t-24]) / t0_low × 100</code></td>
+</tr>
+<tr>
+<td>52</td>
+<td><strong>t_15_20p_liukuva</strong></td>
+<td>20 päivän liukuva keskiarvo, ajanjakso t-15...t-34</td>
+<td><code>mean([t-15, ..., t-34]) / t0_low × 100</code></td>
+</tr>
+<tr>
+<td>53</td>
+<td><strong>t_20_5p_liukuva</strong></td>
+<td>5 päivän liukuva keskiarvo, ajanjakso t-20...t-24</td>
+<td><code>mean([t-20, t-21, t-22, t-23, t-24]) / t0_low × 100</code></td>
+</tr>
+<tr>
+<td>54</td>
+<td><strong>t_20_10p_liukuva</strong></td>
+<td>10 päivän liukuva keskiarvo, ajanjakso t-20...t-29</td>
+<td><code>mean([t-20, ..., t-29]) / t0_low × 100</code></td>
+</tr>
+<tr>
+<td>55</td>
+<td><strong>t_20_20p_liukuva</strong></td>
+<td>20 päivän liukuva keskiarvo, ajanjakso t-20...t-39</td>
+<td><code>mean([t-20, ..., t-39]) / t0_low × 100</code></td>
+</tr>
+<tr>
+<td>56</td>
+<td><strong>t0_50p_liukuva</strong></td>
+<td>50 päivän liukuva keskiarvo, päättyen t₀</td>
+<td><code>mean([t-49...t0]) / t0_low × 100</code></td>
+</tr>
+<tr>
+<td>57</td>
+<td><strong>t0_200p_liukuva</strong></td>
+<td>200 päivän liukuva keskiarvo, päättyen t₀</td>
+<td><code>mean([t-199...t0]) / t0_low × 100</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>HUOM:</strong> 200 päivän liukuva keskiarvo lasketaan vain jos dataa on riittävästi. Jos ei ole, arvo on tyhjä (None).</p>
+<hr>
+<h2 id="410-sp-500-indeksi-sarakkeet-5868">4.10 S&amp;P 500 Indeksi (sarakkeet 58–68)</h2>
+<p>Nämä sarakkeet sisältävät S&amp;P 500 -indeksin (^GSPC) <strong>päätösarvot</strong> vastaavina päivinä kuin osakedata.</p>
+<p><strong>HUOM:</strong> Indeksidata <strong>NORMALISOIDAAN</strong> indeksin omaan t₀ päätöskurssiin (t0_close = 100). <strong>EI normalisoida osakkeen t₀ alin hintaan.</strong></p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Sarake</th>
+<th>Merkitys</th>
+<th>Laskenta</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>58</td>
+<td><strong>SPX_0</strong></td>
+<td>S&amp;P 500 päätösarvo t₀-päivänä (normalisoitu)</td>
+<td><strong>Aina 100</strong> (normalisointiperusta)</td>
+</tr>
+<tr>
+<td>59</td>
+<td><strong>SPX_2</strong></td>
+<td>S&amp;P 500 päätösarvo t₋₂-päivänä (normalisoitu)</td>
+<td><code>(^GSPC close_t-2 / ^GSPC close_t0) × 100</code></td>
+</tr>
+<tr>
+<td>60</td>
+<td><strong>SPX_5</strong></td>
+<td>S&amp;P 500 päätösarvo t₋₅-päivänä (normalisoitu)</td>
+<td><code>(^GSPC close_t-5 / ^GSPC close_t0) × 100</code></td>
+</tr>
+<tr>
+<td>61</td>
+<td><strong>SPX_10</strong></td>
+<td>S&amp;P 500 päätösarvo t₋₁₀-päivänä (normalisoitu)</td>
+<td><code>(^GSPC close_t-10 / ^GSPC close_t0) × 100</code></td>
+</tr>
+<tr>
+<td>62</td>
+<td><strong>SPX_15</strong></td>
+<td>S&amp;P 500 päätösarvo t₋₁₅-päivänä (normalisoitu)</td>
+<td><code>(^GSPC close_t-15 / ^GSPC close_t0) × 100</code></td>
+</tr>
+<tr>
+<td>63</td>
+<td><strong>SPX_20</strong></td>
+<td>S&amp;P 500 päätösarvo t₋₂₀-päivänä (normalisoitu)</td>
+<td><code>(^GSPC close_t-20 / ^GSPC close_t0) × 100</code></td>
+</tr>
+<tr>
+<td>64</td>
+<td><strong>SPX2</strong></td>
+<td>S&amp;P 500 päätösarvo t₊₂-päivänä (normalisoitu)</td>
+<td><code>(^GSPC close_t+2 / ^GSPC close_t0) × 100</code></td>
+</tr>
+<tr>
+<td>65</td>
+<td><strong>SPX5</strong></td>
+<td>S&amp;P 500 päätösarvo t₊₅-päivänä (normalisoitu)</td>
+<td><code>(^GSPC close_t+5 / ^GSPC close_t0) × 100</code></td>
+</tr>
+<tr>
+<td>66</td>
+<td><strong>SPX10</strong></td>
+<td>S&amp;P 500 päätösarvo t₊₁₀-päivänä (normalisoitu)</td>
+<td><code>(^GSPC close_t+10 / ^GSPC close_t0) × 100</code></td>
+</tr>
+<tr>
+<td>67</td>
+<td><strong>SPX15</strong></td>
+<td>S&amp;P 500 päätösarvo t₊₁₅-päivänä (normalisoitu)</td>
+<td><code>(^GSPC close_t+15 / ^GSPC close_t0) × 100</code></td>
+</tr>
+<tr>
+<td>68</td>
+<td><strong>SPX20</strong></td>
+<td>S&amp;P 500 päätösarvo t₊₂₀-päivänä (normalisoitu)</td>
+<td><code>(^GSPC close_t+20 / ^GSPC close_t0) × 100</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Käyttö:</strong> Voidaan vertailla osakkeen kehitystä markkinoihin (beta, korrelaatio). SPX_0 on aina 100, muut arvot suhteessa siihen.</p>
+<hr>
+<h2 id="411-nasdaq-100-indeksi-sarakkeet-6979">4.11 Nasdaq 100 Indeksi (sarakkeet 69–79)</h2>
+<p>Nämä sarakkeet sisältävät Nasdaq 100 -indeksin (^NDX) <strong>päätösarvot</strong> vastaavina päivinä.</p>
+<p><strong>HUOM:</strong> Indeksidata <strong>NORMALISOIDAAN</strong> indeksin omaan t₀ päätöskurssiin (t0_close = 100). <strong>EI normalisoida osakkeen t₀ alin hintaan.</strong></p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Sarake</th>
+<th>Merkitys</th>
+<th>Laskenta</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>69</td>
+<td><strong>NDX_0</strong></td>
+<td>Nasdaq 100 päätösarvo t₀-päivänä (normalisoitu)</td>
+<td><strong>Aina 100</strong> (normalisointiperusta)</td>
+</tr>
+<tr>
+<td>70</td>
+<td><strong>NDX_2</strong></td>
+<td>Nasdaq 100 päätösarvo t₋₂-päivänä (normalisoitu)</td>
+<td><code>(^NDX close_t-2 / ^NDX close_t0) × 100</code></td>
+</tr>
+<tr>
+<td>71</td>
+<td><strong>NDX_5</strong></td>
+<td>Nasdaq 100 päätösarvo t₋₅-päivänä (normalisoitu)</td>
+<td><code>(^NDX close_t-5 / ^NDX close_t0) × 100</code></td>
+</tr>
+<tr>
+<td>72</td>
+<td><strong>NDX_10</strong></td>
+<td>Nasdaq 100 päätösarvo t₋₁₀-päivänä (normalisoitu)</td>
+<td><code>(^NDX close_t-10 / ^NDX close_t0) × 100</code></td>
+</tr>
+<tr>
+<td>73</td>
+<td><strong>NDX_15</strong></td>
+<td>Nasdaq 100 päätösarvo t₋₁₅-päivänä (normalisoitu)</td>
+<td><code>(^NDX close_t-15 / ^NDX close_t0) × 100</code></td>
+</tr>
+<tr>
+<td>74</td>
+<td><strong>NDX_20</strong></td>
+<td>Nasdaq 100 päätösarvo t₋₂₀-päivänä (normalisoitu)</td>
+<td><code>(^NDX close_t-20 / ^NDX close_t0) × 100</code></td>
+</tr>
+<tr>
+<td>75</td>
+<td><strong>NDX2</strong></td>
+<td>Nasdaq 100 päätösarvo t₊₂-päivänä (normalisoitu)</td>
+<td><code>(^NDX close_t+2 / ^NDX close_t0) × 100</code></td>
+</tr>
+<tr>
+<td>76</td>
+<td><strong>NDX5</strong></td>
+<td>Nasdaq 100 päätösarvo t₊₅-päivänä (normalisoitu)</td>
+<td><code>(^NDX close_t+5 / ^NDX close_t0) × 100</code></td>
+</tr>
+<tr>
+<td>77</td>
+<td><strong>NDX10</strong></td>
+<td>Nasdaq 100 päätösarvo t₊₁₀-päivänä (normalisoitu)</td>
+<td><code>(^NDX close_t+10 / ^NDX close_t0) × 100</code></td>
+</tr>
+<tr>
+<td>78</td>
+<td><strong>NDX15</strong></td>
+<td>Nasdaq 100 päätösarvo t₊₁₅-päivänä (normalisoitu)</td>
+<td><code>(^NDX close_t+15 / ^NDX close_t0) × 100</code></td>
+</tr>
+<tr>
+<td>79</td>
+<td><strong>NDX20</strong></td>
+<td>Nasdaq 100 päätösarvo t₊₂₀-päivänä (normalisoitu)</td>
+<td><code>(^NDX close_t+20 / ^NDX close_t0) × 100</code></td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="412-rsi14_t0-sarake-80">4.12 RSI14_t0 (sarake 80)</h2>
+<p><strong>RSI</strong> (Relative Strength Index) on momentum-indikaattori, joka mittaa hinnan muutosten nopeutta ja suuruutta. Se vaihtelee välillä <strong>0–100</strong>.</p>
+<h4 id="laskentalogiikka-wilderin-menetelmä">Laskentalogiikka (Wilderin menetelmä)</h4>
+<p>RSI lasketaan <strong>14 päivän</strong> jaksolle käyttäen <strong>eksponentiaalista liukuvaa keskiarvoa</strong> (EMA):</p>
+<ol>
+<li>
+<p><strong>Lasketaan päivittäiset muutokset (delta):</strong></p>
+<p class="katex-block"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi mathvariant="normal">Δ</mi><mi>i</mi></msub><mo>=</mo><msub><mtext>close</mtext><mi>i</mi></msub><mo>−</mo><msub><mtext>close</mtext><mrow><mi>i</mi><mo>−</mo><mn>1</mn></mrow></msub></mrow><annotation encoding="application/x-tex">\Delta_i = \text{close}_i - \text{close}_{i-1}
+</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord">Δ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord text"><span class="mord">close</span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.9028em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord text"><span class="mord">close</span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span></span></span></span></span></p>
+</li>
+<li>
+<p><strong>Erotellaan nousut ja laskut:</strong></p>
+<ul>
+<li>Nousu (gain): <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mtext>gain</mtext><mi>i</mi></msub><mo>=</mo><mi>max</mi><mo>⁡</mo><mo stretchy="false">(</mo><mn>0</mn><mo separator="true">,</mo><msub><mi mathvariant="normal">Δ</mi><mi>i</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\text{gain}_i = \max(0, \Delta_i)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.912em;vertical-align:-0.2441em;"></span><span class="mord"><span class="mord text"><span class="mord">gain</span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2175em;"><span style="top:-2.4559em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2441em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">max</span><span class="mopen">(</span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord">Δ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></li>
+<li>Lasku (loss): <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mtext>loss</mtext><mi>i</mi></msub><mo>=</mo><mi>max</mi><mo>⁡</mo><mo stretchy="false">(</mo><mn>0</mn><mo separator="true">,</mo><mo>−</mo><msub><mi mathvariant="normal">Δ</mi><mi>i</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\text{loss}_i = \max(0, -\Delta_i)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord text"><span class="mord">loss</span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">max</span><span class="mopen">(</span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">−</span><span class="mord"><span class="mord">Δ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></li>
+</ul>
+</li>
+<li>
+<p><strong>Lasketaan eksponentiaaliset liukuvat keskiarvot:</strong></p>
+<ul>
+<li><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>α</mi><mo>=</mo><mfrac><mn>1</mn><mn>14</mn></mfrac></mrow><annotation encoding="application/x-tex">\alpha = \frac{1}{14}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1901em;vertical-align:-0.345em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8451em;"><span style="top:-2.655em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">14</span></span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.394em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.345em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span></span></span></span> (Wilderin suositus)</li>
+<li><code>avg_gain = EMA(gain, alpha=1/14, min_periods=14)</code></li>
+<li><code>avg_loss = EMA(loss, alpha=1/14, min_periods=14)</code></li>
+</ul>
+</li>
+<li>
+<p><strong>Lasketaan suhteellinen vahvuus (RS):</strong></p>
+<p class="katex-block"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>R</mi><mi>S</mi><mo>=</mo><mfrac><mtext>avg_gain</mtext><mtext>avg_loss</mtext></mfrac></mrow><annotation encoding="application/x-tex">RS = \frac{\text{avg\_gain}}{\text{avg\_loss}}
+</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.05764em;">RS</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.3639em;vertical-align:-0.996em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3679em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord text"><span class="mord">avg_loss</span></span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.7em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord text"><span class="mord">avg_gain</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.996em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span></span></span></span></span></p>
+</li>
+<li>
+<p><strong>Lasketaan RSI:</strong></p>
+<p class="katex-block"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>R</mi><mi>S</mi><mi>I</mi><mo>=</mo><mn>100</mn><mo>−</mo><mfrac><mn>100</mn><mrow><mn>1</mn><mo>+</mo><mi>R</mi><mi>S</mi></mrow></mfrac></mrow><annotation encoding="application/x-tex">RSI = 100 - \frac{100}{1 + RS}
+</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.05764em;">RS</span><span class="mord mathnormal" style="margin-right:0.07847em;">I</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">100</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:2.0908em;vertical-align:-0.7693em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3214em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord mathnormal" style="margin-right:0.05764em;">RS</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">100</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.7693em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span></span></span></span></span></p>
+</li>
+<li>
+<p><strong>Erikoistapaukset:</strong></p>
+<ul>
+<li>Jos <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mtext>avg_loss</mtext><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">\text{avg\_loss} = 0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0044em;vertical-align:-0.31em;"></span><span class="mord text"><span class="mord">avg_loss</span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span> (ei laskuja): <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>R</mi><mi>S</mi><mi>I</mi><mo>=</mo><mn>100</mn></mrow><annotation encoding="application/x-tex">RSI = 100</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.05764em;">RS</span><span class="mord mathnormal" style="margin-right:0.07847em;">I</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">100</span></span></span></span></li>
+<li>Jos <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mtext>avg_gain</mtext><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">\text{avg\_gain} = 0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9779em;vertical-align:-0.31em;"></span><span class="mord text"><span class="mord">avg_gain</span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span> (ei nousuja): <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>R</mi><mi>S</mi><mi>I</mi><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">RSI = 0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.05764em;">RS</span><span class="mord mathnormal" style="margin-right:0.07847em;">I</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></li>
+<li>Jos molemmat nolla (ei liikettä): <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>R</mi><mi>S</mi><mi>I</mi><mo>=</mo><mn>50</mn></mrow><annotation encoding="application/x-tex">RSI = 50</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.05764em;">RS</span><span class="mord mathnormal" style="margin-right:0.07847em;">I</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">50</span></span></span></span></li>
+</ul>
+</li>
+</ol>
+<h4 id="tulkinta">Tulkinta</h4>
+<table>
+<thead>
+<tr>
+<th>RSI-arvo</th>
+<th>Tulkinta</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>0–30</strong></td>
+<td><strong>Ylimyyty</strong> — osake saattaa olla liian halpa, mahdollinen ostomahdollisuus</td>
+</tr>
+<tr>
+<td><strong>30–50</strong></td>
+<td>Neutraali, lähempänä heikkoutta</td>
+</tr>
+<tr>
+<td><strong>50–70</strong></td>
+<td>Neutraali, lähempänä vahvuutta</td>
+</tr>
+<tr>
+<td><strong>70–100</strong></td>
+<td><strong>Yliostettu</strong> — osake saattaa olla yliarvostettu, mahdollinen myyntisignaali</td>
+</tr>
+</tbody>
+</table>
+<p><strong>HUOM:</strong> RSI lasketaan t₀-päivän tietoihin perustuen, käyttäen 14 päivän historiaa.</p>
+<hr>
+<h2 id="5-yhteenveto-ja-käyttöohjeet">5. Yhteenveto ja Käyttöohjeet</h2>
+<h3 id="51-miten-tulkita-excel-tiedostoa">5.1 Miten tulkita Excel-tiedostoa?</h3>
+<ol>
+<li><strong>Tunnista kynttilä:</strong> Katso <strong>kynttilä</strong>-saraketta (sarake 3) ja <strong>vahvuus</strong>-saraketta (sarake 4).</li>
+<li><strong>Arvioi signaali:</strong> Vahvuus 0.7–1.0 = vahva signaali, 0.5–0.7 = keskivahva, 0.0–0.5 = heikko.</li>
+<li><strong>Tarkista konteksti:</strong>
+<ul>
+<li>Katso historiallisia hintoja (t₋₂, t₋₅, ...) ja volatiliteettia (t_2_hajonta, ...)</li>
+<li>Katso tulevaa kehitystä (t₂, t₅, t₁₀, t₂₀) ja arvioi, toteutuiko signaali</li>
+</ul>
+</li>
+<li><strong>Vertaa indekseihin:</strong> SPX ja NDX sarakkeet kertovat markkinoiden yleisen tilanteen</li>
+<li><strong>Tarkista RSI:</strong> Jos RSI &lt; 30 JA Hammer-signaali vahva → vahva ostosignaali</li>
+</ol>
+<h3 id="52-esimerkkitulkinta">5.2 Esimerkkitulkinta</h3>
+<p><strong>Rivi 1:</strong></p>
+<ul>
+<li><strong>osake:</strong> AAPL</li>
+<li><strong>kynttilä:</strong> Hammer</li>
+<li><strong>vahvuus:</strong> 0.85</li>
+<li><strong>t0_bodi:</strong> 102.5 (päätöskurssi normalisoitu)</li>
+<li><strong>t5:</strong> 107.3 (hinta nousi 7.3 % viidessä päivässä)</li>
+<li><strong>RSI14_t0:</strong> 28 (ylimyyty)</li>
+</ul>
+<p><strong>Tulkinta:</strong> Vahva Hammer-signaali ylimyydyssä tilassa. Hinta nousi todella seuraavan 5 päivän aikana → signaali toimi hyvin.</p>
+<hr>
+<h2 id="6-tekniset-huomiot">6. Tekniset Huomiot</h2>
+<ul>
+<li><strong>Normalisointi:</strong>
+<ul>
+<li><strong>Osakkeiden hinnat:</strong> Normalisoidaan t₀ alin hintaan (t0_low = 100)</li>
+<li><strong>Indeksit (S&amp;P 500, Nasdaq 100):</strong> Normalisoidaan <strong>indeksin omaan</strong> t₀ päätöskurssiin (t0_close = 100)</li>
+<li><strong>Volyymit:</strong> Ilmaistaan <strong>suhdelukuina</strong> verrattuna 100 päivän keskiarvoon (päättyen t₋₁)</li>
+<li><strong>Volatiliteetit:</strong> EI normalisoida (absoluuttiset standardipoikkeamat)</li>
+</ul>
+</li>
+<li><strong>Volatiliteetti:</strong> Lasketaan standardipoikkeamana (ei normalisoida).</li>
+<li><strong>Liukuvat keskiarvot:</strong> Normalisoidaan osakkeen t₀ alin hintaan (kuten hinnat).</li>
+<li><strong>RSI:</strong> Käytetään Wilderin eksponentiaalista menetelmää, 14 päivän jakso.</li>
+<li><strong>Indeksit:</strong> S&amp;P 500 ja Nasdaq 100 normalisoidaan omaan t₀-arvoonsa, jolloin vertailu osakkeen kehitykseen on helpompaa (molemmat alkavat arvosta 100).</li>
+<li><strong>Volyymisuhdeluvut:</strong> Kaikki volyymidata on normalisoitu samaan 100 päivän keskiarvoon (päättyen t₋₁), mikä mahdollistaa volyymiaktiivisuuden vertailun eri ajanjaksoilla.</li>
+</ul>
+<hr>
+<h2 id="7-yhteystiedot-ja-tuki">7. Yhteystiedot ja Tuki</h2>
+<p>Kysymykset dokumentaatiosta tai Excelin käytöstä:</p>
+<ul>
+<li><strong>Projekti:</strong> Rawcandle</li>
+<li><strong>Versio:</strong> 1.0</li>
+<li><strong>Päivitetty:</strong> 25.10.2025</li>
+</ul>
+<hr>
+<p><strong>Dokumentin loppu</strong></p>
+
+            <script async src="https://cdn.jsdelivr.net/npm/katex-copytex@latest/dist/katex-copytex.min.js"></script>
+            
+        </body>
+        </html>
