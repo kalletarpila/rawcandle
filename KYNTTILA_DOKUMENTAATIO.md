@@ -189,36 +189,37 @@ Kaikki normalisoitu t₀ alin hintaan (t₀ = 100).
 
 ### 4.4 Volatiliteetti (sarakkeet 22–26)
 
-Volatiliteetti mitataan **standardipoikkeamana** päätöskursseista taaksepäin katsottuna (sisältäen t₀-päivän).
+Volatiliteetti mitataan **standardipoikkeamana** päätöskurssien normalisoiduista arvoista taaksepäin katsottuna (HUOM: EI sisällä t₀-päivää, vaan vain t0:aa edeltävät päivät). Normalisointi: jokainen arvo on (close_t-i / low_t0) * 100.
 
-**HUOM:** Volatiliteetti **EI ole normalisoitu** — se esitetään raakana standardipoikkeamana ($, €, yms.).
+**HUOM:** Volatiliteetti lasketaan normalisoiduista arvoista: jokainen arvo on (close_t-i / low_t0) * 100. Lopputulos on näiden arvojen standardipoikkeama (ei valuuttayksikköä, vaan prosenttipohjainen hajonta).
 
 #### Laskentasääntö
 
-Volatiliteetti lasketaan käyttäen **Pythonin `statistics.stdev`-funktiota**, joka laskee **näytteen standardipoikkeaman** (sample standard deviation):
+Volatiliteetti lasketaan käyttäen **Pythonin `statistics.pstdev`-funktiota**, joka laskee **populaation standardipoikkeaman** (population standard deviation):
+
 
 $$
-\sigma = \sqrt{\frac{1}{n-1} \sum_{i=1}^{n} (x_i - \bar{x})^2}
+\sigma = \sqrt{\frac{1}{n} \sum_{i=1}^{n} (x_i - \bar{x})^2}
 $$
+
 
 jossa:
 - $n$ = päivien lukumäärä (esim. 2, 5, 10, 15 tai 20)
-- $x_i$ = päätöskurssi päivänä $i$
-- $\bar{x}$ = päätöskurssien keskiarvo
+- $x_i$ = normalisoitu päätöskurssi päivänä $i$ (eli $(close_{t-i}/low_{t0})*100$)
+- $\bar{x}$ = normalisoitujen päätöskurssien keskiarvo
 
-**Miksi käytetään näytteen standardipoikkeamaa (n−1)?**  
-- Finanssianalyysissä oletetaan yleensä, että datan pisteet ovat **näyte populaatiosta**, ei koko populaatio.
-- Bessel-korjaus (n−1) antaa **puolueettoman estimaatin** populaation varianssin arviointiin.
+
+**HUOM:** Käytetään populaatiohajontaa (n jakajana, ei n−1). Tämä antaa hieman pienemmän arvon kuin otoshajonta.
 
 **Laskentajakso:**
 
 | # | Sarake         | Merkitys                           | Laskenta                                             |
 |---|----------------|-----------------------------------|-----------------------------------------------------|
-| 22| **t_2_hajonta** | Volatiliteetti 2 päivän ajalta     | `stdev([close_t-1, close_t0])`                       |
-| 23| **t_5_hajonta** | Volatiliteetti 5 päivän ajalta     | `stdev([close_t-4, ..., close_t0])`                  |
-| 24| **t_10_hajonta**| Volatiliteetti 10 päivän ajalta    | `stdev([close_t-9, ..., close_t0])`                  |
-| 25| **t_15_hajonta**| Volatiliteetti 15 päivän ajalta    | `stdev([close_t-14, ..., close_t0])`                 |
-| 26| **t_20_hajonta**| Volatiliteetti 20 päivän ajalta    | `stdev([close_t-19, ..., close_t0])`                 |
+| 22| **t_2_hajonta** | Volatiliteetti 2 päivän ajalta     | `pstdev([(close_t-2/low_t0)*100, (close_t-1/low_t0)*100])`                       |
+| 23| **t_5_hajonta** | Volatiliteetti 5 päivän ajalta     | `pstdev([(close_t-5/low_t0)*100, ..., (close_t-1/low_t0)*100])`                  |
+| 24| **t_10_hajonta**| Volatiliteetti 10 päivän ajalta    | `pstdev([(close_t-10/low_t0)*100, ..., (close_t-1/low_t0)*100])`                 |
+| 25| **t_15_hajonta**| Volatiliteetti 15 päivän ajalta    | `pstdev([(close_t-15/low_t0)*100, ..., (close_t-1/low_t0)*100])`                 |
+| 26| **t_20_hajonta**| Volatiliteetti 20 päivän ajalta    | `pstdev([(close_t-20/low_t0)*100, ..., (close_t-1/low_t0)*100])`                 |
 
 **Tulkinta:**
 - **Korkea volatiliteetti:** Osakkeen hinta vaihtelee voimakkaasti → suurempi riski ja mahdollisuus
@@ -292,9 +293,10 @@ Jos `downtrend_filter = True`:
 
 ## 4.8 Volyymit (sarakkeet 31–40)
 
-Volyymidata sisältää sekä **historialliset** että **tulevat volyymisuhdeluvut**.
 
-**HUOM:** Volyymit **EI ole absoluuttisia arvoja**, vaan **suhdelukuja (ratio)** verrattuna **100 päivän keskiarvoon** (päättyen t₋₁:een).
+Volyymidata sisältää sekä **historialliset** että **tulevat volyymisuhdeluvut prosentteina**.
+
+**HUOM:** Volyymit **EI ole absoluuttisia arvoja**, vaan **prosentteja** verrattuna **100 päivän keskiarvoon** (päättyen t₋₁:een).
 
 #### Laskentalogiikka
 
@@ -302,12 +304,12 @@ Kaikki volyymisarakkeet lasketaan seuraavasti:
 
 1. **Jakson keskiarvo**: Lasketaan volyymin keskiarvo tietyllä jaksolla
 2. **100 päivän vertailukeskiarvo**: Lasketaan 100 päivän volyymien keskiarvo **päättyen t₋₁:een** (ei sisällä t₀)
-3. **Suhdeluku**: `jakson_keskiarvo / 100_päivän_keskiarvo`
+3. **Prosenttiluku**: Jakson keskiarvo jaetaan 100 päivän keskiarvolla ja kerrotaan 100:lla
 
 **Tulkinta:**
-- **Arvo 1.0** = jakson volyymi on sama kuin 100 päivän keskiarvo
-- **Arvo > 1.0** = jakson volyymi ylittää 100 päivän keskiarvon (esim. 1.5 = 150%)
-- **Arvo < 1.0** = jakson volyymi alittaa 100 päivän keskiarvon (esim. 0.8 = 80%)
+- **Arvo 100** = jakson volyymi on sama kuin 100 päivän keskiarvo
+- **Arvo > 100** = jakson volyymi ylittää 100 päivän keskiarvon (esim. 150 = 150%)
+- **Arvo < 100** = jakson volyymi alittaa 100 päivän keskiarvon (esim. 80 = 80%)
 
 | # | Sarake         | Merkitys                                 | Laskenta           |
 |---|----------------|------------------------------------------|-------------------|

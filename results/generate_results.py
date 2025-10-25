@@ -2,7 +2,7 @@ import sqlite3
 import threading
 import traceback
 from pathlib import Path
-from statistics import mean, stdev
+from statistics import mean, pstdev
 from typing import List, Optional, Tuple
 import locale
 
@@ -34,7 +34,7 @@ def _calculate_relative_stdev(values: List[float]) -> Optional[float]:
         avg = mean(values)
         if avg == 0:
             return None
-        std = stdev(values)
+    std = pstdev(values)
         return (std / avg) * 100.0
     except Exception:
         return None
@@ -58,7 +58,7 @@ def _create_excel_file(
     header: List[str],
     output_rows: List[List],
     excel_path: Path,
-    downtrend_filter: bool = False,
+    downtrend_filter: bool = True,
 ):
     """Luo Excel-tiedoston suomalaisilla asetuksilla ja kauniilla muotoilulla"""
     try:
@@ -308,7 +308,7 @@ def _get_index_data(
 def _build_output_rows(
     analysis_db: Path,
     osake_db: Path,
-    downtrend_filter: bool = False,
+    downtrend_filter: bool = True,
     min_decline_percent: float = 3.0,
     use_ma_filter: bool = True,
     use_volume_filter: bool = False,
@@ -445,22 +445,22 @@ def _build_output_rows(
         "t5_volyymi",  # 38. t5_volyymi
         "t10_volyymi",  # 39. t10_volyymi
         "t20_volyymi",  # 40. t20_volyymi
-        # Liukuvat keskiarvot (41-57)
-        "t2_5p_liukuva",  # 41. t2_5p_liukuva
-        "t2_10p_liukuva",  # 42. t2_10p_liukuva
-        "t2_20p_liukuva",  # 43. t2_20p_liukuva
-        "t5_5p_liukuva",  # 44. t5_5p_liukuva
-        "t5_10p_liukuva",  # 45. t5_10p_liukuva
-        "t5_20p_liukuva",  # 46. t5_20p_liukuva
-        "t10_5p_liukuva",  # 47. t10_5p_liukuva
-        "t10_10p_liukuva",  # 48. t10_10p_liukuva
-        "t10_20p_liukuva",  # 49. t10_20p_liukuva
-        "t15_5p_liukuva",  # 50. t15_5p_liukuva
-        "t15_10p_liukuva",  # 51. t15_10p_liukuva
-        "t15_20p_liukuva",  # 52. t15_20p_liukuva
-        "t20_5p_liukuva",  # 53. t20_5p_liukuva
-        "t20_10p_liukuva",  # 54. t20_10p_liukuva
-        "t20_20p_liukuva",  # 55. t20_20p_liukuva
+        # Liukuvat keskiarvot (41-55)
+        "t_2_5p_liukuva",  # 41. t_2_5p_liukuva
+        "t_2_10p_liukuva",  # 42. t_2_10p_liukuva
+        "t_2_20p_liukuva",  # 43. t_2_20p_liukuva
+        "t_5_5p_liukuva",  # 44. t_5_5p_liukuva
+        "t_5_10p_liukuva",  # 45. t_5_10p_liukuva
+        "t_5_20p_liukuva",  # 46. t_5_20p_liukuva
+        "t_10_5p_liukuva",  # 47. t_10_5p_liukuva
+        "t_10_10p_liukuva",  # 48. t_10_10p_liukuva
+        "t_10_20p_liukuva",  # 49. t_10_20p_liukuva
+        "t_15_5p_liukuva",  # 50. t_15_5p_liukuva
+        "t_15_10p_liukuva",  # 51. t_15_10p_liukuva
+        "t_15_20p_liukuva",  # 52. t_15_20p_liukuva
+        "t_20_5p_liukuva",  # 53. t_20_5p_liukuva
+        "t_20_10p_liukuva",  # 54. t_20_10p_liukuva
+        "t_20_20p_liukuva",  # 55. t_20_20p_liukuva
         "t0_50p_liukuva",  # 56. t0_50p_liukuva
         "t0_200p_liukuva",  # 57. t0_200p_liukuva
         # S&P 500 index (58-68)
@@ -739,17 +739,23 @@ def _build_output_rows(
 
                 # Calculate volatility (standard deviation, NO NORMALIZATION)
                 def calc_volatility(days_back):
-                    if idx - days_back + 1 < 0:
+                    # Muutettu: lasketaan hajonta t0:n edeltäviltä päiviltä (ei t0 mukana), normalisoiduilla arvoilla
+                    if idx - days_back < 0:
                         return None
-                    start_idx = idx - days_back + 1
-                    end_idx = idx  # Include current day (t0) in volatility calculation
+                    start_idx = idx - days_back
+                    end_idx = idx - 1  # Ei sisällä t0
                     subset = df.iloc[start_idx : end_idx + 1]
+                    t0_low = safe_get(r0, lcol)
+                    if t0_low is None or t0_low == 0:
+                        return None
                     values = [safe_get(row, ccol) for _, row in subset.iterrows()]
                     values = [v for v in values if v is not None]
                     if len(values) < 2:
                         return None
+                    # Normalisoi arvot t0_low:lla ja kerro 100
+                    norm_values = [(v / t0_low) * 100 for v in values]
                     try:
-                        return stdev(values)  # Raw standard deviation, no normalization
+                        return pstdev(norm_values)
                     except Exception:
                         return None
 
@@ -806,7 +812,7 @@ def _build_output_rows(
                         if hundred_avg <= 0:
                             return None
 
-                        return period_avg / hundred_avg
+                        return (period_avg / hundred_avg) * 100
 
                     except Exception:
                         return None
@@ -842,7 +848,7 @@ def _build_output_rows(
                     ]
                     hundred_avg = mean(hundred_volumes) if hundred_volumes else None
                     t0_volyymi = (
-                        t0_volume / hundred_avg
+                        (t0_volume / hundred_avg) * 100
                         if t0_volume and hundred_avg and hundred_avg > 0
                         else None
                     )
@@ -864,58 +870,91 @@ def _build_output_rows(
                 )  # mean(t+1...t+20) / 100-day avg
 
                 # Calculate moving averages according to specification
+
                 def calc_ma_normalized_spec(days_offset, ma_period):
                     """
-                    Calculate moving average with specification normalization:
-                    - Indices: normalized to t0_close=100
-                    - Stocks: normalized to t0_alin=100
+                    Laskee liukuvan keskiarvon t0-päivää edeltävältä ajanjaksolta:
+                    Esim. t_2_5p_liukuva = mean([t-2, t-3, t-4, t-5, t-6])
                     """
-                    target_idx = idx + days_offset
-                    ma_val = _calculate_moving_average(df, ccol, target_idx, ma_period)
-
-                    if ma_val is None:
+                    # Lasketaan päätepiste (t0 + days_offset), mutta EI oteta sitä mukaan, vaan taaksepäin ma_period päivää
+                    end_idx = idx + days_offset  # t2 -> idx-2
+                    start_idx = end_idx - ma_period + 1
+                    if start_idx < 0 or end_idx < 0 or end_idx >= len(df):
                         return None
-
+                    subset = df.iloc[start_idx : end_idx + 1]  # end_idx sisältyy
+                    values = [safe_get(row, ccol) for _, row in subset.iterrows()]
+                    values = [v for v in values if v is not None]
+                    if len(values) != ma_period:
+                        return None
+                    ma_val = mean(values)
                     if is_index:
-                        # Indices: normalize to t0_close=100
                         return (
                             (ma_val / t0_close * 100)
                             if t0_close and t0_close > 0
                             else None
                         )
                     else:
-                        # Stocks: normalize to t0_alin=100
-                        # Get the actual t0_low value for normalization
                         t0_low = safe_get(r0, lcol)
                         return (
                             (ma_val / t0_low * 100) if t0_low and t0_low > 0 else None
                         )
 
-                t2_5p_liukuva = calc_ma_normalized_spec(-2, 5)
-                t2_10p_liukuva = calc_ma_normalized_spec(-2, 10)
-                t2_20p_liukuva = calc_ma_normalized_spec(-2, 20)
+                t_2_5p_liukuva = calc_ma_normalized_spec(-2, 5)
+                t_2_10p_liukuva = calc_ma_normalized_spec(-2, 10)
+                t_2_20p_liukuva = calc_ma_normalized_spec(-2, 20)
 
-                t5_5p_liukuva = calc_ma_normalized_spec(-5, 5)
-                t5_10p_liukuva = calc_ma_normalized_spec(-5, 10)
-                t5_20p_liukuva = calc_ma_normalized_spec(-5, 20)
+                t_5_5p_liukuva = calc_ma_normalized_spec(-5, 5)
+                t_5_10p_liukuva = calc_ma_normalized_spec(-5, 10)
+                t_5_20p_liukuva = calc_ma_normalized_spec(-5, 20)
 
-                t10_5p_liukuva = calc_ma_normalized_spec(-10, 5)
-                t10_10p_liukuva = calc_ma_normalized_spec(-10, 10)
-                t10_20p_liukuva = calc_ma_normalized_spec(-10, 20)
+                t_10_5p_liukuva = calc_ma_normalized_spec(-10, 5)
+                t_10_10p_liukuva = calc_ma_normalized_spec(-10, 10)
+                t_10_20p_liukuva = calc_ma_normalized_spec(-10, 20)
 
-                t15_5p_liukuva = calc_ma_normalized_spec(-15, 5)
-                t15_10p_liukuva = calc_ma_normalized_spec(-15, 10)
-                t15_20p_liukuva = calc_ma_normalized_spec(-15, 20)
+                t_15_5p_liukuva = calc_ma_normalized_spec(-15, 5)
+                t_15_10p_liukuva = calc_ma_normalized_spec(-15, 10)
+                t_15_20p_liukuva = calc_ma_normalized_spec(-15, 20)
 
-                t20_5p_liukuva = calc_ma_normalized_spec(-20, 5)
-                t20_10p_liukuva = calc_ma_normalized_spec(-20, 10)
-                t20_20p_liukuva = calc_ma_normalized_spec(-20, 20)
+                t_20_5p_liukuva = calc_ma_normalized_spec(-20, 5)
+                t_20_10p_liukuva = calc_ma_normalized_spec(-20, 10)
+                t_20_20p_liukuva = calc_ma_normalized_spec(-20, 20)
 
                 t50_50p_liukuva = calc_ma_normalized_spec(-50, 50)
 
                 # Special case for t200_200p_liukuva - set to 0 if not enough data
-                t200_200p_liukuva = calc_ma_normalized_spec(-200, 200)
-                if t200_200p_liukuva is None:
+                # Korjattu: etsitään t0:n indeksi päivämäärän perusteella
+                t0_pvm = "2024-10-10"  # Testaa tällä päivällä, jatkossa parametrina
+                if "pvm" in df.columns:
+                    t0_idx = df.index[df["pvm"] == t0_pvm]
+                    if len(t0_idx) > 0:
+                        t0_idx = t0_idx[0]
+
+                        def calc_ma_normalized_spec_idx(idx, days_offset, ma_period):
+                            end_idx = idx + days_offset
+                            start_idx = end_idx - ma_period + 1
+                            if start_idx < 0 or end_idx < 0 or end_idx >= len(df):
+                                return None
+                            subset = df.iloc[start_idx : end_idx + 1]
+                            values = [
+                                safe_get(row, ccol) for _, row in subset.iterrows()
+                            ]
+                            values = [v for v in values if v is not None]
+                            if len(values) != ma_period:
+                                return None
+                            ma_val = mean(values)
+                            t0_low = safe_get(r0, lcol)
+                            return (
+                                (ma_val / t0_low * 100)
+                                if t0_low and t0_low > 0
+                                else None
+                            )
+
+                        t200_200p_liukuva = calc_ma_normalized_spec_idx(t0_idx, 0, 200)
+                        if t200_200p_liukuva is None:
+                            t200_200p_liukuva = 0
+                    else:
+                        t200_200p_liukuva = 0
+                else:
                     t200_200p_liukuva = 0
 
                 # Calculate index data according to specification
@@ -1040,21 +1079,21 @@ def _build_output_rows(
                     fmt_val(t10_volyymi),
                     fmt_val(t20_volyymi),
                     # Moving averages
-                    fmt_val(t2_5p_liukuva),
-                    fmt_val(t2_10p_liukuva),
-                    fmt_val(t2_20p_liukuva),
-                    fmt_val(t5_5p_liukuva),
-                    fmt_val(t5_10p_liukuva),
-                    fmt_val(t5_20p_liukuva),
-                    fmt_val(t10_5p_liukuva),
-                    fmt_val(t10_10p_liukuva),
-                    fmt_val(t10_20p_liukuva),
-                    fmt_val(t15_5p_liukuva),
-                    fmt_val(t15_10p_liukuva),
-                    fmt_val(t15_20p_liukuva),
-                    fmt_val(t20_5p_liukuva),
-                    fmt_val(t20_10p_liukuva),
-                    fmt_val(t20_20p_liukuva),
+                    fmt_val(t_2_5p_liukuva),
+                    fmt_val(t_2_10p_liukuva),
+                    fmt_val(t_2_20p_liukuva),
+                    fmt_val(t_5_5p_liukuva),
+                    fmt_val(t_5_10p_liukuva),
+                    fmt_val(t_5_20p_liukuva),
+                    fmt_val(t_10_5p_liukuva),
+                    fmt_val(t_10_10p_liukuva),
+                    fmt_val(t_10_20p_liukuva),
+                    fmt_val(t_15_5p_liukuva),
+                    fmt_val(t_15_10p_liukuva),
+                    fmt_val(t_15_20p_liukuva),
+                    fmt_val(t_20_5p_liukuva),
+                    fmt_val(t_20_10p_liukuva),
+                    fmt_val(t_20_20p_liukuva),
                     fmt_val(t50_50p_liukuva),
                     fmt_val(t200_200p_liukuva),
                     # S&P 500 index
@@ -1382,7 +1421,7 @@ def paivita_results_csv_click(e):
 
 def generate_results_now(
     write: bool = True,
-    downtrend_filter: bool = False,
+    downtrend_filter: bool = True,
     min_decline_percent: float = 3.0,
     use_ma_filter: bool = True,
     use_volume_filter: bool = False,
