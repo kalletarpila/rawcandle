@@ -4,6 +4,7 @@ import sqlite3
 
 import pandas as pd
 import yfinance as yf
+from simu import SimuView, SimulationService
 
 
 # Compatibility shim: ensure ft.Colors/ft.colors and ft.Icons/ft.icons exist
@@ -1914,6 +1915,10 @@ class RawCandleApp:
             horizontal_lines=ft.border.BorderSide(1, ft.Colors.GREY_300),
         )
 
+        # Simulaatio-välilehden hallinta
+        self.simu_service = SimulationService()
+        self.simu_view = SimuView(self.page, self.create_appbar, self.simu_service)
+
         # Aloita etusivulta (only if page supports go)
         try:
             if hasattr(self.page, "go"):
@@ -1959,6 +1964,11 @@ class RawCandleApp:
                     ft.Icons.FLARE,
                     tooltip="Candles",
                     on_click=lambda _: self.page.go("/candles"),
+                ),
+                ft.IconButton(
+                    ft.Icons.SCIENCE,
+                    tooltip="Simulaatio",
+                    on_click=lambda _: self.page.go("/simu"),
                 ),
                 ft.IconButton(
                     ft.Icons.ANALYTICS,
@@ -2127,6 +2137,11 @@ class RawCandleApp:
             self.page.overlay.append(sb)
         sb.open = True
         self.page.update()
+        try:
+            if hasattr(self, "simu_service"):
+                self.simu_service.close()
+        except Exception:
+            pass
         import threading
 
         def delayed_exit():
@@ -2147,6 +2162,8 @@ class RawCandleApp:
             self.page.views.append(self.create_settings_view())
         elif self.page.route == "/candles":
             self.page.views.append(self.create_candles_view())
+        elif self.page.route == "/simu":
+            self.page.views.append(self.simu_view.create_view())
         elif self.page.route == "/analysis":
             self.page.views.append(self.create_analysis_view())
         elif self.page.route == "/tulokset":
