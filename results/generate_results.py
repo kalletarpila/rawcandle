@@ -396,7 +396,7 @@ def _build_output_rows(
         acur.execute(q)
         rows = acur.fetchall()
 
-    # Define the complete header according to final specification (80 columns)
+    # Define the complete header according to final specification (81 columns)
     # HUOM: Näitä otsikoita ei saa muuttaa, jotta Excelin sarakejärjestys säilyy.
     header = [
         # Perustieto (1-4)
@@ -488,6 +488,7 @@ def _build_output_rows(
         "NDX15",  # 78. NDX15
         "NDX20",  # 79. NDX20
         "RSI14_t0",  # 80. RSI14_t0
+        "t0_close_norm",  # 81. Normalisoitu t0_close
     ]
 
     if not rows:
@@ -655,6 +656,8 @@ def _build_output_rows(
 
                 if t0_low is None or t0_low <= 0 or t0_close is None or t0_close <= 0:
                     continue
+
+                t0_close_norm = (t0_close / t0_low * 100) if t0_low else None
 
                 # Helper function to calculate body percentage and color
                 def calc_candle_details(row_data):
@@ -1030,7 +1033,7 @@ def _build_output_rows(
                         return round(v, decimals)
                     return v
 
-                # Build output row with all 80 columns according to specification
+                # Build output row with all 81 columns according to specification
                 out = [
                     ticker,  # 1. osake
                     date,  # 2. date
@@ -1122,6 +1125,7 @@ def _build_output_rows(
                     fmt_val(NDX15),
                     fmt_val(NDX20),
                     fmt_val(rsi14_t0),
+                    fmt_val(t0_close_norm),
                 ]
 
                 output_rows.append(out)

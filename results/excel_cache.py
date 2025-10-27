@@ -28,7 +28,7 @@ class ExcelResultsCache:
         with sqlite3.connect(self.results_db) as conn:
             conn.executescript(
                 """
-                -- Staging-taulu Excel-tuloksia varten (78 saraketta SARAKKEET_DOKUMENTAATIO.md mukaan)
+                -- Staging-taulu Excel-tuloksia varten (79 saraketta SARAKKEET_DOKUMENTAATIO.md mukaan)
                 CREATE TABLE IF NOT EXISTS excel_staging (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     
@@ -131,6 +131,9 @@ class ExcelResultsCache:
                     nasdaq_vs_ma20 REAL,               -- 76. nasdaq_vs_ma20 (%)
                     nasdaq_vs_ma50 REAL,               -- 77. nasdaq_vs_ma50 (%)
                     nasdaq_vs_ma200 REAL,              -- 78. nasdaq_vs_ma200 (%)
+                    
+                    -- Lisätiedot
+                    t0_close_norm REAL,                -- 79. t0_close_norm (normalisoitu t0_close)
                     
                     -- Metadata
                     calculated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -419,10 +422,11 @@ class ExcelResultsCache:
                  sp500_t_1, sp500_t0, sp500_t1, sp500_ma_20, sp500_ma_50, sp500_ma_200,
                  sp500_change_t0, sp500_change_t1, sp500_vs_ma20, sp500_vs_ma50, sp500_vs_ma200,
                  nasdaq_t_1, nasdaq_t0, nasdaq_t1, nasdaq_ma_20, nasdaq_ma_50, nasdaq_ma_200,
-                 nasdaq_change_t0, nasdaq_change_t1, nasdaq_vs_ma20, nasdaq_vs_ma50, nasdaq_vs_ma200)
+                 nasdaq_change_t0, nasdaq_change_t1, nasdaq_vs_ma20, nasdaq_vs_ma50, nasdaq_vs_ma200,
+                 t0_close_norm)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
-                       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 batch_data,
             )
@@ -436,7 +440,7 @@ class ExcelResultsCache:
         spx_df: pd.DataFrame,
         ndx_df: pd.DataFrame,
     ) -> Optional[Tuple]:
-        """Laske kaikki Excel-sarakkeiden arvot SARAKKEET_DOKUMENTAATIO.md mukaan (78 saraketta)"""
+        """Laske kaikki Excel-sarakkeiden arvot SARAKKEET_DOKUMENTAATIO.md mukaan (79 saraketta)"""
 
         try:
             # Etsi rivi DataFramesta
@@ -486,6 +490,7 @@ class ExcelResultsCache:
             t0_ylin_norm = (t0_high / t0_low) * 100.0
             t0_bodi = abs(t0_close - t0_open) / t0_open * 100.0
             t0_bodi_colour = 1 if t0_close > t0_open else 0
+            t0_close_norm = (t0_close / t0_low) * 100.0 if t0_low else None
 
             # 12-15: T1 tiedot
             t1_alin, t1_ylin, t1_bodi, t1_bodi_colour = get_candle_values(1)
@@ -716,7 +721,7 @@ class ExcelResultsCache:
             if nasdaq_t0 and nasdaq_ma_200 and nasdaq_ma_200 > 0:
                 nasdaq_vs_ma200 = ((nasdaq_t0 - nasdaq_ma_200) / nasdaq_ma_200) * 100.0
 
-            # Palauta kaikki 78 arvoa oikeassa järjestyksessä
+            # Palauta kaikki 79 arvoa oikeassa järjestyksessä
 
             # Muunna kynttilä-string numeroksi SARAKKEET_DOKUMENTAATIO.md mukaan
             candle_mapping = {
@@ -820,6 +825,7 @@ class ExcelResultsCache:
                 nasdaq_vs_ma20,
                 nasdaq_vs_ma50,
                 nasdaq_vs_ma200,
+                t0_close_norm,
             )
 
         except Exception as e:
@@ -833,7 +839,7 @@ class ExcelResultsCache:
         ticker_filter: str = None,
         progress_callback=None,
     ) -> bool:
-        """Nopea Excel-export staging-taulusta (78 saraketta dokumentaation mukaan)"""
+        """Nopea Excel-export staging-taulusta (79 saraketta dokumentaation mukaan)"""
         try:
 
             def update_progress(step: str, current: int, total: int):
@@ -854,7 +860,7 @@ class ExcelResultsCache:
 
             # Lue kaikki data kerralla staging-taulusta
             with sqlite3.connect(self.results_db) as conn:
-                # Rakenna SQL-kysely SARAKKEET_DOKUMENTAATIO.md mukaan (78 saraketta)
+                # Rakenna SQL-kysely SARAKKEET_DOKUMENTAATIO.md mukaan (79 saraketta)
                 base_query = """
                     SELECT 
                         -- Perustiedot (1-3)
@@ -899,7 +905,10 @@ class ExcelResultsCache:
                         nasdaq_t_1, nasdaq_t0, nasdaq_t1,
                         nasdaq_ma_20, nasdaq_ma_50, nasdaq_ma_200,
                         nasdaq_change_t0, nasdaq_change_t1,
-                        nasdaq_vs_ma20, nasdaq_vs_ma50, nasdaq_vs_ma200
+                        nasdaq_vs_ma20, nasdaq_vs_ma50, nasdaq_vs_ma200,
+                        
+                        -- Lisätiedot
+                        t0_close_norm
                         
                     FROM excel_staging"""
 
@@ -936,7 +945,7 @@ class ExcelResultsCache:
             Path(excel_path).parent.mkdir(parents=True, exist_ok=True)
             df.to_excel(excel_path, index=False, engine="openpyxl")
 
-            # Muotoile numerosarakkeet (sarakkeet 3-78) kahdella desimaalilla
+            # Muotoile numerosarakkeet (sarakkeet 3-... ) kahdella desimaalilla
             update_progress("Muotoillaan numerosarakkeet", 95, 100)
 
             import openpyxl
@@ -945,8 +954,8 @@ class ExcelResultsCache:
             wb = openpyxl.load_workbook(excel_path)
             ws = wb.active
 
-            # Muotoile sarakkeet 3-78 (C-??), ohita sarakkeet 1-2 (A-B)
-            for col in range(3, min(79, ws.max_column + 1)):  # Sarakkeet C-??
+            # Muotoile sarakkeet 3-...(C-??), ohita sarakkeet 1-2 (A-B)
+            for col in range(3, ws.max_column + 1):  # Sarakkeet C-??
                 col_letter = openpyxl.utils.get_column_letter(col)
                 for row in range(2, ws.max_row + 1):  # Ohita otsikkorivi
                     cell = ws[f"{col_letter}{row}"]

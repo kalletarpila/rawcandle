@@ -246,24 +246,28 @@ class SimulationEngine:
                 take_price = avg_cost * rise_multiplier
                 close_price = row.close
                 should_sell = False
+                drop_reason = None
                 if drop_reference is not None:
                     drop_threshold = drop_reference * drop_multiplier
                     if close_price <= drop_threshold:
-                        print(
-                            "[SIMU][SELL-TRIGGER]",
-                            ticker,
-                            current_date,
-                            f"close={close_price:.2f}",
-                            f"drop_avg={drop_reference:.2f}",
-                            f"threshold={drop_threshold:.2f}",
-                        )
+                        drop_reason = "avoid loss"
                         should_sell = True
                 if close_price >= take_price:
+                    drop_reason = "secure profits"
                     should_sell = True
                 if should_sell:
                     next_date = price_series.next_date_within(current_date, end_date)
                     if next_date:
                         pending_sale = PendingSale(date=next_date, trigger_date=current_date)
+                        print(
+                            "[SIMU][SELL-TRIGGER]",
+                            ticker,
+                            current_date,
+                            f"close={close_price:.2f}",
+                            f"avg_ref={drop_reference:.2f}" if drop_reference is not None else "avg_ref=NA",
+                            f"take_price={take_price:.2f}",
+                            f"reason={drop_reason or 'rule'}",
+                        )
 
         # Final valuation at the last available close on/before end_date.
         final_row = price_series.previous_on_or_before(end_date)

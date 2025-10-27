@@ -87,7 +87,7 @@ class AnalysisEngine:
         if lower_shadow <= 0:
             return False
 
-        return lower_shadow >= body_size * 2 and upper_shadow <= body_size * 0.5
+        return lower_shadow >= body_size * 1.5 and upper_shadow <= body_size * 0.7
 
     def detect_shooting_star(
         self, open_price: float, high: float, low: float, close: float
