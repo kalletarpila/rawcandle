@@ -19,6 +19,7 @@ class SimulationSettings:
     capital_thousands: int
     invest_percent: float
     drop_percent: float
+    drop_average_days: int
     rise_percent: float
     min_strength: float
     max_rsi: float
@@ -32,6 +33,10 @@ class SimulationSettings:
     @property
     def invest_fraction(self) -> float:
         return max(0.0, min(self.invest_percent, 100.0)) / 100.0
+
+    @property
+    def drop_average_window(self) -> int:
+        return max(1, self.drop_average_days)
 
     def canonical_patterns(self) -> List[str]:
         return canonicalise_selection(self.selected_patterns)
@@ -69,6 +74,15 @@ class SimulationEngine:
         settings = request.settings
 
         price_series = self.price_repo.fetch_price_series(ticker)
+        print(
+            "[SIMU][INIT]",
+            ticker,
+            f"capital_thousands={settings.capital_thousands}",
+            f"starting_cash={settings.starting_capital:,.2f}",
+        )
+        signal_count = 0
+        eligible_signals = 0
+
         if len(price_series) == 0:
             start_capital = settings.starting_capital
             return SimulationResult(
@@ -77,9 +91,13 @@ class SimulationEngine:
                 end_capital=start_capital,
                 growth_pct=0.0,
                 buy_trades=0,
+                signals_found=0,
+                eligible_signals=0,
             )
 
         canonical_patterns = settings.canonical_patterns()
+        downtrend_only = set(canonical_patterns) == {"downtrend"}
+        price_rows_all = price_series.rows()
         signals_map = resolve_signals(
             self.analysis_repo,
             ticker,
@@ -88,8 +106,8 @@ class SimulationEngine:
             canonical_patterns,
             settings.min_strength,
         )
+        signal_count = len(signals_map)
 
-        price_rows_all = price_series.rows()
         rsi_map = compute_rsi(price_rows_all, period=config.RSI_PERIOD)
         volume_growth_map = compute_volume_growth(price_rows_all, window=config.VOLUME_SMA_WINDOW)
 
@@ -122,6 +140,8 @@ class SimulationEngine:
 
         end_date = settings.end_date
 
+        drop_window = settings.drop_average_window
+
         for current_date in trading_dates:
             row = price_series.get(current_date)
             if row is None:
@@ -130,7 +150,22 @@ class SimulationEngine:
             # Execute pending sale at the day's open before new buys.
             if pending_sale and pending_sale.date == current_date and shares > 0:
                 sale_price = row.open
+                print(
+                    "[SIMU][SELL]",
+                    ticker,
+                    current_date,
+                    f"shares={shares}",
+                    f"price={sale_price:.2f}",
+                    f"cash_before={cash:.2f}",
+                )
                 cash += shares * sale_price
+                print(
+                    "[SIMU][SELL]",
+                    ticker,
+                    current_date,
+                    "cash_after",
+                    f"{cash:.2f}",
+                )
                 shares = 0
                 avg_cost = 0.0
                 pending_sale = None
@@ -148,7 +183,23 @@ class SimulationEngine:
                     # Skip silently if funds insufficient for at least one share
                     continue
                 total_cost = max_shares * buy_price
+                print(
+                    "[SIMU][BUY]",
+                    ticker,
+                    current_date,
+                    f"shares={max_shares}",
+                    f"price={buy_price:.2f}",
+                    f"cost={total_cost:.2f}",
+                    f"cash_before={cash:.2f}",
+                )
                 cash -= total_cost
+                print(
+                    "[SIMU][BUY]",
+                    ticker,
+                    current_date,
+                    "cash_after",
+                    f"{cash:.2f}",
+                )
                 if shares == 0:
                     avg_cost = buy_price
                 else:
@@ -159,23 +210,55 @@ class SimulationEngine:
             # Evaluate t0 signal for current day.
             signal = signals_map.get(current_date)
             if signal:
-                rsi_value = rsi_map.get(current_date)
-                if rsi_value is not None and rsi_value <= settings.max_rsi:
+                if downtrend_only:
+                    rsi_value = rsi_map.get(current_date)
                     volume_growth = volume_growth_map.get(current_date)
-                    if volume_growth is not None and volume_growth >= settings.min_volume_growth:
-                        next_date = price_series.next_date_within(current_date, end_date)
-                        if next_date:
-                            pending_buys.append(PendingBuy(date=next_date, t0_date=current_date))
+                    rsi_ok = True
+                    vol_ok = True
+                else:
+                    rsi_value = rsi_map.get(current_date)
+                    volume_growth = volume_growth_map.get(current_date)
+                    rsi_ok = rsi_value is not None and rsi_value <= settings.max_rsi
+                    vol_ok = volume_growth is not None and volume_growth >= settings.min_volume_growth
+                next_date = price_series.next_date_within(current_date, end_date)
+                print(
+                    "[SIMU][SIGNAL]",
+                    ticker,
+                    current_date,
+                    signal.raw_pattern,
+                    f"strength={signal.strength:.2f}",
+                    f"RSI={rsi_value:.2f}" if rsi_value is not None else "RSI=NA",
+                    f"vol%={volume_growth:.2f}" if volume_growth is not None else "vol%=NA",
+                    f"RSI_OK={rsi_ok}",
+                    f"VOL_OK={vol_ok}",
+                    f"next_date={next_date}",
+                )
+                if rsi_ok and vol_ok and next_date:
+                    eligible_signals += 1
+                    pending_buys.append(PendingBuy(date=next_date, t0_date=current_date))
 
             # Evaluate stop-loss / take-profit triggers at close.
             if shares > 0 and pending_sale is None:
-                stop_price = avg_cost * drop_multiplier
+                previous_closes = price_series.previous_closes(current_date, drop_window)
+                drop_reference = None
+                if len(previous_closes) >= drop_window:
+                    drop_reference = sum(previous_closes) / len(previous_closes)
                 take_price = avg_cost * rise_multiplier
                 close_price = row.close
                 should_sell = False
-                if close_price <= stop_price:
-                    should_sell = True
-                elif close_price >= take_price:
+                if drop_reference is not None:
+                    drop_threshold = drop_reference * drop_multiplier
+                    if close_price <= drop_threshold:
+                        print(
+                            "[SIMU][SELL-TRIGGER]",
+                            ticker,
+                            current_date,
+                            f"close={close_price:.2f}",
+                            f"drop_avg={drop_reference:.2f}",
+                            f"threshold={drop_threshold:.2f}",
+                        )
+                        should_sell = True
+                if close_price >= take_price:
                     should_sell = True
                 if should_sell:
                     next_date = price_series.next_date_within(current_date, end_date)
@@ -184,20 +267,38 @@ class SimulationEngine:
 
         # Final valuation at the last available close on/before end_date.
         final_row = price_series.previous_on_or_before(end_date)
-        end_capital = cash
-        if shares > 0 and final_row:
-            end_capital += shares * final_row.close
+        position_value = 0.0
+        if shares > 0:
+            if final_row:
+                position_value = shares * final_row.close
+            else:
+                print("[SIMU][WARN]", ticker, "open position without final price")
+        end_capital = cash + position_value
 
         start_capital = settings.starting_capital
         growth_pct = 0.0
         if start_capital > 0:
             growth_pct = ((end_capital / start_capital) - 1.0) * 100.0
 
+        print(
+            "[SIMU][SUMMARY]",
+            ticker,
+            f"start={start_capital:.2f}",
+            f"end={end_capital:.2f}",
+            f"growth={growth_pct:.2f}%",
+            f"buy_trades={buy_trades}",
+            f"signals_total={signal_count}",
+            f"eligible={eligible_signals}",
+        )
+
         return SimulationResult(
             ticker=ticker,
             start_capital=start_capital,
             end_capital=end_capital,
+            end_cash=cash,
+            end_position_value=position_value,
             growth_pct=growth_pct,
             buy_trades=buy_trades,
+            signals_found=signal_count,
+            eligible_signals=eligible_signals,
         )
-

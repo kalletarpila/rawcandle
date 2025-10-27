@@ -95,8 +95,7 @@ class AnalysisRepository:
             pattern_raw = (row["pattern_value"] or "").strip()
             strength = row["signal_strength"]
             if strength is None:
-                # default strength when column missing or value NULL
-                strength = 1.0
+                strength = 1.0 if pattern_raw.lower() == "downtrend" else 0.0
             events.append(
                 AnalysisEvent(
                     ticker=ticker,
@@ -159,6 +158,15 @@ class PriceSeries:
     def previous_on_or_before(self, date_value: _dt.date) -> Optional[PriceRow]:
         candidates = [row for row in self._rows if row.date <= date_value]
         return candidates[-1] if candidates else None
+
+    def previous_closes(self, date_value: _dt.date, days: int) -> list[float]:
+        if days <= 0:
+            return []
+        idx = self._index.get(date_value)
+        if idx is None:
+            return []
+        start = max(0, idx - days)
+        return [self._rows[i].close for i in range(start, idx)]
 
 
 class PriceRepository:

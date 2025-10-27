@@ -78,10 +78,17 @@ def resolve_signals(
         strength = float(event.strength or 0.0)
         if strength < min_strength:
             continue
-        grouped.setdefault(event.date, []).append(event)
+        grouped.setdefault(event.date, []).append(
+            AnalysisEvent(
+                ticker=event.ticker,
+                date=event.date,
+                pattern_key=event.pattern_key,
+                raw_pattern=event.raw_pattern,
+                strength=strength,
+            )
+        )
 
     selected_signals: Dict[_dt.date, SelectedSignal] = {}
     for date_value, candidates in grouped.items():
         selected_signals[date_value] = _choose_event(candidates)
     return selected_signals
-

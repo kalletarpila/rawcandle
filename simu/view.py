@@ -25,7 +25,8 @@ class SimuView:
         self._service = service
 
         # Tallennetaan simulaation tulokset, jotta näkymä voidaan rakentaa uudelleen.
-        self._results_data: list[dict[str, str]] = []
+        self._results_data: list[SimulationResult] = []
+        self.results_text: Optional[ft.Text] = None
         self._result_counter = 0
 
         # UI-komponenttien oletusviittaukset (asetetaan create_view-metodissa)
@@ -47,10 +48,10 @@ class SimuView:
 
     def create_view(self) -> ft.View:
         """Palauttaa simulaatio-välilehden ft.View-rakenteena."""
-        percent_filter = ft.InputFilter(allow=True, regex=r"[0-9,]")
-        int_filter = ft.InputFilter(allow=True, regex=r"[0-9]")
-        ticker_filter = ft.InputFilter(allow=True, regex=r"[A-Za-z0-9,\\s]")
-        date_filter = ft.InputFilter(allow=True, regex=r"[0-9.]")
+        percent_filter = ft.InputFilter(r"[0-9,]", allow=True)
+        int_filter = ft.InputFilter(r"[0-9]", allow=True)
+        ticker_filter = ft.InputFilter(r"[A-Za-z0-9,\\s]", allow=True)
+        date_filter = ft.InputFilter(r"[0-9.]", allow=True)
 
         self.ticker_field = ft.TextField(
             label="Osakkeen tickerit",
@@ -84,7 +85,7 @@ class SimuView:
 
         self.end_date_field = ft.TextField(
             label="Lopetuspäivä",
-            value="31.12.2024",
+            value="30.9.2025",
             helper_text="Muoto dd.mm.yyyy.",
             input_filter=date_filter,
             expand=True,
@@ -101,7 +102,7 @@ class SimuView:
         self.invest_amount_field = ft.TextField(
             label="Sijoitettava summa",
             value="100",
-            helper_text="Anna kokonaisluku (1-100).",
+            helper_text="Anna kokonaisluku (1-100) – arvo tulkitaan tuhansina (100 → 100 000).",
             keyboard_type=ft.KeyboardType.NUMBER,
             input_filter=int_filter,
             expand=True,
@@ -153,9 +154,26 @@ class SimuView:
             )
         )
 
+        self.drop_average_days_field = ft.TextField(
+            label="Kurssialarajan keskiarvon päivät",
+            value="5",
+            helper_text="Kuinka monen edeltävän päivän keskiarvoa verrataan (1-60).",
+            keyboard_type=ft.KeyboardType.NUMBER,
+            input_filter=int_filter,
+            expand=True,
+        )
+        self.drop_average_days_field.on_change = (
+            lambda e, fld=self.drop_average_days_field: self._clear_error(fld)
+        )
+        self.drop_average_days_field.on_blur = (
+            lambda e, fld=self.drop_average_days_field: self._clamp_integer_field(
+                fld, 1, 60
+            )
+        )
+
         self.rise_threshold_field = ft.TextField(
             label="Kurssinousuraja",
-            value="5",
+            value="15",
             suffix_text="%",
             helper_text="Anna prosentti (1-100).",
             keyboard_type=ft.KeyboardType.NUMBER,
@@ -229,6 +247,7 @@ class SimuView:
                 self.invest_amount_field,
                 self.investment_share_field,
                 self.drop_threshold_field,
+                self.drop_average_days_field,
                 self.rise_threshold_field,
                 self.strength_field,
                 self.rsi_field,
@@ -239,7 +258,11 @@ class SimuView:
         )
 
         self.pattern_checkboxes = [
-            ft.Checkbox(label=definition.label, value=False, data=definition.key)
+            ft.Checkbox(
+                label=definition.label,
+                value=definition.key == "hammer",
+                data=definition.key,
+            )
             for definition in config.PATTERN_DEFINITIONS
         ]
 
@@ -289,29 +312,16 @@ class SimuView:
                 ),
             ],
             run_spacing=16,
-            horizontal_alignment=ft.CrossAxisAlignment.START,
+            alignment=ft.MainAxisAlignment.START,
         )
 
-        self.results_table = ft.DataTable(
-            columns=[
-                ft.DataColumn(ft.Text("#", weight=ft.FontWeight.BOLD)),
-                ft.DataColumn(ft.Text("Osake", weight=ft.FontWeight.BOLD)),
-                ft.DataColumn(ft.Text("Sijoitus alussa", weight=ft.FontWeight.BOLD)),
-                ft.DataColumn(ft.Text("Sijoitus lopussa", weight=ft.FontWeight.BOLD)),
-                ft.DataColumn(ft.Text("Kasvuprosentti", weight=ft.FontWeight.BOLD)),
-                ft.DataColumn(ft.Text("Ostotapahtumia kpl", weight=ft.FontWeight.BOLD)),
-            ],
-            rows=[],
-            column_spacing=18,
-            data_row_height=48,
-            heading_row_height=48,
-            border=ft.border.all(1, ft.Colors.GREY_400),
-            border_radius=8,
-            vertical_lines=ft.border.BorderSide(1, ft.Colors.GREY_300),
-            horizontal_lines=ft.border.BorderSide(1, ft.Colors.GREY_300),
+        self.results_text = ft.Text(
+            value="Ei simulaatiotuloksia vielä.",
+            selectable=True,
             expand=True,
         )
-        self._update_results_table()
+        if self._results_data:
+            self._update_results_view()
 
         results_card = ft.Card(
             content=ft.Container(
@@ -327,10 +337,7 @@ class SimuView:
                             color=ft.Colors.GREY_600,
                             size=13,
                         ),
-                        ft.Container(
-                            content=self.results_table,
-                            expand=True,
-                        ),
+                        ft.Container(content=self.results_text, expand=True),
                     ],
                     spacing=12,
                     expand=True,
@@ -480,6 +487,7 @@ class SimuView:
         invest_amount = int(self._parse_float_value(self.invest_amount_field))
         invest_percent = self._parse_float_value(self.investment_share_field)
         drop_percent = self._parse_float_value(self.drop_threshold_field)
+        drop_avg_days = int(self._parse_float_value(self.drop_average_days_field))
         rise_percent = self._parse_float_value(self.rise_threshold_field)
         min_strength = self._parse_float_value(self.strength_field)
         max_rsi = self._parse_float_value(self.rsi_field)
@@ -491,6 +499,7 @@ class SimuView:
             capital_thousands=invest_amount,
             invest_percent=invest_percent,
             drop_percent=drop_percent,
+            drop_average_days=drop_avg_days,
             rise_percent=rise_percent,
             min_strength=min_strength,
             max_rsi=max_rsi,
@@ -498,28 +507,40 @@ class SimuView:
             selected_patterns=self._selected_patterns(),
         )
 
-    def _update_results_table(self):
-        if not self.results_table:
+    def _update_results_view(self):
+        if self.results_text is None:
+            print("[SIMU][UI] results_text missing, skipping update")
             return
-        rows = []
-        for item in self._results_data:
-            rows.append(
-                ft.DataRow(
-                    cells=[
-                        ft.DataCell(ft.Text(str(item["index"]))),
-                        ft.DataCell(ft.Text(item["stock"])),
-                        ft.DataCell(ft.Text(item["start_amount"])),
-                        ft.DataCell(ft.Text(item["end_amount"])),
-                        ft.DataCell(ft.Text(item["growth_pct"])),
-                        ft.DataCell(ft.Text(item["trades"])),
-                    ]
+        print("[SIMU][UI] refreshing results", len(self._results_data))
+        if not self._results_data:
+            self.results_text.value = "Ei simulaatiotuloksia vielä."
+        else:
+            lines = []
+            for idx, result in enumerate(self._results_data, start=1):
+                lines.append(
+                    " | ".join(
+                        [
+                            f"{idx}. {result.ticker}",
+                            f"Aloitus (kassa): {result.start_capital:,.2f}",
+                            f"Kassa nyt: {result.end_cash:,.2f}",
+                            f"Osakkeiden arvo: {result.end_position_value:,.2f}",
+                            f"Yhteensä: {result.end_capital:,.2f}",
+                            f"Kasvu: {result.growth_pct:.2f} %",
+                            f"Ostoja: {result.buy_trades}"
+                        ]
+                    )
                 )
-            )
-        self.results_table.rows = rows
+            self.results_text.value = "\n".join(lines)
         try:
-            self.results_table.update()
-        except Exception:
-            pass
+            self.results_text.update()
+        except Exception as exc:
+            print("[SIMU][UI][TEXT] update failed", exc)
+        if getattr(self.page, "update", None):
+            try:
+                self.page.update()
+            except Exception as exc:
+                print("[SIMU][UI][PAGE] update failed", exc)
+
 
     def _clear_error(self, field: Optional[ft.TextField]):
         if field is None:
@@ -815,6 +836,11 @@ class SimuView:
             valid = False
             error_message = error_message or "Kurssilaskuraja on virheellinen."
         if self._validate_int_input(
+            self.drop_average_days_field, 1, 60, "Kurssialarajan keskiarvon päivät"
+        ) is None:
+            valid = False
+            error_message = error_message or "Keskiarvopäivien määrä on virheellinen."
+        if self._validate_int_input(
             self.rise_threshold_field, 1, 100, "Kurssinousuraja (%)"
         ) is None:
             valid = False
@@ -851,14 +877,13 @@ class SimuView:
 
     def _append_result(self, result: SimulationResult):
         self._result_counter += 1
-        self._results_data.append(
-            {
-                "index": self._result_counter,
-                "stock": result.ticker,
-                "start_amount": f"{result.start_capital:,.2f}",
-                "end_amount": f"{result.end_capital:,.2f}",
-                "growth_pct": f"{result.growth_pct:.2f} %",
-                "trades": str(result.buy_trades),
-            }
+        print(
+            "[SIMU][UI][APPEND]",
+            result.ticker,
+            f"start={result.start_capital:.2f}",
+            f"end={result.end_capital:.2f}",
+            f"growth={result.growth_pct:.2f}%",
+            f"trades={result.buy_trades}",
         )
-        self._update_results_table()
+        self._results_data.append(result)
+        self._update_results_view()
