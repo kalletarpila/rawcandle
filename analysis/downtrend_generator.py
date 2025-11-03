@@ -183,7 +183,7 @@ class DowntrendGenerator:
 
             cursor.execute(
                 """
-                INSERT INTO analysis_findings (
+                INSERT OR REPLACE INTO analysis_findings (
                     ticker, date, pattern, signal_strength
                 ) VALUES (?, ?, ?, ?)
             """,
