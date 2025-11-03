@@ -300,6 +300,7 @@ class DowntrendGenerator:
                 events_found = 0
                 attempts = 0
                 max_attempts = 500
+                used_dates = set()  # Pidä kirjaa jo käytetyistä päivämääristä
 
                 while events_found < events_per_ticker and attempts < max_attempts:
                     # Check for cancellation
@@ -313,7 +314,20 @@ class DowntrendGenerator:
                     if len(available_dates) < 11:
                         break
 
-                    target_date = random.choice(available_dates[10:])
+                    # Valitse päivämäärä jota ei ole vielä käytetty
+                    available_unused_dates = [
+                        d for d in available_dates[10:] if d not in used_dates
+                    ]
+                    
+                    # Jos kaikki päivämäärät on käytetty, lopeta
+                    if not available_unused_dates:
+                        self.logger.info(
+                            f"Ticker {ticker}: all available dates exhausted after {events_found} events"
+                        )
+                        break
+                    
+                    target_date = random.choice(available_unused_dates)
+                    used_dates.add(target_date)  # Merkitse päivämäärä käytetyksi
 
                     # Get price data [t-10 ... t0]
                     price_data = self._get_price_data(
