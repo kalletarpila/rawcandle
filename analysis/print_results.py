@@ -91,9 +91,9 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
             base_dir = os.path.dirname(output_path)
             base_name = os.path.splitext(os.path.basename(output_path))[0]
             ts = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-            
+
             # Ei tehdä arkistointia - poistettu arkistointilogiikka
-            
+
             timestamped_txt = os.path.join(base_dir, f"{base_name}_{ts}.txt")
             with open(timestamped_txt, "w", encoding="utf-8") as f:
                 f.write(msg + "\n")
@@ -119,125 +119,96 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
             # append error note to returned message so UI can show it
             msg = msg + f"\n\n❌ Virhe tiedostoon kirjoitettaessa: {ex}"
 
-    # Also write CSV file next to the text output if output_path provided
-    csv_path = None
+    # Ei luoda CSV-tiedostoja - poistettu CSV-luontilogiikka
+    # Tallennetaan vain .txt tiedostot
+    
+    # Kirjataan löydökset logiin
     if output_path:
         try:
-            # write CSV with the same timestamped base name
-            csv_path = os.path.splitext(output_path)[0] + ".csv"
-            # if output_path ended with .txt, replace .txt with .csv
-            if csv_path.lower().endswith(".txt.csv"):
-                csv_path = csv_path[:-4]
-            with open(csv_path, "w", encoding="utf-8") as cf:
-                cf.write("ticker,date,candle,signal_strength\n")
-                for key in sorted(results.keys()):
-                    if "|" in key:
-                        t, d = key.split("|", 1)
-                    else:
-                        t = ticker or ""
-                        d = key
-                    for entry in results[key]:
-                        pattern_name = _extract_pattern(entry)
-                        strength = _extract_strength(entry)
-                        strength_str = f"{strength:.3f}" if strength is not None else ""
-                        cf.write(f"{t},{d},{pattern_name},{strength_str}\n")
-            # also log each finding as a separate log line (one finding per log row)
-            try:
-                from .logger import setup_logger
+            from .logger import setup_logger
 
-                logger = setup_logger()
-                for key in sorted(results.keys()):
-                    if "|" in key:
-                        t, d = key.split("|", 1)
-                    else:
-                        t = ticker or ""
-                        d = key
-                    for entry in results[key]:
-                        pattern_name = _extract_pattern(entry)
-                        strength = _extract_strength(entry)
-                        strength_str = f"{strength:.3f}" if strength is not None else ""
-                        logger.info(f"{t},{d},{pattern_name},{strength_str}")
-            except Exception:
-                # non-fatal if logging fails
-                pass
-            # also persist findings to a small analysis DB (avoid duplicates)
-            try:
-                import sqlite3
-
-                db_path = os.path.join(os.path.dirname(__file__), "analysis.db")
-                conn = sqlite3.connect(db_path)
-                cur = conn.cursor()
-                # Yhtenäistä skeema database_managerin kanssa
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS analysis_findings (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        ticker TEXT NOT NULL,
-                        date TEXT NOT NULL,
-                        pattern TEXT,
-                        signal_strength REAL,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        UNIQUE(ticker, date, pattern)
-                    )
-                """
-                )
-                # Poista mahdolliset duplikaatit ennen uniikki-indeksin luontia
-                cur.execute(
-                    """
-                    DELETE FROM analysis_findings
-                    WHERE rowid NOT IN (
-                        SELECT MIN(rowid)
-                        FROM analysis_findings
-                        GROUP BY ticker, date, pattern
-                    )
-                    """
-                )
-                cur.execute(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_finding ON analysis_findings(ticker, date, pattern)"
-                )
-                rows = []
-                for key in sorted(results.keys()):
-                    if "|" in key:
-                        t, d = key.split("|", 1)
-                    else:
-                        t = ticker or ""
-                        d = key
-                        # ei tietoa muista tickereistä -> fallback tickerille
-                    for entry in results[key]:
-                        pattern_name = _extract_pattern(entry)
-                        if not pattern_name:
-                            continue
-                        strength = _extract_strength(entry)
-                        rows.append((t, d, pattern_name, strength if strength is not None else 1.0))
-                if rows:
-                    cur.executemany(
-                        "INSERT OR REPLACE INTO analysis_findings (ticker, date, pattern, signal_strength) VALUES (?, ?, ?, ?)",
-                        rows,
-                    )
-                    conn.commit()
-                conn.close()
-            except Exception:
-                # non-fatal persistence failure
-                pass
-            # also update canonical CSV
-            try:
-                canonical_csv = os.path.join(base_dir, f"{base_name}.csv")
-                with open(canonical_csv, "w", encoding="utf-8") as bcf:
-                    bcf.write("ticker,date,candle,signal_strength\n")
-                    for key in sorted(results.keys()):
-                        if "|" in key:
-                            t, d = key.split("|", 1)
-                        else:
-                            t = ticker or ""
-                            d = key
-                        for entry in results[key]:
-                            pattern_name = _extract_pattern(entry)
-                            strength = _extract_strength(entry)
-                            strength_str = f"{strength:.3f}" if strength is not None else ""
-                            bcf.write(f"{t},{d},{pattern_name},{strength_str}\n")
-            except Exception:
-                pass
+            logger = setup_logger()
+            for key in sorted(results.keys()):
+                if "|" in key:
+                    t, d = key.split("|", 1)
+                else:
+                    t = ticker or ""
+                    d = key
+                for entry in results[key]:
+                    pattern_name = _extract_pattern(entry)
+                    strength = _extract_strength(entry)
+                    strength_str = f"{strength:.3f}" if strength is not None else ""
+                    logger.info(f"{t},{d},{pattern_name},{strength_str}")
         except Exception:
-            csv_path = None
+            # non-fatal if logging fails
+            pass
+    
+    # Tallenna löydökset tietokantaan
+    if output_path:
+        try:
+            import sqlite3
 
-    return msg, csv_path
+            db_path = os.path.join(os.path.dirname(__file__), "analysis.db")
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            # Yhtenäistä skeema database_managerin kanssa
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS analysis_findings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT NOT NULL,
+                    date TEXT NOT NULL,
+                    pattern TEXT,
+                    signal_strength REAL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(ticker, date, pattern)
+                )
+            """
+            )
+            # Poista mahdolliset duplikaatit ennen uniikki-indeksin luontia
+            cur.execute(
+                """
+                DELETE FROM analysis_findings
+                WHERE rowid NOT IN (
+                    SELECT MIN(rowid)
+                    FROM analysis_findings
+                    GROUP BY ticker, date, pattern
+                )
+                """
+            )
+            cur.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_finding ON analysis_findings(ticker, date, pattern)"
+            )
+            rows = []
+            for key in sorted(results.keys()):
+                if "|" in key:
+                    t, d = key.split("|", 1)
+                else:
+                    t = ticker or ""
+                    d = key
+                    # ei tietoa muista tickereistä -> fallback tickerille
+                for entry in results[key]:
+                    pattern_name = _extract_pattern(entry)
+                    if not pattern_name:
+                        continue
+                    strength = _extract_strength(entry)
+                    rows.append(
+                        (
+                            t,
+                            d,
+                            pattern_name,
+                            strength if strength is not None else 1.0,
+                        )
+                    )
+            if rows:
+                cur.executemany(
+                    "INSERT OR REPLACE INTO analysis_findings (ticker, date, pattern, signal_strength) VALUES (?, ?, ?, ?)",
+                    rows,
+                )
+                conn.commit()
+            conn.close()
+        except Exception:
+            # non-fatal persistence failure
+            pass
+
+    return msg, None  # Ei palauteta csv_path:ia enää

@@ -786,9 +786,9 @@ def start_results_generation(app, e):
 
             total_matches = sum(len(v) for v in results.values())
             if ticker is None:
-                banner = f"CSV generoitu: kaikki tickereitä, löydetty yhteensä {total_matches} tapahtumaa."
+                banner = f"Tulokset generoitu: kaikki tickereitä, löydetty yhteensä {total_matches} tapahtumaa."
             else:
-                banner = f"CSV generoitu: {ticker}, löydetty yhteensä {total_matches} tapahtumaa."
+                banner = f"Tulokset generoitu: {ticker}, löydetty yhteensä {total_matches} tapahtumaa."
             try:
                 app.results_banner.value = banner
                 app.results_banner.color = ft.Colors.GREEN_600
@@ -799,8 +799,6 @@ def start_results_generation(app, e):
             logger.info(
                 f"Results generation done (results.view): {ticker} - {str(text_msg)[:200]}"
             )
-            if csv_path:
-                logger.info(f"Results CSV written: {csv_path}")
 
         except Exception as ex:
             logger.exception("Virhe generoitaessa tuloksia (results.view)")

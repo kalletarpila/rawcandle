@@ -1338,8 +1338,6 @@ class RawCandleApp:
                 self.page.update()
                 safe_msg = str(text_msg).replace("\n", " | ")
                 logger.info(f"Analyysi valmis: {ticker} - {safe_msg}")
-                if csv_path:
-                    logger.info(f"Analysis CSV written: {csv_path}")
                 # Update Candles result banner: show analyzed ticker(s) and total matches
                 try:
                     total_matches = sum(len(v) for v in results.values())
@@ -1496,9 +1494,9 @@ class RawCandleApp:
 
                 total_matches = sum(len(v) for v in results.values())
                 if ticker is None:
-                    banner = f"CSV generoitu: kaikki tickereitä, löydetty yhteensä {total_matches} tapahtumaa."
+                    banner = f"Tulokset generoitu: kaikki tickereitä, löydetty yhteensä {total_matches} tapahtumaa."
                 else:
-                    banner = f"CSV generoitu: {ticker}, löydetty yhteensä {total_matches} tapahtumaa."
+                    banner = f"Tulokset generoitu: {ticker}, löydetty yhteensä {total_matches} tapahtumaa."
                 try:
                     self.results_banner.value = banner
                     self.results_banner.color = ft.Colors.GREEN_600
@@ -1509,8 +1507,6 @@ class RawCandleApp:
                 logger.info(
                     f"Results generation done: {ticker} - {str(text_msg)[:200]}"
                 )
-                if csv_path:
-                    logger.info(f"Results CSV written: {csv_path}")
 
             except Exception as ex:
                 logger.exception("Virhe generoitaessa tuloksia")
