@@ -78,6 +78,36 @@ class DowntrendGenerator:
             self.logger.error(f"Failed to select random ticker: {e}")
             return None
 
+    def _select_random_tickers(
+        self, conn: sqlite3.Connection, num_tickers: int
+    ) -> List[str]:
+        """Select multiple random tickers from stock database.
+
+        Args:
+            conn: Database connection
+            num_tickers: Number of unique tickers to select
+
+        Returns:
+            List of unique ticker symbols
+        """
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT DISTINCT osake 
+                FROM osakedata 
+                WHERE pvm >= '2024-01-01'
+                ORDER BY RANDOM() 
+                LIMIT ?
+            """,
+                (num_tickers,),
+            )
+            rows = cursor.fetchall()
+            return [row[0] for row in rows]
+        except Exception as e:
+            self.logger.error(f"Failed to select random tickers: {e}")
+            return []
+
     def _get_price_data(
         self,
         conn: sqlite3.Connection,
@@ -274,7 +304,17 @@ class DowntrendGenerator:
             return 0, errors
 
         try:
-            for ticker_idx in range(num_tickers):
+            # Valitse ensin kaikki tickerit kerralla
+            tickers = self._select_random_tickers(stock_conn, num_tickers)
+            if not tickers:
+                errors.append("Failed to select any tickers")
+                return 0, errors
+
+            self.logger.info(
+                f"Selected {len(tickers)} unique tickers for event generation"
+            )
+
+            for ticker_idx, ticker in enumerate(tickers):
                 # Check for cancellation
                 if cancel_check and cancel_check():
                     self.logger.info("Generation cancelled by user")
@@ -282,13 +322,7 @@ class DowntrendGenerator:
 
                 # Update progress
                 if progress_callback:
-                    progress_callback(ticker_idx, num_tickers)
-
-                # Select random ticker
-                ticker = self._select_random_ticker(stock_conn)
-                if not ticker:
-                    errors.append(f"Failed to select ticker {ticker_idx + 1}")
-                    continue
+                    progress_callback(ticker_idx, len(tickers))
 
                 # Get all available dates for this ticker
                 available_dates = self._get_ticker_dates(stock_conn, ticker)
@@ -354,7 +388,7 @@ class DowntrendGenerator:
 
             # Final progress update
             if progress_callback:
-                progress_callback(num_tickers, num_tickers)
+                progress_callback(len(tickers), len(tickers))
 
         except Exception as e:
             errors.append(f"Generation error: {e}")
