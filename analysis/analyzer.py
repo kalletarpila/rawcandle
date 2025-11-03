@@ -7,6 +7,116 @@ import logging
 from typing import List, Dict, Any, Optional, Tuple
 import sqlite3
 from datetime import datetime
+from statistics import mean
+import pandas as pd
+
+
+def _calculate_moving_average(
+    df: pd.DataFrame, ccol: str, idx: int, days: int
+) -> Optional[float]:
+    """Laskee liukuvan keskiarvon annetusta indeksistä taaksepäin"""
+    try:
+        if idx - days + 1 < 0:
+            return None
+        subset = df.iloc[idx - days + 1 : idx + 1]
+        values = [
+            float(row[ccol]) for _, row in subset.iterrows() if pd.notna(row[ccol])
+        ]
+        if len(values) != days:
+            return None
+        return mean(values)
+    except Exception:
+        return None
+
+
+def _is_in_downtrend(
+    df: pd.DataFrame,
+    ccol: str,
+    vcol: str,
+    idx: int,
+    min_decline_percent: float = 3.0,
+    use_ma_filter: bool = True,
+    use_volume_filter: bool = False,
+) -> bool:
+    """Tarkistaa onko kynttilä laskutrendissä annettujen kriteerien mukaan"""
+    try:
+        # Tarvitaan vähintään 10 päivää historiaa
+        if idx < 10:
+            return False
+
+        def safe_get(row_idx, col):
+            if row_idx < 0 or row_idx >= len(df):
+                return None
+            try:
+                val = df.iloc[row_idx][col]
+                return float(val) if pd.notna(val) else None
+            except Exception:
+                return None
+
+        # 1. Peruskriteeri: Porrastava lasku t-10 > t-5 > t-2 > t0
+        t0 = safe_get(idx, ccol)
+        t_2 = safe_get(idx - 2, ccol)
+        t_5 = safe_get(idx - 5, ccol)
+        t_10 = safe_get(idx - 10, ccol)
+
+        if not all([t0, t_2, t_5, t_10]):
+            return False
+
+        if not (t_10 > t_5 > t_2 > t0):
+            return False
+
+        # 2. Minimalasku: vähintään X% laskua 10 päivässä
+        decline_percent = ((t_10 - t0) / t_10) * 100
+        if decline_percent < min_decline_percent:
+            return False
+
+        # 3. Liukuva keskiarvo -suodatin (valinnainen)
+        if use_ma_filter:
+            ma5 = _calculate_moving_average(df, ccol, idx, 5)
+            ma10 = _calculate_moving_average(df, ccol, idx, 10)
+
+            if ma5 is None or ma10 is None:
+                return False
+
+            # Kurssi alle MA(10) ja MA(5) < MA(10)
+            if not (t0 < ma10 and ma5 < ma10):
+                return False
+
+        # 4. Volyymi-suodatin (valinnainen)
+        if use_volume_filter:
+            try:
+                # Keskivolyymi viimeisen 5 päivän ajalta
+                recent_volumes = []
+                for i in range(max(0, idx - 4), idx + 1):
+                    vol = safe_get(i, vcol)
+                    if vol and vol > 0:
+                        recent_volumes.append(vol)
+
+                # Keskivolyymi 20 päivän historiasta (päivät -25 ... -5)
+                historical_volumes = []
+                for i in range(max(0, idx - 25), max(0, idx - 4)):
+                    vol = safe_get(i, vcol)
+                    if vol and vol > 0:
+                        historical_volumes.append(vol)
+
+                if not recent_volumes or not historical_volumes:
+                    return False
+
+                recent_avg = mean(recent_volumes)
+                historical_avg = mean(historical_volumes)
+
+                # Volyymi vähintään 1.2x normaalia
+                if recent_avg < 1.2 * historical_avg:
+                    return False
+
+            except Exception:
+                # Jos volyymitarkistus epäonnistuu, hyväksytään kuitenkin
+                pass
+
+        return True
+
+    except Exception:
+        return False
 
 
 class AnalysisEngine:
@@ -216,18 +326,34 @@ class AnalysisEngine:
         return round(base_strength, 3)
 
     def analyze_price_data(
-        self, price_data: List[Dict[str, Any]]
+        self,
+        price_data: List[Dict[str, Any]],
+        downtrend_filter: bool = False,
+        min_decline_percent: float = 3.0,
+        use_ma_filter: bool = True,
+        use_volume_filter: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Analysoi hintadataa ja tunnista kuvioita.
 
         Args:
             price_data: Lista hintadataa (dictejä date, open, high, low, close, volume)
+            downtrend_filter: Jos True, suodatetaan vain laskutrendien kynttilät
+            min_decline_percent: Minimalasku prosentteina (oletuksena 3.0)
+            use_ma_filter: Käytetäänkö liukuvan keskiarvon suodatinta (oletuksena True)
+            use_volume_filter: Käytetäänkö volyymi-suodatinta (oletuksena False)
 
         Returns:
             Lista löydettyjä kuvioita
         """
         findings = []
+
+        # Muunna DataFrame:ksi downtrend-tarkistusta varten jos tarvitaan
+        df = None
+        if downtrend_filter:
+            df = pd.DataFrame(price_data)
+            if "date" in df.columns:
+                df = df.sort_values("date").reset_index(drop=True)
 
         for i, candle in enumerate(price_data):
             try:
@@ -238,6 +364,19 @@ class AnalysisEngine:
                 volume = int(candle.get("volume", 0))
                 date = candle["date"]
                 symbol = candle.get("symbol", "UNKNOWN")
+
+                # Downtrend-suodatus
+                if downtrend_filter and df is not None:
+                    if not _is_in_downtrend(
+                        df,
+                        "close",
+                        "volume",
+                        i,
+                        min_decline_percent,
+                        use_ma_filter,
+                        use_volume_filter,
+                    ):
+                        continue  # Ohita kynttilät jotka eivät ole laskutrendissä
 
                 # Tunnista yksittäisen kynttilän kuviot
                 if self.detect_doji(open_price, high, low, close):
@@ -337,7 +476,14 @@ class AnalysisEngine:
         return findings
 
     def analyze_batch(
-        self, symbols: List[str], start_date: str = None, end_date: str = None
+        self,
+        symbols: List[str],
+        start_date: str = None,
+        end_date: str = None,
+        downtrend_filter: bool = False,
+        min_decline_percent: float = 3.0,
+        use_ma_filter: bool = True,
+        use_volume_filter: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Analysoi useita symboleja kerralla.
@@ -346,6 +492,10 @@ class AnalysisEngine:
             symbols: Lista symboleista
             start_date: Alkupäivämäärä
             end_date: Loppupäivämäärä
+            downtrend_filter: Jos True, suodatetaan vain laskutrendien kynttilät
+            min_decline_percent: Minimalasku prosentteina (oletuksena 3.0)
+            use_ma_filter: Käytetäänkö liukuvan keskiarvon suodatinta (oletuksena True)
+            use_volume_filter: Käytetäänkö volyymi-suodatinta (oletuksena False)
 
         Returns:
             Lista kaikista löydöksistä
@@ -398,7 +548,13 @@ class AnalysisEngine:
                         )
 
                     # Analysoi symbolin data
-                    symbol_findings = self.analyze_price_data(price_data)
+                    symbol_findings = self.analyze_price_data(
+                        price_data,
+                        downtrend_filter,
+                        min_decline_percent,
+                        use_ma_filter,
+                        use_volume_filter,
+                    )
                     all_findings.extend(symbol_findings)
 
             conn.close()

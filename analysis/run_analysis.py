@@ -60,10 +60,26 @@ def run_candlestick_analysis(
     start_date: str = None,
     end_date: str = None,
     progress_callback=None,
+    downtrend_filter: bool = False,
+    min_decline_percent: float = 3.0,
+    use_ma_filter: bool = True,
+    use_volume_filter: bool = False,
 ):
     """
     Suorittaa valittujen kynttiläkuvioiden analyysin annetulle tickerille ja aikavälille.
     Palauttaa tulokset dict-muodossa: {päivä: [löydetyt_kuviot]}
+    
+    Args:
+        db_path: Polku osakedata-tietokantaan
+        ticker: Osakkeen tunniste
+        patterns: Lista analysoitavista kuvioista
+        start_date: Alkupäivämäärä (valinnainen)
+        end_date: Loppupäivämäärä (valinnainen)
+        progress_callback: Edistymisen seurantafunktio (valinnainen)
+        downtrend_filter: Jos True, suodatetaan vain laskutrendien kynttilät
+        min_decline_percent: Minimalasku prosentteina (oletuksena 3.0)
+        use_ma_filter: Käytetäänkö liukuvan keskiarvon suodatinta (oletuksena True)
+        use_volume_filter: Käytetäänkö volyymi-suodatinta (oletuksena False)
     """
     import sqlite3
 
@@ -126,9 +142,104 @@ def run_candlestick_analysis(
         # Ensure pvm is datetime for correct sorting and comparisons
         df["pvm"] = pd.to_datetime(df["pvm"])
         df = df.sort_values("pvm").reset_index(drop=True)
+    
+    # Lisää apufunktiot downtrend-tarkistukseen
+    from statistics import mean
+    
+    def _calculate_moving_average_local(df_local, ccol, idx, days):
+        """Laskee liukuvan keskiarvon"""
+        try:
+            if idx - days + 1 < 0:
+                return None
+            subset = df_local.iloc[idx - days + 1 : idx + 1]
+            values = [float(row[ccol]) for _, row in subset.iterrows() if pd.notna(row[ccol])]
+            if len(values) != days:
+                return None
+            return mean(values)
+        except Exception:
+            return None
+    
+    def _is_in_downtrend_local(df_local, ccol, vcol, idx):
+        """Tarkistaa onko kynttilä laskutrendissä"""
+        try:
+            if idx < 10:
+                return False
+            
+            def safe_get(row_idx, col):
+                if row_idx < 0 or row_idx >= len(df_local):
+                    return None
+                try:
+                    val = df_local.iloc[row_idx][col]
+                    return float(val) if pd.notna(val) else None
+                except Exception:
+                    return None
+            
+            # 1. Porrastava lasku
+            t0 = safe_get(idx, ccol)
+            t_2 = safe_get(idx - 2, ccol)
+            t_5 = safe_get(idx - 5, ccol)
+            t_10 = safe_get(idx - 10, ccol)
+            
+            if not all([t0, t_2, t_5, t_10]):
+                return False
+            
+            if not (t_10 > t_5 > t_2 > t0):
+                return False
+            
+            # 2. Minimalasku
+            decline_percent = ((t_10 - t0) / t_10) * 100
+            if decline_percent < min_decline_percent:
+                return False
+            
+            # 3. MA-suodatin
+            if use_ma_filter:
+                ma5 = _calculate_moving_average_local(df_local, ccol, idx, 5)
+                ma10 = _calculate_moving_average_local(df_local, ccol, idx, 10)
+                
+                if ma5 is None or ma10 is None:
+                    return False
+                
+                if not (t0 < ma10 and ma5 < ma10):
+                    return False
+            
+            # 4. Volyymi-suodatin
+            if use_volume_filter:
+                try:
+                    recent_volumes = []
+                    for i_vol in range(max(0, idx - 4), idx + 1):
+                        vol = safe_get(i_vol, vcol)
+                        if vol and vol > 0:
+                            recent_volumes.append(vol)
+                    
+                    historical_volumes = []
+                    for i_vol in range(max(0, idx - 25), max(0, idx - 4)):
+                        vol = safe_get(i_vol, vcol)
+                        if vol and vol > 0:
+                            historical_volumes.append(vol)
+                    
+                    if not recent_volumes or not historical_volumes:
+                        return False
+                    
+                    recent_avg = mean(recent_volumes)
+                    historical_avg = mean(historical_volumes)
+                    
+                    if recent_avg < 1.2 * historical_avg:
+                        return False
+                except Exception:
+                    pass
+            
+            return True
+        except Exception:
+            return False
+    
     results = {}
     total = len(df)
     for i, row in df.iterrows():
+        # Downtrend-suodatus
+        if downtrend_filter:
+            if not _is_in_downtrend_local(df, "Close", "Volume", i):
+                continue  # Ohita kynttilät jotka eivät ole laskutrendissä
+        
         found = []
         # Check each pattern and log the result per pattern
         if "Hammer" in patterns and is_hammer(row):

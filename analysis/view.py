@@ -43,6 +43,12 @@ class AnalysisView:
         self.pattern_filter = None
         self.symbol_filter = None
         self.progress_dialog = None
+        
+        # Downtrend-suodattimet
+        self.downtrend_filter = None
+        self.min_decline_percent = None
+        self.ma_filter = None
+        self.volume_filter = None
 
         # Data
         self.all_findings = []
@@ -124,7 +130,7 @@ class AnalysisView:
             spacing=20,
         )
 
-    def _create_filters(self) -> ft.Row:
+    def _create_filters(self) -> ft.Column:
         """Luo suodattimen UI."""
         self.search_field = ft.TextField(
             label="Hae symboli...",
@@ -152,12 +158,48 @@ class AnalysisView:
             on_click=self._clear_filters,
         )
 
-        # (no random-event controls on Analysis view)
-        return ft.Row(
+        # Downtrend-suodattimet
+        self.downtrend_filter = ft.Checkbox(
+            label="🔻 Suodata vain laskutrendien kynttilät",
+            value=False,
+        )
+        
+        self.min_decline_percent = ft.TextField(
+            label="Min. lasku (%)",
+            width=120,
+            value="3.0",
+            hint_text="3.0",
+        )
+        
+        self.ma_filter = ft.Checkbox(
+            label="Lisää liukuva keskiarvo -suodatin",
+            value=True,
+        )
+        
+        self.volume_filter = ft.Checkbox(
+            label="Lisää volyymi-suodatin",
+            value=False,
+        )
+
+        # Rivit suodattimille
+        row1 = ft.Row(
             [self.search_field, self.pattern_filter, clear_btn],
             spacing=10,
             alignment=ft.MainAxisAlignment.START,
         )
+        
+        row2 = ft.Row(
+            [
+                self.downtrend_filter,
+                self.min_decline_percent,
+                self.ma_filter,
+                self.volume_filter,
+            ],
+            spacing=10,
+            alignment=ft.MainAxisAlignment.START,
+        )
+
+        return ft.Column([row1, row2], spacing=10)
 
     # (random generation dialog and handlers removed from Analysis view)
 
@@ -389,8 +431,27 @@ class AnalysisView:
             # Hae symbolit (tässä vaiheessa vain testisymboli)
             test_symbols = ["AAPL", "MSFT", "GOOGL"]
 
-            # Aja analyysi
-            findings = self.analysis_engine.analyze_batch(test_symbols)
+            # Hae downtrend-parametrit UI:sta
+            downtrend_enabled = self.downtrend_filter.value if self.downtrend_filter else False
+            
+            min_decline = 3.0
+            if self.min_decline_percent and self.min_decline_percent.value:
+                try:
+                    min_decline = float(self.min_decline_percent.value)
+                except ValueError:
+                    min_decline = 3.0
+            
+            use_ma = self.ma_filter.value if self.ma_filter else True
+            use_vol = self.volume_filter.value if self.volume_filter else False
+
+            # Aja analyysi downtrend-parametreilla
+            findings = self.analysis_engine.analyze_batch(
+                test_symbols,
+                downtrend_filter=downtrend_enabled,
+                min_decline_percent=min_decline,
+                use_ma_filter=use_ma,
+                use_volume_filter=use_vol,
+            )
 
             # Tallenna löydökset
             saved_count = 0
