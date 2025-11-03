@@ -318,14 +318,14 @@ class DowntrendGenerator:
                     available_unused_dates = [
                         d for d in available_dates[10:] if d not in used_dates
                     ]
-                    
+
                     # Jos kaikki päivämäärät on käytetty, lopeta
                     if not available_unused_dates:
                         self.logger.info(
                             f"Ticker {ticker}: all available dates exhausted after {events_found} events"
                         )
                         break
-                    
+
                     target_date = random.choice(available_unused_dates)
                     used_dates.add(target_date)  # Merkitse päivämäärä käytetyksi
 
