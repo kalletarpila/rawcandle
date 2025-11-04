@@ -15,6 +15,7 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 
 # Uusi optimoitu cache-järjestelmä
 from .excel_cache import ExcelResultsCache
+from .divergence_cache import DivergenceCache
 
 
 def _identify_columns(cur, table_name: str):
@@ -491,6 +492,8 @@ def _build_output_rows(
         "NDX20",  # 79. NDX20
         "RSI14_t0",  # 80. RSI14_t0
         "t0_close_norm",  # 81. Normalisoitu t0_close
+        "Bearish Divergence",  # 82. Bearish Divergence (1 jos löytyy t0/t-1/t-2/t-3, muuten 0)
+        "Bullish Divergence",  # 83. Bullish Divergence (1 jos löytyy t0/t-1/t-2/t-3, muuten 0)
     ]
 
     if not rows:
@@ -541,6 +544,9 @@ def _build_output_rows(
         )
 
     output_rows = []
+
+    # Initialize divergence cache
+    div_cache = DivergenceCache()
 
     # --- read osakedata per ticker ---
     with sqlite3.connect(osake_db) as oconn:
@@ -610,6 +616,20 @@ def _build_output_rows(
             df = df.reset_index(drop=True)
             date_to_idx = {str(r[pcol]): idx for idx, r in df.iterrows()}
 
+            # Calculate and cache divergences for this ticker if not already cached
+            if not div_cache.has_ticker(ticker):
+                print(f"🔄 Calculating divergences for {ticker}...")
+                div_cache.calculate_and_cache_ticker(
+                    ticker=ticker,
+                    df=df,
+                    date_col=pcol,
+                    close_col=ccol,
+                    lookback_days=30,
+                    rsi_period=14,
+                    min_rsi_change=3.0,
+                    sensitivity_days=7,
+                )
+
             # Laske 14 päivän RSI koko sarjalle (Wilderin eksponentiaalinen kaava)
             try:
                 close_series = pd.to_numeric(df[ccol], errors="coerce")
@@ -652,6 +672,20 @@ def _build_output_rows(
                 # Check if we have enough data for all calculations (except t200_200p_liukuva)
                 if idx < 20 or idx + 20 >= len(df):
                     continue
+
+                # Get divergence flags for t0, t-1, t-2, t-3
+                # Find the 4 trading days: t0 (current), t-1, t-2, t-3
+                check_dates = []
+                for offset in [0, -1, -2, -3]:
+                    check_idx = idx + offset
+                    if 0 <= check_idx < len(df):
+                        check_date = str(df.iloc[check_idx][pcol])
+                        check_dates.append(check_date)
+
+                # Query cache for divergences on these dates
+                bearish_div, bullish_div = div_cache.get_divergence_for_dates(
+                    ticker=ticker, dates=check_dates
+                )
 
                 # Laskutrendi-suodatus
                 if downtrend_filter:
@@ -1145,6 +1179,8 @@ def _build_output_rows(
                     fmt_val(NDX20),
                     fmt_val(rsi14_t0),
                     fmt_val(t0_close_norm),
+                    bearish_div,  # 82. Bearish Divergence (0 or 1)
+                    bullish_div,  # 83. Bullish Divergence (0 or 1)
                 ]
 
                 output_rows.append(out)
