@@ -208,17 +208,27 @@ def is_bullish_divergence(
     if not is_divergence:
         return None
 
-    # Laske vahvuus: yhdistelmä hinnan laskun ja RSI:n nousun suhteesta
-    # Mitä enemmän hinta laskee JA RSI nousee, sitä vahvempi signaali
-    strength = min(1.0, (abs(price_change) / 10.0) * (rsi_change / 20.0))
-    strength = max(0.0, min(1.0, strength))
+    # Laske vahvuus yhdistelmäkaavalla (1-3 asteikolla):
+    # - RSI:n muutos (0-1 pistettä per 5 pistettä RSI-muutosta)
+    # - Hinnan muutos (0-1 pistettä per 10% hinnan muutos)
+    # - Keston vaikutus (0-1 pistettä per 20 päivää)
+    days_between = idx - prev_bottom_idx
+
+    rsi_component = min(1.0, abs(rsi_change) / 5.0)
+    price_component = min(1.0, abs(price_change) / 10.0)
+    duration_component = min(1.0, days_between / 20.0)
+
+    strength = rsi_component + price_component + duration_component
+    strength = max(1.0, min(3.0, strength))  # Skaalaa välille 1-3
+    strength = round(strength)  # Pyöristä kokonaisluvuksi (1, 2 tai 3)
 
     return {
         "found": True,
-        "strength": round(strength, 3),
+        "strength": strength,
         "price_change": round(price_change, 2),
         "rsi_change": round(rsi_change, 2),
         "prev_date": df.iloc[prev_bottom_idx].get("pvm", prev_bottom_idx),
+        "days_between": days_between,
     }
 
 
@@ -312,14 +322,25 @@ def is_bearish_divergence(
     if not is_divergence:
         return None
 
-    # Laske vahvuus
-    strength = min(1.0, (price_change / 10.0) * (abs(rsi_change) / 20.0))
-    strength = max(0.0, min(1.0, strength))
+    # Laske vahvuus yhdistelmäkaavalla (1-3 asteikolla):
+    # - RSI:n muutos (0-1 pistettä per 5 pistettä RSI-muutosta)
+    # - Hinnan muutos (0-1 pistettä per 10% hinnan muutos)
+    # - Keston vaikutus (0-1 pistettä per 20 päivää)
+    days_between = idx - prev_peak_idx
+
+    rsi_component = min(1.0, abs(rsi_change) / 5.0)
+    price_component = min(1.0, abs(price_change) / 10.0)
+    duration_component = min(1.0, days_between / 20.0)
+
+    strength = rsi_component + price_component + duration_component
+    strength = max(1.0, min(3.0, strength))  # Skaalaa välille 1-3
+    strength = round(strength)  # Pyöristä kokonaisluvuksi (1, 2 tai 3)
 
     return {
         "found": True,
-        "strength": round(strength, 3),
+        "strength": strength,
         "price_change": round(price_change, 2),
         "rsi_change": round(rsi_change, 2),
         "prev_date": df.iloc[prev_peak_idx].get("pvm", prev_peak_idx),
+        "days_between": days_between,
     }

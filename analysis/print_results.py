@@ -121,7 +121,7 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
 
     # Ei luoda CSV-tiedostoja - poistettu CSV-luontilogiikka
     # Tallennetaan vain .txt tiedostot
-    
+
     # Kirjataan löydökset logiin
     if output_path:
         try:
@@ -142,44 +142,14 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
         except Exception:
             # non-fatal if logging fails
             pass
-    
+
     # Tallenna löydökset tietokantaan
     if output_path:
         try:
-            import sqlite3
+            from analysis.database_manager import DatabaseManager
 
-            db_path = os.path.join(os.path.dirname(__file__), "analysis.db")
-            conn = sqlite3.connect(db_path)
-            cur = conn.cursor()
-            # Yhtenäistä skeema database_managerin kanssa
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS analysis_findings (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    ticker TEXT NOT NULL,
-                    date TEXT NOT NULL,
-                    pattern TEXT,
-                    signal_strength REAL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(ticker, date, pattern)
-                )
-            """
-            )
-            # Poista mahdolliset duplikaatit ennen uniikki-indeksin luontia
-            cur.execute(
-                """
-                DELETE FROM analysis_findings
-                WHERE rowid NOT IN (
-                    SELECT MIN(rowid)
-                    FROM analysis_findings
-                    GROUP BY ticker, date, pattern
-                )
-                """
-            )
-            cur.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_finding ON analysis_findings(ticker, date, pattern)"
-            )
-            rows = []
+            db_manager = DatabaseManager()
+
             for key in sorted(results.keys()):
                 if "|" in key:
                     t, d = key.split("|", 1)
@@ -192,21 +162,15 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
                     if not pattern_name:
                         continue
                     strength = _extract_strength(entry)
-                    rows.append(
-                        (
-                            t,
-                            d,
-                            pattern_name,
-                            strength if strength is not None else 1.0,
-                        )
+
+                    db_manager.save_finding(
+                        ticker=t,
+                        date=d,
+                        pattern=pattern_name,
+                        signal_strength=strength if strength is not None else 1.0,
                     )
-            if rows:
-                cur.executemany(
-                    "INSERT OR REPLACE INTO analysis_findings (ticker, date, pattern, signal_strength) VALUES (?, ?, ?, ?)",
-                    rows,
-                )
-                conn.commit()
-            conn.close()
+
+            db_manager.close()
         except Exception:
             # non-fatal persistence failure
             pass

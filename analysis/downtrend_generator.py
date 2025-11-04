@@ -10,6 +10,8 @@ from typing import Optional, Callable, Dict, List, Tuple
 from datetime import datetime, date
 import logging
 
+from analysis.database_manager import DatabaseManager
+
 
 logger = logging.getLogger(__name__)
 
@@ -196,12 +198,12 @@ class DowntrendGenerator:
         return True
 
     def _save_to_analysis(
-        self, conn: sqlite3.Connection, ticker: str, price_record: Dict
+        self, db_manager: DatabaseManager, ticker: str, price_record: Dict
     ) -> bool:
-        """Save downtrend event to analysis database.
+        """Save downtrend event to analysis database using DatabaseManager.
 
         Args:
-            conn: Analysis database connection
+            db_manager: DatabaseManager instance
             ticker: Stock ticker
             price_record: Price data for the event (t0)
 
@@ -209,24 +211,12 @@ class DowntrendGenerator:
             True if save succeeded
         """
         try:
-            cursor = conn.cursor()
-
-            cursor.execute(
-                """
-                INSERT OR REPLACE INTO analysis_findings (
-                    ticker, date, pattern, signal_strength
-                ) VALUES (?, ?, ?, ?)
-            """,
-                (
-                    ticker,
-                    price_record["pvm"],
-                    "downtrend",
-                    1.0,
-                ),
+            return db_manager.save_finding(
+                ticker=ticker,
+                date=price_record["pvm"],
+                pattern="downtrend",
+                signal_strength=1.0,
             )
-
-            conn.commit()
-            return True
         except Exception as e:
             self.logger.error(f"Failed to save to analysis: {e}")
             return False
@@ -298,7 +288,7 @@ class DowntrendGenerator:
 
         try:
             stock_conn = self._get_stock_connection()
-            analysis_conn = self._get_analysis_connection()
+            db_manager = DatabaseManager(self.analysis_db_path)
         except Exception as e:
             errors.append(f"Database connection failed: {e}")
             return 0, errors
@@ -374,9 +364,7 @@ class DowntrendGenerator:
                     # Check downtrend criteria
                     if self._check_downtrend_criteria(price_data):
                         # Save to analysis database (t0 is the last record)
-                        if self._save_to_analysis(
-                            analysis_conn, ticker, price_data[-1]
-                        ):
+                        if self._save_to_analysis(db_manager, ticker, price_data[-1]):
                             events_found += 1
                             total_saved += 1
 
@@ -396,7 +384,7 @@ class DowntrendGenerator:
 
         finally:
             stock_conn.close()
-            analysis_conn.close()
+            db_manager.close()
 
         return total_saved, errors
 

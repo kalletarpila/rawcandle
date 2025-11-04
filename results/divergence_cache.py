@@ -29,6 +29,7 @@ class DivergenceCache:
     def _init_database(self):
         """Create database table if it doesn't exist."""
         with sqlite3.connect(self.db_path) as conn:
+            # Try to create table with new schema
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS divergence_cache (
@@ -37,10 +38,27 @@ class DivergenceCache:
                     rsi REAL,
                     bullish_divergence INTEGER DEFAULT 0,
                     bearish_divergence INTEGER DEFAULT 0,
+                    bullish_strength INTEGER DEFAULT 0,
+                    bearish_strength INTEGER DEFAULT 0,
                     PRIMARY KEY (ticker, date)
                 )
             """
             )
+
+            # Check if strength columns exist, add them if not (for existing databases)
+            cursor = conn.execute("PRAGMA table_info(divergence_cache)")
+            columns = [row[1] for row in cursor.fetchall()]
+
+            if "bullish_strength" not in columns:
+                conn.execute(
+                    "ALTER TABLE divergence_cache ADD COLUMN bullish_strength INTEGER DEFAULT 0"
+                )
+
+            if "bearish_strength" not in columns:
+                conn.execute(
+                    "ALTER TABLE divergence_cache ADD COLUMN bearish_strength INTEGER DEFAULT 0"
+                )
+
             conn.commit()
 
     def has_ticker(self, ticker: str) -> bool:
@@ -123,6 +141,8 @@ class DivergenceCache:
             # Check for divergences at this point
             bullish = 0
             bearish = 0
+            bullish_strength = 0
+            bearish_strength = 0
 
             # Need enough data for divergence detection
             if idx >= lookback_days and not pd.isna(rsi):
@@ -133,36 +153,51 @@ class DivergenceCache:
 
                 if len(window_df) > sensitivity_days:
                     # Check bullish divergence
-                    if is_bullish_divergence(
+                    bullish_result = is_bullish_divergence(
                         window_df,
                         idx_in_window=len(window_df) - 1,
                         lookback_days=lookback_days,
                         min_rsi_gain=min_rsi_change,
                         min_days_between=3,
-                        sensitivity_days=sensitivity_days,
-                    ):
+                    )
+
+                    if bullish_result and bullish_result.get("found"):
                         bullish = 1
+                        bullish_strength = bullish_result.get("strength", 1)
 
                     # Check bearish divergence (only if no bullish)
-                    elif is_bearish_divergence(
-                        window_df,
-                        idx_in_window=len(window_df) - 1,
-                        lookback_days=lookback_days,
-                        min_rsi_loss=min_rsi_change,
-                        min_days_between=3,
-                        sensitivity_days=sensitivity_days,
-                    ):
-                        bearish = 1
+                    else:
+                        bearish_result = is_bearish_divergence(
+                            window_df,
+                            idx_in_window=len(window_df) - 1,
+                            lookback_days=lookback_days,
+                            min_rsi_loss=min_rsi_change,
+                            min_days_between=3,
+                        )
 
-            records.append((ticker, date, rsi, bullish, bearish))
+                        if bearish_result and bearish_result.get("found"):
+                            bearish = 1
+                            bearish_strength = bearish_result.get("strength", 1)
+
+            records.append(
+                (
+                    ticker,
+                    date,
+                    rsi,
+                    bullish,
+                    bearish,
+                    bullish_strength,
+                    bearish_strength,
+                )
+            )
 
         # Batch insert to database
         with sqlite3.connect(self.db_path) as conn:
             conn.executemany(
                 """
                 INSERT OR REPLACE INTO divergence_cache 
-                (ticker, date, rsi, bullish_divergence, bearish_divergence)
-                VALUES (?, ?, ?, ?, ?)
+                (ticker, date, rsi, bullish_divergence, bearish_divergence, bullish_strength, bearish_strength)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
                 records,
             )
@@ -183,17 +218,17 @@ class DivergenceCache:
             dates: List of date strings to check
 
         Returns:
-            Tuple (bearish_flag, bullish_flag) where:
-            - bearish_flag = 1 if bearish divergence found on any date, else 0
-            - bullish_flag = 1 if bullish divergence found on any date, else 0
-            - Mutual exclusivity: if one is 1, the other is automatically 0
+            Tuple (bearish_strength, bullish_strength) where:
+            - bearish_strength = strength (1-3) if bearish divergence found, else 0
+            - bullish_strength = strength (1-3) if bullish divergence found, else 0
+            - Mutual exclusivity: if one is > 0, the other is automatically 0
         """
         if not dates:
             return (0, 0)
 
         placeholders = ",".join("?" * len(dates))
         query = f"""
-            SELECT bullish_divergence, bearish_divergence
+            SELECT bullish_divergence, bearish_divergence, bullish_strength, bearish_strength
             FROM divergence_cache
             WHERE ticker = ? AND date IN ({placeholders})
         """
@@ -202,17 +237,25 @@ class DivergenceCache:
             cursor = conn.execute(query, [ticker] + dates)
             results = cursor.fetchall()
 
-        # Check if any date has divergence
-        has_bullish = any(row[0] == 1 for row in results)
-        has_bearish = any(row[1] == 1 for row in results)
+        # Find the strongest divergence across all dates
+        max_bullish_strength = 0
+        max_bearish_strength = 0
+
+        for row in results:
+            bullish, bearish, bullish_str, bearish_str = row
+            if bullish == 1 and bullish_str > max_bullish_strength:
+                max_bullish_strength = bullish_str
+            if bearish == 1 and bearish_str > max_bearish_strength:
+                max_bearish_strength = bearish_str
 
         # Mutual exclusivity: if one is found, the other must be 0
-        # Return in order: (bearish, bullish) to match Excel column order
-        if has_bullish:
-            return (0, 1)
-        elif has_bearish:
-            return (1, 0)
+        # Return in order: (bearish_strength, bullish_strength) to match Excel column order
+        if max_bullish_strength > 0:
+            return (0, max_bullish_strength)
+        elif max_bearish_strength > 0:
+            return (max_bearish_strength, 0)
         else:
+            return (0, 0)
             return (0, 0)
 
     def clear_ticker(self, ticker: str):
