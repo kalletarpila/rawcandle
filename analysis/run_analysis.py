@@ -138,6 +138,10 @@ def run_candlestick_analysis(
             inplace=True,
         )
         if df.empty:
+            if logger:
+                logger.warning(
+                    f"Ei dataa tickerille: {ticker} (aikaväli: {s_iso or 'alku'} - {e_iso or 'loppu'})"
+                )
             return {}
         # Ensure pvm is datetime for correct sorting and comparisons
         df["pvm"] = pd.to_datetime(df["pvm"])
