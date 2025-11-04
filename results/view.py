@@ -64,6 +64,92 @@ def create_results_view(app) -> ft.View:
         width=250,
         hint_text="Jätä tyhjäksi analysoidaksesi kaikki",
     )
+
+    # Painike CSV-tiedoston lataamiseen
+    def load_tickers_from_csv_results(e):
+        """Lataa tickerit tickers.txt tiedostosta results-sivulle."""
+        import os
+        from analysis.logger import setup_logger
+
+        logger = setup_logger()
+        csv_path = "/home/kalle/projects/rawcandle/data/tickers.txt"
+
+        try:
+            if not os.path.exists(csv_path):
+                sb = ft.SnackBar(
+                    ft.Text(
+                        f"❌ Tiedostoa ei löydy: {csv_path}", color=ft.Colors.WHITE
+                    ),
+                    bgcolor=ft.Colors.RED_600,
+                    duration=3000,
+                )
+                if sb not in app.page.overlay:
+                    app.page.overlay.append(sb)
+                sb.open = True
+                app.page.update()
+                return
+
+            with open(csv_path, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+
+            if not content:
+                sb = ft.SnackBar(
+                    ft.Text("❌ Tiedosto on tyhjä", color=ft.Colors.WHITE),
+                    bgcolor=ft.Colors.RED_600,
+                    duration=3000,
+                )
+                if sb not in app.page.overlay:
+                    app.page.overlay.append(sb)
+                sb.open = True
+                app.page.update()
+                return
+
+            # Aseta tickerit kenttään (pilkulla eroteltuina)
+            # Trimmataan välilyönnit joka tickeristä
+            tickers = [line.strip() for line in content.split("\n") if line.strip()]
+            tickers_str = ",".join(tickers)
+
+            app.results_ticker_field.value = tickers_str
+            app.results_ticker_field.update()
+
+            # Vaihda radio valinta "single" tilaan
+            app.results_radio_group.value = "single"
+            app.results_radio_group.update()
+
+            sb = ft.SnackBar(
+                ft.Text(
+                    f"✅ Ladattu {len(tickers)} tickeriä tiedostosta",
+                    color=ft.Colors.WHITE,
+                ),
+                bgcolor=ft.Colors.GREEN_600,
+                duration=2000,
+            )
+            if sb not in app.page.overlay:
+                app.page.overlay.append(sb)
+            sb.open = True
+            app.page.update()
+
+        except Exception as ex:
+            logger.exception("Virhe ladattaessa tickereitä CSV:stä (results)")
+            sb = ft.SnackBar(
+                ft.Text(f"❌ Virhe: {ex}", color=ft.Colors.WHITE),
+                bgcolor=ft.Colors.RED_600,
+                duration=3000,
+            )
+            if sb not in app.page.overlay:
+                app.page.overlay.append(sb)
+            sb.open = True
+            app.page.update()
+
+    app.results_load_csv_button = ft.ElevatedButton(
+        "Lue CSV:stä",
+        icon=ft.Icons.UPLOAD_FILE,
+        on_click=load_tickers_from_csv_results,
+        bgcolor=ft.Colors.BLUE_400,
+        color=ft.Colors.WHITE,
+        width=150,
+    )
+
     app.results_radio_group = ft.RadioGroup(
         content=ft.Row(
             [
@@ -225,6 +311,7 @@ def create_results_view(app) -> ft.View:
 
                 # Hae ticker-filtteri app-objektista
                 ticker_filter = None
+                ticker_list = None
                 try:
                     ticker_mode = app.results_radio_group.value
                     ticker = (
@@ -234,9 +321,21 @@ def create_results_view(app) -> ft.View:
                     )
 
                     if ticker_mode == "single" and ticker:
-                        ticker_filter = ticker
-                        update_progress(f"Suodatetaan ticker: {ticker_filter}", 10, 100)
-                        print(f"🔍 Ticker-suodatin: {ticker_filter}")
+                        # Jos ticker sisältää pilkkuja, käsitellään se listana
+                        if "," in ticker:
+                            ticker_list = [
+                                t.strip() for t in ticker.split(",") if t.strip()
+                            ]
+                            update_progress(
+                                f"Suodatetaan {len(ticker_list)} tickeriä", 10, 100
+                            )
+                            print(f"🔍 Ticker-lista: {len(ticker_list)} tickeriä")
+                        else:
+                            ticker_filter = ticker
+                            update_progress(
+                                f"Suodatetaan ticker: {ticker_filter}", 10, 100
+                            )
+                            print(f"🔍 Ticker-suodatin: {ticker_filter}")
                     else:
                         update_progress("Generoidaan kaikille tickereille", 10, 100)
                         print("🌐 Haetaan kaikki tickerit")
@@ -266,11 +365,17 @@ def create_results_view(app) -> ft.View:
                         print(f"Dialogin näyttö epäonnistui: {err}")
 
                 # Varmista että ticker löytyy analysis-tietokannasta ennen jatkamista
+                tickers_to_check = []
                 if ticker_filter:
+                    tickers_to_check = [ticker_filter]
+                elif ticker_list:
+                    tickers_to_check = ticker_list
+
+                if tickers_to_check:
                     try:
                         base = Path(__file__).resolve().parents[1]
                         analysis_db_path = base / "analysis" / "analysis.db"
-                        ticker_exists = False
+                        missing_tickers = []
 
                         if analysis_db_path.exists():
                             with sqlite3.connect(analysis_db_path) as conn:
@@ -298,7 +403,9 @@ def create_results_view(app) -> ft.View:
                                     info = conn.execute(
                                         f'PRAGMA table_info("{table_name}")'
                                     ).fetchall()
-                                    lower_cols = {col[1].lower(): col[1] for col in info}
+                                    lower_cols = {
+                                        col[1].lower(): col[1] for col in info
+                                    }
                                     ticker_col = (
                                         lower_cols.get("ticker")
                                         or lower_cols.get("osake")
@@ -306,33 +413,39 @@ def create_results_view(app) -> ft.View:
                                     )
 
                                     if ticker_col:
-                                        res = conn.execute(
-                                            f'SELECT 1 FROM "{table_name}" WHERE UPPER("{ticker_col}") = ? LIMIT 1',
-                                            (ticker_filter,),
-                                        ).fetchone()
-                                        ticker_exists = res is not None
-                        if not ticker_exists:
+                                        # Tarkista jokainen ticker
+                                        for check_ticker in tickers_to_check:
+                                            res = conn.execute(
+                                                f'SELECT 1 FROM "{table_name}" WHERE UPPER("{ticker_col}") = ? LIMIT 1',
+                                                (check_ticker,),
+                                            ).fetchone()
+                                            if res is None:
+                                                missing_tickers.append(check_ticker)
+                        else:
+                            missing_tickers = tickers_to_check
+
+                        if missing_tickers:
                             if progress_dialog and progress_dialog.open:
                                 close_progress_dialog()
 
-                            print(f"❌ Tickeri {ticker_filter} puuttuu analysis.db:stä")
-                            show_modal_message(
-                                "⚠️ Ticker puuttuu",
-                                f"Tickeriä {ticker_filter} ei löytynyt analyysidatasta.",
-                            )
+                            if len(missing_tickers) == 1:
+                                msg = f"Tickeriä {missing_tickers[0]} ei löytynyt analyysidatasta."
+                            elif len(missing_tickers) <= 10:
+                                msg = f"{len(missing_tickers)} tickeriä ei löytynyt analyysidatasta:\n{', '.join(missing_tickers)}"
+                            else:
+                                msg = f"{len(missing_tickers)} tickeriä ei löytynyt analyysidatasta:\n{', '.join(missing_tickers[:10])}... (+{len(missing_tickers)-10} muuta)"
+
+                            print(f"❌ Puuttuvat tickerit: {missing_tickers}")
+                            show_modal_message("⚠️ Tickereitä puuttuu", msg)
                             return
                     except Exception as ex:
-                        print(f"Tickerin tarkistus epäonnistui: {ex}")
+                        print(f"Tickereiden tarkistus epäonnistui: {ex}")
                         if progress_dialog and progress_dialog.open:
                             close_progress_dialog()
 
-                        print(
-                            f"❌ Tickerin {ticker_filter} tarkistus epäonnistui: {ex}"
-                        )
-
                         show_modal_message(
                             "❌ Virhe",
-                            f"Tickerin {ticker_filter} tarkistus epäonnistui. Tarkista analysis.db.",
+                            f"Tickereiden tarkistus epäonnistui. Tarkista analysis.db.",
                         )
                         return
                 update_progress("Haetaan analyysit", 20, 100)
@@ -349,6 +462,14 @@ def create_results_view(app) -> ft.View:
                     except Exception:
                         pass
 
+                # Jos ticker_list on asetettu, muodosta ticker_filter siitä
+                final_ticker_filter = ticker_filter
+                if ticker_list and not ticker_filter:
+                    # Käytä ensimmäistä tickeriä filterinä tai None jos halutaan kaikki
+                    # Tai voidaan välittää koko lista - riippuu _build_output_rows toteutuksesta
+                    # Tarkistetaan miten _build_output_rows toimii ticker_list:n kanssa
+                    final_ticker_filter = ticker_list  # Välitetään koko lista
+
                 header, output_rows = _build_output_rows(
                     analysis_db,
                     osake_db,
@@ -357,7 +478,7 @@ def create_results_view(app) -> ft.View:
                     use_ma_filter=True,
                     use_volume_filter=False,
                     progress_callback=fallback_progress,
-                    ticker_filter=ticker_filter,
+                    ticker_filter=final_ticker_filter,
                 )
 
                 update_progress("Generoidaan Excel-tiedostoa", 80, 100)
@@ -515,7 +636,14 @@ def create_results_view(app) -> ft.View:
                                                             color=ft.Colors.ORANGE_600,
                                                         ),
                                                         app.results_radio_group,
-                                                        app.results_ticker_field,
+                                                        ft.Row(
+                                                            [
+                                                                app.results_ticker_field,
+                                                                app.results_load_csv_button,
+                                                            ],
+                                                            spacing=10,
+                                                            alignment=ft.MainAxisAlignment.START,
+                                                        ),
                                                     ],
                                                     horizontal_alignment=ft.CrossAxisAlignment.START,
                                                     spacing=10,

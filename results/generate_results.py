@@ -313,7 +313,7 @@ def _build_output_rows(
     use_ma_filter: bool = True,
     use_volume_filter: bool = False,
     progress_callback=None,
-    ticker_filter: Optional[str] = None,
+    ticker_filter: Optional[str | list] = None,
 ):
     """Synchronous builder for output rows according to spec.
 
@@ -325,7 +325,7 @@ def _build_output_rows(
         use_ma_filter: Käytetäänkö liukuva keskiarvo -suodatinta
         use_volume_filter: Käytetäänkö volyymi-suodatinta
         progress_callback: Callback-funktio edistymisen raportointiin
-        ticker_filter: Jos annettu, rajaa tulokset tiettyyn tickeriin
+        ticker_filter: Jos annettu, rajaa tulokset tiettyyn tickeriin tai ticker-listaan
     """
 
     # Candlestick pattern to integer mapping
@@ -494,7 +494,14 @@ def _build_output_rows(
     if not rows:
         return header, []
 
-    ticker_filter_upper = ticker_filter.upper() if ticker_filter else None
+    # Ticker-filtteri voi olla merkkijono tai lista
+    ticker_filter_set = None
+    if ticker_filter:
+        if isinstance(ticker_filter, list):
+            ticker_filter_set = {t.upper() for t in ticker_filter if t}
+        else:
+            ticker_filter_set = {ticker_filter.upper()}
+
     by_ticker = {}
     for rec in rows:
         # Handle different numbers of columns based on what was selected
@@ -514,7 +521,7 @@ def _build_output_rows(
             continue
 
         ticker_str = str(ticker)
-        if ticker_filter_upper and ticker_str.upper() != ticker_filter_upper:
+        if ticker_filter_set and ticker_str.upper() not in ticker_filter_set:
             continue
 
         by_ticker.setdefault(ticker_str, []).append(
