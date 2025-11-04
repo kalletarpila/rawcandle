@@ -314,6 +314,7 @@ def _build_output_rows(
     use_volume_filter: bool = False,
     progress_callback=None,
     ticker_filter: Optional[str | list] = None,
+    pattern_filter: Optional[list] = None,
 ):
     """Synchronous builder for output rows according to spec.
 
@@ -326,6 +327,7 @@ def _build_output_rows(
         use_volume_filter: Käytetäänkö volyymi-suodatinta
         progress_callback: Callback-funktio edistymisen raportointiin
         ticker_filter: Jos annettu, rajaa tulokset tiettyyn tickeriin tai ticker-listaan
+        pattern_filter: Jos annettu, rajaa tulokset vain valittuihin kynttiläkuvioihin
     """
 
     # Candlestick pattern to integer mapping
@@ -502,6 +504,11 @@ def _build_output_rows(
         else:
             ticker_filter_set = {ticker_filter.upper()}
 
+    # Pattern-filtteri - muunna lista setiksi vertailua varten
+    pattern_filter_set = None
+    if pattern_filter:
+        pattern_filter_set = {p for p in pattern_filter if p}
+
     by_ticker = {}
     for rec in rows:
         # Handle different numbers of columns based on what was selected
@@ -523,6 +530,11 @@ def _build_output_rows(
         ticker_str = str(ticker)
         if ticker_filter_set and ticker_str.upper() not in ticker_filter_set:
             continue
+
+        # Suodata pattern:in mukaan jos pattern_filter on asetettu
+        if pattern_filter_set and candle:
+            if str(candle) not in pattern_filter_set:
+                continue
 
         by_ticker.setdefault(ticker_str, []).append(
             (str(date), candle, signal_strength)

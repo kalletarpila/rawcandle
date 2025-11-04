@@ -214,6 +214,8 @@ class RawCandleApp:
             ft.Checkbox(label="Three White Soldiers", value=False),
             ft.Checkbox(label="Morning Star", value=False),
             ft.Checkbox(label="Dragonfly Doji", value=False),
+            ft.Checkbox(label="Bullish Divergence", value=False),
+            ft.Checkbox(label="Bearish Divergence", value=False),
         ]
         self.candles_ticker_field = ft.TextField(
             label="Osakkeen ticker (esim. AAPL)",

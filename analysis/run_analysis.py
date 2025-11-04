@@ -3,6 +3,9 @@ from pathlib import Path
 import pandas as pd
 
 from .candlestick_patterns import (
+    calculate_rsi,
+    is_bearish_divergence,
+    is_bullish_divergence,
     is_bullish_engulfing,
     is_dragonfly_doji,
     is_hammer,
@@ -145,6 +148,11 @@ def run_candlestick_analysis(
             return {}
         # Ensure pvm is datetime for correct sorting and comparisons
         df["pvm"] = pd.to_datetime(df["pvm"])
+        df = df.sort_values("pvm").reset_index(drop=True)
+
+    # Laske RSI jos divergenssejä tarkistetaan
+    if "Bullish Divergence" in patterns or "Bearish Divergence" in patterns:
+        df["RSI"] = calculate_rsi(df, period=14)
         df = df.sort_values("pvm").reset_index(drop=True)
 
     # Lisää apufunktiot downtrend-tarkistukseen
@@ -344,6 +352,44 @@ def run_candlestick_analysis(
                 logger.info(
                     f"{ticker} {row['pvm'].date().isoformat()} Dragonfly Doji checked - FOUND (strength {strength})"
                 )
+
+        # Divergenssit - tarkista vain jos RSI on laskettu
+        if "Bullish Divergence" in patterns and "RSI" in df.columns:
+            divergence_result = is_bullish_divergence(
+                df, i, lookback_days=30, min_rsi_gain=3.0, min_days_between=3
+            )
+            if divergence_result and divergence_result.get("found"):
+                found.append(
+                    {
+                        "pattern": "Bullish Divergence",
+                        "strength": divergence_result["strength"],
+                    }
+                )
+                if logger:
+                    logger.info(
+                        f"{ticker} {row['pvm'].date().isoformat()} Bullish Divergence checked - FOUND "
+                        f"(strength {divergence_result['strength']}, price: {divergence_result['price_change']}%, "
+                        f"RSI: +{divergence_result['rsi_change']})"
+                    )
+
+        if "Bearish Divergence" in patterns and "RSI" in df.columns:
+            divergence_result = is_bearish_divergence(
+                df, i, lookback_days=30, min_rsi_drop=3.0, min_days_between=3
+            )
+            if divergence_result and divergence_result.get("found"):
+                found.append(
+                    {
+                        "pattern": "Bearish Divergence",
+                        "strength": divergence_result["strength"],
+                    }
+                )
+                if logger:
+                    logger.info(
+                        f"{ticker} {row['pvm'].date().isoformat()} Bearish Divergence checked - FOUND "
+                        f"(strength {divergence_result['strength']}, price: +{divergence_result['price_change']}%, "
+                        f"RSI: {divergence_result['rsi_change']})"
+                    )
+
         if found:
             key = f"{ticker}|{row['pvm'].date().isoformat()}"
             bucket = results.setdefault(key, [])

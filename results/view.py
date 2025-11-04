@@ -39,6 +39,8 @@ def create_results_view(app) -> ft.View:
         ft.Checkbox(label="Three White Soldiers", value=False),
         ft.Checkbox(label="Morning Star", value=False),
         ft.Checkbox(label="Dragonfly Doji", value=False),
+        ft.Checkbox(label="Bullish Divergence", value=False),
+        ft.Checkbox(label="Bearish Divergence", value=False),
     ]
 
     # Laskutrendi-suodattimet
@@ -445,7 +447,7 @@ def create_results_view(app) -> ft.View:
 
                         show_modal_message(
                             "❌ Virhe",
-                            f"Tickereiden tarkistus epäonnistui. Tarkista analysis.db.",
+                            "Tickereiden tarkistus epäonnistui. Tarkista analysis.db.",
                         )
                         return
                 update_progress("Haetaan analyysit", 20, 100)
@@ -470,6 +472,22 @@ def create_results_view(app) -> ft.View:
                     # Tarkistetaan miten _build_output_rows toimii ticker_list:n kanssa
                     final_ticker_filter = ticker_list  # Välitetään koko lista
 
+                # Hae valitut kynttiläkuviot checkboxeista
+                selected_patterns = None
+                try:
+                    if hasattr(app, "results_checkboxes"):
+                        selected_patterns = [
+                            cb.label for cb in app.results_checkboxes if cb.value
+                        ]
+                        if selected_patterns:
+                            print(
+                                f"🔍 Kuviosuodatin: {len(selected_patterns)} kuviota valittu"
+                            )
+                        else:
+                            print("🌐 Ei kuviosuodatinta - käytetään kaikkia")
+                except Exception as ex:
+                    print(f"Virhe kuviosuodattimen lukemisessa: {ex}")
+
                 header, output_rows = _build_output_rows(
                     analysis_db,
                     osake_db,
@@ -479,6 +497,7 @@ def create_results_view(app) -> ft.View:
                     use_volume_filter=False,
                     progress_callback=fallback_progress,
                     ticker_filter=final_ticker_filter,
+                    pattern_filter=selected_patterns,
                 )
 
                 update_progress("Generoidaan Excel-tiedostoa", 80, 100)
@@ -820,127 +839,6 @@ def create_results_view(app) -> ft.View:
     )
 
     return view
-
-
-def start_results_generation(app, e):
-    # Delegates to the existing analysis runner and print_results module.
-    from analysis.logger import setup_logger
-    from analysis.print_results import print_analysis_results
-    from analysis.run_analysis import run_candlestick_analysis
-
-    logger = setup_logger()
-    logger.info("start_results_generation called (results.view)")
-
-    sb = ft.SnackBar(
-        ft.Text("🔄 Generoidaan CSV...", color=ft.Colors.WHITE),
-        bgcolor=ft.Colors.BLUE_600,
-        duration=1500,
-    )
-    if sb not in app.page.overlay:
-        app.page.overlay.append(sb)
-    sb.open = True
-    app.page.update()
-
-    selected_patterns = [cb.label for cb in app.results_checkboxes if cb.value]
-    if not selected_patterns:
-        dlg = ft.AlertDialog(title=ft.Text("Valitse vähintään yksi analyysi!"))
-        if dlg not in app.page.overlay:
-            app.page.overlay.append(dlg)
-        dlg.open = True
-        app.page.update()
-        return
-
-    ticker_mode = app.results_radio_group.value
-    ticker = app.results_ticker_field.value.strip().upper()
-    if ticker_mode == "single" and not ticker:
-        dlg = ft.AlertDialog(title=ft.Text("Syötä osakkeen ticker!"))
-        if dlg not in app.page.overlay:
-            app.page.overlay.append(dlg)
-        dlg.open = True
-        app.page.update()
-        return
-    if ticker_mode == "all":
-        ticker = None
-
-    date_mode = app.results_date_radio_group.value
-    if date_mode == "range":
-        sd = app.results_start_date.value
-        ed = app.results_end_date.value
-        if sd is None or ed is None or sd > ed:
-            dlg = ft.AlertDialog(title=ft.Text("Täytä kelvollinen aikaväli."))
-            if dlg not in app.page.overlay:
-                app.page.overlay.append(dlg)
-            dlg.open = True
-            app.page.update()
-            return
-        start_date = sd.isoformat()
-        end_date = ed.isoformat()
-    else:
-        start_date = None
-        end_date = None
-
-    def worker():
-        try:
-            db_path = os.path.join(
-                os.path.dirname(__file__), "..", "data", "osakedata.db"
-            )
-            db_path = os.path.normpath(db_path)
-            if ticker is None:
-                with sqlite3.connect(db_path) as conn:
-                    cur = conn.cursor()
-                    cur.execute("SELECT DISTINCT osake FROM osakedata ORDER BY osake")
-                    rows = [r[0] for r in cur.fetchall()]
-                results = {}
-                for idx, t in enumerate(rows):
-                    res = run_candlestick_analysis(
-                        db_path, t, selected_patterns, start_date, end_date
-                    )
-                    for k, v in res.items():
-                        results[k] = results.get(k, []) + v
-            else:
-                results = run_candlestick_analysis(
-                    db_path, ticker, selected_patterns, start_date, end_date
-                )
-
-            data_dir = os.path.join(os.path.dirname(__file__), "..", "analysis")
-            data_dir = os.path.normpath(data_dir)
-            output_path = os.path.join(data_dir, "analysis_results.txt")
-            result = print_analysis_results(results, ticker, output_path)
-            if isinstance(result, tuple):
-                text_msg, csv_path = result
-            else:
-                text_msg = result
-                csv_path = None
-
-            total_matches = sum(len(v) for v in results.values())
-            if ticker is None:
-                banner = f"Tulokset generoitu: kaikki tickereitä, löydetty yhteensä {total_matches} tapahtumaa."
-            else:
-                banner = f"Tulokset generoitu: {ticker}, löydetty yhteensä {total_matches} tapahtumaa."
-            try:
-                app.results_banner.value = banner
-                app.results_banner.color = ft.Colors.GREEN_600
-                app.page.update()
-            except Exception:
-                pass
-
-            logger.info(
-                f"Results generation done (results.view): {ticker} - {str(text_msg)[:200]}"
-            )
-
-        except Exception as ex:
-            logger.exception("Virhe generoitaessa tuloksia (results.view)")
-            sb2 = ft.SnackBar(
-                ft.Text(f"❌ Virhe generoitaessa: {ex}", color=ft.Colors.WHITE),
-                bgcolor=ft.Colors.RED_600,
-                duration=3000,
-            )
-            if sb2 not in app.page.overlay:
-                app.page.overlay.append(sb2)
-            sb2.open = True
-            app.page.update()
-
-    threading.Thread(target=worker, daemon=True).start()
 
 
 def show_results_csv(app, e):
