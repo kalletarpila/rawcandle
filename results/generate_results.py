@@ -492,8 +492,8 @@ def _build_output_rows(
         "NDX20",  # 79. NDX20
         "RSI14_t0",  # 80. RSI14_t0
         "t0_close_norm",  # 81. Normalisoitu t0_close
-        "Bearish Divergence",  # 82. Bearish Divergence vahvuus (1-3) jos löytyy t0/t-1/t-2/t-3, muuten 0
-        "Bullish Divergence",  # 83. Bullish Divergence vahvuus (1-3) jos löytyy t0/t-1/t-2/t-3, muuten 0
+        "Bearish Divergence",  # 82. Bearish Divergence vahvuus (1.00-3.00, 2 desimaalia) jos löytyy t0/t-1/t-2/t-3, muuten 0
+        "Bullish Divergence",  # 83. Bullish Divergence vahvuus (1.00-3.00, 2 desimaalia) jos löytyy t0/t-1/t-2/t-3, muuten 0
     ]
 
     if not rows:

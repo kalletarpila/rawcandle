@@ -220,7 +220,7 @@ def is_bullish_divergence(
 
     strength = rsi_component + price_component + duration_component
     strength = max(1.0, min(3.0, strength))  # Skaalaa välille 1-3
-    strength = round(strength)  # Pyöristä kokonaisluvuksi (1, 2 tai 3)
+    strength = round(strength, 2)  # Kahden desimaalin tarkkuus
 
     return {
         "found": True,
@@ -334,7 +334,7 @@ def is_bearish_divergence(
 
     strength = rsi_component + price_component + duration_component
     strength = max(1.0, min(3.0, strength))  # Skaalaa välille 1-3
-    strength = round(strength)  # Pyöristä kokonaisluvuksi (1, 2 tai 3)
+    strength = round(strength, 2)  # Kahden desimaalin tarkkuus
 
     return {
         "found": True,

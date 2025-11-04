@@ -38,8 +38,8 @@ class DivergenceCache:
                     rsi REAL,
                     bullish_divergence INTEGER DEFAULT 0,
                     bearish_divergence INTEGER DEFAULT 0,
-                    bullish_strength INTEGER DEFAULT 0,
-                    bearish_strength INTEGER DEFAULT 0,
+                    bullish_strength REAL DEFAULT 0,
+                    bearish_strength REAL DEFAULT 0,
                     PRIMARY KEY (ticker, date)
                 )
             """
@@ -51,12 +51,12 @@ class DivergenceCache:
 
             if "bullish_strength" not in columns:
                 conn.execute(
-                    "ALTER TABLE divergence_cache ADD COLUMN bullish_strength INTEGER DEFAULT 0"
+                    "ALTER TABLE divergence_cache ADD COLUMN bullish_strength REAL DEFAULT 0"
                 )
 
             if "bearish_strength" not in columns:
                 conn.execute(
-                    "ALTER TABLE divergence_cache ADD COLUMN bearish_strength INTEGER DEFAULT 0"
+                    "ALTER TABLE divergence_cache ADD COLUMN bearish_strength REAL DEFAULT 0"
                 )
 
             conn.commit()
