@@ -220,6 +220,85 @@ class RawCandleApp:
             width=250,
             hint_text="Jätä tyhjäksi analysoidaksesi kaikki",
         )
+        
+        # Painike CSV-tiedoston lataamiseen
+        def load_tickers_from_csv(e):
+            """Lataa tickerit tickers.txt tiedostosta."""
+            import os
+            
+            csv_path = "/home/kalle/projects/rawcandle/data/tickers.txt"
+            
+            try:
+                if not os.path.exists(csv_path):
+                    sb = ft.SnackBar(
+                        ft.Text(f"❌ Tiedostoa ei löydy: {csv_path}", color=ft.Colors.WHITE),
+                        bgcolor=ft.Colors.RED_600,
+                        duration=3000,
+                    )
+                    if sb not in self.page.overlay:
+                        self.page.overlay.append(sb)
+                    sb.open = True
+                    self.page.update()
+                    return
+                
+                with open(csv_path, 'r', encoding='utf-8') as f:
+                    content = f.read().strip()
+                
+                if not content:
+                    sb = ft.SnackBar(
+                        ft.Text("❌ Tiedosto on tyhjä", color=ft.Colors.WHITE),
+                        bgcolor=ft.Colors.RED_600,
+                        duration=3000,
+                    )
+                    if sb not in self.page.overlay:
+                        self.page.overlay.append(sb)
+                    sb.open = True
+                    self.page.update()
+                    return
+                
+                # Aseta tickerit kenttään (pilkulla eroteltuina)
+                # Trimmataan välilyönnit joka tickeristä
+                tickers = [line.strip() for line in content.split('\n') if line.strip()]
+                tickers_str = ','.join(tickers)
+                
+                self.candles_ticker_field.value = tickers_str
+                self.candles_ticker_field.update()
+                
+                # Vaihda radio valinta "single" tilaan
+                self.candles_radio_group.value = "single"
+                self.candles_radio_group.update()
+                
+                sb = ft.SnackBar(
+                    ft.Text(f"✅ Ladattu {len(tickers)} tickeriä tiedostosta", color=ft.Colors.WHITE),
+                    bgcolor=ft.Colors.GREEN_600,
+                    duration=2000,
+                )
+                if sb not in self.page.overlay:
+                    self.page.overlay.append(sb)
+                sb.open = True
+                self.page.update()
+                
+            except Exception as ex:
+                logger.exception("Virhe ladattaessa tickereitä CSV:stä")
+                sb = ft.SnackBar(
+                    ft.Text(f"❌ Virhe: {ex}", color=ft.Colors.WHITE),
+                    bgcolor=ft.Colors.RED_600,
+                    duration=3000,
+                )
+                if sb not in self.page.overlay:
+                    self.page.overlay.append(sb)
+                sb.open = True
+                self.page.update()
+        
+        self.candles_load_csv_button = ft.ElevatedButton(
+            "Lue CSV:stä",
+            icon=ft.Icons.UPLOAD_FILE,
+            on_click=load_tickers_from_csv,
+            bgcolor=ft.Colors.BLUE_400,
+            color=ft.Colors.WHITE,
+            width=150,
+        )
+        
         self.candles_radio_group = ft.RadioGroup(
             content=ft.Row(
                 [
@@ -811,7 +890,14 @@ class RawCandleApp:
                                                                 color=ft.Colors.ORANGE_600,
                                                             ),
                                                             self.candles_radio_group,
-                                                            self.candles_ticker_field,
+                                                            ft.Row(
+                                                                [
+                                                                    self.candles_ticker_field,
+                                                                    self.candles_load_csv_button,
+                                                                ],
+                                                                spacing=10,
+                                                                alignment=ft.MainAxisAlignment.START,
+                                                            ),
                                                         ],
                                                         horizontal_alignment=ft.CrossAxisAlignment.START,
                                                         spacing=10,
@@ -1203,9 +1289,16 @@ class RawCandleApp:
                 dlg.open = True
                 self.page.update()
                 return
+            # Jos ticker sisältää pilkkuja, käsitellään se listana
+            if ',' in ticker:
+                ticker_list = [t.strip() for t in ticker.split(',') if t.strip()]
+                ticker = None  # Asetetaan None, jotta käytetään ticker_list:ia
+            else:
+                ticker_list = None
         else:
             # analyze all tickers if radio group set to 'all'
             ticker = None
+            ticker_list = None
 
         # Aikaväli
         date_mode = self.candles_date_radio_group.value
@@ -1287,7 +1380,7 @@ class RawCandleApp:
                     os.path.dirname(__file__), "data", "osakedata.db"
                 )
                 results = {}
-                if ticker is None:
+                if ticker is None and ticker_list is None:
                     # analyze all tickers in DB and aggregate results
                     with sqlite3.connect(db_path) as conn:
                         cur = conn.cursor()
@@ -1315,7 +1408,30 @@ class RawCandleApp:
                         # merge results
                         for k, v in res.items():
                             results[k] = results.get(k, []) + v
+                elif ticker_list is not None:
+                    # Analysoi lista tickereitä
+                    total_tickers = len(ticker_list)
+                    for idx, t in enumerate(ticker_list):
+                        # map per-ticker fraction into overall progress
+                        def per_ticker_progress(
+                            fraction: float, idx=idx, total=total_tickers
+                        ):
+                            overall = (idx + fraction) / max(1, total)
+                            progress_cb(overall)
+
+                        res = run_candlestick_analysis(
+                            db_path,
+                            t,
+                            selected_patterns,
+                            start_date,
+                            end_date,
+                            progress_callback=per_ticker_progress,
+                        )
+                        # merge results
+                        for k, v in res.items():
+                            results[k] = results.get(k, []) + v
                 else:
+                    # Yksittäinen ticker
                     results = run_candlestick_analysis(
                         db_path,
                         ticker,
@@ -1325,7 +1441,9 @@ class RawCandleApp:
                         progress_callback=progress_cb,
                     )
                 # tallenna ja muodosta viesti
-                result = print_analysis_results(results, ticker, output_path)
+                # Ticker-parametri tulostusfunktiossa: jos useita tickereitä, asetetaan None
+                display_ticker = ticker if ticker_list is None else None
+                result = print_analysis_results(results, display_ticker, output_path)
                 # print_analysis_results may return (msg, csv_path) or a plain string
                 if isinstance(result, tuple):
                     text_msg, csv_path = result
@@ -1337,11 +1455,13 @@ class RawCandleApp:
                 progress.value = 1.0
                 self.page.update()
                 safe_msg = str(text_msg).replace("\n", " | ")
-                logger.info(f"Analyysi valmis: {ticker} - {safe_msg}")
+                logger.info(f"Analyysi valmis: {ticker or (f'{len(ticker_list)} tickeriä' if ticker_list else 'kaikki')} - {safe_msg}")
                 # Update Candles result banner: show analyzed ticker(s) and total matches
                 try:
                     total_matches = sum(len(v) for v in results.values())
-                    if ticker is None:
+                    if ticker_list is not None:
+                        banner = f"Analyysi valmis: {len(ticker_list)} tickeriä, löydetty yhteensä {total_matches} tapahtumaa."
+                    elif ticker is None:
                         banner = f"Analyysi valmis: kaikki tickereitä, löydetty yhteensä {total_matches} tapahtumaa."
                     else:
                         banner = f"Analyysi valmis: {ticker}, löydetty yhteensä {total_matches} tapahtumaa."
@@ -1354,8 +1474,9 @@ class RawCandleApp:
                 # Näytä yhteenveto-ikkuna: montako matchia ja montako tickeriä sisältää tuloksia
                 try:
                     total_matches = sum(len(v) for v in results.values())
-                    tickers_with_results = 1 if results else 0
-                    summary = f"Analyysi valmis: {ticker}\nLöydetty yhteensä {total_matches} tapahtumaa.\nTickereitä joissa tuloksia: {tickers_with_results}"
+                    tickers_with_results = len([k for k in results.keys() if results[k]])
+                    ticker_display = ticker or (f'{len(ticker_list)} tickeriä' if ticker_list else 'kaikki')
+                    summary = f"Analyysi valmis: {ticker_display}\nLöydetty yhteensä {total_matches} tapahtumaa.\nTickereitä joissa tuloksia: {tickers_with_results}"
                     summary_dlg = ft.AlertDialog(
                         title=ft.Text("Analyysin yhteenveto"),
                         content=ft.Text(summary),
