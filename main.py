@@ -463,6 +463,30 @@ class RawCandleApp:
         )
         # Result banner (mirrors main page `loading_text` style)
         self.candles_result_text = ft.Text(value="", color=ft.colors.BLUE_600)
+
+        # Downtrend filters for Candles view
+        self.candles_downtrend_filter = ft.Checkbox(
+            label="🔻 Suodata vain laskutrendien kynttilät",
+            value=False,
+        )
+
+        self.candles_min_decline_percent = ft.TextField(
+            label="Min. lasku (%)",
+            width=120,
+            value="3.0",
+            hint_text="3.0",
+        )
+
+        self.candles_ma_filter = ft.Checkbox(
+            label="Lisää liukuva keskiarvo -suodatin",
+            value=True,
+        )
+
+        self.candles_volume_filter = ft.Checkbox(
+            label="Lisää volyymi-suodatin",
+            value=False,
+        )
+
         # Random events controls for Candles view
         self.candles_random_checkbox = ft.Checkbox(
             label="Tee random tapahtumia", value=False
@@ -842,6 +866,37 @@ class RawCandleApp:
                                                     ft.Column(
                                                         self.candles_checkboxes,
                                                         spacing=12,
+                                                    ),
+                                                    ft.Container(height=12),
+                                                    # Downtrend filters card
+                                                    ft.Card(
+                                                        content=ft.Container(
+                                                            content=ft.Column(
+                                                                [
+                                                                    ft.Text(
+                                                                        "Laskutrendi-suodattimet",
+                                                                        size=14,
+                                                                        weight=ft.FontWeight.BOLD,
+                                                                    ),
+                                                                    ft.Column(
+                                                                        [
+                                                                            self.candles_downtrend_filter,
+                                                                            self.candles_min_decline_percent,
+                                                                            self.candles_ma_filter,
+                                                                            self.candles_volume_filter,
+                                                                        ],
+                                                                        spacing=8,
+                                                                        horizontal_alignment=ft.CrossAxisAlignment.START,
+                                                                    ),
+                                                                ],
+                                                                spacing=8,
+                                                            ),
+                                                            padding=12,
+                                                            bgcolor=ft.Colors.GREY_50,
+                                                            border_radius=8,
+                                                            width=300,
+                                                        ),
+                                                        elevation=1,
                                                     ),
                                                     ft.Container(height=12),
                                                     # Random tapahtumat card moved here (left column)
@@ -1338,6 +1393,15 @@ class RawCandleApp:
             start_date = None
             end_date = None
 
+        # Extract downtrend filter values
+        downtrend_filter = bool(self.candles_downtrend_filter.value)
+        try:
+            min_decline_percent = float(self.candles_min_decline_percent.value or "3.0")
+        except ValueError:
+            min_decline_percent = 3.0
+        use_ma_filter = bool(self.candles_ma_filter.value)
+        use_volume_filter = bool(self.candles_volume_filter.value)
+
         # Progress dialog
         progress = ft.ProgressBar(width=400)
         status = ft.Text("Aloitetaan analyysi...")
@@ -1389,6 +1453,9 @@ class RawCandleApp:
                 results = {}
                 processed_tickers = []  # Seurataan käsiteltyjä tickereitä
                 empty_tickers = []  # Seurataan tickereitä joilla ei dataa
+                no_pattern_tickers = (
+                    []
+                )  # Seurataan tickereitä joilla ei löytynyt kuvioita
 
                 if ticker is None and ticker_list is None:
                     # analyze all tickers in DB and aggregate results
@@ -1416,12 +1483,21 @@ class RawCandleApp:
                             start_date,
                             end_date,
                             progress_callback=per_ticker_progress,
+                            downtrend_filter=downtrend_filter,
+                            min_decline_percent=min_decline_percent,
+                            use_ma_filter=use_ma_filter,
+                            use_volume_filter=use_volume_filter,
                         )
                         # merge results
-                        if not res:
+                        if res is None:
+                            # None = ei dataa
                             empty_tickers.append(t)
-                        for k, v in res.items():
-                            results[k] = results.get(k, []) + v
+                        elif not res:
+                            # {} = ei kuvioita
+                            no_pattern_tickers.append(t)
+                        else:
+                            for k, v in res.items():
+                                results[k] = results.get(k, []) + v
                 elif ticker_list is not None:
                     # Analysoi lista tickereitä
                     total_tickers = len(ticker_list)
@@ -1442,12 +1518,21 @@ class RawCandleApp:
                             start_date,
                             end_date,
                             progress_callback=per_ticker_progress,
+                            downtrend_filter=downtrend_filter,
+                            min_decline_percent=min_decline_percent,
+                            use_ma_filter=use_ma_filter,
+                            use_volume_filter=use_volume_filter,
                         )
                         # merge results
-                        if not res:
+                        if res is None:
+                            # None = ei dataa
                             empty_tickers.append(t)
-                        for k, v in res.items():
-                            results[k] = results.get(k, []) + v
+                        elif not res:
+                            # {} = ei kuvioita
+                            no_pattern_tickers.append(t)
+                        else:
+                            for k, v in res.items():
+                                results[k] = results.get(k, []) + v
                 else:
                     # Yksittäinen ticker
                     processed_tickers.append(ticker)
@@ -1458,9 +1543,18 @@ class RawCandleApp:
                         start_date,
                         end_date,
                         progress_callback=progress_cb,
+                        downtrend_filter=downtrend_filter,
+                        min_decline_percent=min_decline_percent,
+                        use_ma_filter=use_ma_filter,
+                        use_volume_filter=use_volume_filter,
                     )
-                    if not results:
+                    if results is None:
+                        # None = ei dataa
                         empty_tickers.append(ticker)
+                        results = {}  # Aseta tyhjä dict jatkoa varten
+                    elif not results:
+                        # {} = ei kuvioita
+                        no_pattern_tickers.append(ticker)
                 # tallenna ja muodosta viesti
                 # Ticker-parametri tulostusfunktiossa: jos useita tickereitä, asetetaan None
                 display_ticker = ticker if ticker_list is None else None
@@ -1508,9 +1602,16 @@ class RawCandleApp:
                     summary = f"Analyysi valmis: {ticker_display}\nLöydetty yhteensä {total_matches} tapahtumaa.\nTickereitä joissa tuloksia: {tickers_with_results}"
 
                     if empty_tickers:
-                        summary += f"\n\n⚠️ Varoitus: {len(empty_tickers)} tickerillä ei dataa kannassa"
+                        summary += f"\n\n⚠️ {len(empty_tickers)} tickerillä ei dataa kannassa/aikavälillä"
                         if len(empty_tickers) <= 10:
                             summary += f":\n{', '.join(empty_tickers)}"
+                        else:
+                            summary += f":\n{', '.join(empty_tickers[:10])}... (+{len(empty_tickers)-10} muuta)"
+
+                    if no_pattern_tickers:
+                        summary += f"\n\nℹ️ {len(no_pattern_tickers)} tickerillä ei löytynyt kuvioita"
+                        if len(no_pattern_tickers) <= 10:
+                            summary += f":\n{', '.join(no_pattern_tickers)}"
                         else:
                             summary += f":\n{', '.join(empty_tickers[:10])}... (+{len(empty_tickers)-10} muuta)"
 
@@ -1889,140 +1990,14 @@ class RawCandleApp:
                     self.loading_text.color = ft.Colors.RED_600
                     self.page.update()
                     results.append(msg)
-                # 1 sekunnin tauko jokaisen osakkeen jälkeen
-                time.sleep(1)
-                # 1 minuutin tauko joka 100. osakkeen jälkeen
-                if (idx + 1) % 100 == 0:
-                    self.loading_text.value = (
-                        "⏳ 100 osaketta luettu, pidetään minuutin tauko..."
-                    )
+                # 1.5 sekunnin tauko jokaisen osakkeen jälkeen
+                time.sleep(1.5)
+                # 30 sekunnin tauko joka 500. osakkeen jälkeen
+                if (idx + 1) % 500 == 0:
+                    self.loading_text.value = f"⏳ {idx + 1} osaketta käsitelty, pidetään 30 sekunnin tauko..."
                     self.loading_text.color = ft.Colors.ORANGE_600
                     self.page.update()
-                    time.sleep(60)
-            self.loading_text.value = "\n".join(results)
-            self.loading_text.color = ft.Colors.GREEN_600
-        except Exception as ex:
-            self.loading_text.value = f"❌ Virhe tiedostoa käsitellessä: {str(ex)}"
-            self.loading_text.color = ft.Colors.RED_600
-        self.page.update()
-        import os
-
-        data_dir = os.path.join(os.path.dirname(__file__), "data")
-        tickers_file = os.path.join(data_dir, "tickers.txt")
-        file_path = os.path.join(data_dir, "osakedata.csv")
-        if not os.path.exists(tickers_file):
-            self.loading_text.value = f"❌ Tiedostoa ei löytynyt: {tickers_file}"
-            self.loading_text.color = ft.Colors.RED_600
-            self.page.update()
-            return
-        if not os.path.exists(data_dir):
-            os.makedirs(data_dir)
-        try:
-            with open(tickers_file, "r", encoding="utf-8") as f:
-                tickers = [line.strip() for line in f if line.strip()]
-            if not tickers:
-                self.loading_text.value = "❌ Tiedostossa ei ole tickereitä!"
-                self.loading_text.color = ft.Colors.RED_600
-                self.page.update()
-                return
-            results = []
-            import time
-
-            for idx, ticker in enumerate(tickers):
-                self.loading_text.value = f"🔄 Haetaan dataa: {ticker}..."
-                self.loading_text.color = ft.Colors.BLUE_600
-                self.page.update()
-                try:
-                    stock = yf.Ticker(ticker)
-                    start_date = "2023-07-01"
-                    end_date = "2025-09-30"
-                    hist = stock.history(start=start_date, end=end_date)
-                    if hist.empty:
-                        msg = f"{ticker}: Ei dataa"
-                        self.loading_text.value = msg
-                        self.loading_text.color = ft.Colors.RED_600
-                        self.page.update()
-                        results.append(msg)
-                        continue
-                    df = hist.copy().sort_index(ascending=False)
-                    df.index = df.index.strftime("%Y-%m-%d")
-                    row_data = [ticker]
-                    for date, row in df.iterrows():
-                        date_str = date
-                        open_val = (
-                            f"{row['Open']:.2f}"
-                            if "Open" in row and pd.notna(row["Open"])
-                            else ""
-                        )
-                        close_val = (
-                            f"{row['Close']:.2f}"
-                            if "Close" in row and pd.notna(row["Close"])
-                            else ""
-                        )
-                        high_val = (
-                            f"{row['High']:.2f}"
-                            if "High" in row and pd.notna(row["High"])
-                            else ""
-                        )
-                        low_val = (
-                            f"{row['Low']:.2f}"
-                            if "Low" in row and pd.notna(row["Low"])
-                            else ""
-                        )
-                        volume_val = (
-                            f"{int(row['Volume'])}"
-                            if "Volume" in row and pd.notna(row["Volume"])
-                            else ""
-                        )
-                        row_data.extend(
-                            [
-                                date_str,
-                                open_val,
-                                close_val,
-                                high_val,
-                                low_val,
-                                volume_val,
-                            ]
-                        )
-                    csv_string = ",".join(row_data) + "\n"
-                    try:
-                        with open(file_path, "a", encoding="utf-8") as f:
-                            f.write(csv_string)
-                        # Kirjoita lokiin
-                        loki_path = os.path.join(data_dir, "loki.txt")
-                        from datetime import datetime
-
-                        log_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        log_entry = f"{log_date}, {ticker}, {len(df)} päivää\n"
-                        with open(loki_path, "a", encoding="utf-8") as loki:
-                            loki.write(log_entry)
-                        msg = f"{ticker}: OK ({len(df)} päivää) - Tallennus OK"
-                        self.loading_text.value = msg
-                        self.loading_text.color = ft.Colors.GREEN_600
-                        self.page.update()
-                        results.append(msg)
-                    except Exception as write_ex:
-                        msg = f"{ticker}: OK ({len(df)} päivää) - Tallennus VIRHE: {str(write_ex)}"
-                        self.loading_text.value = msg
-                        self.loading_text.color = ft.Colors.RED_600
-                        self.page.update()
-                        results.append(msg)
-                except Exception as ex:
-                    msg = f"{ticker}: Virhe ({str(ex)})"
-                    self.loading_text.value = msg
-                    self.loading_text.color = ft.Colors.RED_600
-                    self.page.update()
-                    results.append(msg)
-                # 1 sekunnin tauko jokaisen osakkeen jälkeen
-                time.sleep(1)
-                # 1 minuutin tauko joka 100. osakkeen jälkeen
-                if (idx + 1) % 100 == 0:
-                    self.loading_text.value = (
-                        "⏳ 100 osaketta luettu, pidetään minuutin tauko..."
-                    )
-                    self.loading_text.color = ft.Colors.ORANGE_600
-                    self.page.update()
-                    time.sleep(60)
+                    time.sleep(30)
             self.loading_text.value = "\n".join(results)
             self.loading_text.color = ft.Colors.GREEN_600
         except Exception as ex:
@@ -2145,6 +2120,164 @@ class RawCandleApp:
             ],
         )
 
+    def update_stock_data(self, e):
+        """Päivitä olemassa olevien osakkeiden tiedot Yahoosta"""
+        import os
+        import sqlite3
+        import time
+        from datetime import datetime, timedelta
+
+        data_dir = os.path.join(os.path.dirname(__file__), "data")
+        db_path = os.path.join(data_dir, "osakedata.db")
+
+        if not os.path.exists(db_path):
+            self.loading_text.value = "❌ Osakedata.db ei löydy!"
+            self.loading_text.color = ft.Colors.RED_600
+            self.page.update()
+            return
+
+        try:
+            # Hae kaikki osakkeet ja niiden viimeisin päivämäärä
+            with sqlite3.connect(db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT osake, MAX(pvm) as viimeisin_pvm
+                    FROM osakedata
+                    GROUP BY osake
+                    ORDER BY osake
+                """
+                )
+                stocks = cursor.fetchall()
+
+            if not stocks:
+                self.loading_text.value = "❌ Ei osakkeita kannassa!"
+                self.loading_text.color = ft.Colors.RED_600
+                self.page.update()
+                return
+
+            yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+            total_stocks = len(stocks)
+            updated_count = 0
+            skipped_count = 0
+            error_count = 0
+
+            self.loading_text.value = (
+                f"🔄 Aloitetaan päivitys {total_stocks} osakkeelle..."
+            )
+            self.loading_text.color = ft.Colors.BLUE_600
+            self.page.update()
+
+            for idx, (ticker, last_date) in enumerate(stocks, 1):
+                # Tarkista tarvitaanko päivitystä
+                if last_date >= yesterday:
+                    skipped_count += 1
+                    if idx % 10 == 0:
+                        self.loading_text.value = f"⏭️ {idx}/{total_stocks}: {ticker} (ohitettu, data ajan tasalla)"
+                        self.page.update()
+                    continue
+
+                # Laske päivitysväli
+                start_date = (
+                    datetime.fromisoformat(last_date) + timedelta(days=1)
+                ).strftime("%Y-%m-%d")
+
+                self.loading_text.value = f"🔄 {idx}/{total_stocks}: Haetaan {ticker} ({start_date} → {yesterday})"
+                self.loading_text.color = ft.Colors.BLUE_600
+                self.page.update()
+
+                try:
+                    stock = yf.Ticker(ticker)
+                    hist = stock.history(start=start_date, end=yesterday)
+
+                    if hist.empty:
+                        skipped_count += 1
+                        continue
+
+                    # Tallenna tietokantaan
+                    with sqlite3.connect(db_path) as conn:
+                        cursor = conn.cursor()
+                        rows_added = 0
+                        for date, row in hist.iterrows():
+                            date_str = date.strftime("%Y-%m-%d")
+                            cursor.execute(
+                                """
+                                INSERT OR REPLACE INTO osakedata 
+                                (osake, pvm, open, high, low, close, volume)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                            """,
+                                (
+                                    ticker,
+                                    date_str,
+                                    (
+                                        float(row["Open"])
+                                        if pd.notna(row["Open"])
+                                        else None
+                                    ),
+                                    (
+                                        float(row["High"])
+                                        if pd.notna(row["High"])
+                                        else None
+                                    ),
+                                    float(row["Low"]) if pd.notna(row["Low"]) else None,
+                                    (
+                                        float(row["Close"])
+                                        if pd.notna(row["Close"])
+                                        else None
+                                    ),
+                                    (
+                                        int(row["Volume"])
+                                        if pd.notna(row["Volume"])
+                                        else None
+                                    ),
+                                ),
+                            )
+                            rows_added += 1
+                        conn.commit()
+
+                    updated_count += 1
+                    self.loading_text.value = (
+                        f"✅ {idx}/{total_stocks}: {ticker} (+{rows_added} päivää)"
+                    )
+                    self.loading_text.color = ft.Colors.GREEN_600
+                    self.page.update()
+
+                except Exception as ex:
+                    error_count += 1
+                    self.loading_text.value = (
+                        f"❌ {idx}/{total_stocks}: {ticker} - Virhe: {str(ex)}"
+                    )
+                    self.loading_text.color = ft.Colors.RED_600
+                    self.page.update()
+
+                # Tauot
+                time.sleep(1.5)  # 1.5s per osake (turvallinen Yahoo Finance API:lle)
+
+                # 30s tauko per 500 osaketta
+                if idx % 500 == 0:
+                    self.loading_text.value = (
+                        f"⏳ {idx} osaketta käsitelty, pidetään 30 sekunnin tauko..."
+                    )
+                    self.loading_text.color = ft.Colors.ORANGE_600
+                    self.page.update()
+                    time.sleep(30)
+
+            # Yhteenveto
+            summary = f"""✅ Päivitys valmis!
+Käsitelty: {total_stocks} osaketta
+Päivitetty: {updated_count} osaketta
+Ohitettu: {skipped_count} (data ajan tasalla)
+Virheet: {error_count}"""
+
+            self.loading_text.value = summary
+            self.loading_text.color = ft.Colors.GREEN_600
+            self.page.update()
+
+        except Exception as ex:
+            self.loading_text.value = f"❌ Virhe päivityksessä: {str(ex)}"
+            self.loading_text.color = ft.Colors.RED_600
+            self.page.update()
+
     def create_home_view(self):
         """Luo etusivun näkymän"""
         return ft.View(
@@ -2215,6 +2348,20 @@ class RawCandleApp:
                                                 ],
                                                 alignment=ft.MainAxisAlignment.CENTER,
                                                 spacing=10,
+                                            ),
+                                            ft.Divider(height=20),
+                                            ft.Row(
+                                                [
+                                                    ft.ElevatedButton(
+                                                        "Päivitä osaketiedot",
+                                                        icon=ft.Icons.UPDATE,
+                                                        on_click=self.update_stock_data,
+                                                        bgcolor=ft.Colors.BLUE_700,
+                                                        color=ft.Colors.WHITE,
+                                                        tooltip="Hae puuttuvat päivät kaikille kannassa oleville osakkeille",
+                                                    ),
+                                                ],
+                                                alignment=ft.MainAxisAlignment.CENTER,
                                             ),
                                         ],
                                         horizontal_alignment=ft.CrossAxisAlignment.CENTER,

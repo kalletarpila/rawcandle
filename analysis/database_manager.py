@@ -400,6 +400,34 @@ class DatabaseManager:
             self.logger.error(f"Delete finding failed: {e}")
             return False
 
+    def delete_findings_by_ids(self, finding_ids: list[int]) -> int:
+        """
+        Poista useita löydöksiä ID-listan perusteella.
+
+        Args:
+            finding_ids: Lista löydösten ID:itä
+
+        Returns:
+            Poistettujen rivien määrä
+        """
+        if not finding_ids:
+            return 0
+
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            placeholders = ",".join("?" * len(finding_ids))
+            query = f"DELETE FROM analysis_findings WHERE id IN ({placeholders})"
+            cursor.execute(query, finding_ids)
+            conn.commit()
+
+            return cursor.rowcount
+
+        except Exception as e:
+            self.logger.error(f"Delete findings by IDs failed: {e}")
+            return 0
+
     def update_finding(self, finding_id: int, **kwargs) -> bool:
         """
         Päivitä löydös.

@@ -280,6 +280,9 @@ def _get_index_data(
 ) -> Optional[float]:
     """Hakee indeksi-tietoja tietokannasta"""
     try:
+        # Normalisoi ticker: isot kirjaimet, trimmattu
+        ticker = (ticker or "").strip().upper()
+
         # Hae indeksin data
         df = pd.read_sql_query(
             "SELECT pvm, open, high, low, close FROM osakedata WHERE osake = ? ORDER BY pvm ASC",

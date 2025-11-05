@@ -233,6 +233,9 @@ def calculate_and_save_divergences(
     )
     from analysis.database_manager import DatabaseManager
 
+    # Normalisoi ticker: isot kirjaimet, trimmattu
+    ticker = (ticker or "").strip().upper()
+
     try:
         # Lue data
         with sqlite3.connect(osakedata_db_path) as conn:

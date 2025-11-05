@@ -86,6 +86,9 @@ def run_candlestick_analysis(
     """
     import sqlite3
 
+    # Normalisoi ticker: isot kirjaimet, trimmattu
+    ticker = (ticker or "").strip().upper()
+
     # setup logger
     try:
         from .logger import setup_logger
@@ -145,7 +148,7 @@ def run_candlestick_analysis(
                 logger.warning(
                     f"Ei dataa tickerille: {ticker} (aikaväli: {s_iso or 'alku'} - {e_iso or 'loppu'})"
                 )
-            return {}
+            return None  # None = ei dataa, {} = ei kuvioita
         # Ensure pvm is datetime for correct sorting and comparisons
         df["pvm"] = pd.to_datetime(df["pvm"])
         df = df.sort_values("pvm").reset_index(drop=True)

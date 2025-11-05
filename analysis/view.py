@@ -44,6 +44,11 @@ class AnalysisView:
         self.symbol_filter = None
         self.progress_dialog = None
 
+        # Aikaväli-suodattimet
+        self.date_filter_enabled = None
+        self.start_date_field = None
+        self.end_date_field = None
+
         # Downtrend-suodattimet
         self.downtrend_filter = None
         self.min_decline_percent = None
@@ -141,13 +146,18 @@ class AnalysisView:
 
         self.pattern_filter = ft.Dropdown(
             label="Kuvio",
-            width=150,
+            width=200,
             options=[
                 ft.dropdown.Option("", "Kaikki"),
-                ft.dropdown.Option("Doji", "Doji"),
+                ft.dropdown.Option("downtrend", "Downtrend"),
                 ft.dropdown.Option("Hammer", "Hammer"),
-                ft.dropdown.Option("Shooting Star", "Shooting Star"),
-                ft.dropdown.Option("Engulfing", "Engulfing"),
+                ft.dropdown.Option("Bullish Engulfing", "Bullish Engulfing"),
+                ft.dropdown.Option("Piercing Pattern", "Piercing Pattern"),
+                ft.dropdown.Option("Three White Soldiers", "Three White Soldiers"),
+                ft.dropdown.Option("Morning Star", "Morning Star"),
+                ft.dropdown.Option("Dragonfly Doji", "Dragonfly Doji"),
+                ft.dropdown.Option("Bullish Divergence", "Bullish Divergence"),
+                ft.dropdown.Option("Bearish Divergence", "Bearish Divergence"),
             ],
             on_change=self._on_filter_change,
         )
@@ -158,27 +168,25 @@ class AnalysisView:
             on_click=self._clear_filters,
         )
 
-        # Downtrend-suodattimet
-        self.downtrend_filter = ft.Checkbox(
-            label="🔻 Suodata vain laskutrendien kynttilät",
+        # Aikaväli-suodatin
+        self.date_filter_enabled = ft.Checkbox(
+            label="Suodata aikavälin mukaan",
             value=False,
+            on_change=self._on_filter_change,
         )
 
-        self.min_decline_percent = ft.TextField(
-            label="Min. lasku (%)",
-            width=120,
-            value="3.0",
-            hint_text="3.0",
+        self.start_date_field = ft.TextField(
+            label="Alkupäivä (YYYY-MM-DD)",
+            hint_text="esim. 2024-01-01",
+            width=200,
+            on_change=self._on_filter_change,
         )
 
-        self.ma_filter = ft.Checkbox(
-            label="Lisää liukuva keskiarvo -suodatin",
-            value=True,
-        )
-
-        self.volume_filter = ft.Checkbox(
-            label="Lisää volyymi-suodatin",
-            value=False,
+        self.end_date_field = ft.TextField(
+            label="Loppupäivä (YYYY-MM-DD)",
+            hint_text="esim. 2024-12-31",
+            width=200,
+            on_change=self._on_filter_change,
         )
 
         # Rivit suodattimille
@@ -189,12 +197,7 @@ class AnalysisView:
         )
 
         row2 = ft.Row(
-            [
-                self.downtrend_filter,
-                self.min_decline_percent,
-                self.ma_filter,
-                self.volume_filter,
-            ],
+            [self.date_filter_enabled, self.start_date_field, self.end_date_field],
             spacing=10,
             alignment=ft.MainAxisAlignment.START,
         )
@@ -205,22 +208,6 @@ class AnalysisView:
 
     def _create_action_buttons(self) -> ft.Row:
         """Luo toimintopainikkeet."""
-        run_analysis_btn = ft.ElevatedButton(
-            text="🔍 Aja Analyysi",
-            icon=ft.Icons.ANALYTICS,
-            on_click=self._run_analysis,
-            bgcolor=ft.Colors.GREEN_700,
-            color=ft.Colors.WHITE,
-        )
-
-        refresh_btn = ft.IconButton(
-            icon=ft.Icons.REFRESH, tooltip="Päivitä data", on_click=self._refresh_data
-        )
-
-        export_btn = ft.IconButton(
-            icon=ft.Icons.DOWNLOAD, tooltip="Vie Excel", on_click=self._export_data
-        )
-
         delete_all_btn = ft.IconButton(
             icon=ft.Icons.DELETE_SWEEP,
             tooltip="Poista kaikki",
@@ -229,13 +216,7 @@ class AnalysisView:
         )
 
         return ft.Row(
-            [
-                run_analysis_btn,
-                ft.VerticalDivider(),
-                refresh_btn,
-                export_btn,
-                delete_all_btn,
-            ],
+            [delete_all_btn],
             alignment=ft.MainAxisAlignment.START,
         )
 
@@ -243,12 +224,11 @@ class AnalysisView:
         """Luo löydösten taulukko."""
         return ft.DataTable(
             columns=[
-                ft.DataColumn(ft.Text("Symboli", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Osake", weight=ft.FontWeight.BOLD)),
                 ft.DataColumn(ft.Text("Päivämäärä", weight=ft.FontWeight.BOLD)),
                 ft.DataColumn(ft.Text("Kuvio", weight=ft.FontWeight.BOLD)),
                 ft.DataColumn(ft.Text("Vahvuus", weight=ft.FontWeight.BOLD)),
-                ft.DataColumn(ft.Text("Hinta", weight=ft.FontWeight.BOLD)),
-                ft.DataColumn(ft.Text("Volyymi", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("RSI", weight=ft.FontWeight.BOLD)),
                 ft.DataColumn(ft.Text("Toiminnot", weight=ft.FontWeight.BOLD)),
             ],
             rows=[],
@@ -310,12 +290,17 @@ class AnalysisView:
         for finding in self.filtered_findings[:100]:  # Näytä max 100
             row = ft.DataRow(
                 cells=[
-                    ft.DataCell(ft.Text(finding.get("symbol", ""))),
+                    ft.DataCell(ft.Text(finding.get("ticker", ""))),
                     ft.DataCell(ft.Text(finding.get("date", ""))),
                     ft.DataCell(ft.Text(finding.get("pattern", ""))),
                     ft.DataCell(ft.Text(f"{finding.get('signal_strength', 0):.2f}")),
-                    ft.DataCell(ft.Text(f"${finding.get('price', 0):.2f}")),
-                    ft.DataCell(ft.Text(f"{finding.get('volume', 0):,}")),
+                    ft.DataCell(
+                        ft.Text(
+                            f"{finding.get('rsi14', 0):.1f}"
+                            if finding.get("rsi14")
+                            else "N/A"
+                        )
+                    ),
                     ft.DataCell(
                         ft.IconButton(
                             icon=ft.Icons.DELETE,
@@ -411,6 +396,37 @@ class AnalysisView:
                 if f.get("signal_strength", 0) >= min_strength
             ]
 
+        # Aikavälisuodatin
+        if self.date_filter_enabled and self.date_filter_enabled.value:
+            start_date_str = (
+                self.start_date_field.value if self.start_date_field else None
+            )
+            end_date_str = self.end_date_field.value if self.end_date_field else None
+
+            if start_date_str:
+                try:
+                    start_date = datetime.fromisoformat(start_date_str).date()
+                    self.filtered_findings = [
+                        f
+                        for f in self.filtered_findings
+                        if datetime.fromisoformat(f.get("date", "9999-12-31")).date()
+                        >= start_date
+                    ]
+                except (ValueError, TypeError):
+                    pass  # Virheellinen päivämäärä, ohitetaan
+
+            if end_date_str:
+                try:
+                    end_date = datetime.fromisoformat(end_date_str).date()
+                    self.filtered_findings = [
+                        f
+                        for f in self.filtered_findings
+                        if datetime.fromisoformat(f.get("date", "1900-01-01")).date()
+                        <= end_date
+                    ]
+                except (ValueError, TypeError):
+                    pass  # Virheellinen päivämäärä, ohitetaan
+
         self._update_table()
         self._update_statistics()
 
@@ -420,6 +436,12 @@ class AnalysisView:
             self.search_field.value = ""
         if self.pattern_filter:
             self.pattern_filter.value = ""
+        if self.date_filter_enabled:
+            self.date_filter_enabled.value = False
+        if self.start_date_field:
+            self.start_date_field.value = ""
+        if self.end_date_field:
+            self.end_date_field.value = ""
 
         self._apply_filters()
 
@@ -431,29 +453,8 @@ class AnalysisView:
             # Hae symbolit (tässä vaiheessa vain testisymboli)
             test_symbols = ["AAPL", "MSFT", "GOOGL"]
 
-            # Hae downtrend-parametrit UI:sta
-            downtrend_enabled = (
-                self.downtrend_filter.value if self.downtrend_filter else False
-            )
-
-            min_decline = 3.0
-            if self.min_decline_percent and self.min_decline_percent.value:
-                try:
-                    min_decline = float(self.min_decline_percent.value)
-                except ValueError:
-                    min_decline = 3.0
-
-            use_ma = self.ma_filter.value if self.ma_filter else True
-            use_vol = self.volume_filter.value if self.volume_filter else False
-
-            # Aja analyysi downtrend-parametreilla
-            findings = self.analysis_engine.analyze_batch(
-                test_symbols,
-                downtrend_filter=downtrend_enabled,
-                min_decline_percent=min_decline,
-                use_ma_filter=use_ma,
-                use_volume_filter=use_vol,
-            )
+            # Aja analyysi
+            findings = self.analysis_engine.analyze_batch(test_symbols)
 
             # Tallenna löydökset
             saved_count = 0
@@ -495,9 +496,61 @@ class AnalysisView:
             self._show_error("Löydöksen poisto epäonnistui!")
 
     def _delete_all_findings(self, e) -> None:
-        """Poista kaikki löydökset vahvistuksen jälkeen."""
-        # Tämä tarvitsisi vahvistusdialogin
-        self._show_info("Kaikkien poisto vaatii vahvistuksen (ei vielä toteutettu)")
+        """Poista suodatetut löydökset vahvistuksen jälkeen."""
+        if not self.filtered_findings:
+            self._show_info("Ei poistettavia löydöksiä suodattimilla")
+            return
+
+        count = len(self.filtered_findings)
+
+        # Luo vahvistusikkuna
+        def confirm_delete(e):
+            # Kerää ID:t suodatetuista löydöksistä
+            finding_ids = [f.get("id") for f in self.filtered_findings if f.get("id")]
+
+            if not finding_ids:
+                self._show_error("Ei poistettavia ID:itä löytynyt")
+                close_dialog(None)
+                return
+
+            # Poista löydökset
+            deleted_count = self.db_manager.delete_findings_by_ids(finding_ids)
+
+            if deleted_count > 0:
+                self._show_success(f"Poistettu {deleted_count} löydöstä")
+                self.refresh_data()
+            else:
+                self._show_error("Poisto epäonnistui")
+
+            close_dialog(None)
+
+        def close_dialog(e):
+            confirm_dlg.open = False
+            if confirm_dlg in self.page.overlay:
+                self.page.overlay.remove(confirm_dlg)
+            self.page.update()
+
+        confirm_dlg = ft.AlertDialog(
+            title=ft.Text("Vahvista poisto"),
+            content=ft.Text(
+                f"Haluatko varmasti poistaa {count} suodatettua löydöstä?\n\n"
+                f"Tämä toiminto ei ole palautettavissa."
+            ),
+            actions=[
+                ft.TextButton("Peruuta", on_click=close_dialog),
+                ft.TextButton(
+                    "Poista",
+                    on_click=confirm_delete,
+                    style=ft.ButtonStyle(color=ft.Colors.RED_700),
+                ),
+            ],
+            modal=True,
+        )
+
+        if confirm_dlg not in self.page.overlay:
+            self.page.overlay.append(confirm_dlg)
+        confirm_dlg.open = True
+        self.page.update()
 
     def _show_progress(self, message: str) -> None:
         """Näytä progress dialog."""

@@ -130,6 +130,7 @@ def is_bullish_divergence(
     - RSI tekee korkeamman pohjan (higher low)
     - Pohjien välillä vähintään min_days_between päivää
     - RSI-nousu vähintään min_rsi_gain pistettä
+    - **UUSI: Vaaditaan laskeva trendi** (hinta alle 20 päivän EMA)
 
     Args:
         df: DataFrame jossa Close, RSI sarakkeet ja pvm-indeksi
@@ -143,19 +144,34 @@ def is_bullish_divergence(
         dict: {'found': bool, 'strength': float, 'price_change': float, 'rsi_change': float}
               tai None jos ei tarpeeksi dataa
     """
-    # Tarvitaan vähintään lookback_days + 14 (RSI-laskentaan) dataa
-    if idx < lookback_days + 14:
+    # Tarvitaan vähintään lookback_days + 20 (EMA-laskentaan) dataa
+    if idx < max(lookback_days + 20, 34):
         return None
 
     # Varmistetaan että RSI-sarake on laskettu
     if "RSI" not in df.columns:
         return None
 
-    # Etsi nykyinen paikallinen minimi (t2)
+    # UUSI: Tarkista että ollaan laskutrendissä
+    # Lasketaan 20 päivän EMA nykyiselle hinnalle
     current_price = df.iloc[idx][close_col]
+
+    if pd.isna(current_price):
+        return None
+
+    # Yksinkertainen trenditarkistus: hinta alle 20-päivän liukuvan keskiarvon
+    ema_window = 20
+    if idx >= ema_window:
+        ema_prices = df.iloc[idx - ema_window + 1 : idx + 1][close_col]
+        ema_20 = ema_prices.ewm(span=ema_window, adjust=False).mean().iloc[-1]
+
+        # Jos hinta yli EMA20, ei ole laskutrendissä -> ei bullish divergenssiä
+        if current_price >= ema_20:
+            return None
+    # Etsi nykyinen paikallinen minimi (t2)
     current_rsi = df.iloc[idx]["RSI"]
 
-    if pd.isna(current_price) or pd.isna(current_rsi):
+    if pd.isna(current_rsi):
         return None
 
     # Tarkista onko nykyinen indeksi paikallinen minimi hinnan suhteen
@@ -246,6 +262,7 @@ def is_bearish_divergence(
     - RSI tekee matalamman huipun (lower high)
     - Huippujen välillä vähintään min_days_between päivää
     - RSI-lasku vähintään min_rsi_drop pistettä
+    - **UUSI: Vaaditaan nouseva trendi** (hinta yli 20 päivän EMA)
 
     Args:
         df: DataFrame jossa Close, RSI sarakkeet ja pvm-indeksi
@@ -259,19 +276,34 @@ def is_bearish_divergence(
         dict: {'found': bool, 'strength': float, 'price_change': float, 'rsi_change': float}
               tai None jos ei tarpeeksi dataa
     """
-    # Tarvitaan vähintään lookback_days + 14 (RSI-laskentaan) dataa
-    if idx < lookback_days + 14:
+    # Tarvitaan vähintään lookback_days + 20 (EMA-laskentaan) dataa
+    if idx < max(lookback_days + 20, 34):
         return None
 
     # Varmistetaan että RSI-sarake on laskettu
     if "RSI" not in df.columns:
         return None
 
-    # Etsi nykyinen paikallinen maksimi (t2)
+    # UUSI: Tarkista että ollaan nousutrendissä
+    # Lasketaan 20 päivän EMA nykyiselle hinnalle
     current_price = df.iloc[idx][close_col]
+
+    if pd.isna(current_price):
+        return None
+
+    # Yksinkertainen trenditarkistus: hinta yli 20-päivän liukuvan keskiarvon
+    ema_window = 20
+    if idx >= ema_window:
+        ema_prices = df.iloc[idx - ema_window + 1 : idx + 1][close_col]
+        ema_20 = ema_prices.ewm(span=ema_window, adjust=False).mean().iloc[-1]
+
+        # Jos hinta alle EMA20, ei ole nousutrendissä -> ei bearish divergenssiä
+        if current_price <= ema_20:
+            return None
+    # Etsi nykyinen paikallinen maksimi (t2)
     current_rsi = df.iloc[idx]["RSI"]
 
-    if pd.isna(current_price) or pd.isna(current_rsi):
+    if pd.isna(current_rsi):
         return None
 
     # Tarkista onko nykyinen indeksi paikallinen maksimi hinnan suhteen

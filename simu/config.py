@@ -20,9 +20,9 @@ VOLUME_SMA_WINDOW = 10
 class PatternDefinition:
     """Description of a candlestick pattern used by the simulator UI."""
 
-    key: str          # canonical key used in code and UI data fields
-    db_name: str      # value stored in analysis database
-    label: str        # label shown to the user
+    key: str  # canonical key used in code and UI data fields
+    db_name: str  # value stored in analysis database
+    label: str  # label shown to the user
 
 
 PATTERN_DEFINITIONS: tuple[PatternDefinition, ...] = (
@@ -30,10 +30,20 @@ PATTERN_DEFINITIONS: tuple[PatternDefinition, ...] = (
     PatternDefinition("hammer", "Hammer", "1 Hammer"),
     PatternDefinition("bullish_engulfing", "Bullish Engulfing", "2 Bullish Engulfing"),
     PatternDefinition("piercing_pattern", "Piercing Pattern", "3 Piercing Pattern"),
-    PatternDefinition("three_white_soldiers", "Three White Soldiers", "4 Three White Soldiers"),
+    PatternDefinition(
+        "three_white_soldiers", "Three White Soldiers", "4 Three White Soldiers"
+    ),
     PatternDefinition("morning_star", "Morning Star", "5 Morning Star"),
     PatternDefinition("dragonfly_doji", "Dragonfly Doji", "6 Dragonfly Doji"),
+    PatternDefinition(
+        "bullish_divergence", "Bullish Divergence", "7 Bullish Divergence"
+    ),
+    PatternDefinition(
+        "bearish_divergence", "Bearish Divergence", "8 Bearish Divergence"
+    ),
 )
 
 PATTERN_MAP: dict[str, PatternDefinition] = {p.key: p for p in PATTERN_DEFINITIONS}
-DB_PATTERN_TO_KEY: dict[str, str] = {p.db_name.lower(): p.key for p in PATTERN_DEFINITIONS}
+DB_PATTERN_TO_KEY: dict[str, str] = {
+    p.db_name.lower(): p.key for p in PATTERN_DEFINITIONS
+}

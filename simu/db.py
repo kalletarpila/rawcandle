@@ -89,7 +89,9 @@ class AnalysisRepository:
               AND date BETWEEN ? AND ?
             ORDER BY date ASC
         """
-        rows = conn.execute(query, (ticker, start_date.isoformat(), end_date.isoformat())).fetchall()
+        rows = conn.execute(
+            query, (ticker, start_date.isoformat(), end_date.isoformat())
+        ).fetchall()
         events: list[AnalysisEvent] = []
         for row in rows:
             pattern_raw = (row["pattern_value"] or "").strip()
@@ -100,11 +102,67 @@ class AnalysisRepository:
                 AnalysisEvent(
                     ticker=ticker,
                     date=parse_iso_date(row["date"]),
-                    pattern_key=config.DB_PATTERN_TO_KEY.get(pattern_raw.lower(), pattern_raw.lower()),
+                    pattern_key=config.DB_PATTERN_TO_KEY.get(
+                        pattern_raw.lower(), pattern_raw.lower()
+                    ),
                     raw_pattern=pattern_raw,
                     strength=float(strength),
                 )
             )
+        return events
+
+    def fetch_divergences(
+        self,
+        ticker: str,
+        start_date: _dt.date,
+        end_date: _dt.date,
+    ) -> list[AnalysisEvent]:
+        """Fetch bullish and bearish divergences from divergence_data table."""
+        ticker = ensure_upper_ticker(ticker)
+        conn = self._get_connection()
+        query = """
+            SELECT
+                ticker,
+                date,
+                bullish_strength,
+                bearish_strength
+            FROM divergence_data
+            WHERE ticker = ?
+              AND date BETWEEN ? AND ?
+            ORDER BY date ASC
+        """
+        rows = conn.execute(
+            query, (ticker, start_date.isoformat(), end_date.isoformat())
+        ).fetchall()
+        events: list[AnalysisEvent] = []
+        for row in rows:
+            bullish = float(row["bullish_strength"] or 0.0)
+            bearish = float(row["bearish_strength"] or 0.0)
+
+            # Add bullish divergence event if strength > 0
+            if bullish > 0:
+                events.append(
+                    AnalysisEvent(
+                        ticker=ticker,
+                        date=parse_iso_date(row["date"]),
+                        pattern_key="bullish_divergence",
+                        raw_pattern="Bullish Divergence",
+                        strength=bullish,
+                    )
+                )
+
+            # Add bearish divergence event if strength > 0
+            if bearish > 0:
+                events.append(
+                    AnalysisEvent(
+                        ticker=ticker,
+                        date=parse_iso_date(row["date"]),
+                        pattern_key="bearish_divergence",
+                        raw_pattern="Bearish Divergence",
+                        strength=bearish,
+                    )
+                )
+
         return events
 
 
@@ -145,7 +203,9 @@ class PriceSeries:
             return None
         return self._rows[idx + 1].date
 
-    def next_date_within(self, current: _dt.date, end_date: _dt.date) -> Optional[_dt.date]:
+    def next_date_within(
+        self, current: _dt.date, end_date: _dt.date
+    ) -> Optional[_dt.date]:
         idx = self._index.get(current)
         if idx is None:
             return None

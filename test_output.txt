@@ -1,0 +1,22 @@
+Analyysitulokset (2025-11-05 17:58:19) — tickerille AAPL
+Hammer: 16 kpl
+Bullish Divergence: 1 kpl
+
+Löydetyt tapahtumat (CSV: ticker,päivä,kuvio[,signal_strength]):
+AAPL,2024-01-11,Hammer,0.760
+AAPL,2024-01-29,Hammer,0.990
+AAPL,2024-02-13,Hammer,0.768
+AAPL,2024-04-19,Bullish Divergence,2.240
+AAPL,2024-05-02,Hammer,0.990
+AAPL,2024-07-08,Hammer,0.990
+AAPL,2024-07-09,Hammer,0.763
+AAPL,2024-08-19,Hammer,0.990
+AAPL,2024-08-26,Hammer,0.990
+AAPL,2024-09-04,Hammer,0.990
+AAPL,2024-09-11,Hammer,0.990
+AAPL,2024-10-02,Hammer,0.990
+AAPL,2024-10-04,Hammer,0.890
+AAPL,2024-10-24,Hammer,0.976
+AAPL,2024-11-11,Hammer,0.990
+AAPL,2024-11-20,Hammer,0.846
+AAPL,2024-12-23,Hammer,0.968

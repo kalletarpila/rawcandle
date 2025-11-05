@@ -288,6 +288,9 @@ class ExcelResultsCache:
     ):
         """Prosessoi yhden osakkeen kaikki löydökset optimoidusti"""
 
+        # Normalisoi ticker: isot kirjaimet, trimmattu
+        ticker = (ticker or "").strip().upper()
+
         # Hae kaikki osakkeen hinnat kerralla
         try:
             df = pd.read_sql(
@@ -937,6 +940,23 @@ class ExcelResultsCache:
 
             if df.empty:
                 logging.warning("Ei dataa staging-taulussa")
+                return False
+
+            # Suodata pois rivit joissa on puuttuvia tietoja (NaN, None, NULL)
+            rows_before = len(df)
+            df = df.dropna()
+            rows_after = len(df)
+            rows_removed = rows_before - rows_after
+
+            if rows_removed > 0:
+                logging.info(
+                    f"Poistettu {rows_removed} riviä puuttuvien tietojen takia"
+                )
+
+            if df.empty:
+                logging.warning(
+                    "Ei dataa suodatuksen jälkeen - kaikilla riveillä oli puuttuvia tietoja"
+                )
                 return False
 
             update_progress("Tallennetaan Excel-tiedosto", 80, 100)

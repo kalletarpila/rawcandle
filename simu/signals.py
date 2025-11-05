@@ -66,7 +66,23 @@ def resolve_signals(
     downtrend_only = set(selected) == {"downtrend"}
     selected_set = set(selected)
 
-    raw_events = repo.fetch_events(ticker, start_date, end_date)
+    # Check if divergences are selected
+    has_divergences = (
+        "bullish_divergence" in selected_set or "bearish_divergence" in selected_set
+    )
+    has_candlestick_patterns = any(
+        p not in {"bullish_divergence", "bearish_divergence"} for p in selected_set
+    )
+
+    # Fetch candlestick pattern events
+    raw_events: List[AnalysisEvent] = []
+    if has_candlestick_patterns:
+        raw_events.extend(repo.fetch_events(ticker, start_date, end_date))
+
+    # Fetch divergence events
+    if has_divergences:
+        raw_events.extend(repo.fetch_divergences(ticker, start_date, end_date))
+
     grouped: Dict[_dt.date, List[AnalysisEvent]] = {}
     for event in raw_events:
         key = event.pattern_key
