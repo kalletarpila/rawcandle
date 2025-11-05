@@ -341,6 +341,7 @@ def _build_output_rows(
     # 6 = Dragonfly Doji
     # 7 = Bullish Divergence
     # 8 = Bearish Divergence
+    # 0 = downtrend (ei kynttilämalli)
     CANDLE_MAPPING = {
         "Hammer": 1,
         "Bullish Engulfing": 2,
@@ -350,6 +351,7 @@ def _build_output_rows(
         "Dragonfly Doji": 6,
         "Bullish Divergence": 7,
         "Bearish Divergence": 8,
+        "downtrend": 0,  # Ei kynttilämalli, vain laskutrendi-indikaattori
     }
 
     # --- read analysis rows ---
