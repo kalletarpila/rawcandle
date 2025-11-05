@@ -15,7 +15,6 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 
 # Uusi optimoitu cache-järjestelmä
 from .excel_cache import ExcelResultsCache
-from .divergence_cache import DivergenceCache
 
 
 def _identify_columns(cur, table_name: str):
@@ -559,9 +558,6 @@ def _build_output_rows(
 
     output_rows = []
 
-    # Initialize divergence cache
-    div_cache = DivergenceCache()
-
     # --- read osakedata per ticker ---
     with sqlite3.connect(osake_db) as oconn:
         ocur = oconn.cursor()
@@ -630,20 +626,6 @@ def _build_output_rows(
             df = df.reset_index(drop=True)
             date_to_idx = {str(r[pcol]): idx for idx, r in df.iterrows()}
 
-            # Calculate and cache divergences for this ticker if not already cached
-            if not div_cache.has_ticker(ticker):
-                print(f"🔄 Calculating divergences for {ticker}...")
-                div_cache.calculate_and_cache_ticker(
-                    ticker=ticker,
-                    df=df,
-                    date_col=pcol,
-                    close_col=ccol,
-                    lookback_days=30,
-                    rsi_period=14,
-                    min_rsi_change=3.0,
-                    sensitivity_days=7,
-                )
-
             # RSI lasketaan nyt analysis-vaiheessa ja luetaan analysis.db:stä
             # Ei tarvita erillistä RSI-laskentaa täällä
 
@@ -674,10 +656,14 @@ def _build_output_rows(
                         check_date = str(df.iloc[check_idx][pcol])
                         check_dates.append(check_date)
 
-                # Query cache for divergences on these dates
-                bearish_div, bullish_div = div_cache.get_divergence_for_dates(
+                # Hae divergenssit analysis.db:stä (t0, t-1, t-2, t-3)
+                from analysis.database_manager import DatabaseManager
+
+                db_mgr = DatabaseManager(db_path=str(analysis_db))
+                bearish_div, bullish_div = db_mgr.get_divergences_for_dates(
                     ticker=ticker, dates=check_dates
                 )
+                db_mgr.close()
 
                 # Laskutrendi-suodatus
                 if downtrend_filter:

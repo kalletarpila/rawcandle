@@ -89,6 +89,29 @@ class DatabaseManager:
                 "CREATE INDEX IF NOT EXISTS idx_pattern ON analysis_findings(pattern)"
             )
 
+            # Luo divergence_data taulu
+            # Tallentaa divergenssit KAIKILLE päiville (ei vain kuviopäiville)
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS divergence_data (
+                    ticker TEXT NOT NULL,
+                    date TEXT NOT NULL,
+                    bullish_strength REAL DEFAULT 0,
+                    bearish_strength REAL DEFAULT 0,
+                    rsi REAL,
+                    PRIMARY KEY (ticker, date)
+                )
+            """
+            )
+
+            # Luo indeksit divergence_data tauluun
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_div_ticker ON divergence_data(ticker)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_div_date ON divergence_data(date)"
+            )
+
             conn.commit()
             self.logger.info("Analysis database initialized successfully")
 
@@ -549,6 +572,125 @@ class DatabaseManager:
         return self.search_findings(
             ticker=kwargs.get("ticker"), pattern=kwargs.get("pattern")
         )
+
+    def save_divergence_batch(
+        self, ticker: str, divergence_records: List[Tuple[str, float, float, float]]
+    ) -> bool:
+        """
+        Tallenna divergenssidataa batch-moodissa.
+
+        Args:
+            ticker: Osakkeen symboli
+            divergence_records: Lista tupleja (date, bullish_strength, bearish_strength, rsi)
+
+        Returns:
+            True jos tallennus onnistui
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            # Prepare data with ticker
+            records_with_ticker = [
+                (ticker, date, bullish, bearish, rsi)
+                for date, bullish, bearish, rsi in divergence_records
+            ]
+
+            cursor.executemany(
+                """
+                INSERT OR REPLACE INTO divergence_data 
+                (ticker, date, bullish_strength, bearish_strength, rsi)
+                VALUES (?, ?, ?, ?, ?)
+            """,
+                records_with_ticker,
+            )
+
+            conn.commit()
+            self.logger.info(
+                f"Saved {len(divergence_records)} divergence records for {ticker}"
+            )
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Save divergence batch failed: {e}")
+            return False
+
+    def get_divergences_for_dates(
+        self, ticker: str, dates: List[str]
+    ) -> Tuple[float, float]:
+        """
+        Hae divergenssit annetuille päiville (t0, t-1, t-2, t-3).
+
+        Args:
+            ticker: Osakkeen symboli
+            dates: Lista päivämääriä
+
+        Returns:
+            Tuple (bearish_strength, bullish_strength) missä arvo on vahvin löydetty divergenssi
+        """
+        if not dates:
+            return (0.0, 0.0)
+
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            placeholders = ",".join("?" * len(dates))
+            query = f"""
+                SELECT bullish_strength, bearish_strength
+                FROM divergence_data
+                WHERE ticker = ? AND date IN ({placeholders})
+            """
+
+            cursor.execute(query, [ticker] + dates)
+            results = cursor.fetchall()
+
+            # Etsi vahvin divergenssi
+            max_bullish = 0.0
+            max_bearish = 0.0
+
+            for row in results:
+                bullish, bearish = row
+                if bullish and bullish > max_bullish:
+                    max_bullish = bullish
+                if bearish and bearish > max_bearish:
+                    max_bearish = bearish
+
+            # Mutual exclusivity: jos bullish löytyy, bearish = 0
+            if max_bullish > 0:
+                return (0.0, max_bullish)
+            elif max_bearish > 0:
+                return (max_bearish, 0.0)
+            else:
+                return (0.0, 0.0)
+
+        except Exception as e:
+            self.logger.error(f"Get divergences for dates failed: {e}")
+            return (0.0, 0.0)
+
+    def has_divergence_data(self, ticker: str) -> bool:
+        """
+        Tarkista onko tickerille tallennettu divergenssidataa.
+
+        Args:
+            ticker: Osakkeen symboli
+
+        Returns:
+            True jos dataa löytyy
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute(
+                "SELECT COUNT(*) FROM divergence_data WHERE ticker = ?", (ticker,)
+            )
+            count = cursor.fetchone()[0]
+            return count > 0
+
+        except Exception as e:
+            self.logger.error(f"Check divergence data failed: {e}")
+            return False
 
 
 if __name__ == "__main__":
