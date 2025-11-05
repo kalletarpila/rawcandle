@@ -172,7 +172,7 @@ class DivergenceCache:
                             window_df,
                             idx=len(window_df) - 1,
                             lookback_days=lookback_days,
-                            min_rsi_loss=min_rsi_change,
+                            min_rsi_drop=min_rsi_change,
                             min_days_between=3,
                             close_col=close_col,
                         )
