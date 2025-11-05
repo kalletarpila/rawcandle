@@ -124,7 +124,7 @@ class DivergenceCache:
             return
 
         # Calculate RSI
-        df_with_rsi = calculate_rsi(df, period=rsi_period)
+        df_with_rsi = calculate_rsi(df, period=rsi_period, close_col=close_col)
 
         if "RSI" not in df_with_rsi.columns:
             print(f"⚠️ RSI calculation failed for {ticker}")
@@ -159,6 +159,7 @@ class DivergenceCache:
                         lookback_days=lookback_days,
                         min_rsi_gain=min_rsi_change,
                         min_days_between=3,
+                        close_col=close_col,
                     )
 
                     if bullish_result and bullish_result.get("found"):
@@ -173,6 +174,7 @@ class DivergenceCache:
                             lookback_days=lookback_days,
                             min_rsi_loss=min_rsi_change,
                             min_days_between=3,
+                            close_col=close_col,
                         )
 
                         if bearish_result and bearish_result.get("found"):

@@ -152,7 +152,7 @@ def run_candlestick_analysis(
 
     # Laske RSI jos divergenssejä tarkistetaan
     if "Bullish Divergence" in patterns or "Bearish Divergence" in patterns:
-        df["RSI"] = calculate_rsi(df, period=14)
+        df = calculate_rsi(df, period=14, close_col="Close")
         df = df.sort_values("pvm").reset_index(drop=True)
 
     # Lisää apufunktiot downtrend-tarkistukseen

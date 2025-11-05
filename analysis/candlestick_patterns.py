@@ -2,26 +2,28 @@ import pandas as pd
 import numpy as np
 
 
-def calculate_rsi(df, period=14):
+def calculate_rsi(df, period=14, close_col="Close"):
     """
     Laskee Relative Strength Index (RSI) -indikaattorin.
 
     Args:
-        df: DataFrame jossa 'Close' sarake
+        df: DataFrame jossa close-sarake
         period: RSI-jakso (oletuksena 14 päivää)
+        close_col: Close-sarakkeen nimi (oletuksena "Close")
 
     Returns:
-        Series joka sisältää RSI-arvot (0-100)
+        DataFrame jossa alkuperäiset sarakkeet + 'RSI' sarake
     """
-    delta = df["Close"].diff()
+    df = df.copy()
+    delta = df[close_col].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
 
     # Vältetään jakaminen nollalla
     rs = gain / loss.replace(0, np.inf)
-    rsi = 100 - (100 / (1 + rs))
+    df["RSI"] = 100 - (100 / (1 + rs))
 
-    return rsi
+    return df
 
 
 def find_local_extremes(series, window=14, extreme_type="min"):
@@ -118,7 +120,7 @@ def is_dragonfly_doji(row):
 
 
 def is_bullish_divergence(
-    df, idx, lookback_days=30, min_rsi_gain=3.0, min_days_between=3
+    df, idx, lookback_days=30, min_rsi_gain=3.0, min_days_between=3, close_col="Close"
 ):
     """
     Tunnistaa Bullish Divergence -kuvion.
@@ -135,6 +137,7 @@ def is_bullish_divergence(
         lookback_days: Kuinka kauaksi taaksepäin etsitään edellistä pohjaa (oletus 30)
         min_rsi_gain: RSI:n minimaalinen nousu pohjien välillä (oletus 3.0)
         min_days_between: Minimietäisyys pohjien välillä päivinä (oletus 3)
+        close_col: Close-sarakkeen nimi (oletuksena "Close")
 
     Returns:
         dict: {'found': bool, 'strength': float, 'price_change': float, 'rsi_change': float}
@@ -149,7 +152,7 @@ def is_bullish_divergence(
         return None
 
     # Etsi nykyinen paikallinen minimi (t2)
-    current_price = df.iloc[idx]["Close"]
+    current_price = df.iloc[idx][close_col]
     current_rsi = df.iloc[idx]["RSI"]
 
     if pd.isna(current_price) or pd.isna(current_rsi):
@@ -160,7 +163,7 @@ def is_bullish_divergence(
     window = 7
     start_check = max(0, idx - window)
     end_check = min(len(df), idx + window + 1)
-    local_min_prices = df.iloc[start_check:end_check]["Close"]
+    local_min_prices = df.iloc[start_check:end_check][close_col]
 
     if current_price != local_min_prices.min():
         return None  # Ei ole paikallinen minimi
@@ -181,8 +184,8 @@ def is_bullish_divergence(
         # Tarkista onko paikallinen minimi
         i_start = max(0, i - window)
         i_end = min(len(df), i + window + 1)
-        i_local_prices = df.iloc[i_start:i_end]["Close"]
-        i_price = df.iloc[i]["Close"]
+        i_local_prices = df.iloc[i_start:i_end][close_col]
+        i_price = df.iloc[i][close_col]
         i_rsi = df.iloc[i]["RSI"]
 
         if pd.isna(i_price) or pd.isna(i_rsi):
@@ -233,7 +236,7 @@ def is_bullish_divergence(
 
 
 def is_bearish_divergence(
-    df, idx, lookback_days=30, min_rsi_drop=3.0, min_days_between=3
+    df, idx, lookback_days=30, min_rsi_drop=3.0, min_days_between=3, close_col="Close"
 ):
     """
     Tunnistaa Bearish Divergence -kuvion.
@@ -250,6 +253,7 @@ def is_bearish_divergence(
         lookback_days: Kuinka kauaksi taaksepäin etsitään edellistä huippua (oletus 30)
         min_rsi_drop: RSI:n minimaalinen lasku huippujen välillä (oletus 3.0)
         min_days_between: Minimietäisyys huippujen välillä päivinä (oletus 3)
+        close_col: Close-sarakkeen nimi (oletuksena "Close")
 
     Returns:
         dict: {'found': bool, 'strength': float, 'price_change': float, 'rsi_change': float}
@@ -264,7 +268,7 @@ def is_bearish_divergence(
         return None
 
     # Etsi nykyinen paikallinen maksimi (t2)
-    current_price = df.iloc[idx]["Close"]
+    current_price = df.iloc[idx][close_col]
     current_rsi = df.iloc[idx]["RSI"]
 
     if pd.isna(current_price) or pd.isna(current_rsi):
@@ -274,7 +278,7 @@ def is_bearish_divergence(
     window = 7
     start_check = max(0, idx - window)
     end_check = min(len(df), idx + window + 1)
-    local_max_prices = df.iloc[start_check:end_check]["Close"]
+    local_max_prices = df.iloc[start_check:end_check][close_col]
 
     if current_price != local_max_prices.max():
         return None  # Ei ole paikallinen maksimi
@@ -295,8 +299,8 @@ def is_bearish_divergence(
         # Tarkista onko paikallinen maksimi
         i_start = max(0, i - window)
         i_end = min(len(df), i + window + 1)
-        i_local_prices = df.iloc[i_start:i_end]["Close"]
-        i_price = df.iloc[i]["Close"]
+        i_local_prices = df.iloc[i_start:i_end][close_col]
+        i_price = df.iloc[i][close_col]
         i_rsi = df.iloc[i]["RSI"]
 
         if pd.isna(i_price) or pd.isna(i_rsi):
