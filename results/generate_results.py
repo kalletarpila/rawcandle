@@ -1185,8 +1185,8 @@ def _build_output_rows(
                     fmt_val(NDX20),
                     fmt_val(rsi14_t0),
                     fmt_val(t0_close_norm),
-                    bearish_div,  # 82. Bearish Divergence (0 or 1)
-                    bullish_div,  # 83. Bullish Divergence (0 or 1)
+                    bearish_div,  # 82. Bearish Divergence vahvuus (0 tai 1.00-3.00)
+                    bullish_div,  # 83. Bullish Divergence vahvuus (0 tai 1.00-3.00)
                 ]
 
                 output_rows.append(out)
