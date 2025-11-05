@@ -22,7 +22,7 @@ class DowntrendGenerator:
     def __init__(
         self,
         stock_db_path: str = "data/osakedata.db",
-        analysis_db_path: str = "analysis/analysis.db",
+        analysis_db_path: str = "data/analysis.db",
     ):
         """Initialize generator with database paths.
 
@@ -395,7 +395,7 @@ def generate_random_findings(
     progress_callback: Optional[Callable[[int, int], None]] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
     stock_db_path: str = "data/osakedata.db",
-    analysis_db_path: str = "analysis/analysis.db",
+    analysis_db_path: str = "data/analysis.db",
 ) -> Tuple[int, List[str]]:
     """Convenience function for generating downtrend events.
 

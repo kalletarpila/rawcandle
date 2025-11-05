@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 
-def migrate_database(db_path: str = "analysis/analysis.db"):
+def migrate_database(db_path: str = "data/analysis.db"):
     """Migroi tietokanta yksinkertaistettuun rakenteeseen"""
 
     print(f"🔧 Migroidaan tietokanta: {db_path}")
@@ -160,6 +160,6 @@ def migrate_database(db_path: str = "analysis/analysis.db"):
 
 
 if __name__ == "__main__":
-    db_path = sys.argv[1] if len(sys.argv) > 1 else "analysis/analysis.db"
+    db_path = sys.argv[1] if len(sys.argv) > 1 else "data/analysis.db"
     success = migrate_database(db_path)
     sys.exit(0 if success else 1)

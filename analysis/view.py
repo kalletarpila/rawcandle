@@ -18,8 +18,8 @@ class AnalysisView:
     def __init__(
         self,
         page: ft.Page,
-        analysis_db_path: str = "analysis.db",
-        stock_db_path: str = "stock_data.db",
+        analysis_db_path: str = "data/analysis.db",
+        stock_db_path: str = "data/osakedata.db",
     ):
         """
         Alusta AnalysisView.

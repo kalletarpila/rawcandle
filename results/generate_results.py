@@ -390,6 +390,7 @@ def _build_output_rows(
             or lower.get("pattern_name")
         )
         signal_strength_col = lower.get("signal_strength") or lower.get("strength")
+        rsi14_col = lower.get("rsi14")
 
         if not date_col or not ticker_col:
             raise RuntimeError(
@@ -401,6 +402,8 @@ def _build_output_rows(
             q += f', "{candle_col}"'
         if signal_strength_col:
             q += f', "{signal_strength_col}"'
+        if rsi14_col:
+            q += f', "{rsi14_col}"'
         q += f' FROM "{table_name}"'
         acur.execute(q)
         rows = acur.fetchall()
@@ -521,15 +524,20 @@ def _build_output_rows(
     by_ticker = {}
     for rec in rows:
         # Handle different numbers of columns based on what was selected
-        if len(rec) >= 4:  # New format with signal_strength
+        if len(rec) >= 5:  # New format with signal_strength and rsi14
+            date, ticker, candle, signal_strength, rsi14 = rec[:5]
+        elif len(rec) >= 4:  # Format with signal_strength but no rsi14
             date, ticker, candle, signal_strength = rec[:4]
+            rsi14 = None
         elif len(rec) == 3:  # Legacy format
             date, ticker, candle = rec
             signal_strength = None
+            rsi14 = None
         elif len(rec) == 2:  # Legacy format without candle
             date, ticker = rec
             candle = ""
             signal_strength = None
+            rsi14 = None
         else:
             continue
 
@@ -546,7 +554,7 @@ def _build_output_rows(
                 continue
 
         by_ticker.setdefault(ticker_str, []).append(
-            (str(date), candle, signal_strength)
+            (str(date), candle, signal_strength, rsi14)
         )
 
     output_rows = []
@@ -636,30 +644,8 @@ def _build_output_rows(
                     sensitivity_days=7,
                 )
 
-            # Laske 14 päivän RSI koko sarjalle (Wilderin eksponentiaalinen kaava)
-            try:
-                close_series = pd.to_numeric(df[ccol], errors="coerce")
-                delta = close_series.diff()
-                gain = delta.clip(lower=0)
-                loss = (-delta).clip(lower=0)
-
-                avg_gain = gain.ewm(alpha=1 / 14, min_periods=14, adjust=False).mean()
-                avg_loss = loss.ewm(alpha=1 / 14, min_periods=14, adjust=False).mean()
-
-                loss_zero = avg_loss == 0
-                gain_zero = avg_gain == 0
-                both_zero = gain_zero & loss_zero
-
-                avg_loss_safe = avg_loss.replace(0, np.nan)
-                rs = avg_gain / avg_loss_safe
-                rsi_series = 100 - (100 / (1 + rs))
-                rsi_series = rsi_series.mask(both_zero, 50.0)
-                rsi_series = rsi_series.mask(loss_zero & ~both_zero, 100.0)
-                rsi_series = rsi_series.mask(gain_zero & ~both_zero, 0.0)
-
-                df["rsi14"] = rsi_series
-            except Exception:
-                df["rsi14"] = pd.NA
+            # RSI lasketaan nyt analysis-vaiheessa ja luetaan analysis.db:stä
+            # Ei tarvita erillistä RSI-laskentaa täällä
 
             def safe_get(row, col):
                 try:
@@ -670,7 +656,7 @@ def _build_output_rows(
                 except Exception:
                     return None
 
-            for date, candle, signal_strength in items:
+            for date, candle, signal_strength, rsi14_from_db in items:
                 if date not in date_to_idx:
                     continue
                 idx = date_to_idx[date]
@@ -1072,14 +1058,13 @@ def _build_output_rows(
                 NDX15 = get_index_normalized_spec("^NDX", 15)
                 NDX20 = get_index_normalized_spec("^NDX", 20)
 
-                # RSI-14 t0-arvo
+                # RSI-14 t0-arvo (luettu analysis.db:stä)
                 rsi14_t0 = None
-                try:
-                    rsi_val = df.iloc[idx]["rsi14"]
-                    if pd.notna(rsi_val):
-                        rsi14_t0 = float(rsi_val)
-                except Exception:
-                    rsi14_t0 = None
+                if rsi14_from_db is not None:
+                    try:
+                        rsi14_t0 = float(rsi14_from_db)
+                    except Exception:
+                        rsi14_t0 = None
 
                 # Convert candle name to integer using mapping
                 candle_int = CANDLE_MAPPING.get(candle, 0)  # 0 for unknown patterns
@@ -1200,7 +1185,7 @@ def paivita_results_csv(page: ft.Page, app=None):
     def worker():
         try:
             base = Path(__file__).resolve().parents[1]
-            analysis_db = base / "analysis" / "analysis.db"
+            analysis_db = base / "data" / "analysis.db"
             osake_db = base / "data" / "osakedata.db"
             excel_path = base / "data" / "results.xlsx"
 
@@ -1504,7 +1489,7 @@ def generate_results_now(
         progress_callback: Callback-funktio edistymisen raportointiin
     """
     base = Path(__file__).resolve().parents[1]
-    analysis_db = base / "analysis" / "analysis.db"
+    analysis_db = base / "data" / "analysis.db"
     osake_db = base / "data" / "osakedata.db"
     excel_path = base / "data" / "results.xlsx"
 
@@ -1547,7 +1532,7 @@ def generate_results_now(
 def generate_excel_optimized(
     excel_path: str = "data/results.xlsx",
     progress_callback=None,
-    analysis_db: str = "analysis/analysis.db",
+    analysis_db: str = "data/analysis.db",
     osake_db: str = "data/osakedata.db",
     force_rebuild: bool = False,
     limit_rows: int = None,

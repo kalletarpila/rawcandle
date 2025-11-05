@@ -150,10 +150,9 @@ def run_candlestick_analysis(
         df["pvm"] = pd.to_datetime(df["pvm"])
         df = df.sort_values("pvm").reset_index(drop=True)
 
-    # Laske RSI jos divergenssejä tarkistetaan
-    if "Bullish Divergence" in patterns or "Bearish Divergence" in patterns:
-        df = calculate_rsi(df, period=14, close_col="Close")
-        df = df.sort_values("pvm").reset_index(drop=True)
+    # Laske RSI kaikille kynttiöille (tallennetaan analysis.db:hen)
+    df = calculate_rsi(df, period=14, close_col="Close")
+    df = df.sort_values("pvm").reset_index(drop=True)
 
     # Lisää apufunktiot downtrend-tarkistukseen
     from statistics import mean
@@ -391,6 +390,11 @@ def run_candlestick_analysis(
                     )
 
         if found:
+            # Lisää RSI-arvo jokaiseen löydökseen
+            rsi_value = row.get("RSI") if "RSI" in df.columns else None
+            for item in found:
+                item["rsi14"] = rsi_value
+
             key = f"{ticker}|{row['pvm'].date().isoformat()}"
             bucket = results.setdefault(key, [])
             bucket.extend(found)

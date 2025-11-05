@@ -1017,7 +1017,7 @@ class RawCandleApp:
 
             analysis_view = AnalysisView(
                 self.page,
-                analysis_db_path="analysis/analysis.db",
+                analysis_db_path="data/analysis.db",
                 stock_db_path="data/osakedata.db",
             )
 

@@ -124,7 +124,7 @@ class AnalysisEngine:
 
     def __init__(
         self,
-        analysis_db_path: str = "analysis/analysis.db",
+        analysis_db_path: str = "data/analysis.db",
         osakedata_db_path: str = "data/osakedata.db",
     ):
         """

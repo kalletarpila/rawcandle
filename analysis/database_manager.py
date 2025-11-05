@@ -13,7 +13,7 @@ import logging
 class DatabaseManager:
     """Hallinnoi analysis-tietokannan operaatiot"""
 
-    def __init__(self, db_path: str = "analysis/analysis.db"):
+    def __init__(self, db_path: str = "data/analysis.db"):
         """
         Alusta DatabaseManager.
 
@@ -40,7 +40,7 @@ class DatabaseManager:
             cursor = conn.cursor()
 
             # Luo yksinkertaistettu analysis_findings taulu
-            # Vain tarpeelliset kentät: id, ticker, date, pattern, signal_strength, created_at
+            # Vain tarpeelliset kentät: id, ticker, date, pattern, signal_strength, rsi14, created_at
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS analysis_findings (
@@ -49,10 +49,19 @@ class DatabaseManager:
                     date TEXT NOT NULL,
                     pattern TEXT,
                     signal_strength REAL,
+                    rsi14 REAL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """
             )
+
+            # Lisää rsi14 sarake jos se puuttuu (migraatio vanhoille tietokannoille)
+            cursor.execute("PRAGMA table_info(analysis_findings)")
+            columns = [row[1] for row in cursor.fetchall()]
+            if "rsi14" not in columns:
+                cursor.execute("ALTER TABLE analysis_findings ADD COLUMN rsi14 REAL")
+                self.logger.info("Added rsi14 column to analysis_findings table")
+
             # Poista mahdolliset duplikaatit ennen uniikki-indeksin luontia
             cursor.execute(
                 """
@@ -120,6 +129,7 @@ class DatabaseManager:
         date: str,
         pattern: str = None,
         signal_strength: float = None,
+        rsi14: float = None,
     ) -> bool:
         """
         Lisää uusi löydös tietokantaan.
@@ -129,6 +139,7 @@ class DatabaseManager:
             date: Päivämäärä (YYYY-MM-DD)
             pattern: Kynttiläkuvio (valinnainen)
             signal_strength: Signaalin vahvuus 0-1 (valinnainen)
+            rsi14: RSI(14) arvo (valinnainen)
 
         Returns:
             True jos lisäys onnistui
@@ -140,10 +151,10 @@ class DatabaseManager:
             cursor.execute(
                 """
                 INSERT OR REPLACE INTO analysis_findings 
-                (ticker, date, pattern, signal_strength)
-                VALUES (?, ?, ?, ?)
+                (ticker, date, pattern, signal_strength, rsi14)
+                VALUES (?, ?, ?, ?, ?)
             """,
-                (ticker, date, pattern, signal_strength),
+                (ticker, date, pattern, signal_strength, rsi14),
             )
 
             conn.commit()
@@ -159,6 +170,7 @@ class DatabaseManager:
         date: str,
         pattern: str = None,
         signal_strength: float = None,
+        rsi14: float = None,
     ):
         """
         Tallenna analyysin löydös tietokantaan.
@@ -168,12 +180,14 @@ class DatabaseManager:
             date: Päivämäärä (YYYY-MM-DD)
             pattern: Kynttiläkuvio (valinnainen)
             signal_strength: Signaalin vahvuus 0-1 (valinnainen)
+            rsi14: RSI(14) arvo (valinnainen)
         """
         return self.insert_finding(
             ticker=ticker,
             date=date,
             pattern=pattern,
             signal_strength=signal_strength,
+            rsi14=rsi14,
         )
 
     def get_all_findings(self) -> List[Dict[str, Any]]:

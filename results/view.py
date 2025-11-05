@@ -376,7 +376,7 @@ def create_results_view(app) -> ft.View:
                 if tickers_to_check:
                     try:
                         base = Path(__file__).resolve().parents[1]
-                        analysis_db_path = base / "analysis" / "analysis.db"
+                        analysis_db_path = base / "data" / "analysis.db"
                         missing_tickers = []
 
                         if analysis_db_path.exists():
@@ -453,7 +453,7 @@ def create_results_view(app) -> ft.View:
                 update_progress("Haetaan analyysit", 20, 100)
 
                 base = Path(__file__).resolve().parents[1]
-                analysis_db = base / "analysis" / "analysis.db"
+                analysis_db = base / "data" / "analysis.db"
                 osake_db = base / "data" / "osakedata.db"
                 excel_path = base / "data" / "results.xlsx"
 

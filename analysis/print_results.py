@@ -39,6 +39,17 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
                     return None
         return None
 
+    def _extract_rsi(entry):
+        """Poimii RSI-arvon löydöksestä"""
+        if isinstance(entry, dict):
+            rsi = entry.get("rsi14")
+            if rsi is not None:
+                try:
+                    return float(rsi)
+                except Exception:
+                    return None
+        return None
+
     pattern_list = []
     for pats in results.values():
         for entry in pats:
@@ -148,7 +159,7 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
         try:
             from analysis.database_manager import DatabaseManager
 
-            db_manager = DatabaseManager()
+            db_manager = DatabaseManager(db_path="data/analysis.db")
 
             for key in sorted(results.keys()):
                 if "|" in key:
@@ -162,12 +173,14 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
                     if not pattern_name:
                         continue
                     strength = _extract_strength(entry)
+                    rsi14 = _extract_rsi(entry)
 
                     db_manager.save_finding(
                         ticker=t,
                         date=d,
                         pattern=pattern_name,
                         signal_strength=strength if strength is not None else 1.0,
+                        rsi14=rsi14,
                     )
 
             db_manager.close()
