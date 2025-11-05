@@ -339,6 +339,8 @@ def _build_output_rows(
     # 4 = Three White Soldiers
     # 5 = Morning Star
     # 6 = Dragonfly Doji
+    # 7 = Bullish Divergence
+    # 8 = Bearish Divergence
     CANDLE_MAPPING = {
         "Hammer": 1,
         "Bullish Engulfing": 2,
@@ -346,6 +348,8 @@ def _build_output_rows(
         "Three White Soldiers": 4,
         "Morning Star": 5,
         "Dragonfly Doji": 6,
+        "Bullish Divergence": 7,
+        "Bearish Divergence": 8,
     }
 
     # --- read analysis rows ---
