@@ -62,10 +62,11 @@ class DivergenceCache:
             conn.commit()
 
     def has_ticker(self, ticker: str) -> bool:
-        """Check if ticker exists in cache."""
+        """Check if ticker exists in cache and has valid RSI data."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
-                "SELECT COUNT(*) FROM divergence_cache WHERE ticker = ?", (ticker,)
+                "SELECT COUNT(*) FROM divergence_cache WHERE ticker = ? AND rsi IS NOT NULL",
+                (ticker,),
             )
             count = cursor.fetchone()[0]
             return count > 0
