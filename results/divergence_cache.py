@@ -155,7 +155,7 @@ class DivergenceCache:
                     # Check bullish divergence
                     bullish_result = is_bullish_divergence(
                         window_df,
-                        idx_in_window=len(window_df) - 1,
+                        idx=len(window_df) - 1,
                         lookback_days=lookback_days,
                         min_rsi_gain=min_rsi_change,
                         min_days_between=3,
@@ -170,7 +170,7 @@ class DivergenceCache:
                     else:
                         bearish_result = is_bearish_divergence(
                             window_df,
-                            idx_in_window=len(window_df) - 1,
+                            idx=len(window_df) - 1,
                             lookback_days=lookback_days,
                             min_rsi_loss=min_rsi_change,
                             min_days_between=3,
