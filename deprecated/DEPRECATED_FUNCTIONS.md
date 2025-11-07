@@ -1,6 +1,25 @@
 # Deprecated Functions
 
-Tämä dokumentti listaa funktiot jotka on siirretty pois käytöstä.
+Tämä dokumentti listaa funktiot ja koodit jotka on siirretty pois käytöstä.
+
+## candles/ (koko hakemisto)
+
+### Siirretty kokonaan deprecated/-hakemistoon (2024-11-07):
+
+**Syy:** Ei käytetty missään, korvattu `analysis/candlestick_patterns.py`:llä
+
+- **`candles/patterns.py`** - Vanha pattern-tunnistus
+  - 6 funktiota: is_hammer, is_bullish_engulfing, is_piercing_pattern, is_three_white_soldiers, is_morning_star, is_dragonfly_doji
+  - Pandas Series -pohjainen toteutus
+  - Korvattu modernilla row-based toteutuksella `analysis/candlestick_patterns.py`:ssä
+  
+- **`candles/results.py`** - Tyhjä tiedosto, ei sisältöä
+
+- **`candles/utils.py`** - Tyhjä tiedosto, ei sisältöä
+
+- **`candles/__init__.py`** - Tyhjä __init__
+
+**Vaikutus:** Ei mitään, koska ei yhtään importtia koko projektissa
 
 ## results/generate_results.py
 
