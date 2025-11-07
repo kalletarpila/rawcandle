@@ -8,7 +8,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 
 # Database paths
-ANALYSIS_DB_PATH = BASE_DIR / "analysis" / "analysis.db"
+ANALYSIS_DB_PATH = DATA_DIR / "analysis.db"
 PRICE_DB_PATH = DATA_DIR / "osakedata.db"
 
 # Indicator defaults
