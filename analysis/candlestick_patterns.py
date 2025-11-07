@@ -2,6 +2,124 @@ import pandas as pd
 import numpy as np
 
 
+def _is_in_downtrend(df, idx, close_col="Close", use_ma_filter=True):
+    """
+    Tarkista onko osake laskutrendissä käyttäen samaa logiikkaa kuin analysis-vaiheen suodatin.
+
+    Kriteerit:
+    1. Porrastava lasku: t-10 > t-5 > t-2 > t0
+    2. MA-suodatin: t0 < MA(10) JA MA(5) < MA(10)
+
+    Args:
+        df: DataFrame jossa hintadata
+        idx: Tarkistettava indeksi
+        close_col: Close-sarakkeen nimi
+        use_ma_filter: Käytetäänkö MA-suodatinta (oletus True)
+
+    Returns:
+        bool: True jos laskutrendissä
+    """
+    # Tarvitaan vähintään 10 päivää dataa
+    if idx < 10:
+        return False
+
+    try:
+        # 1. Porrastava lasku: t-10 > t-5 > t-2 > t0
+        t0 = df.iloc[idx][close_col]
+        t_2 = df.iloc[idx - 2][close_col]
+        t_5 = df.iloc[idx - 5][close_col]
+        t_10 = df.iloc[idx - 10][close_col]
+
+        if pd.isna(t0) or pd.isna(t_2) or pd.isna(t_5) or pd.isna(t_10):
+            return False
+
+        if not (t_10 > t_5 > t_2 > t0):
+            return False
+
+        # 2. MA-suodatin
+        if use_ma_filter:
+            # Laske MA(5) ja MA(10)
+            ma5_prices = df.iloc[idx - 4 : idx + 1][close_col]
+            ma10_prices = df.iloc[idx - 9 : idx + 1][close_col]
+
+            if len(ma5_prices) < 5 or len(ma10_prices) < 10:
+                return False
+
+            ma5 = ma5_prices.mean()
+            ma10 = ma10_prices.mean()
+
+            if pd.isna(ma5) or pd.isna(ma10):
+                return False
+
+            # t0 < MA(10) JA MA(5) < MA(10)
+            if not (t0 < ma10 and ma5 < ma10):
+                return False
+
+        return True
+
+    except Exception:
+        return False
+
+
+def _is_in_uptrend(df, idx, close_col="Close", use_ma_filter=True):
+    """
+    Tarkista onko osake nousutrendissä (päinvastainen laskutrendille).
+
+    Kriteerit:
+    1. Porrastava nousu: t-10 < t-5 < t-2 < t0
+    2. MA-suodatin: t0 > MA(10) JA MA(5) > MA(10)
+
+    Args:
+        df: DataFrame jossa hintadata
+        idx: Tarkistettava indeksi
+        close_col: Close-sarakkeen nimi
+        use_ma_filter: Käytetäänkö MA-suodatinta (oletus True)
+
+    Returns:
+        bool: True jos nousutrendissä
+    """
+    # Tarvitaan vähintään 10 päivää dataa
+    if idx < 10:
+        return False
+
+    try:
+        # 1. Porrastava nousu: t-10 < t-5 < t-2 < t0
+        t0 = df.iloc[idx][close_col]
+        t_2 = df.iloc[idx - 2][close_col]
+        t_5 = df.iloc[idx - 5][close_col]
+        t_10 = df.iloc[idx - 10][close_col]
+
+        if pd.isna(t0) or pd.isna(t_2) or pd.isna(t_5) or pd.isna(t_10):
+            return False
+
+        if not (t_10 < t_5 < t_2 < t0):
+            return False
+
+        # 2. MA-suodatin
+        if use_ma_filter:
+            # Laske MA(5) ja MA(10)
+            ma5_prices = df.iloc[idx - 4 : idx + 1][close_col]
+            ma10_prices = df.iloc[idx - 9 : idx + 1][close_col]
+
+            if len(ma5_prices) < 5 or len(ma10_prices) < 10:
+                return False
+
+            ma5 = ma5_prices.mean()
+            ma10 = ma10_prices.mean()
+
+            if pd.isna(ma5) or pd.isna(ma10):
+                return False
+
+            # t0 > MA(10) JA MA(5) > MA(10)
+            if not (t0 > ma10 and ma5 > ma10):
+                return False
+
+        return True
+
+    except Exception:
+        return False
+
+
 def calculate_rsi(df, period=14, close_col="Close"):
     """
     Laskee Relative Strength Index (RSI) -indikaattorin.
@@ -130,7 +248,7 @@ def is_bullish_divergence(
     - RSI tekee korkeamman pohjan (higher low)
     - Pohjien välillä vähintään min_days_between päivää
     - RSI-nousu vähintään min_rsi_gain pistettä
-    - **UUSI: Vaaditaan laskeva trendi** (hinta alle 20 päivän EMA)
+    - **Vaaditaan laskutrendi:** Porrastava lasku (t-10 > t-5 > t-2 > t0) + MA-suodatin
 
     Args:
         df: DataFrame jossa Close, RSI sarakkeet ja pvm-indeksi
@@ -144,30 +262,23 @@ def is_bullish_divergence(
         dict: {'found': bool, 'strength': float, 'price_change': float, 'rsi_change': float}
               tai None jos ei tarpeeksi dataa
     """
-    # Tarvitaan vähintään lookback_days + 20 (EMA-laskentaan) dataa
-    if idx < max(lookback_days + 20, 34):
+    # Tarvitaan vähintään lookback_days + 10 (trenditarkistukseen) dataa
+    if idx < max(lookback_days + 10, 34):
         return None
 
     # Varmistetaan että RSI-sarake on laskettu
     if "RSI" not in df.columns:
         return None
 
-    # UUSI: Tarkista että ollaan laskutrendissä
-    # Lasketaan 20 päivän EMA nykyiselle hinnalle
+    # Tarkista että ollaan laskutrendissä
+    if not _is_in_downtrend(df, idx, close_col=close_col, use_ma_filter=True):
+        return None
+
     current_price = df.iloc[idx][close_col]
 
     if pd.isna(current_price):
         return None
 
-    # Yksinkertainen trenditarkistus: hinta alle 20-päivän liukuvan keskiarvon
-    ema_window = 20
-    if idx >= ema_window:
-        ema_prices = df.iloc[idx - ema_window + 1 : idx + 1][close_col]
-        ema_20 = ema_prices.ewm(span=ema_window, adjust=False).mean().iloc[-1]
-
-        # Jos hinta yli EMA20, ei ole laskutrendissä -> ei bullish divergenssiä
-        if current_price >= ema_20:
-            return None
     # Etsi nykyinen paikallinen minimi (t2)
     current_rsi = df.iloc[idx]["RSI"]
 
@@ -262,7 +373,7 @@ def is_bearish_divergence(
     - RSI tekee matalamman huipun (lower high)
     - Huippujen välillä vähintään min_days_between päivää
     - RSI-lasku vähintään min_rsi_drop pistettä
-    - **UUSI: Vaaditaan nouseva trendi** (hinta yli 20 päivän EMA)
+    - **Vaaditaan nousutrendi:** Porrastava nousu (t-10 < t-5 < t-2 < t0) + MA-suodatin
 
     Args:
         df: DataFrame jossa Close, RSI sarakkeet ja pvm-indeksi
@@ -276,30 +387,23 @@ def is_bearish_divergence(
         dict: {'found': bool, 'strength': float, 'price_change': float, 'rsi_change': float}
               tai None jos ei tarpeeksi dataa
     """
-    # Tarvitaan vähintään lookback_days + 20 (EMA-laskentaan) dataa
-    if idx < max(lookback_days + 20, 34):
+    # Tarvitaan vähintään lookback_days + 10 (trenditarkistukseen) dataa
+    if idx < max(lookback_days + 10, 34):
         return None
 
     # Varmistetaan että RSI-sarake on laskettu
     if "RSI" not in df.columns:
         return None
 
-    # UUSI: Tarkista että ollaan nousutrendissä
-    # Lasketaan 20 päivän EMA nykyiselle hinnalle
+    # Tarkista että ollaan nousutrendissä
+    if not _is_in_uptrend(df, idx, close_col=close_col, use_ma_filter=True):
+        return None
+
     current_price = df.iloc[idx][close_col]
 
     if pd.isna(current_price):
         return None
 
-    # Yksinkertainen trenditarkistus: hinta yli 20-päivän liukuvan keskiarvon
-    ema_window = 20
-    if idx >= ema_window:
-        ema_prices = df.iloc[idx - ema_window + 1 : idx + 1][close_col]
-        ema_20 = ema_prices.ewm(span=ema_window, adjust=False).mean().iloc[-1]
-
-        # Jos hinta alle EMA20, ei ole nousutrendissä -> ei bearish divergenssiä
-        if current_price <= ema_20:
-            return None
     # Etsi nykyinen paikallinen maksimi (t2)
     current_rsi = df.iloc[idx]["RSI"]
 

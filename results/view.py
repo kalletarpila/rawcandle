@@ -300,7 +300,7 @@ def create_results_view(app) -> ft.View:
                     """Päivitä progress-dialog"""
                     try:
                         if progress_dialog and progress_dialog.open:
-                            progress_text.value = f"{step} ({current}/{total})"
+                            progress_text.value = f"{step} {current}% valmiina"
                             if total > 0:
                                 progress_bar.value = current / total
                             else:
