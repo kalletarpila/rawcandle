@@ -96,42 +96,7 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
         msg_lines.extend(csv_lines)
         msg = "\n".join(msg_lines)
 
-    if output_path:
-        try:
-            # create timestamped filename next to the provided output_path
-            base_dir = os.path.dirname(output_path)
-            base_name = os.path.splitext(os.path.basename(output_path))[0]
-            ts = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-
-            # Ei tehdä arkistointia - poistettu arkistointilogiikka
-
-            timestamped_txt = os.path.join(base_dir, f"{base_name}_{ts}.txt")
-            with open(timestamped_txt, "w", encoding="utf-8") as f:
-                f.write(msg + "\n")
-            # also update the canonical (non-timestamped) output file so UI can keep using it
-            canonical_txt = os.path.join(base_dir, f"{base_name}.txt")
-            try:
-                with open(canonical_txt, "w", encoding="utf-8") as cf:
-                    cf.write(msg + "\n")
-            except Exception:
-                # non-fatal
-                pass
-            # expose timestamped path to caller via output_path variable
-            output_path = timestamped_txt
-        except Exception as ex:
-            # try to log via available logger, but don't require it
-            try:
-                from .logger import setup_logger
-
-                logger = setup_logger()
-                logger.exception("Virhe kirjoitettaessa analyysitulostiedostoa")
-            except Exception:
-                pass
-            # append error note to returned message so UI can show it
-            msg = msg + f"\n\n❌ Virhe tiedostoon kirjoitettaessa: {ex}"
-
-    # Ei luoda CSV-tiedostoja - poistettu CSV-luontilogiikka
-    # Tallennetaan vain .txt tiedostot
+    # Tiedostojen kirjoitus poistettu - käytetään vain analysis.log ja tietokantaa
 
     # Kirjataan löydökset logiin
     if output_path:

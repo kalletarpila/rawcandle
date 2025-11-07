@@ -2,6 +2,16 @@
 
 Tämä dokumentti listaa funktiot ja koodit jotka on siirretty pois käytöstä.
 
+## analysis/print_results.py
+
+### Poistettu toiminnallisuus (2024-11-07):
+
+- **`.txt` ja `.csv` tiedostojen generointi** 
+  - Poistettu rivit 103-136 (tiedostokirjoitus)
+  - Säilytetty: analysis.log kirjoitus ja tietokantatallennus
+  - Tulokset tallentuvat nyt vain analysis.db:hen ja analysis.log:iin
+  - UI voi lukea tulokset suoraan tietokannasta
+
 ## candles/ (koko hakemisto)
 
 ### Siirretty kokonaan deprecated/-hakemistoon (2024-11-07):
