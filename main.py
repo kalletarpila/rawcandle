@@ -2317,7 +2317,7 @@ Virheet: {error_count}"""
                                                 [
                                                     self.ticker_field,
                                                     ft.ElevatedButton(
-                                                        "Hae Data",
+                                                        "Hae data kantaan",
                                                         icon=ft.Icons.DOWNLOAD,
                                                         on_click=self.fetch_stock_data,
                                                     ),
@@ -2483,7 +2483,10 @@ Virheet: {error_count}"""
         self.page.update()
 
     def fetch_stock_data(self, e):
-        """Hakee osakedata Yahoo Financesta syyskuulta"""
+        """Hakee osakedata Yahoo Financesta ja tallentaa osakedata.db kantaan"""
+        import os
+        import sqlite3
+
         ticker = self.ticker_field.value.strip().upper()
 
         if not ticker:
@@ -2499,23 +2502,76 @@ Virheet: {error_count}"""
         try:
             stock = yf.Ticker(ticker)
             start_date = "2023-07-01"
-            end_date = "2025-09-30"
+            end_date = datetime.now().strftime("%Y-%m-%d")
 
             # Hae historiallinen data
             hist = stock.history(start=start_date, end=end_date)
 
             if hist.empty:
-                self.loading_text.value = (
-                    f"❌ Ei dataa löytynyt tickerille {ticker} Sori! "
-                )
+                self.loading_text.value = f"❌ Ei dataa löytynyt tickerille {ticker}"
                 self.loading_text.color = ft.Colors.RED_600
-                self.stock_data = None
-            else:
-                self.stock_data = hist
-                self.loading_text.value = (
-                    f"✅ Data haettu onnistuneesti! ({len(hist)} päivää)"
-                )
-                self.loading_text.color = ft.Colors.GREEN_600
+                self.page.update()
+                return
+
+            # Tarkista onko penny stock (hinta alle $1)
+            avg_close = hist['Close'].mean()
+            if avg_close < 1.0:
+                self.loading_text.value = f"❌ {ticker} on penny stock (keskihinta ${avg_close:.3f}). Ei talleteta kantaan."
+                self.loading_text.color = ft.Colors.RED_600
+                self.page.update()
+                return
+
+            # Tallenna tietokantaan
+            data_dir = os.path.join(os.path.dirname(__file__), "data")
+            if not os.path.exists(data_dir):
+                os.makedirs(data_dir)
+            
+            db_path = os.path.join(data_dir, "osakedata.db")
+            
+            with sqlite3.connect(db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Varmista että taulu on olemassa
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS osakedata (
+                        osake TEXT NOT NULL,
+                        pvm TEXT NOT NULL,
+                        open REAL,
+                        high REAL,
+                        low REAL,
+                        close REAL,
+                        volume INTEGER,
+                        PRIMARY KEY (osake, pvm)
+                    )
+                """)
+                
+                # Tallenna rivit
+                rows_added = 0
+                for date, row in hist.iterrows():
+                    date_str = date.strftime("%Y-%m-%d")
+                    cursor.execute(
+                        """
+                        INSERT OR REPLACE INTO osakedata 
+                        (osake, pvm, open, high, low, close, volume)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            ticker,
+                            date_str,
+                            float(row["Open"]) if pd.notna(row["Open"]) else None,
+                            float(row["High"]) if pd.notna(row["High"]) else None,
+                            float(row["Low"]) if pd.notna(row["Low"]) else None,
+                            float(row["Close"]) if pd.notna(row["Close"]) else None,
+                            int(row["Volume"]) if pd.notna(row["Volume"]) else None,
+                        ),
+                    )
+                    rows_added += 1
+                
+                conn.commit()
+                
+            self.loading_text.value = f"✅ {ticker}: {rows_added} päivän tiedot tallennettu kantaan!"
+            self.loading_text.color = ft.Colors.GREEN_600
+            self.stock_data = hist  # Säilytetään yhteensopivuus
 
         except Exception as ex:
             self.loading_text.value = f"❌ Virhe dataa hakiessa: {str(ex)}"
