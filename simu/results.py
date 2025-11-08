@@ -12,8 +12,10 @@ class SimulationResult:
     end_position_value: float
     growth_pct: float
     buy_trades: int
-    signals_found: int
-    eligible_signals: int
+    winning_trades: int = 0
+    losing_trades: int = 0
+    signals_found: int = 0
+    eligible_signals: int = 0
     cash_blocked_signals: int = 0
 
     def as_dict(self) -> dict[str, float | str]:
@@ -25,6 +27,8 @@ class SimulationResult:
             "end_position_value": self.end_position_value,
             "growth_pct": self.growth_pct,
             "buy_trades": self.buy_trades,
+            "winning_trades": self.winning_trades,
+            "losing_trades": self.losing_trades,
             "signals_found": self.signals_found,
             "eligible_signals": self.eligible_signals,
             "cash_blocked_signals": self.cash_blocked_signals,

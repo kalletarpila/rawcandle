@@ -989,32 +989,39 @@ class SimuView:
             """Wrapper joka suorittaa simulaation yhdelle osakkeelle"""
             try:
                 from .engine import SimulationRequest
+                from .main import SimulationService
 
-                # Luo request
-                request = SimulationRequest(ticker=ticker, settings=settings)
+                # Luo uusi service-instanssi jokaiselle simulaatiolle
+                # Tämä välttää SQLite-ongelmat eri säikeiden välillä
+                service = SimulationService()
 
-                # Suorita simulaatio
-                result = self._service.engine.run(request)
+                try:
+                    # Luo request
+                    request = SimulationRequest(ticker=ticker, settings=settings)
 
-                # Palauta tulokset batch_simulatorin ymmärtämässä muodossa
-                profit_eur = result.end_capital - result.start_capital
-                # Laske voittaneet kaupat kasvu-% perusteella
-                successful = 1 if profit_eur > 0 else 0
+                    # Suorita simulaatio
+                    result = service.engine.run(request)
 
-                return (
-                    True,
-                    {
-                        "initial_capital": result.start_capital,
-                        "final_capital": result.end_capital,
-                        "profit_eur": profit_eur,
-                        "profit_pct": result.growth_pct,
-                        "total_trades": result.buy_trades,
-                        "successful_trades": successful,
-                        "failed_trades": 1 - successful,
-                        "win_rate": (successful * 100),
-                    },
-                    "",
-                )
+                    # Palauta tulokset batch_simulatorin ymmärtämässä muodossa
+                    profit_eur = result.end_capital - result.start_capital
+
+                    return (
+                        True,
+                        {
+                            "initial_capital": result.start_capital,
+                            "final_capital": result.end_capital,
+                            "profit_eur": profit_eur,
+                            "profit_pct": result.growth_pct,
+                            "total_trades": result.buy_trades,
+                            "winning_trades": result.winning_trades,
+                            "losing_trades": result.losing_trades,
+                        },
+                        "",
+                    )
+                finally:
+                    # Sulje yhteydet
+                    service.close()
+
             except Exception as ex:
                 return (False, {}, str(ex))
 

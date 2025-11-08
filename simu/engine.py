@@ -109,9 +109,13 @@ class SimulationEngine:
         signal_count = len(signals_map)
 
         rsi_map = compute_rsi(price_rows_all, period=config.RSI_PERIOD)
-        volume_growth_map = compute_volume_growth(price_rows_all, window=config.VOLUME_SMA_WINDOW)
+        volume_growth_map = compute_volume_growth(
+            price_rows_all, window=config.VOLUME_SMA_WINDOW
+        )
 
-        trading_dates = price_series.dates_between(settings.start_date, settings.end_date)
+        trading_dates = price_series.dates_between(
+            settings.start_date, settings.end_date
+        )
         if not trading_dates:
             start_capital = settings.starting_capital
             final_row = price_series.previous_on_or_before(settings.end_date)
@@ -130,6 +134,8 @@ class SimulationEngine:
         shares = 0
         avg_cost = 0.0
         buy_trades = 0
+        winning_trades = 0
+        losing_trades = 0
 
         pending_buys: List[PendingBuy] = []
         pending_sale: Optional[PendingSale] = None
@@ -158,6 +164,13 @@ class SimulationEngine:
                     f"price={sale_price:.2f}",
                     f"cash_before={cash:.2f}",
                 )
+                # Laske kaupan tulos
+                profit_per_share = sale_price - avg_cost
+                if profit_per_share > 0:
+                    winning_trades += 1
+                else:
+                    losing_trades += 1
+
                 cash += shares * sale_price
                 print(
                     "[SIMU][SELL]",
@@ -165,6 +178,7 @@ class SimulationEngine:
                     current_date,
                     "cash_after",
                     f"{cash:.2f}",
+                    f"profit_per_share={profit_per_share:.2f}",
                 )
                 shares = 0
                 avg_cost = 0.0
@@ -203,7 +217,9 @@ class SimulationEngine:
                 if shares == 0:
                     avg_cost = buy_price
                 else:
-                    avg_cost = ((avg_cost * shares) + total_cost) / (shares + max_shares)
+                    avg_cost = ((avg_cost * shares) + total_cost) / (
+                        shares + max_shares
+                    )
                 shares += max_shares
                 buy_trades += 1
 
@@ -219,7 +235,10 @@ class SimulationEngine:
                     rsi_value = rsi_map.get(current_date)
                     volume_growth = volume_growth_map.get(current_date)
                     rsi_ok = rsi_value is not None and rsi_value <= settings.max_rsi
-                    vol_ok = volume_growth is not None and volume_growth >= settings.min_volume_growth
+                    vol_ok = (
+                        volume_growth is not None
+                        and volume_growth >= settings.min_volume_growth
+                    )
                 next_date = price_series.next_date_within(current_date, end_date)
                 print(
                     "[SIMU][SIGNAL]",
@@ -228,18 +247,26 @@ class SimulationEngine:
                     signal.raw_pattern,
                     f"strength={signal.strength:.2f}",
                     f"RSI={rsi_value:.2f}" if rsi_value is not None else "RSI=NA",
-                    f"vol%={volume_growth:.2f}" if volume_growth is not None else "vol%=NA",
+                    (
+                        f"vol%={volume_growth:.2f}"
+                        if volume_growth is not None
+                        else "vol%=NA"
+                    ),
                     f"RSI_OK={rsi_ok}",
                     f"VOL_OK={vol_ok}",
                     f"next_date={next_date}",
                 )
                 if rsi_ok and vol_ok and next_date:
                     eligible_signals += 1
-                    pending_buys.append(PendingBuy(date=next_date, t0_date=current_date))
+                    pending_buys.append(
+                        PendingBuy(date=next_date, t0_date=current_date)
+                    )
 
             # Evaluate stop-loss / take-profit triggers at close.
             if shares > 0 and pending_sale is None:
-                previous_closes = price_series.previous_closes(current_date, drop_window)
+                previous_closes = price_series.previous_closes(
+                    current_date, drop_window
+                )
                 drop_reference = None
                 if len(previous_closes) >= drop_window:
                     drop_reference = sum(previous_closes) / len(previous_closes)
@@ -258,13 +285,19 @@ class SimulationEngine:
                 if should_sell:
                     next_date = price_series.next_date_within(current_date, end_date)
                     if next_date:
-                        pending_sale = PendingSale(date=next_date, trigger_date=current_date)
+                        pending_sale = PendingSale(
+                            date=next_date, trigger_date=current_date
+                        )
                         print(
                             "[SIMU][SELL-TRIGGER]",
                             ticker,
                             current_date,
                             f"close={close_price:.2f}",
-                            f"avg_ref={drop_reference:.2f}" if drop_reference is not None else "avg_ref=NA",
+                            (
+                                f"avg_ref={drop_reference:.2f}"
+                                if drop_reference is not None
+                                else "avg_ref=NA"
+                            ),
                             f"take_price={take_price:.2f}",
                             f"reason={drop_reason or 'rule'}",
                         )
@@ -291,6 +324,8 @@ class SimulationEngine:
             f"end={end_capital:.2f}",
             f"growth={growth_pct:.2f}%",
             f"buy_trades={buy_trades}",
+            f"winning_trades={winning_trades}",
+            f"losing_trades={losing_trades}",
             f"signals_total={signal_count}",
             f"eligible={eligible_signals}",
         )
@@ -303,6 +338,8 @@ class SimulationEngine:
             end_position_value=position_value,
             growth_pct=growth_pct,
             buy_trades=buy_trades,
+            winning_trades=winning_trades,
+            losing_trades=losing_trades,
             signals_found=signal_count,
             eligible_signals=eligible_signals,
         )

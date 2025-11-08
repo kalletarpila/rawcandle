@@ -2003,6 +2003,17 @@ class RawCandleApp:
                     time.sleep(0.5)
                     continue
 
+                # Tarkista keskimääräinen päivävolyymi vuodelta 2025
+                hist_2025 = hist[hist.index >= "2025-01-01"]
+                if len(hist_2025) > 0:
+                    avg_volume_2025 = hist_2025["Volume"].mean()
+                    if avg_volume_2025 < 100000:
+                        rejected_penny += (
+                            1  # Käytetään samaa laskuria yksinkertaisuuden vuoksi
+                        )
+                        time.sleep(0.5)
+                        continue
+
                 # Tallenna kantaan
                 with sqlite3.connect(db_path) as conn:
                     cursor = conn.cursor()
@@ -3176,6 +3187,16 @@ Virheet: {error_count}"""
                     self.loading_text.color = ft.Colors.RED_600
                     self.page.update()
                     return
+
+                # Tarkista keskimääräinen päivävolyymi vuodelta 2025
+                hist_2025 = hist[hist.index >= "2025-01-01"]
+                if len(hist_2025) > 0:
+                    avg_volume_2025 = hist_2025["Volume"].mean()
+                    if avg_volume_2025 < 100000:
+                        self.loading_text.value = f"❌ {ticker} liian vähän vaihdettu vuonna 2025 (keskim. {avg_volume_2025:,.0f} osaketta/pv). Vaaditaan ≥100k."
+                        self.loading_text.color = ft.Colors.RED_600
+                        self.page.update()
+                        return
 
             # Tallenna tietokantaan
             with sqlite3.connect(db_path) as conn:

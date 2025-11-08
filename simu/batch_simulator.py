@@ -88,16 +88,15 @@ class BatchSimulator:
                             {
                                 "ticker": ticker,
                                 "status": "OK",
-                                "initial_capital": sim_results.get("initial_capital", 0),
+                                "initial_capital": sim_results.get(
+                                    "initial_capital", 0
+                                ),
                                 "final_capital": sim_results.get("final_capital", 0),
                                 "profit_eur": sim_results.get("profit_eur", 0),
                                 "profit_pct": sim_results.get("profit_pct", 0),
                                 "total_trades": total_trades,
-                                "successful_trades": sim_results.get(
-                                    "successful_trades", 0
-                                ),
-                                "failed_trades": sim_results.get("failed_trades", 0),
-                                "win_rate": sim_results.get("win_rate", 0),
+                                "winning_trades": sim_results.get("winning_trades", 0),
+                                "losing_trades": sim_results.get("losing_trades", 0),
                                 "error": "",
                             }
                         )
@@ -111,9 +110,8 @@ class BatchSimulator:
                             "profit_eur": 0,
                             "profit_pct": 0,
                             "total_trades": 0,
-                            "successful_trades": 0,
-                            "failed_trades": 0,
-                            "win_rate": 0,
+                            "winning_trades": 0,
+                            "losing_trades": 0,
                             "error": error or "Tuntematon virhe",
                         }
                     )
@@ -128,12 +126,14 @@ class BatchSimulator:
                         "profit_eur": 0,
                         "profit_pct": 0,
                         "total_trades": 0,
-                        "successful_trades": 0,
-                        "failed_trades": 0,
-                        "win_rate": 0,
+                        "winning_trades": 0,
+                        "losing_trades": 0,
                         "error": str(ex),
                     }
                 )
+
+        # Lajittele tulokset kasvuprosentin mukaan suurimmasta pienimpään
+        results.sort(key=lambda x: x["profit_pct"], reverse=True)
 
         # Tallenna Excel
         excel_path = self._save_to_excel(results, parameters)
@@ -224,11 +224,10 @@ class BatchSimulator:
             "Alkupääoma",
             "Loppupääoma",
             "Voitto/Tappio (€)",
-            "Voitto/Tappio (%)",
+            "Kasvu (%)",
             "Kauppoja",
-            "Onnistuneet",
-            "Epäonnistuneet",
-            "Voitto-%",
+            "Voitolliset",
+            "Tappiolliset",
             "Virhe",
         ]
 
@@ -249,33 +248,28 @@ class BatchSimulator:
             # Numerot todellisina numeroina (float), aseta numeroformaatti pilkulla
             cell = ws.cell(row=row_idx, column=3)
             cell.value = result["initial_capital"]
-            cell.number_format = '#,##0.00'
-            
+            cell.number_format = "#,##0.00"
+
             cell = ws.cell(row=row_idx, column=4)
             cell.value = result["final_capital"]
-            cell.number_format = '#,##0.00'
-            
+            cell.number_format = "#,##0.00"
+
             cell = ws.cell(row=row_idx, column=5)
             cell.value = result["profit_eur"]
-            cell.number_format = '#,##0.00'
-            
+            cell.number_format = "#,##0.00"
+
             cell = ws.cell(row=row_idx, column=6)
             cell.value = result["profit_pct"]
-            cell.number_format = '#,##0.00'
-            
+            cell.number_format = "#,##0.00"
+
             ws.cell(row=row_idx, column=7).value = result["total_trades"]
-            ws.cell(row=row_idx, column=8).value = result["successful_trades"]
-            ws.cell(row=row_idx, column=9).value = result["failed_trades"]
-            
-            cell = ws.cell(row=row_idx, column=10)
-            cell.value = result["win_rate"]
-            cell.number_format = '#,##0.00'
-            
-            ws.cell(row=row_idx, column=11).value = result["error"]
+            ws.cell(row=row_idx, column=8).value = result["winning_trades"]
+            ws.cell(row=row_idx, column=9).value = result["losing_trades"]
+            ws.cell(row=row_idx, column=10).value = result["error"]
 
             # Väritä ERROR-rivit punaisella
             if result["status"] == "ERROR":
-                for col in range(1, 12):
+                for col in range(1, 11):
                     ws.cell(row=row_idx, column=col).fill = PatternFill(
                         start_color="FFCCCC", end_color="FFCCCC", fill_type="solid"
                     )
@@ -286,12 +280,11 @@ class BatchSimulator:
         ws.column_dimensions["C"].width = 15  # Alkupääoma
         ws.column_dimensions["D"].width = 15  # Loppupääoma
         ws.column_dimensions["E"].width = 18  # Voitto €
-        ws.column_dimensions["F"].width = 18  # Voitto %
+        ws.column_dimensions["F"].width = 15  # Kasvu %
         ws.column_dimensions["G"].width = 12  # Kauppoja
-        ws.column_dimensions["H"].width = 15  # Onnistuneet
-        ws.column_dimensions["I"].width = 15  # Epäonnistuneet
-        ws.column_dimensions["J"].width = 12  # Voitto-%
-        ws.column_dimensions["K"].width = 40  # Virhe
+        ws.column_dimensions["H"].width = 15  # Voitolliset
+        ws.column_dimensions["I"].width = 15  # Tappiolliset
+        ws.column_dimensions["J"].width = 40  # Virhe
 
     def _format_number(self, value: float) -> str:
         """
