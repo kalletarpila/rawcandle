@@ -2334,12 +2334,6 @@ Virheet: {error_count}"""
                                                         disabled=False,
                                                     ),
                                                     ft.ElevatedButton(
-                                                        "Talleta Tiedot",
-                                                        icon=ft.Icons.SAVE_ALT,
-                                                        on_click=self.download_csv_data,
-                                                        disabled=False,
-                                                    ),
-                                                    ft.ElevatedButton(
                                                         "Hae ja tallenna tiedot tiedostosta",
                                                         icon=ft.Icons.FILE_DOWNLOAD,
                                                         on_click=self.fetch_and_save_from_file,
@@ -2584,126 +2578,6 @@ Virheet: {error_count}"""
 
         self.page.update()
 
-    def download_csv_data(self, e):
-        """Tallentaa osakedata CSV-tiedostona"""
-        if self.stock_data is None:
-            self.loading_text.value = "❌ Ei dataa tallennettavaksi. Hae ensin data!"
-            self.loading_text.color = ft.Colors.RED_600
-            self.page.update()
-            return
-
-        # Muodosta CSV-data
-        df = self.stock_data.copy().sort_index(ascending=False)
-        df.index = df.index.strftime("%Y-%m-%d")
-        ticker = self.ticker_field.value.strip().upper()
-        row_data = [ticker]
-        for date, row in df.iterrows():
-            date_str = date
-            open_val = (
-                f"{row['Open']:.2f}" if "Open" in row and pd.notna(row["Open"]) else ""
-            )
-            close_val = (
-                f"{row['Close']:.2f}"
-                if "Close" in row and pd.notna(row["Close"])
-                else ""
-            )
-            high_val = (
-                f"{row['High']:.2f}" if "High" in row and pd.notna(row["High"]) else ""
-            )
-            low_val = (
-                f"{row['Low']:.2f}" if "Low" in row and pd.notna(row["Low"]) else ""
-            )
-            volume_val = (
-                f"{int(row['Volume'])}"
-                if "Volume" in row and pd.notna(row["Volume"])
-                else ""
-            )
-            row_data.extend(
-                [date_str, open_val, close_val, high_val, low_val, volume_val]
-            )
-        csv_string = ",".join(row_data) + "\n"
-
-        # Luo datauri-linkki CSV-tiedostolle
-        import urllib.parse
-
-        filename = f"{ticker}_osakedata_syyskuu2024.csv"
-        csv_b64 = urllib.parse.quote(csv_string)
-        # Tallennetaan CSV-tiedosto data-hakemistoon, tiedoston nimi aina 'osakedata.csv'
-        import os
-
-        data_dir = os.path.join(os.path.dirname(__file__), "data")
-        if not os.path.exists(data_dir):
-            os.makedirs(data_dir)
-        file_path = os.path.join(data_dir, "osakedata.csv")
-        try:
-            # Lisää uusi rivi tiedoston loppuun
-            with open(file_path, "a", encoding="utf-8") as f:
-                f.write(csv_string)
-            # Kirjoita lokiin
-            loki_path = os.path.join(data_dir, "loki.txt")
-            from datetime import datetime
-
-            # Also write the CSV to /tmp/<filename> for test compatibility
-            try:
-                tmp_path = os.path.join("/tmp", filename)
-                with open(tmp_path, "w", encoding="utf-8") as tf:
-                    tf.write(csv_string)
-            except Exception:
-                pass
-
-            log_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            log_entry = f"{log_date}, {ticker}, {len(df)} päivää\n"
-            with open(loki_path, "a", encoding="utf-8") as loki:
-                loki.write(log_entry)
-            save_msg = f"✅ Rivi lisätty tiedostoon: {file_path}"
-            save_color = ft.Colors.GREEN_600
-        except Exception as ex:
-            save_msg = f"❌ Virhe tallennuksessa: {str(ex)}"
-            save_color = ft.Colors.RED_600
-
-        # Näytä CSV-esikatselu ja Kopioi CSV -painike
-        csv_preview = csv_string[:500] + "..." if len(csv_string) > 500 else csv_string
-
-        def copy_to_clipboard(e):
-            self.page.set_clipboard(csv_string)
-            copy_button.text = "✅ Kopioitu!"
-            self.page.update()
-
-        copy_button = ft.TextButton("📋 Kopioi CSV", on_click=copy_to_clipboard)
-
-        dialog = ft.AlertDialog(
-            title=ft.Text(f"📊 CSV-data valmis: {filename}"),
-            content=ft.Column(
-                [
-                    ft.Text(save_msg, color=save_color),
-                    ft.Text(
-                        "CSV-data on valmis. Voit kopioida sen leikepöydälle ja liittää esim. Exceliin:"
-                    ),
-                    ft.Container(
-                        content=ft.Text(csv_preview, size=10, selectable=True),
-                        bgcolor=ft.Colors.GREY_100,
-                        padding=10,
-                        border_radius=5,
-                        height=200,
-                        width=500,
-                    ),
-                    ft.Text(f"Yksi rivi, {len(df)} päivää dataa", size=12, italic=True),
-                ],
-                tight=True,
-                scroll=ft.ScrollMode.AUTO,
-            ),
-            actions=[
-                copy_button,
-                ft.TextButton("Sulje", on_click=lambda _: self.close_dialog(dialog)),
-            ],
-            actions_alignment=ft.MainAxisAlignment.END,
-        )
-        self.page.overlay.append(dialog)
-        dialog.open = True
-        self.loading_text.value = save_msg
-        self.loading_text.color = save_color
-        self.page.update()
-
     def close_dialog(self, dialog):
         dialog.open = False
         self.page.update()
@@ -2878,7 +2752,7 @@ Virheet: {error_count}"""
                     WHERE osake = ?
                     ORDER BY pvm DESC
                     """,
-                    (ticker,)
+                    (ticker,),
                 )
                 rows = cursor.fetchall()
 
@@ -2891,7 +2765,11 @@ Virheet: {error_count}"""
             # Päivitä taulukon otsikko
             total_days = len(rows)
             self.data_table.columns = [
-                ft.DataColumn(ft.Text(f"Päivämäärä ({total_days} päivää)", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(
+                    ft.Text(
+                        f"Päivämäärä ({total_days} päivää)", weight=ft.FontWeight.BOLD
+                    )
+                ),
                 ft.DataColumn(ft.Text("Open", weight=ft.FontWeight.BOLD)),
                 ft.DataColumn(ft.Text("High", weight=ft.FontWeight.BOLD)),
                 ft.DataColumn(ft.Text("Low", weight=ft.FontWeight.BOLD)),
@@ -2907,6 +2785,7 @@ Virheet: {error_count}"""
 
                     # Formatoi päivämäärä
                     from datetime import datetime
+
                     date_obj = datetime.strptime(pvm, "%Y-%m-%d")
                     date_str = date_obj.strftime("%d.%m.%Y")
 
@@ -2925,7 +2804,9 @@ Virheet: {error_count}"""
                     row_color = ft.Colors.GREY_100 if i % 2 == 0 else ft.Colors.WHITE
 
                     # Luo japanilainen kynttilä tälle päivälle
-                    if all(v is not None for v in [open_val, high_val, low_val, close_val]):
+                    if all(
+                        v is not None for v in [open_val, high_val, low_val, close_val]
+                    ):
                         candlestick = self.create_candlestick(
                             open_val, high_val, low_val, close_val
                         )
@@ -2963,7 +2844,9 @@ Virheet: {error_count}"""
                     print(f"Virhe rivin {i} käsittelyssä: {e}")
                     continue
 
-            self.loading_text.value = f"📊 {ticker}: Näytetään {total_days} päivän tiedot kannasta"
+            self.loading_text.value = (
+                f"📊 {ticker}: Näytetään {total_days} päivän tiedot kannasta"
+            )
             self.loading_text.color = ft.Colors.GREEN_600
 
         except Exception as ex:
