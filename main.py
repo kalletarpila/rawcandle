@@ -2514,7 +2514,7 @@ Virheet: {error_count}"""
                 return
 
             # Tarkista onko penny stock (hinta alle $1)
-            avg_close = hist['Close'].mean()
+            avg_close = hist["Close"].mean()
             if avg_close < 1.0:
                 self.loading_text.value = f"❌ {ticker} on penny stock (keskihinta ${avg_close:.3f}). Ei talleteta kantaan."
                 self.loading_text.color = ft.Colors.RED_600
@@ -2525,14 +2525,15 @@ Virheet: {error_count}"""
             data_dir = os.path.join(os.path.dirname(__file__), "data")
             if not os.path.exists(data_dir):
                 os.makedirs(data_dir)
-            
+
             db_path = os.path.join(data_dir, "osakedata.db")
-            
+
             with sqlite3.connect(db_path) as conn:
                 cursor = conn.cursor()
-                
+
                 # Varmista että taulu on olemassa
-                cursor.execute("""
+                cursor.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS osakedata (
                         osake TEXT NOT NULL,
                         pvm TEXT NOT NULL,
@@ -2543,8 +2544,9 @@ Virheet: {error_count}"""
                         volume INTEGER,
                         PRIMARY KEY (osake, pvm)
                     )
-                """)
-                
+                """
+                )
+
                 # Tallenna rivit
                 rows_added = 0
                 for date, row in hist.iterrows():
@@ -2566,10 +2568,12 @@ Virheet: {error_count}"""
                         ),
                     )
                     rows_added += 1
-                
+
                 conn.commit()
-                
-            self.loading_text.value = f"✅ {ticker}: {rows_added} päivän tiedot tallennettu kantaan!"
+
+            self.loading_text.value = (
+                f"✅ {ticker}: {rows_added} päivän tiedot tallennettu kantaan!"
+            )
             self.loading_text.color = ft.Colors.GREEN_600
             self.stock_data = hist  # Säilytetään yhteensopivuus
 
@@ -2839,9 +2843,14 @@ Virheet: {error_count}"""
             return ft.Text("📊", size=12)
 
     def show_stock_data(self, e):
-        """Näyttää osakedata taulukossa laskevassa järjestyksessä"""
-        if self.stock_data is None:
-            self.loading_text.value = "❌ Ei dataa näytettäväksi. Hae ensin data!"
+        """Hakee ja näyttää osakedata kannasta"""
+        import os
+        import sqlite3
+
+        ticker = self.ticker_field.value.strip().upper()
+
+        if not ticker:
+            self.loading_text.value = "❌ Syötä osakkeen ticker!"
             self.loading_text.color = ft.Colors.RED_600
             self.page.update()
             return
@@ -2850,35 +2859,65 @@ Virheet: {error_count}"""
             # Tyhjennä aiemmat rivit
             self.data_table.rows.clear()
 
-            # Lajittele päivämäärän mukaan laskevasti (uusin ensin)
-            sorted_data = self.stock_data.sort_index(ascending=False)
+            # Hae tiedot kannasta
+            data_dir = os.path.join(os.path.dirname(__file__), "data")
+            db_path = os.path.join(data_dir, "osakedata.db")
 
-            # Validoi että meillä on tarvittavat sarakkeet
-            required_columns = ["Open", "High", "Low", "Close", "Volume"]
-            if not all(col in sorted_data.columns for col in required_columns):
-                self.loading_text.value = (
-                    "❌ Puutteellinen data - tarvitaan Open, High, Low, Close, Volume"
-                )
+            if not os.path.exists(db_path):
+                self.loading_text.value = "❌ Tietokantaa ei löydy! Hae ensin dataa."
                 self.loading_text.color = ft.Colors.RED_600
                 self.page.update()
                 return
 
-            # Lisää rivit taulukkoon
-            for i, (date, row) in enumerate(sorted_data.iterrows()):
-                try:
-                    # Formatoi päivämäärä
-                    date_str = date.strftime("%d.%m.%Y")
+            with sqlite3.connect(db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT pvm, open, high, low, close, volume
+                    FROM osakedata
+                    WHERE osake = ?
+                    ORDER BY pvm DESC
+                    """,
+                    (ticker,)
+                )
+                rows = cursor.fetchall()
 
-                    # Formatoi numerot kahden desimaalin tarkkuudella
-                    open_val = f"{row['Open']:.2f}" if pd.notna(row["Open"]) else "N/A"
-                    high_val = f"{row['High']:.2f}" if pd.notna(row["High"]) else "N/A"
-                    low_val = f"{row['Low']:.2f}" if pd.notna(row["Low"]) else "N/A"
-                    close_val = (
-                        f"{row['Close']:.2f}" if pd.notna(row["Close"]) else "N/A"
-                    )
-                    volume_val = (
-                        f"{int(row['Volume']):,}".replace(",", " ")
-                        if pd.notna(row["Volume"])
+            if not rows:
+                self.loading_text.value = f"❌ Ei dataa tickerille {ticker} kannassa!"
+                self.loading_text.color = ft.Colors.RED_600
+                self.page.update()
+                return
+
+            # Päivitä taulukon otsikko
+            total_days = len(rows)
+            self.data_table.columns = [
+                ft.DataColumn(ft.Text(f"Päivämäärä ({total_days} päivää)", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Open", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("High", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Low", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Close", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Volume", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Kynttilä", weight=ft.FontWeight.BOLD)),
+            ]
+
+            # Lisää rivit taulukkoon
+            for i, row in enumerate(rows):
+                try:
+                    pvm, open_val, high_val, low_val, close_val, volume_val = row
+
+                    # Formatoi päivämäärä
+                    from datetime import datetime
+                    date_obj = datetime.strptime(pvm, "%Y-%m-%d")
+                    date_str = date_obj.strftime("%d.%m.%Y")
+
+                    # Formatoi numerot
+                    open_str = f"{open_val:.2f}" if open_val is not None else "N/A"
+                    high_str = f"{high_val:.2f}" if high_val is not None else "N/A"
+                    low_str = f"{low_val:.2f}" if low_val is not None else "N/A"
+                    close_str = f"{close_val:.2f}" if close_val is not None else "N/A"
+                    volume_str = (
+                        f"{int(volume_val):,}".replace(",", " ")
+                        if volume_val is not None
                         else "N/A"
                     )
 
@@ -2886,22 +2925,25 @@ Virheet: {error_count}"""
                     row_color = ft.Colors.GREY_100 if i % 2 == 0 else ft.Colors.WHITE
 
                     # Luo japanilainen kynttilä tälle päivälle
-                    candlestick = self.create_candlestick(
-                        row["Open"], row["High"], row["Low"], row["Close"]
-                    )
+                    if all(v is not None for v in [open_val, high_val, low_val, close_val]):
+                        candlestick = self.create_candlestick(
+                            open_val, high_val, low_val, close_val
+                        )
+                    else:
+                        candlestick = ft.Container()
 
-                    # Varmista että meillä on tasan 7 solua (vastaa 7 saraketta)
+                    # Luo taulukkorivi
                     cells = [
                         ft.DataCell(ft.Text(date_str, size=12)),
-                        ft.DataCell(ft.Text(open_val, size=12)),
+                        ft.DataCell(ft.Text(open_str, size=12)),
                         ft.DataCell(
-                            ft.Text(high_val, size=12, color=ft.Colors.GREEN_700)
+                            ft.Text(high_str, size=12, color=ft.Colors.GREEN_700)
                         ),
-                        ft.DataCell(ft.Text(low_val, size=12, color=ft.Colors.RED_700)),
+                        ft.DataCell(ft.Text(low_str, size=12, color=ft.Colors.RED_700)),
                         ft.DataCell(
-                            ft.Text(close_val, size=12, weight=ft.FontWeight.BOLD)
+                            ft.Text(close_str, size=12, weight=ft.FontWeight.BOLD)
                         ),
-                        ft.DataCell(ft.Text(volume_val, size=11)),
+                        ft.DataCell(ft.Text(volume_str, size=11)),
                         ft.DataCell(
                             ft.Container(
                                 content=candlestick,
@@ -2912,13 +2954,6 @@ Virheet: {error_count}"""
                         ),
                     ]
 
-                    # Varmista että solujen määrä on oikea
-                    if len(cells) != 7:
-                        print(
-                            f"VAROITUS: Rivissä {i} on {len(cells)} solua, pitäisi olla 7"
-                        )
-                        continue
-
                     # Lisää rivi taulukkoon
                     self.data_table.rows.append(
                         ft.DataRow(cells=cells, color=row_color)
@@ -2926,10 +2961,9 @@ Virheet: {error_count}"""
 
                 except Exception as e:
                     print(f"Virhe rivin {i} käsittelyssä: {e}")
-                    # Jatka seuraavaan riviin
                     continue
 
-            self.loading_text.value = f"📊 Näytetään {len(self.data_table.rows)} päivän tiedot (scrollaa nähdäksesi lisää)"
+            self.loading_text.value = f"📊 {ticker}: Näytetään {total_days} päivän tiedot kannasta"
             self.loading_text.color = ft.Colors.GREEN_600
 
         except Exception as ex:
