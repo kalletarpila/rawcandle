@@ -10923,3 +10923,20 @@
 2025-11-06 01:32:54,175 INFO: Analysis database initialized successfully
 2025-11-06 01:32:54,566 INFO: Analysis database initialized successfully
 2025-11-06 01:32:54,961 INFO: Analysis database initialized successfully
+2025-11-08 17:27:54,662 INFO: start_candles_analysis called
+2025-11-08 17:27:54,699 INFO: NOKIA.HE 2023-07-18 Bullish Engulfing checked - FOUND (strength 0.88)
+2025-11-08 17:27:54,769 INFO: NOKIA.HE 2024-07-18 Dragonfly Doji checked - FOUND (strength 1.0)
+2025-11-08 17:27:54,795 INFO: NOKIA.HE 2024-11-22 Piercing Pattern checked - FOUND (strength 0.55)
+2025-11-08 17:27:54,867 INFO: NOKIA.HE,2023-07-18,Bullish Engulfing,0.880
+2025-11-08 17:27:54,867 INFO: NOKIA.HE,2024-07-18,Dragonfly Doji,1.000
+2025-11-08 17:27:54,867 INFO: NOKIA.HE,2024-11-22,Piercing Pattern,0.550
+2025-11-08 17:27:54,936 INFO: Analysis database initialized successfully
+2025-11-08 17:27:55,081 INFO: Analysis database initialized successfully
+2025-11-08 17:27:55,200 INFO: Saved 594 divergence records for NOKIA.HE
+2025-11-08 17:27:55,202 INFO: Analyysi valmis: NOKIA.HE - Analyysitulokset (2025-11-08 17:27:54) — tickerille NOKIA.HE | Bullish Engulfing: 1 kpl | Dragonfly Doji: 1 kpl | Piercing Pattern: 1 kpl |  | Löydetyt tapahtumat (CSV: ticker,päivä,kuvio[,signal_strength]): | NOKIA.HE,2023-07-18,Bullish Engulfing,0.880 | NOKIA.HE,2024-07-18,Dragonfly Doji,1.000 | NOKIA.HE,2024-11-22,Piercing Pattern,0.550
+2025-11-08 17:28:40,574 INFO: Analysis database initialized successfully
+2025-11-08 17:28:40,590 INFO: Analysis database initialized successfully
+2025-11-08 17:29:26,585 INFO: Analysis database initialized successfully
+2025-11-08 17:29:26,599 INFO: Analysis database initialized successfully
+2025-11-08 17:30:45,975 INFO: Analysis database initialized successfully
+2025-11-08 17:30:46,357 INFO: Analysis database initialized successfully

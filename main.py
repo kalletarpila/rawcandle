@@ -1882,127 +1882,207 @@ class RawCandleApp:
             self.page.update()
 
     def fetch_and_save_from_file(self, e):
+        """Hakee useiden osakkeiden tiedot tiedostosta ja tallentaa kantaan"""
         import os
+        import sqlite3
+        import time
+        from datetime import datetime
 
         data_dir = os.path.join(os.path.dirname(__file__), "data")
         tickers_file = os.path.join(data_dir, "tickers.txt")
-        file_path = os.path.join(data_dir, "osakedata.csv")
+        db_path = os.path.join(data_dir, "osakedata.db")
+
+        # Tarkista tickers.txt
         if not os.path.exists(tickers_file):
             self.loading_text.value = f"❌ Tiedostoa ei löytynyt: {tickers_file}"
             self.loading_text.color = ft.Colors.RED_600
             self.page.update()
             return
-        if not os.path.exists(data_dir):
-            os.makedirs(data_dir)
+
+        # Lue tickerit
         try:
             with open(tickers_file, "r", encoding="utf-8") as f:
-                tickers = [line.strip() for line in f if line.strip()]
+                tickers = [line.strip().upper() for line in f if line.strip()]
+
             if not tickers:
                 self.loading_text.value = "❌ Tiedostossa ei ole tickereitä!"
                 self.loading_text.color = ft.Colors.RED_600
                 self.page.update()
                 return
-            results = []
-            import time
 
-            for idx, ticker in enumerate(tickers):
-                self.loading_text.value = f"🔄 Haetaan dataa: {ticker}..."
+        except Exception as ex:
+            self.loading_text.value = f"❌ Virhe tiedostoa lukiessa: {str(ex)}"
+            self.loading_text.color = ft.Colors.RED_600
+            self.page.update()
+            return
+
+        # Varmista että kanta on olemassa
+        if not os.path.exists(data_dir):
+            os.makedirs(data_dir)
+
+        # Hae olemassa olevat tickerit kannasta
+        existing_tickers = set()
+        try:
+            with sqlite3.connect(db_path) as conn:
+                cursor = conn.cursor()
+                # Varmista taulu
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS osakedata (
+                        osake TEXT NOT NULL,
+                        pvm TEXT NOT NULL,
+                        open REAL,
+                        high REAL,
+                        low REAL,
+                        close REAL,
+                        volume INTEGER,
+                        PRIMARY KEY (osake, pvm)
+                    )
+                """
+                )
+                # Hae kaikki uniikit tickerit
+                cursor.execute("SELECT DISTINCT osake FROM osakedata")
+                existing_tickers = {row[0] for row in cursor.fetchall()}
+        except Exception as ex:
+            self.loading_text.value = f"❌ Virhe tietokantaa lukiessa: {str(ex)}"
+            self.loading_text.color = ft.Colors.RED_600
+            self.page.update()
+            return
+
+        # Tilastot
+        total = len(tickers)
+        saved_count = 0
+        skipped_in_db = 0
+        rejected_no_data = 0
+        rejected_penny = 0
+        error_count = 0
+        divergences_calculated = 0
+
+        start_date = "2023-07-01"
+        end_date = datetime.now().strftime("%Y-%m-%d")
+
+        self.loading_text.value = f"🔄 Aloitetaan haku {total} osakkeelle..."
+        self.loading_text.color = ft.Colors.BLUE_600
+        self.page.update()
+
+        for idx, ticker in enumerate(tickers, 1):
+            try:
+                # Ohita jos jo kannassa
+                if ticker in existing_tickers:
+                    skipped_in_db += 1
+                    if idx % 10 == 0:
+                        self.loading_text.value = (
+                            f"📊 Käsitelty: {idx}/{total} | "
+                            f"Tallennettu: {saved_count} | "
+                            f"Ohitettu (kannassa): {skipped_in_db} | "
+                            f"Hylätty (ei dataa): {rejected_no_data} | "
+                            f"Hylätty (penny): {rejected_penny}"
+                        )
+                        self.page.update()
+                    time.sleep(0.5)  # Lyhyt tauko
+                    continue
+
+                # Hae data
+                self.loading_text.value = f"🔄 {idx}/{total}: Haetaan {ticker}..."
                 self.loading_text.color = ft.Colors.BLUE_600
                 self.page.update()
-                try:
-                    stock = yf.Ticker(ticker)
-                    start_date = "2023-07-01"
-                    end_date = "2025-09-30"
-                    hist = stock.history(start=start_date, end=end_date)
-                    if hist.empty:
-                        msg = f"{ticker}: Ei dataa"
-                        self.loading_text.value = msg
-                        self.loading_text.color = ft.Colors.RED_600
-                        self.page.update()
-                        results.append(msg)
-                        continue
-                    df = hist.copy().sort_index(ascending=False)
-                    df.index = df.index.strftime("%Y-%m-%d")
-                    row_data = [ticker]
-                    for date, row in df.iterrows():
-                        date_str = date
-                        open_val = (
-                            f"{row['Open']:.2f}"
-                            if "Open" in row and pd.notna(row["Open"])
-                            else ""
-                        )
-                        close_val = (
-                            f"{row['Close']:.2f}"
-                            if "Close" in row and pd.notna(row["Close"])
-                            else ""
-                        )
-                        high_val = (
-                            f"{row['High']:.2f}"
-                            if "High" in row and pd.notna(row["High"])
-                            else ""
-                        )
-                        low_val = (
-                            f"{row['Low']:.2f}"
-                            if "Low" in row and pd.notna(row["Low"])
-                            else ""
-                        )
-                        volume_val = (
-                            f"{int(row['Volume'])}"
-                            if "Volume" in row and pd.notna(row["Volume"])
-                            else ""
-                        )
-                        row_data.extend(
-                            [
-                                date_str,
-                                open_val,
-                                close_val,
-                                high_val,
-                                low_val,
-                                volume_val,
-                            ]
-                        )
-                    csv_string = ",".join(row_data) + "\n"
-                    try:
-                        with open(file_path, "a", encoding="utf-8") as f:
-                            f.write(csv_string)
-                        # Kirjoita lokiin
-                        loki_path = os.path.join(data_dir, "loki.txt")
-                        from datetime import datetime
 
-                        log_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        log_entry = f"{log_date}, {ticker}, {len(df)} päivää\n"
-                        with open(loki_path, "a", encoding="utf-8") as loki:
-                            loki.write(log_entry)
-                        msg = f"{ticker}: OK ({len(df)} päivää) - Tallennus OK"
-                        self.loading_text.value = msg
-                        self.loading_text.color = ft.Colors.GREEN_600
-                        self.page.update()
-                        results.append(msg)
-                    except Exception as write_ex:
-                        msg = f"{ticker}: OK ({len(df)} päivää) - Tallennus VIRHE: {str(write_ex)}"
-                        self.loading_text.value = msg
-                        self.loading_text.color = ft.Colors.RED_600
-                        self.page.update()
-                        results.append(msg)
-                except Exception as ex:
-                    msg = f"{ticker}: Virhe ({str(ex)})"
-                    self.loading_text.value = msg
-                    self.loading_text.color = ft.Colors.RED_600
+                stock = yf.Ticker(ticker)
+                hist = stock.history(start=start_date, end=end_date)
+
+                # Tarkista onko dataa
+                if hist.empty:
+                    rejected_no_data += 1
+                    time.sleep(0.5)
+                    continue
+
+                # Tarkista penny stock
+                avg_close = hist["Close"].mean()
+                if avg_close < 1.0:
+                    rejected_penny += 1
+                    time.sleep(0.5)
+                    continue
+
+                # Tallenna kantaan
+                with sqlite3.connect(db_path) as conn:
+                    cursor = conn.cursor()
+                    rows_added = 0
+                    for date, row in hist.iterrows():
+                        date_str = date.strftime("%Y-%m-%d")
+                        cursor.execute(
+                            """
+                            INSERT OR REPLACE INTO osakedata 
+                            (osake, pvm, open, high, low, close, volume)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                ticker,
+                                date_str,
+                                float(row["Open"]) if pd.notna(row["Open"]) else None,
+                                float(row["High"]) if pd.notna(row["High"]) else None,
+                                float(row["Low"]) if pd.notna(row["Low"]) else None,
+                                float(row["Close"]) if pd.notna(row["Close"]) else None,
+                                int(row["Volume"]) if pd.notna(row["Volume"]) else None,
+                            ),
+                        )
+                        rows_added += 1
+                    conn.commit()
+
+                saved_count += 1
+                existing_tickers.add(ticker)  # Lisää listaan
+
+                # Laske divergenssit
+                div_success, div_days, div_error = self._calculate_and_save_divergences(
+                    ticker, only_missing=True
+                )
+                if div_success and div_days > 0:
+                    divergences_calculated += 1
+
+                # Päivitä tilanne joka 10. osakkeen jälkeen tai jos tallennettu
+                if idx % 10 == 0 or saved_count > 0:
+                    self.loading_text.value = (
+                        f"📊 Käsitelty: {idx}/{total} | "
+                        f"Tallennettu: {saved_count} | "
+                        f"Divergenssit: {divergences_calculated} | "
+                        f"Ohitettu (kannassa): {skipped_in_db} | "
+                        f"Hylätty (ei dataa): {rejected_no_data} | "
+                        f"Hylätty (penny): {rejected_penny}"
+                    )
+                    self.loading_text.color = ft.Colors.BLUE_600
                     self.page.update()
-                    results.append(msg)
-                # 1.5 sekunnin tauko jokaisen osakkeen jälkeen
-                time.sleep(1.5)
-                # 30 sekunnin tauko joka 500. osakkeen jälkeen
-                if (idx + 1) % 500 == 0:
-                    self.loading_text.value = f"⏳ {idx + 1} osaketta käsitelty, pidetään 30 sekunnin tauko..."
+
+                # Tauko Yahoo rate limitin välttämiseksi
+                # Lyhyempi tauko jos paljon päiviä (divergenssit vievät aikaa)
+                pause_time = 1.0 if rows_added >= 50 else 1.5
+                time.sleep(pause_time)
+
+                # 30s tauko joka 500. osakkeen jälkeen
+                if idx % 500 == 0:
+                    self.loading_text.value = (
+                        f"⏳ {idx} osaketta käsitelty, pidetään 30 sekunnin tauko..."
+                    )
                     self.loading_text.color = ft.Colors.ORANGE_600
                     self.page.update()
                     time.sleep(30)
-            self.loading_text.value = "\n".join(results)
-            self.loading_text.color = ft.Colors.GREEN_600
-        except Exception as ex:
-            self.loading_text.value = f"❌ Virhe tiedostoa käsitellessä: {str(ex)}"
-            self.loading_text.color = ft.Colors.RED_600
+
+            except Exception as ex:
+                error_count += 1
+                print(f"Virhe tickerillä {ticker}: {ex}")
+                time.sleep(0.5)
+                continue
+
+        # Lopputilanne
+        self.loading_text.value = (
+            f"✅ Valmis! | "
+            f"Käsitelty: {total} | "
+            f"Tallennettu: {saved_count} | "
+            f"Divergenssit: {divergences_calculated} | "
+            f"Ohitettu (kannassa): {skipped_in_db} | "
+            f"Hylätty (ei dataa): {rejected_no_data} | "
+            f"Hylätty (penny): {rejected_penny} | "
+            f"Virheet: {error_count}"
+        )
+        self.loading_text.color = ft.Colors.GREEN_600
         self.page.update()
 
     def __init__(self, page: ft.Page):
@@ -2018,6 +2098,16 @@ class RawCandleApp:
             on_submit=self.fetch_stock_data,
         )
         self.loading_text = ft.Text(value="", color=ft.Colors.BLUE_600)
+        self.stock_count_text = ft.Text(
+            value="", size=14, weight=ft.FontWeight.W_500, color=ft.Colors.GREY_600
+        )
+        self.delete_ticker_field = ft.TextField(
+            label="Osakkeen ticker",
+            width=200,
+            hint_text="Esim. AAPL",
+        )
+        self.delete_dialog = None
+        self.clear_dialog = None
         self.stock_data = None
         self.download_button = None
         # FilePicker CSV-tiedoston tallennukseen
@@ -2235,10 +2325,16 @@ class RawCandleApp:
                             rows_added += 1
                         conn.commit()
 
-                    updated_count += 1
-                    self.loading_text.value = (
-                        f"✅ {idx}/{total_stocks}: {ticker} (+{rows_added} päivää)"
+                    # Laske divergenssit päivitetylle osakkeelle
+                    div_success, div_days, div_error = (
+                        self._calculate_and_save_divergences(ticker, only_missing=True)
                     )
+
+                    updated_count += 1
+                    msg = f"✅ {idx}/{total_stocks}: {ticker} (+{rows_added} päivää)"
+                    if div_success and div_days > 0:
+                        msg += f", div: {div_days}"
+                    self.loading_text.value = msg
                     self.loading_text.color = ft.Colors.GREEN_600
                     self.page.update()
 
@@ -2250,8 +2346,9 @@ class RawCandleApp:
                     self.loading_text.color = ft.Colors.RED_600
                     self.page.update()
 
-                # Tauot
-                time.sleep(1.5)  # 1.5s per osake (turvallinen Yahoo Finance API:lle)
+                # Tauot - lyhyempi jos paljon päiviä (divergenssit vievät aikaa)
+                pause_time = 1.0 if rows_added >= 50 else 1.5
+                time.sleep(pause_time)
 
                 # 30s tauko per 500 osaketta
                 if idx % 500 == 0:
@@ -2278,8 +2375,472 @@ Virheet: {error_count}"""
             self.loading_text.color = ft.Colors.RED_600
             self.page.update()
 
+    def update_stock_count(self):
+        """Päivittää kannassa olevien osakkeiden määrän"""
+        import os
+        import sqlite3
+
+        try:
+            data_dir = os.path.join(os.path.dirname(__file__), "data")
+            db_path = os.path.join(data_dir, "osakedata.db")
+
+            if not os.path.exists(db_path):
+                self.stock_count_text.value = ""
+                return
+
+            with sqlite3.connect(db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(DISTINCT osake) FROM osakedata")
+                count = cursor.fetchone()[0]
+                self.stock_count_text.value = f"Kannassa: {count} osaketta"
+        except Exception:
+            self.stock_count_text.value = ""
+
+    def calculate_missing_divergences(self, e):
+        """Laske puuttuvat divergenssit kaikille osakkeille kannassa"""
+        import os
+        import sqlite3
+
+        try:
+            data_dir = os.path.join(os.path.dirname(__file__), "data")
+            osakedata_path = os.path.join(data_dir, "osakedata.db")
+            analysis_path = os.path.join(data_dir, "analysis.db")
+
+            if not os.path.exists(osakedata_path):
+                self.loading_text.value = "❌ Osakedata-kantaa ei löydy!"
+                self.loading_text.color = ft.Colors.RED_600
+                self.page.update()
+                return
+
+            # Hae kaikki tickerit
+            with sqlite3.connect(osakedata_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT DISTINCT osake FROM osakedata ORDER BY osake")
+                all_tickers = [row[0] for row in cursor.fetchall()]
+
+            if not all_tickers:
+                self.loading_text.value = "❌ Ei osakkeita kannassa!"
+                self.loading_text.color = ft.Colors.RED_600
+                self.page.update()
+                return
+
+            # Tarkista mitkä tarvitsevat divergenssit
+            from analysis.database_manager import DatabaseManager
+
+            db_manager = DatabaseManager(db_path=analysis_path)
+            tickers_needing_calc = []
+
+            for ticker in all_tickers:
+                if not db_manager.has_divergence_data(ticker):
+                    tickers_needing_calc.append(ticker)
+
+            db_manager.close()
+
+            if not tickers_needing_calc:
+                self.loading_text.value = (
+                    "✅ Kaikilla osakkeilla on jo divergenssit laskettu!"
+                )
+                self.loading_text.color = ft.Colors.GREEN_600
+                self.page.update()
+                return
+
+            # Laske puuttuvat
+            total = len(tickers_needing_calc)
+            calculated = 0
+            errors = 0
+
+            self.loading_text.value = (
+                f"🔄 Lasketaan divergenssejä {total} osakkeelle..."
+            )
+            self.loading_text.color = ft.Colors.BLUE_600
+            self.page.update()
+
+            for idx, ticker in enumerate(tickers_needing_calc, 1):
+                try:
+                    self.loading_text.value = f"🔄 {idx}/{total}: Lasketaan {ticker}..."
+                    self.loading_text.color = ft.Colors.BLUE_600
+                    self.page.update()
+
+                    success, days, error = self._calculate_and_save_divergences(
+                        ticker, only_missing=False
+                    )
+
+                    if success:
+                        calculated += 1
+                        self.loading_text.value = (
+                            f"✅ {idx}/{total}: {ticker} - {days} päivää laskettu"
+                        )
+                        self.loading_text.color = ft.Colors.GREEN_600
+                    else:
+                        errors += 1
+                        self.loading_text.value = (
+                            f"❌ {idx}/{total}: {ticker} - {error}"
+                        )
+                        self.loading_text.color = ft.Colors.RED_600
+
+                    self.page.update()
+
+                except Exception as ex:
+                    errors += 1
+                    self.loading_text.value = f"❌ {idx}/{total}: {ticker} - {str(ex)}"
+                    self.loading_text.color = ft.Colors.RED_600
+                    self.page.update()
+
+            # Yhteenveto
+            self.loading_text.value = (
+                f"✅ Valmis! Laskettu: {calculated}/{total} | Virheet: {errors}"
+            )
+            self.loading_text.color = ft.Colors.GREEN_600
+            self.page.update()
+
+        except Exception as ex:
+            self.loading_text.value = f"❌ Virhe: {str(ex)}"
+            self.loading_text.color = ft.Colors.RED_600
+            self.page.update()
+
+    def _calculate_and_save_divergences(
+        self, ticker: str, only_missing: bool = True
+    ) -> tuple:
+        """
+        Laske ja tallenna divergenssit yhdelle tickerille.
+
+        Args:
+            ticker: Osakkeen symboli
+            only_missing: Jos True, laske vain päiville joita ei ole divergence_data:ssa
+
+        Returns:
+            (success: bool, days_calculated: int, error_message: str)
+        """
+        import os
+        import sqlite3
+        import pandas as pd
+        from analysis.candlestick_patterns import (
+            calculate_rsi,
+            is_bullish_divergence,
+            is_bearish_divergence,
+        )
+        from analysis.database_manager import DatabaseManager
+
+        try:
+            data_dir = os.path.join(os.path.dirname(__file__), "data")
+            osakedata_path = os.path.join(data_dir, "osakedata.db")
+            analysis_path = os.path.join(data_dir, "analysis.db")
+
+            # Lue osakedata
+            with sqlite3.connect(osakedata_path) as conn:
+                df = pd.read_sql_query(
+                    "SELECT pvm, close FROM osakedata WHERE osake = ? ORDER BY pvm",
+                    conn,
+                    params=[ticker],
+                )
+
+            if df.empty:
+                return (False, 0, f"Ei dataa tickerille {ticker}")
+
+            # Laske RSI
+            df = calculate_rsi(df, period=14, close_col="close")
+
+            if "RSI" not in df.columns:
+                return (False, 0, "RSI-laskenta epäonnistui")
+
+            # Hae olemassa olevat divergenssit jos only_missing
+            existing_dates = set()
+            if only_missing:
+                try:
+                    with sqlite3.connect(analysis_path) as conn:
+                        cursor = conn.cursor()
+                        cursor.execute(
+                            "SELECT date FROM divergence_data WHERE ticker = ?",
+                            (ticker,),
+                        )
+                        existing_dates = {row[0] for row in cursor.fetchall()}
+                except Exception:
+                    pass  # Taulu ei ehkä ole vielä olemassa
+
+            # Laske divergenssit
+            divergence_records = []
+
+            for idx in range(len(df)):
+                date = str(df.iloc[idx]["pvm"])
+
+                # Ohita jos jo laskettu
+                if only_missing and date in existing_dates:
+                    continue
+
+                rsi = df.iloc[idx]["RSI"]
+                bullish_strength = 0.0
+                bearish_strength = 0.0
+
+                # Tarvitaan vähintään 30 päivää historiaa
+                if idx >= 30 and not pd.isna(rsi):
+                    # Bullish divergence
+                    bullish_result = is_bullish_divergence(
+                        df,
+                        idx=idx,
+                        lookback_days=30,
+                        min_rsi_gain=3.0,
+                        min_days_between=3,
+                        close_col="close",
+                    )
+
+                    if bullish_result and bullish_result.get("found"):
+                        bullish_strength = bullish_result.get("strength", 1.0)
+
+                    # Bearish divergence (vain jos ei bullish)
+                    elif not bullish_strength:
+                        bearish_result = is_bearish_divergence(
+                            df,
+                            idx=idx,
+                            lookback_days=30,
+                            min_rsi_drop=3.0,
+                            min_days_between=3,
+                            close_col="close",
+                        )
+
+                        if bearish_result and bearish_result.get("found"):
+                            bearish_strength = bearish_result.get("strength", 1.0)
+
+                divergence_records.append(
+                    (
+                        date,
+                        bullish_strength,
+                        bearish_strength,
+                        rsi if not pd.isna(rsi) else None,
+                    )
+                )
+
+            # Tallenna kantaan
+            if divergence_records:
+                db_manager = DatabaseManager(db_path=analysis_path)
+                success = db_manager.save_divergence_batch(ticker, divergence_records)
+                db_manager.close()
+
+                if success:
+                    return (True, len(divergence_records), "")
+                else:
+                    return (False, 0, "Tallennus epäonnistui")
+            else:
+                return (True, 0, "")  # Ei uusia laskettavia
+
+        except Exception as ex:
+            return (False, 0, str(ex))
+
+    def show_delete_stock_dialog(self, e):
+        """Näyttää dialogin yksittäisen osakkeen poistamiseen"""
+        self.delete_ticker_field.value = ""
+
+        self.delete_dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("⚠️ Poista osake"),
+            content=ft.Column(
+                [
+                    ft.Text("Syötä poistettavan osakkeen ticker:"),
+                    self.delete_ticker_field,
+                    ft.Text(
+                        "Tämä poistaa osakkeen kaikki tiedot osakedata- ja analysis-kannoista.",
+                        size=12,
+                        color=ft.Colors.ORANGE_700,
+                    ),
+                ],
+                tight=True,
+                spacing=10,
+                height=150,
+            ),
+            actions=[
+                ft.TextButton("Peruuta", on_click=self.close_delete_dialog),
+                ft.TextButton(
+                    "Poista",
+                    on_click=self.delete_stock_confirmed,
+                    style=ft.ButtonStyle(color=ft.Colors.RED_700),
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+
+        # Varmista että dialogi on overlay-listassa
+        if hasattr(self.page, "overlay"):
+            if self.delete_dialog not in self.page.overlay:
+                self.page.overlay.append(self.delete_dialog)
+
+        self.page.dialog = self.delete_dialog
+        self.delete_dialog.open = True
+        self.page.update()
+
+    def close_delete_dialog(self, e):
+        """Sulkee poisto-dialogin"""
+        if self.delete_dialog:
+            self.delete_dialog.open = False
+            self.page.update()
+
+    def delete_stock_confirmed(self, e):
+        """Poistaa osakkeen tiedot kannasta vahvistuksen jälkeen"""
+        import os
+        import sqlite3
+
+        ticker = self.delete_ticker_field.value.strip().upper()
+
+        if not ticker:
+            self.loading_text.value = "❌ Syötä osakkeen ticker!"
+            self.loading_text.color = ft.Colors.RED_600
+            self.close_delete_dialog(None)
+            self.page.update()
+            return
+
+        try:
+            data_dir = os.path.join(os.path.dirname(__file__), "data")
+
+            # Poista osakedata-kannasta
+            osakedata_path = os.path.join(data_dir, "osakedata.db")
+            deleted_osakedata = 0
+            if os.path.exists(osakedata_path):
+                with sqlite3.connect(osakedata_path) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("DELETE FROM osakedata WHERE osake = ?", (ticker,))
+                    deleted_osakedata = cursor.rowcount
+                    conn.commit()
+
+            # Poista analysis-kannasta
+            analysis_path = os.path.join(data_dir, "analysis.db")
+            deleted_analysis = 0
+            if os.path.exists(analysis_path):
+                with sqlite3.connect(analysis_path) as conn:
+                    cursor = conn.cursor()
+                    # Tarkista onko analysis-taulu olemassa
+                    cursor.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name='analysis'"
+                    )
+                    if cursor.fetchone():
+                        cursor.execute(
+                            "DELETE FROM analysis WHERE osake = ?", (ticker,)
+                        )
+                        deleted_analysis = cursor.rowcount
+                        conn.commit()
+
+            self.close_delete_dialog(None)
+            self.update_stock_count()
+
+            if deleted_osakedata > 0 or deleted_analysis > 0:
+                self.loading_text.value = (
+                    f"✅ {ticker} poistettu! "
+                    f"(osakedata: {deleted_osakedata} riviä, analysis: {deleted_analysis} riviä)"
+                )
+                self.loading_text.color = ft.Colors.GREEN_600
+            else:
+                self.loading_text.value = f"❌ Osaketta {ticker} ei löytynyt kannasta"
+                self.loading_text.color = ft.Colors.ORANGE_600
+
+            self.page.update()
+
+        except Exception as ex:
+            self.close_delete_dialog(None)
+            self.loading_text.value = f"❌ Virhe poistaessa: {str(ex)}"
+            self.loading_text.color = ft.Colors.RED_600
+            self.page.update()
+
+    def show_clear_database_dialog(self, e):
+        """Näyttää dialogin kaikkien tietokantojen tyhjentämiseen"""
+        self.clear_dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("⚠️ Tyhjennä kannat"),
+            content=ft.Column(
+                [
+                    ft.Text(
+                        "Haluatko varmasti tyhjentää KAIKKI tiedot osakedata- ja analysis-kannoista?",
+                        weight=ft.FontWeight.BOLD,
+                    ),
+                    ft.Text(
+                        "TÄTÄ EI VOI PERUA!",
+                        size=16,
+                        color=ft.Colors.RED_700,
+                        weight=ft.FontWeight.BOLD,
+                    ),
+                ],
+                tight=True,
+                spacing=10,
+                height=100,
+            ),
+            actions=[
+                ft.TextButton("Peruuta", on_click=self.close_clear_dialog),
+                ft.TextButton(
+                    "TYHJENNÄ KAIKKI",
+                    on_click=self.clear_database_confirmed,
+                    style=ft.ButtonStyle(
+                        color=ft.Colors.WHITE,
+                        bgcolor=ft.Colors.RED_700,
+                    ),
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+
+        # Varmista että dialogi on overlay-listassa
+        if hasattr(self.page, "overlay"):
+            if self.clear_dialog not in self.page.overlay:
+                self.page.overlay.append(self.clear_dialog)
+
+        self.page.dialog = self.clear_dialog
+        self.clear_dialog.open = True
+        self.page.update()
+
+    def close_clear_dialog(self, e):
+        """Sulkee tyhjennys-dialogin"""
+        if self.clear_dialog:
+            self.clear_dialog.open = False
+            self.page.update()
+
+    def clear_database_confirmed(self, e):
+        """Tyhjentää kaikki kannat vahvistuksen jälkeen"""
+        import os
+        import sqlite3
+
+        try:
+            data_dir = os.path.join(os.path.dirname(__file__), "data")
+
+            # Tyhjennä osakedata
+            osakedata_path = os.path.join(data_dir, "osakedata.db")
+            deleted_osakedata = 0
+            if os.path.exists(osakedata_path):
+                with sqlite3.connect(osakedata_path) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("DELETE FROM osakedata")
+                    deleted_osakedata = cursor.rowcount
+                    conn.commit()
+
+            # Tyhjennä analysis
+            analysis_path = os.path.join(data_dir, "analysis.db")
+            deleted_analysis = 0
+            if os.path.exists(analysis_path):
+                with sqlite3.connect(analysis_path) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name='analysis'"
+                    )
+                    if cursor.fetchone():
+                        cursor.execute("DELETE FROM analysis")
+                        deleted_analysis = cursor.rowcount
+                        conn.commit()
+
+            self.close_clear_dialog(None)
+            self.update_stock_count()
+
+            self.loading_text.value = (
+                f"✅ Kannat tyhjennetty! "
+                f"(osakedata: {deleted_osakedata} riviä, analysis: {deleted_analysis} riviä)"
+            )
+            self.loading_text.color = ft.Colors.GREEN_600
+            self.page.update()
+
+        except Exception as ex:
+            self.close_clear_dialog(None)
+            self.loading_text.value = f"❌ Virhe tyhjennettäessä: {str(ex)}"
+            self.loading_text.color = ft.Colors.RED_600
+            self.page.update()
+
     def create_home_view(self):
         """Luo etusivun näkymän"""
+        # Päivitä osakkeiden määrä
+        self.update_stock_count()
+
         return ft.View(
             "/",
             [
@@ -2346,6 +2907,7 @@ Virheet: {error_count}"""
                                             ft.Divider(height=20),
                                             ft.Row(
                                                 [
+                                                    self.stock_count_text,
                                                     ft.ElevatedButton(
                                                         "Päivitä osaketiedot",
                                                         icon=ft.Icons.UPDATE,
@@ -2356,6 +2918,44 @@ Virheet: {error_count}"""
                                                     ),
                                                 ],
                                                 alignment=ft.MainAxisAlignment.CENTER,
+                                                spacing=15,
+                                            ),
+                                            ft.Divider(height=20),
+                                            ft.Row(
+                                                [
+                                                    ft.ElevatedButton(
+                                                        "Laske puuttuvat divergenssit",
+                                                        icon=ft.Icons.CALCULATE,
+                                                        on_click=self.calculate_missing_divergences,
+                                                        bgcolor=ft.Colors.PURPLE_700,
+                                                        color=ft.Colors.WHITE,
+                                                        tooltip="Laske divergenssit osakkeille joilta ne puuttuvat",
+                                                    ),
+                                                ],
+                                                alignment=ft.MainAxisAlignment.CENTER,
+                                            ),
+                                            ft.Divider(height=20),
+                                            ft.Row(
+                                                [
+                                                    ft.ElevatedButton(
+                                                        "Poista osake",
+                                                        icon=ft.Icons.DELETE_OUTLINE,
+                                                        on_click=self.show_delete_stock_dialog,
+                                                        bgcolor=ft.Colors.ORANGE_700,
+                                                        color=ft.Colors.WHITE,
+                                                        tooltip="Poista yksittäinen osake kannasta",
+                                                    ),
+                                                    ft.ElevatedButton(
+                                                        "Tyhjennä kannat",
+                                                        icon=ft.Icons.DELETE_FOREVER,
+                                                        on_click=self.show_clear_database_dialog,
+                                                        bgcolor=ft.Colors.RED_700,
+                                                        color=ft.Colors.WHITE,
+                                                        tooltip="Poista KAIKKI tiedot kannoista",
+                                                    ),
+                                                ],
+                                                alignment=ft.MainAxisAlignment.CENTER,
+                                                spacing=10,
                                             ),
                                         ],
                                         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -2480,6 +3080,7 @@ Virheet: {error_count}"""
         """Hakee osakedata Yahoo Financesta ja tallentaa osakedata.db kantaan"""
         import os
         import sqlite3
+        from datetime import datetime
 
         ticker = self.ticker_field.value.strip().upper()
 
@@ -2494,28 +3095,7 @@ Virheet: {error_count}"""
         self.page.update()
 
         try:
-            stock = yf.Ticker(ticker)
-            start_date = "2023-07-01"
-            end_date = datetime.now().strftime("%Y-%m-%d")
-
-            # Hae historiallinen data
-            hist = stock.history(start=start_date, end=end_date)
-
-            if hist.empty:
-                self.loading_text.value = f"❌ Ei dataa löytynyt tickerille {ticker}"
-                self.loading_text.color = ft.Colors.RED_600
-                self.page.update()
-                return
-
-            # Tarkista onko penny stock (hinta alle $1)
-            avg_close = hist["Close"].mean()
-            if avg_close < 1.0:
-                self.loading_text.value = f"❌ {ticker} on penny stock (keskihinta ${avg_close:.3f}). Ei talleteta kantaan."
-                self.loading_text.color = ft.Colors.RED_600
-                self.page.update()
-                return
-
-            # Tallenna tietokantaan
+            # Tarkista ensin kannasta viimeisin päivämäärä
             data_dir = os.path.join(os.path.dirname(__file__), "data")
             if not os.path.exists(data_dir):
                 os.makedirs(data_dir)
@@ -2541,7 +3121,67 @@ Virheet: {error_count}"""
                 """
                 )
 
-                # Tallenna rivit
+                # Hae viimeisin päivämäärä kannasta tälle osakkeelle
+                cursor.execute(
+                    "SELECT MAX(pvm) FROM osakedata WHERE osake = ?", (ticker,)
+                )
+                result = cursor.fetchone()
+                last_date_in_db = result[0] if result[0] else None
+
+            # Määritä mistä haetaan
+            if last_date_in_db:
+                # Hae viimeisen päivän jälkeinen data
+                from datetime import datetime, timedelta
+
+                last_date_obj = datetime.strptime(last_date_in_db, "%Y-%m-%d")
+                start_date = (last_date_obj + timedelta(days=1)).strftime("%Y-%m-%d")
+
+                self.loading_text.value = f"🔄 {ticker} löytyy kannasta (viimeisin: {last_date_in_db}), haetaan uudet päivät..."
+                self.loading_text.color = ft.Colors.BLUE_600
+                self.page.update()
+            else:
+                # Ei kannassa, hae kaikki
+                start_date = "2023-07-01"
+                self.loading_text.value = (
+                    f"🔄 {ticker} ei kannassa, haetaan koko historia..."
+                )
+                self.loading_text.color = ft.Colors.BLUE_600
+                self.page.update()
+
+            stock = yf.Ticker(ticker)
+            end_date = datetime.now().strftime("%Y-%m-%d")
+
+            # Hae historiallinen data
+            hist = stock.history(start=start_date, end=end_date)
+
+            if hist.empty:
+                if last_date_in_db:
+                    self.loading_text.value = (
+                        f"✅ {ticker} on jo ajan tasalla (viimeisin: {last_date_in_db})"
+                    )
+                    self.loading_text.color = ft.Colors.GREEN_600
+                else:
+                    self.loading_text.value = (
+                        f"❌ Ei dataa löytynyt tickerille {ticker}"
+                    )
+                    self.loading_text.color = ft.Colors.RED_600
+                self.page.update()
+                return
+
+            # Tarkista onko penny stock (hinta alle $1) - vain jos uusi osake
+            if not last_date_in_db:
+                avg_close = hist["Close"].mean()
+                if avg_close < 1.0:
+                    self.loading_text.value = f"❌ {ticker} on penny stock (keskihinta ${avg_close:.3f}). Ei talleteta kantaan."
+                    self.loading_text.color = ft.Colors.RED_600
+                    self.page.update()
+                    return
+
+            # Tallenna tietokantaan
+            with sqlite3.connect(db_path) as conn:
+                cursor = conn.cursor()
+
+                # Tallenna rivit (taulu on jo luotu aiemmin)
                 rows_added = 0
                 for date, row in hist.iterrows():
                     date_str = date.strftime("%Y-%m-%d")
@@ -2565,9 +3205,25 @@ Virheet: {error_count}"""
 
                 conn.commit()
 
-            self.loading_text.value = (
-                f"✅ {ticker}: {rows_added} päivän tiedot tallennettu kantaan!"
+            # Laske ja tallenna divergenssit
+            div_success, div_days, div_error = self._calculate_and_save_divergences(
+                ticker, only_missing=True
             )
+
+            if last_date_in_db:
+                msg = f"✅ {ticker}: {rows_added} uutta päivää lisätty kantaan! (aiemmin: {last_date_in_db})"
+                if div_success and div_days > 0:
+                    msg += f" | Divergenssit laskettu {div_days} päivälle"
+                self.loading_text.value = msg
+            else:
+                msg = f"✅ {ticker}: {rows_added} päivän tiedot tallennettu kantaan!"
+                if div_success and div_days > 0:
+                    msg += f" | Divergenssit laskettu {div_days} päivälle"
+                self.loading_text.value = msg
+
+            if div_error and not div_success:
+                self.loading_text.value += f" ⚠️ Divergenssit: {div_error}"
+
             self.loading_text.color = ft.Colors.GREEN_600
             self.stock_data = hist  # Säilytetään yhteensopivuus
 

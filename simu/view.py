@@ -214,9 +214,7 @@ class SimuView:
             input_filter=int_filter,
             expand=True,
         )
-        self.rsi_field.on_change = (
-            lambda e, fld=self.rsi_field: self._clear_error(fld)
-        )
+        self.rsi_field.on_change = lambda e, fld=self.rsi_field: self._clear_error(fld)
         self.rsi_field.on_blur = (
             lambda e, fld=self.rsi_field: self._clamp_integer_field(fld, 0, 100)
         )
@@ -286,6 +284,27 @@ class SimuView:
             color=ft.Colors.WHITE,
         )
 
+        # Batch-simulaatio nappi
+        self.batch_button = ft.ElevatedButton(
+            "Simuloi kaikki osakkeet",
+            icon=ft.Icons.PLAYLIST_PLAY,
+            on_click=self.on_batch_start,
+            bgcolor=ft.Colors.BLUE_700,
+            color=ft.Colors.WHITE,
+        )
+
+        # Progressbar batch-simulaatiolle
+        self.batch_progress_bar = ft.ProgressBar(visible=False, width=400)
+        self.batch_progress_text = ft.Text(value="", visible=False)
+        self.batch_cancel_button = ft.ElevatedButton(
+            "Keskeytä",
+            icon=ft.Icons.STOP,
+            on_click=self.on_batch_cancel,
+            bgcolor=ft.Colors.RED_700,
+            color=ft.Colors.WHITE,
+            visible=False,
+        )
+
         controls_row = ft.ResponsiveRow(
             controls=[
                 ft.Container(
@@ -301,6 +320,12 @@ class SimuView:
                             checkbox_column,
                             ft.Divider(height=10, color=ft.Colors.TRANSPARENT),
                             self.start_button,
+                            ft.Divider(height=5, color=ft.Colors.TRANSPARENT),
+                            self.batch_button,
+                            ft.Divider(height=10, color=ft.Colors.TRANSPARENT),
+                            self.batch_progress_bar,
+                            self.batch_progress_text,
+                            self.batch_cancel_button,
                         ],
                         spacing=16,
                         horizontal_alignment=ft.CrossAxisAlignment.START,
@@ -424,7 +449,9 @@ class SimuView:
             if results_generated:
                 self._show_snack("Simulaatio valmis.", ft.Colors.GREEN_600)
             else:
-                self._show_snack("Simulaatio ei tuottanut tuloksia.", ft.Colors.ORANGE_400)
+                self._show_snack(
+                    "Simulaatio ei tuottanut tuloksia.", ft.Colors.ORANGE_400
+                )
         except Exception as exc:
             self._show_snack(f"Simulaatio epäonnistui: {exc}", ft.Colors.RED_600)
         finally:
@@ -526,7 +553,7 @@ class SimuView:
                             f"Osakkeiden arvo: {result.end_position_value:,.2f}",
                             f"Yhteensä: {result.end_capital:,.2f}",
                             f"Kasvu: {result.growth_pct:.2f} %",
-                            f"Ostoja: {result.buy_trades}"
+                            f"Ostoja: {result.buy_trades}",
                         ]
                     )
                 )
@@ -540,7 +567,6 @@ class SimuView:
                 self.page.update()
             except Exception as exc:
                 print("[SIMU][UI][PAGE] update failed", exc)
-
 
     def _clear_error(self, field: Optional[ft.TextField]):
         if field is None:
@@ -619,7 +645,9 @@ class SimuView:
             field.value = str(value)
             field.update()
         except Exception:
-            self._set_error(field, "Syötä kelvollinen kokonaisluku. Käytettiin oletusarvoa.")
+            self._set_error(
+                field, "Syötä kelvollinen kokonaisluku. Käytettiin oletusarvoa."
+            )
             field.value = str(minimum)
             try:
                 field.update()
@@ -661,7 +689,9 @@ class SimuView:
             field.update()
         except Exception:
             formatted = f"{minimum:.{decimals}f}".replace(".", ",")
-            self._set_error(field, "Syötä kelvollinen desimaaliluku. Käytettiin oletusarvoa.")
+            self._set_error(
+                field, "Syötä kelvollinen desimaaliluku. Käytettiin oletusarvoa."
+            )
             field.value = formatted
             try:
                 field.update()
@@ -698,16 +728,12 @@ class SimuView:
             self._set_error(self.ticker_field, "Anna vähintään yksi ticker.")
             return None
         tokens = [
-            token.strip().upper()
-            for token in re.split(r"[,\n]", raw)
-            if token.strip()
+            token.strip().upper() for token in re.split(r"[,\n]", raw) if token.strip()
         ]
         if not tokens:
             self._set_error(self.ticker_field, "Anna vähintään yksi ticker.")
             return None
-        invalid = [
-            t for t in tokens if not re.fullmatch(r"[A-Z0-9.-]{1,12}", t)
-        ]
+        invalid = [t for t in tokens if not re.fullmatch(r"[A-Z0-9.-]{1,12}", t)]
         if invalid:
             self._set_error(
                 self.ticker_field,
@@ -734,14 +760,18 @@ class SimuView:
             normalized = raw.replace(" ", "").replace(",", ".")
             value_float = float(normalized)
         except Exception:
-            self._set_error(field, f"{label}: syötä kokonaisluku väliltä {minimum}–{maximum}.")
+            self._set_error(
+                field, f"{label}: syötä kokonaisluku väliltä {minimum}–{maximum}."
+            )
             return None
         if not value_float.is_integer():
             self._set_error(field, f"{label}: käytä kokonaislukua ilman desimaaleja.")
             return None
         value = int(value_float)
         if value < minimum or value > maximum:
-            self._set_error(field, f"{label}: arvo täytyy olla välillä {minimum}–{maximum}.")
+            self._set_error(
+                field, f"{label}: arvo täytyy olla välillä {minimum}–{maximum}."
+            )
             return None
         field.value = str(value)
         self._clear_error(field)
@@ -765,7 +795,9 @@ class SimuView:
             normalized = raw.replace(" ", "").replace(",", ".")
             value = float(normalized)
         except Exception:
-            self._set_error(field, f"{label}: syötä desimaaliluku pilkulla (esim. 0,8).")
+            self._set_error(
+                field, f"{label}: syötä desimaaliluku pilkulla (esim. 0,8)."
+            )
             return None
         if value < minimum or value > maximum:
             self._set_error(
@@ -817,51 +849,74 @@ class SimuView:
             self._clear_error(self.start_date_field)
             self._clear_error(self.end_date_field)
 
-        if self._validate_int_input(
-            self.invest_amount_field, 1, 100, "Sijoitettava summa"
-        ) is None:
+        if (
+            self._validate_int_input(
+                self.invest_amount_field, 1, 100, "Sijoitettava summa"
+            )
+            is None
+        ):
             valid = False
-            error_message = error_message or "Sijoitettava summa ei ole sallituissa rajoissa."
-        if self._validate_int_input(
-            self.investment_share_field,
-            1,
-            100,
-            "Kerralla sijoitettava osuus pääomasta (%)",
-        ) is None:
+            error_message = (
+                error_message or "Sijoitettava summa ei ole sallituissa rajoissa."
+            )
+        if (
+            self._validate_int_input(
+                self.investment_share_field,
+                1,
+                100,
+                "Kerralla sijoitettava osuus pääomasta (%)",
+            )
+            is None
+        ):
             valid = False
-            error_message = error_message or "Kerralla sijoitettava osuus on virheellinen."
-        if self._validate_int_input(
-            self.drop_threshold_field, 1, 100, "Kurssilaskuraja (%)"
-        ) is None:
+            error_message = (
+                error_message or "Kerralla sijoitettava osuus on virheellinen."
+            )
+        if (
+            self._validate_int_input(
+                self.drop_threshold_field, 1, 100, "Kurssilaskuraja (%)"
+            )
+            is None
+        ):
             valid = False
             error_message = error_message or "Kurssilaskuraja on virheellinen."
-        if self._validate_int_input(
-            self.drop_average_days_field, 1, 60, "Kurssialarajan keskiarvon päivät"
-        ) is None:
+        if (
+            self._validate_int_input(
+                self.drop_average_days_field, 1, 60, "Kurssialarajan keskiarvon päivät"
+            )
+            is None
+        ):
             valid = False
             error_message = error_message or "Keskiarvopäivien määrä on virheellinen."
-        if self._validate_int_input(
-            self.rise_threshold_field, 1, 100, "Kurssinousuraja (%)"
-        ) is None:
+        if (
+            self._validate_int_input(
+                self.rise_threshold_field, 1, 100, "Kurssinousuraja (%)"
+            )
+            is None
+        ):
             valid = False
             error_message = error_message or "Kurssinousuraja on virheellinen."
-        if self._validate_decimal_input(
-            self.strength_field,
-            0.1,
-            1.0,
-            "Kynttilän vahvuus",
-            decimals=1,
-        ) is None:
+        if (
+            self._validate_decimal_input(
+                self.strength_field,
+                0.1,
+                1.0,
+                "Kynttilän vahvuus",
+                decimals=1,
+            )
+            is None
+        ):
             valid = False
             error_message = error_message or "Kynttilän vahvuus on virheellinen."
-        if self._validate_int_input(
-            self.rsi_field, 0, 100, "RSI t0 päivänä"
-        ) is None:
+        if self._validate_int_input(self.rsi_field, 0, 100, "RSI t0 päivänä") is None:
             valid = False
             error_message = error_message or "RSI-arvo on virheellinen."
-        if self._validate_int_input(
-            self.volume_growth_field, 1, 100, "Volyymin kasvu t0 (%)"
-        ) is None:
+        if (
+            self._validate_int_input(
+                self.volume_growth_field, 1, 100, "Volyymin kasvu t0 (%)"
+            )
+            is None
+        ):
             valid = False
             error_message = error_message or "Volyymin kasvu on virheellinen."
 
@@ -887,3 +942,122 @@ class SimuView:
         )
         self._results_data.append(result)
         self._update_results_view()
+
+    # ---- Batch Simulation Methods ------------------------------------
+
+    def on_batch_start(self, e):
+        """Aloita batch-simulaatio kaikille osakkeille"""
+        import os
+        from .batch_simulator import BatchSimulator
+
+        # Validoi ensin parametrit
+        settings = self._build_settings()
+        if settings is None:
+            return
+
+        # Piiloita normaali nappi, näytä progress
+        self.batch_button.visible = False
+        self.start_button.disabled = True
+        self.batch_progress_bar.visible = True
+        self.batch_progress_bar.value = 0
+        self.batch_progress_text.visible = True
+        self.batch_progress_text.value = "Valmistellaan..."
+        self.batch_cancel_button.visible = True
+        self.page.update()
+
+        # Luo BatchSimulator
+        data_dir = os.path.join(os.path.dirname(__file__), "..", "data")
+        batch_sim = BatchSimulator(data_dir=data_dir)
+
+        # Kerää parametrit
+        parameters = {
+            "initial_capital": settings.capital_thousands,
+            "start_date": settings.start_date.strftime("%Y-%m-%d"),
+            "end_date": settings.end_date.strftime("%Y-%m-%d"),
+            "invest_percent": settings.invest_percent,
+            "drop_percent": settings.drop_percent,
+            "drop_average_days": settings.drop_average_days,
+            "rise_percent": settings.rise_percent,
+            "min_strength": settings.min_strength,
+            "max_rsi": settings.max_rsi if settings.max_rsi < 101 else None,
+            "min_volume_growth": settings.min_volume_growth,
+            "selected_patterns": ", ".join(settings.selected_patterns),
+        }
+
+        # Määritä simulaatio-funktio
+        def simulation_wrapper(ticker: str, params: dict):
+            """Wrapper joka suorittaa simulaation yhdelle osakkeelle"""
+            try:
+                from .engine import SimulationRequest
+
+                # Luo request
+                request = SimulationRequest(ticker=ticker, settings=settings)
+
+                # Suorita simulaatio
+                result = self._service.engine.run(request)
+
+                # Palauta tulokset batch_simulatorin ymmärtämässä muodossa
+                profit_eur = result.end_capital - result.start_capital
+                # Laske voittaneet kaupat kasvu-% perusteella
+                successful = 1 if profit_eur > 0 else 0
+
+                return (
+                    True,
+                    {
+                        "initial_capital": result.start_capital,
+                        "final_capital": result.end_capital,
+                        "profit_eur": profit_eur,
+                        "profit_pct": result.growth_pct,
+                        "total_trades": result.buy_trades,
+                        "successful_trades": successful,
+                        "failed_trades": 1 - successful,
+                        "win_rate": (successful * 100),
+                    },
+                    "",
+                )
+            except Exception as ex:
+                return (False, {}, str(ex))
+
+        # Progress callback
+        def progress_callback(current: int, total: int, ticker: str):
+            """Päivitä UI edistymisestä"""
+            progress = current / total
+            self.batch_progress_bar.value = progress
+            self.batch_progress_text.value = (
+                f"Käsitellään: {ticker} ({current}/{total})"
+            )
+            self.page.update()
+
+        # Tallenna batch_sim instanssi jotta cancel toimii
+        self._batch_sim = batch_sim
+
+        try:
+            # Suorita batch-simulaatio
+            excel_path = batch_sim.run_batch_simulation(
+                simulation_func=simulation_wrapper,
+                parameters=parameters,
+                progress_callback=progress_callback,
+            )
+
+            # Valmis
+            if batch_sim.cancelled:
+                self.batch_progress_text.value = f"Keskeytetty. Tulokset: {excel_path}"
+            else:
+                self.batch_progress_text.value = f"✅ Valmis! Tulokset: {excel_path}"
+
+        except Exception as ex:
+            self.batch_progress_text.value = f"❌ Virhe: {str(ex)}"
+
+        finally:
+            # Palauta UI
+            self.batch_button.visible = True
+            self.start_button.disabled = False
+            self.batch_cancel_button.visible = False
+            self.page.update()
+
+    def on_batch_cancel(self, e):
+        """Keskeytä batch-simulaatio"""
+        if hasattr(self, "_batch_sim") and self._batch_sim:
+            self._batch_sim.cancel()
+            self.batch_progress_text.value = "Keskeytetään..."
+            self.page.update()
