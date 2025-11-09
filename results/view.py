@@ -6,6 +6,9 @@ from pathlib import Path
 
 import flet as ft
 
+from analysis.database_manager import DatabaseManager
+from analysis.results_generator import ResultsGenerator
+from results.excel_exporter import ExcelExporter
 from results.generate_results import _build_output_rows, _create_excel_file
 
 # Note: this module implements the whole "Tulokset" page and its handlers
@@ -24,6 +27,79 @@ def try_parse_date(s: str):
             return datetime.datetime.strptime(s, "%Y-%m-%d").date()
         except Exception:
             return None
+
+
+def generate_results_to_database(app, progress_callback=None):
+    """
+    Generoi tulokset tietokantaan ResultsGeneratorilla.
+    
+    Returns:
+        Tuple[int, float, str]: (rows_inserted, processing_time, error_msg)
+    """
+    try:
+        # Hae polut
+        analysis_db = "analysis.db"
+        stock_db = "stock_data.db"
+        
+        if not os.path.exists(analysis_db):
+            return 0, 0.0, f"Analysis-tietokantaa ei löydy: {analysis_db}"
+        
+        if not os.path.exists(stock_db):
+            return 0, 0.0, f"Stock-tietokantaa ei löydy: {stock_db}"
+        
+        # Luo generaattori
+        db_manager = DatabaseManager(analysis_db)
+        generator = ResultsGenerator(db_manager, stock_db)
+        
+        # Generoi
+        rows, time_taken = generator.generate_results(progress_callback=progress_callback)
+        
+        return rows, time_taken, None
+        
+    except Exception as e:
+        return 0, 0.0, str(e)
+
+
+def clear_results_database(app):
+    """
+    Tyhjennä results_data taulu.
+    
+    Returns:
+        Tuple[int, str]: (deleted_count, error_msg)
+    """
+    try:
+        analysis_db = "analysis.db"
+        
+        if not os.path.exists(analysis_db):
+            return 0, f"Analysis-tietokantaa ei löydy: {analysis_db}"
+        
+        db_manager = DatabaseManager(analysis_db)
+        deleted_count = db_manager.clear_results_data()
+        
+        return deleted_count, None
+        
+    except Exception as e:
+        return 0, str(e)
+
+
+def get_results_metadata(app):
+    """
+    Hae viimeisin metadata results_metadata taulusta.
+    
+    Returns:
+        dict tai None
+    """
+    try:
+        analysis_db = "analysis.db"
+        
+        if not os.path.exists(analysis_db):
+            return None
+        
+        db_manager = DatabaseManager(analysis_db)
+        return db_manager.get_latest_results_metadata()
+        
+    except Exception:
+        return None
 
 
 def create_results_view(app) -> ft.View:
@@ -581,25 +657,316 @@ def create_results_view(app) -> ft.View:
                     else:
                         e.page.update()
 
-        generate_btn = ft.ElevatedButton(
-            "🚀 Generoi tulokset",
+        # UUDET PAINIKKEET: Generoi tietokantaan + Vie Exceliin + Tyhjennä
+        
+        def generoi_tietokantaan_click(e):
+            """Generoi tulokset tietokantaan"""
+            progress_dialog = None
+            progress_title = ft.Text("Generoidaan tuloksia tietokantaan")
+            progress_text = ft.Text("Aloitetaan...")
+            progress_bar = ft.ProgressBar(width=400, value=0)
+            
+            try:
+                progress_dialog = ft.AlertDialog(
+                    modal=True,
+                    title=progress_title,
+                    content=ft.Column(
+                        [
+                            progress_text,
+                            progress_bar,
+                        ],
+                        tight=True,
+                        height=80,
+                    ),
+                )
+                
+                app.page.overlay.append(progress_dialog)
+                progress_dialog.open = True
+                e.page.update()
+                
+                def progress_callback(ticker, current, total):
+                    """Päivitä progress bar joka 10. osake"""
+                    try:
+                        progress_text.value = f"Käsitellään: {ticker} ({current}/{total})"
+                        progress_bar.value = current / total if total > 0 else 0
+                        e.page.update()
+                    except Exception:
+                        pass
+                
+                def run_generation():
+                    rows, time_taken, error = generate_results_to_database(app, progress_callback)
+                    
+                    def show_result():
+                        try:
+                            progress_dialog.open = False
+                            e.page.update()
+                            
+                            if error:
+                                result_dialog = ft.AlertDialog(
+                                    title=ft.Text("Virhe"),
+                                    content=ft.Text(f"Tulosten generointi epäonnistui:\n{error}"),
+                                    actions=[ft.TextButton("OK", on_click=lambda _: app.close_dialog(result_dialog))],
+                                )
+                            else:
+                                result_dialog = ft.AlertDialog(
+                                    title=ft.Text("✅ Valmis!"),
+                                    content=ft.Text(
+                                        f"Generoitu {rows} riviä tietokantaan\n"
+                                        f"Aikaa kului: {time_taken:.2f}s"
+                                    ),
+                                    actions=[ft.TextButton("OK", on_click=lambda _: app.close_dialog(result_dialog))],
+                                )
+                            
+                            app.page.overlay.append(result_dialog)
+                            result_dialog.open = True
+                            
+                            # Päivitä metadata-näyttö
+                            metadata = get_results_metadata(app)
+                            if metadata and hasattr(app, 'results_metadata_text'):
+                                gen_time = metadata.get("generated_at", "")
+                                total = metadata.get("total_rows", 0)
+                                app.results_metadata_text.value = f"Tulokset generoitu: {gen_time} ({total} riviä)"
+                            
+                            e.page.update()
+                        except Exception as ex:
+                            print(f"Error showing result: {ex}")
+                    
+                    e.page.run_task(show_result)
+                
+                threading.Thread(target=run_generation, daemon=True).start()
+                
+            except Exception as ex:
+                if progress_dialog:
+                    progress_dialog.open = False
+                e.page.snack_bar = ft.SnackBar(ft.Text(f"Virhe: {ex}"), open=True)
+                e.page.update()
+        
+        def vie_exceliin_click(e):
+            """Vie results_data Exceliin"""
+            try:
+                # Tarkista onko tuloksia
+                metadata = get_results_metadata(app)
+                if not metadata or metadata.get("total_rows", 0) == 0:
+                    e.page.snack_bar = ft.SnackBar(
+                        ft.Text("Ei tuloksia vietäväksi. Generoi ensin tulokset tietokantaan."),
+                        open=True
+                    )
+                    e.page.update()
+                    return
+                
+                # Kysy tiedostonimi
+                def save_excel(save_e):
+                    try:
+                        if hasattr(app, 'file_picker') and app.file_picker.result:
+                            save_path = app.file_picker.result.path
+                            
+                            # Varmista .xlsx-pääte
+                            if not save_path.endswith('.xlsx'):
+                                save_path += '.xlsx'
+                            
+                            # Hae valitut patternit checkboxeista
+                            pattern_mapping = {
+                                "Hammer": 1,
+                                "Bullish Engulfing": 2,
+                                "Piercing Pattern": 3,
+                                "Three White Soldiers": 4,
+                                "Morning Star": 5,
+                                "Dragonfly Doji": 6,
+                                "Bullish Divergence": 7,
+                                "Bearish Divergence": 8,
+                            }
+                            
+                            selected_patterns = []
+                            for cb in app.results_checkboxes:
+                                if cb.value and cb.label in pattern_mapping:
+                                    selected_patterns.append(pattern_mapping[cb.label])
+                            
+                            # Jos ei valintoja, vie kaikki
+                            if not selected_patterns:
+                                selected_patterns = None
+                            
+                            # Vie Excel
+                            exporter = ExcelExporter("analysis.db")
+                            success, message = exporter.export_to_excel(
+                                save_path,
+                                selected_patterns=selected_patterns
+                            )
+                            
+                            if success:
+                                e.page.snack_bar = ft.SnackBar(
+                                    ft.Text(f"✅ {message}"),
+                                    open=True
+                                )
+                            else:
+                                e.page.snack_bar = ft.SnackBar(
+                                    ft.Text(f"❌ {message}"),
+                                    open=True
+                                )
+                            e.page.update()
+                    except Exception as ex:
+                        e.page.snack_bar = ft.SnackBar(
+                            ft.Text(f"Virhe tallennuksessa: {ex}"),
+                            open=True
+                        )
+                        e.page.update()
+                
+                # Avaa tiedostovalitsin
+                if hasattr(app, 'file_picker'):
+                    app.file_picker.save_file(
+                        dialog_title="Tallenna Excel-tiedosto",
+                        file_name="tulokset.xlsx",
+                        allowed_extensions=["xlsx"],
+                    )
+                    # Odota käyttäjän valintaa ja kutsu save_excel
+                    # HUOM: Tämä toimii Fletin async-mallilla
+                    e.page.update()
+                else:
+                    # Fallback: tallenna oletuspolkuun
+                    default_path = "tulokset.xlsx"
+                    exporter = ExcelExporter("analysis.db")
+                    success, message = exporter.export_to_excel(default_path)
+                    
+                    if success:
+                        e.page.snack_bar = ft.SnackBar(
+                            ft.Text(f"✅ {message}"),
+                            open=True
+                        )
+                    else:
+                        e.page.snack_bar = ft.SnackBar(
+                            ft.Text(f"❌ {message}"),
+                            open=True
+                        )
+                    e.page.update()
+                    
+            except Exception as ex:
+                e.page.snack_bar = ft.SnackBar(
+                    ft.Text(f"Virhe: {ex}"),
+                    open=True
+                )
+                e.page.update()
+        
+        def tyhjenna_tulokset_click(e):
+            """Tyhjennä results_data vahvistuksen jälkeen"""
+            def confirm_clear(confirm_e):
+                if confirm_e.control.text == "Kyllä":
+                    deleted, error = clear_results_database(app)
+                    
+                    if error:
+                        e.page.snack_bar = ft.SnackBar(
+                            ft.Text(f"Virhe: {error}"),
+                            open=True
+                        )
+                    else:
+                        e.page.snack_bar = ft.SnackBar(
+                            ft.Text(f"✅ Poistettu {deleted} riviä"),
+                            open=True
+                        )
+                        
+                        # Päivitä metadata-näyttö
+                        if hasattr(app, 'results_metadata_text'):
+                            app.results_metadata_text.value = "Ei generoituja tuloksia"
+                
+                app.close_dialog(confirm_dialog)
+                e.page.update()
+            
+            confirm_dialog = ft.AlertDialog(
+                title=ft.Text("Vahvista tyhjennys"),
+                content=ft.Text("Haluatko varmasti tyhjentää kaikki generoidut tulokset tietokannasta?"),
+                actions=[
+                    ft.TextButton("Kyllä", on_click=confirm_clear),
+                    ft.TextButton("Peruuta", on_click=lambda _: app.close_dialog(confirm_dialog)),
+                ],
+            )
+            
+            app.page.overlay.append(confirm_dialog)
+            confirm_dialog.open = True
+            e.page.update()
+        
+        # Luo uudet painikkeet
+        generoi_db_btn = ft.ElevatedButton(
+            "� Generoi tulokset",
+            icon=ft.Icons.DATABASE,
+            bgcolor=ft.colors.BLUE_700,
+            color=ft.colors.WHITE,
+            on_click=generoi_tietokantaan_click,
+            width=220,
+        )
+        
+        vie_excel_btn = ft.ElevatedButton(
+            "📊 Vie Exceliin",
             icon=ft.Icons.TABLE_CHART,
             bgcolor=ft.colors.GREEN_600,
+            color=ft.colors.WHITE,
+            on_click=vie_exceliin_click,
+            width=220,
+        )
+        
+        tyhjenna_btn = ft.ElevatedButton(
+            "🗑️ Tyhjennä tulokset",
+            icon=ft.Icons.DELETE_OUTLINE,
+            bgcolor=ft.colors.RED_700,
+            color=ft.colors.WHITE,
+            on_click=tyhjenna_tulokset_click,
+            width=220,
+        )
+        
+        # Metadata-näyttö
+        metadata = get_results_metadata(app)
+        if metadata:
+            gen_time = metadata.get("generated_at", "")
+            total = metadata.get("total_rows", 0)
+            metadata_text = f"Tulokset generoitu: {gen_time} ({total} riviä)"
+        else:
+            metadata_text = "Ei generoituja tuloksia"
+        
+        app.results_metadata_text = ft.Text(
+            metadata_text,
+            size=12,
+            color=ft.colors.GREY_700,
+            italic=True,
+        )
+        
+        # Vanha painike (pidetään vielä)
+        generate_btn = ft.ElevatedButton(
+            "🚀 Generoi tulokset (vanha)",
+            icon=ft.Icons.TABLE_CHART,
+            bgcolor=ft.colors.ORANGE_600,
             color=ft.colors.WHITE,
             disabled=False,
             on_click=paivita_excel_cache_click,  # Käytä uutta funktiota
             width=220,
+            visible=False,  # Piilotetaan toistaiseksi
         )
-    except Exception:
-        generate_btn = ft.ElevatedButton(
-            "🚀 Päivitä Results.xlsx",
+    except Exception as ex:
+        # Jos vanha generate-funktio ei toimi, luodaan placeholder-painikkeet
+        print(f"Warning: Old generate function failed: {ex}")
+        generoi_db_btn = ft.ElevatedButton(
+            "� Generoi tulokset",
+            icon=ft.Icons.DATABASE,
+            bgcolor=ft.colors.BLUE_700,
+            color=ft.colors.WHITE,
+            disabled=True,
+            tooltip="Virhe: " + str(ex),
+            width=220,
+        )
+        vie_excel_btn = ft.ElevatedButton(
+            "📊 Vie Exceliin",
             icon=ft.Icons.TABLE_CHART,
             bgcolor=ft.colors.GREEN_600,
             color=ft.colors.WHITE,
             disabled=True,
-            tooltip="Ei vielä käytössä",
             width=220,
         )
+        tyhjenna_btn = ft.ElevatedButton(
+            "🗑️ Tyhjennä tulokset",
+            icon=ft.Icons.DELETE_OUTLINE,
+            bgcolor=ft.colors.RED_700,
+            color=ft.colors.WHITE,
+            disabled=True,
+            width=220,
+        )
+        app.results_metadata_text = ft.Text("Virhe ladattaessa", size=12, color=ft.colors.RED)
+    
     app.results_banner = ft.Text(value="", color=ft.colors.BLUE_600)
 
     view = ft.View(
@@ -621,8 +988,19 @@ def create_results_view(app) -> ft.View:
                             color=ft.Colors.GREY_600,
                         ),
                         ft.Container(height=16),
+                        # Metadata-näyttö
                         ft.Row(
-                            [generate_btn],
+                            [app.results_metadata_text],
+                            alignment=ft.MainAxisAlignment.CENTER,
+                        ),
+                        ft.Container(height=8),
+                        # Uudet painikkeet
+                        ft.Row(
+                            [
+                                generoi_db_btn,
+                                vie_excel_btn,
+                                tyhjenna_btn,
+                            ],
                             alignment=ft.MainAxisAlignment.CENTER,
                             spacing=20,
                         ),

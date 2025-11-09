@@ -112,6 +112,133 @@ class DatabaseManager:
                 "CREATE INDEX IF NOT EXISTS idx_div_date ON divergence_data(date)"
             )
 
+            # Luo results_data taulu
+            # Tallentaa prosessoidut tulokset (vain kynttiläkuviopäivät)
+            # 84 saraketta (83 alkuperäistä + weekday)
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS results_data (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT NOT NULL,
+                    date TEXT NOT NULL,
+                    candle_pattern INTEGER,
+                    signal_strength REAL,
+                    t_1_alin REAL,
+                    t_1_ylin REAL,
+                    t_1_bodi REAL,
+                    t_1_bodi_colour INTEGER,
+                    t0_alin REAL,
+                    t0_ylin REAL,
+                    t0_bodi REAL,
+                    t0_bodi_colour INTEGER,
+                    t1_alin REAL,
+                    t1_ylin REAL,
+                    t1_bodi REAL,
+                    t1_bodi_colour INTEGER,
+                    t_2 REAL,
+                    t_5 REAL,
+                    t_10 REAL,
+                    t_15 REAL,
+                    t_20 REAL,
+                    t_2_hajonta REAL,
+                    t_5_hajonta REAL,
+                    t_10_hajonta REAL,
+                    t_15_hajonta REAL,
+                    t_20_hajonta REAL,
+                    t2 REAL,
+                    t5 REAL,
+                    t10 REAL,
+                    t20 REAL,
+                    t_2_volyymi REAL,
+                    t_5_volyymi REAL,
+                    t_10_volyymi REAL,
+                    t_15_volyymi REAL,
+                    t_20_volyymi REAL,
+                    t0_volyymi REAL,
+                    t2_volyymi REAL,
+                    t5_volyymi REAL,
+                    t10_volyymi REAL,
+                    t20_volyymi REAL,
+                    t_2_5p_liukuva REAL,
+                    t_2_10p_liukuva REAL,
+                    t_2_20p_liukuva REAL,
+                    t_5_5p_liukuva REAL,
+                    t_5_10p_liukuva REAL,
+                    t_5_20p_liukuva REAL,
+                    t_10_5p_liukuva REAL,
+                    t_10_10p_liukuva REAL,
+                    t_10_20p_liukuva REAL,
+                    t_15_5p_liukuva REAL,
+                    t_15_10p_liukuva REAL,
+                    t_15_20p_liukuva REAL,
+                    t_20_5p_liukuva REAL,
+                    t_20_10p_liukuva REAL,
+                    t_20_20p_liukuva REAL,
+                    t0_50p_liukuva REAL,
+                    t0_200p_liukuva REAL,
+                    SPX_0 REAL,
+                    SPX_2 REAL,
+                    SPX_5 REAL,
+                    SPX_10 REAL,
+                    SPX_15 REAL,
+                    SPX_20 REAL,
+                    SPX2 REAL,
+                    SPX5 REAL,
+                    SPX10 REAL,
+                    SPX15 REAL,
+                    SPX20 REAL,
+                    NDX_0 REAL,
+                    NDX_2 REAL,
+                    NDX_5 REAL,
+                    NDX_10 REAL,
+                    NDX_15 REAL,
+                    NDX_20 REAL,
+                    NDX2 REAL,
+                    NDX5 REAL,
+                    NDX10 REAL,
+                    NDX15 REAL,
+                    NDX20 REAL,
+                    RSI14_t0 REAL,
+                    t0_close_norm REAL,
+                    bearish_divergence REAL,
+                    bullish_divergence REAL,
+                    weekday INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(ticker, date)
+                )
+            """
+            )
+
+            # Luo indeksit results_data tauluun
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_results_ticker ON results_data(ticker)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_results_date ON results_data(date)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_results_pattern ON results_data(candle_pattern)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_results_ticker_date ON results_data(ticker, date)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_results_pattern_date ON results_data(candle_pattern, date)"
+            )
+
+            # Luo results_metadata taulu
+            # Tallentaa metatiedot generoinneista
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS results_metadata (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    total_rows INTEGER,
+                    processing_time_seconds REAL
+                )
+            """
+            )
+
             conn.commit()
             self.logger.info("Analysis database initialized successfully")
 
@@ -745,6 +872,536 @@ class DatabaseManager:
         except Exception as e:
             self.logger.error(f"Check divergence data failed: {e}")
             return False
+
+    # ===== RESULTS_DATA METHODS =====
+
+    def get_results_max_date(self) -> Optional[str]:
+        """
+        Hae viimeisin päivämäärä results_data taulusta.
+
+        Returns:
+            Viimeisin päivämäärä tai None jos taulu tyhjä
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT MAX(date) FROM results_data")
+            result = cursor.fetchone()
+            return result[0] if result else None
+
+        except Exception as e:
+            self.logger.error(f"Get results max date failed: {e}")
+            return None
+
+    def get_existing_results_tickers(self) -> set:
+        """
+        Hae kaikki tickerit joilla on jo dataa results_data taulussa.
+
+        Returns:
+            Set tickereistä
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT DISTINCT ticker FROM results_data")
+            return {row[0] for row in cursor.fetchall()}
+
+        except Exception as e:
+            self.logger.error(f"Get existing results tickers failed: {e}")
+            return set()
+
+    def insert_result_data(
+        self,
+        ticker: str,
+        date: str,
+        candle_pattern: int,
+        signal_strength: Optional[float],
+        t_1_alin: Optional[float],
+        t_1_ylin: Optional[float],
+        t_1_bodi: Optional[float],
+        t_1_bodi_colour: Optional[int],
+        t0_alin: Optional[float],
+        t0_ylin: Optional[float],
+        t0_bodi: Optional[float],
+        t0_bodi_colour: Optional[int],
+        t1_alin: Optional[float],
+        t1_ylin: Optional[float],
+        t1_bodi: Optional[float],
+        t1_bodi_colour: Optional[int],
+        t_2: Optional[float],
+        t_5: Optional[float],
+        t_10: Optional[float],
+        t_15: Optional[float],
+        t_20: Optional[float],
+        t_2_hajonta: Optional[float],
+        t_5_hajonta: Optional[float],
+        t_10_hajonta: Optional[float],
+        t_15_hajonta: Optional[float],
+        t_20_hajonta: Optional[float],
+        t2: Optional[float],
+        t5: Optional[float],
+        t10: Optional[float],
+        t20: Optional[float],
+        t_2_volyymi: Optional[float],
+        t_5_volyymi: Optional[float],
+        t_10_volyymi: Optional[float],
+        t_15_volyymi: Optional[float],
+        t_20_volyymi: Optional[float],
+        t0_volyymi: Optional[float],
+        t2_volyymi: Optional[float],
+        t5_volyymi: Optional[float],
+        t10_volyymi: Optional[float],
+        t20_volyymi: Optional[float],
+        t_2_5p_liukuva: Optional[float],
+        t_2_10p_liukuva: Optional[float],
+        t_2_20p_liukuva: Optional[float],
+        t_5_5p_liukuva: Optional[float],
+        t_5_10p_liukuva: Optional[float],
+        t_5_20p_liukuva: Optional[float],
+        t_10_5p_liukuva: Optional[float],
+        t_10_10p_liukuva: Optional[float],
+        t_10_20p_liukuva: Optional[float],
+        t_15_5p_liukuva: Optional[float],
+        t_15_10p_liukuva: Optional[float],
+        t_15_20p_liukuva: Optional[float],
+        t_20_5p_liukuva: Optional[float],
+        t_20_10p_liukuva: Optional[float],
+        t_20_20p_liukuva: Optional[float],
+        t0_50p_liukuva: Optional[float],
+        t0_200p_liukuva: Optional[float],
+        SPX_0: Optional[float],
+        SPX_2: Optional[float],
+        SPX_5: Optional[float],
+        SPX_10: Optional[float],
+        SPX_15: Optional[float],
+        SPX_20: Optional[float],
+        SPX2: Optional[float],
+        SPX5: Optional[float],
+        SPX10: Optional[float],
+        SPX15: Optional[float],
+        SPX20: Optional[float],
+        NDX_0: Optional[float],
+        NDX_2: Optional[float],
+        NDX_5: Optional[float],
+        NDX_10: Optional[float],
+        NDX_15: Optional[float],
+        NDX_20: Optional[float],
+        NDX2: Optional[float],
+        NDX5: Optional[float],
+        NDX10: Optional[float],
+        NDX15: Optional[float],
+        NDX20: Optional[float],
+        RSI14_t0: Optional[float],
+        t0_close_norm: Optional[float],
+        bearish_divergence: Optional[float],
+        bullish_divergence: Optional[float],
+        weekday: int,
+    ) -> bool:
+        """
+        Lisää rivi results_data tauluun.
+
+        Returns:
+            True jos onnistui
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO results_data
+                (ticker, date, candle_pattern, signal_strength,
+                 t_1_alin, t_1_ylin, t_1_bodi, t_1_bodi_colour,
+                 t0_alin, t0_ylin, t0_bodi, t0_bodi_colour,
+                 t1_alin, t1_ylin, t1_bodi, t1_bodi_colour,
+                 t_2, t_5, t_10, t_15, t_20,
+                 t_2_hajonta, t_5_hajonta, t_10_hajonta, t_15_hajonta, t_20_hajonta,
+                 t2, t5, t10, t20,
+                 t_2_volyymi, t_5_volyymi, t_10_volyymi, t_15_volyymi, t_20_volyymi,
+                 t0_volyymi, t2_volyymi, t5_volyymi, t10_volyymi, t20_volyymi,
+                 t_2_5p_liukuva, t_2_10p_liukuva, t_2_20p_liukuva,
+                 t_5_5p_liukuva, t_5_10p_liukuva, t_5_20p_liukuva,
+                 t_10_5p_liukuva, t_10_10p_liukuva, t_10_20p_liukuva,
+                 t_15_5p_liukuva, t_15_10p_liukuva, t_15_20p_liukuva,
+                 t_20_5p_liukuva, t_20_10p_liukuva, t_20_20p_liukuva,
+                 t0_50p_liukuva, t0_200p_liukuva,
+                 SPX_0, SPX_2, SPX_5, SPX_10, SPX_15, SPX_20,
+                 SPX2, SPX5, SPX10, SPX15, SPX20,
+                 NDX_0, NDX_2, NDX_5, NDX_10, NDX_15, NDX_20,
+                 NDX2, NDX5, NDX10, NDX15, NDX20,
+                 RSI14_t0, t0_close_norm, bearish_divergence, bullish_divergence, weekday)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?)
+                """,
+                (
+                    ticker,
+                    date,
+                    candle_pattern,
+                    signal_strength,
+                    t_1_alin,
+                    t_1_ylin,
+                    t_1_bodi,
+                    t_1_bodi_colour,
+                    t0_alin,
+                    t0_ylin,
+                    t0_bodi,
+                    t0_bodi_colour,
+                    t1_alin,
+                    t1_ylin,
+                    t1_bodi,
+                    t1_bodi_colour,
+                    t_2,
+                    t_5,
+                    t_10,
+                    t_15,
+                    t_20,
+                    t_2_hajonta,
+                    t_5_hajonta,
+                    t_10_hajonta,
+                    t_15_hajonta,
+                    t_20_hajonta,
+                    t2,
+                    t5,
+                    t10,
+                    t20,
+                    t_2_volyymi,
+                    t_5_volyymi,
+                    t_10_volyymi,
+                    t_15_volyymi,
+                    t_20_volyymi,
+                    t0_volyymi,
+                    t2_volyymi,
+                    t5_volyymi,
+                    t10_volyymi,
+                    t20_volyymi,
+                    t_2_5p_liukuva,
+                    t_2_10p_liukuva,
+                    t_2_20p_liukuva,
+                    t_5_5p_liukuva,
+                    t_5_10p_liukuva,
+                    t_5_20p_liukuva,
+                    t_10_5p_liukuva,
+                    t_10_10p_liukuva,
+                    t_10_20p_liukuva,
+                    t_15_5p_liukuva,
+                    t_15_10p_liukuva,
+                    t_15_20p_liukuva,
+                    t_20_5p_liukuva,
+                    t_20_10p_liukuva,
+                    t_20_20p_liukuva,
+                    t0_50p_liukuva,
+                    t0_200p_liukuva,
+                    SPX_0,
+                    SPX_2,
+                    SPX_5,
+                    SPX_10,
+                    SPX_15,
+                    SPX_20,
+                    SPX2,
+                    SPX5,
+                    SPX10,
+                    SPX15,
+                    SPX20,
+                    NDX_0,
+                    NDX_2,
+                    NDX_5,
+                    NDX_10,
+                    NDX_15,
+                    NDX_20,
+                    NDX2,
+                    NDX5,
+                    NDX10,
+                    NDX15,
+                    NDX20,
+                    RSI14_t0,
+                    t0_close_norm,
+                    bearish_divergence,
+                    bullish_divergence,
+                    weekday,
+                ),
+            )
+            conn.commit()
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Insert result data failed: {e}")
+            return False
+
+    def bulk_insert_results(self, results: List[dict], batch_size: int = 100) -> int:
+        """
+        Lisää useita rivejä results_data tauluun batch-erinä.
+
+        Args:
+            results: Lista dictionaryja, joissa avaimet vastaavat sarakkeita
+            batch_size: Montako riviä commitoidaan kerralla
+
+        Returns:
+            Lisättyjen rivien määrä
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            inserted = 0
+
+            for i in range(0, len(results), batch_size):
+                batch = results[i : i + batch_size]
+
+                for result in batch:
+                    # Debug: laske tuple pituus
+                    values_tuple = (
+                        result["ticker"],
+                        result["date"],
+                        result["candle_pattern"],
+                        result.get("signal_strength"),
+                        result.get("t_1_alin"),
+                        result.get("t_1_ylin"),
+                        result.get("t_1_bodi"),
+                        result.get("t_1_bodi_colour"),
+                        result.get("t0_alin"),
+                        result.get("t0_ylin"),
+                        result.get("t0_bodi"),
+                        result.get("t0_bodi_colour"),
+                        result.get("t1_alin"),
+                        result.get("t1_ylin"),
+                        result.get("t1_bodi"),
+                        result.get("t1_bodi_colour"),
+                        result.get("t_2"),
+                        result.get("t_5"),
+                        result.get("t_10"),
+                        result.get("t_15"),
+                        result.get("t_20"),
+                        result.get("t_2_hajonta"),
+                        result.get("t_5_hajonta"),
+                        result.get("t_10_hajonta"),
+                        result.get("t_15_hajonta"),
+                        result.get("t_20_hajonta"),
+                        result.get("t2"),
+                        result.get("t5"),
+                        result.get("t10"),
+                        result.get("t20"),
+                        result.get("t_2_volyymi"),
+                        result.get("t_5_volyymi"),
+                        result.get("t_10_volyymi"),
+                        result.get("t_15_volyymi"),
+                        result.get("t_20_volyymi"),
+                        result.get("t0_volyymi"),
+                        result.get("t2_volyymi"),
+                        result.get("t5_volyymi"),
+                        result.get("t10_volyymi"),
+                        result.get("t20_volyymi"),
+                        result.get("t_2_5p_liukuva"),
+                        result.get("t_2_10p_liukuva"),
+                        result.get("t_2_20p_liukuva"),
+                        result.get("t_5_5p_liukuva"),
+                        result.get("t_5_10p_liukuva"),
+                        result.get("t_5_20p_liukuva"),
+                        result.get("t_10_5p_liukuva"),
+                        result.get("t_10_10p_liukuva"),
+                        result.get("t_10_20p_liukuva"),
+                        result.get("t_15_5p_liukuva"),
+                        result.get("t_15_10p_liukuva"),
+                        result.get("t_15_20p_liukuva"),
+                        result.get("t_20_5p_liukuva"),
+                        result.get("t_20_10p_liukuva"),
+                        result.get("t_20_20p_liukuva"),
+                        result.get("t0_50p_liukuva"),
+                        result.get("t0_200p_liukuva"),
+                        result.get("SPX_0"),
+                        result.get("SPX_2"),
+                        result.get("SPX_5"),
+                        result.get("SPX_10"),
+                        result.get("SPX_15"),
+                        result.get("SPX_20"),
+                        result.get("SPX2"),
+                        result.get("SPX5"),
+                        result.get("SPX10"),
+                        result.get("SPX15"),
+                        result.get("SPX20"),
+                        result.get("NDX_0"),
+                        result.get("NDX_2"),
+                        result.get("NDX_5"),
+                        result.get("NDX_10"),
+                        result.get("NDX_15"),
+                        result.get("NDX_20"),
+                        result.get("NDX2"),
+                        result.get("NDX5"),
+                        result.get("NDX10"),
+                        result.get("NDX15"),
+                        result.get("NDX20"),
+                        result.get("RSI14_t0"),
+                        result.get("t0_close_norm"),
+                        result.get("bearish_divergence"),
+                        result.get("bullish_divergence"),
+                        result.get("weekday"),
+                    )
+
+                    if len(values_tuple) != 84:
+                        self.logger.error(
+                            f"VALUES tuple length is {len(values_tuple)}, expected 84"
+                        )
+                        self.logger.error(f"Result keys: {sorted(result.keys())}")
+
+                    cursor.execute(
+                        """
+                        INSERT OR REPLACE INTO results_data
+                        (ticker, date, candle_pattern, signal_strength,
+                         t_1_alin, t_1_ylin, t_1_bodi, t_1_bodi_colour,
+                         t0_alin, t0_ylin, t0_bodi, t0_bodi_colour,
+                         t1_alin, t1_ylin, t1_bodi, t1_bodi_colour,
+                         t_2, t_5, t_10, t_15, t_20,
+                         t_2_hajonta, t_5_hajonta, t_10_hajonta, t_15_hajonta, t_20_hajonta,
+                         t2, t5, t10, t20,
+                         t_2_volyymi, t_5_volyymi, t_10_volyymi, t_15_volyymi, t_20_volyymi,
+                         t0_volyymi, t2_volyymi, t5_volyymi, t10_volyymi, t20_volyymi,
+                         t_2_5p_liukuva, t_2_10p_liukuva, t_2_20p_liukuva,
+                         t_5_5p_liukuva, t_5_10p_liukuva, t_5_20p_liukuva,
+                         t_10_5p_liukuva, t_10_10p_liukuva, t_10_20p_liukuva,
+                         t_15_5p_liukuva, t_15_10p_liukuva, t_15_20p_liukuva,
+                         t_20_5p_liukuva, t_20_10p_liukuva, t_20_20p_liukuva,
+                         t0_50p_liukuva, t0_200p_liukuva,
+                         SPX_0, SPX_2, SPX_5, SPX_10, SPX_15, SPX_20,
+                         SPX2, SPX5, SPX10, SPX15, SPX20,
+                         NDX_0, NDX_2, NDX_5, NDX_10, NDX_15, NDX_20,
+                         NDX2, NDX5, NDX10, NDX15, NDX20,
+                         RSI14_t0, t0_close_norm, bearish_divergence, bullish_divergence, weekday)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                                ?, ?, ?, ?)
+                        """,
+                        values_tuple,
+                    )
+                    inserted += 1
+
+                conn.commit()
+                self.logger.debug(f"Committed batch {i // batch_size + 1}")
+
+            return inserted
+
+        except Exception as e:
+            self.logger.error(f"Bulk insert results failed: {e}")
+            if "85 values for 84 columns" in str(e):
+                self.logger.error(
+                    f"DEBUG: Last result dict had {len(result.keys())} keys"
+                )
+                self.logger.error(f"DEBUG: values_tuple length was {len(values_tuple)}")
+            return 0
+
+    def clear_results_data(self) -> int:
+        """
+        Tyhjennä results_data taulu.
+
+        Returns:
+            Poistettujen rivien määrä
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT COUNT(*) FROM results_data")
+            count = cursor.fetchone()[0]
+
+            cursor.execute("DELETE FROM results_data")
+            conn.commit()
+
+            self.logger.info(f"Cleared results_data: {count} rows deleted")
+            return count
+
+        except Exception as e:
+            self.logger.error(f"Clear results data failed: {e}")
+            return 0
+
+    def get_results_data(self, limit: Optional[int] = None) -> List[dict]:
+        """
+        Hae kaikki rivit results_data taulusta.
+
+        Args:
+            limit: Rajoita rivien määrää
+
+        Returns:
+            Lista dictionaryja
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            query = "SELECT * FROM results_data ORDER BY date DESC, ticker"
+            if limit:
+                query += f" LIMIT {limit}"
+
+            cursor.execute(query)
+            columns = [desc[0] for desc in cursor.description]
+
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+        except Exception as e:
+            self.logger.error(f"Get results data failed: {e}")
+            return []
+
+    def insert_results_metadata(self, total_rows: int, processing_time: float) -> bool:
+        """
+        Tallenna metatiedot generointiajosta.
+
+        Args:
+            total_rows: Generoitujen rivien määrä
+            processing_time: Käsittelyaika sekunneissa
+
+        Returns:
+            True jos onnistui
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                INSERT INTO results_metadata (total_rows, processing_time_seconds)
+                VALUES (?, ?)
+                """,
+                (total_rows, processing_time),
+            )
+            conn.commit()
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Insert results metadata failed: {e}")
+            return False
+
+    def get_latest_results_metadata(self) -> Optional[dict]:
+        """
+        Hae viimeisin metatietorivi.
+
+        Returns:
+            Dictionary tai None
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                SELECT * FROM results_metadata 
+                ORDER BY id DESC 
+                LIMIT 1
+                """
+            )
+
+            row = cursor.fetchone()
+            if not row:
+                return None
+
+            columns = [desc[0] for desc in cursor.description]
+            return dict(zip(columns, row))
+
+        except Exception as e:
+            self.logger.error(f"Get latest results metadata failed: {e}")
+            return None
 
 
 if __name__ == "__main__":
