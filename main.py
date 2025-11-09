@@ -316,6 +316,7 @@ class RawCandleApp:
             bgcolor=ft.Colors.BLUE_400,
             color=ft.Colors.WHITE,
             width=150,
+            tooltip="Lataa tickereiden lista CSV-tiedostosta analysoitavaksi",
         )
 
         self.candles_radio_group = ft.RadioGroup(
@@ -472,6 +473,7 @@ class RawCandleApp:
             color=ft.colors.WHITE,
             on_click=self.start_candles_analysis,
             width=220,
+            tooltip="Analysoi valitut kynttiläkuviot valituille tickereille ja tallenna tulokset CSV-tiedostoon",
         )
         # Result banner (mirrors main page `loading_text` style)
         self.candles_result_text = ft.Text(value="", color=ft.colors.BLUE_600)
@@ -749,6 +751,7 @@ class RawCandleApp:
             visible=False,
             bgcolor=ft.Colors.ORANGE_700,
             color=ft.Colors.WHITE,
+            tooltip="Generoi satunnaisia laskutrendi-tapahtumia testikäyttöön",
         )
 
         # Validation helpers for Candles random inputs
@@ -1020,6 +1023,7 @@ class RawCandleApp:
                                                                         width=220,
                                                                         bgcolor=ft.Colors.ORANGE_300,
                                                                         color=ft.Colors.WHITE,
+                                                                        tooltip="Aktivoi aikavälin valinta analyysiä varten",
                                                                     ),
                                                                 ],
                                                                 alignment=ft.MainAxisAlignment.START,
@@ -1239,6 +1243,7 @@ class RawCandleApp:
                 setattr(self.file_picker, "on_result", on_save_analysis_result),
                 self.file_picker.save_file(),
             ),
+            tooltip="Tallenna analyysin tulokset tiedostoon",
         )
 
         dlg = ft.AlertDialog(
@@ -1261,7 +1266,10 @@ class RawCandleApp:
     def create_database_view(self):
         """Return a minimal database view used by tests to find export button."""
         # Build a simple structure compatible with tests traversing controls
-        export_btn = ft.ElevatedButton("Siirrä tietokantaan")
+        export_btn = ft.ElevatedButton(
+            "Siirrä tietokantaan",
+            tooltip="Siirrä data tietokantaan",
+        )
         container = ft.Container(content=ft.Column([ft.Row([export_btn])]))
         view = type("View", (), {"controls": [container]})()
         return view
@@ -1851,6 +1859,7 @@ class RawCandleApp:
                 ),
                 self.file_picker.save_file(),
             ),
+            tooltip="Tallenna analyysin tulokset CSV-tiedostoon",
         )
 
         dlg = ft.AlertDialog(
@@ -2909,6 +2918,7 @@ Virheet: {error_count}"""
                                                         "Hae data kantaan",
                                                         icon=ft.Icons.DOWNLOAD,
                                                         on_click=self.fetch_stock_data,
+                                                        tooltip="Lataa osakkeen historiatiedot Yahoo Finance:sta ja tallenna tietokantaan",
                                                     ),
                                                 ],
                                                 alignment=ft.MainAxisAlignment.CENTER,
@@ -2921,12 +2931,14 @@ Virheet: {error_count}"""
                                                         icon=ft.Icons.TABLE_VIEW,
                                                         on_click=self.show_stock_data,
                                                         disabled=False,
+                                                        tooltip="Näytä osakkeen historiatiedot kannasta",
                                                     ),
                                                     ft.ElevatedButton(
                                                         "Hae ja tallenna tiedot tiedostosta",
                                                         icon=ft.Icons.FILE_DOWNLOAD,
                                                         on_click=self.fetch_and_save_from_file,
                                                         disabled=False,
+                                                        tooltip="Lataa osakkeiden tiedot tiedostosta ja tallenna tietokantaan",
                                                     ),
                                                 ],
                                                 alignment=ft.MainAxisAlignment.CENTER,
@@ -3027,6 +3039,7 @@ Virheet: {error_count}"""
                                 "Back to Home",
                                 icon=ft.Icons.HOME,
                                 on_click=lambda _: self.page.go("/"),
+                                tooltip="Palaa päänäkymään",
                             ),
                             ft.ElevatedButton(
                                 "Lopeta ohjelma",
@@ -3034,6 +3047,7 @@ Virheet: {error_count}"""
                                 on_click=self.quit_app,
                                 bgcolor=ft.Colors.RED_400,
                                 color=ft.Colors.WHITE,
+                                tooltip="Sulje sovellus",
                             ),
                         ],
                         horizontal_alignment=ft.CrossAxisAlignment.CENTER,

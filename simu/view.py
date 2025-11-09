@@ -282,6 +282,7 @@ class SimuView:
             on_click=self.on_start,
             bgcolor=ft.Colors.ORANGE_600,
             color=ft.Colors.WHITE,
+            tooltip="Käynnistä simulaatio valituilla parametreilla",
         )
 
         # Batch-simulaatio nappi
@@ -291,6 +292,7 @@ class SimuView:
             on_click=self.on_batch_start,
             bgcolor=ft.Colors.BLUE_700,
             color=ft.Colors.WHITE,
+            tooltip="Suorita simulaatio kaikille kannassa oleville osakkeille",
         )
 
         # Progressbar batch-simulaatiolle
@@ -303,6 +305,7 @@ class SimuView:
             bgcolor=ft.Colors.RED_700,
             color=ft.Colors.WHITE,
             visible=False,
+            tooltip="Pysäytä käynnissä oleva batch-simulaatio",
         )
 
         controls_row = ft.ResponsiveRow(

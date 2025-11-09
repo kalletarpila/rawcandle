@@ -222,6 +222,7 @@ class AnalysisView:
             on_click=self._delete_all_findings,
             bgcolor=ft.Colors.RED_700,
             color=ft.Colors.WHITE,
+            tooltip="Poista kaikki suodatetut analyysitulokset",
         )
 
         clear_db_btn = ft.ElevatedButton(
@@ -230,6 +231,7 @@ class AnalysisView:
             on_click=self._clear_database,
             bgcolor=ft.Colors.RED_900,
             color=ft.Colors.WHITE,
+            tooltip="Tyhjennä koko analyysitietokanta",
         )
 
         return ft.Row(
