@@ -145,7 +145,8 @@ class ResultsGenerator:
 
         Args:
             ticker_filter: Lista tickereistä joita haetaan (None = kaikki)
-            pattern_filter: Lista pattern-numeroista joita haetaan (None = kaikki)
+            pattern_filter: Lista pattern-nimistä joita haetaan (None = kaikki)
+                           Esim: ["Hammer", "Bullish Engulfing"]
 
         Returns:
             Lista findings dictejä
@@ -157,6 +158,26 @@ class ResultsGenerator:
             # Tarkista onko results_data taulussa dataa
             max_date = self.db_manager.get_results_max_date()
             existing_tickers = self.db_manager.get_existing_results_tickers()
+
+            # Jos pattern_filter on numeroita, muunna ne nimiksi
+            if pattern_filter and all(isinstance(p, int) for p in pattern_filter):
+                # Käänteinen mappaus: numero -> nimi
+                pattern_names = {
+                    1: "Hammer",
+                    2: "Bullish Engulfing",
+                    3: "Piercing Pattern",
+                    4: "Three White Soldiers",
+                    5: "Morning Star",
+                    6: "Dragonfly Doji",
+                    7: "Bullish Divergence",
+                    8: "Bearish Divergence",
+                }
+                pattern_filter = [
+                    pattern_names[num] for num in pattern_filter if num in pattern_names
+                ]
+                self.logger.debug(
+                    f"Converted pattern numbers to names: {pattern_filter}"
+                )
 
             # Rakenna suodatinlausekkeet
             filter_clauses = []
