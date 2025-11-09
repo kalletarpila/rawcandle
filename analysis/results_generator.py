@@ -49,13 +49,18 @@ class ResultsGenerator:
         self.logger = logging.getLogger(__name__)
 
     def generate_results(
-        self, progress_callback: Optional[Callable[[str, int, int], None]] = None
+        self,
+        progress_callback: Optional[Callable[[str, int, int], None]] = None,
+        ticker_filter: Optional[list] = None,
+        pattern_filter: Optional[list] = None,
     ) -> Tuple[int, float]:
         """
         Generoi tulokset tietokantaan inkrementaalisesti.
 
         Args:
             progress_callback: Callback(ticker, current, total)
+            ticker_filter: Lista tickereistä joille generoidaan (None = kaikki)
+            pattern_filter: Lista pattern-numeroista joita generoidaan (None = kaikki)
 
         Returns:
             (rows_inserted, processing_time_seconds)
@@ -66,7 +71,9 @@ class ResultsGenerator:
 
         try:
             # 1. Hae uudet findings
-            findings = self._fetch_new_findings()
+            findings = self._fetch_new_findings(
+                ticker_filter=ticker_filter, pattern_filter=pattern_filter
+            )
             if not findings:
                 self.logger.info("No new findings to process")
                 return 0, 0.0
@@ -80,8 +87,8 @@ class ResultsGenerator:
                 by_ticker.setdefault(ticker, []).append(finding)
 
             # 3. Prosessoi jokainen ticker
-            results = []
             total_tickers = len(by_ticker)
+            total_inserted = 0
 
             for idx, (ticker, ticker_findings) in enumerate(by_ticker.items(), 1):
                 if progress_callback:
@@ -93,24 +100,34 @@ class ResultsGenerator:
                     self.logger.warning(f"No stock data for {ticker}")
                     continue
 
-                # Prosessoi jokainen finding
+                # Prosessoi kaikki findingit tälle tickerille
+                ticker_results = []
                 for finding in ticker_findings:
                     result = self._process_finding(finding, stock_data, ticker)
                     if result:
-                        results.append(result)
+                        ticker_results.append(result)
 
-            # 4. Tallenna tietokantaan batch-erinä
-            if results:
-                inserted = self.db_manager.bulk_insert_results(results, batch_size=100)
-                self.logger.info(f"Inserted {inserted} rows to results_data")
+                # Tallenna tämän tickerin tulokset heti kantaan
+                if ticker_results:
+                    inserted = self.db_manager.bulk_insert_results(
+                        ticker_results, batch_size=100
+                    )
+                    total_inserted += inserted
+                    self.logger.debug(
+                        f"Inserted {inserted} rows for {ticker} ({idx}/{total_tickers})"
+                    )
 
-                # 5. Tallenna metadata
+            # 4. Tallenna metadata lopuksi
+            if total_inserted > 0:
                 processing_time = time.time() - start_time
                 self.db_manager.insert_results_metadata(
-                    total_rows=inserted, processing_time=processing_time
+                    total_rows=total_inserted, processing_time=processing_time
+                )
+                self.logger.info(
+                    f"Total inserted {total_inserted} rows to results_data"
                 )
 
-                return inserted, processing_time
+                return total_inserted, processing_time
 
             return 0, 0.0
 
@@ -118,9 +135,17 @@ class ResultsGenerator:
             self.logger.error(f"Generate results failed: {e}", exc_info=True)
             return 0, 0.0
 
-    def _fetch_new_findings(self) -> List[dict]:
+    def _fetch_new_findings(
+        self,
+        ticker_filter: Optional[list] = None,
+        pattern_filter: Optional[list] = None,
+    ) -> List[dict]:
         """
         Hae uudet findings inkrementaalisesti (two-query approach).
+
+        Args:
+            ticker_filter: Lista tickereistä joita haetaan (None = kaikki)
+            pattern_filter: Lista pattern-numeroista joita haetaan (None = kaikki)
 
         Returns:
             Lista findings dictejä
@@ -133,15 +158,35 @@ class ResultsGenerator:
             max_date = self.db_manager.get_results_max_date()
             existing_tickers = self.db_manager.get_existing_results_tickers()
 
+            # Rakenna suodatinlausekkeet
+            filter_clauses = []
+            filter_params = []
+
+            if ticker_filter:
+                placeholders = ",".join("?" * len(ticker_filter))
+                filter_clauses.append(f"ticker IN ({placeholders})")
+                filter_params.extend(ticker_filter)
+
+            if pattern_filter:
+                placeholders = ",".join("?" * len(pattern_filter))
+                filter_clauses.append(f"pattern IN ({placeholders})")
+                filter_params.extend(pattern_filter)
+
+            filter_sql = (
+                " AND " + " AND ".join(filter_clauses) if filter_clauses else ""
+            )
+
             if max_date is None:
                 # Ensimmäinen generointi - hae kaikki
                 self.logger.info("First generation - fetching all findings")
                 cursor.execute(
-                    """
+                    f"""
                     SELECT ticker, date, pattern, signal_strength, rsi14
                     FROM analysis_findings
+                    WHERE 1=1{filter_sql}
                     ORDER BY date DESC
-                    """
+                    """,
+                    filter_params,
                 )
             else:
                 # Inkrementaalinen päivitys - two-query approach
@@ -152,28 +197,50 @@ class ResultsGenerator:
                 if existing_tickers:
                     # Query 1: Uudet päivämäärät olemassa oleville tickereille
                     # Query 2: Kaikki datat uusille tickereille
-                    placeholders = ",".join("?" * len(existing_tickers))
+                    existing_placeholders = ",".join("?" * len(existing_tickers))
+
+                    query_params = [max_date] + list(existing_tickers)
+
+                    # Lisää ticker/pattern suodattimet
+                    if ticker_filter or pattern_filter:
+                        # Molemmat UNION-osiot tarvitsevat samat suodattimet
+                        cursor.execute(
+                            f"""
+                            SELECT ticker, date, pattern, signal_strength, rsi14
+                            FROM analysis_findings
+                            WHERE date > ?{filter_sql}
+                            UNION
+                            SELECT ticker, date, pattern, signal_strength, rsi14
+                            FROM analysis_findings
+                            WHERE ticker NOT IN ({existing_placeholders}){filter_sql}
+                            ORDER BY date DESC
+                            """,
+                            query_params + filter_params + filter_params,
+                        )
+                    else:
+                        cursor.execute(
+                            f"""
+                            SELECT ticker, date, pattern, signal_strength, rsi14
+                            FROM analysis_findings
+                            WHERE date > ?
+                            UNION
+                            SELECT ticker, date, pattern, signal_strength, rsi14
+                            FROM analysis_findings
+                            WHERE ticker NOT IN ({existing_placeholders})
+                            ORDER BY date DESC
+                            """,
+                            query_params,
+                        )
+                else:
+                    # Ei olemassa olevia tickereitä, hae kaikki
                     cursor.execute(
                         f"""
                         SELECT ticker, date, pattern, signal_strength, rsi14
                         FROM analysis_findings
-                        WHERE date > ?
-                        UNION
-                        SELECT ticker, date, pattern, signal_strength, rsi14
-                        FROM analysis_findings
-                        WHERE ticker NOT IN ({placeholders})
+                        WHERE 1=1{filter_sql}
                         ORDER BY date DESC
                         """,
-                        [max_date] + list(existing_tickers),
-                    )
-                else:
-                    # Ei olemassa olevia tickereitä, hae kaikki
-                    cursor.execute(
-                        """
-                        SELECT ticker, date, pattern, signal_strength, rsi14
-                        FROM analysis_findings
-                        ORDER BY date DESC
-                        """
+                        filter_params,
                     )
 
             rows = cursor.fetchall()

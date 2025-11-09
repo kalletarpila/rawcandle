@@ -28,9 +28,17 @@ def try_parse_date(s: str):
             return None
 
 
-def generate_results_to_database(app, progress_callback=None):
+def generate_results_to_database(
+    app, progress_callback=None, ticker_filter=None, pattern_filter=None
+):
     """
     Generoi tulokset tietokantaan ResultsGeneratorilla.
+
+    Args:
+        app: App instance
+        progress_callback: Progress callback function
+        ticker_filter: Lista tickereistä joille generoidaan (None = kaikki)
+        pattern_filter: Lista pattern-numeroista joita generoidaan (None = kaikki)
 
     Returns:
         Tuple[int, float, str]: (rows_inserted, processing_time, error_msg)
@@ -50,9 +58,11 @@ def generate_results_to_database(app, progress_callback=None):
         db_manager = DatabaseManager(analysis_db)
         generator = ResultsGenerator(db_manager, stock_db)
 
-        # Generoi
+        # Generoi suodattimilla
         rows, time_taken = generator.generate_results(
-            progress_callback=progress_callback
+            progress_callback=progress_callback,
+            ticker_filter=ticker_filter,
+            pattern_filter=pattern_filter,
         )
 
         return rows, time_taken, None
@@ -397,8 +407,6 @@ def create_results_view(app) -> ft.View:
                     except Exception:
                         pass
 
-                from results.excel_cache import ExcelResultsCache
-
                 # Hae ticker-filtteri app-objektista
                 ticker_filter = None
                 ticker_list = None
@@ -700,64 +708,113 @@ def create_results_view(app) -> ft.View:
                         pass
 
                 def run_generation():
+                    # Lue ticker-suodatin
+                    ticker_filter = None
+                    try:
+                        ticker_mode = app.results_radio_group.value
+                        ticker_value = (
+                            app.results_ticker_field.value.strip().upper()
+                            if app.results_ticker_field.value
+                            else ""
+                        )
+
+                        if ticker_mode == "single" and ticker_value:
+                            # Pilkulla erotettu lista
+                            if "," in ticker_value:
+                                ticker_filter = [
+                                    t.strip()
+                                    for t in ticker_value.split(",")
+                                    if t.strip()
+                                ]
+                            else:
+                                ticker_filter = [ticker_value]
+                    except Exception as ex:
+                        print(f"Virhe ticker-suodattimen lukemisessa: {ex}")
+
+                    # Lue pattern-suodatin
+                    pattern_filter = None
+                    try:
+                        pattern_mapping = {
+                            "Hammer": 1,
+                            "Bullish Engulfing": 2,
+                            "Piercing Pattern": 3,
+                            "Three White Soldiers": 4,
+                            "Morning Star": 5,
+                            "Dragonfly Doji": 6,
+                            "Bullish Divergence": 7,
+                            "Bearish Divergence": 8,
+                        }
+
+                        selected_patterns = []
+                        for cb in app.results_checkboxes:
+                            if cb.value and cb.label in pattern_mapping:
+                                selected_patterns.append(pattern_mapping[cb.label])
+
+                        if selected_patterns:
+                            pattern_filter = selected_patterns
+                    except Exception as ex:
+                        print(f"Virhe pattern-suodattimen lukemisessa: {ex}")
+
+                    # Generoi suodattimilla
                     rows, time_taken, error = generate_results_to_database(
-                        app, progress_callback
+                        app,
+                        progress_callback,
+                        ticker_filter=ticker_filter,
+                        pattern_filter=pattern_filter,
                     )
 
-                    def show_result():
-                        try:
-                            progress_dialog.open = False
-                            e.page.update()
+                    # Päivitä UI pääsäikeessä
+                    try:
+                        progress_dialog.open = False
+                        e.page.update()
 
-                            if error:
-                                result_dialog = ft.AlertDialog(
-                                    title=ft.Text("Virhe"),
-                                    content=ft.Text(
-                                        f"Tulosten generointi epäonnistui:\n{error}"
-                                    ),
-                                    actions=[
-                                        ft.TextButton(
-                                            "OK",
-                                            on_click=lambda _: app.close_dialog(
-                                                result_dialog
-                                            ),
-                                        )
-                                    ],
-                                )
-                            else:
-                                result_dialog = ft.AlertDialog(
-                                    title=ft.Text("✅ Valmis!"),
-                                    content=ft.Text(
-                                        f"Generoitu {rows} riviä tietokantaan\n"
-                                        f"Aikaa kului: {time_taken:.2f}s"
-                                    ),
-                                    actions=[
-                                        ft.TextButton(
-                                            "OK",
-                                            on_click=lambda _: app.close_dialog(
-                                                result_dialog
-                                            ),
-                                        )
-                                    ],
-                                )
+                        if error:
+                            result_dialog = ft.AlertDialog(
+                                title=ft.Text("Virhe"),
+                                content=ft.Text(
+                                    f"Tulosten generointi epäonnistui:\n{error}"
+                                ),
+                                actions=[
+                                    ft.TextButton(
+                                        "OK",
+                                        on_click=lambda _: app.close_dialog(
+                                            result_dialog
+                                        ),
+                                    )
+                                ],
+                            )
+                        else:
+                            result_dialog = ft.AlertDialog(
+                                title=ft.Text("✅ Valmis!"),
+                                content=ft.Text(
+                                    f"Generoitu {rows} riviä tietokantaan\n"
+                                    f"Aikaa kului: {time_taken:.2f}s"
+                                ),
+                                actions=[
+                                    ft.TextButton(
+                                        "OK",
+                                        on_click=lambda _: app.close_dialog(
+                                            result_dialog
+                                        ),
+                                    )
+                                ],
+                            )
 
-                            app.page.overlay.append(result_dialog)
-                            result_dialog.open = True
+                        app.page.overlay.append(result_dialog)
+                        result_dialog.open = True
 
-                            # Päivitä metadata-näyttö
-                            metadata = get_results_metadata(app)
-                            if metadata and hasattr(app, "results_metadata_text"):
-                                gen_time = metadata.get("generated_at", "")
-                                total = metadata.get("total_rows", 0)
-                                app.results_metadata_text.value = (
-                                    f"Tulokset generoitu: {gen_time} ({total} riviä)"
-                                )
+                        # Päivitä metadata-näyttö
+                        metadata = get_results_metadata(app)
+                        if metadata and hasattr(app, "results_metadata_text"):
+                            gen_time = metadata.get("generated_at", "")
+                            total = metadata.get("total_rows", 0)
+                            app.results_metadata_text.value = (
+                                f"Tulokset generoitu: {gen_time} ({total} riviä)"
+                            )
 
-                            e.page.update()
-                        except Exception as ex:
-                            print(f"Error showing result: {ex}")
-
-                    e.page.run_task(show_result)
+                        e.page.update()
+                    except Exception as ex:
+                        print(f"Error showing result: {ex}")
 
                 threading.Thread(target=run_generation, daemon=True).start()
 
@@ -813,10 +870,35 @@ def create_results_view(app) -> ft.View:
                             if not selected_patterns:
                                 selected_patterns = None
 
+                            # Hae ticker-suodatin
+                            ticker_filter = None
+                            try:
+                                ticker_mode = app.results_radio_group.value
+                                ticker_value = (
+                                    app.results_ticker_field.value.strip().upper()
+                                    if app.results_ticker_field.value
+                                    else ""
+                                )
+
+                                if ticker_mode == "single" and ticker_value:
+                                    # Pilkulla erotettu lista
+                                    if "," in ticker_value:
+                                        ticker_filter = [
+                                            t.strip()
+                                            for t in ticker_value.split(",")
+                                            if t.strip()
+                                        ]
+                                    else:
+                                        ticker_filter = [ticker_value]
+                            except Exception as ex:
+                                print(f"Virhe ticker-suodattimen lukemisessa: {ex}")
+
                             # Vie Excel
                             exporter = ExcelExporter("data/analysis.db")
                             success, message = exporter.export_to_excel(
-                                save_path, selected_patterns=selected_patterns
+                                save_path,
+                                selected_patterns=selected_patterns,
+                                ticker_filter=ticker_filter,
                             )
 
                             if success:
@@ -847,8 +929,54 @@ def create_results_view(app) -> ft.View:
                 else:
                     # Fallback: tallenna oletuspolkuun
                     default_path = "tulokset.xlsx"
+
+                    # Hae suodattimet
+                    pattern_mapping = {
+                        "Hammer": 1,
+                        "Bullish Engulfing": 2,
+                        "Piercing Pattern": 3,
+                        "Three White Soldiers": 4,
+                        "Morning Star": 5,
+                        "Dragonfly Doji": 6,
+                        "Bullish Divergence": 7,
+                        "Bearish Divergence": 8,
+                    }
+
+                    selected_patterns = []
+                    for cb in app.results_checkboxes:
+                        if cb.value and cb.label in pattern_mapping:
+                            selected_patterns.append(pattern_mapping[cb.label])
+
+                    if not selected_patterns:
+                        selected_patterns = None
+
+                    ticker_filter = None
+                    try:
+                        ticker_mode = app.results_radio_group.value
+                        ticker_value = (
+                            app.results_ticker_field.value.strip().upper()
+                            if app.results_ticker_field.value
+                            else ""
+                        )
+
+                        if ticker_mode == "single" and ticker_value:
+                            if "," in ticker_value:
+                                ticker_filter = [
+                                    t.strip()
+                                    for t in ticker_value.split(",")
+                                    if t.strip()
+                                ]
+                            else:
+                                ticker_filter = [ticker_value]
+                    except Exception as ex:
+                        print(f"Virhe ticker-suodattimen lukemisessa: {ex}")
+
                     exporter = ExcelExporter("data/analysis.db")
-                    success, message = exporter.export_to_excel(default_path)
+                    success, message = exporter.export_to_excel(
+                        default_path,
+                        selected_patterns=selected_patterns,
+                        ticker_filter=ticker_filter,
+                    )
 
                     if success:
                         e.page.snack_bar = ft.SnackBar(

@@ -47,6 +47,7 @@ class ExcelExporter:
         self,
         output_path: str,
         selected_patterns: Optional[list] = None,
+        ticker_filter: Optional[list] = None,
     ) -> tuple[bool, str]:
         """
         Vie results_data Excel-tiedostoon.
@@ -54,6 +55,7 @@ class ExcelExporter:
         Args:
             output_path: Polku luotavaan Excel-tiedostoon
             selected_patterns: Lista pattern-numeroita joita viedään (None = kaikki)
+            ticker_filter: Lista tickereistä joita viedään (None = kaikki)
 
         Returns:
             Tuple[bool, str]: (success, message)
@@ -75,6 +77,10 @@ class ExcelExporter:
                 ]
             else:
                 results = all_results
+
+            # Suodata tickereillä jos annettu
+            if ticker_filter is not None:
+                results = [r for r in results if r["ticker"] in ticker_filter]
 
             if not results:
                 return False, "Valituilla suodattimilla ei löytynyt tuloksia."
