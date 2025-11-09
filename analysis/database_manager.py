@@ -428,6 +428,32 @@ class DatabaseManager:
             self.logger.error(f"Delete findings by IDs failed: {e}")
             return 0
 
+    def clear_all_findings(self) -> int:
+        """
+        Tyhjennä koko analysis_findings taulu.
+
+        Returns:
+            Poistettujen rivien määrä
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            # Hae määrä ennen poistoa
+            cursor.execute("SELECT COUNT(*) FROM analysis_findings")
+            count = cursor.fetchone()[0]
+
+            # Tyhjennä taulu
+            cursor.execute("DELETE FROM analysis_findings")
+            conn.commit()
+
+            self.logger.info(f"Cleared all findings: {count} rows deleted")
+            return count
+
+        except Exception as e:
+            self.logger.error(f"Clear all findings failed: {e}")
+            return 0
+
     def update_finding(self, finding_id: int, **kwargs) -> bool:
         """
         Päivitä löydös.

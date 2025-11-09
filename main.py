@@ -217,6 +217,18 @@ class RawCandleApp:
             ft.Checkbox(label="Bullish Divergence", value=False),
             ft.Checkbox(label="Bearish Divergence", value=False),
         ]
+
+        # "Kaikki" valintaruutu
+        def toggle_all_candles(e):
+            """Valitse tai poista valinta kaikista analyysityypeistä"""
+            for cb in self.candles_checkboxes:
+                cb.value = self.candles_select_all.value
+            self.page.update()
+
+        self.candles_select_all = ft.Checkbox(
+            label="Kaikki", value=False, on_change=toggle_all_candles
+        )
+
         self.candles_ticker_field = ft.TextField(
             label="Osakkeen ticker (esim. AAPL)",
             width=250,
@@ -467,7 +479,7 @@ class RawCandleApp:
         # Downtrend filters for Candles view
         self.candles_downtrend_filter = ft.Checkbox(
             label="🔻 Suodata vain laskutrendien kynttilät",
-            value=False,
+            value=True,
         )
 
         self.candles_min_decline_percent = ft.TextField(
@@ -862,6 +874,11 @@ class RawCandleApp:
                                                         size=18,
                                                         weight=ft.FontWeight.BOLD,
                                                         color=ft.Colors.ORANGE_600,
+                                                    ),
+                                                    self.candles_select_all,
+                                                    ft.Divider(
+                                                        height=1,
+                                                        color=ft.Colors.GREY_300,
                                                     ),
                                                     ft.Column(
                                                         self.candles_checkboxes,

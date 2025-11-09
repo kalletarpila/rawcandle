@@ -43,9 +43,20 @@ def create_results_view(app) -> ft.View:
         ft.Checkbox(label="Bearish Divergence", value=False),
     ]
 
+    # "Kaikki" valintaruutu
+    def toggle_all_results(e):
+        """Valitse tai poista valinta kaikista analyysityypeistä"""
+        for cb in app.results_checkboxes:
+            cb.value = app.results_select_all.value
+        app.page.update()
+
+    app.results_select_all = ft.Checkbox(
+        label="Kaikki", value=False, on_change=toggle_all_results
+    )
+
     # Laskutrendi-suodattimet
     app.results_downtrend_filter = ft.Checkbox(
-        label="🔻 Suodata vain laskutrendien kynttilät", value=False
+        label="🔻 Suodata vain laskutrendien kynttilät", value=True
     )
     app.results_min_decline_percent = ft.TextField(
         label="Min. lasku (%)", width=120, value="3.0", hint_text="3.0"
@@ -628,6 +639,10 @@ def create_results_view(app) -> ft.View:
                                                     size=18,
                                                     weight=ft.FontWeight.BOLD,
                                                     color=ft.Colors.ORANGE_600,
+                                                ),
+                                                app.results_select_all,
+                                                ft.Divider(
+                                                    height=1, color=ft.Colors.GREY_300
                                                 ),
                                                 ft.Column(
                                                     app.results_checkboxes, spacing=12

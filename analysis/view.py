@@ -74,6 +74,13 @@ class AnalysisView:
             color=ft.Colors.BLUE_700,
         )
 
+        # Kynttiläkohtaiset määrät
+        self.pattern_counts_text = ft.Text(
+            "",
+            size=14,
+            color=ft.Colors.GREY_700,
+        )
+
         # Suodattimet
         filters = self._create_filters()
 
@@ -92,6 +99,7 @@ class AnalysisView:
         return ft.Column(
             [
                 title,
+                self.pattern_counts_text,
                 ft.Divider(),
                 filters,
                 ft.Divider(),
@@ -208,16 +216,26 @@ class AnalysisView:
 
     def _create_action_buttons(self) -> ft.Row:
         """Luo toimintopainikkeet."""
-        delete_all_btn = ft.IconButton(
+        delete_all_btn = ft.ElevatedButton(
+            text="Poista suodatetut",
             icon=ft.Icons.DELETE_SWEEP,
-            tooltip="Poista kaikki",
             on_click=self._delete_all_findings,
-            icon_color=ft.Colors.RED_700,
+            bgcolor=ft.Colors.RED_700,
+            color=ft.Colors.WHITE,
+        )
+
+        clear_db_btn = ft.ElevatedButton(
+            text="Tyhjennä kanta",
+            icon=ft.Icons.DELETE_FOREVER,
+            on_click=self._clear_database,
+            bgcolor=ft.Colors.RED_900,
+            color=ft.Colors.WHITE,
         )
 
         return ft.Row(
-            [delete_all_btn],
+            [delete_all_btn, clear_db_btn],
             alignment=ft.MainAxisAlignment.START,
+            spacing=10,
         )
 
     def _create_findings_table(self) -> ft.DataTable:
@@ -337,8 +355,47 @@ class AnalysisView:
         self.total_findings_text.value = str(total)
         self.avg_strength_text.value = f"{avg_strength:.2f}"
 
+        # Päivitä kynttiläkohtaiset määrät
+        self._update_pattern_counts()
+
         if hasattr(self.page, "update"):
             self.page.update()
+
+    def _update_pattern_counts(self) -> None:
+        """Päivitä kynttiläkohtaiset määrät."""
+        if not hasattr(self, "pattern_counts_text") or not self.pattern_counts_text:
+            return
+
+        # Kynttilöiden numerointi (sama kuin generate_results.py)
+        PATTERN_ORDER = {
+            "downtrend": 0,
+            "Hammer": 1,
+            "Bullish Engulfing": 2,
+            "Piercing Pattern": 3,
+            "Three White Soldiers": 4,
+            "Morning Star": 5,
+            "Dragonfly Doji": 6,
+            "Bullish Divergence": 7,
+            "Bearish Divergence": 8,
+        }
+
+        # Laske määrät kynttilätyypeittäin koko kannasta (ei suodatetuista)
+        pattern_counts = {pattern: 0 for pattern in PATTERN_ORDER.keys()}
+
+        for finding in self.all_findings:
+            pattern = finding.get("pattern", "")
+            if pattern in pattern_counts:
+                pattern_counts[pattern] += 1
+
+        # Järjestä sisäisen numeron mukaan ja muodosta teksti
+        sorted_patterns = sorted(
+            pattern_counts.items(), key=lambda x: PATTERN_ORDER[x[0]]
+        )
+        counts_text = " | ".join(
+            [f"{pattern}: {count}" for pattern, count in sorted_patterns]
+        )
+
+        self.pattern_counts_text.value = counts_text
 
     def _on_search_change(self, e) -> None:
         """Käsittele hakukentän muutos."""
@@ -524,17 +581,29 @@ class AnalysisView:
 
             close_dialog(None)
 
+        confirm_dlg = None  # Määritellään ensin
+
         def close_dialog(e):
-            confirm_dlg.open = False
-            if confirm_dlg in self.page.overlay:
-                self.page.overlay.remove(confirm_dlg)
-            self.page.update()
+            nonlocal confirm_dlg
+            if confirm_dlg:
+                confirm_dlg.open = False
+                self.page.update()
 
         confirm_dlg = ft.AlertDialog(
-            title=ft.Text("Vahvista poisto"),
-            content=ft.Text(
-                f"Haluatko varmasti poistaa {count} suodatettua löydöstä?\n\n"
-                f"Tämä toiminto ei ole palautettavissa."
+            modal=True,
+            title=ft.Text("⚠️ Poista suodatetut löydökset"),
+            content=ft.Column(
+                [
+                    ft.Text(f"Haluatko varmasti poistaa {count} suodatettua löydöstä?"),
+                    ft.Text(
+                        "Tämä toiminto ei ole palautettavissa.",
+                        size=12,
+                        color=ft.Colors.ORANGE_700,
+                    ),
+                ],
+                tight=True,
+                spacing=10,
+                height=80,
             ),
             actions=[
                 ft.TextButton("Peruuta", on_click=close_dialog),
@@ -544,11 +613,85 @@ class AnalysisView:
                     style=ft.ButtonStyle(color=ft.Colors.RED_700),
                 ),
             ],
-            modal=True,
+            actions_alignment=ft.MainAxisAlignment.END,
         )
 
-        if confirm_dlg not in self.page.overlay:
-            self.page.overlay.append(confirm_dlg)
+        if hasattr(self.page, "overlay"):
+            if confirm_dlg not in self.page.overlay:
+                self.page.overlay.append(confirm_dlg)
+        confirm_dlg.open = True
+        self.page.update()
+
+    def _clear_database(self, e) -> None:
+        """Tyhjennä koko analysis-kanta vahvistuksen jälkeen."""
+        # Hae kokonaismäärä
+        total_count = len(self.all_findings)
+
+        if total_count == 0:
+            self._show_info("Kanta on jo tyhjä")
+            return
+
+        # Luo vahvistusikkuna
+        def confirm_clear(e):
+            try:
+                # Tyhjennä koko kanta
+                deleted_count = self.db_manager.clear_all_findings()
+
+                if deleted_count > 0:
+                    self._show_success(
+                        f"Kanta tyhjennetty: {deleted_count} löydöstä poistettu"
+                    )
+                    self.refresh_data()
+                else:
+                    self._show_error("Kannan tyhjennys epäonnistui")
+            except Exception as ex:
+                self._show_error(f"Virhe: {str(ex)}")
+
+            close_dialog(None)
+
+        confirm_dlg = None  # Määritellään ensin
+
+        def close_dialog(e):
+            nonlocal confirm_dlg
+            if confirm_dlg:
+                confirm_dlg.open = False
+                self.page.update()
+
+        confirm_dlg = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("⚠️ Tyhjennä koko analysis-kanta"),
+            content=ft.Column(
+                [
+                    ft.Text("Haluatko varmasti tyhjentää koko kannan?"),
+                    ft.Text(
+                        f"Tämä poistaa KAIKKI {total_count} löydöstä!",
+                        weight=ft.FontWeight.BOLD,
+                        color=ft.Colors.RED_700,
+                    ),
+                    ft.Text(
+                        "Tämä toiminto ei ole palautettavissa.",
+                        size=12,
+                        color=ft.Colors.ORANGE_700,
+                    ),
+                ],
+                tight=True,
+                spacing=10,
+                height=100,
+            ),
+            actions=[
+                ft.TextButton("Peruuta", on_click=close_dialog),
+                ft.TextButton(
+                    "Tyhjennä kanta",
+                    on_click=confirm_clear,
+                    style=ft.ButtonStyle(color=ft.Colors.RED_900),
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+
+        if hasattr(self.page, "overlay"):
+            if confirm_dlg not in self.page.overlay:
+                self.page.overlay.append(confirm_dlg)
         confirm_dlg.open = True
         self.page.update()
 
