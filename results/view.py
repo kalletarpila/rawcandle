@@ -688,7 +688,17 @@ def create_results_view(app) -> ft.View:
             progress_text = ft.Text("Aloitetaan...")
             progress_bar = ft.ProgressBar(width=400, value=0)
 
+            # Keskeytys-lippu
+            cancel_flag = {"cancelled": False}
+
             try:
+
+                def cancel_generation(e_cancel):
+                    """Keskeytä generointi"""
+                    cancel_flag["cancelled"] = True
+                    progress_text.value = "Keskeytetään..."
+                    e_cancel.page.update()
+
                 progress_dialog = ft.AlertDialog(
                     modal=True,
                     title=progress_title,
@@ -700,6 +710,12 @@ def create_results_view(app) -> ft.View:
                         tight=True,
                         height=80,
                     ),
+                    actions=[
+                        ft.TextButton(
+                            "Keskeytä",
+                            on_click=cancel_generation,
+                        )
+                    ],
                 )
 
                 app.page.overlay.append(progress_dialog)
@@ -707,15 +723,20 @@ def create_results_view(app) -> ft.View:
                 e.page.update()
 
                 def progress_callback(ticker, current, total):
-                    """Päivitä progress bar joka 10. osake"""
+                    """Päivitä progress bar ja tarkista keskeytys"""
                     try:
+                        # Palauta True jos keskeytetty
+                        if cancel_flag["cancelled"]:
+                            return True
+
                         progress_text.value = (
                             f"Käsitellään: {ticker} ({current}/{total})"
                         )
                         progress_bar.value = current / total if total > 0 else 0
                         e.page.update()
+                        return False
                     except Exception:
-                        pass
+                        return False
 
                 def run_generation():
                     # Lue ticker-suodatin
@@ -791,6 +812,23 @@ def create_results_view(app) -> ft.View:
                                 title=ft.Text("Virhe"),
                                 content=ft.Text(
                                     f"Tulosten generointi epäonnistui:\n{error}"
+                                ),
+                                actions=[
+                                    ft.TextButton(
+                                        "OK",
+                                        on_click=lambda _: app.close_dialog(
+                                            result_dialog
+                                        ),
+                                    )
+                                ],
+                            )
+                        elif cancel_flag["cancelled"]:
+                            result_dialog = ft.AlertDialog(
+                                title=ft.Text("⚠️ Keskeytetty"),
+                                content=ft.Text(
+                                    f"Generointi keskeytetty käyttäjän toimesta\n"
+                                    f"Generoitu {rows} riviä ennen keskeytystä\n"
+                                    f"Aikaa kului: {time_taken:.2f}s"
                                 ),
                                 actions=[
                                     ft.TextButton(

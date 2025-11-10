@@ -91,8 +91,15 @@ class ResultsGenerator:
             total_inserted = 0
 
             for idx, (ticker, ticker_findings) in enumerate(by_ticker.items(), 1):
+                # Tarkista keskeytys
                 if progress_callback:
-                    progress_callback(ticker, idx, total_tickers)
+                    cancelled = progress_callback(ticker, idx, total_tickers)
+                    if cancelled:
+                        self.logger.info(
+                            f"Generation cancelled by user at {idx}/{total_tickers}"
+                        )
+                        processing_time = time.time() - start_time
+                        return total_inserted, processing_time
 
                 # Hae osakedata tälle tickerille
                 stock_data = self._fetch_stock_data(ticker)
