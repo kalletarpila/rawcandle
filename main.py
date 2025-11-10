@@ -1137,6 +1137,57 @@ class RawCandleApp:
                 ],
             )
 
+    def create_findings_view(self):
+        """Luo Findings Dashboard -näkymän (results_data taulu)"""
+        try:
+            from findings.view import FindingsView
+
+            findings_view = FindingsView(
+                self.page,
+                analysis_db_path="data/analysis.db",
+                stock_db_path="data/osakedata.db",
+            )
+
+            return ft.View(
+                "/findings",
+                [
+                    self.create_appbar(),
+                    ft.Container(
+                        content=findings_view.create_view(),
+                        padding=20,
+                        expand=True,
+                    ),
+                ],
+                scroll=ft.ScrollMode.AUTO,
+            )
+        except Exception as e:
+            # On import failure, fall back to a minimal placeholder view
+            import traceback
+
+            traceback.print_exc()
+            return ft.View(
+                "/findings",
+                [
+                    self.create_appbar(),
+                    ft.Container(
+                        content=ft.Column(
+                            [
+                                ft.Text(
+                                    "Results Dashboard",
+                                    size=24,
+                                    weight=ft.FontWeight.BOLD,
+                                ),
+                                ft.Text(
+                                    f"Virhe ladattaessa: {e}", color=ft.Colors.RED_600
+                                ),
+                            ],
+                            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                        padding=40,
+                    ),
+                ],
+            )
+
     def create_results_view(self):
         # Delegates to the standalone results.view module to keep the page
         # implementation inside the `results` package.
@@ -2232,6 +2283,11 @@ class RawCandleApp:
                     on_click=lambda _: self.page.go("/analysis"),
                 ),
                 ft.IconButton(
+                    ft.Icons.TABLE_CHART,
+                    tooltip="Results Dashboard",
+                    on_click=lambda _: self.page.go("/findings"),
+                ),
+                ft.IconButton(
                     ft.Icons.INSIGHTS,
                     tooltip="Tulokset",
                     on_click=lambda _: self.page.go("/tulokset"),
@@ -3103,6 +3159,8 @@ Virheet: {error_count}"""
             self.page.views.append(self.simu_view.create_view())
         elif self.page.route == "/analysis":
             self.page.views.append(self.create_analysis_view())
+        elif self.page.route == "/findings":
+            self.page.views.append(self.create_findings_view())
         elif self.page.route == "/tulokset":
             self.page.views.append(self.create_results_view())
         else:

@@ -1317,6 +1317,63 @@ class DatabaseManager:
             self.logger.error(f"Clear results data failed: {e}")
             return 0
 
+    def delete_result_by_id(self, result_id: int) -> bool:
+        """
+        Poista yksittäinen tulos results_data taulusta ID:llä.
+
+        Args:
+            result_id: Poistettavan tuloksen ID
+
+        Returns:
+            True jos onnistui
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute("DELETE FROM results_data WHERE id = ?", (result_id,))
+            conn.commit()
+
+            success = cursor.rowcount > 0
+            if success:
+                self.logger.debug(f"Deleted result id={result_id}")
+            return success
+
+        except Exception as e:
+            self.logger.error(f"Delete result by id failed: {e}")
+            return False
+
+    def delete_results_by_ids(self, result_ids: List[int]) -> int:
+        """
+        Poista tulokset results_data taulusta ID-listalla.
+
+        Args:
+            result_ids: Lista ID:itä joita poistetaan
+
+        Returns:
+            Poistettujen rivien määrä
+        """
+        if not result_ids:
+            return 0
+
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            # SQLiten IN -kysely
+            placeholders = ",".join("?" * len(result_ids))
+            query = f"DELETE FROM results_data WHERE id IN ({placeholders})"
+            cursor.execute(query, result_ids)
+            conn.commit()
+
+            deleted = cursor.rowcount
+            self.logger.info(f"Deleted {deleted} results by IDs")
+            return deleted
+
+        except Exception as e:
+            self.logger.error(f"Delete results by ids failed: {e}")
+            return 0
+
     def get_results_data(self, limit: Optional[int] = None) -> List[dict]:
         """
         Hae kaikki rivit results_data taulusta.
