@@ -29,7 +29,11 @@ def try_parse_date(s: str):
 
 
 def generate_results_to_database(
-    app, progress_callback=None, ticker_filter=None, pattern_filter=None
+    app,
+    progress_callback=None,
+    ticker_filter=None,
+    pattern_filter=None,
+    force_rebuild=False,
 ):
     """
     Generoi tulokset tietokantaan ResultsGeneratorilla.
@@ -39,6 +43,7 @@ def generate_results_to_database(
         progress_callback: Progress callback function
         ticker_filter: Lista tickereistä joille generoidaan (None = kaikki)
         pattern_filter: Lista pattern-numeroista joita generoidaan (None = kaikki)
+        force_rebuild: Jos True, tyhjennä ensin results_data taulu
 
     Returns:
         Tuple[int, float, str]: (rows_inserted, processing_time, error_msg)
@@ -56,6 +61,11 @@ def generate_results_to_database(
 
         # Luo generaattori
         db_manager = DatabaseManager(analysis_db)
+
+        # Tyhjennä taulu jos force_rebuild
+        if force_rebuild:
+            db_manager.clear_results_data()
+
         generator = ResultsGenerator(db_manager, stock_db)
 
         # Generoi suodattimilla
@@ -755,12 +765,20 @@ def create_results_view(app) -> ft.View:
                     except Exception as ex:
                         print(f"Virhe pattern-suodattimen lukemisessa: {ex}")
 
+                    # Lue force_rebuild -asetus
+                    force_rebuild = (
+                        app.results_force_rebuild.value
+                        if hasattr(app.results_force_rebuild, "value")
+                        else False
+                    )
+
                     # Generoi suodattimilla
                     rows, time_taken, error = generate_results_to_database(
                         app,
                         progress_callback,
                         ticker_filter=ticker_filter,
                         pattern_filter=pattern_filter,
+                        force_rebuild=force_rebuild,
                     )
 
                     # Päivitä UI pääsäikeessä
