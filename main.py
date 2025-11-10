@@ -473,7 +473,7 @@ class RawCandleApp:
             color=ft.colors.WHITE,
             on_click=self.start_candles_analysis,
             width=220,
-            tooltip="Analysoi valitut kynttiläkuviot valituille tickereille ja tallenna tulokset CSV-tiedostoon",
+            tooltip="Analysoi valitut kynttiläkuviot valituille tickereille ja tallenna tulokset tietokantaan",
         )
         # Result banner (mirrors main page `loading_text` style)
         self.candles_result_text = ft.Text(value="", color=ft.colors.BLUE_600)

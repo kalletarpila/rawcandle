@@ -194,15 +194,14 @@ class ExcelExporter:
 
             # Lisää data
             for row_num, result in enumerate(results, 2):
-                # Konvertoi pattern numero nimeksi sarakkeessa 3
+                # Käytä pattern numeroa (SPSS-yhteensopivuus)
                 pattern_num = result.get("candle_pattern", 0)
-                pattern_name = self.PATTERN_NAMES.get(pattern_num, "Unknown")
 
                 # Rakenna rivi (84 saraketta)
                 row_data = [
                     result.get("ticker"),
                     result.get("date"),
-                    pattern_name,
+                    pattern_num,  # Numerokoodi nimen sijasta
                     result.get("signal_strength"),
                     result.get("t_1_alin"),
                     result.get("t_1_ylin"),
@@ -288,7 +287,16 @@ class ExcelExporter:
 
                 # Kirjoita rivi
                 for col_num, value in enumerate(row_data, 1):
-                    ws.cell(row=row_num, column=col_num, value=value)
+                    # Pyöristä REAL-luvut 2 desimaaliin
+                    if isinstance(value, (int, float)) and value is not None:
+                        # Älä pyöristä kokonaislukuja (colour, weekday)
+                        if col_num in [8, 12, 16, 84]:  # _colour sarakkeet ja weekday
+                            ws.cell(row=row_num, column=col_num, value=value)
+                        else:
+                            # Pyöristä muut numeeriset arvot 2 desimaaliin
+                            ws.cell(row=row_num, column=col_num, value=round(value, 2))
+                    else:
+                        ws.cell(row=row_num, column=col_num, value=value)
 
             # Automaattinen sarakeleveys
             for col_num in range(1, len(headers) + 1):

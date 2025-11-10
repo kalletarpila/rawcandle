@@ -825,7 +825,7 @@ def create_results_view(app) -> ft.View:
                 e.page.update()
 
         def vie_exceliin_click(e):
-            """Vie results_data Exceliin"""
+            """Vie results_data Exceliin progress dialogilla"""
             try:
                 # Tarkista onko tuloksia
                 metadata = get_results_metadata(app)
@@ -839,156 +839,128 @@ def create_results_view(app) -> ft.View:
                     e.page.update()
                     return
 
-                # Kysy tiedostonimi
-                def save_excel(save_e):
-                    try:
-                        if hasattr(app, "file_picker") and app.file_picker.result:
-                            save_path = app.file_picker.result.path
+                # Luo progress dialog
+                progress_title = ft.Text("Viedään tuloksia Exceliin")
+                progress_text = ft.Text("Valmistellaan...")
+                progress_bar = ft.ProgressBar(width=400, value=None)
 
-                            # Varmista .xlsx-pääte
-                            if not save_path.endswith(".xlsx"):
-                                save_path += ".xlsx"
+                progress_dialog = ft.AlertDialog(
+                    modal=True,
+                    title=progress_title,
+                    content=ft.Column(
+                        [
+                            progress_text,
+                            progress_bar,
+                        ],
+                        tight=True,
+                        height=80,
+                    ),
+                )
 
-                            # Hae valitut patternit checkboxeista
-                            pattern_mapping = {
-                                "Hammer": 1,
-                                "Bullish Engulfing": 2,
-                                "Piercing Pattern": 3,
-                                "Three White Soldiers": 4,
-                                "Morning Star": 5,
-                                "Dragonfly Doji": 6,
-                                "Bullish Divergence": 7,
-                                "Bearish Divergence": 8,
-                            }
+                app.page.overlay.append(progress_dialog)
+                progress_dialog.open = True
+                e.page.update()
 
-                            selected_patterns = []
-                            for cb in app.results_checkboxes:
-                                if cb.value and cb.label in pattern_mapping:
-                                    selected_patterns.append(pattern_mapping[cb.label])
+                # Hae suodattimet
+                pattern_mapping = {
+                    "Hammer": 1,
+                    "Bullish Engulfing": 2,
+                    "Piercing Pattern": 3,
+                    "Three White Soldiers": 4,
+                    "Morning Star": 5,
+                    "Dragonfly Doji": 6,
+                    "Bullish Divergence": 7,
+                    "Bearish Divergence": 8,
+                }
 
-                            # Jos ei valintoja, vie kaikki
-                            if not selected_patterns:
-                                selected_patterns = None
+                selected_patterns = []
+                for cb in app.results_checkboxes:
+                    if cb.value and cb.label in pattern_mapping:
+                        selected_patterns.append(pattern_mapping[cb.label])
 
-                            # Hae ticker-suodatin
-                            ticker_filter = None
-                            try:
-                                ticker_mode = app.results_radio_group.value
-                                ticker_value = (
-                                    app.results_ticker_field.value.strip().upper()
-                                    if app.results_ticker_field.value
-                                    else ""
-                                )
+                if not selected_patterns:
+                    selected_patterns = None
 
-                                if ticker_mode == "single" and ticker_value:
-                                    # Pilkulla erotettu lista
-                                    if "," in ticker_value:
-                                        ticker_filter = [
-                                            t.strip()
-                                            for t in ticker_value.split(",")
-                                            if t.strip()
-                                        ]
-                                    else:
-                                        ticker_filter = [ticker_value]
-                            except Exception as ex:
-                                print(f"Virhe ticker-suodattimen lukemisessa: {ex}")
+                ticker_filter = None
+                try:
+                    ticker_mode = app.results_radio_group.value
+                    ticker_value = (
+                        app.results_ticker_field.value.strip().upper()
+                        if app.results_ticker_field.value
+                        else ""
+                    )
 
-                            # Vie Excel
-                            exporter = ExcelExporter("data/analysis.db")
-                            success, message = exporter.export_to_excel(
-                                save_path,
-                                selected_patterns=selected_patterns,
-                                ticker_filter=ticker_filter,
+                    if ticker_mode == "single" and ticker_value:
+                        if "," in ticker_value:
+                            ticker_filter = [
+                                t.strip() for t in ticker_value.split(",") if t.strip()
+                            ]
+                        else:
+                            ticker_filter = [ticker_value]
+                except Exception as ex:
+                    print(f"Virhe ticker-suodattimen lukemisessa: {ex}")
+
+                # Päivitä progress
+                progress_text.value = "Viedään tietoja Exceliin..."
+                progress_bar.value = 0.5
+                e.page.update()
+
+                # Käytä data/results.xlsx oletuspolkuna
+                from pathlib import Path
+
+                base = Path(__file__).resolve().parents[1]
+                excel_path = base / "data" / "results.xlsx"
+
+                # Vie Excel
+                exporter = ExcelExporter("data/analysis.db")
+                success, message = exporter.export_to_excel(
+                    str(excel_path),
+                    selected_patterns=selected_patterns,
+                    ticker_filter=ticker_filter,
+                )
+
+                # Sulje progress ja näytä tulos
+                progress_dialog.open = False
+                e.page.update()
+
+                if success:
+                    result_dialog = ft.AlertDialog(
+                        title=ft.Text("✅ Valmis!"),
+                        content=ft.Text(
+                            f"{message}\n\nTiedosto tallennettu: data/results.xlsx"
+                        ),
+                        actions=[
+                            ft.TextButton(
+                                "OK",
+                                on_click=lambda _: app.close_dialog(result_dialog),
                             )
-
-                            if success:
-                                e.page.snack_bar = ft.SnackBar(
-                                    ft.Text(f"✅ {message}"), open=True
-                                )
-                            else:
-                                e.page.snack_bar = ft.SnackBar(
-                                    ft.Text(f"❌ {message}"), open=True
-                                )
-                            e.page.update()
-                    except Exception as ex:
-                        e.page.snack_bar = ft.SnackBar(
-                            ft.Text(f"Virhe tallennuksessa: {ex}"), open=True
-                        )
-                        e.page.update()
-
-                # Avaa tiedostovalitsin
-                if hasattr(app, "file_picker"):
-                    app.file_picker.save_file(
-                        dialog_title="Tallenna Excel-tiedosto",
-                        file_name="tulokset.xlsx",
-                        allowed_extensions=["xlsx"],
+                        ],
                     )
-                    # Odota käyttäjän valintaa ja kutsu save_excel
-                    # HUOM: Tämä toimii Fletin async-mallilla
-                    e.page.update()
                 else:
-                    # Fallback: tallenna oletuspolkuun
-                    default_path = "tulokset.xlsx"
-
-                    # Hae suodattimet
-                    pattern_mapping = {
-                        "Hammer": 1,
-                        "Bullish Engulfing": 2,
-                        "Piercing Pattern": 3,
-                        "Three White Soldiers": 4,
-                        "Morning Star": 5,
-                        "Dragonfly Doji": 6,
-                        "Bullish Divergence": 7,
-                        "Bearish Divergence": 8,
-                    }
-
-                    selected_patterns = []
-                    for cb in app.results_checkboxes:
-                        if cb.value and cb.label in pattern_mapping:
-                            selected_patterns.append(pattern_mapping[cb.label])
-
-                    if not selected_patterns:
-                        selected_patterns = None
-
-                    ticker_filter = None
-                    try:
-                        ticker_mode = app.results_radio_group.value
-                        ticker_value = (
-                            app.results_ticker_field.value.strip().upper()
-                            if app.results_ticker_field.value
-                            else ""
-                        )
-
-                        if ticker_mode == "single" and ticker_value:
-                            if "," in ticker_value:
-                                ticker_filter = [
-                                    t.strip()
-                                    for t in ticker_value.split(",")
-                                    if t.strip()
-                                ]
-                            else:
-                                ticker_filter = [ticker_value]
-                    except Exception as ex:
-                        print(f"Virhe ticker-suodattimen lukemisessa: {ex}")
-
-                    exporter = ExcelExporter("data/analysis.db")
-                    success, message = exporter.export_to_excel(
-                        default_path,
-                        selected_patterns=selected_patterns,
-                        ticker_filter=ticker_filter,
+                    result_dialog = ft.AlertDialog(
+                        title=ft.Text("❌ Virhe"),
+                        content=ft.Text(f"Excel-vienti epäonnistui:\n{message}"),
+                        actions=[
+                            ft.TextButton(
+                                "OK",
+                                on_click=lambda _: app.close_dialog(result_dialog),
+                            )
+                        ],
                     )
 
-                    if success:
-                        e.page.snack_bar = ft.SnackBar(
-                            ft.Text(f"✅ {message}"), open=True
-                        )
-                    else:
-                        e.page.snack_bar = ft.SnackBar(
-                            ft.Text(f"❌ {message}"), open=True
-                        )
-                    e.page.update()
+                app.page.overlay.append(result_dialog)
+                result_dialog.open = True
+                e.page.update()
 
             except Exception as ex:
+                # Sulje progress jos avoinna
+                try:
+                    if progress_dialog and progress_dialog.open:
+                        progress_dialog.open = False
+                        e.page.update()
+                except Exception:
+                    pass
+
                 e.page.snack_bar = ft.SnackBar(ft.Text(f"Virhe: {ex}"), open=True)
                 e.page.update()
 
