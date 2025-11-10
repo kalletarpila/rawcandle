@@ -895,6 +895,15 @@ def create_results_view(app) -> ft.View:
                     e.page.update()
                     return
 
+                # Keskeytys-lippu
+                cancel_flag = {"cancelled": False}
+
+                def cancel_export(e_cancel):
+                    """Keskeytä Excel-vienti"""
+                    cancel_flag["cancelled"] = True
+                    progress_text.value = "Keskeytetään..."
+                    e_cancel.page.update()
+
                 # Luo progress dialog
                 progress_title = ft.Text("Viedään tuloksia Exceliin")
                 progress_text = ft.Text("Valmistellaan...")
@@ -911,6 +920,12 @@ def create_results_view(app) -> ft.View:
                         tight=True,
                         height=80,
                     ),
+                    actions=[
+                        ft.TextButton(
+                            "Keskeytä",
+                            on_click=cancel_export,
+                        )
+                    ],
                 )
 
                 app.page.overlay.append(progress_dialog)
@@ -956,9 +971,23 @@ def create_results_view(app) -> ft.View:
                 except Exception as ex:
                     print(f"Virhe ticker-suodattimen lukemisessa: {ex}")
 
+                # Progress callback
+                def progress_callback(current, total):
+                    """Päivitä progress ja tarkista keskeytys"""
+                    try:
+                        if cancel_flag["cancelled"]:
+                            return True
+
+                        progress_text.value = f"Viedään riviä {current}/{total}..."
+                        progress_bar.value = current / total if total > 0 else 0
+                        e.page.update()
+                        return False
+                    except Exception:
+                        return False
+
                 # Päivitä progress
                 progress_text.value = "Viedään tietoja Exceliin..."
-                progress_bar.value = 0.5
+                progress_bar.value = 0.1
                 e.page.update()
 
                 # Käytä data/results.xlsx oletuspolkuna
@@ -973,6 +1002,7 @@ def create_results_view(app) -> ft.View:
                     str(excel_path),
                     selected_patterns=selected_patterns,
                     ticker_filter=ticker_filter,
+                    progress_callback=progress_callback,
                 )
 
                 # Sulje progress ja näytä tulos
@@ -985,6 +1015,17 @@ def create_results_view(app) -> ft.View:
                         content=ft.Text(
                             f"{message}\n\nTiedosto tallennettu: data/results.xlsx"
                         ),
+                        actions=[
+                            ft.TextButton(
+                                "OK",
+                                on_click=lambda _: app.close_dialog(result_dialog),
+                            )
+                        ],
+                    )
+                elif cancel_flag["cancelled"]:
+                    result_dialog = ft.AlertDialog(
+                        title=ft.Text("⚠️ Keskeytetty"),
+                        content=ft.Text(f"Excel-vienti keskeytetty:\n{message}"),
                         actions=[
                             ft.TextButton(
                                 "OK",

@@ -48,6 +48,7 @@ class ExcelExporter:
         output_path: str,
         selected_patterns: Optional[list] = None,
         ticker_filter: Optional[list] = None,
+        progress_callback=None,
     ) -> tuple[bool, str]:
         """
         Vie results_data Excel-tiedostoon.
@@ -56,6 +57,7 @@ class ExcelExporter:
             output_path: Polku luotavaan Excel-tiedostoon
             selected_patterns: Lista pattern-numeroita joita viedään (None = kaikki)
             ticker_filter: Lista tickereistä joita viedään (None = kaikki)
+            progress_callback: Callback(current, total) -> bool (True = keskeytä)
 
         Returns:
             Tuple[bool, str]: (success, message)
@@ -193,7 +195,17 @@ class ExcelExporter:
                 cell.fill = header_fill
 
             # Lisää data
+            total_rows = len(results)
             for row_num, result in enumerate(results, 2):
+                # Tarkista keskeytys joka 100. rivi
+                if progress_callback and (row_num - 2) % 100 == 0:
+                    cancelled = progress_callback(row_num - 2, total_rows)
+                    if cancelled:
+                        self.logger.info(
+                            f"Excel export cancelled at row {row_num - 2}/{total_rows}"
+                        )
+                        return False, f"Vienti keskeytetty ({row_num - 2} riviä viety)"
+
                 # Käytä pattern numeroa (SPSS-yhteensopivuus)
                 pattern_num = result.get("candle_pattern", 0)
 
