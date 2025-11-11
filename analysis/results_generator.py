@@ -80,6 +80,13 @@ class ResultsGenerator:
                 self.logger.info("No new findings to process")
                 return 0, 0.0
 
+            # Debug: Laske patternit
+            pattern_counts = {}
+            for f in findings:
+                p = f.get("pattern", "unknown")
+                pattern_counts[p] = pattern_counts.get(p, 0) + 1
+            self.logger.info(f"📊 Haetut findings: {dict(pattern_counts)}")
+
             # 2. Suodata divergenssi-yhdistelmät jos valittu
             if divergence_combo_filter:
                 findings = self._filter_divergence_combos(findings)
@@ -118,10 +125,18 @@ class ResultsGenerator:
 
                 # Prosessoi kaikki findingit tälle tickerille
                 ticker_results = []
+                processed_count = 0
                 for finding in ticker_findings:
                     result = self._process_finding(finding, stock_data, ticker)
                     if result:
                         ticker_results.append(result)
+                        processed_count += 1
+
+                # Debug downtrend-progress
+                if any(f.get("pattern") == "downtrend" for f in ticker_findings):
+                    self.logger.info(
+                        f"🔍 Downtrend {ticker}: {processed_count}/{len(ticker_findings)} käsitelty onnistuneesti"
+                    )
 
                 # Tallenna tämän tickerin tulokset heti kantaan
                 if ticker_results:
@@ -229,9 +244,36 @@ class ResultsGenerator:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
 
-            # Tarkista onko results_data taulussa dataa
-            max_date = self.db_manager.get_results_max_date()
-            existing_tickers = self.db_manager.get_existing_results_tickers()
+            # Muunna pattern_filter numeroiksi jos tarvitaan max_date/existing_tickers hakua varten
+            pattern_number_filter = None
+            if pattern_filter and all(isinstance(p, int) for p in pattern_filter):
+                pattern_number_filter = pattern_filter
+            elif pattern_filter:
+                # Käänteinen mappaus: nimi -> numero
+                pattern_numbers = {
+                    "downtrend": 0,
+                    "Hammer": 1,
+                    "Bullish Engulfing": 2,
+                    "Piercing Pattern": 3,
+                    "Three White Soldiers": 4,
+                    "Morning Star": 5,
+                    "Dragonfly Doji": 6,
+                    "Bullish Divergence": 7,
+                    "Bearish Divergence": 8,
+                }
+                pattern_number_filter = [
+                    pattern_numbers[name]
+                    for name in pattern_filter
+                    if name in pattern_numbers
+                ]
+
+            # Tarkista onko results_data taulussa dataa (suodatettuna patternilla)
+            max_date = self.db_manager.get_results_max_date(
+                pattern_filter=pattern_number_filter
+            )
+            existing_tickers = self.db_manager.get_existing_results_tickers(
+                pattern_filter=pattern_number_filter
+            )
 
             # Jos pattern_filter on numeroita, muunna ne nimiksi
             if pattern_filter and all(isinstance(p, int) for p in pattern_filter):
@@ -465,12 +507,20 @@ class ResultsGenerator:
             # Etsi päivämäärän indeksi
             date_to_idx = {str(row["pvm"]): idx for idx, row in stock_df.iterrows()}
             if date not in date_to_idx:
+                if pattern == "downtrend":
+                    self.logger.warning(
+                        f"⚠️ Downtrend {ticker} {date}: Päivämäärää ei löydy stock_df:stä"
+                    )
                 return None
 
             idx = date_to_idx[date]
 
             # Tarkista että on tarpeeksi dataa (20 päivää taakse, 20 eteenpäin)
             if idx < 20 or idx + 20 >= len(stock_df):
+                if pattern == "downtrend":
+                    self.logger.warning(
+                        f"⚠️ Downtrend {ticker} {date}: Ei tarpeeksi dataa (idx={idx}, len={len(stock_df)}, tarvitaan 20 edellä ja jälkeen)"
+                    )
                 return None
 
             # Hae t0 rivit

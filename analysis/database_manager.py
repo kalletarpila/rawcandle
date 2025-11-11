@@ -875,9 +875,14 @@ class DatabaseManager:
 
     # ===== RESULTS_DATA METHODS =====
 
-    def get_results_max_date(self) -> Optional[str]:
+    def get_results_max_date(
+        self, pattern_filter: Optional[list] = None
+    ) -> Optional[str]:
         """
         Hae viimeisin päivämäärä results_data taulusta.
+
+        Args:
+            pattern_filter: Lista pattern-numeroista (None = kaikki patternit)
 
         Returns:
             Viimeisin päivämäärä tai None jos taulu tyhjä
@@ -886,7 +891,15 @@ class DatabaseManager:
             conn = self.get_connection()
             cursor = conn.cursor()
 
-            cursor.execute("SELECT MAX(date) FROM results_data")
+            if pattern_filter:
+                placeholders = ",".join("?" * len(pattern_filter))
+                cursor.execute(
+                    f"SELECT MAX(date) FROM results_data WHERE candle_pattern IN ({placeholders})",
+                    pattern_filter,
+                )
+            else:
+                cursor.execute("SELECT MAX(date) FROM results_data")
+
             result = cursor.fetchone()
             return result[0] if result else None
 
@@ -894,9 +907,14 @@ class DatabaseManager:
             self.logger.error(f"Get results max date failed: {e}")
             return None
 
-    def get_existing_results_tickers(self) -> set:
+    def get_existing_results_tickers(
+        self, pattern_filter: Optional[list] = None
+    ) -> set:
         """
         Hae kaikki tickerit joilla on jo dataa results_data taulussa.
+
+        Args:
+            pattern_filter: Lista pattern-numeroista (None = kaikki patternit)
 
         Returns:
             Set tickereistä
@@ -905,7 +923,15 @@ class DatabaseManager:
             conn = self.get_connection()
             cursor = conn.cursor()
 
-            cursor.execute("SELECT DISTINCT ticker FROM results_data")
+            if pattern_filter:
+                placeholders = ",".join("?" * len(pattern_filter))
+                cursor.execute(
+                    f"SELECT DISTINCT ticker FROM results_data WHERE candle_pattern IN ({placeholders})",
+                    pattern_filter,
+                )
+            else:
+                cursor.execute("SELECT DISTINCT ticker FROM results_data")
+
             return {row[0] for row in cursor.fetchall()}
 
         except Exception as e:

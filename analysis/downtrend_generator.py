@@ -9,8 +9,10 @@ import random
 from typing import Optional, Callable, Dict, List, Tuple
 from datetime import datetime, date
 import logging
+import pandas as pd
 
 from analysis.database_manager import DatabaseManager
+from analysis.candlestick_patterns import calculate_rsi
 
 
 logger = logging.getLogger(__name__)
@@ -198,7 +200,7 @@ class DowntrendGenerator:
         return True
 
     def _save_to_analysis(
-        self, db_manager: DatabaseManager, ticker: str, price_record: Dict
+        self, db_manager: DatabaseManager, ticker: str, price_record: Dict, stock_conn: sqlite3.Connection
     ) -> bool:
         """Save downtrend event to analysis database using DatabaseManager.
 
@@ -206,20 +208,73 @@ class DowntrendGenerator:
             db_manager: DatabaseManager instance
             ticker: Stock ticker
             price_record: Price data for the event (t0)
+            stock_conn: Connection to stock database for RSI calculation
 
         Returns:
             True if save succeeded
         """
         try:
+            # Laske RSI14 t0-päivämäärälle
+            rsi14 = self._calculate_rsi14(stock_conn, ticker, price_record["pvm"])
+            
             return db_manager.save_finding(
                 ticker=ticker,
                 date=price_record["pvm"],
                 pattern="downtrend",
                 signal_strength=1.0,
+                rsi14=rsi14,
             )
         except Exception as e:
             self.logger.error(f"Failed to save to analysis: {e}")
             return False
+
+    def _calculate_rsi14(self, conn: sqlite3.Connection, ticker: str, target_date: str) -> Optional[float]:
+        """Calculate RSI(14) for a specific date.
+
+        Args:
+            conn: Database connection
+            ticker: Stock ticker
+            target_date: Target date (YYYY-MM-DD)
+
+        Returns:
+            RSI(14) value or None if calculation fails
+        """
+        try:
+            # Hae hintadata (tarvitaan vähintään 14 päivää + pari ylimääräistä RSI-laskentaa varten)
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT pvm, close
+                FROM osakedata
+                WHERE osake = ? AND pvm <= ?
+                ORDER BY pvm DESC
+                LIMIT 50
+            """,
+                (ticker, target_date),
+            )
+            
+            rows = cursor.fetchall()
+            if len(rows) < 15:  # Tarvitaan vähintään 15 päivää RSI(14) laskentaan
+                return None
+            
+            # Muunna pandas DataFrameksi
+            df = pd.DataFrame(rows, columns=["pvm", "Close"])
+            df = df.sort_values("pvm").reset_index(drop=True)
+            
+            # Laske RSI
+            df = calculate_rsi(df, period=14, close_col="Close")
+            
+            # Hae RSI arvo target_date:lle
+            target_row = df[df["pvm"] == target_date]
+            if target_row.empty:
+                return None
+            
+            rsi_value = target_row.iloc[0].get("RSI_14")
+            return float(rsi_value) if pd.notna(rsi_value) else None
+            
+        except Exception as e:
+            self.logger.warning(f"RSI14 calculation failed for {ticker} {target_date}: {e}")
+            return None
 
     def _get_ticker_dates(self, conn: sqlite3.Connection, ticker: str) -> List[str]:
         """Get all dates for a ticker starting from 2024-01-01.
@@ -364,7 +419,7 @@ class DowntrendGenerator:
                     # Check downtrend criteria
                     if self._check_downtrend_criteria(price_data):
                         # Save to analysis database (t0 is the last record)
-                        if self._save_to_analysis(db_manager, ticker, price_data[-1]):
+                        if self._save_to_analysis(db_manager, ticker, price_data[-1], stock_conn):
                             events_found += 1
                             total_saved += 1
 
