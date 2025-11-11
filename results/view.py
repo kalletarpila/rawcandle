@@ -33,6 +33,7 @@ def generate_results_to_database(
     progress_callback=None,
     ticker_filter=None,
     pattern_filter=None,
+    divergence_combo_filter=False,
     force_rebuild=False,
 ):
     """
@@ -43,6 +44,7 @@ def generate_results_to_database(
         progress_callback: Progress callback function
         ticker_filter: Lista tickereistä joille generoidaan (None = kaikki)
         pattern_filter: Lista pattern-numeroista joita generoidaan (None = kaikki)
+        divergence_combo_filter: Jos True, generoi vain kynttilämalli + divergenssi yhdistelmät
         force_rebuild: Jos True, tyhjennä ensin results_data taulu
 
     Returns:
@@ -73,6 +75,7 @@ def generate_results_to_database(
             progress_callback=progress_callback,
             ticker_filter=ticker_filter,
             pattern_filter=pattern_filter,
+            divergence_combo_filter=divergence_combo_filter,
         )
 
         return rows, time_taken, None
@@ -130,6 +133,7 @@ def create_results_view(app) -> ft.View:
     """
     # controls
     app.results_checkboxes = [
+        ft.Checkbox(label="downtrend", value=False),
         ft.Checkbox(label="Hammer", value=False),
         ft.Checkbox(label="Bullish Engulfing", value=False),
         ft.Checkbox(label="Piercing Pattern", value=False),
@@ -169,6 +173,14 @@ def create_results_view(app) -> ft.View:
         value=False,
         tooltip="Valittuna: Luo uusi Excel-tiedosto alusta.\nEi valittuna: Lisää vain uusia löydöksiä olemassa olevaan tiedostoon.",
     )
+
+    # Divergenssi-yhdistelmä filtteri
+    app.results_divergence_combo_filter = ft.Checkbox(
+        label="Vain kynttilämalli + divergenssi -yhdistelmät",
+        value=False,
+        tooltip="Näytä vain tapahtumat joissa samalla tickerillä samana päivänä on sekä kynttilämalli (1-6) että divergenssi (7-8)",
+    )
+
     app.results_ticker_field = ft.TextField(
         label="Osakkeen ticker (esim. AAPL)",
         width=250,
@@ -588,6 +600,7 @@ def create_results_view(app) -> ft.View:
                         if selected_pattern_names:
                             # Muunna nimet numeroiksi (käänteinen mappaus ExcelExporterin PATTERN_NAMES:sta)
                             pattern_name_to_num = {
+                                "downtrend": 0,
                                 "Hammer": 1,
                                 "Bullish Engulfing": 2,
                                 "Piercing Pattern": 3,
@@ -766,6 +779,7 @@ def create_results_view(app) -> ft.View:
                     pattern_filter = None
                     try:
                         pattern_mapping = {
+                            "downtrend": 0,
                             "Hammer": 1,
                             "Bullish Engulfing": 2,
                             "Piercing Pattern": 3,
@@ -793,12 +807,20 @@ def create_results_view(app) -> ft.View:
                         else False
                     )
 
+                    # Lue divergence_combo_filter -asetus
+                    divergence_combo_filter = (
+                        app.results_divergence_combo_filter.value
+                        if hasattr(app.results_divergence_combo_filter, "value")
+                        else False
+                    )
+
                     # Generoi suodattimilla
                     rows, time_taken, error = generate_results_to_database(
                         app,
                         progress_callback,
                         ticker_filter=ticker_filter,
                         pattern_filter=pattern_filter,
+                        divergence_combo_filter=divergence_combo_filter,
                         force_rebuild=force_rebuild,
                     )
 
@@ -934,6 +956,7 @@ def create_results_view(app) -> ft.View:
 
                 # Hae suodattimet
                 pattern_mapping = {
+                    "downtrend": 0,
                     "Hammer": 1,
                     "Bullish Engulfing": 2,
                     "Piercing Pattern": 3,
@@ -971,6 +994,62 @@ def create_results_view(app) -> ft.View:
                 except Exception as ex:
                     print(f"Virhe ticker-suodattimen lukemisessa: {ex}")
 
+                # Lue divergence_combo_filter
+                divergence_combo_filter = (
+                    app.results_divergence_combo_filter.value
+                    if hasattr(app.results_divergence_combo_filter, "value")
+                    else False
+                )
+
+                # Jos divergence_combo_filter on päällä, suodata ID:t
+                id_filter = None
+                if divergence_combo_filter:
+                    try:
+                        from analysis.database_manager import DatabaseManager
+
+                        db_mgr = DatabaseManager("data/analysis.db")
+                        all_results = db_mgr.get_results_data()
+
+                        # Kynttilämalli patternit (1-6)
+                        candle_patterns = {1, 2, 3, 4, 5, 6}
+                        # Divergenssi patternit (7-8)
+                        divergence_patterns = {7, 8}
+
+                        # Rakenna (ticker, date) -> patterns mapping
+                        ticker_date_patterns = {}
+                        ticker_date_ids = {}
+
+                        for result in all_results:
+                            key = (result.get("ticker"), result.get("date"))
+                            pattern = result.get("candle_pattern")
+                            result_id = result.get("id")
+
+                            if key not in ticker_date_patterns:
+                                ticker_date_patterns[key] = set()
+                                ticker_date_ids[key] = []
+
+                            ticker_date_patterns[key].add(pattern)
+                            ticker_date_ids[key].append(result_id)
+
+                        # Etsi (ticker, date) yhdistelmät joissa on sekä kynttilämalli että divergenssi
+                        combo_ids = []
+                        for key, patterns in ticker_date_patterns.items():
+                            has_candle = bool(patterns & candle_patterns)
+                            has_divergence = bool(patterns & divergence_patterns)
+
+                            if has_candle and has_divergence:
+                                combo_ids.extend(ticker_date_ids[key])
+
+                        if combo_ids:
+                            id_filter = combo_ids
+                            print(
+                                f"🔍 Divergenssi-yhdistelmä: {len(id_filter)} tapahtumaa"
+                            )
+                        else:
+                            print("⚠️ Ei divergenssi-yhdistelmiä löytynyt")
+                    except Exception as ex:
+                        print(f"Virhe divergenssi-yhdistelmä suodattimessa: {ex}")
+
                 # Progress callback
                 def progress_callback(current, total):
                     """Päivitä progress ja tarkista keskeytys"""
@@ -1002,6 +1081,7 @@ def create_results_view(app) -> ft.View:
                     str(excel_path),
                     selected_patterns=selected_patterns,
                     ticker_filter=ticker_filter,
+                    id_filter=id_filter,  # Lisätty ID-suodatin
                     progress_callback=progress_callback,
                 )
 
@@ -1251,6 +1331,10 @@ def create_results_view(app) -> ft.View:
                                                 ft.Column(
                                                     app.results_checkboxes, spacing=12
                                                 ),
+                                                ft.Divider(
+                                                    height=1, color=ft.Colors.GREY_300
+                                                ),
+                                                app.results_divergence_combo_filter,
                                             ],
                                             horizontal_alignment=ft.CrossAxisAlignment.START,
                                         ),

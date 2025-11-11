@@ -53,6 +53,7 @@ class ResultsGenerator:
         progress_callback: Optional[Callable[[str, int, int], None]] = None,
         ticker_filter: Optional[list] = None,
         pattern_filter: Optional[list] = None,
+        divergence_combo_filter: bool = False,
     ) -> Tuple[int, float]:
         """
         Generoi tulokset tietokantaan inkrementaalisesti.
@@ -61,6 +62,7 @@ class ResultsGenerator:
             progress_callback: Callback(ticker, current, total)
             ticker_filter: Lista tickereistä joille generoidaan (None = kaikki)
             pattern_filter: Lista pattern-numeroista joita generoidaan (None = kaikki)
+            divergence_combo_filter: Jos True, generoi vain kynttilämalli + divergenssi yhdistelmät
 
         Returns:
             (rows_inserted, processing_time_seconds)
@@ -77,6 +79,13 @@ class ResultsGenerator:
             if not findings:
                 self.logger.info("No new findings to process")
                 return 0, 0.0
+
+            # 2. Suodata divergenssi-yhdistelmät jos valittu
+            if divergence_combo_filter:
+                findings = self._filter_divergence_combos(findings)
+                if not findings:
+                    self.logger.info("No divergence combos found after filtering")
+                    return 0, 0.0
 
             self.logger.info(f"Processing {len(findings)} new findings")
 
@@ -142,6 +151,64 @@ class ResultsGenerator:
             self.logger.error(f"Generate results failed: {e}", exc_info=True)
             return 0, 0.0
 
+    def _filter_divergence_combos(self, findings: List[dict]) -> List[dict]:
+        """
+        Suodata vain kynttilämalli + divergenssi yhdistelmät.
+
+        Palauttaa vain ne findings joissa samalla tickerillä samana päivänä on sekä:
+        - Kynttilämalli (pattern: Hammer, Bullish Engulfing, Piercing Pattern, Three White Soldiers, Morning Star, Dragonfly Doji)
+        - Divergenssi (pattern: Bullish Divergence, Bearish Divergence)
+
+        Args:
+            findings: Lista findings dictejä
+
+        Returns:
+            Suodatettu lista findings dictejä
+        """
+        # Kynttilämalli patternit (analysis_findings taulussa pattern-nimi)
+        candle_patterns = {
+            "Hammer",
+            "Bullish Engulfing",
+            "Piercing Pattern",
+            "Three White Soldiers",
+            "Morning Star",
+            "Dragonfly Doji",
+        }
+
+        # Divergenssi patternit
+        divergence_patterns = {"Bullish Divergence", "Bearish Divergence"}
+
+        # Rakenna (ticker, date) -> patterns mapping
+        ticker_date_patterns = {}
+        for finding in findings:
+            key = (finding.get("ticker"), finding.get("pvm"))
+            pattern = finding.get("pattern")
+
+            if key not in ticker_date_patterns:
+                ticker_date_patterns[key] = set()
+            ticker_date_patterns[key].add(pattern)
+
+        # Etsi (ticker, date) yhdistelmät joissa on sekä kynttilämalli että divergenssi
+        combo_keys = set()
+        for key, patterns in ticker_date_patterns.items():
+            has_candle = bool(patterns & candle_patterns)
+            has_divergence = bool(patterns & divergence_patterns)
+
+            if has_candle and has_divergence:
+                combo_keys.add(key)
+
+        # Suodata findings jotka kuuluvat combo_keys:iin
+        filtered = [
+            f for f in findings if (f.get("ticker"), f.get("pvm")) in combo_keys
+        ]
+
+        self.logger.info(
+            f"Divergence combo filter: {len(filtered)}/{len(findings)} findings "
+            f"({len(combo_keys)} unique ticker+date combos)"
+        )
+
+        return filtered
+
     def _fetch_new_findings(
         self,
         ticker_filter: Optional[list] = None,
@@ -170,6 +237,7 @@ class ResultsGenerator:
             if pattern_filter and all(isinstance(p, int) for p in pattern_filter):
                 # Käänteinen mappaus: numero -> nimi
                 pattern_names = {
+                    0: "downtrend",
                     1: "Hammer",
                     2: "Bullish Engulfing",
                     3: "Piercing Pattern",

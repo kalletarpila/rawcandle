@@ -59,6 +59,10 @@ class AnalysisView:
         self.all_findings = []
         self.filtered_findings = []
 
+        # Lajittelun tila
+        self.sort_column = None  # Sarakkeen nimi
+        self.sort_ascending = False  # Laskeva järjestys oletuksena
+
     def create_view(self) -> ft.Column:
         """
         Luo analysis-sivun UI.
@@ -197,6 +201,14 @@ class AnalysisView:
             on_change=self._on_filter_change,
         )
 
+        # Divergenssi + kynttilämalli -suodatin
+        self.divergence_combo_filter = ft.Checkbox(
+            label="Vain kynttilämalli + divergenssi -yhdistelmät",
+            value=False,
+            on_change=self._on_filter_change,
+            tooltip="Näytä vain tapahtumat joissa samalle tickerille ja päivälle on sekä kynttilämalli (Hammer-Dragonfly Doji) että divergenssi",
+        )
+
         # Rivit suodattimille
         row1 = ft.Row(
             [self.search_field, self.pattern_filter, clear_btn],
@@ -210,7 +222,13 @@ class AnalysisView:
             alignment=ft.MainAxisAlignment.START,
         )
 
-        return ft.Column([row1, row2], spacing=10)
+        row3 = ft.Row(
+            [self.divergence_combo_filter],
+            spacing=10,
+            alignment=ft.MainAxisAlignment.START,
+        )
+
+        return ft.Column([row1, row2, row3], spacing=10)
 
     # (random generation dialog and handlers removed from Analysis view)
 
@@ -244,11 +262,26 @@ class AnalysisView:
         """Luo löydösten taulukko."""
         return ft.DataTable(
             columns=[
-                ft.DataColumn(ft.Text("Osake", weight=ft.FontWeight.BOLD)),
-                ft.DataColumn(ft.Text("Päivämäärä", weight=ft.FontWeight.BOLD)),
-                ft.DataColumn(ft.Text("Kuvio", weight=ft.FontWeight.BOLD)),
-                ft.DataColumn(ft.Text("Vahvuus", weight=ft.FontWeight.BOLD)),
-                ft.DataColumn(ft.Text("RSI", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(
+                    ft.Text("Osake", weight=ft.FontWeight.BOLD),
+                    on_sort=lambda e: self._sort_by_column("ticker"),
+                ),
+                ft.DataColumn(
+                    ft.Text("Päivämäärä", weight=ft.FontWeight.BOLD),
+                    on_sort=lambda e: self._sort_by_column("date"),
+                ),
+                ft.DataColumn(
+                    ft.Text("Kuvio", weight=ft.FontWeight.BOLD),
+                    on_sort=lambda e: self._sort_by_column("pattern"),
+                ),
+                ft.DataColumn(
+                    ft.Text("Vahvuus", weight=ft.FontWeight.BOLD),
+                    on_sort=lambda e: self._sort_by_column("signal_strength"),
+                ),
+                ft.DataColumn(
+                    ft.Text("RSI", weight=ft.FontWeight.BOLD),
+                    on_sort=lambda e: self._sort_by_column("rsi14"),
+                ),
                 ft.DataColumn(ft.Text("Toiminnot", weight=ft.FontWeight.BOLD)),
             ],
             rows=[],
@@ -440,6 +473,43 @@ class AnalysisView:
                 f for f in self.filtered_findings if f.get("pattern") == pattern_val
             ]
 
+        # Divergenssi + kynttilämalli -suodatin
+        if self.divergence_combo_filter and self.divergence_combo_filter.value:
+            # Analysis taulussa pattern on tekstinä (ei numeroina kuten results_data)
+            candle_patterns = {
+                "Hammer",
+                "Bullish Engulfing",
+                "Piercing Pattern",
+                "Three White Soldiers",
+                "Morning Star",
+                "Dragonfly Doji",
+            }
+            divergence_patterns = {"Bullish Divergence", "Bearish Divergence"}
+
+            # Rakenna setti (ticker, date) pareista joissa on sekä kynttilämalli että divergenssi
+            candle_pairs = set()
+            divergence_pairs = set()
+
+            for f in self.all_findings:
+                ticker = f.get("ticker", "")
+                date = f.get("date", "")
+                pattern = f.get("pattern", "")
+
+                if pattern in candle_patterns:
+                    candle_pairs.add((ticker, date))
+                elif pattern in divergence_patterns:
+                    divergence_pairs.add((ticker, date))
+
+            # Yhdistelmä-parit: sekä kynttilämalli että divergenssi
+            combo_pairs = candle_pairs & divergence_pairs
+
+            # Suodata vain ne rivit joiden (ticker, date) on combo_pairs:issa
+            self.filtered_findings = [
+                f
+                for f in self.filtered_findings
+                if (f.get("ticker", ""), f.get("date", "")) in combo_pairs
+            ]
+
         # Min strength filter (tests set min_strength)
         min_strength = None
         if hasattr(self, "min_strength") and self.min_strength is not None:
@@ -501,8 +571,45 @@ class AnalysisView:
             self.start_date_field.value = ""
         if self.end_date_field:
             self.end_date_field.value = ""
+        if self.divergence_combo_filter:
+            self.divergence_combo_filter.value = False
 
         self._apply_filters()
+
+    def _sort_by_column(self, column_name: str) -> None:
+        """
+        Lajittele taulukko sarakkeen mukaan.
+
+        Args:
+            column_name: Sarakkeen kenttänimi (esim. "signal_strength", "rsi14")
+        """
+        # Jos sama sarake, vaihda järjestys
+        if self.sort_column == column_name:
+            self.sort_ascending = not self.sort_ascending
+        else:
+            # Uusi sarake, aloita laskevasta
+            self.sort_column = column_name
+            self.sort_ascending = False
+
+        # Lajittele filtered_findings
+        if self.filtered_findings:
+            self.filtered_findings.sort(
+                key=lambda x: (
+                    x.get(column_name)
+                    if x.get(column_name) is not None
+                    else float("-inf")
+                ),
+                reverse=not self.sort_ascending,  # reverse=True = laskeva
+            )
+
+        # Päivitä näyttö
+        self._update_table()
+
+        # Näytä info
+        direction = "nousevaan" if self.sort_ascending else "laskevaan"
+        self._show_info(
+            f"Lajiteltu sarakkeen {column_name} mukaan {direction} järjestykseen"
+        )
 
     def _run_analysis(self, e) -> None:
         """Aja analyysi."""

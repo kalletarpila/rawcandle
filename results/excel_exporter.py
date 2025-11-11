@@ -48,6 +48,7 @@ class ExcelExporter:
         output_path: str,
         selected_patterns: Optional[list] = None,
         ticker_filter: Optional[list] = None,
+        id_filter: Optional[list] = None,
         progress_callback=None,
     ) -> tuple[bool, str]:
         """
@@ -57,6 +58,7 @@ class ExcelExporter:
             output_path: Polku luotavaan Excel-tiedostoon
             selected_patterns: Lista pattern-numeroita joita viedään (None = kaikki)
             ticker_filter: Lista tickereistä joita viedään (None = kaikki)
+            id_filter: Lista result ID:istä joita viedään (None = kaikki)
             progress_callback: Callback(current, total) -> bool (True = keskeytä)
 
         Returns:
@@ -72,17 +74,22 @@ class ExcelExporter:
                     "Ei tuloksia vietäväksi. Generoi ensin tulokset tietokantaan.",
                 )
 
-            # Suodata patterneilla jos annettu
-            if selected_patterns is not None:
-                results = [
-                    r for r in all_results if r["candle_pattern"] in selected_patterns
-                ]
+            # Suodata ID:illä ensin (ensisijainen suodatin)
+            if id_filter is not None:
+                id_set = set(id_filter)
+                results = [r for r in all_results if r.get("id") in id_set]
             else:
                 results = all_results
 
-            # Suodata tickereillä jos annettu
-            if ticker_filter is not None:
-                results = [r for r in results if r["ticker"] in ticker_filter]
+                # Suodata patterneilla jos annettu (vain jos ei ID-suodatusta)
+                if selected_patterns is not None:
+                    results = [
+                        r for r in results if r["candle_pattern"] in selected_patterns
+                    ]
+
+                # Suodata tickereillä jos annettu (vain jos ei ID-suodatusta)
+                if ticker_filter is not None:
+                    results = [r for r in results if r["ticker"] in ticker_filter]
 
             if not results:
                 return False, "Valituilla suodattimilla ei löytynyt tuloksia."

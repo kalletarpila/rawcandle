@@ -5,10 +5,13 @@ Käyttöliittymä results_data -taulun tarkasteluun.
 
 import flet as ft
 import logging
+import random
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 
 from analysis.database_manager import DatabaseManager
+from results.excel_exporter import ExcelExporter
 
 
 class FindingsView:
@@ -193,6 +196,14 @@ class FindingsView:
             on_change=self._on_filter_change,
         )
 
+        # Divergenssi + kynttilämalli -suodatin
+        self.divergence_combo_filter = ft.Checkbox(
+            label="Vain kynttilämalli + divergenssi -yhdistelmät",
+            value=False,
+            on_change=self._on_filter_change,
+            tooltip="Näytä vain tapahtumat joissa samalle tickerille ja päivälle on sekä kynttilämalli (1-6) että divergenssi (7-8)",
+        )
+
         # Rivit suodattimille
         row1 = ft.Row(
             [self.search_field, self.pattern_filter, clear_btn],
@@ -206,7 +217,13 @@ class FindingsView:
             alignment=ft.MainAxisAlignment.START,
         )
 
-        return ft.Column([row1, row2], spacing=10)
+        row3 = ft.Row(
+            [self.divergence_combo_filter],
+            spacing=10,
+            alignment=ft.MainAxisAlignment.START,
+        )
+
+        return ft.Column([row1, row2, row3], spacing=10)
 
     # (random generation dialog and handlers removed from Analysis view)
 
@@ -289,6 +306,11 @@ class FindingsView:
         """Luo tilastonäkymä."""
         self.total_findings_text = ft.Text("0", size=20, weight=ft.FontWeight.BOLD)
         self.avg_strength_text = ft.Text("0.0", size=20, weight=ft.FontWeight.BOLD)
+        self.avg_rsi_text = ft.Text("0.0", size=20, weight=ft.FontWeight.BOLD)
+        self.avg_t2_text = ft.Text("0.0", size=20, weight=ft.FontWeight.BOLD)
+        self.avg_t5_text = ft.Text("0.0", size=20, weight=ft.FontWeight.BOLD)
+        self.avg_t10_text = ft.Text("0.0", size=20, weight=ft.FontWeight.BOLD)
+        self.avg_t20_text = ft.Text("0.0", size=20, weight=ft.FontWeight.BOLD)
 
         total_card = ft.Card(
             content=ft.Container(
@@ -312,7 +334,66 @@ class FindingsView:
             )
         )
 
-        return ft.Row([total_card, avg_card], alignment=ft.MainAxisAlignment.START)
+        rsi_card = ft.Card(
+            content=ft.Container(
+                content=ft.Column(
+                    [ft.Text("RSI14 ka", size=12), self.avg_rsi_text],
+                    alignment=ft.MainAxisAlignment.CENTER,
+                ),
+                padding=20,
+                width=120,
+            )
+        )
+
+        t2_card = ft.Card(
+            content=ft.Container(
+                content=ft.Column(
+                    [ft.Text("t2 ka", size=12), self.avg_t2_text],
+                    alignment=ft.MainAxisAlignment.CENTER,
+                ),
+                padding=20,
+                width=110,
+            )
+        )
+
+        t5_card = ft.Card(
+            content=ft.Container(
+                content=ft.Column(
+                    [ft.Text("t5 ka", size=12), self.avg_t5_text],
+                    alignment=ft.MainAxisAlignment.CENTER,
+                ),
+                padding=20,
+                width=110,
+            )
+        )
+
+        t10_card = ft.Card(
+            content=ft.Container(
+                content=ft.Column(
+                    [ft.Text("t10 ka", size=12), self.avg_t10_text],
+                    alignment=ft.MainAxisAlignment.CENTER,
+                ),
+                padding=20,
+                width=110,
+            )
+        )
+
+        t20_card = ft.Card(
+            content=ft.Container(
+                content=ft.Column(
+                    [ft.Text("t20 ka", size=12), self.avg_t20_text],
+                    alignment=ft.MainAxisAlignment.CENTER,
+                ),
+                padding=20,
+                width=110,
+            )
+        )
+
+        return ft.Row(
+            [total_card, avg_card, rsi_card, t2_card, t5_card, t10_card, t20_card],
+            alignment=ft.MainAxisAlignment.START,
+            spacing=10,
+        )
 
     def refresh_data(self) -> None:
         """Päivitä data tietokannasta."""
@@ -422,13 +503,68 @@ class FindingsView:
 
         total = len(self.filtered_findings)
         avg_strength = 0.0
+        avg_rsi = 0.0
+        avg_t2 = 0.0
+        avg_t5 = 0.0
+        avg_t10 = 0.0
+        avg_t20 = 0.0
 
         if total > 0:
+            # Keskivahvuus
             strengths = [f.get("signal_strength", 0) for f in self.filtered_findings]
             avg_strength = sum(strengths) / len(strengths)
 
+            # RSI14 keskiarvo (poista None-arvot)
+            rsi_values = [
+                f.get("RSI14_t0")
+                for f in self.filtered_findings
+                if f.get("RSI14_t0") is not None
+            ]
+            if rsi_values:
+                avg_rsi = sum(rsi_values) / len(rsi_values)
+
+            # t2 keskiarvo (poista None-arvot)
+            t2_values = [
+                f.get("t2") for f in self.filtered_findings if f.get("t2") is not None
+            ]
+            if t2_values:
+                avg_t2 = sum(t2_values) / len(t2_values)
+
+            # t5 keskiarvo (poista None-arvot)
+            t5_values = [
+                f.get("t5") for f in self.filtered_findings if f.get("t5") is not None
+            ]
+            if t5_values:
+                avg_t5 = sum(t5_values) / len(t5_values)
+
+            # t10 keskiarvo (poista None-arvot)
+            t10_values = [
+                f.get("t10") for f in self.filtered_findings if f.get("t10") is not None
+            ]
+            if t10_values:
+                avg_t10 = sum(t10_values) / len(t10_values)
+
+            # t20 keskiarvo (poista None-arvot)
+            t20_values = [
+                f.get("t20") for f in self.filtered_findings if f.get("t20") is not None
+            ]
+            if t20_values:
+                avg_t20 = sum(t20_values) / len(t20_values)
+
         self.total_findings_text.value = str(total)
         self.avg_strength_text.value = f"{avg_strength:.2f}"
+
+        # Päivitä uudet tekstit jos ne on olemassa
+        if hasattr(self, "avg_rsi_text") and self.avg_rsi_text:
+            self.avg_rsi_text.value = f"{avg_rsi:.1f}"
+        if hasattr(self, "avg_t2_text") and self.avg_t2_text:
+            self.avg_t2_text.value = f"{avg_t2:.2f}%"
+        if hasattr(self, "avg_t5_text") and self.avg_t5_text:
+            self.avg_t5_text.value = f"{avg_t5:.2f}%"
+        if hasattr(self, "avg_t10_text") and self.avg_t10_text:
+            self.avg_t10_text.value = f"{avg_t10:.2f}%"
+        if hasattr(self, "avg_t20_text") and self.avg_t20_text:
+            self.avg_t20_text.value = f"{avg_t20:.2f}%"
 
         # Päivitä kynttiläkohtaiset määrät
         self._update_pattern_counts()
@@ -505,6 +641,19 @@ class FindingsView:
             ]
 
         # Kuviosuodatin: prefer UI control, fall back to test-set attribute
+        # Pattern-numeroiden nimet (results_data käyttää candle_pattern numeroa 0-8)
+        PATTERN_NAMES = {
+            0: "downtrend",
+            1: "Hammer",
+            2: "Bullish Engulfing",
+            3: "Piercing Pattern",
+            4: "Three White Soldiers",
+            5: "Morning Star",
+            6: "Dragonfly Doji",
+            7: "Bullish Divergence",
+            8: "Bearish Divergence",
+        }
+
         pattern_val = None
         if self.pattern_filter and getattr(self.pattern_filter, "value", None):
             pattern_val = self.pattern_filter.value
@@ -512,8 +661,44 @@ class FindingsView:
             pattern_val = self.selected_pattern
 
         if pattern_val:
+            # Muunna pattern-nimi numeroksi
+            pattern_num = None
+            for num, name in PATTERN_NAMES.items():
+                if name == pattern_val:
+                    pattern_num = num
+                    break
+
+            if pattern_num is not None:
+                self.filtered_findings = [
+                    f
+                    for f in self.filtered_findings
+                    if f.get("candle_pattern") == pattern_num
+                ]
+
+        # Divergenssi + kynttilämalli -suodatin
+        if self.divergence_combo_filter and self.divergence_combo_filter.value:
+            # Rakenna setti (ticker, date) pareista joissa on sekä kynttilämalli (1-6) että divergenssi (7-8)
+            candle_pairs = set()  # (ticker, date) parit joissa kynttilämalli 1-6
+            divergence_pairs = set()  # (ticker, date) parit joissa divergenssi 7-8
+
+            for f in self.all_findings:
+                ticker = f.get("ticker", "")
+                date = f.get("date", "")
+                pattern = f.get("candle_pattern", 0)
+
+                if 1 <= pattern <= 6:
+                    candle_pairs.add((ticker, date))
+                elif pattern in [7, 8]:
+                    divergence_pairs.add((ticker, date))
+
+            # Yhdistelmä-parit: sekä kynttilämalli että divergenssi
+            combo_pairs = candle_pairs & divergence_pairs
+
+            # Suodata vain ne rivit joiden (ticker, date) on combo_pairs:issa
             self.filtered_findings = [
-                f for f in self.filtered_findings if f.get("pattern") == pattern_val
+                f
+                for f in self.filtered_findings
+                if (f.get("ticker", ""), f.get("date", "")) in combo_pairs
             ]
 
         # Min strength filter (tests set min_strength)
@@ -577,6 +762,8 @@ class FindingsView:
             self.start_date_field.value = ""
         if self.end_date_field:
             self.end_date_field.value = ""
+        if self.divergence_combo_filter:
+            self.divergence_combo_filter.value = False
 
         self._apply_filters()
 
@@ -621,17 +808,48 @@ class FindingsView:
         self._show_success("Data päivitetty!")
 
     def _export_data(self, e) -> None:
-        """Vie data Exceliin."""
-        # Tämä voitaisiin toteuttaa myöhemmin
-        self._show_info("Excel-vienti tulossa pian!")
+        """Avaa Excel-vienti dialogi."""
+        self._open_excel_export_dialog()
 
     def _delete_finding(self, finding_id: int) -> None:
         """Poista yksittäinen tuloslöydös results_data taulusta."""
-        if finding_id and self.db_manager.delete_result_by_id(finding_id):
-            self._show_success("Tulos poistettu!")
-            self.refresh_data()
-        else:
-            self._show_error("Tuloksen poisto epäonnistui!")
+        if not finding_id:
+            self._show_error("Virheellinen ID")
+            return
+
+        # Poista taustasäikeessä
+        def delete_task():
+            try:
+                success = self.db_manager.delete_result_by_id(finding_id)
+
+                # Päivitä UI pääsäikeessä
+                def update_ui():
+                    if success:
+                        self._show_success("Tulos poistettu!")
+                        self.refresh_data()
+                    else:
+                        self._show_error("Tuloksen poisto epäonnistui!")
+
+                if hasattr(self.page, "run_task"):
+                    self.page.run_task(update_ui)
+                else:
+                    update_ui()
+
+            except Exception as ex:
+
+                def show_error():
+                    self._show_error(f"Virhe poistossa: {str(ex)}")
+
+                if hasattr(self.page, "run_task"):
+                    self.page.run_task(show_error)
+                else:
+                    show_error()
+
+        import threading
+
+        thread = threading.Thread(target=delete_task)
+        thread.daemon = True
+        thread.start()
 
     def _delete_all_findings(self, e) -> None:
         """Poista suodatetut tulokset results_data taulusta vahvistuksen jälkeen."""
@@ -651,16 +869,42 @@ class FindingsView:
                 close_dialog(None)
                 return
 
-            # Poista tulokset results_data taulusta
-            deleted_count = self.db_manager.delete_results_by_ids(finding_ids)
-
-            if deleted_count > 0:
-                self._show_success(f"Poistettu {deleted_count} tulosta")
-                self.refresh_data()
-            else:
-                self._show_error("Poisto epäonnistui")
-
+            # Sulje dialogi ensin
             close_dialog(None)
+
+            # Poista tulokset taustasäikeessä
+            def delete_task():
+                try:
+                    deleted_count = self.db_manager.delete_results_by_ids(finding_ids)
+
+                    # Päivitä UI pääsäikeessä
+                    def update_ui():
+                        if deleted_count > 0:
+                            self._show_success(f"Poistettu {deleted_count} tulosta")
+                            self.refresh_data()
+                        else:
+                            self._show_error("Poisto epäonnistui")
+
+                    if hasattr(self.page, "run_task"):
+                        self.page.run_task(update_ui)
+                    else:
+                        update_ui()
+
+                except Exception as ex:
+
+                    def show_error():
+                        self._show_error(f"Virhe poistossa: {str(ex)}")
+
+                    if hasattr(self.page, "run_task"):
+                        self.page.run_task(show_error)
+                    else:
+                        show_error()
+
+            import threading
+
+            thread = threading.Thread(target=delete_task)
+            thread.daemon = True
+            thread.start()
 
         confirm_dlg = None  # Määritellään ensin
 
@@ -714,21 +958,44 @@ class FindingsView:
 
         # Luo vahvistusikkuna
         def confirm_clear(e):
-            try:
-                # Tyhjennä results_data taulu
-                deleted_count = self.db_manager.clear_results_data()
-
-                if deleted_count > 0:
-                    self._show_success(
-                        f"Taulu tyhjennetty: {deleted_count} tulosta poistettu"
-                    )
-                    self.refresh_data()
-                else:
-                    self._show_error("Taulun tyhjennys epäonnistui")
-            except Exception as ex:
-                self._show_error(f"Virhe: {str(ex)}")
-
+            # Sulje dialogi ensin
             close_dialog(None)
+
+            # Tyhjennä taulu taustasäikeessä
+            def clear_task():
+                try:
+                    deleted_count = self.db_manager.clear_results_data()
+
+                    # Päivitä UI pääsäikeessä
+                    def update_ui():
+                        if deleted_count > 0:
+                            self._show_success(
+                                f"Taulu tyhjennetty: {deleted_count} tulosta poistettu"
+                            )
+                            self.refresh_data()
+                        else:
+                            self._show_error("Taulun tyhjennys epäonnistui")
+
+                    if hasattr(self.page, "run_task"):
+                        self.page.run_task(update_ui)
+                    else:
+                        update_ui()
+
+                except Exception as ex:
+
+                    def show_error():
+                        self._show_error(f"Virhe: {str(ex)}")
+
+                    if hasattr(self.page, "run_task"):
+                        self.page.run_task(show_error)
+                    else:
+                        show_error()
+
+            import threading
+
+            thread = threading.Thread(target=clear_task)
+            thread.daemon = True
+            thread.start()
 
         confirm_dlg = None  # Määritellään ensin
 
@@ -865,6 +1132,227 @@ class FindingsView:
         elif sort_by == "pattern":
             return sorted(self.filtered_findings, key=lambda x: x.get("pattern", ""))
         return self.filtered_findings
+
+    def _open_excel_export_dialog(self) -> None:
+        """Avaa Excel-vienti dialogi."""
+        if not self.filtered_findings:
+            self._show_info("Ei vietäviä tuloksia. Sovella ensin suodattimia.")
+            return
+
+        total_count = len(self.filtered_findings)
+
+        # Radio-painikkeiden tila
+        export_mode = ft.Ref[ft.RadioGroup]()
+        sample_size_field = ft.Ref[ft.TextField]()
+
+        def on_mode_change(e):
+            """Aktivoi/deaktivoi määräkenttä."""
+            is_random = export_mode.current.value == "random"
+            sample_size_field.current.disabled = not is_random
+            sample_size_field.current.update()
+
+        def close_dialog(e):
+            """Sulje dialogi."""
+            export_dlg.open = False
+            self.page.update()
+
+        def export_action(e):
+            """Suorita Excel-vienti."""
+            mode = export_mode.current.value
+
+            # Määritä vietävät tapahtumat
+            if mode == "all":
+                events_to_export = self.filtered_findings.copy()
+                sample_info = ""
+            else:  # random
+                try:
+                    requested_count = int(sample_size_field.current.value or "0")
+                    if requested_count <= 0:
+                        self._show_error("Anna positiivinen määrä")
+                        return
+
+                    # Tarkista ylimitoitus
+                    if requested_count > total_count:
+                        self._show_info(
+                            f"Pyydetty {requested_count} tapahtumaa, mutta saatavilla vain {total_count}. "
+                            f"Viedään kaikki {total_count} tapahtumaa."
+                        )
+                        events_to_export = self.filtered_findings.copy()
+                        sample_info = (
+                            f" (pyydetty {requested_count}, saatavilla {total_count})"
+                        )
+                    else:
+                        # Satunnaisotanta ilman palauttamista
+                        events_to_export = random.sample(
+                            self.filtered_findings, requested_count
+                        )
+                        sample_info = f" (arvottu {requested_count}/{total_count})"
+
+                except ValueError:
+                    self._show_error("Virheellinen määrä")
+                    return
+
+            # Sulje dialogi
+            close_dialog(None)
+
+            # Vie Exceliin progress-dialogilla
+            self._export_to_excel_with_progress(events_to_export, sample_info)
+
+        # Luo dialogi
+        export_dlg = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("📊 Vie Exceliin"),
+            content=ft.Container(
+                content=ft.Column(
+                    [
+                        ft.Text(
+                            f"Filtteröityjä tapahtumia: {total_count}",
+                            weight=ft.FontWeight.BOLD,
+                        ),
+                        ft.Divider(),
+                        ft.RadioGroup(
+                            ref=export_mode,
+                            value="all",
+                            on_change=on_mode_change,
+                            content=ft.Column(
+                                [
+                                    ft.Radio(
+                                        value="all",
+                                        label=f"Vie kaikki {total_count} tapahtumaa",
+                                    ),
+                                    ft.Radio(
+                                        value="random",
+                                        label="Satunnainen osajoukko:",
+                                    ),
+                                ]
+                            ),
+                        ),
+                        ft.Container(
+                            content=ft.TextField(
+                                ref=sample_size_field,
+                                label="Tapahtumien määrä",
+                                hint_text=f"1 - {total_count}",
+                                keyboard_type=ft.KeyboardType.NUMBER,
+                                disabled=True,
+                                width=200,
+                            ),
+                            padding=ft.padding.only(left=30),
+                        ),
+                    ],
+                    tight=True,
+                    spacing=10,
+                ),
+                width=400,
+                height=200,
+            ),
+            actions=[
+                ft.TextButton("Peruuta", on_click=close_dialog),
+                ft.ElevatedButton(
+                    "Vie Excel",
+                    icon=ft.Icons.FILE_DOWNLOAD,
+                    on_click=export_action,
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+
+        # Näytä dialogi
+        if hasattr(self.page, "overlay"):
+            if export_dlg not in self.page.overlay:
+                self.page.overlay.append(export_dlg)
+        export_dlg.open = True
+        self.page.update()
+
+    def _export_to_excel_with_progress(
+        self, events: List[Dict[str, Any]], sample_info: str = ""
+    ) -> None:
+        """
+        Vie tapahtumat Exceliin progress-dialogilla.
+
+        Args:
+            events: Lista tapahtumia (dict) vietäväksi
+            sample_info: Lisäinfo sample-tilasta (esim. " (arvottu 50/200)")
+        """
+        if not events:
+            self._show_error("Ei vietäviä tapahtumia")
+            return
+
+        # Luo progress dialog
+        progress_bar = ft.ProgressBar(width=400, value=0)
+        progress_text = ft.Text("Aloitetaan vientiä...")
+        cancel_requested = {"value": False}
+
+        def cancel_export(e):
+            """Keskeytä vienti."""
+            cancel_requested["value"] = True
+            progress_text.value = "Keskeytetään..."
+            progress_text.update()
+
+        progress_dlg = ft.AlertDialog(
+            modal=True,
+            title=ft.Text(f"📊 Viedään {len(events)} tapahtumaa Exceliin{sample_info}"),
+            content=ft.Container(
+                content=ft.Column(
+                    [progress_text, progress_bar],
+                    tight=True,
+                    spacing=10,
+                ),
+                width=400,
+                height=80,
+            ),
+            actions=[
+                ft.TextButton("Keskeytä", on_click=cancel_export),
+            ],
+        )
+
+        if hasattr(self.page, "overlay"):
+            if progress_dlg not in self.page.overlay:
+                self.page.overlay.append(progress_dlg)
+        progress_dlg.open = True
+        self.page.update()
+
+        # Luo ExcelExporter ja vie data
+        try:
+            exporter = ExcelExporter(self.db_manager.db_path)
+
+            # Kerää event ID:t
+            event_ids = [event.get("id") for event in events if event.get("id")]
+
+            # Luo output path
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_path = f"data/results_export_{timestamp}.xlsx"
+
+            # Progress callback
+            def update_progress(current: int, total: int) -> bool:
+                """Päivitä progress ja tarkista keskeytys."""
+                progress_bar.value = current / total
+                progress_text.value = f"Viety {current}/{total} tapahtumaa..."
+                self.page.update()
+                return cancel_requested["value"]
+
+            # Vie Excel ID-suodatuksella
+            success, message = exporter.export_to_excel(
+                output_path=output_path,
+                selected_patterns=None,
+                ticker_filter=None,
+                id_filter=event_ids,  # Käytä ID-suodatusta
+                progress_callback=update_progress,
+            )  # Sulje progress dialog
+            progress_dlg.open = False
+            self.page.update()
+
+            if cancel_requested["value"]:
+                self._show_info("Vienti keskeytetty")
+            elif success:
+                self._show_success(f"Excel-vienti onnistui: {output_path}")
+            else:
+                self._show_error(f"Excel-vienti epäonnistui: {message}")
+
+        except Exception as e:
+            self.logger.error(f"Excel export error: {e}")
+            progress_dlg.open = False
+            self.page.update()
+            self._show_error(f"Virhe Excel-viennissä: {str(e)}")
 
     def validate_ticker(self, ticker: str) -> bool:
         """Validoi ticker syöte"""
