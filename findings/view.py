@@ -229,6 +229,15 @@ class FindingsView:
 
     def _create_action_buttons(self) -> ft.Row:
         """Luo toimintopainikkeet."""
+        refresh_btn = ft.ElevatedButton(
+            text="Päivitä",
+            icon=ft.Icons.REFRESH,
+            on_click=self._refresh_data,
+            bgcolor=ft.Colors.BLUE_700,
+            color=ft.Colors.WHITE,
+            tooltip="Päivitä tulokset tietokannasta",
+        )
+
         delete_all_btn = ft.ElevatedButton(
             text="Poista suodatetut",
             icon=ft.Icons.DELETE_SWEEP,
@@ -248,7 +257,7 @@ class FindingsView:
         )
 
         return ft.Row(
-            [delete_all_btn, clear_db_btn],
+            [refresh_btn, delete_all_btn, clear_db_btn],
             alignment=ft.MainAxisAlignment.START,
             spacing=10,
         )
@@ -804,8 +813,28 @@ class FindingsView:
 
     def _refresh_data(self, e) -> None:
         """Päivitä data painikkeesta."""
-        self.refresh_data()
-        self._show_success("Data päivitetty!")
+
+        def refresh_task():
+            try:
+                # Create new database manager for this thread
+                from analysis.database_manager import DatabaseManager
+
+                db_mgr = DatabaseManager(self.db_manager.db_path)
+
+                # Load fresh data from database
+                self.all_findings = db_mgr.get_results_data()
+                self.filtered_findings = self.all_findings.copy()
+
+                # Apply current filters
+                self._apply_filters()
+                self._show_success("Data päivitetty!")
+            except Exception as ex:
+                self._show_error(f"Päivitys epäonnistui: {str(ex)}")
+
+        import threading
+
+        thread = threading.Thread(target=refresh_task, daemon=True)
+        thread.start()
 
     def _export_data(self, e) -> None:
         """Avaa Excel-vienti dialogi."""
@@ -820,30 +849,23 @@ class FindingsView:
         # Poista taustasäikeessä
         def delete_task():
             try:
-                success = self.db_manager.delete_result_by_id(finding_id)
+                # Luo uusi DatabaseManager instanssi tälle säikeelle
+                from analysis.database_manager import DatabaseManager
 
-                # Päivitä UI pääsäikeessä
-                def update_ui():
-                    if success:
-                        self._show_success("Tulos poistettu!")
-                        self.refresh_data()
-                    else:
-                        self._show_error("Tuloksen poisto epäonnistui!")
+                db_mgr = DatabaseManager(self.db_manager.db_path)
 
-                if hasattr(self.page, "run_task"):
-                    self.page.run_task(update_ui)
+                success = db_mgr.delete_result_by_id(finding_id)
+
+                # Päivitä UI - EI kutsuta refresh_data()
+                if success:
+                    self._show_success(
+                        "Tulos poistettu! Päivitä sivu nähdäksesi muutokset."
+                    )
                 else:
-                    update_ui()
+                    self._show_error("Tuloksen poisto epäonnistui!")
 
             except Exception as ex:
-
-                def show_error():
-                    self._show_error(f"Virhe poistossa: {str(ex)}")
-
-                if hasattr(self.page, "run_task"):
-                    self.page.run_task(show_error)
-                else:
-                    show_error()
+                self._show_error(f"Virhe poistossa: {str(ex)}")
 
         import threading
 
@@ -875,30 +897,24 @@ class FindingsView:
             # Poista tulokset taustasäikeessä
             def delete_task():
                 try:
-                    deleted_count = self.db_manager.delete_results_by_ids(finding_ids)
+                    # Luo uusi DatabaseManager instanssi tälle säikeelle
+                    from analysis.database_manager import DatabaseManager
 
-                    # Päivitä UI pääsäikeessä
-                    def update_ui():
-                        if deleted_count > 0:
-                            self._show_success(f"Poistettu {deleted_count} tulosta")
-                            self.refresh_data()
-                        else:
-                            self._show_error("Poisto epäonnistui")
+                    db_mgr = DatabaseManager(self.db_manager.db_path)
 
-                    if hasattr(self.page, "run_task"):
-                        self.page.run_task(update_ui)
+                    deleted_count = db_mgr.delete_results_by_ids(finding_ids)
+
+                    # Päivitä UI pääsäikeessä - EI kutsuta refresh_data() täältä!
+                    # Tallennetaan tulos ja annetaan käyttäjän päivittää sivu
+                    if deleted_count > 0:
+                        self._show_success(
+                            f"Poistettu {deleted_count} tulosta. Päivitä sivu nähdäksesi muutokset."
+                        )
                     else:
-                        update_ui()
+                        self._show_error("Poisto epäonnistui")
 
                 except Exception as ex:
-
-                    def show_error():
-                        self._show_error(f"Virhe poistossa: {str(ex)}")
-
-                    if hasattr(self.page, "run_task"):
-                        self.page.run_task(show_error)
-                    else:
-                        show_error()
+                    self._show_error(f"Virhe poistossa: {str(ex)}")
 
             import threading
 
@@ -964,32 +980,23 @@ class FindingsView:
             # Tyhjennä taulu taustasäikeessä
             def clear_task():
                 try:
-                    deleted_count = self.db_manager.clear_results_data()
+                    # Luo uusi DatabaseManager instanssi tälle säikeelle
+                    from analysis.database_manager import DatabaseManager
 
-                    # Päivitä UI pääsäikeessä
-                    def update_ui():
-                        if deleted_count > 0:
-                            self._show_success(
-                                f"Taulu tyhjennetty: {deleted_count} tulosta poistettu"
-                            )
-                            self.refresh_data()
-                        else:
-                            self._show_error("Taulun tyhjennys epäonnistui")
+                    db_mgr = DatabaseManager(self.db_manager.db_path)
 
-                    if hasattr(self.page, "run_task"):
-                        self.page.run_task(update_ui)
+                    deleted_count = db_mgr.clear_results_data()
+
+                    # Päivitä UI - EI kutsuta refresh_data()
+                    if deleted_count > 0:
+                        self._show_success(
+                            f"Taulu tyhjennetty: {deleted_count} tulosta poistettu. Päivitä sivu."
+                        )
                     else:
-                        update_ui()
+                        self._show_error("Taulun tyhjennys epäonnistui")
 
                 except Exception as ex:
-
-                    def show_error():
-                        self._show_error(f"Virhe: {str(ex)}")
-
-                    if hasattr(self.page, "run_task"):
-                        self.page.run_task(show_error)
-                    else:
-                        show_error()
+                    self._show_error(f"Virhe: {str(ex)}")
 
             import threading
 

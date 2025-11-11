@@ -169,9 +169,9 @@ def create_results_view(app) -> ft.View:
 
     # Generointi-asetukset
     app.results_force_rebuild = ft.Checkbox(
-        label="🔄 Generoi kokonaan uusi tiedosto (muuten lisää vain uusia rivejä)",
+        label="🔄 Tyhjennä ja rakenna results_data taulu kokonaan uudelleen",
         value=False,
-        tooltip="Valittuna: Luo uusi Excel-tiedosto alusta.\nEi valittuna: Lisää vain uusia löydöksiä olemassa olevaan tiedostoon.",
+        tooltip="Valittuna: Tyhjentää results_data taulun ja generoi KAIKKI tulokset analysis_findings taulusta uudelleen.\nEi valittuna: Lisää vain uusia löydöksiä (inkrementaalinen päivitys).",
     )
 
     # Divergenssi-yhdistelmä filtteri
@@ -1310,6 +1310,12 @@ def create_results_view(app) -> ft.View:
                             alignment=ft.MainAxisAlignment.CENTER,
                             spacing=20,
                         ),
+                        ft.Container(height=8),
+                        # Generointi-asetus heti painikkeen alle
+                        ft.Row(
+                            [app.results_force_rebuild],
+                            alignment=ft.MainAxisAlignment.CENTER,
+                        ),
                         ft.Container(content=app.results_banner),
                         ft.Divider(height=30, color=ft.Colors.TRANSPARENT),
                         ft.Row(
@@ -1482,14 +1488,6 @@ def create_results_view(app) -> ft.View:
                                                             height=1,
                                                             color=ft.Colors.GREY_300,
                                                         ),
-                                                        ft.Text(
-                                                            "⚙️ Generointi:",
-                                                            size=12,
-                                                            weight=ft.FontWeight.BOLD,
-                                                            color=ft.Colors.BLUE_600,
-                                                        ),
-                                                        app.results_force_rebuild,
-                                                        ft.Container(height=8),
                                                         ft.Text(
                                                             "📊 Kriteerit:",
                                                             size=12,
