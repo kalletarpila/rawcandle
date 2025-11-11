@@ -203,6 +203,9 @@ class ExcelExporter:
 
             # Lisää data
             total_rows = len(results)
+            skipped_rows = 0
+            written_rows = 0
+            
             for row_num, result in enumerate(results, 2):
                 # Tarkista keskeytys joka 100. rivi
                 if progress_callback and (row_num - 2) % 100 == 0:
@@ -304,18 +307,26 @@ class ExcelExporter:
                     result.get("weekday"),
                 ]
 
-                # Kirjoita rivi
+                # Tarkista että KAIKISSA sarakkeissa on data (ei None-arvoja)
+                if None in row_data:
+                    skipped_rows += 1
+                    continue  # Skipppaa tämä rivi
+
+                # Kirjoita rivi (käytä written_rows laskuria rivin numeroinnissa)
+                written_rows += 1
+                actual_row = written_rows + 1  # +1 koska otsikkorivi on rivi 1
+                
                 for col_num, value in enumerate(row_data, 1):
                     # Pyöristä REAL-luvut 2 desimaaliin
                     if isinstance(value, (int, float)) and value is not None:
                         # Älä pyöristä kokonaislukuja (colour, weekday)
                         if col_num in [8, 12, 16, 84]:  # _colour sarakkeet ja weekday
-                            ws.cell(row=row_num, column=col_num, value=value)
+                            ws.cell(row=actual_row, column=col_num, value=value)
                         else:
                             # Pyöristä muut numeeriset arvot 2 desimaaliin
-                            ws.cell(row=row_num, column=col_num, value=round(value, 2))
+                            ws.cell(row=actual_row, column=col_num, value=round(value, 2))
                     else:
-                        ws.cell(row=row_num, column=col_num, value=value)
+                        ws.cell(row=actual_row, column=col_num, value=value)
 
             # Automaattinen sarakeleveys
             for col_num in range(1, len(headers) + 1):
@@ -334,8 +345,14 @@ class ExcelExporter:
 
             # Tallenna
             wb.save(output_path)
-            self.logger.info(f"Excel file saved: {output_path}")
-            return True, f"Viety {len(results)} riviä"
+            
+            # Luo viesti
+            message = f"Viety {written_rows} riviä Exceliin"
+            if skipped_rows > 0:
+                message += f" ({skipped_rows} riviä ohitettu puuttuvien tietojen vuoksi)"
+            
+            self.logger.info(f"Excel file saved: {output_path} - {message}")
+            return True, message
 
         except Exception as e:
             self.logger.error(f"Export to Excel failed: {e}")

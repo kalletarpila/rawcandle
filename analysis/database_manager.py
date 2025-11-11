@@ -1374,6 +1374,59 @@ class DatabaseManager:
             self.logger.error(f"Delete results by ids failed: {e}")
             return 0
 
+    def delete_results_by_filters(
+        self,
+        pattern_filter: Optional[List[int]] = None,
+        ticker_filter: Optional[List[str]] = None,
+    ) -> int:
+        """
+        Poista tulokset results_data taulusta pattern/ticker -filttereillä.
+
+        Args:
+            pattern_filter: Lista pattern-numeroista (0-8) joita poistetaan
+            ticker_filter: Lista tickereistä joita poistetaan
+
+        Returns:
+            Poistettujen rivien määrä
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            # Rakenna WHERE-lauseke
+            conditions = []
+            params = []
+
+            if pattern_filter:
+                placeholders = ",".join("?" * len(pattern_filter))
+                conditions.append(f"candle_pattern IN ({placeholders})")
+                params.extend(pattern_filter)
+
+            if ticker_filter:
+                placeholders = ",".join("?" * len(ticker_filter))
+                conditions.append(f"ticker IN ({placeholders})")
+                params.extend(ticker_filter)
+
+            if not conditions:
+                # Ei filttereitä, ei poisteta mitään
+                return 0
+
+            where_clause = " AND ".join(conditions)
+            query = f"DELETE FROM results_data WHERE {where_clause}"
+
+            cursor.execute(query, params)
+            conn.commit()
+
+            deleted = cursor.rowcount
+            self.logger.info(
+                f"Deleted {deleted} results by filters (patterns={pattern_filter}, tickers={ticker_filter})"
+            )
+            return deleted
+
+        except Exception as e:
+            self.logger.error(f"Delete results by filters failed: {e}")
+            return 0
+
     def get_results_data(self, limit: Optional[int] = None) -> List[dict]:
         """
         Hae kaikki rivit results_data taulusta.

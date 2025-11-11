@@ -64,9 +64,20 @@ def generate_results_to_database(
         # Luo generaattori
         db_manager = DatabaseManager(analysis_db)
 
-        # Tyhjennä taulu jos force_rebuild
+        # Tyhjennä vain suodatetut rivit jos force_rebuild
         if force_rebuild:
-            db_manager.clear_results_data()
+            # Jos on filttereitä, poista vain ne rivit jotka vastaavat filttereitä
+            if pattern_filter or ticker_filter:
+                deleted = db_manager.delete_results_by_filters(
+                    pattern_filter=pattern_filter, ticker_filter=ticker_filter
+                )
+                # Log info
+                print(
+                    f"🗑️ Force rebuild: poistettu {deleted} riviä filttereiden perusteella"
+                )
+            else:
+                # Ei filttereitä = tyhjennä koko taulu
+                db_manager.clear_results_data()
 
         generator = ResultsGenerator(db_manager, stock_db)
 
@@ -169,9 +180,9 @@ def create_results_view(app) -> ft.View:
 
     # Generointi-asetukset
     app.results_force_rebuild = ft.Checkbox(
-        label="🔄 Tyhjennä ja rakenna results_data taulu kokonaan uudelleen",
+        label="🔄 Poista ensin valitut patternit/tickerit ennen generointia",
         value=False,
-        tooltip="Valittuna: Tyhjentää results_data taulun ja generoi KAIKKI tulokset analysis_findings taulusta uudelleen.\nEi valittuna: Lisää vain uusia löydöksiä (inkrementaalinen päivitys).",
+        tooltip="Valittuna: Poistaa VAIN valittujen patternien/tickerien rivit results_data:sta ennen uudelleengenerointia.\nEi valittuna: Lisää vain uusia löydöksiä (inkrementaalinen päivitys - ei poista mitään).",
     )
 
     # Divergenssi-yhdistelmä filtteri
