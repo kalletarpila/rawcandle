@@ -914,7 +914,153 @@ def create_results_view(app) -> ft.View:
                 e.page.update()
 
         def vie_exceliin_click(e):
-            """Vie results_data Exceliin progress dialogilla"""
+            """Avaa Excel-vienti dialogi valintoineen"""
+            try:
+                # Tarkista onko tuloksia
+                metadata = get_results_metadata(app)
+                if not metadata or metadata.get("total_rows", 0) == 0:
+                    e.page.snack_bar = ft.SnackBar(
+                        ft.Text(
+                            "Ei tuloksia vietäväksi. Generoi ensin tulokset tietokantaan."
+                        ),
+                        open=True,
+                    )
+                    e.page.update()
+                    return
+
+                total_count = metadata.get("total_rows", 0)
+
+                # Radio-painikkeiden tila
+                export_mode = ft.Ref[ft.RadioGroup]()
+                sample_size_field = ft.Ref[ft.TextField]()
+
+                def on_mode_change(e_mode):
+                    """Aktivoi/deaktivoi määräkenttä."""
+                    is_random = export_mode.current.value == "random"
+                    sample_size_field.current.disabled = not is_random
+                    sample_size_field.current.update()
+
+                def close_dialog(e_close):
+                    """Sulje dialogi."""
+                    export_dlg.open = False
+                    e.page.update()
+
+                def export_action(e_export):
+                    """Suorita Excel-vienti valinnalla."""
+                    mode = export_mode.current.value
+                    
+                    # Määritä ID-filtteri satunnaisotannalle
+                    id_filter = None
+                    sample_info = ""
+                    
+                    if mode == "random":
+                        try:
+                            requested_count = int(sample_size_field.current.value or "0")
+                            if requested_count <= 0:
+                                e.page.snack_bar = ft.SnackBar(
+                                    ft.Text("Anna positiivinen määrä"), open=True
+                                )
+                                e.page.update()
+                                return
+
+                            # Hae kaikki ID:t tietokannasta
+                            from analysis.database_manager import DatabaseManager
+                            db_mgr = DatabaseManager("data/analysis.db")
+                            all_results = db_mgr.get_results_data()
+                            
+                            # Tarkista ylimitoitus
+                            if requested_count > len(all_results):
+                                sample_info = f" (pyydetty {requested_count}, saatavilla {len(all_results)})"
+                                # Vie kaikki
+                            else:
+                                # Satunnaisotanta ID:istä
+                                import random
+                                sampled_results = random.sample(all_results, requested_count)
+                                id_filter = [r.get("id") for r in sampled_results if r.get("id")]
+                                sample_info = f" (arvottu {requested_count}/{len(all_results)})"
+
+                        except ValueError:
+                            e.page.snack_bar = ft.SnackBar(
+                                ft.Text("Virheellinen määrä"), open=True
+                            )
+                            e.page.update()
+                            return
+                    
+                    # Sulje dialogi
+                    close_dialog(None)
+                    
+                    # Kutsu varsinaista export-funktiota
+                    vie_exceliin_with_filters(e, id_filter, sample_info)
+
+                # Luo dialogi
+                export_dlg = ft.AlertDialog(
+                    modal=True,
+                    title=ft.Text("📊 Vie Exceliin"),
+                    content=ft.Container(
+                        content=ft.Column(
+                            [
+                                ft.Text(
+                                    f"Tuloksia tietokannassa: {total_count}",
+                                    weight=ft.FontWeight.BOLD,
+                                ),
+                                ft.Divider(),
+                                ft.RadioGroup(
+                                    ref=export_mode,
+                                    value="all",
+                                    on_change=on_mode_change,
+                                    content=ft.Column(
+                                        [
+                                            ft.Radio(
+                                                value="all",
+                                                label=f"Vie kaikki {total_count} tapahtumaa",
+                                            ),
+                                            ft.Radio(
+                                                value="random",
+                                                label="Satunnainen osajoukko:",
+                                            ),
+                                        ]
+                                    ),
+                                ),
+                                ft.Container(
+                                    content=ft.TextField(
+                                        ref=sample_size_field,
+                                        label="Tapahtumien määrä",
+                                        hint_text=f"1 - {total_count}",
+                                        keyboard_type=ft.KeyboardType.NUMBER,
+                                        disabled=True,
+                                        width=200,
+                                    ),
+                                    padding=ft.padding.only(left=30),
+                                ),
+                            ],
+                            tight=True,
+                            spacing=10,
+                        ),
+                        width=400,
+                        height=200,
+                    ),
+                    actions=[
+                        ft.TextButton("Peruuta", on_click=close_dialog),
+                        ft.ElevatedButton(
+                            "Vie Excel",
+                            icon=ft.Icons.FILE_DOWNLOAD,
+                            on_click=export_action,
+                        ),
+                    ],
+                    actions_alignment=ft.MainAxisAlignment.END,
+                )
+
+                # Näytä dialogi
+                app.page.overlay.append(export_dlg)
+                export_dlg.open = True
+                e.page.update()
+
+            except Exception as ex:
+                e.page.snack_bar = ft.SnackBar(ft.Text(f"Virhe: {ex}"), open=True)
+                e.page.update()
+
+        def vie_exceliin_with_filters(e, id_filter=None, sample_info=""):
+            """Vie results_data Exceliin progress dialogilla (sisäinen funktio)"""
             try:
                 # Tarkista onko tuloksia
                 metadata = get_results_metadata(app)
@@ -1012,9 +1158,9 @@ def create_results_view(app) -> ft.View:
                     else False
                 )
 
-                # Jos divergence_combo_filter on päällä, suodata ID:t
-                id_filter = None
-                if divergence_combo_filter:
+                # Jos divergence_combo_filter on päällä JA ei ole id_filteriä random samplesta,
+                # suodata ID:t divergenssi-yhdistelmille
+                if divergence_combo_filter and id_filter is None:
                     try:
                         from analysis.database_manager import DatabaseManager
 
@@ -1104,7 +1250,7 @@ def create_results_view(app) -> ft.View:
                     result_dialog = ft.AlertDialog(
                         title=ft.Text("✅ Valmis!"),
                         content=ft.Text(
-                            f"{message}\n\nTiedosto tallennettu: data/results.xlsx"
+                            f"{message}{sample_info}\n\nTiedosto tallennettu: data/results.xlsx"
                         ),
                         actions=[
                             ft.TextButton(

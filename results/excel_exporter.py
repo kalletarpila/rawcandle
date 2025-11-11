@@ -205,7 +205,7 @@ class ExcelExporter:
             total_rows = len(results)
             skipped_rows = 0
             written_rows = 0
-            
+
             for row_num, result in enumerate(results, 2):
                 # Tarkista keskeytys joka 100. rivi
                 if progress_callback and (row_num - 2) % 100 == 0:
@@ -315,7 +315,7 @@ class ExcelExporter:
                 # Kirjoita rivi (käytä written_rows laskuria rivin numeroinnissa)
                 written_rows += 1
                 actual_row = written_rows + 1  # +1 koska otsikkorivi on rivi 1
-                
+
                 for col_num, value in enumerate(row_data, 1):
                     # Pyöristä REAL-luvut 2 desimaaliin
                     if isinstance(value, (int, float)) and value is not None:
@@ -324,7 +324,9 @@ class ExcelExporter:
                             ws.cell(row=actual_row, column=col_num, value=value)
                         else:
                             # Pyöristä muut numeeriset arvot 2 desimaaliin
-                            ws.cell(row=actual_row, column=col_num, value=round(value, 2))
+                            ws.cell(
+                                row=actual_row, column=col_num, value=round(value, 2)
+                            )
                     else:
                         ws.cell(row=actual_row, column=col_num, value=value)
 
@@ -345,12 +347,14 @@ class ExcelExporter:
 
             # Tallenna
             wb.save(output_path)
-            
+
             # Luo viesti
             message = f"Viety {written_rows} riviä Exceliin"
             if skipped_rows > 0:
-                message += f" ({skipped_rows} riviä ohitettu puuttuvien tietojen vuoksi)"
-            
+                message += (
+                    f" ({skipped_rows} riviä ohitettu puuttuvien tietojen vuoksi)"
+                )
+
             self.logger.info(f"Excel file saved: {output_path} - {message}")
             return True, message
 
