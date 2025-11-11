@@ -27,12 +27,14 @@ def temp_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             ticker TEXT NOT NULL,
             date TEXT NOT NULL,
-            pattern TEXT NOT NULL,
-            signal_strength REAL NOT NULL,
-            price REAL NOT NULL,
+            pattern TEXT,
+            signal_strength REAL,
+            price REAL,
             volume INTEGER,
             description TEXT,
-            analysis_date TEXT NOT NULL,
+            analysis_date TEXT,
+            market_cap REAL,
+            sector TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """
