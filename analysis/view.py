@@ -475,8 +475,10 @@ class AnalysisView:
 
         # Divergenssi + kynttilämalli -suodatin
         if self.divergence_combo_filter and self.divergence_combo_filter.value:
-            # Analysis taulussa pattern on tekstinä (ei numeroina kuten results_data)
+            # Analysis-taulussa pattern on tekstinä, mutta hyödynnetään results_data:n
+            # divergenssilippuja jotta tulos vastaa Exceliä.
             candle_patterns = {
+                "downtrend",
                 "Hammer",
                 "Bullish Engulfing",
                 "Piercing Pattern",
@@ -486,7 +488,6 @@ class AnalysisView:
             }
             divergence_patterns = {"Bullish Divergence", "Bearish Divergence"}
 
-            # Rakenna setti (ticker, date) pareista joissa on sekä kynttilämalli että divergenssi
             candle_pairs = set()
             divergence_pairs = set()
 
@@ -500,10 +501,15 @@ class AnalysisView:
                 elif pattern in divergence_patterns:
                     divergence_pairs.add((ticker, date))
 
-            # Yhdistelmä-parit: sekä kynttilämalli että divergenssi
             combo_pairs = candle_pairs & divergence_pairs
 
-            # Suodata vain ne rivit joiden (ticker, date) on combo_pairs:issa
+            # Yhdistä results_data:n combo-parit (sis. sarakkeen 83 liput)
+            if self.db_manager:
+                try:
+                    combo_pairs |= self.db_manager.get_divergence_combo_pairs()
+                except Exception:
+                    pass
+
             self.filtered_findings = [
                 f
                 for f in self.filtered_findings

@@ -292,15 +292,30 @@ class PriceRepository:
             ORDER BY {self._date_column} ASC
         """
         rows = conn.execute(query, (ticker,)).fetchall()
-        price_rows = [
-            PriceRow(
-                date=parse_iso_date(row["date_value"]),
-                open=float(row["open_value"]),
-                high=float(row["high_value"]),
-                low=float(row["low_value"]),
-                close=float(row["close_value"]),
-                volume=float(row["volume_value"]),
-            )
-            for row in rows
-        ]
+        price_rows: list[PriceRow] = []
+        for row in rows:
+            try:
+                date_value = parse_iso_date(row["date_value"])
+                open_val = row["open_value"]
+                high_val = row["high_value"]
+                low_val = row["low_value"]
+                close_val = row["close_value"]
+                volume_val = row["volume_value"]
+
+                if None in (open_val, high_val, low_val, close_val, volume_val):
+                    continue
+
+                price_rows.append(
+                    PriceRow(
+                        date=date_value,
+                        open=float(open_val),
+                        high=float(high_val),
+                        low=float(low_val),
+                        close=float(close_val),
+                        volume=float(volume_val),
+                    )
+                )
+            except (TypeError, ValueError):
+                continue
+
         return PriceSeries(price_rows)

@@ -5,6 +5,10 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, List, Sequence
 
 from . import config
+
+DIV_KEYS = set(config.DIVERGENCE_KEYS)
+MAX_DIVERGENCE_LOOKBACK_DAYS = 3
+
 from .db import AnalysisEvent, AnalysisRepository
 
 
@@ -57,54 +61,75 @@ def resolve_signals(
     end_date: _dt.date,
     selected_patterns: Sequence[str],
     min_strength: float,
+    require_combo: bool = False,
 ) -> Dict[_dt.date, SelectedSignal]:
     """Fetch and filter t0 signals for the given ticker and pattern selection."""
     selected = canonicalise_selection(selected_patterns)
     if not selected:
         return {}
 
-    downtrend_only = set(selected) == {"downtrend"}
     selected_set = set(selected)
+    candle_keys = {p for p in selected_set if p not in DIV_KEYS}
+    has_divergences = bool(selected_set & DIV_KEYS)
+    has_candlestick_patterns = bool(candle_keys)
 
-    # Check if divergences are selected
-    has_divergences = (
-        "bullish_divergence" in selected_set or "bearish_divergence" in selected_set
-    )
-    has_candlestick_patterns = any(
-        p not in {"bullish_divergence", "bearish_divergence"} for p in selected_set
-    )
+    if require_combo and (not candle_keys or not has_divergences):
+        return {}
 
-    # Fetch candlestick pattern events
+    downtrend_only = set(selected) == {"downtrend"}
+
     raw_events: List[AnalysisEvent] = []
     if has_candlestick_patterns:
         raw_events.extend(repo.fetch_events(ticker, start_date, end_date))
-
-    # Fetch divergence events
     if has_divergences:
         raw_events.extend(repo.fetch_divergences(ticker, start_date, end_date))
 
     grouped: Dict[_dt.date, List[AnalysisEvent]] = {}
+    candle_events: Dict[_dt.date, List[AnalysisEvent]] = {}
+    divergence_dates: set[_dt.date] = set()
+
     for event in raw_events:
         key = event.pattern_key
-        if key not in selected_set:
-            continue
-        if key == "downtrend" and not downtrend_only:
-            # downtrend allowed only when it is the sole selection
-            continue
         strength = float(event.strength or 0.0)
         if strength < min_strength:
             continue
-        grouped.setdefault(event.date, []).append(
-            AnalysisEvent(
-                ticker=event.ticker,
-                date=event.date,
-                pattern_key=event.pattern_key,
-                raw_pattern=event.raw_pattern,
-                strength=strength,
-            )
-        )
+
+        if key in DIV_KEYS:
+            divergence_dates.add(event.date)
+            if not require_combo and key in selected_set:
+                grouped.setdefault(event.date, []).append(event)
+            continue
+
+        if key not in selected_set:
+            continue
+
+        if key == "downtrend" and not (
+            downtrend_only or (require_combo and has_divergences)
+        ):
+            continue
+
+        candle_events.setdefault(event.date, []).append(event)
+        if not require_combo:
+            grouped.setdefault(event.date, []).append(event)
 
     selected_signals: Dict[_dt.date, SelectedSignal] = {}
-    for date_value, candidates in grouped.items():
-        selected_signals[date_value] = _choose_event(candidates)
+
+    if require_combo:
+        divergence_lookup = set(divergence_dates)
+
+        def has_divergence_for(date_value: _dt.date) -> bool:
+            for offset in range(0, MAX_DIVERGENCE_LOOKBACK_DAYS + 1):
+                check_date = date_value - _dt.timedelta(days=offset)
+                if check_date in divergence_lookup:
+                    return True
+            return False
+
+        for date_value, candidates in candle_events.items():
+            if not has_divergence_for(date_value):
+                continue
+            selected_signals[date_value] = _choose_event(candidates)
+    else:
+        for date_value, candidates in grouped.items():
+            selected_signals[date_value] = _choose_event(candidates)
+
     return selected_signals

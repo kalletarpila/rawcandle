@@ -68,8 +68,9 @@ Kun käyttäjä käynnistää generoinnin Candles-näkymästä:
    ```
    ticker          = osakkeen ticker
    date            = t0 päivämäärä
-   pattern         = "Random"
+   pattern         = "downtrend"
    signal_strength = 1.0
+   rsi14           = RSI(14) laskettuna t0-päivälle (vaatii vähintään 14 päivää historiaa)
    price           = close(t0)
    volume          = volume(t0)
    description     = "Auto-generated downtrend event"
@@ -84,6 +85,7 @@ Kun käyttäjä käynnistää generoinnin Candles-näkymästä:
    - Etsitään osakkeelle `events_per_ticker` tapahtumaa
    - Jos 500 yrityksen jälkeen ei löydy tarpeeksi, jatketaan seuraavaan osakkeeseen
    - Prosessoidaan yhteensä `num_tickers` osaketta
+   - Generoinnin lopuksi täydennetään automaattisesti myös aiemmat laskutrendit, joilta puuttuu RSI14-arvo (mikäli historiadataa on riittävästi)
 
 ### 3. Käyttöliittymä
 

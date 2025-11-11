@@ -1177,35 +1177,17 @@ def create_results_view(app) -> ft.View:
                         db_mgr = DatabaseManager("data/analysis.db")
                         all_results = db_mgr.get_results_data()
 
-                        # Kynttilämalli patternit (1-6)
-                        candle_patterns = {1, 2, 3, 4, 5, 6}
-                        # Divergenssi patternit (7-8)
-                        divergence_patterns = {7, 8}
-
-                        # Rakenna (ticker, date) -> patterns mapping
-                        ticker_date_patterns = {}
-                        ticker_date_ids = {}
-
-                        for result in all_results:
-                            key = (result.get("ticker"), result.get("date"))
-                            pattern = result.get("candle_pattern")
-                            result_id = result.get("id")
-
-                            if key not in ticker_date_patterns:
-                                ticker_date_patterns[key] = set()
-                                ticker_date_ids[key] = []
-
-                            ticker_date_patterns[key].add(pattern)
-                            ticker_date_ids[key].append(result_id)
-
-                        # Etsi (ticker, date) yhdistelmät joissa on sekä kynttilämalli että divergenssi
-                        combo_ids = []
-                        for key, patterns in ticker_date_patterns.items():
-                            has_candle = bool(patterns & candle_patterns)
-                            has_divergence = bool(patterns & divergence_patterns)
-
-                            if has_candle and has_divergence:
-                                combo_ids.extend(ticker_date_ids[key])
+                        combo_pairs = db_mgr.get_divergence_combo_pairs()
+                        combo_ids = [
+                            result.get("id")
+                            for result in all_results
+                            if result.get("id")
+                            and (
+                                result.get("ticker"),
+                                result.get("date"),
+                            )
+                            in combo_pairs
+                        ]
 
                         if combo_ids:
                             id_filter = combo_ids

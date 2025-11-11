@@ -41,6 +41,8 @@ class SimuView:
         self.rsi_field: Optional[ft.TextField] = None
         self.volume_growth_field: Optional[ft.TextField] = None
         self.pattern_checkboxes: list[ft.Checkbox] = []
+        self.require_combo_checkbox: Optional[ft.Checkbox] = None
+        self.combo_summary_text: Optional[ft.Text] = None
         self.start_button: Optional[ft.ElevatedButton] = None
         self.results_table: Optional[ft.DataTable] = None
 
@@ -77,10 +79,8 @@ class SimuView:
         self.start_date_field.on_change = (
             lambda e, fld=self.start_date_field: self._clear_error(fld)
         )
-        self.start_date_field.on_blur = (
-            lambda e, fld=self.start_date_field: self._sanitize_date_field(
-                fld, "01.01.2024"
-            )
+        self.start_date_field.on_blur = self._make_date_blur_handler(
+            self.start_date_field, "01.01.2024"
         )
 
         self.end_date_field = ft.TextField(
@@ -93,10 +93,8 @@ class SimuView:
         self.end_date_field.on_change = (
             lambda e, fld=self.end_date_field: self._clear_error(fld)
         )
-        self.end_date_field.on_blur = (
-            lambda e, fld=self.end_date_field: self._sanitize_date_field(
-                fld, "31.12.2024"
-            )
+        self.end_date_field.on_blur = self._make_date_blur_handler(
+            self.end_date_field, "31.12.2024"
         )
 
         self.invest_amount_field = ft.TextField(
@@ -255,14 +253,31 @@ class SimuView:
             tight=True,
         )
 
-        self.pattern_checkboxes = [
-            ft.Checkbox(
+        self.pattern_checkboxes = []
+        for definition in config.PATTERN_DEFINITIONS:
+            cb = ft.Checkbox(
                 label=definition.label,
                 value=definition.key == "hammer",
                 data=definition.key,
             )
-            for definition in config.PATTERN_DEFINITIONS
-        ]
+            cb.on_change = self._on_pattern_checkbox_change
+            self.pattern_checkboxes.append(cb)
+
+        self.require_combo_checkbox = ft.Checkbox(
+            label="Vain kynttilä + divergenssi",
+            value=False,
+            tooltip=(
+                "Kauppa avataan vain jos valittu kynttiläkuvio (myös downtrend) "
+                "ja divergenssi esiintyvät samana päivänä."
+            ),
+        )
+        self.require_combo_checkbox.on_change = self._on_pattern_checkbox_change
+        self.combo_summary_text = ft.Text(
+            "",
+            size=12,
+            color=ft.Colors.BLUE_600,
+            visible=False,
+        )
 
         checkbox_column = ft.Column(
             [
@@ -272,6 +287,8 @@ class SimuView:
                     weight=ft.FontWeight.BOLD,
                 ),
                 ft.Column(self.pattern_checkboxes, spacing=6),
+                self.require_combo_checkbox,
+                self.combo_summary_text,
             ],
             spacing=12,
         )
@@ -307,6 +324,12 @@ class SimuView:
             visible=False,
             tooltip="Pysäytä käynnissä oleva batch-simulaatio",
         )
+        self.trade_summary_text = ft.Text(
+            value="",
+            visible=False,
+            color=ft.Colors.BLUE_600,
+            size=13,
+        )
 
         controls_row = ft.ResponsiveRow(
             controls=[
@@ -329,6 +352,7 @@ class SimuView:
                             self.batch_progress_bar,
                             self.batch_progress_text,
                             self.batch_cancel_button,
+                            self.trade_summary_text,
                         ],
                         spacing=16,
                         horizontal_alignment=ft.CrossAxisAlignment.START,
@@ -376,7 +400,7 @@ class SimuView:
             elevation=2,
         )
 
-        return ft.View(
+        view = ft.View(
             "/simu",
             [
                 self._appbar_factory(),
@@ -407,6 +431,8 @@ class SimuView:
             ],
             scroll=ft.ScrollMode.AUTO,
         )
+        self._update_combo_summary()
+        return view
 
     def append_result(
         self,
@@ -490,6 +516,133 @@ class SimuView:
             if cb.value and isinstance(cb.data, str)
         ]
 
+    def _on_pattern_checkbox_change(self, e):
+        self._update_combo_summary()
+
+    def _resolve_combo_tickers(
+        self, settings: SimulationSettings
+    ) -> Optional[list[str]]:
+        """Palauta lista tickereistä joilla on combo-tapahtumia."""
+        candle_keys = [
+            key
+            for key in settings.selected_patterns
+            if key not in config.DIVERGENCE_KEYS
+        ]
+        if not candle_keys:
+            return []
+        candle_numbers = [
+            config.PATTERN_KEY_TO_NUMBER.get(key)
+            for key in candle_keys
+            if key in config.PATTERN_KEY_TO_NUMBER
+        ]
+        candle_numbers = [num for num in candle_numbers if num is not None]
+        if not candle_numbers:
+            return []
+
+        try:
+            from analysis.database_manager import DatabaseManager
+
+            db_mgr = DatabaseManager("data/analysis.db")
+            combo_pairs = db_mgr.get_divergence_combo_pairs(
+                candle_patterns=candle_numbers,
+                start_date=settings.start_date.isoformat(),
+                end_date=settings.end_date.isoformat(),
+            )
+            tickers = sorted({ticker for ticker, _ in combo_pairs})
+            return tickers
+        except Exception as exc:
+            print(f"[SIMU][BATCH] Combo ticker lookup failed: {exc}")
+            return []
+
+    def _safe_parse_date(self, field: Optional[ft.TextField]) -> Optional[datetime.date]:
+        if field is None:
+            return None
+        try:
+            return parse_ui_date(field.value or "")
+        except Exception:
+            return None
+
+    def _update_combo_summary(self):
+        if not self.combo_summary_text:
+            return
+
+        text = self.combo_summary_text
+
+        if not self.require_combo_checkbox or not self.require_combo_checkbox.value:
+            text.value = ""
+            text.visible = False
+            self._refresh_combo_summary_text()
+            return
+
+        start_date = self._safe_parse_date(self.start_date_field)
+        end_date = self._safe_parse_date(self.end_date_field)
+
+        if start_date is None or end_date is None:
+            text.value = "Anna kelvollinen aikaväli yhteenvetoon."
+            text.visible = True
+            self._refresh_combo_summary_text()
+            return
+
+        selected = self._selected_patterns()
+        candle_keys = [key for key in selected if key not in config.DIVERGENCE_KEYS]
+        divergence_keys = [key for key in selected if key in config.DIVERGENCE_KEYS]
+        if not divergence_keys and self.require_combo_checkbox and self.require_combo_checkbox.value:
+            # Ehkä valittiin vain kynttilä, lisätään toinen oletukseksi? Ei, anna varoitus ja näytä ohje
+            text.value = "Valitse myös divergenssi (7/8) comboyhteenvedon näkemiseksi."
+            text.visible = True
+            self._refresh_combo_summary_text()
+            return
+
+        if not candle_keys or not divergence_keys:
+            text.value = "Valitse sekä kynttiläkuvio että divergenssi yhteenvetoa varten."
+            text.visible = True
+            self._refresh_combo_summary_text()
+            return
+
+        candle_numbers = [
+            config.PATTERN_KEY_TO_NUMBER.get(key) for key in candle_keys
+        ]
+        candle_numbers = [num for num in candle_numbers if num is not None]
+        if not candle_numbers:
+            text.value = "Kynttiläkuvioille ei löytynyt numeroarvoa."
+            text.visible = True
+            self._refresh_combo_summary_text()
+            return
+
+        try:
+            from analysis.database_manager import DatabaseManager
+
+            db_mgr = DatabaseManager("data/analysis.db")
+            combo_pairs = db_mgr.get_divergence_combo_pairs(
+                candle_patterns=candle_numbers,
+                start_date=start_date.isoformat(),
+                end_date=end_date.isoformat(),
+            )
+        except Exception as exc:
+            text.value = f"Combo-yhteenveto epäonnistui: {exc}"
+            text.visible = True
+            self._refresh_combo_summary_text()
+            return
+
+        ticker_count = len({ticker for ticker, _ in combo_pairs})
+        total_days = len(combo_pairs)
+        text.value = (
+            f"Kombot: {ticker_count} osaketta / {total_days} t0-päivää "
+            f"({start_date.strftime('%d.%m.%Y')} – {end_date.strftime('%d.%m.%Y')}). "
+            "Divergenssi huomioidaan ikkunoissa t0…t-3."
+        )
+        text.visible = True
+        self._refresh_combo_summary_text()
+
+    def _refresh_combo_summary_text(self):
+        try:
+            if self.combo_summary_text:
+                self.combo_summary_text.update()
+            if self.page:
+                self.page.update()
+        except Exception:
+            pass
+
     def _parse_float_value(self, field: Optional[ft.TextField]) -> float:
         if field is None:
             raise ValueError("Arvo puuttuu")
@@ -535,6 +688,9 @@ class SimuView:
             max_rsi=max_rsi,
             min_volume_growth=min_volume_growth,
             selected_patterns=self._selected_patterns(),
+            require_divergence_combo=bool(
+                self.require_combo_checkbox and self.require_combo_checkbox.value
+            ),
         )
 
     def _update_results_view(self):
@@ -722,6 +878,14 @@ class SimuView:
             field.update()
         except Exception:
             self._set_error(field, "Anna päivämäärä muodossa pp.kk.vvvv.")
+        finally:
+            self._update_combo_summary()
+
+    def _make_date_blur_handler(self, field: Optional[ft.TextField], default_value: str):
+        def handler(e):
+            self._sanitize_date_field(field, default_value)
+
+        return handler
 
     def _parse_tickers(self) -> Optional[list[str]]:
         if self.ticker_field is None:
@@ -930,6 +1094,21 @@ class SimuView:
                     or "Valitse vähintään yksi kynttiläkuvio ennen simulaatiota."
                 )
                 valid = False
+            elif self.require_combo_checkbox and self.require_combo_checkbox.value:
+                selected_patterns = self._selected_patterns()
+                divergence_keys = {"bullish_divergence", "bearish_divergence"}
+                has_candle = any(
+                    pattern not in divergence_keys for pattern in selected_patterns
+                )
+                has_divergence = any(
+                    pattern in divergence_keys for pattern in selected_patterns
+                )
+                if not has_candle or not has_divergence:
+                    valid = False
+                    error_message = error_message or (
+                        "Kombovaatimus edellyttää sekä kynttiläkuvion että "
+                        "divergenssin valintaa."
+                    )
 
         return valid, error_message
 
@@ -958,13 +1137,31 @@ class SimuView:
         if settings is None:
             return
 
+        combo_tickers: Optional[list[str]] = None
+        if settings.require_divergence_combo:
+            combo_tickers = self._resolve_combo_tickers(settings)
+            if not combo_tickers:
+                self._show_snack(
+                    "Yhdistelmäsäännön täyttäviä osakkeita ei löytynyt.",
+                    ft.Colors.ORANGE_400,
+                )
+                return
+
         # Piiloita normaali nappi, näytä progress
         self.batch_button.visible = False
         self.start_button.disabled = True
         self.batch_progress_bar.visible = True
         self.batch_progress_bar.value = 0
         self.batch_progress_text.visible = True
-        self.batch_progress_text.value = "Valmistellaan..."
+        if self.trade_summary_text:
+            self.trade_summary_text.visible = False
+            self.trade_summary_text.value = ""
+        if combo_tickers is not None:
+            self.batch_progress_text.value = (
+                f"Valmistellaan {len(combo_tickers)} osaketta..."
+            )
+        else:
+            self.batch_progress_text.value = "Valmistellaan..."
         self.batch_cancel_button.visible = True
         self.page.update()
 
@@ -985,6 +1182,7 @@ class SimuView:
             "max_rsi": settings.max_rsi if settings.max_rsi < 101 else None,
             "min_volume_growth": settings.min_volume_growth,
             "selected_patterns": ", ".join(settings.selected_patterns),
+            "require_divergence_combo": settings.require_divergence_combo,
         }
 
         # Määritä simulaatio-funktio
@@ -1043,10 +1241,11 @@ class SimuView:
 
         try:
             # Suorita batch-simulaatio
-            excel_path = batch_sim.run_batch_simulation(
+            excel_path, trades_count = batch_sim.run_batch_simulation(
                 simulation_func=simulation_wrapper,
                 parameters=parameters,
                 progress_callback=progress_callback,
+                tickers=combo_tickers,
             )
 
             # Valmis
@@ -1054,6 +1253,15 @@ class SimuView:
                 self.batch_progress_text.value = f"Keskeytetty. Tulokset: {excel_path}"
             else:
                 self.batch_progress_text.value = f"✅ Valmis! Tulokset: {excel_path}"
+
+            if self.trade_summary_text:
+                self.trade_summary_text.visible = True
+                self.trade_summary_text.value = (
+                    f"Kauppoja tehtiin {trades_count} osakkeelle."
+                    if trades_count
+                    else "Yhtään kauppaa ei tehty valituilla parametreilla."
+                )
+                self.trade_summary_text.update()
 
         except Exception as ex:
             self.batch_progress_text.value = f"❌ Virhe: {str(ex)}"

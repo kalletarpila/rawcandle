@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 class DowntrendGenerator:
     """Generates downtrend events from real stock data."""
 
+    MIN_DOWNTREND_HISTORY = 10
+    RSI_PERIOD = 14
+
     def __init__(
         self,
         stock_db_path: str = "data/osakedata.db",
@@ -232,6 +235,60 @@ class DowntrendGenerator:
             self.logger.error(f"Failed to save to analysis: {e}")
             return False
 
+    def _backfill_missing_rsi(
+        self, db_manager: DatabaseManager, stock_conn: sqlite3.Connection
+    ) -> int:
+        """
+        Backfill RSI14 values for downtrend findings that are missing it.
+
+        Args:
+            db_manager: DatabaseManager instance
+            stock_conn: Connection to stock database for RSI calculation
+
+        Returns:
+            Number of findings successfully updated
+        """
+        try:
+            conn = db_manager.get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, ticker, date
+                FROM analysis_findings
+                WHERE pattern = 'downtrend' AND (rsi14 IS NULL OR rsi14 = '')
+                ORDER BY date
+            """
+            )
+            rows = cursor.fetchall()
+            if not rows:
+                return 0
+
+            updated = 0
+            skipped = 0
+            for row in rows:
+                ticker = row["ticker"]
+                date_value = row["date"]
+                rsi14 = self._calculate_rsi14(stock_conn, ticker, date_value)
+                if rsi14 is None:
+                    skipped += 1
+                    continue
+                if db_manager.update_finding(row["id"], rsi14=rsi14):
+                    updated += 1
+
+            if updated:
+                self.logger.info(
+                    f"Backfilled RSI14 for {updated} downtrend findings (skipped {skipped})"
+                )
+            else:
+                self.logger.info(
+                    "No RSI14 values were backfilled for downtrend findings (all calculations failed)"
+                )
+            return updated
+
+        except Exception as e:
+            self.logger.error(f"Failed to backfill RSI14 values: {e}", exc_info=True)
+            return 0
+
     def _calculate_rsi14(
         self, conn: sqlite3.Connection, ticker: str, target_date: str
     ) -> Optional[float]:
@@ -246,7 +303,9 @@ class DowntrendGenerator:
             RSI(14) value or None if calculation fails
         """
         try:
-            # Hae hintadata (tarvitaan vähintään 14 päivää + pari ylimääräistä RSI-laskentaa varten)
+            period = self.RSI_PERIOD
+
+            # Hae hintadata (tarvitaan vähintään RSI_PERIOD päivää)
             cursor = conn.cursor()
             cursor.execute(
                 """
@@ -260,7 +319,7 @@ class DowntrendGenerator:
             )
 
             rows = cursor.fetchall()
-            if len(rows) < 15:  # Tarvitaan vähintään 15 päivää RSI(14) laskentaan
+            if len(rows) < period:
                 return None
 
             # Muunna pandas DataFrameksi
@@ -268,7 +327,7 @@ class DowntrendGenerator:
             df = df.sort_values("pvm").reset_index(drop=True)
 
             # Laske RSI
-            df = calculate_rsi(df, period=14, close_col="Close")
+            df = calculate_rsi(df, period=period, close_col="Close")
 
             # Hae RSI arvo target_date:lle
             target_row = df[df["pvm"] == target_date]
@@ -402,8 +461,11 @@ class DowntrendGenerator:
                         break
 
                     # Valitse päivämäärä jota ei ole vielä käytetty
+                    history_offset = max(
+                        self.MIN_DOWNTREND_HISTORY, self.RSI_PERIOD
+                    )
                     available_unused_dates = [
-                        d for d in available_dates[10:] if d not in used_dates
+                        d for d in available_dates[history_offset:] if d not in used_dates
                     ]
 
                     # Jos kaikki päivämäärät on käytetty, lopeta
@@ -442,6 +504,17 @@ class DowntrendGenerator:
             # Final progress update
             if progress_callback:
                 progress_callback(len(tickers), len(tickers))
+
+            # Backfill RSI14 for any existing downtrend findings missing it
+            try:
+                backfilled = self._backfill_missing_rsi(db_manager, stock_conn)
+                if backfilled:
+                    self.logger.info(
+                        f"RSI14 backfill completed for {backfilled} existing downtrend findings"
+                    )
+            except Exception:
+                # Detailed error already logged inside helper
+                pass
 
         except Exception as e:
             errors.append(f"Generation error: {e}")

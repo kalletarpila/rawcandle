@@ -695,24 +695,13 @@ class FindingsView:
 
         # Divergenssi + kynttilämalli -suodatin
         if self.divergence_combo_filter and self.divergence_combo_filter.value:
-            # Rakenna setti (ticker, date) pareista joissa on sekä kynttilämalli (1-6) että divergenssi (7-8)
-            candle_pairs = set()  # (ticker, date) parit joissa kynttilämalli 1-6
-            divergence_pairs = set()  # (ticker, date) parit joissa divergenssi 7-8
+            combo_pairs = set()
+            if self.db_manager:
+                try:
+                    combo_pairs = self.db_manager.get_divergence_combo_pairs()
+                except Exception:
+                    combo_pairs = set()
 
-            for f in self.all_findings:
-                ticker = f.get("ticker", "")
-                date = f.get("date", "")
-                pattern = f.get("candle_pattern", 0)
-
-                if 1 <= pattern <= 6:
-                    candle_pairs.add((ticker, date))
-                elif pattern in [7, 8]:
-                    divergence_pairs.add((ticker, date))
-
-            # Yhdistelmä-parit: sekä kynttilämalli että divergenssi
-            combo_pairs = candle_pairs & divergence_pairs
-
-            # Suodata vain ne rivit joiden (ticker, date) on combo_pairs:issa
             self.filtered_findings = [
                 f
                 for f in self.filtered_findings

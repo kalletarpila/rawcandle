@@ -182,6 +182,7 @@ class ResultsGenerator:
         """
         # Kynttilämalli patternit (analysis_findings taulussa pattern-nimi)
         candle_patterns = {
+            "downtrend",
             "Hammer",
             "Bullish Engulfing",
             "Piercing Pattern",

@@ -47,3 +47,7 @@ PATTERN_MAP: dict[str, PatternDefinition] = {p.key: p for p in PATTERN_DEFINITIO
 DB_PATTERN_TO_KEY: dict[str, str] = {
     p.db_name.lower(): p.key for p in PATTERN_DEFINITIONS
 }
+PATTERN_KEY_TO_NUMBER: dict[str, int] = {
+    definition.key: index for index, definition in enumerate(PATTERN_DEFINITIONS)
+}
+DIVERGENCE_KEYS = {"bullish_divergence", "bearish_divergence"}

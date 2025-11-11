@@ -5,7 +5,7 @@ Batch Simulator - Suorittaa simulaation kaikille osakkeille kannassa
 import os
 import sqlite3
 from datetime import datetime
-from typing import Dict, List, Any, Callable
+from typing import Dict, List, Any, Callable, Optional
 import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill
 
@@ -47,7 +47,8 @@ class BatchSimulator:
         simulation_func: Callable,
         parameters: Dict[str, Any],
         progress_callback: Callable[[int, int, str], None] = None,
-    ) -> str:
+        tickers: Optional[List[str]] = None,
+    ) -> tuple[str, int]:
         """
         Suorita simulaatio kaikille osakkeille
 
@@ -61,7 +62,8 @@ class BatchSimulator:
             Polku luotuun Excel-tiedostoon
         """
         self.cancelled = False
-        tickers = self.get_all_tickers()
+        if tickers is None:
+            tickers = self.get_all_tickers()
 
         if not tickers:
             raise ValueError("Ei osakkeita kannassa!")
@@ -137,7 +139,7 @@ class BatchSimulator:
 
         # Tallenna Excel
         excel_path = self._save_to_excel(results, parameters)
-        return excel_path
+        return excel_path, len(results)
 
     def cancel(self):
         """Keskeytä batch-simulaatio"""

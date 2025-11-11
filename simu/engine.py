@@ -25,6 +25,7 @@ class SimulationSettings:
     max_rsi: float
     min_volume_growth: float
     selected_patterns: List[str] = field(default_factory=list)
+    require_divergence_combo: bool = False
 
     @property
     def starting_capital(self) -> float:
@@ -105,6 +106,7 @@ class SimulationEngine:
             settings.end_date,
             canonical_patterns,
             settings.min_strength,
+            require_combo=settings.require_divergence_combo,
         )
         signal_count = len(signals_map)
 

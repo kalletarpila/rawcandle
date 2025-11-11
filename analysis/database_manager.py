@@ -5,7 +5,7 @@ Hallinnoi analysis-tietokannan operaatiot.
 
 import sqlite3
 import os
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Iterable
 from datetime import datetime
 import logging
 
@@ -1452,6 +1452,98 @@ class DatabaseManager:
         except Exception as e:
             self.logger.error(f"Delete results by filters failed: {e}")
             return 0
+
+    def get_divergence_combo_pairs(
+        self,
+        candle_patterns: Optional[Iterable[int]] = None,
+        tickers: Optional[Iterable[str]] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> set:
+        """
+        Palauta (ticker, date) parit joille results_data:ssa on sekä kynttilä (0-6) että
+        divergenssi (pattern 7/8 TAI bearish/bullish -flagit).
+        """
+        conn = None
+        try:
+            # Luo uusi yhteys, jotta metodia voidaan kutsua taustasäikeistä
+            conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            cursor = conn.cursor()
+
+            if candle_patterns:
+                candle_patterns = list(candle_patterns)
+            if tickers:
+                tickers = list({t.upper() for t in tickers if t})
+
+            if candle_patterns:
+                placeholders = ",".join("?" * len(candle_patterns))
+                candle_case = (
+                    f"CASE WHEN candle_pattern IN ({placeholders}) THEN 1 ELSE 0 END"
+                )
+                flag_case = (
+                    f"CASE WHEN candle_pattern IN ({placeholders}) "
+                    "AND (COALESCE(bearish_divergence, 0) <> 0 "
+                    "OR COALESCE(bullish_divergence, 0) <> 0) THEN 1 ELSE 0 END"
+                )
+                candle_params = list(candle_patterns)
+                flag_params = list(candle_patterns)
+            else:
+                candle_case = (
+                    "CASE WHEN candle_pattern BETWEEN 0 AND 6 THEN 1 ELSE 0 END"
+                )
+                flag_case = (
+                    "CASE WHEN candle_pattern BETWEEN 0 AND 6 "
+                    "AND (COALESCE(bearish_divergence, 0) <> 0 "
+                    "OR COALESCE(bullish_divergence, 0) <> 0) THEN 1 ELSE 0 END"
+                )
+                candle_params = []
+                flag_params = []
+
+            where_clause_parts = []
+            params: list[Any] = candle_params + flag_params
+
+            if tickers:
+                placeholders = ",".join("?" * len(tickers))
+                where_clause_parts.append(f"ticker IN ({placeholders})")
+                params.extend(tickers)
+
+            if start_date and end_date:
+                where_clause_parts.append("date BETWEEN ? AND ?")
+                params.extend([start_date, end_date])
+
+            where_clause = (
+                "WHERE " + " AND ".join(where_clause_parts)
+                if where_clause_parts
+                else ""
+            )
+            cursor.execute(
+                """
+                WITH grouped AS (
+                    SELECT
+                        ticker,
+                        date,
+                        MAX({candle_case}) AS has_candle,
+                        MAX(CASE WHEN candle_pattern IN (7, 8) THEN 1 ELSE 0 END) AS has_divergence_pattern,
+                        MAX({flag_case}) AS has_flagged_divergence
+                    FROM results_data
+                    {where_clause}
+                    GROUP BY ticker, date
+                )
+                SELECT ticker, date
+                FROM grouped
+                WHERE has_candle = 1 AND (has_divergence_pattern = 1 OR has_flagged_divergence = 1)
+            """.format(
+                    candle_case=candle_case, flag_case=flag_case, where_clause=where_clause
+                ),
+                params,
+            )
+            return {(row[0], row[1]) for row in cursor.fetchall()}
+        except Exception as e:
+            self.logger.error(f"Get divergence combo pairs failed: {e}")
+            return set()
+        finally:
+            if conn:
+                conn.close()
 
     def get_results_data(self, limit: Optional[int] = None) -> List[dict]:
         """
