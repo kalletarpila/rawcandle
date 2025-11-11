@@ -238,6 +238,15 @@ class FindingsView:
             tooltip="Päivitä tulokset tietokannasta",
         )
 
+        export_btn = ft.ElevatedButton(
+            text="Vie Exceliin",
+            icon=ft.Icons.FILE_DOWNLOAD,
+            on_click=lambda e: self._open_excel_export_dialog(),
+            bgcolor=ft.Colors.GREEN_700,
+            color=ft.Colors.WHITE,
+            tooltip="Vie suodatetut tulokset Excel-tiedostoon",
+        )
+
         delete_all_btn = ft.ElevatedButton(
             text="Poista suodatetut",
             icon=ft.Icons.DELETE_SWEEP,
@@ -257,7 +266,7 @@ class FindingsView:
         )
 
         return ft.Row(
-            [refresh_btn, delete_all_btn, clear_db_btn],
+            [refresh_btn, export_btn, delete_all_btn, clear_db_btn],
             alignment=ft.MainAxisAlignment.START,
             spacing=10,
         )

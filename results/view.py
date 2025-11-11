@@ -948,14 +948,16 @@ def create_results_view(app) -> ft.View:
                 def export_action(e_export):
                     """Suorita Excel-vienti valinnalla."""
                     mode = export_mode.current.value
-                    
+
                     # Määritä ID-filtteri satunnaisotannalle
                     id_filter = None
                     sample_info = ""
-                    
+
                     if mode == "random":
                         try:
-                            requested_count = int(sample_size_field.current.value or "0")
+                            requested_count = int(
+                                sample_size_field.current.value or "0"
+                            )
                             if requested_count <= 0:
                                 e.page.snack_bar = ft.SnackBar(
                                     ft.Text("Anna positiivinen määrä"), open=True
@@ -965,9 +967,10 @@ def create_results_view(app) -> ft.View:
 
                             # Hae kaikki ID:t tietokannasta
                             from analysis.database_manager import DatabaseManager
+
                             db_mgr = DatabaseManager("data/analysis.db")
                             all_results = db_mgr.get_results_data()
-                            
+
                             # Tarkista ylimitoitus
                             if requested_count > len(all_results):
                                 sample_info = f" (pyydetty {requested_count}, saatavilla {len(all_results)})"
@@ -975,9 +978,16 @@ def create_results_view(app) -> ft.View:
                             else:
                                 # Satunnaisotanta ID:istä
                                 import random
-                                sampled_results = random.sample(all_results, requested_count)
-                                id_filter = [r.get("id") for r in sampled_results if r.get("id")]
-                                sample_info = f" (arvottu {requested_count}/{len(all_results)})"
+
+                                sampled_results = random.sample(
+                                    all_results, requested_count
+                                )
+                                id_filter = [
+                                    r.get("id") for r in sampled_results if r.get("id")
+                                ]
+                                sample_info = (
+                                    f" (arvottu {requested_count}/{len(all_results)})"
+                                )
 
                         except ValueError:
                             e.page.snack_bar = ft.SnackBar(
@@ -985,10 +995,10 @@ def create_results_view(app) -> ft.View:
                             )
                             e.page.update()
                             return
-                    
+
                     # Sulje dialogi
                     close_dialog(None)
-                    
+
                     # Kutsu varsinaista export-funktiota
                     vie_exceliin_with_filters(e, id_filter, sample_info)
 
