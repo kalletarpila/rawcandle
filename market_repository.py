@@ -205,30 +205,36 @@ def upsert_market(
     conn = _connect(db_path)
     cursor = conn.cursor()
 
-    if market_id is None:
-        cursor.execute(
-            """
-            INSERT INTO markets (name, abbreviation, yahoo_suffix, min_volume)
-            VALUES (?, ?, ?, ?)
-            """,
-            (name.strip(), abbreviation, yahoo_suffix, min_volume_value),
-        )
-        market_id = cursor.lastrowid
-    else:
-        cursor.execute(
-            """
-            UPDATE markets
-            SET name = ?, abbreviation = ?, yahoo_suffix = ?, min_volume = ?
-            WHERE id = ?
-            """,
-            (name.strip(), abbreviation, yahoo_suffix, min_volume_value, market_id),
-        )
-        if cursor.rowcount == 0:
-            raise ValueError("Market ID:tä ei löytynyt")
+    try:
+        if market_id is None:
+            cursor.execute(
+                """
+                INSERT INTO markets (name, abbreviation, yahoo_suffix, min_volume)
+                VALUES (?, ?, ?, ?)
+                """,
+                (name.strip(), abbreviation, yahoo_suffix, min_volume_value),
+            )
+            market_id = cursor.lastrowid
+        else:
+            cursor.execute(
+                """
+                UPDATE markets
+                SET name = ?, abbreviation = ?, yahoo_suffix = ?, min_volume = ?
+                WHERE id = ?
+                """,
+                (name.strip(), abbreviation, yahoo_suffix, min_volume_value, market_id),
+            )
+            if cursor.rowcount == 0:
+                raise ValueError("Market ID:tä ei löytynyt")
 
-    conn.commit()
-    conn.close()
-    return market_id
+        conn.commit()
+        return market_id
+
+    except sqlite3.IntegrityError as exc:
+        conn.rollback()
+        raise ValueError("Markkinan lyhenne on jo käytössä") from exc
+    finally:
+        conn.close()
 
 
 def delete_market(market_id: int, db_path: Optional[str] = None) -> None:

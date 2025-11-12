@@ -1,16 +1,11 @@
 from __future__ import annotations
 
 import math
+import datetime as dt
 from typing import Callable, Dict, List, Optional, Sequence
 
 import flet as ft
-
-try:
-    from plotly.graph_objects import Bar, Candlestick, Scatter
-    from plotly.subplots import make_subplots
-except ModuleNotFoundError:  # pragma: no cover - optional dependency
-    Bar = Candlestick = Scatter = None  # type: ignore
-    make_subplots = None  # type: ignore
+from flet import canvas as cv
 
 from stock import services
 
@@ -228,6 +223,7 @@ class StockView:
                 ],
                 spacing=18,
                 expand=True,
+                scroll=ft.ScrollMode.AUTO,
             ),
         )
 
@@ -237,6 +233,7 @@ class StockView:
                 self._appbar_factory(),
                 view_content,
             ],
+            scroll=ft.ScrollMode.AUTO,
         )
 
     # ------------------------------------------------------------------ #
@@ -284,7 +281,10 @@ class StockView:
         self._render_price_table()
         self._update_analysis_pager()
 
-        self._set_status(f"✅ Data haettu tickerille {ticker}", ft.Colors.GREEN_600)
+        self._set_status(
+            f"✅ Data haettu tickerille {ticker} ({len(price_records)} päivää)",
+            ft.Colors.GREEN_600,
+        )
 
     def _set_status(self, message: str, color: str = ft.Colors.GREY_600) -> None:
         if not self.status_text:
@@ -312,12 +312,9 @@ class StockView:
     def _render_chart(self) -> None:
         if not self.chart_container:
             return
-        figure = _build_price_figure(self.price_records)
-        if figure:
-            self.chart_container.content = ft.PlotlyChart(
-                figure,
-                expand=True,
-            )
+        chart_content = _build_price_chart(self.price_records)
+        if chart_content:
+            self.chart_container.content = chart_content
         else:
             self.chart_container.content = ft.Text(
                 "Ei riittävästi dataa kynttilägrafiikalle.",
@@ -419,100 +416,203 @@ class StockView:
 # ---------------------------------------------------------------------- #
 # Helpers
 
-def _build_price_figure(price_records: Sequence[Dict]) -> Optional[object]:
-    if not price_records:
-        return None
-    if make_subplots is None or Bar is None or Candlestick is None or Scatter is None:
-        return None
-
-    x_values = [record["date"].isoformat() for record in price_records]
-    opens = [record.get("open") for record in price_records]
-    highs = [record.get("high") for record in price_records]
-    lows = [record.get("low") for record in price_records]
-    closes = [record.get("close") for record in price_records]
-    volumes = [record.get("volume") or 0 for record in price_records]
-
-    if not any(value is not None for value in closes):
+def _build_price_chart(price_records: Sequence[Dict]) -> Optional[ft.Control]:
+    valid = [
+        record
+        for record in price_records
+        if all(record.get(key) is not None for key in ("open", "high", "low", "close"))
+    ]
+    if len(valid) < 2:
         return None
 
-    fig = make_subplots(
-        rows=2,
-        cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.03,
-        row_heights=[0.7, 0.3],
-    )
+    min_low = min(float(rec["low"]) for rec in valid)
+    max_high = max(float(rec["high"]) for rec in valid)
+    if max_high - min_low <= 0:
+        return None
 
-    fig.add_trace(
-        Candlestick(
-            x=x_values,
-            open=opens,
-            high=highs,
-            low=lows,
-            close=closes,
-            name="OHLC",
-        ),
-        row=1,
-        col=1,
-    )
+    price_height = 260
+    volume_height = 110
+    spacing = 8
+    candle_width = 5
+    x_offset = 20
+    canvas_width = max(640, len(valid) * spacing + x_offset * 2)
 
-    fig.add_trace(
-        Bar(
-            x=x_values,
-            y=volumes,
-            marker_color="#8884d8",
-            name="Volyymi",
-        ),
-        row=2,
-        col=1,
-    )
+    price_scale = price_height / (max_high - min_low)
+    price_shapes = [
+        cv.Line(
+            0,
+            price_height,
+            canvas_width,
+            price_height,
+            paint=ft.Paint(stroke_width=1, color="#E5E7EB"),
+        )
+    ]
 
-    sma20 = [record.get("sma20") for record in price_records]
-    if any(value is not None for value in sma20):
-        fig.add_trace(
-            Scatter(
-                x=x_values,
-                y=sma20,
-                mode="lines",
-                name="SMA20",
-                line=dict(color="#F97316"),
-            ),
-            row=1,
-            col=1,
+    for idx, record in enumerate(valid):
+        open_val = float(record["open"])
+        close_val = float(record["close"])
+        high_val = float(record["high"])
+        low_val = float(record["low"])
+
+        x_center = x_offset + idx * spacing
+        wick_color = "#22C55E" if close_val >= open_val else "#EF4444"
+        paint_wick = ft.Paint(stroke_width=1, color=wick_color)
+        high_y = price_height - (high_val - min_low) * price_scale
+        low_y = price_height - (low_val - min_low) * price_scale
+        price_shapes.append(cv.Line(x_center, high_y, x_center, low_y, paint=paint_wick))
+
+        open_y = price_height - (open_val - min_low) * price_scale
+        close_y = price_height - (close_val - min_low) * price_scale
+        top = min(open_y, close_y)
+        height = max(abs(open_y - close_y), 1)
+        paint_body = ft.Paint(color=wick_color)
+        price_shapes.append(
+            cv.Rect(
+                x_center - candle_width / 2,
+                top,
+                candle_width,
+                height,
+                paint=paint_body,
+            )
         )
 
-    sma50 = [record.get("sma50") for record in price_records]
-    if any(value is not None for value in sma50):
-        fig.add_trace(
-            Scatter(
-                x=x_values,
-                y=sma50,
-                mode="lines",
-                name="SMA50",
-                line=dict(color="#0EA5E9"),
-            ),
-            row=1,
-            col=1,
+        record["x_center"] = x_center
+
+        sma20 = record.get("sma20")
+        record["sma20_y"] = (
+            price_height - (sma20 - min_low) * price_scale
+            if isinstance(sma20, (int, float))
+            else None
+        )
+        sma50 = record.get("sma50")
+        record["sma50_y"] = (
+            price_height - (sma50 - min_low) * price_scale
+            if isinstance(sma50, (int, float))
+            else None
         )
 
-    fig.update_layout(
-        margin=dict(t=10, r=10, l=10, b=0),
-        template="plotly_white",
-        showlegend=False,
-        height=400,
+    price_shapes.extend(_build_sma_paths(valid, "sma20_y", "#F97316"))
+    price_shapes.extend(_build_sma_paths(valid, "sma50_y", "#0EA5E9"))
+
+    price_canvas = cv.Canvas(
+        shapes=price_shapes,
+        width=canvas_width,
+        height=price_height + 20,
     )
-    fig.update_yaxes(title_text="Hinta", row=1, col=1)
-    fig.update_yaxes(title_text="Volyymi", row=2, col=1)
-    return fig
+
+    max_volume = max(float(record.get("volume") or 0.0) for record in valid)
+    volume_shapes = [
+        cv.Line(
+            0,
+            volume_height,
+            canvas_width,
+            volume_height,
+            paint=ft.Paint(stroke_width=1, color="#E5E7EB"),
+        )
+    ]
+    if max_volume > 0:
+        volume_scale = volume_height / max_volume
+        for record in valid:
+            volume = float(record.get("volume") or 0.0)
+            bar_height = volume * volume_scale
+            color = "#6366F1"
+            volume_shapes.append(
+                cv.Rect(
+                    record["x_center"] - candle_width / 2,
+                    volume_height - bar_height,
+                    candle_width,
+                    max(bar_height, 1),
+                    paint=ft.Paint(color=color),
+                )
+            )
+
+    volume_canvas = cv.Canvas(
+        shapes=volume_shapes,
+        width=canvas_width,
+        height=volume_height + 20,
+    )
+
+    label_row = _build_label_row(valid, canvas_width)
+    inner_column = ft.Column(
+        [
+            price_canvas,
+            ft.Text("Hinta", size=12, color=ft.Colors.GREY_600),
+            volume_canvas,
+            ft.Text("Volyymi", size=12, color=ft.Colors.GREY_600),
+            label_row,
+        ],
+        spacing=6,
+        width=canvas_width,
+    )
+
+    return ft.Row(
+        controls=[inner_column],
+        scroll=ft.ScrollMode.AUTO,
+    )
+
+
+def _build_sma_paths(records: Sequence[Dict], key: str, color: str) -> List:
+    points = [
+        (record["x_center"], record[key])
+        for record in records
+        if record.get("x_center") is not None and record.get(key) is not None
+    ]
+    if len(points) < 2:
+        return []
+    shapes: List = []
+    for idx in range(1, len(points)):
+        x1, y1 = points[idx - 1]
+        x2, y2 = points[idx]
+        shapes.append(
+            cv.Line(
+                x1,
+                y1,
+                x2,
+                y2,
+                paint=ft.Paint(stroke_width=1.5, color=color),
+            )
+        )
+    return shapes
+
+
+def _build_label_row(records: Sequence[Dict], width: int) -> ft.Row:
+    if not records:
+        return ft.Row([])
+    indices = [0, len(records) // 2, len(records) - 1]
+    labels = []
+    for idx in indices:
+        idx = min(max(idx, 0), len(records) - 1)
+        date_value = records[idx]["date"]
+        if isinstance(date_value, (dt.date, dt.datetime)):
+            label = date_value.strftime("%d.%m.%Y")
+        else:
+            label = str(date_value)
+        labels.append(ft.Text(label, size=11, color=ft.Colors.GREY_600))
+    return ft.Row(
+        controls=[
+            labels[0],
+            ft.Container(expand=True),
+            labels[1],
+            ft.Container(expand=True),
+            labels[2],
+        ],
+        width=width,
+    )
 
 
 def _format_number(value: Optional[float]) -> str:
     if value is None:
         return "-"
-    return f"{value:.2f}"
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return "-"
 
 
 def _format_volume(value: Optional[float]) -> str:
     if value is None:
         return "-"
-    return f"{value:,.0f}".replace(",", " ")
+    try:
+        return f"{float(value):,.0f}".replace(",", " ")
+    except (TypeError, ValueError):
+        return "-"
