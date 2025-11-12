@@ -5,11 +5,10 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, List, Sequence
 
 from . import config
+from .db import AnalysisEvent, AnalysisRepository
 
 DIV_KEYS = set(config.DIVERGENCE_KEYS)
 MAX_DIVERGENCE_LOOKBACK_DAYS = 3
-
-from .db import AnalysisEvent, AnalysisRepository
 
 
 @dataclass(frozen=True)

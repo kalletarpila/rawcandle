@@ -6,14 +6,18 @@ import os
 import pandas as pd
 import yfinance as yf
 from simu import SimuView, SimulationService
+from stock.view import StockView
 from market_repository import (
     delete_market,
     ensure_market_schema,
     get_market_for_ticker,
+    get_market_info,
+    get_market_min_volume,
     list_markets,
     ticker_exists,
     upsert_market,
     validate_market,
+    MARKET_VOLUME_DEFAULTS,
 )
 
 
@@ -199,6 +203,20 @@ class RawCandleApp:
         except Exception:
             pass
 
+    def _get_market_min_volume_requirement(self, market_code: str) -> int:
+        info = get_market_info(
+            market_code,
+            db_path=self.osakedata_db_path,
+        )
+        if info and info.get("min_volume") is not None:
+            try:
+                return max(0, int(info["min_volume"]))
+            except (TypeError, ValueError):
+                pass
+        return MARKET_VOLUME_DEFAULTS.get(
+            (market_code or "usa").strip().lower(), 100_000
+        )
+
     def _set_market_selection(self, market: str):
         if not market:
             return
@@ -250,7 +268,15 @@ class RawCandleApp:
 
     def _build_market_row(self, market: dict) -> ft.Container:
         """Luo yhden markkinarivin asetussivulle."""
-        subtitle = f"Lyhenne: {market['abbreviation'].upper()} | Yahoo: {market['yahoo_suffix'] or '-'}"
+        min_vol = market.get("min_volume")
+        min_vol_str = (
+            f"{int(min_vol):,}".replace(",", " ") if isinstance(min_vol, (int, float)) else "-"
+        )
+        subtitle = (
+            f"Lyhenne: {market['abbreviation'].upper()} | "
+            f"Yahoo: {market['yahoo_suffix'] or '-'} | "
+            f"Min vol: {min_vol_str}"
+        )
         return ft.Container(
             content=ft.Row(
                 [
@@ -300,10 +326,14 @@ class RawCandleApp:
         self.market_name_input.value = selected["name"]
         self.market_abbr_input.value = selected["abbreviation"]
         self.market_suffix_input.value = selected["yahoo_suffix"]
+        if self.market_min_volume_input is not None:
+            self.market_min_volume_input.value = str(selected.get("min_volume") or 0)
         try:
             self.market_name_input.update()
             self.market_abbr_input.update()
             self.market_suffix_input.update()
+            if self.market_min_volume_input:
+                self.market_min_volume_input.update()
         except Exception:
             pass
         if getattr(self, "market_save_button", None):
@@ -320,6 +350,7 @@ class RawCandleApp:
             getattr(self, "market_name_input", None),
             getattr(self, "market_abbr_input", None),
             getattr(self, "market_suffix_input", None),
+            getattr(self, "market_min_volume_input", None),
         ):
             if control:
                 control.value = ""
@@ -341,11 +372,20 @@ class RawCandleApp:
         name = (self.market_name_input.value or "").strip()
         abbreviation = (self.market_abbr_input.value or "").strip() or ""
         suffix = (self.market_suffix_input.value or "").strip()
+        min_volume_value = (
+            self.market_min_volume_input.value.strip()
+            if getattr(self, "market_min_volume_input", None)
+            and self.market_min_volume_input.value
+            else ""
+        )
         try:
             upsert_market(
                 name=name,
                 abbreviation=abbreviation,
                 yahoo_suffix=suffix,
+                min_volume=min_volume_value or MARKET_VOLUME_DEFAULTS.get(
+                    abbreviation.lower(), 100000
+                ),
                 market_id=self.market_form_id,
                 db_path=self.osakedata_db_path,
             )
@@ -380,6 +420,12 @@ class RawCandleApp:
             hint_text="esim. .HE",
             width=200,
         )
+        self.market_min_volume_input = ft.TextField(
+            label="Minimivolyymi/päivä",
+            hint_text="esim. 100000",
+            width=200,
+            keyboard_type=ft.KeyboardType.NUMBER,
+        )
         self.market_save_button = ft.ElevatedButton(
             "Lisää markkina",
             icon=ft.Icons.ADD,
@@ -404,10 +450,15 @@ class RawCandleApp:
                 ),
                 ft.Divider(),
                 ft.Text("Lisää tai muokkaa markkinaa", weight=ft.FontWeight.BOLD),
-                ft.Row(
-                    [self.market_name_input, self.market_abbr_input, self.market_suffix_input],
-                    spacing=20,
-                ),
+        ft.Row(
+            [
+                self.market_name_input,
+                self.market_abbr_input,
+                self.market_suffix_input,
+                self.market_min_volume_input,
+            ],
+            spacing=20,
+        ),
                 ft.Row([self.market_save_button, cancel_button], spacing=10),
                 ft.Divider(),
                 ft.Text("Markkinat", weight=ft.FontWeight.BOLD),
@@ -2328,6 +2379,9 @@ class RawCandleApp:
                 )
                 if not validate_market(target_market, db_path=self.osakedata_db_path):
                     target_market = "usa"
+                min_volume_required = self._get_market_min_volume_requirement(
+                    target_market
+                )
 
                 self.loading_text.value = f"🔄 {idx}/{total}: Haetaan {ticker}..."
                 self.loading_text.color = ft.Colors.BLUE_600
@@ -2350,7 +2404,7 @@ class RawCandleApp:
                 hist_2025 = hist[hist.index >= "2025-01-01"]
                 if len(hist_2025) > 0:
                     avg_volume_2025 = hist_2025["Volume"].mean()
-                    if avg_volume_2025 < 100000:
+                    if avg_volume_2025 < min_volume_required:
                         rejected_penny += 1
                         time.sleep(0.5)
                         continue
@@ -2444,6 +2498,7 @@ class RawCandleApp:
         self.market_name_input = None
         self.market_abbr_input = None
         self.market_suffix_input = None
+        self.market_min_volume_input = None
         self.market_save_button = None
 
         # Osakedata-komponentit
@@ -2499,6 +2554,7 @@ class RawCandleApp:
         # Simulaatio-välilehden hallinta
         self.simu_service = SimulationService()
         self.simu_view = SimuView(self.page, self.create_appbar, self.simu_service)
+        self.stock_view = StockView(self.page, self.create_appbar)
 
         # Aloita etusivulta (only if page supports go)
         try:
@@ -2545,6 +2601,11 @@ class RawCandleApp:
                     ft.Icons.FLARE,
                     tooltip="Candles",
                     on_click=lambda _: self.page.go("/candles"),
+                ),
+                ft.IconButton(
+                    ft.Icons.SHOW_CHART,
+                    tooltip="Stock",
+                    on_click=lambda _: self.page.go("/stock"),
                 ),
                 ft.IconButton(
                     ft.Icons.SCIENCE,
@@ -3433,6 +3494,8 @@ Virheet: {error_count}"""
             self.page.views.append(self.create_settings_view())
         elif self.page.route == "/candles":
             self.page.views.append(self.create_candles_view())
+        elif self.page.route == "/stock":
+            self.page.views.append(self.stock_view.create_view())
         elif self.page.route == "/simu":
             self.page.views.append(self.simu_view.create_view())
         elif self.page.route == "/analysis":
@@ -3510,9 +3573,16 @@ Virheet: {error_count}"""
                     if existing_market_row and existing_market_row[0]
                     else None
                 )
+                min_volume_required = self._get_market_min_volume_requirement(
+                    target_market
+                )
+
                 if existing_market:
                     target_market = existing_market
                     self._set_market_selection(existing_market)
+                    min_volume_required = self._get_market_min_volume_requirement(
+                        existing_market
+                    )
 
             if not validate_market(
                 target_market, db_path=self.osakedata_db_path
@@ -3573,8 +3643,14 @@ Virheet: {error_count}"""
                 hist_2025 = hist[hist.index >= "2025-01-01"]
                 if len(hist_2025) > 0:
                     avg_volume_2025 = hist_2025["Volume"].mean()
-                    if avg_volume_2025 < 100000:
-                        self.loading_text.value = f"❌ {ticker} liian vähän vaihdettu vuonna 2025 (keskim. {avg_volume_2025:,.0f} osaketta/pv). Vaaditaan ≥100k."
+                    if avg_volume_2025 < min_volume_required:
+                        required_str = f"{min_volume_required:,.0f}".replace(",", " ")
+                        avg_str = f"{avg_volume_2025:,.0f}".replace(",", " ")
+                        self.loading_text.value = (
+                            f"❌ {ticker} liian vähän vaihdettu vuonna 2025 "
+                            f"(keskim. {avg_str} osaketta/pv). "
+                            f"Markkina {target_market.upper()} vaatii ≥{required_str}."
+                        )
                         self.loading_text.color = ft.Colors.RED_600
                         self.page.update()
                         return

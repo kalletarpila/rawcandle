@@ -3,7 +3,6 @@
 import os
 import sqlite3
 import tempfile
-import pandas as pd
 from analysis.run_analysis import run_candlestick_analysis
 from analysis.database_manager import DatabaseManager
 
