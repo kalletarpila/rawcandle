@@ -7,7 +7,7 @@ Tämä moduuli toteuttaa älykkään inkrementaalisen päivityslogiikan:
   1. Uudet päivämäärät olemassa oleville osakkeille
   2. Kaikki data täysin uusille osakkeille
 
-Laskee KAIKKI 84 saraketta kuten alkuperäisessä generate_results.py:ssä.
+Laskee KAIKKI 85 saraketta kuten alkuperäisessä generate_results.py:ssä (market + 84 mittaria).
 """
 
 import logging
@@ -19,11 +19,13 @@ from typing import Callable, List, Optional, Tuple
 
 import pandas as pd
 
+from market_repository import ensure_market_schema, get_market_for_ticker
+
 from .database_manager import DatabaseManager
 
 
 class ResultsGenerator:
-    """Generoi results_data tauluun kaikki 84 saraketta."""
+    """Generoi results_data tauluun kaikki 85 saraketta."""
 
     # Kynttilöiden numerointi (sama kuin generate_results.py)
     PATTERN_MAPPING = {
@@ -47,6 +49,8 @@ class ResultsGenerator:
         self.db_manager = db_manager
         self.stock_db_path = stock_db_path
         self.logger = logging.getLogger(__name__)
+        ensure_market_schema(stock_db_path)
+        self._market_cache: dict[str, str] = {}
 
     def generate_results(
         self,
@@ -123,11 +127,15 @@ class ResultsGenerator:
                     self.logger.warning(f"No stock data for {ticker}")
                     continue
 
+                ticker_market = self._get_market(ticker)
+
                 # Prosessoi kaikki findingit tälle tickerille
                 ticker_results = []
                 processed_count = 0
                 for finding in ticker_findings:
-                    result = self._process_finding(finding, stock_data, ticker)
+                    result = self._process_finding(
+                        finding, stock_data, ticker, ticker_market
+                    )
                     if result:
                         ticker_results.append(result)
                         processed_count += 1
@@ -437,6 +445,21 @@ class ResultsGenerator:
             self.logger.error(f"Fetch stock data failed for {ticker}: {e}")
             return pd.DataFrame()
 
+    def _get_market(self, ticker: str) -> str:
+        """Palauta tickerin markkina osakedata-kannasta (välimuistissa)."""
+        cached = self._market_cache.get(ticker)
+        if cached:
+            return cached
+        try:
+            market = get_market_for_ticker(
+                ticker, db_path=self.stock_db_path, default="usa"
+            )
+        except Exception:
+            market = "usa"
+        market = market or "usa"
+        self._market_cache[ticker] = market
+        return market
+
     def _get_index_data(self, ticker: str, date: str, offset: int) -> Optional[float]:
         """
         Hae indeksin close-arvo tietylle offsetille.
@@ -483,7 +506,7 @@ class ResultsGenerator:
             return None
 
     def _process_finding(
-        self, finding: dict, stock_df: pd.DataFrame, ticker: str
+        self, finding: dict, stock_df: pd.DataFrame, ticker: str, market: str
     ) -> Optional[dict]:
         """
         Käsittele yksittäinen finding ja laske KAIKKI 84 saraketta.
@@ -838,10 +861,11 @@ class ResultsGenerator:
             date_obj = datetime.strptime(date, "%Y-%m-%d")
             weekday = date_obj.isoweekday()  # 1=Ma, 7=Su
 
-            # Muodosta tulos dictionary (KAIKKI 84 saraketta)
+            # Muodosta tulos dictionary (KAIKKI 85 saraketta)
             return {
                 "ticker": ticker,
                 "date": date,
+                "market": market,
                 "candle_pattern": candle_pattern,
                 "signal_strength": signal_strength,
                 "t_1_alin": t_1_alin,

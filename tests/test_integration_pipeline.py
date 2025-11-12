@@ -42,7 +42,8 @@ def _create_stock_database(
             high REAL,
             low REAL,
             close REAL,
-            volume INTEGER
+            volume INTEGER,
+            market TEXT NOT NULL DEFAULT 'usa'
         )
         """
     )

@@ -114,13 +114,14 @@ class DatabaseManager:
 
             # Luo results_data taulu
             # Tallentaa prosessoidut tulokset (vain kynttiläkuviopäivät)
-            # 84 saraketta (83 alkuperäistä + weekday)
+            # 85 saraketta (market + alkuperäiset 84 kenttää)
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS results_data (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     ticker TEXT NOT NULL,
                     date TEXT NOT NULL,
+                    market TEXT NOT NULL DEFAULT 'usa',
                     candle_pattern INTEGER,
                     signal_strength REAL,
                     t_1_alin REAL,
@@ -209,6 +210,19 @@ class DatabaseManager:
             """
             )
 
+            cursor.execute("PRAGMA table_info(results_data)")
+            results_columns = [row[1] for row in cursor.fetchall()]
+            if "market" not in results_columns:
+                cursor.execute(
+                    "ALTER TABLE results_data ADD COLUMN market TEXT NOT NULL DEFAULT 'usa'"
+                )
+                cursor.execute(
+                    "UPDATE results_data SET market = 'suomi' WHERE ticker LIKE '%.HE'"
+                )
+                cursor.execute(
+                    "UPDATE results_data SET market = 'usa' WHERE market IS NULL"
+                )
+
             # Luo indeksit results_data tauluun
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_results_ticker ON results_data(ticker)"
@@ -224,6 +238,9 @@ class DatabaseManager:
             )
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_results_pattern_date ON results_data(candle_pattern, date)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_results_market ON results_data(market)"
             )
 
             # Luo results_metadata taulu
@@ -942,6 +959,7 @@ class DatabaseManager:
         self,
         ticker: str,
         date: str,
+        market: str,
         candle_pattern: int,
         signal_strength: Optional[float],
         t_1_alin: Optional[float],
@@ -1038,7 +1056,7 @@ class DatabaseManager:
             cursor.execute(
                 """
                 INSERT OR REPLACE INTO results_data
-                (ticker, date, candle_pattern, signal_strength,
+                (ticker, date, market, candle_pattern, signal_strength,
                  t_1_alin, t_1_ylin, t_1_bodi, t_1_bodi_colour,
                  t0_alin, t0_ylin, t0_bodi, t0_bodi_colour,
                  t1_alin, t1_ylin, t1_bodi, t1_bodi_colour,
@@ -1062,11 +1080,12 @@ class DatabaseManager:
                         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?)
+                        ?, ?, ?, ?, ?)
                 """,
                 (
                     ticker,
                     date,
+                    market,
                     candle_pattern,
                     signal_strength,
                     t_1_alin,
@@ -1182,6 +1201,7 @@ class DatabaseManager:
                     values_tuple = (
                         result["ticker"],
                         result["date"],
+                        result.get("market", "usa"),
                         result["candle_pattern"],
                         result.get("signal_strength"),
                         result.get("t_1_alin"),
@@ -1266,16 +1286,16 @@ class DatabaseManager:
                         result.get("weekday"),
                     )
 
-                    if len(values_tuple) != 84:
+                    if len(values_tuple) != 85:
                         self.logger.error(
-                            f"VALUES tuple length is {len(values_tuple)}, expected 84"
+                            f"VALUES tuple length is {len(values_tuple)}, expected 85"
                         )
                         self.logger.error(f"Result keys: {sorted(result.keys())}")
 
                     cursor.execute(
                         """
                         INSERT OR REPLACE INTO results_data
-                        (ticker, date, candle_pattern, signal_strength,
+                        (ticker, date, market, candle_pattern, signal_strength,
                          t_1_alin, t_1_ylin, t_1_bodi, t_1_bodi_colour,
                          t0_alin, t0_ylin, t0_bodi, t0_bodi_colour,
                          t1_alin, t1_ylin, t1_bodi, t1_bodi_colour,
@@ -1299,7 +1319,7 @@ class DatabaseManager:
                                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                                ?, ?, ?, ?)
+                                ?, ?, ?, ?, ?)
                         """,
                         values_tuple,
                     )
@@ -1312,7 +1332,7 @@ class DatabaseManager:
 
         except Exception as e:
             self.logger.error(f"Bulk insert results failed: {e}")
-            if "85 values for 84 columns" in str(e):
+            if "86 values for 85 columns" in str(e):
                 self.logger.error(
                     f"DEBUG: Last result dict had {len(result.keys())} keys"
                 )

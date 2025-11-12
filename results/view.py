@@ -223,9 +223,21 @@ def create_results_view(app) -> ft.View:
                 return
 
             with open(csv_path, "r", encoding="utf-8") as f:
-                content = f.read().strip()
+                lines = f.readlines()
 
-            if not content:
+            tickers = []
+            for raw_line in lines:
+                line = raw_line.split("#", 1)[0].strip()
+                if not line:
+                    continue
+                if "," in line:
+                    line = line.split(",", 1)[0]
+                if ";" in line:
+                    line = line.split(";", 1)[0]
+                if line:
+                    tickers.append(line.upper())
+
+            if not tickers:
                 sb = ft.SnackBar(
                     ft.Text("❌ Tiedosto on tyhjä", color=ft.Colors.WHITE),
                     bgcolor=ft.Colors.RED_600,
@@ -237,9 +249,6 @@ def create_results_view(app) -> ft.View:
                 app.page.update()
                 return
 
-            # Aseta tickerit kenttään (pilkulla eroteltuina)
-            # Trimmataan välilyönnit joka tickeristä
-            tickers = [line.strip() for line in content.split("\n") if line.strip()]
             tickers_str = ",".join(tickers)
 
             app.results_ticker_field.value = tickers_str

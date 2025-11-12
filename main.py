@@ -1,10 +1,20 @@
 import flet as ft
 import datetime
 import sqlite3
+import os
 
 import pandas as pd
 import yfinance as yf
 from simu import SimuView, SimulationService
+from market_repository import (
+    delete_market,
+    ensure_market_schema,
+    get_market_for_ticker,
+    list_markets,
+    ticker_exists,
+    upsert_market,
+    validate_market,
+)
 
 
 # Compatibility shim: ensure ft.Colors/ft.colors and ft.Icons/ft.icons exist
@@ -174,35 +184,252 @@ class RawCandleApp:
             except Exception:
                 pass
 
+    def _show_snackbar(self, message: str, color: str = ft.Colors.BLUE_600):
+        """Näytä SnackBar turvallisesti."""
+        try:
+            sb = ft.SnackBar(
+                content=ft.Text(message, color=ft.Colors.WHITE),
+                bgcolor=color,
+                duration=3000,
+            )
+            if sb not in self.page.overlay:
+                self.page.overlay.append(sb)
+            sb.open = True
+            self.page.update()
+        except Exception:
+            pass
+
+    def _set_market_selection(self, market: str):
+        if not market:
+            return
+        try:
+            if getattr(self, "market_dropdown", None):
+                self.market_dropdown.value = market
+                self.market_dropdown.update()
+        except Exception:
+            pass
+
+    def _refresh_markets(self):
+        self.markets = list_markets(self.osakedata_db_path)
+        self._update_market_dropdown()
+        self._update_market_list()
+
+    def _update_market_dropdown(self):
+        if not getattr(self, "market_dropdown", None):
+            return
+        options = [
+            ft.dropdown.Option(
+                text=f"{m['name']} ({m['abbreviation'].upper()})", key=m["abbreviation"]
+            )
+            for m in self.markets
+        ]
+        self.market_dropdown.options = options
+        valid_values = {opt.key or opt.text for opt in options}
+        if options:
+            if (
+                not self.market_dropdown.value
+                or self.market_dropdown.value not in valid_values
+            ):
+                default_value = options[0].key or options[0].text
+                self.market_dropdown.value = default_value
+        try:
+            self.market_dropdown.update()
+        except Exception:
+            pass
+
+    def _update_market_list(self):
+        if not getattr(self, "market_list_column", None):
+            return
+        self.market_list_column.controls = [
+            self._build_market_row(market) for market in self.markets
+        ]
+        try:
+            self.market_list_column.update()
+        except Exception:
+            pass
+
+    def _build_market_row(self, market: dict) -> ft.Container:
+        """Luo yhden markkinarivin asetussivulle."""
+        subtitle = f"Lyhenne: {market['abbreviation'].upper()} | Yahoo: {market['yahoo_suffix'] or '-'}"
+        return ft.Container(
+            content=ft.Row(
+                [
+                    ft.Column(
+                        [
+                            ft.Text(market["name"], weight=ft.FontWeight.BOLD),
+                            ft.Text(subtitle, size=12, color=ft.Colors.GREY_600),
+                        ],
+                        expand=True,
+                    ),
+                    ft.Row(
+                        [
+                            ft.IconButton(
+                                ft.Icons.EDIT,
+                                tooltip="Muokkaa markkinaa",
+                                on_click=lambda e, mid=market["id"]: self._edit_market(
+                                    mid
+                                ),
+                            ),
+                            ft.IconButton(
+                                ft.Icons.DELETE,
+                                tooltip="Poista markkina",
+                                on_click=lambda e, mid=market["id"]: self._delete_market(
+                                    mid
+                                ),
+                            ),
+                        ]
+                    ),
+                ],
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=10,
+            bgcolor=ft.Colors.GREY_50,
+            border_radius=8,
+        )
+
+    def _edit_market(self, market_id: int):
+        """Täytä lomake valitun markkinan tiedoilla."""
+        if not getattr(self, "market_name_input", None):
+            return
+        selected = next((m for m in self.markets if m["id"] == market_id), None)
+        if not selected:
+            self._show_snackbar("Markkinaa ei löytynyt", ft.Colors.RED_600)
+            return
+        self.market_form_id = market_id
+        self.market_name_input.value = selected["name"]
+        self.market_abbr_input.value = selected["abbreviation"]
+        self.market_suffix_input.value = selected["yahoo_suffix"]
+        try:
+            self.market_name_input.update()
+            self.market_abbr_input.update()
+            self.market_suffix_input.update()
+        except Exception:
+            pass
+        if getattr(self, "market_save_button", None):
+            self.market_save_button.text = "Päivitä markkina"
+            self.market_save_button.icon = ft.Icons.SAVE
+            try:
+                self.market_save_button.update()
+            except Exception:
+                pass
+
+    def _reset_market_form(self, _=None):
+        self.market_form_id = None
+        for control in (
+            getattr(self, "market_name_input", None),
+            getattr(self, "market_abbr_input", None),
+            getattr(self, "market_suffix_input", None),
+        ):
+            if control:
+                control.value = ""
+                try:
+                    control.update()
+                except Exception:
+                    pass
+        if getattr(self, "market_save_button", None):
+            self.market_save_button.text = "Lisää markkina"
+            self.market_save_button.icon = ft.Icons.ADD
+            try:
+                self.market_save_button.update()
+            except Exception:
+                pass
+
+    def _save_market_form(self, e):
+        if not getattr(self, "market_name_input", None):
+            return
+        name = (self.market_name_input.value or "").strip()
+        abbreviation = (self.market_abbr_input.value or "").strip() or ""
+        suffix = (self.market_suffix_input.value or "").strip()
+        try:
+            upsert_market(
+                name=name,
+                abbreviation=abbreviation,
+                yahoo_suffix=suffix,
+                market_id=self.market_form_id,
+                db_path=self.osakedata_db_path,
+            )
+            self._show_snackbar("Markkina tallennettu", ft.Colors.GREEN_600)
+            self._reset_market_form()
+            self._refresh_markets()
+        except ValueError as err:
+            self._show_snackbar(f"❌ {err}", ft.Colors.RED_600)
+
+    def _delete_market(self, market_id: int):
+        try:
+            delete_market(market_id, db_path=self.osakedata_db_path)
+            self._show_snackbar("Markkina poistettu", ft.Colors.GREEN_600)
+            self._refresh_markets()
+        except ValueError as err:
+            self._show_snackbar(f"❌ {err}", ft.Colors.RED_600)
+
     def create_settings_view(self):
-        """Palauttaa placeholder-näkymän asetuksille"""
+        """Luo asetussivun markkinapaikkojen hallinnalle."""
+        self.market_name_input = ft.TextField(
+            label="Markkinan nimi",
+            hint_text="Esim. Yhdysvallat",
+            width=300,
+        )
+        self.market_abbr_input = ft.TextField(
+            label="Lyhenne (1-5 merkkiä)",
+            hint_text="esim. usa",
+            width=200,
+        )
+        self.market_suffix_input = ft.TextField(
+            label="Yahoo Finance -pääte",
+            hint_text="esim. .HE",
+            width=200,
+        )
+        self.market_save_button = ft.ElevatedButton(
+            "Lisää markkina",
+            icon=ft.Icons.ADD,
+            on_click=self._save_market_form,
+        )
+        cancel_button = ft.TextButton("Tyhjennä lomake", on_click=self._reset_market_form)
+
+        self.market_list_column = ft.Column(spacing=10, expand=True)
+        self._update_market_list()
+
+        content = ft.Column(
+            [
+                ft.Text(
+                    "Asetukset",
+                    size=28,
+                    weight=ft.FontWeight.BOLD,
+                    color=ft.colors.ORANGE_700,
+                ),
+                ft.Text(
+                    "Hallinnoi markkinapaikkoja ja niihin liitettäviä Yahoo Finance -päätteitä.",
+                    color=ft.colors.GREY_600,
+                ),
+                ft.Divider(),
+                ft.Text("Lisää tai muokkaa markkinaa", weight=ft.FontWeight.BOLD),
+                ft.Row(
+                    [self.market_name_input, self.market_abbr_input, self.market_suffix_input],
+                    spacing=20,
+                ),
+                ft.Row([self.market_save_button, cancel_button], spacing=10),
+                ft.Divider(),
+                ft.Text("Markkinat", weight=ft.FontWeight.BOLD),
+                ft.Container(
+                    content=self.market_list_column,
+                    padding=10,
+                    bgcolor=ft.Colors.GREY_50,
+                    border_radius=8,
+                    expand=True,
+                ),
+            ],
+            spacing=16,
+        )
+
         return ft.View(
             "/settings",
             [
                 self.create_appbar(),
-                ft.Container(
-                    content=ft.Column(
-                        [
-                            ft.Text(
-                                "Asetukset",
-                                size=28,
-                                weight=ft.FontWeight.BOLD,
-                                color=ft.colors.ORANGE_700,
-                            ),
-                            ft.Text(
-                                "Tämä on asetukset-sivu (toteutus puuttuu)",
-                                color=ft.colors.GREY_600,
-                            ),
-                        ],
-                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                        spacing=20,
-                    ),
-                    padding=40,
-                    expand=True,
-                ),
+                ft.Container(content=content, padding=40, expand=True),
             ],
             vertical_alignment=ft.MainAxisAlignment.START,
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         )
 
     def create_candles_view(self):
@@ -258,9 +485,21 @@ class RawCandleApp:
                     return
 
                 with open(csv_path, "r", encoding="utf-8") as f:
-                    content = f.read().strip()
+                    lines = f.readlines()
 
-                if not content:
+                tickers = []
+                for raw_line in lines:
+                    line = raw_line.split("#", 1)[0].strip()
+                    if not line:
+                        continue
+                    if "," in line:
+                        line = line.split(",", 1)[0]
+                    if ";" in line:
+                        line = line.split(";", 1)[0]
+                    if line:
+                        tickers.append(line.upper())
+
+                if not tickers:
                     sb = ft.SnackBar(
                         ft.Text("❌ Tiedosto on tyhjä", color=ft.Colors.WHITE),
                         bgcolor=ft.Colors.RED_600,
@@ -272,9 +511,6 @@ class RawCandleApp:
                     self.page.update()
                     return
 
-                # Aseta tickerit kenttään (pilkulla eroteltuina)
-                # Trimmataan välilyönnit joka tickeristä
-                tickers = [line.strip() for line in content.split("\n") if line.strip()]
                 tickers_str = ",".join(tickers)
 
                 self.candles_ticker_field.value = tickers_str
@@ -1960,49 +2196,79 @@ class RawCandleApp:
 
     def fetch_and_save_from_file(self, e):
         """Hakee useiden osakkeiden tiedot tiedostosta ja tallentaa kantaan"""
-        import os
         import sqlite3
         import time
         from datetime import datetime
 
-        data_dir = os.path.join(os.path.dirname(__file__), "data")
-        tickers_file = os.path.join(data_dir, "tickers.txt")
-        db_path = os.path.join(data_dir, "osakedata.db")
+        tickers_file = os.path.join(self.data_dir, "tickers.txt")
+        db_path = self.osakedata_db_path
 
-        # Tarkista tickers.txt
         if not os.path.exists(tickers_file):
             self.loading_text.value = f"❌ Tiedostoa ei löytynyt: {tickers_file}"
             self.loading_text.color = ft.Colors.RED_600
             self.page.update()
             return
 
-        # Lue tickerit
+        def parse_entry(raw: str):
+            """Palauta (ticker, market) riviltä 'TICKER,market' (market vapaaehtoinen)."""
+            line = raw.split('#', 1)[0].strip()
+            if not line:
+                return None
+            market = None
+            for delim in (',', ';'):
+                if delim in line:
+                    ticker_part, market_part = line.split(delim, 1)
+                    line = ticker_part.strip()
+                    market_candidate = market_part.strip().lower()
+                    market = market_candidate or None
+                    break
+            ticker_value = line.upper()
+            return ticker_value, market
+
+        entries = []
+        invalid_markets = []
         try:
-            with open(tickers_file, "r", encoding="utf-8") as f:
-                tickers = [line.strip().upper() for line in f if line.strip()]
-
-            if not tickers:
-                self.loading_text.value = "❌ Tiedostossa ei ole tickereitä!"
-                self.loading_text.color = ft.Colors.RED_600
-                self.page.update()
-                return
-
+            with open(tickers_file, 'r', encoding='utf-8') as f:
+                for raw_line in f:
+                    parsed = parse_entry(raw_line)
+                    if not parsed:
+                        continue
+                    ticker_value, market_value = parsed
+                    if not ticker_value:
+                        continue
+                    if market_value and not validate_market(
+                        market_value, db_path=self.osakedata_db_path
+                    ):
+                        invalid_markets.append((ticker_value, market_value))
+                        continue
+                    entries.append((ticker_value, market_value))
         except Exception as ex:
-            self.loading_text.value = f"❌ Virhe tiedostoa lukiessa: {str(ex)}"
+            self.loading_text.value = f"❌ Virhe tiedostoa lukiessa: {ex}"
             self.loading_text.color = ft.Colors.RED_600
             self.page.update()
             return
 
-        # Varmista että kanta on olemassa
-        if not os.path.exists(data_dir):
-            os.makedirs(data_dir)
+        if invalid_markets:
+            sample = ', '.join(f"{t} ({m})" for t, m in invalid_markets[:3])
+            if len(invalid_markets) > 3:
+                sample += f" ... (+{len(invalid_markets) - 3} muuta)"
+            self.loading_text.value = f"❌ Tuntematon markkina: {sample}"
+            self.loading_text.color = ft.Colors.RED_600
+            self.page.update()
+            return
 
-        # Hae olemassa olevat tickerit kannasta
+        if not entries:
+            self.loading_text.value = "❌ Tiedostossa ei ole tickereitä!"
+            self.loading_text.color = ft.Colors.RED_600
+            self.page.update()
+            return
+
+        os.makedirs(self.data_dir, exist_ok=True)
+
         existing_tickers = set()
         try:
             with sqlite3.connect(db_path) as conn:
                 cursor = conn.cursor()
-                # Varmista taulu
                 cursor.execute(
                     """
                     CREATE TABLE IF NOT EXISTS osakedata (
@@ -2013,21 +2279,20 @@ class RawCandleApp:
                         low REAL,
                         close REAL,
                         volume INTEGER,
+                        market TEXT NOT NULL DEFAULT 'usa',
                         PRIMARY KEY (osake, pvm)
                     )
-                """
+                    """
                 )
-                # Hae kaikki uniikit tickerit
                 cursor.execute("SELECT DISTINCT osake FROM osakedata")
                 existing_tickers = {row[0] for row in cursor.fetchall()}
         except Exception as ex:
-            self.loading_text.value = f"❌ Virhe tietokantaa lukiessa: {str(ex)}"
+            self.loading_text.value = f"❌ Virhe tietokantaa lukiessa: {ex}"
             self.loading_text.color = ft.Colors.RED_600
             self.page.update()
             return
 
-        # Tilastot
-        total = len(tickers)
+        total = len(entries)
         saved_count = 0
         skipped_in_db = 0
         rejected_no_data = 0
@@ -2042,9 +2307,8 @@ class RawCandleApp:
         self.loading_text.color = ft.Colors.BLUE_600
         self.page.update()
 
-        for idx, ticker in enumerate(tickers, 1):
+        for idx, (ticker, preferred_market) in enumerate(entries, 1):
             try:
-                # Ohita jos jo kannassa
                 if ticker in existing_tickers:
                     skipped_in_db += 1
                     if idx % 10 == 0:
@@ -2056,10 +2320,15 @@ class RawCandleApp:
                             f"Hylätty (penny): {rejected_penny}"
                         )
                         self.page.update()
-                    time.sleep(0.5)  # Lyhyt tauko
+                    time.sleep(0.5)
                     continue
 
-                # Hae data
+                target_market = preferred_market or (
+                    (self.market_dropdown.value or "usa").strip().lower()
+                )
+                if not validate_market(target_market, db_path=self.osakedata_db_path):
+                    target_market = "usa"
+
                 self.loading_text.value = f"🔄 {idx}/{total}: Haetaan {ticker}..."
                 self.loading_text.color = ft.Colors.BLUE_600
                 self.page.update()
@@ -2067,31 +2336,25 @@ class RawCandleApp:
                 stock = yf.Ticker(ticker)
                 hist = stock.history(start=start_date, end=end_date)
 
-                # Tarkista onko dataa
                 if hist.empty:
                     rejected_no_data += 1
                     time.sleep(0.5)
                     continue
 
-                # Tarkista penny stock
                 avg_close = hist["Close"].mean()
                 if avg_close < 1.0:
                     rejected_penny += 1
                     time.sleep(0.5)
                     continue
 
-                # Tarkista keskimääräinen päivävolyymi vuodelta 2025
                 hist_2025 = hist[hist.index >= "2025-01-01"]
                 if len(hist_2025) > 0:
                     avg_volume_2025 = hist_2025["Volume"].mean()
                     if avg_volume_2025 < 100000:
-                        rejected_penny += (
-                            1  # Käytetään samaa laskuria yksinkertaisuuden vuoksi
-                        )
+                        rejected_penny += 1
                         time.sleep(0.5)
                         continue
 
-                # Tallenna kantaan
                 with sqlite3.connect(db_path) as conn:
                     cursor = conn.cursor()
                     rows_added = 0
@@ -2099,9 +2362,9 @@ class RawCandleApp:
                         date_str = date.strftime("%Y-%m-%d")
                         cursor.execute(
                             """
-                            INSERT OR REPLACE INTO osakedata 
-                            (osake, pvm, open, high, low, close, volume)
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                            INSERT OR REPLACE INTO osakedata
+                            (osake, pvm, open, high, low, close, volume, market)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                             """,
                             (
                                 ticker,
@@ -2111,22 +2374,21 @@ class RawCandleApp:
                                 float(row["Low"]) if pd.notna(row["Low"]) else None,
                                 float(row["Close"]) if pd.notna(row["Close"]) else None,
                                 int(row["Volume"]) if pd.notna(row["Volume"]) else None,
+                                target_market,
                             ),
                         )
                         rows_added += 1
                     conn.commit()
 
                 saved_count += 1
-                existing_tickers.add(ticker)  # Lisää listaan
+                existing_tickers.add(ticker)
 
-                # Laske divergenssit
-                div_success, div_days, div_error = self._calculate_and_save_divergences(
+                div_success, div_days, _ = self._calculate_and_save_divergences(
                     ticker, only_missing=True
                 )
                 if div_success and div_days > 0:
                     divergences_calculated += 1
 
-                # Päivitä tilanne joka 10. osakkeen jälkeen tai jos tallennettu
                 if idx % 10 == 0 or saved_count > 0:
                     self.loading_text.value = (
                         f"📊 Käsitelty: {idx}/{total} | "
@@ -2139,12 +2401,9 @@ class RawCandleApp:
                     self.loading_text.color = ft.Colors.BLUE_600
                     self.page.update()
 
-                # Tauko Yahoo rate limitin välttämiseksi
-                # Lyhyempi tauko jos paljon päiviä (divergenssit vievät aikaa)
                 pause_time = 1.0 if rows_added >= 50 else 1.5
                 time.sleep(pause_time)
 
-                # 30s tauko joka 500. osakkeen jälkeen
                 if idx % 500 == 0:
                     self.loading_text.value = (
                         f"⏳ {idx} osaketta käsitelty, pidetään 30 sekunnin tauko..."
@@ -2159,7 +2418,6 @@ class RawCandleApp:
                 time.sleep(0.5)
                 continue
 
-        # Lopputilanne
         self.loading_text.value = (
             f"✅ Valmis! | "
             f"Käsitelty: {total} | "
@@ -2177,6 +2435,16 @@ class RawCandleApp:
         self.page = page
         self.setup_page()
         self.setup_routing()
+        self.data_dir = os.path.join(os.path.dirname(__file__), "data")
+        self.osakedata_db_path = os.path.join(self.data_dir, "osakedata.db")
+        ensure_market_schema(self.osakedata_db_path)
+        self.markets = list_markets(self.osakedata_db_path)
+        self.market_form_id = None
+        self.market_list_column = None
+        self.market_name_input = None
+        self.market_abbr_input = None
+        self.market_suffix_input = None
+        self.market_save_button = None
 
         # Osakedata-komponentit
         self.ticker_field = ft.TextField(
@@ -2185,6 +2453,12 @@ class RawCandleApp:
             hint_text="Kirjoita osakkeen symboli",
             on_submit=self.fetch_stock_data,
         )
+        self.market_dropdown = ft.Dropdown(
+            label="Markkinapaikka",
+            width=200,
+            options=[],
+        )
+        self._update_market_dropdown()
         self.loading_text = ft.Text(value="", color=ft.Colors.BLUE_600)
         self.stock_count_text = ft.Text(
             value="", size=14, weight=ft.FontWeight.W_500, color=ft.Colors.GREY_600
@@ -2305,13 +2579,11 @@ class RawCandleApp:
 
     def update_stock_data(self, e):
         """Päivitä olemassa olevien osakkeiden tiedot Yahoosta"""
-        import os
         import sqlite3
         import time
         from datetime import datetime, timedelta
 
-        data_dir = os.path.join(os.path.dirname(__file__), "data")
-        db_path = os.path.join(data_dir, "osakedata.db")
+        db_path = self.osakedata_db_path
 
         if not os.path.exists(db_path):
             self.loading_text.value = "❌ Osakedata.db ei löydy!"
@@ -2325,7 +2597,7 @@ class RawCandleApp:
                 cursor = conn.cursor()
                 cursor.execute(
                     """
-                    SELECT osake, MAX(pvm) as viimeisin_pvm
+                    SELECT osake, MAX(pvm) as viimeisin_pvm, MAX(market) as market
                     FROM osakedata
                     GROUP BY osake
                     ORDER BY osake
@@ -2351,7 +2623,10 @@ class RawCandleApp:
             self.loading_text.color = ft.Colors.BLUE_600
             self.page.update()
 
-            for idx, (ticker, last_date) in enumerate(stocks, 1):
+            for idx, (ticker, last_date, ticker_market) in enumerate(stocks, 1):
+                ticker_market = (ticker_market or "usa").strip().lower()
+                if not validate_market(ticker_market, db_path=self.osakedata_db_path):
+                    ticker_market = "usa"
                 # Tarkista tarvitaanko päivitystä
                 if last_date >= yesterday:
                     skipped_count += 1
@@ -2385,13 +2660,13 @@ class RawCandleApp:
                             date_str = date.strftime("%Y-%m-%d")
                             cursor.execute(
                                 """
-                                INSERT OR REPLACE INTO osakedata 
-                                (osake, pvm, open, high, low, close, volume)
-                                VALUES (?, ?, ?, ?, ?, ?, ?)
-                            """,
-                                (
-                                    ticker,
-                                    date_str,
+                            INSERT OR REPLACE INTO osakedata 
+                            (osake, pvm, open, high, low, close, volume, market)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                            (
+                                ticker,
+                                date_str,
                                     (
                                         float(row["Open"])
                                         if pd.notna(row["Open"])
@@ -2413,6 +2688,7 @@ class RawCandleApp:
                                         if pd.notna(row["Volume"])
                                         else None
                                     ),
+                                    ticker_market,
                                 ),
                             )
                             rows_added += 1
@@ -2970,6 +3246,7 @@ Virheet: {error_count}"""
                                             ft.Row(
                                                 [
                                                     self.ticker_field,
+                                                    self.market_dropdown,
                                                     ft.ElevatedButton(
                                                         "Hae data kantaan",
                                                         icon=ft.Icons.DOWNLOAD,
@@ -2978,6 +3255,7 @@ Virheet: {error_count}"""
                                                     ),
                                                 ],
                                                 alignment=ft.MainAxisAlignment.CENTER,
+                                                spacing=15,
                                             ),
                                             self.loading_text,
                                             ft.Row(
@@ -3178,7 +3456,6 @@ Virheet: {error_count}"""
 
     def fetch_stock_data(self, e):
         """Hakee osakedata Yahoo Financesta ja tallentaa osakedata.db kantaan"""
-        import os
         import sqlite3
         from datetime import datetime
 
@@ -3195,13 +3472,9 @@ Virheet: {error_count}"""
         self.page.update()
 
         try:
-            # Tarkista ensin kannasta viimeisin päivämäärä
-            data_dir = os.path.join(os.path.dirname(__file__), "data")
-            if not os.path.exists(data_dir):
-                os.makedirs(data_dir)
-
-            db_path = os.path.join(data_dir, "osakedata.db")
-
+            os.makedirs(self.data_dir, exist_ok=True)
+            db_path = self.osakedata_db_path
+            target_market = (self.market_dropdown.value or "usa").strip().lower()
             with sqlite3.connect(db_path) as conn:
                 cursor = conn.cursor()
 
@@ -3216,6 +3489,7 @@ Virheet: {error_count}"""
                         low REAL,
                         close REAL,
                         volume INTEGER,
+                        market TEXT NOT NULL DEFAULT 'usa',
                         PRIMARY KEY (osake, pvm)
                     )
                 """
@@ -3226,7 +3500,25 @@ Virheet: {error_count}"""
                     "SELECT MAX(pvm) FROM osakedata WHERE osake = ?", (ticker,)
                 )
                 result = cursor.fetchone()
-                last_date_in_db = result[0] if result[0] else None
+                last_date_in_db = result[0] if result and result[0] else None
+                cursor.execute(
+                    "SELECT market FROM osakedata WHERE osake = ? LIMIT 1", (ticker,)
+                )
+                existing_market_row = cursor.fetchone()
+                existing_market = (
+                    existing_market_row[0]
+                    if existing_market_row and existing_market_row[0]
+                    else None
+                )
+                if existing_market:
+                    target_market = existing_market
+                    self._set_market_selection(existing_market)
+
+            if not validate_market(
+                target_market, db_path=self.osakedata_db_path
+            ):
+                target_market = "usa"
+                self._set_market_selection(target_market)
 
             # Määritä mistä haetaan
             if last_date_in_db:
@@ -3298,8 +3590,8 @@ Virheet: {error_count}"""
                     cursor.execute(
                         """
                         INSERT OR REPLACE INTO osakedata 
-                        (osake, pvm, open, high, low, close, volume)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        (osake, pvm, open, high, low, close, volume, market)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             ticker,
@@ -3309,6 +3601,7 @@ Virheet: {error_count}"""
                             float(row["Low"]) if pd.notna(row["Low"]) else None,
                             float(row["Close"]) if pd.notna(row["Close"]) else None,
                             int(row["Volume"]) if pd.notna(row["Volume"]) else None,
+                            target_market,
                         ),
                     )
                     rows_added += 1

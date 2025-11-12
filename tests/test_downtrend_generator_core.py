@@ -20,7 +20,8 @@ def _build_stock_db(tmp_path: Path) -> str:
             high REAL,
             low REAL,
             close REAL,
-            volume REAL
+            volume REAL,
+            market TEXT NOT NULL DEFAULT 'usa'
         )
         """
     )

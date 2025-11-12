@@ -26,7 +26,8 @@ def temp_databases(tmp_path):
             high REAL,
             low REAL,
             close REAL,
-            volume INTEGER
+            volume INTEGER,
+            market TEXT NOT NULL DEFAULT 'usa'
         )
     """
     )
