@@ -30,6 +30,39 @@ class RegressionView:
             options=self._build_pattern_options(),
             value="__all__",
         )
+        self.horizon_dropdown = ft.Dropdown(
+            label="Horisontti",
+            width=160,
+            options=[
+                ft.dropdown.Option("2", "2 päivää"),
+                ft.dropdown.Option("5", "5 päivää"),
+                ft.dropdown.Option("10", "10 päivää"),
+                ft.dropdown.Option("20", "20 päivää"),
+            ],
+            value="5",
+        )
+        self.success_threshold_fields = {
+            2: ft.TextField(
+                label="success2 raja",
+                width=130,
+                value=f"{run_regression.DEFAULT_SUCCESS_THRESHOLDS[2]:.2f}",
+            ),
+            5: ft.TextField(
+                label="success5 raja",
+                width=130,
+                value=f"{run_regression.DEFAULT_SUCCESS_THRESHOLDS[5]:.2f}",
+            ),
+            10: ft.TextField(
+                label="success10 raja",
+                width=130,
+                value=f"{run_regression.DEFAULT_SUCCESS_THRESHOLDS[10]:.2f}",
+            ),
+            20: ft.TextField(
+                label="success20 raja",
+                width=130,
+                value=f"{run_regression.DEFAULT_SUCCESS_THRESHOLDS[20]:.2f}",
+            ),
+        }
         self.run_button = ft.ElevatedButton(
             "Aja regressio",
             icon=ft.Icons.PLAY_ARROW,
@@ -70,9 +103,20 @@ class RegressionView:
                     [
                         self.market_dropdown,
                         self.pattern_dropdown,
+                        self.horizon_dropdown,
                         self.run_button,
                     ],
                     spacing=16,
+                ),
+                ft.ResponsiveRow(
+                    [
+                        ft.Container(
+                            padding=ft.padding.symmetric(vertical=6),
+                            content=field,
+                            col={"xs": 6, "sm": 3, "md": 2},
+                        )
+                        for field in self.success_threshold_fields.values()
+                    ]
                 ),
                 self.status_text,
             ],
@@ -191,6 +235,8 @@ class RegressionView:
     def _on_run_clicked(self, _):
         market_value = self.market_dropdown.value or "__all__"
         pattern_value = self.pattern_dropdown.value or "__all__"
+        horizon_value = int(self.horizon_dropdown.value or 5)
+        thresholds = self._get_thresholds()
         self._set_status("Ajetaan regressioanalyysiä...", ft.Colors.BLUE_600)
         self.run_button.disabled = True
         self.page.update()
@@ -201,7 +247,10 @@ class RegressionView:
             else:
                 pattern_code = int(pattern_value)
             result = run_regression.run_regression_for_market(
-                market_value, pattern_code
+                market_value,
+                pattern_code,
+                success_horizon=horizon_value,
+                success_thresholds=thresholds,
             )
             formatted = self._format_result_text(result, market_value)
             self.output_field.value = formatted
@@ -223,6 +272,9 @@ class RegressionView:
         logistic = result["logistic"]
         linear = result["linear"]
         pattern_label = result.get("pattern_label", "Kaikki kynttilät")
+        horizon = result.get("success_horizon", 5)
+        thresholds = result.get("success_thresholds", run_regression.DEFAULT_SUCCESS_THRESHOLDS)
+        label_name = f"success{horizon}"
 
         top_pos = logistic["top_positive"]
         top_neg = logistic["top_negative"]
@@ -233,11 +285,17 @@ class RegressionView:
         lines = [
             f"Markkina: {market_label}",
             f"Kynttilätyyppi: {pattern_label}",
+            f"Horisontti: {horizon} päivää",
+            "Rajat (%): "
+            + ", ".join(
+                f"success{h}:{thresholds.get(h, '-'):.2f}"
+                for h in sorted(run_regression.DEFAULT_SUCCESS_THRESHOLDS)
+            ),
             f"Rivejä analyysissä: {result['row_count']}",
             "",
             result["summary"],
             "",
-            "== Logistinen regressio (success5) ==",
+            f"== Logistinen regressio ({label_name}) ==",
             f"AUC: {logistic['auc']:.3f}",
             logistic["classification_report"].strip(),
             "",
@@ -251,3 +309,14 @@ class RegressionView:
             linear["summary"],
         ]
         return "\n".join(lines)
+
+    def _get_thresholds(self) -> Dict[int, float]:
+        thresholds: Dict[int, float] = {}
+        for horizon, field in self.success_threshold_fields.items():
+            try:
+                value = float(field.value)
+                thresholds[horizon] = value
+                field.error_text = None
+            except (TypeError, ValueError):
+                field.error_text = "Anna luku (esim. 0.03)"
+        return thresholds

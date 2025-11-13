@@ -54,6 +54,7 @@ PATTERN_LABELS = {
     7: "Bullish Divergence",
     8: "Bearish Divergence",
 }
+DEFAULT_SUCCESS_THRESHOLDS = {2: 0.02, 5: 0.03, 10: 0.05, 20: 0.08}
 
 ALIAS_MAP = {
     "vahvuus": "signal_strength",
@@ -97,7 +98,9 @@ def load_data(
 
 # ------------- 2. Labelien rakentaminen -----------------
 
-def add_return_labels(df: pd.DataFrame) -> pd.DataFrame:
+def add_return_labels(
+    df: pd.DataFrame, thresholds: Optional[Dict[int, float]] = None
+) -> pd.DataFrame:
     """
     Rakentaa tuottomuuttujat ja binäärilabelit.
     Oletus: t2, t5, t10, t20 ovat suhteessa t0_low = 100.
@@ -107,14 +110,17 @@ def add_return_labels(df: pd.DataFrame) -> pd.DataFrame:
     if missing:
         raise ValueError(f"Datasetistä puuttuu sarakkeet: {missing}")
 
+    thresholds = {int(k): float(v) for k, v in (thresholds or {}).items()}
+
     for col in RETURN_COLUMNS:
-        ret_col = f"y{col[1:]}"
+        horizon = int(col[1:])
+        ret_col = f"y{horizon}"
         df[ret_col] = (df[col] - 100.0) / 100.0
 
-    df["success2"] = (df["y2"] > 0.02).astype(int)
-    df["success5"] = (df["y5"] > 0.03).astype(int)
-    df["success10"] = (df["y10"] > 0.05).astype(int)
-    df["success20"] = (df["y20"] > 0.08).astype(int)
+    for horizon, default_threshold in DEFAULT_SUCCESS_THRESHOLDS.items():
+        threshold = thresholds.get(horizon, default_threshold)
+        label_col = f"success{horizon}"
+        df[label_col] = (df[f"y{horizon}"] > threshold).astype(int)
     return df
 
 
@@ -142,18 +148,18 @@ def build_feature_matrix(df: pd.DataFrame) -> pd.DataFrame:
 
 # ------------- 4. Perusdiagnostiikka -----------------
 
-def quick_summary(df: pd.DataFrame) -> str:
+def quick_summary(df: pd.DataFrame, label_column: str = "success5") -> str:
     """
     Palauta onnistumisprosentit success5-labelille.
     """
-    def rate(mask: pd.Series, label: str = "success5") -> tuple[float, int]:
+    def rate(mask: pd.Series) -> tuple[float, int]:
         sub = df.loc[mask]
         if sub.empty:
             return 0.0, 0
-        return float(sub[label].mean()), len(sub)
+        return float(sub[label_column].mean()), len(sub)
 
-    lines = ["== Perusonnistumisprosentit (success5) =="]
-    all_rate, n_all = rate(df["success5"].notna())
+    lines = [f"== Perusonnistumisprosentit ({label_column}) =="]
+    all_rate, n_all = rate(df[label_column].notna())
     lines.append(f"Kaikki rivit:          {all_rate:.3f} (n={n_all})")
 
     candle_rate, n_candle = rate(df["is_candle_day"] == 1)
@@ -206,10 +212,10 @@ def run_logistic_regression(
 
     return {
         "auc": float(auc),
-        "classification_report": report,
-        "top_positive": pos,
-        "top_negative": neg,
-        "model": model,
+            "classification_report": report,
+            "top_positive": pos,
+            "top_negative": neg,
+            "model": model,
         "scaler": scaler,
     }
 
@@ -247,6 +253,8 @@ def run_linear_regression(
 def run_regression_for_market(
     market: Optional[str] = None,
     pattern_code: Optional[int] = None,
+    success_horizon: int = 5,
+    success_thresholds: Optional[Dict[int, float]] = None,
     db_path: Path | str = DEFAULT_DB_PATH,
 ) -> Dict[str, object]:
     """
@@ -259,7 +267,7 @@ def run_regression_for_market(
             f"Results-data tyhjä markkinalle: {friendly_market}. Suorita analyysi ensin."
         )
 
-    df = add_return_labels(df)
+    df = add_return_labels(df, thresholds=success_thresholds)
     if pattern_code is not None:
         try:
             pattern_code = int(pattern_code)
@@ -270,19 +278,27 @@ def run_regression_for_market(
             raise ValueError(
                 f"Ei rivejä pattern-koodille {pattern_code} valitulla markkinalla."
             )
+    if success_horizon not in DEFAULT_SUCCESS_THRESHOLDS:
+        raise ValueError(
+            f"Horisontin tulee olla yksi arvoista {list(DEFAULT_SUCCESS_THRESHOLDS.keys())}"
+        )
+
+    success_label = f"success{success_horizon}"
+    return_label = f"y{success_horizon}"
+
     df = df.dropna(
         subset=FEATURE_COLUMNS
-        + ["success5", "y5", PATTERN_COLUMN, MARKET_COLUMN]
+        + [success_label, return_label, PATTERN_COLUMN, MARKET_COLUMN]
     ).reset_index(drop=True)
 
     if df.empty:
         raise ValueError("Ei riittävästi täydellisiä rivejä valitulla markkinalla.")
 
     X = build_feature_matrix(df)
-    y_success = df["success5"]
-    y_return = df["y5"]
+    y_success = df[success_label]
+    y_return = df[return_label]
 
-    summary_text = quick_summary(df)
+    summary_text = quick_summary(df, label_column=success_label)
     logistic_result = run_logistic_regression(X, y_success)
     linear_result = run_linear_regression(X, y_return)
 
@@ -292,6 +308,13 @@ def run_regression_for_market(
         "pattern_label": PATTERN_LABELS.get(pattern_code, "Kaikki kynttilät")
         if pattern_code is not None
         else "Kaikki kynttilät",
+        "success_horizon": success_horizon,
+        "success_thresholds": {
+            h: success_thresholds.get(h, DEFAULT_SUCCESS_THRESHOLDS[h])
+            if success_thresholds
+            else DEFAULT_SUCCESS_THRESHOLDS[h]
+            for h in DEFAULT_SUCCESS_THRESHOLDS
+        },
         "summary": summary_text,
         "logistic": logistic_result,
         "linear": linear_result,
