@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 
 from .database_manager import DatabaseManager
 from .analyzer import AnalysisEngine
+from market_repository import list_markets, get_market_for_ticker
 
 
 class AnalysisView:
@@ -36,11 +37,13 @@ class AnalysisView:
         # Alusta komponentit
         self.db_manager = DatabaseManager(analysis_db_path)
         self.analysis_engine = AnalysisEngine(analysis_db_path, stock_db_path)
+        self.stock_db_path = stock_db_path
 
         # UI komponentit
         self.findings_table = None
         self.search_field = None
         self.pattern_filter = None
+        self.market_filter = None
         self.symbol_filter = None
         self.progress_dialog = None
 
@@ -58,6 +61,9 @@ class AnalysisView:
         # Data
         self.all_findings = []
         self.filtered_findings = []
+        self._market_cache: Dict[str, str] = {}
+        self._markets = self._load_market_list()
+        self._market_label_map = self._build_market_label_map()
 
         # Lajittelun tila
         self.sort_column = None  # Sarakkeen nimi
@@ -120,33 +126,6 @@ class AnalysisView:
         """Alias create_view:lle testejä varten"""
         return self.create_view()
 
-        # Toimintopainikkeet
-        actions = self._create_action_buttons()
-
-        # Findings taulu
-        self.findings_table = self._create_findings_table()
-
-        # Tilastot
-        stats = self._create_statistics()
-
-        # Päivitä data
-        self.refresh_data()
-
-        return ft.Column(
-            [
-                title,
-                ft.Divider(),
-                filters,
-                ft.Divider(),
-                actions,
-                ft.Divider(),
-                stats,
-                ft.Divider(),
-                self.findings_table,
-            ],
-            spacing=20,
-        )
-
     def _create_filters(self) -> ft.Column:
         """Luo suodattimen UI."""
         self.search_field = ft.TextField(
@@ -172,6 +151,14 @@ class AnalysisView:
                 ft.dropdown.Option("Bearish Divergence", "Bearish Divergence"),
             ],
             on_change=self._on_filter_change,
+        )
+
+        self.market_filter = ft.Dropdown(
+            label="Markkina",
+            width=200,
+            options=self._build_market_options(),
+            on_change=self._on_filter_change,
+            value="",
         )
 
         clear_btn = ft.IconButton(
@@ -211,7 +198,7 @@ class AnalysisView:
 
         # Rivit suodattimille
         row1 = ft.Row(
-            [self.search_field, self.pattern_filter, clear_btn],
+            [self.search_field, self.pattern_filter, self.market_filter, clear_btn],
             spacing=10,
             alignment=ft.MainAxisAlignment.START,
         )
@@ -229,6 +216,104 @@ class AnalysisView:
         )
 
         return ft.Column([row1, row2, row3], spacing=10)
+
+    def _build_market_options(self) -> List[ft.dropdown.Option]:
+        """Muodosta markkina-alasvetovalikon vaihtoehdot."""
+        options = [ft.dropdown.Option("", "Kaikki markkinat")]
+        for code in self._get_available_market_codes():
+            options.append(ft.dropdown.Option(code, self._format_market_label(code)))
+        return options
+
+    def _load_market_list(self) -> List[Dict[str, Any]]:
+        """Lataa markkinalistan settings-sivua varten."""
+        try:
+            return list_markets(self.stock_db_path)
+        except Exception as exc:
+            self.logger.warning(f"Market list load failed: {exc}")
+            return []
+
+    def _build_market_label_map(self) -> Dict[str, str]:
+        label_map: Dict[str, str] = {}
+        for market in self._markets:
+            try:
+                abbr = (market.get("abbreviation") or "").strip().lower()
+                name = (market.get("name") or "").strip()
+                label = (
+                    f"{name} ({abbr.upper()})"
+                    if name and abbr
+                    else name
+                    if name
+                    else abbr.upper()
+                    if abbr
+                    else ""
+                )
+                if abbr:
+                    label_map[abbr] = label
+                if name:
+                    label_map.setdefault(name.lower(), label)
+            except Exception:
+                continue
+        return label_map
+
+    def _format_market_label(self, code: str) -> str:
+        if not code:
+            return "Kaikki markkinat"
+        return self._market_label_map.get(code, code.upper())
+
+    def _get_available_market_codes(self) -> List[str]:
+        codes = sorted(
+            {
+                (f.get("market") or "").strip().lower()
+                for f in self.all_findings
+                if f.get("market")
+            }
+        )
+        return [c for c in codes if c]
+
+    def _refresh_market_filter_options(self) -> None:
+        if not self.market_filter:
+            return
+        current = self.market_filter.value or ""
+        options = [ft.dropdown.Option("", "Kaikki markkinat")]
+        codes = self._get_available_market_codes()
+        seen = {""}
+        for code in codes:
+            if code in seen:
+                continue
+            seen.add(code)
+            options.append(ft.dropdown.Option(code, self._format_market_label(code)))
+        self.market_filter.options = options
+        valid_values = {opt.key or opt.text or "" for opt in options}
+        if current not in valid_values:
+            current = ""
+        self.market_filter.value = current
+        try:
+            self.market_filter.update()
+        except Exception:
+            pass
+
+    def _annotate_markets(self) -> None:
+        """Lisää markkinatieto löydöksiin cachin avulla."""
+        if not self.all_findings or not self.stock_db_path:
+            return
+
+        for finding in self.all_findings:
+            ticker = finding.get("ticker")
+            if not ticker:
+                finding.setdefault("market", "")
+                continue
+
+            ticker_key = ticker.strip().upper()
+            if ticker_key not in self._market_cache:
+                try:
+                    market = get_market_for_ticker(
+                        ticker_key, db_path=self.stock_db_path, default="usa"
+                    )
+                except Exception:
+                    market = ""
+                self._market_cache[ticker_key] = (market or "").strip().lower()
+
+            finding["market"] = self._market_cache.get(ticker_key, "")
 
     # (random generation dialog and handlers removed from Analysis view)
 
@@ -324,6 +409,8 @@ class AnalysisView:
         """Päivitä data tietokannasta."""
         try:
             self.all_findings = self.db_manager.get_all_findings()
+            self._annotate_markets()
+            self._refresh_market_filter_options()
             # Load data and then apply any active filters
             self.filtered_findings = self.all_findings.copy()
             # Apply filters (this will update table and statistics)
@@ -473,6 +560,20 @@ class AnalysisView:
                 f for f in self.filtered_findings if f.get("pattern") == pattern_val
             ]
 
+        # Markkinasuodatin
+        market_val = None
+        if self.market_filter and getattr(self.market_filter, "value", None):
+            market_val = self.market_filter.value.strip().lower()
+        elif hasattr(self, "selected_market") and self.selected_market:
+            market_val = self.selected_market.strip().lower()
+
+        if market_val:
+            self.filtered_findings = [
+                f
+                for f in self.filtered_findings
+                if (f.get("market") or "").lower() == market_val
+            ]
+
         # Divergenssi + kynttilämalli -suodatin
         if self.divergence_combo_filter and self.divergence_combo_filter.value:
             # Analysis-taulussa pattern on tekstinä, mutta hyödynnetään results_data:n
@@ -571,6 +672,8 @@ class AnalysisView:
             self.search_field.value = ""
         if self.pattern_filter:
             self.pattern_filter.value = ""
+        if self.market_filter:
+            self.market_filter.value = ""
         if self.date_filter_enabled:
             self.date_filter_enabled.value = False
         if self.start_date_field:

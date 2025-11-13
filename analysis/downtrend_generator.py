@@ -86,29 +86,40 @@ class DowntrendGenerator:
             return None
 
     def _select_random_tickers(
-        self, conn: sqlite3.Connection, num_tickers: int
+        self,
+        conn: sqlite3.Connection,
+        num_tickers: int,
+        market: Optional[str] = None,
     ) -> List[str]:
         """Select multiple random tickers from stock database.
 
         Args:
             conn: Database connection
             num_tickers: Number of unique tickers to select
+            market: Optional market abbreviation to filter tickers
 
         Returns:
             List of unique ticker symbols
         """
         try:
             cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT DISTINCT osake 
-                FROM osakedata 
-                WHERE pvm >= '2024-01-01'
-                ORDER BY RANDOM() 
-                LIMIT ?
-            """,
-                (num_tickers,),
+            query = [
+                "SELECT DISTINCT osake",
+                "FROM osakedata",
+                "WHERE pvm >= '2024-01-01'",
+            ]
+            params = []
+            if market:
+                query.append("  AND LOWER(market) = ?")
+                params.append(market.strip().lower())
+            query.extend(
+                [
+                    "ORDER BY RANDOM()",
+                    "LIMIT ?",
+                ]
             )
+            params.append(num_tickers)
+            cursor.execute("\n".join(query), tuple(params))
             rows = cursor.fetchall()
             return [row[0] for row in rows]
         except Exception as e:
@@ -378,6 +389,7 @@ class DowntrendGenerator:
         events_per_ticker: int = 20,
         progress_callback: Optional[Callable[[int, int], None]] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
+        market: Optional[str] = None,
     ) -> Tuple[int, List[str]]:
         """Generate downtrend events from real stock data.
 
@@ -397,6 +409,7 @@ class DowntrendGenerator:
             events_per_ticker: Target events per stock (1..200)
             progress_callback: Optional callback(current, total) for progress updates
             cancel_check: Optional callback() -> bool to check if user cancelled
+            market: Optional market abbreviation (esim. 'usa') to constrain ticker pool
 
         Returns:
             Tuple of (total_events_saved, list_of_error_messages)
@@ -404,6 +417,8 @@ class DowntrendGenerator:
         # Validate inputs
         num_tickers = max(1, min(1000, int(num_tickers)))
         events_per_ticker = max(1, min(200, int(events_per_ticker)))
+        display_market = market.strip() if isinstance(market, str) else None
+        market_filter = display_market.lower() if display_market else None
 
         total_saved = 0
         errors = []
@@ -417,13 +432,22 @@ class DowntrendGenerator:
 
         try:
             # Valitse ensin kaikki tickerit kerralla
-            tickers = self._select_random_tickers(stock_conn, num_tickers)
+            tickers = self._select_random_tickers(
+                stock_conn, num_tickers, market_filter
+            )
             if not tickers:
-                errors.append("Failed to select any tickers")
+                if market_filter:
+                    errors.append(
+                        f"Valitulla markkinalla '{display_market}' ei löytynyt osakkeita"
+                    )
+                else:
+                    errors.append("Failed to select any tickers")
                 return 0, errors
 
             self.logger.info(
-                f"Selected {len(tickers)} unique tickers for event generation"
+                "Selected %s unique tickers for event generation%s",
+                len(tickers),
+                f" (market={display_market})" if display_market else "",
             )
 
             for ticker_idx, ticker in enumerate(tickers):
@@ -534,6 +558,7 @@ def generate_random_findings(
     cancel_check: Optional[Callable[[], bool]] = None,
     stock_db_path: str = "data/osakedata.db",
     analysis_db_path: str = "data/analysis.db",
+    market: Optional[str] = None,
 ) -> Tuple[int, List[str]]:
     """Convenience function for generating downtrend events.
 
@@ -548,4 +573,5 @@ def generate_random_findings(
         events_per_ticker=events_per_ticker,
         progress_callback=progress_callback,
         cancel_check=cancel_check,
+        market=market,
     )

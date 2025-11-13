@@ -7,7 +7,10 @@ import pytest
 from analysis.downtrend_generator import DowntrendGenerator
 
 
-def _build_stock_db(tmp_path: Path) -> str:
+def _build_stock_db(
+    tmp_path: Path, tickers_with_markets: list[tuple[str, str]] | None = None
+) -> str:
+    tickers_with_markets = tickers_with_markets or [("AAA", "usa")]
     db_path = tmp_path / "osakedata.db"
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
@@ -27,26 +30,28 @@ def _build_stock_db(tmp_path: Path) -> str:
     )
 
     start = datetime.date(2024, 1, 1)
-    price = 50.0
-    for i in range(25):
-        date = start + datetime.timedelta(days=i)
-        # tee tasaisesti laskeva kurssi -> varmistaa downtrend-kriteerit
-        close = price - (i * 0.7)
-        cursor.execute(
-            """
-            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                "AAA",
-                date.isoformat(),
-                close + 0.5,
-                close + 1.0,
-                close - 1.0,
-                close,
-                1_000_000 + (i * 1000),
-            ),
-        )
+    for ticker, market in tickers_with_markets:
+        price = 50.0
+        for i in range(25):
+            date = start + datetime.timedelta(days=i)
+            # tee tasaisesti laskeva kurssi -> varmistaa downtrend-kriteerit
+            close = price - (i * 0.7)
+            cursor.execute(
+                """
+                INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    ticker,
+                    date.isoformat(),
+                    close + 0.5,
+                    close + 1.0,
+                    close - 1.0,
+                    close,
+                    1_000_000 + (i * 1000),
+                    market,
+                ),
+            )
     conn.commit()
     conn.close()
     return str(db_path)
@@ -86,7 +91,7 @@ def test_downtrend_generator_creates_events(tmp_path, monkeypatch, events_per_ti
         "analysis.downtrend_generator.random.choice", lambda seq: seq[0]
     )
     monkeypatch.setattr(
-        generator, "_select_random_tickers", lambda conn, n: ["AAA"]
+        generator, "_select_random_tickers", lambda conn, n, market=None: ["AAA"]
     )
 
     saved, errors = generator.generate_random_findings(
@@ -108,3 +113,60 @@ def test_downtrend_generator_creates_events(tmp_path, monkeypatch, events_per_ti
         assert ticker == "AAA"
         assert pattern == "downtrend"
         assert rsi14 is None or isinstance(rsi14, float)
+
+
+def test_select_random_tickers_filters_by_market(tmp_path):
+    stock_db = _build_stock_db(
+        Path(tmp_path),
+        tickers_with_markets=[("USA1", "usa"), ("FIN1", "suomi"), ("FIN2", "suomi")],
+    )
+    analysis_db = _build_analysis_db(Path(tmp_path))
+    generator = DowntrendGenerator(stock_db_path=stock_db, analysis_db_path=analysis_db)
+
+    conn = sqlite3.connect(stock_db)
+    try:
+        selected = generator._select_random_tickers(conn, num_tickers=5, market="suomi")
+    finally:
+        conn.close()
+
+    assert selected, "Expected at least one ticker for suomi market"
+    assert set(selected).issubset({"FIN1", "FIN2"})
+
+
+def test_generate_random_findings_respects_market_filter(tmp_path, monkeypatch):
+    stock_db = _build_stock_db(
+        Path(tmp_path),
+        tickers_with_markets=[("USA1", "usa"), ("FIN1", "suomi")],
+    )
+    analysis_db = _build_analysis_db(Path(tmp_path))
+    generator = DowntrendGenerator(stock_db_path=stock_db, analysis_db_path=analysis_db)
+
+    # deterministinen päivämäärävalinta
+    monkeypatch.setattr(
+        "analysis.downtrend_generator.random.choice", lambda seq: seq[0]
+    )
+
+    saved, errors = generator.generate_random_findings(
+        num_tickers=1,
+        events_per_ticker=1,
+        market="suomi",
+    )
+
+    assert not errors
+    assert saved >= 1
+
+    conn = sqlite3.connect(analysis_db)
+    cursor = conn.cursor()
+    cursor.execute("SELECT DISTINCT ticker FROM analysis_findings")
+    tickers = {row[0] for row in cursor.fetchall()}
+    conn.close()
+    assert tickers == {"FIN1"}
+
+    saved_none, errors_none = generator.generate_random_findings(
+        num_tickers=1,
+        events_per_ticker=1,
+        market="norja",
+    )
+    assert saved_none == 0
+    assert errors_none
+    assert "Valitulla markkinalla" in errors_none[0]

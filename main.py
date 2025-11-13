@@ -230,6 +230,7 @@ class RawCandleApp:
     def _refresh_markets(self):
         self.markets = list_markets(self.osakedata_db_path)
         self._update_market_dropdown()
+        self._update_random_market_dropdown()
         self._update_market_list()
 
     def _update_market_dropdown(self):
@@ -252,6 +253,29 @@ class RawCandleApp:
                 self.market_dropdown.value = default_value
         try:
             self.market_dropdown.update()
+        except Exception:
+            pass
+
+    def _update_random_market_dropdown(self):
+        dropdown = getattr(self, "candles_random_market_dropdown", None)
+        if not dropdown:
+            return
+
+        options = [
+            ft.dropdown.Option(text="Kaikki markkinat", key=""),
+        ] + [
+            ft.dropdown.Option(
+                text=f"{m['name']} ({m['abbreviation'].upper()})",
+                key=m["abbreviation"],
+            )
+            for m in self.markets
+        ]
+        dropdown.options = options
+        valid_values = {opt.key if opt.key is not None else "" for opt in options}
+        if dropdown.value not in valid_values:
+            dropdown.value = ""
+        try:
+            dropdown.update()
         except Exception:
             pass
 
@@ -450,15 +474,15 @@ class RawCandleApp:
                 ),
                 ft.Divider(),
                 ft.Text("Lisää tai muokkaa markkinaa", weight=ft.FontWeight.BOLD),
-        ft.Row(
-            [
-                self.market_name_input,
-                self.market_abbr_input,
-                self.market_suffix_input,
-                self.market_min_volume_input,
-            ],
-            spacing=20,
-        ),
+                ft.Row(
+                    controls=[
+                        self.market_name_input,
+                        self.market_abbr_input,
+                        self.market_suffix_input,
+                        self.market_min_volume_input,
+                    ],
+                    spacing=20,
+                ),
                 ft.Row([self.market_save_button, cancel_button], spacing=10),
                 ft.Divider(),
                 ft.Text("Markkinat", weight=ft.FontWeight.BOLD),
@@ -811,11 +835,20 @@ class RawCandleApp:
             # validation attached later
         )
 
+        self.candles_random_market_dropdown = ft.Dropdown(
+            label="Valitse markkina",
+            width=220,
+            options=[],
+            visible=False,
+        )
+        self._update_random_market_dropdown()
+
         def _on_candles_random_toggle(e):
             try:
                 is_checked = bool(self.candles_random_checkbox.value)
                 self.candles_random_stocks_field.visible = is_checked
                 self.candles_random_events_field.visible = is_checked
+                self.candles_random_market_dropdown.visible = is_checked
                 try:
                     self.candles_generate_random_btn.visible = is_checked
                 except Exception:
@@ -849,6 +882,12 @@ class RawCandleApp:
                     events_per = int(self.candles_random_events_field.value or 0)
                 except Exception:
                     events_per = 20
+                selected_market = None
+                dropdown = getattr(self, "candles_random_market_dropdown", None)
+                if dropdown and dropdown.value is not None:
+                    raw_market = str(dropdown.value).strip()
+                    if raw_market:
+                        selected_market = raw_market
 
                 # Create progress dialog
                 progress_bar = ft.ProgressBar(width=400, value=0)
@@ -915,6 +954,7 @@ class RawCandleApp:
                             events_per_ticker=events_per,
                             progress_callback=progress_callback,
                             cancel_check=cancel_check,
+                            market=selected_market,
                         )
 
                         # Update progress dialog to show results
@@ -1221,6 +1261,7 @@ class RawCandleApp:
                                                                             self.candles_random_checkbox,
                                                                             self.candles_random_stocks_field,
                                                                             self.candles_random_events_field,
+                                                                            self.candles_random_market_dropdown,
                                                                             self.candles_generate_random_btn,
                                                                         ],
                                                                         spacing=8,
@@ -2721,38 +2762,22 @@ class RawCandleApp:
                             date_str = date.strftime("%Y-%m-%d")
                             cursor.execute(
                                 """
-                            INSERT OR REPLACE INTO osakedata 
-                            (osake, pvm, open, high, low, close, volume, market)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                            (
-                                ticker,
-                                date_str,
-                                    (
-                                        float(row["Open"])
-                                        if pd.notna(row["Open"])
-                                        else None
-                                    ),
-                                    (
-                                        float(row["High"])
-                                        if pd.notna(row["High"])
-                                        else None
-                                    ),
+                                INSERT OR REPLACE INTO osakedata 
+                                (osake, pvm, open, high, low, close, volume, market)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                """,
+                                (
+                                    ticker,
+                                    date_str,
+                                    float(row["Open"]) if pd.notna(row["Open"]) else None,
+                                    float(row["High"]) if pd.notna(row["High"]) else None,
                                     float(row["Low"]) if pd.notna(row["Low"]) else None,
-                                    (
-                                        float(row["Close"])
-                                        if pd.notna(row["Close"])
-                                        else None
-                                    ),
-                                    (
-                                        int(row["Volume"])
-                                        if pd.notna(row["Volume"])
-                                        else None
-                                    ),
+                                    float(row["Close"]) if pd.notna(row["Close"]) else None,
+                                    int(row["Volume"]) if pd.notna(row["Volume"]) else None,
                                     ticker_market,
                                 ),
                             )
-                            rows_added += 1
+                        rows_added += 1
                         conn.commit()
 
                     # Laske divergenssit päivitetylle osakkeelle
