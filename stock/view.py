@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import base64
 import math
 import datetime as dt
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence, Set
 
 import flet as ft
 from flet import canvas as cv
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 from stock import services
 
@@ -15,6 +18,35 @@ class StockView:
 
     PRICE_LIMIT = 200
     ANALYSIS_PAGE_SIZE = 25
+    RANGE_PRESETS = [
+        ("1M", "1 kk"),
+        ("3M", "3 kk"),
+        ("6M", "6 kk"),
+        ("1Y", "1 v"),
+        ("ALL", "Kaikki"),
+    ]
+    PATTERN_OPTIONS = [
+        ("downtrend", "Downtrend"),
+        ("Hammer", "Hammer"),
+        ("Bullish Engulfing", "Bullish Engulfing"),
+        ("Piercing Pattern", "Piercing Pattern"),
+        ("Three White Soldiers", "Three White Soldiers"),
+        ("Morning Star", "Morning Star"),
+        ("Dragonfly Doji", "Dragonfly Doji"),
+        ("Bullish Divergence", "Bullish Divergence"),
+        ("Bearish Divergence", "Bearish Divergence"),
+    ]
+    PATTERN_COLORS = {
+        "downtrend": "#ef4444",
+        "Hammer": "#22c55e",
+        "Bullish Engulfing": "#16a34a",
+        "Piercing Pattern": "#0ea5e9",
+        "Three White Soldiers": "#9333ea",
+        "Morning Star": "#d97706",
+        "Dragonfly Doji": "#14b8a6",
+        "Bullish Divergence": "#f43f5e",
+        "Bearish Divergence": "#f97316",
+    }
 
     def __init__(self, page: ft.Page, appbar_factory: Callable[[], ft.AppBar]):
         self.page = page
@@ -29,12 +61,23 @@ class StockView:
         self.analysis_prev_btn: Optional[ft.IconButton] = None
         self.analysis_next_btn: Optional[ft.IconButton] = None
         self.price_table: Optional[ft.DataTable] = None
+        self.ma50_checkbox: Optional[ft.Checkbox] = None
+        self.ma200_checkbox: Optional[ft.Checkbox] = None
+        self.rsi_checkbox: Optional[ft.Checkbox] = None
+        self.range_button_map: Dict[str, ft.Button] = {}
+        self.pattern_checkboxes: Dict[str, ft.Checkbox] = {}
+        self.pattern_select_all: Optional[ft.Checkbox] = None
 
         # Data-tila
         self.current_ticker: Optional[str] = None
         self.price_records: List[Dict] = []
+        self.analysis_events: List[Dict] = []
         self.analysis_total: int = 0
         self.analysis_page: int = 0
+        self.selected_range: str = "6M"
+        self.show_ma50 = True
+        self.show_ma200 = True
+        self.show_rsi = True
 
     # ------------------------------------------------------------------ #
     # Public API
@@ -65,9 +108,10 @@ class StockView:
             "Syötä ticker ja hae tiedot.",
             color=ft.Colors.GREY_600,
         )
+        filters_card = self._build_filters_card()
 
         self.chart_container = ft.Container(
-            height=420,
+            height=520,
             bgcolor=ft.Colors.GREY_50,
             border_radius=10,
             padding=15,
@@ -193,6 +237,7 @@ class StockView:
                         spacing=12,
                     ),
                     self.status_text,
+                    filters_card,
                     ft.Card(
                         content=ft.Container(
                             padding=20,
@@ -236,6 +281,138 @@ class StockView:
             scroll=ft.ScrollMode.AUTO,
         )
 
+    def _build_filters_card(self) -> ft.Card:
+        self.range_button_map = {}
+        range_buttons = []
+        for key, label in self.RANGE_PRESETS:
+            btn = ft.FilledButton(
+                label,
+                on_click=lambda e, preset=key: self._on_range_preset_click(preset),
+            )
+            self.range_button_map[key] = btn
+            range_buttons.append(btn)
+        self._update_range_button_styles()
+
+        self.ma50_checkbox = ft.Checkbox(
+            label="MA50",
+            value=True,
+            data="ma50",
+            on_change=self._on_indicator_toggle,
+        )
+        self.ma200_checkbox = ft.Checkbox(
+            label="MA200",
+            value=True,
+            data="ma200",
+            on_change=self._on_indicator_toggle,
+        )
+        self.rsi_checkbox = ft.Checkbox(
+            label="RSI",
+            value=True,
+            data="rsi",
+            on_change=self._on_indicator_toggle,
+        )
+
+        indicator_row = ft.Row(
+            [self.ma50_checkbox, self.ma200_checkbox, self.rsi_checkbox],
+            spacing=16,
+        )
+
+        self.pattern_checkboxes = {}
+        self.pattern_select_all = ft.Checkbox(
+            label="Valitse kaikki löydöt",
+            value=True,
+            on_change=self._on_pattern_select_all,
+        )
+        pattern_controls: List[ft.Control] = [self.pattern_select_all]
+        for key, label in self.PATTERN_OPTIONS:
+            cb = ft.Checkbox(
+                label=label,
+                value=True,
+                data=key,
+                on_change=self._on_pattern_toggle,
+            )
+            self.pattern_checkboxes[key] = cb
+            pattern_controls.append(cb)
+
+        patterns_column = ft.Column(pattern_controls, spacing=4, horizontal_alignment=ft.CrossAxisAlignment.START)
+
+        return ft.Card(
+            content=ft.Container(
+                padding=20,
+                content=ft.Column(
+                    [
+                        ft.Text("Aikaikkuna & indikaattorit", weight=ft.FontWeight.BOLD),
+                        ft.Row(range_buttons, spacing=8, wrap=True),
+                        indicator_row,
+                        ft.Divider(),
+                        ft.Text("Näytä löydöt", weight=ft.FontWeight.BOLD),
+                        patterns_column,
+                    ],
+                    spacing=12,
+                ),
+            )
+        )
+
+    def _update_range_button_styles(self) -> None:
+        for key, btn in self.range_button_map.items():
+            is_selected = key == self.selected_range
+            btn.style = ft.ButtonStyle(
+                bgcolor=ft.Colors.BLUE_700 if is_selected else ft.Colors.GREY_200,
+                color=ft.Colors.WHITE if is_selected else ft.Colors.BLACK,
+            )
+            try:
+                btn.update()
+            except Exception:
+                pass
+
+    def _on_range_preset_click(self, preset: str) -> None:
+        if preset == self.selected_range:
+            return
+        self.selected_range = preset
+        self._update_range_button_styles()
+        self._render_chart()
+
+    def _on_indicator_toggle(self, e) -> None:
+        control = e.control
+        flag = control.data
+        value = bool(control.value)
+        if flag == "ma50":
+            self.show_ma50 = value
+        elif flag == "ma200":
+            self.show_ma200 = value
+        elif flag == "rsi":
+            self.show_rsi = value
+        self._render_chart()
+
+    def _on_pattern_select_all(self, e) -> None:
+        value = bool(e.control.value)
+        for checkbox in self.pattern_checkboxes.values():
+            checkbox.value = value
+            try:
+                checkbox.update()
+            except Exception:
+                pass
+        self._render_chart()
+
+    def _on_pattern_toggle(self, e) -> None:
+        if not self.pattern_select_all:
+            return
+        all_selected = all(cb.value for cb in self.pattern_checkboxes.values())
+        self.pattern_select_all.value = all_selected
+        try:
+            self.pattern_select_all.update()
+        except Exception:
+            pass
+        self._render_chart()
+
+    def _get_selected_patterns(self) -> Set[str]:
+        if not self.pattern_checkboxes:
+            return {key for key, _ in self.PATTERN_OPTIONS}
+        selected = {
+            key for key, checkbox in self.pattern_checkboxes.items() if checkbox.value
+        }
+        return selected
+
     # ------------------------------------------------------------------ #
     # Event handlers & rendering helpers
 
@@ -251,6 +428,15 @@ class StockView:
             price_records = services.fetch_price_rows(
                 ticker,
                 limit=self.PRICE_LIMIT,
+            )
+            analysis_events = (
+                services.fetch_analysis_events(
+                    ticker,
+                    start_date=price_records[0]["date"],
+                    end_date=price_records[-1]["date"],
+                )
+                if price_records
+                else []
             )
             analysis_rows, total = services.fetch_analysis_records(
                 ticker,
@@ -273,6 +459,7 @@ class StockView:
 
         self.current_ticker = ticker
         self.price_records = price_records
+        self.analysis_events = analysis_events
         self.analysis_total = total
         self.analysis_page = 0
 
@@ -307,20 +494,227 @@ class StockView:
             self.price_table.rows = []
             self.price_table.update()
         self.analysis_total = 0
+        self.analysis_events = []
         self._update_analysis_pager()
 
     def _render_chart(self) -> None:
         if not self.chart_container:
             return
-        chart_content = _build_price_chart(self.price_records)
-        if chart_content:
-            self.chart_container.content = chart_content
-        else:
+        filtered = self._filter_price_records()
+        if not filtered:
             self.chart_container.content = ft.Text(
-                "Ei riittävästi dataa kynttilägrafiikalle.",
+                "Ei riittävästi dataa valitulla aikavälillä.",
                 color=ft.Colors.GREY_600,
             )
+            self.chart_container.update()
+            return
+
+        events = self._get_filtered_events(filtered)
+        fig = self._build_plotly_figure(filtered, events)
+        html = fig.to_html(include_plotlyjs="cdn", full_html=False)
+        data_url = "data:text/html;base64," + base64.b64encode(html.encode("utf-8")).decode("utf-8")
+        self.chart_container.content = ft.WebView(
+            url=data_url,
+            enable_javascript=True,
+            height=520,
+        )
         self.chart_container.update()
+
+    def _filter_price_records(self) -> List[Dict]:
+        if not self.price_records:
+            return []
+        if self.selected_range == "ALL":
+            return self.price_records
+
+        end_date = self.price_records[-1]["date"]
+        start_date = self._calculate_range_start(end_date)
+        return [rec for rec in self.price_records if rec["date"] >= start_date]
+
+    def _calculate_range_start(self, end_date: dt.date) -> dt.date:
+        range_days = {
+            "1M": 30,
+            "3M": 90,
+            "6M": 180,
+            "1Y": 365,
+        }
+        days = range_days.get(self.selected_range, 365 * 10)
+        start_candidate = end_date - dt.timedelta(days=days)
+        first_date = self.price_records[0]["date"]
+        return max(first_date, start_candidate)
+
+    def _get_filtered_events(self, records: Sequence[Dict]) -> List[Dict]:
+        if not self.analysis_events:
+            return []
+        selected_patterns = self._get_selected_patterns()
+        if not selected_patterns:
+            return []
+        start = records[0]["date"]
+        end = records[-1]["date"]
+        return [
+            event
+            for event in self.analysis_events
+            if start <= event["date"] <= end
+            and event.get("pattern") in selected_patterns
+        ]
+
+    def _build_plotly_figure(
+        self, records: Sequence[Dict], events: Sequence[Dict]
+    ) -> go.Figure:
+        dates = [rec["date"] for rec in records]
+        opens = [rec.get("open") for rec in records]
+        highs = [rec.get("high") for rec in records]
+        lows = [rec.get("low") for rec in records]
+        closes = [rec.get("close") for rec in records]
+        volumes = [rec.get("volume") or 0 for rec in records]
+        price_values = [val for val in highs + lows + closes if val is not None]
+        if not price_values:
+            price_values = [0.0]
+        price_min = min(price_values)
+        price_max = max(price_values)
+
+        fig = make_subplots(
+            rows=2,
+            cols=1,
+            shared_xaxes=True,
+            row_heights=[0.7, 0.3],
+            vertical_spacing=0.03,
+            specs=[[{"secondary_y": False}], [{"secondary_y": True}]],
+        )
+
+        fig.add_trace(
+            go.Candlestick(
+                x=dates,
+                open=opens,
+                high=highs,
+                low=lows,
+                close=closes,
+                name="Hinta",
+                increasing_line_color="#16a34a",
+                decreasing_line_color="#ef4444",
+            ),
+            row=1,
+            col=1,
+        )
+
+        price_by_date = {rec["date"]: rec.get("high") or rec.get("close") for rec in records}
+
+        if self.show_ma50:
+            fig.add_trace(
+                go.Scatter(
+                    x=dates,
+                    y=[rec.get("sma50") for rec in records],
+                    mode="lines",
+                    name="MA50",
+                    line=dict(color="#0ea5e9", width=1.5),
+                ),
+                row=1,
+                col=1,
+            )
+
+        if self.show_ma200:
+            fig.add_trace(
+                go.Scatter(
+                    x=dates,
+                    y=[rec.get("sma200") for rec in records],
+                    mode="lines",
+                    name="MA200",
+                    line=dict(color="#f59e0b", width=1.5, dash="dash"),
+                ),
+                row=1,
+                col=1,
+            )
+
+        fig.add_trace(
+            go.Bar(
+                x=dates,
+                y=volumes,
+                name="Volyymi",
+                marker_color="#6366f1",
+                opacity=0.7,
+            ),
+            row=2,
+            col=1,
+        )
+
+        if self.show_rsi:
+            fig.add_trace(
+                go.Scatter(
+                    x=dates,
+                    y=[rec.get("rsi") for rec in records],
+                    mode="lines",
+                    name="RSI",
+                    line=dict(color="#f43f5e", width=1.2),
+                ),
+                row=2,
+                col=1,
+                secondary_y=True,
+            )
+            fig.update_yaxes(title_text="Volyymi", row=2, col=1, secondary_y=False)
+            fig.update_yaxes(
+                title_text="RSI",
+                row=2,
+                col=1,
+                secondary_y=True,
+                range=[0, 100],
+            )
+        else:
+            fig.update_yaxes(title_text="Volyymi", row=2, col=1, secondary_y=False)
+
+        if events:
+            grouped: Dict[str, List[Dict]] = {}
+            for event in events:
+                grouped.setdefault(event.get("pattern") or "", []).append(event)
+                color = self.PATTERN_COLORS.get(event.get("pattern"), "#94a3b8")
+                event_date = event["date"]
+                fig.add_shape(
+                    type="line",
+                    x0=event_date,
+                    x1=event_date,
+                    y0=price_min,
+                    y1=price_max,
+                    xref="x",
+                    yref="y1",
+                    line=dict(color=color, width=1, dash="dot"),
+                )
+
+            for pattern, items in grouped.items():
+                color = self.PATTERN_COLORS.get(pattern, "#94a3b8")
+                scatter_x = []
+                scatter_y = []
+                hover_texts = []
+                for entry in items:
+                    date = entry["date"]
+                    hover_texts.append(
+                        f"{pattern or 'Pattern'}<br>Vahvuus: {entry.get('signal_strength') or '-'}"
+                    )
+                    scatter_x.append(date)
+                    base_y = price_by_date.get(date) or price_max
+                    scatter_y.append(base_y * 1.01)
+                fig.add_trace(
+                    go.Scatter(
+                        x=scatter_x,
+                        y=scatter_y,
+                        mode="markers",
+                        name=f"Löydöt: {pattern}",
+                        marker=dict(color=color, symbol="triangle-up", size=9),
+                        hovertemplate="%{text}<extra></extra>",
+                        text=hover_texts,
+                    ),
+                    row=1,
+                    col=1,
+                )
+
+        fig.update_layout(
+            template="plotly_white",
+            height=520,
+            margin=dict(t=30, l=40, r=20, b=20),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+        )
+        fig.update_yaxes(title_text="Hinta", row=1, col=1)
+        fig.update_xaxes(showspikes=True, spikemode="across", spikethickness=1)
+        fig.update_xaxes(rangeslider_visible=True, row=2, col=1)
+
+        return fig
 
     def _set_analysis_rows(self, rows: Sequence[Dict]) -> None:
         if not self.analysis_table:

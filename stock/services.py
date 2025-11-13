@@ -102,6 +102,7 @@ def fetch_price_rows(
 
     _apply_sma(price_records, window=20, key="sma20")
     _apply_sma(price_records, window=50, key="sma50")
+    _apply_sma(price_records, window=200, key="sma200")
 
     for record in price_records:
         record["rsi"] = rsi_map.get(record["date"])
@@ -183,6 +184,74 @@ def fetch_analysis_records(
         conn.close()
 
     return records, total_rows
+
+
+def fetch_analysis_events(
+    ticker: str,
+    *,
+    start_date: dt.date | None = None,
+    end_date: dt.date | None = None,
+    patterns: Sequence[str] | None = None,
+    analysis_db: Path | None = None,
+) -> List[Dict]:
+    """Return all analysis_findings rows for overlays."""
+    if not ticker:
+        return []
+
+    db_path = Path(analysis_db or ANALYSIS_DB_PATH)
+    conn = _connect(db_path)
+    try:
+        columns_cursor = conn.execute("PRAGMA table_info(analysis_findings)")
+        column_names = [row["name"] for row in columns_cursor.fetchall()]
+        if "pattern" in column_names:
+            pattern_col = "pattern"
+        elif "candle" in column_names:
+            pattern_col = "candle"
+        else:
+            raise StockDataError("analysis_findings-taulusta puuttuu pattern/candle sarake.")
+
+        strength_col = "signal_strength" if "signal_strength" in column_names else None
+
+        query = f"""
+            SELECT date,
+                   {pattern_col} AS pattern_name,
+                   {strength_col if strength_col else 'NULL'} AS signal_strength
+            FROM analysis_findings
+            WHERE ticker = ?
+        """
+        params: List = [ticker.strip().upper()]
+
+        if start_date:
+            query += " AND date >= ?"
+            params.append(start_date.isoformat())
+        if end_date:
+            query += " AND date <= ?"
+            params.append(end_date.isoformat())
+        if patterns:
+            placeholders = ",".join("?" for _ in patterns)
+            query += f" AND {pattern_col} IN ({placeholders})"
+            params.extend(patterns)
+
+        query += " ORDER BY date ASC"
+
+        cursor = conn.execute(query, params)
+        events = []
+        for row in cursor.fetchall():
+            date_value = row["date"]
+            parsed_date = dt.date.fromisoformat(date_value) if date_value else None
+            if not parsed_date:
+                continue
+            events.append(
+                {
+                    "date": parsed_date,
+                    "pattern": row["pattern_name"],
+                    "signal_strength": row["signal_strength"],
+                }
+            )
+    finally:
+        conn.close()
+
+    return events
 
 
 def _apply_sma(records: Sequence[Dict], *, window: int, key: str) -> None:
