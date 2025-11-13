@@ -33,10 +33,10 @@ def fetch_price_rows(
     limit: int | None = 200,
     rsi_period: int | None = None,
     price_db: Path | None = None,
-) -> List[Dict]:
-    """Return latest OHLCV rows (ascending by date) enriched with RSI and SMAs."""
+) -> Tuple[List[Dict], int]:
+    """Return OHLCV rows enriched with RSI/SMAs and total count."""
     if not ticker:
-        return []
+        return [], 0
 
     db_path = Path(price_db or PRICE_DB_PATH)
     conn = _connect(db_path)
@@ -54,11 +54,9 @@ def fetch_price_rows(
     finally:
         conn.close()
 
+    total_rows = len(rows)
     if not rows:
-        return []
-
-    if limit and len(rows) > limit:
-        rows = rows[-limit:]
+        return [], 0
 
     price_records: List[Dict] = []
     price_rows_for_rsi: List[PriceRow] = []
@@ -100,6 +98,7 @@ def fetch_price_rows(
     else:
         rsi_map = {}
 
+    _apply_sma(price_records, window=5, key="sma5")
     _apply_sma(price_records, window=20, key="sma20")
     _apply_sma(price_records, window=50, key="sma50")
     _apply_sma(price_records, window=200, key="sma200")
@@ -107,7 +106,10 @@ def fetch_price_rows(
     for record in price_records:
         record["rsi"] = rsi_map.get(record["date"])
 
-    return price_records
+    if limit and len(price_records) > limit:
+        price_records = price_records[-limit:]
+
+    return price_records, total_rows
 
 
 def fetch_analysis_records(

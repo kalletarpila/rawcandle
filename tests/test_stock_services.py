@@ -89,12 +89,13 @@ def _create_analysis_db(tmp_path: Path) -> Path:
 
 def test_fetch_price_rows_returns_rsi_and_sma(tmp_path):
     price_db = _create_price_db(tmp_path)
-    rows = services.fetch_price_rows(
+    rows, total = services.fetch_price_rows(
         "test",
         limit=5,
         rsi_period=3,
         price_db=price_db,
     )
+    assert total == 6
     assert len(rows) == 5
     assert rows[-1]["rsi"] is not None
     assert "sma20" in rows[-1] and "sma50" in rows[-1]

@@ -16,7 +16,7 @@ from stock import services
 class StockView:
     """Rakentaa Stock-sivun, joka näyttää yksittäisen osakkeen tiedot."""
 
-    PRICE_LIMIT = 200
+    PRICE_LIMIT = None  # fetch all data so "Kaikki" preset shows entire range
     ANALYSIS_PAGE_SIZE = 25
     RANGE_PRESETS = [
         ("1M", "1 kk"),
@@ -61,6 +61,7 @@ class StockView:
         self.analysis_prev_btn: Optional[ft.IconButton] = None
         self.analysis_next_btn: Optional[ft.IconButton] = None
         self.price_table: Optional[ft.DataTable] = None
+        self.ma20_checkbox: Optional[ft.Checkbox] = None
         self.ma50_checkbox: Optional[ft.Checkbox] = None
         self.ma200_checkbox: Optional[ft.Checkbox] = None
         self.rsi_checkbox: Optional[ft.Checkbox] = None
@@ -75,6 +76,9 @@ class StockView:
         self.analysis_total: int = 0
         self.analysis_page: int = 0
         self.selected_range: str = "6M"
+        self.total_days: int = 0
+        self.show_ma5 = True
+        self.show_ma20 = True
         self.show_ma50 = True
         self.show_ma200 = True
         self.show_rsi = True
@@ -251,7 +255,7 @@ class StockView:
                                                 weight=ft.FontWeight.BOLD,
                                             ),
                                             ft.Text(
-                                                "SMA20 + SMA50",
+                                                "MA20 / MA50 / MA200",
                                                 color=ft.Colors.GREY_600,
                                             ),
                                         ],
@@ -293,6 +297,18 @@ class StockView:
             range_buttons.append(btn)
         self._update_range_button_styles()
 
+        self.ma5_checkbox = ft.Checkbox(
+            label="MA5",
+            value=True,
+            data="ma5",
+            on_change=self._on_indicator_toggle,
+        )
+        self.ma20_checkbox = ft.Checkbox(
+            label="MA20",
+            value=True,
+            data="ma20",
+            on_change=self._on_indicator_toggle,
+        )
         self.ma50_checkbox = ft.Checkbox(
             label="MA50",
             value=True,
@@ -312,18 +328,13 @@ class StockView:
             on_change=self._on_indicator_toggle,
         )
 
-        indicator_row = ft.Row(
-            [self.ma50_checkbox, self.ma200_checkbox, self.rsi_checkbox],
-            spacing=16,
-        )
-
         self.pattern_checkboxes = {}
         self.pattern_select_all = ft.Checkbox(
             label="Valitse kaikki löydöt",
             value=True,
             on_change=self._on_pattern_select_all,
         )
-        pattern_controls: List[ft.Control] = [self.pattern_select_all]
+        pattern_controls: List[ft.Control] = []
         for key, label in self.PATTERN_OPTIONS:
             cb = ft.Checkbox(
                 label=label,
@@ -334,7 +345,43 @@ class StockView:
             self.pattern_checkboxes[key] = cb
             pattern_controls.append(cb)
 
-        patterns_column = ft.Column(pattern_controls, spacing=4, horizontal_alignment=ft.CrossAxisAlignment.START)
+        indicator_section = ft.ExpansionTile(
+            title=ft.Text("Indikaattorit", weight=ft.FontWeight.BOLD),
+            initially_expanded=False,
+            controls=[
+                ft.Column(
+                    [
+                        self.ma5_checkbox,
+                        self.ma20_checkbox,
+                        self.ma50_checkbox,
+                        self.ma200_checkbox,
+                        self.rsi_checkbox,
+                    ],
+                    spacing=4,
+                    alignment=ft.MainAxisAlignment.START,
+                )
+            ],
+        )
+
+        findings_section = ft.ExpansionTile(
+            title=ft.Text("Löydöt", weight=ft.FontWeight.BOLD),
+            initially_expanded=False,
+            controls=[
+                ft.Column(
+                    [
+                        self.pattern_select_all,
+                        *pattern_controls,
+                    ],
+                    spacing=4,
+                    alignment=ft.MainAxisAlignment.START,
+                )
+            ],
+        )
+
+        combined_wrap = ft.Column(
+            [indicator_section, findings_section],
+            spacing=8,
+        )
 
         return ft.Card(
             content=ft.Container(
@@ -343,10 +390,7 @@ class StockView:
                     [
                         ft.Text("Aikaikkuna & indikaattorit", weight=ft.FontWeight.BOLD),
                         ft.Row(range_buttons, spacing=8, wrap=True),
-                        indicator_row,
-                        ft.Divider(),
-                        ft.Text("Näytä löydöt", weight=ft.FontWeight.BOLD),
-                        patterns_column,
+                        combined_wrap,
                     ],
                     spacing=12,
                 ),
@@ -376,8 +420,12 @@ class StockView:
         control = e.control
         flag = control.data
         value = bool(control.value)
-        if flag == "ma50":
+        if flag == "ma5":
+            self.show_ma5 = value
+        elif flag == "ma50":
             self.show_ma50 = value
+        elif flag == "ma20":
+            self.show_ma20 = value
         elif flag == "ma200":
             self.show_ma200 = value
         elif flag == "rsi":
@@ -425,7 +473,7 @@ class StockView:
         self._set_status(f"Haetaan tietoja tickerille {ticker}...", ft.Colors.BLUE_600)
 
         try:
-            price_records = services.fetch_price_rows(
+            price_records, total_rows = services.fetch_price_rows(
                 ticker,
                 limit=self.PRICE_LIMIT,
             )
@@ -459,6 +507,7 @@ class StockView:
 
         self.current_ticker = ticker
         self.price_records = price_records
+        self.total_days = total_rows
         self.analysis_events = analysis_events
         self.analysis_total = total
         self.analysis_page = 0
@@ -469,7 +518,7 @@ class StockView:
         self._update_analysis_pager()
 
         self._set_status(
-            f"✅ Data haettu tickerille {ticker} ({len(price_records)} päivää)",
+            f"✅ Data haettu tickerille {ticker} ({self.total_days} päivää)",
             ft.Colors.GREEN_600,
         )
 
@@ -573,12 +622,12 @@ class StockView:
         price_max = max(price_values)
 
         fig = make_subplots(
-            rows=2,
+            rows=3,
             cols=1,
             shared_xaxes=True,
-            row_heights=[0.7, 0.3],
+            row_heights=[0.65, 0.2, 0.15],
             vertical_spacing=0.03,
-            specs=[[{"secondary_y": False}], [{"secondary_y": True}]],
+            specs=[[{"secondary_y": False}], [{"secondary_y": False}], [{"secondary_y": False}]],
         )
 
         fig.add_trace(
@@ -597,6 +646,32 @@ class StockView:
         )
 
         price_by_date = {rec["date"]: rec.get("high") or rec.get("close") for rec in records}
+
+        if self.show_ma20:
+            fig.add_trace(
+                go.Scatter(
+                    x=dates,
+                    y=[rec.get("sma20") for rec in records],
+                    mode="lines",
+                    name="MA20",
+                    line=dict(color="#f97316", width=1.5),
+                ),
+                row=1,
+                col=1,
+            )
+
+        if self.show_ma5:
+            fig.add_trace(
+                go.Scatter(
+                    x=dates,
+                    y=[rec.get("sma5") for rec in records],
+                    mode="lines",
+                    name="MA5",
+                    line=dict(color="#d1d5db", width=1.5),
+                ),
+                row=1,
+                col=1,
+            )
 
         if self.show_ma50:
             fig.add_trace(
@@ -618,23 +693,25 @@ class StockView:
                     y=[rec.get("sma200") for rec in records],
                     mode="lines",
                     name="MA200",
-                    line=dict(color="#f59e0b", width=1.5, dash="dash"),
+                    line=dict(color="#374151", width=1.5),
                 ),
                 row=1,
                 col=1,
             )
 
-        fig.add_trace(
-            go.Bar(
-                x=dates,
-                y=volumes,
-                name="Volyymi",
-                marker_color="#6366f1",
-                opacity=0.7,
-            ),
-            row=2,
-            col=1,
-        )
+        if volumes:
+            fig.add_trace(
+                go.Bar(
+                    x=dates,
+                    y=volumes,
+                    name="Volyymi",
+                    marker_color="#6366f1",
+                    opacity=0.7,
+                ),
+                row=2,
+                col=1,
+            )
+            fig.update_yaxes(title_text="Volyymi", row=2, col=1)
 
         if self.show_rsi:
             fig.add_trace(
@@ -645,20 +722,30 @@ class StockView:
                     name="RSI",
                     line=dict(color="#f43f5e", width=1.2),
                 ),
-                row=2,
+                row=3,
                 col=1,
-                secondary_y=True,
             )
-            fig.update_yaxes(title_text="Volyymi", row=2, col=1, secondary_y=False)
-            fig.update_yaxes(
-                title_text="RSI",
-                row=2,
-                col=1,
-                secondary_y=True,
-                range=[0, 100],
+            fig.add_shape(
+                type="line",
+                x0=dates[0],
+                x1=dates[-1],
+                y0=70,
+                y1=70,
+                xref="x3",
+                yref="y3",
+                line=dict(color="#d1d5db", dash="dash", width=1),
             )
-        else:
-            fig.update_yaxes(title_text="Volyymi", row=2, col=1, secondary_y=False)
+            fig.add_shape(
+                type="line",
+                x0=dates[0],
+                x1=dates[-1],
+                y0=30,
+                y1=30,
+                xref="x3",
+                yref="y3",
+                line=dict(color="#d1d5db", dash="dash", width=1),
+            )
+            fig.update_yaxes(title_text="RSI", row=3, col=1, range=[0, 100])
 
         if events:
             grouped: Dict[str, List[Dict]] = {}
@@ -695,7 +782,7 @@ class StockView:
                         x=scatter_x,
                         y=scatter_y,
                         mode="markers",
-                        name=f"Löydöt: {pattern}",
+                        name=pattern or "Löydöt",
                         marker=dict(color=color, symbol="triangle-up", size=9),
                         hovertemplate="%{text}<extra></extra>",
                         text=hover_texts,
@@ -709,10 +796,59 @@ class StockView:
             height=520,
             margin=dict(t=30, l=40, r=20, b=20),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+            xaxis_rangeslider=dict(visible=False),
+            updatemenus=[
+                dict(
+                    type="buttons",
+                    direction="left",
+                    buttons=[
+                        dict(
+                            label="Reset zoom",
+                            method="relayout",
+                            args=[
+                                {
+                                    "xaxis.autorange": True,
+                                    "yaxis.autorange": True,
+                                    "yaxis2.autorange": True,
+                                    "yaxis3.autorange": True,
+                                }
+                            ],
+                        )
+                    ],
+                    x=0.0,
+                    y=1.1,
+                    xanchor="left",
+                    yanchor="bottom",
+                    showactive=False,
+                )
+            ],
         )
         fig.update_yaxes(title_text="Hinta", row=1, col=1)
-        fig.update_xaxes(showspikes=True, spikemode="across", spikethickness=1)
-        fig.update_xaxes(rangeslider_visible=True, row=2, col=1)
+
+        # build rangebreaks for weekends + missing market days (e.g. holidays)
+        rangebreaks = [dict(bounds=["sat", "mon"])]
+        if dates:
+            date_set = {d for d in dates}
+            cur = dates[0]
+            missing = []
+            while cur <= dates[-1]:
+                if cur not in date_set:
+                    missing.append(cur)
+                cur += dt.timedelta(days=1)
+            if missing:
+                rangebreaks.append(dict(values=[d.isoformat() for d in missing]))
+        rangebreaks = [dict(bounds=["sat", "mon"])]
+        fig.update_xaxes(
+            showspikes=True,
+            spikemode="across",
+            spikethickness=1,
+            rangebreaks=rangebreaks,
+            row=1,
+            col=1,
+        )
+        fig.update_xaxes(rangebreaks=rangebreaks, row=1, col=1)
+        fig.update_xaxes(rangebreaks=rangebreaks, row=2, col=1)
+        fig.update_xaxes(rangebreaks=rangebreaks, row=3, col=1)
 
         return fig
 
@@ -872,6 +1008,12 @@ def _build_price_chart(price_records: Sequence[Dict]) -> Optional[ft.Control]:
 
         record["x_center"] = x_center
 
+        sma5 = record.get("sma5")
+        record["sma5_y"] = (
+            price_height - (sma5 - min_low) * price_scale
+            if isinstance(sma5, (int, float))
+            else None
+        )
         sma20 = record.get("sma20")
         record["sma20_y"] = (
             price_height - (sma20 - min_low) * price_scale
@@ -885,6 +1027,7 @@ def _build_price_chart(price_records: Sequence[Dict]) -> Optional[ft.Control]:
             else None
         )
 
+    price_shapes.extend(_build_sma_paths(valid, "sma5_y", "#D1D5DB"))
     price_shapes.extend(_build_sma_paths(valid, "sma20_y", "#F97316"))
     price_shapes.extend(_build_sma_paths(valid, "sma50_y", "#0EA5E9"))
 
