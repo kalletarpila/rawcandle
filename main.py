@@ -7,6 +7,7 @@ import pandas as pd
 import yfinance as yf
 from simu import SimuView, SimulationService
 from stock.view import StockView
+from regression.view import RegressionView
 from market_repository import (
     delete_market,
     ensure_market_schema,
@@ -818,7 +819,7 @@ class RawCandleApp:
         )
 
         self.candles_random_stocks_field = ft.TextField(
-            label="Anna osakkeiden lkm",
+            label="Anna osakkeiden lkm (1-4000)",
             width=160,
             value="100",
             keyboard_type=ft.KeyboardType.NUMBER,
@@ -1106,8 +1107,8 @@ class RawCandleApp:
 
                 if v < 1:
                     v = 1
-                if v > 1000:
-                    v = 1000
+                if v > 4000:
+                    v = 4000
                 if str(v) != str(self.candles_random_stocks_field.value):
                     self.candles_random_stocks_field.value = str(v)
                 self.candles_random_stocks_field.error_text = None
@@ -2592,10 +2593,11 @@ class RawCandleApp:
             horizontal_lines=ft.border.BorderSide(1, ft.Colors.GREY_300),
         )
 
-        # Simulaatio-välilehden hallinta
+        # Simulaatio- ja erikoisvälilehdet
         self.simu_service = SimulationService()
         self.simu_view = SimuView(self.page, self.create_appbar, self.simu_service)
         self.stock_view = StockView(self.page, self.create_appbar)
+        self.regression_view = RegressionView(self.page, self.create_appbar)
 
         # Aloita etusivulta (only if page supports go)
         try:
@@ -2657,6 +2659,11 @@ class RawCandleApp:
                     ft.Icons.ANALYTICS,
                     tooltip="Analysis Dashboard",
                     on_click=lambda _: self.page.go("/analysis"),
+                ),
+                ft.IconButton(
+                    ft.Icons.AUTO_GRAPH,
+                    tooltip="Regression",
+                    on_click=lambda _: self.page.go("/regression"),
                 ),
                 ft.IconButton(
                     ft.Icons.TABLE_CHART,
@@ -3525,6 +3532,8 @@ Virheet: {error_count}"""
             self.page.views.append(self.simu_view.create_view())
         elif self.page.route == "/analysis":
             self.page.views.append(self.create_analysis_view())
+        elif self.page.route == "/regression":
+            self.page.views.append(self.regression_view.create_view())
         elif self.page.route == "/findings":
             self.page.views.append(self.create_findings_view())
         elif self.page.route == "/tulokset":

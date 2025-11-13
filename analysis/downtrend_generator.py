@@ -405,7 +405,7 @@ class DowntrendGenerator:
            where MA5 = avg([t-5..t-1]), MA10 = avg([t-10..t-1])
 
         Args:
-            num_tickers: Number of stocks to process (1..1000)
+        num_tickers: Number of stocks to process (1..4000)
             events_per_ticker: Target events per stock (1..200)
             progress_callback: Optional callback(current, total) for progress updates
             cancel_check: Optional callback() -> bool to check if user cancelled
@@ -415,7 +415,7 @@ class DowntrendGenerator:
             Tuple of (total_events_saved, list_of_error_messages)
         """
         # Validate inputs
-        num_tickers = max(1, min(1000, int(num_tickers)))
+        num_tickers = max(1, min(4000, int(num_tickers)))
         events_per_ticker = max(1, min(200, int(events_per_ticker)))
         display_market = market.strip() if isinstance(market, str) else None
         market_filter = display_market.lower() if display_market else None
