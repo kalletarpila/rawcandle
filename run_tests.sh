@@ -5,6 +5,8 @@
 
 set -e
 
+VENV_PYTHON="./venv/bin/python"
+
 echo "🧪 RawCandle Analysis Tests"
 echo "=========================="
 
@@ -35,9 +37,6 @@ print_error() {
 # Tarkista että pytest on asennettu
 check_dependencies() {
     print_status "Tarkistetaan riippuvuudet..."
-    
-    # Virtuaaliympäristön Python
-    VENV_PYTHON="./venv/bin/python"
     
     if ! [ -f "$VENV_PYTHON" ]; then
         print_error "Virtuaaliympäristö ei löydy: $VENV_PYTHON"
@@ -84,7 +83,20 @@ run_unit_tests() {
 run_integration_tests() {
     print_status "Suoritetaan integraatiotestit..."
     
-    python3 -m pytest tests/test_integration.py \
+    local integration_files=()
+    if [ -f "tests/test_integration.py" ]; then
+        integration_files+=("tests/test_integration.py")
+    fi
+    if [ -f "tests/test_integration_pipeline.py" ]; then
+        integration_files+=("tests/test_integration_pipeline.py")
+    fi
+
+    if [ ${#integration_files[@]} -eq 0 ]; then
+        print_warning "Integraatiotestejä ei löytynyt – ohitetaan vaihe."
+        return 0
+    fi
+
+    $VENV_PYTHON -m pytest "${integration_files[@]}" \
         -v \
         --cov=analysis \
         --cov-report=html:reports/coverage_integration \
@@ -105,7 +117,7 @@ run_integration_tests() {
 run_performance_tests() {
     print_status "Suoritetaan suorituskykytestit..."
     
-    python3 -m pytest tests/test_performance.py \
+    $VENV_PYTHON -m pytest tests/test_performance.py \
         -v \
         --html=reports/performance_tests.html \
         --self-contained-html \
@@ -125,7 +137,7 @@ run_performance_tests() {
 run_all_tests() {
     print_status "Suoritetaan kaikki testit..."
     
-    python3 -m pytest tests/ \
+    $VENV_PYTHON -m pytest tests/ \
         -v \
         --cov=analysis \
         --cov=results \
@@ -216,10 +228,15 @@ main() {
             run_linting
             run_unit_tests && run_integration_tests
             # Suorituskykytestit erikseen (voivat olla hitaita)
-            print_status "Haluatko suorittaa suorituskykytestit? [y/N]"
-            read -r response
-            if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
-                run_performance_tests
+            if [ -t 0 ]; then
+                print_status "Haluatko suorittaa suorituskykytestit? [y/N]"
+                if read -r response; then
+                    if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+                        run_performance_tests
+                    fi
+                fi
+            else
+                print_status "Ei interaktiivista päätettä – suorituskykytestit ohitetaan."
             fi
             ;;
         "quick")

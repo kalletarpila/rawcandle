@@ -13,12 +13,15 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Iterable, Tuple
 
+import pytest
 from openpyxl import load_workbook
 
 from analysis.database_manager import DatabaseManager
 from analysis.results_generator import ResultsGenerator
 from analysis.run_analysis import run_candlestick_analysis
 from results.excel_exporter import ExcelExporter
+
+pytestmark = pytest.mark.integration
 
 BASE_START = datetime(2024, 1, 1)
 TOTAL_DAYS = 260

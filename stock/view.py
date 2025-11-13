@@ -37,15 +37,15 @@ class StockView:
         ("Bearish Divergence", "Bearish Divergence"),
     ]
     PATTERN_COLORS = {
-        "downtrend": "#ef4444",
-        "Hammer": "#22c55e",
-        "Bullish Engulfing": "#16a34a",
-        "Piercing Pattern": "#0ea5e9",
-        "Three White Soldiers": "#9333ea",
-        "Morning Star": "#d97706",
-        "Dragonfly Doji": "#14b8a6",
-        "Bullish Divergence": "#f43f5e",
-        "Bearish Divergence": "#f97316",
+        "downtrend": "#dc2626",  # kirkas punainen
+        "Hammer": "#0ea5e9",  # turkoosi
+        "Bullish Engulfing": "#16a34a",  # vihreä
+        "Piercing Pattern": "#f97316",  # oranssi
+        "Three White Soldiers": "#9333ea",  # violetti
+        "Morning Star": "#d97706",  # ruskea/oranssi
+        "Dragonfly Doji": "#14b8a6",  # vihertävä sininen
+        "Bullish Divergence": "#f43f5e",  # pinkki
+        "Bearish Divergence": "#8b5cf6",  # violetti sinertävä
     }
 
     def __init__(self, page: ft.Page, appbar_factory: Callable[[], ft.AppBar]):
@@ -645,7 +645,10 @@ class StockView:
             col=1,
         )
 
-        price_by_date = {rec["date"]: rec.get("high") or rec.get("close") for rec in records}
+        price_by_date = {
+            rec["date"]: rec.get("high") or rec.get("close") for rec in records
+        }
+        record_by_date = {rec["date"]: rec for rec in records}
 
         if self.show_ma20:
             fig.add_trace(
@@ -751,32 +754,48 @@ class StockView:
             grouped: Dict[str, List[Dict]] = {}
             for event in events:
                 grouped.setdefault(event.get("pattern") or "", []).append(event)
-                color = self.PATTERN_COLORS.get(event.get("pattern"), "#94a3b8")
-                event_date = event["date"]
-                fig.add_shape(
-                    type="line",
-                    x0=event_date,
-                    x1=event_date,
-                    y0=price_min,
-                    y1=price_max,
-                    xref="x",
-                    yref="y1",
-                    line=dict(color=color, width=1, dash="dot"),
-                )
 
             for pattern, items in grouped.items():
                 color = self.PATTERN_COLORS.get(pattern, "#94a3b8")
-                scatter_x = []
-                scatter_y = []
-                hover_texts = []
+                scatter_x: List[dt.date] = []
+                scatter_y: List[float] = []
+                hover_texts: List[str] = []
+                line_x: List[Optional[dt.date]] = []
+                line_y: List[Optional[float]] = []
+                line_hover: List[Optional[str]] = []
                 for entry in items:
                     date = entry["date"]
-                    hover_texts.append(
-                        f"{pattern or 'Pattern'}<br>Vahvuus: {entry.get('signal_strength') or '-'}"
+                    hover_text = self._format_event_tooltip(
+                        pattern or "Pattern",
+                        entry,
+                        record_by_date.get(date),
                     )
+                    hover_texts.append(hover_text)
                     scatter_x.append(date)
                     base_y = price_by_date.get(date) or price_max
                     scatter_y.append(base_y * 1.01)
+
+                    # pystysuora katkoviiva
+                    line_x.extend([date, date, None])
+                    line_y.extend([price_min, price_max, None])
+                    line_hover.extend([hover_text, hover_text, None])
+
+                if line_x:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=line_x,
+                            y=line_y,
+                            mode="lines",
+                            line=dict(color=color, dash="dot", width=1),
+                            hovertemplate="%{text}<extra></extra>",
+                            text=line_hover,
+                            name=f"{pattern or 'Löydöt'}-viiva",
+                            showlegend=False,
+                        ),
+                        row=1,
+                        col=1,
+                    )
+
                 fig.add_trace(
                     go.Scatter(
                         x=scatter_x,
@@ -837,7 +856,7 @@ class StockView:
                 cur += dt.timedelta(days=1)
             if missing:
                 rangebreaks.append(dict(values=[d.isoformat() for d in missing]))
-        rangebreaks = [dict(bounds=["sat", "mon"])]
+
         fig.update_xaxes(
             showspikes=True,
             spikemode="across",
@@ -846,11 +865,48 @@ class StockView:
             row=1,
             col=1,
         )
-        fig.update_xaxes(rangebreaks=rangebreaks, row=1, col=1)
         fig.update_xaxes(rangebreaks=rangebreaks, row=2, col=1)
         fig.update_xaxes(rangebreaks=rangebreaks, row=3, col=1)
 
         return fig
+
+    def _format_event_tooltip(
+        self,
+        pattern_name: str,
+        event: Dict,
+        record: Optional[Dict],
+    ) -> str:
+        """Muodosta tooltip-teksti kynttilä- ja tapahtumatiedoista."""
+
+        def fmt(value: Optional[float]) -> str:
+            return f"{value:.2f}" if isinstance(value, (int, float)) else "-"
+
+        date_value = event.get("date")
+        if isinstance(date_value, dt.date):
+            date_str = date_value.strftime("%d.%m.%Y")
+        else:
+            date_str = str(date_value)
+
+        strength = event.get("signal_strength")
+        strength_str = fmt(strength)
+        if strength is None:
+            strength_str = "-"
+
+        open_val = record.get("open") if record else None
+        high_val = record.get("high") if record else None
+        low_val = record.get("low") if record else None
+        close_val = record.get("close") if record else None
+        rsi_val = record.get("rsi") if record else None
+
+        return (
+            f"{pattern_name} ({date_str})<br>"
+            f"Vahvuus: {strength_str}<br>"
+            f"Open: {fmt(open_val)}<br>"
+            f"High: {fmt(high_val)}<br>"
+            f"Low: {fmt(low_val)}<br>"
+            f"Close: {fmt(close_val)}<br>"
+            f"RSI14: {fmt(rsi_val)}"
+        )
 
     def _set_analysis_rows(self, rows: Sequence[Dict]) -> None:
         if not self.analysis_table:
