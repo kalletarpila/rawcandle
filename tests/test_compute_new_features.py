@@ -13,6 +13,7 @@ from compute_new_features import (
     compute_rsi_slope,
     compute_volume_impulse,
     compute_volatility_ratio,
+    compute_bull_divergence_features,
     ensure_columns,
     update_features,
 )
@@ -76,7 +77,10 @@ def test_compute_gap_body_shadow_creates_expected_columns():
 
     compute_gap_body_shadow(df)
 
-    assert np.isclose(df.loc[0, "Gap_down_strength"], (10 - 11) / 11)
+    eps = 1e-6
+    base_gap = (10.0 - 11.0) / (11.0 + eps)
+    expected_gap = np.log1p(abs(base_gap)) * np.sign(base_gap)
+    assert np.isclose(df.loc[0, "Gap_down_strength"], expected_gap)
     assert np.isclose(df.loc[0, "Body_ratio"], abs(12 - 10) / (13 - 9))
     upper = 13 - max(10, 12)
     lower = min(10, 12) - 9
@@ -107,7 +111,7 @@ def test_compute_volume_impulse_and_reversal_context():
             "volume_raw": [200.0],
             "prev10_avg_volume": [100.0],
             "t_10": [92.0],
-            "bullish_divergence": [2.0],
+            "BullDiv_recent_strength": [2.0],
             "t_10_hajonta": [1.5],
         }
     )
@@ -118,6 +122,49 @@ def test_compute_volume_impulse_and_reversal_context():
     assert impulse.iloc[0] == 2.0
     expected_score = 0.4 * (100 - 92) + 0.4 * 2.0 - 0.2 * 1.5
     assert np.isclose(context.iloc[0], expected_score)
+
+
+def test_compute_bull_divergence_features_defaults():
+    df_results = pd.DataFrame(
+        {"ticker": ["AAA"], "date": pd.to_datetime(["2024-01-05"])}
+    )
+    df_div = pd.DataFrame()
+    updated = compute_bull_divergence_features(df_results.copy(), df_div)
+    assert updated["BullDiv_strength"].iloc[0] == 0.0
+    assert updated["BullDiv_recent_strength"].iloc[0] == 0.0
+    assert updated["BullDiv_recent_offset"].iloc[0] == -1
+    assert updated["Has_BullDiv_recent"].iloc[0] == 0
+
+
+def test_compute_bull_divergence_features_from_history():
+    dates = pd.date_range("2024-01-01", periods=5, freq="B")
+    df_results = pd.DataFrame(
+        {
+            "ticker": ["AAA"] * 3,
+            "date": dates[1:4],
+        }
+    )
+    df_div = pd.DataFrame(
+        {
+            "ticker": ["AAA"] * len(dates),
+            "date": dates,
+            "bullish_strength": [0.0, 1.5, 0.0, 0.8, 0.0],
+        }
+    )
+
+    updated = compute_bull_divergence_features(df_results.copy(), df_div)
+
+    strengths = updated["BullDiv_strength"].tolist()
+    recent_strengths = updated["BullDiv_recent_strength"].tolist()
+    offsets = updated["BullDiv_recent_offset"].tolist()
+    flags = updated["Has_BullDiv_recent"].tolist()
+
+    assert strengths == [1.5, 0.0, 0.8]
+    assert recent_strengths[0] == 1.5
+    assert recent_strengths[1] == 1.5
+    assert recent_strengths[2] == 1.5
+    assert offsets == [0, 1, 0]
+    assert flags == [1, 1, 1]
 
 
 def test_ensure_columns_and_update_features(tmp_path):

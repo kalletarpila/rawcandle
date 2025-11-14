@@ -112,6 +112,26 @@ class DatabaseManager:
                 "CREATE INDEX IF NOT EXISTS idx_div_date ON divergence_data(date)"
             )
 
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS blackout_dates (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT NOT NULL,
+                    date TEXT NOT NULL,
+                    event TEXT NOT NULL,
+                    source TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(ticker, date, event)
+                )
+            """
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_blackout_ticker ON blackout_dates(ticker)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_blackout_date ON blackout_dates(date)"
+            )
+
             # Luo results_data taulu
             # Tallentaa prosessoidut tulokset (vain kynttiläkuviopäivät)
             # 85 saraketta (market + alkuperäiset 84 kenttää)
@@ -203,6 +223,10 @@ class DatabaseManager:
                     t0_close_norm REAL,
                     bearish_divergence REAL,
                     bullish_divergence REAL,
+                    BullDiv_strength REAL,
+                    BullDiv_recent_strength REAL,
+                    BullDiv_recent_offset INTEGER,
+                    Has_BullDiv_recent INTEGER,
                     weekday INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(ticker, date)
@@ -222,6 +246,19 @@ class DatabaseManager:
                 cursor.execute(
                     "UPDATE results_data SET market = 'usa' WHERE market IS NULL"
                 )
+
+            divergence_column_defs = {
+                "BullDiv_strength": "REAL",
+                "BullDiv_recent_strength": "REAL",
+                "BullDiv_recent_offset": "INTEGER DEFAULT -1",
+                "Has_BullDiv_recent": "INTEGER DEFAULT 0",
+            }
+            for column, ddl in divergence_column_defs.items():
+                if column not in results_columns:
+                    cursor.execute(f"ALTER TABLE results_data ADD COLUMN {column} {ddl}")
+                    self.logger.info(
+                        f"Added {column} column to results_data table"
+                    )
 
             # Luo indeksit results_data tauluun
             cursor.execute(
@@ -830,31 +867,18 @@ class DatabaseManager:
             return (0.0, 0.0)
 
         try:
-            conn = self.get_connection()
-            cursor = conn.cursor()
-
-            placeholders = ",".join("?" * len(dates))
-            query = f"""
-                SELECT bullish_strength, bearish_strength
-                FROM divergence_data
-                WHERE ticker = ? AND date IN ({placeholders})
-            """
-
-            cursor.execute(query, [ticker] + dates)
-            results = cursor.fetchall()
-
-            # Etsi vahvin divergenssi
+            records = self.get_divergence_records(ticker, dates)
             max_bullish = 0.0
             max_bearish = 0.0
 
-            for row in results:
-                bullish, bearish = row
-                if bullish and bullish > max_bullish:
+            for row in records.values():
+                bullish = row.get("bullish_strength") or 0.0
+                bearish = row.get("bearish_strength") or 0.0
+                if bullish > max_bullish:
                     max_bullish = bullish
-                if bearish and bearish > max_bearish:
+                if bearish > max_bearish:
                     max_bearish = bearish
 
-            # Mutual exclusivity: jos bullish löytyy, bearish = 0
             if max_bullish > 0:
                 return (0.0, max_bullish)
             elif max_bearish > 0:
@@ -865,6 +889,60 @@ class DatabaseManager:
         except Exception as e:
             self.logger.error(f"Get divergences for dates failed: {e}")
             return (0.0, 0.0)
+
+    def get_divergence_records(
+        self, ticker: str, dates: List[str]
+    ) -> dict[str, dict[str, float]]:
+        """
+        Palauta divergenssirivit annetuista päivistä.
+
+        Returns:
+            Dict[date, {"bullish_strength": float, "bearish_strength": float}]
+        """
+        if not dates:
+            return {}
+
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            placeholders = ",".join("?" * len(dates))
+            query = f"""
+                SELECT date, bullish_strength, bearish_strength
+                FROM divergence_data
+                WHERE ticker = ? AND date IN ({placeholders})
+            """
+            cursor.execute(query, [ticker] + dates)
+            rows = cursor.fetchall()
+            return {
+                date: {
+                    "bullish_strength": bullish or 0.0,
+                    "bearish_strength": bearish or 0.0,
+                }
+                for date, bullish, bearish in rows
+            }
+        except Exception as e:
+            self.logger.error(f"Get divergence records failed: {e}")
+            return {}
+
+    def insert_blackout_entries(self, entries: List[tuple[str, str, str, str]]) -> int:
+        if not entries:
+            return 0
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            cursor.executemany(
+                """
+                INSERT OR IGNORE INTO blackout_dates (ticker, date, event, source)
+                VALUES (?, ?, ?, ?)
+            """,
+                entries,
+            )
+            conn.commit()
+            return cursor.rowcount
+        except Exception as e:
+            self.logger.error(f"Insert blackout entries failed: {e}")
+            return 0
 
     def has_divergence_data(self, ticker: str) -> bool:
         """
@@ -955,18 +1033,6 @@ class DatabaseManager:
             self.logger.error(f"Get existing results tickers failed: {e}")
             return set()
 
-    def count_results_rows(self) -> int:
-        """Palauta results_data-taulun rivien lukumäärä."""
-        try:
-            conn = self.get_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM results_data")
-            result = cursor.fetchone()
-            return int(result[0]) if result and result[0] is not None else 0
-        except Exception as e:
-            self.logger.error(f"Count results rows failed: {e}")
-            return 0
-
     def insert_result_data(
         self,
         ticker: str,
@@ -1053,7 +1119,11 @@ class DatabaseManager:
         t0_close_norm: Optional[float],
         bearish_divergence: Optional[float],
         bullish_divergence: Optional[float],
-        weekday: int,
+        BullDiv_strength: Optional[float] = None,
+        BullDiv_recent_strength: Optional[float] = None,
+        BullDiv_recent_offset: Optional[int] = None,
+        Has_BullDiv_recent: Optional[int] = None,
+        weekday: int = 1,
     ) -> bool:
         """
         Lisää rivi results_data tauluun.
@@ -1065,8 +1135,99 @@ class DatabaseManager:
             conn = self.get_connection()
             cursor = conn.cursor()
 
-            cursor.execute(
-                """
+            values_tuple = (
+                ticker,
+                date,
+                market,
+                candle_pattern,
+                signal_strength,
+                t_1_alin,
+                t_1_ylin,
+                t_1_bodi,
+                t_1_bodi_colour,
+                t0_alin,
+                t0_ylin,
+                t0_bodi,
+                t0_bodi_colour,
+                t1_alin,
+                t1_ylin,
+                t1_bodi,
+                t1_bodi_colour,
+                t_2,
+                t_5,
+                t_10,
+                t_15,
+                t_20,
+                t_2_hajonta,
+                t_5_hajonta,
+                t_10_hajonta,
+                t_15_hajonta,
+                t_20_hajonta,
+                t2,
+                t5,
+                t10,
+                t20,
+                t_2_volyymi,
+                t_5_volyymi,
+                t_10_volyymi,
+                t_15_volyymi,
+                t_20_volyymi,
+                t0_volyymi,
+                t2_volyymi,
+                t5_volyymi,
+                t10_volyymi,
+                t20_volyymi,
+                t_2_5p_liukuva,
+                t_2_10p_liukuva,
+                t_2_20p_liukuva,
+                t_5_5p_liukuva,
+                t_5_10p_liukuva,
+                t_5_20p_liukuva,
+                t_10_5p_liukuva,
+                t_10_10p_liukuva,
+                t_10_20p_liukuva,
+                t_15_5p_liukuva,
+                t_15_10p_liukuva,
+                t_15_20p_liukuva,
+                t_20_5p_liukuva,
+                t_20_10p_liukuva,
+                t_20_20p_liukuva,
+                t0_50p_liukuva,
+                t0_200p_liukuva,
+                SPX_0,
+                SPX_2,
+                SPX_5,
+                SPX_10,
+                SPX_15,
+                SPX_20,
+                SPX2,
+                SPX5,
+                SPX10,
+                SPX15,
+                SPX20,
+                NDX_0,
+                NDX_2,
+                NDX_5,
+                NDX_10,
+                NDX_15,
+                NDX_20,
+                NDX2,
+                NDX5,
+                NDX10,
+                NDX15,
+                NDX20,
+                RSI14_t0,
+                t0_close_norm,
+                bearish_divergence,
+                bullish_divergence,
+                BullDiv_strength,
+                BullDiv_recent_strength,
+                BullDiv_recent_offset,
+                Has_BullDiv_recent,
+                weekday,
+            )
+            placeholders = ", ".join("?" for _ in range(len(values_tuple)))
+            insert_sql = """
                 INSERT OR REPLACE INTO results_data
                 (ticker, date, market, candle_pattern, signal_strength,
                  t_1_alin, t_1_ylin, t_1_bodi, t_1_bodi_colour,
@@ -1087,101 +1248,12 @@ class DatabaseManager:
                  SPX2, SPX5, SPX10, SPX15, SPX20,
                  NDX_0, NDX_2, NDX_5, NDX_10, NDX_15, NDX_20,
                  NDX2, NDX5, NDX10, NDX15, NDX20,
-                 RSI14_t0, t0_close_norm, bearish_divergence, bullish_divergence, weekday)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?)
-                """,
-                (
-                    ticker,
-                    date,
-                    market,
-                    candle_pattern,
-                    signal_strength,
-                    t_1_alin,
-                    t_1_ylin,
-                    t_1_bodi,
-                    t_1_bodi_colour,
-                    t0_alin,
-                    t0_ylin,
-                    t0_bodi,
-                    t0_bodi_colour,
-                    t1_alin,
-                    t1_ylin,
-                    t1_bodi,
-                    t1_bodi_colour,
-                    t_2,
-                    t_5,
-                    t_10,
-                    t_15,
-                    t_20,
-                    t_2_hajonta,
-                    t_5_hajonta,
-                    t_10_hajonta,
-                    t_15_hajonta,
-                    t_20_hajonta,
-                    t2,
-                    t5,
-                    t10,
-                    t20,
-                    t_2_volyymi,
-                    t_5_volyymi,
-                    t_10_volyymi,
-                    t_15_volyymi,
-                    t_20_volyymi,
-                    t0_volyymi,
-                    t2_volyymi,
-                    t5_volyymi,
-                    t10_volyymi,
-                    t20_volyymi,
-                    t_2_5p_liukuva,
-                    t_2_10p_liukuva,
-                    t_2_20p_liukuva,
-                    t_5_5p_liukuva,
-                    t_5_10p_liukuva,
-                    t_5_20p_liukuva,
-                    t_10_5p_liukuva,
-                    t_10_10p_liukuva,
-                    t_10_20p_liukuva,
-                    t_15_5p_liukuva,
-                    t_15_10p_liukuva,
-                    t_15_20p_liukuva,
-                    t_20_5p_liukuva,
-                    t_20_10p_liukuva,
-                    t_20_20p_liukuva,
-                    t0_50p_liukuva,
-                    t0_200p_liukuva,
-                    SPX_0,
-                    SPX_2,
-                    SPX_5,
-                    SPX_10,
-                    SPX_15,
-                    SPX_20,
-                    SPX2,
-                    SPX5,
-                    SPX10,
-                    SPX15,
-                    SPX20,
-                    NDX_0,
-                    NDX_2,
-                    NDX_5,
-                    NDX_10,
-                    NDX_15,
-                    NDX_20,
-                    NDX2,
-                    NDX5,
-                    NDX10,
-                    NDX15,
-                    NDX20,
-                    RSI14_t0,
-                    t0_close_norm,
-                    bearish_divergence,
-                    bullish_divergence,
-                    weekday,
-                ),
-            )
+                 RSI14_t0, t0_close_norm, bearish_divergence, bullish_divergence,
+                 BullDiv_strength, BullDiv_recent_strength, BullDiv_recent_offset,
+                 Has_BullDiv_recent, weekday)
+                VALUES ({placeholders})
+            """.format(placeholders=placeholders)
+            cursor.execute(insert_sql, values_tuple)
             conn.commit()
             return True
 
@@ -1295,17 +1367,21 @@ class DatabaseManager:
                         result.get("t0_close_norm"),
                         result.get("bearish_divergence"),
                         result.get("bullish_divergence"),
+                        result.get("BullDiv_strength"),
+                        result.get("BullDiv_recent_strength"),
+                        result.get("BullDiv_recent_offset"),
+                        result.get("Has_BullDiv_recent"),
                         result.get("weekday"),
                     )
 
-                    if len(values_tuple) != 85:
+                    if len(values_tuple) != 89:
                         self.logger.error(
-                            f"VALUES tuple length is {len(values_tuple)}, expected 85"
+                            f"VALUES tuple length is {len(values_tuple)}, expected 89"
                         )
                         self.logger.error(f"Result keys: {sorted(result.keys())}")
 
-                    cursor.execute(
-                        """
+                    placeholders = ", ".join("?" for _ in range(len(values_tuple)))
+                    insert_sql = """
                         INSERT OR REPLACE INTO results_data
                         (ticker, date, market, candle_pattern, signal_strength,
                          t_1_alin, t_1_ylin, t_1_bodi, t_1_bodi_colour,
@@ -1326,15 +1402,12 @@ class DatabaseManager:
                          SPX2, SPX5, SPX10, SPX15, SPX20,
                          NDX_0, NDX_2, NDX_5, NDX_10, NDX_15, NDX_20,
                          NDX2, NDX5, NDX10, NDX15, NDX20,
-                         RSI14_t0, t0_close_norm, bearish_divergence, bullish_divergence, weekday)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                                ?, ?, ?, ?, ?)
-                        """,
-                        values_tuple,
-                    )
+                         RSI14_t0, t0_close_norm, bearish_divergence, bullish_divergence,
+                         BullDiv_strength, BullDiv_recent_strength, BullDiv_recent_offset,
+                         Has_BullDiv_recent, weekday)
+                        VALUES ({placeholders})
+                    """.format(placeholders=placeholders)
+                    cursor.execute(insert_sql, values_tuple)
                     inserted += 1
 
                 conn.commit()
@@ -1507,6 +1580,14 @@ class DatabaseManager:
             if tickers:
                 tickers = list({t.upper() for t in tickers if t})
 
+            bull_indicator = (
+                "CASE "
+                "WHEN COALESCE(Has_BullDiv_recent, 0) = 1 THEN 1 "
+                "WHEN COALESCE(BullDiv_recent_strength, 0) <> 0 THEN 1 "
+                "WHEN COALESCE(bullish_divergence, 0) <> 0 THEN 1 "
+                "ELSE 0 END"
+            )
+
             if candle_patterns:
                 placeholders = ",".join("?" * len(candle_patterns))
                 candle_case = (
@@ -1514,8 +1595,8 @@ class DatabaseManager:
                 )
                 flag_case = (
                     f"CASE WHEN candle_pattern IN ({placeholders}) "
-                    "AND (COALESCE(bearish_divergence, 0) <> 0 "
-                    "OR COALESCE(bullish_divergence, 0) <> 0) THEN 1 ELSE 0 END"
+                    f"AND (({bull_indicator}) = 1 "
+                    "OR COALESCE(bearish_divergence, 0) <> 0) THEN 1 ELSE 0 END"
                 )
                 candle_params = list(candle_patterns)
                 flag_params = list(candle_patterns)
@@ -1525,8 +1606,8 @@ class DatabaseManager:
                 )
                 flag_case = (
                     "CASE WHEN candle_pattern BETWEEN 0 AND 6 "
-                    "AND (COALESCE(bearish_divergence, 0) <> 0 "
-                    "OR COALESCE(bullish_divergence, 0) <> 0) THEN 1 ELSE 0 END"
+                    f"AND (({bull_indicator}) = 1 "
+                    "OR COALESCE(bearish_divergence, 0) <> 0) THEN 1 ELSE 0 END"
                 )
                 candle_params = []
                 flag_params = []
@@ -1603,6 +1684,131 @@ class DatabaseManager:
         except Exception as e:
             self.logger.error(f"Get results data failed: {e}")
             return []
+
+    def count_results_rows(self) -> int:
+        """Palauta results_data-taulun rivien määrä."""
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM results_data")
+            row = cursor.fetchone()
+            return int(row[0]) if row and row[0] is not None else 0
+        except Exception as e:
+            self.logger.error(f"Count results rows failed: {e}")
+            return 0
+
+    def count_results_filtered(
+        self,
+        *,
+        patterns: Optional[List[int]] = None,
+        tickers: Optional[List[str]] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        downtrend_only: bool = False,
+    ) -> int:
+        query, params = self._build_results_filter_query(
+            select_clause="SELECT COUNT(*) FROM results_data",
+            patterns=patterns,
+            tickers=tickers,
+            start_date=start_date,
+            end_date=end_date,
+            downtrend_only=downtrend_only,
+        )
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            row = cursor.fetchone()
+            return int(row[0]) if row and row[0] is not None else 0
+        except Exception as e:
+            self.logger.error(f"Count filtered results failed: {e}")
+            return 0
+
+    def get_results_filtered(
+        self,
+        *,
+        patterns: Optional[List[int]] = None,
+        tickers: Optional[List[str]] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        downtrend_only: bool = False,
+        limit: Optional[int] = None,
+    ) -> List[dict]:
+        query, params = self._build_results_filter_query(
+            select_clause="SELECT * FROM results_data",
+            patterns=patterns,
+            tickers=tickers,
+            start_date=start_date,
+            end_date=end_date,
+            downtrend_only=downtrend_only,
+        )
+        query += " ORDER BY date DESC, ticker"
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            columns = [desc[0] for desc in cursor.description]
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        except Exception as e:
+            self.logger.error(f"Fetch filtered results failed: {e}")
+            return []
+
+    def get_results_by_ids(self, ids: List[int]) -> List[dict]:
+        if not ids:
+            return []
+        placeholders = ",".join("?" for _ in ids)
+        query = f"SELECT * FROM results_data WHERE id IN ({placeholders})"
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            cursor.execute(query, ids)
+            columns = [desc[0] for desc in cursor.description]
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        except Exception as e:
+            self.logger.error(f"Fetch results by ids failed: {e}")
+            return []
+
+    def _build_results_filter_query(
+        self,
+        *,
+        select_clause: str,
+        patterns: Optional[List[int]],
+        tickers: Optional[List[str]],
+        start_date: Optional[str],
+        end_date: Optional[str],
+        downtrend_only: bool,
+    ) -> tuple[str, List[Any]]:
+        clauses: List[str] = []
+        params: List[Any] = []
+
+        if downtrend_only:
+            clauses.append("candle_pattern = 0")
+        elif patterns:
+            placeholders = ",".join("?" * len(patterns))
+            clauses.append(f"candle_pattern IN ({placeholders})")
+            params.extend(int(p) for p in patterns)
+
+        if tickers:
+            normalized = [t.upper() for t in tickers]
+            placeholders = ",".join("?" * len(normalized))
+            clauses.append(f"ticker IN ({placeholders})")
+            params.extend(normalized)
+
+        if start_date:
+            clauses.append("date >= ?")
+            params.append(start_date)
+        if end_date:
+            clauses.append("date <= ?")
+            params.append(end_date)
+
+        query = select_clause
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        return query, params
 
     def insert_results_metadata(self, total_rows: int, processing_time: float) -> bool:
         """

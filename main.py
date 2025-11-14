@@ -518,7 +518,6 @@ class RawCandleApp:
             ft.Checkbox(label="Morning Star", value=False),
             ft.Checkbox(label="Dragonfly Doji", value=False),
             ft.Checkbox(label="Bullish Divergence", value=False),
-            ft.Checkbox(label="Bearish Divergence", value=False),
         ]
 
         # "Kaikki" valintaruutu
@@ -2960,6 +2959,86 @@ Virheet: {error_count}"""
             self.loading_text.color = ft.Colors.RED_600
             self.page.update()
 
+    def show_blackout_fetch_dialog(self, e):
+        import threading
+
+        initial_value = (
+            self.ticker_field.value.strip().upper() if self.ticker_field.value else ""
+        )
+        ticker_input = ft.TextField(
+            label="Tickerit (pilkulla tai rivinvaihdolla)",
+            multiline=True,
+            width=420,
+            value=initial_value,
+        )
+        start_input = ft.TextField(label="Alkupäivä", width=200, value="2022-01-01")
+        status_text = ft.Text("", color=ft.Colors.GREY_700)
+        progress_bar = ft.ProgressBar(width=420, visible=False)
+
+        def close_dialog(_=None):
+            if blackout_dialog in self.page.overlay:
+                blackout_dialog.open = False
+                self.page.update()
+
+        def start_fetch(_):
+            raw = ticker_input.value or ""
+            tokens = [t.strip() for part in raw.splitlines() for t in part.split(",")]
+            tickers = [t.upper() for t in tokens if t]
+            if not tickers:
+                status_text.value = "Anna vähintään yksi ticker."
+                self.page.update()
+                return
+
+            start_date = start_input.value.strip() or "2022-01-01"
+            progress_bar.visible = True
+            status_text.value = "Haetaan Yahoo Finance -tietoja..."
+            self.page.update()
+
+            def worker():
+                from blackout.fetch_blackouts import fetch_blackouts_for_tickers
+
+                try:
+                    result = fetch_blackouts_for_tickers(
+                        tickers, start_date=start_date, db_path="data/analysis.db"
+                    )
+                    msg = (
+                        f"Lisätty {result['inserted']} blackout-riviä "
+                        f"{len(tickers)} tickerille."
+                    )
+                    if result.get("errors"):
+                        msg += "\nVirheet: " + "; ".join(result["errors"])
+                except Exception as exc:
+                    msg = f"Virhe: {exc}"
+
+                def finish():
+                    progress_bar.visible = False
+                    status_text.value = msg
+                    self.page.update()
+
+                self.page.call_later(0, finish)
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        blackout_dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Hae blackout-päivät"),
+            content=ft.Column(
+                [ticker_input, start_input, progress_bar, status_text],
+                tight=True,
+                width=450,
+                spacing=10,
+            ),
+            actions=[
+                ft.TextButton("Sulje", on_click=close_dialog),
+                ft.ElevatedButton("Hae", icon=ft.Icons.CLOUD_DOWNLOAD, on_click=start_fetch),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+
+        self.page.overlay.append(blackout_dialog)
+        blackout_dialog.open = True
+        self.page.update()
+
     def _calculate_and_save_divergences(
         self, ticker: str, only_missing: bool = True
     ) -> tuple:
@@ -3397,6 +3476,14 @@ Virheet: {error_count}"""
                                                         bgcolor=ft.Colors.PURPLE_700,
                                                         color=ft.Colors.WHITE,
                                                         tooltip="Laske divergenssit osakkeille joilta ne puuttuvat",
+                                                    ),
+                                                    ft.ElevatedButton(
+                                                        "Hae blackout-päivät",
+                                                        icon=ft.Icons.DATE_RANGE,
+                                                        on_click=self.show_blackout_fetch_dialog,
+                                                        bgcolor=ft.Colors.BLUE_GREY_700,
+                                                        color=ft.Colors.WHITE,
+                                                        tooltip="Nouda Yahoo Finance -osavuosikatsaus- ja osinkopäivät ja tallenna blackout-tauluun",
                                                     ),
                                                 ],
                                                 alignment=ft.MainAxisAlignment.CENTER,
