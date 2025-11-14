@@ -3,11 +3,13 @@ import os
 import sqlite3
 import threading
 from pathlib import Path
+from typing import Optional
 
 import flet as ft
 
 from analysis.database_manager import DatabaseManager
 from analysis.results_generator import ResultsGenerator
+from compute_new_features import FeatureEnrichmentSummary, run_feature_enrichment
 from results.excel_exporter import ExcelExporter
 
 # Note: this module implements the whole "Tulokset" page and its handlers
@@ -48,7 +50,8 @@ def generate_results_to_database(
         force_rebuild: Jos True, tyhjennä ensin results_data taulu
 
     Returns:
-        Tuple[int, float, str]: (rows_inserted, processing_time, error_msg)
+        Tuple[int, float, str, Optional[FeatureEnrichmentSummary], Optional[str]]:
+        (rows_inserted, processing_time, error_msg, feature_summary, feature_error)
     """
     try:
         # Hae polut
@@ -56,10 +59,22 @@ def generate_results_to_database(
         stock_db = "data/osakedata.db"
 
         if not os.path.exists(analysis_db):
-            return 0, 0.0, f"Analysis-tietokantaa ei löydy: {analysis_db}"
+            return (
+                0,
+                0.0,
+                f"Analysis-tietokantaa ei löydy: {analysis_db}",
+                None,
+                None,
+            )
 
         if not os.path.exists(stock_db):
-            return 0, 0.0, f"Stock-tietokantaa ei löydy: {stock_db}"
+            return (
+                0,
+                0.0,
+                f"Stock-tietokantaa ei löydy: {stock_db}",
+                None,
+                None,
+            )
 
         # Luo generaattori
         db_manager = DatabaseManager(analysis_db)
@@ -89,10 +104,22 @@ def generate_results_to_database(
             divergence_combo_filter=divergence_combo_filter,
         )
 
-        return rows, time_taken, None
+        feature_summary = None
+        feature_error = None
+        try:
+            feature_summary = run_feature_enrichment(
+                analysis_db_path=analysis_db,
+                stock_db_path=stock_db,
+                create_backup=False,
+                verbose=False,
+            )
+        except Exception as exc:  # pragma: no cover - surfaced to UI
+            feature_error = str(exc)
+
+        return rows, time_taken, None, feature_summary, feature_error
 
     except Exception as e:
-        return 0, 0.0, str(e)
+        return 0, 0.0, str(e), None, None
 
 
 def clear_results_database(app):
@@ -835,7 +862,13 @@ def create_results_view(app) -> ft.View:
                     )
 
                     # Generoi suodattimilla
-                    rows, time_taken, error = generate_results_to_database(
+                    (
+                        rows,
+                        time_taken,
+                        error,
+                        feature_summary,
+                        feature_error,
+                    ) = generate_results_to_database(
                         app,
                         progress_callback,
                         ticker_filter=ticker_filter,
@@ -843,6 +876,8 @@ def create_results_view(app) -> ft.View:
                         divergence_combo_filter=divergence_combo_filter,
                         force_rebuild=force_rebuild,
                     )
+                    if feature_error and not error:
+                        error = feature_error
 
                     # Päivitä UI pääsäikeessä
                     try:
@@ -882,12 +917,18 @@ def create_results_view(app) -> ft.View:
                                 ],
                             )
                         else:
+                            msg = (
+                                f"Generoitu {rows} riviä tietokantaan\n"
+                                f"Aikaa kului: {time_taken:.2f}s"
+                            )
+                            if feature_summary:
+                                msg += (
+                                    f"\nLisäfeaturet päivitetty {feature_summary.total_rows} riville"
+                                )
+
                             result_dialog = ft.AlertDialog(
                                 title=ft.Text("✅ Valmis!"),
-                                content=ft.Text(
-                                    f"Generoitu {rows} riviä tietokantaan\n"
-                                    f"Aikaa kului: {time_taken:.2f}s"
-                                ),
+                                content=ft.Text(msg),
                                 actions=[
                                     ft.TextButton(
                                         "OK",

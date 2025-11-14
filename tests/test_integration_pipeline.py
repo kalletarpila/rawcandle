@@ -19,6 +19,7 @@ from openpyxl import load_workbook
 from analysis.database_manager import DatabaseManager
 from analysis.results_generator import ResultsGenerator
 from analysis.run_analysis import run_candlestick_analysis
+from compute_new_features import run_feature_enrichment
 from results.excel_exporter import ExcelExporter
 
 pytestmark = pytest.mark.integration
@@ -163,6 +164,14 @@ def test_full_pipeline_generates_excel(tmp_path):
     assert rows_inserted > 0
     assert len(results) == 1
     assert results[0]["ticker"] == "TST1"
+    run_feature_enrichment(
+        analysis_db_path=str(analysis_db),
+        stock_db_path=str(stock_db),
+        create_backup=False,
+        verbose=False,
+    )
+    enriched_results = db_manager.get_results_data()
+    assert enriched_results[0]["RSI_slope_5"] is not None
 
     exporter = ExcelExporter(str(analysis_db))
     output_file = Path(tmp_path) / "results.xlsx"
