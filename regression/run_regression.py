@@ -14,8 +14,9 @@ Tarkoitus:
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -233,6 +234,13 @@ def run_linear_regression(
     X_scaled_df = pd.DataFrame(X_scaled, columns=X.columns, index=X.index)
     X_const = sm.add_constant(X_scaled_df)
     model = sm.OLS(y, X_const).fit()
+    cond_number = float(np.linalg.cond(X_const))
+    warning = None
+    if not np.isfinite(cond_number) or cond_number > 1e12:
+        warning = (
+            "Suuri condition number ("
+            f"{cond_number:.2e}). Mallissa on mahdollisesti multikollineaarisuutta."
+        )
 
     column_map_lines = ["OLS sarakeavain:"]
     for idx, name in enumerate(X.columns, 1):
@@ -245,6 +253,8 @@ def run_linear_regression(
         "model": model,
         "scaler": scaler,
         "column_map": column_map_lines,
+        "condition_number": cond_number,
+        "warning": warning,
     }
 
 
@@ -252,10 +262,10 @@ def run_linear_regression(
 
 def run_regression_for_market(
     market: Optional[str] = None,
-    pattern_code: Optional[int] = None,
-    success_horizon: int = 5,
+    success_horizons: Optional[List[int]] = None,
     success_thresholds: Optional[Dict[int, float]] = None,
     db_path: Path | str = DEFAULT_DB_PATH,
+    write_report: bool = True,
 ) -> Dict[str, object]:
     """
     Suorita koko pipeline yhdelle markkinalle ja palauta tulokset.
@@ -268,71 +278,148 @@ def run_regression_for_market(
         )
 
     df = add_return_labels(df, thresholds=success_thresholds)
-    if pattern_code is not None:
-        try:
-            pattern_code = int(pattern_code)
-        except ValueError as exc:
-            raise ValueError("Pattern-koodin tulee olla kokonaisluku") from exc
-        df = df[df[PATTERN_COLUMN] == pattern_code]
-        if df.empty:
-            raise ValueError(
-                f"Ei rivejä pattern-koodille {pattern_code} valitulla markkinalla."
-            )
-    if success_horizon not in DEFAULT_SUCCESS_THRESHOLDS:
+    overall_row_count = len(df)
+    horizons = success_horizons or [5]
+    invalid = [h for h in horizons if h not in DEFAULT_SUCCESS_THRESHOLDS]
+    if invalid:
         raise ValueError(
-            f"Horisontin tulee olla yksi arvoista {list(DEFAULT_SUCCESS_THRESHOLDS.keys())}"
+            f"Tuntemattomat horisontit: {invalid}. Sallittuja arvoja: "
+            f"{sorted(DEFAULT_SUCCESS_THRESHOLDS.keys())}"
         )
 
-    success_label = f"success{success_horizon}"
-    return_label = f"y{success_horizon}"
+    horizon_results: Dict[int, Dict[str, object]] = {}
+    warning_messages: List[str] = []
+    for horizon in horizons:
+        success_label = f"success{horizon}"
+        return_label = f"y{horizon}"
+        subset = df.dropna(
+            subset=FEATURE_COLUMNS
+            + [success_label, return_label, PATTERN_COLUMN, MARKET_COLUMN]
+        ).reset_index(drop=True)
 
-    df = df.dropna(
-        subset=FEATURE_COLUMNS
-        + [success_label, return_label, PATTERN_COLUMN, MARKET_COLUMN]
-    ).reset_index(drop=True)
+        if subset.empty:
+            raise ValueError(
+                f"Ei riittävästi dataa horisontille {horizon} valituilla suodattimilla."
+            )
 
-    if df.empty:
-        raise ValueError("Ei riittävästi täydellisiä rivejä valitulla markkinalla.")
+        X = build_feature_matrix(subset)
+        y_success = subset[success_label]
+        y_return = subset[return_label]
 
-    X = build_feature_matrix(df)
-    y_success = df[success_label]
-    y_return = df[return_label]
+        summary_text = quick_summary(subset, label_column=success_label)
+        logistic_result = run_logistic_regression(X, y_success)
+        linear_result = run_linear_regression(X, y_return)
 
-    summary_text = quick_summary(df, label_column=success_label)
-    logistic_result = run_logistic_regression(X, y_success)
-    linear_result = run_linear_regression(X, y_return)
+        horizon_results[horizon] = {
+            "row_count": len(subset),
+            "summary": summary_text,
+            "logistic": logistic_result,
+            "linear": linear_result,
+        }
+        if linear_result.get("warning"):
+            warning_messages.append(f"H{horizon}: {linear_result['warning']}")
+
+    thresholds_payload = {
+        h: success_thresholds.get(h, DEFAULT_SUCCESS_THRESHOLDS[h])
+        if success_thresholds
+        else DEFAULT_SUCCESS_THRESHOLDS[h]
+        for h in DEFAULT_SUCCESS_THRESHOLDS
+    }
+
+    report_text = _build_report_text(
+        market,
+        "Kaikki kynttilät (sis. downtrend)",
+        horizons,
+        thresholds_payload,
+        horizon_results,
+        warning_messages,
+    )
+    report_path = _write_report(report_text) if write_report else None
 
     return {
-        "row_count": len(df),
-        "pattern_code": pattern_code,
-        "pattern_label": PATTERN_LABELS.get(pattern_code, "Kaikki kynttilät")
-        if pattern_code is not None
-        else "Kaikki kynttilät",
-        "success_horizon": success_horizon,
-        "success_thresholds": {
-            h: success_thresholds.get(h, DEFAULT_SUCCESS_THRESHOLDS[h])
-            if success_thresholds
-            else DEFAULT_SUCCESS_THRESHOLDS[h]
-            for h in DEFAULT_SUCCESS_THRESHOLDS
-        },
-        "summary": summary_text,
-        "logistic": logistic_result,
-        "linear": linear_result,
+        "market": market,
+        "row_count": overall_row_count,
+        "pattern_code": None,
+        "pattern_label": "Kaikki kynttilät (sis. downtrend)",
+        "success_horizons": sorted(horizons),
+        "success_thresholds": thresholds_payload,
+        "horizons": horizon_results,
+        "report": report_text,
+        "report_path": report_path,
+        "warnings": warning_messages,
     }
 
 
-def main():
-    result = run_regression_for_market()
-    print(result["summary"])
-    print(f"\n== Logistinen regressio ==\nAUC: {result['logistic']['auc']:.3f}")
-    print(result["logistic"]["classification_report"])
-    print("\nTop +15:")
-    print(result["logistic"]["top_positive"])
-    print("\nBottom -15:")
-    print(result["logistic"]["top_negative"])
-    print("\n== Lineaarinen regressio ==")
-    print(result["linear"]["summary"])
+def _build_report_text(
+    market: Optional[str],
+    pattern_label: str,
+    horizons: List[int],
+    thresholds: Dict[int, float],
+    horizon_results: Dict[int, Dict[str, object]],
+    warnings: Optional[List[str]] = None,
+) -> str:
+    market_label = (market or "Kaikki markkinat").upper()
+    lines = [
+        f"Markkina: {market_label}",
+        f"Kynttilätyyppi: {pattern_label}",
+        "Käytetyt horisontit: " + ", ".join(f"{h} pv" for h in sorted(horizons)),
+        "Rajat (%): "
+        + ", ".join(
+            f"success{h}: {thresholds.get(h, float('nan')):.2f}"
+            for h in sorted(DEFAULT_SUCCESS_THRESHOLDS.keys())
+        ),
+        "",
+    ]
+    if warnings:
+        lines.append("VAROITUKSET:")
+        lines.extend(f"- {msg}" for msg in warnings)
+        lines.append("")
+
+    for horizon in sorted(horizon_results.keys()):
+        section = horizon_results[horizon]
+        logistic = section["logistic"]
+        linear = section["linear"]
+        lines.extend(
+            [
+                "=" * 60,
+                f"== Horisontti: {horizon} päivää ==",
+                f"Rivejä: {section['row_count']}",
+                "",
+                section["summary"],
+                "",
+                f"== Logistinen regressio (success{horizon}) ==",
+                f"AUC: {logistic['auc']:.3f}",
+                logistic["classification_report"].strip(),
+                "",
+                "Top 15 positiivista:",
+                _format_series(logistic["top_positive"]),
+                "",
+                "Top 15 negatiivista:",
+                _format_series(logistic["top_negative"]),
+                "",
+                f"== Lineaarinen regressio (y{horizon}) ==",
+                linear["summary"],
+                "",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def _format_series(series: pd.Series) -> str:
+    return "\n".join(f"{idx}: {val:.4f}" for idx, val in series.items())
+
+
+def _write_report(report_text: str) -> Path:
+    data_dir = PROJECT_ROOT / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = data_dir / f"regression_report_{timestamp}.txt"
+    path.write_text(report_text, encoding="utf-8")
+    return path
 
 
 if __name__ == "__main__":
-    main()
+    result = run_regression_for_market()
+    print(result["report"])
+    if result["report_path"]:
+        print(f"\nRaportti tallennettu: {result['report_path']}")

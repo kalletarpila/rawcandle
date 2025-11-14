@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Callable, Dict, List
 
 import flet as ft
-import pandas as pd
 
 from market_repository import list_markets
 from regression import run_regression
@@ -24,23 +23,12 @@ class RegressionView:
             options=self._build_market_options(),
             value="__all__",
         )
-        self.pattern_dropdown = ft.Dropdown(
-            label="Valitse kynttilätyyppi",
-            width=240,
-            options=self._build_pattern_options(),
-            value="__all__",
-        )
-        self.horizon_dropdown = ft.Dropdown(
-            label="Horisontti",
-            width=160,
-            options=[
-                ft.dropdown.Option("2", "2 päivää"),
-                ft.dropdown.Option("5", "5 päivää"),
-                ft.dropdown.Option("10", "10 päivää"),
-                ft.dropdown.Option("20", "20 päivää"),
-            ],
-            value="5",
-        )
+        self.horizon_checkboxes = {
+            2: ft.Checkbox(label="2 päivää", value=False),
+            5: ft.Checkbox(label="5 päivää", value=True),
+            10: ft.Checkbox(label="10 päivää", value=False),
+            20: ft.Checkbox(label="20 päivää", value=False),
+        }
         self.success_threshold_fields = {
             2: ft.TextField(
                 label="success2 raja",
@@ -102,11 +90,13 @@ class RegressionView:
                 ft.Row(
                     [
                         self.market_dropdown,
-                        self.pattern_dropdown,
-                        self.horizon_dropdown,
                         self.run_button,
                     ],
                     spacing=16,
+                ),
+                ft.Row(
+                    list(self.horizon_checkboxes.values()),
+                    spacing=10,
                 ),
                 ft.ResponsiveRow(
                     [
@@ -218,12 +208,6 @@ class RegressionView:
             pass
         return options
 
-    def _build_pattern_options(self) -> List[ft.dropdown.Option]:
-        options = [ft.dropdown.Option("__all__", "Kaikki kynttilät")]
-        for code, label in run_regression.PATTERN_LABELS.items():
-            options.append(ft.dropdown.Option(str(code), label))
-        return options
-
     def _set_status(self, message: str, color: str = ft.Colors.GREY_600) -> None:
         self.status_text.value = message
         self.status_text.color = color
@@ -234,27 +218,35 @@ class RegressionView:
 
     def _on_run_clicked(self, _):
         market_value = self.market_dropdown.value or "__all__"
-        pattern_value = self.pattern_dropdown.value or "__all__"
-        horizon_value = int(self.horizon_dropdown.value or 5)
+        selected_horizons = self._get_selected_horizons()
+        if not selected_horizons:
+            self._set_status(
+                "Valitse vähintään yksi horisontti.",
+                ft.Colors.RED_600,
+            )
+            self.run_button.disabled = False
+            self.page.update()
+            return
+
+        horizon_value = selected_horizons  # list
         thresholds = self._get_thresholds()
         self._set_status("Ajetaan regressioanalyysiä...", ft.Colors.BLUE_600)
         self.run_button.disabled = True
         self.page.update()
 
         try:
-            if pattern_value in {"", "__all__"}:
-                pattern_code = None
-            else:
-                pattern_code = int(pattern_value)
             result = run_regression.run_regression_for_market(
                 market_value,
-                pattern_code,
-                success_horizon=horizon_value,
+                success_horizons=selected_horizons,
                 success_thresholds=thresholds,
             )
-            formatted = self._format_result_text(result, market_value)
-            self.output_field.value = formatted
-            self._set_status("Analyysi valmis.", ft.Colors.GREEN_600)
+            self.output_field.value = result["report"]
+            status_msg = "Analyysi valmis."
+            if result.get("report_path"):
+                status_msg += f" Raportti tallennettu: {result['report_path']}"
+            if result.get("warnings"):
+                status_msg += " | Varoitukset: " + "; ".join(result["warnings"])
+            self._set_status(status_msg, ft.Colors.GREEN_600)
         except Exception as exc:
             self.output_field.value = f"Virhe: {exc}"
             self._set_status("Analyysi epäonnistui.", ft.Colors.RED_600)
@@ -264,51 +256,6 @@ class RegressionView:
                 self.page.update()
             except Exception:
                 pass
-
-    def _format_result_text(self, result: Dict[str, object], market_value: str) -> str:
-        market_label = (
-            "Kaikki markkinat" if market_value in {"", "__all__"} else market_value.upper()
-        )
-        logistic = result["logistic"]
-        linear = result["linear"]
-        pattern_label = result.get("pattern_label", "Kaikki kynttilät")
-        horizon = result.get("success_horizon", 5)
-        thresholds = result.get("success_thresholds", run_regression.DEFAULT_SUCCESS_THRESHOLDS)
-        label_name = f"success{horizon}"
-
-        top_pos = logistic["top_positive"]
-        top_neg = logistic["top_negative"]
-
-        def format_series(series: pd.Series) -> str:
-            return "\n".join(f"{idx}: {val:.4f}" for idx, val in series.items())
-
-        lines = [
-            f"Markkina: {market_label}",
-            f"Kynttilätyyppi: {pattern_label}",
-            f"Horisontti: {horizon} päivää",
-            "Rajat (%): "
-            + ", ".join(
-                f"success{h}:{thresholds.get(h, '-'):.2f}"
-                for h in sorted(run_regression.DEFAULT_SUCCESS_THRESHOLDS)
-            ),
-            f"Rivejä analyysissä: {result['row_count']}",
-            "",
-            result["summary"],
-            "",
-            f"== Logistinen regressio ({label_name}) ==",
-            f"AUC: {logistic['auc']:.3f}",
-            logistic["classification_report"].strip(),
-            "",
-            "Top 15 positiivista featurea:",
-            format_series(top_pos),
-            "",
-            "Top 15 negatiivista featurea:",
-            format_series(top_neg),
-            "",
-            "== Lineaarinen regressio (y5) ==",
-            linear["summary"],
-        ]
-        return "\n".join(lines)
 
     def _get_thresholds(self) -> Dict[int, float]:
         thresholds: Dict[int, float] = {}
@@ -320,3 +267,9 @@ class RegressionView:
             except (TypeError, ValueError):
                 field.error_text = "Anna luku (esim. 0.03)"
         return thresholds
+
+    def _get_selected_horizons(self) -> List[int]:
+        horizons = [
+            h for h, checkbox in self.horizon_checkboxes.items() if checkbox.value
+        ]
+        return sorted(horizons)

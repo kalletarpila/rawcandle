@@ -81,27 +81,23 @@ def test_run_regression_for_market_uses_loader(monkeypatch):
     monkeypatch.setattr(rr, "load_data", fake_loader)
     result = rr.run_regression_for_market(market="usa")
     assert result["row_count"] == len(sample_df)
-    assert "Kaikki rivit" in result["summary"]
-    assert 0 <= result["logistic"]["auc"] <= 1
-    assert result["pattern_code"] is None
-    assert result["pattern_label"] == "Kaikki kynttilät"
-    assert result["success_horizon"] == 5
+    horizons = result["horizons"]
+    assert 5 in horizons
+    assert 0 <= horizons[5]["logistic"]["auc"] <= 1
 
 
-def test_run_regression_for_market_filters_pattern(monkeypatch):
+def test_run_regression_includes_downtrend_control(monkeypatch):
     sample_df = _sample_dataframe(60)
 
     def fake_loader(db_path=None, market=None):
         return sample_df.copy()
 
     monkeypatch.setattr(rr, "load_data", fake_loader)
-    target_code = 2
-    expected_rows = len(sample_df[sample_df["kynttila_koodi"] == target_code])
-    result = rr.run_regression_for_market(pattern_code=target_code, success_horizon=2)
-    assert result["row_count"] == expected_rows
-    assert result["pattern_code"] == target_code
-    assert result["pattern_label"] == rr.PATTERN_LABELS[target_code]
-    assert result["success_horizon"] == 2
+    result = rr.run_regression_for_market(success_horizons=[2])
+    assert result["row_count"] == len(sample_df)
+    assert result["pattern_code"] is None
+    assert result["pattern_label"] == "Kaikki kynttilät (sis. downtrend)"
+    assert result["success_horizons"] == [2]
 
 
 def test_run_regression_respects_custom_thresholds(monkeypatch):
@@ -117,3 +113,5 @@ def test_run_regression_respects_custom_thresholds(monkeypatch):
     )
     for horizon, value in thresholds.items():
         assert pytest.approx(result["success_thresholds"][horizon], rel=1e-6) == value
+    assert result["success_horizons"] == [5]
+    assert 5 in result["horizons"]
