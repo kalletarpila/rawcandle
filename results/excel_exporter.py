@@ -2,7 +2,8 @@
 Excel-vienti results_data taulusta.
 
 Vie results_data taulun tiedot Excel-tiedostoon samassa muodossa
-kuin alkuperäinen generate_results.py (84 saraketta).
+kuin alkuperäinen generate_results.py ja liittää uudet feature-sarakkeet
+85. kolumnista eteenpäin.
 """
 
 import logging
@@ -32,6 +33,116 @@ class ExcelExporter:
         8: "Bearish Divergence",
     }
 
+    BASE_HEADERS = [
+        "osake",
+        "date",
+        "kynttila",
+        "vahvuus",
+        "t_1_alin",
+        "t_1_ylin",
+        "t_1_bodi",
+        "t_1_bodi_colour",
+        "t0_alin",
+        "t0_ylin",
+        "t0_bodi",
+        "t0_bodi_colour",
+        "t1_alin",
+        "t1_ylin",
+        "t1_bodi",
+        "t1_bodi_colour",
+        "t_2",
+        "t_5",
+        "t_10",
+        "t_15",
+        "t_20",
+        "t_2_hajonta",
+        "t_5_hajonta",
+        "t_10_hajonta",
+        "t_15_hajonta",
+        "t_20_hajonta",
+        "t2",
+        "t5",
+        "t10",
+        "t20",
+        "t_2_volyymi",
+        "t_5_volyymi",
+        "t_10_volyymi",
+        "t_15_volyymi",
+        "t_20_volyymi",
+        "t0_volyymi",
+        "t2_volyymi",
+        "t5_volyymi",
+        "t10_volyymi",
+        "t20_volyymi",
+        "t_2_5p_liukuva",
+        "t_2_10p_liukuva",
+        "t_2_20p_liukuva",
+        "t_5_5p_liukuva",
+        "t_5_10p_liukuva",
+        "t_5_20p_liukuva",
+        "t_10_5p_liukuva",
+        "t_10_10p_liukuva",
+        "t_10_20p_liukuva",
+        "t_15_5p_liukuva",
+        "t_15_10p_liukuva",
+        "t_15_20p_liukuva",
+        "t_20_5p_liukuva",
+        "t_20_10p_liukuva",
+        "t_20_20p_liukuva",
+        "t0_50p_liukuva",
+        "t0_200p_liukuva",
+        "SPX_0",
+        "SPX_2",
+        "SPX_5",
+        "SPX_10",
+        "SPX_15",
+        "SPX_20",
+        "SPX2",
+        "SPX5",
+        "SPX10",
+        "SPX15",
+        "SPX20",
+        "NDX_0",
+        "NDX_2",
+        "NDX_5",
+        "NDX_10",
+        "NDX_15",
+        "NDX_20",
+        "NDX2",
+        "NDX5",
+        "NDX10",
+        "NDX15",
+        "NDX20",
+        "RSI14_t0",
+        "t0_close_norm",
+        "Bearish Divergence",
+        "Bullish Divergence",
+        "weekday",
+    ]
+
+    NEW_FEATURE_HEADERS = [
+        "RSI_slope_5",
+        "Price_slope_5",
+        "Price_slope_10",
+        "Price_acceleration_5_10",
+        "Volatility_ratio_10_20",
+        "Gap_down_strength",
+        "Body_ratio",
+        "Shadow_ratio",
+        "SPX_volatility_10",
+        "NDX_volatility_10",
+        "Volume_impulse",
+        "Reversal_Context_Score",
+    ]
+
+    HEADERS = BASE_HEADERS + NEW_FEATURE_HEADERS
+    NON_ROUNDED_HEADERS = {
+        "t_1_bodi_colour",
+        "t0_bodi_colour",
+        "t1_bodi_colour",
+        "weekday",
+    }
+
     def __init__(self, db_path: str = "analysis.db"):
         """
         Alusta exporter.
@@ -50,6 +161,9 @@ class ExcelExporter:
         ticker_filter: Optional[list] = None,
         id_filter: Optional[list] = None,
         progress_callback=None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        downtrend_only: bool = False,
     ) -> tuple[bool, str]:
         """
         Vie results_data Excel-tiedostoon.
@@ -60,6 +174,9 @@ class ExcelExporter:
             ticker_filter: Lista tickereistä joita viedään (None = kaikki)
             id_filter: Lista result ID:istä joita viedään (None = kaikki)
             progress_callback: Callback(current, total) -> bool (True = keskeytä)
+            start_date: ISO-päivä (YYYY-MM-DD) alarajana (None = ei rajaa)
+            end_date: ISO-päivä (YYYY-MM-DD) ylärajana (None = ei rajaa)
+            downtrend_only: Jos True, vie vain downtrend-mallin rivit
 
         Returns:
             Tuple[bool, str]: (success, message)
@@ -91,6 +208,24 @@ class ExcelExporter:
                 if ticker_filter is not None:
                     results = [r for r in results if r["ticker"] in ticker_filter]
 
+            if downtrend_only:
+                results = [
+                    r for r in results if r.get("candle_pattern") == 0
+                ]
+
+            if start_date or end_date:
+                def in_date_range(date_value: Optional[str]) -> bool:
+                    if not date_value:
+                        return False
+                    value = str(date_value)
+                    if start_date and value < start_date:
+                        return False
+                    if end_date and value > end_date:
+                        return False
+                    return True
+
+                results = [r for r in results if in_date_range(r.get("date"))]
+
             if not results:
                 return False, "Valituilla suodattimilla ei löytynyt tuloksia."
 
@@ -102,92 +237,7 @@ class ExcelExporter:
             ws.title = "Kynttilätulokset"
 
             # Otsikkorivi (84 saraketta - samat kuin generate_results.py)
-            headers = [
-                "osake",
-                "date",
-                "kynttila",
-                "vahvuus",
-                "t_1_alin",
-                "t_1_ylin",
-                "t_1_bodi",
-                "t_1_bodi_colour",
-                "t0_alin",
-                "t0_ylin",
-                "t0_bodi",
-                "t0_bodi_colour",
-                "t1_alin",
-                "t1_ylin",
-                "t1_bodi",
-                "t1_bodi_colour",
-                "t_2",
-                "t_5",
-                "t_10",
-                "t_15",
-                "t_20",
-                "t_2_hajonta",
-                "t_5_hajonta",
-                "t_10_hajonta",
-                "t_15_hajonta",
-                "t_20_hajonta",
-                "t2",
-                "t5",
-                "t10",
-                "t20",
-                "t_2_volyymi",
-                "t_5_volyymi",
-                "t_10_volyymi",
-                "t_15_volyymi",
-                "t_20_volyymi",
-                "t0_volyymi",
-                "t2_volyymi",
-                "t5_volyymi",
-                "t10_volyymi",
-                "t20_volyymi",
-                "t_2_5p_liukuva",
-                "t_2_10p_liukuva",
-                "t_2_20p_liukuva",
-                "t_5_5p_liukuva",
-                "t_5_10p_liukuva",
-                "t_5_20p_liukuva",
-                "t_10_5p_liukuva",
-                "t_10_10p_liukuva",
-                "t_10_20p_liukuva",
-                "t_15_5p_liukuva",
-                "t_15_10p_liukuva",
-                "t_15_20p_liukuva",
-                "t_20_5p_liukuva",
-                "t_20_10p_liukuva",
-                "t_20_20p_liukuva",
-                "t0_50p_liukuva",
-                "t0_200p_liukuva",
-                "SPX_0",
-                "SPX_2",
-                "SPX_5",
-                "SPX_10",
-                "SPX_15",
-                "SPX_20",
-                "SPX2",
-                "SPX5",
-                "SPX10",
-                "SPX15",
-                "SPX20",
-                "NDX_0",
-                "NDX_2",
-                "NDX_5",
-                "NDX_10",
-                "NDX_15",
-                "NDX_20",
-                "NDX2",
-                "NDX5",
-                "NDX10",
-                "NDX15",
-                "NDX20",
-                "RSI14_t0",
-                "t0_close_norm",
-                "Bearish Divergence",
-                "Bullish Divergence",
-                "weekday",
-            ]
+            headers = self.HEADERS
 
             # Tyylitys otsikoille
             header_font = Font(bold=True, color="FFFFFF")
@@ -306,9 +356,13 @@ class ExcelExporter:
                     result.get("bullish_divergence"),
                     result.get("weekday"),
                 ]
+                row_data.extend(
+                    [result.get(col) for col in self.NEW_FEATURE_HEADERS]
+                )
 
                 # Tarkista että KAIKISSA sarakkeissa on data (ei None-arvoja)
-                if None in row_data:
+                base_values = row_data[: len(self.BASE_HEADERS)]
+                if None in base_values:
                     skipped_rows += 1
                     continue  # Skipppaa tämä rivi
 
@@ -316,11 +370,13 @@ class ExcelExporter:
                 written_rows += 1
                 actual_row = written_rows + 1  # +1 koska otsikkorivi on rivi 1
 
-                for col_num, value in enumerate(row_data, 1):
+                for col_num, (header, value) in enumerate(
+                    zip(headers, row_data), 1
+                ):
                     # Pyöristä REAL-luvut 2 desimaaliin
                     if isinstance(value, (int, float)) and value is not None:
                         # Älä pyöristä kokonaislukuja (colour, weekday)
-                        if col_num in [8, 12, 16, 84]:  # _colour sarakkeet ja weekday
+                        if header in self.NON_ROUNDED_HEADERS:
                             ws.cell(row=actual_row, column=col_num, value=value)
                         else:
                             # Pyöristä muut numeeriset arvot 2 desimaaliin

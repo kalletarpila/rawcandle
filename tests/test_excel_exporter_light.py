@@ -7,7 +7,7 @@ from analysis.database_manager import DatabaseManager
 from results.excel_exporter import ExcelExporter
 
 
-def _prepare_results_db(tmp_path: Path) -> str:
+def _prepare_results_db(tmp_path: Path, row_overrides=None) -> str:
     db_path = tmp_path / "analysis.db"
     manager = DatabaseManager(str(db_path))
     conn = manager.get_connection()
@@ -16,34 +16,42 @@ def _prepare_results_db(tmp_path: Path) -> str:
     cursor.execute("PRAGMA table_info(results_data)")
     columns_info = cursor.fetchall()
 
-    values = {}
-    for _cid, name, col_type, *_rest in columns_info:
-        if name == "id":
-            continue
-        upper_type = (col_type or "").upper()
-        if name == "ticker":
-            values[name] = "AAA"
-        elif name == "date":
-            values[name] = "2024-01-02"
-        elif name == "candle_pattern":
-            values[name] = 1
-        elif name == "signal_strength":
-            values[name] = 0.8
-        elif name == "weekday":
-            values[name] = 2
-        elif "TEXT" in upper_type:
-            values[name] = "0"
-        elif "INTEGER" in upper_type:
-            values[name] = 1
-        else:  # REAL tai muu numeerinen
-            values[name] = 1.0
+    def build_row(overrides: dict | None = None) -> dict:
+        values = {}
+        for _cid, name, col_type, *_rest in columns_info:
+            if name == "id":
+                continue
+            upper_type = (col_type or "").upper()
+            if name == "ticker":
+                values[name] = "AAA"
+            elif name == "date":
+                values[name] = "2024-01-02"
+            elif name == "candle_pattern":
+                values[name] = 1
+            elif name == "signal_strength":
+                values[name] = 0.8
+            elif name == "weekday":
+                values[name] = 2
+            elif "TEXT" in upper_type:
+                values[name] = "0"
+            elif "INTEGER" in upper_type:
+                values[name] = 1
+            else:  # REAL tai muu numeerinen
+                values[name] = 1.0
+        if overrides:
+            values.update(overrides)
+        return values
 
-    columns = ", ".join(values.keys())
-    placeholders = ", ".join(["?"] * len(values))
-    cursor.execute(
-        f"INSERT INTO results_data ({columns}) VALUES ({placeholders})",
-        list(values.values()),
-    )
+    rows = row_overrides or [{}]
+    for overrides in rows:
+        row_values = build_row(overrides)
+        columns = ", ".join(row_values.keys())
+        placeholders = ", ".join(["?"] * len(row_values))
+        cursor.execute(
+            f"INSERT INTO results_data ({columns}) VALUES ({placeholders})",
+            list(row_values.values()),
+        )
+
     conn.commit()
     return str(db_path)
 
@@ -62,3 +70,30 @@ def test_excel_exporter_writes_rows(tmp_path):
     ws = wb.active
     assert ws["A2"].value == "AAA"
     assert ws["C2"].value == 1
+
+
+def test_excel_exporter_applies_filters(tmp_path):
+    overrides = [
+        {"ticker": "AAA", "date": "2024-01-02", "candle_pattern": 1},
+        {"ticker": "BBB", "date": "2024-02-10", "candle_pattern": 0},
+        {"ticker": "BBB", "date": "2024-03-15", "candle_pattern": 1},
+    ]
+    db_path = _prepare_results_db(Path(tmp_path), overrides)
+    exporter = ExcelExporter(db_path)
+
+    output_file = Path(tmp_path) / "filtered.xlsx"
+    success, message = exporter.export_to_excel(
+        str(output_file),
+        ticker_filter=["BBB"],
+        start_date="2024-02-01",
+        end_date="2024-02-28",
+        downtrend_only=True,
+    )
+
+    assert success, message
+    wb = load_workbook(output_file)
+    ws = wb.active
+    assert ws.max_row == 2  # header + 1 row
+    assert ws["A2"].value == "BBB"
+    assert ws["B2"].value == "2024-02-10"
+    assert ws["C2"].value == 0

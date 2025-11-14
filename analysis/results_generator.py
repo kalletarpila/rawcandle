@@ -322,6 +322,7 @@ class ResultsGenerator:
             filter_sql = (
                 " AND " + " AND ".join(filter_clauses) if filter_clauses else ""
             )
+            has_filter = bool(filter_clauses)
 
             if max_date is None:
                 # Ensimmäinen generointi - hae kaikki
@@ -346,38 +347,26 @@ class ResultsGenerator:
                     # Query 2: Kaikki datat uusille tickereille
                     existing_placeholders = ",".join("?" * len(existing_tickers))
 
-                    query_params = [max_date] + list(existing_tickers)
+                    params = [max_date]
+                    if has_filter:
+                        params += filter_params
+                    params += list(existing_tickers)
+                    if has_filter:
+                        params += filter_params
 
-                    # Lisää ticker/pattern suodattimet
-                    if ticker_filter or pattern_filter:
-                        # Molemmat UNION-osiot tarvitsevat samat suodattimet
-                        cursor.execute(
-                            f"""
-                            SELECT ticker, date, pattern, signal_strength, rsi14
-                            FROM analysis_findings
-                            WHERE date > ?{filter_sql}
-                            UNION
-                            SELECT ticker, date, pattern, signal_strength, rsi14
-                            FROM analysis_findings
-                            WHERE ticker NOT IN ({existing_placeholders}){filter_sql}
-                            ORDER BY date DESC
-                            """,
-                            query_params + filter_params + filter_params,
-                        )
-                    else:
-                        cursor.execute(
-                            f"""
-                            SELECT ticker, date, pattern, signal_strength, rsi14
-                            FROM analysis_findings
-                            WHERE date > ?
-                            UNION
-                            SELECT ticker, date, pattern, signal_strength, rsi14
-                            FROM analysis_findings
-                            WHERE ticker NOT IN ({existing_placeholders})
-                            ORDER BY date DESC
-                            """,
-                            query_params,
-                        )
+                    cursor.execute(
+                        f"""
+                        SELECT ticker, date, pattern, signal_strength, rsi14
+                        FROM analysis_findings
+                        WHERE date > ?{filter_sql}
+                        UNION
+                        SELECT ticker, date, pattern, signal_strength, rsi14
+                        FROM analysis_findings
+                        WHERE ticker NOT IN ({existing_placeholders}){filter_sql}
+                        ORDER BY date DESC
+                        """,
+                        params,
+                    )
                 else:
                     # Ei olemassa olevia tickereitä, hae kaikki
                     cursor.execute(

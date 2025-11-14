@@ -215,3 +215,45 @@ def test_divergence_combo_filter_requires_matching_patterns(tmp_path):
     assert results[0]["date"] == combo_date
 
     db_manager.close()
+
+
+def test_filtered_generation_includes_new_ticker(tmp_path):
+    """Ticker-suodatin ei saa estää täysin uutta tickeriä päätymästä kantaan."""
+    analysis_db = Path(tmp_path) / "analysis.db"
+    stock_db = Path(tmp_path) / "stock.db"
+    hammer_idx_old = 120
+    hammer_idx_new = 140
+    overrides = {
+        ("TSTOLD", hammer_idx_old): {
+            "open": 110.0,
+            "close": 111.2,
+            "low": 100.0,
+            "high": 111.5,
+        },
+        ("TSTNEW", hammer_idx_new): {
+            "open": 210.0,
+            "close": 211.3,
+            "low": 205.0,
+            "high": 211.6,
+        },
+    }
+    _create_stock_database(stock_db, ["TSTOLD", "TSTNEW"], overrides=overrides)
+
+    db_manager = DatabaseManager(str(analysis_db))
+    old_dates = _run_analysis_for_ticker(db_manager, str(stock_db), "TSTOLD")
+    new_dates = _run_analysis_for_ticker(db_manager, str(stock_db), "TSTNEW")
+    _seed_divergence_data(db_manager, "TSTOLD", bullish_dates=old_dates)
+    _seed_divergence_data(db_manager, "TSTNEW", bullish_dates=new_dates)
+
+    generator = ResultsGenerator(db_manager, str(stock_db))
+    rows_old, _ = generator.generate_results(ticker_filter=["TSTOLD"])
+    assert rows_old > 0
+
+    rows_new, _ = generator.generate_results(ticker_filter=["TSTNEW"])
+    assert rows_new > 0
+
+    tickers = {row["ticker"] for row in db_manager.get_results_data()}
+    assert "TSTOLD" in tickers
+    assert "TSTNEW" in tickers
+
+    db_manager.close()

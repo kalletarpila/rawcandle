@@ -966,9 +966,9 @@ def create_results_view(app) -> ft.View:
         def vie_exceliin_click(e):
             """Avaa Excel-vienti dialogi valintoineen"""
             try:
-                # Tarkista onko tuloksia
-                metadata = get_results_metadata(app)
-                if not metadata or metadata.get("total_rows", 0) == 0:
+                db_manager = DatabaseManager("data/analysis.db")
+                total_count = db_manager.count_results_rows()
+                if total_count == 0:
                     e.page.snack_bar = ft.SnackBar(
                         ft.Text(
                             "Ei tuloksia vietäväksi. Generoi ensin tulokset tietokantaan."
@@ -977,8 +977,6 @@ def create_results_view(app) -> ft.View:
                     )
                     e.page.update()
                     return
-
-                total_count = metadata.get("total_rows", 0)
 
                 # Radio-painikkeiden tila
                 export_mode = ft.Ref[ft.RadioGroup]()
@@ -1063,6 +1061,11 @@ def create_results_view(app) -> ft.View:
                                     f"Tuloksia tietokannassa: {total_count}",
                                     weight=ft.FontWeight.BOLD,
                                 ),
+                                ft.Text(
+                                    "Viennissä käytetään valittuja suodattimia (ticker, kuviot, aikaväli, laskutrendi).",
+                                    size=12,
+                                    color=ft.Colors.GREY_600,
+                                ),
                                 ft.Divider(),
                                 ft.RadioGroup(
                                     ref=export_mode,
@@ -1123,8 +1126,9 @@ def create_results_view(app) -> ft.View:
             """Vie results_data Exceliin progress dialogilla (sisäinen funktio)"""
             try:
                 # Tarkista onko tuloksia
-                metadata = get_results_metadata(app)
-                if not metadata or metadata.get("total_rows", 0) == 0:
+                db_manager = DatabaseManager("data/analysis.db")
+                total_rows = db_manager.count_results_rows()
+                if total_rows == 0:
                     e.page.snack_bar = ft.SnackBar(
                         ft.Text(
                             "Ei tuloksia vietäväksi. Generoi ensin tulokset tietokantaan."
@@ -1201,15 +1205,68 @@ def create_results_view(app) -> ft.View:
                         else ""
                     )
 
-                    if ticker_mode == "single" and ticker_value:
+                    if ticker_value:
                         if "," in ticker_value:
                             ticker_filter = [
                                 t.strip() for t in ticker_value.split(",") if t.strip()
                             ]
                         else:
                             ticker_filter = [ticker_value]
+                        if ticker_mode != "single":
+                            print(
+                                "ℹ️ Ticker-kenttä käytössä Excel-viennissä vaikka 'Analysoi kaikki' on valittuna."
+                            )
                 except Exception as ex:
                     print(f"Virhe ticker-suodattimen lukemisessa: {ex}")
+
+                def resolve_date_value(picker, text_field):
+                    if picker and getattr(picker, "value", None):
+                        return picker.value.isoformat()
+                    if text_field and getattr(text_field, "value", None):
+                        v = text_field.value.strip()
+                        if v:
+                            d = try_parse_date(v)
+                            if d:
+                                return d.isoformat()
+                    return None
+
+                start_date = None
+                end_date = None
+                if (
+                    hasattr(app, "results_date_radio_group")
+                    and app.results_date_radio_group.value == "range"
+                ):
+                    start_date = resolve_date_value(
+                        getattr(app, "results_start_date", None),
+                        getattr(app, "results_start_date_text", None),
+                    )
+                    end_date = resolve_date_value(
+                        getattr(app, "results_end_date", None),
+                        getattr(app, "results_end_date_text", None),
+                    )
+                    if not start_date and not end_date:
+                        progress_dialog.open = False
+                        e.page.update()
+                        e.page.snack_bar = ft.SnackBar(
+                            ft.Text("Anna vähintään yksi päivämäärä aikaväliä varten."),
+                            open=True,
+                        )
+                        e.page.update()
+                        return
+                    if start_date and end_date and start_date > end_date:
+                        progress_dialog.open = False
+                        e.page.update()
+                        e.page.snack_bar = ft.SnackBar(
+                            ft.Text("Alkupäivä ei voi olla loppupäivän jälkeen."),
+                            open=True,
+                        )
+                        e.page.update()
+                        return
+
+                downtrend_only = bool(
+                    getattr(app, "results_downtrend_filter", None)
+                    and app.results_downtrend_filter.value
+                )
 
                 # Lue divergence_combo_filter
                 divergence_combo_filter = (
@@ -1222,12 +1279,9 @@ def create_results_view(app) -> ft.View:
                 # suodata ID:t divergenssi-yhdistelmille
                 if divergence_combo_filter and id_filter is None:
                     try:
-                        from analysis.database_manager import DatabaseManager
+                        all_results = db_manager.get_results_data()
 
-                        db_mgr = DatabaseManager("data/analysis.db")
-                        all_results = db_mgr.get_results_data()
-
-                        combo_pairs = db_mgr.get_divergence_combo_pairs()
+                        combo_pairs = db_manager.get_divergence_combo_pairs()
                         combo_ids = [
                             result.get("id")
                             for result in all_results
@@ -1274,6 +1328,23 @@ def create_results_view(app) -> ft.View:
                 base = Path(__file__).resolve().parents[1]
                 excel_path = base / "data" / "results.xlsx"
 
+                filter_notes = []
+                if ticker_filter:
+                    ticker_label = ", ".join(sorted(ticker_filter))
+                    if len(ticker_label) > 80:
+                        ticker_label = ticker_label[:77] + "..."
+                    filter_notes.append("Tickerit: " + ticker_label)
+                if start_date or end_date:
+                    filter_notes.append(
+                        f"Aikaväli: {start_date or '---'} / {end_date or '---'}"
+                    )
+                if downtrend_only:
+                    filter_notes.append("Vain laskutrendit")
+                if selected_patterns:
+                    filter_notes.append(
+                        f"Kuvioita {len(selected_patterns)} kpl"
+                    )
+
                 # Vie Excel
                 exporter = ExcelExporter("data/analysis.db")
                 success, message = exporter.export_to_excel(
@@ -1281,6 +1352,9 @@ def create_results_view(app) -> ft.View:
                     selected_patterns=selected_patterns,
                     ticker_filter=ticker_filter,
                     id_filter=id_filter,  # Lisätty ID-suodatin
+                    start_date=start_date,
+                    end_date=end_date,
+                    downtrend_only=downtrend_only,
                     progress_callback=progress_callback,
                 )
 
@@ -1289,10 +1363,15 @@ def create_results_view(app) -> ft.View:
                 e.page.update()
 
                 if success:
+                    filter_suffix = (
+                        "\nSuodattimet: " + ", ".join(filter_notes)
+                        if filter_notes
+                        else ""
+                    )
                     result_dialog = ft.AlertDialog(
                         title=ft.Text("✅ Valmis!"),
                         content=ft.Text(
-                            f"{message}{sample_info}\n\nTiedosto tallennettu: data/results.xlsx"
+                            f"{message}{sample_info}{filter_suffix}\n\nTiedosto tallennettu: data/results.xlsx"
                         ),
                         actions=[
                             ft.TextButton(

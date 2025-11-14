@@ -955,6 +955,18 @@ class DatabaseManager:
             self.logger.error(f"Get existing results tickers failed: {e}")
             return set()
 
+    def count_results_rows(self) -> int:
+        """Palauta results_data-taulun rivien lukumäärä."""
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM results_data")
+            result = cursor.fetchone()
+            return int(result[0]) if result and result[0] is not None else 0
+        except Exception as e:
+            self.logger.error(f"Count results rows failed: {e}")
+            return 0
+
     def insert_result_data(
         self,
         ticker: str,
