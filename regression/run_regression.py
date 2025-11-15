@@ -40,7 +40,6 @@ FEATURE_COLUMNS = [
     "t0_close_norm",
     "BullDiv_strength",
     "BullDiv_recent_strength",
-    "BullDiv_recent_offset",
     "Has_BullDiv_recent",
 
     # Trendin syvyys ja volatiliteetti
@@ -109,6 +108,117 @@ ALIAS_MAP = {
     "Bearish Divergence": "bearish_divergence",
     PATTERN_COLUMN: "candle_pattern",
 }
+
+
+def load_blackout_dates(db_path: Path | str = DEFAULT_DB_PATH) -> pd.DataFrame:
+    """
+    Lataa blackout_dates-taulun (earnings/dividend-päivät) analysis.db-kannasta.
+
+    Taulun schema:
+        id INTEGER PRIMARY KEY AUTOINCREMENT
+        ticker TEXT NOT NULL
+        date TEXT NOT NULL
+        event TEXT NOT NULL  -- 'earnings' tai 'dividend'
+        source TEXT        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        UNIQUE(ticker, date, event)
+    """
+    db_path = Path(db_path)
+    if not db_path.exists():
+        raise FileNotFoundError(f"Analysis-kantaa ei löytynyt: {db_path}")
+
+    with sqlite3.connect(db_path) as conn:
+        df = pd.read_sql_query(
+            "SELECT ticker, date, event FROM blackout_dates",
+            conn,
+        )
+
+    if df.empty:
+        return df
+
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df = df.dropna(subset=["date"])
+    df["ticker"] = df["ticker"].astype(str)
+    df["event"] = df["event"].astype(str).str.lower()
+    return df
+
+
+def apply_blackout_flags(
+    df: pd.DataFrame,
+    blackout_df: pd.DataFrame,
+    date_col: str = "date",
+    ticker_col: str = "ticker",
+) -> pd.DataFrame:
+    """
+    Lisää blackout-flagit results_data-DataFrameen.
+
+    Logiikka:
+    - is_earnings_t0:       1, jos samalla päivällä (t0) on earnings-event
+    - is_dividend_t0:       1, jos samalla päivällä (t0) on dividend-event
+    - is_earnings_window:   1, jos t0 on earnings-ikkunassa (event-päivä tai 1-2 päivää ENNEN earnings-päivää)
+    - is_dividend_window:   1, jos t0 on dividend-ikkunassa (event-päivä tai 1 päivä ENNEN dividend-päivää)
+    - is_blackout_t0:       1, jos t0 on earnings/dividend tapahtumapäivä
+    - is_blackout_window:   1, jos t0 on missä tahansa yllä mainituista ikkunoista
+    - exclude_from_regression: 1, jos is_blackout_window == 1 (eli rivi tiputetaan regressiokoulutuksesta)
+    """
+    if blackout_df is None or blackout_df.empty:
+        for col in [
+            "is_earnings_t0",
+            "is_dividend_t0",
+            "is_earnings_window",
+            "is_dividend_window",
+            "is_blackout_t0",
+            "is_blackout_window",
+            "exclude_from_regression",
+        ]:
+            df[col] = 0
+        return df
+
+    df = df.copy()
+    if date_col not in df.columns or ticker_col not in df.columns:
+        raise ValueError(f"apply_blackout_flags: df:stä puuttuu {date_col} tai {ticker_col}")
+
+    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+    df["ticker"] = df[ticker_col].astype(str)
+
+    bo = blackout_df.copy()
+    bo = bo[["ticker", "date", "event"]].dropna()
+    bo["event"] = bo["event"].str.lower()
+    grouped = bo.groupby("ticker")
+
+    df["is_earnings_t0"] = 0
+    df["is_dividend_t0"] = 0
+    df["is_earnings_window"] = 0
+    df["is_dividend_window"] = 0
+
+    for idx, row in df.iterrows():
+        t0_date = row[date_col]
+        tkr = row["ticker"]
+        if pd.isna(t0_date) or tkr not in grouped.indices:
+            continue
+
+        events_for_ticker = grouped.get_group(tkr)
+        deltas = (events_for_ticker["date"] - t0_date).dt.days
+        earnings_mask = events_for_ticker["event"] == "earnings"
+        earnings_deltas = deltas[earnings_mask]
+        dividend_mask = events_for_ticker["event"] == "dividend"
+        dividend_deltas = deltas[dividend_mask]
+
+        if (earnings_deltas == 0).any():
+            df.at[idx, "is_earnings_t0"] = 1
+        if (dividend_deltas == 0).any():
+            df.at[idx, "is_dividend_t0"] = 1
+        if ((earnings_deltas >= 0) & (earnings_deltas <= 2)).any():
+            df.at[idx, "is_earnings_window"] = 1
+        if ((dividend_deltas >= 0) & (dividend_deltas <= 1)).any():
+            df.at[idx, "is_dividend_window"] = 1
+
+    df["is_blackout_t0"] = ((df["is_earnings_t0"] == 1) | (df["is_dividend_t0"] == 1)).astype(int)
+    df["is_blackout_window"] = (
+        (df["is_earnings_window"] == 1) | (df["is_dividend_window"] == 1)
+    ).astype(int)
+    df["exclude_from_regression"] = df["is_blackout_window"]
+
+    return df
 
 
 # ------------- 1. Datan luku -----------------
@@ -189,13 +299,22 @@ def build_feature_matrix(
     continuous_cols = FEATURE_COLUMNS.copy()
     feature_df = df[continuous_cols].copy()
 
-    categorical = df[[PATTERN_COLUMN, MARKET_COLUMN]].astype("category")
+    # is_candle_day aina mukana dummyissä
     dummy_df = pd.DataFrame({"is_candle_day": df["is_candle_day"]})
+
+    # Kategoriset sarakkeet: pattern, market ja optional BullDiv_recent_offset
+    categorical_cols = [PATTERN_COLUMN, MARKET_COLUMN]
+    offset_col = "BullDiv_recent_offset"
+    if offset_col in df.columns:
+        categorical_cols.append(offset_col)
+
+    categorical = df[categorical_cols].astype("category")
     dummy_df = dummy_df.join(categorical)
-    dummy_df = pd.get_dummies(
-        dummy_df, columns=[PATTERN_COLUMN, MARKET_COLUMN], drop_first=True
-    )
+
+    # Tee dummyt kaikista kategorisista (pattern, market, offset)
+    dummy_df = pd.get_dummies(dummy_df, columns=categorical_cols, drop_first=True)
     dummy_df = dummy_df.astype(float)
+
     feature_df = pd.concat([feature_df, dummy_df], axis=1)
     dummy_cols = [col for col in feature_df.columns if col not in continuous_cols]
     return feature_df, continuous_cols, dummy_cols
@@ -207,7 +326,9 @@ def calculate_vif(X: pd.DataFrame) -> pd.DataFrame:
     X_np = X.values
     for i in range(X.shape[1]):
         try:
-            vif_val = variance_inflation_factor(X_np, i)
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=RuntimeWarning)
+                vif_val = variance_inflation_factor(X_np, i)
         except Exception:
             vif_val = float("nan")
         vif_rows.append({"feature": X.columns[i], "VIF": float(vif_val)})
@@ -244,13 +365,16 @@ def quick_summary(df: pd.DataFrame, label_column: str = "success5") -> str:
 # ------------- 5. Logistinen regressio -----------------
 
 def run_logistic_regression(
-    X: pd.DataFrame, y: pd.Series, continuous_cols: list[str]
+    X: pd.DataFrame,
+    y: pd.Series,
+    continuous_cols: list[str],
+    label_name: str = "success",
 ) -> Dict[str, object]:
     """
     Logistinen regressio P(success5=1 | featuret).
     """
     if y.nunique() < 2:
-        raise ValueError("success5 sisältää vain yhden luokan – lisää dataa.")
+        raise ValueError(f"{label_name} sisältää vain yhden luokan – lisää dataa.")
 
     X_train, X_test, y_train, y_test = train_test_split(
         X,
@@ -335,7 +459,9 @@ def run_linear_regression(
     friendly_cols = [_friendly_feature_name(name) for name in X_scaled_df.columns]
     X_scaled_df.columns = friendly_cols
     X_const = sm.add_constant(X_scaled_df)
-    model = sm.OLS(y, X_const).fit()
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        model = sm.OLS(y, X_const).fit()
     cond_number = float(np.linalg.cond(X_const))
     warning = None
     if not np.isfinite(cond_number) or cond_number > 1e12:
@@ -387,7 +513,15 @@ def run_regression_for_market(
         )
 
     df = add_return_labels(df, thresholds=success_thresholds)
-    overall_row_count = len(df)
+    blackout_df = load_blackout_dates(db_path=db_path)
+    df = apply_blackout_flags(df, blackout_df)
+    df_full = df.copy()
+    if "exclude_from_regression" in df.columns:
+        train_mask = df["exclude_from_regression"].fillna(0) == 0
+        df = df.loc[train_mask].reset_index(drop=True)
+    else:
+        df = df.reset_index(drop=True)
+
     filter_label = "Kaikki kynttilät (sis. downtrend)"
 
     if pattern_code is not None:
@@ -405,6 +539,14 @@ def run_regression_for_market(
         df = filtered
         friendly = PATTERN_LABELS.get(pattern_code, f"Pattern {pattern_code}")
         filter_label = f"{friendly} + downtrend"
+        df_full = df_full[
+            df_full[PATTERN_COLUMN].astype(int).isin({pattern_code, 0})
+        ].reset_index(drop=True)
+    else:
+        df_full = df_full.reset_index(drop=True)
+
+    if df.empty:
+        raise ValueError("Ei rivejä regressiota varten blackout-suodatuksen jälkeen.")
     horizons = success_horizons or [5]
     invalid = [h for h in horizons if h not in DEFAULT_SUCCESS_THRESHOLDS]
     if invalid:
@@ -413,36 +555,80 @@ def run_regression_for_market(
             f"{sorted(DEFAULT_SUCCESS_THRESHOLDS.keys())}"
         )
 
+    # Globaali VIF-analyysi: käytä kaikkia rivejä, joissa featuret ovat kunnossa
+    vif_subset = df.dropna(
+        subset=FEATURE_COLUMNS + [PATTERN_COLUMN, MARKET_COLUMN]
+    ).reset_index(drop=True)
+    if vif_subset.empty:
+        raise ValueError("Ei riittävästi dataa VIF-analyysiä varten.")
+    X_vif, continuous_cols_vif, dummy_cols_vif = build_feature_matrix(vif_subset)
+    vif_all = calculate_vif(X_vif)
+    if continuous_cols_vif:
+        vif_continuous = calculate_vif(X_vif[continuous_cols_vif])
+    else:
+        vif_continuous = pd.DataFrame(columns=["feature", "VIF"])
+
     horizon_results: Dict[int, Dict[str, object]] = {}
     warning_messages: List[str] = []
     for horizon in horizons:
         success_label = f"success{horizon}"
         return_label = f"y{horizon}"
-        subset = df.dropna(
+        subset_train = df.dropna(
+            subset=FEATURE_COLUMNS
+            + [success_label, return_label, PATTERN_COLUMN, MARKET_COLUMN]
+        ).reset_index(drop=True)
+        subset_full = df_full.dropna(
             subset=FEATURE_COLUMNS
             + [success_label, return_label, PATTERN_COLUMN, MARKET_COLUMN]
         ).reset_index(drop=True)
 
-        if subset.empty:
+        if subset_train.empty:
             raise ValueError(
                 f"Ei riittävästi dataa horisontille {horizon} valituilla suodattimilla."
             )
 
-        X, continuous_cols, dummy_cols = build_feature_matrix(subset)
-        vif_df = calculate_vif(X)
-        y_success = subset[success_label]
-        y_return = subset[return_label]
+        X, continuous_cols, dummy_cols = build_feature_matrix(subset_train)
+        y_success = subset_train[success_label]
+        y_return = subset_train[return_label]
 
-        summary_text = quick_summary(subset, label_column=success_label)
-        logistic_result = run_logistic_regression(X, y_success, continuous_cols)
+        summary_text = quick_summary(subset_train, label_column=success_label)
+        logistic_result = run_logistic_regression(
+            X, y_success, continuous_cols, label_name=success_label
+        )
         linear_result = run_linear_regression(X, y_return, continuous_cols)
 
+        if "is_blackout_window" in subset_full.columns:
+            mask_blackout = subset_full["is_blackout_window"] == 1
+            mask_non_blackout = subset_full["is_blackout_window"] == 0
+
+            def _rate(mask: pd.Series) -> tuple[float, int]:
+                sub = subset_full.loc[mask]
+                if sub.empty:
+                    return 0.0, 0
+                return float(sub[success_label].mean()), len(sub)
+
+            blackout_rate, n_blackout = _rate(mask_blackout)
+            non_rate, n_non = _rate(mask_non_blackout)
+            blackout_stats = {
+                "blackout_rate": blackout_rate,
+                "blackout_n": n_blackout,
+                "non_blackout_rate": non_rate,
+                "non_blackout_n": n_non,
+            }
+        else:
+            blackout_stats = {
+                "blackout_rate": 0.0,
+                "blackout_n": 0,
+                "non_blackout_rate": 0.0,
+                "non_blackout_n": 0,
+            }
+
         horizon_results[horizon] = {
-            "row_count": len(subset),
+            "row_count": len(subset_train),
             "summary": summary_text,
             "logistic": logistic_result,
             "linear": linear_result,
-            "vif": vif_df,
+            "blackout_stats": blackout_stats,
         }
         if linear_result.get("warning"):
             warning_messages.append(f"H{horizon}: {linear_result['warning']}")
@@ -475,6 +661,8 @@ def run_regression_for_market(
         "report": report_text,
         "report_path": report_path,
         "warnings": warning_messages,
+        "vif_all": vif_all,
+        "vif_continuous": vif_continuous,
     }
 
 
@@ -515,6 +703,28 @@ def _build_report_text(
                 "",
                 section["summary"],
                 "",
+            ]
+        )
+        blackout = section.get("blackout_stats") or {}
+        if blackout:
+            lines.extend(
+                [
+                    "== Blackout-ikkuna-analyysi ==",
+                    (
+                        f"Blackout-ikkuna (earnings/dividend): "
+                        f"success{horizon} = {blackout.get('blackout_rate', 0.0):.3f} "
+                        f"(n={blackout.get('blackout_n', 0)})"
+                    ),
+                    (
+                        f"Ei blackout-ikkunaa: "
+                        f"success{horizon} = {blackout.get('non_blackout_rate', 0.0):.3f} "
+                        f"(n={blackout.get('non_blackout_n', 0)})"
+                    ),
+                    "",
+                ]
+            )
+        lines.extend(
+            [
                 f"== Logistinen regressio (success{horizon}) ==",
                 f"AUC: {logistic['auc']:.3f}",
                 logistic["classification_report"].strip(),
@@ -555,10 +765,11 @@ def _write_report(report_text: str) -> Path:
 if __name__ == "__main__":
     result = run_regression_for_market()
     print(result["report"])
-    first_horizon = sorted(result["horizons"].keys())[0]
-    vif_df = result["horizons"][first_horizon]["vif"]
-    print("\n== VIF-analyysi (Variance Inflation Factor) ==")
-    print(vif_df.head(20))
+    print("\n== VIF-analyysi (kaikki featuret) ==")
+    print(result["vif_all"].head(20))
+
+    print("\n== VIF-analyysi (vain jatkuvat featuret) ==")
+    print(result["vif_continuous"].head(20))
     latest_horizon = max(result["horizons"].keys())
     logistic_result = result["horizons"][latest_horizon]["logistic"]
     linear_result = result["horizons"][latest_horizon]["linear"]
