@@ -228,9 +228,44 @@ class RawCandleApp:
 
     def _refresh_markets(self):
         self.markets = list_markets(self.osakedata_db_path)
+        self._load_market_stats()
         self._update_market_dropdown()
         self._update_random_market_dropdown()
         self._update_market_list()
+    def _load_market_stats(self):
+        """Laske markkinakohtaiset osake- ja blackout-lukumäärät."""
+        stats: dict[str, dict[str, int]] = {}
+        ticker_market: dict[str, str] = {}
+        try:
+            with sqlite3.connect(self.osakedata_db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT UPPER(osake), LOWER(market) FROM osakedata GROUP BY UPPER(osake)"
+                )
+                for ticker, market in cursor.fetchall():
+                    if not ticker or not market:
+                        continue
+                    ticker_market[ticker] = market
+                    stats.setdefault(market, {"tickers": 0, "blackouts": 0})
+                    stats[market]["tickers"] += 1
+        except Exception:
+            self._market_stats = stats
+            return
+
+        analysis_path = os.path.join(self.data_dir, "analysis.db")
+        try:
+            with sqlite3.connect(analysis_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT DISTINCT UPPER(ticker) FROM blackout_dates")
+                for (ticker,) in cursor.fetchall():
+                    market = ticker_market.get(ticker)
+                    if not market:
+                        continue
+                    stats.setdefault(market, {"tickers": 0, "blackouts": 0})
+                    stats[market]["blackouts"] += 1
+        except Exception:
+            pass
+        self._market_stats = stats
 
     def _update_market_dropdown(self):
         if not getattr(self, "market_dropdown", None):
@@ -297,10 +332,16 @@ class RawCandleApp:
             if isinstance(min_vol, (int, float))
             else "-"
         )
+        stats = getattr(self, "_market_stats", {})
+        key = (market.get("abbreviation") or "").strip().lower()
+        market_stats = stats.get(key, {})
+        ticker_count = market_stats.get("tickers", 0)
+        blackout_count = market_stats.get("blackouts", 0)
         subtitle = (
             f"Lyhenne: {market['abbreviation'].upper()} | "
             f"Yahoo: {market['yahoo_suffix'] or '-'} | "
-            f"Min vol: {min_vol_str}"
+            f"Min vol: {min_vol_str}\n"
+            f"Osakkeita: {ticker_count} | Blackout-tickerit: {blackout_count}"
         )
         return ft.Container(
             content=ft.Row(
@@ -2433,6 +2474,8 @@ class RawCandleApp:
         self.analysis_db_path = os.path.join(self.data_dir, "analysis.db")
         ensure_market_schema(self.osakedata_db_path)
         self.markets = list_markets(self.osakedata_db_path)
+        self._market_stats: dict[str, dict[str, int]] = {}
+        self._load_market_stats()
         self.market_form_id = None
         self.market_list_column = None
         self.market_name_input = None
@@ -3003,8 +3046,10 @@ Virheet: {error_count}"""
         def worker():
             from blackout.fetch_blackouts import fetch_blackouts_for_missing_tickers
 
-            def progress_cb(ticker: str, index: int, total: int) -> None:
-                ticker_text.value = f"{index}/{total}: {ticker}"
+            def progress_cb(ticker: str, index: int, total: int, inserted: int) -> None:
+                ticker_text.value = (
+                    f"{index}/{total}: {ticker} (lisätty {inserted} tapahtumaa)"
+                )
                 try:
                     progress_bar.value = index / float(total)
                 except Exception:
@@ -3249,30 +3294,54 @@ Virheet: {error_count}"""
                     deleted_osakedata = cursor.rowcount
                     conn.commit()
 
-            # Poista analysis-kannasta
+            deleted_analysis_tables: dict[str, int] = {}
             analysis_path = os.path.join(data_dir, "analysis.db")
-            deleted_analysis = 0
             if os.path.exists(analysis_path):
                 with sqlite3.connect(analysis_path) as conn:
                     cursor = conn.cursor()
-                    # Tarkista onko analysis-taulu olemassa
-                    cursor.execute(
-                        "SELECT name FROM sqlite_master WHERE type='table' AND name='analysis'"
-                    )
-                    if cursor.fetchone():
+
+                    def delete_from_table(table: str, column: str = "ticker") -> int:
                         cursor.execute(
-                            "DELETE FROM analysis WHERE osake = ?", (ticker,)
+                            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                            (table,),
                         )
-                        deleted_analysis = cursor.rowcount
-                        conn.commit()
+                        if cursor.fetchone():
+                            cursor.execute(
+                                f"DELETE FROM {table} WHERE {column} = ?", (ticker,)
+                            )
+                            count = cursor.rowcount
+                            conn.commit()
+                            return count
+                        return 0
+
+                    deleted_analysis_tables["results_data"] = delete_from_table(
+                        "results_data", "ticker"
+                    )
+                    deleted_analysis_tables["analysis_findings"] = delete_from_table(
+                        "analysis_findings", "ticker"
+                    )
+                    deleted_analysis_tables["divergence_data"] = delete_from_table(
+                        "divergence_data", "ticker"
+                    )
+                    deleted_analysis_tables["blackout_dates"] = delete_from_table(
+                        "blackout_dates", "ticker"
+                    )
 
             self.close_delete_dialog(None)
             self.update_stock_count()
 
-            if deleted_osakedata > 0 or deleted_analysis > 0:
+            total_analysis_deleted = sum(deleted_analysis_tables.values())
+            if deleted_osakedata > 0 or total_analysis_deleted > 0:
+                breakdown = ", ".join(
+                    f"{table}: {count}"
+                    for table, count in deleted_analysis_tables.items()
+                    if count
+                )
+                if not breakdown:
+                    breakdown = "analysis-tauluista ei löytynyt rivejä"
                 self.loading_text.value = (
                     f"✅ {ticker} poistettu! "
-                    f"(osakedata: {deleted_osakedata} riviä, analysis: {deleted_analysis} riviä)"
+                    f"(osakedata: {deleted_osakedata} riviä, {breakdown})"
                 )
                 self.loading_text.color = ft.Colors.GREEN_600
             else:

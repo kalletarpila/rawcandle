@@ -34,7 +34,6 @@ class StockView:
         ("Morning Star", "Morning Star"),
         ("Dragonfly Doji", "Dragonfly Doji"),
         ("Bullish Divergence", "Bullish Divergence"),
-        ("Bearish Divergence", "Bearish Divergence"),
     ]
     PATTERN_COLORS = {
         "downtrend": "#dc2626",  # kirkas punainen
@@ -45,7 +44,6 @@ class StockView:
         "Morning Star": "#d97706",  # ruskea/oranssi
         "Dragonfly Doji": "#14b8a6",  # vihertävä sininen
         "Bullish Divergence": "#f43f5e",  # pinkki
-        "Bearish Divergence": "#8b5cf6",  # violetti sinertävä
     }
 
     def __init__(self, page: ft.Page, appbar_factory: Callable[[], ft.AppBar]):
@@ -82,6 +80,7 @@ class StockView:
         self.show_ma50 = True
         self.show_ma200 = True
         self.show_rsi = True
+        self.blackout_dates: Set[dt.date] = set()
 
     # ------------------------------------------------------------------ #
     # Public API
@@ -115,7 +114,7 @@ class StockView:
         filters_card = self._build_filters_card()
 
         self.chart_container = ft.Container(
-            height=520,
+            height=600,
             bgcolor=ft.Colors.GREY_50,
             border_radius=10,
             padding=15,
@@ -491,6 +490,7 @@ class StockView:
                 page=0,
                 page_size=self.ANALYSIS_PAGE_SIZE,
             )
+            blackout_dates = services.fetch_blackout_dates(ticker)
         except services.StockDataError as exc:
             self._set_status(str(exc), ft.Colors.RED_600)
             self._clear_results()
@@ -511,6 +511,7 @@ class StockView:
         self.analysis_events = analysis_events
         self.analysis_total = total
         self.analysis_page = 0
+        self.blackout_dates = blackout_dates or set()
 
         self._render_chart()
         self._set_analysis_rows(analysis_rows)
@@ -565,7 +566,7 @@ class StockView:
         self.chart_container.content = ft.WebView(
             url=data_url,
             enable_javascript=True,
-            height=520,
+            height=600,
         )
         self.chart_container.update()
 
@@ -625,9 +626,13 @@ class StockView:
             rows=3,
             cols=1,
             shared_xaxes=True,
-            row_heights=[0.65, 0.2, 0.15],
-            vertical_spacing=0.03,
-            specs=[[{"secondary_y": False}], [{"secondary_y": False}], [{"secondary_y": False}]],
+            row_heights=[0.58, 0.17, 0.33],
+            vertical_spacing=0.05,
+            specs=[
+                [{"secondary_y": False}],
+                [{"secondary_y": False}],
+                [{"secondary_y": False}],
+            ],
         )
 
         fig.add_trace(
@@ -703,12 +708,17 @@ class StockView:
             )
 
         if volumes:
+            blackout_set = getattr(self, "blackout_dates", set()) or set()
+            volume_colors = [
+                "#dc2626" if rec["date"] in blackout_set else "#6366f1"
+                for rec in records
+            ]
             fig.add_trace(
                 go.Bar(
                     x=dates,
                     y=volumes,
                     name="Volyymi",
-                    marker_color="#6366f1",
+                    marker_color=volume_colors,
                     opacity=0.7,
                 ),
                 row=2,
@@ -717,10 +727,11 @@ class StockView:
             fig.update_yaxes(title_text="Volyymi", row=2, col=1)
 
         if self.show_rsi:
+            rsi_values = [rec.get("rsi") for rec in records]
             fig.add_trace(
                 go.Scatter(
                     x=dates,
-                    y=[rec.get("rsi") for rec in records],
+                    y=rsi_values,
                     mode="lines",
                     name="RSI",
                     line=dict(color="#f43f5e", width=1.2),
@@ -736,7 +747,7 @@ class StockView:
                 y1=70,
                 xref="x3",
                 yref="y3",
-                line=dict(color="#d1d5db", dash="dash", width=1),
+                line=dict(color="#1e3a8a", dash="dash", width=1),
             )
             fig.add_shape(
                 type="line",
@@ -746,7 +757,7 @@ class StockView:
                 y1=30,
                 xref="x3",
                 yref="y3",
-                line=dict(color="#d1d5db", dash="dash", width=1),
+                line=dict(color="#1e3a8a", dash="dash", width=1),
             )
             fig.update_yaxes(title_text="RSI", row=3, col=1, range=[0, 100])
 

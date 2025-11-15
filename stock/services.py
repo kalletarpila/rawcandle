@@ -4,7 +4,7 @@ import datetime as dt
 import sqlite3
 from collections import deque
 from pathlib import Path
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple, Set
 
 from simu import config as simu_config
 from simu.db import PriceRow
@@ -110,6 +110,40 @@ def fetch_price_rows(
         price_records = price_records[-limit:]
 
     return price_records, total_rows
+
+
+def fetch_blackout_dates(
+    ticker: str, analysis_db: Path | None = None
+) -> Set[dt.date]:
+    """Palauta blackout-päivien joukko (earnings/dividend) annetulle tickerille."""
+    if not ticker:
+        return set()
+
+    db_path = Path(analysis_db or ANALYSIS_DB_PATH)
+    try:
+        conn = _connect(db_path)
+    except StockDataError:
+        return set()
+
+    try:
+        cursor = conn.execute(
+            "SELECT date FROM blackout_dates WHERE ticker = ?",
+            (ticker.strip().upper(),),
+        )
+        dates: Set[dt.date] = set()
+        for row in cursor.fetchall():
+            date_value = row["date"]
+            if not date_value:
+                continue
+            try:
+                dates.add(dt.date.fromisoformat(date_value))
+            except ValueError:
+                continue
+        return dates
+    except sqlite3.OperationalError:
+        return set()
+    finally:
+        conn.close()
 
 
 def fetch_analysis_records(

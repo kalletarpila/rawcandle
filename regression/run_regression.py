@@ -647,6 +647,8 @@ def run_regression_for_market(
         thresholds_payload,
         horizon_results,
         warning_messages,
+        vif_all,
+        vif_continuous,
     )
     report_path = _write_report(report_text) if write_report else None
 
@@ -673,6 +675,8 @@ def _build_report_text(
     thresholds: Dict[int, float],
     horizon_results: Dict[int, Dict[str, object]],
     warnings: Optional[List[str]] = None,
+    vif_all: Optional[pd.DataFrame] = None,
+    vif_continuous: Optional[pd.DataFrame] = None,
 ) -> str:
     market_label = (market or "Kaikki markkinat").upper()
     lines = [
@@ -689,6 +693,15 @@ def _build_report_text(
     if warnings:
         lines.append("VAROITUKSET:")
         lines.extend(f"- {msg}" for msg in warnings)
+        lines.append("")
+
+    if vif_all is not None:
+        lines.append("== VIF-analyysi (kaikki featuret) ==")
+        lines.extend(vif_all.head(20).to_string(index=False).splitlines())
+        lines.append("")
+    if vif_continuous is not None:
+        lines.append("== VIF-analyysi (vain jatkuvat featuret) ==")
+        lines.extend(vif_continuous.head(20).to_string(index=False).splitlines())
         lines.append("")
 
     for horizon in sorted(horizon_results.keys()):
@@ -765,11 +778,6 @@ def _write_report(report_text: str) -> Path:
 if __name__ == "__main__":
     result = run_regression_for_market()
     print(result["report"])
-    print("\n== VIF-analyysi (kaikki featuret) ==")
-    print(result["vif_all"].head(20))
-
-    print("\n== VIF-analyysi (vain jatkuvat featuret) ==")
-    print(result["vif_continuous"].head(20))
     latest_horizon = max(result["horizons"].keys())
     logistic_result = result["horizons"][latest_horizon]["logistic"]
     linear_result = result["horizons"][latest_horizon]["linear"]
