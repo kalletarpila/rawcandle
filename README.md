@@ -18,4 +18,11 @@ The upcoming `simu` package adds a backtesting-style simulation tab to RawCandle
 - **Trade logic**: capital input represents thousands USD (e.g. `10 → 10,000`). On a qualifying `t0`, buy on the next available session’s Open using the configured percentage of free cash (full shares only; skip trade if even one share cannot be purchased). Maintain weighted-average cost. Evaluate stop-loss / take-profit on each close; trigger sales at the next available Open (process all exits before new entries on the same day). If future pricing is missing, carry positions until data resumes or the simulation end.
 - **Results**: for each ticker emit `{ticker, start_capital, end_capital, growth_pct, buy_trades}` with numeric fields (growth in percent). The final portfolio value equals remaining cash plus mark-to-market of open lots at the final day’s Close (or latest prior session if the end date is a holiday).
 
+## 📊 Regression pipeline & blackout-data
+
+- `apply_blackout_flags()` tuottaa nyt myös `has_blackout_data`-sarakkeen ticker-tasolla ja sarake on osa `FEATURE_COLUMNS`-listaa, joten logistinen ja lineaarinen malli näkevät blackout-kattavuuden binäärisenä featuretietona.
+- Kun `run_regression_for_market()` ajetaan, raportin alkuun lisätään tiivistelmä rivimääristä: kuinka monella rivillä blackout-data on (ja prosenttiosuus) sekä montako riviä jää ilman dataa.
+- Pipeline hyväksyy uuden parametrin `require_blackout_data` (oletus `False`). Jos UI:ssa valitaan “Käytä vain tickereitä, joilla blackout-data…”, tausta-ajossa välitetään `require_blackout_data=True`, jolloin regressio suoritetaan vain niille tickereille, joilta löytyy earnings/dividend-blackoutta.
+- Sama flagi on saatavilla myös suoraan Python-rajapinnan kautta, joten komentoriviltä voi rajata datasetin helposti: `run_regression_for_market(market="nyse", require_blackout_data=True)`.
+
 ### 🚀 Enjoy coding with Flet + Render!

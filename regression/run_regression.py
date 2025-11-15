@@ -68,6 +68,9 @@ FEATURE_COLUMNS = [
     "Volume_impulse",
     "Reversal_Context_Score",
 
+    # Blackout-kattavuus
+    "has_blackout_data",
+
     # Markkinaympäristö ja indeksivola
     "SPX_10",
     "SPX_20",
@@ -169,6 +172,7 @@ def apply_blackout_flags(
             "is_blackout_t0",
             "is_blackout_window",
             "exclude_from_regression",
+            "has_blackout_data",
         ]:
             df[col] = 0
         return df
@@ -183,12 +187,14 @@ def apply_blackout_flags(
     bo = blackout_df.copy()
     bo = bo[["ticker", "date", "event"]].dropna()
     bo["event"] = bo["event"].str.lower()
+    tickers_with_blackout = set(bo["ticker"].astype(str).unique())
     grouped = bo.groupby("ticker")
 
     df["is_earnings_t0"] = 0
     df["is_dividend_t0"] = 0
     df["is_earnings_window"] = 0
     df["is_dividend_window"] = 0
+    df["has_blackout_data"] = df["ticker"].astype(str).isin(tickers_with_blackout).astype(int)
 
     for idx, row in df.iterrows():
         t0_date = row[date_col]
@@ -501,6 +507,7 @@ def run_regression_for_market(
     success_thresholds: Optional[Dict[int, float]] = None,
     db_path: Path | str = DEFAULT_DB_PATH,
     write_report: bool = True,
+    require_blackout_data: bool = False,
 ) -> Dict[str, object]:
     """
     Suorita koko pipeline yhdelle markkinalle ja palauta tulokset.
@@ -516,11 +523,14 @@ def run_regression_for_market(
     blackout_df = load_blackout_dates(db_path=db_path)
     df = apply_blackout_flags(df, blackout_df)
     df_full = df.copy()
-    if "exclude_from_regression" in df.columns:
-        train_mask = df["exclude_from_regression"].fillna(0) == 0
-        df = df.loc[train_mask].reset_index(drop=True)
+    if require_blackout_data and "has_blackout_data" in df_full.columns:
+        df_full = df_full.loc[df_full["has_blackout_data"] == 1].reset_index(drop=True)
+
+    if "exclude_from_regression" in df_full.columns:
+        train_mask = df_full["exclude_from_regression"].fillna(0) == 0
+        df = df_full.loc[train_mask].reset_index(drop=True)
     else:
-        df = df.reset_index(drop=True)
+        df = df_full.copy().reset_index(drop=True)
 
     filter_label = "Kaikki kynttilät (sis. downtrend)"
 
@@ -544,6 +554,28 @@ def run_regression_for_market(
         ].reset_index(drop=True)
     else:
         df_full = df_full.reset_index(drop=True)
+
+    if "has_blackout_data" in df_full.columns:
+        total_rows_full = len(df_full)
+        rows_with_bo = int((df_full["has_blackout_data"] == 1).sum())
+        rows_without_bo = int((df_full["has_blackout_data"] == 0).sum())
+        share_without_bo = (rows_without_bo / total_rows_full * 100.0) if total_rows_full > 0 else 0.0
+        share_with_bo = (rows_with_bo / total_rows_full * 100.0) if total_rows_full > 0 else 0.0
+        blackout_coverage = {
+            "total_rows": total_rows_full,
+            "with_bo_rows": rows_with_bo,
+            "without_bo_rows": rows_without_bo,
+            "with_bo_pct": share_with_bo,
+            "without_bo_pct": share_without_bo,
+        }
+    else:
+        blackout_coverage = {
+            "total_rows": len(df_full),
+            "with_bo_rows": 0,
+            "without_bo_rows": len(df_full),
+            "with_bo_pct": 0.0,
+            "without_bo_pct": 100.0,
+        }
 
     if df.empty:
         raise ValueError("Ei rivejä regressiota varten blackout-suodatuksen jälkeen.")
@@ -647,6 +679,7 @@ def run_regression_for_market(
         thresholds_payload,
         horizon_results,
         warning_messages,
+        blackout_coverage,
         vif_all,
         vif_continuous,
     )
@@ -665,6 +698,7 @@ def run_regression_for_market(
         "warnings": warning_messages,
         "vif_all": vif_all,
         "vif_continuous": vif_continuous,
+        "blackout_coverage": blackout_coverage,
     }
 
 
@@ -675,6 +709,7 @@ def _build_report_text(
     thresholds: Dict[int, float],
     horizon_results: Dict[int, Dict[str, object]],
     warnings: Optional[List[str]] = None,
+    blackout_coverage: Optional[Dict[str, float]] = None,
     vif_all: Optional[pd.DataFrame] = None,
     vif_continuous: Optional[pd.DataFrame] = None,
 ) -> str:
@@ -690,6 +725,26 @@ def _build_report_text(
         ),
         "",
     ]
+    if blackout_coverage:
+        lines.extend(
+            [
+                (
+                    "Rivejä yhteensä (valitulla markkinalla/patternilla): "
+                    f"{blackout_coverage.get('total_rows', 0)}"
+                ),
+                (
+                    "Rivejä, joilla blackout-dataa: "
+                    f"{blackout_coverage.get('with_bo_rows', 0)} "
+                    f"({blackout_coverage.get('with_bo_pct', 0.0):.1f} %)"
+                ),
+                (
+                    "Rivejä ilman blackout-dataa: "
+                    f"{blackout_coverage.get('without_bo_rows', 0)} "
+                    f"({blackout_coverage.get('without_bo_pct', 0.0):.1f} %)"
+                ),
+                "",
+            ]
+        )
     if warnings:
         lines.append("VAROITUKSET:")
         lines.extend(f"- {msg}" for msg in warnings)

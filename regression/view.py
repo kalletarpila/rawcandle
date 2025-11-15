@@ -23,12 +23,22 @@ class RegressionView:
             options=self._build_market_options(),
             value="__all__",
         )
+        self.pattern_dropdown = ft.Dropdown(
+            label="Valitse kynttilätyyppi",
+            width=240,
+            options=self._build_pattern_options(),
+            value="__all__",
+        )
         self.horizon_checkboxes = {
             2: ft.Checkbox(label="2 päivää", value=False),
             5: ft.Checkbox(label="5 päivää", value=True),
             10: ft.Checkbox(label="10 päivää", value=False),
             20: ft.Checkbox(label="20 päivää", value=False),
         }
+        self.require_blackout_checkbox = ft.Checkbox(
+            label="Käytä vain tickereitä, joilla blackout-data (earnings/dividend) löytyi",
+            value=False,
+        )
         self.success_threshold_fields = {
             2: ft.TextField(
                 label="success2 raja",
@@ -90,6 +100,8 @@ class RegressionView:
                 ft.Row(
                     [
                         self.market_dropdown,
+                        self.pattern_dropdown,
+                        self.require_blackout_checkbox,
                         self.run_button,
                     ],
                     spacing=16,
@@ -208,6 +220,14 @@ class RegressionView:
             pass
         return options
 
+    def _build_pattern_options(self) -> List[ft.dropdown.Option]:
+        options = [ft.dropdown.Option("__all__", "Kaikki kynttilät")]
+        for code, label in run_regression.PATTERN_LABELS.items():
+            if label == "Bearish Divergence":
+                continue
+            options.append(ft.dropdown.Option(str(code), label))
+        return options
+
     def _set_status(self, message: str, color: str = ft.Colors.GREY_600) -> None:
         self.status_text.value = message
         self.status_text.color = color
@@ -218,6 +238,7 @@ class RegressionView:
 
     def _on_run_clicked(self, _):
         market_value = self.market_dropdown.value or "__all__"
+        pattern_value = self.pattern_dropdown.value or "__all__"
         selected_horizons = self._get_selected_horizons()
         if not selected_horizons:
             self._set_status(
@@ -228,17 +249,22 @@ class RegressionView:
             self.page.update()
             return
 
-        horizon_value = selected_horizons  # list
         thresholds = self._get_thresholds()
         self._set_status("Ajetaan regressioanalyysiä...", ft.Colors.BLUE_600)
         self.run_button.disabled = True
         self.page.update()
 
         try:
+            require_blackout = bool(self.require_blackout_checkbox.value)
+            pattern_code = (
+                None if pattern_value in {"", "__all__"} else int(pattern_value)
+            )
             result = run_regression.run_regression_for_market(
                 market_value,
+                pattern_code=pattern_code,
                 success_horizons=selected_horizons,
                 success_thresholds=thresholds,
+                require_blackout_data=require_blackout,
             )
             self.output_field.value = result["report"]
             status_msg = "Analyysi valmis."
