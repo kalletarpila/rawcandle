@@ -9,7 +9,8 @@ pandas>=2.3.0
 numpy>=2.2.0
 scikit-learn>=1.5.0
 statsmodels>=0.14.0
-yfinance>=0.2.40
+lxml>=5.3.0
+
 
 # Technical analysis
 TA-Lib>=0.6.0

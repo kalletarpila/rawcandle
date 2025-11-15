@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, List
+import time
+from typing import Callable, Iterable, List, Optional
 
 import pandas as pd
 import yfinance as yf
@@ -26,6 +27,7 @@ def fetch_blackouts_for_tickers(
     *,
     start_date: str = "2022-01-01",
     db_path: str = "data/analysis.db",
+    db: Optional[DatabaseManager] = None,
 ) -> dict:
     tickers = _clean_tickers(tickers)
     if not tickers:
@@ -43,7 +45,10 @@ def fetch_blackouts_for_tickers(
     except ValueError:
         raise ValueError("Virheellinen päivämäärä. Käytä muotoa YYYY-MM-DD.")
 
-    db = DatabaseManager(db_path)
+    owned_db = False
+    if db is None:
+        db = DatabaseManager(db_path)
+        owned_db = True
     entries: List[tuple[str, str, str, str]] = []
     details: List[dict] = []
     errors: List[str] = []
@@ -96,4 +101,76 @@ def fetch_blackouts_for_tickers(
             errors.append(f"{ticker}: {exc}")
 
     inserted = db.insert_blackout_entries(entries)
+    if owned_db:
+        db.close()
     return {"inserted": inserted, "details": details, "errors": errors}
+
+
+def fetch_blackouts_for_missing_tickers(
+    *,
+    start_date: str = "2022-01-01",
+    db_path: str = "data/analysis.db",
+    delay_seconds: float = 1.5,
+    limit: Optional[int] = None,
+    progress_callback: Optional[Callable[[str, int, int], None]] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
+) -> dict:
+    """
+    Hae blackout-päivät kaikille tickereille, joilta tiedot puuttuvat.
+
+    Args:
+        start_date: Aikaisin huomioitava päivä
+        db_path: Analysis-kannan polku
+        delay_seconds: Viive jokaisen tickerin välillä
+        limit: Kuinka monta tickeriä käsitellään (debug-tarkoituksiin)
+        progress_callback: Kutsutaan jokaiselle tickerille (ticker, current, total)
+    """
+    db = DatabaseManager(db_path)
+    tickers = db.get_tickers_missing_blackouts(limit=limit)
+    total = len(tickers)
+    if total == 0:
+        db.close()
+        return {
+            "inserted": 0,
+            "processed": 0,
+            "details": [],
+            "errors": [],
+            "tickers": [],
+        }
+
+    inserted_total = 0
+    processed = 0
+    details: List[dict] = []
+    errors: List[str] = []
+
+    for idx, ticker in enumerate(tickers, start=1):
+        if cancel_check and cancel_check():
+            break
+        if progress_callback:
+            try:
+                progress_callback(ticker, idx, total)
+            except Exception:
+                pass
+        result = fetch_blackouts_for_tickers(
+            [ticker],
+            start_date=start_date,
+            db_path=db_path,
+            db=db,
+        )
+        inserted_total += result.get("inserted", 0)
+        details.extend(result.get("details", []))
+        errors.extend(result.get("errors", []))
+        processed += 1
+        if idx < total and delay_seconds > 0:
+            time.sleep(delay_seconds)
+
+    db.close()
+    return {
+        "inserted": inserted_total,
+        "processed": processed,
+        "total": total,
+        "cancelled": processed < total,
+        "details": details,
+        "errors": errors,
+        "tickers": tickers,
+    }

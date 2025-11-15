@@ -13,9 +13,7 @@ from market_repository import (
     ensure_market_schema,
     get_market_for_ticker,
     get_market_info,
-    get_market_min_volume,
     list_markets,
-    ticker_exists,
     upsert_market,
     validate_market,
     MARKET_VOLUME_DEFAULTS,
@@ -295,7 +293,9 @@ class RawCandleApp:
         """Luo yhden markkinarivin asetussivulle."""
         min_vol = market.get("min_volume")
         min_vol_str = (
-            f"{int(min_vol):,}".replace(",", " ") if isinstance(min_vol, (int, float)) else "-"
+            f"{int(min_vol):,}".replace(",", " ")
+            if isinstance(min_vol, (int, float))
+            else "-"
         )
         subtitle = (
             f"Lyhenne: {market['abbreviation'].upper()} | "
@@ -324,9 +324,9 @@ class RawCandleApp:
                             ft.IconButton(
                                 ft.Icons.DELETE,
                                 tooltip="Poista markkina",
-                                on_click=lambda e, mid=market["id"]: self._delete_market(
-                                    mid
-                                ),
+                                on_click=lambda e, mid=market[
+                                    "id"
+                                ]: self._delete_market(mid),
                             ),
                         ]
                     ),
@@ -408,9 +408,8 @@ class RawCandleApp:
                 name=name,
                 abbreviation=abbreviation,
                 yahoo_suffix=suffix,
-                min_volume=min_volume_value or MARKET_VOLUME_DEFAULTS.get(
-                    abbreviation.lower(), 100000
-                ),
+                min_volume=min_volume_value
+                or MARKET_VOLUME_DEFAULTS.get(abbreviation.lower(), 100000),
                 market_id=self.market_form_id,
                 db_path=self.osakedata_db_path,
             )
@@ -456,7 +455,9 @@ class RawCandleApp:
             icon=ft.Icons.ADD,
             on_click=self._save_market_form,
         )
-        cancel_button = ft.TextButton("Tyhjennä lomake", on_click=self._reset_market_form)
+        cancel_button = ft.TextButton(
+            "Tyhjennä lomake", on_click=self._reset_market_form
+        )
 
         self.market_list_column = ft.Column(spacing=10, expand=True)
         self._update_market_list()
@@ -961,10 +962,8 @@ class RawCandleApp:
                         try:
                             if cancelled["value"]:
                                 result_msg = f"⚠️ Generointi keskeytetty\n\nTallennettu {inserted} tapahtumaa."
-                                result_color = ft.Colors.ORANGE_700
                             else:
                                 result_msg = f"✅ Generointi valmis!\n\nTallennettu {inserted} laskutrenditapahtumaa tietokantaan."
-                                result_color = ft.Colors.GREEN_700
 
                             if errors:
                                 error_count = len(errors)
@@ -2185,107 +2184,6 @@ class RawCandleApp:
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def show_results_csv(self, e):
-        """Opens the canonical analysis CSV if exists or notifies the user."""
-        import os
-
-        from analysis.logger import setup_logger
-
-        logger = setup_logger()
-        csv_path = os.path.join(
-            os.path.dirname(__file__), "analysis", "analysis_results.csv"
-        )
-        if not os.path.exists(csv_path):
-            sb = ft.SnackBar(
-                ft.Text("ℹ️ CSV-tiedostoa ei löytynyt.", color=ft.Colors.WHITE),
-                bgcolor=ft.Colors.ORANGE_600,
-                duration=2000,
-            )
-            if sb not in self.page.overlay:
-                self.page.overlay.append(sb)
-            sb.open = True
-            self.page.update()
-            logger.info(
-                "analysis_results.csv not found when attempting to show results CSV"
-            )
-            return
-        try:
-            with open(csv_path, "r", encoding="utf-8") as f:
-                content = f.read()
-        except Exception as ex:
-            logger.exception("Virhe avattaessa CSV-tiedostoa")
-            sb = ft.SnackBar(
-                ft.Text(f"❌ Virhe tiedostoa avattaessa: {ex}", color=ft.Colors.WHITE),
-                bgcolor=ft.Colors.RED_600,
-                duration=3000,
-            )
-            if sb not in self.page.overlay:
-                self.page.overlay.append(sb)
-            sb.open = True
-            self.page.update()
-            return
-
-        content_control = ft.Text(content, selectable=True)
-
-        save_button = ft.ElevatedButton(
-            "Tallenna CSV",
-            icon=ft.Icons.FILE_DOWNLOAD,
-            on_click=lambda _: (
-                setattr(
-                    self.file_picker,
-                    "on_result",
-                    lambda ev: self.save_csv_from_analysis(ev, csv_path),
-                ),
-                self.file_picker.save_file(),
-            ),
-            tooltip="Tallenna analyysin tulokset CSV-tiedostoon",
-        )
-
-        dlg = ft.AlertDialog(
-            title=ft.Text("Analyysin CSV-tulokset"),
-            content=ft.Column([content_control], tight=True),
-            actions=[
-                save_button,
-                ft.TextButton("Sulje", on_click=lambda _: self.close_dialog(dlg)),
-            ],
-        )
-        if dlg not in self.page.overlay:
-            self.page.overlay.append(dlg)
-        dlg.open = True
-        self.page.update()
-
-    def save_csv_from_analysis(self, e: ft.FilePickerResultEvent, src_path: str):
-        if not e.path:
-            return
-        try:
-            with open(src_path, "r", encoding="utf-8") as src:
-                data = src.read()
-            with open(e.path, "w", encoding="utf-8") as dst:
-                dst.write(data)
-            sb = ft.SnackBar(
-                ft.Text(f"✅ CSV tallennettu: {e.path}"),
-                bgcolor=ft.Colors.GREEN_600,
-                duration=2000,
-            )
-            if sb not in self.page.overlay:
-                self.page.overlay.append(sb)
-            sb.open = True
-            self.page.update()
-        except Exception as ex:
-            from analysis.logger import setup_logger
-
-            logger = setup_logger()
-            logger.exception("Virhe tallennettaessa CSV:ää")
-            sb = ft.SnackBar(
-                ft.Text(f"❌ Virhe tallennuksessa: {ex}"),
-                bgcolor=ft.Colors.RED_600,
-                duration=3000,
-            )
-            if sb not in self.page.overlay:
-                self.page.overlay.append(sb)
-            sb.open = True
-            self.page.update()
-
     def fetch_and_save_from_file(self, e):
         """Hakee useiden osakkeiden tiedot tiedostosta ja tallentaa kantaan"""
         import sqlite3
@@ -2303,11 +2201,11 @@ class RawCandleApp:
 
         def parse_entry(raw: str):
             """Palauta (ticker, market) riviltä 'TICKER,market' (market vapaaehtoinen)."""
-            line = raw.split('#', 1)[0].strip()
+            line = raw.split("#", 1)[0].strip()
             if not line:
                 return None
             market = None
-            for delim in (',', ';'):
+            for delim in (",", ";"):
                 if delim in line:
                     ticker_part, market_part = line.split(delim, 1)
                     line = ticker_part.strip()
@@ -2320,7 +2218,7 @@ class RawCandleApp:
         entries = []
         invalid_markets = []
         try:
-            with open(tickers_file, 'r', encoding='utf-8') as f:
+            with open(tickers_file, "r", encoding="utf-8") as f:
                 for raw_line in f:
                     parsed = parse_entry(raw_line)
                     if not parsed:
@@ -2341,7 +2239,7 @@ class RawCandleApp:
             return
 
         if invalid_markets:
-            sample = ', '.join(f"{t} ({m})" for t, m in invalid_markets[:3])
+            sample = ", ".join(f"{t} ({m})" for t, m in invalid_markets[:3])
             if len(invalid_markets) > 3:
                 sample += f" ... (+{len(invalid_markets) - 3} muuta)"
             self.loading_text.value = f"❌ Tuntematon markkina: {sample}"
@@ -2532,6 +2430,7 @@ class RawCandleApp:
         self.setup_routing()
         self.data_dir = os.path.join(os.path.dirname(__file__), "data")
         self.osakedata_db_path = os.path.join(self.data_dir, "osakedata.db")
+        self.analysis_db_path = os.path.join(self.data_dir, "analysis.db")
         ensure_market_schema(self.osakedata_db_path)
         self.markets = list_markets(self.osakedata_db_path)
         self.market_form_id = None
@@ -2775,11 +2674,27 @@ class RawCandleApp:
                                 (
                                     ticker,
                                     date_str,
-                                    float(row["Open"]) if pd.notna(row["Open"]) else None,
-                                    float(row["High"]) if pd.notna(row["High"]) else None,
+                                    (
+                                        float(row["Open"])
+                                        if pd.notna(row["Open"])
+                                        else None
+                                    ),
+                                    (
+                                        float(row["High"])
+                                        if pd.notna(row["High"])
+                                        else None
+                                    ),
                                     float(row["Low"]) if pd.notna(row["Low"]) else None,
-                                    float(row["Close"]) if pd.notna(row["Close"]) else None,
-                                    int(row["Volume"]) if pd.notna(row["Volume"]) else None,
+                                    (
+                                        float(row["Close"])
+                                        if pd.notna(row["Close"])
+                                        else None
+                                    ),
+                                    (
+                                        int(row["Volume"])
+                                        if pd.notna(row["Volume"])
+                                        else None
+                                    ),
                                     ticker_market,
                                 ),
                             )
@@ -2999,7 +2914,9 @@ Virheet: {error_count}"""
 
                 try:
                     result = fetch_blackouts_for_tickers(
-                        tickers, start_date=start_date, db_path="data/analysis.db"
+                        tickers,
+                        start_date=start_date,
+                        db_path=self.analysis_db_path,
                     )
                     msg = (
                         f"Lisätty {result['inserted']} blackout-riviä "
@@ -3015,7 +2932,7 @@ Virheet: {error_count}"""
                     status_text.value = msg
                     self.page.update()
 
-                self.page.call_later(0, finish)
+                finish()
 
             threading.Thread(target=worker, daemon=True).start()
 
@@ -3030,7 +2947,9 @@ Virheet: {error_count}"""
             ),
             actions=[
                 ft.TextButton("Sulje", on_click=close_dialog),
-                ft.ElevatedButton("Hae", icon=ft.Icons.CLOUD_DOWNLOAD, on_click=start_fetch),
+                ft.ElevatedButton(
+                    "Hae", icon=ft.Icons.CLOUD_DOWNLOAD, on_click=start_fetch
+                ),
             ],
             actions_alignment=ft.MainAxisAlignment.END,
         )
@@ -3038,6 +2957,96 @@ Virheet: {error_count}"""
         self.page.overlay.append(blackout_dialog)
         blackout_dialog.open = True
         self.page.update()
+
+    def update_blackout_dates(self, e):
+        import threading
+
+        status_text = ft.Text("Selvitetään puuttuvia blackout-päiviä...")
+        ticker_text = ft.Text("", size=12, color=ft.Colors.GREY_600)
+        progress_bar = ft.ProgressBar(width=420, value=0.0)
+        progress_bar.visible = True
+
+        def close_dialog(_=None):
+            if blackout_dialog in self.page.overlay:
+                blackout_dialog.open = False
+                self.page.update()
+
+        cancelled = {"value": False}
+
+        def cancel_fetch(_=None):
+            cancelled["value"] = True
+            status_text.value = "Peruutetaan hakua..."
+            cancel_btn.disabled = True
+            try:
+                self.page.update()
+            except Exception:
+                pass
+
+        close_btn = ft.TextButton("Sulje", on_click=close_dialog, disabled=True)
+        cancel_btn = ft.TextButton("Keskeytä", on_click=cancel_fetch)
+        blackout_dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Päivitä blackout-päivät"),
+            content=ft.Column(
+                [status_text, ticker_text, progress_bar],
+                tight=True,
+                width=450,
+                spacing=10,
+            ),
+            actions=[cancel_btn, close_btn],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        self.page.overlay.append(blackout_dialog)
+        blackout_dialog.open = True
+        self.page.update()
+
+        def worker():
+            from blackout.fetch_blackouts import fetch_blackouts_for_missing_tickers
+
+            def progress_cb(ticker: str, index: int, total: int) -> None:
+                ticker_text.value = f"{index}/{total}: {ticker}"
+                try:
+                    progress_bar.value = index / float(total)
+                except Exception:
+                    progress_bar.value = None
+                try:
+                    self.page.update()
+                except Exception:
+                    pass
+
+            try:
+                result = fetch_blackouts_for_missing_tickers(
+                    start_date="2022-01-01",
+                    db_path=self.analysis_db_path,
+                    delay_seconds=1.5,
+                    progress_callback=progress_cb,
+                    cancel_check=lambda: cancelled["value"],
+                )
+                if result["processed"] == 0 and not result.get("cancelled"):
+                    message = "Kaikilla tickereillä on jo blackout-päivät."
+                else:
+                    message = (
+                        f"Valmis: käsitelty {result['processed']} / {result.get('total', result['processed'])} tickeriä, "
+                        f"lisätty {result['inserted']} blackout-riviä."
+                    )
+                    if result.get("cancelled"):
+                        message = "Keskeytetty. " + message
+                    if result.get("errors"):
+                        message += f" Virheitä {len(result['errors'])} kpl."
+            except Exception as exc:
+                message = f"Virhe: {exc}"
+
+            progress_bar.visible = False
+            ticker_text.value = ""
+            status_text.value = message
+            close_btn.disabled = False
+            cancel_btn.disabled = True
+            try:
+                self.page.update()
+            except Exception:
+                pass
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _calculate_and_save_divergences(
         self, ticker: str, only_missing: bool = True
@@ -3485,8 +3494,17 @@ Virheet: {error_count}"""
                                                         color=ft.Colors.WHITE,
                                                         tooltip="Nouda Yahoo Finance -osavuosikatsaus- ja osinkopäivät ja tallenna blackout-tauluun",
                                                     ),
+                                                    ft.ElevatedButton(
+                                                        "Päivitä blackout-päivät",
+                                                        icon=ft.Icons.SYNC,
+                                                        on_click=self.update_blackout_dates,
+                                                        bgcolor=ft.Colors.BLUE_GREY_900,
+                                                        color=ft.Colors.WHITE,
+                                                        tooltip="Hae blackout-päivät kaikille tickereille joilta tiedot puuttuvat",
+                                                    ),
                                                 ],
                                                 alignment=ft.MainAxisAlignment.CENTER,
+                                                wrap=True,
                                             ),
                                             ft.Divider(height=20),
                                             ft.Row(
@@ -3705,9 +3723,7 @@ Virheet: {error_count}"""
                         existing_market
                     )
 
-            if not validate_market(
-                target_market, db_path=self.osakedata_db_path
-            ):
+            if not validate_market(target_market, db_path=self.osakedata_db_path):
                 target_market = "usa"
                 self._set_market_selection(target_market)
 

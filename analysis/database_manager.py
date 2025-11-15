@@ -793,6 +793,46 @@ class DatabaseManager:
             self.logger.error(f"Get available patterns failed: {e}")
             return []
 
+    def get_tickers_missing_blackouts(self, limit: Optional[int] = None) -> List[str]:
+        """
+        Hae tickerit, joilta puuttuu blackout-päivämerkinnät.
+
+        Args:
+            limit: Palautettavien tickereiden enimmäismäärä
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            params: List[object] = []
+            query = """
+                WITH combined_tickers AS (
+                    SELECT DISTINCT ticker
+                    FROM results_data
+                    WHERE ticker IS NOT NULL AND TRIM(ticker) != ''
+                    UNION
+                    SELECT DISTINCT ticker
+                    FROM analysis_findings
+                    WHERE ticker IS NOT NULL AND TRIM(ticker) != ''
+                ),
+                existing AS (
+                    SELECT DISTINCT ticker FROM blackout_dates
+                )
+                SELECT c.ticker
+                FROM combined_tickers c
+                LEFT JOIN existing e ON e.ticker = c.ticker
+                WHERE e.ticker IS NULL
+                ORDER BY c.ticker
+            """
+            if limit is not None:
+                query += " LIMIT ?"
+                params.append(int(limit))
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            return [row[0] for row in rows]
+        except Exception as e:
+            self.logger.error(f"Get tickers missing blackouts failed: {e}")
+            return []
+
     def get_findings_with_filters(self, **kwargs) -> List[Dict[str, Any]]:
         """
         Hae löydökset suodattimilla (testejä varten).
@@ -849,46 +889,6 @@ class DatabaseManager:
         except Exception as e:
             self.logger.error(f"Save divergence batch failed: {e}")
             return False
-
-    def get_divergences_for_dates(
-        self, ticker: str, dates: List[str]
-    ) -> Tuple[float, float]:
-        """
-        Hae divergenssit annetuille päiville (t0, t-1, t-2, t-3).
-
-        Args:
-            ticker: Osakkeen symboli
-            dates: Lista päivämääriä
-
-        Returns:
-            Tuple (bearish_strength, bullish_strength) missä arvo on vahvin löydetty divergenssi
-        """
-        if not dates:
-            return (0.0, 0.0)
-
-        try:
-            records = self.get_divergence_records(ticker, dates)
-            max_bullish = 0.0
-            max_bearish = 0.0
-
-            for row in records.values():
-                bullish = row.get("bullish_strength") or 0.0
-                bearish = row.get("bearish_strength") or 0.0
-                if bullish > max_bullish:
-                    max_bullish = bullish
-                if bearish > max_bearish:
-                    max_bearish = bearish
-
-            if max_bullish > 0:
-                return (0.0, max_bullish)
-            elif max_bearish > 0:
-                return (max_bearish, 0.0)
-            else:
-                return (0.0, 0.0)
-
-        except Exception as e:
-            self.logger.error(f"Get divergences for dates failed: {e}")
-            return (0.0, 0.0)
 
     def get_divergence_records(
         self, ticker: str, dates: List[str]
@@ -1032,234 +1032,6 @@ class DatabaseManager:
         except Exception as e:
             self.logger.error(f"Get existing results tickers failed: {e}")
             return set()
-
-    def insert_result_data(
-        self,
-        ticker: str,
-        date: str,
-        market: str,
-        candle_pattern: int,
-        signal_strength: Optional[float],
-        t_1_alin: Optional[float],
-        t_1_ylin: Optional[float],
-        t_1_bodi: Optional[float],
-        t_1_bodi_colour: Optional[int],
-        t0_alin: Optional[float],
-        t0_ylin: Optional[float],
-        t0_bodi: Optional[float],
-        t0_bodi_colour: Optional[int],
-        t1_alin: Optional[float],
-        t1_ylin: Optional[float],
-        t1_bodi: Optional[float],
-        t1_bodi_colour: Optional[int],
-        t_2: Optional[float],
-        t_5: Optional[float],
-        t_10: Optional[float],
-        t_15: Optional[float],
-        t_20: Optional[float],
-        t_2_hajonta: Optional[float],
-        t_5_hajonta: Optional[float],
-        t_10_hajonta: Optional[float],
-        t_15_hajonta: Optional[float],
-        t_20_hajonta: Optional[float],
-        t2: Optional[float],
-        t5: Optional[float],
-        t10: Optional[float],
-        t20: Optional[float],
-        t_2_volyymi: Optional[float],
-        t_5_volyymi: Optional[float],
-        t_10_volyymi: Optional[float],
-        t_15_volyymi: Optional[float],
-        t_20_volyymi: Optional[float],
-        t0_volyymi: Optional[float],
-        t2_volyymi: Optional[float],
-        t5_volyymi: Optional[float],
-        t10_volyymi: Optional[float],
-        t20_volyymi: Optional[float],
-        t_2_5p_liukuva: Optional[float],
-        t_2_10p_liukuva: Optional[float],
-        t_2_20p_liukuva: Optional[float],
-        t_5_5p_liukuva: Optional[float],
-        t_5_10p_liukuva: Optional[float],
-        t_5_20p_liukuva: Optional[float],
-        t_10_5p_liukuva: Optional[float],
-        t_10_10p_liukuva: Optional[float],
-        t_10_20p_liukuva: Optional[float],
-        t_15_5p_liukuva: Optional[float],
-        t_15_10p_liukuva: Optional[float],
-        t_15_20p_liukuva: Optional[float],
-        t_20_5p_liukuva: Optional[float],
-        t_20_10p_liukuva: Optional[float],
-        t_20_20p_liukuva: Optional[float],
-        t0_50p_liukuva: Optional[float],
-        t0_200p_liukuva: Optional[float],
-        SPX_0: Optional[float],
-        SPX_2: Optional[float],
-        SPX_5: Optional[float],
-        SPX_10: Optional[float],
-        SPX_15: Optional[float],
-        SPX_20: Optional[float],
-        SPX2: Optional[float],
-        SPX5: Optional[float],
-        SPX10: Optional[float],
-        SPX15: Optional[float],
-        SPX20: Optional[float],
-        NDX_0: Optional[float],
-        NDX_2: Optional[float],
-        NDX_5: Optional[float],
-        NDX_10: Optional[float],
-        NDX_15: Optional[float],
-        NDX_20: Optional[float],
-        NDX2: Optional[float],
-        NDX5: Optional[float],
-        NDX10: Optional[float],
-        NDX15: Optional[float],
-        NDX20: Optional[float],
-        RSI14_t0: Optional[float],
-        t0_close_norm: Optional[float],
-        bearish_divergence: Optional[float],
-        bullish_divergence: Optional[float],
-        BullDiv_strength: Optional[float] = None,
-        BullDiv_recent_strength: Optional[float] = None,
-        BullDiv_recent_offset: Optional[int] = None,
-        Has_BullDiv_recent: Optional[int] = None,
-        weekday: int = 1,
-    ) -> bool:
-        """
-        Lisää rivi results_data tauluun.
-
-        Returns:
-            True jos onnistui
-        """
-        try:
-            conn = self.get_connection()
-            cursor = conn.cursor()
-
-            values_tuple = (
-                ticker,
-                date,
-                market,
-                candle_pattern,
-                signal_strength,
-                t_1_alin,
-                t_1_ylin,
-                t_1_bodi,
-                t_1_bodi_colour,
-                t0_alin,
-                t0_ylin,
-                t0_bodi,
-                t0_bodi_colour,
-                t1_alin,
-                t1_ylin,
-                t1_bodi,
-                t1_bodi_colour,
-                t_2,
-                t_5,
-                t_10,
-                t_15,
-                t_20,
-                t_2_hajonta,
-                t_5_hajonta,
-                t_10_hajonta,
-                t_15_hajonta,
-                t_20_hajonta,
-                t2,
-                t5,
-                t10,
-                t20,
-                t_2_volyymi,
-                t_5_volyymi,
-                t_10_volyymi,
-                t_15_volyymi,
-                t_20_volyymi,
-                t0_volyymi,
-                t2_volyymi,
-                t5_volyymi,
-                t10_volyymi,
-                t20_volyymi,
-                t_2_5p_liukuva,
-                t_2_10p_liukuva,
-                t_2_20p_liukuva,
-                t_5_5p_liukuva,
-                t_5_10p_liukuva,
-                t_5_20p_liukuva,
-                t_10_5p_liukuva,
-                t_10_10p_liukuva,
-                t_10_20p_liukuva,
-                t_15_5p_liukuva,
-                t_15_10p_liukuva,
-                t_15_20p_liukuva,
-                t_20_5p_liukuva,
-                t_20_10p_liukuva,
-                t_20_20p_liukuva,
-                t0_50p_liukuva,
-                t0_200p_liukuva,
-                SPX_0,
-                SPX_2,
-                SPX_5,
-                SPX_10,
-                SPX_15,
-                SPX_20,
-                SPX2,
-                SPX5,
-                SPX10,
-                SPX15,
-                SPX20,
-                NDX_0,
-                NDX_2,
-                NDX_5,
-                NDX_10,
-                NDX_15,
-                NDX_20,
-                NDX2,
-                NDX5,
-                NDX10,
-                NDX15,
-                NDX20,
-                RSI14_t0,
-                t0_close_norm,
-                bearish_divergence,
-                bullish_divergence,
-                BullDiv_strength,
-                BullDiv_recent_strength,
-                BullDiv_recent_offset,
-                Has_BullDiv_recent,
-                weekday,
-            )
-            placeholders = ", ".join("?" for _ in range(len(values_tuple)))
-            insert_sql = """
-                INSERT OR REPLACE INTO results_data
-                (ticker, date, market, candle_pattern, signal_strength,
-                 t_1_alin, t_1_ylin, t_1_bodi, t_1_bodi_colour,
-                 t0_alin, t0_ylin, t0_bodi, t0_bodi_colour,
-                 t1_alin, t1_ylin, t1_bodi, t1_bodi_colour,
-                 t_2, t_5, t_10, t_15, t_20,
-                 t_2_hajonta, t_5_hajonta, t_10_hajonta, t_15_hajonta, t_20_hajonta,
-                 t2, t5, t10, t20,
-                 t_2_volyymi, t_5_volyymi, t_10_volyymi, t_15_volyymi, t_20_volyymi,
-                 t0_volyymi, t2_volyymi, t5_volyymi, t10_volyymi, t20_volyymi,
-                 t_2_5p_liukuva, t_2_10p_liukuva, t_2_20p_liukuva,
-                 t_5_5p_liukuva, t_5_10p_liukuva, t_5_20p_liukuva,
-                 t_10_5p_liukuva, t_10_10p_liukuva, t_10_20p_liukuva,
-                 t_15_5p_liukuva, t_15_10p_liukuva, t_15_20p_liukuva,
-                 t_20_5p_liukuva, t_20_10p_liukuva, t_20_20p_liukuva,
-                 t0_50p_liukuva, t0_200p_liukuva,
-                 SPX_0, SPX_2, SPX_5, SPX_10, SPX_15, SPX_20,
-                 SPX2, SPX5, SPX10, SPX15, SPX20,
-                 NDX_0, NDX_2, NDX_5, NDX_10, NDX_15, NDX_20,
-                 NDX2, NDX5, NDX10, NDX15, NDX20,
-                 RSI14_t0, t0_close_norm, bearish_divergence, bullish_divergence,
-                 BullDiv_strength, BullDiv_recent_strength, BullDiv_recent_offset,
-                 Has_BullDiv_recent, weekday)
-                VALUES ({placeholders})
-            """.format(placeholders=placeholders)
-            cursor.execute(insert_sql, values_tuple)
-            conn.commit()
-            return True
-
-        except Exception as e:
-            self.logger.error(f"Insert result data failed: {e}")
-            return False
 
     def bulk_insert_results(self, results: List[dict], batch_size: int = 100) -> int:
         """
@@ -1684,18 +1456,6 @@ class DatabaseManager:
         except Exception as e:
             self.logger.error(f"Get results data failed: {e}")
             return []
-
-    def count_results_rows(self) -> int:
-        """Palauta results_data-taulun rivien määrä."""
-        try:
-            conn = self.get_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM results_data")
-            row = cursor.fetchone()
-            return int(row[0]) if row and row[0] is not None else 0
-        except Exception as e:
-            self.logger.error(f"Count results rows failed: {e}")
-            return 0
 
     def count_results_filtered(
         self,
