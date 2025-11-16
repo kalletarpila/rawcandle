@@ -38,9 +38,11 @@ FEATURE_COLUMNS = [
     "RSI14_t0",
     "t0_volyymi",
     "t0_close_norm",
-    "BullDiv_strength",
-    "BullDiv_recent_strength",
-    "Has_BullDiv_recent",
+    # Divergenssiengageeratut featuret (engineered)
+    "is_divergence_today",  # divergence today (from divergence_data)
+    "recent_divergence_min_distance",  # days since last divergence (1-5, else 6)
+    "recent_divergence_decay_strength",  # strength / (1 + distance)
+    "rolling_BullDiv_influence",  # windowed influence of last 5 days
     # Trendin syvyys ja volatiliteetti
     "t_10",
     "t_20",
@@ -138,6 +140,41 @@ def load_blackout_dates(db_path: Path | str = DEFAULT_DB_PATH) -> pd.DataFrame:
     df = df.dropna(subset=["date"])
     df["ticker"] = df["ticker"].astype(str)
     df["event"] = df["event"].astype(str).str.lower()
+    return df
+
+
+def load_divergence_data(db_path: Path | str = DEFAULT_DB_PATH) -> pd.DataFrame:
+    """
+    Lataa divergence_data-taulun (bullish/bearish divergencet) analysis.db-kannasta.
+
+    Taulun schema:
+        ticker TEXT NOT NULL
+        date   TEXT NOT NULL
+        bullish_strength REAL DEFAULT 0
+        bearish_strength REAL DEFAULT 0
+        rsi REAL
+        PRIMARY KEY (ticker, date)
+    """
+    db_path = Path(db_path)
+    if not db_path.exists():
+        raise FileNotFoundError(f"Analysis-kantaa ei löytynyt: {db_path}")
+
+    with sqlite3.connect(db_path) as conn:
+        try:
+            df = pd.read_sql_query(
+                "SELECT ticker, date, bullish_strength FROM divergence_data",
+                conn,
+            )
+        except sqlite3.OperationalError:
+            return pd.DataFrame(columns=["ticker", "date", "bullish_strength"])
+
+    if df.empty:
+        return df
+
+    df["ticker"] = df["ticker"].astype(str)
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df = df.dropna(subset=["date"])
+    df["bullish_strength"] = df["bullish_strength"].fillna(0.0).astype(float)
     return df
 
 
@@ -291,6 +328,105 @@ def add_return_labels(
     return df
 
 
+def add_divergence_features(
+    df: pd.DataFrame,
+    db_path: Path | str = DEFAULT_DB_PATH,
+    divergence_df: Optional[pd.DataFrame] = None,
+) -> pd.DataFrame:
+    """
+    Rakentaa bullish divergence -featuret divergence_data-taulusta:
+    erottelee tämän päivän tapahtumat, etäisyyden viimeiseen divergenceen sekä vaimenevan vaikutuksen.
+    """
+
+    defaults = {
+        "is_divergence_today": 0,
+        "recent_divergence_min_distance": 6,
+        "recent_divergence_decay_strength": 0.0,
+        "rolling_BullDiv_influence": 0.0,
+    }
+
+    def _apply_defaults(target: pd.DataFrame) -> pd.DataFrame:
+        for col, value in defaults.items():
+            target[col] = value
+        return target
+
+    if any(col not in df.columns for col in ["ticker", "date"]):
+        return _apply_defaults(df.copy())
+
+    working_df = df.copy()
+    original_index = working_df.index
+    working_df["ticker"] = working_df["ticker"].astype(str)
+    working_df["date"] = pd.to_datetime(working_df["date"], errors="coerce")
+
+    if divergence_df is None:
+        divergence_df = load_divergence_data(db_path=db_path)
+
+    if divergence_df.empty:
+        return _apply_defaults(working_df)
+
+    merge_cols = divergence_df[["ticker", "date", "bullish_strength"]].rename(
+        columns={"bullish_strength": "_divergence_strength"}
+    )
+    working_df = working_df.merge(
+        merge_cols,
+        on=["ticker", "date"],
+        how="left",
+        sort=False,
+    )
+    strength_col = "_divergence_strength"
+    working_df[strength_col] = working_df[strength_col].fillna(0.0).astype(float)
+
+    working_df["is_divergence_today"] = (working_df[strength_col] > 0).astype(int)
+    working_df["recent_divergence_min_distance"] = 6
+    working_df["recent_divergence_decay_strength"] = 0.0
+    working_df["rolling_BullDiv_influence"] = 0.0
+
+    sorted_df = (
+        working_df.sort_values(["ticker", "date"])
+        .reset_index(drop=False)
+        .rename(columns={"index": "_orig_index"})
+    )
+
+    n_rows = len(sorted_df)
+    distances = np.full(n_rows, 6, dtype=int)
+    decays = np.zeros(n_rows, dtype=float)
+    influences = np.zeros(n_rows, dtype=float)
+
+    for _, group in sorted_df.groupby("ticker", sort=False):
+        group_idx = group.index.to_numpy()
+        events = group["is_divergence_today"].to_numpy()
+        strengths = group[strength_col].to_numpy()
+
+        for local_i, global_pos in enumerate(group_idx):
+            window_start = max(0, local_i - 5)
+            last_event_local = -1
+            for j in range(local_i - 1, window_start - 1, -1):
+                if events[j] == 1:
+                    last_event_local = j
+                    break
+            if last_event_local != -1:
+                distance = local_i - last_event_local
+                distances[global_pos] = distance
+                decays[global_pos] = strengths[last_event_local] / (1 + distance)
+            else:
+                distances[global_pos] = 6
+                decays[global_pos] = 0.0
+
+            influence_total = 0.0
+            for j in range(window_start, local_i):
+                if events[j] == 1:
+                    age = local_i - j
+                    influence_total += strengths[j] * float(np.exp(-0.7 * age))
+            influences[global_pos] = influence_total
+    order = sorted_df["_orig_index"].to_numpy()
+    working_df.loc[order, "recent_divergence_min_distance"] = distances
+    working_df.loc[order, "recent_divergence_decay_strength"] = decays
+    working_df.loc[order, "rolling_BullDiv_influence"] = influences
+    working_df = working_df.drop(columns=[strength_col])
+    working_df = working_df.loc[original_index]
+    return working_df
+
+
 # ------------- 3. Featurejen valinta -----------------
 
 
@@ -338,6 +474,13 @@ def build_feature_matrix(
         categorical_dummies = pd.get_dummies(
             categorical, columns=categorical_cols, drop_first=True
         ).astype(float)
+        drop_cols = [
+            col
+            for col in categorical_dummies.columns
+            if col.startswith(f"{PATTERN_COLUMN}_7")
+        ]
+        if drop_cols:
+            categorical_dummies = categorical_dummies.drop(columns=drop_cols)
         dummy_frames.append(categorical_dummies)
 
     if dummy_frames:
@@ -581,6 +724,10 @@ def run_regression_for_market(
     df = add_return_labels(df, thresholds=success_thresholds)
     blackout_df = load_blackout_dates(db_path=db_path)
     df = apply_blackout_flags(df, blackout_df)
+    divergence_source = load_divergence_data(db_path=db_path)
+    df = add_divergence_features(
+        df, db_path=db_path, divergence_df=divergence_source
+    )
     df_full = df.copy()
     if require_blackout_data and "has_blackout_data" in df_full.columns:
         df_full = df_full.loc[df_full["has_blackout_data"] == 1].reset_index(drop=True)
