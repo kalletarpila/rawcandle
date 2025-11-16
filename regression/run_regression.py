@@ -17,7 +17,7 @@ import sqlite3
 import warnings
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Iterable, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -41,36 +41,29 @@ FEATURE_COLUMNS = [
     "BullDiv_strength",
     "BullDiv_recent_strength",
     "Has_BullDiv_recent",
-
     # Trendin syvyys ja volatiliteetti
     "t_10",
     "t_20",
     "t_10_hajonta",
     "t_20_hajonta",
-
     # Liukuvat keskiarvot
     "t0_50p_liukuva",
     "t0_200p_liukuva",
-
     # Uudet slope- ja kiihtyvyysfeaturet
     "RSI_slope_5",
     "Price_slope_5",
     "Price_slope_10",
     "Price_acceleration_5_10",
-
     # Uudet vola- ja rakennefeaturet
     "Volatility_ratio_10_20",
     "Gap_down_strength",
     "Body_ratio",
     "Shadow_ratio",
-
     # Volyymi-impulssi ja kontekstipiste
     "Volume_impulse",
     "Reversal_Context_Score",
-
     # Blackout-kattavuus
     "has_blackout_data",
-
     # Markkinaympäristö ja indeksivola
     "SPX_10",
     "SPX_20",
@@ -81,6 +74,8 @@ FEATURE_COLUMNS = [
 ]
 PATTERN_COLUMN = "kynttila_koodi"
 MARKET_COLUMN = "market"
+CATEGORICAL_DUMMY_COLUMNS = [PATTERN_COLUMN, MARKET_COLUMN, "BullDiv_recent_offset"]
+FEATURE_SELECTION_MARKER = "__ui_feature_selection__"
 PATTERN_LABELS = {
     0: "Downtrend (kontrolli)",
     1: "Hammer",
@@ -105,6 +100,7 @@ def _friendly_feature_name(name: str) -> str:
         except ValueError:
             pass
     return name
+
 
 ALIAS_MAP = {
     "vahvuus": "signal_strength",
@@ -179,7 +175,9 @@ def apply_blackout_flags(
 
     df = df.copy()
     if date_col not in df.columns or ticker_col not in df.columns:
-        raise ValueError(f"apply_blackout_flags: df:stä puuttuu {date_col} tai {ticker_col}")
+        raise ValueError(
+            f"apply_blackout_flags: df:stä puuttuu {date_col} tai {ticker_col}"
+        )
 
     df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
     df["ticker"] = df[ticker_col].astype(str)
@@ -194,7 +192,9 @@ def apply_blackout_flags(
     df["is_dividend_t0"] = 0
     df["is_earnings_window"] = 0
     df["is_dividend_window"] = 0
-    df["has_blackout_data"] = df["ticker"].astype(str).isin(tickers_with_blackout).astype(int)
+    df["has_blackout_data"] = (
+        df["ticker"].astype(str).isin(tickers_with_blackout).astype(int)
+    )
 
     for idx, row in df.iterrows():
         t0_date = row[date_col]
@@ -218,7 +218,9 @@ def apply_blackout_flags(
         if ((dividend_deltas >= 0) & (dividend_deltas <= 1)).any():
             df.at[idx, "is_dividend_window"] = 1
 
-    df["is_blackout_t0"] = ((df["is_earnings_t0"] == 1) | (df["is_dividend_t0"] == 1)).astype(int)
+    df["is_blackout_t0"] = (
+        (df["is_earnings_t0"] == 1) | (df["is_dividend_t0"] == 1)
+    ).astype(int)
     df["is_blackout_window"] = (
         (df["is_earnings_window"] == 1) | (df["is_dividend_window"] == 1)
     ).astype(int)
@@ -228,6 +230,7 @@ def apply_blackout_flags(
 
 
 # ------------- 1. Datan luku -----------------
+
 
 def load_data(
     db_path: Path | str = DEFAULT_DB_PATH, market: Optional[str] = None
@@ -261,6 +264,7 @@ def load_data(
 
 # ------------- 2. Labelien rakentaminen -----------------
 
+
 def add_return_labels(
     df: pd.DataFrame, thresholds: Optional[Dict[int, float]] = None
 ) -> pd.DataFrame:
@@ -289,39 +293,59 @@ def add_return_labels(
 
 # ------------- 3. Featurejen valinta -----------------
 
+
 def build_feature_matrix(
     df: pd.DataFrame,
+    feature_columns: list[str] | None = None,
+    include_is_candle_day: bool = True,
+    categorical_columns: Optional[Iterable[str]] = None,
 ) -> tuple[pd.DataFrame, list[str], list[str]]:
     """
     Valitse psykologiset ja tekniset featuret sekä koodaa kategoriset.
     """
-    required_cols = FEATURE_COLUMNS + [PATTERN_COLUMN, MARKET_COLUMN]
+    feature_columns = feature_columns or FEATURE_COLUMNS
+
+    required_cols = feature_columns + [PATTERN_COLUMN, MARKET_COLUMN]
     missing = [col for col in required_cols if col not in df.columns]
     if missing:
         raise ValueError(f"Datasetistä puuttuu sarakkeet: {missing}")
 
-    df["is_candle_day"] = (df[PATTERN_COLUMN].fillna(0).astype(int) != 0).astype(int)
+    is_candle_series = (df[PATTERN_COLUMN].fillna(0).astype(int) != 0).astype(int)
+    df["is_candle_day"] = is_candle_series
 
-    continuous_cols = FEATURE_COLUMNS.copy()
+    continuous_cols = feature_columns.copy()
     feature_df = df[continuous_cols].copy()
 
-    # is_candle_day aina mukana dummyissä
-    dummy_df = pd.DataFrame({"is_candle_day": df["is_candle_day"]})
-
-    # Kategoriset sarakkeet: pattern, market ja optional BullDiv_recent_offset
-    categorical_cols = [PATTERN_COLUMN, MARKET_COLUMN]
+    allowed_cats = set(categorical_columns) if categorical_columns is not None else None
+    categorical_cols: list[str] = []
+    for col in [PATTERN_COLUMN, MARKET_COLUMN]:
+        if allowed_cats is None or col in allowed_cats:
+            categorical_cols.append(col)
     offset_col = "BullDiv_recent_offset"
-    if offset_col in df.columns:
+    if offset_col in df.columns and (allowed_cats is None or offset_col in allowed_cats):
         categorical_cols.append(offset_col)
 
-    categorical = df[categorical_cols].astype("category")
-    dummy_df = dummy_df.join(categorical)
+    dummy_frames: list[pd.DataFrame] = []
+    if include_is_candle_day:
+        dummy_frames.append(
+            pd.DataFrame(
+                {"is_candle_day": is_candle_series.astype(float)}, index=df.index
+            )
+        )
 
-    # Tee dummyt kaikista kategorisista (pattern, market, offset)
-    dummy_df = pd.get_dummies(dummy_df, columns=categorical_cols, drop_first=True)
-    dummy_df = dummy_df.astype(float)
+    if categorical_cols:
+        categorical = df[categorical_cols].astype("category")
+        categorical_dummies = pd.get_dummies(
+            categorical, columns=categorical_cols, drop_first=True
+        ).astype(float)
+        dummy_frames.append(categorical_dummies)
 
-    feature_df = pd.concat([feature_df, dummy_df], axis=1)
+    if dummy_frames:
+        dummy_df = pd.concat(dummy_frames, axis=1)
+        feature_df = pd.concat([feature_df, dummy_df], axis=1)
+    else:
+        feature_df = feature_df.copy()
+
     dummy_cols = [col for col in feature_df.columns if col not in continuous_cols]
     return feature_df, continuous_cols, dummy_cols
 
@@ -346,10 +370,12 @@ def calculate_vif(X: pd.DataFrame) -> pd.DataFrame:
 
 # ------------- 4. Perusdiagnostiikka -----------------
 
+
 def quick_summary(df: pd.DataFrame, label_column: str = "success5") -> str:
     """
     Palauta onnistumisprosentit success5-labelille.
     """
+
     def rate(mask: pd.Series) -> tuple[float, int]:
         sub = df.loc[mask]
         if sub.empty:
@@ -369,6 +395,7 @@ def quick_summary(df: pd.DataFrame, label_column: str = "success5") -> str:
 
 
 # ------------- 5. Logistinen regressio -----------------
+
 
 def run_logistic_regression(
     X: pd.DataFrame,
@@ -391,9 +418,13 @@ def run_logistic_regression(
     )
 
     dummy_cols = [col for col in X.columns if col not in continuous_cols]
-    scaler = StandardScaler()
-    X_train_cont = scaler.fit_transform(X_train[continuous_cols])
-    X_test_cont = scaler.transform(X_test[continuous_cols])
+    scaler = StandardScaler() if continuous_cols else None
+    if continuous_cols:
+        X_train_cont = scaler.fit_transform(X_train[continuous_cols])
+        X_test_cont = scaler.transform(X_test[continuous_cols])
+    else:
+        X_train_cont = np.empty((len(X_train), 0))
+        X_test_cont = np.empty((len(X_test), 0))
     X_train_dummy = (
         X_train[dummy_cols].to_numpy(dtype=float)
         if dummy_cols
@@ -443,6 +474,7 @@ def run_logistic_regression(
 
 # ------------- 6. Lineaarinen regressio -----------------
 
+
 def run_linear_regression(
     X: pd.DataFrame, y: pd.Series, continuous_cols: list[str]
 ) -> Dict[str, object]:
@@ -450,12 +482,13 @@ def run_linear_regression(
     Lineaarinen regressio odotetulle tuotolle (y5).
     """
     dummy_cols = [col for col in X.columns if col not in continuous_cols]
-    scaler = StandardScaler()
-    X_cont_scaled = scaler.fit_transform(X[continuous_cols])
+    scaler = StandardScaler() if continuous_cols else None
+    if continuous_cols:
+        X_cont_scaled = scaler.fit_transform(X[continuous_cols])
+    else:
+        X_cont_scaled = np.empty((len(X), 0))
     X_dummy_raw = (
-        X[dummy_cols].to_numpy(dtype=float)
-        if dummy_cols
-        else np.empty((len(X), 0))
+        X[dummy_cols].to_numpy(dtype=float) if dummy_cols else np.empty((len(X), 0))
     )
     X_full = np.hstack([X_cont_scaled, X_dummy_raw])
 
@@ -500,6 +533,7 @@ def run_linear_regression(
 
 # ------------- 7. Yhteenveto & rajapinta -----------------
 
+
 def run_regression_for_market(
     market: Optional[str] = None,
     pattern_code: Optional[int] = None,
@@ -508,10 +542,35 @@ def run_regression_for_market(
     db_path: Path | str = DEFAULT_DB_PATH,
     write_report: bool = True,
     require_blackout_data: bool = False,
+    feature_columns: Optional[List[str]] = None,
 ) -> Dict[str, object]:
     """
     Suorita koko pipeline yhdelle markkinalle ja palauta tulokset.
     """
+    default_feature_set = (
+        list(FEATURE_COLUMNS) + ["is_candle_day"] + CATEGORICAL_DUMMY_COLUMNS
+    )
+    if feature_columns is None:
+        selected_set = set(default_feature_set)
+    else:
+        selected_set = set(feature_columns)
+        sentinel_present = FEATURE_SELECTION_MARKER in selected_set
+        selected_set.discard(FEATURE_SELECTION_MARKER)
+        if not sentinel_present:
+            selected_set.update({"is_candle_day", *CATEGORICAL_DUMMY_COLUMNS})
+
+    include_is_candle_day = "is_candle_day" in selected_set
+    enabled_dummy_groups = [
+        name for name in CATEGORICAL_DUMMY_COLUMNS if name in selected_set
+    ]
+    continuous_feature_columns = [
+        name for name in FEATURE_COLUMNS if name in selected_set
+    ]
+    disabled_features = [name for name in default_feature_set if name not in selected_set]
+    ordered_selected_features = [
+        name for name in default_feature_set if name in selected_set
+    ]
+
     df = load_data(db_path=db_path, market=market)
     if df.empty:
         friendly_market = "kaikki markkinat" if not market else market.upper()
@@ -559,8 +618,12 @@ def run_regression_for_market(
         total_rows_full = len(df_full)
         rows_with_bo = int((df_full["has_blackout_data"] == 1).sum())
         rows_without_bo = int((df_full["has_blackout_data"] == 0).sum())
-        share_without_bo = (rows_without_bo / total_rows_full * 100.0) if total_rows_full > 0 else 0.0
-        share_with_bo = (rows_with_bo / total_rows_full * 100.0) if total_rows_full > 0 else 0.0
+        share_without_bo = (
+            (rows_without_bo / total_rows_full * 100.0) if total_rows_full > 0 else 0.0
+        )
+        share_with_bo = (
+            (rows_with_bo / total_rows_full * 100.0) if total_rows_full > 0 else 0.0
+        )
         blackout_coverage = {
             "total_rows": total_rows_full,
             "with_bo_rows": rows_with_bo,
@@ -589,11 +652,16 @@ def run_regression_for_market(
 
     # Globaali VIF-analyysi: käytä kaikkia rivejä, joissa featuret ovat kunnossa
     vif_subset = df.dropna(
-        subset=FEATURE_COLUMNS + [PATTERN_COLUMN, MARKET_COLUMN]
+        subset=continuous_feature_columns + [PATTERN_COLUMN, MARKET_COLUMN]
     ).reset_index(drop=True)
     if vif_subset.empty:
         raise ValueError("Ei riittävästi dataa VIF-analyysiä varten.")
-    X_vif, continuous_cols_vif, dummy_cols_vif = build_feature_matrix(vif_subset)
+    X_vif, continuous_cols_vif, dummy_cols_vif = build_feature_matrix(
+        vif_subset,
+        feature_columns=continuous_feature_columns,
+        include_is_candle_day=include_is_candle_day,
+        categorical_columns=enabled_dummy_groups,
+    )
     vif_all = calculate_vif(X_vif)
     if continuous_cols_vif:
         vif_continuous = calculate_vif(X_vif[continuous_cols_vif])
@@ -606,11 +674,11 @@ def run_regression_for_market(
         success_label = f"success{horizon}"
         return_label = f"y{horizon}"
         subset_train = df.dropna(
-            subset=FEATURE_COLUMNS
+            subset=continuous_feature_columns
             + [success_label, return_label, PATTERN_COLUMN, MARKET_COLUMN]
         ).reset_index(drop=True)
         subset_full = df_full.dropna(
-            subset=FEATURE_COLUMNS
+            subset=continuous_feature_columns
             + [success_label, return_label, PATTERN_COLUMN, MARKET_COLUMN]
         ).reset_index(drop=True)
 
@@ -619,7 +687,12 @@ def run_regression_for_market(
                 f"Ei riittävästi dataa horisontille {horizon} valituilla suodattimilla."
             )
 
-        X, continuous_cols, dummy_cols = build_feature_matrix(subset_train)
+        X, continuous_cols, dummy_cols = build_feature_matrix(
+            subset_train,
+            feature_columns=continuous_feature_columns,
+            include_is_candle_day=include_is_candle_day,
+            categorical_columns=enabled_dummy_groups,
+        )
         y_success = subset_train[success_label]
         y_return = subset_train[return_label]
 
@@ -666,12 +739,15 @@ def run_regression_for_market(
             warning_messages.append(f"H{horizon}: {linear_result['warning']}")
 
     thresholds_payload = {
-        h: success_thresholds.get(h, DEFAULT_SUCCESS_THRESHOLDS[h])
-        if success_thresholds
-        else DEFAULT_SUCCESS_THRESHOLDS[h]
+        h: (
+            success_thresholds.get(h, DEFAULT_SUCCESS_THRESHOLDS[h])
+            if success_thresholds
+            else DEFAULT_SUCCESS_THRESHOLDS[h]
+        )
         for h in DEFAULT_SUCCESS_THRESHOLDS
     }
 
+    report_features = ordered_selected_features.copy()
     report_text = _build_report_text(
         market,
         filter_label,
@@ -682,6 +758,8 @@ def run_regression_for_market(
         blackout_coverage,
         vif_all,
         vif_continuous,
+        feature_columns=report_features,
+        excluded_features=disabled_features,
     )
     report_path = _write_report(report_text) if write_report else None
 
@@ -712,8 +790,13 @@ def _build_report_text(
     blackout_coverage: Optional[Dict[str, float]] = None,
     vif_all: Optional[pd.DataFrame] = None,
     vif_continuous: Optional[pd.DataFrame] = None,
+    feature_columns: Optional[List[str]] = None,
+    excluded_features: Optional[List[str]] = None,
 ) -> str:
     market_label = (market or "Kaikki markkinat").upper()
+    features_line = (
+        "Käytetyt featuret: " + ", ".join(feature_columns or FEATURE_COLUMNS)
+    )
     lines = [
         f"Markkina: {market_label}",
         f"Kynttilätyyppi: {pattern_label}",
@@ -723,8 +806,13 @@ def _build_report_text(
             f"success{h}: {thresholds.get(h, float('nan')):.2f}"
             for h in sorted(DEFAULT_SUCCESS_THRESHOLDS.keys())
         ),
-        "",
+        features_line,
     ]
+    if excluded_features:
+        lines.append(
+            "Pois jätetyt featuret: " + ", ".join(excluded_features)
+        )
+    lines.append("")
     if blackout_coverage:
         lines.extend(
             [

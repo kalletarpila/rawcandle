@@ -48,6 +48,9 @@ def _sample_dataframe(rows: int = 40) -> pd.DataFrame:
                 "BullDiv_recent_strength": float(np.clip(rng.normal(1.2, 0.6), 0, 3)),
                 "BullDiv_recent_offset": int(rng.integers(-1, 4)),
                 "Has_BullDiv_recent": int(rng.integers(0, 2)),
+                "has_blackout_data": int(rng.integers(0, 2)),
+                "date": pd.Timestamp("2024-01-01") + pd.Timedelta(days=i),
+                "ticker": f"TICK{i:03d}",
                 "kynttila_koodi": pattern_codes[i % len(pattern_codes)],
                 "market": markets[i % len(markets)],
             }
@@ -72,6 +75,30 @@ def test_build_feature_matrix_creates_dummies_and_is_candle_flag():
     market_cols = [col for col in X.columns if col.startswith("market_")]
     assert pattern_cols, "Pattern-ohjaimia ei syntynyt"
     assert market_cols, "Markkina-ohjaimia ei syntynyt"
+
+
+def test_build_feature_matrix_respects_custom_feature_columns():
+    df = rr.add_return_labels(_sample_dataframe(8))
+    custom_features = rr.FEATURE_COLUMNS[:5]
+    X, continuous_cols, dummy_cols = rr.build_feature_matrix(
+        df, feature_columns=custom_features
+    )
+    assert continuous_cols == custom_features
+    base_cols = set(rr.FEATURE_COLUMNS)
+    returned_base_cols = set(col for col in X.columns if col in base_cols)
+    assert returned_base_cols == set(custom_features)
+    assert dummy_cols, "Dummy-sarakkeita pitäisi syntyä edelleen"
+
+
+def test_build_feature_matrix_can_exclude_is_candle_day_dummy():
+    df = rr.add_return_labels(_sample_dataframe(8))
+    X, continuous_cols, dummy_cols = rr.build_feature_matrix(
+        df,
+        feature_columns=rr.FEATURE_COLUMNS[:3],
+        include_is_candle_day=False,
+    )
+    assert "is_candle_day" not in X.columns
+    assert all(not col.startswith("is_candle_day") for col in dummy_cols)
 
 
 def test_run_logistic_regression_returns_metrics():
@@ -152,3 +179,126 @@ def test_run_regression_respects_custom_thresholds(monkeypatch):
         assert pytest.approx(result["success_thresholds"][horizon], rel=1e-6) == value
     assert result["success_horizons"] == [5]
     assert 5 in result["horizons"]
+
+
+def test_run_regression_for_market_passes_feature_columns(monkeypatch):
+    sample_df = _sample_dataframe(60)
+
+    def fake_loader(db_path=None, market=None):
+        return sample_df.copy()
+
+    monkeypatch.setattr(rr, "load_data", fake_loader)
+    monkeypatch.setattr(rr, "load_blackout_dates", lambda *_, **__: pd.DataFrame())
+    recorded_feature_args = []
+    original_build = rr.build_feature_matrix
+
+    def wrapped_build(
+        df,
+        feature_columns=None,
+        include_is_candle_day=True,
+        categorical_columns=None,
+    ):
+        recorded_feature_args.append(
+            {
+                "features": tuple(feature_columns or ()),
+                "include_is_candle_day": include_is_candle_day,
+                "categorical_columns": tuple(sorted(categorical_columns or [])),
+            }
+        )
+        return original_build(
+            df,
+            feature_columns=feature_columns,
+            include_is_candle_day=include_is_candle_day,
+            categorical_columns=categorical_columns,
+        )
+
+    monkeypatch.setattr(rr, "build_feature_matrix", wrapped_build)
+    selected_features = (
+        rr.FEATURE_COLUMNS[:4]
+        + ["is_candle_day", rr.PATTERN_COLUMN, rr.FEATURE_SELECTION_MARKER]
+    )
+    result = rr.run_regression_for_market(
+        market="usa",
+        success_horizons=[5],
+        feature_columns=selected_features,
+    )
+    assert result["success_horizons"] == [5]
+    assert recorded_feature_args, "build_feature_matrix ei kutsunut valituilla featureilla"
+    for call in recorded_feature_args:
+        assert call["include_is_candle_day"] is True
+        assert list(call["features"]) == rr.FEATURE_COLUMNS[:4]
+        assert call["categorical_columns"] == (rr.PATTERN_COLUMN,)
+    assert "Pois jätetyt featuret" in result["report"]
+    assert rr.FEATURE_COLUMNS[5] in result["report"]
+
+
+def test_run_regression_can_disable_is_candle_day(monkeypatch):
+    sample_df = _sample_dataframe(60)
+
+    def fake_loader(db_path=None, market=None):
+        return sample_df.copy()
+
+    monkeypatch.setattr(rr, "load_data", fake_loader)
+    monkeypatch.setattr(rr, "load_blackout_dates", lambda *_, **__: pd.DataFrame())
+    include_flags = []
+
+    original_build = rr.build_feature_matrix
+
+    def wrapped_build(
+        df,
+        feature_columns=None,
+        include_is_candle_day=True,
+        categorical_columns=None,
+    ):
+        include_flags.append(include_is_candle_day)
+        return original_build(
+            df,
+            feature_columns=feature_columns,
+            include_is_candle_day=include_is_candle_day,
+            categorical_columns=categorical_columns,
+        )
+
+    monkeypatch.setattr(rr, "build_feature_matrix", wrapped_build)
+    rr.run_regression_for_market(
+        market="suomi",
+        success_horizons=[5],
+        feature_columns=rr.FEATURE_COLUMNS[:3] + [rr.FEATURE_SELECTION_MARKER],
+    )
+    assert include_flags
+    assert all(flag is False for flag in include_flags)
+
+
+def test_run_regression_can_disable_dummy_groups(monkeypatch):
+    sample_df = _sample_dataframe(60)
+
+    def fake_loader(db_path=None, market=None):
+        return sample_df.copy()
+
+    monkeypatch.setattr(rr, "load_data", fake_loader)
+    monkeypatch.setattr(rr, "load_blackout_dates", lambda *_, **__: pd.DataFrame())
+    recorded_cats = []
+    original_build = rr.build_feature_matrix
+
+    def wrapped_build(
+        df,
+        feature_columns=None,
+        include_is_candle_day=True,
+        categorical_columns=None,
+    ):
+        recorded_cats.append(tuple(sorted(categorical_columns or [])))
+        return original_build(
+            df,
+            feature_columns=feature_columns,
+            include_is_candle_day=include_is_candle_day,
+            categorical_columns=categorical_columns,
+        )
+
+    monkeypatch.setattr(rr, "build_feature_matrix", wrapped_build)
+    rr.run_regression_for_market(
+        market="suomi",
+        success_horizons=[5],
+        feature_columns=rr.FEATURE_COLUMNS[:3]
+        + ["is_candle_day", rr.FEATURE_SELECTION_MARKER],
+    )
+    assert recorded_cats
+    assert all(cat == () for cat in recorded_cats)

@@ -61,6 +61,27 @@ class RegressionView:
                 value=f"{run_regression.DEFAULT_SUCCESS_THRESHOLDS[20]:.2f}",
             ),
         }
+        continuous_features = list(run_regression.FEATURE_COLUMNS)
+        dummy_features = [
+            run_regression.PATTERN_COLUMN,
+            run_regression.MARKET_COLUMN,
+            "BullDiv_recent_offset",
+        ]
+        self.feature_names = continuous_features + ["is_candle_day"] + dummy_features
+        seen = set()
+        ordered_feature_names: list[str] = []
+        for name in self.feature_names:
+            if name not in seen:
+                ordered_feature_names.append(name)
+                seen.add(name)
+        self.feature_names = ordered_feature_names
+        feature_type_map = {name: "Jatkuva" for name in continuous_features}
+        for name in ["is_candle_day"] + dummy_features:
+            feature_type_map[name] = "Dummy"
+        self.feature_checkboxes: Dict[str, ft.Checkbox] = {
+            name: ft.Checkbox(label=f"{name} ({feature_type_map[name]})", value=True)
+            for name in self.feature_names
+        }
         self.run_button = ft.ElevatedButton(
             "Aja regressio",
             icon=ft.Icons.PLAY_ARROW,
@@ -125,6 +146,38 @@ class RegressionView:
             spacing=10,
         )
 
+        feature_selection_card = ft.Card(
+            content=ft.Container(
+                padding=20,
+                content=ft.Column(
+                    [
+                        ft.Text(
+                            "Valitse regressioon käytettävät featurit",
+                            weight=ft.FontWeight.BOLD,
+                            size=18,
+                        ),
+                        ft.Text(
+                            "Voit kytkeä featuureita päälle/pois ilman, että ohjelmakoodia tarvitsee muuttaa.",
+                            color=ft.Colors.GREY_600,
+                        ),
+                        ft.ResponsiveRow(
+                            [
+                                ft.Container(
+                                    padding=5,
+                                    content=self.feature_checkboxes[name],
+                                    col={"xs": 12, "sm": 6, "md": 4, "lg": 3},
+                                )
+                                for name in self.feature_names
+                            ],
+                            spacing=10,
+                            run_spacing=5,
+                        ),
+                    ],
+                    spacing=10,
+                ),
+            )
+        )
+
         info_cards = ft.ResponsiveRow(
             [
                 ft.Container(
@@ -183,6 +236,7 @@ class RegressionView:
             content=ft.Column(
                 [
                     hero,
+                    feature_selection_card,
                     info_cards,
                     ft.Card(
                         content=ft.Container(
@@ -250,6 +304,8 @@ class RegressionView:
             return
 
         thresholds = self._get_thresholds()
+        selected_features = self._get_selected_features()
+        feature_payload = selected_features + [run_regression.FEATURE_SELECTION_MARKER]
         self._set_status("Ajetaan regressioanalyysiä...", ft.Colors.BLUE_600)
         self.run_button.disabled = True
         self.page.update()
@@ -265,6 +321,7 @@ class RegressionView:
                 success_horizons=selected_horizons,
                 success_thresholds=thresholds,
                 require_blackout_data=require_blackout,
+                feature_columns=feature_payload,
             )
             self.output_field.value = result["report"]
             status_msg = "Analyysi valmis."
@@ -299,3 +356,11 @@ class RegressionView:
             h for h, checkbox in self.horizon_checkboxes.items() if checkbox.value
         ]
         return sorted(horizons)
+
+    def _get_selected_features(self) -> List[str]:
+        selected = [
+            name for name in self.feature_names if self.feature_checkboxes[name].value
+        ]
+        if not selected:
+            return list(self.feature_names)
+        return selected
