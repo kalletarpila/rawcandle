@@ -738,26 +738,59 @@ def run_regression_for_market(
     else:
         df = df_full.copy().reset_index(drop=True)
 
+    pattern_selection: Optional[List[int]]
+    if pattern_code is None or (
+        isinstance(pattern_code, str) and pattern_code in {"", "__all__"}
+    ):
+        pattern_selection = None
+    else:
+        raw_codes: Iterable[object]
+        if isinstance(pattern_code, (list, tuple, set)):
+            raw_codes = pattern_code
+        else:
+            raw_codes = [pattern_code]
+        try:
+            pattern_selection = sorted({int(code) for code in raw_codes})
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "Pattern-koodien tulee olla kokonaislukuja tai lista kokonaisluvuista."
+            ) from exc
+        if not pattern_selection:
+            pattern_selection = None
+
     filter_label = "Kaikki kynttilät (sis. downtrend)"
 
-    if pattern_code is not None:
-        try:
-            pattern_code = int(pattern_code)
-        except ValueError as exc:
-            raise ValueError("Pattern-koodin tulee olla kokonaisluku") from exc
-        pattern_mask = df[PATTERN_COLUMN].astype(int) == pattern_code
-        downtrend_mask = df[PATTERN_COLUMN].astype(int) == 0
-        filtered = df[pattern_mask | downtrend_mask]
-        if filtered.empty or not pattern_mask.any():
-            raise ValueError(
-                f"Ei rivejä valitulle patternille {pattern_code} (downtrend lisättiin automaattisesti)."
+    def _pattern_label(code: int) -> str:
+        return PATTERN_LABELS.get(code, f"Pattern {code}")
+
+    if pattern_selection:
+        pattern_series = df[PATTERN_COLUMN].astype(int)
+        if pattern_selection == [0]:
+            mask = pattern_series == 0
+            if not mask.any():
+                raise ValueError("Ei downtrend-rivejä analyysia varten.")
+            df = df[mask].reset_index(drop=True)
+            df_full = df_full[df_full[PATTERN_COLUMN].astype(int) == 0].reset_index(
+                drop=True
             )
-        df = filtered
-        friendly = PATTERN_LABELS.get(pattern_code, f"Pattern {pattern_code}")
-        filter_label = f"{friendly} + downtrend"
-        df_full = df_full[
-            df_full[PATTERN_COLUMN].astype(int).isin({pattern_code, 0})
-        ].reset_index(drop=True)
+            filter_label = _pattern_label(0)
+        else:
+            selected_nonzero = [code for code in pattern_selection if code != 0]
+            if not selected_nonzero:
+                raise ValueError("Valitse vähintään yksi kynttilätyyppi.")
+            filter_set = set(selected_nonzero) | {0}
+            filtered = df[pattern_series.isin(filter_set)]
+            if filtered.empty or not pattern_series.isin(selected_nonzero).any():
+                missing = ", ".join(str(code) for code in selected_nonzero)
+                raise ValueError(
+                    f"Ei rivejä valituille pattern-koodeille: {missing} (downtrend lisättiin automaattisesti)."
+                )
+            df = filtered.reset_index(drop=True)
+            df_full = df_full[
+                df_full[PATTERN_COLUMN].astype(int).isin(filter_set)
+            ].reset_index(drop=True)
+            friendly = ", ".join(_pattern_label(code) for code in selected_nonzero)
+            filter_label = f"{friendly} + downtrend"
     else:
         df_full = df_full.reset_index(drop=True)
 
@@ -910,10 +943,15 @@ def run_regression_for_market(
     )
     report_path = _write_report(report_text) if write_report else None
 
+    single_pattern_code = (
+        pattern_selection[0] if pattern_selection and len(pattern_selection) == 1 else None
+    )
+
     return {
         "market": market,
         "row_count": len(df),
-        "pattern_code": pattern_code,
+        "pattern_code": single_pattern_code,
+        "selected_patterns": pattern_selection,
         "pattern_label": filter_label,
         "success_horizons": sorted(horizons),
         "success_thresholds": thresholds_payload,

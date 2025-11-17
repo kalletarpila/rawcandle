@@ -23,12 +23,6 @@ class RegressionView:
             options=self._build_market_options(),
             value="__all__",
         )
-        self.pattern_dropdown = ft.Dropdown(
-            label="Valitse kynttilätyyppi",
-            width=240,
-            options=self._build_pattern_options(),
-            value="__all__",
-        )
         self.horizon_checkboxes = {
             2: ft.Checkbox(label="2 päivää", value=False),
             5: ft.Checkbox(label="5 päivää", value=True),
@@ -82,6 +76,18 @@ class RegressionView:
             name: ft.Checkbox(label=f"{name} ({feature_type_map[name]})", value=True)
             for name in self.feature_names
         }
+        pattern_codes = [
+            (code, label)
+            for code, label in run_regression.PATTERN_LABELS.items()
+            if 0 <= code <= 7
+        ]
+        self.pattern_checkboxes: Dict[int, ft.Checkbox] = {
+            code: ft.Checkbox(
+                label=f"{label} (koodi {code})",
+                value=(code != 0),
+            )
+            for code, label in pattern_codes
+        }
         self.run_button = ft.ElevatedButton(
             "Aja regressio",
             icon=ft.Icons.PLAY_ARROW,
@@ -121,7 +127,6 @@ class RegressionView:
                 ft.Row(
                     [
                         self.market_dropdown,
-                        self.pattern_dropdown,
                         self.require_blackout_checkbox,
                         self.run_button,
                     ],
@@ -144,6 +149,39 @@ class RegressionView:
                 self.status_text,
             ],
             spacing=10,
+        )
+
+        pattern_selection_card = ft.Card(
+            content=ft.Container(
+                padding=20,
+                content=ft.Column(
+                    [
+                        ft.Text(
+                            "Valitse analyysiin sisällytettävät kynttilätyypit",
+                            weight=ft.FontWeight.BOLD,
+                            size=18,
+                        ),
+                        ft.Text(
+                            "Downtrend (0) analysoidaan erikseen vain, jos valitset sen yksin. "
+                            "Muulloin downtrend lisätään automaattisesti muiden valittujen kuvioiden rinnalle.",
+                            color=ft.Colors.GREY_600,
+                        ),
+                        ft.ResponsiveRow(
+                            [
+                                ft.Container(
+                                    padding=5,
+                                    content=self.pattern_checkboxes[code],
+                                    col={"xs": 12, "sm": 6, "md": 4},
+                                )
+                                for code in sorted(self.pattern_checkboxes.keys())
+                            ],
+                            spacing=10,
+                            run_spacing=5,
+                        ),
+                    ],
+                    spacing=10,
+                ),
+            )
         )
 
         feature_selection_card = ft.Card(
@@ -236,6 +274,7 @@ class RegressionView:
             content=ft.Column(
                 [
                     hero,
+                    pattern_selection_card,
                     feature_selection_card,
                     info_cards,
                     ft.Card(
@@ -274,14 +313,6 @@ class RegressionView:
             pass
         return options
 
-    def _build_pattern_options(self) -> List[ft.dropdown.Option]:
-        options = [ft.dropdown.Option("__all__", "Kaikki kynttilät")]
-        for code, label in run_regression.PATTERN_LABELS.items():
-            if label == "Bearish Divergence":
-                continue
-            options.append(ft.dropdown.Option(str(code), label))
-        return options
-
     def _set_status(self, message: str, color: str = ft.Colors.GREY_600) -> None:
         self.status_text.value = message
         self.status_text.color = color
@@ -292,7 +323,6 @@ class RegressionView:
 
     def _on_run_clicked(self, _):
         market_value = self.market_dropdown.value or "__all__"
-        pattern_value = self.pattern_dropdown.value or "__all__"
         selected_horizons = self._get_selected_horizons()
         if not selected_horizons:
             self._set_status(
@@ -304,6 +334,15 @@ class RegressionView:
             return
 
         thresholds = self._get_thresholds()
+        selected_patterns = self._get_selected_patterns()
+        if not selected_patterns:
+            self._set_status(
+                "Valitse vähintään yksi kynttilätyyppi.",
+                ft.Colors.RED_600,
+            )
+            self.run_button.disabled = False
+            self.page.update()
+            return
         selected_features = self._get_selected_features()
         feature_payload = selected_features + [run_regression.FEATURE_SELECTION_MARKER]
         self._set_status("Ajetaan regressioanalyysiä...", ft.Colors.BLUE_600)
@@ -312,12 +351,9 @@ class RegressionView:
 
         try:
             require_blackout = bool(self.require_blackout_checkbox.value)
-            pattern_code = (
-                None if pattern_value in {"", "__all__"} else int(pattern_value)
-            )
             result = run_regression.run_regression_for_market(
                 market_value,
-                pattern_code=pattern_code,
+                pattern_code=selected_patterns,
                 success_horizons=selected_horizons,
                 success_thresholds=thresholds,
                 require_blackout_data=require_blackout,
@@ -356,6 +392,12 @@ class RegressionView:
             h for h, checkbox in self.horizon_checkboxes.items() if checkbox.value
         ]
         return sorted(horizons)
+
+    def _get_selected_patterns(self) -> List[int]:
+        selected = [
+            code for code, checkbox in self.pattern_checkboxes.items() if checkbox.value
+        ]
+        return sorted(selected)
 
     def _get_selected_features(self) -> List[str]:
         selected = [
