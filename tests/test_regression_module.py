@@ -9,9 +9,15 @@ def _sample_dataframe(rows: int = 40) -> pd.DataFrame:
     rng = np.random.default_rng(123)
     pattern_codes = [0, 1, 2, 3, 4, 5, 6]
     markets = ["usa", "suomi"]
+    crisis_start = pd.Timestamp(rr.CRISIS_START)
+    crisis_end = pd.Timestamp(rr.CRISIS_END)
     records = []
     for i in range(rows):
         shift = rng.normal(0, 2)
+        base_date = pd.Timestamp("2024-01-01") + pd.Timedelta(days=i)
+        if i % 9 == 0:
+            base_date = pd.Timestamp("2025-03-01") + pd.Timedelta(days=i % 40)
+        is_crisis = int(crisis_start <= base_date <= crisis_end)
         records.append(
             {
                 "t2": 100 + rng.normal(1 + shift, 3),
@@ -22,6 +28,14 @@ def _sample_dataframe(rows: int = 40) -> pd.DataFrame:
                 "RSI14_t0": float(np.clip(rng.normal(50, 15), 0, 100)),
                 "t0_volyymi": float(np.clip(rng.normal(120, 30), 10, 400)),
                 "t0_close_norm": float(100 + rng.normal(5, 10)),
+                "is_divergence_today": int(rng.integers(0, 2)),
+                "recent_divergence_min_distance": int(rng.integers(1, 6)),
+                "recent_divergence_decay_strength": float(
+                    np.clip(rng.normal(0.4, 0.1), 0, 2)
+                ),
+                "rolling_BullDiv_influence": float(
+                    np.clip(rng.normal(0.5, 0.3), 0, 3)
+                ),
                 "t_10_hajonta": float(abs(rng.normal(5, 2))),
                 "t_20_hajonta": float(abs(rng.normal(8, 3))),
                 "t_10": 100 + rng.normal(-2, 3),
@@ -38,6 +52,7 @@ def _sample_dataframe(rows: int = 40) -> pd.DataFrame:
                 "Shadow_ratio": float(np.clip(rng.normal(0.1, 0.3), -1, 3)),
                 "Volume_impulse": float(np.clip(rng.normal(1.2, 0.5), 0.1, 5)),
                 "Reversal_Context_Score": float(rng.normal(5, 2)),
+                "is_crisis": is_crisis,
                 "SPX_10": 100 + rng.normal(0, 1),
                 "SPX_20": 100 + rng.normal(0, 1.2),
                 "SPX_volatility_10": float(abs(rng.normal(1.5, 0.3))),
@@ -49,7 +64,7 @@ def _sample_dataframe(rows: int = 40) -> pd.DataFrame:
                 "BullDiv_recent_offset": int(rng.integers(-1, 4)),
                 "Has_BullDiv_recent": int(rng.integers(0, 2)),
                 "has_blackout_data": int(rng.integers(0, 2)),
-                "date": pd.Timestamp("2024-01-01") + pd.Timedelta(days=i),
+                "date": base_date,
                 "ticker": f"TICK{i:03d}",
                 "kynttila_koodi": pattern_codes[i % len(pattern_codes)],
                 "market": markets[i % len(markets)],
@@ -65,6 +80,47 @@ def test_add_return_labels_produces_expected_columns():
         assert col in df.columns
     assert df["y5"].between(-1, 5).all()
     assert set(df["success5"].unique()).issubset({0, 1})
+
+
+def test_add_crisis_flag_marks_window():
+    dates = [
+        pd.Timestamp("2025-03-15"),
+        pd.Timestamp("2025-05-10"),
+    ]
+    df = pd.DataFrame({"date": dates})
+    flagged = rr.add_crisis_flag(df.copy())
+    assert flagged.loc[0, "is_crisis"] == 1
+    assert flagged.loc[1, "is_crisis"] == 0
+
+
+def test_compute_crisis_success_stats_counts_groups():
+    df = pd.DataFrame(
+        {
+            "is_crisis": [1, 1, 0, 0],
+            "success2": [1, 0, 1, 0],
+            "success5": [0, 0, 1, 1],
+            "success10": [1, 1, 0, 0],
+            "success20": [0, 1, 0, 1],
+        }
+    )
+    stats_info = rr.compute_crisis_success_stats(
+        df, ["success2", "success5", "success10", "success20"]
+    )
+    assert stats_info["has_column"] is True
+    data = stats_info["stats"]
+    assert data["success2"]["crisis_rate"] == pytest.approx(0.5)
+    assert data["success5"]["normal_rate"] == pytest.approx(1.0)
+    assert data["success10"]["crisis_n"] == 2
+    assert data["success20"]["normal_n"] == 2
+
+
+def test_compute_crisis_success_stats_handles_exclusion():
+    df = pd.DataFrame({"success2": [1, 0], "is_crisis": [1, 0]})
+    stats_info = rr.compute_crisis_success_stats(
+        df, ["success2"], exclude_crisis_period=True
+    )
+    assert stats_info["excluded"] is True
+    assert stats_info["stats"] == {}
 
 
 def test_build_feature_matrix_creates_dummies_and_is_candle_flag():
@@ -126,11 +182,18 @@ def test_run_regression_for_market_uses_loader(monkeypatch):
         return sample_df.copy()
 
     monkeypatch.setattr(rr, "load_data", fake_loader)
+    monkeypatch.setattr(rr, "load_blackout_dates", lambda *_, **__: pd.DataFrame())
+    monkeypatch.setattr(rr, "load_divergence_data", lambda *_, **__: pd.DataFrame())
     result = rr.run_regression_for_market(market="usa")
     assert result["row_count"] == len(sample_df)
     horizons = result["horizons"]
     assert 5 in horizons
     assert 0 <= horizons[5]["logistic"]["auc"] <= 1
+    crisis_stats = horizons[5]["crisis_stats"]["stats"]
+    assert "success5" in crisis_stats
+    assert crisis_stats["success5"]["crisis_n"] >= 0
+    assert crisis_stats["success5"]["normal_n"] >= 0
+    assert "Kriisijakso poistettu analyyseista" in result["report"]
 
 
 def test_run_regression_includes_downtrend_control(monkeypatch):
@@ -302,3 +365,20 @@ def test_run_regression_can_disable_dummy_groups(monkeypatch):
     )
     assert recorded_cats
     assert all(cat == () for cat in recorded_cats)
+
+
+def test_run_regression_can_exclude_crisis_period(monkeypatch):
+    sample_df = _sample_dataframe(80)
+
+    def fake_loader(db_path=None, market=None):
+        return sample_df.copy()
+
+    monkeypatch.setattr(rr, "load_data", fake_loader)
+    monkeypatch.setattr(rr, "load_blackout_dates", lambda *_, **__: pd.DataFrame())
+    monkeypatch.setattr(rr, "load_divergence_data", lambda *_, **__: pd.DataFrame())
+    result = rr.run_regression_for_market(
+        success_horizons=[5], exclude_crisis_period=True
+    )
+    expected_rows = len(sample_df[sample_df["is_crisis"] == 0])
+    assert result["row_count"] == expected_rows
+    assert "Kriisijakso on poistettu analyyseista" in result["report"]

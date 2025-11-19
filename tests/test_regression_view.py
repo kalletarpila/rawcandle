@@ -48,6 +48,8 @@ def regression_view(monkeypatch):
         5: SimpleNamespace(value="0.03", error_text=None),
     }
     view.require_blackout_checkbox = SimpleNamespace(value=False)
+    view.exclude_crisis_checkbox = SimpleNamespace(value=False)
+    view.pattern_checkboxes = {0: SimpleNamespace(value=True)}
     view.run_button = SimpleNamespace(disabled=False)
     view.status_text = SimpleNamespace(value="", color="")
     view.output_field = SimpleNamespace(value="")
@@ -75,6 +77,7 @@ def test_on_run_clicked_passes_selected_features(monkeypatch, regression_view):
 
     def fake_run_regression_for_market(*args, **kwargs):
         captured["feature_columns"] = kwargs.get("feature_columns")
+        captured["exclude_crisis_period"] = kwargs.get("exclude_crisis_period")
         return {
             "report": "OK",
             "warnings": [],
@@ -95,4 +98,5 @@ def test_on_run_clicked_passes_selected_features(monkeypatch, regression_view):
         regression_view_module.run_regression.FEATURE_SELECTION_MARKER
     ]
     assert captured["feature_columns"] == expected_payload
+    assert captured["exclude_crisis_period"] is False
     assert regression_view.output_field.value == "OK"

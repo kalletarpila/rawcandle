@@ -66,6 +66,8 @@ FEATURE_COLUMNS = [
     "Reversal_Context_Score",
     # Blackout-kattavuus
     "has_blackout_data",
+    # Kriisi-ikkuna
+    "is_crisis",
     # Markkinaympäristö ja indeksivola
     "SPX_10",
     "SPX_20",
@@ -90,6 +92,10 @@ PATTERN_LABELS = {
     8: "Bearish Divergence",
 }
 DEFAULT_SUCCESS_THRESHOLDS = {2: 0.02, 5: 0.03, 10: 0.05, 20: 0.08}
+CRISIS_START = "2025-03-01"
+CRISIS_END = "2025-04-30"
+BINARY_FEATURES = {"is_crisis"}
+CRISIS_SUCCESS_LABELS = [f"success{h}" for h in sorted(DEFAULT_SUCCESS_THRESHOLDS.keys())]
 
 
 def _friendly_feature_name(name: str) -> str:
@@ -109,6 +115,27 @@ ALIAS_MAP = {
     "Bearish Divergence": "bearish_divergence",
     PATTERN_COLUMN: "candle_pattern",
 }
+
+
+def add_crisis_flag(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Merkitse rivit, jotka osuvat määriteltyyn kriisi-ikkunaan.
+    """
+    if df.empty:
+        df["is_crisis"] = 0
+        return df
+
+    if "date" not in df.columns:
+        df["is_crisis"] = 0
+        return df
+
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    start = pd.Timestamp(CRISIS_START)
+    end = pd.Timestamp(CRISIS_END)
+    df["is_crisis"] = (
+        (df["date"] >= start) & (df["date"] <= end)
+    ).astype(int)
+    return df
 
 
 def load_blackout_dates(db_path: Path | str = DEFAULT_DB_PATH) -> pd.DataFrame:
@@ -296,6 +323,7 @@ def load_data(
         if alias not in df.columns and source in df.columns:
             df[alias] = df[source]
 
+    df = add_crisis_flag(df)
     return df
 
 
@@ -449,7 +477,8 @@ def build_feature_matrix(
     is_candle_series = (df[PATTERN_COLUMN].fillna(0).astype(int) != 0).astype(int)
     df["is_candle_day"] = is_candle_series
 
-    continuous_cols = feature_columns.copy()
+    binary_cols = [col for col in feature_columns if col in BINARY_FEATURES]
+    continuous_cols = [col for col in feature_columns if col not in BINARY_FEATURES]
     feature_df = df[continuous_cols].copy()
 
     allowed_cats = set(categorical_columns) if categorical_columns is not None else None
@@ -468,6 +497,9 @@ def build_feature_matrix(
                 {"is_candle_day": is_candle_series.astype(float)}, index=df.index
             )
         )
+
+    if binary_cols:
+        dummy_frames.append(df[binary_cols].astype(float))
 
     if categorical_cols:
         categorical = df[categorical_cols].astype("category")
@@ -535,6 +567,55 @@ def quick_summary(df: pd.DataFrame, label_column: str = "success5") -> str:
     random_rate, n_random = rate(df["is_candle_day"] == 0)
     lines.append(f"Satunnaiset downtrend: {random_rate:.3f} (n={n_random})")
     return "\n".join(lines)
+
+
+def compute_crisis_success_stats(
+    df: pd.DataFrame,
+    label_columns: Iterable[str],
+    exclude_crisis_period: bool = False,
+) -> Dict[str, object]:
+    """
+    Laske onnistumisprosentit kriisi-ikkunan sisällä vs. sen ulkopuolella.
+    """
+    info: Dict[str, object] = {
+        "excluded": bool(exclude_crisis_period),
+        "has_column": "is_crisis" in df.columns,
+        "stats": {},
+        "has_crisis_rows": False,
+        "has_normal_rows": False,
+    }
+    if exclude_crisis_period or not info["has_column"] or df.empty:
+        return info
+
+    stats: Dict[str, Dict[str, float]] = {}
+    crisis_mask = df["is_crisis"] == 1
+    normal_mask = df["is_crisis"] == 0
+
+    def _rate(mask: pd.Series, label: str) -> tuple[float, int]:
+        subset = df.loc[mask, label].dropna()
+        if subset.empty:
+            return 0.0, 0
+        return float(subset.mean()), int(len(subset))
+
+    any_crisis = False
+    any_normal = False
+    for label in label_columns:
+        if label not in df.columns:
+            continue
+        crisis_rate, crisis_n = _rate(crisis_mask, label)
+        normal_rate, normal_n = _rate(normal_mask, label)
+        any_crisis = any_crisis or crisis_n > 0
+        any_normal = any_normal or normal_n > 0
+        stats[label] = {
+            "crisis_rate": crisis_rate,
+            "crisis_n": crisis_n,
+            "normal_rate": normal_rate,
+            "normal_n": normal_n,
+        }
+    info["stats"] = stats
+    info["has_crisis_rows"] = any_crisis
+    info["has_normal_rows"] = any_normal
+    return info
 
 
 # ------------- 5. Logistinen regressio -----------------
@@ -685,6 +766,7 @@ def run_regression_for_market(
     db_path: Path | str = DEFAULT_DB_PATH,
     write_report: bool = True,
     require_blackout_data: bool = False,
+    exclude_crisis_period: bool = False,
     feature_columns: Optional[List[str]] = None,
 ) -> Dict[str, object]:
     """
@@ -737,6 +819,10 @@ def run_regression_for_market(
         df = df_full.loc[train_mask].reset_index(drop=True)
     else:
         df = df_full.copy().reset_index(drop=True)
+
+    if exclude_crisis_period and "is_crisis" in df.columns:
+        df = df.loc[df["is_crisis"] == 0].reset_index(drop=True)
+        df_full = df_full.loc[df_full["is_crisis"] == 0].reset_index(drop=True)
 
     pattern_selection: Optional[List[int]]
     if pattern_code is None or (
@@ -867,6 +953,9 @@ def run_regression_for_market(
                 f"Ei riittävästi dataa horisontille {horizon} valituilla suodattimilla."
             )
 
+        crisis_stats = compute_crisis_success_stats(
+            subset_train, CRISIS_SUCCESS_LABELS, exclude_crisis_period=exclude_crisis_period
+        )
         X, continuous_cols, dummy_cols = build_feature_matrix(
             subset_train,
             feature_columns=continuous_feature_columns,
@@ -914,6 +1003,7 @@ def run_regression_for_market(
             "logistic": logistic_result,
             "linear": linear_result,
             "blackout_stats": blackout_stats,
+            "crisis_stats": crisis_stats,
         }
         if linear_result.get("warning"):
             warning_messages.append(f"H{horizon}: {linear_result['warning']}")
@@ -940,6 +1030,7 @@ def run_regression_for_market(
         vif_continuous,
         feature_columns=report_features,
         excluded_features=disabled_features,
+        exclude_crisis_period=exclude_crisis_period,
     )
     report_path = _write_report(report_text) if write_report else None
 
@@ -977,10 +1068,15 @@ def _build_report_text(
     vif_continuous: Optional[pd.DataFrame] = None,
     feature_columns: Optional[List[str]] = None,
     excluded_features: Optional[List[str]] = None,
+    exclude_crisis_period: bool = False,
 ) -> str:
     market_label = (market or "Kaikki markkinat").upper()
     features_line = (
         "Käytetyt featuret: " + ", ".join(feature_columns or FEATURE_COLUMNS)
+    )
+    crisis_line = (
+        "Kriisijakso poistettu analyyseista: "
+        f"{'Kyllä' if exclude_crisis_period else 'Ei'} ({CRISIS_START} – {CRISIS_END})"
     )
     lines = [
         f"Markkina: {market_label}",
@@ -991,6 +1087,7 @@ def _build_report_text(
             f"success{h}: {thresholds.get(h, float('nan')):.2f}"
             for h in sorted(DEFAULT_SUCCESS_THRESHOLDS.keys())
         ),
+        crisis_line,
         features_line,
     ]
     if excluded_features:
@@ -1064,6 +1161,35 @@ def _build_report_text(
                     "",
                 ]
             )
+        crisis = section.get("crisis_stats") or {}
+        crisis_stats = crisis.get("stats") or {}
+        has_column = crisis.get("has_column", False)
+        crisis_excluded = crisis.get("excluded", False)
+        if crisis_excluded or has_column:
+            lines.append("== Kriisijakso-analyysi ==")
+            if crisis_excluded:
+                lines.append(
+                    "Kriisijakso on poistettu analyyseista (exclude_crisis_period = True)."
+                )
+            elif not has_column:
+                lines.append("is_crisis-saraketta ei löytynyt datasta.")
+            else:
+                if not crisis.get("has_crisis_rows", False):
+                    lines.append("Ei yhtään riviä kriisijaksolta (is_crisis = 1).")
+                if not crisis_stats:
+                    lines.append("Ei kriisi-/normaalijakaumaa laskettavaksi.")
+                for label in CRISIS_SUCCESS_LABELS:
+                    stats = crisis_stats.get(label)
+                    if not stats:
+                        continue
+                    lines.append(
+                        (
+                            f"{label}: kriisi {stats['crisis_rate']:.3f} "
+                            f"(n={stats['crisis_n']}) | normaali {stats['normal_rate']:.3f} "
+                            f"(n={stats['normal_n']})"
+                        )
+                    )
+            lines.append("")
         lines.extend(
             [
                 f"== Logistinen regressio (success{horizon}) ==",

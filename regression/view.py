@@ -33,6 +33,14 @@ class RegressionView:
             label="Käytä vain tickereitä, joilla blackout-data (earnings/dividend) löytyi",
             value=False,
         )
+        self.exclude_crisis_checkbox = ft.Checkbox(
+            label="Poista kriisiaika analyyseista",
+            value=False,
+            tooltip=(
+                "Poistaa kriisijakson 2025-03-01 – 2025-04-30 analyysidatasta "
+                "(is_crisis = 1 rivit)."
+            ),
+        )
         self.success_threshold_fields = {
             2: ft.TextField(
                 label="success2 raja",
@@ -128,6 +136,7 @@ class RegressionView:
                     [
                         self.market_dropdown,
                         self.require_blackout_checkbox,
+                        self.exclude_crisis_checkbox,
                         self.run_button,
                     ],
                     spacing=16,
@@ -351,12 +360,14 @@ class RegressionView:
 
         try:
             require_blackout = bool(self.require_blackout_checkbox.value)
+            exclude_crisis = bool(self.exclude_crisis_checkbox.value)
             result = run_regression.run_regression_for_market(
                 market_value,
                 pattern_code=selected_patterns,
                 success_horizons=selected_horizons,
                 success_thresholds=thresholds,
                 require_blackout_data=require_blackout,
+                exclude_crisis_period=exclude_crisis,
                 feature_columns=feature_payload,
             )
             self.output_field.value = result["report"]
