@@ -84,6 +84,7 @@ class RegressionView:
             name: ft.Checkbox(label=f"{name} ({feature_type_map[name]})", value=True)
             for name in self.feature_names
         }
+        self._apply_saved_feature_selection()
         pattern_codes = [
             (code, label)
             for code, label in run_regression.PATTERN_LABELS.items()
@@ -353,6 +354,7 @@ class RegressionView:
             self.page.update()
             return
         selected_features = self._get_selected_features()
+        raw_feature_selection = self._get_selected_features(allow_empty=True)
         feature_payload = selected_features + [run_regression.FEATURE_SELECTION_MARKER]
         self._set_status("Ajetaan regressioanalyysiä...", ft.Colors.BLUE_600)
         self.run_button.disabled = True
@@ -377,6 +379,8 @@ class RegressionView:
             if result.get("warnings"):
                 status_msg += " | Varoitukset: " + "; ".join(result["warnings"])
             self._set_status(status_msg, ft.Colors.GREEN_600)
+            persisted_selection = raw_feature_selection
+            run_regression.save_feature_selection_preferences(persisted_selection)
         except Exception as exc:
             self.output_field.value = f"Virhe: {exc}"
             self._set_status("Analyysi epäonnistui.", ft.Colors.RED_600)
@@ -410,10 +414,18 @@ class RegressionView:
         ]
         return sorted(selected)
 
-    def _get_selected_features(self) -> List[str]:
+    def _apply_saved_feature_selection(self) -> None:
+        saved = run_regression.load_feature_selection_preferences()
+        if not saved:
+            return
+        saved_set = set(saved)
+        for name, checkbox in self.feature_checkboxes.items():
+            checkbox.value = name in saved_set
+
+    def _get_selected_features(self, allow_empty: bool = False) -> List[str]:
         selected = [
             name for name in self.feature_names if self.feature_checkboxes[name].value
         ]
-        if not selected:
-            return list(self.feature_names)
-        return selected
+        if selected or allow_empty:
+            return selected
+        return list(self.feature_names)

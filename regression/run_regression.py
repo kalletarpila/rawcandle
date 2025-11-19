@@ -16,6 +16,7 @@ from __future__ import annotations
 import sqlite3
 import warnings
 from datetime import datetime
+import json
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
@@ -96,6 +97,7 @@ CRISIS_START = "2025-03-01"
 CRISIS_END = "2025-04-30"
 BINARY_FEATURES = {"is_crisis"}
 CRISIS_SUCCESS_LABELS = [f"success{h}" for h in sorted(DEFAULT_SUCCESS_THRESHOLDS.keys())]
+FEATURE_SELECTION_STORE = PROJECT_ROOT / "data" / "regression_feature_selection.json"
 
 
 def _friendly_feature_name(name: str) -> str:
@@ -136,6 +138,28 @@ def add_crisis_flag(df: pd.DataFrame) -> pd.DataFrame:
         (df["date"] >= start) & (df["date"] <= end)
     ).astype(int)
     return df
+
+
+def load_feature_selection_preferences() -> List[str]:
+    if not FEATURE_SELECTION_STORE.exists():
+        return []
+    try:
+        data = json.loads(FEATURE_SELECTION_STORE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+    if isinstance(data, list):
+        return [str(item) for item in data]
+    return []
+
+
+def save_feature_selection_preferences(selected_features: Iterable[str]) -> None:
+    data_dir = FEATURE_SELECTION_STORE.parent
+    data_dir.mkdir(parents=True, exist_ok=True)
+    payload = [str(name) for name in selected_features]
+    try:
+        FEATURE_SELECTION_STORE.write_text(json.dumps(payload), encoding="utf-8")
+    except OSError:
+        pass
 
 
 def load_blackout_dates(db_path: Path | str = DEFAULT_DB_PATH) -> pd.DataFrame:

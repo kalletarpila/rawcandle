@@ -91,6 +91,21 @@ def test_on_run_clicked_passes_selected_features(monkeypatch, regression_view):
         "run_regression_for_market",
         fake_run_regression_for_market,
     )
+    saved = {}
+
+    def fake_save_preferences(features):
+        saved["features"] = list(features)
+
+    monkeypatch.setattr(
+        regression_view_module.run_regression,
+        "save_feature_selection_preferences",
+        fake_save_preferences,
+    )
+    monkeypatch.setattr(
+        regression_view_module.run_regression,
+        "load_feature_selection_preferences",
+        lambda: [],
+    )
 
     regression_view._on_run_clicked(None)
 
@@ -100,3 +115,5 @@ def test_on_run_clicked_passes_selected_features(monkeypatch, regression_view):
     assert captured["feature_columns"] == expected_payload
     assert captured["exclude_crisis_period"] is False
     assert regression_view.output_field.value == "OK"
+    raw_expected = regression_view._get_selected_features(allow_empty=True)
+    assert saved["features"] == raw_expected

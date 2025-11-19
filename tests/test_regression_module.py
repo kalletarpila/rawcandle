@@ -82,6 +82,15 @@ def test_add_return_labels_produces_expected_columns():
     assert set(df["success5"].unique()).issubset({0, 1})
 
 
+def test_feature_selection_preferences_roundtrip(tmp_path, monkeypatch):
+    temp_store = tmp_path / "selection.json"
+    monkeypatch.setattr(rr, "FEATURE_SELECTION_STORE", temp_store)
+    rr.save_feature_selection_preferences(["feat_a", "feat_b"])
+    assert temp_store.exists()
+    loaded = rr.load_feature_selection_preferences()
+    assert loaded == ["feat_a", "feat_b"]
+
+
 def test_add_crisis_flag_marks_window():
     dates = [
         pd.Timestamp("2025-03-15"),
