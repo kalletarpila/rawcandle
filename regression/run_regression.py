@@ -79,6 +79,10 @@ FEATURE_COLUMNS = [
     "has_blackout_data",
     # Kriisi-ikkuna
     "is_crisis",
+    # Päiväkohtaiset signaaliyhdistelmät
+    "num_candles_same_day",
+    "has_multi_candle_combo",
+    "has_bullish_divergence_same_day",
     # Markkinaympäristö ja indeksivola
     "SPX_10",
     "SPX_20",
@@ -90,7 +94,12 @@ FEATURE_COLUMNS = [
 FEATURE_COLUMNS += COMBO_FEATURE_COLUMNS
 PATTERN_COLUMN = "kynttila_koodi"
 MARKET_COLUMN = "market"
-CATEGORICAL_DUMMY_COLUMNS = [PATTERN_COLUMN, MARKET_COLUMN, "BullDiv_recent_offset"]
+CATEGORICAL_DUMMY_COLUMNS = [
+    PATTERN_COLUMN,
+    MARKET_COLUMN,
+    "BullDiv_recent_offset",
+    "signal_combo_code",
+]
 FEATURE_SELECTION_MARKER = "__ui_feature_selection__"
 PATTERN_LABELS = {
     0: "Downtrend (kontrolli)",
@@ -111,6 +120,7 @@ BINARY_FEATURES.update(
     {"bullDiv_last_1d", "bullDiv_last_2d", "bullDiv_last_3d", "bullDiv_last_3d_any"}
 )
 BINARY_FEATURES.update(COMBO_FEATURE_COLUMNS)
+BINARY_FEATURES.update({"has_multi_candle_combo", "has_bullish_divergence_same_day"})
 BULL_DIV_DIAGNOSTIC_BASE = ["vahvuus", "Price_slope_10", "SPX_volatility_10"]
 BULL_DIV_DIAGNOSTIC_FEATURES = BULL_DIV_DIAGNOSTIC_BASE + COMBO_FEATURE_COLUMNS
 CRISIS_SUCCESS_LABELS = [f"success{h}" for h in sorted(DEFAULT_SUCCESS_THRESHOLDS.keys())]
@@ -494,6 +504,89 @@ def add_divergence_features(
     working_df = working_df.drop(columns=[strength_col])
     working_df = working_df.loc[original_index]
     return working_df
+
+
+def preprocess_signals(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Puhdistaa signaalit regressiota varten:
+
+    - Yksi rivi per (ticker, date)
+    - Valitsee "vahvimman" kynttilän (strongest candle wins)
+    - Rakentaa multi-signal -koodin (signal_combo_code) sekä siihen liittyvät flagit:
+
+        signal_combo_code:
+            0 = puhdas downtrend (ei kynttilää eikä Bullish Divergencea samana päivänä)
+            1 = yksi kynttilä (pattern 1-6), ei Bullish Divergencea
+            2 = useampi kynttilä samana päivänä (pattern 1-6), ei Bullish Divergencea
+            3 = kynttilä(t) + Bullish Divergence samana päivänä
+            4 = puhdas Bullish Divergence (ilman kynttilää 1-6)
+
+    Lisäksi lisää sarakkeet:
+        - num_candles_same_day
+        - has_multi_candle_combo
+        - has_bullish_divergence_same_day
+
+    Jos pakollisia sarakkeita puuttuu tai df on tyhjä, palauttaa df:n sellaisenaan.
+    """
+    required_cols = {"ticker", "date", PATTERN_COLUMN}
+    if df.empty:
+        return df
+    missing = [col for col in required_cols if col not in df.columns]
+    if missing:
+        return df
+
+    work = df.copy()
+    work["date"] = pd.to_datetime(work["date"], errors="coerce")
+    work = work.dropna(subset=["date"])
+    work[PATTERN_COLUMN] = work[PATTERN_COLUMN].fillna(0).astype(int)
+
+    rows = []
+
+    for (ticker, date), g in work.groupby(["ticker", "date"], sort=False):
+        pat = g[PATTERN_COLUMN].astype(int)
+
+        candles = sorted({p for p in pat.tolist() if p in {1, 2, 3, 4, 5, 6}})
+
+        has_bulldiv = False
+        if "is_divergence_today" in g.columns:
+            has_bulldiv = bool(g["is_divergence_today"].fillna(0).astype(int).max() == 1)
+        if not has_bulldiv and (pat == 7).any():
+            has_bulldiv = True
+
+        if not candles and not has_bulldiv:
+            combo_code = 0
+        elif len(candles) == 1 and not has_bulldiv:
+            combo_code = 1
+        elif len(candles) >= 2 and not has_bulldiv:
+            combo_code = 2
+        elif not candles and has_bulldiv:
+            combo_code = 4
+        else:
+            combo_code = 3
+
+        rep = g
+        nonzero_mask = rep[PATTERN_COLUMN].astype(int) != 0
+        if nonzero_mask.any():
+            rep = rep.loc[nonzero_mask]
+
+        if "vahvuus" in rep.columns:
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=RuntimeWarning)
+                vahv = pd.to_numeric(rep["vahvuus"], errors="coerce")
+            idx = vahv.fillna(vahv.min() - 1).idxmax()
+            row = rep.loc[idx].copy()
+        else:
+            row = rep.iloc[0].copy()
+
+        row["signal_combo_code"] = combo_code
+        row["num_candles_same_day"] = len(candles)
+        row["has_multi_candle_combo"] = int(len(candles) >= 2)
+        row["has_bullish_divergence_same_day"] = int(has_bulldiv)
+
+        rows.append(row)
+
+    result = pd.DataFrame(rows).reset_index(drop=True)
+    return result
 
 
 # ------------- 3. Featurejen valinta -----------------
@@ -959,6 +1052,10 @@ def run_regression_for_market(
     if exclude_crisis_period and "is_crisis" in df.columns:
         df = df.loc[df["is_crisis"] == 0].reset_index(drop=True)
         df_full = df_full.loc[df_full["is_crisis"] == 0].reset_index(drop=True)
+
+    # Puhdistetaan signaalit: yksi rivi per (ticker, date) ja combo-featuret
+    df = preprocess_signals(df)
+    df_full = preprocess_signals(df_full)
 
     pattern_selection: Optional[List[int]]
     if pattern_code is None or (
