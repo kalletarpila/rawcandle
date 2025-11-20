@@ -134,9 +134,20 @@ def ensure_market_schema(db_path: Optional[str] = None) -> None:
                 )
                 for m in DEFAULT_MARKETS
             ],
-        )
+    )
 
     conn.commit()
+
+    # Luo indeksi price_data-tauluun (käytetään analyysissä tiheästi)
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='price_data'"
+    )
+    if cursor.fetchone():
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_price_data_ticker_date ON price_data(ticker, date)"
+        )
+        conn.commit()
+
     conn.close()
 
 
