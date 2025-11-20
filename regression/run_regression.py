@@ -29,6 +29,11 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
+from analysis.combo_features import (
+    BULL_DIV_GENERAL_FEATURES,
+    COMBO_FEATURE_COLUMNS,
+)
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB_PATH = PROJECT_ROOT / "data" / "analysis.db"
 
@@ -44,6 +49,11 @@ FEATURE_COLUMNS = [
     "recent_divergence_min_distance",  # days since last divergence (1-5, else 6)
     "recent_divergence_decay_strength",  # strength / (1 + distance)
     "rolling_BullDiv_influence",  # windowed influence of last 5 days
+    "bullDiv_offset",
+    "bullDiv_last_1d",
+    "bullDiv_last_2d",
+    "bullDiv_last_3d",
+    "bullDiv_last_3d_any",
     # Trendin syvyys ja volatiliteetti
     "t_10",
     "t_20",
@@ -77,6 +87,7 @@ FEATURE_COLUMNS = [
     "NDX_20",
     "NDX_volatility_10",
 ]
+FEATURE_COLUMNS += COMBO_FEATURE_COLUMNS
 PATTERN_COLUMN = "kynttila_koodi"
 MARKET_COLUMN = "market"
 CATEGORICAL_DUMMY_COLUMNS = [PATTERN_COLUMN, MARKET_COLUMN, "BullDiv_recent_offset"]
@@ -96,6 +107,12 @@ DEFAULT_SUCCESS_THRESHOLDS = {2: 0.02, 5: 0.03, 10: 0.05, 20: 0.08}
 CRISIS_START = "2025-03-01"
 CRISIS_END = "2025-04-30"
 BINARY_FEATURES = {"is_crisis"}
+BINARY_FEATURES.update(
+    {"bullDiv_last_1d", "bullDiv_last_2d", "bullDiv_last_3d", "bullDiv_last_3d_any"}
+)
+BINARY_FEATURES.update(COMBO_FEATURE_COLUMNS)
+BULL_DIV_DIAGNOSTIC_BASE = ["vahvuus", "Price_slope_10", "SPX_volatility_10"]
+BULL_DIV_DIAGNOSTIC_FEATURES = BULL_DIV_DIAGNOSTIC_BASE + COMBO_FEATURE_COLUMNS
 CRISIS_SUCCESS_LABELS = [f"success{h}" for h in sorted(DEFAULT_SUCCESS_THRESHOLDS.keys())]
 FEATURE_SELECTION_STORE = PROJECT_ROOT / "data" / "regression_feature_selection.json"
 
@@ -642,6 +659,49 @@ def compute_crisis_success_stats(
     return info
 
 
+def compute_bull_div_distribution(df: pd.DataFrame) -> Dict[int, int]:
+    if df.empty or "bullDiv_offset" not in df.columns:
+        return {}
+    counts = df["bullDiv_offset"].fillna(99).astype(int).value_counts().to_dict()
+    return {int(k): int(v) for k, v in counts.items()}
+
+
+def candle_bull_div_combo_analysis(
+    df: pd.DataFrame, horizon: int
+) -> Optional[List[str]]:
+    if "bullDiv_offset" not in df.columns or "bullDiv_last_3d_any" not in df.columns:
+        return None
+    label = f"success{horizon}"
+    if label not in df.columns:
+        return None
+    candle_mask = df[PATTERN_COLUMN].fillna(0).astype(int) != 0
+    candle_df = df.loc[candle_mask].copy()
+    if candle_df.empty:
+        return None
+
+    def _rate(mask: pd.Series) -> tuple[float, int]:
+        sub = candle_df.loc[mask & candle_df[label].notna()]
+        if sub.empty:
+            return 0.0, 0
+        return float(sub[label].mean()), len(sub)
+
+    offset_series = candle_df["bullDiv_offset"].fillna(99).astype(int)
+    last_any = candle_df["bullDiv_last_3d_any"].fillna(0).astype(int)
+    lines = [f"== Candle + Bullish Divergence combo analysis (H{horizon}) =="]
+    stats = [
+        ("Candle only (no BullDiv last 3d)", last_any == 0),
+        ("Candle + BullDiv t0", offset_series == 0),
+        ("Candle + BullDiv t-1", offset_series == 1),
+        ("Candle + BullDiv t-2", offset_series == 2),
+        ("Candle + BullDiv last 3d (0-2)", last_any == 1),
+    ]
+    for desc, mask in stats:
+        rate, count = _rate(mask)
+        lines.append(f"{desc}: success{horizon} = {rate:.3f} (n={count})")
+    lines.append("")
+    return lines
+
+
 # ------------- 5. Logistinen regressio -----------------
 
 
@@ -779,6 +839,58 @@ def run_linear_regression(
     }
 
 
+def run_candle_bull_div_diagnostic(
+    df: pd.DataFrame, label_col: str
+) -> Optional[Dict[str, object]]:
+    if label_col not in df.columns:
+        return None
+    available_features = [
+        col for col in BULL_DIV_DIAGNOSTIC_FEATURES if col in df.columns
+    ]
+    if any(base not in available_features for base in BULL_DIV_DIAGNOSTIC_BASE):
+        return None
+    subset = df.dropna(subset=available_features + [label_col]).copy()
+    if subset.empty:
+        return None
+    subset = subset[subset[PATTERN_COLUMN].fillna(0).astype(int) != 0]
+    if subset.empty or subset[label_col].nunique() < 2:
+        return None
+
+    X = subset[available_features]
+    y = subset[label_col]
+    try:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X,
+            y,
+            test_size=0.2,
+            random_state=42,
+            stratify=y,
+        )
+    except ValueError:
+        return None
+
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+    model = LogisticRegression(
+        max_iter=1000,
+        class_weight="balanced",
+    )
+    model.fit(X_train_scaled, y_train)
+    y_proba = model.predict_proba(X_test_scaled)[:, 1]
+    auc = roc_auc_score(y_test, y_proba)
+    coef = pd.Series(model.coef_[0], index=available_features)
+    sorted_coef = coef.sort_values(ascending=False)
+    importance = coef.abs().sort_values(ascending=False)
+    return {
+        "auc": float(auc),
+        "coef": coef,
+        "top_positive": sorted_coef.head(min(5, len(sorted_coef))),
+        "top_negative": sorted_coef.tail(min(5, len(sorted_coef))),
+        "importance": importance.head(min(10, len(importance))),
+    }
+
+
 # ------------- 7. Yhteenveto & rajapinta -----------------
 
 
@@ -904,6 +1016,12 @@ def run_regression_for_market(
     else:
         df_full = df_full.reset_index(drop=True)
 
+    bull_div_distribution_all = compute_bull_div_distribution(df_full)
+    candle_mask_full = df_full[PATTERN_COLUMN].fillna(0).astype(int) != 0
+    bull_div_distribution_candles = compute_bull_div_distribution(
+        df_full.loc[candle_mask_full]
+    )
+
     if "has_blackout_data" in df_full.columns:
         total_rows_full = len(df_full)
         rows_with_bo = int((df_full["has_blackout_data"] == 1).sum())
@@ -958,6 +1076,7 @@ def run_regression_for_market(
     else:
         vif_continuous = pd.DataFrame(columns=["feature", "VIF"])
 
+    combo_feature_set = set(COMBO_FEATURE_COLUMNS)
     horizon_results: Dict[int, Dict[str, object]] = {}
     warning_messages: List[str] = []
     for horizon in horizons:
@@ -980,16 +1099,39 @@ def run_regression_for_market(
         crisis_stats = compute_crisis_success_stats(
             subset_train, CRISIS_SUCCESS_LABELS, exclude_crisis_period=exclude_crisis_period
         )
+        combo_features_active = [
+            col for col in continuous_feature_columns if col in combo_feature_set
+        ]
+        base_feature_columns = [
+            col for col in continuous_feature_columns if col not in combo_feature_set
+        ]
+        y_success = subset_train[success_label]
+        y_return = subset_train[return_label]
+
+        logistic_base_result = None
+        if combo_features_active and base_feature_columns:
+            X_base, base_cont_cols, _ = build_feature_matrix(
+                subset_train,
+                feature_columns=base_feature_columns,
+                include_is_candle_day=include_is_candle_day,
+                categorical_columns=enabled_dummy_groups,
+            )
+            logistic_base_result = run_logistic_regression(
+                X_base, y_success, base_cont_cols, label_name=success_label
+            )
+
         X, continuous_cols, dummy_cols = build_feature_matrix(
             subset_train,
             feature_columns=continuous_feature_columns,
             include_is_candle_day=include_is_candle_day,
             categorical_columns=enabled_dummy_groups,
         )
-        y_success = subset_train[success_label]
-        y_return = subset_train[return_label]
 
         summary_text = quick_summary(subset_train, label_column=success_label)
+        combo_lines = candle_bull_div_combo_analysis(subset_train, horizon)
+        diag_logistic = None
+        if horizon in {5, 10}:
+            diag_logistic = run_candle_bull_div_diagnostic(subset_train, success_label)
         logistic_result = run_logistic_regression(
             X, y_success, continuous_cols, label_name=success_label
         )
@@ -1025,9 +1167,13 @@ def run_regression_for_market(
             "row_count": len(subset_train),
             "summary": summary_text,
             "logistic": logistic_result,
+            "logistic_base": logistic_base_result,
             "linear": linear_result,
             "blackout_stats": blackout_stats,
             "crisis_stats": crisis_stats,
+            "combo_lines": combo_lines,
+            "diag_logistic": diag_logistic,
+            "combo_features": combo_features_active,
         }
         if linear_result.get("warning"):
             warning_messages.append(f"H{horizon}: {linear_result['warning']}")
@@ -1054,6 +1200,8 @@ def run_regression_for_market(
         vif_continuous,
         feature_columns=report_features,
         excluded_features=disabled_features,
+        bull_div_distribution=bull_div_distribution_all,
+        bull_div_candle_distribution=bull_div_distribution_candles,
         exclude_crisis_period=exclude_crisis_period,
     )
     report_path = _write_report(report_text) if write_report else None
@@ -1077,6 +1225,8 @@ def run_regression_for_market(
         "vif_all": vif_all,
         "vif_continuous": vif_continuous,
         "blackout_coverage": blackout_coverage,
+        "bull_div_distribution": bull_div_distribution_all,
+        "bull_div_candle_distribution": bull_div_distribution_candles,
     }
 
 
@@ -1092,6 +1242,8 @@ def _build_report_text(
     vif_continuous: Optional[pd.DataFrame] = None,
     feature_columns: Optional[List[str]] = None,
     excluded_features: Optional[List[str]] = None,
+    bull_div_distribution: Optional[Dict[int, int]] = None,
+    bull_div_candle_distribution: Optional[Dict[int, int]] = None,
     exclude_crisis_period: bool = False,
 ) -> str:
     market_label = (market or "Kaikki markkinat").upper()
@@ -1114,6 +1266,21 @@ def _build_report_text(
         crisis_line,
         features_line,
     ]
+    if bull_div_distribution:
+        formatted = ", ".join(
+            f"{offset}: {count}" for offset, count in sorted(bull_div_distribution.items())
+        )
+        lines.append(
+            f"Bullish Divergence offset -jakauma (koko datasetti): {formatted}"
+        )
+    if bull_div_candle_distribution:
+        formatted = ", ".join(
+            f"{offset}: {count}"
+            for offset, count in sorted(bull_div_candle_distribution.items())
+        )
+        lines.append(
+            f"Bullish Divergence offset -jakauma (kynttilärivit): {formatted}"
+        )
     if excluded_features:
         lines.append(
             "Pois jätetyt featuret: " + ", ".join(excluded_features)
@@ -1214,6 +1381,24 @@ def _build_report_text(
                         )
                     )
             lines.append("")
+        combo_lines = section.get("combo_lines")
+        if combo_lines:
+            lines.extend(combo_lines)
+        diag = section.get("diag_logistic")
+        if diag:
+            lines.append(
+                f"== Bullish Divergence + kynttiläkombo diagnostinen logistinen (H{horizon}) =="
+            )
+            lines.append(f"AUC: {diag.get('auc', float('nan')):.3f}")
+            top_pos = diag.get("top_positive")
+            if isinstance(top_pos, pd.Series) and not top_pos.empty:
+                lines.append("Top positiiviset koefit:")
+                lines.extend(_format_series(top_pos).splitlines())
+            top_neg = diag.get("top_negative")
+            if isinstance(top_neg, pd.Series) and not top_neg.empty:
+                lines.append("Top negatiiviset koefit:")
+                lines.extend(_format_series(top_neg).splitlines())
+            lines.append("")
         lines.extend(
             [
                 f"== Logistinen regressio (success{horizon}) ==",
@@ -1237,11 +1422,53 @@ def _build_report_text(
                 "",
             ]
         )
+    combo_summary_lines = _build_combo_summary_section(horizon_results)
+    if combo_summary_lines:
+        lines.extend(combo_summary_lines)
     return "\n".join(lines)
 
 
 def _format_series(series: pd.Series) -> str:
     return "\n".join(f"{idx}: {val:.4f}" for idx, val in series.items())
+
+
+def _build_combo_summary_section(
+    horizon_results: Dict[int, Dict[str, object]]
+) -> List[str]:
+    lines: List[str] = []
+    for horizon in (5, 10):
+        section = horizon_results.get(horizon)
+        if not section:
+            continue
+        combo_features = section.get("combo_features") or []
+        if not combo_features:
+            continue
+        logistic_result = section.get("logistic") or {}
+        combo_auc = logistic_result.get("auc")
+        base_result = section.get("logistic_base") or {}
+        base_auc = base_result.get("auc")
+        if combo_auc is None:
+            continue
+        lines.append(
+            f"== Bullish Divergence + kynttiläkombo -featuret (H{horizon}) =="
+        )
+        improvement = (
+            combo_auc - base_auc if base_auc is not None else float("nan")
+        )
+        base_text = f"{base_auc:.3f}" if base_auc is not None else "N/A"
+        lines.append(
+            f"Base-malli ilman comboja: AUC={base_text} | Combo-malli: AUC={combo_auc:.3f} | Parannus: {improvement:.3f}"
+        )
+        importance = logistic_result.get("importance")
+        if isinstance(importance, pd.Series):
+            combo_importance = importance.loc[
+                importance.index.isin(combo_features)
+            ].head(min(5, len(combo_features)))
+            if not combo_importance.empty:
+                lines.append("Top combo-featuret (|coef|):")
+                lines.extend(_format_series(combo_importance).splitlines())
+        lines.append("")
+    return lines
 
 
 def _write_report(report_text: str) -> Path:
@@ -1251,6 +1478,104 @@ def _write_report(report_text: str) -> Path:
     path = data_dir / f"regression_report_{timestamp}.txt"
     path.write_text(report_text, encoding="utf-8")
     return path
+
+
+def run_results_data_diagnostics(
+    db_path: Path | str = DEFAULT_DB_PATH,
+    success_thresholds: Optional[Dict[int, float]] = None,
+    market: Optional[str] = None,
+) -> str:
+    """
+    Tarkistaa results_data-taulun terveyden:
+    - puuttuvat t2/t5/t10/t20
+    - success-labelien jakaumat
+    - success-labelien arvot (0/1/NaN)
+    - pattern-kohtaiset success-%:t
+    - (ticker, date) duplikaatit
+
+    Palauttaa tekstiraportin (str).
+    """
+    lines: List[str] = []
+
+    df = load_data(db_path=db_path, market=market)
+    if df.empty:
+        return "results_data on tyhjä – generoi data ensin."
+
+    lines.append("== RESULTS_DATA DIAGNOSTIIKKA ==")
+    lines.append(f"Rivejä yhteensä: {len(df)}")
+    if market:
+        lines.append(f"Markkinafiltteri: {market}")
+    lines.append("")
+
+    missing_info: Dict[str, object] = {}
+    for col in RETURN_COLUMNS:
+        if col not in df.columns:
+            missing_info[col] = "PUUTTUU SARAKESTA"
+            continue
+        n_missing = int(df[col].isna().sum())
+        missing_info[col] = n_missing
+
+    lines.append("== Puuttuvat tulevaisuuden hintasarakeet (t2/t5/t10/t20) ==")
+    for col, val in missing_info.items():
+        if isinstance(val, str):
+            lines.append(f"{col}: {val}")
+        else:
+            pct = val / len(df) * 100.0
+            lines.append(f"{col}: {val} riviä puuttuu ({pct:.2f} %)")
+    lines.append("")
+
+    try:
+        df = add_return_labels(df.copy(), thresholds=success_thresholds)
+    except ValueError as exc:
+        lines.append("Virhe add_return_labels-funktiossa:")
+        lines.append(str(exc))
+        return "\n".join(lines)
+
+    lines.append("== success-labelien arvoalueet ==")
+    for horizon in sorted(DEFAULT_SUCCESS_THRESHOLDS.keys()):
+        label_col = f"success{horizon}"
+        if label_col not in df.columns:
+            lines.append(f"{label_col}: sarake puuttuu")
+            continue
+        vals = df[label_col].dropna().unique()
+        vals_sorted = sorted(vals.tolist())
+        n_nan = int(df[label_col].isna().sum())
+        lines.append(
+            f"{label_col}: uniikit arvot (ilman NaN): {vals_sorted}, NaN: {n_nan}"
+        )
+    lines.append("")
+
+    lines.append("== success5 %-jakauma pattern-koodeittain ==")
+    label_col = "success5"
+    if label_col in df.columns and PATTERN_COLUMN in df.columns:
+        grp = df.groupby(PATTERN_COLUMN)[label_col].agg(
+            success_mean="mean", count="count"
+        )
+        grp = grp.sort_index()
+        for code, row in grp.iterrows():
+            pattern_name = PATTERN_LABELS.get(code, f"Pattern {code}")
+            rate = row["success_mean"]
+            n = int(row["count"])
+            rate_str = "NaN" if pd.isna(rate) else f"{rate:.3f}"
+            lines.append(f"{code} ({pattern_name}): success5 = {rate_str} (n={n})")
+    else:
+        lines.append("Ei voitu laskea pattern-kohtaista jakaumaa.")
+    lines.append("")
+
+    if "ticker" in df.columns and "date" in df.columns:
+        dup_mask = df.duplicated(subset=["ticker", "date"], keep=False)
+        n_dups = int(dup_mask.sum())
+        lines.append("== (ticker, date) duplikaatit ==")
+        lines.append(f"Duplikaattirivejä: {n_dups}")
+        if n_dups > 0:
+            sample = df.loc[dup_mask, ["ticker", "date", PATTERN_COLUMN]].head(20)
+            lines.append("Ensimmäiset 20 duplikaattia:")
+            lines.append(sample.to_string(index=False))
+    else:
+        lines.append("Duplikaattitarkistus ohitettu (ticker/date-saraketta ei ole).")
+
+    lines.append("")
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":
@@ -1265,3 +1590,8 @@ if __name__ == "__main__":
     print(linear_result["importance"].head(20))
     if result.get("report_path"):
         print(f"\nRaportti tallennettu: {result['report_path']}")
+
+    print("\n" + "=" * 80)
+    print("AJETAAN RESULTS_DATA-DIAGNOSTIIKKA...\n")
+    diag_report = run_results_data_diagnostics()
+    print(diag_report)
