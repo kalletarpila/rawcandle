@@ -33,12 +33,14 @@ def test_build_universe_query():
         "bullish_only": True,
         "exclude_blackout": True,
         "exclude_crisis": True,
+        "max_rows": 123,
     }
     sql, sql_params = queries.build_universe_query(params)
     assert "WHERE" in sql
     assert "candle_pattern IN (0, 7)" in sql
     assert "is_crisis" in sql
-    assert sql_params == ["fin"]
+    assert "LIMIT" in sql.upper()
+    assert sql_params == ["fin", 123]
 
 
 def test_select_topN():

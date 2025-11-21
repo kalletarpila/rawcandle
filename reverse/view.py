@@ -30,6 +30,7 @@ class ReverseView:
         self.bullish_checkbox: ft.Checkbox | None = None
         self.exclude_blackout_checkbox: ft.Checkbox | None = None
         self.exclude_crisis_checkbox: ft.Checkbox | None = None
+        self.max_rows_field: ft.TextField | None = None
         self.feature_set_dropdown: ft.Dropdown | None = None
         self.custom_features_field: ft.TextField | None = None
         self.run_button: ft.ElevatedButton | None = None
@@ -92,7 +93,7 @@ class ReverseView:
         market_options = self._build_market_options()
         self.horizon_dropdown = ft.Dropdown(
             label="Horizon (päivää)",
-            options=[ft.dropdown.Option(str(v)) for v in (5, 10, 20)],
+            options=[ft.dropdown.Option(str(v)) for v in (2, 5, 10, 20)],
             value="10",
             width=140,
         )
@@ -101,6 +102,13 @@ class ReverseView:
             value="500",
             width=120,
             keyboard_type=ft.KeyboardType.NUMBER,
+        )
+        self.max_rows_field = ft.TextField(
+            label="Rivimäärän yläraja (universe)",
+            value="0",
+            width=180,
+            keyboard_type=ft.KeyboardType.NUMBER,
+            helper_text="0 = ei rajaa",
         )
         self.market_dropdown = ft.Dropdown(
             label="Market",
@@ -201,6 +209,7 @@ class ReverseView:
                 [
                     self.horizon_dropdown,
                     self.topn_field,
+                    self.max_rows_field,
                     self.market_dropdown,
                 ],
                 spacing=12,
@@ -372,6 +381,9 @@ class ReverseView:
             "horizon": horizon,
             "top_n": top_n,
             "market": market or "__all__",
+            "max_rows": self._safe_int(
+                self.max_rows_field.value if self.max_rows_field else "0", 0
+            ),
             "bullish_only": self.bullish_checkbox.value if self.bullish_checkbox else True,
             "exclude_blackout": self.exclude_blackout_checkbox.value
             if self.exclude_blackout_checkbox

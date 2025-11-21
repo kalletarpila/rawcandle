@@ -32,7 +32,15 @@ def build_universe_query(params: dict[str, Any]) -> tuple[str, list[Any]]:
         where_clause = "WHERE " + " AND ".join(where)
 
     order_clause = "ORDER BY date DESC, signal_strength DESC"
-    sql = f"SELECT * FROM results_data {where_clause} {order_clause}"
+    limit_clause = ""
+    try:
+        max_rows = int(params.get("max_rows", 0) or 0)
+        if max_rows > 0:
+            limit_clause = " LIMIT ?"
+            sql_params.append(max_rows)
+    except Exception:
+        max_rows = 0
+    sql = f"SELECT * FROM results_data {where_clause} {order_clause}{limit_clause}"
     return sql, sql_params
 
 
