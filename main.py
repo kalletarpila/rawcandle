@@ -8,6 +8,7 @@ import yfinance as yf
 from simu import SimuView, SimulationService
 from stock.view import StockView
 from regression.view import RegressionView
+from reverse.view import ReverseView
 from market_repository import (
     delete_market,
     ensure_market_schema,
@@ -2539,6 +2540,7 @@ class RawCandleApp:
         self.simu_view = SimuView(self.page, self.create_appbar, self.simu_service)
         self.stock_view = StockView(self.page, self.create_appbar)
         self.regression_view = RegressionView(self.page, self.create_appbar)
+        self.reverse_view = ReverseView(self.page, self.create_appbar)
 
         # Aloita etusivulta (only if page supports go)
         try:
@@ -2605,6 +2607,11 @@ class RawCandleApp:
                     ft.Icons.AUTO_GRAPH,
                     tooltip="Regression",
                     on_click=lambda _: self.page.go("/regression"),
+                ),
+                ft.IconButton(
+                    ft.Icons.BAR_CHART,
+                    tooltip="Reverse",
+                    on_click=lambda _: self.page.go("/reverse"),
                 ),
                 ft.IconButton(
                     ft.Icons.TABLE_CHART,
@@ -3708,6 +3715,8 @@ Virheet: {error_count}"""
             self.page.views.append(self.create_analysis_view())
         elif self.page.route == "/regression":
             self.page.views.append(self.regression_view.create_view())
+        elif self.page.route == "/reverse":
+            self.page.views.append(self.reverse_view.create_view())
         elif self.page.route == "/findings":
             self.page.views.append(self.create_findings_view())
         elif self.page.route == "/tulokset":
