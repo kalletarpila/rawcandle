@@ -1,6 +1,6 @@
 import pandas as pd
 
-from analysis.regression_shared_utils import (
+from analysis.preprocess_utils import (
     apply_blackout_flags,
     preprocess_signals,
 )
@@ -54,5 +54,5 @@ def test_preprocess_signals_matches_expected_combo_counts():
     assert row["has_multi_candle_combo"] == 1
     assert row["has_bullish_divergence_same_day"] == 1
     enriched = add_same_day_aggregate_features(df, dedup, "kynttila_koodi")
-    assert enriched.iloc[0]["num_signals_same_day"] == 3
+    assert enriched.iloc[0]["same_day_signal_count"] == 3
     assert enriched.iloc[0]["has_same_day_reversal_cluster"] == 1

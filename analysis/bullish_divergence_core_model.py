@@ -14,7 +14,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
-from analysis.regression_shared_utils import (
+from analysis.preprocess_utils import (
     apply_blackout_flags,
     load_blackout_dates,
     preprocess_signals,
@@ -57,12 +57,10 @@ class BullishDivergenceModel:
         "has_multi_candle_combo",
         "has_bullish_divergence_same_day",
         "signal_combo_code",
-        "num_signals_same_day",
-        "num_unique_patterns_same_day",
-        "max_signal_strength_same_day",
-        "second_best_strength_same_day",
-        "sum_signal_strength_same_day",
-        "has_same_day_cluster",
+        "same_day_signal_count",
+        "same_day_unique_patterns",
+        "same_day_max_strength",
+        "same_day_second_best_strength",
         "has_same_day_reversal_cluster",
         "is_candle_day",
     ]
@@ -85,7 +83,6 @@ class BullishDivergenceModel:
         "is_candle_day",
         "has_multi_candle_combo",
         "has_bullish_divergence_same_day",
-        "has_same_day_cluster",
         "has_same_day_reversal_cluster",
     }
     ALLOWED_HORIZONS = (2, 5, 10, 20)
@@ -184,13 +181,17 @@ class BullishDivergenceModel:
         df_full_raw = df_full.copy()
         df_train_raw = df_train.copy()
 
-        df_full = preprocess_signals(df_full)
-        df_full = add_same_day_aggregate_features(
-            df_full_raw, df_full, self.PATTERN_COLUMN
+        df_full = preprocess_signals(
+            df_full, pattern_column=self.PATTERN_COLUMN
         )
-        df_train = preprocess_signals(df_train)
+        df_full = add_same_day_aggregate_features(
+            df_full_raw, df_full, pattern_col=self.PATTERN_COLUMN
+        )
+        df_train = preprocess_signals(
+            df_train, pattern_column=self.PATTERN_COLUMN
+        )
         df_train = add_same_day_aggregate_features(
-            df_train_raw, df_train, self.PATTERN_COLUMN
+            df_train_raw, df_train, pattern_col=self.PATTERN_COLUMN
         )
 
         df_full = self._add_return_labels(df_full)
