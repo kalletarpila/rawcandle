@@ -7,13 +7,12 @@ Tämä moduuli toteuttaa älykkään inkrementaalisen päivityslogiikan:
   1. Uudet päivämäärät olemassa oleville osakkeille
   2. Kaikki data täysin uusille osakkeille
 
-Laskee KAIKKI 85 saraketta kuten alkuperäisessä generate_results.py:ssä (market + 84 mittaria).
+Laskee KAIKKI 89 saraketta kuten laajennetussa generate_results.py:ssä (market + 88 mittaria, mukaan lukien BullDiv-mittarit).
 """
 
 import logging
 import sqlite3
 from datetime import datetime
-from pathlib import Path
 from statistics import mean, pstdev
 from typing import Callable, List, Optional, Tuple
 
@@ -21,11 +20,30 @@ import pandas as pd
 
 from market_repository import ensure_market_schema, get_market_for_ticker
 
+from .combo_features import CANDLE_PATTERN_TO_SLUG
 from .database_manager import DatabaseManager
+from .preprocess_utils import load_blackout_dates
+
+CRISIS_START = datetime(2025, 3, 1).date()
+CRISIS_END = datetime(2025, 4, 30).date()
+
+SAME_DAY_DEFAULTS = {
+    "signal_count_same_day": 0,
+    "unique_patterns_same_day": 0,
+    "max_strength_same_day": 0.0,
+    "second_best_strength_same_day": 0.0,
+    "sum_strength_same_day": 0.0,
+    "signal_combo_code": 0,
+    "num_candles_same_day": 0,
+    "has_multi_candle_combo": 0,
+    "has_bullish_divergence_same_day": 0,
+    "has_same_day_reversal_cluster": 0,
+    "is_candle_day": 0,
+}
 
 
 class ResultsGenerator:
-    """Generoi results_data tauluun kaikki 85 saraketta."""
+    """Generoi results_data tauluun kaikki 89 saraketta."""
 
     # Kynttilöiden numerointi (sama kuin generate_results.py)
     PATTERN_MAPPING = {
@@ -51,6 +69,9 @@ class ResultsGenerator:
         self.logger = logging.getLogger(__name__)
         ensure_market_schema(stock_db_path)
         self._market_cache: dict[str, str] = {}
+        self._blackout_by_ticker: dict[str, pd.DataFrame] = {}
+        self._sector_warning_logged = False
+        self._load_blackout_data()
 
     def generate_results(
         self,
@@ -129,12 +150,18 @@ class ResultsGenerator:
 
                 ticker_market = self._get_market(ticker)
 
+                aggregates_by_date = self._build_same_day_aggregates(ticker_findings)
+
                 # Prosessoi kaikki findingit tälle tickerille
                 ticker_results = []
                 processed_count = 0
                 for finding in ticker_findings:
                     result = self._process_finding(
-                        finding, stock_data, ticker, ticker_market
+                        finding,
+                        stock_data,
+                        ticker,
+                        ticker_market,
+                        aggregates_by_date.get(finding["date"]),
                     )
                     if result:
                         ticker_results.append(result)
@@ -146,15 +173,16 @@ class ResultsGenerator:
                         f"🔍 Downtrend {ticker}: {processed_count}/{len(ticker_findings)} käsitelty onnistuneesti"
                     )
 
-                # Tallenna tämän tickerin tulokset heti kantaan
-                if ticker_results:
-                    inserted = self.db_manager.bulk_insert_results(
-                        ticker_results, batch_size=100
-                    )
-                    total_inserted += inserted
-                    self.logger.debug(
-                        f"Inserted {inserted} rows for {ticker} ({idx}/{total_tickers})"
-                    )
+                if not ticker_results:
+                    continue
+
+                inserted = self.db_manager.bulk_insert_results(
+                    ticker_results, batch_size=100
+                )
+                total_inserted += inserted
+                self.logger.debug(
+                    f"Inserted {inserted} event rows for {ticker} ({idx}/{total_tickers})"
+                )
 
             # 4. Tallenna metadata lopuksi
             if total_inserted > 0:
@@ -495,7 +523,12 @@ class ResultsGenerator:
             return None
 
     def _process_finding(
-        self, finding: dict, stock_df: pd.DataFrame, ticker: str, market: str
+        self,
+        finding: dict,
+        stock_df: pd.DataFrame,
+        ticker: str,
+        market: str,
+        same_day_features: Optional[dict] = None,
     ) -> Optional[dict]:
         """
         Käsittele yksittäinen finding ja laske KAIKKI 84 saraketta.
@@ -513,6 +546,7 @@ class ResultsGenerator:
             pattern = finding["pattern"]
             signal_strength = finding["signal_strength"]
             rsi14_from_db = finding.get("rsi14")
+            RSI14_t0 = float(rsi14_from_db) if rsi14_from_db is not None else None
 
             # Tarkista onko ticker indeksi
             is_index = ticker.startswith("^")
@@ -539,8 +573,6 @@ class ResultsGenerator:
             # Hae t0 rivit
             r0 = stock_df.iloc[idx]
             t0_low = float(r0["low"]) if pd.notna(r0["low"]) else None
-            t0_high = float(r0["high"]) if pd.notna(r0["high"]) else None
-            t0_open = float(r0["open"]) if pd.notna(r0["open"]) else None
             t0_close = float(r0["close"]) if pd.notna(r0["close"]) else None
 
             if not t0_low or not t0_close or t0_low <= 0 or t0_close <= 0:
@@ -696,6 +728,29 @@ class ResultsGenerator:
                 else:
                     return (ma_val / t0_low * 100) if t0_low > 0 else None
 
+            def calc_price_slope(normalized_value, horizon):
+                """Laske hintaslope normalisoidusta arvosta"""
+                if normalized_value is None or horizon <= 0:
+                    return None
+                try:
+                    return (100.0 - float(normalized_value)) / float(horizon)
+                except Exception:
+                    return None
+
+            def calc_index_volatility(index_ticker: str) -> Optional[float]:
+                """Laske indeksin 10 päivän volatiliteetti (t-10..t-1)"""
+                values = []
+                for offset in range(-10, 0):
+                    val = get_index_normalized(index_ticker, offset)
+                    if val is not None:
+                        values.append(val)
+                if len(values) < 2:
+                    return None
+                try:
+                    return pstdev(values)
+                except Exception:
+                    return None
+
             def get_index_normalized(index_ticker, offset):
                 """Hae indeksin arvo normalisoituna"""
                 index_t0_close = self._get_index_data(index_ticker, date, 0)
@@ -709,11 +764,130 @@ class ResultsGenerator:
                     else None
                 )
 
+            def calc_ma_series(end_idx, period):
+                """Laske raakadatasta liukuva keskiarvo ilman normalisointia"""
+                start_idx = end_idx - period + 1
+                if start_idx < 0 or end_idx >= len(stock_df):
+                    return None
+                subset = stock_df.iloc[start_idx : end_idx + 1]
+                closes = [
+                    safe_float(row["close"]) for _, row in subset.iterrows()
+                ]
+                closes = [c for c in closes if c is not None]
+                if len(closes) != period:
+                    return None
+                return mean(closes)
+
+            def calc_slope(end_idx, period, lookback=5):
+                """Laske MA-slope t-1 päättyvälle jaksolle normalisoituna"""
+                if end_idx - lookback < 0:
+                    return None
+                ma_today = calc_ma_series(end_idx, period)
+                ma_prev = calc_ma_series(end_idx - lookback, period)
+                if ma_today is None or ma_prev is None:
+                    return None
+                base = t0_close if is_index else t0_low
+                if not base or base <= 0:
+                    return None
+                return ((ma_today - ma_prev) / lookback) / base * 100.0
+
+            def calc_regime(short_ma, long_ma):
+                if short_ma is None or long_ma is None:
+                    return None
+                return int(short_ma > long_ma)
+
+            def calc_atr(end_idx, period=14):
+                if end_idx - period < 0:
+                    return None
+                trs = []
+                for i in range(end_idx - period + 1, end_idx + 1):
+                    if i <= 0:
+                        continue
+                    curr = stock_df.iloc[i]
+                    prev = stock_df.iloc[i - 1]
+                    curr_high = safe_float(curr["high"])
+                    curr_low = safe_float(curr["low"])
+                    prev_close = safe_float(prev["close"])
+                    if curr_high is None or curr_low is None or prev_close is None:
+                        continue
+                    tr = max(
+                        curr_high - curr_low,
+                        abs(curr_high - prev_close),
+                        abs(curr_low - prev_close),
+                    )
+                    trs.append(tr)
+                if len(trs) < period * 0.7:
+                    return None
+                return mean(trs)
+
+            def calc_ema(values: List[float], span: int) -> List[float]:
+                alpha = 2 / (span + 1)
+                ema_values: List[float] = []
+                ema_val = None
+                for value in values:
+                    if value is None:
+                        return []
+                    ema_val = value if ema_val is None else alpha * value + (1 - alpha) * ema_val
+                    ema_values.append(ema_val)
+                return ema_values
+
+            def calc_macd(end_idx):
+                if end_idx < 26:
+                    return None, None, None
+                closes = [
+                    safe_float(stock_df.iloc[i]["close"]) for i in range(end_idx + 1)
+                ]
+                if any(c is None for c in closes):
+                    return None, None, None
+                ema12 = calc_ema(closes, 12)
+                ema26 = calc_ema(closes, 26)
+                if len(ema12) != len(closes) or len(ema26) != len(closes):
+                    return None, None, None
+                macd_line = [a - b for a, b in zip(ema12, ema26)]
+                signal = calc_ema(macd_line, 9)
+                if not macd_line or not signal:
+                    return None, None, None
+                line = macd_line[-1]
+                sig = signal[-1]
+                hist = line - sig
+                return line, sig, hist
+
+            def calc_pivot_low_strength(window):
+                start_idx = idx - window
+                if start_idx < 0:
+                    return None
+                subset = stock_df.iloc[start_idx:idx]
+                lows = [safe_float(row["low"]) for _, row in subset.iterrows()]
+                lows = [val for val in lows if val]
+                if len(lows) < window * 0.7:
+                    return None
+                prev_min = min(lows)
+                if not prev_min or prev_min <= 0 or not t0_low or t0_low <= 0:
+                    return None
+                return (prev_min - t0_low) / prev_min * 100.0
+
+            def calc_pivot_high_strength(window):
+                start_idx = idx - window
+                if start_idx < 0:
+                    return None
+                subset = stock_df.iloc[start_idx:idx]
+                highs = [safe_float(row["high"]) for _, row in subset.iterrows()]
+                highs = [val for val in highs if val]
+                if len(highs) < window * 0.7:
+                    return None
+                prev_max = max(highs)
+                if not prev_max or prev_max <= 0 or not t0_high or t0_high <= 0:
+                    return None
+                return (t0_high - prev_max) / prev_max * 100.0
+
             # === LASKE KAIKKI SARAKKEET ===
 
             # Kynttilä detaljit (5-16)
             r_m1 = stock_df.iloc[idx - 1] if idx > 0 else None
             r1 = stock_df.iloc[idx + 1] if idx + 1 < len(stock_df) else None
+            t0_open = safe_float(r0["open"])
+            t0_high = safe_float(r0["high"])
+            prev_close = safe_float(r_m1["close"]) if r_m1 is not None else None
 
             t_1_alin, t_1_ylin, t_1_bodi, t_1_bodi_colour = calc_candle_details(r_m1)
             t0_alin, t0_ylin, t0_bodi, t0_bodi_colour = calc_candle_details(r0)
@@ -725,6 +899,13 @@ class ResultsGenerator:
             t_10 = get_normalized_close(-10)
             t_15 = get_normalized_close(-15)
             t_20 = get_normalized_close(-20)
+            price_slope_5 = calc_price_slope(t_5, 5)
+            price_slope_10 = calc_price_slope(t_10, 10)
+            price_acceleration_5_10 = (
+                price_slope_5 - price_slope_10
+                if price_slope_5 is not None and price_slope_10 is not None
+                else None
+            )
 
             # Volatiliteetti (22-26)
             t_2_hajonta = calc_volatility(2)
@@ -732,6 +913,14 @@ class ResultsGenerator:
             t_10_hajonta = calc_volatility(10)
             t_15_hajonta = calc_volatility(15)
             t_20_hajonta = calc_volatility(20)
+            if (
+                t_10_hajonta is not None
+                and t_20_hajonta is not None
+                and t_20_hajonta > 0
+            ):
+                volatility_ratio_10_20 = t_10_hajonta / t_20_hajonta
+            else:
+                volatility_ratio_10_20 = 0.0
 
             # Tulevat hinnat (27-30)
             t2 = get_normalized_close(2)
@@ -767,6 +956,69 @@ class ResultsGenerator:
             else:
                 t0_volyymi = None
 
+            def calc_volume_impulse_ratio() -> float:
+                if t0_volume is None or t0_volume <= 0:
+                    return 1.0
+                start_idx = max(0, idx - 5)
+                end_idx = idx - 1
+                if start_idx > end_idx:
+                    return 1.0
+                subset = stock_df.iloc[start_idx : end_idx + 1]
+                prev_volumes = [
+                    safe_float(row["volume"]) for _, row in subset.iterrows()
+                ]
+                prev_volumes = [v for v in prev_volumes if v is not None and v > 0]
+                if not prev_volumes:
+                    return 1.0
+                avg_prev5 = mean(prev_volumes)
+                if avg_prev5 is None or avg_prev5 <= 0:
+                    return 1.0
+                return t0_volume / avg_prev5
+
+            volume_impulse = calc_volume_impulse_ratio()
+            gap_down_strength = 0.0
+            if (
+                prev_close is not None
+                and prev_close > 0
+                and t0_open is not None
+            ):
+                gap_value = (t0_open - prev_close) / prev_close
+                gap_down_strength = abs(gap_value) if gap_value < 0 else 0.0
+
+            if (
+                t0_high is not None
+                and t0_low is not None
+                and t0_open is not None
+                and t0_close is not None
+                and t0_high > t0_low
+            ):
+                candle_range_raw = t0_high - t0_low
+                body_value = abs(t0_close - t0_open)
+                lower_shadow = max(min(t0_open, t0_close) - t0_low, 0.0)
+                upper_shadow = max(t0_high - max(t0_open, t0_close), 0.0)
+                body_ratio = body_value / candle_range_raw if candle_range_raw else 0.0
+                shadow_ratio = (
+                    (lower_shadow + upper_shadow) / candle_range_raw
+                    if candle_range_raw
+                    else 0.0
+                )
+            else:
+                body_ratio = 0.0
+                shadow_ratio = 0.0
+
+            depth_component = (
+                abs(t_10 - 100.0) / 10.0 if t_10 is not None else 0.0
+            )
+            volatility_component = (
+                (t_10_hajonta / 2.0) if t_10_hajonta is not None else 0.0
+            )
+            volume_component = (
+                (volume_impulse - 1.0) if volume_impulse is not None else 0.0
+            )
+            reversal_context_score = (
+                depth_component + volatility_component + volume_component
+            )
+
             t2_volyymi = calc_volume_ratio(2, 1)
             t5_volyymi = calc_volume_ratio(5, 1)
             t10_volyymi = calc_volume_ratio(10, 1)
@@ -793,6 +1045,7 @@ class ResultsGenerator:
             t_20_10p_liukuva = calc_ma_normalized(-20, 10)
             t_20_20p_liukuva = calc_ma_normalized(-20, 20)
 
+            t0_20p_liukuva = calc_ma_normalized(0, 20)
             t0_50p_liukuva = calc_ma_normalized(0, 50)
             t0_200p_liukuva = calc_ma_normalized(0, 200) if idx >= 199 else 0
 
@@ -821,37 +1074,141 @@ class ResultsGenerator:
             NDX10 = get_index_normalized("^NDX", 10)
             NDX15 = get_index_normalized("^NDX", 15)
             NDX20 = get_index_normalized("^NDX", 20)
+            SPX_volatility_10 = calc_index_volatility("^GSPC")
+            NDX_volatility_10 = calc_index_volatility("^NDX")
+            VIX_10 = get_index_normalized("^VIX", -10)
+            VIX_norm_10 = (
+                (VIX_10 - 100.0) / 100.0 if VIX_10 is not None else None
+            )
 
-            # RSI (80)
-            RSI14_t0 = float(rsi14_from_db) if rsi14_from_db is not None else None
+            ma5 = calc_ma_series(idx - 1, 5)
+            ma20 = calc_ma_series(idx - 1, 20)
+            ma50 = calc_ma_series(idx - 1, 50)
+            ma200 = calc_ma_series(idx - 1, 200)
+
+            t0_50p_slope = calc_slope(idx - 1, 50, lookback=5)
+            t0_200p_slope = calc_slope(idx - 1, 200, lookback=5)
+
+            trend_regime_5_20 = calc_regime(ma5, ma20)
+            trend_regime_20_50 = calc_regime(ma20, ma50)
+            trend_regime_50_200 = calc_regime(ma50, ma200)
+
+            ATR_14 = calc_atr(idx - 1, 14)
+            ATR_ratio_14 = (
+                (ATR_14 / t0_close) * 100.0 if ATR_14 is not None and t0_close else None
+            )
+
+            MACD_line, MACD_signal, MACD_hist = calc_macd(idx - 1)
+
+            pivot_low_strength_3 = calc_pivot_low_strength(3)
+            pivot_low_strength_5 = calc_pivot_low_strength(5)
+            pivot_high_strength_3 = calc_pivot_high_strength(3)
+            pivot_high_strength_5 = calc_pivot_high_strength(5)
+
+            same_day_data = (
+                dict(same_day_features)
+                if same_day_features
+                else self._default_same_day_features()
+            )
+            for key, default in SAME_DAY_DEFAULTS.items():
+                same_day_data.setdefault(key, default)
+
+            blackout_flags = self._compute_blackout_flags(ticker, date)
+            sector_features = self._get_sector_features(ticker)
 
             # Normalisoitu close (81)
             t0_close_norm = (t0_close / t0_low * 100) if t0_low > 0 else None
 
             # Divergenssit (82-83)
-            # Hae divergenssit t0, t-1, t-2, t-3 päiviltä
-            check_dates = []
-            for offset in [0, -1, -2, -3]:
+            check_points = []
+            for offset in [0, -1, -2, -3, -4, -5]:
                 check_idx = idx + offset
                 if 0 <= check_idx < len(stock_df):
                     check_date = str(stock_df.iloc[check_idx]["pvm"])
-                    check_dates.append(check_date)
+                    check_points.append((offset, check_date))
 
-            bearish_divergence, bullish_divergence = (
-                self.db_manager.get_divergences_for_dates(
-                    ticker=ticker, dates=check_dates
-                )
+            check_dates = [date for _, date in check_points]
+            divergence_records = self.db_manager.get_divergence_records(
+                ticker=ticker, dates=check_dates
             )
+            BullDiv_strength = 0.0
+            BullDiv_recent_strength = 0.0
+            BullDiv_recent_offset = -1
+            bearish_divergence = 0.0
+            rsi_values_by_offset: dict[int, float] = {}
+
+            for relative_offset, check_date in check_points:
+                record = divergence_records.get(check_date)
+                if not record:
+                    continue
+
+                abs_offset = abs(relative_offset)
+                bullish_strength = record.get("bullish_strength") or 0.0
+                bearish_strength = record.get("bearish_strength") or 0.0
+
+                if abs_offset == 0 and bullish_strength > 0:
+                    BullDiv_strength = bullish_strength
+
+                if bullish_strength > BullDiv_recent_strength:
+                    BullDiv_recent_strength = bullish_strength
+
+                if bullish_strength > 0 and BullDiv_recent_offset == -1:
+                    BullDiv_recent_offset = abs_offset
+
+                if bearish_strength > bearish_divergence:
+                    bearish_divergence = bearish_strength
+
+                rsi_val = record.get("rsi")
+                if rsi_val is not None:
+                    try:
+                        rsi_values_by_offset[abs_offset] = float(rsi_val)
+                    except (TypeError, ValueError):
+                        continue
+
+            rsi_t0_value = (
+                RSI14_t0 if RSI14_t0 is not None else rsi_values_by_offset.get(0)
+            )
+            rsi_t5_value = rsi_values_by_offset.get(5)
+            if rsi_t0_value is not None and rsi_t5_value is not None:
+                RSI_slope_5 = (rsi_t0_value - rsi_t5_value) / 5.0
+            else:
+                RSI_slope_5 = None
+
+            Has_BullDiv_recent = 1 if BullDiv_recent_strength > 0 else 0
+            if not Has_BullDiv_recent:
+                BullDiv_recent_offset = -1
+
+            if BullDiv_recent_strength > 0:
+                bullish_divergence = BullDiv_recent_strength
+                bearish_divergence = 0.0
+            else:
+                bullish_divergence = 0.0
 
             # Pattern numero (3)
             candle_pattern = self.PATTERN_MAPPING.get(pattern, 0)
 
+            bull_div_offset_value = (
+                BullDiv_recent_offset if BullDiv_recent_offset != -1 else 99
+            )
+            bull_div_general = {
+                "bullDiv_offset": bull_div_offset_value,
+                "bullDiv_last_1d": 1 if bull_div_offset_value == 0 else 0,
+                "bullDiv_last_2d": 1 if bull_div_offset_value in (0, 1) else 0,
+                "bullDiv_last_3d": 1 if bull_div_offset_value in (0, 1, 2) else 0,
+                "bullDiv_last_3d_any": 1 if bull_div_offset_value in (0, 1, 2) else 0,
+            }
+            combo_features = self._compute_candle_combo_features(
+                candle_pattern, BullDiv_recent_offset
+            )
+
             # Viikonpäivä (84)
             date_obj = datetime.strptime(date, "%Y-%m-%d")
             weekday = date_obj.isoweekday()  # 1=Ma, 7=Su
+            date_only = date_obj.date()
+            is_crisis = 1 if CRISIS_START <= date_only <= CRISIS_END else 0
 
-            # Muodosta tulos dictionary (KAIKKI 85 saraketta)
-            return {
+            # Muodosta tulos dictionary (KAIKKI sarakkeet)
+            result = {
                 "ticker": ticker,
                 "date": date,
                 "market": market,
@@ -908,6 +1265,7 @@ class ResultsGenerator:
                 "t_20_5p_liukuva": t_20_5p_liukuva,
                 "t_20_10p_liukuva": t_20_10p_liukuva,
                 "t_20_20p_liukuva": t_20_20p_liukuva,
+                "t0_20p_liukuva": t0_20p_liukuva,
                 "t0_50p_liukuva": t0_50p_liukuva,
                 "t0_200p_liukuva": t0_200p_liukuva,
                 "SPX_0": SPX_0,
@@ -936,12 +1294,223 @@ class ResultsGenerator:
                 "t0_close_norm": t0_close_norm,
                 "bearish_divergence": bearish_divergence,
                 "bullish_divergence": bullish_divergence,
+                "BullDiv_strength": BullDiv_strength,
+                "BullDiv_recent_strength": BullDiv_recent_strength,
+                "BullDiv_recent_offset": BullDiv_recent_offset,
+                "Has_BullDiv_recent": Has_BullDiv_recent,
+                "RSI_slope_5": RSI_slope_5,
+                "Price_slope_5": price_slope_5,
+                "Price_slope_10": price_slope_10,
+                "Price_acceleration_5_10": price_acceleration_5_10,
+                "Volatility_ratio_10_20": volatility_ratio_10_20,
+                "Gap_down_strength": gap_down_strength,
+                "Body_ratio": body_ratio,
+                "Shadow_ratio": shadow_ratio,
+                "Volume_impulse": volume_impulse,
+                "Reversal_Context_Score": reversal_context_score,
+                "SPX_volatility_10": SPX_volatility_10,
+                "NDX_volatility_10": NDX_volatility_10,
+                "t0_50p_slope": t0_50p_slope,
+                "t0_200p_slope": t0_200p_slope,
+                "trend_regime_5_20": trend_regime_5_20,
+                "trend_regime_20_50": trend_regime_20_50,
+                "trend_regime_50_200": trend_regime_50_200,
+                "ATR_14": ATR_14,
+                "ATR_ratio_14": ATR_ratio_14,
+                "MACD_line": MACD_line,
+                "MACD_signal": MACD_signal,
+                "MACD_hist": MACD_hist,
+                "pivot_low_strength_3": pivot_low_strength_3,
+                "pivot_low_strength_5": pivot_low_strength_5,
+                "pivot_high_strength_3": pivot_high_strength_3,
+                "pivot_high_strength_5": pivot_high_strength_5,
+                "VIX_10": VIX_10,
+                "VIX_norm_10": VIX_norm_10,
+                "is_crisis": is_crisis,
                 "weekday": weekday,
             }
+            result.update(bull_div_general)
+            result.update(combo_features)
+            result.update(same_day_data)
+            result.update(blackout_flags)
+            result.update(sector_features)
+            return result
 
         except Exception as e:
             self.logger.error(f"Process finding failed: {e}", exc_info=True)
             return None
+
+    def _load_blackout_data(self) -> None:
+        """Lataa blackout-datan ja indeksoi ticker-tasolla."""
+        try:
+            df = load_blackout_dates(self.db_manager.db_path)
+        except Exception as exc:
+            self.logger.warning(
+                f"Failed to load blackout dates ({exc}). Proceeding without blackout data."
+            )
+            self._blackout_by_ticker = {}
+            return
+
+        if df.empty:
+            self._blackout_by_ticker = {}
+            return
+
+        df = df.copy()
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+        df = df.dropna(subset=["date"])
+        grouped = {}
+        for ticker, group in df.groupby("ticker"):
+            grouped[str(ticker)] = group.copy()
+        self._blackout_by_ticker = grouped
+
+    def _compute_blackout_flags(self, ticker: str, date: str) -> dict:
+        flags = {
+            "is_earnings_t0": 0,
+            "is_dividend_t0": 0,
+            "is_earnings_window": 0,
+            "is_dividend_window": 0,
+            "is_blackout_t0": 0,
+            "is_blackout_window": 0,
+            "exclude_from_regression": 0,
+            "has_blackout_data": 0,
+        }
+        events = self._blackout_by_ticker.get(ticker)
+        if events is None or events.empty:
+            return flags
+
+        date_ts = pd.to_datetime(date, errors="coerce")
+        if pd.isna(date_ts):
+            return flags
+
+        deltas = (events["date"] - date_ts).dt.days
+        earnings_mask = events["event"].str.lower() == "earnings"
+        dividend_mask = events["event"].str.lower() == "dividend"
+
+        flags["has_blackout_data"] = 1
+        flags["is_earnings_t0"] = int(
+            ((deltas == 0) & earnings_mask).any()
+        )
+        flags["is_dividend_t0"] = int(
+            ((deltas == 0) & dividend_mask).any()
+        )
+        flags["is_earnings_window"] = int(
+            (((deltas >= 0) & (deltas <= 2)) & earnings_mask).any()
+        )
+        flags["is_dividend_window"] = int(
+            (((deltas >= 0) & (deltas <= 1)) & dividend_mask).any()
+        )
+        flags["is_blackout_t0"] = int(
+            flags["is_earnings_t0"] == 1 or flags["is_dividend_t0"] == 1
+        )
+        flags["is_blackout_window"] = int(
+            flags["is_earnings_window"] == 1 or flags["is_dividend_window"] == 1
+        )
+        flags["exclude_from_regression"] = flags["is_blackout_window"]
+        return flags
+
+    def _build_same_day_aggregates(self, findings: List[dict]) -> dict[str, dict]:
+        aggregates: dict[str, dict] = {}
+        by_date: dict[str, List[dict]] = {}
+        for finding in findings:
+            date = finding.get("date")
+            if not date:
+                continue
+            by_date.setdefault(date, []).append(finding)
+
+        for date, items in by_date.items():
+            pattern_codes = [
+                self.PATTERN_MAPPING.get(item.get("pattern"), 0) for item in items
+            ]
+            strengths = []
+            for item in items:
+                try:
+                    strengths.append(float(item.get("signal_strength") or 0.0))
+                except (TypeError, ValueError):
+                    strengths.append(0.0)
+            candle_codes = [code for code in pattern_codes if 1 <= code <= 6]
+            num_candles = len(candle_codes)
+            has_bullish_div = any(code == 7 for code in pattern_codes)
+            has_any_div = has_bullish_div or any(code == 8 for code in pattern_codes)
+
+            sorted_strengths = sorted(strengths, reverse=True)
+            max_strength = float(sorted_strengths[0]) if sorted_strengths else 0.0
+            second_best = (
+                float(sorted_strengths[1]) if len(sorted_strengths) >= 2 else 0.0
+            )
+            sum_strength = float(sum(strengths)) if strengths else 0.0
+
+            if num_candles == 0 and not has_any_div:
+                combo_code = 0
+            elif num_candles == 1 and not has_any_div:
+                combo_code = 1
+            elif num_candles >= 2 and not has_any_div:
+                combo_code = 2
+            elif num_candles == 0 and has_any_div:
+                combo_code = 4
+            else:
+                combo_code = 3
+
+            has_multi = int(num_candles >= 2)
+            is_candle_day = int(num_candles > 0)
+            has_cluster = int(has_multi == 1 or (is_candle_day == 1 and has_any_div))
+
+            aggregates[date] = {
+                "signal_count_same_day": len(items),
+                "unique_patterns_same_day": len(
+                    {code for code in pattern_codes if code != 0}
+                ),
+                "max_strength_same_day": max_strength,
+                "second_best_strength_same_day": second_best,
+                "sum_strength_same_day": sum_strength,
+                "signal_combo_code": combo_code,
+                "num_candles_same_day": num_candles,
+                "has_multi_candle_combo": has_multi,
+                "has_bullish_divergence_same_day": int(has_bullish_div),
+                "has_same_day_reversal_cluster": has_cluster,
+                "is_candle_day": is_candle_day,
+            }
+        return aggregates
+
+    def _default_same_day_features(self) -> dict:
+        return dict(SAME_DAY_DEFAULTS)
+
+    def _get_sector_features(self, ticker: str) -> dict:
+        if not self._sector_warning_logged:
+            self.logger.warning(
+                "Sector data not available; sector features will be null."
+            )
+            self._sector_warning_logged = True
+        return {
+            "sector": None,
+            "sector_momentum_5": None,
+            "sector_momentum_20": None,
+            "sector_volatility_20": None,
+        }
+
+    def _compute_candle_combo_features(
+        self, candle_pattern: int, bull_offset: int
+    ) -> dict:
+        combos = {}
+        offset = bull_offset if bull_offset is not None else -1
+        for pattern_name, slug in CANDLE_PATTERN_TO_SLUG.items():
+            code = self.PATTERN_MAPPING.get(pattern_name, -1)
+            is_pattern = int(candle_pattern == code)
+            combos[f"is_{slug}_only_t0"] = int(
+                is_pattern == 1 and (offset == -1 or offset > 5)
+            )
+            combos[f"is_{slug}_and_BullDiv_t0"] = int(
+                is_pattern == 1 and offset == 0
+            )
+            combos[f"is_{slug}_and_BullDiv_recent_2d"] = int(
+                is_pattern == 1 and offset != -1 and offset <= 2
+            )
+            combos[f"is_{slug}_and_BullDiv_recent_3d"] = int(
+                is_pattern == 1 and offset != -1 and offset <= 3
+            )
+            combos[f"is_{slug}_and_BullDiv_recent_5d"] = int(
+                is_pattern == 1 and offset != -1 and offset <= 5
+            )
+        return combos
 
 
 if __name__ == "__main__":

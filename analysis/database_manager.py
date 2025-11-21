@@ -9,6 +9,215 @@ from typing import List, Dict, Any, Optional, Tuple, Iterable
 from datetime import datetime
 import logging
 
+from .combo_features import (
+    BULL_DIV_GENERAL_FEATURES,
+    COMBO_FEATURE_COLUMNS,
+)
+
+RESULTS_BASE_COLUMNS: List[str] = [
+    "ticker",
+    "date",
+    "market",
+    "candle_pattern",
+    "signal_strength",
+    "t_1_alin",
+    "t_1_ylin",
+    "t_1_bodi",
+    "t_1_bodi_colour",
+    "t0_alin",
+    "t0_ylin",
+    "t0_bodi",
+    "t0_bodi_colour",
+    "t1_alin",
+    "t1_ylin",
+    "t1_bodi",
+    "t1_bodi_colour",
+    "t_2",
+    "t_5",
+    "t_10",
+    "t_15",
+    "t_20",
+    "t_2_hajonta",
+    "t_5_hajonta",
+    "t_10_hajonta",
+    "t_15_hajonta",
+    "t_20_hajonta",
+    "t2",
+    "t5",
+    "t10",
+    "t20",
+    "t_2_volyymi",
+    "t_5_volyymi",
+    "t_10_volyymi",
+    "t_15_volyymi",
+    "t_20_volyymi",
+    "t0_volyymi",
+    "t2_volyymi",
+    "t5_volyymi",
+    "t10_volyymi",
+    "t20_volyymi",
+    "t_2_5p_liukuva",
+    "t_2_10p_liukuva",
+    "t_2_20p_liukuva",
+    "t_5_5p_liukuva",
+    "t_5_10p_liukuva",
+    "t_5_20p_liukuva",
+    "t_10_5p_liukuva",
+    "t_10_10p_liukuva",
+    "t_10_20p_liukuva",
+    "t_15_5p_liukuva",
+    "t_15_10p_liukuva",
+    "t_15_20p_liukuva",
+    "t_20_5p_liukuva",
+    "t_20_10p_liukuva",
+    "t_20_20p_liukuva",
+    "t0_50p_liukuva",
+    "t0_200p_liukuva",
+    "SPX_0",
+    "SPX_2",
+    "SPX_5",
+    "SPX_10",
+    "SPX_15",
+    "SPX_20",
+    "SPX2",
+    "SPX5",
+    "SPX10",
+    "SPX15",
+    "SPX20",
+    "NDX_0",
+    "NDX_2",
+    "NDX_5",
+    "NDX_10",
+    "NDX_15",
+    "NDX_20",
+    "NDX2",
+    "NDX5",
+    "NDX10",
+    "NDX15",
+    "NDX20",
+    "RSI14_t0",
+    "t0_close_norm",
+    "bearish_divergence",
+    "bullish_divergence",
+    "BullDiv_strength",
+    "BullDiv_recent_strength",
+    "BullDiv_recent_offset",
+    "Has_BullDiv_recent",
+    "weekday",
+]
+
+MASTER_FEATURE_COLUMNS: List[str] = [
+    "t0_20p_liukuva",
+    "t0_50p_slope",
+    "t0_200p_slope",
+    "trend_regime_5_20",
+    "trend_regime_20_50",
+    "trend_regime_50_200",
+    "RSI_slope_5",
+    "Price_slope_5",
+    "Price_slope_10",
+    "Price_acceleration_5_10",
+    "Volatility_ratio_10_20",
+    "Gap_down_strength",
+    "Body_ratio",
+    "Shadow_ratio",
+    "Volume_impulse",
+    "Reversal_Context_Score",
+    "SPX_volatility_10",
+    "NDX_volatility_10",
+    "ATR_14",
+    "ATR_ratio_14",
+    "MACD_line",
+    "MACD_signal",
+    "MACD_hist",
+    "pivot_low_strength_3",
+    "pivot_low_strength_5",
+    "pivot_high_strength_3",
+    "pivot_high_strength_5",
+    "VIX_10",
+    "VIX_norm_10",
+    "is_crisis",
+    "is_candle_day",
+    "signal_combo_code",
+    "num_candles_same_day",
+    "has_multi_candle_combo",
+    "has_bullish_divergence_same_day",
+    "signal_count_same_day",
+    "unique_patterns_same_day",
+    "max_strength_same_day",
+    "second_best_strength_same_day",
+    "sum_strength_same_day",
+    "has_same_day_reversal_cluster",
+    "has_blackout_data",
+    "is_earnings_t0",
+    "is_earnings_window",
+    "is_dividend_t0",
+    "is_dividend_window",
+    "is_blackout_t0",
+    "is_blackout_window",
+    "exclude_from_regression",
+    "sector",
+    "sector_momentum_5",
+    "sector_momentum_20",
+    "sector_volatility_20",
+]
+
+MASTER_FEATURE_COLUMN_DEFS = {
+    "t0_20p_liukuva": "REAL",
+    "t0_50p_slope": "REAL",
+    "t0_200p_slope": "REAL",
+    "trend_regime_5_20": "INTEGER",
+    "trend_regime_20_50": "INTEGER",
+    "trend_regime_50_200": "INTEGER",
+    "RSI_slope_5": "REAL",
+    "Price_slope_5": "REAL",
+    "Price_slope_10": "REAL",
+    "Price_acceleration_5_10": "REAL",
+    "Volatility_ratio_10_20": "REAL",
+    "Gap_down_strength": "REAL",
+    "Body_ratio": "REAL",
+    "Shadow_ratio": "REAL",
+    "Volume_impulse": "REAL",
+    "Reversal_Context_Score": "REAL",
+    "SPX_volatility_10": "REAL",
+    "NDX_volatility_10": "REAL",
+    "ATR_14": "REAL",
+    "ATR_ratio_14": "REAL",
+    "MACD_line": "REAL",
+    "MACD_signal": "REAL",
+    "MACD_hist": "REAL",
+    "pivot_low_strength_3": "REAL",
+    "pivot_low_strength_5": "REAL",
+    "pivot_high_strength_3": "REAL",
+    "pivot_high_strength_5": "REAL",
+    "VIX_10": "REAL",
+    "VIX_norm_10": "REAL",
+    "is_crisis": "INTEGER DEFAULT 0",
+    "is_candle_day": "INTEGER DEFAULT 0",
+    "signal_combo_code": "INTEGER DEFAULT 0",
+    "num_candles_same_day": "INTEGER DEFAULT 0",
+    "has_multi_candle_combo": "INTEGER DEFAULT 0",
+    "has_bullish_divergence_same_day": "INTEGER DEFAULT 0",
+    "signal_count_same_day": "INTEGER DEFAULT 0",
+    "unique_patterns_same_day": "INTEGER DEFAULT 0",
+    "max_strength_same_day": "REAL DEFAULT 0.0",
+    "second_best_strength_same_day": "REAL DEFAULT 0.0",
+    "sum_strength_same_day": "REAL DEFAULT 0.0",
+    "has_same_day_reversal_cluster": "INTEGER DEFAULT 0",
+    "has_blackout_data": "INTEGER DEFAULT 0",
+    "is_earnings_t0": "INTEGER DEFAULT 0",
+    "is_earnings_window": "INTEGER DEFAULT 0",
+    "is_dividend_t0": "INTEGER DEFAULT 0",
+    "is_dividend_window": "INTEGER DEFAULT 0",
+    "is_blackout_t0": "INTEGER DEFAULT 0",
+    "is_blackout_window": "INTEGER DEFAULT 0",
+    "exclude_from_regression": "INTEGER DEFAULT 0",
+    "sector": "TEXT",
+    "sector_momentum_5": "REAL",
+    "sector_momentum_20": "REAL",
+    "sector_volatility_20": "REAL",
+}
+
 
 class DatabaseManager:
     """Hallinnoi analysis-tietokannan operaatiot"""
@@ -228,8 +437,61 @@ class DatabaseManager:
                     BullDiv_recent_offset INTEGER,
                     Has_BullDiv_recent INTEGER,
                     weekday INTEGER,
+                    t0_20p_liukuva REAL,
+                    RSI_slope_5 REAL,
+                    Price_slope_5 REAL,
+                    Price_slope_10 REAL,
+                    Price_acceleration_5_10 REAL,
+                    Volatility_ratio_10_20 REAL,
+                    Gap_down_strength REAL,
+                    Body_ratio REAL,
+                    Shadow_ratio REAL,
+                    Volume_impulse REAL,
+                    Reversal_Context_Score REAL,
+                    SPX_volatility_10 REAL,
+                    NDX_volatility_10 REAL,
+                    t0_50p_slope REAL,
+                    t0_200p_slope REAL,
+                    trend_regime_5_20 INTEGER,
+                    trend_regime_20_50 INTEGER,
+                    trend_regime_50_200 INTEGER,
+                    ATR_14 REAL,
+                    ATR_ratio_14 REAL,
+                    MACD_line REAL,
+                    MACD_signal REAL,
+                    MACD_hist REAL,
+                    pivot_low_strength_3 REAL,
+                    pivot_low_strength_5 REAL,
+                    pivot_high_strength_3 REAL,
+                    pivot_high_strength_5 REAL,
+                    VIX_10 REAL,
+                    VIX_norm_10 REAL,
+                    is_crisis INTEGER DEFAULT 0,
+                    is_candle_day INTEGER DEFAULT 0,
+                    signal_combo_code INTEGER DEFAULT 0,
+                    num_candles_same_day INTEGER DEFAULT 0,
+                    has_multi_candle_combo INTEGER DEFAULT 0,
+                    has_bullish_divergence_same_day INTEGER DEFAULT 0,
+                    signal_count_same_day INTEGER DEFAULT 0,
+                    unique_patterns_same_day INTEGER DEFAULT 0,
+                    max_strength_same_day REAL DEFAULT 0.0,
+                    second_best_strength_same_day REAL DEFAULT 0.0,
+                    sum_strength_same_day REAL DEFAULT 0.0,
+                    has_same_day_reversal_cluster INTEGER DEFAULT 0,
+                    has_blackout_data INTEGER DEFAULT 0,
+                    is_earnings_t0 INTEGER DEFAULT 0,
+                    is_earnings_window INTEGER DEFAULT 0,
+                    is_dividend_t0 INTEGER DEFAULT 0,
+                    is_dividend_window INTEGER DEFAULT 0,
+                    is_blackout_t0 INTEGER DEFAULT 0,
+                    is_blackout_window INTEGER DEFAULT 0,
+                    exclude_from_regression INTEGER DEFAULT 0,
+                    sector TEXT,
+                    sector_momentum_5 REAL,
+                    sector_momentum_20 REAL,
+                    sector_volatility_20 REAL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(ticker, date)
+                    UNIQUE(ticker, date, candle_pattern)
                 )
             """
             )
@@ -247,13 +509,28 @@ class DatabaseManager:
                     "UPDATE results_data SET market = 'usa' WHERE market IS NULL"
                 )
 
-            divergence_column_defs = {
+            additional_column_defs = {
                 "BullDiv_strength": "REAL",
                 "BullDiv_recent_strength": "REAL",
                 "BullDiv_recent_offset": "INTEGER DEFAULT -1",
                 "Has_BullDiv_recent": "INTEGER DEFAULT 0",
             }
-            for column, ddl in divergence_column_defs.items():
+            general_column_ddls = {
+                "bullDiv_offset": "INTEGER DEFAULT 99",
+                "bullDiv_last_1d": "INTEGER DEFAULT 0",
+                "bullDiv_last_2d": "INTEGER DEFAULT 0",
+                "bullDiv_last_3d": "INTEGER DEFAULT 0",
+                "bullDiv_last_3d_any": "INTEGER DEFAULT 0",
+            }
+            additional_column_defs.update(MASTER_FEATURE_COLUMN_DEFS)
+            for column in BULL_DIV_GENERAL_FEATURES:
+                additional_column_defs[column] = general_column_ddls.get(
+                    column, "INTEGER DEFAULT 0"
+                )
+            for combo_column in COMBO_FEATURE_COLUMNS:
+                additional_column_defs[combo_column] = "INTEGER DEFAULT 0"
+
+            for column, ddl in additional_column_defs.items():
                 if column not in results_columns:
                     cursor.execute(f"ALTER TABLE results_data ADD COLUMN {column} {ddl}")
                     self.logger.info(
@@ -908,7 +1185,7 @@ class DatabaseManager:
 
             placeholders = ",".join("?" * len(dates))
             query = f"""
-                SELECT date, bullish_strength, bearish_strength
+                SELECT date, bullish_strength, bearish_strength, rsi
                 FROM divergence_data
                 WHERE ticker = ? AND date IN ({placeholders})
             """
@@ -918,8 +1195,9 @@ class DatabaseManager:
                 date: {
                     "bullish_strength": bullish or 0.0,
                     "bearish_strength": bearish or 0.0,
+                    "rsi": rsi,
                 }
-                for date, bullish, bearish in rows
+                for date, bullish, bearish, rsi in rows
             }
         except Exception as e:
             self.logger.error(f"Get divergence records failed: {e}")
@@ -1045,140 +1323,44 @@ class DatabaseManager:
             Lisättyjen rivien määrä
         """
         try:
+            if not results:
+                return 0
+
             conn = self.get_connection()
             cursor = conn.cursor()
             inserted = 0
+
+            all_columns = (
+                RESULTS_BASE_COLUMNS
+                + MASTER_FEATURE_COLUMNS
+                + BULL_DIV_GENERAL_FEATURES
+                + COMBO_FEATURE_COLUMNS
+            )
+            columns_clause = ", ".join(all_columns)
+            placeholders = ", ".join("?" for _ in all_columns)
+            insert_sql = (
+                "INSERT OR REPLACE INTO results_data "
+                f"({columns_clause}) VALUES ({placeholders})"
+            )
+
+            def _get_value(row: dict, column: str):
+                if column == "market":
+                    return row.get(column, "usa")
+                return row.get(column)
 
             for i in range(0, len(results), batch_size):
                 batch = results[i : i + batch_size]
 
                 for result in batch:
-                    # Debug: laske tuple pituus
-                    values_tuple = (
-                        result["ticker"],
-                        result["date"],
-                        result.get("market", "usa"),
-                        result["candle_pattern"],
-                        result.get("signal_strength"),
-                        result.get("t_1_alin"),
-                        result.get("t_1_ylin"),
-                        result.get("t_1_bodi"),
-                        result.get("t_1_bodi_colour"),
-                        result.get("t0_alin"),
-                        result.get("t0_ylin"),
-                        result.get("t0_bodi"),
-                        result.get("t0_bodi_colour"),
-                        result.get("t1_alin"),
-                        result.get("t1_ylin"),
-                        result.get("t1_bodi"),
-                        result.get("t1_bodi_colour"),
-                        result.get("t_2"),
-                        result.get("t_5"),
-                        result.get("t_10"),
-                        result.get("t_15"),
-                        result.get("t_20"),
-                        result.get("t_2_hajonta"),
-                        result.get("t_5_hajonta"),
-                        result.get("t_10_hajonta"),
-                        result.get("t_15_hajonta"),
-                        result.get("t_20_hajonta"),
-                        result.get("t2"),
-                        result.get("t5"),
-                        result.get("t10"),
-                        result.get("t20"),
-                        result.get("t_2_volyymi"),
-                        result.get("t_5_volyymi"),
-                        result.get("t_10_volyymi"),
-                        result.get("t_15_volyymi"),
-                        result.get("t_20_volyymi"),
-                        result.get("t0_volyymi"),
-                        result.get("t2_volyymi"),
-                        result.get("t5_volyymi"),
-                        result.get("t10_volyymi"),
-                        result.get("t20_volyymi"),
-                        result.get("t_2_5p_liukuva"),
-                        result.get("t_2_10p_liukuva"),
-                        result.get("t_2_20p_liukuva"),
-                        result.get("t_5_5p_liukuva"),
-                        result.get("t_5_10p_liukuva"),
-                        result.get("t_5_20p_liukuva"),
-                        result.get("t_10_5p_liukuva"),
-                        result.get("t_10_10p_liukuva"),
-                        result.get("t_10_20p_liukuva"),
-                        result.get("t_15_5p_liukuva"),
-                        result.get("t_15_10p_liukuva"),
-                        result.get("t_15_20p_liukuva"),
-                        result.get("t_20_5p_liukuva"),
-                        result.get("t_20_10p_liukuva"),
-                        result.get("t_20_20p_liukuva"),
-                        result.get("t0_50p_liukuva"),
-                        result.get("t0_200p_liukuva"),
-                        result.get("SPX_0"),
-                        result.get("SPX_2"),
-                        result.get("SPX_5"),
-                        result.get("SPX_10"),
-                        result.get("SPX_15"),
-                        result.get("SPX_20"),
-                        result.get("SPX2"),
-                        result.get("SPX5"),
-                        result.get("SPX10"),
-                        result.get("SPX15"),
-                        result.get("SPX20"),
-                        result.get("NDX_0"),
-                        result.get("NDX_2"),
-                        result.get("NDX_5"),
-                        result.get("NDX_10"),
-                        result.get("NDX_15"),
-                        result.get("NDX_20"),
-                        result.get("NDX2"),
-                        result.get("NDX5"),
-                        result.get("NDX10"),
-                        result.get("NDX15"),
-                        result.get("NDX20"),
-                        result.get("RSI14_t0"),
-                        result.get("t0_close_norm"),
-                        result.get("bearish_divergence"),
-                        result.get("bullish_divergence"),
-                        result.get("BullDiv_strength"),
-                        result.get("BullDiv_recent_strength"),
-                        result.get("BullDiv_recent_offset"),
-                        result.get("Has_BullDiv_recent"),
-                        result.get("weekday"),
-                    )
-
-                    if len(values_tuple) != 89:
+                    values_tuple = tuple(_get_value(result, col) for col in all_columns)
+                    if len(values_tuple) != len(all_columns):
                         self.logger.error(
-                            f"VALUES tuple length is {len(values_tuple)}, expected 89"
+                            f"VALUES tuple length is {len(values_tuple)}, "
+                            f"expected {len(all_columns)}"
                         )
                         self.logger.error(f"Result keys: {sorted(result.keys())}")
+                        continue
 
-                    placeholders = ", ".join("?" for _ in range(len(values_tuple)))
-                    insert_sql = """
-                        INSERT OR REPLACE INTO results_data
-                        (ticker, date, market, candle_pattern, signal_strength,
-                         t_1_alin, t_1_ylin, t_1_bodi, t_1_bodi_colour,
-                         t0_alin, t0_ylin, t0_bodi, t0_bodi_colour,
-                         t1_alin, t1_ylin, t1_bodi, t1_bodi_colour,
-                         t_2, t_5, t_10, t_15, t_20,
-                         t_2_hajonta, t_5_hajonta, t_10_hajonta, t_15_hajonta, t_20_hajonta,
-                         t2, t5, t10, t20,
-                         t_2_volyymi, t_5_volyymi, t_10_volyymi, t_15_volyymi, t_20_volyymi,
-                         t0_volyymi, t2_volyymi, t5_volyymi, t10_volyymi, t20_volyymi,
-                         t_2_5p_liukuva, t_2_10p_liukuva, t_2_20p_liukuva,
-                         t_5_5p_liukuva, t_5_10p_liukuva, t_5_20p_liukuva,
-                         t_10_5p_liukuva, t_10_10p_liukuva, t_10_20p_liukuva,
-                         t_15_5p_liukuva, t_15_10p_liukuva, t_15_20p_liukuva,
-                         t_20_5p_liukuva, t_20_10p_liukuva, t_20_20p_liukuva,
-                         t0_50p_liukuva, t0_200p_liukuva,
-                         SPX_0, SPX_2, SPX_5, SPX_10, SPX_15, SPX_20,
-                         SPX2, SPX5, SPX10, SPX15, SPX20,
-                         NDX_0, NDX_2, NDX_5, NDX_10, NDX_15, NDX_20,
-                         NDX2, NDX5, NDX10, NDX15, NDX20,
-                         RSI14_t0, t0_close_norm, bearish_divergence, bullish_divergence,
-                         BullDiv_strength, BullDiv_recent_strength, BullDiv_recent_offset,
-                         Has_BullDiv_recent, weekday)
-                        VALUES ({placeholders})
-                    """.format(placeholders=placeholders)
                     cursor.execute(insert_sql, values_tuple)
                     inserted += 1
 
@@ -1189,11 +1371,6 @@ class DatabaseManager:
 
         except Exception as e:
             self.logger.error(f"Bulk insert results failed: {e}")
-            if "86 values for 85 columns" in str(e):
-                self.logger.error(
-                    f"DEBUG: Last result dict had {len(result.keys())} keys"
-                )
-                self.logger.error(f"DEBUG: values_tuple length was {len(values_tuple)}")
             return 0
 
     def clear_results_data(self) -> int:
