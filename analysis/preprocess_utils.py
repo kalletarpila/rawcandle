@@ -7,6 +7,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from .same_day_aggregates import apply_same_day_aliases
+
 
 PATTERN_COLUMN_DEFAULT = "kynttila_koodi"
 
@@ -182,6 +184,7 @@ def preprocess_signals(
         rows.append(row)
 
     result = pd.DataFrame(rows).reset_index(drop=True)
+    result = apply_same_day_aliases(result)
     return result
 
 
