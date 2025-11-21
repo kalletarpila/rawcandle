@@ -14,6 +14,13 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
+from analysis.regression_shared_utils import (
+    apply_blackout_flags,
+    load_blackout_dates,
+    preprocess_signals,
+)
+from analysis.same_day_aggregates import add_same_day_aggregate_features
+
 
 class BullishDivergenceModel:
     """
@@ -46,9 +53,20 @@ class BullishDivergenceModel:
         "SPX_20",
         "SPX_volatility_10",
         "NDX_10",
+        "num_candles_same_day",
+        "has_multi_candle_combo",
+        "has_bullish_divergence_same_day",
+        "signal_combo_code",
+        "num_signals_same_day",
+        "num_unique_patterns_same_day",
+        "max_signal_strength_same_day",
+        "second_best_strength_same_day",
+        "sum_signal_strength_same_day",
+        "has_same_day_cluster",
+        "has_same_day_reversal_cluster",
+        "is_candle_day",
     ]
     EXCLUDED_COLUMNS = {
-        "is_divergence_today",
         "recent_divergence_min_distance",
         "recent_divergence_decay_strength",
         "rolling_BullDiv_influence",
@@ -62,38 +80,60 @@ class BullishDivergenceModel:
         "Reversal_Context_Score",
         "reversal_context_score",
     }
-    BINARY_FEATURES = {"is_crisis"}
+    BINARY_FEATURES = {
+        "is_crisis",
+        "is_candle_day",
+        "has_multi_candle_combo",
+        "has_bullish_divergence_same_day",
+        "has_same_day_cluster",
+        "has_same_day_reversal_cluster",
+    }
+    ALLOWED_HORIZONS = (2, 5, 10, 20)
+    ALIAS_MAP = {
+        PATTERN_COLUMN: "candle_pattern",
+        "vahvuus": "signal_strength",
+    }
 
     def __init__(
         self,
         market: Optional[str] = None,
         exclude_crisis_period: bool = False,
+        require_blackout_data: bool = False,
         crisis_start: Optional[str] = None,
         crisis_end: Optional[str] = None,
         horizon_list: Optional[Iterable[int]] = None,
         success_thresholds: Optional[Dict[int | str, float]] = None,
         feature_include: Optional[Iterable[str]] = None,
         feature_exclude: Optional[Iterable[str]] = None,
-        db_path: Path | str = Path(__file__).resolve().parents[1] / "data" / "analysis.db",
+        db_path: Path | str = Path(__file__).resolve().parents[1]
+        / "data"
+        / "analysis.db",
     ) -> None:
         self.market = market
         self.exclude_crisis_period = bool(exclude_crisis_period)
+        self.require_blackout_data = bool(require_blackout_data)
         self.crisis_start = crisis_start
         self.crisis_end = crisis_end
-        self.horizons = sorted({int(h) for h in (horizon_list or [5, 10])})
+        default_horizons = list(self.ALLOWED_HORIZONS)
+        requested = horizon_list or default_horizons
+        filtered = [int(h) for h in requested if int(h) in self.ALLOWED_HORIZONS]
+        self.horizons = filtered or default_horizons
         self.db_path = Path(db_path)
         self.success_thresholds = self._normalize_thresholds(success_thresholds)
-        include = list(feature_include) if feature_include else list(self.DEFAULT_FEATURES)
+        include = (
+            list(feature_include) if feature_include else list(self.DEFAULT_FEATURES)
+        )
         exclude = set(feature_exclude or [])
         self.feature_whitelist = [col for col in include if col not in exclude]
         self.feature_exclusions = set(feature_exclude or []) | self.EXCLUDED_COLUMNS
         self.date_column: Optional[str] = None
+        self._warnings: List[str] = []
 
     @staticmethod
     def _normalize_thresholds(
-        thresholds: Optional[Dict[int | str, float]]
+        thresholds: Optional[Dict[int | str, float]],
     ) -> Dict[int, float]:
-        defaults = {2: 0.02, 5: 0.08, 10: 0.12, 20: 0.08}
+        defaults = {2: 0.02, 5: 0.03, 10: 0.05, 20: 0.08}
         if not thresholds:
             return defaults
         normalized: Dict[int, float] = {}
@@ -110,14 +150,54 @@ class BullishDivergenceModel:
         return normalized
 
     def run_all(self) -> Dict[str, object]:
-        df = self._load_data()
-        df = self._filter_bullish_divergence_cases(df)
-        df = self._apply_crisis_exclusion(df)
-        if df.empty:
-            raise ValueError("Ei rivejä Bullish Divergence -mallia varten suodatusten jälkeen.")
-        df = self._add_return_labels(df)
-        feature_df, feature_cols, continuous_cols = self._prepare_features(df)
-        base_rates = self._compute_base_rates(df)
+        df_full = self._load_data()
+        blackout_df = load_blackout_dates(db_path=self.db_path)
+        df_full = apply_blackout_flags(df_full, blackout_df)
+
+        if self.require_blackout_data:
+            if "has_blackout_data" in df_full.columns:
+                mask_bo = df_full["has_blackout_data"] == 1
+                df_full = df_full.loc[mask_bo].reset_index(drop=True)
+            else:
+                self._warnings.append(
+                    "has_blackout_data-saraketta ei löytynyt; blackout-vaatimus ohitettiin."
+                )
+
+        df_train = df_full
+        if "exclude_from_regression" in df_train.columns:
+            train_mask = df_train["exclude_from_regression"].fillna(0) == 0
+            df_train = df_train.loc[train_mask].reset_index(drop=True)
+        else:
+            df_train = df_train.copy().reset_index(drop=True)
+
+        df_full = self._filter_bullish_divergence_cases(df_full)
+        df_train = self._filter_bullish_divergence_cases(df_train)
+
+        df_full = self._apply_crisis_exclusion(df_full)
+        df_train = self._apply_crisis_exclusion(df_train)
+
+        if df_train.empty:
+            raise ValueError(
+                "Ei rivejä Bullish Divergence -mallia varten suodatusten jälkeen."
+            )
+
+        df_full_raw = df_full.copy()
+        df_train_raw = df_train.copy()
+
+        df_full = preprocess_signals(df_full)
+        df_full = add_same_day_aggregate_features(
+            df_full_raw, df_full, self.PATTERN_COLUMN
+        )
+        df_train = preprocess_signals(df_train)
+        df_train = add_same_day_aggregate_features(
+            df_train_raw, df_train, self.PATTERN_COLUMN
+        )
+
+        df_full = self._add_return_labels(df_full)
+        df_train = self._add_return_labels(df_train)
+
+        feature_df, feature_cols, continuous_cols = self._prepare_features(df_train)
+        base_rates = self._compute_base_rates(df_train)
         vif_all, vif_cont = self._run_vif(feature_df, feature_cols, continuous_cols)
 
         logistic_results: Dict[int, Dict[str, object]] = {}
@@ -126,25 +206,41 @@ class BullishDivergenceModel:
 
         for horizon in self.horizons:
             label_col = f"success{horizon}"
-            target = df[label_col] if label_col in df.columns else pd.Series(dtype=float)
+            target = (
+                df_train[label_col]
+                if label_col in df_train.columns
+                else pd.Series(dtype=float)
+            )
             logistic_results[horizon] = self._run_logistic_regression(
                 feature_df, target, continuous_cols, feature_cols, label_col
             )
             used_counts[horizon] = logistic_results[horizon].get("row_count", 0)
 
             return_col = f"y{horizon}"
-            target_return = df[return_col] if return_col in df.columns else pd.Series(dtype=float)
+            target_return = (
+                df_train[return_col]
+                if return_col in df_train.columns
+                else pd.Series(dtype=float)
+            )
             ols_results[horizon] = self._run_ols_regression(
                 feature_df, target_return, continuous_cols, feature_cols, return_col
             )
 
-        total_rows = len(df)
-        pattern_series = df[self.PATTERN_COLUMN].fillna(0).astype(int)
+        total_rows = len(df_train)
+        pattern_series = df_train[self.PATTERN_COLUMN].fillna(0).astype(int)
+        full_pattern_series = df_full[self.PATTERN_COLUMN].fillna(0).astype(int)
         row_counts = {
             "total": total_rows,
             "bull_div_rows": int((pattern_series == self.BULLISH_PATTERN).sum()),
             "downtrend_rows": int((pattern_series == self.DOWNTREND_PATTERN).sum()),
             "used_for_regression": used_counts,
+            "total_full": len(df_full),
+            "bull_div_rows_full": int(
+                (full_pattern_series == self.BULLISH_PATTERN).sum()
+            ),
+            "downtrend_rows_full": int(
+                (full_pattern_series == self.DOWNTREND_PATTERN).sum()
+            ),
         }
 
         return {
@@ -153,6 +249,7 @@ class BullishDivergenceModel:
                 "horizons": self.horizons,
                 "success_thresholds": self.success_thresholds,
                 "exclude_crisis_period": self.exclude_crisis_period,
+                "require_blackout_data": self.require_blackout_data,
                 "crisis_start": self.crisis_start,
                 "crisis_end": self.crisis_end,
                 "feature_columns": feature_cols,
@@ -162,6 +259,7 @@ class BullishDivergenceModel:
             "vif": {"all": vif_all, "continuous": vif_cont},
             "logistic": logistic_results,
             "ols": ols_results,
+            "warnings": list(self._warnings),
         }
 
     def _load_data(self) -> pd.DataFrame:
@@ -176,6 +274,7 @@ class BullishDivergenceModel:
             df = pd.read_sql_query(query, conn, params=params)
         if df.empty:
             return df
+        df = self._apply_alias_columns(df)
         for candidate in self.DATE_CANDIDATES:
             if candidate in df.columns:
                 self.date_column = candidate
@@ -188,10 +287,18 @@ class BullishDivergenceModel:
             df[self.PATTERN_COLUMN] = df[self.PATTERN_COLUMN].fillna(0).astype(int)
         return df
 
+    def _apply_alias_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        for alias, source in self.ALIAS_MAP.items():
+            if alias not in df.columns and source in df.columns:
+                df[alias] = df[source]
+        return df
+
     def _filter_bullish_divergence_cases(self, df: pd.DataFrame) -> pd.DataFrame:
         if df.empty or self.PATTERN_COLUMN not in df.columns:
             return df
-        mask = df[self.PATTERN_COLUMN].isin({self.BULLISH_PATTERN, self.DOWNTREND_PATTERN})
+        mask = df[self.PATTERN_COLUMN].isin(
+            {self.BULLISH_PATTERN, self.DOWNTREND_PATTERN}
+        )
         return df.loc[mask].reset_index(drop=True)
 
     def _apply_crisis_exclusion(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -230,6 +337,11 @@ class BullishDivergenceModel:
     ) -> tuple[pd.DataFrame, List[str], List[str]]:
         if df.empty:
             return df.copy(), [], []
+        df = df.copy()
+        if self.PATTERN_COLUMN in df.columns:
+            df["is_candle_day"] = (
+                df[self.PATTERN_COLUMN].fillna(0).astype(int) != 0
+            ).astype(int)
         available = [col for col in self.feature_whitelist if col in df.columns]
         available = [col for col in available if col not in self.feature_exclusions]
         feature_df = df[available].copy()
@@ -248,9 +360,11 @@ class BullishDivergenceModel:
             if label not in df.columns:
                 continue
             series = df[label]
+
             def _mean(mask: pd.Series) -> float:
                 subset = series.loc[mask & series.notna()]
                 return float(subset.mean()) if not subset.empty else float("nan")
+
             base = series.dropna()
             rates[horizon] = {
                 "all": float(base.mean()) if not base.empty else float("nan"),
@@ -260,7 +374,10 @@ class BullishDivergenceModel:
         return rates
 
     def _run_vif(
-        self, feature_df: pd.DataFrame, feature_cols: List[str], continuous_cols: List[str]
+        self,
+        feature_df: pd.DataFrame,
+        feature_cols: List[str],
+        continuous_cols: List[str],
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
         if not feature_cols:
             empty = pd.DataFrame(columns=["feature", "VIF"])
@@ -310,7 +427,10 @@ class BullishDivergenceModel:
         subset = subset.dropna(subset=feature_cols + [label_col])
         row_count = len(subset)
         if row_count == 0 or subset[label_col].nunique() < 2:
-            return {"row_count": row_count, "error": "Ei riittävästi dataa logistiselle mallille."}
+            return {
+                "row_count": row_count,
+                "error": "Ei riittävästi dataa logistiselle mallille.",
+            }
         X = subset[feature_cols]
         y = subset[label_col]
         binary_cols = [col for col in feature_cols if col not in continuous_cols]
@@ -324,10 +444,14 @@ class BullishDivergenceModel:
                 stratify=y,
             )
         except ValueError as exc:
-            return {"row_count": row_count, "error": f"Train/test jako epäonnistui: {exc}"}
+            return {
+                "row_count": row_count,
+                "error": f"Train/test jako epäonnistui: {exc}",
+            }
 
         if continuous_cols:
             scaler.fit(X_train[continuous_cols])
+
         def _stack(data: pd.DataFrame) -> np.ndarray:
             parts: List[np.ndarray] = []
             if continuous_cols:

@@ -1004,11 +1004,12 @@ def run_regression_for_market(
     """
     if isinstance(pattern_code, str) and pattern_code == "BullishDivergenceOnly":
         thresholds_for_model = success_thresholds or DEFAULT_SUCCESS_THRESHOLDS
-        horizon_targets = success_horizons or [5, 10]
-        filtered_horizons = [h for h in horizon_targets if h in {5, 10}] or [5, 10]
+        horizon_targets = success_horizons or [2, 5, 10, 20]
+        filtered_horizons = [h for h in horizon_targets if h in {2, 5, 10, 20}] or [2, 5, 10, 20]
         model = BullishDivergenceModel(
             market=market,
             exclude_crisis_period=exclude_crisis_period,
+            require_blackout_data=require_blackout_data,
             crisis_start=CRISIS_START,
             crisis_end=CRISIS_END,
             db_path=db_path,
@@ -1021,7 +1022,7 @@ def run_regression_for_market(
             "market": market,
             "pattern_code": "BullishDivergenceOnly",
             "report": report_text,
-            "warnings": [],
+            "warnings": bd_results.get("warnings", []),
             "horizons": {},
             "bullish_divergence_model": bd_results,
         }
