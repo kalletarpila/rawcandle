@@ -97,6 +97,14 @@ class RegressionView:
             )
             for code, label in pattern_codes
         }
+        self.bullish_divergence_only_checkbox = ft.Checkbox(
+            label="Bullish Divergence -ydinmalli (vain downtrend + Bullish Divergence)",
+            value=False,
+            tooltip=(
+                "Ajaa erillisen ydinkehikon: analysoi vain downtrend (0) ja Bullish Divergence (7) rivit."
+            ),
+            on_change=self._toggle_bullish_divergence_mode,
+        )
         self.run_button = ft.ElevatedButton(
             "Aja regressio",
             icon=ft.Icons.PLAY_ARROW,
@@ -188,6 +196,13 @@ class RegressionView:
                             spacing=10,
                             run_spacing=5,
                         ),
+                        ft.Divider(),
+                        ft.Text(
+                            "Tai valitse erillinen Bullish Divergence -ydinmalli (downtrend + BullDiv):",
+                            weight=ft.FontWeight.BOLD,
+                            size=16,
+                        ),
+                        self.bullish_divergence_only_checkbox,
                     ],
                     spacing=10,
                 ),
@@ -408,7 +423,10 @@ class RegressionView:
         ]
         return sorted(horizons)
 
-    def _get_selected_patterns(self) -> List[int]:
+    def _get_selected_patterns(self):
+        if getattr(self, "bullish_divergence_only_checkbox", None):
+            if self.bullish_divergence_only_checkbox.value:
+                return "BullishDivergenceOnly"
         selected = [
             code for code, checkbox in self.pattern_checkboxes.items() if checkbox.value
         ]
@@ -429,3 +447,12 @@ class RegressionView:
         if selected or allow_empty:
             return selected
         return list(self.feature_names)
+
+    def _toggle_bullish_divergence_mode(self, _):
+        enabled = not self.bullish_divergence_only_checkbox.value
+        for checkbox in self.pattern_checkboxes.values():
+            checkbox.disabled = not enabled
+        try:
+            self.page.update()
+        except Exception:
+            pass

@@ -50,6 +50,7 @@ def regression_view(monkeypatch):
     view.require_blackout_checkbox = SimpleNamespace(value=False)
     view.exclude_crisis_checkbox = SimpleNamespace(value=False)
     view.pattern_checkboxes = {0: SimpleNamespace(value=True)}
+    view.bullish_divergence_only_checkbox = SimpleNamespace(value=False)
     view.run_button = SimpleNamespace(disabled=False)
     view.status_text = SimpleNamespace(value="", color="")
     view.output_field = SimpleNamespace(value="")

@@ -29,6 +29,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
+from analysis.bullish_divergence_core_model import BullishDivergenceModel
 from analysis.combo_features import (
     BULL_DIV_GENERAL_FEATURES,
     COMBO_FEATURE_COLUMNS,
@@ -1001,6 +1002,30 @@ def run_regression_for_market(
     """
     Suorita koko pipeline yhdelle markkinalle ja palauta tulokset.
     """
+    if isinstance(pattern_code, str) and pattern_code == "BullishDivergenceOnly":
+        thresholds_for_model = success_thresholds or DEFAULT_SUCCESS_THRESHOLDS
+        horizon_targets = success_horizons or [5, 10]
+        filtered_horizons = [h for h in horizon_targets if h in {5, 10}] or [5, 10]
+        model = BullishDivergenceModel(
+            market=market,
+            exclude_crisis_period=exclude_crisis_period,
+            crisis_start=CRISIS_START,
+            crisis_end=CRISIS_END,
+            db_path=db_path,
+            horizon_list=filtered_horizons,
+            success_thresholds=thresholds_for_model,
+        )
+        bd_results = model.run_all()
+        report_text = _build_bullish_divergence_report(bd_results)
+        return {
+            "market": market,
+            "pattern_code": "BullishDivergenceOnly",
+            "report": report_text,
+            "warnings": [],
+            "horizons": {},
+            "bullish_divergence_model": bd_results,
+        }
+
     default_feature_set = (
         list(FEATURE_COLUMNS) + ["is_candle_day"] + CATEGORICAL_DUMMY_COLUMNS
     )
@@ -1522,6 +1547,59 @@ def _build_report_text(
     combo_summary_lines = _build_combo_summary_section(horizon_results)
     if combo_summary_lines:
         lines.extend(combo_summary_lines)
+    return "\n".join(lines)
+
+
+def _build_bullish_divergence_report(model_payload: Dict[str, object]) -> str:
+    config = model_payload.get("config", {}) if model_payload else {}
+    row_counts = model_payload.get("row_counts", {}) if model_payload else {}
+    base_rates = model_payload.get("base_rates", {}) if model_payload else {}
+    logistic = model_payload.get("logistic", {}) if model_payload else {}
+    ols = model_payload.get("ols", {}) if model_payload else {}
+
+    def _fmt(val: object) -> str:
+        try:
+            num = float(val)
+        except (TypeError, ValueError):
+            return "NaN"
+        if np.isnan(num):
+            return "NaN"
+        return f"{num:.3f}"
+
+    horizons = config.get("horizons", [])
+    market_label = (config.get("market") or "__all__").upper()
+    lines = [
+        "== Bullish Divergence -ydinmalli ==",
+        f"Markkina: {market_label}",
+        "Horisontit: " + ", ".join(f"{h} pv" for h in horizons),
+        (
+            f"Rivejä yhteensä: {row_counts.get('total', 0)} | "
+            f"BullDiv: {row_counts.get('bull_div_rows', 0)} | "
+            f"Downtrend: {row_counts.get('downtrend_rows', 0)}"
+        ),
+        "",
+    ]
+    for horizon in horizons:
+        lines.append("-" * 60)
+        lines.append(f"Horisontti {horizon} päivää")
+        base = base_rates.get(horizon, {})
+        lines.append(
+            "Base success% (Kaikki / BullDiv / Downtrend): "
+            f"{_fmt(base.get('all'))} / {_fmt(base.get('bull_div'))} / {_fmt(base.get('downtrend'))}"
+        )
+        log_entry = logistic.get(horizon, {})
+        if log_entry.get("error"):
+            lines.append(f"Logistinen malli: {log_entry['error']}")
+        else:
+            lines.append(f"Logistinen AUC: {_fmt(log_entry.get('auc'))}")
+            report = log_entry.get("classification_report")
+            if report:
+                lines.append(report.strip())
+        ols_entry = ols.get(horizon, {})
+        if ols_entry.get("error"):
+            lines.append(f"OLS-malli: {ols_entry['error']}")
+        else:
+            lines.append(f"OLS R^2: {_fmt(ols_entry.get('r2'))}")
     return "\n".join(lines)
 
 
