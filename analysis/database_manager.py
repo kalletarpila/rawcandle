@@ -5,7 +5,7 @@ Hallinnoi analysis-tietokannan operaatiot.
 
 import sqlite3
 import os
-from typing import List, Dict, Any, Optional, Tuple, Iterable
+from typing import List, Dict, Any, Optional, Tuple, Iterable, Set
 from datetime import datetime
 import logging
 
@@ -200,9 +200,9 @@ MASTER_FEATURE_COLUMN_DEFS = {
     "has_bullish_divergence_same_day": "INTEGER DEFAULT 0",
     "signal_count_same_day": "INTEGER DEFAULT 0",
     "unique_patterns_same_day": "INTEGER DEFAULT 0",
-    "max_strength_same_day": "REAL DEFAULT 0.0",
-    "second_best_strength_same_day": "REAL DEFAULT 0.0",
-    "sum_strength_same_day": "REAL DEFAULT 0.0",
+    "max_strength_same_day": "REAL",
+    "second_best_strength_same_day": "REAL",
+    "sum_strength_same_day": "REAL",
     "has_same_day_reversal_cluster": "INTEGER DEFAULT 0",
     "has_blackout_data": "INTEGER DEFAULT 0",
     "is_earnings_t0": "INTEGER DEFAULT 0",
@@ -217,6 +217,72 @@ MASTER_FEATURE_COLUMN_DEFS = {
     "sector_momentum_20": "REAL",
     "sector_volatility_20": "REAL",
 }
+BULL_DIV_METRIC_COLUMN_DEFS = {
+    "BullDiv_strength": "REAL",
+    "BullDiv_recent_strength": "REAL",
+    "BullDiv_recent_offset": "INTEGER DEFAULT -1",
+    "Has_BullDiv_recent": "INTEGER DEFAULT 0",
+    "bullish_divergence": "REAL",
+    "bearish_divergence": "REAL",
+}
+
+COMBO_COLUMN_DEFS = {
+    column: "INTEGER DEFAULT 0" for column in COMBO_FEATURE_COLUMNS
+}
+
+BULL_DIV_GENERAL_DEFAULTS = {
+    "bullDiv_offset": 99,
+    "bullDiv_last_1d": 0,
+    "bullDiv_last_2d": 0,
+    "bullDiv_last_3d": 0,
+    "bullDiv_last_3d_any": 0,
+}
+
+BULL_DIV_METRIC_DEFAULTS = {
+    "BullDiv_recent_offset": -1,
+    "Has_BullDiv_recent": 0,
+}
+
+MASTER_FEATURE_INTEGER_COLUMNS: Set[str] = {
+    "t_1_bodi_colour",
+    "t0_bodi_colour",
+    "t1_bodi_colour",
+    "is_crisis",
+    "is_candle_day",
+    "signal_combo_code",
+    "num_candles_same_day",
+    "has_multi_candle_combo",
+    "has_bullish_divergence_same_day",
+    "signal_count_same_day",
+    "unique_patterns_same_day",
+    "has_same_day_reversal_cluster",
+    "has_blackout_data",
+    "is_earnings_t0",
+    "is_earnings_window",
+    "is_dividend_t0",
+    "is_dividend_window",
+    "is_blackout_t0",
+    "is_blackout_window",
+    "exclude_from_regression",
+}
+MASTER_FEATURE_TEXT_COLUMNS: Set[str] = {"sector"}
+MASTER_FEATURE_CONTINUOUS_COLUMNS: Set[str] = {
+    col
+    for col in MASTER_FEATURE_COLUMNS
+    if col not in MASTER_FEATURE_INTEGER_COLUMNS
+    and col not in MASTER_FEATURE_TEXT_COLUMNS
+}
+RESULTS_SCHEMA_REQUIRED_COLUMNS: Dict[str, str] = {}
+
+RESULTS_SCHEMA_REQUIRED_COLUMNS.update(MASTER_FEATURE_COLUMN_DEFS)
+RESULTS_SCHEMA_REQUIRED_COLUMNS.update(BULL_DIV_METRIC_COLUMN_DEFS)
+RESULTS_SCHEMA_REQUIRED_COLUMNS.update(
+    {
+        column: f"INTEGER DEFAULT {BULL_DIV_GENERAL_DEFAULTS.get(column, 0)}"
+        for column in BULL_DIV_GENERAL_FEATURES
+    }
+)
+RESULTS_SCHEMA_REQUIRED_COLUMNS.update(COMBO_COLUMN_DEFS)
 
 
 class DatabaseManager:
@@ -557,6 +623,9 @@ class DatabaseManager:
                 "CREATE INDEX IF NOT EXISTS idx_results_market ON results_data(market)"
             )
 
+            # Varmista että results_data sisältää kaikki master-sarakkeet.
+            self.ensure_results_schema()
+
             # Luo results_metadata taulu
             # Tallentaa metatiedot generoinneista
             cursor.execute(
@@ -577,6 +646,62 @@ class DatabaseManager:
             self.logger.error(f"Database initialization failed: {e}")
             raise
 
+    def _get_existing_columns(self, table: str) -> Set[str]:
+        """
+        Palauta annetun taulun sarakkeiden nimet.
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            cursor.execute(f"PRAGMA table_info({table})")
+            return {row[1] for row in cursor.fetchall()}
+        except Exception as e:
+            self.logger.error(f"Fetch columns failed for table {table}: {e}")
+            return set()
+
+    def ensure_results_schema(self) -> None:
+        """
+        Lisää puuttuvat results_data-sarakkeet idempotentisti (ei droppaa dataa).
+
+        Tämä varmistaa, että kaikki master-featuret ja blackout/same-day sarakkeet
+        löytyvät myös legacy-kannoista. Metodi käyttää pelkkiä ALTER TABLE ADD COLUMN
+        -lauseita ja on turvallinen suorittaa useasti.
+        """
+        try:
+            existing = self._get_existing_columns("results_data")
+            if not existing:
+                # results_data puuttuu kokonaan; _init_database luo sen myöhemmin
+                return
+
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            added = False
+            for column, ddl in RESULTS_SCHEMA_REQUIRED_COLUMNS.items():
+                if column not in existing:
+                    cursor.execute(f"ALTER TABLE results_data ADD COLUMN {column} {ddl}")
+                    self.logger.info(
+                        f"Added missing column '{column}' to results_data"
+                    )
+                    added = True
+                    existing.add(column)
+            if added:
+                conn.commit()
+
+            expected_columns = (
+                set(MASTER_FEATURE_COLUMNS)
+                | set(BULL_DIV_GENERAL_FEATURES)
+                | set(BULL_DIV_METRIC_COLUMN_DEFS.keys())
+                | set(COMBO_FEATURE_COLUMNS)
+            )
+            missing = expected_columns - existing
+            if missing:
+                msg = f"results_data missing required columns: {sorted(missing)}"
+                self.logger.error(msg)
+                raise RuntimeError(msg)
+        except Exception as e:
+            self.logger.error(f"Ensure results schema failed: {e}")
+            raise
+
     def get_connection(self) -> sqlite3.Connection:
         """
         Hae tietokantayhteys.
@@ -594,6 +719,12 @@ class DatabaseManager:
         if self._connection:
             self._connection.close()
             self._connection = None
+
+    def get_table_columns(self, table: str) -> Set[str]:
+        """
+        Palauta annetun taulun sarakkeet julkisesti (PRAGMA table_info).
+        """
+        return self._get_existing_columns(table)
 
     def is_connected(self) -> bool:
         """
@@ -1352,7 +1483,42 @@ class DatabaseManager:
                 batch = results[i : i + batch_size]
 
                 for result in batch:
-                    values_tuple = tuple(_get_value(result, col) for col in all_columns)
+                    normalized = dict(result)
+                    normalized.setdefault("market", "usa")
+
+                    missing_keys = [
+                        key for key in ("ticker", "date", "candle_pattern") if key not in normalized
+                    ]
+                    if missing_keys:
+                        self.logger.warning(
+                            f"Skipping result insert, missing required keys: {missing_keys}"
+                        )
+                        continue
+
+                    for column in MASTER_FEATURE_COLUMNS:
+                        if column in normalized:
+                            continue
+                        if column in MASTER_FEATURE_INTEGER_COLUMNS:
+                            normalized[column] = 0
+                        elif column in MASTER_FEATURE_TEXT_COLUMNS:
+                            normalized[column] = None
+                        else:
+                            normalized[column] = None
+
+                    for column in BULL_DIV_METRIC_COLUMN_DEFS.keys():
+                        if column in normalized:
+                            continue
+                        normalized[column] = BULL_DIV_METRIC_DEFAULTS.get(column)
+
+                    for column in BULL_DIV_GENERAL_FEATURES:
+                        if column not in normalized:
+                            normalized[column] = BULL_DIV_GENERAL_DEFAULTS.get(
+                                column, 0
+                            )
+                    for column in COMBO_FEATURE_COLUMNS:
+                        normalized.setdefault(column, 0)
+
+                    values_tuple = tuple(_get_value(normalized, col) for col in all_columns)
                     if len(values_tuple) != len(all_columns):
                         self.logger.error(
                             f"VALUES tuple length is {len(values_tuple)}, "

@@ -72,6 +72,7 @@ class ResultsGenerator:
         self._blackout_by_ticker: dict[str, pd.DataFrame] = {}
         self._sector_warning_logged = False
         self._load_blackout_data()
+        self._parity_checked = False
 
     def generate_results(
         self,
@@ -164,6 +165,9 @@ class ResultsGenerator:
                         aggregates_by_date.get(finding["date"]),
                     )
                     if result:
+                        if not self._parity_checked:
+                            self._schema_parity_check(result)
+                            self._parity_checked = True
                         ticker_results.append(result)
                         processed_count += 1
 
@@ -957,27 +961,27 @@ class ResultsGenerator:
             else:
                 t0_volyymi = None
 
-            def calc_volume_impulse_ratio() -> float:
+            def calc_volume_impulse_ratio() -> Optional[float]:
                 if t0_volume is None or t0_volume <= 0:
-                    return 1.0
+                    return None
                 start_idx = max(0, idx - 5)
                 end_idx = idx - 1
                 if start_idx > end_idx:
-                    return 1.0
+                    return None
                 subset = stock_df.iloc[start_idx : end_idx + 1]
                 prev_volumes = [
                     safe_float(row["volume"]) for _, row in subset.iterrows()
                 ]
                 prev_volumes = [v for v in prev_volumes if v is not None and v > 0]
                 if not prev_volumes:
-                    return 1.0
+                    return None
                 avg_prev5 = mean(prev_volumes)
                 if avg_prev5 is None or avg_prev5 <= 0:
-                    return 1.0
+                    return None
                 return t0_volume / avg_prev5
 
             volume_impulse = calc_volume_impulse_ratio()
-            gap_down_strength = 0.0
+            gap_down_strength = None
             if (
                 prev_close is not None
                 and prev_close > 0
@@ -997,28 +1001,31 @@ class ResultsGenerator:
                 body_value = abs(t0_close - t0_open)
                 lower_shadow = max(min(t0_open, t0_close) - t0_low, 0.0)
                 upper_shadow = max(t0_high - max(t0_open, t0_close), 0.0)
-                body_ratio = body_value / candle_range_raw if candle_range_raw else 0.0
+                body_ratio = body_value / candle_range_raw if candle_range_raw else None
                 shadow_ratio = (
                     (lower_shadow + upper_shadow) / candle_range_raw
                     if candle_range_raw
-                    else 0.0
+                    else None
                 )
             else:
-                body_ratio = 0.0
-                shadow_ratio = 0.0
+                body_ratio = None
+                shadow_ratio = None
 
             depth_component = (
-                abs(t_10 - 100.0) / 10.0 if t_10 is not None else 0.0
+                abs(t_10 - 100.0) / 10.0 if t_10 is not None else None
             )
             volatility_component = (
-                (t_10_hajonta / 2.0) if t_10_hajonta is not None else 0.0
+                (t_10_hajonta / 2.0) if t_10_hajonta is not None else None
             )
             volume_component = (
-                (volume_impulse - 1.0) if volume_impulse is not None else 0.0
+                (volume_impulse - 1.0) if volume_impulse is not None else None
             )
-            reversal_context_score = (
-                depth_component + volatility_component + volume_component
-            )
+            if None not in (depth_component, volatility_component, volume_component):
+                reversal_context_score = (
+                    depth_component + volatility_component + volume_component
+                )
+            else:
+                reversal_context_score = None
 
             t2_volyymi = calc_volume_ratio(2, 1)
             t5_volyymi = calc_volume_ratio(5, 1)
@@ -1512,6 +1519,33 @@ class ResultsGenerator:
                 is_pattern == 1 and offset != -1 and offset <= 5
             )
         return combos
+
+    def _schema_parity_check(self, sample_result: dict) -> None:
+        """
+        Varmista että results_data taulussa on kaikki generoidut sarakkeet.
+        """
+        try:
+            columns = self.db_manager.get_table_columns("results_data")
+        except Exception as exc:
+            self.logger.warning(
+                "Unable to fetch results_data columns for parity check (%s)", exc
+            )
+            return
+
+        allowed_extra = {"id", "created_at"}
+        keys = set(sample_result.keys())
+        missing = keys - columns
+        extra = (columns - keys) - allowed_extra
+
+        if missing:
+            raise ValueError(
+                f"results_data missing expected columns: {sorted(missing)}"
+            )
+        if extra:
+            self.logger.warning(
+                "results_data contains extra columns not generated anymore: %s",
+                sorted(extra),
+            )
 
 
 if __name__ == "__main__":

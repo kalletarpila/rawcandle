@@ -309,6 +309,11 @@ class TestResultsGeneratorBasic(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertIsNone(result["Volatility_ratio_10_20"])
 
+    def test_schema_parity_check_runs_once(self):
+        rows, _ = self.generator.generate_results()
+        self.assertGreater(rows, 0)
+        self.assertTrue(self.generator._parity_checked)
+
 
 class TestDatabaseMethods(unittest.TestCase):
     """Testit DatabaseManager results_data metodeille."""
