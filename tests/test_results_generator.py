@@ -1,17 +1,19 @@
 """
-Testit ResultsGenerator:lle (85 sarakkeen rakenne).
+Testit ResultsGenerator:lle (89 sarakkeen rakenne).
 
 Yksinkertaistetut testit jotka varmistavat että:
-1. Generaattori luo oikean määrän sarakkeita (85)
+1. Generaattori luo oikean määrän sarakkeita (89)
 2. Inkrementaalinen logiikka toimii
 3. Kaikki sarakkeet tallennetaan tietokantaan
 """
 
 import sqlite3
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
+
+import pandas as pd
 
 from analysis.database_manager import DatabaseManager
 from analysis.results_generator import ResultsGenerator
@@ -65,8 +67,6 @@ class TestResultsGeneratorBasic(unittest.TestCase):
 
         for ticker in ["AAPL", "MSFT", "^GSPC", "^NDX"]:
             for i in range(-25, 35):  # Lisätty enemmän tulevaisuuteen
-                from datetime import timedelta
-
                 date = (base_date + timedelta(days=i)).strftime("%Y-%m-%d")
 
                 # Simuloi hintadata
@@ -119,13 +119,13 @@ class TestResultsGeneratorBasic(unittest.TestCase):
 
         conn.commit()
 
-    def test_generate_creates_85_columns(self):
-        """Testaa että generointi luo 85 saraketta."""
+    def test_generate_creates_all_columns(self):
+        """Testaa että generointi luo kaikki sarakkeet."""
         rows, time_taken = self.generator.generate_results()
 
         self.assertGreater(rows, 0, "Pitäisi generoida rivejä")
 
-        # Tarkista että results_data taulussa on 85 dataa + id + created_at
+        # Tarkista että results_data taulussa on kaikki kentät + id + created_at
         results = self.db_manager.get_results_data()
         self.assertEqual(len(results), 2, "Pitäisi olla 2 riviä (AAPL ja MSFT)")
 
@@ -166,6 +166,10 @@ class TestResultsGeneratorBasic(unittest.TestCase):
             "t0_close_norm",
             "bearish_divergence",
             "bullish_divergence",
+            "BullDiv_strength",
+            "BullDiv_recent_strength",
+            "BullDiv_recent_offset",
+            "Has_BullDiv_recent",
             "weekday",
         ]
 
@@ -239,6 +243,72 @@ class TestResultsGeneratorBasic(unittest.TestCase):
             self.assertIsNotNone(result.get("SPX_2"), "SPX_2 ei saa olla None")
             self.assertIsNotNone(result.get("NDX_2"), "NDX_2 ei saa olla None")
 
+    def _get_stock_dataframe(self, ticker: str) -> pd.DataFrame:
+        conn = sqlite3.connect(self.stock_db)
+        df = pd.read_sql_query(
+            """
+            SELECT pvm, open, high, low, close, volume
+            FROM osakedata
+            WHERE osake = ?
+            ORDER BY pvm ASC
+            """,
+            conn,
+            params=(ticker,),
+        )
+        conn.close()
+        df["pvm"] = pd.to_datetime(df["pvm"]).dt.strftime("%Y-%m-%d")
+        return df
+
+    def _run_process_finding(self, ticker: str, date: str, stock_df: pd.DataFrame):
+        self.generator.db_manager.get_divergence_records = (
+            lambda *args, **kwargs: {}
+        )
+        finding = {
+            "ticker": ticker,
+            "date": date,
+            "pattern": "Hammer",
+            "signal_strength": 0.5,
+            "rsi14": 50.0,
+        }
+        return self.generator._process_finding(
+            finding, stock_df, ticker, "usa"
+        )
+
+    def test_filter_divergence_combo_uses_date(self):
+        findings = [
+            {"ticker": "AAA", "date": "2024-01-01", "pattern": "Hammer"},
+            {"ticker": "AAA", "date": "2024-01-01", "pattern": "Bullish Divergence"},
+        ]
+        filtered = self.generator._filter_divergence_combos(findings)
+        self.assertEqual(len(filtered), 2)
+
+    def test_normalized_prices_use_t0_close(self):
+        stock_df = self._get_stock_dataframe("AAPL")
+        idx = stock_df.index[stock_df["pvm"] == "2024-10-15"][0]
+        close_t0 = float(stock_df.loc[idx, "close"])
+        close_t5 = float(stock_df.loc[idx - 5, "close"])
+        expected = close_t5 / close_t0 * 100.0
+
+        result = self._run_process_finding("AAPL", "2024-10-15", stock_df)
+        self.assertIsNotNone(result)
+        self.assertAlmostEqual(result["t_5"], expected, places=6)
+        self.assertEqual(result["t0_close_norm"], 100.0)
+
+    def test_t0_200_ma_none_when_insufficient_history(self):
+        stock_df = self._get_stock_dataframe("AAPL")
+        result = self._run_process_finding("AAPL", "2024-10-15", stock_df)
+        self.assertIsNotNone(result)
+        self.assertIsNone(result["t0_200p_liukuva"])
+
+    def test_volatility_ratio_none_when_missing_data(self):
+        stock_df = self._get_stock_dataframe("AAPL")
+        idx = stock_df.index[stock_df["pvm"] == "2024-10-15"][0]
+        for i in range(idx - 20, idx):
+            stock_df.at[i, "close"] = None
+        result = self._run_process_finding("AAPL", "2024-10-15", stock_df)
+        self.assertIsNotNone(result)
+        self.assertIsNone(result["Volatility_ratio_10_20"])
+
 
 class TestDatabaseMethods(unittest.TestCase):
     """Testit DatabaseManager results_data metodeille."""
@@ -254,8 +324,8 @@ class TestDatabaseMethods(unittest.TestCase):
         self.db_manager.close()
         self.temp_dir.cleanup()
 
-    def test_bulk_insert_85_columns(self):
-        """Testaa että bulk insert toimii 85 sarakkeella."""
+    def test_bulk_insert_all_columns(self):
+        """Testaa että bulk insert toimii kaikilla sarakkeilla."""
         # Luo testimuotoinen data
         test_data = []
         for i in range(10):
@@ -344,6 +414,10 @@ class TestDatabaseMethods(unittest.TestCase):
                     "t0_close_norm": 105.0,
                     "bearish_divergence": 0.0,
                     "bullish_divergence": 0.0,
+                    "BullDiv_strength": 0.0,
+                    "BullDiv_recent_strength": 0.0,
+                    "BullDiv_recent_offset": -1,
+                    "Has_BullDiv_recent": 0,
                     "weekday": 2,
                 }
             )

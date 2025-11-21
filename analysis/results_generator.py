@@ -233,7 +233,7 @@ class ResultsGenerator:
         # Rakenna (ticker, date) -> patterns mapping
         ticker_date_patterns = {}
         for finding in findings:
-            key = (finding.get("ticker"), finding.get("pvm"))
+            key = (finding.get("ticker"), finding.get("date"))
             pattern = finding.get("pattern")
 
             if key not in ticker_date_patterns:
@@ -251,7 +251,7 @@ class ResultsGenerator:
 
         # Suodata findings jotka kuuluvat combo_keys:iin
         filtered = [
-            f for f in findings if (f.get("ticker"), f.get("pvm")) in combo_keys
+            f for f in findings if (f.get("ticker"), f.get("date")) in combo_keys
         ]
 
         self.logger.info(
@@ -602,9 +602,10 @@ class ResultsGenerator:
                 if any(x is None for x in [low, high, open_val, close_val]):
                     return None, None, None, None
 
-                # Normalisoi t0_low:lla
-                norm_low = (low / t0_low * 100) if t0_low > 0 else None
-                norm_high = (high / t0_low * 100) if t0_low > 0 else None
+                # Normalisoi t0_close:lla
+                base_close = t0_close if t0_close and t0_close > 0 else None
+                norm_low = (low / base_close * 100) if base_close else None
+                norm_high = (high / base_close * 100) if base_close else None
 
                 # Body prosentti
                 candle_range = high - low
@@ -629,12 +630,10 @@ class ResultsGenerator:
                 if close_val is None:
                     return None
 
-                if is_index:
-                    # Indeksit: normalisoi t0_close=100
-                    return (close_val / t0_close * 100) if t0_close > 0 else None
-                else:
-                    # Osakkeet: normalisoi t0_low=100
-                    return (close_val / t0_low * 100) if t0_low > 0 else None
+                base_close = t0_close if t0_close and t0_close > 0 else None
+                if not base_close:
+                    return None
+                return (close_val / base_close) * 100
 
             def calc_volatility(days_back):
                 """Laske volatiliteetti (stdev normalisoiduista arvoista)"""
@@ -649,8 +648,10 @@ class ResultsGenerator:
                 if len(values) < 2:
                     return None
 
-                # Normalisoi t0_low:lla
-                norm_values = [(v / t0_low) * 100 for v in values]
+                base_close = t0_close if t0_close and t0_close > 0 else None
+                if not base_close:
+                    return None
+                norm_values = [(v / base_close) * 100 for v in values]
                 try:
                     return pstdev(norm_values)
                 except Exception:
@@ -723,10 +724,10 @@ class ResultsGenerator:
 
                 ma_val = mean(values)
 
-                if is_index:
-                    return (ma_val / t0_close * 100) if t0_close > 0 else None
-                else:
-                    return (ma_val / t0_low * 100) if t0_low > 0 else None
+                base_close = t0_close if t0_close and t0_close > 0 else None
+                if not base_close:
+                    return None
+                return (ma_val / base_close) * 100
 
             def calc_price_slope(normalized_value, horizon):
                 """Laske hintaslope normalisoidusta arvosta"""
@@ -786,8 +787,8 @@ class ResultsGenerator:
                 ma_prev = calc_ma_series(end_idx - lookback, period)
                 if ma_today is None or ma_prev is None:
                     return None
-                base = t0_close if is_index else t0_low
-                if not base or base <= 0:
+                base = t0_close if t0_close and t0_close > 0 else None
+                if not base:
                     return None
                 return ((ma_today - ma_prev) / lookback) / base * 100.0
 
@@ -920,7 +921,7 @@ class ResultsGenerator:
             ):
                 volatility_ratio_10_20 = t_10_hajonta / t_20_hajonta
             else:
-                volatility_ratio_10_20 = 0.0
+                volatility_ratio_10_20 = None
 
             # Tulevat hinnat (27-30)
             t2 = get_normalized_close(2)
@@ -1047,7 +1048,7 @@ class ResultsGenerator:
 
             t0_20p_liukuva = calc_ma_normalized(0, 20)
             t0_50p_liukuva = calc_ma_normalized(0, 50)
-            t0_200p_liukuva = calc_ma_normalized(0, 200) if idx >= 199 else 0
+            t0_200p_liukuva = calc_ma_normalized(0, 200) if idx >= 199 else None
 
             # S&P 500 indeksi (58-68)
             SPX_0 = 100.0  # t0_close normalisoitu 100:ksi
@@ -1117,7 +1118,7 @@ class ResultsGenerator:
             sector_features = self._get_sector_features(ticker)
 
             # Normalisoitu close (81)
-            t0_close_norm = (t0_close / t0_low * 100) if t0_low > 0 else None
+            t0_close_norm = 100.0 if t0_close and t0_close > 0 else None
 
             # Divergenssit (82-83)
             check_points = []
