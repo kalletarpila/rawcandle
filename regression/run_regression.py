@@ -141,7 +141,9 @@ BINARY_FEATURES.update(
 )
 BULL_DIV_DIAGNOSTIC_BASE = ["vahvuus", "Price_slope_10", "SPX_volatility_10"]
 BULL_DIV_DIAGNOSTIC_FEATURES = BULL_DIV_DIAGNOSTIC_BASE + COMBO_FEATURE_COLUMNS
-CRISIS_SUCCESS_LABELS = [f"success{h}" for h in sorted(DEFAULT_SUCCESS_THRESHOLDS.keys())]
+CRISIS_SUCCESS_LABELS = [
+    f"success{h}" for h in sorted(DEFAULT_SUCCESS_THRESHOLDS.keys())
+]
 FEATURE_SELECTION_STORE = PROJECT_ROOT / "data" / "regression_feature_selection.json"
 
 
@@ -179,9 +181,7 @@ def add_crisis_flag(df: pd.DataFrame) -> pd.DataFrame:
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     start = pd.Timestamp(CRISIS_START)
     end = pd.Timestamp(CRISIS_END)
-    df["is_crisis"] = (
-        (df["date"] >= start) & (df["date"] <= end)
-    ).astype(int)
+    df["is_crisis"] = ((df["date"] >= start) & (df["date"] <= end)).astype(int)
     return df
 
 
@@ -240,8 +240,6 @@ def load_divergence_data(db_path: Path | str = DEFAULT_DB_PATH) -> pd.DataFrame:
     df = df.dropna(subset=["date"])
     df["bullish_strength"] = df["bullish_strength"].fillna(0.0).astype(float)
     return df
-
-
 
 
 # ------------- 1. Datan luku -----------------
@@ -438,7 +436,9 @@ def build_feature_matrix(
         if allowed_cats is None or col in allowed_cats:
             categorical_cols.append(col)
     offset_col = "BullDiv_recent_offset"
-    if offset_col in df.columns and (allowed_cats is None or offset_col in allowed_cats):
+    if offset_col in df.columns and (
+        allowed_cats is None or offset_col in allowed_cats
+    ):
         categorical_cols.append(offset_col)
 
     dummy_frames: list[pd.DataFrame] = []
@@ -821,7 +821,12 @@ def run_regression_for_market(
     if isinstance(pattern_code, str) and pattern_code == "BullishDivergenceOnly":
         thresholds_for_model = success_thresholds or DEFAULT_SUCCESS_THRESHOLDS
         horizon_targets = success_horizons or [2, 5, 10, 20]
-        filtered_horizons = [h for h in horizon_targets if h in {2, 5, 10, 20}] or [2, 5, 10, 20]
+        filtered_horizons = [h for h in horizon_targets if h in {2, 5, 10, 20}] or [
+            2,
+            5,
+            10,
+            20,
+        ]
         model = BullishDivergenceModel(
             market=market,
             exclude_crisis_period=exclude_crisis_period,
@@ -862,7 +867,9 @@ def run_regression_for_market(
     continuous_feature_columns = [
         name for name in FEATURE_COLUMNS if name in selected_set
     ]
-    disabled_features = [name for name in default_feature_set if name not in selected_set]
+    disabled_features = [
+        name for name in default_feature_set if name not in selected_set
+    ]
     ordered_selected_features = [
         name for name in default_feature_set if name in selected_set
     ]
@@ -878,9 +885,7 @@ def run_regression_for_market(
     blackout_df = load_blackout_dates(db_path=db_path)
     df = apply_blackout_flags(df, blackout_df)
     divergence_source = load_divergence_data(db_path=db_path)
-    df = add_divergence_features(
-        df, db_path=db_path, divergence_df=divergence_source
-    )
+    df = add_divergence_features(df, db_path=db_path, divergence_df=divergence_source)
     df_full = df.copy()
     if require_blackout_data and "has_blackout_data" in df_full.columns:
         df_full = df_full.loc[df_full["has_blackout_data"] == 1].reset_index(drop=True)
@@ -1036,7 +1041,9 @@ def run_regression_for_market(
             )
 
         crisis_stats = compute_crisis_success_stats(
-            subset_train, CRISIS_SUCCESS_LABELS, exclude_crisis_period=exclude_crisis_period
+            subset_train,
+            CRISIS_SUCCESS_LABELS,
+            exclude_crisis_period=exclude_crisis_period,
         )
         combo_features_active = [
             col for col in continuous_feature_columns if col in combo_feature_set
@@ -1146,7 +1153,9 @@ def run_regression_for_market(
     report_path = _write_report(report_text) if write_report else None
 
     single_pattern_code = (
-        pattern_selection[0] if pattern_selection and len(pattern_selection) == 1 else None
+        pattern_selection[0]
+        if pattern_selection and len(pattern_selection) == 1
+        else None
     )
 
     return {
@@ -1186,8 +1195,8 @@ def _build_report_text(
     exclude_crisis_period: bool = False,
 ) -> str:
     market_label = (market or "Kaikki markkinat").upper()
-    features_line = (
-        "Käytetyt featuret: " + ", ".join(feature_columns or FEATURE_COLUMNS)
+    features_line = "Käytetyt featuret: " + ", ".join(
+        feature_columns or FEATURE_COLUMNS
     )
     crisis_line = (
         "Kriisijakso poistettu analyyseista: "
@@ -1207,7 +1216,8 @@ def _build_report_text(
     ]
     if bull_div_distribution:
         formatted = ", ".join(
-            f"{offset}: {count}" for offset, count in sorted(bull_div_distribution.items())
+            f"{offset}: {count}"
+            for offset, count in sorted(bull_div_distribution.items())
         )
         lines.append(
             f"Bullish Divergence offset -jakauma (koko datasetti): {formatted}"
@@ -1217,13 +1227,9 @@ def _build_report_text(
             f"{offset}: {count}"
             for offset, count in sorted(bull_div_candle_distribution.items())
         )
-        lines.append(
-            f"Bullish Divergence offset -jakauma (kynttilärivit): {formatted}"
-        )
+        lines.append(f"Bullish Divergence offset -jakauma (kynttilärivit): {formatted}")
     if excluded_features:
-        lines.append(
-            "Pois jätetyt featuret: " + ", ".join(excluded_features)
-        )
+        lines.append("Pois jätetyt featuret: " + ", ".join(excluded_features))
     lines.append("")
     if blackout_coverage:
         lines.extend(
@@ -1425,7 +1431,7 @@ def _format_series(series: pd.Series) -> str:
 
 
 def _build_combo_summary_section(
-    horizon_results: Dict[int, Dict[str, object]]
+    horizon_results: Dict[int, Dict[str, object]],
 ) -> List[str]:
     lines: List[str] = []
     for horizon in (5, 10):
@@ -1441,12 +1447,8 @@ def _build_combo_summary_section(
         base_auc = base_result.get("auc")
         if combo_auc is None:
             continue
-        lines.append(
-            f"== Bullish Divergence + kynttiläkombo -featuret (H{horizon}) =="
-        )
-        improvement = (
-            combo_auc - base_auc if base_auc is not None else float("nan")
-        )
+        lines.append(f"== Bullish Divergence + kynttiläkombo -featuret (H{horizon}) ==")
+        improvement = combo_auc - base_auc if base_auc is not None else float("nan")
         base_text = f"{base_auc:.3f}" if base_auc is not None else "N/A"
         lines.append(
             f"Base-malli ilman comboja: AUC={base_text} | Combo-malli: AUC={combo_auc:.3f} | Parannus: {improvement:.3f}"
