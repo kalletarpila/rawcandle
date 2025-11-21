@@ -115,8 +115,10 @@ class ExcelExporter:
         "NDX20",
         "RSI14_t0",
         "t0_close_norm",
-        "Bearish Divergence",
-        "Bullish Divergence",
+        "BullDiv_strength",
+        "BullDiv_recent_strength",
+        "BullDiv_recent_offset",
+        "Has_BullDiv_recent",
         "weekday",
     ]
 
@@ -141,6 +143,29 @@ class ExcelExporter:
         "t0_bodi_colour",
         "t1_bodi_colour",
         "weekday",
+        "BullDiv_recent_offset",
+        "Has_BullDiv_recent",
+    }
+    PRECISION_MAP = {
+        "Gap_down_strength": 6,
+        "Body_ratio": 8,
+        "Shadow_ratio": 8,
+        "Volume_impulse": 8,
+        "Volatility_ratio_10_20": 8,
+        "Price_acceleration_5_10": 8,
+        "Price_slope_5": 8,
+        "Price_slope_10": 8,
+        "RSI_slope_5": 8,
+        "Reversal_Context_Score": 8,
+        "t0_close_norm": 8,
+        "t_2": 8,
+        "t_5": 8,
+        "t_10": 8,
+        "t_20": 8,
+        "BullDiv_strength": 3,
+        "BullDiv_recent_strength": 3,
+        "BullDiv_recent_offset": 0,
+        "Has_BullDiv_recent": 0,
     }
 
     def __init__(self, db_path: str = "analysis.db"):
@@ -153,6 +178,38 @@ class ExcelExporter:
         self.db_path = db_path
         self.db_manager = DatabaseManager(db_path)
         self.logger = logging.getLogger(__name__)
+
+    def _normalize_rows(self, rows):
+        """Palauta listamuotoinen kopio annetusta rivilähteestä."""
+        if rows is None:
+            return []
+        if isinstance(rows, list):
+            return rows
+        try:
+            return list(rows)
+        except TypeError:
+            return []
+
+    def _fetch_rows_by_ids(self, id_filter: list[int]) -> list[dict]:
+        """Hae rivit annetuilla ID:illä, fallback-käsittelyllä testejä varten."""
+        rows = self._normalize_rows(self.db_manager.get_results_by_ids(id_filter))
+        if rows:
+            return rows
+
+        fallback = self._normalize_rows(self.db_manager.get_results_data())
+        if not fallback:
+            return []
+
+        id_set = set(id_filter)
+        return [row for row in fallback if row.get("id") in id_set]
+
+    def _precision_for(self, header: str) -> int:
+        if header in self.PRECISION_MAP:
+            return self.PRECISION_MAP[header]
+        lower = header.lower()
+        if "hajonta" in lower or "volatility" in lower:
+            return 8
+        return 2
 
     def export_to_excel(
         self,
@@ -182,49 +239,36 @@ class ExcelExporter:
             Tuple[bool, str]: (success, message)
         """
         try:
-            # Hae data tietokannasta
-            all_results = self.db_manager.get_results_data()
+            effective_patterns = None
+            if selected_patterns is not None:
+                effective_patterns = [p for p in selected_patterns if p != 8]
+                if not effective_patterns:
+                    return False, "Bearish Divergence ei ole Excel-viennissä käytössä."
 
-            if not all_results:
-                return (
-                    False,
-                    "Ei tuloksia vietäväksi. Generoi ensin tulokset tietokantaan.",
+            if id_filter is not None:
+                results = self._fetch_rows_by_ids(id_filter)
+            else:
+                results = self._normalize_rows(
+                    self.db_manager.get_results_filtered(
+                        patterns=effective_patterns,
+                        tickers=ticker_filter,
+                        start_date=start_date,
+                        end_date=end_date,
+                        downtrend_only=downtrend_only,
+                    )
                 )
 
-            # Suodata ID:illä ensin (ensisijainen suodatin)
-            if id_filter is not None:
-                id_set = set(id_filter)
-                results = [r for r in all_results if r.get("id") in id_set]
-            else:
-                results = all_results
+            original_total = len(results)
+            results = [row for row in results if row.get("candle_pattern") != 8]
+            removed_disabled = original_total - len(results)
+            if not results:
+                return False, "Valituilla suodattimilla ei löytynyt tuloksia."
 
-                # Suodata patterneilla jos annettu (vain jos ei ID-suodatusta)
-                if selected_patterns is not None:
-                    results = [
-                        r for r in results if r["candle_pattern"] in selected_patterns
-                    ]
-
-                # Suodata tickereillä jos annettu (vain jos ei ID-suodatusta)
-                if ticker_filter is not None:
-                    results = [r for r in results if r["ticker"] in ticker_filter]
-
-            if downtrend_only:
-                results = [
-                    r for r in results if r.get("candle_pattern") == 0
-                ]
-
-            if start_date or end_date:
-                def in_date_range(date_value: Optional[str]) -> bool:
-                    if not date_value:
-                        return False
-                    value = str(date_value)
-                    if start_date and value < start_date:
-                        return False
-                    if end_date and value > end_date:
-                        return False
-                    return True
-
-                results = [r for r in results if in_date_range(r.get("date"))]
+            if len(results) != original_total:
+                self.logger.info(
+                    "Filtered out %s Bearish Divergence rows before Excel export",
+                    original_total - len(results),
+                )
 
             if not results:
                 return False, "Valituilla suodattimilla ei löytynyt tuloksia."
@@ -268,6 +312,21 @@ class ExcelExporter:
 
                 # Käytä pattern numeroa (SPSS-yhteensopivuus)
                 pattern_num = result.get("candle_pattern", 0)
+
+                bull_strength = result.get("BullDiv_strength")
+                bull_recent_strength = result.get("BullDiv_recent_strength")
+                bull_recent_offset = result.get("BullDiv_recent_offset")
+                has_bull_recent = result.get("Has_BullDiv_recent")
+
+                # Taaksepäinyhteensopivat oletusarvot
+                if bull_strength is None:
+                    bull_strength = 0.0
+                if bull_recent_strength is None:
+                    bull_recent_strength = bull_strength
+                if bull_recent_offset is None:
+                    bull_recent_offset = -1
+                if has_bull_recent is None:
+                    has_bull_recent = 1 if bull_recent_strength > 0 else 0
 
                 # Rakenna rivi (84 saraketta)
                 row_data = [
@@ -352,13 +411,13 @@ class ExcelExporter:
                     result.get("NDX20"),
                     result.get("RSI14_t0"),
                     result.get("t0_close_norm"),
-                    result.get("bearish_divergence"),
-                    result.get("bullish_divergence"),
+                    bull_strength,
+                    bull_recent_strength,
+                    bull_recent_offset,
+                    has_bull_recent,
                     result.get("weekday"),
                 ]
-                row_data.extend(
-                    [result.get(col) for col in self.NEW_FEATURE_HEADERS]
-                )
+                row_data.extend([result.get(col) for col in self.NEW_FEATURE_HEADERS])
 
                 # Tarkista että KAIKISSA sarakkeissa on data (ei None-arvoja)
                 base_values = row_data[: len(self.BASE_HEADERS)]
@@ -370,18 +429,18 @@ class ExcelExporter:
                 written_rows += 1
                 actual_row = written_rows + 1  # +1 koska otsikkorivi on rivi 1
 
-                for col_num, (header, value) in enumerate(
-                    zip(headers, row_data), 1
-                ):
+                for col_num, (header, value) in enumerate(zip(headers, row_data), 1):
                     # Pyöristä REAL-luvut 2 desimaaliin
                     if isinstance(value, (int, float)) and value is not None:
                         # Älä pyöristä kokonaislukuja (colour, weekday)
                         if header in self.NON_ROUNDED_HEADERS:
                             ws.cell(row=actual_row, column=col_num, value=value)
                         else:
-                            # Pyöristä muut numeeriset arvot 2 desimaaliin
+                            precision = self._precision_for(header)
                             ws.cell(
-                                row=actual_row, column=col_num, value=round(value, 2)
+                                row=actual_row,
+                                column=col_num,
+                                value=round(value, precision),
                             )
                     else:
                         ws.cell(row=actual_row, column=col_num, value=value)
@@ -406,6 +465,11 @@ class ExcelExporter:
 
             # Luo viesti
             message = f"Viety {written_rows} riviä Exceliin"
+            if removed_disabled > 0:
+                message += (
+                    f" (pyydetty {original_total} riviä, {removed_disabled} "
+                    "Bearish Divergence -riviä ohitettu)"
+                )
             if skipped_rows > 0:
                 message += (
                     f" ({skipped_rows} riviä ohitettu puuttuvien tietojen vuoksi)"

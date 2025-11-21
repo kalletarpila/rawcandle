@@ -2,12 +2,16 @@ import pandas as pd
 import numpy as np
 import pytest
 
+from analysis.combo_features import (
+    CANDLE_PATTERN_TO_SLUG,
+    COMBO_FEATURE_COLUMNS,
+)
 from regression import run_regression as rr
 
 
 def _sample_dataframe(rows: int = 40) -> pd.DataFrame:
     rng = np.random.default_rng(123)
-    pattern_codes = [0, 1, 2, 3, 4, 5, 6]
+    pattern_codes = [0, 1, 2, 3, 4, 5, 6, 7]
     markets = ["usa", "suomi"]
     crisis_start = pd.Timestamp(rr.CRISIS_START)
     crisis_end = pd.Timestamp(rr.CRISIS_END)
@@ -18,6 +22,50 @@ def _sample_dataframe(rows: int = 40) -> pd.DataFrame:
         if i % 9 == 0:
             base_date = pd.Timestamp("2025-03-01") + pd.Timedelta(days=i % 40)
         is_crisis = int(crisis_start <= base_date <= crisis_end)
+        bull_offset_choice = int(rng.integers(-1, 6))
+        bull_offset_recent = bull_offset_choice if bull_offset_choice >= 0 else -1
+        bull_offset_value = bull_offset_recent if bull_offset_recent >= 0 else 99
+        bull_last_1d = int(bull_offset_value == 0)
+        bull_last_2d = int(bull_offset_value in {0, 1})
+        bull_last_3d = int(bull_offset_value in {0, 1, 2})
+        bull_last_3d_any = bull_last_3d
+        pattern_code = pattern_codes[i % len(pattern_codes)]
+        pattern_label = rr.PATTERN_LABELS.get(pattern_code, "")
+        slug = CANDLE_PATTERN_TO_SLUG.get(pattern_label)
+        candles = []
+        if pattern_code in {1, 2, 3, 4, 5, 6}:
+            candles.append(pattern_code)
+        extra = int(rng.integers(0, 2))
+        for _ in range(extra):
+            candles.append(int(rng.integers(1, 7)))
+        combo_features = {col: 0 for col in COMBO_FEATURE_COLUMNS}
+        if slug:
+            base_name = f"is_{slug}"
+            combo_features[f"{base_name}_only_t0"] = int(bull_offset_recent == -1)
+            combo_features[f"{base_name}_and_BullDiv_t0"] = int(
+                bull_offset_recent == 0
+            )
+            combo_features[f"{base_name}_and_BullDiv_recent_2d"] = int(
+                bull_offset_recent != -1 and bull_offset_recent <= 2
+            )
+            combo_features[f"{base_name}_and_BullDiv_recent_3d"] = int(
+                bull_offset_recent != -1 and bull_offset_recent <= 3
+            )
+            combo_features[f"{base_name}_and_BullDiv_recent_5d"] = int(
+                bull_offset_recent != -1 and bull_offset_recent <= 5
+            )
+        has_bull_div_same_day = int(bull_offset_recent == 0 or pattern_code == 7)
+        if not candles and not has_bull_div_same_day:
+            combo_code = 0
+        elif len(candles) == 1 and not has_bull_div_same_day:
+            combo_code = 1
+        elif len(candles) >= 2 and not has_bull_div_same_day:
+            combo_code = 2
+        elif not candles and has_bull_div_same_day:
+            combo_code = 4
+        else:
+            combo_code = 3
+
         records.append(
             {
                 "t2": 100 + rng.normal(1 + shift, 3),
@@ -53,6 +101,15 @@ def _sample_dataframe(rows: int = 40) -> pd.DataFrame:
                 "Volume_impulse": float(np.clip(rng.normal(1.2, 0.5), 0.1, 5)),
                 "Reversal_Context_Score": float(rng.normal(5, 2)),
                 "is_crisis": is_crisis,
+                "bullDiv_offset": bull_offset_value,
+                "bullDiv_last_1d": bull_last_1d,
+                "bullDiv_last_2d": bull_last_2d,
+                "bullDiv_last_3d": bull_last_3d,
+                "bullDiv_last_3d_any": bull_last_3d_any,
+                "num_candles_same_day": len(candles),
+                "has_multi_candle_combo": int(len(candles) >= 2),
+                "has_bullish_divergence_same_day": has_bull_div_same_day,
+                "signal_combo_code": combo_code,
                 "SPX_10": 100 + rng.normal(0, 1),
                 "SPX_20": 100 + rng.normal(0, 1.2),
                 "SPX_volatility_10": float(abs(rng.normal(1.5, 0.3))),
@@ -66,10 +123,11 @@ def _sample_dataframe(rows: int = 40) -> pd.DataFrame:
                 "has_blackout_data": int(rng.integers(0, 2)),
                 "date": base_date,
                 "ticker": f"TICK{i:03d}",
-                "kynttila_koodi": pattern_codes[i % len(pattern_codes)],
+                "kynttila_koodi": pattern_code,
                 "market": markets[i % len(markets)],
             }
         )
+        records[-1].update(combo_features)
     return pd.DataFrame.from_records(records)
 
 

@@ -44,7 +44,6 @@ class AnalysisView:
         self.search_field = None
         self.pattern_filter = None
         self.market_filter = None
-        self.symbol_filter = None
         self.progress_dialog = None
 
         # Aikaväli-suodattimet
@@ -55,13 +54,12 @@ class AnalysisView:
         # Downtrend-suodattimet
         self.downtrend_filter = None
         self.min_decline_percent = None
-        self.ma_filter = None
-        self.volume_filter = None
 
         # Data
         self.all_findings = []
         self.filtered_findings = []
         self._market_cache: Dict[str, str] = {}
+        self.ALL_MARKETS_KEY = "__all__"
         self._markets = self._load_market_list()
         self._market_label_map = self._build_market_label_map()
 
@@ -148,7 +146,6 @@ class AnalysisView:
                 ft.dropdown.Option("Morning Star", "Morning Star"),
                 ft.dropdown.Option("Dragonfly Doji", "Dragonfly Doji"),
                 ft.dropdown.Option("Bullish Divergence", "Bullish Divergence"),
-                ft.dropdown.Option("Bearish Divergence", "Bearish Divergence"),
             ],
             on_change=self._on_filter_change,
         )
@@ -158,7 +155,7 @@ class AnalysisView:
             width=200,
             options=self._build_market_options(),
             on_change=self._on_filter_change,
-            value="",
+            value=self.ALL_MARKETS_KEY,
         )
 
         clear_btn = ft.IconButton(
@@ -219,7 +216,7 @@ class AnalysisView:
 
     def _build_market_options(self) -> List[ft.dropdown.Option]:
         """Muodosta markkina-alasvetovalikon vaihtoehdot."""
-        options = [ft.dropdown.Option("", "Kaikki markkinat")]
+        options = [ft.dropdown.Option(self.ALL_MARKETS_KEY, "Kaikki markkinat")]
         for code in self._get_available_market_codes():
             options.append(ft.dropdown.Option(code, self._format_market_label(code)))
         return options
@@ -256,7 +253,7 @@ class AnalysisView:
         return label_map
 
     def _format_market_label(self, code: str) -> str:
-        if not code:
+        if not code or code == self.ALL_MARKETS_KEY:
             return "Kaikki markkinat"
         return self._market_label_map.get(code, code.upper())
 
@@ -270,22 +267,29 @@ class AnalysisView:
         )
         return [c for c in codes if c]
 
+    def _normalize_market_value(self, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = str(value).strip().lower()
+        if value in {"", self.ALL_MARKETS_KEY, "kaikki", "kaikki markkinat"}:
+            return None
+        return value
+
     def _refresh_market_filter_options(self) -> None:
         if not self.market_filter:
             return
-        current = self.market_filter.value or ""
-        options = [ft.dropdown.Option("", "Kaikki markkinat")]
-        codes = self._get_available_market_codes()
-        seen = {""}
-        for code in codes:
+        current = self.market_filter.value or self.ALL_MARKETS_KEY
+        options = [ft.dropdown.Option(self.ALL_MARKETS_KEY, "Kaikki markkinat")]
+        seen = {self.ALL_MARKETS_KEY}
+        for code in self._get_available_market_codes():
             if code in seen:
                 continue
             seen.add(code)
             options.append(ft.dropdown.Option(code, self._format_market_label(code)))
         self.market_filter.options = options
-        valid_values = {opt.key or opt.text or "" for opt in options}
+        valid_values = {opt.key or opt.text or self.ALL_MARKETS_KEY for opt in options}
         if current not in valid_values:
-            current = ""
+            current = self.ALL_MARKETS_KEY
         self.market_filter.value = current
         try:
             self.market_filter.update()
@@ -408,7 +412,13 @@ class AnalysisView:
     def refresh_data(self) -> None:
         """Päivitä data tietokannasta."""
         try:
-            self.all_findings = self.db_manager.get_all_findings()
+            raw_findings = self.db_manager.get_all_findings()
+            self.all_findings = [
+                f
+                for f in raw_findings
+                if f.get("pattern") != "Bearish Divergence"
+                and f.get("candle_pattern") != 8
+            ]
             self._annotate_markets()
             self._refresh_market_filter_options()
             # Load data and then apply any active filters
@@ -498,7 +508,6 @@ class AnalysisView:
             "Morning Star": 5,
             "Dragonfly Doji": 6,
             "Bullish Divergence": 7,
-            "Bearish Divergence": 8,
         }
 
         # Laske määrät kynttilätyypeittäin koko kannasta (ei suodatetuista)
@@ -561,11 +570,11 @@ class AnalysisView:
             ]
 
         # Markkinasuodatin
-        market_val = None
-        if self.market_filter and getattr(self.market_filter, "value", None):
-            market_val = self.market_filter.value.strip().lower()
-        elif hasattr(self, "selected_market") and self.selected_market:
-            market_val = self.selected_market.strip().lower()
+        market_val = self._normalize_market_value(
+            getattr(self.market_filter, "value", None)
+        )
+        if not market_val and hasattr(self, "selected_market") and self.selected_market:
+            market_val = self._normalize_market_value(self.selected_market)
 
         if market_val:
             self.filtered_findings = [
@@ -587,7 +596,7 @@ class AnalysisView:
                 "Morning Star",
                 "Dragonfly Doji",
             }
-            divergence_patterns = {"Bullish Divergence", "Bearish Divergence"}
+            divergence_patterns = {"Bullish Divergence"}
 
             candle_pairs = set()
             divergence_pairs = set()
@@ -673,7 +682,7 @@ class AnalysisView:
         if self.pattern_filter:
             self.pattern_filter.value = ""
         if self.market_filter:
-            self.market_filter.value = ""
+            self.market_filter.value = self.ALL_MARKETS_KEY
         if self.date_filter_enabled:
             self.date_filter_enabled.value = False
         if self.start_date_field:

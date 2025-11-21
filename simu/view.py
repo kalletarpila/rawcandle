@@ -255,6 +255,8 @@ class SimuView:
 
         self.pattern_checkboxes = []
         for definition in config.PATTERN_DEFINITIONS:
+            if definition.key == "bearish_divergence":
+                continue
             cb = ft.Checkbox(
                 label=definition.label,
                 value=definition.key == "hammer",

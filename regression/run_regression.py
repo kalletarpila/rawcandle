@@ -89,6 +89,12 @@ FEATURE_COLUMNS = [
     "num_candles_same_day",
     "has_multi_candle_combo",
     "has_bullish_divergence_same_day",
+    "signal_count_same_day",
+    "unique_patterns_same_day",
+    "max_strength_same_day",
+    "second_best_strength_same_day",
+    "sum_strength_same_day",
+    "has_same_day_reversal_cluster",
     # Markkinaympäristö ja indeksivola
     "SPX_10",
     "SPX_20",
@@ -126,7 +132,13 @@ BINARY_FEATURES.update(
     {"bullDiv_last_1d", "bullDiv_last_2d", "bullDiv_last_3d", "bullDiv_last_3d_any"}
 )
 BINARY_FEATURES.update(COMBO_FEATURE_COLUMNS)
-BINARY_FEATURES.update({"has_multi_candle_combo", "has_bullish_divergence_same_day"})
+BINARY_FEATURES.update(
+    {
+        "has_multi_candle_combo",
+        "has_bullish_divergence_same_day",
+        "has_same_day_reversal_cluster",
+    }
+)
 BULL_DIV_DIAGNOSTIC_BASE = ["vahvuus", "Price_slope_10", "SPX_volatility_10"]
 BULL_DIV_DIAGNOSTIC_FEATURES = BULL_DIV_DIAGNOSTIC_BASE + COMBO_FEATURE_COLUMNS
 CRISIS_SUCCESS_LABELS = [f"success{h}" for h in sorted(DEFAULT_SUCCESS_THRESHOLDS.keys())]

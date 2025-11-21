@@ -233,6 +233,7 @@ class RawCandleApp:
         self._update_market_dropdown()
         self._update_random_market_dropdown()
         self._update_market_list()
+
     def _load_market_stats(self):
         """Laske markkinakohtaiset osake- ja blackout-lukumäärät."""
         stats: dict[str, dict[str, int]] = {}
@@ -2329,6 +2330,7 @@ class RawCandleApp:
         skipped_in_db = 0
         rejected_no_data = 0
         rejected_penny = 0
+        rejected_volume = 0
         error_count = 0
         divergences_calculated = 0
 
@@ -2349,7 +2351,8 @@ class RawCandleApp:
                             f"Tallennettu: {saved_count} | "
                             f"Ohitettu (kannassa): {skipped_in_db} | "
                             f"Hylätty (ei dataa): {rejected_no_data} | "
-                            f"Hylätty (penny): {rejected_penny}"
+                            f"Hylätty (penny): {rejected_penny} | "
+                            f"Hylätty (volyymi): {rejected_volume}"
                         )
                         self.page.update()
                     time.sleep(0.5)
@@ -2376,19 +2379,23 @@ class RawCandleApp:
                     time.sleep(0.5)
                     continue
 
-                avg_close = hist["Close"].mean()
-                if avg_close < 1.0:
-                    rejected_penny += 1
-                    time.sleep(0.5)
-                    continue
+                # Tarkista onko indeksi (alkaa ^ merkillä) - indeksit hyväksytään aina
+                is_index = ticker.startswith("^")
 
-                hist_2025 = hist[hist.index >= "2025-01-01"]
-                if len(hist_2025) > 0:
-                    avg_volume_2025 = hist_2025["Volume"].mean()
-                    if avg_volume_2025 < min_volume_required:
+                if not is_index:
+                    avg_close = hist["Close"].mean()
+                    if avg_close < 1.0:
                         rejected_penny += 1
                         time.sleep(0.5)
                         continue
+
+                    hist_2025 = hist[hist.index >= "2025-01-01"]
+                    if len(hist_2025) > 0:
+                        avg_volume_2025 = hist_2025["Volume"].mean()
+                        if avg_volume_2025 < min_volume_required:
+                            rejected_volume += 1
+                            time.sleep(0.5)
+                            continue
 
                 with sqlite3.connect(db_path) as conn:
                     cursor = conn.cursor()
@@ -2431,7 +2438,8 @@ class RawCandleApp:
                         f"Divergenssit: {divergences_calculated} | "
                         f"Ohitettu (kannassa): {skipped_in_db} | "
                         f"Hylätty (ei dataa): {rejected_no_data} | "
-                        f"Hylätty (penny): {rejected_penny}"
+                        f"Hylätty (penny): {rejected_penny} | "
+                        f"Hylätty (volyymi): {rejected_volume}"
                     )
                     self.loading_text.color = ft.Colors.BLUE_600
                     self.page.update()
@@ -2461,6 +2469,7 @@ class RawCandleApp:
             f"Ohitettu (kannassa): {skipped_in_db} | "
             f"Hylätty (ei dataa): {rejected_no_data} | "
             f"Hylätty (penny): {rejected_penny} | "
+            f"Hylätty (volyymi): {rejected_volume} | "
             f"Virheet: {error_count}"
         )
         self.loading_text.color = ft.Colors.GREEN_600
@@ -3847,28 +3856,34 @@ Virheet: {error_count}"""
 
             # Tarkista onko penny stock (hinta alle $1) - vain jos uusi osake
             if not last_date_in_db:
-                avg_close = hist["Close"].mean()
-                if avg_close < 1.0:
-                    self.loading_text.value = f"❌ {ticker} on penny stock (keskihinta ${avg_close:.3f}). Ei talleteta kantaan."
-                    self.loading_text.color = ft.Colors.RED_600
-                    self.page.update()
-                    return
+                # Tarkista onko indeksi (alkaa ^ merkillä) - indeksit hyväksytään aina
+                is_index = ticker.startswith("^")
 
-                # Tarkista keskimääräinen päivävolyymi vuodelta 2025
-                hist_2025 = hist[hist.index >= "2025-01-01"]
-                if len(hist_2025) > 0:
-                    avg_volume_2025 = hist_2025["Volume"].mean()
-                    if avg_volume_2025 < min_volume_required:
-                        required_str = f"{min_volume_required:,.0f}".replace(",", " ")
-                        avg_str = f"{avg_volume_2025:,.0f}".replace(",", " ")
-                        self.loading_text.value = (
-                            f"❌ {ticker} liian vähän vaihdettu vuonna 2025 "
-                            f"(keskim. {avg_str} osaketta/pv). "
-                            f"Markkina {target_market.upper()} vaatii ≥{required_str}."
-                        )
+                if not is_index:
+                    avg_close = hist["Close"].mean()
+                    if avg_close < 1.0:
+                        self.loading_text.value = f"❌ {ticker} on penny stock (keskihinta ${avg_close:.3f}). Ei talleteta kantaan."
                         self.loading_text.color = ft.Colors.RED_600
                         self.page.update()
                         return
+
+                    # Tarkista keskimääräinen päivävolyymi vuodelta 2025
+                    hist_2025 = hist[hist.index >= "2025-01-01"]
+                    if len(hist_2025) > 0:
+                        avg_volume_2025 = hist_2025["Volume"].mean()
+                        if avg_volume_2025 < min_volume_required:
+                            required_str = f"{min_volume_required:,.0f}".replace(
+                                ",", " "
+                            )
+                            avg_str = f"{avg_volume_2025:,.0f}".replace(",", " ")
+                            self.loading_text.value = (
+                                f"❌ {ticker} liian vähän vaihdettu vuonna 2025 "
+                                f"(keskim. {avg_str} osaketta/pv). "
+                                f"Markkina {target_market.upper()} vaatii ≥{required_str}."
+                            )
+                            self.loading_text.color = ft.Colors.RED_600
+                            self.page.update()
+                            return
 
             # Tallenna tietokantaan
             with sqlite3.connect(db_path) as conn:

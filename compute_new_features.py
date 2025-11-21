@@ -41,7 +41,11 @@ RESULTS_TABLE = "results_data"
 DIVERGENCE_TABLE = "divergence_data"
 OSAKEDATA_TABLE = "osakedata"
 INDEX_TICKERS = {"SPX": "^GSPC", "NDX": "^NDX"}
-BULLISH_COLUMN = "bullish_divergence"
+BULLISH_COLUMNS = [
+    "BullDiv_recent_strength",
+    "bullish_divergence",
+    "Bullish Divergence",
+]
 
 NEW_COLUMNS = {
     "RSI_slope_5": "REAL",
@@ -56,6 +60,10 @@ NEW_COLUMNS = {
     "NDX_volatility_10": "REAL",
     "Volume_impulse": "REAL",
     "Reversal_Context_Score": "REAL",
+    "BullDiv_strength": "REAL",
+    "BullDiv_recent_strength": "REAL",
+    "BullDiv_recent_offset": "INTEGER",
+    "Has_BullDiv_recent": "INTEGER",
 }
 
 
@@ -106,6 +114,19 @@ def load_divergence(conn: sqlite3.Connection) -> pd.DataFrame:
     if df.empty:
         return df
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    return df
+
+
+def load_divergence_strengths(conn: sqlite3.Connection) -> pd.DataFrame:
+    query = f"""
+        SELECT ticker, date, bullish_strength
+        FROM {DIVERGENCE_TABLE}
+    """
+    df = pd.read_sql_query(query, conn)
+    if df.empty:
+        return df
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df["bullish_strength"] = df["bullish_strength"].fillna(0.0)
     return df
 
 
@@ -248,9 +269,11 @@ def compute_gap_body_shadow(df: pd.DataFrame) -> None:
     high_raw = df["high_raw"]
     prev_close = df["prev_close_raw"]
 
-    # Gap: (open - prev_close) / prev_close
-    gap = (open_raw - prev_close) / prev_close.replace(0, np.nan)
-    df["Gap_down_strength"] = gap
+    # Gap: log1p-asteikolla ja suojauksella
+    eps = 1e-6
+    gap = (open_raw - prev_close) / (prev_close + eps)
+    log_gap = np.log1p(np.abs(gap)) * np.sign(gap)
+    df["Gap_down_strength"] = log_gap
 
     range_val = high_raw - low_raw
     body = (close_raw - open_raw).abs()
@@ -295,7 +318,13 @@ def compute_volume_impulse(df: pd.DataFrame) -> pd.Series:
 
 
 def compute_reversal_context(df: pd.DataFrame) -> pd.Series:
-    divergence_col = BULLISH_COLUMN if BULLISH_COLUMN in df.columns else "Bullish Divergence"
+    divergence_col = next((col for col in BULLISH_COLUMNS if col in df.columns), None)
+    if divergence_col is None:
+        print(
+            "⚠️ Bullish divergence -sarake puuttuu. Reversal_Context_Score jää NaN:ksi."
+        )
+        return pd.Series(np.nan, index=df.index)
+
     required = ["t_10", divergence_col, "t_10_hajonta"]
     for col in required:
         if col not in df.columns:
@@ -305,6 +334,89 @@ def compute_reversal_context(df: pd.DataFrame) -> pd.Series:
     score = 0.4 * drop_10 + 0.4 * df[divergence_col] - 0.2 * df["t_10_hajonta"]
     score.name = "Reversal_Context_Score"
     return score
+
+
+def compute_bull_divergence_features(
+    df_results: pd.DataFrame, df_divergence: pd.DataFrame
+) -> pd.DataFrame:
+    """Laske BullDiv_* sarakkeet divergence_data:n perusteella."""
+    columns = [
+        "BullDiv_strength",
+        "BullDiv_recent_strength",
+        "BullDiv_recent_offset",
+        "Has_BullDiv_recent",
+    ]
+    if df_results.empty:
+        for col in columns:
+            if col not in df_results:
+                df_results[col] = []
+        return df_results
+
+    defaults = {
+        "BullDiv_strength": 0.0,
+        "BullDiv_recent_strength": 0.0,
+        "BullDiv_recent_offset": -1,
+        "Has_BullDiv_recent": 0,
+    }
+
+    if df_divergence.empty:
+        for col, default in defaults.items():
+            df_results[col] = default
+        return df_results
+
+    df_div = df_divergence.dropna(subset=["date"]).copy()
+    if df_div.empty:
+        for col, default in defaults.items():
+            df_results[col] = default
+        return df_results
+
+    df_div = df_div.sort_values(["ticker", "date"])
+    df_div["BullDiv_strength"] = df_div["bullish_strength"].fillna(0.0)
+
+    df_div["BullDiv_recent_strength"] = (
+        df_div.groupby("ticker")["BullDiv_strength"]
+        .transform(lambda s: s.rolling(window=4, min_periods=1).max())
+    )
+
+    offsets = []
+    for ticker, group in df_div.groupby("ticker"):
+        series = group["BullDiv_strength"]
+        offset_series = pd.Series(-1, index=group.index, dtype="int64")
+        for shift in range(4):
+            shifted = series.shift(shift)
+            mask = (offset_series == -1) & (shifted > 0)
+            offset_series.loc[mask] = shift
+        offsets.append(offset_series)
+    df_div["BullDiv_recent_offset"] = pd.concat(offsets).sort_index()
+    df_div["Has_BullDiv_recent"] = (
+        df_div["BullDiv_recent_strength"] > 0
+    ).astype(int)
+
+    merge_cols = [
+        "ticker",
+        "date",
+        "BullDiv_strength",
+        "BullDiv_recent_strength",
+        "BullDiv_recent_offset",
+        "Has_BullDiv_recent",
+    ]
+    df_results = df_results.merge(
+        df_div[merge_cols], on=["ticker", "date"], how="left"
+    )
+
+    for col, default in defaults.items():
+        if col not in df_results:
+            df_results[col] = default
+        else:
+            df_results[col] = df_results[col].fillna(default)
+
+    df_results["BullDiv_recent_offset"] = (
+        df_results["BullDiv_recent_offset"].astype(int)
+    )
+    df_results["Has_BullDiv_recent"] = (
+        df_results["Has_BullDiv_recent"].astype(int)
+    )
+    return df_results
 
 
 def update_features(conn: sqlite3.Connection, df: pd.DataFrame, columns: Iterable[str]) -> None:
@@ -345,6 +457,7 @@ def run_feature_enrichment(
         )
 
     df_div = load_divergence(conn)
+    df_div_strengths = load_divergence_strengths(conn)
     min_date = df_results["date"].min() - timedelta(days=30)
     max_date = df_results["date"].max()
 
@@ -389,6 +502,7 @@ def run_feature_enrichment(
     )
     df_results["Volume_impulse"] = compute_volume_impulse(df_results)
     df_results["Reversal_Context_Score"] = compute_reversal_context(df_results)
+    df_results = compute_bull_divergence_features(df_results, df_div_strengths)
 
     update_cols = list(NEW_COLUMNS.keys())
     if verbose:

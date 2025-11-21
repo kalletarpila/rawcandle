@@ -3,7 +3,7 @@ import os
 import sqlite3
 import threading
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 import flet as ft
 
@@ -179,7 +179,6 @@ def create_results_view(app) -> ft.View:
         ft.Checkbox(label="Morning Star", value=False),
         ft.Checkbox(label="Dragonfly Doji", value=False),
         ft.Checkbox(label="Bullish Divergence", value=False),
-        ft.Checkbox(label="Bearish Divergence", value=False),
     ]
 
     # "Kaikki" valintaruutu
@@ -216,7 +215,11 @@ def create_results_view(app) -> ft.View:
     app.results_divergence_combo_filter = ft.Checkbox(
         label="Vain kynttilämalli + divergenssi -yhdistelmät",
         value=False,
-        tooltip="Näytä vain tapahtumat joissa samalla tickerillä samana päivänä on sekä kynttilämalli (1-6) että divergenssi (7-8)",
+        tooltip=(
+            "Ruksi pitää näkyvissä vain tapaukset, joissa samana päivänä on sekä "
+            "klassinen kynttiläkuvio (Hammer, Engulfing, jne.) että divergenssi "
+            "(Bullish). Pelkät divergenssikynttilät (pattern 7) eivät näy."
+        ),
     )
 
     app.results_ticker_field = ft.TextField(
@@ -619,23 +622,7 @@ def create_results_view(app) -> ft.View:
 
                 base = Path(__file__).resolve().parents[1]
                 analysis_db = base / "data" / "analysis.db"
-                osake_db = base / "data" / "osakedata.db"
                 excel_path = base / "data" / "results.xlsx"
-
-                def fallback_progress(message, fraction):
-                    try:
-                        progress_value = min(max(fraction, 0.0), 1.0)
-                        update_progress(message, int(progress_value * 100), 100)
-                    except Exception:
-                        pass
-
-                # Jos ticker_list on asetettu, muodosta ticker_filter siitä
-                final_ticker_filter = ticker_filter
-                if ticker_list and not ticker_filter:
-                    # Käytä ensimmäistä tickeriä filterinä tai None jos halutaan kaikki
-                    # Tai voidaan välittää koko lista - riippuu _build_output_rows toteutuksesta
-                    # Tarkistetaan miten _build_output_rows toimii ticker_list:n kanssa
-                    final_ticker_filter = ticker_list  # Välitetään koko lista
 
                 # Hae valitut kynttiläkuviot checkboxeista ja muunna numeroiksi
                 selected_pattern_numbers = None
@@ -655,7 +642,6 @@ def create_results_view(app) -> ft.View:
                                 "Morning Star": 5,
                                 "Dragonfly Doji": 6,
                                 "Bullish Divergence": 7,
-                                "Bearish Divergence": 8,
                             }
                             selected_pattern_numbers = [
                                 pattern_name_to_num.get(name)
@@ -834,7 +820,6 @@ def create_results_view(app) -> ft.View:
                             "Morning Star": 5,
                             "Dragonfly Doji": 6,
                             "Bullish Divergence": 7,
-                            "Bearish Divergence": 8,
                         }
 
                         selected_patterns = []
@@ -965,13 +950,123 @@ def create_results_view(app) -> ft.View:
 
         def vie_exceliin_click(e):
             """Avaa Excel-vienti dialogi valintoineen"""
+
+            def collect_filters() -> dict:
+                pattern_mapping = {
+                    "downtrend": 0,
+                    "Hammer": 1,
+                    "Bullish Engulfing": 2,
+                    "Piercing Pattern": 3,
+                    "Three White Soldiers": 4,
+                    "Morning Star": 5,
+                    "Dragonfly Doji": 6,
+                    "Bullish Divergence": 7,
+                }
+
+                selected_patterns = [
+                    pattern_mapping[cb.label]
+                    for cb in app.results_checkboxes
+                    if cb.value and cb.label in pattern_mapping
+                ]
+                if not selected_patterns:
+                    selected_patterns = None
+
+                ticker_filter = None
+                try:
+                    ticker_mode = app.results_radio_group.value
+                    ticker_value = (
+                        app.results_ticker_field.value.strip().upper()
+                        if app.results_ticker_field.value
+                        else ""
+                    )
+
+                    if ticker_value:
+                        if "," in ticker_value:
+                            ticker_filter = [
+                                t.strip()
+                                for t in ticker_value.split(",")
+                                if t.strip()
+                            ]
+                        else:
+                            ticker_filter = [ticker_value]
+                        if ticker_mode != "single":
+                            print(
+                                "ℹ️ Ticker-kenttä käytössä Excel-viennissä vaikka 'Analysoi kaikki' on valittuna."
+                            )
+                except Exception as ex:
+                    print(f"Virhe ticker-suodattimen lukemisessa: {ex}")
+
+                def resolve_date_value(picker, text_field):
+                    if picker and getattr(picker, "value", None):
+                        return picker.value.isoformat()
+                    if text_field and getattr(text_field, "value", None):
+                        v = text_field.value.strip()
+                        if v:
+                            d = try_parse_date(v)
+                            if d:
+                                return d.isoformat()
+                    return None
+
+                start_date = None
+                end_date = None
+                if (
+                    hasattr(app, "results_date_radio_group")
+                    and app.results_date_radio_group.value == "range"
+                ):
+                    start_date = resolve_date_value(
+                        getattr(app, "results_start_date", None),
+                        getattr(app, "results_start_date_text", None),
+                    )
+                    end_date = resolve_date_value(
+                        getattr(app, "results_end_date", None),
+                        getattr(app, "results_end_date_text", None),
+                    )
+                    if not start_date and not end_date:
+                        raise ValueError("Anna vähintään yksi päivämäärä aikaväliä varten.")
+                    if start_date and end_date and start_date > end_date:
+                        raise ValueError("Alkupäivä ei voi olla loppupäivän jälkeen.")
+
+                downtrend_only = bool(
+                    getattr(app, "results_downtrend_filter", None)
+                    and app.results_downtrend_filter.value
+                )
+
+                divergence_combo_filter = bool(
+                    hasattr(app, "results_divergence_combo_filter")
+                    and app.results_divergence_combo_filter.value
+                )
+
+                return {
+                    "patterns": selected_patterns,
+                    "ticker_filter": ticker_filter,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "downtrend_only": downtrend_only,
+                    "divergence_combo_filter": divergence_combo_filter,
+                }
+
             try:
                 db_manager = DatabaseManager("data/analysis.db")
-                total_count = db_manager.count_results_rows()
+                try:
+                    initial_filters = collect_filters()
+                except ValueError as err:
+                    e.page.snack_bar = ft.SnackBar(
+                        ft.Text(str(err)), open=True
+                    )
+                    e.page.update()
+                    return
+
+                total_count = db_manager.count_results_filtered(
+                    patterns=initial_filters["patterns"],
+                    tickers=initial_filters["ticker_filter"],
+                    start_date=initial_filters["start_date"],
+                    end_date=initial_filters["end_date"],
+                    downtrend_only=initial_filters["downtrend_only"],
+                )
                 if total_count == 0:
                     e.page.snack_bar = ft.SnackBar(
                         ft.Text(
-                            "Ei tuloksia vietäväksi. Generoi ensin tulokset tietokantaan."
+                            "Ei suodattimia vastaavia tuloksia. Päivitä hakuasetukset ensin."
                         ),
                         open=True,
                     )
@@ -995,60 +1090,107 @@ def create_results_view(app) -> ft.View:
 
                 def export_action(e_export):
                     """Suorita Excel-vienti valinnalla."""
-                    mode = export_mode.current.value
+                    try:
+                        filters = collect_filters()
+                    except ValueError as err:
+                        e.page.snack_bar = ft.SnackBar(ft.Text(str(err)), open=True)
+                        e.page.update()
+                        return
 
-                    # Määritä ID-filtteri satunnaisotannalle
+                    mode = export_mode.current.value
                     id_filter = None
                     sample_info = ""
+                    filtered_rows_cache: Optional[List[dict]] = None
+
+                    def ensure_filtered_rows() -> List[dict]:
+                        nonlocal filtered_rows_cache
+                        if filtered_rows_cache is None:
+                            filtered_rows_cache = db_manager.get_results_filtered(
+                                patterns=filters["patterns"],
+                                tickers=filters["ticker_filter"],
+                                start_date=filters["start_date"],
+                                end_date=filters["end_date"],
+                                downtrend_only=filters["downtrend_only"],
+                            )
+                        return filtered_rows_cache
 
                     if mode == "random":
                         try:
                             requested_count = int(
                                 sample_size_field.current.value or "0"
                             )
-                            if requested_count <= 0:
-                                e.page.snack_bar = ft.SnackBar(
-                                    ft.Text("Anna positiivinen määrä"), open=True
-                                )
-                                e.page.update()
-                                return
-
-                            # Hae kaikki ID:t tietokannasta
-                            from analysis.database_manager import DatabaseManager
-
-                            db_mgr = DatabaseManager("data/analysis.db")
-                            all_results = db_mgr.get_results_data()
-
-                            # Tarkista ylimitoitus
-                            if requested_count > len(all_results):
-                                sample_info = f" (pyydetty {requested_count}, saatavilla {len(all_results)})"
-                                # Vie kaikki
-                            else:
-                                # Satunnaisotanta ID:istä
-                                import random
-
-                                sampled_results = random.sample(
-                                    all_results, requested_count
-                                )
-                                id_filter = [
-                                    r.get("id") for r in sampled_results if r.get("id")
-                                ]
-                                sample_info = (
-                                    f" (arvottu {requested_count}/{len(all_results)})"
-                                )
-
                         except ValueError:
                             e.page.snack_bar = ft.SnackBar(
                                 ft.Text("Virheellinen määrä"), open=True
                             )
                             e.page.update()
                             return
+                        if requested_count <= 0:
+                            e.page.snack_bar = ft.SnackBar(
+                                ft.Text("Anna positiivinen määrä"), open=True
+                            )
+                            e.page.update()
+                            return
+
+                        rows = ensure_filtered_rows()
+                        total_available = len(rows)
+                        if total_available == 0:
+                            e.page.snack_bar = ft.SnackBar(
+                                ft.Text("Ei suodattimia vastaavia tuloksia."), open=True
+                            )
+                            e.page.update()
+                            return
+
+                        import random
+
+                        if requested_count > total_available:
+                            sampled_rows = rows
+                            sample_info = (
+                                f" (pyydetty {requested_count}, saatavilla {total_available})"
+                            )
+                        else:
+                            sampled_rows = random.sample(rows, requested_count)
+                            sample_info = (
+                                f" (arvottu {requested_count}/{total_available})"
+                            )
+                        id_filter = [
+                            r.get("id") for r in sampled_rows if r.get("id") is not None
+                        ]
+                        if not id_filter:
+                            e.page.snack_bar = ft.SnackBar(
+                                ft.Text(
+                                    "Satunnaisotanta ei tuottanut vietäviä rivejä."
+                                ),
+                                open=True,
+                            )
+                            e.page.update()
+                            return
+
+                    if (
+                        filters["divergence_combo_filter"]
+                        and id_filter is None
+                    ):
+                        rows = ensure_filtered_rows()
+                        combo_pairs = db_manager.get_divergence_combo_pairs()
+                        combo_ids = [
+                            r.get("id")
+                            for r in rows
+                            if r.get("id")
+                            and (r.get("ticker"), r.get("date")) in combo_pairs
+                        ]
+                        if combo_ids:
+                            id_filter = combo_ids
+                            print(
+                                f"🔍 Divergenssi-yhdistelmä: {len(id_filter)} tapahtumaa"
+                            )
+                        else:
+                            print("⚠️ Ei divergenssi-yhdistelmiä löytynyt")
 
                     # Sulje dialogi
                     close_dialog(None)
 
                     # Kutsu varsinaista export-funktiota
-                    vie_exceliin_with_filters(e, id_filter, sample_info)
+                    vie_exceliin_with_filters(e, id_filter, sample_info, filters)
 
                 # Luo dialogi
                 export_dlg = ft.AlertDialog(
@@ -1058,7 +1200,7 @@ def create_results_view(app) -> ft.View:
                         content=ft.Column(
                             [
                                 ft.Text(
-                                    f"Tuloksia tietokannassa: {total_count}",
+                                    f"Filtteröityjä tuloksia: {total_count}",
                                     weight=ft.FontWeight.BOLD,
                                 ),
                                 ft.Text(
@@ -1122,22 +1264,39 @@ def create_results_view(app) -> ft.View:
                 e.page.snack_bar = ft.SnackBar(ft.Text(f"Virhe: {ex}"), open=True)
                 e.page.update()
 
-        def vie_exceliin_with_filters(e, id_filter=None, sample_info=""):
+        def vie_exceliin_with_filters(e, id_filter=None, sample_info="", filters=None):
             """Vie results_data Exceliin progress dialogilla (sisäinen funktio)"""
             try:
-                # Tarkista onko tuloksia
                 db_manager = DatabaseManager("data/analysis.db")
-                total_rows = db_manager.count_results_rows()
-                if total_rows == 0:
-                    e.page.snack_bar = ft.SnackBar(
-                        ft.Text(
-                            "Ei tuloksia vietäväksi. Generoi ensin tulokset tietokantaan."
-                        ),
-                        open=True,
+                if filters is None:
+                    filters = collect_filters()
+                if id_filter is None:
+                    filtered_total = db_manager.count_results_filtered(
+                        patterns=filters["patterns"],
+                        tickers=filters["ticker_filter"],
+                        start_date=filters["start_date"],
+                        end_date=filters["end_date"],
+                        downtrend_only=filters["downtrend_only"],
                     )
-                    e.page.update()
-                    return
+                    if filtered_total == 0:
+                        e.page.snack_bar = ft.SnackBar(
+                            ft.Text(
+                                "Ei suodattimia vastaavia tuloksia. Päivitä hakuasetukset ensin."
+                            ),
+                            open=True,
+                        )
+                        e.page.update()
+                        return
+            except ValueError as err:
+                e.page.snack_bar = ft.SnackBar(ft.Text(str(err)), open=True)
+                e.page.update()
+                return
+            except Exception as ex:
+                e.page.snack_bar = ft.SnackBar(ft.Text(f"Virhe: {ex}"), open=True)
+                e.page.update()
+                return
 
+            try:
                 # Keskeytys-lippu
                 cancel_flag = {"cancelled": False}
 
@@ -1175,133 +1334,11 @@ def create_results_view(app) -> ft.View:
                 progress_dialog.open = True
                 e.page.update()
 
-                # Hae suodattimet
-                pattern_mapping = {
-                    "downtrend": 0,
-                    "Hammer": 1,
-                    "Bullish Engulfing": 2,
-                    "Piercing Pattern": 3,
-                    "Three White Soldiers": 4,
-                    "Morning Star": 5,
-                    "Dragonfly Doji": 6,
-                    "Bullish Divergence": 7,
-                    "Bearish Divergence": 8,
-                }
-
-                selected_patterns = []
-                for cb in app.results_checkboxes:
-                    if cb.value and cb.label in pattern_mapping:
-                        selected_patterns.append(pattern_mapping[cb.label])
-
-                if not selected_patterns:
-                    selected_patterns = None
-
-                ticker_filter = None
-                try:
-                    ticker_mode = app.results_radio_group.value
-                    ticker_value = (
-                        app.results_ticker_field.value.strip().upper()
-                        if app.results_ticker_field.value
-                        else ""
-                    )
-
-                    if ticker_value:
-                        if "," in ticker_value:
-                            ticker_filter = [
-                                t.strip() for t in ticker_value.split(",") if t.strip()
-                            ]
-                        else:
-                            ticker_filter = [ticker_value]
-                        if ticker_mode != "single":
-                            print(
-                                "ℹ️ Ticker-kenttä käytössä Excel-viennissä vaikka 'Analysoi kaikki' on valittuna."
-                            )
-                except Exception as ex:
-                    print(f"Virhe ticker-suodattimen lukemisessa: {ex}")
-
-                def resolve_date_value(picker, text_field):
-                    if picker and getattr(picker, "value", None):
-                        return picker.value.isoformat()
-                    if text_field and getattr(text_field, "value", None):
-                        v = text_field.value.strip()
-                        if v:
-                            d = try_parse_date(v)
-                            if d:
-                                return d.isoformat()
-                    return None
-
-                start_date = None
-                end_date = None
-                if (
-                    hasattr(app, "results_date_radio_group")
-                    and app.results_date_radio_group.value == "range"
-                ):
-                    start_date = resolve_date_value(
-                        getattr(app, "results_start_date", None),
-                        getattr(app, "results_start_date_text", None),
-                    )
-                    end_date = resolve_date_value(
-                        getattr(app, "results_end_date", None),
-                        getattr(app, "results_end_date_text", None),
-                    )
-                    if not start_date and not end_date:
-                        progress_dialog.open = False
-                        e.page.update()
-                        e.page.snack_bar = ft.SnackBar(
-                            ft.Text("Anna vähintään yksi päivämäärä aikaväliä varten."),
-                            open=True,
-                        )
-                        e.page.update()
-                        return
-                    if start_date and end_date and start_date > end_date:
-                        progress_dialog.open = False
-                        e.page.update()
-                        e.page.snack_bar = ft.SnackBar(
-                            ft.Text("Alkupäivä ei voi olla loppupäivän jälkeen."),
-                            open=True,
-                        )
-                        e.page.update()
-                        return
-
-                downtrend_only = bool(
-                    getattr(app, "results_downtrend_filter", None)
-                    and app.results_downtrend_filter.value
-                )
-
-                # Lue divergence_combo_filter
-                divergence_combo_filter = (
-                    app.results_divergence_combo_filter.value
-                    if hasattr(app.results_divergence_combo_filter, "value")
-                    else False
-                )
-
-                # Jos divergence_combo_filter on päällä JA ei ole id_filteriä random samplesta,
-                # suodata ID:t divergenssi-yhdistelmille
-                if divergence_combo_filter and id_filter is None:
-                    try:
-                        all_results = db_manager.get_results_data()
-
-                        combo_pairs = db_manager.get_divergence_combo_pairs()
-                        combo_ids = [
-                            result.get("id")
-                            for result in all_results
-                            if result.get("id")
-                            and (
-                                result.get("ticker"),
-                                result.get("date"),
-                            )
-                            in combo_pairs
-                        ]
-
-                        if combo_ids:
-                            id_filter = combo_ids
-                            print(
-                                f"🔍 Divergenssi-yhdistelmä: {len(id_filter)} tapahtumaa"
-                            )
-                        else:
-                            print("⚠️ Ei divergenssi-yhdistelmiä löytynyt")
-                    except Exception as ex:
-                        print(f"Virhe divergenssi-yhdistelmä suodattimessa: {ex}")
+                selected_patterns = filters["patterns"]
+                ticker_filter = filters["ticker_filter"]
+                start_date = filters["start_date"]
+                end_date = filters["end_date"]
+                downtrend_only = filters["downtrend_only"]
 
                 # Progress callback
                 def progress_callback(current, total):
@@ -1341,9 +1378,7 @@ def create_results_view(app) -> ft.View:
                 if downtrend_only:
                     filter_notes.append("Vain laskutrendit")
                 if selected_patterns:
-                    filter_notes.append(
-                        f"Kuvioita {len(selected_patterns)} kpl"
-                    )
+                    filter_notes.append(f"Kuvioita {len(selected_patterns)} kpl")
 
                 # Vie Excel
                 exporter = ExcelExporter("data/analysis.db")
@@ -1818,103 +1853,3 @@ def create_results_view(app) -> ft.View:
     )
 
     return view
-
-
-def show_results_csv(app, e):
-    from analysis.logger import setup_logger
-
-    logger = setup_logger()
-    csv_path = os.path.join(
-        os.path.dirname(__file__), "..", "analysis", "analysis_results.csv"
-    )
-    csv_path = os.path.normpath(csv_path)
-    if not os.path.exists(csv_path):
-        sb = ft.SnackBar(
-            ft.Text("ℹ️ CSV-tiedostoa ei löytynyt.", color=ft.Colors.WHITE),
-            bgcolor=ft.Colors.ORANGE_600,
-            duration=2000,
-        )
-        if sb not in app.page.overlay:
-            app.page.overlay.append(sb)
-        sb.open = True
-        app.page.update()
-        logger.info(
-            "analysis_results.csv not found when attempting to show results CSV (results.view)"
-        )
-        return
-    try:
-        with open(csv_path, "r", encoding="utf-8") as f:
-            content = f.read()
-    except Exception as ex:
-        logger.exception("Virhe avattaessa CSV-tiedostoa (results.view)")
-        sb = ft.SnackBar(
-            ft.Text(f"❌ Virhe tiedostoa avattaessa: {ex}", color=ft.Colors.WHITE),
-            bgcolor=ft.Colors.RED_600,
-            duration=3000,
-        )
-        if sb not in app.page.overlay:
-            app.page.overlay.append(sb)
-        sb.open = True
-        app.page.update()
-        return
-
-    content_control = ft.Text(content, selectable=True)
-
-    save_button = ft.ElevatedButton(
-        "Tallenna CSV",
-        icon=ft.Icons.FILE_DOWNLOAD,
-        on_click=lambda ev: (
-            setattr(
-                app.file_picker,
-                "on_result",
-                lambda ev2: save_csv_from_analysis(app, ev2, csv_path),
-            ),
-            app.file_picker.save_file(),
-        ),
-    )
-
-    dlg = ft.AlertDialog(
-        title=ft.Text("Analyysin CSV-tulokset"),
-        content=ft.Column([content_control], tight=True),
-        actions=[
-            save_button,
-            ft.TextButton("Sulje", on_click=lambda _: app.close_dialog(dlg)),
-        ],
-    )
-    if dlg not in app.page.overlay:
-        app.page.overlay.append(dlg)
-    dlg.open = True
-    app.page.update()
-
-
-def save_csv_from_analysis(app, e, src_path: str):
-    if not e.path:
-        return
-    try:
-        with open(src_path, "r", encoding="utf-8") as src:
-            data = src.read()
-        with open(e.path, "w", encoding="utf-8") as dst:
-            dst.write(data)
-        sb = ft.SnackBar(
-            ft.Text(f"✅ CSV tallennettu: {e.path}"),
-            bgcolor=ft.Colors.GREEN_600,
-            duration=2000,
-        )
-        if sb not in app.page.overlay:
-            app.page.overlay.append(sb)
-        sb.open = True
-        app.page.update()
-    except Exception as ex:
-        from analysis.logger import setup_logger
-
-        logger = setup_logger()
-        logger.exception("Virhe tallennettaessa CSV:ää (results.view)")
-        sb = ft.SnackBar(
-            ft.Text(f"❌ Virhe tallennuksessa: {ex}"),
-            bgcolor=ft.Colors.RED_600,
-            duration=3000,
-        )
-        if sb not in app.page.overlay:
-            app.page.overlay.append(sb)
-        sb.open = True
-        app.page.update()

@@ -112,7 +112,7 @@ def fetch_blackouts_for_missing_tickers(
     db_path: str = "data/analysis.db",
     delay_seconds: float = 1.5,
     limit: Optional[int] = None,
-    progress_callback: Optional[Callable[[str, int, int], None]] = None,
+    progress_callback: Optional[Callable[[str, int, int, int], None]] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
 ) -> dict:
     """
@@ -142,25 +142,33 @@ def fetch_blackouts_for_missing_tickers(
     processed = 0
     details: List[dict] = []
     errors: List[str] = []
+    log_path = Path(db_path).resolve().parent / "blackoutdays.txt"
 
     for idx, ticker in enumerate(tickers, start=1):
         if cancel_check and cancel_check():
             break
-        if progress_callback:
-            try:
-                progress_callback(ticker, idx, total)
-            except Exception:
-                pass
         result = fetch_blackouts_for_tickers(
             [ticker],
             start_date=start_date,
             db_path=db_path,
             db=db,
         )
-        inserted_total += result.get("inserted", 0)
+        inserted_this = result.get("inserted", 0)
+        inserted_total += inserted_this
         details.extend(result.get("details", []))
         errors.extend(result.get("errors", []))
         processed += 1
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with log_path.open("a", encoding="utf-8") as fh:
+                fh.write(f"{ticker};{inserted_this}\n")
+        except Exception:
+            pass
+        if progress_callback:
+            try:
+                progress_callback(ticker, processed, total, inserted_this)
+            except Exception:
+                pass
         if idx < total and delay_seconds > 0:
             time.sleep(delay_seconds)
 

@@ -45,7 +45,6 @@ class FindingsView:
         self.search_field = None
         self.pattern_filter = None
         self.market_filter = None
-        self.symbol_filter = None
         self.progress_dialog = None
 
         # Aikaväli-suodattimet
@@ -58,6 +57,7 @@ class FindingsView:
         self.filtered_findings = []
         self._markets = self._load_market_list()
         self._market_label_map = self._build_market_label_map()
+        self.ALL_MARKETS_KEY = "__all__"
 
         # Lajittelun tila
         self.sort_column = None  # Sarakkeen nimi
@@ -142,7 +142,6 @@ class FindingsView:
                 ft.dropdown.Option("Morning Star", "Morning Star"),
                 ft.dropdown.Option("Dragonfly Doji", "Dragonfly Doji"),
                 ft.dropdown.Option("Bullish Divergence", "Bullish Divergence"),
-                ft.dropdown.Option("Bearish Divergence", "Bearish Divergence"),
             ],
             on_change=self._on_filter_change,
         )
@@ -152,7 +151,7 @@ class FindingsView:
             width=200,
             options=self._build_market_options(),
             on_change=self._on_filter_change,
-            value="",
+            value=self.ALL_MARKETS_KEY,
         )
 
         clear_btn = ft.IconButton(
@@ -187,7 +186,7 @@ class FindingsView:
             label="Vain kynttilämalli + divergenssi -yhdistelmät",
             value=False,
             on_change=self._on_filter_change,
-            tooltip="Näytä vain tapahtumat joissa samalle tickerille ja päivälle on sekä kynttilämalli (1-6) että divergenssi (7-8)",
+            tooltip="Näytä vain tapahtumat joissa samalle tickerille ja päivälle on sekä kynttilämalli (1-6) että Bullish-divergenssi (7)",
         )
 
         # Rivit suodattimille
@@ -213,7 +212,7 @@ class FindingsView:
 
     def _build_market_options(self) -> List[ft.dropdown.Option]:
         """Muodosta markkinavalikon vaihtoehdot."""
-        options = [ft.dropdown.Option("", "Kaikki markkinat")]
+        options = [ft.dropdown.Option(self.ALL_MARKETS_KEY, "Kaikki markkinat")]
         for code in self._get_available_market_codes():
             options.append(ft.dropdown.Option(code, self._format_market_label(code)))
         return options
@@ -250,7 +249,7 @@ class FindingsView:
         return label_map
 
     def _format_market_label(self, code: str) -> str:
-        if not code:
+        if not code or code == self.ALL_MARKETS_KEY:
             return "Kaikki markkinat"
         return self._market_label_map.get(code, code.upper())
 
@@ -264,21 +263,29 @@ class FindingsView:
         )
         return [c for c in codes if c]
 
+    def _normalize_market_value(self, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = str(value).strip().lower()
+        if value in {"", self.ALL_MARKETS_KEY, "kaikki", "kaikki markkinat"}:
+            return None
+        return value
+
     def _refresh_market_filter_options(self) -> None:
         if not self.market_filter:
             return
-        current = self.market_filter.value or ""
-        options = [ft.dropdown.Option("", "Kaikki markkinat")]
-        seen = {""}
+        current = self.market_filter.value or self.ALL_MARKETS_KEY
+        options = [ft.dropdown.Option(self.ALL_MARKETS_KEY, "Kaikki markkinat")]
+        seen = {self.ALL_MARKETS_KEY}
         for code in self._get_available_market_codes():
             if code in seen:
                 continue
             seen.add(code)
             options.append(ft.dropdown.Option(code, self._format_market_label(code)))
         self.market_filter.options = options
-        valid_values = {opt.key or opt.text or "" for opt in options}
+        valid_values = {opt.key or opt.text or self.ALL_MARKETS_KEY for opt in options}
         if current not in valid_values:
-            current = ""
+            current = self.ALL_MARKETS_KEY
         self.market_filter.value = current
         try:
             self.market_filter.update()
@@ -477,7 +484,13 @@ class FindingsView:
         """Päivitä data tietokannasta."""
         try:
             # Hae results_data taulusta analysis_findings sijaan
-            self.all_findings = self.db_manager.get_results_data()
+            raw_findings = self.db_manager.get_results_data()
+            self.all_findings = [
+                f
+                for f in raw_findings
+                if f.get("candle_pattern") != 8
+                and f.get("pattern") != "Bearish Divergence"
+            ]
             self._refresh_market_filter_options()
             # Load data and then apply any active filters
             self.filtered_findings = self.all_findings.copy()
@@ -505,7 +518,6 @@ class FindingsView:
             5: "Morning Star",
             6: "Dragonfly Doji",
             7: "Bullish Divergence",
-            8: "Bearish Divergence",
         }
 
         for finding in self.filtered_findings[:100]:  # Näytä max 100
@@ -666,7 +678,6 @@ class FindingsView:
             5: "Morning Star",
             6: "Dragonfly Doji",
             7: "Bullish Divergence",
-            8: "Bearish Divergence",
         }
 
         # Laske määrät kynttilätyypeittäin koko kannasta (ei suodatetuista)
@@ -730,7 +741,6 @@ class FindingsView:
             5: "Morning Star",
             6: "Dragonfly Doji",
             7: "Bullish Divergence",
-            8: "Bearish Divergence",
         }
 
         pattern_val = None
@@ -755,11 +765,11 @@ class FindingsView:
                 ]
 
         # Markkinasuodatin
-        market_val = None
-        if self.market_filter and getattr(self.market_filter, "value", None):
-            market_val = self.market_filter.value.strip().lower()
-        elif hasattr(self, "selected_market") and self.selected_market:
-            market_val = self.selected_market.strip().lower()
+        market_val = self._normalize_market_value(
+            getattr(self.market_filter, "value", None)
+        )
+        if not market_val and hasattr(self, "selected_market") and self.selected_market:
+            market_val = self._normalize_market_value(self.selected_market)
 
         if market_val:
             self.filtered_findings = [
@@ -839,7 +849,7 @@ class FindingsView:
         if self.pattern_filter:
             self.pattern_filter.value = ""
         if self.market_filter:
-            self.market_filter.value = ""
+            self.market_filter.value = self.ALL_MARKETS_KEY
         if self.date_filter_enabled:
             self.date_filter_enabled.value = False
         if self.start_date_field:

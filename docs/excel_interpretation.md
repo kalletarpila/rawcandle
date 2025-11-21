@@ -1,10 +1,10 @@
 # Excel-tulosten tulkintaopas
 
-Tämä dokumentti täydentää RawCandle-järjestelmän tulosexceliä (96 saraketta) ja kuvaa sarakkeiden sisällön, laskentasäännöt sekä tärkeimmät filtteri- ja tulkintasäännöt. Ensimmäiset 84 saraketta vastaavat alkuperäistä generate_results-rakennetta, ja sarakkeet 85–96 sisältävät `compute_new_features.py`-skriptin tuottamat jatkoanalyysimittarit. Dokumentti on suunnattu analyytikoille, jotka hyödyntävät `results_data`-taulua tai siitä tehtyä Excel-vientiä.
+Tämä dokumentti täydentää RawCandle-järjestelmän tulosexceliä (98 saraketta) ja kuvaa sarakkeiden sisällön, laskentasäännöt sekä tärkeimmät filtteri- ja tulkintasäännöt. Ensimmäiset 86 saraketta vastaavat generate_results-rakennetta (markkina + 85 mittaria), ja sarakkeet 87–98 sisältävät `compute_new_features.py`-skriptin tuottamat jatkoanalyysimittarit. Dokumentti on suunnattu analyytikoille, jotka hyödyntävät `results_data`-taulua tai siitä tehtyä Excel-vientiä.
 
 ## 1. Yleisrakenne ja normalisointi
 - Jokainen rivi kuvaa yksittäistä osake- tai indeksihavaintoa päivänä *t0* (kuviopäivä).
-- Excelissä on 84 saraketta (`osake` ... `weekday`). Tietokannan `results_data`-taulussa on lisäksi `market` (lyhenne) samasta rivistä.
+- Excelissä on 98 saraketta: 86 perussaraketta (`osake` ... `Has_BullDiv_recent`) + 12 jatkoanalyysifeaturea (luku 2.9). Tietokannan `results_data`-taulussa on lisäksi `market` (lyhenne) samasta rivistä.
 - Hintasarjat normalisoidaan:
   - Osakkeet: `t0_low = 100`, jolloin kaikki hintasarakkeet ovat prosentteja päivän alimman hinnan tasosta.
   - Indeksit (SPX, NDX): `t0_close = 100`.
@@ -66,35 +66,36 @@ MA_{offset,period} = avg(close_{idx+offset-period+1 ... idx+offset}) / norm * 10
 |`SPX2` ... `SPX20`|S&P 500 tulevat päivät|Sama kaava, mutta offset > 0|
 |`NDX_*`|Vastaavat sarjat Nasdaq 100:lle (^NDX)|Kuten SPX|
 
-### 2.8 Momentum, divergenssit ja metadata (79–84)
+### 2.8 Momentum, divergenssit ja metadata (79–85)
 | # | Sarake | Kuvaus / kaava |
 |---|--------|----------------|
 |79|`RSI14_t0`|14 päivän RSI (ks. luku 3) haetaan `analysis_findings.rsi14`|
 |80|`t0_close_norm`|`(t0_close / t0_low) * 100`, mittaa päätöksen sijaintia päivän vaihteluvälissä|
-|81|`Bearish Divergence`|Vahvin arvo (1–3), jos t0...t-3 välillä löytyi laskeva divergenssi (luku 4)|
-|82|`Bullish Divergence`|Vahvin arvo (1–3), jos löytyi nouseva divergenssi|
-|83|`weekday`|ISO-koodi 1=ma ... 7=su (luku 9)|
-|84|`RSI10_t0` (laajennetut raportit)|10 päivän RSI, sama laskenta kuin RSI14 (luku 3) |
+|81|`BullDiv_strength`|Nousevan divergenssin vahvuus täsmälleen t0-päivänä (`divergence_data`)| 
+|82|`BullDiv_recent_strength`|Suurin bullish-divergenssi t0…t-3 päiviltä (0–3)| 
+|83|`BullDiv_recent_offset`|Offset arvo (0=t0, 1=t-1, 2=t-2, 3=t-3, -1=ei divergencea)| 
+|84|`Has_BullDiv_recent`|Binäärinen lippu: 1 jos viimeisten neljän päivän aikana löytyi bullish-divergenssi| 
+|85|`weekday`|ISO-koodi 1=ma ... 7=su (luku 9)|
 
-> Huom: vakio-Excel sisältää nyt 96 saraketta. Jos jokin uusi feature puuttuu laskennan lähdedatasta, sen soluun kirjoitetaan tyhjä arvo (NaN) mutta perusrivit silti viedään.
+> Huom: vakio-Excel sisältää nyt 98 saraketta. Bearish Divergence (koodi 8) lasketaan taustalla, mutta sitä ei toistaiseksi näytetä UI:ssa eikä viedä Exceliin; arvo jää kuitenkin `results_data`-tauluun tulevaa käyttöä varten. Jos jokin muu feature puuttuu lähtödatoista, kyseinen solukenttä jää tyhjäksi (NaN), mutta muut rivit viedään.
 
-### 2.9 Lisätyt analyysifeaturet (85–96)
-Sarakkeet 85–96 sijaitsevat otsikkorivin lopussa ja syntyvät `compute_new_features.py`-skriptin ajon yhteydessä ennen Excel-vientiä.
+### 2.9 Lisätyt analyysifeaturet (87–98)
+Sarakkeet 87–98 sijaitsevat otsikkorivin lopussa ja syntyvät `compute_new_features.py`-skriptin ajon yhteydessä ennen Excel-vientiä.
 
 | # | Sarake | Kuvaus / kaava |
 |---|--------|----------------|
-|85|`RSI_slope_5`|RSI-momentum 5 päivän ikkunassa: `RSI14_t0 – RSI14_{t-5}` (`divergence_data`-taulun historiasta)|
-|86|`Price_slope_5`|Keskimääräinen laskuvauhti 5 päivää ennen t0: `(100 − t_5) / 5`|
-|87|`Price_slope_10`|Keskimääräinen laskuvauhti 10 päivää ennen t0: `(100 − t_10) / 10`|
-|88|`Price_acceleration_5_10`|Trendin kiihtyvyys: `Price_slope_5 − Price_slope_10` (positiivinen = jyrkkenevä lasku)|
-|89|`Volatility_ratio_10_20`|Lyhyen ja pitkän volatiliteetin suhde: `t_10_hajonta / t_20_hajonta` (0 ja NaN pistetään tyhjäksi)|
-|90|`Gap_down_strength`|Mahdollinen gap ennen kuviota: `(open_raw − prev_close_raw) / prev_close_raw`, jossa `prev_close_raw` = t-1 päätös raakadatasta|
-|91|`Body_ratio`|Rungon osuus kynttilän vaihteluvälistä: `|close_raw − open_raw| / (high_raw − low_raw)`|
-|92|`Shadow_ratio`|Alavarjon suhde ylävarjoon: `lower_shadow / upper_shadow`, missä `lower_shadow = min(open,close) − low` ja `upper_shadow = high − max(open,close)`|
-|93|`SPX_volatility_10`|S&P 500 (^GSPC) 10 päivän (edeltävä) sulkuhintojen keskihajonta; lasketaan `osakedata.db`-kannan indeksisarjoista|
-|94|`NDX_volatility_10`|Nasdaq 100 (^NDX) vastaava 10 päivän volatiliteetti|
-|95|`Volume_impulse`|t0-päivän volyymipiikki suhteessa edeltävän 10 päivän keskiarvoon: `t0_volume_raw / prev10_avg_volume` (raaka volyymit `osakedata`-kannasta)|
-|96|`Reversal_Context_Score`|Yhdistetty kontekstimittari: `0.4 * drop_10 + 0.4 * bullish_divergence − 0.2 * t_10_hajonta`, missä `drop_10 = 100 − t_10`|
+|87|`RSI_slope_5`|RSI-momentum 5 päivän ikkunassa: `RSI14_t0 – RSI14_{t-5}` (`divergence_data`-taulun historiasta)|
+|88|`Price_slope_5`|Keskimääräinen laskuvauhti 5 päivää ennen t0: `(100 − t_5) / 5`|
+|89|`Price_slope_10`|Keskimääräinen laskuvauhti 10 päivää ennen t0: `(100 − t_10) / 10`|
+|90|`Price_acceleration_5_10`|Trendin kiihtyvyys: `Price_slope_5 − Price_slope_10` (positiivinen = jyrkkenevä lasku)|
+|91|`Volatility_ratio_10_20`|Lyhyen ja pitkän volatiliteetin suhde: `t_10_hajonta / t_20_hajonta` (0 ja NaN pistetään tyhjäksi)|
+|92|`Gap_down_strength`|Mahdollinen gap ennen kuviota: `(open_raw − prev_close_raw) / prev_close_raw`, jossa `prev_close_raw` = t-1 päätös raakadatasta|
+|93|`Body_ratio`|Rungon osuus kynttilän vaihteluvälistä: `|close_raw − open_raw| / (high_raw − low_raw)`|
+|94|`Shadow_ratio`|Alavarjon suhde ylävarjoon: `lower_shadow / upper_shadow`, missä `lower_shadow = min(open,close) − low` ja `upper_shadow = high − max(open,close)`|
+|95|`SPX_volatility_10`|S&P 500 (^GSPC) 10 päivän (edeltävä) sulkuhintojen keskihajonta; lasketaan `osakedata.db`-kannan indeksisarjoista|
+|96|`NDX_volatility_10`|Nasdaq 100 (^NDX) vastaava 10 päivän volatiliteetti|
+|97|`Volume_impulse`|t0-päivän volyymipiikki suhteessa edeltävän 10 päivän keskiarvoon: `t0_volume_raw / prev10_avg_volume` (raaka volyymit `osakedata`-kannasta)|
+|98|`Reversal_Context_Score`|Yhdistetty kontekstimittari: `0.4 * drop_10 + 0.4 * BullDiv_recent_strength − 0.2 * t_10_hajonta`, missä `drop_10 = 100 − t_10`|
 
 > Jos jokin lähtösarake puuttuu (esim. historiadataa ei ole), kyseinen lisäfeature jää tyhjäksi muttei estä Excel-vientiä. Varmista ennen vientiä, että `compute_new_features.py` on ajettu onnistuneesti (logitiedote kertoo, montako riviä päivitettiin).
 
@@ -121,12 +122,13 @@ Sarakkeet 85–96 sijaitsevat otsikkorivin lopussa ja syntyvät `compute_new_fea
   - `price_component = min(1, |Deltahinta|/10%)`
   - `duration_component = min(1, days_between/20)`.
 
-### 4.2 Bearish Divergence (koodi 8)
+### 4.2 Bearish Divergence (koodi 8, piilotettu UI:ssa)
 - Peilikuva yllä: hinta tekee korkeamman huipun, RSI matalamman.
 - Nousutrendi-tausta (`t-10 < t-5 < t-2 < t0`, `t0 > MA10`, `MA5 > MA10`).
 - RSI-lasku vähintään 3 pistettä; vahvuuskaava identtinen.
+- Ei näytetä Findings-/Tulokset-näkymissä eikä Excel-viennissä; arvot tallennetaan `results_data`-tauluun ja varmistavat, että mahdollinen tuleva bearish-strategia voi käyttää samaa dataa ilman uutta skannausta.
 
-Tulokset tallentuvat `divergence_data`-tauluun. Exceliin nostetaan t0...t-3 päivien vahvin arvo; jos bullish-divergenssi löytyy, bearish-arvo pakotetaan nollaan ja päinvastoin.
+Tulokset tallentuvat `divergence_data`-tauluun. Exceliin nostetaan nykyisin vain bullish-divergenssin (koodi 7) t0...t-3 päivien vahvin arvo; bearish-arvo jää tietokantaan mutta sitä ei kirjoiteta tiedostoon.
 
 ## 5. Kynttiläkuviot ja numerokoodit
 | Koodi | Kuvio | Kuvaus |
@@ -139,7 +141,7 @@ Tulokset tallentuvat `divergence_data`-tauluun. Exceliin nostetaan t0...t-3 päi
 |5|Morning Star|Laskeva -> pieni runko -> nouseva kolmikkokuvio|
 |6|Dragonfly Doji|Doji, jossa pitkä alavarjo ja lähes olematon ylävarjo|
 |7|Bullish Divergence|RSI nousee vaikka hinta laskee|
-|8|Bearish Divergence|RSI laskee vaikka hinta nousee|
+|8|Bearish Divergence|RSI laskee vaikka hinta nousee (piilotettu UI:ssa & Excelissä, pysyy tietokannassa)|
 
 ## 6. Kuviokohtaiset tunnistussäännöt
 Perustuu `analysis/candlestick_patterns.py` -funktioihin.
@@ -150,7 +152,7 @@ Perustuu `analysis/candlestick_patterns.py` -funktioihin.
 - **Three White Soldiers**: kolme peräkkäistä nousevaa kynttilää, joissa jokainen avaa ja sulkee edellistä korkeammalle.
 - **Morning Star**: laskeva pitkärunkoinen kynttilä, keskimmäinen pieni runko (usein doji), kolmas nouseva joka sulkee vähintään ensimmäisen rungon puolivälin yläpuolelle.
 - **Dragonfly Doji**: hyvin pieni runko (<10 %), pitkä alavarjo (>60 % koko kynttilästä), lähes olematon ylävarjo.
-- **Bullish/Bearish Divergence**: ks. luku 4.
+- **Bullish Divergence** (Bearish tallennetaan vain tietokantaan): ks. luku 4.
 - **Downtrend**: täyttää laskutrendifiltterin (luku 8), tallennetaan erilliseksi patterniksi.
 
 ## 7. Signaalin vahvuus ja tulkinta
@@ -169,7 +171,7 @@ Perustuu `analysis/candlestick_patterns.py` -funktioihin.
 |Morning Star (5)|Oletus 0.5 (+volyymi)|
 |Dragonfly Doji (6)|Doji-logiikka: `1 - body/total_range`|Mitä pienempi runko, sitä vahvempi|
 |Bullish Divergence (7)|1–3 skaala; Excelissä tulkitaan 1=heikko, 2=keskivahva, 3=vahva|Arvo perustuu RSI-, hinta- ja kesto-komponentteihin|
-|Bearish Divergence (8)|Sama kuin yllä|—|
+|Bearish Divergence (8)|Sama kuin yllä, mutta ei viedä Exceliin toistaiseksi|Tallentuu `results_data`:an myöhempää käyttöä varten|
 
 Volyymikerroin: jos `volume > 100000`, vahvuus kerrotaan 1.1:llä (rajataan maksimiin 1.0).
 

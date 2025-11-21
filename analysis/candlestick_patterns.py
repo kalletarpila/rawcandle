@@ -144,30 +144,6 @@ def calculate_rsi(df, period=14, close_col="Close"):
     return df
 
 
-def find_local_extremes(series, window=14, extreme_type="min"):
-    """
-    Löytää paikalliset minimit tai maksimit sarjasta.
-
-    Args:
-        series: Pandas Series josta etsitään ääriarvot
-        window: Ikkunan koko (esim. 14 = alhaisin/ylin 14 päivän sisällä)
-        extreme_type: 'min' tai 'max'
-
-    Returns:
-        Boolean Series jossa True merkitsee paikallista ääriarvoa
-    """
-    if extreme_type == "min":
-        # Paikallinen minimi: alempi kuin kaikki window/2 päivää ennen ja jälkeen
-        rolling_min = series.rolling(window=window, center=True).min()
-        is_extreme = (series == rolling_min) & series.notna()
-    else:
-        # Paikallinen maksimi: korkeampi kuin kaikki window/2 päivää ennen ja jälkeen
-        rolling_max = series.rolling(window=window, center=True).max()
-        is_extreme = (series == rolling_max) & series.notna()
-
-    return is_extreme
-
-
 def is_hammer(row):
     open_ = row["Open"]
     close = row["Close"]

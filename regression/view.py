@@ -452,6 +452,13 @@ class RegressionView:
         enabled = not self.bullish_divergence_only_checkbox.value
         for checkbox in self.pattern_checkboxes.values():
             checkbox.disabled = not enabled
+        if self.bullish_divergence_only_checkbox.value:
+            for horizon in self.horizon_checkboxes.values():
+                horizon.value = True
+                horizon.disabled = True
+        else:
+            for horizon in self.horizon_checkboxes.values():
+                horizon.disabled = False
         try:
             self.page.update()
         except Exception:

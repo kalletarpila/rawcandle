@@ -49,42 +49,6 @@ class DowntrendGenerator:
             self.logger.error(f"Failed to connect to stock database: {e}")
             raise
 
-    def _get_analysis_connection(self) -> sqlite3.Connection:
-        """Get connection to analysis database."""
-        try:
-            conn = sqlite3.connect(self.analysis_db_path)
-            conn.row_factory = sqlite3.Row
-            return conn
-        except Exception as e:
-            self.logger.error(f"Failed to connect to analysis database: {e}")
-            raise
-
-    def _select_random_ticker(self, conn: sqlite3.Connection) -> Optional[str]:
-        """Select a random ticker from stock database.
-
-        Args:
-            conn: Database connection
-
-        Returns:
-            Random ticker symbol or None if error
-        """
-        try:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT DISTINCT osake 
-                FROM osakedata 
-                WHERE pvm >= '2024-01-01'
-                ORDER BY RANDOM() 
-                LIMIT 1
-            """
-            )
-            row = cursor.fetchone()
-            return row[0] if row else None
-        except Exception as e:
-            self.logger.error(f"Failed to select random ticker: {e}")
-            return None
-
     def _select_random_tickers(
         self,
         conn: sqlite3.Connection,

@@ -43,13 +43,18 @@ def regression_view(monkeypatch):
     }
     view.market_dropdown = SimpleNamespace(value="__all__")
     view.pattern_dropdown = SimpleNamespace(value="__all__")
-    view.horizon_checkboxes = {5: SimpleNamespace(value=True)}
+    view.horizon_checkboxes = {
+        2: SimpleNamespace(value=True, disabled=False),
+        5: SimpleNamespace(value=True, disabled=False),
+        10: SimpleNamespace(value=False, disabled=False),
+        20: SimpleNamespace(value=False, disabled=False),
+    }
     view.success_threshold_fields = {
         5: SimpleNamespace(value="0.03", error_text=None),
     }
     view.require_blackout_checkbox = SimpleNamespace(value=False)
     view.exclude_crisis_checkbox = SimpleNamespace(value=False)
-    view.pattern_checkboxes = {0: SimpleNamespace(value=True)}
+    view.pattern_checkboxes = {0: SimpleNamespace(value=True, disabled=False)}
     view.bullish_divergence_only_checkbox = SimpleNamespace(value=False)
     view.run_button = SimpleNamespace(disabled=False)
     view.status_text = SimpleNamespace(value="", color="")
@@ -118,3 +123,10 @@ def test_on_run_clicked_passes_selected_features(monkeypatch, regression_view):
     assert regression_view.output_field.value == "OK"
     raw_expected = regression_view._get_selected_features(allow_empty=True)
     assert saved["features"] == raw_expected
+
+
+def test_bullish_divergence_toggle_forces_all_horizons(regression_view):
+    regression_view.bullish_divergence_only_checkbox.value = True
+    regression_view._toggle_bullish_divergence_mode(None)
+    assert all(cb.disabled for cb in regression_view.horizon_checkboxes.values())
+    assert all(cb.value for cb in regression_view.horizon_checkboxes.values())
