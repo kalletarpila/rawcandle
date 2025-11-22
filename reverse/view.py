@@ -45,6 +45,7 @@ class ReverseView:
         self.cluster_profile_dropdown: ft.Dropdown | None = None
         self.cluster_profile_table: ft.DataTable | None = None
         self.plot_container: ft.ResponsiveRow | None = None
+        self.similarity_table: ft.DataTable | None = None
 
     def create_view(self) -> ft.View:
         """Build and return the Reverse dashboard view."""
@@ -74,6 +75,7 @@ class ReverseView:
                         run_spacing=20,
                     ),
                     self._build_tables_section(),
+                    self._build_similarity_section(),
                     self._build_plots_section(),
                 ],
                 spacing=18,
@@ -154,6 +156,12 @@ class ReverseView:
             max_lines=6,
             visible=False,
         )
+        self.profile_topk_field = ft.TextField(
+            label="Profile top-K features",
+            value="50",
+            width=180,
+            keyboard_type=ft.KeyboardType.NUMBER,
+        )
         self.run_button = ft.ElevatedButton(
             text="Aja reverse-analyysi",
             icon=ft.Icons.PLAY_ARROW,
@@ -220,6 +228,17 @@ class ReverseView:
             column_spacing=12,
         )
         self.plot_container = ft.ResponsiveRow([], spacing=10, run_spacing=10)
+        self.similarity_table = ft.DataTable(
+            columns=[
+                ft.DataColumn(ft.Text("Ticker", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Date")),
+                ft.DataColumn(ft.Text("Pattern")),
+                ft.DataColumn(ft.Text("Similarity")),
+            ],
+            rows=[],
+            heading_row_color=ft.Colors.GREY_100,
+            column_spacing=14,
+        )
 
     def _build_market_options(self) -> List[ft.dropdown.Option]:
         options = [ft.dropdown.Option("__all__", "Kaikki")]
@@ -262,6 +281,7 @@ class ReverseView:
                 [
                     self.feature_set_dropdown,
                     self.custom_features_field,
+                    self.profile_topk_field,
                 ]
             ),
             ft.Row(
@@ -331,6 +351,23 @@ class ReverseView:
                         ),
                     ],
                     spacing=16,
+                ),
+            )
+        )
+
+    def _build_similarity_section(self) -> ft.Card:
+        return ft.Card(
+            content=ft.Container(
+                padding=20,
+                content=ft.Column(
+                    [
+                        ft.Text("Most TopN-like rows", size=18, weight=ft.FontWeight.BOLD),
+                        ft.Container(
+                            height=260,
+                            content=ft.Column([self.similarity_table], scroll=ft.ScrollMode.AUTO),
+                        ),
+                    ],
+                    spacing=12,
                 ),
             )
         )
@@ -441,6 +478,9 @@ class ReverseView:
             "feature_set": self.feature_set_dropdown.value
             if self.feature_set_dropdown
             else schema.DEFAULT_FEATURE_SET,
+            "profile_top_k": self._safe_int(
+                self.profile_topk_field.value if self.profile_topk_field else "50", 50
+            ),
             "custom_features": parse_multiline_text(
                 self.custom_features_field.value if self.custom_features_field else ""
             ),
@@ -461,6 +501,7 @@ class ReverseView:
             results.get("cluster_summary"), horizon=results.get("params", {}).get("horizon", 10)
         )
         self._update_plots(results.get("plots", []))
+        self._update_similarity_table(results.get("similarity_top"), horizon=results.get("params", {}).get("horizon", 10))
         self._safe_page_update()
 
     def _update_top_summary(self, compare_df):
@@ -577,6 +618,25 @@ class ReverseView:
             except Exception:
                 pass
         self.cluster_profile_table.rows = rows
+
+    def _update_similarity_table(self, similarity_df, *, horizon: int):
+        if not self.similarity_table:
+            return
+        rows = []
+        if similarity_df is not None and not getattr(similarity_df, "empty", True):
+            col_h = f"t{horizon}"
+            for _, row in similarity_df.head(50).iterrows():
+                rows.append(
+                    ft.DataRow(
+                        cells=[
+                            ft.DataCell(ft.Text(str(row.get("ticker", "")))),
+                            ft.DataCell(ft.Text(str(row.get("date", "")))),
+                            ft.DataCell(ft.Text(str(row.get("candle_pattern", "")))),
+                            ft.DataCell(ft.Text(f"{row.get('reverse_similarity', 0):.4f}")),
+                        ]
+                    )
+                )
+        self.similarity_table.rows = rows
 
     def _update_progress(self, value: float):
         if not self.progress_bar:

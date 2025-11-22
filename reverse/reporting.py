@@ -76,11 +76,15 @@ def export_report(
     compare_path = run_dir / "compare.csv"
     cluster_path = run_dir / "cluster_summary.csv"
     profiles_path = run_dir / "cluster_profiles.csv"
+    similarity_path = run_dir / "similarity_top.csv"
     report_md_path = run_dir / "report.md"
 
     export_csv(results.get("compare"), compare_path)
     export_csv(results.get("cluster_summary"), cluster_path)
     export_csv(results.get("cluster_profiles"), profiles_path)
+    similarity_df = results.get("similarity_top")
+    if similarity_df is not None:
+        export_csv(similarity_df, similarity_path)
 
     lines: list[str] = [
         "# Reverse-analyysin raportti",
@@ -99,7 +103,19 @@ def export_report(
         _format_cluster_summary(results.get("cluster_summary")),
         "",
         "## Cluster profiles (top 10 delta features per cluster)",
+        "",
+        "## Top 20 universen riviä, jotka muistuttavat eniten TopN-profiilia",
     ]
+    if similarity_df is not None and not getattr(similarity_df, "empty", True):
+        top20 = similarity_df.head(20)
+        lines.append("| ticker | date | candle_pattern | reverse_similarity |")
+        lines.append("| --- | --- | --- | --- |")
+        for _, row in top20.iterrows():
+            lines.append(
+                f"| {row.get('ticker','')} | {row.get('date','')} | {row.get('candle_pattern','')} | {row.get('reverse_similarity', 0):.4f} |"
+            )
+    else:
+        lines.append("_Ei TopN-like rivejä_")
     profiles = results.get("cluster_profiles")
     if profiles is not None and not getattr(profiles, "empty", True):
         try:
@@ -126,5 +142,6 @@ def export_report(
         "compare": compare_path,
         "cluster_summary": cluster_path,
         "cluster_profiles": profiles_path,
+        "similarity_top": similarity_path,
         "report": report_md_path,
     }

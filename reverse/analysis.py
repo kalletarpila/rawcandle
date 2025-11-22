@@ -93,6 +93,44 @@ def _bh_q_values(p_values: list[float]) -> list[float]:
     return q.tolist()
 
 
+def compute_similarity_scores(
+    universe: pd.DataFrame,
+    profile_features: Sequence[str],
+    profile_vector: pd.Series,
+    scaler: StandardScaler | None = None,
+    method: str = "cosine",
+) -> pd.Series:
+    """
+    Compute similarity of universe rows to a reference profile vector.
+    """
+    if not profile_features:
+        return pd.Series(dtype=float)
+
+    available_feats = [f for f in profile_features if f in universe.columns]
+    if not available_feats:
+        return pd.Series(dtype=float, index=universe.index)
+
+    X = universe[available_feats].apply(pd.to_numeric, errors="coerce")
+    median_vals = X.median()
+    X = X.fillna(median_vals)
+
+    profile_vec = profile_vector.reindex(available_feats)
+    profile_vec = profile_vec.fillna(median_vals)
+
+    scaler = scaler or StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    profile_scaled = scaler.transform([profile_vec.values])[0]
+
+    if method == "cosine":
+        denom = np.linalg.norm(X_scaled, axis=1) * (np.linalg.norm(profile_scaled) or np.nan)
+        sim = np.sum(X_scaled * profile_scaled, axis=1) / denom
+        sim = np.where(np.isfinite(sim), sim, 0.0)
+    else:
+        sim = np.zeros(len(X_scaled))
+
+    return pd.Series(sim, index=universe.index, name="reverse_similarity")
+
+
 def compute_feature_scoring(
     top: pd.DataFrame,
     universe: pd.DataFrame,
@@ -351,6 +389,18 @@ def run_reverse_pipeline(
     clustered_top, cluster_summary, cluster_profiles = cluster_top(
         top, scored_features, horizon=horizon, n_clusters=params.get("clusters", 5)
     )
+    # similarity scoring
+    profile_top_k = int(params.get("profile_top_k", 50))
+    profile_features = compare["feature"].head(profile_top_k).tolist() if not compare.empty else list(validated_features)
+    profile_vector = top[profile_features].median(numeric_only=True) if profile_features else pd.Series(dtype=float)
+    if not profile_vector.empty and not universe.empty:
+        sim_scores = compute_similarity_scores(universe, profile_features, profile_vector)
+        universe = universe.copy()
+        universe["reverse_similarity"] = sim_scores
+    else:
+        universe = universe.copy()
+        universe["reverse_similarity"] = np.nan
+    similarity_top = universe.sort_values("reverse_similarity", ascending=False).head(100)
     notify_progress(progress_cb, 0.9)
 
     return {
@@ -362,6 +412,8 @@ def run_reverse_pipeline(
         "cluster_profiles": cluster_profiles,
         "used_features": list(validated_features),
         "cluster_features_used": scored_features,
+        "profile_features_used": profile_features,
+        "similarity_top": similarity_top,
         "params": params,
         "dedupe_topN_by_ticker_date": dedupe_topN,
     }
