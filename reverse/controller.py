@@ -67,23 +67,28 @@ class ReverseController:
         notify(log_cb, "Valmis.")
         return results
 
-    def _attach_plots(self, results: dict[str, Any]) -> None:
+    def _attach_plots(self, results: dict[str, Any], *, out_dir: Path | str | None = None) -> None:
         plot_items: list[dict[str, Any]] = []
         compare = results.get("compare")
         cluster_summary = results.get("cluster_summary")
         clustered_top = results.get("clustered_top")
         features = results.get("used_features") or []
 
-        artifact = plots.plot_feature_diffs(compare, output_dir=self.output_dir)
+        base_dir: Path | str | None = out_dir
+        if base_dir is None and results.get("run_dir"):
+            base_dir = Path(results["run_dir"]) / "figures"
+        base_dir = base_dir or self.output_dir
+
+        artifact = plots.plot_feature_diffs(compare, output_dir=base_dir)
         if artifact:
             plot_items.append({"type": "feature_diffs", **artifact})
 
-        artifact = plots.plot_cluster_counts(cluster_summary, output_dir=self.output_dir)
+        artifact = plots.plot_cluster_counts(cluster_summary, output_dir=base_dir)
         if artifact:
             plot_items.append({"type": "cluster_counts", **artifact})
 
         artifact = plots.plot_cluster_scatter(
-            clustered_top, features, output_dir=self.output_dir
+            clustered_top, features, output_dir=base_dir
         )
         if artifact:
             plot_items.append({"type": "cluster_scatter", **artifact})
@@ -93,4 +98,10 @@ class ReverseController:
     def export_report(self, results: dict[str, Any], params: dict[str, Any]) -> dict[str, Path]:
         if not results:
             raise ValueError("Aja analyysi ennen raportin vientiä.")
-        return reporting.export_report(results, params, output_dir=self.output_dir)
+        paths = reporting.export_report(results, params, output_dir=self.output_dir)
+        results["run_dir"] = paths.get("run_dir")
+        figures_dir = paths.get("run_dir")
+        if figures_dir:
+            figures_dir = Path(figures_dir) / "figures"
+        self._attach_plots(results, out_dir=figures_dir)
+        return paths

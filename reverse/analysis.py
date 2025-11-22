@@ -71,21 +71,26 @@ def _norm_sf_two_sided(z: float) -> float:
 
 def _bh_q_values(p_values: list[float]) -> list[float]:
     """Benjamini–Hochberg FDR."""
-    n = len(p_values)
-    if n == 0:
-        return []
-    sorted_idx = np.argsort(p_values)
-    p_sorted = np.array(p_values)[sorted_idx]
-    q = np.empty(n)
+    p = np.array(p_values, dtype=float)
+    finite_mask = np.isfinite(p)
+    q = np.full_like(p, np.nan, dtype=float)
+    n_finite = int(finite_mask.sum())
+    if n_finite == 0:
+        return q.tolist()
+    p_finite = p[finite_mask]
+    sorted_idx = np.argsort(p_finite)
+    p_sorted = p_finite[sorted_idx]
+    q_sorted = np.empty_like(p_sorted)
     prev = 1.0
-    for i in range(n - 1, -1, -1):
+    for i in range(n_finite - 1, -1, -1):
         rank = i + 1
-        val = p_sorted[i] * n / rank
+        val = p_sorted[i] * n_finite / rank
         prev = min(prev, val)
-        q[i] = min(prev, 1.0)
-    result = np.empty(n)
-    result[sorted_idx] = q
-    return result.tolist()
+        q_sorted[i] = min(prev, 1.0)
+    q_finite = np.empty_like(p_sorted)
+    q_finite[sorted_idx] = q_sorted
+    q[finite_mask] = q_finite
+    return q.tolist()
 
 
 def compute_feature_scoring(
@@ -181,8 +186,10 @@ def compute_feature_scoring(
         entry["top_mean"] = top_mean
         entry["universe_mean"] = uni_mean
         entry["diff"] = diff
-        denom = uni_mean if uni_mean != 0 else np.nan
-        entry["pct_change"] = diff / denom if denom not in (0, np.nan) else np.nan
+        if np.isfinite(uni_mean) and uni_mean != 0:
+            entry["pct_change"] = diff / uni_mean
+        else:
+            entry["pct_change"] = np.nan
 
         # pooled std (Cohen's d)
         std_top = float(top_vals.std(ddof=1)) if len(top_vals) > 1 else np.nan
