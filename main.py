@@ -2658,12 +2658,12 @@ class RawCandleApp:
             return
 
         try:
-            # Hae kaikki osakkeet ja niiden viimeisin päivämäärä
+            # Hae kaikki osakkeet ja niiden viimeisin sekä ensimmäinen päivämäärä
             with sqlite3.connect(db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     """
-                    SELECT osake, MAX(pvm) as viimeisin_pvm, MAX(market) as market
+                    SELECT osake, MIN(pvm) as ensimmainen_pvm, MAX(pvm) as viimeisin_pvm, MAX(market) as market
                     FROM osakedata
                     GROUP BY osake
                     ORDER BY osake
@@ -2689,44 +2689,112 @@ class RawCandleApp:
             self.loading_text.color = ft.Colors.BLUE_600
             self.page.update()
 
-            for idx, (ticker, last_date, ticker_market) in enumerate(stocks, 1):
+            for idx, (ticker, first_date, last_date, ticker_market) in enumerate(
+                stocks, 1
+            ):
                 ticker_market = (ticker_market or "usa").strip().lower()
                 if not validate_market(ticker_market, db_path=self.osakedata_db_path):
                     ticker_market = "usa"
-                # Tarkista tarvitaanko päivitystä
-                if last_date >= yesterday:
+
+                # Tarkista tarvitaanko päivitystä uusimpien päivien osalta
+                needs_update = last_date < yesterday
+
+                # Tarkista tarvitaanko vanhempaa dataa (1.1.2018 - 30.6.2023)
+                needs_historical = first_date > "2018-01-01"
+                historical_end = "2023-06-30"
+
+                if not needs_update and not needs_historical:
                     skipped_count += 1
                     if idx % 10 == 0:
                         self.loading_text.value = f"⏭️ {idx}/{total_stocks}: {ticker} (ohitettu, data ajan tasalla)"
                         self.page.update()
                     continue
 
-                # Laske päivitysväli
-                start_date = (
-                    datetime.fromisoformat(last_date) + timedelta(days=1)
-                ).strftime("%Y-%m-%d")
+                # Määritä hakuvälit
+                historical_start = "2018-01-01"
+                update_start = (
+                    (datetime.fromisoformat(last_date) + timedelta(days=1)).strftime(
+                        "%Y-%m-%d"
+                    )
+                    if needs_update
+                    else None
+                )
 
-                self.loading_text.value = f"🔄 {idx}/{total_stocks}: Haetaan {ticker} ({start_date} → {yesterday})"
+                # Kerää kaikki tarvittavat aikavälit
+                date_ranges = []
+                if needs_historical:
+                    # Hae vanhempaa dataa 2018-01-01 alkaen historical_end asti
+                    hist_end = min(
+                        historical_end,
+                        (
+                            datetime.fromisoformat(first_date) - timedelta(days=1)
+                        ).strftime("%Y-%m-%d"),
+                    )
+                    if hist_end >= historical_start:
+                        date_ranges.append((historical_start, hist_end))
+
+                if needs_update:
+                    # Hae uusia päiviä
+                    date_ranges.append((update_start, yesterday))
+
+                if not date_ranges:
+                    skipped_count += 1
+                    if idx % 10 == 0:
+                        self.loading_text.value = f"⏭️ {idx}/{total_stocks}: {ticker} (ohitettu, data ajan tasalla)"
+                        self.page.update()
+                    continue
+
+                # Näytä mitä haetaan
+                range_desc = []
+                for start, end in date_ranges:
+                    range_desc.append(f"{start}→{end}")
+                range_str = " + ".join(range_desc)
+
+                self.loading_text.value = (
+                    f"🔄 {idx}/{total_stocks}: Haetaan {ticker} ({range_str})"
+                )
                 self.loading_text.color = ft.Colors.BLUE_600
                 self.page.update()
 
                 try:
                     stock = yf.Ticker(ticker)
-                    hist = stock.history(start=start_date, end=yesterday)
+                    all_hist = pd.DataFrame()
 
-                    if hist.empty:
+                    # Hae data jokaiselta aikaväliltä
+                    for start_date, end_date in date_ranges:
+                        hist = stock.history(start=start_date, end=end_date)
+                        if not hist.empty:
+                            all_hist = pd.concat([all_hist, hist])
+
+                    # Poista duplikaatit ja järjestä
+                    if not all_hist.empty:
+                        all_hist = all_hist[~all_hist.index.duplicated(keep="first")]
+                        all_hist = all_hist.sort_index()
+                    else:
                         skipped_count += 1
                         continue
 
-                    # Tallenna tietokantaan
+                    # Tallenna tietokantaan - vain uudet päivät
                     with sqlite3.connect(db_path) as conn:
                         cursor = conn.cursor()
+
+                        # Hae olemassa olevat päivät tälle osakkeelle
+                        cursor.execute(
+                            "SELECT pvm FROM osakedata WHERE osake = ?", (ticker,)
+                        )
+                        existing_dates = set(row[0] for row in cursor.fetchall())
+
                         rows_added = 0
-                        for date, row in hist.iterrows():
+                        for date, row in all_hist.iterrows():
                             date_str = date.strftime("%Y-%m-%d")
+
+                            # Ohita jos päivä on jo tietokannassa
+                            if date_str in existing_dates:
+                                continue
+
                             cursor.execute(
                                 """
-                                INSERT OR REPLACE INTO osakedata 
+                                INSERT INTO osakedata 
                                 (osake, pvm, open, high, low, close, volume, market)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                                 """,
@@ -2757,8 +2825,10 @@ class RawCandleApp:
                                     ticker_market,
                                 ),
                             )
-                        rows_added += 1
-                        conn.commit()
+                            rows_added += 1
+
+                        if rows_added > 0:
+                            conn.commit()
 
                     # Laske divergenssit päivitetylle osakkeelle
                     div_success, div_days, div_error = (
