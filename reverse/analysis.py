@@ -93,6 +93,64 @@ def _bh_q_values(p_values: list[float]) -> list[float]:
     return q.tolist()
 
 
+def split_universe(universe: pd.DataFrame, mode: str) -> dict[str, pd.DataFrame]:
+    mode = (mode or "year").strip().lower()
+    splits: dict[str, pd.DataFrame] = {}
+    if universe.empty:
+        return splits
+
+    df = universe.copy()
+    if mode == "year":
+        if "date" not in df.columns:
+            return splits
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+        df["__year__"] = df["date"].dt.year.astype("Int64")
+        for year, grp in df.groupby("__year__"):
+            if grp.empty or pd.isna(year):
+                continue
+            splits[str(int(year))] = grp.drop(columns=["__year__"])
+    elif mode == "market":
+        key_col = "market"
+        df[key_col] = df.get(key_col, "__null__").fillna("__null__")
+        for key, grp in df.groupby(key_col):
+            if grp.empty:
+                continue
+            splits[str(key)] = grp
+    elif mode == "sector":
+        key_col = "sector"
+        df[key_col] = df.get(key_col, "__null__").fillna("__null__")
+        for key, grp in df.groupby(key_col):
+            if grp.empty:
+                continue
+            splits[str(key)] = grp
+    return splits
+
+
+def compute_rank_vector(scoring_df: pd.DataFrame, top_k: int) -> list[str]:
+    if scoring_df is None or scoring_df.empty:
+        return []
+    top_k = max(1, int(top_k))
+    ranked = scoring_df.sort_values("abs_effect", ascending=False)
+    return ranked["feature"].head(top_k).tolist()
+
+
+def spearman_rank_corr(list_a: list[str], list_b: list[str], universe_features: list[str]) -> float:
+    all_feats = list(universe_features)
+    if not all_feats:
+        return np.nan
+    rank_a = {feat: idx + 1 for idx, feat in enumerate(list_a)}
+    rank_b = {feat: idx + 1 for idx, feat in enumerate(list_b)}
+    n = len(all_feats)
+    if n < 2:
+        return np.nan
+    default_rank = n + 1
+    ranks_a = np.array([rank_a.get(f, default_rank) for f in all_feats], dtype=float)
+    ranks_b = np.array([rank_b.get(f, default_rank) for f in all_feats], dtype=float)
+    d2 = np.square(ranks_a - ranks_b).sum()
+    rho = 1 - (6 * d2) / (n * (n * n - 1))
+    return float(rho)
+
+
 def compute_similarity_scores(
     universe: pd.DataFrame,
     profile_features: Sequence[str],
@@ -275,6 +333,87 @@ def compute_feature_scoring(
     return df
 
 
+def compute_feature_stability(
+    universe: pd.DataFrame,
+    params: dict[str, Any],
+    feature_cols: Sequence[str],
+) -> dict[str, Any]:
+    mode = (params.get("stability_mode") or "year").strip().lower()
+    top_k = int(params.get("stability_top_k", 50))
+    splits = split_universe(universe, mode)
+    horizon = int(params.get("horizon", 10))
+    top_n = int(params.get("top_n", 500))
+    dedupe_topN = bool(params.get("dedupe_topN_by_ticker_date", False))
+
+    split_scores: dict[str, dict[str, Any]] = {}
+    for key, df in splits.items():
+        top = select_topN(df, horizon, top_n, dedupe_ticker_date=dedupe_topN)
+        scoring = compute_feature_scoring(top, df, feature_cols)
+        rank_list = compute_rank_vector(scoring, top_k)
+        split_scores[key] = {"scoring": scoring, "rank": rank_list}
+
+    keys = list(split_scores.keys())
+    matrix = pd.DataFrame(index=keys, columns=keys, dtype=float)
+    for i, k1 in enumerate(keys):
+        for j, k2 in enumerate(keys):
+            if i == j:
+                matrix.loc[k1, k2] = 1.0
+            else:
+                rho = spearman_rank_corr(
+                    split_scores[k1]["rank"],
+                    split_scores[k2]["rank"],
+                    list(feature_cols),
+                )
+                matrix.loc[k1, k2] = rho
+
+    # aggregate feature stats
+    feature_rows: list[dict[str, Any]] = []
+    for feat in feature_cols:
+        effects: list[float] = []
+        q_vals: list[float] = []
+        hits = 0
+        for _, data in split_scores.items():
+            scoring = data["scoring"]
+            if scoring is None or scoring.empty or "feature" not in scoring.columns:
+                continue
+            row = scoring[scoring["feature"] == feat]
+            if not row.empty:
+                eff = row["effect_size"].iloc[0]
+                qv = row["q_value"].iloc[0]
+                effects.append(eff if np.isfinite(eff) else np.nan)
+                q_vals.append(qv if np.isfinite(qv) else np.nan)
+                if feat in data["rank"]:
+                    hits += 1
+        total = len(split_scores) if split_scores else 1
+        hit_rate = hits / total if total else 0.0
+        effect_mean = float(np.nanmean(effects)) if effects else np.nan
+        effect_std = float(np.nanstd(effects)) if effects else np.nan
+        q_med = float(np.nanmedian(q_vals)) if q_vals else np.nan
+        score = hit_rate * (abs(effect_mean) if np.isfinite(effect_mean) else 0.0) / (
+            (effect_std if np.isfinite(effect_std) else 0.0) + 1e-6
+        )
+        feature_rows.append(
+            {
+                "feature": feat,
+                "hit_rate": hit_rate,
+                "effect_mean": effect_mean,
+                "effect_std": effect_std,
+                "q_median": q_med,
+                "score": score,
+            }
+        )
+
+    feature_stability = pd.DataFrame(feature_rows).sort_values("score", ascending=False)
+
+    return {
+        "stability_mode": mode,
+        "stability_top_k": top_k,
+        "split_keys": keys,
+        "stability_matrix": matrix,
+        "feature_stability": feature_stability,
+    }
+
+
 def cluster_top(
     top: pd.DataFrame,
     feature_cols: Sequence[str],
@@ -401,6 +540,9 @@ def run_reverse_pipeline(
         universe = universe.copy()
         universe["reverse_similarity"] = np.nan
     similarity_top = universe.sort_values("reverse_similarity", ascending=False).head(100)
+    stability = None
+    if params.get("compute_stability"):
+        stability = compute_feature_stability(universe, params, validated_features)
     notify_progress(progress_cb, 0.9)
 
     return {
@@ -414,6 +556,7 @@ def run_reverse_pipeline(
         "cluster_features_used": scored_features,
         "profile_features_used": profile_features,
         "similarity_top": similarity_top,
+        "stability": stability,
         "params": params,
         "dedupe_topN_by_ticker_date": dedupe_topN,
     }

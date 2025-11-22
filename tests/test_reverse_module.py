@@ -77,3 +77,19 @@ def test_cluster_top_labels():
     assert not summary.empty
     assert summary["cluster_id"].nunique() <= 3
     assert profiles is not None
+
+
+def test_feature_stability_runs():
+    df = _build_sample_df()
+    params = {
+        "horizon": 10,
+        "top_n": 3,
+        "compute_stability": True,
+        "stability_mode": "year",
+        "stability_top_k": 3,
+    }
+    features = ["RSI14_t0", "t0_volyymi", "Volume_impulse"]
+    out = analysis.compute_feature_stability(df, params, features)
+    assert "stability_matrix" in out
+    assert "feature_stability" in out
+    assert out["stability_matrix"] is not None
