@@ -8,11 +8,13 @@ import pandas as pd
 from .utils import ensure_data_dir, timestamp
 
 
-def _base_name(params: dict[str, Any], ts: str | None = None) -> str:
+def build_run_id(params: dict[str, Any], ts: str | None = None) -> str:
     ts = ts or timestamp()
     horizon = int(params.get("horizon", 10))
     top_n = int(params.get("top_n", 500))
-    return f"h{horizon}_top{top_n}_{ts}"
+    market = (params.get("market") or "__all__").strip().lower()
+    dedupe = int(bool(params.get("dedupe_topN_by_ticker_date", False)))
+    return f"reverse_{ts}_h{horizon}_top{top_n}_m{market}_dedupe{dedupe}"
 
 
 def export_csv(df: pd.DataFrame | None, path: Path) -> None:
@@ -65,11 +67,15 @@ def export_report(
     Write CSV + Markdown report files and return their paths.
     """
     out_dir = ensure_data_dir(output_dir)
-    base = _base_name(params)
+    run_id = build_run_id(params)
+    run_dir = out_dir / run_id
+    figures_dir = run_dir / "figures"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    figures_dir.mkdir(parents=True, exist_ok=True)
 
-    compare_path = out_dir / f"compare_{base}.txt"
-    cluster_path = out_dir / f"cluster_summary_{base}.txt"
-    report_txt_path = out_dir / f"report_{base}.txt"
+    compare_path = run_dir / "compare.csv"
+    cluster_path = run_dir / "cluster_summary.csv"
+    report_md_path = run_dir / "report.md"
 
     export_csv(results.get("compare"), compare_path)
     export_csv(results.get("cluster_summary"), cluster_path)
@@ -90,10 +96,11 @@ def export_report(
         "## Klusterikooste",
         _format_cluster_summary(results.get("cluster_summary")),
     ]
-    report_txt_path.write_text("\n".join(lines), encoding="utf-8")
+    report_md_path.write_text("\n".join(lines), encoding="utf-8")
 
     return {
+        "run_dir": run_dir,
         "compare": compare_path,
         "cluster_summary": cluster_path,
-        "report_txt": report_txt_path,
+        "report": report_md_path,
     }

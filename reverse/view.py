@@ -368,7 +368,7 @@ class ReverseView:
             try:
                 paths = self.controller.export_report(self.current_results, params)
                 self._append_log(
-                    f"Raportti viety: {paths['report']} | Compare: {paths['compare']}"
+                    f"Raportti viety: {paths['report']} | Compare: {paths['compare']} | Run dir: {paths.get('run_dir')}"
                 )
                 self._set_status("Raportti tallennettu.", ft.Colors.GREEN_600)
             except Exception as exc:

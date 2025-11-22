@@ -93,5 +93,4 @@ class ReverseController:
     def export_report(self, results: dict[str, Any], params: dict[str, Any]) -> dict[str, Path]:
         if not results:
             raise ValueError("Aja analyysi ennen raportin vientiä.")
-        paths = reporting.export_report(results, params, output_dir=self.output_dir)
-        return paths
+        return reporting.export_report(results, params, output_dir=self.output_dir)
