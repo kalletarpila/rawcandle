@@ -116,7 +116,8 @@ def fetch_blackouts_for_missing_tickers(
     cancel_check: Optional[Callable[[], bool]] = None,
 ) -> dict:
     """
-    Hae blackout-päivät kaikille tickereille, joilta tiedot puuttuvat.
+    Hae blackout-päivät kaikille osakkeille start_date:stä alkaen.
+    Päivittää sekä osakkeet joilla on jo blackout-tietoja että ne joilta tiedot puuttuvat.
 
     Args:
         start_date: Aikaisin huomioitava päivä
@@ -126,7 +127,35 @@ def fetch_blackouts_for_missing_tickers(
         progress_callback: Kutsutaan jokaiselle tickerille (ticker, current, total)
     """
     db = DatabaseManager(db_path)
-    tickers = db.get_tickers_missing_blackouts(limit=limit)
+
+    # Hae kaikki osakkeet results_data ja analysis_findings tauluista
+    try:
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT DISTINCT ticker
+            FROM (
+                SELECT DISTINCT ticker FROM results_data WHERE ticker IS NOT NULL AND TRIM(ticker) != ''
+                UNION
+                SELECT DISTINCT ticker FROM analysis_findings WHERE ticker IS NOT NULL AND TRIM(ticker) != ''
+            ) AS combined_tickers
+            ORDER BY ticker
+        """
+            + (f" LIMIT {limit}" if limit else "")
+        )
+        tickers = [row[0] for row in cursor.fetchall()]
+    except Exception as e:
+        db.logger.error(f"Failed to get all tickers: {e}")
+        db.close()
+        return {
+            "inserted": 0,
+            "processed": 0,
+            "details": [],
+            "errors": [str(e)],
+            "tickers": [],
+        }
+
     total = len(tickers)
     if total == 0:
         db.close()
