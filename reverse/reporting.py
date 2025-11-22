@@ -69,7 +69,7 @@ def export_report(
 
     compare_path = out_dir / f"compare_{base}.txt"
     cluster_path = out_dir / f"cluster_summary_{base}.txt"
-    report_path = out_dir / f"report_{base}.md"
+    report_txt_path = out_dir / f"report_{base}.txt"
 
     export_csv(results.get("compare"), compare_path)
     export_csv(results.get("cluster_summary"), cluster_path)
@@ -90,10 +90,10 @@ def export_report(
         "## Klusterikooste",
         _format_cluster_summary(results.get("cluster_summary")),
     ]
-    report_path.write_text("\n".join(lines), encoding="utf-8")
+    report_txt_path.write_text("\n".join(lines), encoding="utf-8")
 
     return {
         "compare": compare_path,
         "cluster_summary": cluster_path,
-        "report": report_path,
+        "report_txt": report_txt_path,
     }
