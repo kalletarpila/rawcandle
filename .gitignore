@@ -41,6 +41,8 @@ data/*.db
 data/osakedata.csv
 data/loki.txt
 data/results_backup.csv
+data/reverse/*
+!data/reverse/.gitkeep
 data/test_*.txt
 
 # Large data files
