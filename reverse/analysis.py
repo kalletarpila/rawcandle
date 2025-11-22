@@ -327,8 +327,10 @@ def run_reverse_pipeline(
 
     compare = compute_feature_scoring(top, universe, validated_features)
     notify_progress(progress_cb, 0.5)
+    cluster_top_k = int(params.get("cluster_top_k_features", 40))
+    scored_features = compare["feature"].head(cluster_top_k).tolist() if not compare.empty else list(validated_features)
     clustered_top, cluster_summary = cluster_top(
-        top, validated_features, horizon=horizon, n_clusters=params.get("clusters", 5)
+        top, scored_features, horizon=horizon, n_clusters=params.get("clusters", 5)
     )
     notify_progress(progress_cb, 0.9)
 
@@ -339,6 +341,7 @@ def run_reverse_pipeline(
         "clustered_top": clustered_top,
         "cluster_summary": cluster_summary,
         "used_features": list(validated_features),
+        "cluster_features_used": scored_features,
         "params": params,
         "dedupe_topN_by_ticker_date": dedupe_topN,
     }

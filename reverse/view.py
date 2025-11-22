@@ -32,6 +32,7 @@ class ReverseView:
         self.exclude_crisis_checkbox: ft.Checkbox | None = None
         self.max_rows_field: ft.TextField | None = None
         self.dedupe_checkbox: ft.Checkbox | None = None
+        self.cluster_topk_field: ft.TextField | None = None
         self.feature_set_dropdown: ft.Dropdown | None = None
         self.custom_features_field: ft.TextField | None = None
         self.run_button: ft.ElevatedButton | None = None
@@ -110,6 +111,12 @@ class ReverseView:
             width=180,
             keyboard_type=ft.KeyboardType.NUMBER,
             helper_text="0 = ei rajaa",
+        )
+        self.cluster_topk_field = ft.TextField(
+            label="Cluster top-K features",
+            value="40",
+            width=180,
+            keyboard_type=ft.KeyboardType.NUMBER,
         )
         self.market_dropdown = ft.Dropdown(
             label="Market",
@@ -215,6 +222,7 @@ class ReverseView:
                     self.horizon_dropdown,
                     self.topn_field,
                     self.max_rows_field,
+                    self.cluster_topk_field,
                     self.market_dropdown,
                 ],
                 spacing=12,
@@ -389,6 +397,9 @@ class ReverseView:
             "market": market or "__all__",
             "max_rows": self._safe_int(
                 self.max_rows_field.value if self.max_rows_field else "0", 0
+            ),
+            "cluster_top_k_features": self._safe_int(
+                self.cluster_topk_field.value if self.cluster_topk_field else "40", 40
             ),
             "bullish_only": self.bullish_checkbox.value if self.bullish_checkbox else True,
             "exclude_blackout": self.exclude_blackout_checkbox.value
