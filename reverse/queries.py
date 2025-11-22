@@ -27,6 +27,53 @@ def build_universe_query(params: dict[str, Any]) -> tuple[str, list[Any]]:
     if params.get("exclude_crisis"):
         where.append("(COALESCE(is_crisis, 0) = 0)")
 
+    if params.get("only_candle_days"):
+        where.append("(COALESCE(is_candle_day, 0) = 1)")
+
+    if params.get("exclude_from_regression_only"):
+        where.append("(COALESCE(exclude_from_regression, 0) = 0)")
+
+    sector = (params.get("sector") or "").strip()
+    if sector and sector != "__all__":
+        where.append("sector = ?")
+        sql_params.append(sector)
+
+    rsi_min = params.get("rsi_min")
+    if rsi_min is not None:
+        try:
+            rsi_min_val = float(rsi_min)
+            where.append("RSI14_t0 >= ?")
+            sql_params.append(rsi_min_val)
+        except Exception:
+            pass
+
+    rsi_max = params.get("rsi_max")
+    if rsi_max is not None:
+        try:
+            rsi_max_val = float(rsi_max)
+            where.append("RSI14_t0 <= ?")
+            sql_params.append(rsi_max_val)
+        except Exception:
+            pass
+
+    vola_min = params.get("vola_min")
+    if vola_min is not None:
+        try:
+            vola_min_val = float(vola_min)
+            where.append("ATR_ratio_14 >= ?")
+            sql_params.append(vola_min_val)
+        except Exception:
+            pass
+
+    vola_max = params.get("vola_max")
+    if vola_max is not None:
+        try:
+            vola_max_val = float(vola_max)
+            where.append("ATR_ratio_14 <= ?")
+            sql_params.append(vola_max_val)
+        except Exception:
+            pass
+
     where_clause = ""
     if where:
         where_clause = "WHERE " + " AND ".join(where)
