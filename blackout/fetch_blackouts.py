@@ -25,7 +25,7 @@ def _clean_tickers(tickers: Iterable[str]) -> List[str]:
 def fetch_blackouts_for_tickers(
     tickers: Iterable[str],
     *,
-    start_date: str = "2022-01-01",
+    start_date: str = "2018-01-01",
     db_path: str = "data/analysis.db",
     db: Optional[DatabaseManager] = None,
 ) -> dict:
@@ -108,7 +108,7 @@ def fetch_blackouts_for_tickers(
 
 def fetch_blackouts_for_missing_tickers(
     *,
-    start_date: str = "2022-01-01",
+    start_date: str = "2018-01-01",
     db_path: str = "data/analysis.db",
     delay_seconds: float = 1.5,
     limit: Optional[int] = None,

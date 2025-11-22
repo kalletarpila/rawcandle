@@ -2760,11 +2760,32 @@ class RawCandleApp:
                     stock = yf.Ticker(ticker)
                     all_hist = pd.DataFrame()
 
-                    # Hae data jokaiselta aikaväliltä
+                    # Hae data jokaiselta aikaväliltä - jaa pitkät väliajat pienempiin osiin
                     for start_date, end_date in date_ranges:
-                        hist = stock.history(start=start_date, end=end_date)
-                        if not hist.empty:
-                            all_hist = pd.concat([all_hist, hist])
+                        start = datetime.fromisoformat(start_date)
+                        end = datetime.fromisoformat(end_date)
+
+                        # Jos aikaväli on yli 2 vuotta, jaa pienempiin osiin
+                        if (end - start).days > 730:  # 2 vuotta
+                            current_start = start
+                            while current_start < end:
+                                current_end = min(
+                                    current_start + timedelta(days=365), end
+                                )
+                                hist = stock.history(
+                                    start=current_start.strftime("%Y-%m-%d"),
+                                    end=current_end.strftime("%Y-%m-%d"),
+                                )
+                                if not hist.empty:
+                                    all_hist = pd.concat([all_hist, hist])
+                                current_start = current_end
+                                time.sleep(
+                                    0.5
+                                )  # Pieni tauko API:n kuormituksen vähentämiseksi
+                        else:
+                            hist = stock.history(start=start_date, end=end_date)
+                            if not hist.empty:
+                                all_hist = pd.concat([all_hist, hist])
 
                     # Poista duplikaatit ja järjestä
                     if not all_hist.empty:
@@ -2772,9 +2793,7 @@ class RawCandleApp:
                         all_hist = all_hist.sort_index()
                     else:
                         skipped_count += 1
-                        continue
-
-                    # Tallenna tietokantaan - vain uudet päivät
+                        continue  # Tallenna tietokantaan - vain uudet päivät
                     with sqlite3.connect(db_path) as conn:
                         cursor = conn.cursor()
 
@@ -3015,7 +3034,7 @@ Virheet: {error_count}"""
             width=420,
             value=initial_value,
         )
-        start_input = ft.TextField(label="Alkupäivä", width=200, value="2022-01-01")
+        start_input = ft.TextField(label="Alkupäivä", width=200, value="2018-01-01")
         status_text = ft.Text("", color=ft.Colors.GREY_700)
         progress_bar = ft.ProgressBar(width=420, visible=False)
 
@@ -3033,7 +3052,7 @@ Virheet: {error_count}"""
                 self.page.update()
                 return
 
-            start_date = start_input.value.strip() or "2022-01-01"
+            start_date = start_input.value.strip() or "2018-01-01"
             progress_bar.visible = True
             status_text.value = "Haetaan Yahoo Finance -tietoja..."
             self.page.update()
@@ -3147,7 +3166,7 @@ Virheet: {error_count}"""
 
             try:
                 result = fetch_blackouts_for_missing_tickers(
-                    start_date="2022-01-01",
+                    start_date="2018-01-01",
                     db_path=self.analysis_db_path,
                     delay_seconds=1.5,
                     progress_callback=progress_cb,
