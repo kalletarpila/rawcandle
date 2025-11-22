@@ -73,10 +73,10 @@ def export_report(
     run_dir.mkdir(parents=True, exist_ok=True)
     figures_dir.mkdir(parents=True, exist_ok=True)
 
-    compare_path = run_dir / "compare.csv"
-    cluster_path = run_dir / "cluster_summary.csv"
-    profiles_path = run_dir / "cluster_profiles.csv"
-    similarity_path = run_dir / "similarity_top.csv"
+    compare_path = run_dir / "compare.txt"
+    cluster_path = run_dir / "cluster_summary.txt"
+    profiles_path = run_dir / "cluster_profiles.txt"
+    similarity_path = run_dir / "similarity_top.txt"
     report_md_path = run_dir / "report.md"
 
     export_csv(results.get("compare"), compare_path)
