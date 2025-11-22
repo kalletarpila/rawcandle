@@ -27,10 +27,29 @@ def _deduplicate(items: Iterable[str]) -> list[str]:
     return ordered
 
 
+EXCLUDE_COLUMNS: set[str] = {
+    "id",
+    "ticker",
+    "date",
+    "created_at",
+    "market",
+    "sector",
+    # forward targets
+    "t2",
+    "t5",
+    "t10",
+    "t20",
+}
+
+
+def filter_predictor_features(cols: Sequence[str]) -> list[str]:
+    return [c for c in cols if c not in EXCLUDE_COLUMNS]
+
+
 MASTER_FEATURES: list[str] = _deduplicate(DB_MASTER_FEATURES + REGRESSION_FEATURES)
 
 TOP20_FEATURES: list[str] = [
-    "vahvuus",
+    "signal_strength",
     "RSI14_t0",
     "t0_volyymi",
     "t0_close_norm",
@@ -64,11 +83,11 @@ def get_features_for_mode(
     """
     feature_mode = (feature_mode or DEFAULT_FEATURE_SET).strip().lower()
     if feature_mode == "top20":
-        return list(TOP20_FEATURES)
+        return filter_predictor_features(TOP20_FEATURES)
     if feature_mode == "custom":
-        return list(custom_features or [])
+        return filter_predictor_features(custom_features or [])
     # default master
-    return list(MASTER_FEATURES)
+    return filter_predictor_features(MASTER_FEATURES)
 
 
 def validate_features(
