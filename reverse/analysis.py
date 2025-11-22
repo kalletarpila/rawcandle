@@ -94,7 +94,7 @@ def compute_feature_compare(
 
     denom = compare["universe_mean"].replace(0, np.nan)
     compare["pct_change"] = compare["diff"] / denom
-    compare["pct_change"].replace([np.inf, -np.inf], np.nan, inplace=True)
+    compare["pct_change"] = compare["pct_change"].replace([np.inf, -np.inf], np.nan)
 
     compare = compare.reset_index().rename(columns={"index": "feature"})
     compare["abs_diff"] = compare["diff"].abs()
