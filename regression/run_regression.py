@@ -46,15 +46,11 @@ DEFAULT_DB_PATH = PROJECT_ROOT / "data" / "analysis.db"
 RETURN_COLUMNS = ["t2", "t5", "t10", "t20"]
 FEATURE_COLUMNS = [
     # Peruspsykologia ja kynttilä
-    "vahvuus",
+    "signal_strength",
     "RSI14_t0",
     "t0_volyymi",
     "t0_close_norm",
-    # Divergenssiengageeratut featuret (engineered)
-    "is_divergence_today",  # divergence today (from divergence_data)
-    "recent_divergence_min_distance",  # days since last divergence (1-5, else 6)
-    "recent_divergence_decay_strength",  # strength / (1 + distance)
-    "rolling_BullDiv_influence",  # windowed influence of last 5 days
+    # Divergenssifeaturet (olemassa olevat sarakkeet)
     "bullDiv_offset",
     "bullDiv_last_1d",
     "bullDiv_last_2d",
@@ -139,7 +135,7 @@ BINARY_FEATURES.update(
         "has_same_day_reversal_cluster",
     }
 )
-BULL_DIV_DIAGNOSTIC_BASE = ["vahvuus", "Price_slope_10", "SPX_volatility_10"]
+BULL_DIV_DIAGNOSTIC_BASE = ["signal_strength", "Price_slope_10", "SPX_volatility_10"]
 BULL_DIV_DIAGNOSTIC_FEATURES = BULL_DIV_DIAGNOSTIC_BASE + COMBO_FEATURE_COLUMNS
 CRISIS_SUCCESS_LABELS = [
     f"success{h}" for h in sorted(DEFAULT_SUCCESS_THRESHOLDS.keys())
