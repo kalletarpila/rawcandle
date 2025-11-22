@@ -33,6 +33,7 @@ def select_topN(
     df: pd.DataFrame,
     horizon: int,
     top_n: int,
+    *,
     dedupe_ticker_date: bool = False,
 ) -> pd.DataFrame:
     """
@@ -54,6 +55,7 @@ def select_topN(
     if dedupe_ticker_date:
         # keep one best row per ticker+date
         filtered = filtered.drop_duplicates(subset=["ticker", "date"], keep="first")
+        filtered = filtered.sort_values(by=horizon_col, ascending=False)
 
     return filtered.head(max(1, int(top_n)))
 
@@ -205,4 +207,5 @@ def run_reverse_pipeline(
         "cluster_summary": cluster_summary,
         "used_features": list(validated_features),
         "params": params,
+        "dedupe_topN_by_ticker_date": dedupe_topN,
     }

@@ -31,6 +31,7 @@ class ReverseView:
         self.exclude_blackout_checkbox: ft.Checkbox | None = None
         self.exclude_crisis_checkbox: ft.Checkbox | None = None
         self.max_rows_field: ft.TextField | None = None
+        self.dedupe_checkbox: ft.Checkbox | None = None
         self.feature_set_dropdown: ft.Dropdown | None = None
         self.custom_features_field: ft.TextField | None = None
         self.run_button: ft.ElevatedButton | None = None
@@ -122,6 +123,10 @@ class ReverseView:
         )
         self.exclude_crisis_checkbox = ft.Checkbox(
             label="Exclude crisis window", value=False
+        )
+        self.dedupe_checkbox = ft.Checkbox(
+            label="Dedup TopN per ticker+date (pidä vain päivän paras pattern-rivi)",
+            value=False,
         )
         self.feature_set_dropdown = ft.Dropdown(
             label="Feature set",
@@ -220,6 +225,7 @@ class ReverseView:
                     self.bullish_checkbox,
                     self.exclude_blackout_checkbox,
                     self.exclude_crisis_checkbox,
+                    self.dedupe_checkbox,
                 ],
                 spacing=12,
                 wrap=True,
@@ -390,6 +396,9 @@ class ReverseView:
             else False,
             "exclude_crisis": self.exclude_crisis_checkbox.value
             if self.exclude_crisis_checkbox
+            else False,
+            "dedupe_topN_by_ticker_date": bool(self.dedupe_checkbox.value)
+            if self.dedupe_checkbox
             else False,
             "feature_set": self.feature_set_dropdown.value
             if self.feature_set_dropdown
