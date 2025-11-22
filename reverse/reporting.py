@@ -67,8 +67,8 @@ def export_report(
     out_dir = ensure_data_dir(output_dir)
     base = _base_name(params)
 
-    compare_path = out_dir / f"compare_{base}.csv"
-    cluster_path = out_dir / f"cluster_summary_{base}.csv"
+    compare_path = out_dir / f"compare_{base}.txt"
+    cluster_path = out_dir / f"cluster_summary_{base}.txt"
     report_path = out_dir / f"report_{base}.md"
 
     export_csv(results.get("compare"), compare_path)
