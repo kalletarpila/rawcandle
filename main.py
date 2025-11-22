@@ -3168,6 +3168,7 @@ Virheet: {error_count}"""
                 result = fetch_blackouts_for_missing_tickers(
                     start_date="2018-01-01",
                     db_path=self.analysis_db_path,
+                    osakedata_db_path=self.osakedata_db_path,
                     delay_seconds=1.5,
                     progress_callback=progress_cb,
                     cancel_check=lambda: cancelled["value"],

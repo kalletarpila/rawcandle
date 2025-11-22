@@ -110,6 +110,7 @@ def fetch_blackouts_for_missing_tickers(
     *,
     start_date: str = "2018-01-01",
     db_path: str = "data/analysis.db",
+    osakedata_db_path: Optional[str] = None,
     delay_seconds: float = 1.5,
     limit: Optional[int] = None,
     progress_callback: Optional[Callable[[str, int, int, int], None]] = None,
@@ -121,33 +122,29 @@ def fetch_blackouts_for_missing_tickers(
 
     Args:
         start_date: Aikaisin huomioitava päivä
-        db_path: Analysis-kannan polku
+        db_path: Analysis-kannan polku (kohde blackout-tiedoille)
+        osakedata_db_path: Osakedata-kannan polku (lähde osakkeille), jos None käytetään db_path
         delay_seconds: Viive jokaisen tickerin välillä
         limit: Kuinka monta tickeriä käsitellään (debug-tarkoituksiin)
         progress_callback: Kutsutaan jokaiselle tickerille (ticker, current, total)
     """
     db = DatabaseManager(db_path)
-
-    # Hae kaikki osakkeet results_data ja analysis_findings tauluista
+    
+    # Käytä osakedata_db_path jos annettu, muuten db_path
+    stock_db_path = osakedata_db_path or db_path
+    
+    # Hae kaikki osakkeet osakedata-kannasta
     try:
-        conn = db.get_connection()
+        import sqlite3
+        conn = sqlite3.connect(stock_db_path)
         cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT DISTINCT ticker
-            FROM (
-                SELECT DISTINCT ticker FROM results_data WHERE ticker IS NOT NULL AND TRIM(ticker) != ''
-                UNION
-                SELECT DISTINCT ticker FROM analysis_findings WHERE ticker IS NOT NULL AND TRIM(ticker) != ''
-            ) AS combined_tickers
-            ORDER BY ticker
-        """
-            + (f" LIMIT {limit}" if limit else "")
-        )
+        cursor.execute("SELECT DISTINCT osake FROM osakedata ORDER BY osake" + (f" LIMIT {limit}" if limit else ""))
         tickers = [row[0] for row in cursor.fetchall()]
+        conn.close()
     except Exception as e:
-        db.logger.error(f"Failed to get all tickers: {e}")
+        db.logger.error(f"Failed to get tickers from osakedata: {e}")
         db.close()
+        return {"inserted": 0, "processed": 0, "details": [], "errors": [str(e)], "tickers": []}
         return {
             "inserted": 0,
             "processed": 0,
