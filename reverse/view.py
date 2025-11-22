@@ -42,6 +42,8 @@ class ReverseView:
         self.log_field: ft.TextField | None = None
         self.top_summary_table: ft.DataTable | None = None
         self.cluster_summary_table: ft.DataTable | None = None
+        self.cluster_profile_dropdown: ft.Dropdown | None = None
+        self.cluster_profile_table: ft.DataTable | None = None
         self.plot_container: ft.ResponsiveRow | None = None
 
     def create_view(self) -> ft.View:
@@ -199,6 +201,24 @@ class ReverseView:
             column_spacing=18,
             heading_row_color=ft.Colors.GREY_100,
         )
+        self.cluster_profile_dropdown = ft.Dropdown(
+            label="Valitse cluster",
+            options=[],
+            on_change=self._on_cluster_profile_change,
+            width=200,
+        )
+        self.cluster_profile_table = ft.DataTable(
+            columns=[
+                ft.DataColumn(ft.Text("Feature", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Median")),
+                ft.DataColumn(ft.Text("q25")),
+                ft.DataColumn(ft.Text("q75")),
+                ft.DataColumn(ft.Text("Δ vs top mean")),
+            ],
+            rows=[],
+            heading_row_color=ft.Colors.GREY_100,
+            column_spacing=12,
+        )
         self.plot_container = ft.ResponsiveRow([], spacing=10, run_spacing=10)
 
     def _build_market_options(self) -> List[ft.dropdown.Option]:
@@ -301,6 +321,13 @@ class ReverseView:
                         ft.Container(
                             height=200,
                             content=ft.Column([self.cluster_summary_table], scroll=ft.ScrollMode.AUTO),
+                        ),
+                        ft.Divider(),
+                        ft.Text("Cluster profiles", size=18, weight=ft.FontWeight.BOLD),
+                        ft.Row([self.cluster_profile_dropdown]),
+                        ft.Container(
+                            height=260,
+                            content=ft.Column([self.cluster_profile_table], scroll=ft.ScrollMode.AUTO),
                         ),
                     ],
                     spacing=16,
@@ -481,6 +508,14 @@ class ReverseView:
                     )
                 )
         self.cluster_summary_table.rows = rows
+        # update cluster profile options
+        cluster_ids = [str(row["cluster_id"]) for _, row in (cluster_df or pd.DataFrame()).iterrows()] if cluster_df is not None else []
+        options = [ft.dropdown.Option(cid) for cid in cluster_ids]
+        if self.cluster_profile_dropdown:
+            self.cluster_profile_dropdown.options = options
+            if options and not self.cluster_profile_dropdown.value:
+                self.cluster_profile_dropdown.value = options[0].key
+        self._update_cluster_profile_table()
 
     def _update_plots(self, plots: list[dict]):
         if not self.plot_container:
@@ -507,6 +542,41 @@ class ReverseView:
         if not controls:
             controls = [ft.Text("Kuvaajia ei saatavilla.")]
         self.plot_container.controls = controls
+
+    def _on_cluster_profile_change(self, _):
+        self._update_cluster_profile_table()
+
+    def _update_cluster_profile_table(self):
+        if not self.cluster_profile_table:
+            return
+        selected = None
+        if self.cluster_profile_dropdown:
+            selected = self.cluster_profile_dropdown.value
+        profiles = []
+        if self.current_results:
+            profiles = self.current_results.get("cluster_profiles")
+        rows = []
+        if selected and profiles is not None and not getattr(profiles, "empty", True):
+            try:
+                df = profiles[profiles["cluster_id"] == int(selected)]
+                df = df.copy()
+                df["abs_delta"] = df["delta_vs_top_mean"].abs()
+                df = df.sort_values("abs_delta", ascending=False).head(10)
+                for _, row in df.iterrows():
+                    rows.append(
+                        ft.DataRow(
+                            cells=[
+                                ft.DataCell(ft.Text(str(row["feature"]))),
+                                ft.DataCell(ft.Text(f"{row['median']:.4f}")),
+                                ft.DataCell(ft.Text(f"{row['q25']:.4f}")),
+                                ft.DataCell(ft.Text(f"{row['q75']:.4f}")),
+                                ft.DataCell(ft.Text(f"{row['delta_vs_top_mean']:.4f}")),
+                            ]
+                        )
+                    )
+            except Exception:
+                pass
+        self.cluster_profile_table.rows = rows
 
     def _update_progress(self, value: float):
         if not self.progress_bar:

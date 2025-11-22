@@ -75,10 +75,12 @@ def export_report(
 
     compare_path = run_dir / "compare.csv"
     cluster_path = run_dir / "cluster_summary.csv"
+    profiles_path = run_dir / "cluster_profiles.csv"
     report_md_path = run_dir / "report.md"
 
     export_csv(results.get("compare"), compare_path)
     export_csv(results.get("cluster_summary"), cluster_path)
+    export_csv(results.get("cluster_profiles"), profiles_path)
 
     lines: list[str] = [
         "# Reverse-analyysin raportti",
@@ -95,12 +97,34 @@ def export_report(
         "",
         "## Klusterikooste",
         _format_cluster_summary(results.get("cluster_summary")),
+        "",
+        "## Cluster profiles (top 10 delta features per cluster)",
     ]
+    profiles = results.get("cluster_profiles")
+    if profiles is not None and not getattr(profiles, "empty", True):
+        try:
+            prof = profiles.copy()
+            prof["abs_delta"] = prof["delta_vs_top_mean"].abs()
+            for cid, grp in prof.groupby("cluster_id"):
+                lines.append(f"### Cluster {cid}")
+                top_feats = grp.sort_values("abs_delta", ascending=False).head(10)
+                lines.append("| feature | median | q25 | q75 | delta_vs_top_mean |")
+                lines.append("| --- | --- | --- | --- | --- |")
+                for _, row in top_feats.iterrows():
+                    lines.append(
+                        f"| {row['feature']} | {row['median']:.4f} | {row['q25']:.4f} | {row['q75']:.4f} | {row['delta_vs_top_mean']:.4f} |"
+                    )
+                lines.append("")
+        except Exception:
+            lines.append("_Cluster profiles unavailable_")
+    else:
+        lines.append("_Cluster profiles unavailable_")
     report_md_path.write_text("\n".join(lines), encoding="utf-8")
 
     return {
         "run_dir": run_dir,
         "compare": compare_path,
         "cluster_summary": cluster_path,
+        "cluster_profiles": profiles_path,
         "report": report_md_path,
     }

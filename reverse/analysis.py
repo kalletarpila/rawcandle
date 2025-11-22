@@ -243,12 +243,12 @@ def cluster_top(
     *,
     horizon: int,
     n_clusters: int = 5,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Cluster the Top-N winners and return labels + summary stats.
     """
     if top.empty or not feature_cols:
-        return top.copy(), pd.DataFrame()
+        return top.copy(), pd.DataFrame(), pd.DataFrame()
 
     numeric = top[feature_cols].apply(pd.to_numeric, errors="coerce")
     fill_values = numeric.median(numeric_only=True).fillna(0)
@@ -265,6 +265,8 @@ def cluster_top(
 
     horizon_col = f"t{horizon}"
     summaries: list[dict[str, Any]] = []
+    profiles: list[dict[str, Any]] = []
+    top_feature_means = numeric.mean()
     global_means = numeric.mean()
     for cluster_id, group in clustered.groupby("cluster_id"):
         entry: dict[str, Any] = {
@@ -277,8 +279,25 @@ def cluster_top(
         deltas = (cluster_means - global_means).abs().sort_values(ascending=False)
         entry["top_features"] = ", ".join(deltas.head(3).index.tolist())
         summaries.append(entry)
+        # profiles long form
+        cluster_numeric = numeric.loc[group.index]
+        medians = cluster_numeric.median()
+        q25 = cluster_numeric.quantile(0.25)
+        q75 = cluster_numeric.quantile(0.75)
+        for feat in feature_cols:
+            profiles.append(
+                {
+                    "cluster_id": int(cluster_id),
+                    "feature": feat,
+                    "median": float(medians.get(feat, np.nan)),
+                    "q25": float(q25.get(feat, np.nan)),
+                    "q75": float(q75.get(feat, np.nan)),
+                    "delta_vs_top_mean": float(medians.get(feat, np.nan) - top_feature_means.get(feat, np.nan)),
+                }
+            )
     summary_df = pd.DataFrame(summaries).sort_values("cluster_id")
-    return clustered, summary_df
+    profiles_df = pd.DataFrame(profiles)
+    return clustered, summary_df, profiles_df
 
 
 def run_reverse_pipeline(
@@ -329,7 +348,7 @@ def run_reverse_pipeline(
     notify_progress(progress_cb, 0.5)
     cluster_top_k = int(params.get("cluster_top_k_features", 40))
     scored_features = compare["feature"].head(cluster_top_k).tolist() if not compare.empty else list(validated_features)
-    clustered_top, cluster_summary = cluster_top(
+    clustered_top, cluster_summary, cluster_profiles = cluster_top(
         top, scored_features, horizon=horizon, n_clusters=params.get("clusters", 5)
     )
     notify_progress(progress_cb, 0.9)
@@ -340,6 +359,7 @@ def run_reverse_pipeline(
         "compare": compare,
         "clustered_top": clustered_top,
         "cluster_summary": cluster_summary,
+        "cluster_profiles": cluster_profiles,
         "used_features": list(validated_features),
         "cluster_features_used": scored_features,
         "params": params,

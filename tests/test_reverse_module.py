@@ -70,9 +70,10 @@ def test_compute_feature_scoring_shapes():
 def test_cluster_top_labels():
     df = _build_sample_df()
     features = ["RSI14_t0", "t0_volyymi", "Volume_impulse"]
-    clustered, summary = analysis.cluster_top(
+    clustered, summary, profiles = analysis.cluster_top(
         df, features, horizon=10, n_clusters=3
     )
     assert "cluster_id" in clustered.columns
     assert not summary.empty
     assert summary["cluster_id"].nunique() <= 3
+    assert profiles is not None
