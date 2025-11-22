@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Sequence
 import logging
+from math import erf, sqrt
 
 import numpy as np
 import pandas as pd
@@ -60,48 +61,173 @@ def select_topN(
     return filtered.head(max(1, int(top_n)))
 
 
-def compute_feature_compare(
+def _norm_sf_two_sided(z: float) -> float:
+    """Two-sided tail probability from z using error function (no scipy dependency)."""
+    if np.isnan(z):
+        return np.nan
+    cdf = 0.5 * (1 + erf(z / sqrt(2)))
+    return 2 * (1 - cdf if z >= 0 else cdf)
+
+
+def _bh_q_values(p_values: list[float]) -> list[float]:
+    """Benjamini–Hochberg FDR."""
+    n = len(p_values)
+    if n == 0:
+        return []
+    sorted_idx = np.argsort(p_values)
+    p_sorted = np.array(p_values)[sorted_idx]
+    q = np.empty(n)
+    prev = 1.0
+    for i in range(n - 1, -1, -1):
+        rank = i + 1
+        val = p_sorted[i] * n / rank
+        prev = min(prev, val)
+        q[i] = min(prev, 1.0)
+    result = np.empty(n)
+    result[sorted_idx] = q
+    return result.tolist()
+
+
+def compute_feature_scoring(
     top: pd.DataFrame,
     universe: pd.DataFrame,
     feature_cols: Sequence[str],
 ) -> pd.DataFrame:
     """
-    Compare feature statistics between Top-N and the full universe.
-    Missing values are preserved (NOT forced to 0) to avoid bias.
-    Adds missing-rate diagnostics.
+    Compute statistical scoring for features between Top-N and universe.
+    Produces effect sizes, p-values and q-values (BH FDR).
     """
     if not feature_cols:
         return pd.DataFrame()
 
-    top_stats = top[feature_cols].apply(pd.to_numeric, errors="coerce")
-    universe_stats = universe[feature_cols].apply(pd.to_numeric, errors="coerce")
+    rows: list[dict[str, Any]] = []
+    p_values: list[float] = []
 
-    compare = pd.DataFrame(index=feature_cols)
-    compare["top_mean"] = top_stats.mean()
-    compare["top_median"] = top_stats.median()
-    compare["universe_mean"] = universe_stats.mean()
-    compare["universe_median"] = universe_stats.median()
-    compare["top_q25"] = top_stats.quantile(0.25)
-    compare["top_q75"] = top_stats.quantile(0.75)
-    compare["universe_q25"] = universe_stats.quantile(0.25)
-    compare["universe_q75"] = universe_stats.quantile(0.75)
+    def _is_binary(series: pd.Series) -> bool:
+        non_null = series.dropna().unique()
+        if len(non_null) == 0:
+            return False
+        return set(non_null).issubset({0, 1})
 
-    # Missing-rate diagnostics (0..1)
-    compare["top_missing_rate"] = top_stats.isna().mean()
-    compare["universe_missing_rate"] = universe_stats.isna().mean()
+    for col in feature_cols:
+        top_col = pd.to_numeric(top.get(col, pd.Series(dtype=float)), errors="coerce")
+        uni_col = pd.to_numeric(universe.get(col, pd.Series(dtype=float)), errors="coerce")
+        top_missing = float(top_col.isna().mean()) if len(top_col) else np.nan
+        uni_missing = float(uni_col.isna().mean()) if len(uni_col) else np.nan
 
-    compare["diff"] = compare["top_mean"] - compare["universe_mean"]
+        entry: dict[str, Any] = {
+            "feature": col,
+            "top_missing_rate": top_missing,
+            "universe_missing_rate": uni_missing,
+            "kind": "numeric",
+            "p_value": np.nan,
+            "q_value": np.nan,
+            "effect_size": np.nan,
+        }
 
-    denom = compare["universe_mean"].replace(0, np.nan)
-    compare["pct_change"] = compare["diff"] / denom
-    compare["pct_change"] = compare["pct_change"].replace([np.inf, -np.inf], np.nan)
+        if _is_binary(pd.concat([top_col, uni_col])):
+            entry["kind"] = "binary"
+            top_vals = top_col.dropna()
+            uni_vals = uni_col.dropna()
+            if len(top_vals) == 0 or len(uni_vals) == 0:
+                rows.append(entry)
+                p_values.append(np.nan)
+                continue
+            top_rate = float(top_vals.mean())
+            uni_rate = float(uni_vals.mean())
+            entry["top_rate"] = top_rate
+            entry["universe_rate"] = uni_rate
+            entry["diff"] = top_rate - uni_rate
+            entry["pct_change"] = np.nan
+            # effect size: log odds ratio with smoothing to avoid inf
+            eps = 1e-6
+            odds_top = (top_rate + eps) / (1 - top_rate + eps)
+            odds_uni = (uni_rate + eps) / (1 - uni_rate + eps)
+            entry["effect_size"] = float(np.log(odds_top) - np.log(odds_uni))
 
-    compare = compare.reset_index().rename(columns={"index": "feature"})
-    compare["abs_diff"] = compare["diff"].abs()
+            try:
+                from scipy.stats import fisher_exact
 
-    # NOTE: do NOT fillna(0) here; UI can decide display defaults later.
-    compare = compare.sort_values(by="abs_diff", ascending=False)
-    return compare
+                table = [
+                    [top_vals.sum(), len(top_vals) - top_vals.sum()],
+                    [uni_vals.sum(), len(uni_vals) - uni_vals.sum()],
+                ]
+                _, p_val = fisher_exact(table, alternative="two-sided")
+            except Exception:
+                # two-proportion z-test fallback
+                p_pool = ((top_vals.sum() + uni_vals.sum()) / (len(top_vals) + len(uni_vals)))
+                denom = p_pool * (1 - p_pool) * (1 / len(top_vals) + 1 / len(uni_vals))
+                if denom <= 0:
+                    p_val = np.nan
+                else:
+                    z = (top_rate - uni_rate) / sqrt(denom)
+                    p_val = _norm_sf_two_sided(abs(z))
+            entry["p_value"] = p_val
+            p_values.append(p_val)
+            rows.append(entry)
+            continue
+
+        # numeric
+        top_vals = top_col.dropna()
+        uni_vals = uni_col.dropna()
+        if len(top_vals) == 0 or len(uni_vals) == 0:
+            rows.append(entry)
+            p_values.append(np.nan)
+            continue
+
+        top_mean = float(top_vals.mean())
+        uni_mean = float(uni_vals.mean())
+        diff = top_mean - uni_mean
+        entry["top_mean"] = top_mean
+        entry["universe_mean"] = uni_mean
+        entry["diff"] = diff
+        denom = uni_mean if uni_mean != 0 else np.nan
+        entry["pct_change"] = diff / denom if denom not in (0, np.nan) else np.nan
+
+        # pooled std (Cohen's d)
+        std_top = float(top_vals.std(ddof=1)) if len(top_vals) > 1 else np.nan
+        std_uni = float(uni_vals.std(ddof=1)) if len(uni_vals) > 1 else np.nan
+        pooled = np.nan
+        if not np.isnan(std_top) and not np.isnan(std_uni):
+            pooled = sqrt(
+                (((len(top_vals) - 1) * std_top ** 2) + ((len(uni_vals) - 1) * std_uni ** 2))
+                / (len(top_vals) + len(uni_vals) - 2)
+            )
+        if pooled and not np.isnan(pooled) and pooled > 0:
+            entry["effect_size"] = diff / pooled
+
+        try:
+            from scipy.stats import mannwhitneyu
+
+            _, p_val = mannwhitneyu(top_vals, uni_vals, alternative="two-sided")
+        except Exception:
+            # permutation test fallback
+            combined = np.concatenate([top_vals.values, uni_vals.values])
+            n1 = len(top_vals)
+            obs = abs(diff)
+            more_extreme = 0
+            iters = min(200, max(20, len(combined)))
+            rng = np.random.default_rng(42)
+            for _ in range(iters):
+                rng.shuffle(combined)
+                new_top = combined[:n1]
+                new_uni = combined[n1:]
+                if abs(new_top.mean() - new_uni.mean()) >= obs:
+                    more_extreme += 1
+            p_val = more_extreme / iters if iters else np.nan
+        entry["p_value"] = p_val
+        p_values.append(p_val)
+        rows.append(entry)
+
+    # Apply BH FDR
+    q_vals = _bh_q_values([pv if pv is not None else np.nan for pv in p_values])
+    for row, q in zip(rows, q_vals):
+        row["q_value"] = q
+        row["abs_effect"] = abs(row.get("effect_size")) if row.get("effect_size") is not None else abs(row.get("diff", np.nan))
+
+    df = pd.DataFrame(rows)
+    df = df.sort_values(by="abs_effect", ascending=False)
+    return df
 
 
 def cluster_top(
@@ -192,7 +318,7 @@ def run_reverse_pipeline(
     if not validated_features:
         raise ValueError("Yhtään pyydetyistä featureista ei löytynyt results_data-taulusta.")
 
-    compare = compute_feature_compare(top, universe, validated_features)
+    compare = compute_feature_scoring(top, universe, validated_features)
     notify_progress(progress_cb, 0.5)
     clustered_top, cluster_summary = cluster_top(
         top, validated_features, horizon=horizon, n_clusters=params.get("clusters", 5)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from reverse.analysis import compute_feature_compare, select_topN
+from reverse.analysis import compute_feature_scoring, select_topN
 
 
 def test_compare_does_not_force_missing_to_zero():
@@ -19,7 +19,7 @@ def test_compare_does_not_force_missing_to_zero():
     top = universe.iloc[:1].copy()
     top["feat_x"] = 5.0  # top has value, universe mostly missing
 
-    cmp = compute_feature_compare(top, universe, ["feat_x", "feat_y"])
+    cmp = compute_feature_scoring(top, universe, ["feat_x", "feat_y"])
     row_x = cmp[cmp["feature"] == "feat_x"].iloc[0]
     assert np.isnan(row_x["universe_mean"])
     assert row_x["universe_missing_rate"] == 1.0

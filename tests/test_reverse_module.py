@@ -50,16 +50,19 @@ def test_select_topN():
     assert top.iloc[0]["t10"] >= top.iloc[-1]["t10"]
 
 
-def test_compute_feature_compare_shapes():
+def test_compute_feature_scoring_shapes():
     df = _build_sample_df()
     features = ["RSI14_t0", "t0_volyymi"]
-    compare = analysis.compute_feature_compare(df.head(3), df, features)
+    compare = analysis.compute_feature_scoring(df.head(3), df, features)
     assert set(compare.columns) >= {
         "feature",
         "top_mean",
         "universe_mean",
         "diff",
         "pct_change",
+        "p_value",
+        "q_value",
+        "effect_size",
     }
     assert len(compare) == len(features)
 
