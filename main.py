@@ -990,6 +990,14 @@ class RawCandleApp:
                     return cancelled["value"]
 
                 def worker():
+                    # Get date range from Candles view
+                    gen_start_date = None
+                    gen_end_date = None
+                    if self.candles_date_radio_group.value == "range":
+                        if self.candles_start_date.value and self.candles_end_date.value:
+                            gen_start_date = self.candles_start_date.value.isoformat()
+                            gen_end_date = self.candles_end_date.value.isoformat()
+                    
                     inserted = 0
                     errors = []
                     try:
@@ -999,6 +1007,8 @@ class RawCandleApp:
                             progress_callback=progress_callback,
                             cancel_check=cancel_check,
                             market=selected_market,
+                            start_date=gen_start_date,
+                            end_date=gen_end_date,
                         )
 
                         # Update progress dialog to show results

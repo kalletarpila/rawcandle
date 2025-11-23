@@ -150,9 +150,9 @@ class DowntrendGenerator:
         # Criterion 1: Progressive decline (strictly decreasing at checkpoints)
         # t-10 > t-5 > t-2 > t0 (using last 11 days of the 55-day window)
         t_minus_10 = closes[44]  # index 44 (t-10 relative to t0 at index 54)
-        t_minus_5 = closes[49]   # index 49 (t-5 relative to t0 at index 54)
-        t_minus_2 = closes[52]   # index 52 (t-2 relative to t0 at index 54)
-        t0 = closes[54]          # index 54
+        t_minus_5 = closes[49]  # index 49 (t-5 relative to t0 at index 54)
+        t_minus_2 = closes[52]  # index 52 (t-2 relative to t0 at index 54)
+        t0 = closes[54]  # index 54
 
         if not (t_minus_10 > t_minus_5 > t_minus_2 > t0):
             return False
@@ -318,27 +318,37 @@ class DowntrendGenerator:
             )
             return None
 
-    def _get_ticker_dates(self, conn: sqlite3.Connection, ticker: str) -> List[str]:
-        """Get all dates for a ticker starting from 2024-01-01.
+    def _get_ticker_dates(self, conn: sqlite3.Connection, ticker: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> List[str]:
+        """Get all dates for a ticker within the specified date range.
 
         Args:
             conn: Database connection
             ticker: Stock ticker
+            start_date: Start date (optional, defaults to 2024-01-01)
+            end_date: End date (optional)
 
         Returns:
             List of dates (as strings)
         """
         try:
             cursor = conn.cursor()
+            
+            date_filter = "pvm >= ?"
+            params = [start_date or "2024-01-01"]
+            
+            if end_date:
+                date_filter += " AND pvm <= ?"
+                params.append(end_date)
+            
             cursor.execute(
-                """
+                f"""
                 SELECT DISTINCT pvm
                 FROM osakedata
                 WHERE osake = ?
-                  AND pvm >= '2024-01-01'
+                  AND {date_filter}
                 ORDER BY pvm
             """,
-                (ticker,),
+                [ticker] + params
             )
 
             rows = cursor.fetchall()
@@ -354,6 +364,8 @@ class DowntrendGenerator:
         progress_callback: Optional[Callable[[int, int], None]] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
         market: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
     ) -> Tuple[int, List[str]]:
         """Generate downtrend events from real stock data.
 
@@ -430,9 +442,13 @@ class DowntrendGenerator:
                     progress_callback(ticker_idx, len(tickers))
 
                 # Get all available dates for this ticker
-                available_dates = self._get_ticker_dates(stock_conn, ticker)
-                if len(available_dates) < 85:  # Tarvitsetaan 55 päivää historiaa + 30 päivää tulevaisuutta
-                    errors.append(f"Ticker {ticker}: insufficient data (< 85 days total)")
+                available_dates = self._get_ticker_dates(stock_conn, ticker, start_date, end_date)
+                if (
+                    len(available_dates) < 85
+                ):  # Tarvitsetaan 55 päivää historiaa + 30 päivää tulevaisuutta
+                    errors.append(
+                        f"Ticker {ticker}: insufficient data (< 85 days total)"
+                    )
                     continue
 
                 # Try to find downtrend events
@@ -455,13 +471,14 @@ class DowntrendGenerator:
                         break
 
                     # Valitse päivämäärä jota ei ole vielä käytetty
-                    history_offset = max(
-                        self.MIN_DOWNTREND_HISTORY, self.RSI_PERIOD
+                    history_offset = max(self.MIN_DOWNTREND_HISTORY, self.RSI_PERIOD)
+                    future_offset = (
+                        30  # Tarvitsetaan vähintään 30 päivää tulevaisuudataa
                     )
-                    future_offset = 30  # Tarvitsetaan vähintään 30 päivää tulevaisuudataa
-                    
+
                     available_unused_dates = [
-                        d for d in available_dates[history_offset:-future_offset] 
+                        d
+                        for d in available_dates[history_offset:-future_offset]
                         if d not in used_dates
                     ]
 
@@ -532,6 +549,8 @@ def generate_random_findings(
     stock_db_path: str = "data/osakedata.db",
     analysis_db_path: str = "data/analysis.db",
     market: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
 ) -> Tuple[int, List[str]]:
     """Convenience function for generating downtrend events.
 
@@ -547,4 +566,6 @@ def generate_random_findings(
         progress_callback=progress_callback,
         cancel_check=cancel_check,
         market=market,
+        start_date=start_date,
+        end_date=end_date,
     )
