@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class DowntrendGenerator:
     """Generates downtrend events from real stock data."""
 
-    MIN_DOWNTREND_HISTORY = 10
+    MIN_DOWNTREND_HISTORY = 54  # Tarvitsetaan 55 päivää historiadataa (t-54 ... t0)
     RSI_PERIOD = 14
 
     def __init__(
@@ -95,7 +95,7 @@ class DowntrendGenerator:
         conn: sqlite3.Connection,
         ticker: str,
         target_date: str,
-        days_back: int = 10,
+        days_back: int = 54,
     ) -> Optional[List[Dict]]:
         """Get historical price data for a ticker around a specific date.
 
@@ -103,7 +103,7 @@ class DowntrendGenerator:
             conn: Database connection
             ticker: Stock ticker symbol
             target_date: Target date (t0)
-            days_back: Number of days to fetch before target date
+            days_back: Number of days to fetch before target date (default 54 for 55 days history)
 
         Returns:
             List of price records sorted by date (oldest first), or None if insufficient data
@@ -136,43 +136,43 @@ class DowntrendGenerator:
         """Check if price data meets all three downtrend criteria.
 
         Args:
-            price_data: List of 11 price records [t-10, t-9, ..., t-1, t0]
+            price_data: List of 55 price records [t-54, t-53, ..., t-1, t0]
 
         Returns:
             True if all criteria are met
         """
-        if len(price_data) != 11:
+        if len(price_data) != 55:
             return False
 
         # Extract closing prices
         closes = [d["close"] for d in price_data]
 
         # Criterion 1: Progressive decline (strictly decreasing at checkpoints)
-        # t-10 > t-5 > t-2 > t0
-        t_minus_10 = closes[0]  # index 0
-        t_minus_5 = closes[5]  # index 5
-        t_minus_2 = closes[8]  # index 8
-        t0 = closes[10]  # index 10
+        # t-54 > t-27 > t-13 > t0
+        t_minus_54 = closes[0]   # index 0
+        t_minus_27 = closes[27]  # index 27
+        t_minus_13 = closes[41]  # index 41
+        t0 = closes[54]          # index 54
 
-        if not (t_minus_10 > t_minus_5 > t_minus_2 > t0):
+        if not (t_minus_54 > t_minus_27 > t_minus_13 > t0):
             return False
 
-        # Criterion 2: Minimum 3% drop over 10 days
-        drop_pct = ((t_minus_10 - t0) / t_minus_10) * 100
+        # Criterion 2: Minimum 3% drop over 54 days
+        drop_pct = ((t_minus_54 - t0) / t_minus_54) * 100
         if drop_pct < 3.0:
             return False
 
         # Criterion 3: Moving average filter
-        # MA5 = average of [t-5, t-4, t-3, t-2, t-1] (indices 5-9)
-        # MA10 = average of [t-10, t-9, ..., t-2, t-1] (indices 0-9)
-        ma5_closes = closes[5:10]  # [t-5, t-4, t-3, t-2, t-1]
-        ma10_closes = closes[0:10]  # [t-10, t-9, ..., t-2, t-1]
+        # MA13 = average of [t-13, t-12, ..., t-1] (indices 41-53)
+        # MA27 = average of [t-27, t-26, ..., t-1] (indices 27-53)
+        ma13_closes = closes[41:54]  # [t-13, t-12, ..., t-1]
+        ma27_closes = closes[27:54]  # [t-27, t-26, ..., t-1]
 
-        ma5 = sum(ma5_closes) / len(ma5_closes)
-        ma10 = sum(ma10_closes) / len(ma10_closes)
+        ma13 = sum(ma13_closes) / len(ma13_closes)
+        ma27 = sum(ma27_closes) / len(ma27_closes)
 
-        # Both conditions must be true: close(t0) < MA10 AND MA5 < MA10
-        if not (t0 < ma10 and ma5 < ma10):
+        # Both conditions must be true: close(t0) < MA27 AND MA13 < MA27
+        if not (t0 < ma27 and ma13 < ma27):
             return False
 
         return True
@@ -362,11 +362,16 @@ class DowntrendGenerator:
         2. Finds dates that meet downtrend criteria
         3. Saves matching events to analysis.db
 
+        Requirements:
+        - Minimum 55 days of historical data before event date
+        - Minimum 30 days of future data after event date
+        - Total minimum: 85 days of data per stock
+
         Downtrend criteria (all three required):
-        1. Progressive decline: close(t-10) > close(t-5) > close(t-2) > close(t0)
-        2. Minimum 3% drop: ((close(t-10) - close(t0)) / close(t-10)) * 100 >= 3
-        3. MA filter: close(t0) < MA10 AND MA5 < MA10
-           where MA5 = avg([t-5..t-1]), MA10 = avg([t-10..t-1])
+        1. Progressive decline: close(t-54) > close(t-27) > close(t-13) > close(t0)
+        2. Minimum 3% drop: ((close(t-54) - close(t0)) / close(t-54)) * 100 >= 3
+        3. MA filter: close(t0) < MA27 AND MA13 < MA27
+           where MA13 = avg([t-13..t-1]), MA27 = avg([t-27..t-1])
 
         Args:
         num_tickers: Number of stocks to process (1..4000)
@@ -426,8 +431,8 @@ class DowntrendGenerator:
 
                 # Get all available dates for this ticker
                 available_dates = self._get_ticker_dates(stock_conn, ticker)
-                if len(available_dates) < 11:
-                    errors.append(f"Ticker {ticker}: insufficient data (< 11 days)")
+                if len(available_dates) < 85:  # Tarvitsetaan 55 päivää historiaa + 30 päivää tulevaisuutta
+                    errors.append(f"Ticker {ticker}: insufficient data (< 85 days total)")
                     continue
 
                 # Try to find downtrend events
@@ -443,17 +448,21 @@ class DowntrendGenerator:
 
                     attempts += 1
 
-                    # Select random date (must have at least 10 days before it)
-                    # Skip first 10 dates to ensure we have t-10 data
-                    if len(available_dates) < 11:
+                    # Select random date (must have at least 54 days before it and 30 days after)
+                    # Skip first 54 dates to ensure we have t-54 data
+                    # Also ensure at least 30 days of future data available
+                    if len(available_dates) < 85:  # 54 + 1 + 30
                         break
 
                     # Valitse päivämäärä jota ei ole vielä käytetty
                     history_offset = max(
                         self.MIN_DOWNTREND_HISTORY, self.RSI_PERIOD
                     )
+                    future_offset = 30  # Tarvitsetaan vähintään 30 päivää tulevaisuudataa
+                    
                     available_unused_dates = [
-                        d for d in available_dates[history_offset:] if d not in used_dates
+                        d for d in available_dates[history_offset:-future_offset] 
+                        if d not in used_dates
                     ]
 
                     # Jos kaikki päivämäärät on käytetty, lopeta
@@ -466,9 +475,9 @@ class DowntrendGenerator:
                     target_date = random.choice(available_unused_dates)
                     used_dates.add(target_date)  # Merkitse päivämäärä käytetyksi
 
-                    # Get price data [t-10 ... t0]
+                    # Get price data [t-54 ... t0]
                     price_data = self._get_price_data(
-                        stock_conn, ticker, target_date, days_back=10
+                        stock_conn, ticker, target_date, days_back=54
                     )
 
                     if not price_data:
