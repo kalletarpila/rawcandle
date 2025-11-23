@@ -994,10 +994,13 @@ class RawCandleApp:
                     gen_start_date = None
                     gen_end_date = None
                     if self.candles_date_radio_group.value == "range":
-                        if self.candles_start_date.value and self.candles_end_date.value:
+                        if (
+                            self.candles_start_date.value
+                            and self.candles_end_date.value
+                        ):
                             gen_start_date = self.candles_start_date.value.isoformat()
                             gen_end_date = self.candles_end_date.value.isoformat()
-                    
+
                     inserted = 0
                     errors = []
                     try:

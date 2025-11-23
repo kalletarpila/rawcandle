@@ -129,22 +129,32 @@ def fetch_blackouts_for_missing_tickers(
         progress_callback: Kutsutaan jokaiselle tickerille (ticker, current, total)
     """
     db = DatabaseManager(db_path)
-    
+
     # Käytä osakedata_db_path jos annettu, muuten db_path
     stock_db_path = osakedata_db_path or db_path
-    
+
     # Hae kaikki osakkeet osakedata-kannasta
     try:
         import sqlite3
+
         conn = sqlite3.connect(stock_db_path)
         cursor = conn.cursor()
-        cursor.execute("SELECT DISTINCT osake FROM osakedata ORDER BY osake" + (f" LIMIT {limit}" if limit else ""))
+        cursor.execute(
+            "SELECT DISTINCT osake FROM osakedata ORDER BY osake"
+            + (f" LIMIT {limit}" if limit else "")
+        )
         tickers = [row[0] for row in cursor.fetchall()]
         conn.close()
     except Exception as e:
         db.logger.error(f"Failed to get tickers from osakedata: {e}")
         db.close()
-        return {"inserted": 0, "processed": 0, "details": [], "errors": [str(e)], "tickers": []}
+        return {
+            "inserted": 0,
+            "processed": 0,
+            "details": [],
+            "errors": [str(e)],
+            "tickers": [],
+        }
         return {
             "inserted": 0,
             "processed": 0,

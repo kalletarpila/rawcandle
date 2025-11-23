@@ -80,6 +80,8 @@ class ResultsGenerator:
         ticker_filter: Optional[list] = None,
         pattern_filter: Optional[list] = None,
         divergence_combo_filter: bool = False,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
     ) -> Tuple[int, float]:
         """
         Generoi tulokset tietokantaan inkrementaalisesti.
@@ -89,6 +91,8 @@ class ResultsGenerator:
             ticker_filter: Lista tickereistä joille generoidaan (None = kaikki)
             pattern_filter: Lista pattern-numeroista joita generoidaan (None = kaikki)
             divergence_combo_filter: Jos True, generoi vain kynttilämalli + divergenssi yhdistelmät
+            start_date: Alkupäivämäärä YYYY-MM-DD (valinnainen, ohittaa inkrementaalisen logiikan)
+            end_date: Loppupäivämäärä YYYY-MM-DD (valinnainen, ohittaa inkrementaalisen logiikan)
 
         Returns:
             (rows_inserted, processing_time_seconds)
@@ -100,7 +104,10 @@ class ResultsGenerator:
         try:
             # 1. Hae uudet findings
             findings = self._fetch_new_findings(
-                ticker_filter=ticker_filter, pattern_filter=pattern_filter
+                ticker_filter=ticker_filter,
+                pattern_filter=pattern_filter,
+                start_date=start_date,
+                end_date=end_date,
             )
             if not findings:
                 self.logger.info("No new findings to process")
@@ -269,6 +276,8 @@ class ResultsGenerator:
         self,
         ticker_filter: Optional[list] = None,
         pattern_filter: Optional[list] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
     ) -> List[dict]:
         """
         Hae uudet findings inkrementaalisesti (two-query approach).
@@ -277,6 +286,8 @@ class ResultsGenerator:
             ticker_filter: Lista tickereistä joita haetaan (None = kaikki)
             pattern_filter: Lista pattern-nimistä joita haetaan (None = kaikki)
                            Esim: ["Hammer", "Bullish Engulfing"]
+            start_date: Alkupäivämäärä YYYY-MM-DD (valinnainen, ohittaa inkrementaalisen logiikan)
+            end_date: Loppupäivämäärä YYYY-MM-DD (valinnainen, ohittaa inkrementaalisen logiikan)
 
         Returns:
             Lista findings dictejä
@@ -309,12 +320,20 @@ class ResultsGenerator:
                 ]
 
             # Tarkista onko results_data taulussa dataa (suodatettuna patternilla)
-            max_date = self.db_manager.get_results_max_date(
-                pattern_filter=pattern_number_filter
-            )
-            existing_tickers = self.db_manager.get_existing_results_tickers(
-                pattern_filter=pattern_number_filter
-            )
+            # Jos päivämääräsuodatus on annettu, ohitetaan inkrementaalinen logiikka
+            if start_date or end_date:
+                max_date = None
+                existing_tickers = set()
+                self.logger.info(
+                    f"Date filter specified (start: {start_date}, end: {end_date}) - fetching all findings in range"
+                )
+            else:
+                max_date = self.db_manager.get_results_max_date(
+                    pattern_filter=pattern_number_filter
+                )
+                existing_tickers = self.db_manager.get_existing_results_tickers(
+                    pattern_filter=pattern_number_filter
+                )
 
             # Jos pattern_filter on numeroita, muunna ne nimiksi
             if pattern_filter and all(isinstance(p, int) for p in pattern_filter):
@@ -351,14 +370,27 @@ class ResultsGenerator:
                 filter_clauses.append(f"pattern IN ({placeholders})")
                 filter_params.extend(pattern_filter)
 
+            # Lisää päivämääräsuodatus jos annettu
+            if start_date:
+                filter_clauses.append("date >= ?")
+                filter_params.append(start_date)
+            if end_date:
+                filter_clauses.append("date <= ?")
+                filter_params.append(end_date)
+
             filter_sql = (
                 " AND " + " AND ".join(filter_clauses) if filter_clauses else ""
             )
             has_filter = bool(filter_clauses)
 
-            if max_date is None:
-                # Ensimmäinen generointi - hae kaikki
-                self.logger.info("First generation - fetching all findings")
+            if max_date is None or start_date or end_date:
+                # Ensimmäinen generointi tai päivämääräsuodatus - hae kaikki
+                mode_desc = (
+                    "First generation"
+                    if max_date is None
+                    else f"Date filter ({start_date or 'start'} to {end_date or 'end'})"
+                )
+                self.logger.info(f"{mode_desc} - fetching all findings")
                 cursor.execute(
                     f"""
                     SELECT ticker, date, pattern, signal_strength, rsi14
@@ -775,9 +807,7 @@ class ResultsGenerator:
                 if start_idx < 0 or end_idx >= len(stock_df):
                     return None
                 subset = stock_df.iloc[start_idx : end_idx + 1]
-                closes = [
-                    safe_float(row["close"]) for _, row in subset.iterrows()
-                ]
+                closes = [safe_float(row["close"]) for _, row in subset.iterrows()]
                 closes = [c for c in closes if c is not None]
                 if len(closes) != period:
                     return None
@@ -832,7 +862,11 @@ class ResultsGenerator:
                 for value in values:
                     if value is None:
                         return []
-                    ema_val = value if ema_val is None else alpha * value + (1 - alpha) * ema_val
+                    ema_val = (
+                        value
+                        if ema_val is None
+                        else alpha * value + (1 - alpha) * ema_val
+                    )
                     ema_values.append(ema_val)
                 return ema_values
 
@@ -982,11 +1016,7 @@ class ResultsGenerator:
 
             volume_impulse = calc_volume_impulse_ratio()
             gap_down_strength = None
-            if (
-                prev_close is not None
-                and prev_close > 0
-                and t0_open is not None
-            ):
+            if prev_close is not None and prev_close > 0 and t0_open is not None:
                 gap_value = (t0_open - prev_close) / prev_close
                 gap_down_strength = abs(gap_value) if gap_value < 0 else 0.0
 
@@ -1011,9 +1041,7 @@ class ResultsGenerator:
                 body_ratio = None
                 shadow_ratio = None
 
-            depth_component = (
-                abs(t_10 - 100.0) / 10.0 if t_10 is not None else None
-            )
+            depth_component = abs(t_10 - 100.0) / 10.0 if t_10 is not None else None
             volatility_component = (
                 (t_10_hajonta / 2.0) if t_10_hajonta is not None else None
             )
@@ -1085,9 +1113,7 @@ class ResultsGenerator:
             SPX_volatility_10 = calc_index_volatility("^GSPC")
             NDX_volatility_10 = calc_index_volatility("^NDX")
             VIX_10 = get_index_normalized("^VIX", -10)
-            VIX_norm_10 = (
-                (VIX_10 - 100.0) / 100.0 if VIX_10 is not None else None
-            )
+            VIX_norm_10 = (VIX_10 - 100.0) / 100.0 if VIX_10 is not None else None
 
             ma5 = calc_ma_series(idx - 1, 5)
             ma20 = calc_ma_series(idx - 1, 20)
@@ -1395,12 +1421,8 @@ class ResultsGenerator:
         dividend_mask = events["event"].str.lower() == "dividend"
 
         flags["has_blackout_data"] = 1
-        flags["is_earnings_t0"] = int(
-            ((deltas == 0) & earnings_mask).any()
-        )
-        flags["is_dividend_t0"] = int(
-            ((deltas == 0) & dividend_mask).any()
-        )
+        flags["is_earnings_t0"] = int(((deltas == 0) & earnings_mask).any())
+        flags["is_dividend_t0"] = int(((deltas == 0) & dividend_mask).any())
         flags["is_earnings_window"] = int(
             (((deltas >= 0) & (deltas <= 2)) & earnings_mask).any()
         )
@@ -1506,9 +1528,7 @@ class ResultsGenerator:
             combos[f"is_{slug}_only_t0"] = int(
                 is_pattern == 1 and (offset == -1 or offset > 5)
             )
-            combos[f"is_{slug}_and_BullDiv_t0"] = int(
-                is_pattern == 1 and offset == 0
-            )
+            combos[f"is_{slug}_and_BullDiv_t0"] = int(is_pattern == 1 and offset == 0)
             combos[f"is_{slug}_and_BullDiv_recent_2d"] = int(
                 is_pattern == 1 and offset != -1 and offset <= 2
             )

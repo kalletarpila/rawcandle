@@ -37,6 +37,8 @@ def generate_results_to_database(
     pattern_filter=None,
     divergence_combo_filter=False,
     force_rebuild=False,
+    start_date=None,
+    end_date=None,
 ):
     """
     Generoi tulokset tietokantaan ResultsGeneratorilla.
@@ -48,6 +50,8 @@ def generate_results_to_database(
         pattern_filter: Lista pattern-numeroista joita generoidaan (None = kaikki)
         divergence_combo_filter: Jos True, generoi vain kynttilämalli + divergenssi yhdistelmät
         force_rebuild: Jos True, tyhjennä ensin results_data taulu
+        start_date: Alkupäivämäärä YYYY-MM-DD (valinnainen)
+        end_date: Loppupäivämäärä YYYY-MM-DD (valinnainen)
 
     Returns:
         Tuple[int, float, str, Optional[FeatureEnrichmentSummary], Optional[str]]:
@@ -102,6 +106,8 @@ def generate_results_to_database(
             ticker_filter=ticker_filter,
             pattern_filter=pattern_filter,
             divergence_combo_filter=divergence_combo_filter,
+            start_date=start_date,
+            end_date=end_date,
         )
 
         feature_summary = None
@@ -846,6 +852,19 @@ def create_results_view(app) -> ft.View:
                         else False
                     )
 
+                    # Lue päivämääräsuodatus
+                    start_date = None
+                    end_date = None
+                    try:
+                        date_mode = app.results_date_radio_group.value
+                        if date_mode == "range":
+                            if app.results_start_date_text.value:
+                                start_date = app.results_start_date_text.value.strip()
+                            if app.results_end_date_text.value:
+                                end_date = app.results_end_date_text.value.strip()
+                    except Exception as ex:
+                        print(f"Virhe päivämääräsuodattimen lukemisessa: {ex}")
+
                     # Generoi suodattimilla
                     (
                         rows,
@@ -860,6 +879,8 @@ def create_results_view(app) -> ft.View:
                         pattern_filter=pattern_filter,
                         divergence_combo_filter=divergence_combo_filter,
                         force_rebuild=force_rebuild,
+                        start_date=start_date,
+                        end_date=end_date,
                     )
                     if feature_error and not error:
                         error = feature_error
@@ -907,9 +928,7 @@ def create_results_view(app) -> ft.View:
                                 f"Aikaa kului: {time_taken:.2f}s"
                             )
                             if feature_summary:
-                                msg += (
-                                    f"\nLisäfeaturet päivitetty {feature_summary.total_rows} riville"
-                                )
+                                msg += f"\nLisäfeaturet päivitetty {feature_summary.total_rows} riville"
 
                             result_dialog = ft.AlertDialog(
                                 title=ft.Text("✅ Valmis!"),
@@ -983,9 +1002,7 @@ def create_results_view(app) -> ft.View:
                     if ticker_value:
                         if "," in ticker_value:
                             ticker_filter = [
-                                t.strip()
-                                for t in ticker_value.split(",")
-                                if t.strip()
+                                t.strip() for t in ticker_value.split(",") if t.strip()
                             ]
                         else:
                             ticker_filter = [ticker_value]
@@ -1022,7 +1039,9 @@ def create_results_view(app) -> ft.View:
                         getattr(app, "results_end_date_text", None),
                     )
                     if not start_date and not end_date:
-                        raise ValueError("Anna vähintään yksi päivämäärä aikaväliä varten.")
+                        raise ValueError(
+                            "Anna vähintään yksi päivämäärä aikaväliä varten."
+                        )
                     if start_date and end_date and start_date > end_date:
                         raise ValueError("Alkupäivä ei voi olla loppupäivän jälkeen.")
 
@@ -1050,9 +1069,7 @@ def create_results_view(app) -> ft.View:
                 try:
                     initial_filters = collect_filters()
                 except ValueError as err:
-                    e.page.snack_bar = ft.SnackBar(
-                        ft.Text(str(err)), open=True
-                    )
+                    e.page.snack_bar = ft.SnackBar(ft.Text(str(err)), open=True)
                     e.page.update()
                     return
 
@@ -1145,9 +1162,7 @@ def create_results_view(app) -> ft.View:
 
                         if requested_count > total_available:
                             sampled_rows = rows
-                            sample_info = (
-                                f" (pyydetty {requested_count}, saatavilla {total_available})"
-                            )
+                            sample_info = f" (pyydetty {requested_count}, saatavilla {total_available})"
                         else:
                             sampled_rows = random.sample(rows, requested_count)
                             sample_info = (
@@ -1166,10 +1181,7 @@ def create_results_view(app) -> ft.View:
                             e.page.update()
                             return
 
-                    if (
-                        filters["divergence_combo_filter"]
-                        and id_filter is None
-                    ):
+                    if filters["divergence_combo_filter"] and id_filter is None:
                         rows = ensure_filtered_rows()
                         combo_pairs = db_manager.get_divergence_combo_pairs()
                         combo_ids = [
