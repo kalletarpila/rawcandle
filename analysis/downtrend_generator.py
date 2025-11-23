@@ -318,13 +318,19 @@ class DowntrendGenerator:
             )
             return None
 
-    def _get_ticker_dates(self, conn: sqlite3.Connection, ticker: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> List[str]:
+    def _get_ticker_dates(
+        self,
+        conn: sqlite3.Connection,
+        ticker: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> List[str]:
         """Get all dates for a ticker within the specified date range.
 
         Args:
             conn: Database connection
             ticker: Stock ticker
-            start_date: Start date (optional, defaults to 2024-01-01)
+            start_date: Start date (optional, defaults to 2018-01-01)
             end_date: End date (optional)
 
         Returns:
@@ -332,14 +338,14 @@ class DowntrendGenerator:
         """
         try:
             cursor = conn.cursor()
-            
+
             date_filter = "pvm >= ?"
-            params = [start_date or "2024-01-01"]
-            
+            params = [start_date or "2018-01-01"]
+
             if end_date:
                 date_filter += " AND pvm <= ?"
                 params.append(end_date)
-            
+
             cursor.execute(
                 f"""
                 SELECT DISTINCT pvm
@@ -348,7 +354,7 @@ class DowntrendGenerator:
                   AND {date_filter}
                 ORDER BY pvm
             """,
-                [ticker] + params
+                [ticker] + params,
             )
 
             rows = cursor.fetchall()
@@ -442,7 +448,9 @@ class DowntrendGenerator:
                     progress_callback(ticker_idx, len(tickers))
 
                 # Get all available dates for this ticker
-                available_dates = self._get_ticker_dates(stock_conn, ticker, start_date, end_date)
+                available_dates = self._get_ticker_dates(
+                    stock_conn, ticker, start_date, end_date
+                )
                 if (
                     len(available_dates) < 85
                 ):  # Tarvitsetaan 55 päivää historiaa + 30 päivää tulevaisuutta
