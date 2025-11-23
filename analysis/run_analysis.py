@@ -4,6 +4,7 @@ import pandas as pd
 
 from .candlestick_patterns import (
     calculate_rsi,
+    is_bullish_divergence,
     is_bullish_engulfing,
     is_dragonfly_doji,
     is_hammer,
@@ -352,6 +353,30 @@ def run_candlestick_analysis(
                 logger.info(
                     f"{ticker} {row['pvm'].date().isoformat()} Dragonfly Doji checked - FOUND (strength {strength})"
                 )
+
+        if "Bullish Divergence" in patterns:
+            bull_div = is_bullish_divergence(
+                df,
+                idx=i,
+                lookback_days=30,
+                min_rsi_gain=3.0,
+                min_days_between=3,
+                close_col="Close",
+            )
+            if bull_div and bull_div.get("found"):
+                strength = bull_div.get("strength", 1.0)
+                found.append(
+                    {
+                        "pattern": "Bullish Divergence",
+                        "strength": strength,
+                        "price_change": bull_div.get("price_change"),
+                        "rsi_change": bull_div.get("rsi_change"),
+                    }
+                )
+                if logger:
+                    logger.info(
+                        f"{ticker} {row['pvm'].date().isoformat()} Bullish Divergence checked - FOUND (strength {strength})"
+                    )
 
         if found:
             # Lisää RSI-arvo jokaiseen löydökseen
