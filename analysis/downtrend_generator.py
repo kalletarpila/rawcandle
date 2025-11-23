@@ -148,31 +148,31 @@ class DowntrendGenerator:
         closes = [d["close"] for d in price_data]
 
         # Criterion 1: Progressive decline (strictly decreasing at checkpoints)
-        # t-54 > t-27 > t-13 > t0
-        t_minus_54 = closes[0]   # index 0
-        t_minus_27 = closes[27]  # index 27
-        t_minus_13 = closes[41]  # index 41
+        # t-10 > t-5 > t-2 > t0 (using last 11 days of the 55-day window)
+        t_minus_10 = closes[44]  # index 44 (t-10 relative to t0 at index 54)
+        t_minus_5 = closes[49]   # index 49 (t-5 relative to t0 at index 54)
+        t_minus_2 = closes[52]   # index 52 (t-2 relative to t0 at index 54)
         t0 = closes[54]          # index 54
 
-        if not (t_minus_54 > t_minus_27 > t_minus_13 > t0):
+        if not (t_minus_10 > t_minus_5 > t_minus_2 > t0):
             return False
 
-        # Criterion 2: Minimum 3% drop over 54 days
-        drop_pct = ((t_minus_54 - t0) / t_minus_54) * 100
+        # Criterion 2: Minimum 3% drop over 10 days
+        drop_pct = ((t_minus_10 - t0) / t_minus_10) * 100
         if drop_pct < 3.0:
             return False
 
         # Criterion 3: Moving average filter
-        # MA13 = average of [t-13, t-12, ..., t-1] (indices 41-53)
-        # MA27 = average of [t-27, t-26, ..., t-1] (indices 27-53)
-        ma13_closes = closes[41:54]  # [t-13, t-12, ..., t-1]
-        ma27_closes = closes[27:54]  # [t-27, t-26, ..., t-1]
+        # MA5 = average of [t-5, t-4, t-3, t-2, t-1] (indices 49-53)
+        # MA10 = average of [t-10, t-9, ..., t-2, t-1] (indices 44-53)
+        ma5_closes = closes[49:54]  # [t-5, t-4, t-3, t-2, t-1]
+        ma10_closes = closes[44:54]  # [t-10, t-9, ..., t-2, t-1]
 
-        ma13 = sum(ma13_closes) / len(ma13_closes)
-        ma27 = sum(ma27_closes) / len(ma27_closes)
+        ma5 = sum(ma5_closes) / len(ma5_closes)
+        ma10 = sum(ma10_closes) / len(ma10_closes)
 
-        # Both conditions must be true: close(t0) < MA27 AND MA13 < MA27
-        if not (t0 < ma27 and ma13 < ma27):
+        # Both conditions must be true: close(t0) < MA10 AND MA5 < MA10
+        if not (t0 < ma10 and ma5 < ma10):
             return False
 
         return True
@@ -368,10 +368,10 @@ class DowntrendGenerator:
         - Total minimum: 85 days of data per stock
 
         Downtrend criteria (all three required):
-        1. Progressive decline: close(t-54) > close(t-27) > close(t-13) > close(t0)
-        2. Minimum 3% drop: ((close(t-54) - close(t0)) / close(t-54)) * 100 >= 3
-        3. MA filter: close(t0) < MA27 AND MA13 < MA27
-           where MA13 = avg([t-13..t-1]), MA27 = avg([t-27..t-1])
+        1. Progressive decline: close(t-10) > close(t-5) > close(t-2) > close(t0)
+        2. Minimum 3% drop: ((close(t-10) - close(t0)) / close(t-10)) * 100 >= 3
+        3. MA filter: close(t0) < MA10 AND MA5 < MA10
+           where MA5 = avg([t-5..t-1]), MA10 = avg([t-10..t-1])
 
         Args:
         num_tickers: Number of stocks to process (1..4000)
