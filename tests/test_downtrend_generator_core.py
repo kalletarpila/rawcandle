@@ -32,7 +32,7 @@ def _build_stock_db(
     start = datetime.date(2024, 1, 1)
     for ticker, market in tickers_with_markets:
         price = 50.0
-        for i in range(25):
+        for i in range(120):
             date = start + datetime.timedelta(days=i)
             # tee tasaisesti laskeva kurssi -> varmistaa downtrend-kriteerit
             close = price - (i * 0.7)

@@ -103,6 +103,7 @@ class BullishDivergenceModel:
         success_thresholds: Optional[Dict[int | str, float]] = None,
         feature_include: Optional[Iterable[str]] = None,
         feature_exclude: Optional[Iterable[str]] = None,
+        year_filter: Optional[Iterable[int | str]] = None,
         db_path: Path | str = Path(__file__).resolve().parents[1]
         / "data"
         / "analysis.db",
@@ -126,6 +127,10 @@ class BullishDivergenceModel:
         self.feature_exclusions = set(feature_exclude or []) | self.EXCLUDED_COLUMNS
         self.date_column: Optional[str] = None
         self._warnings: List[str] = []
+        try:
+            self.year_filter = {int(y) for y in year_filter} if year_filter else set()
+        except Exception:
+            self.year_filter = set()
 
     @staticmethod
     def _normalize_thresholds(
@@ -282,6 +287,7 @@ class BullishDivergenceModel:
                 self.date_column = candidate
                 df[candidate] = pd.to_datetime(df[candidate], errors="coerce")
                 break
+        df = self._apply_year_filter(df)
         columns_to_drop = [col for col in self.EXCLUDED_COLUMNS if col in df.columns]
         if columns_to_drop:
             df = df.drop(columns=columns_to_drop)
@@ -301,6 +307,19 @@ class BullishDivergenceModel:
         mask = df[self.PATTERN_COLUMN].isin(
             {self.BULLISH_PATTERN, self.DOWNTREND_PATTERN}
         )
+        return df.loc[mask].reset_index(drop=True)
+
+    def _apply_year_filter(self, df: pd.DataFrame) -> pd.DataFrame:
+        if (
+            df is None
+            or df.empty
+            or not self.year_filter
+            or not self.date_column
+            or self.date_column not in df.columns
+        ):
+            return df
+        date_series = pd.to_datetime(df[self.date_column], errors="coerce")
+        mask = date_series.dt.year.isin(self.year_filter)
         return df.loc[mask].reset_index(drop=True)
 
     def _apply_crisis_exclusion(self, df: pd.DataFrame) -> pd.DataFrame:

@@ -160,6 +160,18 @@ ALIAS_MAP = {
     "Bearish Divergence": "bearish_divergence",
     PATTERN_COLUMN: "candle_pattern",
 }
+OPTIONAL_FEATURE_DEFAULTS: dict[str, float] = {
+    "signal_strength": 0.0,
+    "signal_count_same_day": 0.0,
+    "unique_patterns_same_day": 0.0,
+    "max_strength_same_day": 0.0,
+    "second_best_strength_same_day": 0.0,
+    "sum_strength_same_day": 0.0,
+    "has_same_day_reversal_cluster": 0.0,
+    "has_multi_candle_combo": 0.0,
+    "has_bullish_divergence_same_day": 0.0,
+    "num_candles_same_day": 0.0,
+}
 
 
 def add_crisis_flag(df: pd.DataFrame) -> pd.DataFrame:
@@ -181,24 +193,79 @@ def add_crisis_flag(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def load_feature_selection_preferences() -> List[str]:
+def load_feature_selection_preferences() -> Dict[str, object] | List[str]:
+    """
+    Lue UI:n viimeksi tallennetut valinnat (featurit, markkina, horisontit, success-rajat, vuodet).
+    Yhteensopiva vanhan listamuotoisen tallennuksen kanssa.
+    """
     if not FEATURE_SELECTION_STORE.exists():
-        return []
+        return {}
     try:
         data = json.loads(FEATURE_SELECTION_STORE.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
-        return []
+        return {}
     if isinstance(data, list):
         return [str(item) for item in data]
-    return []
+    if not isinstance(data, dict):
+        return {}
+
+    features = [str(item) for item in data.get("features", [])]
+    market = str(data.get("market")).lower() if data.get("market") else None
+    try:
+        horizons = sorted({int(h) for h in data.get("horizons", [])})
+    except Exception:
+        horizons = []
+    thresholds_raw = data.get("thresholds") or {}
+    thresholds: Dict[int, float] = {}
+    for key, value in thresholds_raw.items():
+        try:
+            thresholds[int(key)] = float(value)
+        except (TypeError, ValueError):
+            continue
+    try:
+        years = sorted({int(y) for y in data.get("years", [])})
+    except Exception:
+        years = []
+
+    return {
+        "features": features,
+        "market": market,
+        "horizons": horizons,
+        "thresholds": thresholds,
+        "years": years,
+    }
 
 
-def save_feature_selection_preferences(selected_features: Iterable[str]) -> None:
+def save_feature_selection_preferences(
+    selected_features: Iterable[str],
+    *,
+    market: Optional[str] = None,
+    horizons: Optional[Iterable[int]] = None,
+    thresholds: Optional[Dict[int, float]] = None,
+    years: Optional[Iterable[int]] = None,
+) -> None:
+    """
+    Tallenna UI-valinnat JSON-tiedostoon seuraavaa sessiota varten.
+    """
     data_dir = FEATURE_SELECTION_STORE.parent
     data_dir.mkdir(parents=True, exist_ok=True)
-    payload = [str(name) for name in selected_features]
+    only_features = all(
+        item is None or item == {} for item in (market, horizons, thresholds, years)
+    )
+    if only_features:
+        payload: object = [str(name) for name in selected_features]
+    else:
+        payload = {
+            "features": [str(name) for name in selected_features],
+            "market": market,
+            "horizons": sorted({int(h) for h in horizons}) if horizons else [],
+            "thresholds": {int(k): float(v) for k, v in (thresholds or {}).items()},
+            "years": sorted({int(y) for y in years}) if years else [],
+        }
     try:
-        FEATURE_SELECTION_STORE.write_text(json.dumps(payload), encoding="utf-8")
+        FEATURE_SELECTION_STORE.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
     except OSError:
         pass
 
@@ -270,6 +337,45 @@ def load_data(
 
     df = add_crisis_flag(df)
     return df
+
+
+def list_available_years(
+    db_path: Path | str = DEFAULT_DB_PATH, market: Optional[str] = None
+) -> List[int]:
+    """
+    Palauttaa results_data-taulun vuosilistan (distinct vuodet date-sarakkeesta).
+    """
+    db_path = Path(db_path)
+    if not db_path.exists():
+        return []
+
+    query = "SELECT DISTINCT strftime('%Y', date) as year FROM results_data"
+    params: list = []
+    if market and market.lower() not in {"", "__all__"}:
+        query += " WHERE lower(market) = ?"
+        params.append(market.strip().lower())
+    with sqlite3.connect(db_path) as conn:
+        df = pd.read_sql_query(query, conn, params=params)
+    try:
+        years = sorted({int(y) for y in df["year"].dropna().astype(int).tolist()})
+    except Exception:
+        years = []
+    return years
+
+
+def apply_year_filter(df: pd.DataFrame, years: Optional[Iterable[int | str]]) -> pd.DataFrame:
+    """
+    Rajaa data annetuille vuosille date-sarakkeen perusteella.
+    """
+    if df is None or df.empty or not years or "date" not in df.columns:
+        return df
+    try:
+        allowed_years = {int(y) for y in years}
+    except Exception:
+        return df
+    date_series = pd.to_datetime(df["date"], errors="coerce")
+    mask = date_series.dt.year.isin(allowed_years)
+    return df.loc[mask].reset_index(drop=True)
 
 
 # ------------- 2. Labelien rakentaminen -----------------
@@ -403,6 +509,23 @@ def add_divergence_features(
 # ------------- 3. Featurejen valinta -----------------
 
 
+def ensure_feature_defaults(
+    df: pd.DataFrame, feature_columns: Iterable[str]
+) -> pd.DataFrame:
+    """
+    Täyttää puuttuvat featuret järkevillä oletuksilla (alias-kopio tai nollat).
+    """
+    feature_columns = list(feature_columns)
+    df = df.copy()
+    for alias, source in ALIAS_MAP.items():
+        if alias not in df.columns and source in df.columns:
+            df[alias] = df[source]
+    for col in feature_columns:
+        if col not in df.columns and col in OPTIONAL_FEATURE_DEFAULTS:
+            df[col] = OPTIONAL_FEATURE_DEFAULTS[col]
+    return df
+
+
 def build_feature_matrix(
     df: pd.DataFrame,
     feature_columns: list[str] | None = None,
@@ -413,6 +536,9 @@ def build_feature_matrix(
     Valitse psykologiset ja tekniset featuret sekä koodaa kategoriset.
     """
     feature_columns = feature_columns or FEATURE_COLUMNS
+
+    # Täytä alias- ja default-sarakkeet ennen vaatimustarkistuksia
+    df = ensure_feature_defaults(df, feature_columns)
 
     required_cols = feature_columns + [PATTERN_COLUMN, MARKET_COLUMN]
     missing = [col for col in required_cols if col not in df.columns]
@@ -810,6 +936,7 @@ def run_regression_for_market(
     require_blackout_data: bool = False,
     exclude_crisis_period: bool = False,
     feature_columns: Optional[List[str]] = None,
+    year_filter: Optional[Iterable[int | str]] = None,
 ) -> Dict[str, object]:
     """
     Suorita koko pipeline yhdelle markkinalle ja palauta tulokset.
@@ -832,6 +959,7 @@ def run_regression_for_market(
             db_path=db_path,
             horizon_list=filtered_horizons,
             success_thresholds=thresholds_for_model,
+            year_filter=year_filter,
         )
         bd_results = model.run_all()
         report_text = _build_bullish_divergence_report(bd_results)
@@ -871,6 +999,7 @@ def run_regression_for_market(
     ]
 
     df = load_data(db_path=db_path, market=market)
+    df = apply_year_filter(df, year_filter)
     if df.empty:
         friendly_market = "kaikki markkinat" if not market else market.upper()
         raise ValueError(
@@ -883,6 +1012,14 @@ def run_regression_for_market(
     divergence_source = load_divergence_data(db_path=db_path)
     df = add_divergence_features(df, db_path=db_path, divergence_df=divergence_source)
     df_full = df.copy()
+    df = ensure_feature_defaults(df, ordered_selected_features)
+    df_full = ensure_feature_defaults(df_full, ordered_selected_features)
+    if "is_candle_day" not in df.columns and PATTERN_COLUMN in df.columns:
+        is_candle_series = (df[PATTERN_COLUMN].fillna(0).astype(int) != 0).astype(int)
+        df["is_candle_day"] = is_candle_series
+        df_full["is_candle_day"] = is_candle_series
+    df = ensure_feature_defaults(df, ordered_selected_features)
+    df_full = ensure_feature_defaults(df_full, ordered_selected_features)
     if require_blackout_data and "has_blackout_data" in df_full.columns:
         df_full = df_full.loc[df_full["has_blackout_data"] == 1].reset_index(drop=True)
 
@@ -1391,6 +1528,11 @@ def _build_bullish_divergence_report(model_payload: Dict[str, object]) -> str:
         "== Bullish Divergence -ydinmalli ==",
         f"Markkina: {market_label}",
         "Horisontit: " + ", ".join(f"{h} pv" for h in horizons),
+        "Success-rajat: "
+        + ", ".join(
+            f"success{h}: {_fmt((config.get('success_thresholds') or {}).get(h, DEFAULT_SUCCESS_THRESHOLDS.get(h)))}"
+            for h in horizons
+        ),
         (
             f"Rivejä yhteensä: {row_counts.get('total', 0)} | "
             f"BullDiv: {row_counts.get('bull_div_rows', 0)} | "

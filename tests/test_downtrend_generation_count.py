@@ -33,10 +33,10 @@ def temp_databases(tmp_path):
     )
 
     # Insert data for 5 different tickers
-    # Each ticker has 30 days of data with a clear downtrend pattern
+    # Each ticker has ample history to satisfy generator (>=85 days)
     tickers = ["TICKER1", "TICKER2", "TICKER3", "TICKER4", "TICKER5"]
     for ticker in tickers:
-        for day in range(30):
+        for day in range(120):
             date = f"2024-01-{day+1:02d}"
             # Create descending prices for downtrend
             close_price = 100.0 - (day * 0.5)  # Progressive decline

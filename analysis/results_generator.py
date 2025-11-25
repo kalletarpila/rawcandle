@@ -261,9 +261,13 @@ class ResultsGenerator:
                 combo_keys.add(key)
 
         # Suodata findings jotka kuuluvat combo_keys:iin
-        filtered = [
-            f for f in findings if (f.get("ticker"), f.get("date")) in combo_keys
-        ]
+        filtered: List[dict] = []
+        seen_keys = set()
+        for f in findings:
+            key = (f.get("ticker"), f.get("date"))
+            if key in combo_keys and key not in seen_keys:
+                filtered.append(f)
+                seen_keys.add(key)
 
         self.logger.info(
             f"Divergence combo filter: {len(filtered)}/{len(findings)} findings "

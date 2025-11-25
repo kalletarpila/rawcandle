@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Callable, Dict, List
 
 import flet as ft
@@ -23,6 +24,10 @@ class RegressionView:
             options=self._build_market_options(),
             value="__all__",
         )
+        available_years = self._load_year_options()
+        self.year_checkboxes = {
+            year: ft.Checkbox(label=str(year), value=True) for year in available_years
+        }
         self.horizon_checkboxes = {
             2: ft.Checkbox(label="2 päivää", value=False),
             5: ft.Checkbox(label="5 päivää", value=True),
@@ -149,6 +154,14 @@ class RegressionView:
                         self.run_button,
                     ],
                     spacing=16,
+                ),
+                ft.Row(
+                    [
+                        ft.Text("Vuosifiltteri:", weight=ft.FontWeight.BOLD),
+                        *list(self.year_checkboxes.values()),
+                    ],
+                    spacing=10,
+                    wrap=True,
                 ),
                 ft.Row(
                     list(self.horizon_checkboxes.values()),
@@ -338,6 +351,20 @@ class RegressionView:
             pass
         return options
 
+    def _load_year_options(self) -> List[int]:
+        """
+        Palauttaa saatavilla olevat vuodet results_data-taulusta.
+        Jos lataus epäonnistuu, käytä väliä 2018 - kuluvan vuoden loppuun.
+        """
+        try:
+            years = run_regression.list_available_years()
+            if years:
+                return years
+        except Exception:
+            pass
+        current_year = datetime.now().year
+        return list(range(2018, current_year + 1))
+
     def _set_status(self, message: str, color: str = ft.Colors.GREY_600) -> None:
         self.status_text.value = message
         self.status_text.color = color
@@ -352,6 +379,15 @@ class RegressionView:
         if not selected_horizons:
             self._set_status(
                 "Valitse vähintään yksi horisontti.",
+                ft.Colors.RED_600,
+            )
+            self.run_button.disabled = False
+            self.page.update()
+            return
+        selected_years = self._get_selected_years()
+        if not selected_years:
+            self._set_status(
+                "Valitse vähintään yksi vuosi.",
                 ft.Colors.RED_600,
             )
             self.run_button.disabled = False
@@ -386,6 +422,7 @@ class RegressionView:
                 require_blackout_data=require_blackout,
                 exclude_crisis_period=exclude_crisis,
                 feature_columns=feature_payload,
+                year_filter=selected_years,
             )
             self.output_field.value = result["report"]
             status_msg = "Analyysi valmis."
@@ -395,7 +432,17 @@ class RegressionView:
                 status_msg += " | Varoitukset: " + "; ".join(result["warnings"])
             self._set_status(status_msg, ft.Colors.GREEN_600)
             persisted_selection = raw_feature_selection
-            run_regression.save_feature_selection_preferences(persisted_selection)
+            try:
+                run_regression.save_feature_selection_preferences(
+                    persisted_selection,
+                    market=market_value,
+                    horizons=selected_horizons,
+                    thresholds=thresholds,
+                    years=selected_years,
+                )
+            except TypeError:
+                # Yhteensopivuus vanhojen implementaatioiden kanssa
+                run_regression.save_feature_selection_preferences(persisted_selection)
         except Exception as exc:
             self.output_field.value = f"Virhe: {exc}"
             self._set_status("Analyysi epäonnistui.", ft.Colors.RED_600)
@@ -423,6 +470,16 @@ class RegressionView:
         ]
         return sorted(horizons)
 
+    def _get_selected_years(self) -> List[int]:
+        if not hasattr(self, "year_checkboxes"):
+            # Luodaan oletukset, jos kontrolli puuttuu (esim. testifixtureissä).
+            self.year_checkboxes = {
+                year: type("Box", (), {"value": True})
+                for year in self._load_year_options()
+            }
+        years = [y for y, checkbox in self.year_checkboxes.items() if checkbox.value]
+        return sorted(years)
+
     def _get_selected_patterns(self):
         if getattr(self, "bullish_divergence_only_checkbox", None):
             if self.bullish_divergence_only_checkbox.value:
@@ -436,9 +493,38 @@ class RegressionView:
         saved = run_regression.load_feature_selection_preferences()
         if not saved:
             return
-        saved_set = set(saved)
+        if isinstance(saved, list):
+            feature_list = saved
+            saved_market = None
+            saved_horizons = set()
+            saved_thresholds: Dict[int, float] = {}
+            saved_years = set()
+        else:
+            feature_list = saved.get("features") or []
+            saved_market = saved.get("market")
+            saved_horizons = set(saved.get("horizons") or [])
+            saved_thresholds = saved.get("thresholds") or {}
+            saved_years = set(saved.get("years") or [])
+        saved_set = set(feature_list)
         for name, checkbox in self.feature_checkboxes.items():
             checkbox.value = name in saved_set
+        if saved_market:
+            option_keys = {
+                getattr(opt, "key", None) or getattr(opt, "value", None)
+                for opt in self.market_dropdown.options
+            }
+            if saved_market in option_keys:
+                self.market_dropdown.value = saved_market
+        if saved_horizons:
+            for h, checkbox in self.horizon_checkboxes.items():
+                checkbox.value = h in saved_horizons
+        if saved_thresholds:
+            for horizon, field in self.success_threshold_fields.items():
+                if horizon in saved_thresholds:
+                    field.value = str(saved_thresholds[horizon])
+        if saved_years and hasattr(self, "year_checkboxes"):
+            for year, checkbox in self.year_checkboxes.items():
+                checkbox.value = year in saved_years
 
     def _get_selected_features(self, allow_empty: bool = False) -> List[str]:
         selected = [

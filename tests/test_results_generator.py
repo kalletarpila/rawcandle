@@ -280,7 +280,7 @@ class TestResultsGeneratorBasic(unittest.TestCase):
             {"ticker": "AAA", "date": "2024-01-01", "pattern": "Bullish Divergence"},
         ]
         filtered = self.generator._filter_divergence_combos(findings)
-        self.assertEqual(len(filtered), 2)
+        self.assertEqual(len(filtered), 1)
 
     def test_normalized_prices_use_t0_close(self):
         stock_df = self._get_stock_dataframe("AAPL")
