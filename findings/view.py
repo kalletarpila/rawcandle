@@ -1433,6 +1433,13 @@ class FindingsView:
 
         # Luo ExcelExporter ja vie data
         try:
+            growth_limit = self._parse_limit_field(
+                self.growth_limit_field, "Kasvun yläraja"
+            )
+            drop_limit = self._parse_limit_field(
+                self.drop_limit_field, "Tiputuksen alaraja"
+            )
+
             exporter = ExcelExporter(self.db_manager.db_path)
 
             # Kerää event ID:t
@@ -1457,8 +1464,8 @@ class FindingsView:
                 ticker_filter=None,
                 id_filter=event_ids,  # Käytä ID-suodatusta
                 progress_callback=update_progress,
-                growth_limit=self._parse_limit(self.growth_limit_field),
-                drop_limit=self._parse_limit(self.drop_limit_field),
+                growth_limit=growth_limit,
+                drop_limit=drop_limit,
             )  # Sulje progress dialog
             progress_dlg.open = False
             self.page.update()
@@ -1496,6 +1503,21 @@ class FindingsView:
     def on_resize(self):
         """Käsittele näytön koon muutos (mock testejä varten)"""
         pass
+
+    @staticmethod
+    def _parse_limit_field(field: Optional[ft.TextField], label: str) -> Optional[float]:
+        """
+        Palauta float tai None kentästä. Tyhjä = None. Virheellinen -> ValueError.
+        """
+        if field is None:
+            return None
+        text = (field.value or "").strip()
+        if not text:
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            raise ValueError(f"{label} tulee olla numeerinen arvo.")
 
     def update_theme(self):
         """Päivitä teema (mock testejä varten)"""
