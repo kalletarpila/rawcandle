@@ -46,6 +46,7 @@ class ExcelExporter:
         "t0_ylin",
         "t0_bodi",
         "t0_bodi_colour",
+        "t0_alinMiinusClose",
         "t1_alin",
         "t1_ylin",
         "t1_bodi",
@@ -221,6 +222,8 @@ class ExcelExporter:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         downtrend_only: bool = False,
+        growth_limit: Optional[float] = None,
+        drop_limit: Optional[float] = None,
     ) -> tuple[bool, str]:
         """
         Vie results_data Excel-tiedostoon.
@@ -234,6 +237,8 @@ class ExcelExporter:
             start_date: ISO-päivä (YYYY-MM-DD) alarajana (None = ei rajaa)
             end_date: ISO-päivä (YYYY-MM-DD) ylärajana (None = ei rajaa)
             downtrend_only: Jos True, vie vain downtrend-mallin rivit
+            growth_limit: Maksimi sallittu arvo t2/t5/t10/t20:lle (None = ei rajaa)
+            drop_limit: Minimi sallittu arvo t2/t5/t10/t20:lle (None = ei rajaa)
 
         Returns:
             Tuple[bool, str]: (success, message)
@@ -270,17 +275,44 @@ class ExcelExporter:
                     original_total - len(results),
                 )
 
+            # Ääriarvofiltterit: drop None ja yli/ali rajat t2/t5/t10/t20-kentistä
+            def _passes_extreme_filters(row: dict) -> bool:
+                fields = ["t2", "t5", "t10", "t20"]
+                values = []
+                for f in fields:
+                    val = row.get(f)
+                    if val is None:
+                        return False  # pudota None
+                    try:
+                        values.append(float(val))
+                    except (TypeError, ValueError):
+                        return False
+                if growth_limit is not None and any(v > growth_limit for v in values):
+                    return False
+                if drop_limit is not None and any(v < drop_limit for v in values):
+                    return False
+                return True
+
+            before_extremes = len(results)
+            results = [row for row in results if _passes_extreme_filters(row)]
+            removed_extremes = before_extremes - len(results)
+
             if not results:
                 return False, "Valituilla suodattimilla ei löytynyt tuloksia."
 
             self.logger.info(f"Exporting {len(results)} results to Excel")
+            if removed_extremes:
+                self.logger.info(
+                    "Filtered out %s rows by growth/drop limits (None also dropped)",
+                    removed_extremes,
+                )
 
             # Luo Excel-tiedosto
             wb = Workbook()
             ws = wb.active
             ws.title = "Kynttilätulokset"
 
-            # Otsikkorivi (84 saraketta - samat kuin generate_results.py)
+            # Otsikkorivi (perussarakkeet + uudet featuret)
             headers = self.HEADERS
 
             # Tyylitys otsikoille
@@ -328,7 +360,7 @@ class ExcelExporter:
                 if has_bull_recent is None:
                     has_bull_recent = 1 if bull_recent_strength > 0 else 0
 
-                # Rakenna rivi (84 saraketta)
+                # Rakenna rivi (BASE_HEADERS + NEW_FEATURE_HEADERS)
                 row_data = [
                     result.get("ticker"),
                     result.get("date"),
@@ -342,6 +374,7 @@ class ExcelExporter:
                     result.get("t0_ylin"),
                     result.get("t0_bodi"),
                     result.get("t0_bodi_colour"),
+                    result.get("t0_alinMiinusClose"),
                     result.get("t1_alin"),
                     result.get("t1_ylin"),
                     result.get("t1_bodi"),

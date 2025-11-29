@@ -97,3 +97,27 @@ def test_excel_exporter_applies_filters(tmp_path):
     assert ws["A2"].value == "BBB"
     assert ws["B2"].value == "2024-02-10"
     assert ws["C2"].value == 0
+
+
+def test_excel_exporter_extreme_filters_drop_rows(tmp_path):
+    overrides = [
+        {"ticker": "AAA", "t2": 200, "t5": 120, "t10": 110, "t20": 105},
+        {"ticker": "BBB", "t2": 140, "t5": 130, "t10": 125, "t20": 115},
+        {"ticker": "CCC", "t2": None, "t5": 90, "t10": 95, "t20": 100},
+    ]
+    db_path = _prepare_results_db(Path(tmp_path), overrides)
+    exporter = ExcelExporter(db_path)
+
+    output_file = Path(tmp_path) / "extreme.xlsx"
+    success, message = exporter.export_to_excel(
+        str(output_file),
+        growth_limit=150.0,
+        drop_limit=80.0,
+    )
+
+    assert success, message
+    wb = load_workbook(output_file)
+    ws = wb.active
+    # Vain BBB jää (ei ylitä 150, ei alita 80, eikä None-arvoja)
+    assert ws.max_row == 2  # header + BBB
+    assert ws["A2"].value == "BBB"

@@ -629,7 +629,7 @@ class ResultsGenerator:
                 except Exception:
                     return None
 
-            def calc_candle_details(row_data):
+            def calc_candle_details(row_data, base_normalizer: Optional[float]):
                 """Laske kynttilän detaljit (alin, ylin, bodi%, väri)"""
                 if row_data is None:
                     return None, None, None, None
@@ -642,10 +642,17 @@ class ResultsGenerator:
                 if any(x is None for x in [low, high, open_val, close_val]):
                     return None, None, None, None
 
-                # Normalisoi t0_close:lla
-                base_close = t0_close if t0_close and t0_close > 0 else None
-                norm_low = (low / base_close * 100) if base_close else None
-                norm_high = (high / base_close * 100) if base_close else None
+                # Normalisoi annetulla perusarvolla
+                norm_low = (
+                    (low / base_normalizer * 100)
+                    if base_normalizer is not None and base_normalizer > 0
+                    else None
+                )
+                norm_high = (
+                    (high / base_normalizer * 100)
+                    if base_normalizer is not None and base_normalizer > 0
+                    else None
+                )
 
                 # Body prosentti
                 candle_range = high - low
@@ -670,10 +677,11 @@ class ResultsGenerator:
                 if close_val is None:
                     return None
 
-                base_close = t0_close if t0_close and t0_close > 0 else None
-                if not base_close:
+                # Historia (offset < 0) normalisoidaan t0_low:lla, t0 ja tulevat t0_close:lla
+                base = t0_low if offset < 0 else t0_close
+                if base is None or base <= 0:
                     return None
-                return (close_val / base_close) * 100
+                return (close_val / base) * 100
 
             def calc_volatility(days_back):
                 """Laske volatiliteetti (stdev normalisoiduista arvoista)"""
@@ -688,22 +696,25 @@ class ResultsGenerator:
                 if len(values) < 2:
                     return None
 
-                base_close = t0_close if t0_close and t0_close > 0 else None
-                if not base_close:
+                base_norm = t0_low if t0_low and t0_low > 0 else None
+                if not base_norm:
                     return None
-                norm_values = [(v / base_close) * 100 for v in values]
+                norm_values = [(v / base_norm) * 100 for v in values]
                 try:
                     return pstdev(norm_values)
                 except Exception:
                     return None
 
-            def calc_volume_ratio(days_count, offset_start):
-                """Laske volyymisuhde speksin mukaan"""
+            def calc_volume_ratio(window, offset):
+                """
+                Laske volyymisuhde:
+                - period_avg: keskiarvo volyymeista ikkunassa, joka päättyy offsetiin (esim. offset=-5, window=5 => t-5..t-1)
+                - baseline_avg: 100 päivän keskiarvo ennen tuota ikkunaa (start-100 .. start-1)
+                Palauttaa (period_avg / baseline_avg) * 100.
+                """
                 try:
-                    # Laske periodin volyymi keskiarvo
-                    start_idx = idx + offset_start
-                    end_idx = start_idx + days_count - 1
-
+                    end_idx = idx + offset
+                    start_idx = end_idx - window + 1
                     if start_idx < 0 or end_idx >= len(stock_df):
                         return None
 
@@ -712,38 +723,26 @@ class ResultsGenerator:
                         safe_float(row["volume"]) for _, row in subset.iterrows()
                     ]
                     volumes = [v for v in volumes if v is not None and v > 0]
-
                     if not volumes:
                         return None
-
                     period_avg = mean(volumes)
 
-                    # Laske 100-päivän keskiarvo päätyen t-1:een
-                    hundred_start = max(0, idx - 100)
-                    hundred_end = idx - 1
-
-                    if hundred_end < hundred_start:
+                    baseline_end = start_idx - 1
+                    baseline_start = baseline_end - 99
+                    if baseline_start < 0 or baseline_end >= len(stock_df):
                         return None
 
-                    hundred_subset = stock_df.iloc[hundred_start : hundred_end + 1]
-                    hundred_volumes = [
-                        safe_float(row["volume"])
-                        for _, row in hundred_subset.iterrows()
+                    baseline_subset = stock_df.iloc[baseline_start : baseline_end + 1]
+                    baseline_vols = [
+                        safe_float(row["volume"]) for _, row in baseline_subset.iterrows()
                     ]
-                    hundred_volumes = [
-                        v for v in hundred_volumes if v is not None and v > 0
-                    ]
-
-                    if not hundred_volumes:
+                    baseline_vols = [v for v in baseline_vols if v is not None and v > 0]
+                    if not baseline_vols:
                         return None
-
-                    hundred_avg = mean(hundred_volumes)
-
-                    if hundred_avg <= 0:
+                    baseline_avg = mean(baseline_vols)
+                    if baseline_avg <= 0:
                         return None
-
-                    return (period_avg / hundred_avg) * 100
-
+                    return (period_avg / baseline_avg) * 100
                 except Exception:
                     return None
 
@@ -764,10 +763,10 @@ class ResultsGenerator:
 
                 ma_val = mean(values)
 
-                base_close = t0_close if t0_close and t0_close > 0 else None
-                if not base_close:
+                base_norm = t0_low if t0_low and t0_low > 0 else None
+                if not base_norm:
                     return None
-                return (ma_val / base_close) * 100
+                return (ma_val / base_norm) * 100
 
             def calc_price_slope(normalized_value, horizon):
                 """Laske hintaslope normalisoidusta arvosta"""
@@ -825,7 +824,7 @@ class ResultsGenerator:
                 ma_prev = calc_ma_series(end_idx - lookback, period)
                 if ma_today is None or ma_prev is None:
                     return None
-                base = t0_close if t0_close and t0_close > 0 else None
+                base = t0_low if t0_low and t0_low > 0 else None
                 if not base:
                     return None
                 return ((ma_today - ma_prev) / lookback) / base * 100.0
@@ -932,9 +931,19 @@ class ResultsGenerator:
             t0_high = safe_float(r0["high"])
             prev_close = safe_float(r_m1["close"]) if r_m1 is not None else None
 
-            t_1_alin, t_1_ylin, t_1_bodi, t_1_bodi_colour = calc_candle_details(r_m1)
-            t0_alin, t0_ylin, t0_bodi, t0_bodi_colour = calc_candle_details(r0)
-            t1_alin, t1_ylin, t1_bodi, t1_bodi_colour = calc_candle_details(r1)
+            base_low = t0_low if t0_low and t0_low > 0 else None
+            base_close = t0_close if t0_close and t0_close > 0 else None
+
+            t_1_alin, t_1_ylin, t_1_bodi, t_1_bodi_colour = calc_candle_details(
+                r_m1, base_low
+            )
+            t0_alin, t0_ylin, t0_bodi, t0_bodi_colour = calc_candle_details(
+                r0, base_close
+            )
+            t1_alin, t1_ylin, t1_bodi, t1_bodi_colour = calc_candle_details(
+                r1, base_close
+            )
+            t0_alin_minus_close = t0_alin - 100.0 if t0_alin is not None else None
 
             # Historialliset hinnat (17-21)
             t_2 = get_normalized_close(-2)
@@ -971,33 +980,16 @@ class ResultsGenerator:
             t10 = get_normalized_close(10)
             t20 = get_normalized_close(20)
 
-            # Volyymit (31-40)
-            t_2_volyymi = calc_volume_ratio(2, -2)
-            t_5_volyymi = calc_volume_ratio(5, -5)
-            t_10_volyymi = calc_volume_ratio(10, -10)
-            t_15_volyymi = calc_volume_ratio(15, -15)
-            t_20_volyymi = calc_volume_ratio(20, -20)
-
-            # t0 volyymi
+            # Volyymit (31-40) - kaikki suhteina 100pv baselineen ennen ikkunaa
             t0_volume = safe_float(r0["volume"])
-            hundred_start = max(0, idx - 100)
-            hundred_end = idx - 1
-            if hundred_end >= hundred_start:
-                hundred_subset = stock_df.iloc[hundred_start : hundred_end + 1]
-                hundred_volumes = [
-                    safe_float(row["volume"]) for _, row in hundred_subset.iterrows()
-                ]
-                hundred_volumes = [
-                    v for v in hundred_volumes if v is not None and v > 0
-                ]
-                hundred_avg = mean(hundred_volumes) if hundred_volumes else None
-                t0_volyymi = (
-                    (t0_volume / hundred_avg) * 100
-                    if t0_volume and hundred_avg and hundred_avg > 0
-                    else None
-                )
-            else:
-                t0_volyymi = None
+            t_2_volyymi = calc_volume_ratio(2, -1)   # t-2..t-1 vs t-102..t-3
+            t_5_volyymi = calc_volume_ratio(5, -1)   # t-5..t-1 vs t-105..t-6
+            t_10_volyymi = calc_volume_ratio(10, -1)  # t-10..t-1 vs t-110..t-11
+            t_15_volyymi = calc_volume_ratio(15, -1)
+            t_20_volyymi = calc_volume_ratio(20, -1)
+
+            # t0 volyymi suhteessa t-100..t-1 baselineen
+            t0_volyymi = calc_volume_ratio(1, 0)
 
             def calc_volume_impulse_ratio() -> Optional[float]:
                 if t0_volume is None or t0_volume <= 0:
@@ -1020,8 +1012,13 @@ class ResultsGenerator:
 
             volume_impulse = calc_volume_impulse_ratio()
             gap_down_strength = None
-            if prev_close is not None and prev_close > 0 and t0_open is not None:
-                gap_value = (t0_open - prev_close) / prev_close
+            if (
+                prev_close is not None
+                and prev_close > 0
+                and t0_open is not None
+                and base_low is not None
+            ):
+                gap_value = ((t0_open - prev_close) / base_low) * 100.0
                 gap_down_strength = abs(gap_value) if gap_value < 0 else 0.0
 
             if (
@@ -1059,10 +1056,11 @@ class ResultsGenerator:
             else:
                 reversal_context_score = None
 
-            t2_volyymi = calc_volume_ratio(2, 1)
-            t5_volyymi = calc_volume_ratio(5, 1)
-            t10_volyymi = calc_volume_ratio(10, 1)
-            t20_volyymi = calc_volume_ratio(20, 1)
+            # Tulevien päivien volyymit (yksi päivä) suhteessa 100pv baselineen ennen kyseistä päivää
+            t2_volyymi = calc_volume_ratio(1, 2) if idx + 2 < len(stock_df) else None
+            t5_volyymi = calc_volume_ratio(1, 5) if idx + 5 < len(stock_df) else None
+            t10_volyymi = calc_volume_ratio(1, 10) if idx + 10 < len(stock_df) else None
+            t20_volyymi = calc_volume_ratio(1, 20) if idx + 20 < len(stock_df) else None
 
             # Liukuvat keskiarvot (41-57)
             t_2_5p_liukuva = calc_ma_normalized(-2, 5)
@@ -1133,7 +1131,7 @@ class ResultsGenerator:
 
             ATR_14 = calc_atr(idx - 1, 14)
             ATR_ratio_14 = (
-                (ATR_14 / t0_close) * 100.0 if ATR_14 is not None and t0_close else None
+                (ATR_14 / t0_low) * 100.0 if ATR_14 is not None and t0_low else None
             )
 
             MACD_line, MACD_signal, MACD_hist = calc_macd(idx - 1)
@@ -1260,6 +1258,7 @@ class ResultsGenerator:
                 "t0_ylin": t0_ylin,
                 "t0_bodi": t0_bodi,
                 "t0_bodi_colour": t0_bodi_colour,
+                "t0_alinMiinusClose": t0_alin_minus_close,
                 "t1_alin": t1_alin,
                 "t1_ylin": t1_ylin,
                 "t1_bodi": t1_bodi,

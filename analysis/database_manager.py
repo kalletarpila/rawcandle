@@ -28,6 +28,7 @@ RESULTS_BASE_COLUMNS: List[str] = [
     "t0_ylin",
     "t0_bodi",
     "t0_bodi_colour",
+    "t0_alinMiinusClose",
     "t1_alin",
     "t1_ylin",
     "t1_bodi",
@@ -226,9 +227,7 @@ BULL_DIV_METRIC_COLUMN_DEFS = {
     "bearish_divergence": "REAL",
 }
 
-COMBO_COLUMN_DEFS = {
-    column: "INTEGER DEFAULT 0" for column in COMBO_FEATURE_COLUMNS
-}
+COMBO_COLUMN_DEFS = {column: "INTEGER DEFAULT 0" for column in COMBO_FEATURE_COLUMNS}
 
 BULL_DIV_GENERAL_DEFAULTS = {
     "bullDiv_offset": 99,
@@ -409,7 +408,7 @@ class DatabaseManager:
 
             # Luo results_data taulu
             # Tallentaa prosessoidut tulokset (vain kynttiläkuviopäivät)
-            # 85 saraketta (market + alkuperäiset 84 kenttää)
+            # Perussarakkeet (market + alkuperäiset kentät)
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS results_data (
@@ -427,6 +426,7 @@ class DatabaseManager:
                     t0_ylin REAL,
                     t0_bodi REAL,
                     t0_bodi_colour INTEGER,
+                    t0_alinMiinusClose REAL,
                     t1_alin REAL,
                     t1_ylin REAL,
                     t1_bodi REAL,
@@ -576,6 +576,7 @@ class DatabaseManager:
                 )
 
             additional_column_defs = {
+                "t0_alinMiinusClose": "REAL",
                 "BullDiv_strength": "REAL",
                 "BullDiv_recent_strength": "REAL",
                 "BullDiv_recent_offset": "INTEGER DEFAULT -1",
@@ -598,10 +599,10 @@ class DatabaseManager:
 
             for column, ddl in additional_column_defs.items():
                 if column not in results_columns:
-                    cursor.execute(f"ALTER TABLE results_data ADD COLUMN {column} {ddl}")
-                    self.logger.info(
-                        f"Added {column} column to results_data table"
+                    cursor.execute(
+                        f"ALTER TABLE results_data ADD COLUMN {column} {ddl}"
                     )
+                    self.logger.info(f"Added {column} column to results_data table")
 
             # Luo indeksit results_data tauluun
             cursor.execute(
@@ -678,10 +679,10 @@ class DatabaseManager:
             added = False
             for column, ddl in RESULTS_SCHEMA_REQUIRED_COLUMNS.items():
                 if column not in existing:
-                    cursor.execute(f"ALTER TABLE results_data ADD COLUMN {column} {ddl}")
-                    self.logger.info(
-                        f"Added missing column '{column}' to results_data"
+                    cursor.execute(
+                        f"ALTER TABLE results_data ADD COLUMN {column} {ddl}"
                     )
+                    self.logger.info(f"Added missing column '{column}' to results_data")
                     added = True
                     existing.add(column)
             if added:
@@ -1512,7 +1513,9 @@ class DatabaseManager:
                     normalized.setdefault("market", "usa")
 
                     missing_keys = [
-                        key for key in ("ticker", "date", "candle_pattern") if key not in normalized
+                        key
+                        for key in ("ticker", "date", "candle_pattern")
+                        if key not in normalized
                     ]
                     if missing_keys:
                         self.logger.warning(
@@ -1543,7 +1546,9 @@ class DatabaseManager:
                     for column in COMBO_FEATURE_COLUMNS:
                         normalized.setdefault(column, 0)
 
-                    values_tuple = tuple(_get_value(normalized, col) for col in all_columns)
+                    values_tuple = tuple(
+                        _get_value(normalized, col) for col in all_columns
+                    )
                     if len(values_tuple) != len(all_columns):
                         self.logger.error(
                             f"VALUES tuple length is {len(values_tuple)}, "
@@ -1649,13 +1654,17 @@ class DatabaseManager:
         self,
         pattern_filter: Optional[List[int]] = None,
         ticker_filter: Optional[List[str]] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
     ) -> int:
         """
-        Poista tulokset results_data taulusta pattern/ticker -filttereillä.
+        Poista tulokset results_data taulusta filttereillä.
 
         Args:
             pattern_filter: Lista pattern-numeroista (0-8) joita poistetaan
             ticker_filter: Lista tickereistä joita poistetaan
+            start_date: Alkupäivämäärä YYYY-MM-DD (valinnainen)
+            end_date: Loppupäivämäärä YYYY-MM-DD (valinnainen)
 
         Returns:
             Poistettujen rivien määrä
@@ -1678,6 +1687,14 @@ class DatabaseManager:
                 conditions.append(f"ticker IN ({placeholders})")
                 params.extend(ticker_filter)
 
+            if start_date:
+                conditions.append("date >= ?")
+                params.append(start_date)
+
+            if end_date:
+                conditions.append("date <= ?")
+                params.append(end_date)
+
             if not conditions:
                 # Ei filttereitä, ei poisteta mitään
                 return 0
@@ -1690,7 +1707,7 @@ class DatabaseManager:
 
             deleted = cursor.rowcount
             self.logger.info(
-                f"Deleted {deleted} results by filters (patterns={pattern_filter}, tickers={ticker_filter})"
+                f"Deleted {deleted} results by filters (patterns={pattern_filter}, tickers={ticker_filter}, start_date={start_date}, end_date={end_date})"
             )
             return deleted
 
@@ -1786,7 +1803,9 @@ class DatabaseManager:
                 FROM grouped
                 WHERE has_candle = 1 AND (has_divergence_pattern = 1 OR has_flagged_divergence = 1)
             """.format(
-                    candle_case=candle_case, flag_case=flag_case, where_clause=where_clause
+                    candle_case=candle_case,
+                    flag_case=flag_case,
+                    where_clause=where_clause,
                 ),
                 params,
             )

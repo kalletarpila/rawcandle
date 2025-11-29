@@ -1,13 +1,13 @@
 # Excel-tulosten tulkintaopas
 
-Tämä dokumentti täydentää RawCandle-järjestelmän tulosexceliä (98 saraketta) ja kuvaa sarakkeiden sisällön, laskentasäännöt sekä tärkeimmät filtteri- ja tulkintasäännöt. Ensimmäiset 86 saraketta vastaavat generate_results-rakennetta (markkina + 85 mittaria), ja sarakkeet 87–98 sisältävät `compute_new_features.py`-skriptin tuottamat jatkoanalyysimittarit. Dokumentti on suunnattu analyytikoille, jotka hyödyntävät `results_data`-taulua tai siitä tehtyä Excel-vientiä.
+Tämä dokumentti täydentää RawCandle-järjestelmän tulosexceliä (99 saraketta) ja kuvaa sarakkeiden sisällön, laskentasäännöt sekä tärkeimmät filtteri- ja tulkintasäännöt. Ensimmäiset 87 saraketta vastaavat generate_results-rakennetta (markkina + 86 mittaria), ja sarakkeet 88–99 sisältävät `compute_new_features.py`-skriptin tuottamat jatkoanalyysimittarit. Dokumentti on suunnattu analyytikoille, jotka hyödyntävät `results_data`-taulua tai siitä tehtyä Excel-vientiä.
 
 ## 1. Yleisrakenne ja normalisointi
 - Jokainen rivi kuvaa yksittäistä osake- tai indeksihavaintoa päivänä *t0* (kuviopäivä).
-- Excelissä on 98 saraketta: 86 perussaraketta (`osake` ... `Has_BullDiv_recent`) + 12 jatkoanalyysifeaturea (luku 2.9). Tietokannan `results_data`-taulussa on lisäksi `market` (lyhenne) samasta rivistä.
+- Excelissä on 99 saraketta: 87 perussaraketta (`osake` ... `weekday`) + 12 jatkoanalyysifeaturea (luku 2.9). Tietokannan `results_data`-taulussa on lisäksi `market` (lyhenne) samasta rivistä.
 - Hintasarjat normalisoidaan:
-  - Osakkeet: `t0_low = 100`, jolloin kaikki hintasarakkeet ovat prosentteja päivän alimman hinnan tasosta.
-  - Indeksit (SPX, NDX): `t0_close = 100`.
+  - Osakkeet: historia (t-1 ja kauemmas) `t0_low = 100`; t0 ja tulevat päivät `t0_close = 100`.
+  - Indeksit (SPX, NDX): aina oma `t0_close = 100`.
 - Volyymit esitetään prosentteina suhteessa edeltävän 100 pörssipäivän keskiarvoon.
 - Negatiiviset offsetit (`t_-2`, `t_-5`, ...) viittaavat historiaan; positiiviset (`t2`, `t5`, ...) t0:n jälkeisiin päiviin.
 
@@ -22,34 +22,35 @@ Tämä dokumentti täydentää RawCandle-järjestelmän tulosexceliä (98 sarake
 
 Tietokannan puolella mukana on myös `market` (lyhenne, ks. luku 10).
 
-### 2.2 Kynttiläkomponentit (5–16)
-Kaikki arvot ovat prosentteja `t0_low`-tasosta.
+### 2.2 Kynttiläkomponentit (5–17)
+Historia (t-1) normalisoidaan t0_low:lla; t0 ja t+1 normalisoidaan t0_close:lla.
 
 | Sarakkeet | Merkitys | Kaava |
 |-----------|----------|-------|
 |`t_1_alin`, `t_1_ylin`, `t_1_bodi`, `t_1_bodi_colour`|t-1 päivän alin/ylin, rungon koko (%) ja väri (1=vihreä)|`low/high` normalisoidaan `(hinta / t0_low)*100`; `bodi = |close-open|/(high-low)`; väri = 1 jos `close > open`|
-|`t0_*`-sarakkeet|Sama logiikka t0-päivälle|Kuten yllä|
-|`t1_*`|Sama logiikka t+1-päivälle|Kuten yllä|
+|`t0_*`-sarakkeet|Sama logiikka t0-päivälle|Normalisointi `(hinta / t0_close)*100`|
+|`t1_*`|Sama logiikka t+1-päivälle|Normalisointi `(hinta / t0_close)*100`|
+- Johdettu `t0_alinMiinusClose` kertoo päätöksen ja päivän alimman hinnan eron: `t0_alin - 100` (yleensä ≤ 0).
 
-### 2.3 Historialliset hinnat ja volatiliteetti (17–26)
+### 2.3 Historialliset hinnat ja volatiliteetti (18–27)
 | Sarakkeet | Kuvaus | Kaava |
 |-----------|--------|-------|
 |`t_2`, `t_5`, `t_10`, `t_15`, `t_20`|Sulkuhinta `offset`-päivää ennen t0|`(close_{t-offset} / t0_low) * 100`|
 |`t_2_hajonta`, `t_5_hajonta`, `t_10_hajonta`, `t_15_hajonta`, `t_20_hajonta`|Volatiliteetti (populaatiokeskihajonta) viimeisten `offset` päivien normalisoiduista sulkuhinnoista|`pstdev( (close_i / t0_low)*100 )` päiville `[t-offset, ..., t-1]`|
 
-### 2.4 Tulevat hinnat (27–30)
+### 2.4 Tulevat hinnat (28–31)
 | Sarake | Kuvaus | Kaava |
 |--------|--------|-------|
-|`t2`, `t5`, `t10`, `t20`|Sulkuhinta `offset` päivää t0:n jälkeen|`(close_{t+offset} / t0_low) * 100`|
+|`t2`, `t5`, `t10`, `t20`|Sulkuhinta `offset` päivää t0:n jälkeen|`(close_{t+offset} / t0_close) * 100`|
 
-### 2.5 Volyymit (31–40)
+### 2.5 Volyymit (32–41)
 | Sarake | Kuvaus | Kaava |
 |--------|--------|-------|
 |`t_2_volyymi`, `t_5_volyymi`, `t_10_volyymi`, `t_15_volyymi`, `t_20_volyymi`|Suhteellinen volyymi|`(avg(volume_{ikkuna}) / avg(volume_{t-100...t-1})) * 100`|
 |`t0_volyymi`|t0-päivän volyymi suhteessa 100 pv keskiarvoon|`(volume_{t0} / avg(volume_{t-100...t-1})) * 100`|
 |`t2_volyymi` ... `t20_volyymi`|Jälkiperiodien volyymit|Kuten yllä, mutta tulevien päivien keskiarvo suhteessa edeltävään 100 pv keskiarvoon|
 
-### 2.6 Liukuvat keskiarvot (41–58)
+### 2.6 Liukuvat keskiarvot (42–58)
 ` t_X_Yp_liukuva ` kuvaa X päivän päähän siirrettyä liukuvaa keskiarvoa, jossa `Y` on ikkuna. Kaava:
 ```
 MA_{offset,period} = avg(close_{idx+offset-period+1 ... idx+offset}) / norm * 100
@@ -58,7 +59,7 @@ MA_{offset,period} = avg(close_{idx+offset-period+1 ... idx+offset}) / norm * 10
 - Esim. `t_5_20p_liukuva` = MA20 päättyen päivään `t-5`.
 - `t0_50p_liukuva`, `t0_200p_liukuva` = perinteiset MA50/MA200 päätettynä t0:aan.
 
-### 2.7 Indeksivertailut (59–78)
+### 2.7 Indeksivertailut (59–80)
 | Sarake | Kuvaus | Kaava |
 |--------|--------|-------|
 |`SPX_0`|Perustaso|Kiinteä 100|
@@ -66,36 +67,36 @@ MA_{offset,period} = avg(close_{idx+offset-period+1 ... idx+offset}) / norm * 10
 |`SPX2` ... `SPX20`|S&P 500 tulevat päivät|Sama kaava, mutta offset > 0|
 |`NDX_*`|Vastaavat sarjat Nasdaq 100:lle (^NDX)|Kuten SPX|
 
-### 2.8 Momentum, divergenssit ja metadata (79–85)
+### 2.8 Momentum, divergenssit ja metadata (81–87)
 | # | Sarake | Kuvaus / kaava |
 |---|--------|----------------|
-|79|`RSI14_t0`|14 päivän RSI (ks. luku 3) haetaan `analysis_findings.rsi14`|
-|80|`t0_close_norm`|`(t0_close / t0_low) * 100`, mittaa päätöksen sijaintia päivän vaihteluvälissä|
-|81|`BullDiv_strength`|Nousevan divergenssin vahvuus täsmälleen t0-päivänä (`divergence_data`)| 
-|82|`BullDiv_recent_strength`|Suurin bullish-divergenssi t0…t-3 päiviltä (0–3)| 
-|83|`BullDiv_recent_offset`|Offset arvo (0=t0, 1=t-1, 2=t-2, 3=t-3, -1=ei divergencea)| 
-|84|`Has_BullDiv_recent`|Binäärinen lippu: 1 jos viimeisten neljän päivän aikana löytyi bullish-divergenssi| 
-|85|`weekday`|ISO-koodi 1=ma ... 7=su (luku 9)|
+|81|`RSI14_t0`|14 päivän RSI (ks. luku 3) haetaan `analysis_findings.rsi14`|
+|82|`t0_close_norm`|Aina 100 (t0_close / t0_close)|
+|83|`BullDiv_strength`|Nousevan divergenssin vahvuus täsmälleen t0-päivänä (`divergence_data`)| 
+|84|`BullDiv_recent_strength`|Suurin bullish-divergenssi t0…t-3 päiviltä (0–3)| 
+|85|`BullDiv_recent_offset`|Offset arvo (0=t0, 1=t-1, 2=t-2, 3=t-3, -1=ei divergencea)| 
+|86|`Has_BullDiv_recent`|Binäärinen lippu: 1 jos viimeisten neljän päivän aikana löytyi bullish-divergenssi| 
+|87|`weekday`|ISO-koodi 1=ma ... 7=su (luku 9)|
 
-> Huom: vakio-Excel sisältää nyt 98 saraketta. Bearish Divergence (koodi 8) lasketaan taustalla, mutta sitä ei toistaiseksi näytetä UI:ssa eikä viedä Exceliin; arvo jää kuitenkin `results_data`-tauluun tulevaa käyttöä varten. Jos jokin muu feature puuttuu lähtödatoista, kyseinen solukenttä jää tyhjäksi (NaN), mutta muut rivit viedään.
+> Huom: vakio-Excel sisältää nyt 99 saraketta. Bearish Divergence (koodi 8) lasketaan taustalla, mutta sitä ei toistaiseksi näytetä UI:ssa eikä viedä Exceliin; arvo jää kuitenkin `results_data`-tauluun tulevaa käyttöä varten. Jos jokin muu feature puuttuu lähtödatoista, kyseinen solukenttä jää tyhjäksi (NaN), mutta muut rivit viedään.
 
-### 2.9 Lisätyt analyysifeaturet (87–98)
-Sarakkeet 87–98 sijaitsevat otsikkorivin lopussa ja syntyvät `compute_new_features.py`-skriptin ajon yhteydessä ennen Excel-vientiä.
+### 2.9 Lisätyt analyysifeaturet (88–99)
+Sarakkeet 88–99 sijaitsevat otsikkorivin lopussa ja syntyvät `compute_new_features.py`-skriptin ajon yhteydessä ennen Excel-vientiä.
 
 | # | Sarake | Kuvaus / kaava |
 |---|--------|----------------|
-|87|`RSI_slope_5`|RSI-momentum 5 päivän ikkunassa: `RSI14_t0 – RSI14_{t-5}` (`divergence_data`-taulun historiasta)|
-|88|`Price_slope_5`|Keskimääräinen laskuvauhti 5 päivää ennen t0: `(100 − t_5) / 5`|
-|89|`Price_slope_10`|Keskimääräinen laskuvauhti 10 päivää ennen t0: `(100 − t_10) / 10`|
-|90|`Price_acceleration_5_10`|Trendin kiihtyvyys: `Price_slope_5 − Price_slope_10` (positiivinen = jyrkkenevä lasku)|
-|91|`Volatility_ratio_10_20`|Lyhyen ja pitkän volatiliteetin suhde: `t_10_hajonta / t_20_hajonta` (0 ja NaN pistetään tyhjäksi)|
-|92|`Gap_down_strength`|Mahdollinen gap ennen kuviota: `(open_raw − prev_close_raw) / prev_close_raw`, jossa `prev_close_raw` = t-1 päätös raakadatasta|
-|93|`Body_ratio`|Rungon osuus kynttilän vaihteluvälistä: `|close_raw − open_raw| / (high_raw − low_raw)`|
-|94|`Shadow_ratio`|Alavarjon suhde ylävarjoon: `lower_shadow / upper_shadow`, missä `lower_shadow = min(open,close) − low` ja `upper_shadow = high − max(open,close)`|
-|95|`SPX_volatility_10`|S&P 500 (^GSPC) 10 päivän (edeltävä) sulkuhintojen keskihajonta; lasketaan `osakedata.db`-kannan indeksisarjoista|
-|96|`NDX_volatility_10`|Nasdaq 100 (^NDX) vastaava 10 päivän volatiliteetti|
-|97|`Volume_impulse`|t0-päivän volyymipiikki suhteessa edeltävän 10 päivän keskiarvoon: `t0_volume_raw / prev10_avg_volume` (raaka volyymit `osakedata`-kannasta)|
-|98|`Reversal_Context_Score`|Yhdistetty kontekstimittari: `0.4 * drop_10 + 0.4 * BullDiv_recent_strength − 0.2 * t_10_hajonta`, missä `drop_10 = 100 − t_10`|
+|88|`RSI_slope_5`|RSI-momentum 5 päivän ikkunassa: `RSI14_t0 – RSI14_{t-5}` (`divergence_data`-taulun historiasta)|
+|89|`Price_slope_5`|Keskimääräinen laskuvauhti 5 päivää ennen t0: `(100 − t_5) / 5`|
+|90|`Price_slope_10`|Keskimääräinen laskuvauhti 10 päivää ennen t0: `(100 − t_10) / 10`|
+|91|`Price_acceleration_5_10`|Trendin kiihtyvyys: `Price_slope_5 − Price_slope_10` (positiivinen = jyrkkenevä lasku)|
+|92|`Volatility_ratio_10_20`|Lyhyen ja pitkän volatiliteetin suhde: `t_10_hajonta / t_20_hajonta` (0 ja NaN pistetään tyhjäksi)|
+|93|`Gap_down_strength`|Mahdollinen gap ennen kuviota: `(open_raw − prev_close_raw) / t0_low * 100`; negatiivinen gap antaa positiivisen arvon, muuten 0|
+|94|`Body_ratio`|Rungon osuus kynttilän vaihteluvälistä: `|close_raw − open_raw| / (high_raw − low_raw)`|
+|95|`Shadow_ratio`|Alavarjon suhde ylävarjoon: `lower_shadow / upper_shadow`, missä `lower_shadow = min(open,close) − low` ja `upper_shadow = high − max(open,close)`|
+|96|`SPX_volatility_10`|S&P 500 (^GSPC) 10 päivän (edeltävä) sulkuhintojen keskihajonta; lasketaan `osakedata.db`-kannan indeksisarjoista|
+|97|`NDX_volatility_10`|Nasdaq 100 (^NDX) vastaava 10 päivän volatiliteetti|
+|98|`Volume_impulse`|t0-päivän volyymipiikki suhteessa edeltävän 10 päivän keskiarvoon: `t0_volume_raw / prev10_avg_volume` (raaka volyymit `osakedata`-kannasta)|
+|99|`Reversal_Context_Score`|Yhdistetty kontekstimittari: `0.4 * drop_10 + 0.4 * BullDiv_recent_strength − 0.2 * t_10_hajonta`, missä `drop_10 = 100 − t_10`|
 
 > Jos jokin lähtösarake puuttuu (esim. historiadataa ei ole), kyseinen lisäfeature jää tyhjäksi muttei estä Excel-vientiä. Varmista ennen vientiä, että `compute_new_features.py` on ajettu onnistuneesti (logitiedote kertoo, montako riviä päivitettiin).
 

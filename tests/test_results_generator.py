@@ -282,12 +282,12 @@ class TestResultsGeneratorBasic(unittest.TestCase):
         filtered = self.generator._filter_divergence_combos(findings)
         self.assertEqual(len(filtered), 1)
 
-    def test_normalized_prices_use_t0_close(self):
+    def test_normalized_prices_use_t0_low_for_history(self):
         stock_df = self._get_stock_dataframe("AAPL")
         idx = stock_df.index[stock_df["pvm"] == "2024-10-15"][0]
-        close_t0 = float(stock_df.loc[idx, "close"])
+        low_t0 = float(stock_df.loc[idx, "low"])
         close_t5 = float(stock_df.loc[idx - 5, "close"])
-        expected = close_t5 / close_t0 * 100.0
+        expected = close_t5 / low_t0 * 100.0
 
         result = self._run_process_finding("AAPL", "2024-10-15", stock_df)
         self.assertIsNotNone(result)

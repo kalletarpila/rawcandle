@@ -86,9 +86,12 @@ def generate_results_to_database(
         # Tyhjennä vain suodatetut rivit jos force_rebuild
         if force_rebuild:
             # Jos on filttereitä, poista vain ne rivit jotka vastaavat filttereitä
-            if pattern_filter or ticker_filter:
+            if pattern_filter or ticker_filter or start_date or end_date:
                 deleted = db_manager.delete_results_by_filters(
-                    pattern_filter=pattern_filter, ticker_filter=ticker_filter
+                    pattern_filter=pattern_filter,
+                    ticker_filter=ticker_filter,
+                    start_date=start_date,
+                    end_date=end_date,
                 )
                 # Log info
                 print(
@@ -209,6 +212,18 @@ def create_results_view(app) -> ft.View:
         label="Lisää liukuva keskiarvo -suodatin", value=True
     )
     app.results_volume_filter = ft.Checkbox(label="Lisää volyymi-suodatin", value=False)
+    app.results_growth_limit = ft.TextField(
+        label="Kasvun yläraja (%)",
+        value="150",
+        width=160,
+        tooltip="Rajaa pois rivit, joiden t2/t5/t10/t20 > tämä arvo. Tyhjä = ei rajaa. None pudotetaan myös.",
+    )
+    app.results_drop_limit = ft.TextField(
+        label="Tiputuksen alaraja (%)",
+        value="50",
+        width=160,
+        tooltip="Rajaa pois rivit, joiden t2/t5/t10/t20 < tämä arvo. Tyhjä = ei rajaa. None pudotetaan myös.",
+    )
 
     # Generointi-asetukset
     app.results_force_rebuild = ft.Checkbox(
@@ -420,6 +435,16 @@ def create_results_view(app) -> ft.View:
             pass
 
     app.results_date_radio_group.on_change = on_date_radio_change
+
+    # Ääriarvofiltterien sisäänottojen asettelu Excel-vientiä varten
+    filters_row = ft.Row(
+        [
+            app.results_growth_limit,
+            app.results_drop_limit,
+        ],
+        spacing=12,
+        wrap=True,
+    )
 
     # Buttons
     # wire the generate button to the implementation in results.excel_cache
@@ -662,11 +687,32 @@ def create_results_view(app) -> ft.View:
                 except Exception as ex:
                     print(f"Virhe kuviosuodattimen lukemisessa: {ex}")
 
+                # Ääriarvofiltterit (kasvu/tiputus)
+                try:
+                    growth_limit = None
+                    drop_limit = None
+                    growth_text = app.results_growth_limit.value.strip()
+                    drop_text = app.results_drop_limit.value.strip()
+                    if growth_text:
+                        growth_limit = float(growth_text)
+                    if drop_text:
+                        drop_limit = float(drop_text)
+                except ValueError:
+                    print("❌ Ääriarvofiltterit: virheellinen syöte")
+                    show_modal_message(
+                        "⚠️ Virhe",
+                        "Kasvun yläraja / Tiputuksen alaraja tulee olla numeerinen arvo.",
+                    )
+                    return
+
                 # Vie tietokannasta Exceliin ExcelExporterilla
                 update_progress("Viedään tuloksia Exceliin...", 80, 100)
                 exporter = ExcelExporter(str(analysis_db))
                 success, message = exporter.export_to_excel(
-                    str(excel_path), selected_patterns=selected_pattern_numbers
+                    str(excel_path),
+                    selected_patterns=selected_pattern_numbers,
+                    growth_limit=growth_limit,
+                    drop_limit=drop_limit,
                 )
 
                 if success:
@@ -1639,6 +1685,11 @@ def create_results_view(app) -> ft.View:
                         # Generointi-asetus heti painikkeen alle
                         ft.Row(
                             [app.results_force_rebuild],
+                            alignment=ft.MainAxisAlignment.CENTER,
+                        ),
+                        ft.Container(height=8),
+                        ft.Row(
+                            [filters_row],
                             alignment=ft.MainAxisAlignment.CENTER,
                         ),
                         ft.Container(content=app.results_banner),

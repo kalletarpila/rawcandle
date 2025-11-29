@@ -51,6 +51,8 @@ class FindingsView:
         self.date_filter_enabled = None
         self.start_date_field = None
         self.end_date_field = None
+        self.growth_limit_field = None
+        self.drop_limit_field = None
 
         # Data
         self.all_findings = []
@@ -160,6 +162,26 @@ class FindingsView:
             on_click=self._clear_filters,
         )
 
+        # Ääriarvofiltterit Excel-vientiä varten
+        self.growth_limit_field = ft.TextField(
+            label="Kasvun yläraja (%)",
+            value="150",
+            width=160,
+            tooltip=(
+                "Rajaa Excel-viennistä rivit, joiden t2/t5/t10/t20 > tämä arvo. "
+                "Tyhjä = ei rajaa. None pudotetaan myös."
+            ),
+        )
+        self.drop_limit_field = ft.TextField(
+            label="Tiputuksen alaraja (%)",
+            value="50",
+            width=160,
+            tooltip=(
+                "Rajaa Excel-viennistä rivit, joiden t2/t5/t10/t20 < tämä arvo. "
+                "Tyhjä = ei rajaa. None pudotetaan myös."
+            ),
+        )
+
         # Aikaväli-suodatin
         self.date_filter_enabled = ft.Checkbox(
             label="Suodata aikavälin mukaan",
@@ -208,7 +230,13 @@ class FindingsView:
             alignment=ft.MainAxisAlignment.START,
         )
 
-        return ft.Column([row1, row2, row3], spacing=10)
+        row4 = ft.Row(
+            [self.growth_limit_field, self.drop_limit_field],
+            spacing=10,
+            alignment=ft.MainAxisAlignment.START,
+        )
+
+        return ft.Column([row1, row2, row3, row4], spacing=10)
 
     def _build_market_options(self) -> List[ft.dropdown.Option]:
         """Muodosta markkinavalikon vaihtoehdot."""
@@ -1429,6 +1457,8 @@ class FindingsView:
                 ticker_filter=None,
                 id_filter=event_ids,  # Käytä ID-suodatusta
                 progress_callback=update_progress,
+                growth_limit=self._parse_limit(self.growth_limit_field),
+                drop_limit=self._parse_limit(self.drop_limit_field),
             )  # Sulje progress dialog
             progress_dlg.open = False
             self.page.update()
