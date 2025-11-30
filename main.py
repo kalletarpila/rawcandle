@@ -176,14 +176,37 @@ class RawCandleApp:
             with sqlite3.connect(self.osakedata_db_path) as conn:
                 if not has_uncorrected_splits(conn, ticker):
                     return
+                print(f"[SPLIT] Havaittu korjaamaton split tickerille {ticker}, korjataan hinnat ja divergence.")
                 start_ts = time.time()
                 delete_prices_from_2018(conn, ticker, start_date="2018-01-01")
                 added = refetch_prices_from_yahoo(
                     conn, ticker, start_date="2018-01-01", end_date="2025-11-28"
                 )
                 if added > 0:
-                    mark_splits_corrected(conn, ticker)
-                    print(f"✅ Splittikorjaus tehty tickerille {ticker}, lisätty {added} riviä.")
+                    # Puhdista analysis ja laske divergence uudelleen
+                    from analysis.splits_analysis_helpers import (
+                        delete_analysis_rows_for_ticker,
+                    )
+
+                    analysis_path = os.path.join(self.data_dir, "analysis.db")
+                    with sqlite3.connect(analysis_path) as conn_analysis:
+                        findings, div_rows, res_rows = delete_analysis_rows_for_ticker(
+                            conn_analysis, ticker
+                        )
+                        print(
+                            f"[SPLIT] {ticker}: analysis puhdistettu (findings={findings}, divergence={div_rows}, results={res_rows})"
+                        )
+
+                    success, days, err = self._calculate_and_save_divergences(
+                        ticker, only_missing=False
+                    )
+                    if success:
+                        mark_splits_corrected(conn, ticker)
+                        print(
+                            f"✅ Splittikorjaus tehty tickerille {ticker}, lisätty {added} riviä, divergence päivitetty ({days} päivää)."
+                        )
+                    else:
+                        print(f"⚠️ Divergenssin päivitys epäonnistui ({ticker}): {err}")
                 else:
                     print(f"⚠️ Splittikorjaus epäonnistui tickerille {ticker} (ei lisätty rivejä).")
                 elapsed = time.time() - start_ts

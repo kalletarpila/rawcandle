@@ -174,6 +174,7 @@ def backfill_uncorrected(
             started = time.time()
             try:
                 logger.info("Korjataan %s (%d/%d)", ticker, idx, len(tickers))
+                print(f"[SPLIT] Havaittu korjaamaton split: {ticker} ({idx}/{len(tickers)})")
                 if not dry_run:
                     delete_prices_from_2018(conn, ticker, start_date=start_date)
                     added = refetch_prices_from_yahoo(
@@ -209,6 +210,7 @@ def backfill_uncorrected(
                                 added,
                                 days,
                             )
+                            print(f"[SPLIT] {ticker}: uudet hinnat haettu ({added} riviä), analysis puhdistettu, divergence laskettu ({days} päivää).")
                         else:
                             logger.warning(
                                 "⚠️ Divergenssin laskenta epäonnistui (%s): %s",
