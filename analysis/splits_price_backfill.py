@@ -21,7 +21,7 @@ from typing import Iterable, List, Optional
 import pandas as pd
 import yfinance as yf
 
-from market_repository import ensure_market_schema, get_market_for_ticker
+from market_repository import ensure_market_schema
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +154,8 @@ def backfill_uncorrected(
 ) -> List[str]:
     ensure_market_schema(str(db_path))
     conn = sqlite3.connect(db_path)
+    analysis_path = Path("data") / "analysis.db"
+    conn_analysis = sqlite3.connect(analysis_path)
     processed: List[str] = []
     try:
         tickers = (
@@ -178,9 +180,41 @@ def backfill_uncorrected(
                         conn, ticker, start_date=start_date, end_date=end_date
                     )
                     if added > 0:
-                        mark_splits_corrected(conn, ticker)
-                        processed.append(ticker)
-                        logger.info("✅ %s korjattu, rivejä lisätty %d", ticker, added)
+                        # analysis.db puhdistus ja divergence
+                        from analysis.splits_analysis_helpers import delete_analysis_rows_for_ticker
+                        # tämä import täällä välttää kiertävät riippuvuudet
+                        findings, div_rows, res_rows = delete_analysis_rows_for_ticker(
+                            conn_analysis, ticker
+                        )
+                        logger.info(
+                            "Poistettu analysis rivit %s: findings=%d, divergence=%d, results=%d",
+                            ticker,
+                            findings,
+                            div_rows,
+                            res_rows,
+                        )
+                        # divergenssin uudelleenlaskenta
+                        from main import RawCandleApp
+
+                        app = RawCandleApp()
+                        success, days, err = app._calculate_and_save_divergences(
+                            ticker, only_missing=False
+                        )
+                        if success:
+                            mark_splits_corrected(conn, ticker)
+                            processed.append(ticker)
+                            logger.info(
+                                "✅ %s korjattu, rivejä lisätty %d, divergence päivitetty (%d päivää)",
+                                ticker,
+                                added,
+                                days,
+                            )
+                        else:
+                            logger.warning(
+                                "⚠️ Divergenssin laskenta epäonnistui (%s): %s",
+                                ticker,
+                                err,
+                            )
                     else:
                         logger.warning("⚠️ %s: ei lisätty uusia rivejä, jätetään flagit muuttamatta", ticker)
                 else:
@@ -192,6 +226,7 @@ def backfill_uncorrected(
         logger.info("Backfill valmis. Onnistuneita tickereitä: %d", len(processed))
         return processed
     finally:
+        conn_analysis.close()
         conn.close()
 
 
