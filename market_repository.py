@@ -82,6 +82,19 @@ def ensure_market_schema(db_path: Optional[str] = None) -> None:
         """
     )
 
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS splits_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            osake TEXT NOT NULL,
+            split_date TEXT NOT NULL,
+            split_ratio REAL NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(osake, split_date)
+        )
+        """
+    )
+
     cursor.execute("PRAGMA table_info(osakedata)")
     columns = {row[1] for row in cursor.fetchall()}
     if "market" not in columns:

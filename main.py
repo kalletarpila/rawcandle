@@ -9,6 +9,7 @@ from simu import SimuView, SimulationService
 from stock.view import StockView
 from regression.view import RegressionView
 from reverse.view import ReverseView
+from stock.splits import sync_splits_for_ticker
 from market_repository import (
     delete_market,
     ensure_market_schema,
@@ -2330,6 +2331,18 @@ class RawCandleApp:
                     )
                     """
                 )
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS splits_data (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        osake TEXT NOT NULL,
+                        split_date TEXT NOT NULL,
+                        split_ratio REAL NOT NULL,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(osake, split_date)
+                    )
+                    """
+                )
                 cursor.execute("SELECT DISTINCT osake FROM osakedata")
                 existing_tickers = {row[0] for row in cursor.fetchall()}
         except Exception as ex:
@@ -2434,6 +2447,11 @@ class RawCandleApp:
                         )
                         rows_added += 1
                     conn.commit()
+
+                try:
+                    sync_splits_for_ticker(db_path, ticker, yf_ticker=stock)
+                except Exception as exc:
+                    print(f"⚠️ Splittien päivitys epäonnistui ({ticker}): {exc}")
 
                 saved_count += 1
                 existing_tickers.add(ticker)
@@ -3886,6 +3904,18 @@ Virheet: {error_count}"""
                     )
                 """
                 )
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS splits_data (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        osake TEXT NOT NULL,
+                        split_date TEXT NOT NULL,
+                        split_ratio REAL NOT NULL,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(osake, split_date)
+                    )
+                """
+                )
 
                 # Hae viimeisin päivämäärä kannasta tälle osakkeelle
                 cursor.execute(
@@ -4016,6 +4046,15 @@ Virheet: {error_count}"""
                     rows_added += 1
 
                 conn.commit()
+
+            try:
+                splits_inserted = sync_splits_for_ticker(
+                    db_path, ticker, yf_ticker=stock
+                )
+                if splits_inserted:
+                    print(f"Lisättiin {splits_inserted} splitiä tickerille {ticker}")
+            except Exception as exc:
+                print(f"⚠️ Splittien päivitys epäonnistui ({ticker}): {exc}")
 
             # Laske ja tallenna divergenssit
             div_success, div_days, div_error = self._calculate_and_save_divergences(
