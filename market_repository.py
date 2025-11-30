@@ -89,11 +89,18 @@ def ensure_market_schema(db_path: Optional[str] = None) -> None:
             osake TEXT NOT NULL,
             split_date TEXT NOT NULL,
             split_ratio REAL NOT NULL,
+            is_price_data_corrected INTEGER NOT NULL DEFAULT 0,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(osake, split_date)
         )
         """
     )
+    cursor.execute("PRAGMA table_info(splits_data)")
+    splits_columns = {row[1] for row in cursor.fetchall()}
+    if "is_price_data_corrected" not in splits_columns:
+        cursor.execute(
+            "ALTER TABLE splits_data ADD COLUMN is_price_data_corrected INTEGER NOT NULL DEFAULT 0"
+        )
 
     cursor.execute("PRAGMA table_info(osakedata)")
     columns = {row[1] for row in cursor.fetchall()}

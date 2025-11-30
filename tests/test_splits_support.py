@@ -37,6 +37,7 @@ def _make_temp_osakedata(tmp_path: Path) -> Path:
             osake TEXT NOT NULL,
             split_date TEXT NOT NULL,
             split_ratio REAL NOT NULL,
+            is_price_data_corrected INTEGER NOT NULL DEFAULT 0,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(osake, split_date)
         )

@@ -2,6 +2,7 @@ import flet as ft
 import datetime
 import sqlite3
 import os
+import time
 
 import pandas as pd
 import yfinance as yf
@@ -10,6 +11,12 @@ from stock.view import StockView
 from regression.view import RegressionView
 from reverse.view import ReverseView
 from stock.splits import sync_splits_for_ticker
+from analysis.splits_price_backfill import (
+    has_uncorrected_splits,
+    delete_prices_from_2018,
+    refetch_prices_from_yahoo,
+    mark_splits_corrected,
+)
 from market_repository import (
     delete_market,
     ensure_market_schema,
@@ -160,6 +167,30 @@ class RawCandleApp:
             self.close_dialog(results_dialog)
         except Exception:
             pass
+
+    def _maybe_backfill_splits_for_ticker(self, ticker: str):
+        """Jos splits_data:ssa on korjaamattomia splittejä, refetcha hinnat 2018- alkaen."""
+        if not ticker:
+            return
+        try:
+            with sqlite3.connect(self.osakedata_db_path) as conn:
+                if not has_uncorrected_splits(conn, ticker):
+                    return
+                start_ts = time.time()
+                delete_prices_from_2018(conn, ticker, start_date="2018-01-01")
+                added = refetch_prices_from_yahoo(
+                    conn, ticker, start_date="2018-01-01", end_date="2025-11-28"
+                )
+                if added > 0:
+                    mark_splits_corrected(conn, ticker)
+                    print(f"✅ Splittikorjaus tehty tickerille {ticker}, lisätty {added} riviä.")
+                else:
+                    print(f"⚠️ Splittikorjaus epäonnistui tickerille {ticker} (ei lisätty rivejä).")
+                elapsed = time.time() - start_ts
+                if elapsed < 0.35:
+                    time.sleep(0.35 - elapsed)
+        except Exception as exc:
+            print(f"⚠️ Splittikorjaus epäonnistui ({ticker}): {exc}")
         try:
             ack_dlg = ft.AlertDialog(
                 title=ft.Text("Huom!"),
@@ -2453,6 +2484,8 @@ class RawCandleApp:
                 except Exception as exc:
                     print(f"⚠️ Splittien päivitys epäonnistui ({ticker}): {exc}")
 
+                self._maybe_backfill_splits_for_ticker(ticker)
+
                 saved_count += 1
                 existing_tickers.add(ticker)
 
@@ -4055,6 +4088,9 @@ Virheet: {error_count}"""
                     print(f"Lisättiin {splits_inserted} splitiä tickerille {ticker}")
             except Exception as exc:
                 print(f"⚠️ Splittien päivitys epäonnistui ({ticker}): {exc}")
+
+            # Korjaa hinnat jos splitit vaativat sitä
+            self._maybe_backfill_splits_for_ticker(ticker)
 
             # Laske ja tallenna divergenssit
             div_success, div_days, div_error = self._calculate_and_save_divergences(

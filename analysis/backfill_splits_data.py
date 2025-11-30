@@ -35,11 +35,17 @@ def ensure_splits_schema(conn: sqlite3.Connection) -> None:
             osake TEXT NOT NULL,
             split_date TEXT NOT NULL,
             split_ratio REAL NOT NULL,
+            is_price_data_corrected INTEGER NOT NULL DEFAULT 0,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(osake, split_date)
         )
         """
     )
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(splits_data)").fetchall()}
+    if "is_price_data_corrected" not in cols:
+        conn.execute(
+            "ALTER TABLE splits_data ADD COLUMN is_price_data_corrected INTEGER NOT NULL DEFAULT 0"
+        )
     conn.commit()
 
 
