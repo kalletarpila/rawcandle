@@ -339,7 +339,7 @@ def compute_reversal_context(df: pd.DataFrame) -> pd.Series:
 def compute_bull_divergence_features(
     df_results: pd.DataFrame, df_divergence: pd.DataFrame
 ) -> pd.DataFrame:
-    """Laske BullDiv_* sarakkeet divergence_data:n perusteella."""
+    """Laske BullDiv_* sarakkeet divergence_data:n perusteella (0..5 pv taakse)."""
     columns = [
         "BullDiv_strength",
         "BullDiv_recent_strength",
@@ -364,58 +364,91 @@ def compute_bull_divergence_features(
             df_results[col] = default
         return df_results
 
-    df_div = df_divergence.dropna(subset=["date"]).copy()
-    if df_div.empty:
-        for col, default in defaults.items():
-            df_results[col] = default
-        return df_results
+    df_results = df_results.copy()
+    df_results["date"] = pd.to_datetime(df_results["date"], errors="coerce")
 
-    df_div = df_div.sort_values(["ticker", "date"])
+    df_div = df_divergence.dropna(subset=["date"]).copy()
+    df_div["date"] = pd.to_datetime(df_div["date"], errors="coerce")
+    df_div = df_div.dropna(subset=["date"])
     df_div["BullDiv_strength"] = df_div["bullish_strength"].fillna(0.0)
 
-    df_div["BullDiv_recent_strength"] = (
-        df_div.groupby("ticker")["BullDiv_strength"]
-        .transform(lambda s: s.rolling(window=4, min_periods=1).max())
-    )
-
-    offsets = []
-    for ticker, group in df_div.groupby("ticker"):
-        series = group["BullDiv_strength"]
-        offset_series = pd.Series(-1, index=group.index, dtype="int64")
-        for shift in range(4):
-            shifted = series.shift(shift)
-            mask = (offset_series == -1) & (shifted > 0)
-            offset_series.loc[mask] = shift
-        offsets.append(offset_series)
-    df_div["BullDiv_recent_offset"] = pd.concat(offsets).sort_index()
-    df_div["Has_BullDiv_recent"] = (
-        df_div["BullDiv_recent_strength"] > 0
-    ).astype(int)
-
-    merge_cols = [
-        "ticker",
-        "date",
-        "BullDiv_strength",
-        "BullDiv_recent_strength",
-        "BullDiv_recent_offset",
-        "Has_BullDiv_recent",
-    ]
-    df_results = df_results.merge(
-        df_div[merge_cols], on=["ticker", "date"], how="left"
-    )
-
+    # Alusta oletusarvot
     for col, default in defaults.items():
-        if col not in df_results:
-            df_results[col] = default
-        else:
-            df_results[col] = df_results[col].fillna(default)
+        df_results[col] = default
 
-    df_results["BullDiv_recent_offset"] = (
-        df_results["BullDiv_recent_offset"].astype(int)
-    )
-    df_results["Has_BullDiv_recent"] = (
-        df_results["Has_BullDiv_recent"].astype(int)
-    )
+    if df_div.empty:
+        df_results["BullDiv_recent_offset"] = df_results["BullDiv_recent_offset"].astype(int)
+        df_results["Has_BullDiv_recent"] = df_results["Has_BullDiv_recent"].astype(int)
+        return df_results
+
+    # Laske jokaiselle riville: sama päivän strength, 0..5 pv takaisen max strength ja offset lähimpään divergenssiin
+    window_days = 5
+    for ticker, res_grp in df_results.groupby("ticker"):
+        res_idx = res_grp.index
+        res_dates = res_grp["date"].sort_values()
+        div_grp = df_div[df_div["ticker"] == ticker].sort_values("date")
+        if div_grp.empty:
+            continue
+
+        div_dates = div_grp["date"].to_numpy()
+        div_strengths = div_grp["BullDiv_strength"].to_numpy()
+
+        # Käytetään liukuvaa ikkunaa (pointers) eteenpäin
+        from collections import deque
+
+        window = deque()
+        d_idx = 0
+        window_start = pd.Timedelta(days=window_days)
+
+        # Tallennetaan tulokset väliaikaisiin listoihin (index -> value)
+        same_day_strength = {}
+        recent_strength = {}
+        recent_offset = {}
+
+        for res_date in res_dates:
+            # Lisää ikkunaan kaikki divergenssit päivään res_date asti
+            while d_idx < len(div_dates) and div_dates[d_idx] <= res_date:
+                window.append((div_dates[d_idx], div_strengths[d_idx]))
+                d_idx += 1
+
+            # Poista ikkunasta divergenssit, jotka ovat yli window_days vanhoja
+            while window and (res_date - window[0][0]) > window_start:
+                window.popleft()
+
+            # Sama päivän strength
+            same_day_strength[res_date] = 0.0
+            if window and window[-1][0] == res_date:
+                same_day_strength[res_date] = window[-1][1]
+
+            # Max strength ja offset (lähin menneisyydessä)
+            positives = [(res_date - dt).days for dt, s in window if s and s > 0]
+            if positives:
+                offsets = [(res_date - dt).days for dt, s in window if s and s > 0]
+                nearest_offset = min(offsets)
+                max_strength = max(s for _, s in window if s and s > 0)
+                recent_strength[res_date] = max_strength
+                recent_offset[res_date] = nearest_offset
+            else:
+                recent_strength[res_date] = 0.0
+                recent_offset[res_date] = -1
+
+        # Kirjoita tulokset takaisin df_results tickerin riveille
+        res_dates_series = res_grp["date"]
+        df_results.loc[res_idx, "BullDiv_strength"] = res_dates_series.map(
+            lambda d: same_day_strength.get(d, 0.0)
+        ).fillna(0.0)
+        df_results.loc[res_idx, "BullDiv_recent_strength"] = res_dates_series.map(
+            lambda d: recent_strength.get(d, 0.0)
+        ).fillna(0.0)
+        df_results.loc[res_idx, "BullDiv_recent_offset"] = res_dates_series.map(
+            lambda d: recent_offset.get(d, -1)
+        ).fillna(-1)
+        df_results.loc[res_idx, "Has_BullDiv_recent"] = (
+            df_results.loc[res_idx, "BullDiv_recent_strength"] > 0
+        ).astype(int)
+
+    df_results["BullDiv_recent_offset"] = df_results["BullDiv_recent_offset"].astype(int)
+    df_results["Has_BullDiv_recent"] = df_results["Has_BullDiv_recent"].astype(int)
     return df_results
 
 

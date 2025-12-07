@@ -21,7 +21,17 @@ from typing import Iterable, List, Optional
 import pandas as pd
 import yfinance as yf
 
+# Lisää projektijuuri sys.path:iin, kun ajetaan skriptinä
+import sys
+
+CURRENT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = CURRENT_DIR.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from market_repository import ensure_market_schema
+from analysis.splits_analysis_helpers import delete_analysis_rows_for_ticker
+from analysis.divergence_recompute import recompute_divergence_for_ticker
 
 logger = logging.getLogger(__name__)
 
@@ -195,11 +205,11 @@ def backfill_uncorrected(
                             res_rows,
                         )
                         # divergenssin uudelleenlaskenta
-                        from main import RawCandleApp
-
-                        app = RawCandleApp()
-                        success, days, err = app._calculate_and_save_divergences(
-                            ticker, only_missing=False
+                        success, days, err = recompute_divergence_for_ticker(
+                            ticker,
+                            osakedata_path=db_path,
+                            analysis_path=analysis_path,
+                            only_missing=False,
                         )
                         if success:
                             mark_splits_corrected(conn, ticker)

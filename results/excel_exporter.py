@@ -33,11 +33,13 @@ class ExcelExporter:
         8: "Bearish Divergence",
     }
 
-    BASE_HEADERS = [
-        "osake",
+    # Täysi otsikkolista: kaikki results_data-sarakkeet (id pois, päivämäärät ja markkina mukana)
+    HEADERS = [
+        "ticker",
         "date",
-        "kynttila",
-        "vahvuus",
+        "market",
+        "candle_pattern",
+        "signal_strength",
         "t_1_alin",
         "t_1_ylin",
         "t_1_bodi",
@@ -90,6 +92,7 @@ class ExcelExporter:
         "t_20_5p_liukuva",
         "t_20_10p_liukuva",
         "t_20_20p_liukuva",
+        "t0_20p_liukuva",
         "t0_50p_liukuva",
         "t0_200p_liukuva",
         "SPX_0",
@@ -120,10 +123,8 @@ class ExcelExporter:
         "BullDiv_recent_strength",
         "BullDiv_recent_offset",
         "Has_BullDiv_recent",
-        "weekday",
-    ]
-
-    NEW_FEATURE_HEADERS = [
+        "bearish_divergence",
+        "bullish_divergence",
         "RSI_slope_5",
         "Price_slope_5",
         "Price_slope_10",
@@ -136,9 +137,86 @@ class ExcelExporter:
         "NDX_volatility_10",
         "Volume_impulse",
         "Reversal_Context_Score",
+        "bullDiv_offset",
+        "bullDiv_last_1d",
+        "bullDiv_last_2d",
+        "bullDiv_last_3d",
+        "bullDiv_last_3d_any",
+        # Combo-liput
+        "is_Hammer_only_t0",
+        "is_Hammer_and_BullDiv_t0",
+        "is_Hammer_and_BullDiv_recent_2d",
+        "is_Hammer_and_BullDiv_recent_3d",
+        "is_Hammer_and_BullDiv_recent_5d",
+        "is_Bullish_Engulfing_only_t0",
+        "is_Bullish_Engulfing_and_BullDiv_t0",
+        "is_Bullish_Engulfing_and_BullDiv_recent_2d",
+        "is_Bullish_Engulfing_and_BullDiv_recent_3d",
+        "is_Bullish_Engulfing_and_BullDiv_recent_5d",
+        "is_Piercing_Pattern_only_t0",
+        "is_Piercing_Pattern_and_BullDiv_t0",
+        "is_Piercing_Pattern_and_BullDiv_recent_2d",
+        "is_Piercing_Pattern_and_BullDiv_recent_3d",
+        "is_Piercing_Pattern_and_BullDiv_recent_5d",
+        "is_Three_White_Soldiers_only_t0",
+        "is_Three_White_Soldiers_and_BullDiv_t0",
+        "is_Three_White_Soldiers_and_BullDiv_recent_2d",
+        "is_Three_White_Soldiers_and_BullDiv_recent_3d",
+        "is_Three_White_Soldiers_and_BullDiv_recent_5d",
+        "is_Morning_Star_only_t0",
+        "is_Morning_Star_and_BullDiv_t0",
+        "is_Morning_Star_and_BullDiv_recent_2d",
+        "is_Morning_Star_and_BullDiv_recent_3d",
+        "is_Morning_Star_and_BullDiv_recent_5d",
+        "is_Dragonfly_Doji_only_t0",
+        "is_Dragonfly_Doji_and_BullDiv_t0",
+        "is_Dragonfly_Doji_and_BullDiv_recent_2d",
+        "is_Dragonfly_Doji_and_BullDiv_recent_3d",
+        "is_Dragonfly_Doji_and_BullDiv_recent_5d",
+        # Same-day aggregaatit
+        "is_candle_day",
+        "signal_combo_code",
+        "num_candles_same_day",
+        "has_multi_candle_combo",
+        "has_bullish_divergence_same_day",
+        "signal_count_same_day",
+        "unique_patterns_same_day",
+        "max_strength_same_day",
+        "second_best_strength_same_day",
+        "sum_strength_same_day",
+        "has_same_day_reversal_cluster",
+        # Trendit ja volatiliteetti / indikaattorit
+        "is_crisis",
+        "has_blackout_data",
+        "is_earnings_t0",
+        "is_earnings_window",
+        "is_dividend_t0",
+        "is_dividend_window",
+        "is_blackout_t0",
+        "is_blackout_window",
+        "exclude_from_regression",
+        "t0_50p_slope",
+        "t0_200p_slope",
+        "trend_regime_5_20",
+        "trend_regime_20_50",
+        "trend_regime_50_200",
+        "ATR_14",
+        "ATR_ratio_14",
+        "MACD_line",
+        "MACD_signal",
+        "MACD_hist",
+        "pivot_low_strength_3",
+        "pivot_low_strength_5",
+        "pivot_high_strength_3",
+        "pivot_high_strength_5",
+        "VIX_10",
+        "VIX_norm_10",
+        "sector",
+        "sector_momentum_5",
+        "sector_momentum_20",
+        "sector_volatility_20",
+        "weekday",
     ]
-
-    HEADERS = BASE_HEADERS + NEW_FEATURE_HEADERS
     NON_ROUNDED_HEADERS = {
         "t_1_bodi_colour",
         "t0_bodi_colour",
@@ -146,27 +224,57 @@ class ExcelExporter:
         "weekday",
         "BullDiv_recent_offset",
         "Has_BullDiv_recent",
+        "bullDiv_offset",
+        "bullDiv_last_1d",
+        "bullDiv_last_2d",
+        "bullDiv_last_3d",
+        "bullDiv_last_3d_any",
+        "is_candle_day",
+        "signal_combo_code",
+        "num_candles_same_day",
+        "has_multi_candle_combo",
+        "has_bullish_divergence_same_day",
+        "has_same_day_reversal_cluster",
+        "is_crisis",
+        "has_blackout_data",
+        "is_earnings_t0",
+        "is_earnings_window",
+        "is_dividend_t0",
+        "is_dividend_window",
+        "is_blackout_t0",
+        "is_blackout_window",
+        "exclude_from_regression",
+        "trend_regime_5_20",
+        "trend_regime_20_50",
+        "trend_regime_50_200",
     }
-    PRECISION_MAP = {
-        "Gap_down_strength": 6,
-        "Body_ratio": 8,
-        "Shadow_ratio": 8,
-        "Volume_impulse": 8,
-        "Volatility_ratio_10_20": 8,
-        "Price_acceleration_5_10": 8,
-        "Price_slope_5": 8,
-        "Price_slope_10": 8,
-        "RSI_slope_5": 8,
-        "Reversal_Context_Score": 8,
-        "t0_close_norm": 8,
-        "t_2": 8,
-        "t_5": 8,
-        "t_10": 8,
-        "t_20": 8,
-        "BullDiv_strength": 3,
-        "BullDiv_recent_strength": 3,
+    # Kaikki REAL-luvut pyöristetään 10 desimaaliin, ellei NON_ROUNDED_HEADERS sisällä
+    PRECISION_MAP = {  # arvot >0 sallii eri desimaalit mutta käytämme 10 oletuksena
         "BullDiv_recent_offset": 0,
         "Has_BullDiv_recent": 0,
+        "bullDiv_offset": 0,
+        "bullDiv_last_1d": 0,
+        "bullDiv_last_2d": 0,
+        "bullDiv_last_3d": 0,
+        "bullDiv_last_3d_any": 0,
+        "signal_combo_code": 0,
+        "num_candles_same_day": 0,
+        "has_multi_candle_combo": 0,
+        "has_bullish_divergence_same_day": 0,
+        "has_same_day_reversal_cluster": 0,
+        "is_candle_day": 0,
+        "is_crisis": 0,
+        "has_blackout_data": 0,
+        "is_earnings_t0": 0,
+        "is_earnings_window": 0,
+        "is_dividend_t0": 0,
+        "is_dividend_window": 0,
+        "is_blackout_t0": 0,
+        "is_blackout_window": 0,
+        "exclude_from_regression": 0,
+        "trend_regime_5_20": 0,
+        "trend_regime_20_50": 0,
+        "trend_regime_50_200": 0,
     }
 
     def __init__(self, db_path: str = "analysis.db"):
@@ -207,10 +315,7 @@ class ExcelExporter:
     def _precision_for(self, header: str) -> int:
         if header in self.PRECISION_MAP:
             return self.PRECISION_MAP[header]
-        lower = header.lower()
-        if "hajonta" in lower or "volatility" in lower:
-            return 8
-        return 2
+        return 10
 
     def export_to_excel(
         self,
@@ -360,103 +465,23 @@ class ExcelExporter:
                 if has_bull_recent is None:
                     has_bull_recent = 1 if bull_recent_strength > 0 else 0
 
-                # Rakenna rivi (BASE_HEADERS + NEW_FEATURE_HEADERS)
-                row_data = [
-                    result.get("ticker"),
-                    result.get("date"),
-                    pattern_num,  # Numerokoodi nimen sijasta
-                    result.get("signal_strength"),
-                    result.get("t_1_alin"),
-                    result.get("t_1_ylin"),
-                    result.get("t_1_bodi"),
-                    result.get("t_1_bodi_colour"),
-                    result.get("t0_alin"),
-                    result.get("t0_ylin"),
-                    result.get("t0_bodi"),
-                    result.get("t0_bodi_colour"),
-                    result.get("t0_alinMiinusClose"),
-                    result.get("t1_alin"),
-                    result.get("t1_ylin"),
-                    result.get("t1_bodi"),
-                    result.get("t1_bodi_colour"),
-                    result.get("t_2"),
-                    result.get("t_5"),
-                    result.get("t_10"),
-                    result.get("t_15"),
-                    result.get("t_20"),
-                    result.get("t_2_hajonta"),
-                    result.get("t_5_hajonta"),
-                    result.get("t_10_hajonta"),
-                    result.get("t_15_hajonta"),
-                    result.get("t_20_hajonta"),
-                    result.get("t2"),
-                    result.get("t5"),
-                    result.get("t10"),
-                    result.get("t20"),
-                    result.get("t_2_volyymi"),
-                    result.get("t_5_volyymi"),
-                    result.get("t_10_volyymi"),
-                    result.get("t_15_volyymi"),
-                    result.get("t_20_volyymi"),
-                    result.get("t0_volyymi"),
-                    result.get("t2_volyymi"),
-                    result.get("t5_volyymi"),
-                    result.get("t10_volyymi"),
-                    result.get("t20_volyymi"),
-                    result.get("t_2_5p_liukuva"),
-                    result.get("t_2_10p_liukuva"),
-                    result.get("t_2_20p_liukuva"),
-                    result.get("t_5_5p_liukuva"),
-                    result.get("t_5_10p_liukuva"),
-                    result.get("t_5_20p_liukuva"),
-                    result.get("t_10_5p_liukuva"),
-                    result.get("t_10_10p_liukuva"),
-                    result.get("t_10_20p_liukuva"),
-                    result.get("t_15_5p_liukuva"),
-                    result.get("t_15_10p_liukuva"),
-                    result.get("t_15_20p_liukuva"),
-                    result.get("t_20_5p_liukuva"),
-                    result.get("t_20_10p_liukuva"),
-                    result.get("t_20_20p_liukuva"),
-                    result.get("t0_50p_liukuva"),
-                    result.get("t0_200p_liukuva"),
-                    result.get("SPX_0"),
-                    result.get("SPX_2"),
-                    result.get("SPX_5"),
-                    result.get("SPX_10"),
-                    result.get("SPX_15"),
-                    result.get("SPX_20"),
-                    result.get("SPX2"),
-                    result.get("SPX5"),
-                    result.get("SPX10"),
-                    result.get("SPX15"),
-                    result.get("SPX20"),
-                    result.get("NDX_0"),
-                    result.get("NDX_2"),
-                    result.get("NDX_5"),
-                    result.get("NDX_10"),
-                    result.get("NDX_15"),
-                    result.get("NDX_20"),
-                    result.get("NDX2"),
-                    result.get("NDX5"),
-                    result.get("NDX10"),
-                    result.get("NDX15"),
-                    result.get("NDX20"),
-                    result.get("RSI14_t0"),
-                    result.get("t0_close_norm"),
-                    bull_strength,
-                    bull_recent_strength,
-                    bull_recent_offset,
-                    has_bull_recent,
-                    result.get("weekday"),
-                ]
-                row_data.extend([result.get(col) for col in self.NEW_FEATURE_HEADERS])
-
-                # Tarkista että KAIKISSA sarakkeissa on data (ei None-arvoja)
-                base_values = row_data[: len(self.BASE_HEADERS)]
-                if None in base_values:
-                    skipped_rows += 1
-                    continue  # Skipppaa tämä rivi
+                # Rakenna rivi HEADERS-järjestyksessä
+                row_data = []
+                for header in self.HEADERS:
+                    if header == "kynttila":
+                        row_data.append(pattern_num)
+                    elif header == "vahvuus":
+                        row_data.append(result.get("signal_strength"))
+                    elif header == "BullDiv_strength":
+                        row_data.append(bull_strength)
+                    elif header == "BullDiv_recent_strength":
+                        row_data.append(bull_recent_strength)
+                    elif header == "BullDiv_recent_offset":
+                        row_data.append(bull_recent_offset)
+                    elif header == "Has_BullDiv_recent":
+                        row_data.append(has_bull_recent)
+                    else:
+                        row_data.append(result.get(header))
 
                 # Kirjoita rivi (käytä written_rows laskuria rivin numeroinnissa)
                 written_rows += 1

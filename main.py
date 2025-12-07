@@ -11,6 +11,7 @@ from stock.view import StockView
 from regression.view import RegressionView
 from reverse.view import ReverseView
 from stock.splits import sync_splits_for_ticker
+from analysis.divergence_recompute import recompute_divergence_for_ticker
 from analysis.splits_price_backfill import (
     has_uncorrected_splits,
     delete_prices_from_2018,
@@ -197,8 +198,11 @@ class RawCandleApp:
                             f"[SPLIT] {ticker}: analysis puhdistettu (findings={findings}, divergence={div_rows}, results={res_rows})"
                         )
 
-                    success, days, err = self._calculate_and_save_divergences(
-                        ticker, only_missing=False
+                    success, days, err = recompute_divergence_for_ticker(
+                        ticker,
+                        osakedata_path=self.osakedata_db_path,
+                        analysis_path=analysis_path,
+                        only_missing=False,
                     )
                     if success:
                         mark_splits_corrected(conn, ticker)
