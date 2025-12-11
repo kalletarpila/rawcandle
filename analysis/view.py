@@ -71,6 +71,7 @@ class AnalysisView:
         self.ALL_MARKETS_KEY = "__all__"
         self._markets = self._load_market_list()
         self._market_label_map = self._build_market_label_map()
+        self._combo_pairs_cache: Optional[set[tuple[str, str]]] = None
 
         # Lajittelun tila
         self.sort_column = None  # Sarakkeen nimi
@@ -448,6 +449,7 @@ class AnalysisView:
             self._refresh_market_filter_options()
             # Load data and then apply any active filters
             self.filtered_findings = self.all_findings.copy()
+            self._combo_pairs_cache = None
             # Apply filters (this will update table and statistics)
             self._apply_filters()
 
@@ -620,61 +622,7 @@ class AnalysisView:
 
         # Divergenssi + kynttilämalli -suodatin
         if self.divergence_combo_filter and self.divergence_combo_filter.value:
-            # Analysis-taulussa pattern on tekstinä, mutta hyödynnetään results_data:n
-            # divergenssilippuja jotta tulos vastaa Exceliä.
-            candle_patterns = {
-                "downtrend",
-                "Hammer",
-                "Bullish Engulfing",
-                "Piercing Pattern",
-                "Three White Soldiers",
-                "Morning Star",
-                "Dragonfly Doji",
-            }
-            divergence_patterns = {"Bullish Divergence"}
-            combo_patterns = set(COMBO_PATTERN_NAMES)
-
-            candle_pairs = set()
-            divergence_pairs = set()
-            combo_pairs = set()
-
-            for f in self.all_findings:
-                ticker = f.get("ticker", "")
-                date = f.get("date", "")
-                pattern = f.get("pattern", "")
-
-                if pattern in candle_patterns:
-                    candle_pairs.add((ticker, date))
-                elif pattern in divergence_patterns:
-                    divergence_pairs.add((ticker, date))
-                if pattern in combo_patterns or str(pattern).startswith("BullDiv &"):
-                    combo_pairs.add((ticker, date))
-
-            # Hyväksy divergenssi t0 tai t-1
-            divergence_lookup: Dict[str, set] = {}
-            for ticker, date in divergence_pairs:
-                try:
-                    d_obj = datetime.fromisoformat(date).date()
-                    divergence_lookup.setdefault(ticker, set()).add(d_obj)
-                except Exception:
-                    continue
-
-            for ticker, date in candle_pairs:
-                try:
-                    d_obj = datetime.fromisoformat(date).date()
-                except Exception:
-                    continue
-                dates_for_ticker = divergence_lookup.get(ticker, set())
-                if d_obj in dates_for_ticker or (d_obj - timedelta(days=1)) in dates_for_ticker:
-                    combo_pairs.add((ticker, date))
-
-            # Yhdistä results_data:n combo-parit (sis. sarakkeen 83 liput)
-            if self.db_manager:
-                try:
-                    combo_pairs |= self.db_manager.get_divergence_combo_pairs()
-                except Exception:
-                    pass
-
+            combo_pairs = self._get_combo_pairs()
             self.filtered_findings = [
                 f
                 for f in self.filtered_findings
@@ -729,6 +677,33 @@ class AnalysisView:
 
         self._update_table()
         self._update_statistics()
+
+    def _get_combo_pairs(self) -> set[tuple[str, str]]:
+        """
+        Palauta (ticker, date) -parit joilla on kynttilä (1–6) ja bull-divergenssi
+        t0 tai t-1. Käytetään suodattimessa ja cachetaan näkymän sisällä.
+        """
+        if self._combo_pairs_cache is not None:
+            return self._combo_pairs_cache
+
+        # Alusta välimuisti kannasta ladattujen komborivien koodeista 71–76
+        combo_pairs: set[tuple[str, str]] = set()
+        for f in self.all_findings:
+            code = f.get("candle_pattern")
+            if isinstance(code, int) and 71 <= code <= 76:
+                combo_pairs.add((f.get("ticker", ""), f.get("date", "")))
+
+        # Jos löydettiin combot suoraan kannasta, ei tarvetta hitaille liitoksille
+        if not combo_pairs and self.db_manager:
+            try:
+                combo_pairs |= self.db_manager.get_divergence_combo_pairs(
+                    candle_patterns=[1, 2, 3, 4, 5, 6]
+                )
+            except Exception as exc:
+                self.logger.warning(f"Combo pair fetch failed: {exc}")
+
+        self._combo_pairs_cache = combo_pairs
+        return combo_pairs
 
     def _clear_filters(self, e) -> None:
         """Tyhjennä suodattimet."""

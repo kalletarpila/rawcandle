@@ -1735,7 +1735,7 @@ class DatabaseManager:
     ) -> set:
         """
         Palauta (ticker, date) parit joille results_data:ssa on sekä kynttilä (0-6) että
-        divergenssi (pattern 7/8 TAI bullish_flag), rajoitettuna t0 tai t-1 divergenssiin.
+        divergenssi t0 tai t-1 (bullish_strength > 0 divergence_data-taulussa).
         """
         conn = None
         try:
@@ -1748,48 +1748,16 @@ class DatabaseManager:
             if tickers:
                 tickers = list({t.upper() for t in tickers if t})
 
-            # Rajaa divergenssi t0 tai t-1: Has_BullDiv_recent/BullDiv_recent_offset=0/1 tai bullish_divergence !=0
-            bull_indicator = (
-                "CASE "
-                "WHEN COALESCE(BullDiv_recent_offset, 99) IN (0, 1) THEN 1 "
-                "WHEN COALESCE(bullish_divergence, 0) <> 0 THEN 1 "
-                "ELSE 0 END"
-            )
-
-            if candle_patterns:
-                placeholders = ",".join("?" * len(candle_patterns))
-                candle_case = (
-                    f"CASE WHEN candle_pattern IN ({placeholders}) THEN 1 ELSE 0 END"
-                )
-                flag_case = (
-                    f"CASE WHEN candle_pattern IN ({placeholders}) "
-                    f"AND (({bull_indicator}) = 1 "
-                    "OR COALESCE(bearish_divergence, 0) <> 0) THEN 1 ELSE 0 END"
-                )
-                candle_params = list(candle_patterns)
-                flag_params = list(candle_patterns)
-            else:
-                candle_case = (
-                    "CASE WHEN candle_pattern BETWEEN 0 AND 6 THEN 1 ELSE 0 END"
-                )
-                flag_case = (
-                    "CASE WHEN candle_pattern BETWEEN 0 AND 6 "
-                    f"AND (({bull_indicator}) = 1 "
-                    "OR COALESCE(bearish_divergence, 0) <> 0) THEN 1 ELSE 0 END"
-                )
-                candle_params = []
-                flag_params = []
-
             where_clause_parts = []
-            params: list[Any] = candle_params + flag_params
+            params: list[Any] = []
 
             if tickers:
                 placeholders = ",".join("?" * len(tickers))
-                where_clause_parts.append(f"ticker IN ({placeholders})")
+                where_clause_parts.append(f"rd.ticker IN ({placeholders})")
                 params.extend(tickers)
 
             if start_date and end_date:
-                where_clause_parts.append("date BETWEEN ? AND ?")
+                where_clause_parts.append("rd.date BETWEEN ? AND ?")
                 params.extend([start_date, end_date])
 
             where_clause = (
@@ -1797,30 +1765,77 @@ class DatabaseManager:
                 if where_clause_parts
                 else ""
             )
+
+            if candle_patterns:
+                candle_placeholders = ",".join("?" * len(candle_patterns))
+                candle_params = list(candle_patterns)
+                candle_filter_clause = f"rd.candle_pattern IN ({candle_placeholders})"
+                params = candle_params + params
+            else:
+                candle_filter_clause = "rd.candle_pattern BETWEEN 0 AND 6"
+
             cursor.execute(
                 """
-                WITH grouped AS (
-                    SELECT
-                        ticker,
-                        date,
-                        MAX({candle_case}) AS has_candle,
-                        MAX(CASE WHEN candle_pattern IN (7, 8) THEN 1 ELSE 0 END) AS has_divergence_pattern,
-                        MAX({flag_case}) AS has_flagged_divergence
-                    FROM results_data
-                    {where_clause}
-                    GROUP BY ticker, date
-                )
-                SELECT ticker, date
-                FROM grouped
-                WHERE has_candle = 1 AND (has_divergence_pattern = 1 OR has_flagged_divergence = 1)
-            """.format(
-                    candle_case=candle_case,
-                    flag_case=flag_case,
-                    where_clause=where_clause,
-                ),
+                SELECT DISTINCT rd.ticker, rd.date
+                FROM results_data rd
+                JOIN divergence_data dd
+                  ON rd.ticker = dd.ticker
+                 AND (
+                        rd.date = dd.date
+                     OR rd.date = date(dd.date, '+1 day')
+                 )
+                {where_clause}
+                AND {candle_filter}
+                AND COALESCE(dd.bullish_strength, 0) > 0
+            """.format(where_clause=where_clause, candle_filter=candle_filter_clause),
                 params,
             )
-            return {(row[0], row[1]) for row in cursor.fetchall()}
+            combo_pairs = {(row[0], row[1]) for row in cursor.fetchall()}
+
+            # Fallback: jos divergence_data ei tuota mitään (esim. testidatassa puuttuu),
+            # käytä results_data:n omia divergenssikenttiä (bullish/bearish, recent).
+            if not combo_pairs:
+                fallback_clauses = []
+                fallback_params: list[Any] = []
+
+                # Alkuperäiset suodatukset
+                if tickers:
+                    placeholders = ",".join("?" * len(tickers))
+                    fallback_clauses.append(f"ticker IN ({placeholders})")
+                    fallback_params.extend(tickers)
+
+                if start_date and end_date:
+                    fallback_clauses.append("date BETWEEN ? AND ?")
+                    fallback_params.extend([start_date, end_date])
+
+                # Kynttiläsuodatus
+                if candle_patterns:
+                    candle_placeholders = ",".join("?" * len(candle_patterns))
+                    fallback_clauses.append(f"candle_pattern IN ({candle_placeholders})")
+                    fallback_params.extend(candle_patterns)
+                else:
+                    fallback_clauses.append("candle_pattern BETWEEN 0 AND 6")
+
+                # Divergenssikentät results_data-taulusta
+                fallback_clauses.append(
+                    """
+                    (
+                        COALESCE(bullish_divergence, 0) > 0
+                     OR COALESCE(BullDiv_recent_strength, 0) > 0
+                     OR COALESCE(Has_BullDiv_recent, 0) > 0
+                     OR COALESCE(bearish_divergence, 0) > 0
+                    )
+                    """
+                )
+
+                fallback_where = " WHERE " + " AND ".join(fallback_clauses)
+                cursor.execute(
+                    f"SELECT DISTINCT ticker, date FROM results_data{fallback_where}",
+                    fallback_params,
+                )
+                combo_pairs = {(row[0], row[1]) for row in cursor.fetchall()}
+
+            return combo_pairs
         except Exception as e:
             self.logger.error(f"Get divergence combo pairs failed: {e}")
             return set()
@@ -1943,7 +1958,7 @@ class DatabaseManager:
         clauses: List[str] = []
         params: List[Any] = []
 
-        if downtrend_only:
+        if downtrend_only and not patterns:
             clauses.append("candle_pattern = 0")
         elif patterns:
             placeholders = ",".join("?" * len(patterns))

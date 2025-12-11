@@ -3034,6 +3034,10 @@ Virheet: {error_count}"""
         import os
         import sqlite3
 
+        # Varmista että elementti on alustettu, ettei route_change kaadu
+        if not hasattr(self, "stock_count_text") or self.stock_count_text is None:
+            return
+
         try:
             data_dir = os.path.join(os.path.dirname(__file__), "data")
             db_path = os.path.join(data_dir, "osakedata.db")

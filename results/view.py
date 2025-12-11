@@ -30,6 +30,35 @@ def try_parse_date(s: str):
             return None
 
 
+def _get_results_combo_pairs(app, db_manager: DatabaseManager) -> set[tuple[str, str]]:
+    """
+    Palauta (ticker, date) -parit joissa on bull-divergenssi t0/t-1 ja kynttilä (1–6),
+    sekä kaikki valmiiksi kombokoodatut rivit (71–76). Välimuistitetaan app-instanssiin.
+    """
+    cache = getattr(app, "results_combo_pairs_cache", None)
+    if cache is not None:
+        return cache
+
+    combo_pairs: set[tuple[str, str]] = set()
+    try:
+        # Koodatut kombot 71–76 (kevyt haku ilman joinia)
+        combo_rows = db_manager.get_results_filtered(
+            patterns=[71, 72, 73, 74, 75, 76],
+            downtrend_only=False,
+        )
+        combo_pairs |= {(r.get("ticker"), r.get("date")) for r in combo_rows}
+
+        # t0/t-1 divergenssiparit kynttilöille 1–6
+        combo_pairs |= db_manager.get_divergence_combo_pairs(
+            candle_patterns=[1, 2, 3, 4, 5, 6]
+        )
+    except Exception as exc:
+        print(f"⚠️ Combo-parien haku epäonnistui: {exc}")
+
+    app.results_combo_pairs_cache = combo_pairs
+    return combo_pairs
+
+
 def generate_results_to_database(
     app,
     progress_callback=None,
@@ -243,11 +272,12 @@ def create_results_view(app) -> ft.View:
         label="Vain kynttilämalli + divergenssi -yhdistelmät",
         value=False,
         tooltip=(
-            "Ruksi pitää näkyvissä vain tapaukset, joissa samana päivänä on sekä "
-            "klassinen kynttiläkuvio (Hammer, Engulfing, jne.) että divergenssi "
-            "(Bullish). Pelkät divergenssikynttilät (pattern 7) eivät näy."
+            "Ruksi pitää näkyvissä vain tapaukset, joissa samana päivänä (t0) tai edellisenä päivänä (t-1) "
+            "on sekä klassinen kynttiläkuvio (Hammer-Dragonfly Doji) että bull-divergenssi. "
+            "Kombot koodataan koodeille 71–76; pelkät divergenssikynttilät (pattern 7) eivät näy."
         ),
     )
+    app.results_combo_pairs_cache = None
 
     app.results_ticker_field = ft.TextField(
         label="Osakkeen ticker (esim. AAPL)",
@@ -679,6 +709,12 @@ def create_results_view(app) -> ft.View:
                                 "Morning Star": 5,
                                 "Dragonfly Doji": 6,
                                 "Bullish Divergence": 7,
+                                "BullDiv & Hammer": 71,
+                                "BullDiv & Bullish Engulfing": 72,
+                                "BullDiv & Piercing Pattern": 73,
+                                "BullDiv & Three White Soldiers": 74,
+                                "BullDiv & Morning Star": 75,
+                                "BullDiv & Dragonfly Doji": 76,
                             }
                             selected_pattern_numbers = [
                                 pattern_name_to_num.get(name)
@@ -787,241 +823,294 @@ def create_results_view(app) -> ft.View:
 
         def generoi_tietokantaan_click(e):
             """Generoi tulokset tietokantaan"""
-            progress_dialog = None
-            progress_title = ft.Text("Generoidaan tuloksia tietokantaan")
-            progress_text = ft.Text("Aloitetaan...")
-            progress_bar = ft.ProgressBar(width=400, value=0)
-
-            # Keskeytys-lippu
-            cancel_flag = {"cancelled": False}
-
             try:
 
-                def cancel_generation(e_cancel):
-                    """Keskeytä generointi"""
-                    cancel_flag["cancelled"] = True
-                    progress_text.value = "Keskeytetään..."
-                    e_cancel.page.update()
+                # 1) Lue suodattimet
+                ticker_filter = None
+                pattern_filter = None
+                force_rebuild = False
+                divergence_combo_filter = False
+                start_date = None
+                end_date = None
 
-                progress_dialog = ft.AlertDialog(
-                    modal=True,
-                    title=progress_title,
-                    content=ft.Column(
-                        [
-                            progress_text,
-                            progress_bar,
-                        ],
-                        tight=True,
-                        height=80,
-                    ),
-                    actions=[
-                        ft.TextButton(
-                            "Keskeytä",
-                            on_click=cancel_generation,
-                        )
-                    ],
+                try:
+                    ticker_mode = app.results_radio_group.value
+                    ticker_value = (
+                        app.results_ticker_field.value.strip().upper()
+                        if app.results_ticker_field.value
+                        else ""
+                    )
+                    if ticker_mode == "single" and ticker_value:
+                        if "," in ticker_value:
+                            ticker_filter = [
+                                t.strip() for t in ticker_value.split(",") if t.strip()
+                            ]
+                        else:
+                            ticker_filter = [ticker_value]
+                except Exception as ex:
+                    print(f"Virhe ticker-suodattimen lukemisessa: {ex}")
+
+                try:
+                    pattern_mapping = {
+                        "downtrend": 0,
+                        "Hammer": 1,
+                        "Bullish Engulfing": 2,
+                        "Piercing Pattern": 3,
+                        "Three White Soldiers": 4,
+                        "Morning Star": 5,
+                        "Dragonfly Doji": 6,
+                        "Bullish Divergence": 7,
+                        "BullDiv & Hammer": 71,
+                        "BullDiv & Bullish Engulfing": 72,
+                        "BullDiv & Piercing Pattern": 73,
+                        "BullDiv & Three White Soldiers": 74,
+                        "BullDiv & Morning Star": 75,
+                        "BullDiv & Dragonfly Doji": 76,
+                    }
+                    selected_patterns = [
+                        pattern_mapping[cb.label]
+                        for cb in app.results_checkboxes
+                        if cb.value and cb.label in pattern_mapping
+                    ]
+                    if selected_patterns:
+                        pattern_filter = selected_patterns
+                except Exception as ex:
+                    print(f"Virhe pattern-suodattimen lukemisessa: {ex}")
+
+                force_rebuild = (
+                    app.results_force_rebuild.value
+                    if hasattr(app.results_force_rebuild, "value")
+                    else False
                 )
 
-                app.page.overlay.append(progress_dialog)
-                progress_dialog.open = True
-                e.page.update()
+                divergence_combo_filter = (
+                    app.results_divergence_combo_filter.value
+                    if hasattr(app.results_divergence_combo_filter, "value")
+                    else False
+                )
 
-                def progress_callback(ticker, current, total):
-                    """Päivitä progress bar ja tarkista keskeytys"""
-                    try:
-                        # Palauta True jos keskeytetty
-                        if cancel_flag["cancelled"]:
-                            return True
+                # Jos komborasti on päällä, ohita downtrend (0) ja varmista että haetaan candle 1–6/71–76
+                if divergence_combo_filter:
+                    if pattern_filter:
+                        pattern_filter = [p for p in pattern_filter if p != 0]
+                    if not pattern_filter:
+                        pattern_filter = [1, 2, 3, 4, 5, 6, 71, 72, 73, 74, 75, 76]
 
-                        progress_text.value = (
-                            f"Käsitellään: {ticker} ({current}/{total})"
-                        )
-                        progress_bar.value = current / total if total > 0 else 0
-                        e.page.update()
-                        return False
-                    except Exception:
-                        return False
+                try:
+                    date_mode = app.results_date_radio_group.value
+                    if date_mode == "range":
+                        if app.results_start_date_text.value:
+                            start_date = app.results_start_date_text.value.strip()
+                        if app.results_end_date_text.value:
+                            end_date = app.results_end_date_text.value.strip()
+                except Exception as ex:
+                    print(f"Virhe päivämääräsuodattimen lukemisessa: {ex}")
 
-                def run_generation():
-                    # Lue ticker-suodatin
-                    ticker_filter = None
-                    try:
-                        ticker_mode = app.results_radio_group.value
-                        ticker_value = (
-                            app.results_ticker_field.value.strip().upper()
-                            if app.results_ticker_field.value
-                            else ""
-                        )
-
-                        if ticker_mode == "single" and ticker_value:
-                            # Pilkulla erotettu lista
-                            if "," in ticker_value:
-                                ticker_filter = [
-                                    t.strip()
-                                    for t in ticker_value.split(",")
-                                    if t.strip()
-                                ]
-                            else:
-                                ticker_filter = [ticker_value]
-                    except Exception as ex:
-                        print(f"Virhe ticker-suodattimen lukemisessa: {ex}")
-
-                    # Lue pattern-suodatin
-                    pattern_filter = None
-                    try:
-                        pattern_mapping = {
-                            "downtrend": 0,
-                            "Hammer": 1,
-                            "Bullish Engulfing": 2,
-                            "Piercing Pattern": 3,
-                            "Three White Soldiers": 4,
-                            "Morning Star": 5,
-                            "Dragonfly Doji": 6,
-                            "Bullish Divergence": 7,
-                            "BullDiv & Hammer": 1,
-                            "BullDiv & Bullish Engulfing": 2,
-                            "BullDiv & Piercing Pattern": 3,
-                            "BullDiv & Three White Soldiers": 4,
-                            "BullDiv & Morning Star": 5,
-                            "BullDiv & Dragonfly Doji": 6,
-                        }
-
-                        selected_patterns = []
-                        for cb in app.results_checkboxes:
-                            if cb.value and cb.label in pattern_mapping:
-                                selected_patterns.append(pattern_mapping[cb.label])
-
-                        if selected_patterns:
-                            pattern_filter = selected_patterns
-                    except Exception as ex:
-                        print(f"Virhe pattern-suodattimen lukemisessa: {ex}")
-
-                    # Lue force_rebuild -asetus
-                    force_rebuild = (
-                        app.results_force_rebuild.value
-                        if hasattr(app.results_force_rebuild, "value")
-                        else False
-                    )
-
-                    # Lue divergence_combo_filter -asetus
-                    divergence_combo_filter = (
-                        app.results_divergence_combo_filter.value
-                        if hasattr(app.results_divergence_combo_filter, "value")
-                        else False
-                    )
-
-                    # Lue päivämääräsuodatus
-                    start_date = None
-                    end_date = None
-                    try:
-                        date_mode = app.results_date_radio_group.value
-                        if date_mode == "range":
-                            if app.results_start_date_text.value:
-                                start_date = app.results_start_date_text.value.strip()
-                            if app.results_end_date_text.value:
-                                end_date = app.results_end_date_text.value.strip()
-                    except Exception as ex:
-                        print(f"Virhe päivämääräsuodattimen lukemisessa: {ex}")
-
-                    # Generoi suodattimilla
-                    (
-                        rows,
-                        time_taken,
-                        error,
-                        feature_summary,
-                        feature_error,
-                    ) = generate_results_to_database(
-                        app,
-                        progress_callback,
+                # 2) Laske esikatselumäärä
+                preview_count = None
+                try:
+                    dbm = DatabaseManager("data/analysis.db")
+                    generator = ResultsGenerator(dbm, "data/osakedata.db")
+                    preview_findings = generator._fetch_new_findings(
                         ticker_filter=ticker_filter,
                         pattern_filter=pattern_filter,
-                        divergence_combo_filter=divergence_combo_filter,
-                        force_rebuild=force_rebuild,
                         start_date=start_date,
                         end_date=end_date,
                     )
-                    if feature_error and not error:
-                        error = feature_error
+                    if divergence_combo_filter:
+                        preview_findings = generator._filter_divergence_combos(
+                            preview_findings
+                        )
+                    preview_count = len(preview_findings)
+                except Exception as ex:
+                    print(f"Esikatselulaskenta epäonnistui: {ex}")
 
-                    # Päivitä UI pääsäikeessä
-                    try:
-                        progress_dialog.open = False
-                        e.page.update()
+                # 3) Kysy vahvistus ennen generointia
+                confirm_dialog = ft.AlertDialog(
+                    modal=True,
+                    title=ft.Text("Generoi tulokset"),
+                    content=ft.Column(
+                        [
+                            ft.Text(
+                                f"Generoitavia tapahtumia: {preview_count if preview_count is not None else 'tuntematon'}",
+                                weight=ft.FontWeight.BOLD,
+                            ),
+                            ft.Text(
+                                "Generointi käyttää valittuja suodattimia (ticker, kuviot, aikaväli, laskutrendi, combo)."
+                            ),
+                        ],
+                        tight=True,
+                        spacing=8,
+                    ),
+                    actions_alignment=ft.MainAxisAlignment.END,
+                )
 
-                        if error:
-                            result_dialog = ft.AlertDialog(
-                                title=ft.Text("Virhe"),
-                                content=ft.Text(
-                                    f"Tulosten generointi epäonnistui:\n{error}"
-                                ),
-                                actions=[
-                                    ft.TextButton(
-                                        "OK",
-                                        on_click=lambda _: app.close_dialog(
-                                            result_dialog
-                                        ),
-                                    )
-                                ],
+                def start_generation(_):
+                    app.close_dialog(confirm_dialog)
+
+                    progress_text = ft.Text("Aloitetaan...")
+                    progress_bar = ft.ProgressBar(width=400, value=0)
+                    cancel_flag = {"cancelled": False}
+
+                    def cancel_generation(e_cancel):
+                        cancel_flag["cancelled"] = True
+                        progress_text.value = "Keskeytetään..."
+                        e_cancel.page.update()
+
+                    progress_dialog = ft.AlertDialog(
+                        modal=True,
+                        title=ft.Text("Generoidaan tuloksia tietokantaan"),
+                        content=ft.Column(
+                            [
+                                progress_text,
+                                progress_bar,
+                            ],
+                            tight=True,
+                            height=80,
+                        ),
+                        actions=[
+                            ft.TextButton(
+                                "Keskeytä",
+                                on_click=cancel_generation,
                             )
-                        elif cancel_flag["cancelled"]:
-                            result_dialog = ft.AlertDialog(
-                                title=ft.Text("⚠️ Keskeytetty"),
-                                content=ft.Text(
-                                    f"Generointi keskeytetty käyttäjän toimesta\n"
-                                    f"Generoitu {rows} riviä ennen keskeytystä\n"
+                        ],
+                    )
+
+                    app.page.overlay.append(progress_dialog)
+                    progress_dialog.open = True
+                    e.page.update()
+
+                    def progress_callback(ticker, current, total):
+                        try:
+                            if cancel_flag["cancelled"]:
+                                return True
+                            progress_text.value = (
+                                f"Käsitellään: {ticker} ({current}/{total})"
+                            )
+                            progress_bar.value = current / total if total > 0 else 0
+                            e.page.update()
+                            return False
+                        except Exception:
+                            return False
+
+                    def run_generation():
+                        try:
+                            (
+                                rows,
+                                time_taken,
+                                error,
+                                feature_summary,
+                                feature_error,
+                            ) = generate_results_to_database(
+                                app,
+                                progress_callback,
+                                ticker_filter=ticker_filter,
+                                pattern_filter=pattern_filter,
+                                divergence_combo_filter=divergence_combo_filter,
+                                force_rebuild=force_rebuild,
+                                start_date=start_date,
+                                end_date=end_date,
+                            )
+                            if feature_error and not error:
+                                error = feature_error
+
+                            if hasattr(app, "results_combo_pairs_cache"):
+                                app.results_combo_pairs_cache = None
+                        except Exception as ex:
+                            if progress_dialog:
+                                progress_dialog.open = False
+                            e.page.snack_bar = ft.SnackBar(
+                                ft.Text(f"Virhe: {ex}"), open=True
+                            )
+                            e.page.update()
+                            return
+
+                        try:
+                            progress_dialog.open = False
+                            e.page.update()
+
+                            if error:
+                                result_dialog = ft.AlertDialog(
+                                    title=ft.Text("Virhe"),
+                                    content=ft.Text(
+                                        f"Tulosten generointi epäonnistui:\n{error}"
+                                    ),
+                                    actions=[
+                                        ft.TextButton(
+                                            "OK",
+                                            on_click=lambda _: app.close_dialog(
+                                                result_dialog
+                                            ),
+                                        )
+                                    ],
+                                )
+                            elif cancel_flag["cancelled"]:
+                                result_dialog = ft.AlertDialog(
+                                    title=ft.Text("⚠️ Keskeytetty"),
+                                    content=ft.Text(
+                                        f"Generointi keskeytetty käyttäjän toimesta\n"
+                                        f"Generoitu {rows} riviä ennen keskeytystä\n"
+                                        f"Aikaa kului: {time_taken:.2f}s"
+                                    ),
+                                    actions=[
+                                        ft.TextButton(
+                                            "OK",
+                                            on_click=lambda _: app.close_dialog(
+                                                result_dialog
+                                            ),
+                                        )
+                                    ],
+                                )
+                            else:
+                                msg = (
+                                    f"Generoitu {rows} riviä tietokantaan\n"
                                     f"Aikaa kului: {time_taken:.2f}s"
-                                ),
-                                actions=[
-                                    ft.TextButton(
-                                        "OK",
-                                        on_click=lambda _: app.close_dialog(
-                                            result_dialog
-                                        ),
-                                    )
-                                ],
-                            )
-                        else:
-                            msg = (
-                                f"Generoitu {rows} riviä tietokantaan\n"
-                                f"Aikaa kului: {time_taken:.2f}s"
-                            )
-                            if feature_summary:
-                                msg += f"\nLisäfeaturet päivitetty {feature_summary.total_rows} riville"
+                                )
+                                if feature_summary:
+                                    msg += f"\nLisäfeaturet päivitetty {feature_summary.total_rows} riville"
 
-                            result_dialog = ft.AlertDialog(
-                                title=ft.Text("✅ Valmis!"),
-                                content=ft.Text(msg),
-                                actions=[
-                                    ft.TextButton(
-                                        "OK",
-                                        on_click=lambda _: app.close_dialog(
-                                            result_dialog
-                                        ),
-                                    )
-                                ],
-                            )
+                                result_dialog = ft.AlertDialog(
+                                    title=ft.Text("✅ Valmis!"),
+                                    content=ft.Text(msg),
+                                    actions=[
+                                        ft.TextButton(
+                                            "OK",
+                                            on_click=lambda _: app.close_dialog(
+                                                result_dialog
+                                            ),
+                                        )
+                                    ],
+                                )
 
-                        app.page.overlay.append(result_dialog)
-                        result_dialog.open = True
+                            app.page.overlay.append(result_dialog)
+                            result_dialog.open = True
 
-                        # Päivitä metadata-näyttö
-                        metadata = get_results_metadata(app)
-                        if metadata and hasattr(app, "results_metadata_text"):
-                            gen_time = metadata.get("generated_at", "")
-                            total = metadata.get("total_rows", 0)
-                            app.results_metadata_text.value = (
-                                f"Tulokset generoitu: {gen_time} ({total} riviä)"
-                            )
+                            metadata = get_results_metadata(app)
+                            if metadata and hasattr(app, "results_metadata_text"):
+                                gen_time = metadata.get("generated_at", "")
+                                total = metadata.get("total_rows", 0)
+                                app.results_metadata_text.value = (
+                                    f"Tulokset generoitu: {gen_time} ({total} riviä)"
+                                )
 
-                        e.page.update()
-                    except Exception as ex:
-                        print(f"Error showing result: {ex}")
+                            e.page.update()
+                        except Exception as ex:
+                            print(f"Error showing result: {ex}")
 
-                threading.Thread(target=run_generation, daemon=True).start()
+                    threading.Thread(target=run_generation, daemon=True).start()
+
+                confirm_dialog.actions = [
+                    ft.TextButton(
+                        "Peruuta", on_click=lambda _: app.close_dialog(confirm_dialog)
+                    ),
+                    ft.TextButton("Generoi", on_click=start_generation),
+                ]
+
+                app.page.overlay.append(confirm_dialog)
+                confirm_dialog.open = True
+                e.page.update()
 
             except Exception as ex:
-                if progress_dialog:
-                    progress_dialog.open = False
                 e.page.snack_bar = ft.SnackBar(ft.Text(f"Virhe: {ex}"), open=True)
                 e.page.update()
 
@@ -1038,12 +1127,12 @@ def create_results_view(app) -> ft.View:
                     "Morning Star": 5,
                     "Dragonfly Doji": 6,
                     "Bullish Divergence": 7,
-                    "BullDiv & Hammer": 1,
-                    "BullDiv & Bullish Engulfing": 2,
-                    "BullDiv & Piercing Pattern": 3,
-                    "BullDiv & Three White Soldiers": 4,
-                    "BullDiv & Morning Star": 5,
-                    "BullDiv & Dragonfly Doji": 6,
+                    "BullDiv & Hammer": 71,
+                    "BullDiv & Bullish Engulfing": 72,
+                    "BullDiv & Piercing Pattern": 73,
+                    "BullDiv & Three White Soldiers": 74,
+                    "BullDiv & Morning Star": 75,
+                    "BullDiv & Dragonfly Doji": 76,
                 }
 
                 selected_patterns = [
@@ -1109,15 +1198,18 @@ def create_results_view(app) -> ft.View:
                     if start_date and end_date and start_date > end_date:
                         raise ValueError("Alkupäivä ei voi olla loppupäivän jälkeen.")
 
-                downtrend_only = bool(
-                    getattr(app, "results_downtrend_filter", None)
-                    and app.results_downtrend_filter.value
-                )
-
                 divergence_combo_filter = bool(
                     hasattr(app, "results_divergence_combo_filter")
                     and app.results_divergence_combo_filter.value
                 )
+
+                downtrend_only = bool(
+                    getattr(app, "results_downtrend_filter", None)
+                    and app.results_downtrend_filter.value
+                )
+                # Kombosuodatin tarvitsee kynttilöitä 1–6/71–76, ei downtrend-koodia 0
+                if divergence_combo_filter:
+                    downtrend_only = False
 
                 return {
                     "patterns": selected_patterns,
@@ -1144,6 +1236,22 @@ def create_results_view(app) -> ft.View:
                     end_date=initial_filters["end_date"],
                     downtrend_only=initial_filters["downtrend_only"],
                 )
+                if initial_filters["divergence_combo_filter"]:
+                    # Laske combo-filtterin läpi menevien rivien määrä välimuistin avulla
+                    combo_pairs = _get_results_combo_pairs(app, db_manager)
+                    rows_for_count = db_manager.get_results_filtered(
+                        patterns=initial_filters["patterns"],
+                        tickers=initial_filters["ticker_filter"],
+                        start_date=initial_filters["start_date"],
+                        end_date=initial_filters["end_date"],
+                        downtrend_only=initial_filters["downtrend_only"],
+                    )
+                    total_count = sum(
+                        1
+                        for r in rows_for_count
+                        if (r.get("ticker"), r.get("date")) in combo_pairs
+                    )
+
                 if total_count == 0:
                     e.page.snack_bar = ft.SnackBar(
                         ft.Text(
@@ -1186,13 +1294,24 @@ def create_results_view(app) -> ft.View:
                     def ensure_filtered_rows() -> List[dict]:
                         nonlocal filtered_rows_cache
                         if filtered_rows_cache is None:
-                            filtered_rows_cache = db_manager.get_results_filtered(
+                            base_rows = db_manager.get_results_filtered(
                                 patterns=filters["patterns"],
                                 tickers=filters["ticker_filter"],
                                 start_date=filters["start_date"],
                                 end_date=filters["end_date"],
-                                downtrend_only=filters["downtrend_only"],
+                                downtrend_only=filters["downtrend_only"]
+                                and not filters["divergence_combo_filter"],
                             )
+                            if filters["divergence_combo_filter"]:
+                                combo_pairs = _get_results_combo_pairs(
+                                    app, db_manager
+                                )
+                                base_rows = [
+                                    r
+                                    for r in base_rows
+                                    if (r.get("ticker"), r.get("date")) in combo_pairs
+                                ]
+                            filtered_rows_cache = base_rows
                         return filtered_rows_cache
 
                     if mode == "random":
@@ -1247,7 +1366,8 @@ def create_results_view(app) -> ft.View:
 
                     if filters["divergence_combo_filter"] and id_filter is None:
                         rows = ensure_filtered_rows()
-                        combo_pairs = db_manager.get_divergence_combo_pairs()
+                        combo_pairs = _get_results_combo_pairs(app, db_manager)
+
                         combo_ids = [
                             r.get("id")
                             for r in rows
@@ -1257,10 +1377,10 @@ def create_results_view(app) -> ft.View:
                         if combo_ids:
                             id_filter = combo_ids
                             print(
-                                f"🔍 Divergenssi-yhdistelmä: {len(id_filter)} tapahtumaa"
+                                f"🔍 Divergenssi-yhdistelmä (t0/t-1): {len(id_filter)} tapahtumaa"
                             )
                         else:
-                            print("⚠️ Ei divergenssi-yhdistelmiä löytynyt")
+                            print("⚠️ Ei t0/t-1 divergenssi-yhdistelmiä löytynyt")
 
                     # Sulje dialogi
                     close_dialog(None)
@@ -1549,6 +1669,10 @@ def create_results_view(app) -> ft.View:
                         # Päivitä metadata-näyttö
                         if hasattr(app, "results_metadata_text"):
                             app.results_metadata_text.value = "Ei generoituja tuloksia"
+
+                    # Invalidoi combovälimuisti
+                    if hasattr(app, "results_combo_pairs_cache"):
+                        app.results_combo_pairs_cache = None
 
                 app.close_dialog(confirm_dialog)
                 e.page.update()

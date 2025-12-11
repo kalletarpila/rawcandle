@@ -227,6 +227,16 @@ class ResultsGenerator:
             "Dragonfly Doji",
         }
 
+        # Valmiiksi koodatut kombokuviot (71–76)
+        combo_patterns = {
+            "BullDiv & Hammer",
+            "BullDiv & Bullish Engulfing",
+            "BullDiv & Piercing Pattern",
+            "BullDiv & Three White Soldiers",
+            "BullDiv & Morning Star",
+            "BullDiv & Dragonfly Doji",
+        }
+
         # Divergenssi patternit
         divergence_patterns = {"Bullish Divergence", "Bearish Divergence"}
 
@@ -248,6 +258,21 @@ class ResultsGenerator:
 
             if has_candle and has_divergence:
                 combo_keys.add(key)
+
+        # Lisää jo valmiiksi kombokoodatut rivit
+        combo_keys |= {
+            (f.get("ticker"), f.get("date"))
+            for f in findings
+            if f.get("pattern") in combo_patterns
+        }
+
+        # Lisää t0/t-1 divergenssiparit kannasta (koodit 1–6)
+        try:
+            combo_keys |= self.db_manager.get_divergence_combo_pairs(
+                candle_patterns=[1, 2, 3, 4, 5, 6]
+            )
+        except Exception as exc:
+            self.logger.warning(f"Divergence combo pair fetch failed: {exc}")
 
         # Suodata findings jotka kuuluvat combo_keys:iin
         filtered: List[dict] = []
@@ -291,21 +316,11 @@ class ResultsGenerator:
 
             # Muunna pattern_filter numeroiksi jos tarvitaan max_date/existing_tickers hakua varten
             pattern_number_filter = None
+            pattern_numbers = dict(self.PATTERN_MAPPING)
             if pattern_filter and all(isinstance(p, int) for p in pattern_filter):
                 pattern_number_filter = pattern_filter
             elif pattern_filter:
                 # Käänteinen mappaus: nimi -> numero
-                pattern_numbers = {
-                    "downtrend": 0,
-                    "Hammer": 1,
-                    "Bullish Engulfing": 2,
-                    "Piercing Pattern": 3,
-                    "Three White Soldiers": 4,
-                    "Morning Star": 5,
-                    "Dragonfly Doji": 6,
-                    "Bullish Divergence": 7,
-                    "Bearish Divergence": 8,
-                }
                 pattern_number_filter = [
                     pattern_numbers[name]
                     for name in pattern_filter
@@ -331,17 +346,7 @@ class ResultsGenerator:
             # Jos pattern_filter on numeroita, muunna ne nimiksi
             if pattern_filter and all(isinstance(p, int) for p in pattern_filter):
                 # Käänteinen mappaus: numero -> nimi
-                pattern_names = {
-                    0: "downtrend",
-                    1: "Hammer",
-                    2: "Bullish Engulfing",
-                    3: "Piercing Pattern",
-                    4: "Three White Soldiers",
-                    5: "Morning Star",
-                    6: "Dragonfly Doji",
-                    7: "Bullish Divergence",
-                    8: "Bearish Divergence",
-                }
+                pattern_names = {num: name for name, num in pattern_numbers.items()}
                 pattern_filter = [
                     pattern_names[num] for num in pattern_filter if num in pattern_names
                 ]
