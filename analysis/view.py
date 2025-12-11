@@ -650,7 +650,23 @@ class AnalysisView:
                 if pattern in combo_patterns or str(pattern).startswith("BullDiv &"):
                     combo_pairs.add((ticker, date))
 
-            combo_pairs |= candle_pairs & divergence_pairs
+            # Hyväksy divergenssi t0 tai t-1
+            divergence_lookup: Dict[str, set] = {}
+            for ticker, date in divergence_pairs:
+                try:
+                    d_obj = datetime.fromisoformat(date).date()
+                    divergence_lookup.setdefault(ticker, set()).add(d_obj)
+                except Exception:
+                    continue
+
+            for ticker, date in candle_pairs:
+                try:
+                    d_obj = datetime.fromisoformat(date).date()
+                except Exception:
+                    continue
+                dates_for_ticker = divergence_lookup.get(ticker, set())
+                if d_obj in dates_for_ticker or (d_obj - timedelta(days=1)) in dates_for_ticker:
+                    combo_pairs.add((ticker, date))
 
             # Yhdistä results_data:n combo-parit (sis. sarakkeen 83 liput)
             if self.db_manager:
