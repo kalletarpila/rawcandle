@@ -23,23 +23,57 @@ class PatternDefinition:
     key: str  # canonical key used in code and UI data fields
     db_name: str  # value stored in analysis database
     label: str  # label shown to the user
+    code: int  # numeric candle code
 
 
 PATTERN_DEFINITIONS: tuple[PatternDefinition, ...] = (
-    PatternDefinition("downtrend", "downtrend", "0 Random laskutrendipäivä"),
-    PatternDefinition("hammer", "Hammer", "1 Hammer"),
-    PatternDefinition("bullish_engulfing", "Bullish Engulfing", "2 Bullish Engulfing"),
-    PatternDefinition("piercing_pattern", "Piercing Pattern", "3 Piercing Pattern"),
+    PatternDefinition("downtrend", "downtrend", "0 Random laskutrendipäivä", 0),
+    PatternDefinition("hammer", "Hammer", "1 Hammer", 1),
     PatternDefinition(
-        "three_white_soldiers", "Three White Soldiers", "4 Three White Soldiers"
+        "bullish_engulfing", "Bullish Engulfing", "2 Bullish Engulfing", 2
     ),
-    PatternDefinition("morning_star", "Morning Star", "5 Morning Star"),
-    PatternDefinition("dragonfly_doji", "Dragonfly Doji", "6 Dragonfly Doji"),
+    PatternDefinition("piercing_pattern", "Piercing Pattern", "3 Piercing Pattern", 3),
     PatternDefinition(
-        "bullish_divergence", "Bullish Divergence", "7 Bullish Divergence"
+        "three_white_soldiers", "Three White Soldiers", "4 Three White Soldiers", 4
+    ),
+    PatternDefinition("morning_star", "Morning Star", "5 Morning Star", 5),
+    PatternDefinition("dragonfly_doji", "Dragonfly Doji", "6 Dragonfly Doji", 6),
+    PatternDefinition("bullish_divergence", "Bullish Divergence", "7 Bullish Divergence", 7),
+    PatternDefinition(
+        "bearish_divergence", "Bearish Divergence", "8 Bearish Divergence", 8
     ),
     PatternDefinition(
-        "bearish_divergence", "Bearish Divergence", "8 Bearish Divergence"
+        "bulldiv_hammer_combo", "BullDiv & Hammer", "71 BullDiv & Hammer", 71
+    ),
+    PatternDefinition(
+        "bulldiv_bullish_engulfing_combo",
+        "BullDiv & Bullish Engulfing",
+        "72 BullDiv & Bullish Engulfing",
+        72,
+    ),
+    PatternDefinition(
+        "bulldiv_piercing_combo",
+        "BullDiv & Piercing Pattern",
+        "73 BullDiv & Piercing Pattern",
+        73,
+    ),
+    PatternDefinition(
+        "bulldiv_three_white_combo",
+        "BullDiv & Three White Soldiers",
+        "74 BullDiv & Three White Soldiers",
+        74,
+    ),
+    PatternDefinition(
+        "bulldiv_morning_star_combo",
+        "BullDiv & Morning Star",
+        "75 BullDiv & Morning Star",
+        75,
+    ),
+    PatternDefinition(
+        "bulldiv_dragonfly_doji_combo",
+        "BullDiv & Dragonfly Doji",
+        "76 BullDiv & Dragonfly Doji",
+        76,
     ),
 )
 
@@ -47,7 +81,5 @@ PATTERN_MAP: dict[str, PatternDefinition] = {p.key: p for p in PATTERN_DEFINITIO
 DB_PATTERN_TO_KEY: dict[str, str] = {
     p.db_name.lower(): p.key for p in PATTERN_DEFINITIONS
 }
-PATTERN_KEY_TO_NUMBER: dict[str, int] = {
-    definition.key: index for index, definition in enumerate(PATTERN_DEFINITIONS)
-}
+PATTERN_KEY_TO_NUMBER: dict[str, int] = {definition.key: definition.code for definition in PATTERN_DEFINITIONS}
 DIVERGENCE_KEYS = {"bullish_divergence", "bearish_divergence"}
