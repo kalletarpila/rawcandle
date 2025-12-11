@@ -212,7 +212,10 @@ class AnalysisView:
             label="Vain kynttilämalli + divergenssi -yhdistelmät",
             value=False,
             on_change=self._on_filter_change,
-            tooltip="Näytä vain tapahtumat joissa samalle tickerille ja päivälle on sekä kynttilämalli (Hammer-Dragonfly Doji) että divergenssi",
+            tooltip=(
+                "Näytä vain tapahtumat joissa samalle tickerille ja päivälle on sekä kynttilämalli (Hammer-Dragonfly Doji) että divergenssi. "
+                "Huom: samalle päivälle koodatut kombot ovat koodeilla 71–76, kun taas tämä suodatin hyväksyy myös divergenssin t-1…t-3 päiviltä."
+            ),
         )
 
         # Rivit suodattimille
