@@ -214,7 +214,7 @@ class AnalysisView:
             on_change=self._on_filter_change,
             tooltip=(
                 "Näytä vain tapahtumat joissa samalle tickerille ja päivälle on sekä kynttilämalli (Hammer-Dragonfly Doji) että divergenssi. "
-                "Huom: samalle päivälle koodatut kombot ovat koodeilla 71–76, kun taas tämä suodatin hyväksyy myös divergenssin t-1…t-3 päiviltä."
+                "Huom: samalle päivälle koodatut kombot ovat koodeilla 71–76; suodatin huomioi divergenssin t0 tai t-1 (ei t-2/t-3)."
             ),
         )
 
@@ -542,14 +542,24 @@ class AnalysisView:
             pattern = finding.get("pattern", "")
             if pattern in pattern_counts:
                 pattern_counts[pattern] += 1
+        # Laske myös koodatut kombot 71–76 candle_pattern-kentästä
+        combo_counts: Dict[int, int] = {}
+        for finding in self.all_findings:
+            code = finding.get("candle_pattern")
+            if isinstance(code, int) and 71 <= code <= 76:
+                combo_counts[code] = combo_counts.get(code, 0) + 1
 
         # Järjestä sisäisen numeron mukaan ja muodosta teksti
         sorted_patterns = sorted(
             pattern_counts.items(), key=lambda x: PATTERN_ORDER[x[0]]
         )
-        counts_text = " | ".join(
-            [f"{pattern}: {count}" for pattern, count in sorted_patterns]
-        )
+        parts = [f"{pattern}: {count}" for pattern, count in sorted_patterns]
+        if combo_counts:
+            combo_text = " | ".join(
+                f"{code}: {count}" for code, count in sorted(combo_counts.items())
+            )
+            parts.append(f"Kombot 71-76: {combo_text}")
+        counts_text = " | ".join(parts)
 
         self.pattern_counts_text.value = counts_text
 

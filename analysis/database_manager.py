@@ -1735,7 +1735,7 @@ class DatabaseManager:
     ) -> set:
         """
         Palauta (ticker, date) parit joille results_data:ssa on sekä kynttilä (0-6) että
-        divergenssi (pattern 7/8 TAI bearish/bullish -flagit).
+        divergenssi (pattern 7/8 TAI bullish_flag), rajoitettuna t0 tai t-1 divergenssiin.
         """
         conn = None
         try:
@@ -1748,10 +1748,10 @@ class DatabaseManager:
             if tickers:
                 tickers = list({t.upper() for t in tickers if t})
 
+            # Rajaa divergenssi t0 tai t-1: Has_BullDiv_recent/BullDiv_recent_offset=0/1 tai bullish_divergence !=0
             bull_indicator = (
                 "CASE "
-                "WHEN COALESCE(Has_BullDiv_recent, 0) = 1 THEN 1 "
-                "WHEN COALESCE(BullDiv_recent_strength, 0) <> 0 THEN 1 "
+                "WHEN COALESCE(BullDiv_recent_offset, 99) IN (0, 1) THEN 1 "
                 "WHEN COALESCE(bullish_divergence, 0) <> 0 THEN 1 "
                 "ELSE 0 END"
             )

@@ -18,6 +18,7 @@ import argparse
 import sqlite3
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence, Tuple
+import datetime
 
 BASE_TO_COMBO = {i: i + 70 for i in range(1, 7)}
 
@@ -41,17 +42,12 @@ def fetch_existing_combos(conn: sqlite3.Connection) -> set[Tuple[str, str]]:
     return {(row[0], row[1]) for row in cur.fetchall()}
 
 
-def fetch_candidate_rows(conn: sqlite3.Connection) -> Sequence[sqlite3.Row]:
+def fetch_candle_rows(conn: sqlite3.Connection) -> Sequence[sqlite3.Row]:
+    """Hae kaikki candle_pattern 1–6 rivit results_data-taulusta."""
     conn.row_factory = sqlite3.Row
-    sql = """
-        SELECT *
-        FROM results_data rd
-        JOIN divergence_data dd
-          ON rd.ticker = dd.ticker AND rd.date = dd.date
-        WHERE dd.bullish_strength > 0
-          AND rd.candle_pattern BETWEEN 1 AND 6
-    """
-    cur = conn.execute(sql)
+    cur = conn.execute(
+        "SELECT * FROM results_data WHERE candle_pattern BETWEEN 1 AND 6"
+    )
     return cur.fetchall()
 
 
@@ -113,20 +109,30 @@ def main(db_path: Path, dry_run: bool = False) -> None:
 
         divergence_days = fetch_divergence_days(conn)
         existing_combos = fetch_existing_combos(conn)
-        rows = fetch_candidate_rows(conn)
+        rows = fetch_candle_rows(conn)
 
-        # Suodata pois päivät, joissa combo on jo olemassa
-        rows = [
-            row
-            for row in rows
-            if (row["ticker"], row["date"]) in divergence_days
-            and (row["ticker"], row["date"]) not in existing_combos
-        ]
-        primary = pick_primary(rows)
+        # Ryhmittele per (ticker, date)
+        by_day: Dict[Tuple[str, str], List[sqlite3.Row]] = {}
+        for row in rows:
+            by_day.setdefault((row["ticker"], row["date"]), []).append(row)
 
-        # Luo lisättävät rivit ja poistettavien id:t
-        add_rows = list(primary.values())
-        delete_ids = [row["id"] for row in add_rows]
+        add_rows: List[sqlite3.Row] = []
+        delete_ids: List[int] = []
+        for (ticker, date_str), candidates in by_day.items():
+            if (ticker, date_str) in existing_combos:
+                continue
+            has_div_t0 = (ticker, date_str) in divergence_days
+            try:
+                d_obj = datetime.date.fromisoformat(date_str)
+                prev_date = (d_obj - datetime.timedelta(days=1)).isoformat()
+            except Exception:
+                prev_date = None
+            has_div_t1 = prev_date and (ticker, prev_date) in divergence_days
+            if not (has_div_t0 or has_div_t1):
+                continue
+            chosen = min(candidates, key=lambda r: r["candle_pattern"])
+            add_rows.append(chosen)
+            delete_ids.append(chosen["id"])
 
         if dry_run:
             dist: Dict[int, int] = {}

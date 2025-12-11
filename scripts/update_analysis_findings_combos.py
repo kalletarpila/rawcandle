@@ -82,20 +82,50 @@ def main(db_path: Path, dry_run: bool = False) -> None:
                     (base_code, row["id"])
                 )
 
-        # Valitse päivän pienin kynttiläkoodi komboksi jos divergenssi samana päivänä
+        # Valitse päivän pienin kynttiläkoodi komboksi jos divergenssi t0 tai t-1
         combo_target: Dict[int, int] = {}
         for key, items in base_candidates.items():
-            if key not in divergence_days:
+            ticker, date_str = key
+            if key in divergence_days:
+                base_code, row_id = min(items, key=lambda x: x[0])
+                combo_target[row_id] = base_code
                 continue
-            base_code, row_id = min(items, key=lambda x: x[0])
-            combo_target[row_id] = base_code
+
+            # tarkista t-1
+            try:
+                from datetime import date, timedelta
+
+                dt = date.fromisoformat(date_str)
+                prev_day = (dt - timedelta(days=1)).isoformat()
+            except Exception:
+                prev_day = None
+
+            if prev_day and (ticker, prev_day) in divergence_days:
+                base_code, row_id = min(items, key=lambda x: x[0])
+                combo_target[row_id] = base_code
 
         updates: List[Tuple[int, str, int]] = []
         combo_counts: Dict[int, int] = {}
+        combo_name_to_base = {name.lower(): base for base, name in COMBO_NAME_BY_BASE.items()}
         for row in rows:
-            base_code = BASE_PATTERN_CODES.get(normalize_pattern(row["pattern"]), 0)
+            pattern_raw = row["pattern"] or ""
+            norm = normalize_pattern(pattern_raw)
+            existing_code = row["candle_pattern"] if "candle_pattern" in row.keys() else None
+
+            # Jätä valmiit kombot ennalleen
+            if isinstance(existing_code, int) and existing_code in {71, 72, 73, 74, 75, 76}:
+                updates.append((existing_code, pattern_raw, row["id"]))
+                continue
+            if norm in combo_name_to_base:
+                base = combo_name_to_base[norm]
+                candle_code = base + 70
+                updates.append((candle_code, pattern_raw, row["id"]))
+                combo_counts[candle_code] = combo_counts.get(candle_code, 0) + 1
+                continue
+
+            base_code = BASE_PATTERN_CODES.get(norm, existing_code if isinstance(existing_code, int) else 0)
             candle_code = base_code
-            pattern_text = row["pattern"]
+            pattern_text = pattern_raw
 
             if row["id"] in combo_target:
                 base = combo_target[row["id"]]
