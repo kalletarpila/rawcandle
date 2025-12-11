@@ -87,6 +87,8 @@ def generate_results_to_database(
         (rows_inserted, processing_time, error_msg, feature_summary, feature_error)
     """
     try:
+        # Muotoile samaan formaattiin kuin SQLite CURRENT_TIMESTAMP (YYYY-MM-DD HH:MM:SS)
+        ts_before = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         # Hae polut
         analysis_db = "data/analysis.db"
         stock_db = "data/osakedata.db"
@@ -150,6 +152,9 @@ def generate_results_to_database(
                 stock_db_path=stock_db,
                 create_backup=False,
                 verbose=False,
+                created_after=ts_before,
+                start_date=start_date,
+                end_date=end_date,
             )
         except Exception as exc:  # pragma: no cover - surfaced to UI
             feature_error = str(exc)

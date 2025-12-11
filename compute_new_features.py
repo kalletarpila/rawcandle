@@ -96,9 +96,38 @@ def ensure_columns(conn: sqlite3.Connection, columns: Dict[str, str]) -> None:
             conn.commit()
 
 
-def load_results(conn: sqlite3.Connection) -> pd.DataFrame:
+def load_results(
+    conn: sqlite3.Connection,
+    created_after: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> pd.DataFrame:
     query = f"SELECT * FROM {RESULTS_TABLE}"
-    df = pd.read_sql_query(query, conn)
+    params: list[str] = []
+    clauses: list[str] = []
+
+    # Suodata luontiajan perusteella, jos sarake on olemassa
+    if created_after:
+        cols = {
+            row[1]
+            for row in conn.execute(f"PRAGMA table_info({RESULTS_TABLE})").fetchall()
+        }
+        if "created_at" in cols:
+            clauses.append("created_at >= ?")
+            params.append(created_after)
+
+    # Suodata päivämäärän perusteella, jos pyydetty
+    if start_date:
+        clauses.append("date >= ?")
+        params.append(start_date)
+    if end_date:
+        clauses.append("date <= ?")
+        params.append(end_date)
+
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
+
+    df = pd.read_sql_query(query, conn, params=params)
     if "date" not in df.columns:
         raise ValueError("results_data taulusta puuttuu date-sarake.")
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
@@ -468,6 +497,9 @@ def run_feature_enrichment(
     *,
     create_backup: bool = True,
     verbose: bool = True,
+    created_after: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> FeatureEnrichmentSummary:
     analysis_path = Path(analysis_db_path)
     if not analysis_path.exists():
@@ -478,7 +510,12 @@ def run_feature_enrichment(
     price_conn = None
     ensure_columns(conn, NEW_COLUMNS)
 
-    df_results = load_results(conn)
+    df_results = load_results(
+        conn,
+        created_after=created_after,
+        start_date=start_date,
+        end_date=end_date,
+    )
     if df_results.empty:
         conn.close()
         if price_conn:
