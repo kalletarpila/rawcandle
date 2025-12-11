@@ -19,28 +19,11 @@ from typing import Callable, List, Optional, Tuple
 import pandas as pd
 
 from market_repository import ensure_market_schema, get_market_for_ticker
-
-from .combo_features import CANDLE_PATTERN_TO_SLUG
 from .database_manager import DatabaseManager
 from .preprocess_utils import load_blackout_dates
 
 CRISIS_START = datetime(2025, 3, 1).date()
 CRISIS_END = datetime(2025, 4, 30).date()
-
-SAME_DAY_DEFAULTS = {
-    "signal_count_same_day": 0,
-    "unique_patterns_same_day": 0,
-    "max_strength_same_day": 0.0,
-    "second_best_strength_same_day": 0.0,
-    "sum_strength_same_day": 0.0,
-    "signal_combo_code": 0,
-    "num_candles_same_day": 0,
-    "has_multi_candle_combo": 0,
-    "has_bullish_divergence_same_day": 0,
-    "has_same_day_reversal_cluster": 0,
-    "is_candle_day": 0,
-}
-
 
 class ResultsGenerator:
     """Generoi results_data tauluun kaikki 89 saraketta."""
@@ -55,6 +38,12 @@ class ResultsGenerator:
         "Dragonfly Doji": 6,
         "Bullish Divergence": 7,
         "Bearish Divergence": 8,
+        "BullDiv & Hammer": 71,
+        "BullDiv & Bullish Engulfing": 72,
+        "BullDiv & Piercing Pattern": 73,
+        "BullDiv & Three White Soldiers": 74,
+        "BullDiv & Morning Star": 75,
+        "BullDiv & Dragonfly Doji": 76,
         "downtrend": 0,
     }
 
@@ -158,7 +147,7 @@ class ResultsGenerator:
 
                 ticker_market = self._get_market(ticker)
 
-                aggregates_by_date = self._build_same_day_aggregates(ticker_findings)
+                aggregates_by_date = {}
 
                 # Prosessoi kaikki findingit tälle tickerille
                 ticker_results = []
@@ -1141,14 +1130,6 @@ class ResultsGenerator:
             pivot_high_strength_3 = calc_pivot_high_strength(3)
             pivot_high_strength_5 = calc_pivot_high_strength(5)
 
-            same_day_data = (
-                dict(same_day_features)
-                if same_day_features
-                else self._default_same_day_features()
-            )
-            for key, default in SAME_DAY_DEFAULTS.items():
-                same_day_data.setdefault(key, default)
-
             blackout_flags = self._compute_blackout_flags(ticker, date)
             sector_features = self._get_sector_features(ticker)
 
@@ -1222,6 +1203,7 @@ class ResultsGenerator:
 
             # Pattern numero (3)
             candle_pattern = self.PATTERN_MAPPING.get(pattern, 0)
+            is_candle_day = int(candle_pattern in {1, 2, 3, 4, 5, 6, 71, 72, 73, 74, 75, 76})
 
             bull_div_offset_value = (
                 BullDiv_recent_offset if BullDiv_recent_offset != -1 else 99
@@ -1233,10 +1215,6 @@ class ResultsGenerator:
                 "bullDiv_last_3d": 1 if bull_div_offset_value in (0, 1, 2) else 0,
                 "bullDiv_last_3d_any": 1 if bull_div_offset_value in (0, 1, 2) else 0,
             }
-            combo_features = self._compute_candle_combo_features(
-                candle_pattern, BullDiv_recent_offset
-            )
-
             # Viikonpäivä (84)
             date_obj = datetime.strptime(date, "%Y-%m-%d")
             weekday = date_obj.isoweekday()  # 1=Ma, 7=Su
@@ -1249,6 +1227,7 @@ class ResultsGenerator:
                 "date": date,
                 "market": market,
                 "candle_pattern": candle_pattern,
+                "is_candle_day": is_candle_day,
                 "signal_strength": signal_strength,
                 "t_1_alin": t_1_alin,
                 "t_1_ylin": t_1_ylin,
@@ -1367,8 +1346,6 @@ class ResultsGenerator:
                 "weekday": weekday,
             }
             result.update(bull_div_general)
-            result.update(combo_features)
-            result.update(same_day_data)
             result.update(blackout_flags)
             result.update(sector_features)
             return result
@@ -1441,72 +1418,6 @@ class ResultsGenerator:
         flags["exclude_from_regression"] = flags["is_blackout_window"]
         return flags
 
-    def _build_same_day_aggregates(self, findings: List[dict]) -> dict[str, dict]:
-        aggregates: dict[str, dict] = {}
-        by_date: dict[str, List[dict]] = {}
-        for finding in findings:
-            date = finding.get("date")
-            if not date:
-                continue
-            by_date.setdefault(date, []).append(finding)
-
-        for date, items in by_date.items():
-            pattern_codes = [
-                self.PATTERN_MAPPING.get(item.get("pattern"), 0) for item in items
-            ]
-            strengths = []
-            for item in items:
-                try:
-                    strengths.append(float(item.get("signal_strength") or 0.0))
-                except (TypeError, ValueError):
-                    strengths.append(0.0)
-            candle_codes = [code for code in pattern_codes if 1 <= code <= 6]
-            num_candles = len(candle_codes)
-            has_bullish_div = any(code == 7 for code in pattern_codes)
-            has_any_div = has_bullish_div or any(code == 8 for code in pattern_codes)
-
-            sorted_strengths = sorted(strengths, reverse=True)
-            max_strength = float(sorted_strengths[0]) if sorted_strengths else 0.0
-            second_best = (
-                float(sorted_strengths[1]) if len(sorted_strengths) >= 2 else 0.0
-            )
-            sum_strength = float(sum(strengths)) if strengths else 0.0
-
-            if num_candles == 0 and not has_any_div:
-                combo_code = 0
-            elif num_candles == 1 and not has_any_div:
-                combo_code = 1
-            elif num_candles >= 2 and not has_any_div:
-                combo_code = 2
-            elif num_candles == 0 and has_any_div:
-                combo_code = 4
-            else:
-                combo_code = 3
-
-            has_multi = int(num_candles >= 2)
-            is_candle_day = int(num_candles > 0)
-            has_cluster = int(has_multi == 1 or (is_candle_day == 1 and has_any_div))
-
-            aggregates[date] = {
-                "signal_count_same_day": len(items),
-                "unique_patterns_same_day": len(
-                    {code for code in pattern_codes if code != 0}
-                ),
-                "max_strength_same_day": max_strength,
-                "second_best_strength_same_day": second_best,
-                "sum_strength_same_day": sum_strength,
-                "signal_combo_code": combo_code,
-                "num_candles_same_day": num_candles,
-                "has_multi_candle_combo": has_multi,
-                "has_bullish_divergence_same_day": int(has_bullish_div),
-                "has_same_day_reversal_cluster": has_cluster,
-                "is_candle_day": is_candle_day,
-            }
-        return aggregates
-
-    def _default_same_day_features(self) -> dict:
-        return dict(SAME_DAY_DEFAULTS)
-
     def _get_sector_features(self, ticker: str) -> dict:
         if not self._sector_warning_logged:
             self.logger.warning(
@@ -1519,29 +1430,6 @@ class ResultsGenerator:
             "sector_momentum_20": None,
             "sector_volatility_20": None,
         }
-
-    def _compute_candle_combo_features(
-        self, candle_pattern: int, bull_offset: int
-    ) -> dict:
-        combos = {}
-        offset = bull_offset if bull_offset is not None else -1
-        for pattern_name, slug in CANDLE_PATTERN_TO_SLUG.items():
-            code = self.PATTERN_MAPPING.get(pattern_name, -1)
-            is_pattern = int(candle_pattern == code)
-            combos[f"is_{slug}_only_t0"] = int(
-                is_pattern == 1 and (offset == -1 or offset > 5)
-            )
-            combos[f"is_{slug}_and_BullDiv_t0"] = int(is_pattern == 1 and offset == 0)
-            combos[f"is_{slug}_and_BullDiv_recent_2d"] = int(
-                is_pattern == 1 and offset != -1 and offset <= 2
-            )
-            combos[f"is_{slug}_and_BullDiv_recent_3d"] = int(
-                is_pattern == 1 and offset != -1 and offset <= 3
-            )
-            combos[f"is_{slug}_and_BullDiv_recent_5d"] = int(
-                is_pattern == 1 and offset != -1 and offset <= 5
-            )
-        return combos
 
     def _schema_parity_check(self, sample_result: dict) -> None:
         """

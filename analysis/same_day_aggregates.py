@@ -55,27 +55,12 @@ def add_same_day_aggregate_features(
     records = []
     for (ticker, date), group in grouped:
         signal_mask = group["_is_signal"]
-        signal_strengths = group.loc[signal_mask, "_strength"].dropna().to_numpy()
         signal_count = int(signal_mask.sum())
-        unique_patterns = int(group["_pattern"].nunique())
-        max_strength = float(signal_strengths.max()) if signal_strengths.size else 0.0
-        if signal_strengths.size >= 2:
-            sorted_vals = np.sort(signal_strengths)
-            second_best = float(sorted_vals[-2])
-        else:
-            second_best = 0.0
-        has_reversal_cluster = int(group["_is_reversal"].sum() >= 2)
-        sum_strength = float(signal_strengths.sum()) if signal_strengths.size else 0.0
         records.append(
             {
                 ticker_col: ticker,
                 date_col: date,
                 "signal_count_same_day": signal_count,
-                "unique_patterns_same_day": unique_patterns,
-                "max_strength_same_day": max_strength,
-                "second_best_strength_same_day": second_best,
-                "sum_strength_same_day": sum_strength,
-                "has_same_day_reversal_cluster": has_reversal_cluster,
             }
         )
 
@@ -99,40 +84,18 @@ def add_same_day_aggregate_features(
 
 
 AGGREGATE_COLUMNS = [
+    # Säilytetään vain yksinkertainen signaalilaskuri yhteensopivuuteen.
     "signal_count_same_day",
-    "unique_patterns_same_day",
-    "max_strength_same_day",
-    "second_best_strength_same_day",
-    "sum_strength_same_day",
-    "has_same_day_reversal_cluster",
 ]
 INT_AGGREGATE_COLUMNS = {
     "signal_count_same_day",
-    "unique_patterns_same_day",
 }
 
 SAME_DAY_ALIAS_MAP = {
     "same_day_signal_count": "signal_count_same_day",
-    "same_day_unique_patterns": "unique_patterns_same_day",
-    "same_day_max_strength": "max_strength_same_day",
-    "same_day_second_best_strength": "second_best_strength_same_day",
-    "same_day_sum_strength": "sum_strength_same_day",
-    "same_day_signal_combo_code": "signal_combo_code",
-    "same_day_num_candles": "num_candles_same_day",
-    "same_day_has_multi_candle_combo": "has_multi_candle_combo",
-    "same_day_has_bullish_divergence": "has_bullish_divergence_same_day",
-    "same_day_has_reversal_cluster": "has_same_day_reversal_cluster",
-    "same_day_is_candle_day": "is_candle_day",
 }
 SAME_DAY_ALIAS_INT_COLUMNS = {
     "same_day_signal_count",
-    "same_day_unique_patterns",
-    "same_day_signal_combo_code",
-    "same_day_num_candles",
-    "same_day_has_multi_candle_combo",
-    "same_day_has_bullish_divergence",
-    "same_day_has_reversal_cluster",
-    "same_day_is_candle_day",
 }
 
 

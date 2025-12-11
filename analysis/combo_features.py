@@ -13,19 +13,9 @@ CANDLE_PATTERN_TO_SLUG: Dict[str, str] = {
     "Dragonfly Doji": "Dragonfly_Doji",
 }
 
-COMBO_SUFFIXES: List[str] = [
-    "only_t0",
-    "and_BullDiv_t0",
-    "and_BullDiv_recent_2d",
-    "and_BullDiv_recent_3d",
-    "and_BullDiv_recent_5d",
-]
-
-COMBO_FEATURE_COLUMNS: List[str] = [
-    f"is_{slug}_{suffix}"
-    for slug in CANDLE_PATTERN_TO_SLUG.values()
-    for suffix in COMBO_SUFFIXES
-]
+# Combo-flagit poistettiin results_data-schemasta; jätetään lista tyhjäksi,
+# mutta säilytetään slug-mapping historiallisia siivouksia varten.
+COMBO_FEATURE_COLUMNS: List[str] = []
 
 BULL_DIV_GENERAL_FEATURES: List[str] = [
     "bullDiv_offset",

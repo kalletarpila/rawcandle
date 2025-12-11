@@ -9,10 +9,7 @@ from typing import List, Dict, Any, Optional, Tuple, Iterable, Set
 from datetime import datetime
 import logging
 
-from .combo_features import (
-    BULL_DIV_GENERAL_FEATURES,
-    COMBO_FEATURE_COLUMNS,
-)
+from .combo_features import BULL_DIV_GENERAL_FEATURES, CANDLE_PATTERN_TO_SLUG
 
 RESULTS_BASE_COLUMNS: List[str] = [
     "ticker",
@@ -139,16 +136,6 @@ MASTER_FEATURE_COLUMNS: List[str] = [
     "VIX_norm_10",
     "is_crisis",
     "is_candle_day",
-    "signal_combo_code",
-    "num_candles_same_day",
-    "has_multi_candle_combo",
-    "has_bullish_divergence_same_day",
-    "signal_count_same_day",
-    "unique_patterns_same_day",
-    "max_strength_same_day",
-    "second_best_strength_same_day",
-    "sum_strength_same_day",
-    "has_same_day_reversal_cluster",
     "has_blackout_data",
     "is_earnings_t0",
     "is_earnings_window",
@@ -162,6 +149,36 @@ MASTER_FEATURE_COLUMNS: List[str] = [
     "sector_momentum_20",
     "sector_volatility_20",
 ]
+
+# Sarakkeet jotka pudotetaan uuden combo-koodipolun myötä
+COMBO_FLAG_COLUMNS: List[str] = [
+    f"is_{slug}_{suffix}"
+    for slug in CANDLE_PATTERN_TO_SLUG.values()
+    for suffix in [
+        "only_t0",
+        "and_BullDiv_t0",
+        "and_BullDiv_recent_2d",
+        "and_BullDiv_recent_3d",
+        "and_BullDiv_recent_5d",
+    ]
+]
+
+SAME_DAY_AGG_COLUMNS: List[str] = [
+    "signal_combo_code",
+    "num_candles_same_day",
+    "has_multi_candle_combo",
+    "has_bullish_divergence_same_day",
+    "signal_count_same_day",
+    "unique_patterns_same_day",
+    "max_strength_same_day",
+    "second_best_strength_same_day",
+    "sum_strength_same_day",
+    "has_same_day_reversal_cluster",
+]
+
+DROPPED_RESULTS_COLUMNS: List[str] = COMBO_FLAG_COLUMNS + SAME_DAY_AGG_COLUMNS
+# Pudotettujen combo-/same-day -sarakkeiden tilalle ei lisätä uusia flagisarjoja.
+COMBO_FEATURE_COLUMNS: List[str] = []
 
 MASTER_FEATURE_COLUMN_DEFS = {
     "t0_20p_liukuva": "REAL",
@@ -195,16 +212,6 @@ MASTER_FEATURE_COLUMN_DEFS = {
     "VIX_norm_10": "REAL",
     "is_crisis": "INTEGER DEFAULT 0",
     "is_candle_day": "INTEGER DEFAULT 0",
-    "signal_combo_code": "INTEGER DEFAULT 0",
-    "num_candles_same_day": "INTEGER DEFAULT 0",
-    "has_multi_candle_combo": "INTEGER DEFAULT 0",
-    "has_bullish_divergence_same_day": "INTEGER DEFAULT 0",
-    "signal_count_same_day": "INTEGER DEFAULT 0",
-    "unique_patterns_same_day": "INTEGER DEFAULT 0",
-    "max_strength_same_day": "REAL",
-    "second_best_strength_same_day": "REAL",
-    "sum_strength_same_day": "REAL",
-    "has_same_day_reversal_cluster": "INTEGER DEFAULT 0",
     "has_blackout_data": "INTEGER DEFAULT 0",
     "is_earnings_t0": "INTEGER DEFAULT 0",
     "is_earnings_window": "INTEGER DEFAULT 0",
@@ -227,8 +234,6 @@ BULL_DIV_METRIC_COLUMN_DEFS = {
     "bearish_divergence": "REAL",
 }
 
-COMBO_COLUMN_DEFS = {column: "INTEGER DEFAULT 0" for column in COMBO_FEATURE_COLUMNS}
-
 BULL_DIV_GENERAL_DEFAULTS = {
     "bullDiv_offset": 99,
     "bullDiv_last_1d": 0,
@@ -248,13 +253,6 @@ MASTER_FEATURE_INTEGER_COLUMNS: Set[str] = {
     "t1_bodi_colour",
     "is_crisis",
     "is_candle_day",
-    "signal_combo_code",
-    "num_candles_same_day",
-    "has_multi_candle_combo",
-    "has_bullish_divergence_same_day",
-    "signal_count_same_day",
-    "unique_patterns_same_day",
-    "has_same_day_reversal_cluster",
     "has_blackout_data",
     "is_earnings_t0",
     "is_earnings_window",
@@ -281,7 +279,6 @@ RESULTS_SCHEMA_REQUIRED_COLUMNS.update(
         for column in BULL_DIV_GENERAL_FEATURES
     }
 )
-RESULTS_SCHEMA_REQUIRED_COLUMNS.update(COMBO_COLUMN_DEFS)
 
 
 class DatabaseManager:
@@ -534,16 +531,6 @@ class DatabaseManager:
                     VIX_norm_10 REAL,
                     is_crisis INTEGER DEFAULT 0,
                     is_candle_day INTEGER DEFAULT 0,
-                    signal_combo_code INTEGER DEFAULT 0,
-                    num_candles_same_day INTEGER DEFAULT 0,
-                    has_multi_candle_combo INTEGER DEFAULT 0,
-                    has_bullish_divergence_same_day INTEGER DEFAULT 0,
-                    signal_count_same_day INTEGER DEFAULT 0,
-                    unique_patterns_same_day INTEGER DEFAULT 0,
-                    max_strength_same_day REAL DEFAULT 0.0,
-                    second_best_strength_same_day REAL DEFAULT 0.0,
-                    sum_strength_same_day REAL DEFAULT 0.0,
-                    has_same_day_reversal_cluster INTEGER DEFAULT 0,
                     has_blackout_data INTEGER DEFAULT 0,
                     is_earnings_t0 INTEGER DEFAULT 0,
                     is_earnings_window INTEGER DEFAULT 0,
@@ -594,8 +581,6 @@ class DatabaseManager:
                 additional_column_defs[column] = general_column_ddls.get(
                     column, "INTEGER DEFAULT 0"
                 )
-            for combo_column in COMBO_FEATURE_COLUMNS:
-                additional_column_defs[combo_column] = "INTEGER DEFAULT 0"
 
             for column, ddl in additional_column_defs.items():
                 if column not in results_columns:
@@ -624,7 +609,8 @@ class DatabaseManager:
                 "CREATE INDEX IF NOT EXISTS idx_results_market ON results_data(market)"
             )
 
-            # Varmista että results_data sisältää kaikki master-sarakkeet.
+            # Pudota vanhat combo-/same-day -sarakkeet ja varmista schema.
+            self._drop_columns_if_exists("results_data", DROPPED_RESULTS_COLUMNS)
             self.ensure_results_schema()
 
             # Luo results_metadata taulu
@@ -660,6 +646,30 @@ class DatabaseManager:
             self.logger.error(f"Fetch columns failed for table {table}: {e}")
             return set()
 
+    def _drop_columns_if_exists(self, table: str, columns: Iterable[str]) -> None:
+        """
+        Pudota annetut sarakkeet jos ne löytyvät taulusta (SQLite 3.35+).
+        """
+        existing = self._get_existing_columns(table)
+        to_drop = [col for col in columns if col in existing]
+        if not to_drop:
+            return
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        for col in to_drop:
+            try:
+                cursor.execute(f"ALTER TABLE {table} DROP COLUMN {col}")
+                self.logger.info(f"Dropped column {col} from {table}")
+            except Exception as exc:
+                self.logger.warning(
+                    "Failed to drop column %s from %s (%s)", col, table, exc
+                )
+        try:
+            conn.commit()
+        except Exception:
+            pass
+
     def ensure_results_schema(self) -> None:
         """
         Lisää puuttuvat results_data-sarakkeet idempotentisti (ei droppaa dataa).
@@ -669,6 +679,7 @@ class DatabaseManager:
         -lauseita ja on turvallinen suorittaa useasti.
         """
         try:
+            self._drop_columns_if_exists("results_data", DROPPED_RESULTS_COLUMNS)
             existing = self._get_existing_columns("results_data")
             if not existing:
                 # results_data puuttuu kokonaan; _init_database luo sen myöhemmin

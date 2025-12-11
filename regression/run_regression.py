@@ -30,10 +30,9 @@ from sklearn.preprocessing import StandardScaler
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
 from analysis.bullish_divergence_core_model import BullishDivergenceModel
-from analysis.combo_features import (
-    BULL_DIV_GENERAL_FEATURES,
-    COMBO_FEATURE_COLUMNS,
-)
+
+# Combo flag -featuret on poistettu; käytetään suoraan candle_pattern -koodia (71-76).
+COMBO_FEATURE_COLUMNS: list[str] = []
 from analysis.preprocess_utils import (
     apply_blackout_flags,
     load_blackout_dates,
@@ -81,16 +80,6 @@ FEATURE_COLUMNS = [
     "has_blackout_data",
     # Kriisi-ikkuna
     "is_crisis",
-    # Päiväkohtaiset signaaliyhdistelmät
-    "num_candles_same_day",
-    "has_multi_candle_combo",
-    "has_bullish_divergence_same_day",
-    "signal_count_same_day",
-    "unique_patterns_same_day",
-    "max_strength_same_day",
-    "second_best_strength_same_day",
-    "sum_strength_same_day",
-    "has_same_day_reversal_cluster",
     # Markkinaympäristö ja indeksivola
     "SPX_10",
     "SPX_20",
@@ -106,7 +95,6 @@ CATEGORICAL_DUMMY_COLUMNS = [
     PATTERN_COLUMN,
     MARKET_COLUMN,
     "BullDiv_recent_offset",
-    "signal_combo_code",
 ]
 FEATURE_SELECTION_MARKER = "__ui_feature_selection__"
 PATTERN_LABELS = {
@@ -126,14 +114,6 @@ CRISIS_END = "2025-04-30"
 BINARY_FEATURES = {"is_crisis"}
 BINARY_FEATURES.update(
     {"bullDiv_last_1d", "bullDiv_last_2d", "bullDiv_last_3d", "bullDiv_last_3d_any"}
-)
-BINARY_FEATURES.update(COMBO_FEATURE_COLUMNS)
-BINARY_FEATURES.update(
-    {
-        "has_multi_candle_combo",
-        "has_bullish_divergence_same_day",
-        "has_same_day_reversal_cluster",
-    }
 )
 BULL_DIV_DIAGNOSTIC_BASE = ["signal_strength", "Price_slope_10", "SPX_volatility_10"]
 BULL_DIV_DIAGNOSTIC_FEATURES = BULL_DIV_DIAGNOSTIC_BASE + COMBO_FEATURE_COLUMNS
@@ -162,15 +142,6 @@ ALIAS_MAP = {
 }
 OPTIONAL_FEATURE_DEFAULTS: dict[str, float] = {
     "signal_strength": 0.0,
-    "signal_count_same_day": 0.0,
-    "unique_patterns_same_day": 0.0,
-    "max_strength_same_day": 0.0,
-    "second_best_strength_same_day": 0.0,
-    "sum_strength_same_day": 0.0,
-    "has_same_day_reversal_cluster": 0.0,
-    "has_multi_candle_combo": 0.0,
-    "has_bullish_divergence_same_day": 0.0,
-    "num_candles_same_day": 0.0,
 }
 
 
@@ -698,42 +669,6 @@ def compute_bull_div_distribution(df: pd.DataFrame) -> Dict[int, int]:
     return {int(k): int(v) for k, v in counts.items()}
 
 
-def candle_bull_div_combo_analysis(
-    df: pd.DataFrame, horizon: int
-) -> Optional[List[str]]:
-    if "bullDiv_offset" not in df.columns or "bullDiv_last_3d_any" not in df.columns:
-        return None
-    label = f"success{horizon}"
-    if label not in df.columns:
-        return None
-    candle_mask = df[PATTERN_COLUMN].fillna(0).astype(int) != 0
-    candle_df = df.loc[candle_mask].copy()
-    if candle_df.empty:
-        return None
-
-    def _rate(mask: pd.Series) -> tuple[float, int]:
-        sub = candle_df.loc[mask & candle_df[label].notna()]
-        if sub.empty:
-            return 0.0, 0
-        return float(sub[label].mean()), len(sub)
-
-    offset_series = candle_df["bullDiv_offset"].fillna(99).astype(int)
-    last_any = candle_df["bullDiv_last_3d_any"].fillna(0).astype(int)
-    lines = [f"== Candle + Bullish Divergence combo analysis (H{horizon}) =="]
-    stats = [
-        ("Candle only (no BullDiv last 3d)", last_any == 0),
-        ("Candle + BullDiv t0", offset_series == 0),
-        ("Candle + BullDiv t-1", offset_series == 1),
-        ("Candle + BullDiv t-2", offset_series == 2),
-        ("Candle + BullDiv last 3d (0-2)", last_any == 1),
-    ]
-    for desc, mask in stats:
-        rate, count = _rate(mask)
-        lines.append(f"{desc}: success{horizon} = {rate:.3f} (n={count})")
-    lines.append("")
-    return lines
-
-
 # ------------- 5. Logistinen regressio -----------------
 
 
@@ -1033,7 +968,7 @@ def run_regression_for_market(
         df = df.loc[df["is_crisis"] == 0].reset_index(drop=True)
         df_full = df_full.loc[df_full["is_crisis"] == 0].reset_index(drop=True)
 
-    # Puhdistetaan signaalit: yksi rivi per (ticker, date) ja combo-featuret
+    # Puhdistetaan signaalit: yksi rivi per (ticker, date)
     df = preprocess_signals(df)
     df_full = preprocess_signals(df_full)
 
@@ -1153,7 +1088,6 @@ def run_regression_for_market(
     else:
         vif_continuous = pd.DataFrame(columns=["feature", "VIF"])
 
-    combo_feature_set = set(COMBO_FEATURE_COLUMNS)
     horizon_results: Dict[int, Dict[str, object]] = {}
     warning_messages: List[str] = []
     for horizon in horizons:
@@ -1178,26 +1112,8 @@ def run_regression_for_market(
             CRISIS_SUCCESS_LABELS,
             exclude_crisis_period=exclude_crisis_period,
         )
-        combo_features_active = [
-            col for col in continuous_feature_columns if col in combo_feature_set
-        ]
-        base_feature_columns = [
-            col for col in continuous_feature_columns if col not in combo_feature_set
-        ]
         y_success = subset_train[success_label]
         y_return = subset_train[return_label]
-
-        logistic_base_result = None
-        if combo_features_active and base_feature_columns:
-            X_base, base_cont_cols, _ = build_feature_matrix(
-                subset_train,
-                feature_columns=base_feature_columns,
-                include_is_candle_day=include_is_candle_day,
-                categorical_columns=enabled_dummy_groups,
-            )
-            logistic_base_result = run_logistic_regression(
-                X_base, y_success, base_cont_cols, label_name=success_label
-            )
 
         X, continuous_cols, dummy_cols = build_feature_matrix(
             subset_train,
@@ -1207,7 +1123,6 @@ def run_regression_for_market(
         )
 
         summary_text = quick_summary(subset_train, label_column=success_label)
-        combo_lines = candle_bull_div_combo_analysis(subset_train, horizon)
         diag_logistic = None
         if horizon in {5, 10}:
             diag_logistic = run_candle_bull_div_diagnostic(subset_train, success_label)
@@ -1246,13 +1161,10 @@ def run_regression_for_market(
             "row_count": len(subset_train),
             "summary": summary_text,
             "logistic": logistic_result,
-            "logistic_base": logistic_base_result,
             "linear": linear_result,
             "blackout_stats": blackout_stats,
             "crisis_stats": crisis_stats,
-            "combo_lines": combo_lines,
             "diag_logistic": diag_logistic,
-            "combo_features": combo_features_active,
         }
         if linear_result.get("warning"):
             warning_messages.append(f"H{horizon}: {linear_result['warning']}")
@@ -1459,9 +1371,6 @@ def _build_report_text(
                         )
                     )
             lines.append("")
-        combo_lines = section.get("combo_lines")
-        if combo_lines:
-            lines.extend(combo_lines)
         diag = section.get("diag_logistic")
         if diag:
             lines.append(
@@ -1500,9 +1409,6 @@ def _build_report_text(
                 "",
             ]
         )
-    combo_summary_lines = _build_combo_summary_section(horizon_results)
-    if combo_summary_lines:
-        lines.extend(combo_summary_lines)
     return "\n".join(lines)
 
 
@@ -1566,41 +1472,6 @@ def _build_bullish_divergence_report(model_payload: Dict[str, object]) -> str:
 
 def _format_series(series: pd.Series) -> str:
     return "\n".join(f"{idx}: {val:.4f}" for idx, val in series.items())
-
-
-def _build_combo_summary_section(
-    horizon_results: Dict[int, Dict[str, object]],
-) -> List[str]:
-    lines: List[str] = []
-    for horizon in (5, 10):
-        section = horizon_results.get(horizon)
-        if not section:
-            continue
-        combo_features = section.get("combo_features") or []
-        if not combo_features:
-            continue
-        logistic_result = section.get("logistic") or {}
-        combo_auc = logistic_result.get("auc")
-        base_result = section.get("logistic_base") or {}
-        base_auc = base_result.get("auc")
-        if combo_auc is None:
-            continue
-        lines.append(f"== Bullish Divergence + kynttiläkombo -featuret (H{horizon}) ==")
-        improvement = combo_auc - base_auc if base_auc is not None else float("nan")
-        base_text = f"{base_auc:.3f}" if base_auc is not None else "N/A"
-        lines.append(
-            f"Base-malli ilman comboja: AUC={base_text} | Combo-malli: AUC={combo_auc:.3f} | Parannus: {improvement:.3f}"
-        )
-        importance = logistic_result.get("importance")
-        if isinstance(importance, pd.Series):
-            combo_importance = importance.loc[
-                importance.index.isin(combo_features)
-            ].head(min(5, len(combo_features)))
-            if not combo_importance.empty:
-                lines.append("Top combo-featuret (|coef|):")
-                lines.extend(_format_series(combo_importance).splitlines())
-        lines.append("")
-    return lines
 
 
 def _write_report(report_text: str) -> Path:

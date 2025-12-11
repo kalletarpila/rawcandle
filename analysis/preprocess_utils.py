@@ -7,8 +7,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .same_day_aggregates import apply_same_day_aliases
-
 
 PATTERN_COLUMN_DEFAULT = "kynttila_koodi"
 
@@ -124,7 +122,7 @@ def preprocess_signals(
 
     - Yksi rivi per (ticker, date)
     - Valitsee "vahvimman" kynttilän (strongest candle wins)
-    - Rakentaa multi-signal -koodin (signal_combo_code) sekä flagit
+    - Vain combo-koodi tulee candle_pattern-kenttään (71-76 jos BullDiv + kynttilä)
     """
     required_cols = {"ticker", "date", pattern_column}
     if df.empty:
@@ -138,34 +136,17 @@ def preprocess_signals(
     work = work.dropna(subset=["date"])
     work[pattern_column] = work[pattern_column].fillna(0).astype(int)
 
+    # Jätä muu logiikka (candles/divergence kombot) analyysiputkelle; tässä vain deduplikointi
+    # ja vahvimman rivin valinta.
     rows = []
-
     for (ticker, date), g in work.groupby(["ticker", "date"], sort=False):
-        pat = g[pattern_column].astype(int)
-
-        candles = sorted({p for p in pat.tolist() if p in {1, 2, 3, 4, 5, 6}})
-
-        has_bulldiv = False
-        if "is_divergence_today" in g.columns:
-            has_bulldiv = bool(g["is_divergence_today"].fillna(0).astype(int).max() == 1)
-        if not has_bulldiv and (pat == 7).any():
-            has_bulldiv = True
-
-        if not candles and not has_bulldiv:
-            combo_code = 0
-        elif len(candles) == 1 and not has_bulldiv:
-            combo_code = 1
-        elif len(candles) >= 2 and not has_bulldiv:
-            combo_code = 2
-        elif not candles and has_bulldiv:
-            combo_code = 4
-        else:
-            combo_code = 3
-
         rep = g
         nonzero_mask = rep[pattern_column].astype(int) != 0
         if nonzero_mask.any():
             rep = rep.loc[nonzero_mask]
+
+        if rep.empty:
+            continue
 
         if "vahvuus" in rep.columns:
             with warnings.catch_warnings():
@@ -176,15 +157,9 @@ def preprocess_signals(
         else:
             row = rep.iloc[0].copy()
 
-        row["signal_combo_code"] = combo_code
-        row["num_candles_same_day"] = len(candles)
-        row["has_multi_candle_combo"] = int(len(candles) >= 2)
-        row["has_bullish_divergence_same_day"] = int(has_bulldiv)
-
         rows.append(row)
 
     result = pd.DataFrame(rows).reset_index(drop=True)
-    result = apply_same_day_aliases(result)
     return result
 
 

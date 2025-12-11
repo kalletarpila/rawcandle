@@ -621,6 +621,12 @@ class RawCandleApp:
             ft.Checkbox(label="Morning Star", value=False),
             ft.Checkbox(label="Dragonfly Doji", value=False),
             ft.Checkbox(label="Bullish Divergence", value=False),
+            ft.Checkbox(label="BullDiv & Hammer", value=False),
+            ft.Checkbox(label="BullDiv & Bullish Engulfing", value=False),
+            ft.Checkbox(label="BullDiv & Piercing Pattern", value=False),
+            ft.Checkbox(label="BullDiv & Three White Soldiers", value=False),
+            ft.Checkbox(label="BullDiv & Morning Star", value=False),
+            ft.Checkbox(label="BullDiv & Dragonfly Doji", value=False),
         ]
 
         # "Kaikki" valintaruutu
@@ -1850,6 +1856,20 @@ class RawCandleApp:
 
         # Kerää valitut analyysit
         selected_patterns = [cb.label for cb in self.candles_checkboxes if cb.value]
+        combo_to_base = {
+            "BullDiv & Hammer": "Hammer",
+            "BullDiv & Bullish Engulfing": "Bullish Engulfing",
+            "BullDiv & Piercing Pattern": "Piercing Pattern",
+            "BullDiv & Three White Soldiers": "Three White Soldiers",
+            "BullDiv & Morning Star": "Morning Star",
+            "BullDiv & Dragonfly Doji": "Dragonfly Doji",
+        }
+        normalized_patterns = []
+        for pat in selected_patterns:
+            base = combo_to_base.get(pat, pat)
+            if base not in normalized_patterns:
+                normalized_patterns.append(base)
+        selected_patterns = normalized_patterns
         if not selected_patterns:
             dlg = ft.AlertDialog(title=ft.Text("Valitse vähintään yksi analyysi!"))
             if dlg not in self.page.overlay:
@@ -1968,6 +1988,9 @@ class RawCandleApp:
                 db_path = os.path.join(
                     os.path.dirname(__file__), "data", "osakedata.db"
                 )
+                analysis_db_path = os.path.join(
+                    os.path.dirname(__file__), "data", "analysis.db"
+                )
                 results = {}
                 processed_tickers = []  # Seurataan käsiteltyjä tickereitä
                 empty_tickers = []  # Seurataan tickereitä joilla ei dataa
@@ -2005,6 +2028,7 @@ class RawCandleApp:
                             min_decline_percent=min_decline_percent,
                             use_ma_filter=use_ma_filter,
                             use_volume_filter=use_volume_filter,
+                            analysis_db_path=analysis_db_path,
                         )
                         # merge results
                         if res is None:
@@ -2040,6 +2064,7 @@ class RawCandleApp:
                             min_decline_percent=min_decline_percent,
                             use_ma_filter=use_ma_filter,
                             use_volume_filter=use_volume_filter,
+                            analysis_db_path=analysis_db_path,
                         )
                         # merge results
                         if res is None:
@@ -2065,6 +2090,7 @@ class RawCandleApp:
                         min_decline_percent=min_decline_percent,
                         use_ma_filter=use_ma_filter,
                         use_volume_filter=use_volume_filter,
+                        analysis_db_path=analysis_db_path,
                     )
                     if results is None:
                         # None = ei dataa
@@ -2239,6 +2265,9 @@ class RawCandleApp:
                 db_path = os.path.join(
                     os.path.dirname(__file__), "data", "osakedata.db"
                 )
+                analysis_db_path = os.path.join(
+                    os.path.dirname(__file__), "data", "analysis.db"
+                )
                 if ticker is None:
                     # aggregate across all tickers
                     with sqlite3.connect(db_path) as conn:
@@ -2251,13 +2280,23 @@ class RawCandleApp:
                     total = len(rows)
                     for idx, t in enumerate(rows):
                         res = run_candlestick_analysis(
-                            db_path, t, selected_patterns, start_date, end_date
+                            db_path,
+                            t,
+                            selected_patterns,
+                            start_date,
+                            end_date,
+                            analysis_db_path=analysis_db_path,
                         )
                         for k, v in res.items():
                             results[k] = results.get(k, []) + v
                 else:
                     results = run_candlestick_analysis(
-                        db_path, ticker, selected_patterns, start_date, end_date
+                        db_path,
+                        ticker,
+                        selected_patterns,
+                        start_date,
+                        end_date,
+                        analysis_db_path=analysis_db_path,
                     )
 
                 data_dir = os.path.join(os.path.dirname(__file__), "analysis")

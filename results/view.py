@@ -188,6 +188,12 @@ def create_results_view(app) -> ft.View:
         ft.Checkbox(label="Morning Star", value=False),
         ft.Checkbox(label="Dragonfly Doji", value=False),
         ft.Checkbox(label="Bullish Divergence", value=False),
+        ft.Checkbox(label="BullDiv & Hammer", value=False),
+        ft.Checkbox(label="BullDiv & Bullish Engulfing", value=False),
+        ft.Checkbox(label="BullDiv & Piercing Pattern", value=False),
+        ft.Checkbox(label="BullDiv & Three White Soldiers", value=False),
+        ft.Checkbox(label="BullDiv & Morning Star", value=False),
+        ft.Checkbox(label="BullDiv & Dragonfly Doji", value=False),
     ]
 
     # "Kaikki" valintaruutu
@@ -872,6 +878,12 @@ def create_results_view(app) -> ft.View:
                             "Morning Star": 5,
                             "Dragonfly Doji": 6,
                             "Bullish Divergence": 7,
+                            "BullDiv & Hammer": 1,
+                            "BullDiv & Bullish Engulfing": 2,
+                            "BullDiv & Piercing Pattern": 3,
+                            "BullDiv & Three White Soldiers": 4,
+                            "BullDiv & Morning Star": 5,
+                            "BullDiv & Dragonfly Doji": 6,
                         }
 
                         selected_patterns = []
@@ -1026,6 +1038,12 @@ def create_results_view(app) -> ft.View:
                     "Morning Star": 5,
                     "Dragonfly Doji": 6,
                     "Bullish Divergence": 7,
+                    "BullDiv & Hammer": 1,
+                    "BullDiv & Bullish Engulfing": 2,
+                    "BullDiv & Piercing Pattern": 3,
+                    "BullDiv & Three White Soldiers": 4,
+                    "BullDiv & Morning Star": 5,
+                    "BullDiv & Dragonfly Doji": 6,
                 }
 
                 selected_patterns = [

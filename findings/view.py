@@ -14,6 +14,34 @@ from analysis.database_manager import DatabaseManager
 from results.excel_exporter import ExcelExporter
 from market_repository import list_markets
 
+COMBO_PATTERN_NAMES = {
+    "BullDiv & Hammer",
+    "BullDiv & Bullish Engulfing",
+    "BullDiv & Piercing Pattern",
+    "BullDiv & Three White Soldiers",
+    "BullDiv & Morning Star",
+    "BullDiv & Dragonfly Doji",
+}
+
+PATTERN_NAMES = {
+    0: "downtrend",
+    1: "Hammer",
+    2: "Bullish Engulfing",
+    3: "Piercing Pattern",
+    4: "Three White Soldiers",
+    5: "Morning Star",
+    6: "Dragonfly Doji",
+    7: "Bullish Divergence",
+    71: "BullDiv & Hammer",
+    72: "BullDiv & Bullish Engulfing",
+    73: "BullDiv & Piercing Pattern",
+    74: "BullDiv & Three White Soldiers",
+    75: "BullDiv & Morning Star",
+    76: "BullDiv & Dragonfly Doji",
+}
+
+COMBO_PATTERN_CODES = {code for code in PATTERN_NAMES if code >= 71}
+
 
 class FindingsView:
     """Findings-sivun käyttöliittymä results_data tauluun"""
@@ -143,6 +171,19 @@ class FindingsView:
                 ft.dropdown.Option("Three White Soldiers", "Three White Soldiers"),
                 ft.dropdown.Option("Morning Star", "Morning Star"),
                 ft.dropdown.Option("Dragonfly Doji", "Dragonfly Doji"),
+                ft.dropdown.Option("BullDiv & Hammer", "BullDiv & Hammer"),
+                ft.dropdown.Option(
+                    "BullDiv & Bullish Engulfing", "BullDiv & Bullish Engulfing"
+                ),
+                ft.dropdown.Option(
+                    "BullDiv & Piercing Pattern", "BullDiv & Piercing Pattern"
+                ),
+                ft.dropdown.Option(
+                    "BullDiv & Three White Soldiers",
+                    "BullDiv & Three White Soldiers",
+                ),
+                ft.dropdown.Option("BullDiv & Morning Star", "BullDiv & Morning Star"),
+                ft.dropdown.Option("BullDiv & Dragonfly Doji", "BullDiv & Dragonfly Doji"),
                 ft.dropdown.Option("Bullish Divergence", "Bullish Divergence"),
             ],
             on_change=self._on_filter_change,
@@ -536,18 +577,6 @@ class FindingsView:
 
         self.findings_table.rows.clear()
 
-        # Pattern-numeroiden nimet
-        PATTERN_NAMES = {
-            0: "downtrend",
-            1: "Hammer",
-            2: "Bullish Engulfing",
-            3: "Piercing Pattern",
-            4: "Three White Soldiers",
-            5: "Morning Star",
-            6: "Dragonfly Doji",
-            7: "Bullish Divergence",
-        }
-
         for finding in self.filtered_findings[:100]:  # Näytä max 100
             # Muunna candle_pattern numerokoodi nimeksi
             pattern_num = finding.get("candle_pattern", 0)
@@ -696,18 +725,6 @@ class FindingsView:
         if not hasattr(self, "pattern_counts_text") or not self.pattern_counts_text:
             return
 
-        # Pattern-numeroiden nimet (sama järjestys kuin taulussa)
-        PATTERN_NAMES = {
-            0: "downtrend",
-            1: "Hammer",
-            2: "Bullish Engulfing",
-            3: "Piercing Pattern",
-            4: "Three White Soldiers",
-            5: "Morning Star",
-            6: "Dragonfly Doji",
-            7: "Bullish Divergence",
-        }
-
         # Laske määrät kynttilätyypeittäin koko kannasta (ei suodatetuista)
         pattern_counts = {name: 0 for name in PATTERN_NAMES.values()}
 
@@ -759,18 +776,6 @@ class FindingsView:
             ]
 
         # Kuviosuodatin: prefer UI control, fall back to test-set attribute
-        # Pattern-numeroiden nimet (results_data käyttää candle_pattern numeroa 0-8)
-        PATTERN_NAMES = {
-            0: "downtrend",
-            1: "Hammer",
-            2: "Bullish Engulfing",
-            3: "Piercing Pattern",
-            4: "Three White Soldiers",
-            5: "Morning Star",
-            6: "Dragonfly Doji",
-            7: "Bullish Divergence",
-        }
-
         pattern_val = None
         if self.pattern_filter and getattr(self.pattern_filter, "value", None):
             pattern_val = self.pattern_filter.value
@@ -814,6 +819,15 @@ class FindingsView:
                     combo_pairs = self.db_manager.get_divergence_combo_pairs()
                 except Exception:
                     combo_pairs = set()
+
+            # Ota huomioon myös suoraan kombokoodeiksi merkityt rivit (71-76)
+            combo_pairs |= {
+                (f.get("ticker", ""), f.get("date", ""))
+                for f in self.filtered_findings
+                if f.get("candle_pattern") in COMBO_PATTERN_CODES
+                or (f.get("pattern") or "") in COMBO_PATTERN_NAMES
+                or str(f.get("pattern") or "").startswith("BullDiv &")
+            }
 
             self.filtered_findings = [
                 f

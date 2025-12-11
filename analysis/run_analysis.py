@@ -1,3 +1,4 @@
+import sqlite3
 from pathlib import Path
 
 import pandas as pd
@@ -55,6 +56,54 @@ def _calculate_signal_strength(
     return round(max(0.0, min(1.0, base_strength)), 3)
 
 
+BASE_CANDLE_ORDER = [
+    "Hammer",
+    "Bullish Engulfing",
+    "Piercing Pattern",
+    "Three White Soldiers",
+    "Morning Star",
+    "Dragonfly Doji",
+]
+
+COMBO_PATTERN_MAP = {
+    "Hammer": "BullDiv & Hammer",
+    "Bullish Engulfing": "BullDiv & Bullish Engulfing",
+    "Piercing Pattern": "BullDiv & Piercing Pattern",
+    "Three White Soldiers": "BullDiv & Three White Soldiers",
+    "Morning Star": "BullDiv & Morning Star",
+    "Dragonfly Doji": "BullDiv & Dragonfly Doji",
+}
+
+
+def _load_bullish_divergence_dates(ticker: str, analysis_db_path: str) -> set[str]:
+    """
+    Palauta päivämäärät joille divergence_data-taulu sisältää Bullish Divergence -havaintoja.
+    """
+    if not ticker or not analysis_db_path:
+        return set()
+
+    try:
+        db_path = Path(analysis_db_path)
+        if not db_path.exists():
+            return set()
+
+        with sqlite3.connect(db_path) as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT date
+                FROM divergence_data
+                WHERE ticker = ?
+                  AND COALESCE(bullish_strength, 0) > 0
+                """,
+                (ticker,),
+            )
+            return {str(row[0]) for row in cur.fetchall() if row and row[0]}
+    except Exception:
+        # Jos divergenssidataa ei saada, käsitellään kuin sitä ei olisi
+        return set()
+
+
 def run_candlestick_analysis(
     db_path: str,
     ticker: str,
@@ -66,6 +115,7 @@ def run_candlestick_analysis(
     min_decline_percent: float = 3.0,
     use_ma_filter: bool = True,
     use_volume_filter: bool = False,
+    analysis_db_path: str = "data/analysis.db",
 ):
     """
     Suorittaa valittujen kynttiläkuvioiden analyysin annetulle tickerille ja aikavälille.
@@ -82,9 +132,8 @@ def run_candlestick_analysis(
         min_decline_percent: Minimalasku prosentteina (oletuksena 3.0)
         use_ma_filter: Käytetäänkö liukuvan keskiarvon suodatinta (oletuksena True)
         use_volume_filter: Käytetäänkö volyymi-suodatinta (oletuksena False)
+        analysis_db_path: Polku analysis.db-tietokantaan (divergence_data tarkistusta varten)
     """
-    import sqlite3
-
     # Normalisoi ticker: isot kirjaimet, trimmattu
     ticker = (ticker or "").strip().upper()
 
@@ -155,6 +204,7 @@ def run_candlestick_analysis(
     # Laske RSI kaikille kynttiöille (tallennetaan analysis.db:hen)
     df = calculate_rsi(df, period=14, close_col="Close")
     df = df.sort_values("pvm").reset_index(drop=True)
+    divergence_dates = _load_bullish_divergence_dates(ticker, analysis_db_path)
 
     # Lisää apufunktiot downtrend-tarkistukseen
     from statistics import mean
@@ -250,6 +300,8 @@ def run_candlestick_analysis(
     results = {}
     total = len(df)
     for i, row in df.iterrows():
+        current_date = row["pvm"].date().isoformat()
+
         # Downtrend-suodatus
         if downtrend_filter:
             if not _is_in_downtrend_local(df, "Close", "Volume", i):
@@ -378,13 +430,39 @@ def run_candlestick_analysis(
                         f"{ticker} {row['pvm'].date().isoformat()} Bullish Divergence checked - FOUND (strength {strength})"
                     )
 
+        # Yhdistelmäkuviot: jos samalle päivälle on Bullish Divergence ja kynttilä (1-6),
+        # vaihdetaan pienimmän koodin mukainen kynttilä komboksi (71-76).
+        if found and current_date in divergence_dates:
+            chosen_idx = None
+            chosen_pattern = None
+            for base_pattern in BASE_CANDLE_ORDER:
+                for idx_found, entry in enumerate(found):
+                    if entry.get("pattern") == base_pattern:
+                        chosen_idx = idx_found
+                        chosen_pattern = base_pattern
+                        break
+                if chosen_idx is not None:
+                    break
+
+            if chosen_pattern:
+                combo_name = COMBO_PATTERN_MAP.get(chosen_pattern)
+                if combo_name:
+                    found_entry = found[chosen_idx]
+                    found_entry["pattern"] = combo_name
+                    if "description" in found_entry and isinstance(
+                        found_entry["description"], str
+                    ):
+                        found_entry["description"] = found_entry[
+                            "description"
+                        ].replace(chosen_pattern, combo_name)
+
         if found:
             # Lisää RSI-arvo jokaiseen löydökseen
             rsi_value = row.get("RSI") if "RSI" in df.columns else None
             for item in found:
                 item["rsi14"] = rsi_value
 
-            key = f"{ticker}|{row['pvm'].date().isoformat()}"
+            key = f"{ticker}|{current_date}"
             bucket = results.setdefault(key, [])
             bucket.extend(found)
         # Call progress callback with fraction (0.0-1.0)

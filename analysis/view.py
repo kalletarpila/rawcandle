@@ -12,6 +12,15 @@ from .database_manager import DatabaseManager
 from .analyzer import AnalysisEngine
 from market_repository import list_markets, get_market_for_ticker
 
+COMBO_PATTERN_NAMES = {
+    "BullDiv & Hammer",
+    "BullDiv & Bullish Engulfing",
+    "BullDiv & Piercing Pattern",
+    "BullDiv & Three White Soldiers",
+    "BullDiv & Morning Star",
+    "BullDiv & Dragonfly Doji",
+}
+
 
 class AnalysisView:
     """Analysis-sivun käyttöliittymä"""
@@ -145,6 +154,19 @@ class AnalysisView:
                 ft.dropdown.Option("Three White Soldiers", "Three White Soldiers"),
                 ft.dropdown.Option("Morning Star", "Morning Star"),
                 ft.dropdown.Option("Dragonfly Doji", "Dragonfly Doji"),
+                ft.dropdown.Option("BullDiv & Hammer", "BullDiv & Hammer"),
+                ft.dropdown.Option(
+                    "BullDiv & Bullish Engulfing", "BullDiv & Bullish Engulfing"
+                ),
+                ft.dropdown.Option(
+                    "BullDiv & Piercing Pattern", "BullDiv & Piercing Pattern"
+                ),
+                ft.dropdown.Option(
+                    "BullDiv & Three White Soldiers",
+                    "BullDiv & Three White Soldiers",
+                ),
+                ft.dropdown.Option("BullDiv & Morning Star", "BullDiv & Morning Star"),
+                ft.dropdown.Option("BullDiv & Dragonfly Doji", "BullDiv & Dragonfly Doji"),
                 ft.dropdown.Option("Bullish Divergence", "Bullish Divergence"),
             ],
             on_change=self._on_filter_change,
@@ -597,9 +619,11 @@ class AnalysisView:
                 "Dragonfly Doji",
             }
             divergence_patterns = {"Bullish Divergence"}
+            combo_patterns = set(COMBO_PATTERN_NAMES)
 
             candle_pairs = set()
             divergence_pairs = set()
+            combo_pairs = set()
 
             for f in self.all_findings:
                 ticker = f.get("ticker", "")
@@ -610,8 +634,10 @@ class AnalysisView:
                     candle_pairs.add((ticker, date))
                 elif pattern in divergence_patterns:
                     divergence_pairs.add((ticker, date))
+                if pattern in combo_patterns or str(pattern).startswith("BullDiv &"):
+                    combo_pairs.add((ticker, date))
 
-            combo_pairs = candle_pairs & divergence_pairs
+            combo_pairs |= candle_pairs & divergence_pairs
 
             # Yhdistä results_data:n combo-parit (sis. sarakkeen 83 liput)
             if self.db_manager:

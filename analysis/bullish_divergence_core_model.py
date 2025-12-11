@@ -19,7 +19,6 @@ from analysis.preprocess_utils import (
     load_blackout_dates,
     preprocess_signals,
 )
-from analysis.same_day_aggregates import add_same_day_aggregate_features
 
 
 class BullishDivergenceModel:
@@ -53,16 +52,6 @@ class BullishDivergenceModel:
         "SPX_20",
         "SPX_volatility_10",
         "NDX_10",
-        "num_candles_same_day",
-        "has_multi_candle_combo",
-        "has_bullish_divergence_same_day",
-        "signal_combo_code",
-        "signal_count_same_day",
-        "unique_patterns_same_day",
-        "max_strength_same_day",
-        "second_best_strength_same_day",
-        "sum_strength_same_day",
-        "has_same_day_reversal_cluster",
         "is_candle_day",
     ]
     EXCLUDED_COLUMNS = {
@@ -82,9 +71,6 @@ class BullishDivergenceModel:
     BINARY_FEATURES = {
         "is_crisis",
         "is_candle_day",
-        "has_multi_candle_combo",
-        "has_bullish_divergence_same_day",
-        "has_same_day_reversal_cluster",
     }
     ALLOWED_HORIZONS = (2, 5, 10, 20)
     ALIAS_MAP = {
@@ -184,21 +170,8 @@ class BullishDivergenceModel:
                 "Ei rivejä Bullish Divergence -mallia varten suodatusten jälkeen."
             )
 
-        df_full_raw = df_full.copy()
-        df_train_raw = df_train.copy()
-
-        df_full = preprocess_signals(
-            df_full, pattern_column=self.PATTERN_COLUMN
-        )
-        df_full = add_same_day_aggregate_features(
-            df_full_raw, df_full, pattern_col=self.PATTERN_COLUMN
-        )
-        df_train = preprocess_signals(
-            df_train, pattern_column=self.PATTERN_COLUMN
-        )
-        df_train = add_same_day_aggregate_features(
-            df_train_raw, df_train, pattern_col=self.PATTERN_COLUMN
-        )
+        df_full = preprocess_signals(df_full, pattern_column=self.PATTERN_COLUMN)
+        df_train = preprocess_signals(df_train, pattern_column=self.PATTERN_COLUMN)
 
         df_full = self._add_return_labels(df_full)
         df_train = self._add_return_labels(df_train)

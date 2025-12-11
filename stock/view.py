@@ -34,6 +34,12 @@ class StockView:
         ("Morning Star", "Morning Star"),
         ("Dragonfly Doji", "Dragonfly Doji"),
         ("Bullish Divergence", "Bullish Divergence"),
+        ("BullDiv & Hammer", "BullDiv & Hammer"),
+        ("BullDiv & Bullish Engulfing", "BullDiv & Bullish Engulfing"),
+        ("BullDiv & Piercing Pattern", "BullDiv & Piercing Pattern"),
+        ("BullDiv & Three White Soldiers", "BullDiv & Three White Soldiers"),
+        ("BullDiv & Morning Star", "BullDiv & Morning Star"),
+        ("BullDiv & Dragonfly Doji", "BullDiv & Dragonfly Doji"),
     ]
     PATTERN_COLORS = {
         "downtrend": "#dc2626",  # kirkas punainen
@@ -44,6 +50,12 @@ class StockView:
         "Morning Star": "#d97706",  # ruskea/oranssi
         "Dragonfly Doji": "#14b8a6",  # vihertävä sininen
         "Bullish Divergence": "#f43f5e",  # pinkki
+        "BullDiv & Hammer": "#0284c7",
+        "BullDiv & Bullish Engulfing": "#0f766e",
+        "BullDiv & Piercing Pattern": "#ea580c",
+        "BullDiv & Three White Soldiers": "#7e22ce",
+        "BullDiv & Morning Star": "#b45309",
+        "BullDiv & Dragonfly Doji": "#0d9488",
     }
 
     def __init__(self, page: ft.Page, appbar_factory: Callable[[], ft.AppBar]):
