@@ -119,7 +119,7 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
             # non-fatal if logging fails
             pass
 
-    # Tallenna löydökset tietokantaan
+    # Tallenna löydökset tietokantaan (ilman divergenssien laskentaa)
     if output_path:
         try:
             from analysis.database_manager import DatabaseManager
@@ -149,25 +149,6 @@ def print_analysis_results(results: dict, ticker: str, output_path: str = None):
                     )
 
             db_manager.close()
-
-            # Laske ja tallenna divergenssit tälle tickerille
-            # Tehdään vain jos output_path on annettu (eli tallennetaan kantaan)
-            if ticker:  # Jos yksittäinen ticker
-                calculate_and_save_divergences(
-                    ticker, osakedata_db_path="data/osakedata.db"
-                )
-            else:  # Jos useita tickereitä
-                # Kerää uniikit tickerit tuloksista
-                tickers_in_results = set()
-                for key in results.keys():
-                    if "|" in key:
-                        t, _ = key.split("|", 1)
-                        tickers_in_results.add(t)
-
-                for t in tickers_in_results:
-                    calculate_and_save_divergences(
-                        t, osakedata_db_path="data/osakedata.db"
-                    )
 
         except Exception:
             # non-fatal persistence failure

@@ -392,17 +392,8 @@ class FindingsView:
             tooltip="Poista kaikki suodatetut analyysitulokset",
         )
 
-        clear_db_btn = ft.ElevatedButton(
-            text="Tyhjennä kanta",
-            icon=ft.Icons.DELETE_FOREVER,
-            on_click=self._clear_database,
-            bgcolor=ft.Colors.RED_900,
-            color=ft.Colors.WHITE,
-            tooltip="Tyhjennä koko analyysitietokanta",
-        )
-
         return ft.Row(
-            [refresh_btn, export_btn, delete_all_btn, clear_db_btn],
+            [refresh_btn, export_btn, delete_all_btn],
             alignment=ft.MainAxisAlignment.START,
             spacing=10,
         )
@@ -1139,43 +1130,8 @@ class FindingsView:
                 confirm_dlg.open = False
                 self.page.update()
 
-        confirm_dlg = ft.AlertDialog(
-            modal=True,
-            title=ft.Text("⚠️ Tyhjennä koko analysis-kanta"),
-            content=ft.Column(
-                [
-                    ft.Text("Haluatko varmasti tyhjentää koko kannan?"),
-                    ft.Text(
-                        f"Tämä poistaa KAIKKI {total_count} löydöstä!",
-                        weight=ft.FontWeight.BOLD,
-                        color=ft.Colors.RED_700,
-                    ),
-                    ft.Text(
-                        "Tämä toiminto ei ole palautettavissa.",
-                        size=12,
-                        color=ft.Colors.ORANGE_700,
-                    ),
-                ],
-                tight=True,
-                spacing=10,
-                height=100,
-            ),
-            actions=[
-                ft.TextButton("Peruuta", on_click=close_dialog),
-                ft.TextButton(
-                    "Tyhjennä kanta",
-                    on_click=confirm_clear,
-                    style=ft.ButtonStyle(color=ft.Colors.RED_900),
-                ),
-            ],
-            actions_alignment=ft.MainAxisAlignment.END,
-        )
-
-        if hasattr(self.page, "overlay"):
-            if confirm_dlg not in self.page.overlay:
-                self.page.overlay.append(confirm_dlg)
-        confirm_dlg.open = True
-        self.page.update()
+        # Toiminto poistettu käytöstä
+        self._show_info("Kannan tyhjennys on poistettu käytöstä.")
 
     def _show_progress(self, message: str) -> None:
         """Näytä progress dialog."""

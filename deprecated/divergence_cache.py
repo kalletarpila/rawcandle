@@ -259,7 +259,6 @@ class DivergenceCache:
             return (max_bearish_strength, 0)
         else:
             return (0, 0)
-            return (0, 0)
 
     def clear_ticker(self, ticker: str):
         """Remove all cached data for a ticker."""

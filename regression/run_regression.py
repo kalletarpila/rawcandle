@@ -29,15 +29,15 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
-from analysis.bullish_divergence_core_model import BullishDivergenceModel
-
-# Combo flag -featuret on poistettu; käytetään suoraan candle_pattern -koodia (71-76).
-COMBO_FEATURE_COLUMNS: list[str] = []
 from analysis.preprocess_utils import (
     apply_blackout_flags,
     load_blackout_dates,
     preprocess_signals,
 )
+from analysis.bullish_divergence_core_model import BullishDivergenceModel
+
+# Combo flag -featuret on poistettu; käytetään suoraan candle_pattern -koodia (71-76).
+COMBO_FEATURE_COLUMNS: list[str] = []
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB_PATH = PROJECT_ROOT / "data" / "analysis.db"

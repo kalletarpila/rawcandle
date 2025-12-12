@@ -358,17 +358,8 @@ class AnalysisView:
             tooltip="Poista kaikki suodatetut analyysitulokset",
         )
 
-        clear_db_btn = ft.ElevatedButton(
-            text="Tyhjennä kanta",
-            icon=ft.Icons.DELETE_FOREVER,
-            on_click=self._clear_database,
-            bgcolor=ft.Colors.RED_900,
-            color=ft.Colors.WHITE,
-            tooltip="Tyhjennä koko analyysitietokanta",
-        )
-
         return ft.Row(
-            [delete_all_btn, clear_db_btn],
+            [delete_all_btn],
             alignment=ft.MainAxisAlignment.START,
             spacing=10,
         )
@@ -880,77 +871,8 @@ class AnalysisView:
         self.page.update()
 
     def _clear_database(self, e) -> None:
-        """Tyhjennä koko analysis-kanta vahvistuksen jälkeen."""
-        # Hae kokonaismäärä
-        total_count = len(self.all_findings)
-
-        if total_count == 0:
-            self._show_info("Kanta on jo tyhjä")
-            return
-
-        # Luo vahvistusikkuna
-        def confirm_clear(e):
-            try:
-                # Tyhjennä koko kanta
-                deleted_count = self.db_manager.clear_all_findings()
-
-                if deleted_count > 0:
-                    self._show_success(
-                        f"Kanta tyhjennetty: {deleted_count} löydöstä poistettu"
-                    )
-                    self.refresh_data()
-                else:
-                    self._show_error("Kannan tyhjennys epäonnistui")
-            except Exception as ex:
-                self._show_error(f"Virhe: {str(ex)}")
-
-            close_dialog(None)
-
-        confirm_dlg = None  # Määritellään ensin
-
-        def close_dialog(e):
-            nonlocal confirm_dlg
-            if confirm_dlg:
-                confirm_dlg.open = False
-                self.page.update()
-
-        confirm_dlg = ft.AlertDialog(
-            modal=True,
-            title=ft.Text("⚠️ Tyhjennä koko analysis-kanta"),
-            content=ft.Column(
-                [
-                    ft.Text("Haluatko varmasti tyhjentää koko kannan?"),
-                    ft.Text(
-                        f"Tämä poistaa KAIKKI {total_count} löydöstä!",
-                        weight=ft.FontWeight.BOLD,
-                        color=ft.Colors.RED_700,
-                    ),
-                    ft.Text(
-                        "Tämä toiminto ei ole palautettavissa.",
-                        size=12,
-                        color=ft.Colors.ORANGE_700,
-                    ),
-                ],
-                tight=True,
-                spacing=10,
-                height=100,
-            ),
-            actions=[
-                ft.TextButton("Peruuta", on_click=close_dialog),
-                ft.TextButton(
-                    "Tyhjennä kanta",
-                    on_click=confirm_clear,
-                    style=ft.ButtonStyle(color=ft.Colors.RED_900),
-                ),
-            ],
-            actions_alignment=ft.MainAxisAlignment.END,
-        )
-
-        if hasattr(self.page, "overlay"):
-            if confirm_dlg not in self.page.overlay:
-                self.page.overlay.append(confirm_dlg)
-        confirm_dlg.open = True
-        self.page.update()
+        """(Poistettu käytöstä)"""
+        self._show_info("Kannan tyhjennys on poistettu käytöstä.")
 
     def _show_progress(self, message: str) -> None:
         """Näytä progress dialog."""

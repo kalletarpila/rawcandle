@@ -23,6 +23,8 @@ class StockView:
         ("3M", "3 kk"),
         ("6M", "6 kk"),
         ("1Y", "1 v"),
+        ("3Y", "3 v"),
+        ("5Y", "5 v"),
         ("ALL", "Kaikki"),
     ]
     PATTERN_OPTIONS = [

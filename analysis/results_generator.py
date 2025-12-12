@@ -25,6 +25,7 @@ from .preprocess_utils import load_blackout_dates
 CRISIS_START = datetime(2025, 3, 1).date()
 CRISIS_END = datetime(2025, 4, 30).date()
 
+
 class ResultsGenerator:
     """Generoi results_data tauluun kaikki 89 saraketta."""
 
