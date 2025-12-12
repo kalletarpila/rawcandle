@@ -2944,6 +2944,7 @@ class RawCandleApp:
 
                 rows_added = 0
                 analysis_error = None
+                analysis_total = 0
 
                 try:
                     stock = yf.Ticker(ticker)
@@ -3047,14 +3048,30 @@ class RawCandleApp:
                         # Aja kynttiläanalyysi lisätylle aikavälille
                         try:
                             from analysis.run_analysis import run_candlestick_analysis
+                            from analysis.database_manager import DatabaseManager
 
                             analysis_start = min(start for start, _ in date_ranges)
                             analysis_end = max(end for _, end in date_ranges)
-                            all_patterns = list(range(1, 77))
-                            run_candlestick_analysis(
+                            pattern_names = [
+                                "Hammer",
+                                "Bullish Engulfing",
+                                "Piercing Pattern",
+                                "Three White Soldiers",
+                                "Morning Star",
+                                "Dragonfly Doji",
+                                "Bullish Divergence",
+                                "Bearish Divergence",
+                                "BullDiv & Hammer",
+                                "BullDiv & Bullish Engulfing",
+                                "BullDiv & Piercing Pattern",
+                                "BullDiv & Three White Soldiers",
+                                "BullDiv & Morning Star",
+                                "BullDiv & Dragonfly Doji",
+                            ]
+                            analysis_results = run_candlestick_analysis(
                                 db_path,
                                 ticker,
-                                all_patterns,
+                                pattern_names,
                                 analysis_start,
                                 analysis_end,
                                 progress_callback=None,
@@ -3064,6 +3081,28 @@ class RawCandleApp:
                                 use_volume_filter=False,
                                 analysis_db_path=self.analysis_db_path,
                             )
+                            if analysis_results:
+                                try:
+                                    dbm = DatabaseManager(
+                                        db_path=self.analysis_db_path
+                                    )
+                                    for key, items in analysis_results.items():
+                                        if "|" in key:
+                                            _ticker_key, date_str = key.split("|", 1)
+                                        else:
+                                            date_str = key
+                                        for item in items:
+                                            dbm.insert_finding(
+                                                ticker=ticker,
+                                                date=date_str,
+                                                pattern=item.get("pattern"),
+                                                signal_strength=item.get("strength"),
+                                                rsi14=item.get("rsi14"),
+                                            )
+                                            analysis_total += 1
+                                    dbm.close()
+                                except Exception:
+                                    analysis_total = 0
                         except Exception as exc:
                             analysis_error = str(exc)
 
@@ -3071,8 +3110,13 @@ class RawCandleApp:
                     msg = f"✅ {idx}/{total_stocks}: {ticker} (+{rows_added} päivää)"
                     if div_success and div_days > 0:
                         msg += f", div: {div_days}"
+                    msg += f", kynttilät: {analysis_total}"
                     if analysis_error:
                         msg += f" | analyysivirhe: {analysis_error}"
+                    # Tulosta terminaaliin yhteenveto tästä tickeristä
+                    print(
+                        f"[UPDATE] {ticker}: haetut päivät={rows_added}, div-päivät={div_days if div_success else 'virhe'}, kynttilät={analysis_total}"
+                    )
                     self.loading_text.value = msg
                     self.loading_text.color = ft.Colors.GREEN_600
                     self.page.update()
@@ -3949,7 +3993,7 @@ Virheet: {error_count}"""
     def fetch_stock_data(self, e):
         """Hakee osakedata Yahoo Financesta ja tallentaa osakedata.db kantaan"""
         import sqlite3
-        from datetime import datetime
+        from datetime import datetime, timedelta
 
         raw_value = (self.ticker_field.value or "").strip()
         if not raw_value:
@@ -4061,8 +4105,6 @@ Virheet: {error_count}"""
                 # Määritä mistä haetaan
                 if last_date_in_db:
                     # Hae viimeisen päivän jälkeinen data
-                    from datetime import datetime, timedelta
-
                     last_date_obj = datetime.strptime(last_date_in_db, "%Y-%m-%d")
                     start_date = (last_date_obj + timedelta(days=1)).strftime(
                         "%Y-%m-%d"
@@ -4085,6 +4127,8 @@ Virheet: {error_count}"""
 
                 # Hae historiallinen data
                 hist = stock.history(start=start_date, end=end_date)
+                analysis_results = None
+                analysis_total = 0
 
                 if hist.empty:
                     if last_date_in_db:
@@ -4167,14 +4211,32 @@ Virheet: {error_count}"""
                 # Aja kynttiläanalyysi lisätylle aikavälille
                 try:
                     from analysis.run_analysis import run_candlestick_analysis
+                    from analysis.database_manager import DatabaseManager
 
                     analysis_start = start_date
                     analysis_end = end_date
-                    all_patterns = list(range(1, 77))
-                    run_candlestick_analysis(
+
+                    pattern_names = [
+                        "Hammer",
+                        "Bullish Engulfing",
+                        "Piercing Pattern",
+                        "Three White Soldiers",
+                        "Morning Star",
+                        "Dragonfly Doji",
+                        "Bullish Divergence",
+                        "Bearish Divergence",
+                        "BullDiv & Hammer",
+                        "BullDiv & Bullish Engulfing",
+                        "BullDiv & Piercing Pattern",
+                        "BullDiv & Three White Soldiers",
+                        "BullDiv & Morning Star",
+                        "BullDiv & Dragonfly Doji",
+                    ]
+
+                    analysis_results = run_candlestick_analysis(
                         db_path,
                         ticker,
-                        all_patterns,
+                        pattern_names,
                         analysis_start,
                         analysis_end,
                         progress_callback=None,
@@ -4184,6 +4246,28 @@ Virheet: {error_count}"""
                         use_volume_filter=False,
                         analysis_db_path=self.analysis_db_path,
                     )
+                    if analysis_results:
+                        try:
+                            from analysis.database_manager import DatabaseManager
+
+                            dbm = DatabaseManager(db_path=self.analysis_db_path)
+                            for key, items in analysis_results.items():
+                                if "|" in key:
+                                    _ticker_key, date_str = key.split("|", 1)
+                                else:
+                                    date_str = key
+                                for item in items:
+                                    dbm.insert_finding(
+                                        ticker=ticker,
+                                        date=date_str,
+                                        pattern=item.get("pattern"),
+                                        signal_strength=item.get("strength"),
+                                        rsi14=item.get("rsi14"),
+                                    )
+                                    analysis_total += 1
+                            dbm.close()
+                        except Exception as exc:
+                            analysis_error = f"finding-save {exc}"
                 except Exception as exc:
                     summary["errors"].append(f"{ticker}: analyysivirhe {exc}")
 
@@ -4195,6 +4279,11 @@ Virheet: {error_count}"""
                     msg += f" | Divergenssit {div_days} päivälle"
                 if div_error and not div_success:
                     msg += f" ⚠️ Divergenssit: {div_error}"
+                msg += f" | Kynttilät {analysis_total}"
+                # Tulosta terminaaliin selkeä status tästä tickeristä
+                print(
+                    f"[FETCH] {ticker}: haetut päivät={rows_added}, div-päivät={div_days if div_success else 'virhe'}, kynttilät={analysis_total}"
+                )
                 summary["ok"].append(msg)
                 # Säilytä viimeinen haettu data UI tallennukseen
                 self.stock_data = hist
