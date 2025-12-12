@@ -5,7 +5,7 @@ Käyttöliittymä analysis-toiminnoille.
 
 import flet as ft
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable
 from datetime import datetime, timedelta
 
 from .database_manager import DatabaseManager
@@ -30,6 +30,7 @@ class AnalysisView:
         page: ft.Page,
         analysis_db_path: str = "data/analysis.db",
         stock_db_path: str = "data/osakedata.db",
+        on_ticker_selected: Optional[Callable[[str], None]] = None,
     ):
         """
         Alusta AnalysisView.
@@ -42,6 +43,7 @@ class AnalysisView:
         self.page = page
         self.logger = logging.getLogger(__name__)
         self.analysis_db_path = analysis_db_path
+        self.on_ticker_selected = on_ticker_selected
 
         # Alusta komponentit
         self.db_manager = DatabaseManager(analysis_db_path)
@@ -456,9 +458,17 @@ class AnalysisView:
         self.findings_table.rows.clear()
 
         for finding in self.filtered_findings[:100]:  # Näytä max 100
+            ticker_value = finding.get("ticker", "")
             row = ft.DataRow(
                 cells=[
-                    ft.DataCell(ft.Text(finding.get("ticker", ""))),
+                    ft.DataCell(
+                        ft.TextButton(
+                            ticker_value or "",
+                            on_click=lambda e, t=ticker_value: self._open_in_stock(t),
+                        )
+                        if ticker_value
+                        else ft.Text("")
+                    ),
                     ft.DataCell(ft.Text(finding.get("date", ""))),
                     ft.DataCell(ft.Text(finding.get("pattern", ""))),
                     ft.DataCell(ft.Text(f"{finding.get('signal_strength', 0):.2f}")),
@@ -510,6 +520,19 @@ class AnalysisView:
 
         if hasattr(self.page, "update"):
             self.page.update()
+
+    def _open_in_stock(self, ticker: str) -> None:
+        """Ohjaa Stock-sivulle ja esitäyttää tickerin, jos callback asetettu."""
+        if not ticker:
+            return
+        if callable(self.on_ticker_selected):
+            try:
+                self.on_ticker_selected(ticker)
+            except Exception as exc:
+                try:
+                    self.logger.warning(f"Ticker-ohjaus epäonnistui ({ticker}): {exc}")
+                except Exception:
+                    pass
 
     def _update_pattern_counts(self) -> None:
         """Päivitä kynttiläkohtaiset määrät."""

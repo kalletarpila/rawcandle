@@ -1538,6 +1538,7 @@ class RawCandleApp:
                 self.page,
                 analysis_db_path="data/analysis.db",
                 stock_db_path="data/osakedata.db",
+                on_ticker_selected=self._open_stock_from_ticker,
             )
 
             return ft.View(
@@ -1589,6 +1590,7 @@ class RawCandleApp:
                 self.page,
                 analysis_db_path="data/analysis.db",
                 stock_db_path="data/osakedata.db",
+                on_ticker_selected=self._open_stock_from_ticker,
             )
 
             return ft.View(
@@ -2689,6 +2691,19 @@ class RawCandleApp:
         try:
             if hasattr(self.page, "go"):
                 self.page.go("/")
+        except Exception:
+            pass
+
+    def _open_stock_from_ticker(self, ticker: str) -> None:
+        """Navigoi Stock-näkymään ja esitäyttää tickerin."""
+        if not ticker:
+            return
+        try:
+            self.stock_view.prefill_ticker(ticker, fetch=True)
+        except Exception:
+            pass
+        try:
+            self.page.go("/stock")
         except Exception:
             pass
 

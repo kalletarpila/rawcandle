@@ -95,9 +95,28 @@ class StockView:
         self.show_ma200 = True
         self.show_rsi = True
         self.blackout_dates: Set[dt.date] = set()
+        self.pending_ticker: Optional[str] = None
+        self.pending_fetch: bool = False
 
     # ------------------------------------------------------------------ #
     # Public API
+
+    def prefill_ticker(self, ticker: str, fetch: bool = True) -> None:
+        """Esitäyttää ticker-kentän ja käynnistää haun tarvittaessa."""
+        t = (ticker or "").strip().upper()
+        if not t:
+            return
+        self.pending_ticker = t
+        self.pending_fetch = fetch
+        if self.ticker_field:
+            self.ticker_field.value = t
+            if fetch:
+                try:
+                    self._on_fetch_clicked(None)
+                    self.pending_fetch = False
+                    self.pending_ticker = None
+                except Exception:
+                    pass
 
     def create_view(self) -> ft.View:
         """Palauttaa Stock-sivun View-rakenteen."""
@@ -114,6 +133,8 @@ class StockView:
             )
 
         self.ticker_field = ft.TextField(**ticker_kwargs)
+        if self.pending_ticker:
+            self.ticker_field.value = self.pending_ticker
 
         fetch_button = ft.ElevatedButton(
             "Hae tiedot",
@@ -288,6 +309,16 @@ class StockView:
                 scroll=ft.ScrollMode.AUTO,
             ),
         )
+
+        # Jos tikkeri on esitäytetty, hae tiedot heti
+        if self.pending_ticker and self.pending_fetch:
+            try:
+                self._on_fetch_clicked(None)
+            except Exception:
+                pass
+        # Nollaa pending-flägät
+        self.pending_fetch = False
+        self.pending_ticker = None
 
         return ft.View(
             "/stock",
