@@ -220,33 +220,17 @@ class RawCandleApp:
         except Exception as exc:
             print(f"⚠️ Splittikorjaus epäonnistui ({ticker}): {exc}")
         try:
-            ack_dlg = ft.AlertDialog(
-                title=ft.Text("Huom!"),
-                content=ft.Text(
-                    "Analyysitulokset ovat tallennettu. Paina OK kuittaaksesi."
-                ),
-                actions=[
-                    ft.TextButton("OK", on_click=lambda _: self.close_dialog(ack_dlg))
-                ],
-                modal=True,
+            sb = ft.SnackBar(
+                ft.Text("Analyysitulokset kirjoitettu."),
+                bgcolor=ft.Colors.BLUE_600,
+                duration=3000,
             )
-            if ack_dlg not in self.page.overlay:
-                self.page.overlay.append(ack_dlg)
-            ack_dlg.open = True
+            if sb not in self.page.overlay:
+                self.page.overlay.append(sb)
+            sb.open = True
             self.page.update()
         except Exception:
-            try:
-                sb = ft.SnackBar(
-                    ft.Text("Analyysitulokset kirjoitettu."),
-                    bgcolor=ft.Colors.BLUE_600,
-                    duration=3000,
-                )
-                if sb not in self.page.overlay:
-                    self.page.overlay.append(sb)
-                sb.open = True
-                self.page.update()
-            except Exception:
-                pass
+            pass
 
     def _show_snackbar(self, message: str, color: str = ft.Colors.BLUE_600):
         """Näytä SnackBar turvallisesti."""
