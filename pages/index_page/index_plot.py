@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -74,8 +74,7 @@ def build_index_plot(
     volume_series: Dict[str, IndexSeries],
     *,
     stock_series: Optional[IndexSeries] = None,
-    include_market: bool = False,
-) -> go.Figure:
+) -> Tuple[go.Figure, Dict[str, str]]:
     fig = make_subplots(
         rows=2,
         cols=1,
@@ -157,23 +156,13 @@ def build_index_plot(
         )
 
     rangebreaks = [dict(bounds=["sat", "mon"])]
-    if all_dates:
-        date_list = sorted(all_dates)
-        date_set = set(date_list)
-        missing = []
-        cur = date_list[0]
-        while cur <= date_list[-1]:
-            if cur not in date_set:
-                missing.append(cur.isoformat())
-            cur += dt.timedelta(days=1)
-        if missing:
-            rangebreaks.append(dict(values=missing))
 
     fig.update_layout(
         template="plotly_white",
         height=600,
         margin=dict(t=30, l=40, r=20, b=20),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+        barmode="group",
     )
     fig.update_xaxes(rangebreaks=rangebreaks, row=1, col=1)
     fig.update_xaxes(rangebreaks=rangebreaks, row=2, col=1)

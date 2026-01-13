@@ -68,6 +68,28 @@ def ensure_index_table(conn: sqlite3.Connection) -> None:
     )
 
 
+def ensure_osakedata_indexes(conn: sqlite3.Connection, schema: SchemaMap) -> None:
+    market_col = schema.get("market")
+    ticker_col = schema.get("ticker")
+    date_col = schema.get("date")
+    sector_col = schema.get("sector")
+    if not (market_col and ticker_col and date_col):
+        return
+    conn.execute(
+        f"""
+        CREATE INDEX IF NOT EXISTS idx_osakedata_mkt_ticker_date
+        ON osakedata({market_col}, {ticker_col}, {date_col})
+        """
+    )
+    if sector_col:
+        conn.execute(
+            f"""
+            CREATE INDEX IF NOT EXISTS idx_osakedata_mkt_sec_ticker_date
+            ON osakedata({market_col}, {sector_col}, {ticker_col}, {date_col})
+            """
+        )
+
+
 def get_available_markets(conn: sqlite3.Connection, schema: SchemaMap) -> List[str]:
     market_col = schema.get("market")
     if not market_col:
@@ -165,6 +187,7 @@ def compute_indices_incremental(
         raise RuntimeError("osakedata-taulusta puuttuu vaadittuja sarakkeita")
 
     ensure_index_table(conn)
+    ensure_osakedata_indexes(conn, schema)
 
     target_sectors = list(sectors or [])
     groups = [("market", None)] + [("sector", sec) for sec in target_sectors]
@@ -173,7 +196,7 @@ def compute_indices_incremental(
 
     for level, sector in groups:
         last_date, last_value = _fetch_last_index_info(conn, market, sector)
-        base_start = max(start_date, last_date) if last_date else start_date
+        base_start = last_date or start_date
 
         logger(
             f"[INDEX] {market} {('sector ' + sector) if sector else 'market'} start from {base_start} (last={last_date or 'none'})"
@@ -185,27 +208,85 @@ def compute_indices_incremental(
             sector_filter = f" AND {sector_col} = ?"
             params.append(sector)
 
-        cursor = conn.execute(
-            f"""
-            SELECT {ticker_col} AS ticker,
-                   {date_col} AS pvm,
-                   {close_col} AS close,
-                   {volume_col} AS volume
-            FROM osakedata
-            WHERE LOWER({market_col}) = LOWER(?)
-              {sector_filter}
-            ORDER BY {ticker_col} ASC, {date_col} ASC
-            """,
-            params,
-        )
-        rows = cursor.fetchall()
+        rows: List[sqlite3.Row] = []
+        try:
+            conn.execute("SELECT LAG(1) OVER (ORDER BY 1)")
+            use_lag = True
+        except sqlite3.OperationalError:
+            use_lag = False
+
+        if use_lag:
+            base_params = list(params)  # [market] or [market, sector]
+            query_params = base_params + [base_start] + base_params + [base_start] + [base_start]
+            rows = conn.execute(
+                f"""
+                WITH base_rows AS (
+                    SELECT
+                        {ticker_col} AS ticker,
+                        {date_col} AS pvm,
+                        {close_col} AS close,
+                        {volume_col} AS volume
+                    FROM osakedata
+                    WHERE LOWER({market_col}) = LOWER(?)
+                      {sector_filter}
+                      AND {date_col} >= ?
+                ),
+                prev_rows AS (
+                    SELECT
+                        o.{ticker_col} AS ticker,
+                        o.{date_col} AS pvm,
+                        o.{close_col} AS close,
+                        o.{volume_col} AS volume
+                    FROM osakedata o
+                    JOIN (
+                        SELECT {ticker_col} AS t, MAX({date_col}) AS max_pvm
+                        FROM osakedata
+                        WHERE LOWER({market_col}) = LOWER(?)
+                          {sector_filter}
+                          AND {date_col} < ?
+                        GROUP BY {ticker_col}
+                    ) p
+                      ON o.{ticker_col} = p.t AND o.{date_col} = p.max_pvm
+                ),
+                all_rows AS (
+                    SELECT * FROM prev_rows
+                    UNION ALL
+                    SELECT * FROM base_rows
+                )
+                SELECT
+                    ticker,
+                    pvm,
+                    close,
+                    volume,
+                    LAG(close) OVER (PARTITION BY ticker ORDER BY pvm) AS prev_close
+                FROM all_rows
+                WHERE pvm >= ?
+                ORDER BY ticker ASC, pvm ASC
+                """,
+                query_params,
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                f"""
+                SELECT {ticker_col} AS ticker,
+                       {date_col} AS pvm,
+                       {close_col} AS close,
+                       {volume_col} AS volume
+                FROM osakedata
+                WHERE LOWER({market_col}) = LOWER(?)
+                  {sector_filter}
+                  AND {date_col} >= ?
+                ORDER BY {ticker_col} ASC, {date_col} ASC
+                """,
+                params + [base_start],
+            ).fetchall()
+
         if not rows:
             continue
 
         per_date_returns: Dict[str, List[float]] = defaultdict(list)
         per_date_volume: Dict[str, float] = defaultdict(float)
         tickers_used: Dict[str, set] = defaultdict(set)
-
         last_close_by_ticker: Dict[str, float] = {}
 
         for row in rows:
@@ -215,19 +296,15 @@ def compute_indices_incremental(
             vol_val = row["volume"] or 0.0
             if not ticker or date_str is None or close_val is None:
                 continue
-            if date_str < base_start:
-                last_close_by_ticker[ticker] = float(close_val)
-                continue
-            prev = last_close_by_ticker.get(ticker)
+            prev = row["prev_close"] if "prev_close" in row.keys() else None
+            if prev is None:
+                prev = last_close_by_ticker.get(ticker)
             if prev is not None and prev != 0:
                 ret = float(close_val) / float(prev) - 1.0
                 per_date_returns[date_str].append(ret)
                 tickers_used[date_str].add(ticker)
             per_date_volume[date_str] += float(vol_val or 0.0)
             last_close_by_ticker[ticker] = float(close_val)
-
-        if not per_date_returns and last_value is None:
-            continue
 
         dates_sorted = sorted(per_date_returns.keys())
         if last_date:
@@ -242,8 +319,10 @@ def compute_indices_incremental(
             daily_ret = sum(returns) / len(returns)
             if prev_value is None:
                 index_value = 100.0
+                daily_ret_to_store = None
             else:
                 index_value = prev_value * (1.0 + daily_ret)
+                daily_ret_to_store = daily_ret
             conn.execute(
                 """
                 INSERT OR REPLACE INTO index_daily
@@ -256,9 +335,9 @@ def compute_indices_incremental(
                     market,
                     sector,
                     index_value,
-                    daily_ret,
+                    daily_ret_to_store,
                     per_date_volume.get(d, 0.0),
-                    len(tickers_used.get(d, [])),
+                    len(tickers_used.get(d, set())),
                 ),
             )
             prev_value = index_value

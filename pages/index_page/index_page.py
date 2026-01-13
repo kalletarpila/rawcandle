@@ -67,7 +67,7 @@ class IndexPage:
 
         self.stock_dropdown = ft.Dropdown(label="Osake (valinn.)", width=220, options=[])
         self.show_market_checkbox = ft.Checkbox(
-            label="Näytä market-indeksi", value=False, on_change=self._on_toggle_market
+            label="Näytä market-indeksi (vain näkymä)", value=False, on_change=self._on_toggle_market
         )
         self.update_button = ft.ElevatedButton(
             "Päivitä indeksit",
@@ -223,7 +223,10 @@ class IndexPage:
         if btn:
             btn.disabled = True
             btn.update()
-        self._set_status("🔄 Lasketaan indeksit...", ft.Colors.BLUE_600)
+        if not sectors:
+            self._set_status("🔄 Päivitetään market-indeksi...", ft.Colors.BLUE_600)
+        else:
+            self._set_status(f"🔄 Päivitetään market + {len(sectors)} sektoria...", ft.Colors.BLUE_600)
 
         def worker():
             try:
@@ -279,7 +282,7 @@ class IndexPage:
                 )
                 self.chart_container.update()
                 return
-            fig, summaries = build_index_plot(index_data, volumes, stock_series=stock_series, include_market=include_market)
+            fig, summaries = build_index_plot(index_data, volumes, stock_series=stock_series)
             html = fig.to_html(include_plotlyjs="cdn", full_html=False)
             data_url = "data:text/html;base64," + base64.b64encode(html.encode("utf-8")).decode("utf-8")
             self.chart_container.content = ft.WebView(
