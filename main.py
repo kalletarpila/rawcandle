@@ -29,6 +29,7 @@ from market_repository import (
     validate_market,
     MARKET_VOLUME_DEFAULTS,
 )
+from sector_update import update_sector_metadata
 
 
 # Compatibility shim: ensure ft.Colors/ft.colors and ft.Icons/ft.icons exist
@@ -367,6 +368,14 @@ class RawCandleApp:
             dropdown.update()
         except Exception:
             pass
+
+    def _on_update_market_change(self, e):
+        try:
+            dropdown = getattr(self, "update_market_dropdown", None)
+            if dropdown:
+                self.active_market = dropdown.value or ""
+        except Exception:
+            self.active_market = ""
 
     def _update_market_list(self):
         if not getattr(self, "market_list_column", None):
@@ -2618,6 +2627,7 @@ class RawCandleApp:
         self.markets = list_markets(self.osakedata_db_path)
         self._market_stats: dict[str, dict[str, int]] = {}
         self._load_market_stats()
+        self.active_market: str = ""
         self.market_form_id = None
         self.market_list_column = None
         self.market_name_input = None
@@ -2646,8 +2656,13 @@ class RawCandleApp:
             label="Markkina päivitykseen",
             width=220,
             options=[],
+            on_change=self._on_update_market_change,
         )
         self._update_update_market_dropdown()
+        try:
+            self.active_market = self.update_market_dropdown.value or ""
+        except Exception:
+            self.active_market = ""
         self.delete_ticker_field = ft.TextField(
             label="Osakkeen ticker",
             width=200,
@@ -3156,6 +3171,47 @@ Virheet: {error_count}"""
             self.loading_text.value = f"❌ Virhe päivityksessä: {str(ex)}"
             self.loading_text.color = ft.Colors.RED_600
             self.page.update()
+
+    def update_sectors_from_ui(self, e):
+        """Päivitä sektoritiedot Yahoo Financesta aktiiviselle markkinalle."""
+        import threading
+
+        btn = getattr(self, "update_sectors_button", None)
+        if btn:
+            btn.disabled = True
+        try:
+            self.loading_text.value = "🔄 Päivitetään sektoritiedot..."
+            self.loading_text.color = ft.Colors.BLUE_600
+            self.page.update()
+        except Exception:
+            pass
+
+        def worker():
+            try:
+                market_filter = getattr(self, "active_market", None) or ""
+                if not market_filter and getattr(self, "update_market_dropdown", None):
+                    market_filter = self.update_market_dropdown.value or ""
+                summary = update_sector_metadata(
+                    self.osakedata_db_path,
+                    market_filter or None,
+                    logger=lambda msg: print(f"[SECTOR] {msg}"),
+                )
+                msg = f"✅ Sektoritiedot päivitetty ({summary.get('updated', 0)} osaketta)"
+                color = ft.Colors.GREEN_600
+            except Exception as exc:
+                msg = f"❌ Sektoripäivitys epäonnistui: {exc}"
+                color = ft.Colors.RED_600
+            finally:
+                try:
+                    self.loading_text.value = msg
+                    self.loading_text.color = color
+                    if btn:
+                        btn.disabled = False
+                    self.page.update()
+                except Exception:
+                    pass
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def update_stock_count(self):
         """Päivittää kannassa olevien osakkeiden määrän"""
@@ -3724,6 +3780,18 @@ Virheet: {error_count}"""
             self.loading_text.color = ft.Colors.RED_600
             self.page.update()
 
+    def _build_update_sectors_button(self):
+        if getattr(self, "update_sectors_button", None) is None:
+            self.update_sectors_button = ft.ElevatedButton(
+                "Päivitä sektoritiedot",
+                icon=ft.Icons.BUSINESS,
+                on_click=self.update_sectors_from_ui,
+                bgcolor=ft.Colors.BLUE_600,
+                color=ft.Colors.WHITE,
+                tooltip="Hae sektorit ja toimialat Yahoo Financesta kaikille valitun markkinan osakkeille",
+            )
+        return self.update_sectors_button
+
     def create_home_view(self):
         """Luo etusivun näkymän"""
         # Päivitä osakkeiden määrä
@@ -3813,6 +3881,12 @@ Virheet: {error_count}"""
                                                 ],
                                                 alignment=ft.MainAxisAlignment.CENTER,
                                                 spacing=15,
+                                            ),
+                                            ft.Row(
+                                                [
+                                                    self._build_update_sectors_button(),
+                                                ],
+                                                alignment=ft.MainAxisAlignment.CENTER,
                                             ),
                                             ft.Divider(height=20),
                                             ft.Row(

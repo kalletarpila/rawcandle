@@ -1,3 +1,4 @@
+import os
 import sqlite3
 from pathlib import Path
 
@@ -201,8 +202,37 @@ def run_candlestick_analysis(
         df["pvm"] = pd.to_datetime(df["pvm"])
         df = df.sort_values("pvm").reset_index(drop=True)
 
-    # Laske RSI kaikille kynttiöille (tallennetaan analysis.db:hen)
-    df = calculate_rsi(df, period=14, close_col="Close")
+    # Täytä RSI ensisijaisesti divergence_data-taulusta, muutoin laske
+    rsi_map = {}
+    if analysis_db_path and os.path.exists(analysis_db_path):
+        try:
+            with sqlite3.connect(analysis_db_path) as conn:
+                rsi_query = "SELECT date, rsi FROM divergence_data WHERE ticker = ?"
+                rsi_params = [ticker]
+                if s_iso and e_iso:
+                    rsi_query += " AND date >= ? AND date <= ?"
+                    rsi_params += [s_iso, e_iso]
+                elif s_iso:
+                    rsi_query += " AND date >= ?"
+                    rsi_params.append(s_iso)
+                elif e_iso:
+                    rsi_query += " AND date <= ?"
+                    rsi_params.append(e_iso)
+                rsi_map = dict(conn.execute(rsi_query, rsi_params).fetchall())
+            if rsi_map:
+                df["RSI"] = df["pvm"].dt.strftime("%Y-%m-%d").map(rsi_map)
+        except Exception:
+            # Jos luku epäonnistuu, lasketaan RSI alla normaalisti
+            rsi_map = {}
+
+    # Laske puuttuvat RSI-arvot (tai kaikki, jos ei löytynyt valmiita)
+    if "RSI" not in df.columns or df["RSI"].isna().any():
+        calc_df = calculate_rsi(df, period=14, close_col="Close")
+        calc_rsi = calc_df["RSI"]
+        if "RSI" in df.columns:
+            df["RSI"] = df["RSI"].fillna(calc_rsi)
+        else:
+            df["RSI"] = calc_rsi
     df = df.sort_values("pvm").reset_index(drop=True)
     divergence_dates = _load_bullish_divergence_dates(ticker, analysis_db_path)
 
