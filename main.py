@@ -13,6 +13,7 @@ from regression.view import RegressionView
 from reverse.view import ReverseView
 from stock.splits import sync_splits_for_ticker
 from analysis.divergence_recompute import recompute_divergence_for_ticker
+from pages.index_page.index_page import IndexPage
 from analysis.splits_price_backfill import (
     has_uncorrected_splits,
     delete_prices_from_2018,
@@ -2701,6 +2702,7 @@ class RawCandleApp:
         self.stock_view = StockView(self.page, self.create_appbar)
         self.regression_view = RegressionView(self.page, self.create_appbar)
         self.reverse_view = ReverseView(self.page, self.create_appbar)
+        self.index_view = IndexPage(self.page, self.create_appbar, self.active_market)
 
         # Aloita etusivulta (only if page supports go)
         try:
@@ -2760,6 +2762,11 @@ class RawCandleApp:
                     ft.Icons.FLARE,
                     tooltip="Candles",
                     on_click=lambda _: self.page.go("/candles"),
+                ),
+                ft.IconButton(
+                    ft.Icons.STACKED_LINE_CHART,
+                    tooltip="Indeksit",
+                    on_click=lambda _: self.page.go("/index"),
                 ),
                 ft.IconButton(
                     ft.Icons.SHOW_CHART,
@@ -4036,6 +4043,8 @@ Virheet: {error_count}"""
             self.page.views.append(self.create_settings_view())
         elif self.page.route == "/candles":
             self.page.views.append(self.create_candles_view())
+        elif self.page.route == "/index":
+            self.page.views.append(self.index_view.create_view())
         elif self.page.route == "/stock":
             self.page.views.append(self.stock_view.create_view())
         elif self.page.route == "/simu":
