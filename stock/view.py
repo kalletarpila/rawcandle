@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import math
 import datetime as dt
+import sqlite3
 from typing import Callable, Dict, List, Optional, Sequence, Set
 
 import flet as ft
@@ -563,8 +564,9 @@ class StockView:
         self._render_price_table()
         self._update_analysis_pager()
 
+        sector, industry = self._fetch_ticker_meta(ticker)
         self._set_status(
-            f"✅ Data haettu tickerille {ticker} ({self.total_days} päivää)",
+            self._build_status_text(ticker, sector, industry),
             ft.Colors.GREEN_600,
         )
 
@@ -574,6 +576,46 @@ class StockView:
         self.status_text.value = message
         self.status_text.color = color
         self.status_text.update()
+
+    def _build_status_text(self, ticker: str, sector: Optional[str], industry: Optional[str]) -> str:
+        parts = [f"✅ Data haettu tickerille {ticker} ({self.total_days} päivää)"]
+        meta = []
+        if sector:
+            meta.append(f"Sektori: {sector}")
+        if industry:
+            meta.append(f"Industry: {industry}")
+        if meta:
+            parts.append(" | ".join(meta))
+        return " | ".join(parts)
+
+    def _fetch_ticker_meta(self, ticker: str) -> tuple[Optional[str], Optional[str]]:
+        try:
+            conn = services._connect(services.PRICE_DB_PATH)
+        except Exception:
+            return None, None
+        try:
+            cursor = conn.execute("PRAGMA table_info(osakedata)")
+            columns = {row["name"] for row in cursor.fetchall()}
+            if "sector" not in columns and "industry" not in columns:
+                return None, None
+            res = conn.execute(
+                """
+                SELECT MAX(sector) AS sector, MAX(industry) AS industry
+                FROM osakedata
+                WHERE osake = ?
+                """,
+                (ticker,),
+            ).fetchone()
+            if not res:
+                return None, None
+            return res["sector"], res["industry"]
+        except Exception:
+            return None, None
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     def _clear_results(self) -> None:
         if self.chart_container:
