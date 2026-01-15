@@ -41,13 +41,17 @@ def extract_trend_chains(
             if chain:
                 chain.update({"object_type": object_type, "object_name": object_name})
                 chains.append(chain)
-            i = next_idx
+                i = next_idx
+            else:
+                i += 1
         elif label == "LH":
             chain, next_idx = _build_chain(markers, i, direction="DOWN")
             if chain:
                 chain.update({"object_type": object_type, "object_name": object_name})
                 chains.append(chain)
-            i = next_idx
+                i = next_idx
+            else:
+                i += 1
         else:
             i += 1
     # Sortataan confidence DESC, end_date DESC

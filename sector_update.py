@@ -8,13 +8,22 @@ import yfinance as yf
 TickerInfo = Tuple[str, str]
 
 
-def _ensure_sector_columns(conn: sqlite3.Connection) -> None:
-    cursor = conn.execute("PRAGMA table_info(osakedata)")
-    columns = {row[1] for row in cursor.fetchall()}
-    if "sector" not in columns:
-        conn.execute("ALTER TABLE osakedata ADD COLUMN sector TEXT")
-    if "industry" not in columns:
-        conn.execute("ALTER TABLE osakedata ADD COLUMN industry TEXT")
+def _ensure_metadata_tables(conn: sqlite3.Connection) -> None:
+    """Varmista ticker_meta-taulu (ticker, market, sector, industry) ja indeksit."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ticker_meta (
+            ticker TEXT PRIMARY KEY,
+            market TEXT,
+            sector TEXT,
+            industry TEXT
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ticker_meta_market ON ticker_meta(market)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ticker_meta_market_sector ON ticker_meta(market, sector)"
+    )
 
 
 def _fetch_sector_data(ticker: str) -> Optional[TickerInfo]:
@@ -51,22 +60,26 @@ def update_sector_metadata(
         raise FileNotFoundError(f"Database not found at {db_path}")
 
     with sqlite3.connect(db_path) as conn:
-        _ensure_sector_columns(conn)
+        _ensure_metadata_tables(conn)
 
         params = []
-        query = "SELECT DISTINCT osake FROM osakedata WHERE osake IS NOT NULL"
+        query = """
+            SELECT DISTINCT osake AS ticker, LOWER(market) AS market
+            FROM osakedata
+            WHERE osake IS NOT NULL
+        """
         if market_filter:
             query += " AND LOWER(market) = LOWER(?)"
             params.append(market_filter)
         query += " ORDER BY osake"
         rows = conn.execute(query, params).fetchall()
-        tickers = [r[0] for r in rows if r[0]]
+        tickers = [(r[0], r[1]) for r in rows if r[0]]
 
         updated = 0
         missing = 0
         errors = 0
 
-        for idx, ticker in enumerate(tickers, 1):
+        for idx, (ticker, mkt) in enumerate(tickers, 1):
             sector_info = None
             try:
                 sector_info = _fetch_sector_data(ticker)
@@ -77,8 +90,15 @@ def update_sector_metadata(
                     missing += 1
 
                 conn.execute(
-                    "UPDATE osakedata SET sector = ?, industry = ? WHERE osake = ?",
-                    (sector_val, industry_val, ticker),
+                    """
+                    INSERT INTO ticker_meta (ticker, market, sector, industry)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(ticker) DO UPDATE SET
+                        market=excluded.market,
+                        sector=excluded.sector,
+                        industry=excluded.industry
+                    """,
+                    (ticker, mkt, sector_val, industry_val),
                 )
                 updated += 1
                 if sector_info:

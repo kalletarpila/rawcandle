@@ -49,16 +49,14 @@ def test_update_sector_metadata_adds_columns_and_updates_values(tmp_path, fake_y
     )
 
     with sqlite3.connect(db_path) as conn:
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(osakedata)")}
-        assert {"sector", "industry"}.issubset(cols)
         rows = {
-            osake: (sector, industry)
-            for osake, sector, industry in conn.execute(
-                "SELECT osake, sector, industry FROM osakedata ORDER BY osake"
+            ticker: (market, sector, industry)
+            for ticker, market, sector, industry in conn.execute(
+                "SELECT ticker, market, sector, industry FROM ticker_meta ORDER BY ticker"
             ).fetchall()
         }
-    assert rows["AAA"] == ("Technology", "Software")
-    assert rows["BBB"] == ("ei löydetty", "ei löydetty")
+    assert rows["AAA"] == ("usa", "Technology", "Software")
+    assert rows["BBB"] == ("fin", "ei löydetty", "ei löydetty")
     assert summary["updated"] == 2
     assert summary["missing"] == 1
     assert "AAA | Technology | Software" in logs
@@ -92,14 +90,14 @@ def test_market_filter_limits_updated_tickers(tmp_path, fake_yfinance):
 
     with sqlite3.connect(db_path) as conn:
         rows = {
-            osake: (sector, industry)
-            for osake, sector, industry in conn.execute(
-                "SELECT osake, sector, industry FROM osakedata ORDER BY osake"
+            ticker: (market, sector, industry)
+            for ticker, market, sector, industry in conn.execute(
+                "SELECT ticker, market, sector, industry FROM ticker_meta ORDER BY ticker"
             ).fetchall()
         }
-    assert rows["AAA"] == ("Tech", "Hardware")
-    # BBB not updated because of market filter; stays NULL
-    assert rows["BBB"] == (None, None)
+    assert rows["AAA"] == ("usa", "Tech", "Hardware")
+    # BBB not updated because of market filter; stays absent/None
+    assert rows.get("BBB") is None
 
 
 def test_throttling_calls_sleep_with_batch_pause(tmp_path, fake_yfinance):

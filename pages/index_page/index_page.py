@@ -11,6 +11,7 @@ import flet as ft
 from pages.index_page.index_calc import (
     compute_indices_incremental,
     ensure_index_table,
+    ensure_ticker_metadata,
     fetch_index_series,
     fetch_stock_series,
     get_available_markets,
@@ -43,6 +44,7 @@ class IndexPage:
         self.sector_column: Optional[ft.Column] = None
         self.stock_input: Optional[ft.TextField] = None
         self.show_market_checkbox: Optional[ft.Checkbox] = None
+        self.normalize_checkbox: Optional[ft.Checkbox] = None
         self.update_button: Optional[ft.ElevatedButton] = None
         self.status_text: Optional[ft.Text] = None
         self.chart_container: Optional[ft.Container] = None
@@ -50,6 +52,9 @@ class IndexPage:
         self.range_buttons: Dict[str, ft.ElevatedButton] = {}
         self.trend_table: Optional[ft.DataTable] = None
         self.trend_empty_text: Optional[ft.Text] = None
+        self.trend_chains_cache: List[Dict] = []
+        self.trend_sort_column: Optional[int] = None
+        self.trend_sort_ascending: bool = False
 
         self.schema_cache: Optional[Dict[str, str]] = None
         self._initial_draw_scheduled = False
@@ -70,7 +75,7 @@ class IndexPage:
                 padding=10,
                 content=ft.Column(
                     [
-                        ft.Text("Sektorit (max 2)", weight=ft.FontWeight.BOLD),
+                        ft.Text("Sektorit (max 5)", weight=ft.FontWeight.BOLD),
                         self.sector_column,
                     ],
                     spacing=8,
@@ -88,8 +93,13 @@ class IndexPage:
         self.show_market_checkbox = ft.Checkbox(
             label="Näytä market-indeksi", value=True, on_change=self._on_toggle_market
         )
+        self.normalize_checkbox = ft.Checkbox(
+            label="Normalisoi näkyvään aikajaksoon",
+            value=False,
+            on_change=self._on_toggle_normalization,
+        )
         self.update_button = ft.ElevatedButton(
-            "Päivitä indeksit",
+            "Päivitä sektoreiden indeksit",
             icon=ft.Icons.UPDATE,
             on_click=self._on_update_click,
             bgcolor=ft.Colors.BLUE_600,
@@ -113,7 +123,7 @@ class IndexPage:
                     wrap=True,
                 ),
                 sector_card,
-                self._build_range_buttons(),
+                ft.Row([self._build_range_buttons(), self.normalize_checkbox], wrap=True, spacing=8),
                 self.status_text,
             ],
             spacing=10,
@@ -156,6 +166,7 @@ class IndexPage:
             with self._connect() as conn:
                 self.schema_cache = introspect_schema(conn)
                 ensure_index_table(conn)
+                ensure_ticker_metadata(conn, self.schema_cache)
                 markets = get_available_markets(conn, self.schema_cache)
         except Exception:
             markets = []
@@ -172,6 +183,7 @@ class IndexPage:
         try:
             with self._connect() as conn:
                 schema = self.schema_cache or introspect_schema(conn)
+                ensure_ticker_metadata(conn, schema)
                 sectors = get_sectors_for_market(conn, schema, market) if market else []
         except Exception:
             sectors = []
@@ -211,14 +223,14 @@ class IndexPage:
         self.trend_empty_text = ft.Text("Ei vahvoja trendiketjuja nykyisellä näkymällä.", color=ft.Colors.GREY_600)
         self.trend_table = ft.DataTable(
             columns=[
-                ft.DataColumn(ft.Text("Objekti", weight=ft.FontWeight.BOLD)),
-                ft.DataColumn(ft.Text("Nimi", weight=ft.FontWeight.BOLD)),
-                ft.DataColumn(ft.Text("Suunta", weight=ft.FontWeight.BOLD)),
-                ft.DataColumn(ft.Text("Alku", weight=ft.FontWeight.BOLD)),
-                ft.DataColumn(ft.Text("Loppu", weight=ft.FontWeight.BOLD)),
-                ft.DataColumn(ft.Text("Tapahtumia", weight=ft.FontWeight.BOLD)),
-                ft.DataColumn(ft.Text("Pareja", weight=ft.FontWeight.BOLD)),
-                ft.DataColumn(ft.Text("Confidence", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Objekti", weight=ft.FontWeight.BOLD), on_sort=self._on_trend_sort),
+                ft.DataColumn(ft.Text("Nimi", weight=ft.FontWeight.BOLD), on_sort=self._on_trend_sort),
+                ft.DataColumn(ft.Text("Suunta", weight=ft.FontWeight.BOLD), on_sort=self._on_trend_sort),
+                ft.DataColumn(ft.Text("Alku", weight=ft.FontWeight.BOLD), on_sort=self._on_trend_sort),
+                ft.DataColumn(ft.Text("Loppu", weight=ft.FontWeight.BOLD), on_sort=self._on_trend_sort),
+                ft.DataColumn(ft.Text("Tapahtumia", weight=ft.FontWeight.BOLD), on_sort=self._on_trend_sort),
+                ft.DataColumn(ft.Text("Pareja", weight=ft.FontWeight.BOLD), on_sort=self._on_trend_sort),
+                ft.DataColumn(ft.Text("Confidence", weight=ft.FontWeight.BOLD), on_sort=self._on_trend_sort),
             ],
             rows=[],
             column_spacing=12,
@@ -267,14 +279,14 @@ class IndexPage:
 
     def _on_sector_toggle(self, e):
         selected = self._selected_sectors()
-        if len(selected) > 2:
+        if len(selected) > 5:
             # perutaan uusin valinta
             for sec, cb in self.sector_checkboxes.items():
                 if cb == e.control:
                     cb.value = False
                     break
             if self.status_text:
-                self.status_text.value = "Max 2 sektoria."
+                self.status_text.value = "Max 5 sektoria."
                 self.status_text.color = ft.Colors.ORANGE_700
         self._refresh_stock_options()
         self._refresh_chart()
@@ -283,6 +295,13 @@ class IndexPage:
     def _on_toggle_market(self, e):
         self._refresh_chart()
         self.page.update()
+
+    def _on_toggle_normalization(self, e):
+        self._refresh_chart()
+        try:
+            self.page.update()
+        except Exception:
+            pass
 
     def _set_status(self, text: str, color=ft.Colors.GREY_700):
         if self.status_text:
@@ -316,16 +335,33 @@ class IndexPage:
         except Exception:
             pass
 
+    def _on_trend_sort(self, e: ft.DataTableSortEvent):
+        try:
+            self.trend_sort_column = e.column_index
+            self.trend_sort_ascending = e.ascending
+            if self.trend_table:
+                self.trend_table.sort_column_index = e.column_index
+                self.trend_table.sort_ascending = e.ascending
+            self._update_trend_table(self.trend_chains_cache)
+            try:
+                self.page.update()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
     def _update_trend_table(self, chains: List[Dict]):
         if not self.trend_table or not self.trend_empty_text:
             return
+        self.trend_chains_cache = list(chains)
         if not chains:
             self.trend_table.rows = []
             self.trend_empty_text.visible = True
             return
+        chains_to_render = self._sort_chains(chains)
         self.trend_empty_text.visible = False
         rows = []
-        for chain in chains:
+        for chain in chains_to_render:
             rows.append(
                 ft.DataRow(
                     cells=[
@@ -342,9 +378,53 @@ class IndexPage:
             )
         self.trend_table.rows = rows
 
+    def _sort_chains(self, chains: List[Dict]) -> List[Dict]:
+        if self.trend_sort_column is None:
+            return sorted(
+                chains,
+                key=lambda c: (c.get("confidence", 0), c.get("end_date")),
+                reverse=True,
+            )
+
+        def sort_key(c: Dict):
+            idx = self.trend_sort_column
+            mapping = {
+                0: c.get("object_type", ""),
+                1: c.get("object_name", ""),
+                2: c.get("direction", ""),
+                3: c.get("start_date", ""),
+                4: c.get("end_date", ""),
+                5: c.get("events_count", 0),
+                6: c.get("pairs_count", 0),
+                7: c.get("confidence", 0),
+            }
+            val = mapping.get(idx, "")
+            if isinstance(val, dt.date):
+                return val
+            # try parse date strings
+            if isinstance(val, str):
+                try:
+                    return dt.date.fromisoformat(val)
+                except Exception:
+                    return val.lower()
+            return val
+
+        reverse = not self.trend_sort_ascending
+        return sorted(chains, key=sort_key, reverse=reverse)
+
     def _fetch_stock_meta(self, ticker: str) -> tuple[Optional[str], Optional[str]]:
         try:
             with self._connect() as conn:
+                # Try metadata table first
+                try:
+                    meta = conn.execute(
+                        "SELECT sector, industry FROM ticker_meta WHERE ticker = ?", (ticker,)
+                    ).fetchone()
+                    if meta:
+                        return meta["sector"], meta["industry"]
+                except Exception:
+                    pass
+                # Fallback to osakedata if metadata missing
                 schema = self.schema_cache or introspect_schema(conn)
                 ticker_col = schema.get("ticker")
                 sector_col = schema.get("sector")
@@ -372,6 +452,7 @@ class IndexPage:
         self.selected_range = key
         for k, btn in self.range_buttons.items():
             btn.disabled = k == key
+            btn.bgcolor = ft.Colors.BLUE_200 if k == key else ft.Colors.GREY_200
         self._refresh_chart()
         try:
             self.page.update()
@@ -382,15 +463,26 @@ class IndexPage:
         if not self.active_market:
             self._set_status("Valitse markkina", ft.Colors.RED_600)
             return
-        sectors = self._selected_sectors()
+        sectors_selected = self._selected_sectors()
+        try:
+            with self._connect() as conn:
+                schema = self.schema_cache or introspect_schema(conn)
+                ensure_ticker_metadata(conn, schema)
+                sectors_all = get_sectors_for_market(conn, schema, self.active_market)
+        except Exception:
+            sectors_all = []
+
         btn = self.update_button
         if btn:
             btn.disabled = True
             btn.update()
-        if not sectors:
-            self._set_status("🔄 Päivitetään market-indeksi...", ft.Colors.BLUE_600)
+        if not sectors_selected:
+            self._set_status("🔄 Päivitetään market-indeksi + kaikki markkinan sektorit...", ft.Colors.BLUE_600)
         else:
-            self._set_status(f"🔄 Päivitetään market + {len(sectors)} sektoria...", ft.Colors.BLUE_600)
+            self._set_status(
+                f"🔄 Päivitetään market + {len(sectors_all)} sektoria (valittuja {len(sectors_selected)})...",
+                ft.Colors.BLUE_600,
+            )
 
         def worker():
             try:
@@ -398,7 +490,7 @@ class IndexPage:
                     summary = compute_indices_incremental(
                         conn,
                         self.active_market,
-                        sectors,
+                        sectors_all,
                         logger=lambda msg: print(msg),
                     )
                 msg = f"✅ Päivitys valmis ({summary.get('updated_rows',0)} riviä)"
@@ -423,6 +515,7 @@ class IndexPage:
         market = self.active_market
         sectors = self._selected_sectors()
         include_market = bool(self.show_market_checkbox and self.show_market_checkbox.value)
+        normalize_range = bool(self.normalize_checkbox and self.normalize_checkbox.value)
         ticker = (self.stock_input.value or "").strip().upper() if self.stock_input else ""
         if not market:
             return
@@ -461,6 +554,10 @@ class IndexPage:
                         stock_series = None
                         self._set_status(f"Ticker {ticker} ei löytynyt kannasta", ft.Colors.ORANGE_700)
                 index_data, volumes, stock_series = self._apply_range_filter(index_data, volumes, stock_series)
+                if normalize_range:
+                    index_data = {k: normalize_series_to_100(v) for k, v in index_data.items()}
+                    if stock_series:
+                        stock_series = normalize_series_to_100(stock_series)
             if not index_data:
                 self.chart_container.content = ft.Text(
                     "Ei indeksidataa. Päivitä indeksit ensin.",

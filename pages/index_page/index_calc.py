@@ -90,56 +90,120 @@ def ensure_osakedata_indexes(conn: sqlite3.Connection, schema: SchemaMap) -> Non
         )
 
 
-def get_available_markets(conn: sqlite3.Connection, schema: SchemaMap) -> List[str]:
+def ensure_ticker_metadata(conn: sqlite3.Connection, schema: SchemaMap) -> None:
+    """Luo ja täytä ticker-metadatataulu (ticker_meta) sektorin/industrystä."""
+    ticker_col = schema.get("ticker")
     market_col = schema.get("market")
-    if not market_col:
-        return []
-    cursor = conn.execute(
-        f"SELECT DISTINCT LOWER({market_col}) AS m FROM osakedata WHERE {market_col} IS NOT NULL ORDER BY m"
+    date_col = schema.get("date")
+    sector_col = schema.get("sector")
+    industry_col = schema.get("industry")
+    if not (ticker_col and market_col and date_col):
+        return
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ticker_meta (
+            ticker TEXT PRIMARY KEY,
+            market TEXT,
+            sector TEXT,
+            industry TEXT
+        )
+        """
     )
-    return [row["m"] for row in cursor.fetchall() if row["m"]]
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ticker_meta_market ON ticker_meta(market)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ticker_meta_market_sector ON ticker_meta(market, sector)"
+    )
+
+    # Täytä sektoritieto: käytä viimeisintä ei-tyhjää sektoria; fallback viimeisin rivi.
+    if not sector_col:
+        return
+
+    industry_sel = industry_col if industry_col else "NULL"
+    conn.execute(
+        f"""
+        WITH last_with_sector AS (
+            SELECT o.{ticker_col} AS ticker,
+                   LOWER(o.{market_col}) AS market,
+                   o.{sector_col} AS sector,
+                   {industry_sel} AS industry
+            FROM osakedata o
+            JOIN (
+                SELECT {ticker_col} AS ticker, MAX({date_col}) AS pvm
+                FROM osakedata
+                WHERE {sector_col} IS NOT NULL AND TRIM({sector_col}) <> ''
+                GROUP BY {ticker_col}
+            ) m ON o.{ticker_col} = m.ticker AND o.{date_col} = m.pvm
+        ),
+        last_any AS (
+            SELECT o.{ticker_col} AS ticker,
+                   LOWER(o.{market_col}) AS market,
+                   o.{sector_col} AS sector,
+                   {industry_sel} AS industry
+            FROM osakedata o
+            JOIN (
+                SELECT {ticker_col} AS ticker, MAX({date_col}) AS pvm
+                FROM osakedata
+                GROUP BY {ticker_col}
+            ) m ON o.{ticker_col} = m.ticker AND o.{date_col} = m.pvm
+        ),
+        combined AS (
+            SELECT * FROM last_with_sector
+            UNION ALL
+            SELECT * FROM last_any WHERE ticker NOT IN (SELECT ticker FROM last_with_sector)
+        )
+        INSERT OR REPLACE INTO ticker_meta (ticker, market, sector, industry)
+        SELECT ticker, market, sector, industry FROM combined
+        """
+    )
+
+
+def get_available_markets(conn: sqlite3.Connection, schema: SchemaMap) -> List[str]:
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS ticker_meta (ticker TEXT PRIMARY KEY, market TEXT, sector TEXT, industry TEXT)")
+        cursor = conn.execute(
+            "SELECT DISTINCT LOWER(market) AS m FROM ticker_meta WHERE market IS NOT NULL ORDER BY m"
+        )
+        return [row["m"] for row in cursor.fetchall() if row["m"]]
+    except Exception:
+        return []
 
 
 def get_sectors_for_market(
     conn: sqlite3.Connection, schema: SchemaMap, market: str
 ) -> List[str]:
-    market_col = schema.get("market")
-    sector_col = schema.get("sector")
-    if not market_col or not sector_col:
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS ticker_meta (ticker TEXT PRIMARY KEY, market TEXT, sector TEXT, industry TEXT)")
+        cursor = conn.execute(
+            """
+            SELECT DISTINCT sector
+            FROM ticker_meta
+            WHERE LOWER(market) = LOWER(?)
+              AND sector IS NOT NULL
+              AND TRIM(sector) <> ''
+            ORDER BY sector
+            """,
+            (market,),
+        )
+        return [row["sector"] for row in cursor.fetchall()]
+    except Exception:
         return []
-    cursor = conn.execute(
-        f"""
-        SELECT DISTINCT {sector_col} AS sector
-        FROM osakedata
-        WHERE LOWER({market_col}) = LOWER(?)
-          AND {sector_col} IS NOT NULL
-          AND TRIM({sector_col}) <> ''
-        ORDER BY sector
-        """,
-        (market,),
-    )
-    return [row["sector"] for row in cursor.fetchall()]
 
 
 def get_tickers_for_market_sectors(
     conn: sqlite3.Connection, schema: SchemaMap, market: str, sectors: Sequence[str]
 ) -> List[str]:
-    ticker_col = schema.get("ticker")
-    market_col = schema.get("market")
-    sector_col = schema.get("sector")
-    if not ticker_col or not market_col:
-        return []
     params: List[object] = [market]
     sector_filter = ""
-    if sectors and sector_col:
+    if sectors:
         placeholders = ",".join(["?"] * len(sectors))
-        sector_filter = f" AND {sector_col} IN ({placeholders})"
+        sector_filter = f" AND sector IN ({placeholders})"
         params.extend(sectors)
     cursor = conn.execute(
         f"""
-        SELECT DISTINCT {ticker_col} AS ticker
-        FROM osakedata
-        WHERE LOWER({market_col}) = LOWER(?)
+        SELECT ticker
+        FROM ticker_meta
+        WHERE LOWER(market) = LOWER(?)
         {sector_filter}
         ORDER BY ticker
         """,
@@ -182,11 +246,11 @@ def compute_indices_incremental(
     close_col = schema.get("close")
     volume_col = schema.get("volume")
     market_col = schema.get("market")
-    sector_col = schema.get("sector")
     if not (ticker_col and date_col and close_col and volume_col and market_col):
         raise RuntimeError("osakedata-taulusta puuttuu vaadittuja sarakkeita")
 
     ensure_index_table(conn)
+    ensure_ticker_metadata(conn, schema)
     ensure_osakedata_indexes(conn, schema)
 
     target_sectors = list(sectors or [])
@@ -204,8 +268,10 @@ def compute_indices_incremental(
 
         params: List[object] = [market]
         sector_filter = ""
-        if sector and sector_col:
-            sector_filter = f" AND {sector_col} = ?"
+        sector_filter_prev = ""
+        if sector:
+            sector_filter = " AND tm.sector = ?"
+            sector_filter_prev = " AND tm2.sector = ?"
             params.append(sector)
 
         rows: List[sqlite3.Row] = []
@@ -222,14 +288,15 @@ def compute_indices_incremental(
                 f"""
                 WITH base_rows AS (
                     SELECT
-                        {ticker_col} AS ticker,
-                        {date_col} AS pvm,
-                        {close_col} AS close,
-                        {volume_col} AS volume
-                    FROM osakedata
-                    WHERE LOWER({market_col}) = LOWER(?)
+                        o.{ticker_col} AS ticker,
+                        o.{date_col} AS pvm,
+                        o.{close_col} AS close,
+                        o.{volume_col} AS volume
+                    FROM osakedata o
+                    JOIN ticker_meta tm ON tm.ticker = o.{ticker_col}
+                    WHERE LOWER(tm.market) = LOWER(?)
                       {sector_filter}
-                      AND {date_col} >= ?
+                      AND o.{date_col} >= ?
                 ),
                 prev_rows AS (
                     SELECT
@@ -238,11 +305,13 @@ def compute_indices_incremental(
                         o.{close_col} AS close,
                         o.{volume_col} AS volume
                     FROM osakedata o
+                    JOIN ticker_meta tm ON tm.ticker = o.{ticker_col}
                     JOIN (
                         SELECT {ticker_col} AS t, MAX({date_col}) AS max_pvm
                         FROM osakedata
-                        WHERE LOWER({market_col}) = LOWER(?)
-                          {sector_filter}
+                        JOIN ticker_meta tm2 ON tm2.ticker = {ticker_col}
+                        WHERE LOWER(tm2.market) = LOWER(?)
+                          {sector_filter_prev}
                           AND {date_col} < ?
                         GROUP BY {ticker_col}
                     ) p
@@ -268,15 +337,16 @@ def compute_indices_incremental(
         else:
             rows = conn.execute(
                 f"""
-                SELECT {ticker_col} AS ticker,
-                       {date_col} AS pvm,
-                       {close_col} AS close,
-                       {volume_col} AS volume
-                FROM osakedata
-                WHERE LOWER({market_col}) = LOWER(?)
+                SELECT o.{ticker_col} AS ticker,
+                       o.{date_col} AS pvm,
+                       o.{close_col} AS close,
+                       o.{volume_col} AS volume
+                FROM osakedata o
+                JOIN ticker_meta tm ON tm.ticker = o.{ticker_col}
+                WHERE LOWER(tm.market) = LOWER(?)
                   {sector_filter}
-                  AND {date_col} >= ?
-                ORDER BY {ticker_col} ASC, {date_col} ASC
+                  AND o.{date_col} >= ?
+                ORDER BY o.{ticker_col} ASC, o.{date_col} ASC
                 """,
                 params + [base_start],
             ).fetchall()
@@ -363,23 +433,24 @@ def fetch_index_series(
     date_to: Optional[str] = None,
 ) -> Dict[str, List[IndexRow]]:
     """Hae indeksi- ja volyymisarjat."""
-    params: List[object] = []
+    level_params: List[object] = []
+    where_params: List[object] = []
     where_clauses = []
     where_clauses.append("market = ?")
-    params.append(market)
+    where_params.append(market)
     if date_from:
         where_clauses.append("date >= ?")
-        params.append(date_from)
+        where_params.append(date_from)
     if date_to:
         where_clauses.append("date <= ?")
-        params.append(date_to)
+        where_params.append(date_to)
     level_filters = []
     if include_market:
         level_filters.append("(level = 'market')")
     if sectors:
         placeholders = ",".join(["?"] * len(sectors))
         level_filters.append(f"(level = 'sector' AND sector IN ({placeholders}))")
-        params.extend(sectors)
+        level_params.extend(sectors)
     if not level_filters:
         return {}
     where_sql = " AND ".join(where_clauses)
@@ -390,6 +461,7 @@ def fetch_index_series(
         WHERE ({level_sql}) AND {where_sql}
         ORDER BY date ASC
     """
+    params = level_params + where_params
     rows = conn.execute(query, params).fetchall()
     result: Dict[str, List[IndexRow]] = {}
     for row in rows:
