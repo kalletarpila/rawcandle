@@ -20,6 +20,7 @@ from pages.index_page.index_calc import (
     _connect,
 )
 from pages.index_page.index_plot import build_index_plot
+from pages.index_page.index_trends import build_trend_chains_for_series
 
 
 class IndexPage:
@@ -47,6 +48,8 @@ class IndexPage:
         self.chart_container: Optional[ft.Container] = None
         self.dow_text: Optional[ft.Text] = None
         self.range_buttons: Dict[str, ft.ElevatedButton] = {}
+        self.trend_table: Optional[ft.DataTable] = None
+        self.trend_empty_text: Optional[ft.Text] = None
 
         self.schema_cache: Optional[Dict[str, str]] = None
         self._initial_draw_scheduled = False
@@ -128,6 +131,7 @@ class IndexPage:
                             controls,
                             ft.Divider(height=10),
                             self.chart_container,
+                            self._build_trend_card(),
                             self.dow_text,
                         ],
                         spacing=12,
@@ -198,6 +202,58 @@ class IndexPage:
             buttons.append(btn)
         return ft.Row(buttons, spacing=8, wrap=True)
 
+    def _build_trend_card(self) -> ft.Card:
+        helper = ft.Text(
+            "Kriteeri: vähintään 2 peräkkäistä HL–HH (nousu) tai LH–LL (lasku) -paria. Ketju alkaa aina HL/LH.",
+            size=12,
+            color=ft.Colors.GREY_700,
+        )
+        self.trend_empty_text = ft.Text("Ei vahvoja trendiketjuja nykyisellä näkymällä.", color=ft.Colors.GREY_600)
+        self.trend_table = ft.DataTable(
+            columns=[
+                ft.DataColumn(ft.Text("Objekti", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Nimi", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Suunta", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Alku", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Loppu", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Tapahtumia", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Pareja", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Confidence", weight=ft.FontWeight.BOLD)),
+            ],
+            rows=[],
+            column_spacing=12,
+            heading_row_color=ft.Colors.GREY_100,
+        )
+        content = ft.Column(
+            [
+                helper,
+                ft.Container(
+                    height=280,
+                    content=ft.Column(
+                        [
+                            self.trend_empty_text,
+                            self.trend_table,
+                        ],
+                        spacing=6,
+                        scroll=ft.ScrollMode.AUTO,
+                    ),
+                ),
+            ],
+            spacing=8,
+        )
+        return ft.Card(
+            content=ft.Container(
+                padding=12,
+                content=ft.Column(
+                    [
+                        ft.Text("Vahvat trendiketjut", size=16, weight=ft.FontWeight.BOLD),
+                        content,
+                    ],
+                    spacing=8,
+                ),
+            )
+        )
+
     def _selected_sectors(self) -> List[str]:
         return [sec for sec, cb in self.sector_checkboxes.items() if cb.value]
 
@@ -259,6 +315,32 @@ class IndexPage:
             self.page.update()
         except Exception:
             pass
+
+    def _update_trend_table(self, chains: List[Dict]):
+        if not self.trend_table or not self.trend_empty_text:
+            return
+        if not chains:
+            self.trend_table.rows = []
+            self.trend_empty_text.visible = True
+            return
+        self.trend_empty_text.visible = False
+        rows = []
+        for chain in chains:
+            rows.append(
+                ft.DataRow(
+                    cells=[
+                        ft.DataCell(ft.Text(str(chain.get("object_type", "")))),
+                        ft.DataCell(ft.Text(str(chain.get("object_name", "")))),
+                        ft.DataCell(ft.Text(str(chain.get("direction", "")))),
+                        ft.DataCell(ft.Text(str(chain.get("start_date", "")))),
+                        ft.DataCell(ft.Text(str(chain.get("end_date", "")))),
+                        ft.DataCell(ft.Text(str(chain.get("events_count", "")))),
+                        ft.DataCell(ft.Text(str(chain.get("pairs_count", "")))),
+                        ft.DataCell(ft.Text(str(chain.get("confidence", "")))),
+                    ]
+                )
+            )
+        self.trend_table.rows = rows
 
     def _fetch_stock_meta(self, ticker: str) -> tuple[Optional[str], Optional[str]]:
         try:
@@ -410,6 +492,8 @@ class IndexPage:
                 if meta_parts:
                     summary_texts.append("Osake: " + " / ".join(meta_parts))
             self.dow_text.value = " | ".join(summary_texts)
+            trend_chains = self._compute_trend_chains(index_data, stock_series, ticker if stock_series else None)
+            self._update_trend_table(trend_chains)
             try:
                 self.page.update()
             except Exception:
@@ -420,6 +504,20 @@ class IndexPage:
                 self.page.update()
             except Exception:
                 pass
+
+    def _compute_trend_chains(self, index_data: Dict[str, List[Dict]], stock_series: Optional[List[Dict]], ticker: Optional[str]) -> List[Dict]:
+        chains: List[Dict] = []
+        # market
+        for key, series in index_data.items():
+            if key == "MARKET":
+                chains.extend(build_trend_chains_for_series(series, "MARKET", "MARKET"))
+            else:
+                chains.extend(build_trend_chains_for_series(series, "SECTOR", key))
+        if stock_series and ticker:
+            chains.extend(build_trend_chains_for_series(stock_series, "STOCK", ticker))
+        # sort by confidence desc, end_date desc
+        chains.sort(key=lambda c: (c.get("confidence", 0), c.get("end_date")), reverse=True)
+        return chains
 
     def _apply_range_filter(
         self,
