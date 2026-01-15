@@ -21,7 +21,10 @@ from pages.index_page.index_calc import (
     _connect,
 )
 from pages.index_page.index_plot import build_index_plot
-from pages.index_page.index_trends import build_trend_chains_for_series
+from pages.index_page import trend_calc
+from pages.index_page import trend_ui
+from pages.index_page import trend_calc
+from pages.index_page import trend_ui
 
 
 class IndexPage:
@@ -38,6 +41,8 @@ class IndexPage:
             ("ALL", "Kaikki"),
         ]
         self.selected_range = "6M"
+        self.lookback_days = 15
+        self.pivot_k = 2
 
         self.market_dropdown: Optional[ft.Dropdown] = None
         self.sector_checkboxes: Dict[str, ft.Checkbox] = {}
@@ -52,9 +57,13 @@ class IndexPage:
         self.range_buttons: Dict[str, ft.ElevatedButton] = {}
         self.trend_table: Optional[ft.DataTable] = None
         self.trend_empty_text: Optional[ft.Text] = None
-        self.trend_chains_cache: List[Dict] = []
-        self.trend_sort_column: Optional[int] = None
-        self.trend_sort_ascending: bool = False
+        self.lookback_field: Optional[ft.TextField] = None
+        self.pivot_k_dropdown: Optional[ft.Dropdown] = None
+        self.trend_card_container: Optional[ft.Container] = None
+        self.trend_snapshot_table: Optional[ft.DataTable] = None
+        self.trend_chain_table: Optional[ft.DataTable] = None
+        self.lookback_days = 15
+        self.pivot_k = 2
 
         self.schema_cache: Optional[Dict[str, str]] = None
         self._initial_draw_scheduled = False
@@ -98,6 +107,20 @@ class IndexPage:
             value=False,
             on_change=self._on_toggle_normalization,
         )
+        self.lookback_field = ft.TextField(
+            label="Lookback (pv)",
+            width=140,
+            value=str(self.lookback_days),
+            on_change=self._on_lookback_change,
+            on_submit=self._on_lookback_change,
+        )
+        self.pivot_k_dropdown = ft.Dropdown(
+            label="Pivot-herkkyys",
+            width=160,
+            options=[ft.dropdown.Option(str(v)) for v in (2, 3, 4)],
+            value=str(self.pivot_k),
+            on_change=self._on_pivot_k_change,
+        )
         self.update_button = ft.ElevatedButton(
             "Päivitä sektoreiden indeksit",
             icon=ft.Icons.UPDATE,
@@ -118,7 +141,14 @@ class IndexPage:
         controls = ft.Column(
             [
                 ft.Row(
-                    [self.market_dropdown, self.stock_input, self.show_market_checkbox, self.update_button],
+                    [
+                        self.market_dropdown,
+                        self.stock_input,
+                        self.show_market_checkbox,
+                        self.update_button,
+                        self.lookback_field,
+                        self.pivot_k_dropdown,
+                    ],
                     alignment=ft.MainAxisAlignment.START,
                     wrap=True,
                 ),
@@ -141,7 +171,7 @@ class IndexPage:
                             controls,
                             ft.Divider(height=10),
                             self.chart_container,
-                            self._build_trend_card(),
+                            self._build_trend_tabs_card(),
                             self.dow_text,
                         ],
                         spacing=12,
@@ -214,57 +244,10 @@ class IndexPage:
             buttons.append(btn)
         return ft.Row(buttons, spacing=8, wrap=True)
 
-    def _build_trend_card(self) -> ft.Card:
-        helper = ft.Text(
-            "Kriteeri: vähintään 2 peräkkäistä HL–HH (nousu) tai LH–LL (lasku) -paria. Ketju alkaa aina HL/LH.",
-            size=12,
-            color=ft.Colors.GREY_700,
-        )
-        self.trend_empty_text = ft.Text("Ei vahvoja trendiketjuja nykyisellä näkymällä.", color=ft.Colors.GREY_600)
-        self.trend_table = ft.DataTable(
-            columns=[
-                ft.DataColumn(ft.Text("Objekti", weight=ft.FontWeight.BOLD), on_sort=self._on_trend_sort),
-                ft.DataColumn(ft.Text("Nimi", weight=ft.FontWeight.BOLD), on_sort=self._on_trend_sort),
-                ft.DataColumn(ft.Text("Suunta", weight=ft.FontWeight.BOLD), on_sort=self._on_trend_sort),
-                ft.DataColumn(ft.Text("Alku", weight=ft.FontWeight.BOLD), on_sort=self._on_trend_sort),
-                ft.DataColumn(ft.Text("Loppu", weight=ft.FontWeight.BOLD), on_sort=self._on_trend_sort),
-                ft.DataColumn(ft.Text("Tapahtumia", weight=ft.FontWeight.BOLD), on_sort=self._on_trend_sort),
-                ft.DataColumn(ft.Text("Pareja", weight=ft.FontWeight.BOLD), on_sort=self._on_trend_sort),
-                ft.DataColumn(ft.Text("Confidence", weight=ft.FontWeight.BOLD), on_sort=self._on_trend_sort),
-            ],
-            rows=[],
-            column_spacing=12,
-            heading_row_color=ft.Colors.GREY_100,
-        )
-        content = ft.Column(
-            [
-                helper,
-                ft.Container(
-                    height=280,
-                    content=ft.Column(
-                        [
-                            self.trend_empty_text,
-                            self.trend_table,
-                        ],
-                        spacing=6,
-                        scroll=ft.ScrollMode.AUTO,
-                    ),
-                ),
-            ],
-            spacing=8,
-        )
-        return ft.Card(
-            content=ft.Container(
-                padding=12,
-                content=ft.Column(
-                    [
-                        ft.Text("Vahvat trendiketjut", size=16, weight=ft.FontWeight.BOLD),
-                        content,
-                    ],
-                    spacing=8,
-                ),
-            )
-        )
+    def _build_trend_tabs_card(self) -> ft.Container:
+        # Placeholder; content replaced in _update_trend_tabs
+        self.trend_card_container = ft.Container()
+        return self.trend_card_container
 
     def _selected_sectors(self) -> List[str]:
         return [sec for sec, cb in self.sector_checkboxes.items() if cb.value]
@@ -313,17 +296,23 @@ class IndexPage:
                 pass
 
     def _schedule_initial_draw(self):
-        def worker():
-            import time
-
-            time.sleep(0.1)
-            self._refresh_chart()
-            try:
-                self.page.update()
-            except Exception:
-                pass
-
-        threading.Thread(target=worker, daemon=True).start()
+        try:
+            if hasattr(self.page, "run_task"):
+                async def task():
+                    self._refresh_chart()
+                    # _refresh_chart will call _refresh_trends with full data
+                    try:
+                        self.page.update()
+                    except Exception:
+                        pass
+                self.page.run_task(task)
+                return
+        except Exception:
+            pass
+        try:
+            self.page.call_later(0.1, lambda: (self._refresh_chart(), self.page.update()))
+        except Exception:
+            pass
 
     def _on_stock_input_change(self, e):
         # Normalize and refresh chart
@@ -335,82 +324,45 @@ class IndexPage:
         except Exception:
             pass
 
-    def _on_trend_sort(self, e: ft.DataTableSortEvent):
+    def _on_lookback_change(self, e):
         try:
-            self.trend_sort_column = e.column_index
-            self.trend_sort_ascending = e.ascending
-            if self.trend_table:
-                self.trend_table.sort_column_index = e.column_index
-                self.trend_table.sort_ascending = e.ascending
-            self._update_trend_table(self.trend_chains_cache)
-            try:
-                self.page.update()
-            except Exception:
-                pass
+            val = int(self.lookback_field.value or "0")
+        except Exception:
+            val = 15
+        if val < 5:
+            val = 5
+        if val > 120:
+            val = 120
+        self.lookback_days = val
+        self.lookback_field.value = str(val)
+        self._refresh_chart()
+        try:
+            self.page.update()
         except Exception:
             pass
 
-    def _update_trend_table(self, chains: List[Dict]):
-        if not self.trend_table or not self.trend_empty_text:
-            return
-        self.trend_chains_cache = list(chains)
-        if not chains:
-            self.trend_table.rows = []
-            self.trend_empty_text.visible = True
-            return
-        chains_to_render = self._sort_chains(chains)
-        self.trend_empty_text.visible = False
-        rows = []
-        for chain in chains_to_render:
-            rows.append(
-                ft.DataRow(
-                    cells=[
-                        ft.DataCell(ft.Text(str(chain.get("object_type", "")))),
-                        ft.DataCell(ft.Text(str(chain.get("object_name", "")))),
-                        ft.DataCell(ft.Text(str(chain.get("direction", "")))),
-                        ft.DataCell(ft.Text(str(chain.get("start_date", "")))),
-                        ft.DataCell(ft.Text(str(chain.get("end_date", "")))),
-                        ft.DataCell(ft.Text(str(chain.get("events_count", "")))),
-                        ft.DataCell(ft.Text(str(chain.get("pairs_count", "")))),
-                        ft.DataCell(ft.Text(str(chain.get("confidence", "")))),
-                    ]
-                )
-            )
-        self.trend_table.rows = rows
+    def _on_pivot_k_change(self, e):
+        try:
+            val = int(self.pivot_k_dropdown.value or "2")
+        except Exception:
+            val = 2
+        if val not in (2, 3, 4):
+            val = 2
+        self.pivot_k = val
+        self.pivot_k_dropdown.value = str(val)
+        self._refresh_chart()
+        try:
+            self.page.update()
+        except Exception:
+            pass
 
-    def _sort_chains(self, chains: List[Dict]) -> List[Dict]:
-        if self.trend_sort_column is None:
-            return sorted(
-                chains,
-                key=lambda c: (c.get("confidence", 0), c.get("end_date")),
-                reverse=True,
-            )
-
-        def sort_key(c: Dict):
-            idx = self.trend_sort_column
-            mapping = {
-                0: c.get("object_type", ""),
-                1: c.get("object_name", ""),
-                2: c.get("direction", ""),
-                3: c.get("start_date", ""),
-                4: c.get("end_date", ""),
-                5: c.get("events_count", 0),
-                6: c.get("pairs_count", 0),
-                7: c.get("confidence", 0),
-            }
-            val = mapping.get(idx, "")
-            if isinstance(val, dt.date):
-                return val
-            # try parse date strings
-            if isinstance(val, str):
-                try:
-                    return dt.date.fromisoformat(val)
-                except Exception:
-                    return val.lower()
-            return val
-
-        reverse = not self.trend_sort_ascending
-        return sorted(chains, key=sort_key, reverse=reverse)
+    def _update_trend_tabs(self, snapshots, chains):
+        snap_rows = trend_ui.snapshot_rows(snapshots)
+        chain_rows = trend_ui.chain_rows(chains)
+        card = trend_ui.build_trend_card(snap_rows, chain_rows, self.lookback_days, self.pivot_k)
+        if not self.trend_card_container:
+            self.trend_card_container = ft.Container()
+        self.trend_card_container.content = card
 
     def _fetch_stock_meta(self, ticker: str) -> tuple[Optional[str], Optional[str]]:
         try:
@@ -519,30 +471,16 @@ class IndexPage:
         ticker = (self.stock_input.value or "").strip().upper() if self.stock_input else ""
         if not market:
             return
-        if (not sectors) and (not include_market):
-            self.chart_container.content = ft.Text(
-                "Valitse vähintään 1 sektori tai ruksaa 'Näytä market-indeksi'.",
-                color=ft.Colors.GREY_600,
-            )
-            try:
-                self.page.update()
-            except Exception:
-                pass
-            return
         try:
             with self._connect() as conn:
-                index_data = fetch_index_series(conn, market, sectors, include_market=include_market)
-                volumes = {
-                    key: [{"date": row["date"], "volume": row["volume"]} for row in series]
-                    for key, series in index_data.items()
-                }
+                index_data_full = fetch_index_series(conn, market, sectors, include_market=True)
                 stock_series = None
                 stock_sector = None
                 stock_industry = None
                 if ticker:
                     schema = self.schema_cache or introspect_schema(conn)
                     all_index_dates = [
-                        row["date"] for series in index_data.values() for row in series
+                        row["date"] for series in index_data_full.values() for row in series
                     ]
                     min_date = min(all_index_dates).isoformat() if all_index_dates else None
                     max_date = max(all_index_dates).isoformat() if all_index_dates else None
@@ -553,7 +491,16 @@ class IndexPage:
                     else:
                         stock_series = None
                         self._set_status(f"Ticker {ticker} ei löytynyt kannasta", ft.Colors.ORANGE_700)
-                index_data, volumes, stock_series = self._apply_range_filter(index_data, volumes, stock_series)
+                # Range filter on full data
+                index_data_full, _, stock_series = self._apply_range_filter(index_data_full, {}, stock_series)
+                # Prepare plotting data with checkbox respect
+                index_data = dict(index_data_full)
+                if not include_market and "MARKET" in index_data:
+                    index_data.pop("MARKET", None)
+                volumes = {
+                    key: [{"date": row["date"], "volume": row["volume"]} for row in series]
+                    for key, series in index_data.items()
+                }
                 if normalize_range:
                     index_data = {k: normalize_series_to_100(v) for k, v in index_data.items()}
                     if stock_series:
@@ -589,8 +536,8 @@ class IndexPage:
                 if meta_parts:
                     summary_texts.append("Osake: " + " / ".join(meta_parts))
             self.dow_text.value = " | ".join(summary_texts)
-            trend_chains = self._compute_trend_chains(index_data, stock_series, ticker if stock_series else None)
-            self._update_trend_table(trend_chains)
+            # pass full data for trends (market included)
+            self._refresh_trends(index_data_full, stock_series, ticker if stock_series else None)
             try:
                 self.page.update()
             except Exception:
@@ -602,19 +549,26 @@ class IndexPage:
             except Exception:
                 pass
 
-    def _compute_trend_chains(self, index_data: Dict[str, List[Dict]], stock_series: Optional[List[Dict]], ticker: Optional[str]) -> List[Dict]:
-        chains: List[Dict] = []
-        # market
+    def _refresh_trends(self, index_data: Dict[str, List[Dict]], stock_series: Optional[List[Dict]], ticker: Optional[str]):
+        lookback = self.lookback_days
+        k = self.pivot_k
+        snapshots = []
+        chains = []
+        # market and sectors
         for key, series in index_data.items():
-            if key == "MARKET":
-                chains.extend(build_trend_chains_for_series(series, "MARKET", "MARKET"))
-            else:
-                chains.extend(build_trend_chains_for_series(series, "SECTOR", key))
+            otype = "MARKET" if key == "MARKET" else "SECTOR"
+            oname = "MARKET" if key == "MARKET" else key
+            snap = trend_calc.compute_snapshot(series, otype, oname, lookback, k)
+            snapshots.append(snap)
+            chains.extend(trend_calc.compute_chains(series, otype, oname, lookback, k))
         if stock_series and ticker:
-            chains.extend(build_trend_chains_for_series(stock_series, "STOCK", ticker))
-        # sort by confidence desc, end_date desc
-        chains.sort(key=lambda c: (c.get("confidence", 0), c.get("end_date")), reverse=True)
-        return chains
+            snap = trend_calc.compute_snapshot(stock_series, "STOCK", ticker, lookback, k)
+            snapshots.append(snap)
+            chains.extend(trend_calc.compute_chains(stock_series, "STOCK", ticker, lookback, k))
+        # sort chains
+        chains.sort(key=lambda c: (c.confidence, c.end_date), reverse=True)
+        # update UI
+        self._update_trend_tabs(snapshots, chains)
 
     def _apply_range_filter(
         self,
