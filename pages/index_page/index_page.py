@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import threading
 from pathlib import Path
+import datetime as dt
 from typing import Callable, Dict, List, Optional
 
 import flet as ft
@@ -14,7 +15,6 @@ from pages.index_page.index_calc import (
     fetch_stock_series,
     get_available_markets,
     get_sectors_for_market,
-    get_tickers_for_market_sectors,
     introspect_schema,
     normalize_series_to_100,
     _connect,
@@ -28,18 +28,28 @@ class IndexPage:
         self._appbar_factory = appbar_factory
         self.price_db = Path("data/osakedata.db")
         self.active_market = (active_market or "").strip().lower()
+        self.RANGE_PRESETS = [
+            ("1M", "1 kk"),
+            ("3M", "3 kk"),
+            ("6M", "6 kk"),
+            ("1Y", "1 v"),
+            ("ALL", "Kaikki"),
+        ]
+        self.selected_range = "6M"
 
         self.market_dropdown: Optional[ft.Dropdown] = None
         self.sector_checkboxes: Dict[str, ft.Checkbox] = {}
         self.sector_column: Optional[ft.Column] = None
-        self.stock_dropdown: Optional[ft.Dropdown] = None
+        self.stock_input: Optional[ft.TextField] = None
         self.show_market_checkbox: Optional[ft.Checkbox] = None
         self.update_button: Optional[ft.ElevatedButton] = None
         self.status_text: Optional[ft.Text] = None
         self.chart_container: Optional[ft.Container] = None
         self.dow_text: Optional[ft.Text] = None
+        self.range_buttons: Dict[str, ft.ElevatedButton] = {}
 
         self.schema_cache: Optional[Dict[str, str]] = None
+        self._initial_draw_scheduled = False
 
     # ------------------ UI ------------------ #
     def create_view(self) -> ft.View:
@@ -65,9 +75,15 @@ class IndexPage:
             )
         )
 
-        self.stock_dropdown = ft.Dropdown(label="Osake (valinn.)", width=220, options=[])
+        self.stock_input = ft.TextField(
+            label="Osake (ticker, valinn.)",
+            width=220,
+            hint_text="Esim. AAPL",
+            on_submit=self._on_stock_input_change,
+            on_change=self._on_stock_input_change,
+        )
         self.show_market_checkbox = ft.Checkbox(
-            label="Näytä market-indeksi (vain näkymä)", value=False, on_change=self._on_toggle_market
+            label="Näytä market-indeksi", value=True, on_change=self._on_toggle_market
         )
         self.update_button = ft.ElevatedButton(
             "Päivitä indeksit",
@@ -89,11 +105,12 @@ class IndexPage:
         controls = ft.Column(
             [
                 ft.Row(
-                    [self.market_dropdown, self.stock_dropdown, self.show_market_checkbox, self.update_button],
+                    [self.market_dropdown, self.stock_input, self.show_market_checkbox, self.update_button],
                     alignment=ft.MainAxisAlignment.START,
                     wrap=True,
                 ),
                 sector_card,
+                self._build_range_buttons(),
                 self.status_text,
             ],
             spacing=10,
@@ -117,10 +134,13 @@ class IndexPage:
                     ),
                 ),
             ],
+            scroll=ft.ScrollMode.AUTO,
         )
         self._refresh_sectors()
-        self._refresh_stock_options()
-        self._refresh_chart()
+        # NOTE: do NOT call _refresh_chart() here; view is not mounted yet.
+        if not self._initial_draw_scheduled:
+            self._schedule_initial_draw()
+            self._initial_draw_scheduled = True
         return view
 
     # ------------------ Data helpers ------------------ #
@@ -161,19 +181,22 @@ class IndexPage:
             self.sector_column.controls = rows
 
     def _refresh_stock_options(self):
-        market = self.active_market
-        selected_sectors = self._selected_sectors()
-        tickers = []
-        try:
-            with self._connect() as conn:
-                schema = self.schema_cache or introspect_schema(conn)
-                tickers = get_tickers_for_market_sectors(conn, schema, market, selected_sectors)
-        except Exception:
-            tickers = []
-        if self.stock_dropdown:
-            self.stock_dropdown.options = [ft.dropdown.Option(t) for t in tickers]
-            if tickers:
-                self.stock_dropdown.value = None
+        return
+
+    def _build_range_buttons(self) -> ft.Row:
+        buttons = []
+        self.range_buttons = {}
+        for key, label in self.RANGE_PRESETS:
+            btn = ft.ElevatedButton(
+                label,
+                on_click=lambda e, k=key: self._on_range_selected(k),
+                disabled=(key == self.selected_range),
+                bgcolor=ft.Colors.GREY_200 if key != self.selected_range else ft.Colors.BLUE_200,
+                color=ft.Colors.BLACK,
+            )
+            self.range_buttons[key] = btn
+            buttons.append(btn)
+        return ft.Row(buttons, spacing=8, wrap=True)
 
     def _selected_sectors(self) -> List[str]:
         return [sec for sec, cb in self.sector_checkboxes.items() if cb.value]
@@ -213,6 +236,65 @@ class IndexPage:
                 self.status_text.update()
             except Exception:
                 pass
+
+    def _schedule_initial_draw(self):
+        def worker():
+            import time
+
+            time.sleep(0.1)
+            self._refresh_chart()
+            try:
+                self.page.update()
+            except Exception:
+                pass
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_stock_input_change(self, e):
+        # Normalize and refresh chart
+        if self.stock_input:
+            self.stock_input.value = (self.stock_input.value or "").strip().upper()
+        self._refresh_chart()
+        try:
+            self.page.update()
+        except Exception:
+            pass
+
+    def _fetch_stock_meta(self, ticker: str) -> tuple[Optional[str], Optional[str]]:
+        try:
+            with self._connect() as conn:
+                schema = self.schema_cache or introspect_schema(conn)
+                ticker_col = schema.get("ticker")
+                sector_col = schema.get("sector")
+                industry_col = schema.get("industry")
+                if not (ticker_col and (sector_col or industry_col)):
+                    return None, None
+                cursor = conn.execute(
+                    f"""
+                    SELECT MAX({sector_col}) AS sector, MAX({industry_col}) AS industry
+                    FROM osakedata
+                    WHERE {ticker_col} = ?
+                    """,
+                    (ticker,),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return None, None
+                return row["sector"], row["industry"]
+        except Exception:
+            return None, None
+
+    def _on_range_selected(self, key: str):
+        if key not in {k for k, _ in self.RANGE_PRESETS}:
+            return
+        self.selected_range = key
+        for k, btn in self.range_buttons.items():
+            btn.disabled = k == key
+        self._refresh_chart()
+        try:
+            self.page.update()
+        except Exception:
+            pass
 
     def _on_update_click(self, e):
         if not self.active_market:
@@ -259,8 +341,18 @@ class IndexPage:
         market = self.active_market
         sectors = self._selected_sectors()
         include_market = bool(self.show_market_checkbox and self.show_market_checkbox.value)
-        ticker = self.stock_dropdown.value if self.stock_dropdown else None
+        ticker = (self.stock_input.value or "").strip().upper() if self.stock_input else ""
         if not market:
+            return
+        if (not sectors) and (not include_market):
+            self.chart_container.content = ft.Text(
+                "Valitse vähintään 1 sektori tai ruksaa 'Näytä market-indeksi'.",
+                color=ft.Colors.GREY_600,
+            )
+            try:
+                self.page.update()
+            except Exception:
+                pass
             return
         try:
             with self._connect() as conn:
@@ -270,17 +362,32 @@ class IndexPage:
                     for key, series in index_data.items()
                 }
                 stock_series = None
+                stock_sector = None
+                stock_industry = None
                 if ticker:
                     schema = self.schema_cache or introspect_schema(conn)
-                    stock_series = normalize_series_to_100(
-                        fetch_stock_series(conn, schema, ticker)
-                    )
+                    all_index_dates = [
+                        row["date"] for series in index_data.values() for row in series
+                    ]
+                    min_date = min(all_index_dates).isoformat() if all_index_dates else None
+                    max_date = max(all_index_dates).isoformat() if all_index_dates else None
+                    stock_rows = fetch_stock_series(conn, schema, ticker, date_from=min_date, date_to=max_date)
+                    if stock_rows:
+                        stock_series = normalize_series_to_100(stock_rows)
+                        stock_sector, stock_industry = self._fetch_stock_meta(ticker)
+                    else:
+                        stock_series = None
+                        self._set_status(f"Ticker {ticker} ei löytynyt kannasta", ft.Colors.ORANGE_700)
+                index_data, volumes, stock_series = self._apply_range_filter(index_data, volumes, stock_series)
             if not index_data:
                 self.chart_container.content = ft.Text(
                     "Ei indeksidataa. Päivitä indeksit ensin.",
                     color=ft.Colors.GREY_600,
                 )
-                self.chart_container.update()
+                try:
+                    self.page.update()
+                except Exception:
+                    pass
                 return
             fig, summaries = build_index_plot(index_data, volumes, stock_series=stock_series)
             html = fig.to_html(include_plotlyjs="cdn", full_html=False)
@@ -291,12 +398,57 @@ class IndexPage:
                 height=620,
             )
             summary_texts = [f"{k}: {v}" for k, v in summaries.items()]
+            if stock_series:
+                meta_parts = [ticker] if ticker else []
+                try:
+                    if stock_sector:
+                        meta_parts.append(stock_sector)
+                    if stock_industry:
+                        meta_parts.append(stock_industry)
+                except Exception:
+                    pass
+                if meta_parts:
+                    summary_texts.append("Osake: " + " / ".join(meta_parts))
             self.dow_text.value = " | ".join(summary_texts)
-            self.chart_container.update()
-            self.dow_text.update()
+            try:
+                self.page.update()
+            except Exception:
+                pass
         except Exception as exc:
             self.chart_container.content = ft.Text(f"Virhe ladattaessa graafia: {exc}", color=ft.Colors.RED_600)
             try:
-                self.chart_container.update()
+                self.page.update()
             except Exception:
                 pass
+
+    def _apply_range_filter(
+        self,
+        index_data: Dict[str, List[Dict]],
+        volumes: Dict[str, List[Dict]],
+        stock_series: Optional[List[Dict]],
+    ):
+        if self.selected_range == "ALL":
+            return index_data, volumes, stock_series
+        all_dates = [row["date"] for series in index_data.values() for row in series]
+        if not all_dates:
+            return index_data, volumes, stock_series
+        max_date = max(all_dates)
+        days_map = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365}
+        days = days_map.get(self.selected_range, 0)
+        start_date = max_date - dt.timedelta(days=days)
+
+        def filt(series):
+            return [r for r in series if r["date"] >= start_date]
+
+        filtered_index = {
+            k: (filt(v) if filt(v) else v) for k, v in index_data.items()
+        }
+        filtered_volumes = {
+            k: (filt(v) if filt(v) else v) for k, v in volumes.items()
+        }
+        filtered_stock = None
+        if stock_series:
+            filtered_stock = [r for r in stock_series if r["date"] >= start_date]
+            if not filtered_stock:
+                filtered_stock = stock_series
+        return filtered_index, filtered_volumes, filtered_stock

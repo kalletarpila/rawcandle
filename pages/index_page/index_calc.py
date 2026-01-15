@@ -301,8 +301,10 @@ def compute_indices_incremental(
                 prev = last_close_by_ticker.get(ticker)
             if prev is not None and prev != 0:
                 ret = float(close_val) / float(prev) - 1.0
-                per_date_returns[date_str].append(ret)
-                tickers_used[date_str].add(ticker)
+                # Suodata epärealistiset piikit (esim. >500%) jotka vääristävät indeksiä
+                if abs(ret) <= 5.0:
+                    per_date_returns[date_str].append(ret)
+                    tickers_used[date_str].add(ticker)
             per_date_volume[date_str] += float(vol_val or 0.0)
             last_close_by_ticker[ticker] = float(close_val)
 

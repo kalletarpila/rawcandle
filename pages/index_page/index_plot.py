@@ -111,14 +111,23 @@ def build_index_plot(
         markers, summary = compute_dow_markers(series)
         dow_summaries[key] = summary
         if markers:
+            colors = []
+            texts = []
+            for m in markers:
+                label = m["label"]
+                texts.append(label)
+                if label.startswith("LH") or label.startswith("LL"):
+                    colors.append("#dc2626")
+                else:
+                    colors.append(color)
             fig.add_trace(
                 go.Scatter(
                     x=[m["date"] for m in markers],
                     y=[m["value"] for m in markers],
                     mode="markers+text",
-                    text=[m["label"] for m in markers],
+                    text=texts,
                     textposition="top center",
-                    marker=dict(color=color, size=9, symbol="circle"),
+                    marker=dict(color=colors, size=9, symbol="circle"),
                     name=f"Pivot {key}",
                     showlegend=False,
                 ),
@@ -156,6 +165,17 @@ def build_index_plot(
         )
 
     rangebreaks = [dict(bounds=["sat", "mon"])]
+    if all_dates:
+        date_list = sorted(all_dates)
+        date_set = set(date_list)
+        missing = []
+        cur = date_list[0]
+        while cur <= date_list[-1]:
+            if cur not in date_set:
+                missing.append(cur.isoformat())
+            cur += dt.timedelta(days=1)
+        if missing:
+            rangebreaks.append(dict(values=missing))
 
     fig.update_layout(
         template="plotly_white",
@@ -163,6 +183,30 @@ def build_index_plot(
         margin=dict(t=30, l=40, r=20, b=20),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
         barmode="group",
+        updatemenus=[
+            dict(
+                type="buttons",
+                direction="left",
+                buttons=[
+                    dict(
+                        label="Reset zoom",
+                        method="relayout",
+                        args=[
+                            {
+                                "xaxis.autorange": True,
+                                "yaxis.autorange": True,
+                                "yaxis2.autorange": True,
+                            }
+                        ],
+                    )
+                ],
+                x=0.0,
+                y=1.1,
+                xanchor="left",
+                yanchor="bottom",
+                showactive=False,
+            )
+        ],
     )
     fig.update_xaxes(rangebreaks=rangebreaks, row=1, col=1)
     fig.update_xaxes(rangebreaks=rangebreaks, row=2, col=1)
