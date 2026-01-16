@@ -69,7 +69,14 @@ def create_snapshot_table() -> ft.DataTable:
                 ft.Text("State", weight=ft.FontWeight.BOLD),
                 tooltip="Trendin tila: CONTINUATION, WARNING tai REVERSAL.",
             ),
-            ft.DataColumn(ft.Text("Confidence", weight=ft.FontWeight.BOLD)),
+            ft.DataColumn(
+                ft.Text("Confidence", weight=ft.FontWeight.BOLD),
+                tooltip=(
+                    "Kuvaa, kuinka selkeä ja johdonmukainen trendirakenne on viimeaikaisen hintakehityksen perusteella.\n"
+                    "Perustuu huippujen ja pohjien määrään, niiden suhteisiin sekä mahdollisiin rakennerikkoihin.\n"
+                    "Ei ole ennuste/to-dennäköisyys, vaan rakenteen vahvuusmittari."
+                ),
+            ),
             ft.DataColumn(
                 ft.Text("SH1", weight=ft.FontWeight.BOLD),
                 tooltip="Viimeisin swing high (huippu), käytetään arvioimaan uusia huippuja.",
