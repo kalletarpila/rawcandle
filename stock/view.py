@@ -607,7 +607,7 @@ class StockView:
                     (ticker,),
                 ).fetchone()
                 if res:
-                    return res["sector"], res["industry"]
+                    return res["sector"] or "ei löydetty", res["industry"] or "ei löydetty"
 
             cursor = conn.execute("PRAGMA table_info(osakedata)")
             columns = {row["name"] for row in cursor.fetchall()}
@@ -623,7 +623,9 @@ class StockView:
             ).fetchone()
             if not res:
                 return None, None
-            return res["sector"], res["industry"]
+            sector = res["sector"] or "ei löydetty"
+            industry = res["industry"] or "ei löydetty"
+            return sector, industry
         except Exception:
             return None, None
         finally:
