@@ -594,6 +594,21 @@ class StockView:
         except Exception:
             return None, None
         try:
+            # Prefer ticker_meta taulu, fallback osakedata sarakkeisiin
+            has_meta = (
+                conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='ticker_meta'"
+                ).fetchone()
+                is not None
+            )
+            if has_meta:
+                res = conn.execute(
+                    "SELECT sector, industry FROM ticker_meta WHERE ticker = ?",
+                    (ticker,),
+                ).fetchone()
+                if res:
+                    return res["sector"], res["industry"]
+
             cursor = conn.execute("PRAGMA table_info(osakedata)")
             columns = {row["name"] for row in cursor.fetchall()}
             if "sector" not in columns and "industry" not in columns:

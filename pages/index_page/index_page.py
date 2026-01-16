@@ -54,6 +54,7 @@ class IndexPage:
         self.status_text: Optional[ft.Text] = None
         self.chart_container: Optional[ft.Container] = None
         self.dow_text: Optional[ft.Text] = None
+        self.stock_meta_text: Optional[ft.Text] = None
         self.range_buttons: Dict[str, ft.ElevatedButton] = {}
         self.trend_table: Optional[ft.DataTable] = None
         self.trend_empty_text: Optional[ft.Text] = None
@@ -164,6 +165,8 @@ class IndexPage:
             spacing=10,
         )
 
+        self.stock_meta_text = ft.Text("", color=ft.Colors.GREY_700)
+
         view = ft.View(
             "/index",
             [
@@ -179,6 +182,7 @@ class IndexPage:
                             ),
                             controls,
                             ft.Divider(height=10),
+                            self.stock_meta_text,
                             self.chart_container,
                             self._build_trend_tabs_card(),
                             self.dow_text,
@@ -611,19 +615,29 @@ class IndexPage:
             )
 
             summary_texts = [f"{k}: {v}" for k, v in summaries.items()]
+            stock_meta_parts = []
             if stock_series_overlay and ticker:
                 meta_parts = [ticker]
                 try:
                     if stock_sector:
                         meta_parts.append(stock_sector)
+                        stock_meta_parts.append(f"Sektori: {stock_sector}")
                     if stock_industry:
                         meta_parts.append(stock_industry)
+                        stock_meta_parts.append(f"Industry: {stock_industry}")
                 except Exception:
                     pass
                 if meta_parts:
                     summary_texts.append("Osake: " + " / ".join(meta_parts))
 
             self.dow_text.value = " | ".join(summary_texts)
+            if self.stock_meta_text is not None:
+                if stock_meta_parts and ticker:
+                    self.stock_meta_text.value = f"{ticker} | " + " | ".join(stock_meta_parts)
+                    self.stock_meta_text.visible = True
+                else:
+                    self.stock_meta_text.value = ""
+                    self.stock_meta_text.visible = False
 
             # pass full data for trends (market included) + RAW stock (un-normalized)
             self._refresh_trends(
