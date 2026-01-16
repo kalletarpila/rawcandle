@@ -56,8 +56,8 @@ def chain_rows(chains: List[TrendChain]) -> List[ft.DataRow]:
     return rows
 
 
-def build_trend_card(snapshot_rows_ctrl: List[ft.DataRow], chain_rows_ctrl: List[ft.DataRow], selected_x: int, selected_k: int) -> ft.Card:
-    snapshot_table = ft.DataTable(
+def create_snapshot_table() -> ft.DataTable:
+    return ft.DataTable(
         columns=[
             ft.DataColumn(ft.Text("Objekti", weight=ft.FontWeight.BOLD)),
             ft.DataColumn(ft.Text("Nimi", weight=ft.FontWeight.BOLD)),
@@ -83,16 +83,14 @@ def build_trend_card(snapshot_rows_ctrl: List[ft.DataRow], chain_rows_ctrl: List
                 tooltip="Kertoo rikottiinko viimeisin huippu (Up) tai pohja (Down).",
             ),
         ],
-        rows=snapshot_rows_ctrl,
+        rows=[],
         column_spacing=10,
         heading_row_color=ft.Colors.GREY_100,
     )
-    snapshot_view = ft.Container(
-        height=280,
-        content=ft.Column([snapshot_table], scroll=ft.ScrollMode.AUTO),
-    )
 
-    chains_table = ft.DataTable(
+
+def create_chain_table() -> ft.DataTable:
+    return ft.DataTable(
         columns=[
             ft.DataColumn(ft.Text("Objekti", weight=ft.FontWeight.BOLD)),
             ft.DataColumn(ft.Text("Nimi", weight=ft.FontWeight.BOLD)),
@@ -103,13 +101,23 @@ def build_trend_card(snapshot_rows_ctrl: List[ft.DataRow], chain_rows_ctrl: List
             ft.DataColumn(ft.Text("Pareja", weight=ft.FontWeight.BOLD)),
             ft.DataColumn(ft.Text("Confidence", weight=ft.FontWeight.BOLD)),
         ],
-        rows=chain_rows_ctrl,
+        rows=[],
         column_spacing=10,
         heading_row_color=ft.Colors.GREY_100,
     )
+
+
+def build_trend_card(
+    snapshot_table: ft.DataTable,
+    chain_table: ft.DataTable,
+    selected_x: int,
+    selected_k: int,
+) -> ft.Card:
+    snapshot_view = ft.Container(
+        height=280, content=ft.Column([snapshot_table], scroll=ft.ScrollMode.AUTO)
+    )
     chains_view = ft.Container(
-        height=320,
-        content=ft.Column([chains_table], scroll=ft.ScrollMode.AUTO),
+        height=320, content=ft.Column([chain_table], scroll=ft.ScrollMode.AUTO)
     )
 
     tabs = ft.Tabs(
@@ -125,7 +133,11 @@ def build_trend_card(snapshot_rows_ctrl: List[ft.DataRow], chain_rows_ctrl: List
             padding=12,
             content=ft.Column(
                 [
-                    ft.Text(f"Trendit (X={selected_x}, k={selected_k})", size=16, weight=ft.FontWeight.BOLD),
+                    ft.Text(
+                        f"Trendit (X={selected_x}, k={selected_k})",
+                        size=16,
+                        weight=ft.FontWeight.BOLD,
+                    ),
                     tabs,
                 ],
                 spacing=8,
