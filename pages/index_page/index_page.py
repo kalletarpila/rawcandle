@@ -112,6 +112,11 @@ class IndexPage:
             value=str(self.lookback_days),
             on_change=self._on_lookback_change,
             on_submit=self._on_lookback_change,
+            tooltip=(
+                "Kuinka monen viimeisen pörssipäivän hintaa käytetään trendin tunnistamiseen.\n"
+                "Pieni arvo = herkempi, nopeampi reagointi\n"
+                "Suuri arvo = vakaampi, pidempi trendi"
+            ),
         )
         self.pivot_k_dropdown = ft.Dropdown(
             label="Pivot-herkkyys",
@@ -119,6 +124,11 @@ class IndexPage:
             options=[ft.dropdown.Option(str(v)) for v in (2, 3, 4)],
             value=str(self.pivot_k),
             on_change=self._on_pivot_k_change,
+            tooltip=(
+                "Määrittää kuinka merkittävä huipun/pohjan pitää olla (k-ikkuna t-k..t+k).\n"
+                "Pieni arvo = herkkä, lyhyet muutokset näkyvät\n"
+                "Suuri arvo = vahvempi, pidempi trendi"
+            ),
         )
         self.update_button = ft.ElevatedButton(
             "Päivitä sektoreiden indeksit",
@@ -404,7 +414,9 @@ class IndexPage:
                         (ticker,),
                     ).fetchone()
                     if meta:
-                        return meta["sector"], meta["industry"]
+                        sector_val = meta["sector"] or "ei löydetty"
+                        industry_val = meta["industry"] or "ei löydetty"
+                        return sector_val, industry_val
                 except Exception:
                     pass
                 # Fallback to osakedata if metadata missing
@@ -425,7 +437,9 @@ class IndexPage:
                 row = cursor.fetchone()
                 if not row:
                     return None, None
-                return row["sector"], row["industry"]
+                sector_val = row["sector"] or "ei löydetty"
+                industry_val = row["industry"] or "ei löydetty"
+                return sector_val, industry_val
         except Exception:
             return None, None
 
@@ -619,12 +633,11 @@ class IndexPage:
             if stock_series_overlay and ticker:
                 meta_parts = [ticker]
                 try:
-                    if stock_sector:
-                        meta_parts.append(stock_sector)
-                        stock_meta_parts.append(f"Sektori: {stock_sector}")
-                    if stock_industry:
-                        meta_parts.append(stock_industry)
-                        stock_meta_parts.append(f"Industry: {stock_industry}")
+                    sector_txt = stock_sector or "ei löydetty"
+                    industry_txt = stock_industry or "ei löydetty"
+                    meta_parts.extend([sector_txt, industry_txt])
+                    stock_meta_parts.append(f"Sektori: {sector_txt}")
+                    stock_meta_parts.append(f"Industry: {industry_txt}")
                 except Exception:
                     pass
                 if meta_parts:
