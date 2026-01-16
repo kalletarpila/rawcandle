@@ -23,12 +23,12 @@ from pages.index_page.index_calc import (
 from pages.index_page.index_plot import build_index_plot
 from pages.index_page import trend_calc
 from pages.index_page import trend_ui
-from pages.index_page import trend_calc
-from pages.index_page import trend_ui
 
 
 class IndexPage:
-    def __init__(self, page: ft.Page, appbar_factory: Callable[[], ft.AppBar], active_market: str):
+    def __init__(
+        self, page: ft.Page, appbar_factory: Callable[[], ft.AppBar], active_market: str
+    ):
         self.page = page
         self._appbar_factory = appbar_factory
         self.price_db = Path("data/osakedata.db")
@@ -36,7 +36,7 @@ class IndexPage:
         self.RANGE_PRESETS = [
             ("1M", "1 kk"),
             ("3M", "3 kk"),
-            ("6M", "6 kk"),
+            ("6M", "3 kk"),
             ("1Y", "1 v"),
             ("ALL", "Kaikki"),
         ]
@@ -62,8 +62,6 @@ class IndexPage:
         self.trend_card_container: Optional[ft.Container] = None
         self.trend_snapshot_table: Optional[ft.DataTable] = None
         self.trend_chain_table: Optional[ft.DataTable] = None
-        self.lookback_days = 15
-        self.pivot_k = 2
 
         self.schema_cache: Optional[Dict[str, str]] = None
         self._initial_draw_scheduled = False
@@ -134,7 +132,10 @@ class IndexPage:
             bgcolor=ft.Colors.GREY_50,
             border_radius=10,
             padding=10,
-            content=ft.Text("Valitse markkina/sektori ja päivitä indeksit.", color=ft.Colors.GREY_600),
+            content=ft.Text(
+                "Valitse markkina/sektori ja päivitä indeksit.",
+                color=ft.Colors.GREY_600,
+            ),
         )
         self.dow_text = ft.Text("", color=ft.Colors.GREY_700)
 
@@ -153,7 +154,11 @@ class IndexPage:
                     wrap=True,
                 ),
                 sector_card,
-                ft.Row([self._build_range_buttons(), self.normalize_checkbox], wrap=True, spacing=8),
+                ft.Row(
+                    [self._build_range_buttons(), self.normalize_checkbox],
+                    wrap=True,
+                    spacing=8,
+                ),
                 self.status_text,
             ],
             spacing=10,
@@ -167,7 +172,11 @@ class IndexPage:
                     padding=15,
                     content=ft.Column(
                         [
-                            ft.Text("Markkina- ja sektorindeksit", size=24, weight=ft.FontWeight.BOLD),
+                            ft.Text(
+                                "Markkina- ja sektorindeksit",
+                                size=24,
+                                weight=ft.FontWeight.BOLD,
+                            ),
                             controls,
                             ft.Divider(height=10),
                             self.chart_container,
@@ -237,7 +246,11 @@ class IndexPage:
                 label,
                 on_click=lambda e, k=key: self._on_range_selected(k),
                 disabled=(key == self.selected_range),
-                bgcolor=ft.Colors.GREY_200 if key != self.selected_range else ft.Colors.BLUE_200,
+                bgcolor=(
+                    ft.Colors.GREY_200
+                    if key != self.selected_range
+                    else ft.Colors.BLUE_200
+                ),
                 color=ft.Colors.BLACK,
             )
             self.range_buttons[key] = btn
@@ -246,7 +259,8 @@ class IndexPage:
 
     def _build_trend_tabs_card(self) -> ft.Container:
         # Placeholder; content replaced in _update_trend_tabs
-        self.trend_card_container = ft.Container()
+        placeholder_card = trend_ui.build_trend_card([], [], self.lookback_days, self.pivot_k)
+        self.trend_card_container = ft.Container(content=placeholder_card)
         return self.trend_card_container
 
     def _selected_sectors(self) -> List[str]:
@@ -298,19 +312,22 @@ class IndexPage:
     def _schedule_initial_draw(self):
         try:
             if hasattr(self.page, "run_task"):
+
                 async def task():
                     self._refresh_chart()
-                    # _refresh_chart will call _refresh_trends with full data
                     try:
                         self.page.update()
                     except Exception:
                         pass
+
                 self.page.run_task(task)
                 return
         except Exception:
             pass
         try:
-            self.page.call_later(0.1, lambda: (self._refresh_chart(), self.page.update()))
+            self.page.call_later(
+                0.1, lambda: (self._refresh_chart(), self.page.update())
+            )
         except Exception:
             pass
 
@@ -359,7 +376,9 @@ class IndexPage:
     def _update_trend_tabs(self, snapshots, chains):
         snap_rows = trend_ui.snapshot_rows(snapshots)
         chain_rows = trend_ui.chain_rows(chains)
-        card = trend_ui.build_trend_card(snap_rows, chain_rows, self.lookback_days, self.pivot_k)
+        card = trend_ui.build_trend_card(
+            snap_rows, chain_rows, self.lookback_days, self.pivot_k
+        )
         if not self.trend_card_container:
             self.trend_card_container = ft.Container()
         self.trend_card_container.content = card
@@ -370,7 +389,8 @@ class IndexPage:
                 # Try metadata table first
                 try:
                     meta = conn.execute(
-                        "SELECT sector, industry FROM ticker_meta WHERE ticker = ?", (ticker,)
+                        "SELECT sector, industry FROM ticker_meta WHERE ticker = ?",
+                        (ticker,),
                     ).fetchone()
                     if meta:
                         return meta["sector"], meta["industry"]
@@ -429,7 +449,10 @@ class IndexPage:
             btn.disabled = True
             btn.update()
         if not sectors_selected:
-            self._set_status("🔄 Päivitetään market-indeksi + kaikki markkinan sektorit...", ft.Colors.BLUE_600)
+            self._set_status(
+                "🔄 Päivitetään market-indeksi + kaikki markkinan sektorit...",
+                ft.Colors.BLUE_600,
+            )
         else:
             self._set_status(
                 f"🔄 Päivitetään market + {len(sectors_all)} sektoria (valittuja {len(sectors_selected)})...",
@@ -466,45 +489,96 @@ class IndexPage:
     def _refresh_chart(self):
         market = self.active_market
         sectors = self._selected_sectors()
-        include_market = bool(self.show_market_checkbox and self.show_market_checkbox.value)
-        normalize_range = bool(self.normalize_checkbox and self.normalize_checkbox.value)
-        ticker = (self.stock_input.value or "").strip().upper() if self.stock_input else ""
+        include_market = bool(
+            self.show_market_checkbox and self.show_market_checkbox.value
+        )
+        normalize_range = bool(
+            self.normalize_checkbox and self.normalize_checkbox.value
+        )
+        ticker = (
+            (self.stock_input.value or "").strip().upper() if self.stock_input else ""
+        )
         if not market:
+            return
+        if (not sectors) and (not include_market):
+            self.chart_container.content = ft.Text(
+                "Valitse vähintään 1 sektori tai ruksaa 'Näytä market-indeksi'.",
+                color=ft.Colors.GREY_600,
+            )
+            self._update_trend_tabs([], [])
+            try:
+                self.page.update()
+            except Exception:
+                pass
             return
         try:
             with self._connect() as conn:
-                index_data_full = fetch_index_series(conn, market, sectors, include_market=True)
-                stock_series = None
+                index_data_full = fetch_index_series(
+                    conn, market, sectors, include_market=True
+                )
+
+                # Stock series: keep RAW for trend calcs, separate overlay for plot
+                stock_series_raw: Optional[List[Dict]] = None
+                stock_series_overlay: Optional[List[Dict]] = None
                 stock_sector = None
                 stock_industry = None
+
                 if ticker:
                     schema = self.schema_cache or introspect_schema(conn)
                     all_index_dates = [
-                        row["date"] for series in index_data_full.values() for row in series
+                        row["date"]
+                        for series in index_data_full.values()
+                        for row in series
                     ]
-                    min_date = min(all_index_dates).isoformat() if all_index_dates else None
-                    max_date = max(all_index_dates).isoformat() if all_index_dates else None
-                    stock_rows = fetch_stock_series(conn, schema, ticker, date_from=min_date, date_to=max_date)
+                    min_date = (
+                        min(all_index_dates).isoformat() if all_index_dates else None
+                    )
+                    max_date = (
+                        max(all_index_dates).isoformat() if all_index_dates else None
+                    )
+                    stock_rows = fetch_stock_series(
+                        conn, schema, ticker, date_from=min_date, date_to=max_date
+                    )
                     if stock_rows:
-                        stock_series = normalize_series_to_100(stock_rows)
+                        stock_series_raw = stock_rows
+                        stock_series_overlay = normalize_series_to_100(stock_rows)
                         stock_sector, stock_industry = self._fetch_stock_meta(ticker)
                     else:
-                        stock_series = None
-                        self._set_status(f"Ticker {ticker} ei löytynyt kannasta", ft.Colors.ORANGE_700)
-                # Range filter on full data
-                index_data_full, _, stock_series = self._apply_range_filter(index_data_full, {}, stock_series)
+                        stock_series_raw = None
+                        stock_series_overlay = None
+                        self._set_status(
+                            f"Ticker {ticker} ei löytynyt kannasta",
+                            ft.Colors.ORANGE_700,
+                        )
+
+                # Range filter affects plot series; keep raw stock for trend calcs
+                vols_full = {
+                    key: [
+                        {"date": row["date"], "volume": row.get("volume", 0.0)}
+                        for row in series
+                    ]
+                    for key, series in index_data_full.items()
+                }
+                index_data_full, vols_full, stock_series_overlay = self._apply_range_filter(
+                    index_data_full, vols_full, stock_series_overlay
+                )
+
                 # Prepare plotting data with checkbox respect
                 index_data = dict(index_data_full)
+                volumes = dict(vols_full)
                 if not include_market and "MARKET" in index_data:
                     index_data.pop("MARKET", None)
-                volumes = {
-                    key: [{"date": row["date"], "volume": row["volume"]} for row in series]
-                    for key, series in index_data.items()
-                }
+                    volumes.pop("MARKET", None)
+
                 if normalize_range:
-                    index_data = {k: normalize_series_to_100(v) for k, v in index_data.items()}
-                    if stock_series:
-                        stock_series = normalize_series_to_100(stock_series)
+                    index_data = {
+                        k: normalize_series_to_100(v) for k, v in index_data.items()
+                    }
+                    if stock_series_overlay:
+                        stock_series_overlay = normalize_series_to_100(
+                            stock_series_overlay
+                        )
+
             if not index_data:
                 self.chart_container.content = ft.Text(
                     "Ei indeksidataa. Päivitä indeksit ensin.",
@@ -515,17 +589,23 @@ class IndexPage:
                 except Exception:
                     pass
                 return
-            fig, summaries = build_index_plot(index_data, volumes, stock_series=stock_series)
+
+            fig, summaries = build_index_plot(
+                index_data, volumes, stock_series=stock_series_overlay
+            )
             html = fig.to_html(include_plotlyjs="cdn", full_html=False)
-            data_url = "data:text/html;base64," + base64.b64encode(html.encode("utf-8")).decode("utf-8")
+            data_url = "data:text/html;base64," + base64.b64encode(
+                html.encode("utf-8")
+            ).decode("utf-8")
             self.chart_container.content = ft.WebView(
                 url=data_url,
                 enable_javascript=True,
                 height=620,
             )
+
             summary_texts = [f"{k}: {v}" for k, v in summaries.items()]
-            if stock_series:
-                meta_parts = [ticker] if ticker else []
+            if stock_series_overlay and ticker:
+                meta_parts = [ticker]
                 try:
                     if stock_sector:
                         meta_parts.append(stock_sector)
@@ -535,21 +615,35 @@ class IndexPage:
                     pass
                 if meta_parts:
                     summary_texts.append("Osake: " + " / ".join(meta_parts))
+
             self.dow_text.value = " | ".join(summary_texts)
-            # pass full data for trends (market included)
-            self._refresh_trends(index_data_full, stock_series, ticker if stock_series else None)
-            try:
-                self.page.update()
-            except Exception:
-                pass
-        except Exception as exc:
-            self.chart_container.content = ft.Text(f"Virhe ladattaessa graafia: {exc}", color=ft.Colors.RED_600)
+
+            # pass full data for trends (market included) + RAW stock (un-normalized)
+            self._refresh_trends(
+                index_data_full, stock_series_raw, ticker if stock_series_raw else None
+            )
+
             try:
                 self.page.update()
             except Exception:
                 pass
 
-    def _refresh_trends(self, index_data: Dict[str, List[Dict]], stock_series: Optional[List[Dict]], ticker: Optional[str]):
+        except Exception as exc:
+            self.chart_container.content = ft.Text(
+                f"Virhe ladattaessa graafia: {exc}",
+                color=ft.Colors.RED_600,
+            )
+            try:
+                self.page.update()
+            except Exception:
+                pass
+
+    def _refresh_trends(
+        self,
+        index_data: Dict[str, List[Dict]],
+        stock_series: Optional[List[Dict]],
+        ticker: Optional[str],
+    ):
         lookback = self.lookback_days
         k = self.pivot_k
         snapshots = []
@@ -562,9 +656,13 @@ class IndexPage:
             snapshots.append(snap)
             chains.extend(trend_calc.compute_chains(series, otype, oname, lookback, k))
         if stock_series and ticker:
-            snap = trend_calc.compute_snapshot(stock_series, "STOCK", ticker, lookback, k)
+            snap = trend_calc.compute_snapshot(
+                stock_series, "STOCK", ticker, lookback, k
+            )
             snapshots.append(snap)
-            chains.extend(trend_calc.compute_chains(stock_series, "STOCK", ticker, lookback, k))
+            chains.extend(
+                trend_calc.compute_chains(stock_series, "STOCK", ticker, lookback, k)
+            )
         # sort chains
         chains.sort(key=lambda c: (c.confidence, c.end_date), reverse=True)
         # update UI
@@ -589,15 +687,13 @@ class IndexPage:
         def filt(series):
             return [r for r in series if r["date"] >= start_date]
 
-        filtered_index = {
-            k: (filt(v) if filt(v) else v) for k, v in index_data.items()
-        }
-        filtered_volumes = {
-            k: (filt(v) if filt(v) else v) for k, v in volumes.items()
-        }
+        filtered_index = {k: (filt(v) if filt(v) else v) for k, v in index_data.items()}
+        filtered_volumes = {k: (filt(v) if filt(v) else v) for k, v in volumes.items()}
+
         filtered_stock = None
         if stock_series:
             filtered_stock = [r for r in stock_series if r["date"] >= start_date]
             if not filtered_stock:
                 filtered_stock = stock_series
+
         return filtered_index, filtered_volumes, filtered_stock
