@@ -62,40 +62,25 @@ def build_trend_card(snapshot_rows_ctrl: List[ft.DataRow], chain_rows_ctrl: List
             ft.DataColumn(ft.Text("Objekti", weight=ft.FontWeight.BOLD)),
             ft.DataColumn(ft.Text("Nimi", weight=ft.FontWeight.BOLD)),
             ft.DataColumn(
-                ft.Text(
-                    "Bias",
-                    weight=ft.FontWeight.BOLD,
-                    tooltip="Trendin perussuunta (UP/DOWN/NEUTRAL) Dow-rakenteen mukaan.",
-                )
+                ft.Text("Bias", weight=ft.FontWeight.BOLD),
+                tooltip="Trendin perussuunta (UP/DOWN/NEUTRAL) Dow-rakenteen mukaan.",
             ),
             ft.DataColumn(
-                ft.Text(
-                    "State",
-                    weight=ft.FontWeight.BOLD,
-                    tooltip="Trendin tila: CONTINUATION, WARNING tai REVERSAL.",
-                )
+                ft.Text("State", weight=ft.FontWeight.BOLD),
+                tooltip="Trendin tila: CONTINUATION, WARNING tai REVERSAL.",
             ),
             ft.DataColumn(ft.Text("Confidence", weight=ft.FontWeight.BOLD)),
             ft.DataColumn(
-                ft.Text(
-                    "SH1",
-                    weight=ft.FontWeight.BOLD,
-                    tooltip="Viimeisin swing high (huippu), käytetään arvioimaan uusia huippuja.",
-                )
+                ft.Text("SH1", weight=ft.FontWeight.BOLD),
+                tooltip="Viimeisin swing high (huippu), käytetään arvioimaan uusia huippuja.",
             ),
             ft.DataColumn(
-                ft.Text(
-                    "SL1",
-                    weight=ft.FontWeight.BOLD,
-                    tooltip="Viimeisin swing low (pohja), seuraa pysyykö rakenne ehjänä.",
-                )
+                ft.Text("SL1", weight=ft.FontWeight.BOLD),
+                tooltip="Viimeisin swing low (pohja), seuraa pysyykö rakenne ehjänä.",
             ),
             ft.DataColumn(
-                ft.Text(
-                    "Break?",
-                    weight=ft.FontWeight.BOLD,
-                    tooltip="Kertoo rikottiinko viimeisin huippu (Up) tai pohja (Down).",
-                )
+                ft.Text("Break?", weight=ft.FontWeight.BOLD),
+                tooltip="Kertoo rikottiinko viimeisin huippu (Up) tai pohja (Down).",
             ),
         ],
         rows=snapshot_rows_ctrl,
