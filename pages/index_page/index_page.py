@@ -352,7 +352,11 @@ class IndexPage:
             val = 120
         self.lookback_days = val
         self.lookback_field.value = str(val)
-        self._refresh_chart()
+        # lighter: just refresh trends using latest data
+        try:
+            self._refresh_trends_last()
+        except Exception:
+            self._refresh_chart()
         try:
             self.page.update()
         except Exception:
@@ -367,7 +371,10 @@ class IndexPage:
             val = 2
         self.pivot_k = val
         self.pivot_k_dropdown.value = str(val)
-        self._refresh_chart()
+        try:
+            self._refresh_trends_last()
+        except Exception:
+            self._refresh_chart()
         try:
             self.page.update()
         except Exception:
@@ -644,6 +651,10 @@ class IndexPage:
         stock_series: Optional[List[Dict]],
         ticker: Optional[str],
     ):
+        # cache last datasets for lighter refresh on lookback/pivot changes
+        self._last_trend_index_data = index_data
+        self._last_trend_stock_series = stock_series
+        self._last_trend_stock_ticker = ticker
         lookback = self.lookback_days
         k = self.pivot_k
         snapshots = []
@@ -667,6 +678,15 @@ class IndexPage:
         chains.sort(key=lambda c: (c.confidence, c.end_date), reverse=True)
         # update UI
         self._update_trend_tabs(snapshots, chains)
+
+    def _refresh_trends_last(self):
+        data = getattr(self, "_last_trend_index_data", None)
+        stock = getattr(self, "_last_trend_stock_series", None)
+        ticker = getattr(self, "_last_trend_stock_ticker", None)
+        if data is None:
+            self._refresh_chart()
+        else:
+            self._refresh_trends(data, stock, ticker)
 
     def _apply_range_filter(
         self,
