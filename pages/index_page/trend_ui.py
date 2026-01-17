@@ -9,10 +9,7 @@ from pages.index_page.trend_models import TrendChain, TrendSnapshot
 
 
 def _hdr(text: str, tooltip: str | None = None) -> ft.Control:
-    base = ft.Text(text, weight=ft.FontWeight.BOLD)
-    if tooltip:
-        return ft.Tooltip(message=tooltip, content=base)
-    return base
+    return ft.Text(text, weight=ft.FontWeight.BOLD, tooltip=tooltip) if tooltip else ft.Text(text, weight=ft.FontWeight.BOLD)
 
 
 def format_date_val(sp) -> str:
@@ -99,19 +96,20 @@ def create_snapshot_table(on_sort=None) -> ft.DataTable:
     )
 
 
-def create_chain_table() -> ft.DataTable:
+def create_chain_table(on_sort=None) -> ft.DataTable:
     return ft.DataTable(
         columns=[
-            ft.DataColumn(_hdr("Objekti")),
-            ft.DataColumn(_hdr("Nimi")),
-            ft.DataColumn(_hdr("Suunta")),
-            ft.DataColumn(_hdr("Alku")),
-            ft.DataColumn(_hdr("Loppu")),
-            ft.DataColumn(_hdr("Tapahtumia")),
-            ft.DataColumn(_hdr("Pareja")),
+            ft.DataColumn(_hdr("Objekti"), on_sort=on_sort),
+            ft.DataColumn(_hdr("Nimi"), on_sort=on_sort),
+            ft.DataColumn(_hdr("Suunta"), on_sort=on_sort),
+            ft.DataColumn(_hdr("Alku"), on_sort=on_sort),
+            ft.DataColumn(_hdr("Loppu"), on_sort=on_sort),
+            ft.DataColumn(_hdr("Tapahtumia"), on_sort=on_sort),
+            ft.DataColumn(_hdr("Pareja"), on_sort=on_sort),
             ft.DataColumn(
                 _hdr("Structural Confidence", "Kuinka vahva trendi on ollut historiassa."),
                 tooltip="Kuinka vahva trendi on ollut historiassa.",
+                on_sort=on_sort,
             ),
         ],
         rows=[],
@@ -126,19 +124,19 @@ def build_trend_card(
     selected_x: int,
     selected_k: int,
 ) -> ft.Card:
-    snapshot_view = ft.Container(
-        height=280, content=ft.Column([snapshot_table], scroll=ft.ScrollMode.AUTO)
-    )
-    chains_view = ft.Container(
-        height=320, content=ft.Column([chain_table], scroll=ft.ScrollMode.AUTO)
-    )
+    snapshot_view = ft.Container(height=280, content=snapshot_table)
+    chains_view = ft.Container(height=320, content=chain_table)
 
-    tabs = ft.Tabs(
-        tabs=[
-            ft.Tab(text="Trend Snapshot", content=snapshot_view),
-            ft.Tab(text="Trend Chains", content=chains_view),
+    info_panel = ft.ExpansionTile(
+        title=ft.Text("Mitä kentät tarkoittavat?"),
+        controls=[
+            ft.Text("Bias: UP/DOWN/NEUTRAL trendin perussuunta."),
+            ft.Text("State: CONTINUATION / WARNING / REVERSAL."),
+            ft.Text("Current Confidence: Kuinka ehjä trendi on nyt."),
+            ft.Text("Structural Confidence: Kuinka vahva trendi on ollut historiassa."),
+            ft.Text("SH1/SL1: viimeisin merkittävä huippu/pohja."),
+            ft.Text("Break?: rikkoutunut huippu (Up) tai pohja (Down)."),
         ],
-        expand=1,
     )
 
     return ft.Card(
@@ -151,7 +149,12 @@ def build_trend_card(
                         size=16,
                         weight=ft.FontWeight.BOLD,
                     ),
-                    tabs,
+                    info_panel,
+                    ft.Text("Trend Snapshot", weight=ft.FontWeight.BOLD),
+                    snapshot_view,
+                    ft.Divider(),
+                    ft.Text("Trend Chains", weight=ft.FontWeight.BOLD),
+                    chains_view,
                 ],
                 spacing=8,
             ),

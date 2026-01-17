@@ -64,6 +64,7 @@ class IndexPage:
         self.trend_snapshot_table: Optional[ft.DataTable] = None
         self.trend_chain_table: Optional[ft.DataTable] = None
         self._last_snapshot_sort: tuple[int, bool] | None = None
+        self._last_chain_sort: tuple[int, bool] | None = None
 
         self.schema_cache: Optional[Dict[str, str]] = None
         self._initial_draw_scheduled = False
@@ -407,7 +408,7 @@ class IndexPage:
         chain_rows = trend_ui.chain_rows(chains)
         # Rebuild tables to ensure headers/tooltips/sort are fresh
         self.trend_snapshot_table = trend_ui.create_snapshot_table(on_sort=self._on_snapshot_sort)
-        self.trend_chain_table = trend_ui.create_chain_table()
+        self.trend_chain_table = trend_ui.create_chain_table(on_sort=self._on_chain_sort)
         self.trend_snapshot_table.rows = snap_rows
         self.trend_chain_table.rows = chain_rows
         card = trend_ui.build_trend_card(
@@ -442,6 +443,27 @@ class IndexPage:
                 self.trend_snapshot_table.sort_ascending = asc
                 self.trend_snapshot_table.rows = sorted_rows
                 self.trend_snapshot_table.update()
+            if self.page:
+                self.page.update()
+        except Exception:
+            pass
+
+    def _on_chain_sort(self, e: ft.DataTableSortEvent):
+        try:
+            col = e.column_index
+            asc = e.ascending
+            self._last_chain_sort = (col, asc)
+            chain_rows = list(self.trend_chain_table.rows) if self.trend_chain_table else []
+            def sort_key(row: ft.DataRow):
+                cells = row.cells
+                val = cells[col].content.value if col < len(cells) else ""
+                return val
+            sorted_rows = sorted(chain_rows, key=sort_key, reverse=not asc)
+            if self.trend_chain_table:
+                self.trend_chain_table.sort_column_index = col
+                self.trend_chain_table.sort_ascending = asc
+                self.trend_chain_table.rows = sorted_rows
+                self.trend_chain_table.update()
             if self.page:
                 self.page.update()
         except Exception:
