@@ -763,14 +763,16 @@ class IndexPage:
             oname = "MARKET" if key == "MARKET" else key
             snap = trend_calc.compute_snapshot(series, otype, oname, lookback, k)
             snapshots.append(snap)
-            chains.extend(trend_calc.compute_chains(series, otype, oname, lookback, k))
+            chain_lookback = len(series)
+            chains.extend(trend_calc.compute_chains(series, otype, oname, chain_lookback, k))
         if stock_series and ticker:
             snap = trend_calc.compute_snapshot(
                 stock_series, "STOCK", ticker, lookback, k
             )
             snapshots.append(snap)
+            chain_lookback = len(stock_series)
             chains.extend(
-                trend_calc.compute_chains(stock_series, "STOCK", ticker, lookback, k)
+                trend_calc.compute_chains(stock_series, "STOCK", ticker, chain_lookback, k)
             )
         # sort chains
         chains.sort(key=lambda c: (c.confidence, c.end_date), reverse=True)
