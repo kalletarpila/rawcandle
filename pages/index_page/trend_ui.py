@@ -8,6 +8,13 @@ import flet as ft
 from pages.index_page.trend_models import TrendChain, TrendSnapshot
 
 
+def _hdr(text: str, tooltip: str | None = None) -> ft.Control:
+    base = ft.Text(text, weight=ft.FontWeight.BOLD)
+    if tooltip:
+        return ft.Tooltip(message=tooltip, content=base)
+    return base
+
+
 def format_date_val(sp) -> str:
     if not sp:
         return "-"
@@ -59,36 +66,30 @@ def chain_rows(chains: List[TrendChain]) -> List[ft.DataRow]:
 def create_snapshot_table(on_sort=None) -> ft.DataTable:
     return ft.DataTable(
         columns=[
-            ft.DataColumn(ft.Text("Objekti", weight=ft.FontWeight.BOLD), on_sort=on_sort),
-            ft.DataColumn(ft.Text("Nimi", weight=ft.FontWeight.BOLD), on_sort=on_sort),
+            ft.DataColumn(_hdr("Objekti"), on_sort=on_sort),
+            ft.DataColumn(_hdr("Nimi"), on_sort=on_sort),
             ft.DataColumn(
-                ft.Text("Bias", weight=ft.FontWeight.BOLD),
-                tooltip="Trendin perussuunta (UP/DOWN/NEUTRAL) Dow-rakenteen mukaan.",
+                _hdr("Bias", "Trendin perussuunta (UP/DOWN/NEUTRAL) Dow-rakenteen mukaan."),
                 on_sort=on_sort,
             ),
             ft.DataColumn(
-                ft.Text("State", weight=ft.FontWeight.BOLD),
-                tooltip="Trendin tila: CONTINUATION, WARNING tai REVERSAL.",
+                _hdr("State", "Trendin tila: CONTINUATION, WARNING tai REVERSAL."),
                 on_sort=on_sort,
             ),
             ft.DataColumn(
-                ft.Text("Current Confidence", weight=ft.FontWeight.BOLD),
-                tooltip="Kuinka ehjä trendi on nyt?",
+                _hdr("Current Confidence", "Kuinka ehjä trendi on nyt?"),
                 on_sort=on_sort,
             ),
             ft.DataColumn(
-                ft.Text("SH1", weight=ft.FontWeight.BOLD),
-                tooltip="Viimeisin swing high (huippu), käytetään arvioimaan uusia huippuja.",
+                _hdr("SH1", "Viimeisin swing high (huippu), käytetään arvioimaan uusia huippuja."),
                 on_sort=on_sort,
             ),
             ft.DataColumn(
-                ft.Text("SL1", weight=ft.FontWeight.BOLD),
-                tooltip="Viimeisin swing low (pohja), seuraa pysyykö rakenne ehjänä.",
+                _hdr("SL1", "Viimeisin swing low (pohja), seuraa pysyykö rakenne ehjänä."),
                 on_sort=on_sort,
             ),
             ft.DataColumn(
-                ft.Text("Break?", weight=ft.FontWeight.BOLD),
-                tooltip="Kertoo rikottiinko viimeisin huippu (Up) tai pohja (Down).",
+                _hdr("Break?", "Kertoo rikottiinko viimeisin huippu (Up) tai pohja (Down)."),
                 on_sort=on_sort,
             ),
         ],
@@ -101,15 +102,15 @@ def create_snapshot_table(on_sort=None) -> ft.DataTable:
 def create_chain_table() -> ft.DataTable:
     return ft.DataTable(
         columns=[
-            ft.DataColumn(ft.Text("Objekti", weight=ft.FontWeight.BOLD)),
-            ft.DataColumn(ft.Text("Nimi", weight=ft.FontWeight.BOLD)),
-            ft.DataColumn(ft.Text("Suunta", weight=ft.FontWeight.BOLD)),
-            ft.DataColumn(ft.Text("Alku", weight=ft.FontWeight.BOLD)),
-            ft.DataColumn(ft.Text("Loppu", weight=ft.FontWeight.BOLD)),
-            ft.DataColumn(ft.Text("Tapahtumia", weight=ft.FontWeight.BOLD)),
-            ft.DataColumn(ft.Text("Pareja", weight=ft.FontWeight.BOLD)),
+            ft.DataColumn(_hdr("Objekti")),
+            ft.DataColumn(_hdr("Nimi")),
+            ft.DataColumn(_hdr("Suunta")),
+            ft.DataColumn(_hdr("Alku")),
+            ft.DataColumn(_hdr("Loppu")),
+            ft.DataColumn(_hdr("Tapahtumia")),
+            ft.DataColumn(_hdr("Pareja")),
             ft.DataColumn(
-                ft.Text("Structural Confidence", weight=ft.FontWeight.BOLD),
+                _hdr("Structural Confidence", "Kuinka vahva trendi on ollut historiassa."),
                 tooltip="Kuinka vahva trendi on ollut historiassa.",
             ),
         ],

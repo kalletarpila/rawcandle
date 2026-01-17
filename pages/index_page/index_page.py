@@ -405,27 +405,21 @@ class IndexPage:
     def _update_trend_tabs(self, snapshots, chains):
         snap_rows = trend_ui.snapshot_rows(snapshots)
         chain_rows = trend_ui.chain_rows(chains)
-        if not self.trend_snapshot_table or not self.trend_chain_table:
-            self.trend_snapshot_table = trend_ui.create_snapshot_table(on_sort=self._on_snapshot_sort)
-            self.trend_chain_table = trend_ui.create_chain_table()
-            card = trend_ui.build_trend_card(
-                self.trend_snapshot_table,
-                self.trend_chain_table,
-                self.lookback_days,
-                self.pivot_k,
-            )
-            if not self.trend_card_container:
-                self.trend_card_container = ft.Container()
-            self.trend_card_container.content = card
+        # Rebuild tables to ensure headers/tooltips/sort are fresh
+        self.trend_snapshot_table = trend_ui.create_snapshot_table(on_sort=self._on_snapshot_sort)
+        self.trend_chain_table = trend_ui.create_chain_table()
         self.trend_snapshot_table.rows = snap_rows
         self.trend_chain_table.rows = chain_rows
+        card = trend_ui.build_trend_card(
+            self.trend_snapshot_table,
+            self.trend_chain_table,
+            self.lookback_days,
+            self.pivot_k,
+        )
+        if not self.trend_card_container:
+            self.trend_card_container = ft.Container()
+        self.trend_card_container.content = card
         try:
-            if self.trend_snapshot_table:
-                self.trend_snapshot_table.update()
-            if self.trend_chain_table:
-                self.trend_chain_table.update()
-            if self.trend_card_container:
-                self.trend_card_container.update()
             if self.page:
                 self.page.update()
         except Exception:
