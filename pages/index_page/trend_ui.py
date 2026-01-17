@@ -59,7 +59,7 @@ def chain_rows(chains: List[TrendChain]) -> List[ft.DataRow]:
 def create_snapshot_table(on_sort=None) -> ft.DataTable:
     return ft.DataTable(
         columns=[
-            ft.DataColumn(ft.Text("Objekti", weight=ft.FontWeight.BOLD)),
+            ft.DataColumn(ft.Text("Objekti", weight=ft.FontWeight.BOLD), on_sort=on_sort),
             ft.DataColumn(ft.Text("Nimi", weight=ft.FontWeight.BOLD), on_sort=on_sort),
             ft.DataColumn(
                 ft.Text("Bias", weight=ft.FontWeight.BOLD),

@@ -274,7 +274,7 @@ class IndexPage:
 
     def _build_trend_tabs_card(self) -> ft.Container:
         # Placeholder; content replaced in _update_trend_tabs
-        self.trend_snapshot_table = trend_ui.create_snapshot_table()
+        self.trend_snapshot_table = trend_ui.create_snapshot_table(on_sort=self._on_snapshot_sort)
         self.trend_chain_table = trend_ui.create_chain_table()
         placeholder_card = trend_ui.build_trend_card(
             self.trend_snapshot_table,
