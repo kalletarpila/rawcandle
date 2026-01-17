@@ -720,6 +720,8 @@ class IndexPage:
                 else:
                     self.stock_meta_text.value = ""
                     self.stock_meta_text.visible = False
+            # Remove any lingering summary text under tables
+            self.dow_text.visible = False
 
             # pass full data for trends (market included) + RAW stock (un-normalized)
             self._refresh_trends(
