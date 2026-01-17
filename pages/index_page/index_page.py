@@ -36,7 +36,7 @@ class IndexPage:
         self.RANGE_PRESETS = [
             ("1M", "1 kk"),
             ("3M", "3 kk"),
-            ("6M", "3 kk"),
+            ("6M", "6 kk"),
             ("1Y", "1 v"),
             ("ALL", "Kaikki"),
         ]
