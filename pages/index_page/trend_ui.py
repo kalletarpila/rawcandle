@@ -72,12 +72,8 @@ def create_snapshot_table(on_sort=None) -> ft.DataTable:
                 on_sort=on_sort,
             ),
             ft.DataColumn(
-                ft.Text("Confidence", weight=ft.FontWeight.BOLD),
-                tooltip=(
-                    "Kuvaa, kuinka selkeä ja johdonmukainen trendirakenne on viimeaikaisen hintakehityksen perusteella.\n"
-                    "Perustuu huippujen ja pohjien määrään, niiden suhteisiin sekä mahdollisiin rakennerikkoihin.\n"
-                    "Ei ole ennuste/to-dennäköisyys, vaan rakenteen vahvuusmittari."
-                ),
+                ft.Text("Current Confidence", weight=ft.FontWeight.BOLD),
+                tooltip="Kuinka ehjä trendi on nyt?",
                 on_sort=on_sort,
             ),
             ft.DataColumn(
@@ -112,7 +108,10 @@ def create_chain_table() -> ft.DataTable:
             ft.DataColumn(ft.Text("Loppu", weight=ft.FontWeight.BOLD)),
             ft.DataColumn(ft.Text("Tapahtumia", weight=ft.FontWeight.BOLD)),
             ft.DataColumn(ft.Text("Pareja", weight=ft.FontWeight.BOLD)),
-            ft.DataColumn(ft.Text("Confidence", weight=ft.FontWeight.BOLD)),
+            ft.DataColumn(
+                ft.Text("Structural Confidence", weight=ft.FontWeight.BOLD),
+                tooltip="Kuinka vahva trendi on ollut historiassa.",
+            ),
         ],
         rows=[],
         column_spacing=10,
