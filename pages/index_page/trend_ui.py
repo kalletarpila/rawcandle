@@ -56,18 +56,20 @@ def chain_rows(chains: List[TrendChain]) -> List[ft.DataRow]:
     return rows
 
 
-def create_snapshot_table() -> ft.DataTable:
+def create_snapshot_table(on_sort=None) -> ft.DataTable:
     return ft.DataTable(
         columns=[
             ft.DataColumn(ft.Text("Objekti", weight=ft.FontWeight.BOLD)),
-            ft.DataColumn(ft.Text("Nimi", weight=ft.FontWeight.BOLD)),
+            ft.DataColumn(ft.Text("Nimi", weight=ft.FontWeight.BOLD), on_sort=on_sort),
             ft.DataColumn(
                 ft.Text("Bias", weight=ft.FontWeight.BOLD),
                 tooltip="Trendin perussuunta (UP/DOWN/NEUTRAL) Dow-rakenteen mukaan.",
+                on_sort=on_sort,
             ),
             ft.DataColumn(
                 ft.Text("State", weight=ft.FontWeight.BOLD),
                 tooltip="Trendin tila: CONTINUATION, WARNING tai REVERSAL.",
+                on_sort=on_sort,
             ),
             ft.DataColumn(
                 ft.Text("Confidence", weight=ft.FontWeight.BOLD),
@@ -76,18 +78,22 @@ def create_snapshot_table() -> ft.DataTable:
                     "Perustuu huippujen ja pohjien määrään, niiden suhteisiin sekä mahdollisiin rakennerikkoihin.\n"
                     "Ei ole ennuste/to-dennäköisyys, vaan rakenteen vahvuusmittari."
                 ),
+                on_sort=on_sort,
             ),
             ft.DataColumn(
                 ft.Text("SH1", weight=ft.FontWeight.BOLD),
                 tooltip="Viimeisin swing high (huippu), käytetään arvioimaan uusia huippuja.",
+                on_sort=on_sort,
             ),
             ft.DataColumn(
                 ft.Text("SL1", weight=ft.FontWeight.BOLD),
                 tooltip="Viimeisin swing low (pohja), seuraa pysyykö rakenne ehjänä.",
+                on_sort=on_sort,
             ),
             ft.DataColumn(
                 ft.Text("Break?", weight=ft.FontWeight.BOLD),
                 tooltip="Kertoo rikottiinko viimeisin huippu (Up) tai pohja (Down).",
+                on_sort=on_sort,
             ),
         ],
         rows=[],

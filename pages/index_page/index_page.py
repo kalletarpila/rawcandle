@@ -63,6 +63,7 @@ class IndexPage:
         self.trend_card_container: Optional[ft.Container] = None
         self.trend_snapshot_table: Optional[ft.DataTable] = None
         self.trend_chain_table: Optional[ft.DataTable] = None
+        self._last_snapshot_sort: tuple[int, bool] | None = None
 
         self.schema_cache: Optional[Dict[str, str]] = None
         self._initial_draw_scheduled = False
@@ -119,13 +120,13 @@ class IndexPage:
             ),
         )
         self.pivot_k_dropdown = ft.Dropdown(
-            label="Pivot-herkkyys",
+            label="Pivot-herkkyys (k)",
             width=160,
             options=[ft.dropdown.Option(str(v)) for v in (2, 3, 4)],
             value=str(self.pivot_k),
             on_change=self._on_pivot_k_change,
             tooltip=(
-                "Määrittää kuinka merkittävä huipun/pohjan pitää olla (k-ikkuna t-k..t+k).\n"
+                "Määrittää kuinka merkittävä huipun/pohjan pitää olla (k-arvo kertoo ikkunan aikavälin eli  t-k..t+k).\n"
                 "Pieni arvo = herkkä, lyhyet muutokset näkyvät\n"
                 "Suuri arvo = vahvempi, pidempi trendi"
             ),
@@ -405,7 +406,7 @@ class IndexPage:
         snap_rows = trend_ui.snapshot_rows(snapshots)
         chain_rows = trend_ui.chain_rows(chains)
         if not self.trend_snapshot_table or not self.trend_chain_table:
-            self.trend_snapshot_table = trend_ui.create_snapshot_table()
+            self.trend_snapshot_table = trend_ui.create_snapshot_table(on_sort=self._on_snapshot_sort)
             self.trend_chain_table = trend_ui.create_chain_table()
             card = trend_ui.build_trend_card(
                 self.trend_snapshot_table,
@@ -425,6 +426,28 @@ class IndexPage:
                 self.trend_chain_table.update()
             if self.trend_card_container:
                 self.trend_card_container.update()
+            if self.page:
+                self.page.update()
+        except Exception:
+            pass
+
+    def _on_snapshot_sort(self, e: ft.DataTableSortEvent):
+        try:
+            col = e.column_index
+            asc = e.ascending
+            self._last_snapshot_sort = (col, asc)
+            # rebuild rows with sort applied
+            snap_rows = self.trend_snapshot_table.rows if self.trend_snapshot_table else []
+            def sort_key(row: ft.DataRow):
+                cells = row.cells
+                val = cells[col].content.value if col < len(cells) else ""
+                return val
+            sorted_rows = sorted(snap_rows, key=sort_key, reverse=not asc)
+            if self.trend_snapshot_table:
+                self.trend_snapshot_table.sort_column_index = col
+                self.trend_snapshot_table.sort_ascending = asc
+                self.trend_snapshot_table.rows = sorted_rows
+                self.trend_snapshot_table.update()
             if self.page:
                 self.page.update()
         except Exception:
@@ -610,8 +633,10 @@ class IndexPage:
                     ]
                     for key, series in index_data_full.items()
                 }
-                index_data_full, vols_full, stock_series_overlay = self._apply_range_filter(
-                    index_data_full, vols_full, stock_series_overlay
+                index_data_full, vols_full, stock_series_overlay = (
+                    self._apply_range_filter(
+                        index_data_full, vols_full, stock_series_overlay
+                    )
                 )
 
                 # Prepare plotting data with checkbox respect
@@ -672,7 +697,9 @@ class IndexPage:
             self.dow_text.value = " | ".join(summary_texts)
             if self.stock_meta_text is not None:
                 if stock_meta_parts and ticker:
-                    self.stock_meta_text.value = f"{ticker} | " + " | ".join(stock_meta_parts)
+                    self.stock_meta_text.value = f"{ticker} | " + " | ".join(
+                        stock_meta_parts
+                    )
                     self.stock_meta_text.visible = True
                 else:
                     self.stock_meta_text.value = ""
