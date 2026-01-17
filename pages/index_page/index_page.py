@@ -273,7 +273,14 @@ class IndexPage:
 
     def _build_trend_tabs_card(self) -> ft.Container:
         # Placeholder; content replaced in _update_trend_tabs
-        placeholder_card = trend_ui.build_trend_card([], [], self.lookback_days, self.pivot_k)
+        self.trend_snapshot_table = trend_ui.create_snapshot_table()
+        self.trend_chain_table = trend_ui.create_chain_table()
+        placeholder_card = trend_ui.build_trend_card(
+            self.trend_snapshot_table,
+            self.trend_chain_table,
+            self.lookback_days,
+            self.pivot_k,
+        )
         self.trend_card_container = ft.Container(content=placeholder_card)
         return self.trend_card_container
 
