@@ -36,9 +36,9 @@ def compute_chains(
     object_type: str,
     object_name: str,
     lookback: int,
-    k: int,
+    pivot_window: int,
 ) -> list[TrendChain]:
     # local import to avoid circular dependency
     from pages.index_page.trend_chains import compute_chains as _compute_chains
 
-    return _compute_chains(series, object_type, object_name, lookback, k)
+    return _compute_chains(series, object_type, object_name, lookback, pivot_window)

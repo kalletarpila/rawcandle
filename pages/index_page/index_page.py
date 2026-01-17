@@ -23,6 +23,7 @@ from pages.index_page.index_calc import (
 from pages.index_page.index_plot import build_index_plot
 from pages.index_page import trend_calc
 from pages.index_page import trend_ui
+from pages.index_page import trend_interpretation
 
 
 class IndexPage:
@@ -43,6 +44,7 @@ class IndexPage:
         self.selected_range = "6M"
         self.lookback_days = 15
         self.pivot_k = 2
+        self.pivot_window = 5
 
         self.market_dropdown: Optional[ft.Dropdown] = None
         self.sector_checkboxes: Dict[str, ft.Checkbox] = {}
@@ -59,10 +61,12 @@ class IndexPage:
         self.trend_table: Optional[ft.DataTable] = None
         self.trend_empty_text: Optional[ft.Text] = None
         self.lookback_field: Optional[ft.TextField] = None
+        self.pivot_window_field: Optional[ft.TextField] = None
         self.pivot_k_dropdown: Optional[ft.Dropdown] = None
         self.trend_card_container: Optional[ft.Container] = None
         self.trend_snapshot_table: Optional[ft.DataTable] = None
         self.trend_chain_table: Optional[ft.DataTable] = None
+        self.trend_interpretation_table: Optional[ft.DataTable] = None
         self._last_snapshot_sort: tuple[int, bool] | None = None
         self._last_chain_sort: tuple[int, bool] | None = None
 
@@ -120,6 +124,14 @@ class IndexPage:
                 "Suuri arvo = vakaampi, pidempi trendi"
             ),
         )
+        self.pivot_window_field = ft.TextField(
+            label="Pivot window",
+            width=140,
+            value=str(self.pivot_window),
+            on_change=self._on_pivot_window_change,
+            on_submit=self._on_pivot_window_change,
+            tooltip="Vaikuttaa graafiin ja trendiketjuihin. Snapshot käyttää hieman herkempiä pivotteja",
+        )
         self.pivot_k_dropdown = ft.Dropdown(
             label="Pivot-herkkyys (k)",
             width=160,
@@ -161,6 +173,7 @@ class IndexPage:
                         self.show_market_checkbox,
                         self.update_button,
                         self.lookback_field,
+                        self.pivot_window_field,
                         self.pivot_k_dropdown,
                     ],
                     alignment=ft.MainAxisAlignment.START,
@@ -277,9 +290,11 @@ class IndexPage:
         # Placeholder; content replaced in _update_trend_tabs
         self.trend_snapshot_table = trend_ui.create_snapshot_table(on_sort=self._on_snapshot_sort)
         self.trend_chain_table = trend_ui.create_chain_table(on_sort=self._on_chain_sort)
+        self.trend_interpretation_table = trend_ui.create_interpretation_table()
         placeholder_card = trend_ui.build_trend_card(
             self.trend_snapshot_table,
             self.trend_chain_table,
+            self.trend_interpretation_table,
             self.lookback_days,
             self.pivot_k,
         )
@@ -403,17 +418,39 @@ class IndexPage:
         except Exception:
             pass
 
-    def _update_trend_tabs(self, snapshots, chains):
+    def _on_pivot_window_change(self, e):
+        try:
+            val = int(self.pivot_window_field.value or "5")
+        except Exception:
+            val = 5
+        if val < 2:
+            val = 2
+        self.pivot_window = val
+        self.pivot_window_field.value = str(val)
+        try:
+            self._refresh_chart()
+        except Exception:
+            pass
+        try:
+            self.page.update()
+        except Exception:
+            pass
+
+    def _update_trend_tabs(self, snapshots, chains, interpretations):
         snap_rows = trend_ui.snapshot_rows(snapshots)
         chain_rows = trend_ui.chain_rows(chains)
+        interp_rows = trend_ui.interpretation_rows(interpretations)
         # Rebuild tables to ensure headers/tooltips/sort are fresh
         self.trend_snapshot_table = trend_ui.create_snapshot_table(on_sort=self._on_snapshot_sort)
         self.trend_chain_table = trend_ui.create_chain_table(on_sort=self._on_chain_sort)
+        self.trend_interpretation_table = trend_ui.create_interpretation_table()
         self.trend_snapshot_table.rows = snap_rows
         self.trend_chain_table.rows = chain_rows
+        self.trend_interpretation_table.rows = interp_rows
         card = trend_ui.build_trend_card(
             self.trend_snapshot_table,
             self.trend_chain_table,
+            self.trend_interpretation_table,
             self.lookback_days,
             self.pivot_k,
         )
@@ -632,14 +669,14 @@ class IndexPage:
                     if stock_rows:
                         stock_series_raw = stock_rows
                         stock_series_overlay = normalize_series_to_100(stock_rows)
-                        stock_sector, stock_industry = self._fetch_stock_meta(ticker)
-                    else:
-                        stock_series_raw = None
-                        stock_series_overlay = None
-                        self._set_status(
-                            f"Ticker {ticker} ei löytynyt kannasta",
-                            ft.Colors.ORANGE_700,
-                        )
+                    stock_sector, stock_industry = self._fetch_stock_meta(ticker)
+                else:
+                    stock_series_raw = None
+                    stock_series_overlay = None
+                    self._set_status(
+                        f"Ticker {ticker} ei löytynyt kannasta",
+                        ft.Colors.ORANGE_700,
+                    )
 
                 # Range filter affects plot series; keep raw stock for trend calcs
                 vols_full = {
@@ -683,7 +720,10 @@ class IndexPage:
                 return
 
             fig, summaries = build_index_plot(
-                index_data, volumes, stock_series=stock_series_overlay
+                index_data,
+                volumes,
+                stock_series=stock_series_overlay,
+                pivot_window=self.pivot_window,
             )
             html = fig.to_html(include_plotlyjs="cdn", full_html=False)
             data_url = "data:text/html;base64," + base64.b64encode(
@@ -723,9 +763,13 @@ class IndexPage:
             # Remove any lingering summary text under tables
             self.dow_text.visible = False
 
-            # pass full data for trends (market included) + RAW stock (un-normalized)
+            # pass full data + plotting data for trends so chains match visible pivots
             self._refresh_trends(
-                index_data_full, stock_series_raw, ticker if stock_series_raw else None
+                index_data_full,
+                index_data,
+                stock_series_overlay,
+                ticker if stock_series_overlay else None,
+                stock_sector if stock_series_overlay else None,
             )
 
             try:
@@ -745,26 +789,48 @@ class IndexPage:
 
     def _refresh_trends(
         self,
-        index_data: Dict[str, List[Dict]],
+        index_data_full: Dict[str, List[Dict]],
+        index_data_plot: Dict[str, List[Dict]],
         stock_series: Optional[List[Dict]],
         ticker: Optional[str],
+        stock_sector: Optional[str] = None,
     ):
         # cache last datasets for lighter refresh on lookback/pivot changes
-        self._last_trend_index_data = index_data
+        self._last_trend_index_data_full = index_data_full
+        self._last_trend_index_data_plot = index_data_plot
         self._last_trend_stock_series = stock_series
         self._last_trend_stock_ticker = ticker
+        self._last_trend_stock_sector = stock_sector
         lookback = self.lookback_days
         k = self.pivot_k
+        pivot_window = self.pivot_window
         snapshots = []
         chains = []
-        # market and sectors
-        for key, series in index_data.items():
+        # market and sectors (plotted)
+        for key, series in index_data_plot.items():
             otype = "MARKET" if key == "MARKET" else "SECTOR"
             oname = "MARKET" if key == "MARKET" else key
             snap = trend_calc.compute_snapshot(series, otype, oname, lookback, k)
             snapshots.append(snap)
             chain_lookback = len(series)
-            chains.extend(trend_calc.compute_chains(series, otype, oname, chain_lookback, k))
+            chains.extend(
+                trend_calc.compute_chains(
+                    series, otype, oname, chain_lookback, pivot_window
+                )
+            )
+        # Ensure market snapshot/chain even if not plotted but exists in full data
+        if "MARKET" in index_data_full and not any(
+            s.object_type == "MARKET" and s.object_name == "MARKET" for s in snapshots
+        ):
+            series = index_data_full["MARKET"]
+            snap = trend_calc.compute_snapshot(series, "MARKET", "MARKET", lookback, k)
+            snapshots.append(snap)
+            chain_lookback = len(series)
+            chains.extend(
+                trend_calc.compute_chains(
+                    series, "MARKET", "MARKET", chain_lookback, pivot_window
+                )
+            )
         if stock_series and ticker:
             snap = trend_calc.compute_snapshot(
                 stock_series, "STOCK", ticker, lookback, k
@@ -772,21 +838,38 @@ class IndexPage:
             snapshots.append(snap)
             chain_lookback = len(stock_series)
             chains.extend(
-                trend_calc.compute_chains(stock_series, "STOCK", ticker, chain_lookback, k)
+                trend_calc.compute_chains(
+                    stock_series, "STOCK", ticker, chain_lookback, pivot_window
+                )
             )
         # sort chains
         chains.sort(key=lambda c: (c.confidence, c.end_date), reverse=True)
+        # plotted objects: market if exists in full, sectors from plotted data, stock if exists
+        plotted_objects = []
+        if "MARKET" in index_data_full:
+            plotted_objects.append(("MARKET", "MARKET"))
+        for key in index_data_plot.keys():
+            if key == "MARKET":
+                continue
+            plotted_objects.append(("SECTOR", key))
+        if stock_series and ticker:
+            plotted_objects.append(("STOCK", ticker))
+        interpretations = trend_interpretation.build_interpretation_items(
+            snapshots, chains, plotted_objects, stock_sector=stock_sector
+        )
         # update UI
-        self._update_trend_tabs(snapshots, chains)
+        self._update_trend_tabs(snapshots, chains, interpretations)
 
     def _refresh_trends_last(self):
-        data = getattr(self, "_last_trend_index_data", None)
+        data_full = getattr(self, "_last_trend_index_data_full", None)
+        data_plot = getattr(self, "_last_trend_index_data_plot", None)
         stock = getattr(self, "_last_trend_stock_series", None)
         ticker = getattr(self, "_last_trend_stock_ticker", None)
-        if data is None:
+        stock_sector = getattr(self, "_last_trend_stock_sector", None)
+        if data_full is None or data_plot is None:
             self._refresh_chart()
         else:
-            self._refresh_trends(data, stock, ticker)
+            self._refresh_trends(data_full, data_plot, stock, ticker, stock_sector)
 
     def _apply_range_filter(
         self,

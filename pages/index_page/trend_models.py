@@ -36,3 +36,11 @@ class TrendChain:
     events_count: int
     pairs_count: int
     confidence: int
+    relevance: str
+
+
+@dataclass
+class InterpretationItem:
+    object_type: str  # 'MARKET' | 'SECTOR' | 'STOCK'
+    object_name: str
+    text: str

@@ -5,7 +5,7 @@ from typing import List
 
 import flet as ft
 
-from pages.index_page.trend_models import TrendChain, TrendSnapshot
+from pages.index_page.trend_models import InterpretationItem, TrendChain, TrendSnapshot
 
 
 def _hdr(text: str, tooltip: str | None = None) -> ft.Control:
@@ -63,6 +63,38 @@ def chain_rows(chains: List[TrendChain]) -> List[ft.DataRow]:
             )
         )
     return rows
+
+
+def interpretation_rows(items: List[InterpretationItem]) -> List[ft.DataRow]:
+    rows = []
+    for it in items:
+        rows.append(
+            ft.DataRow(
+                cells=[
+                    ft.DataCell(ft.Text(it.object_name)),
+                    ft.DataCell(
+                        ft.Text(
+                            it.text,
+                            selectable=True,
+                            max_lines=None,
+                        )
+                    ),
+                ]
+            )
+        )
+    return rows
+
+
+def create_interpretation_table(on_sort=None) -> ft.DataTable:
+    return ft.DataTable(
+        columns=[
+            ft.DataColumn(_hdr("Objekti"), on_sort=on_sort),
+            ft.DataColumn(_hdr("Tulkinta"), on_sort=on_sort),
+        ],
+        rows=[],
+        column_spacing=10,
+        heading_row_color=ft.Colors.GREY_100,
+    )
 
 
 def create_snapshot_table(on_sort=None) -> ft.DataTable:
@@ -144,6 +176,7 @@ def create_chain_table(on_sort=None) -> ft.DataTable:
 def build_trend_card(
     snapshot_table: ft.DataTable,
     chain_table: ft.DataTable,
+    interpretation_table: ft.DataTable,
     selected_x: int,
     selected_k: int,
 ) -> ft.Card:
@@ -159,6 +192,14 @@ def build_trend_card(
         height=240,
         content=ft.Column(
             [chain_table],
+            scroll=ft.ScrollMode.AUTO,
+            expand=True,
+        ),
+    )
+    interpretation_view = ft.Container(
+        height=240,
+        content=ft.Column(
+            [interpretation_table],
             scroll=ft.ScrollMode.AUTO,
             expand=True,
         ),
@@ -189,6 +230,9 @@ def build_trend_card(
                     ft.Divider(),
                     ft.Text("Trend Chains", weight=ft.FontWeight.BOLD),
                     chains_view,
+                    ft.Divider(),
+                    ft.Text("Trend Interpretation", weight=ft.FontWeight.BOLD),
+                    interpretation_view,
                 ],
                 spacing=8,
             ),

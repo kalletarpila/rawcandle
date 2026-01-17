@@ -16,6 +16,7 @@ def build_index_plot(
     volume_series: Dict[str, IndexSeries],
     *,
     stock_series: Optional[IndexSeries] = None,
+    pivot_window: int = 5,
 ) -> Tuple[go.Figure, Dict[str, str]]:
     fig = make_subplots(
         rows=2,
@@ -58,14 +59,14 @@ def build_index_plot(
             row=1,
             col=1,
         )
-        markers, summary = compute_dow_markers(series)
+        markers, summary = compute_dow_markers(series, window=pivot_window)
         dow_summaries[key] = summary
         if markers:
             colors = []
             customdata = []
             for m in markers:
                 label = m["label"]
-                customdata.append(label)
+                customdata.append((label, m["date"]))
                 if label.startswith("LH") or label.startswith("LL"):
                     colors.append("#dc2626")
                 else:
@@ -79,7 +80,7 @@ def build_index_plot(
                     name=f"Pivot {key}",
                     showlegend=False,
                     customdata=customdata,
-                    hovertemplate="Pivot: %{customdata}<br>Arvo: %{y:.2f}<extra></extra>",
+                    hovertemplate="Pivot: %{customdata[0]}<br>Pvm: %{customdata[1]|%m-%d}<br>Arvo: %{y:.2f}<extra></extra>",
                 ),
                 row=1,
                 col=1,
@@ -112,13 +113,13 @@ def build_index_plot(
             row=1,
             col=1,
         )
-        stock_markers, _ = compute_dow_markers(stock_series)
+        stock_markers, _ = compute_dow_markers(stock_series, window=pivot_window)
         if stock_markers:
             colors_stock = []
             customdata_stock = []
             for m in stock_markers:
                 lab = m["label"]
-                customdata_stock.append(lab)
+                customdata_stock.append((lab, m["date"]))
                 if lab.startswith("LH") or lab.startswith("LL"):
                     colors_stock.append("#dc2626")
                 else:
@@ -132,7 +133,7 @@ def build_index_plot(
                     name="Osake pivots",
                     showlegend=False,
                     customdata=customdata_stock,
-                    hovertemplate="Pivot: %{customdata}<br>Arvo: %{y:.2f}<extra></extra>",
+                    hovertemplate="Pivot: %{customdata[0]}<br>Pvm: %{customdata[1]|%m-%d}<br>Arvo: %{y:.2f}<extra></extra>",
                 ),
                 row=1,
                 col=1,

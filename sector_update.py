@@ -33,7 +33,7 @@ def _fetch_sector_data(ticker: str) -> Optional[TickerInfo]:
         industry = (info.get("industry") or "").strip()
         if not sector and not industry:
             return None
-        return sector or "ei löydetty", industry or "ei löydetty"
+        return sector or "NULL", industry or "NULL"
     except Exception:
         return None
 
@@ -86,7 +86,7 @@ def update_sector_metadata(
                 if sector_info:
                     sector_val, industry_val = sector_info
                 else:
-                    sector_val = industry_val = "ei löydetty"
+                    sector_val = industry_val = "NULL"
                     missing += 1
 
                 conn.execute(
