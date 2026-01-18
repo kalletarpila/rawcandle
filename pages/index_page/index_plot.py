@@ -15,7 +15,7 @@ def build_index_plot(
     index_series: Dict[str, IndexSeries],
     volume_series: Dict[str, IndexSeries],
     *,
-    stock_series: Optional[IndexSeries] = None,
+    stock_series_map: Optional[Dict[str, IndexSeries]] = None,
     pivot_window: int = 5,
 ) -> Tuple[go.Figure, Dict[str, str]]:
     fig = make_subplots(
@@ -32,8 +32,8 @@ def build_index_plot(
     sectors_present = any(k != "MARKET" for k in index_series.keys())
     allow_market_volume = not sectors_present
     dow_summaries = {}
-    index_dates_union = set()
-    index_date_sets = []
+    date_sets = []
+    dates_union = set()
 
     for key in sorted(index_series.keys()):
         series = index_series[key]
@@ -46,8 +46,8 @@ def build_index_plot(
             sector_color_idx += 1
         dates = [row["date"] for row in series]
         vals = [row["value"] for row in series]
-        index_dates_union.update(dates)
-        index_date_sets.append(set(dates))
+        dates_union.update(dates)
+        date_sets.append(set(dates))
         fig.add_trace(
             go.Scatter(
                 x=dates,
@@ -99,50 +99,60 @@ def build_index_plot(
                 col=1,
             )
 
-    if stock_series:
-        dates = [row["date"] for row in stock_series]
-        vals = [row["value"] for row in stock_series]
-        fig.add_trace(
-            go.Scatter(
-                x=dates,
-                y=vals,
-                mode="lines",
-                name="Osake (norm)",
-                line=dict(color="#111827", width=2),
-            ),
-            row=1,
-            col=1,
-        )
-        stock_markers, _ = compute_dow_markers(stock_series, window=pivot_window)
-        if stock_markers:
-            colors_stock = []
-            customdata_stock = []
-            for m in stock_markers:
-                lab = m["label"]
-                customdata_stock.append((lab, m["date"]))
-                if lab.startswith("LH") or lab.startswith("LL"):
-                    colors_stock.append("#dc2626")
-                else:
-                    colors_stock.append("#2563eb")
+    if stock_series_map:
+        color_idx = 0
+        for tk, stock_series in stock_series_map.items():
+            dates = [row["date"] for row in stock_series]
+            vals = [row["value"] for row in stock_series]
             fig.add_trace(
                 go.Scatter(
-                    x=[m["date"] for m in stock_markers],
-                    y=[m["value"] for m in stock_markers],
-                    mode="markers",
-                    marker=dict(color=colors_stock, size=8, symbol="circle"),
-                    name="Osake pivots",
-                    showlegend=False,
-                    customdata=customdata_stock,
-                    hovertemplate="Pivot: %{customdata[0]}<br>Pvm: %{customdata[1]|%m-%d}<br>Arvo: %{y:.2f}<extra></extra>",
+                    x=dates,
+                    y=vals,
+                    mode="lines",
+                    name=f"Osake {tk}",
+                    line=dict(width=2, dash="dot"),
                 ),
                 row=1,
                 col=1,
             )
+            stock_markers, _ = compute_dow_markers(stock_series, window=pivot_window)
+            if stock_markers:
+                colors_stock = []
+                customdata_stock = []
+                for m in stock_markers:
+                    lab = m["label"]
+                    customdata_stock.append((lab, m["date"]))
+                    if lab.startswith("LH") or lab.startswith("LL"):
+                        colors_stock.append("#dc2626")
+                    else:
+                        colors_stock.append("#2563eb")
+                fig.add_trace(
+                    go.Scatter(
+                        x=[m["date"] for m in stock_markers],
+                        y=[m["value"] for m in stock_markers],
+                        mode="markers",
+                        marker=dict(color=colors_stock, size=8, symbol="circle"),
+                        name=f"Osake pivots {tk}",
+                        showlegend=False,
+                        customdata=customdata_stock,
+                        hovertemplate="Pivot: %{customdata[0]}<br>Pvm: %{customdata[1]|%m-%d}<br>Arvo: %{y:.2f}<extra></extra>",
+                    ),
+                    row=1,
+                    col=1,
+                )
+            color_idx += 1
+
+    # add stock date sets for rangebreak calculation
+    if stock_series_map:
+        for stock_series in stock_series_map.values():
+            sdates = {row["date"] for row in stock_series}
+            dates_union.update(sdates)
+            date_sets.append(sdates)
 
     rangebreaks = [dict(bounds=["sat", "mon"])]
-    if index_dates_union:
-        common_dates = set.intersection(*index_date_sets) if index_date_sets else set()
-        base_dates = common_dates if common_dates else index_dates_union
+    if dates_union:
+        common_dates = set.intersection(*date_sets) if date_sets else set()
+        base_dates = common_dates if common_dates else dates_union
         date_list = sorted(base_dates)
         date_set = set(date_list)
         missing = []

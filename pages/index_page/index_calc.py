@@ -152,8 +152,12 @@ def ensure_ticker_metadata(conn: sqlite3.Connection, schema: SchemaMap) -> None:
             UNION ALL
             SELECT * FROM last_any WHERE ticker NOT IN (SELECT ticker FROM last_with_sector)
         )
-        INSERT OR REPLACE INTO ticker_meta (ticker, market, sector, industry)
+        INSERT INTO ticker_meta (ticker, market, sector, industry)
         SELECT ticker, market, sector, industry FROM combined
+        ON CONFLICT(ticker) DO UPDATE SET
+            market=excluded.market,
+            sector=COALESCE(ticker_meta.sector, excluded.sector),
+            industry=COALESCE(ticker_meta.industry, excluded.industry)
         """
     )
 
@@ -269,6 +273,7 @@ def compute_indices_incremental(
         params: List[object] = [market]
         sector_filter = ""
         sector_filter_prev = ""
+        exclude_index = " AND tm.ticker NOT LIKE '^%'"
         if sector:
             sector_filter = " AND tm.sector = ?"
             sector_filter_prev = " AND tm2.sector = ?"
@@ -296,6 +301,7 @@ def compute_indices_incremental(
                     JOIN ticker_meta tm ON tm.ticker = o.{ticker_col}
                     WHERE LOWER(tm.market) = LOWER(?)
                       {sector_filter}
+                      {exclude_index}
                       AND o.{date_col} >= ?
                 ),
                 prev_rows AS (
@@ -312,6 +318,7 @@ def compute_indices_incremental(
                         JOIN ticker_meta tm2 ON tm2.ticker = {ticker_col}
                         WHERE LOWER(tm2.market) = LOWER(?)
                           {sector_filter_prev}
+                          AND tm2.ticker NOT LIKE '^%'
                           AND {date_col} < ?
                         GROUP BY {ticker_col}
                     ) p
@@ -345,6 +352,7 @@ def compute_indices_incremental(
                 JOIN ticker_meta tm ON tm.ticker = o.{ticker_col}
                 WHERE LOWER(tm.market) = LOWER(?)
                   {sector_filter}
+                  AND tm.ticker NOT LIKE '^%'
                   AND o.{date_col} >= ?
                 ORDER BY o.{ticker_col} ASC, o.{date_col} ASC
                 """,

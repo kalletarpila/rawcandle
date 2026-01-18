@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import base64
+import json
 import threading
 from pathlib import Path
 import datetime as dt
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 import flet as ft
 
@@ -34,6 +35,7 @@ class IndexPage:
         self._appbar_factory = appbar_factory
         self.price_db = Path("data/osakedata.db")
         self.active_market = (active_market or "").strip().lower()
+        self.recent_file = Path("data/recent_tickers.json")
         self.RANGE_PRESETS = [
             ("1M", "1 kk"),
             ("3M", "3 kk"),
@@ -45,6 +47,9 @@ class IndexPage:
         self.lookback_days = 15
         self.pivot_k = 2
         self.pivot_window = 5
+        self.favorite_tickers = ["^NDX", "^GSPC", "^OMXH25", "^DJI", "^DJT"]
+        self._recent_tickers: List[str] = self._load_recent_tickers()
+        self.selected_stocks: List[str] = []
 
         self.market_dropdown: Optional[ft.Dropdown] = None
         self.sector_checkboxes: Dict[str, ft.Checkbox] = {}
@@ -53,6 +58,7 @@ class IndexPage:
         self.show_market_checkbox: Optional[ft.Checkbox] = None
         self.normalize_checkbox: Optional[ft.Checkbox] = None
         self.update_button: Optional[ft.ElevatedButton] = None
+        self.update_industry_button: Optional[ft.ElevatedButton] = None
         self.status_text: Optional[ft.Text] = None
         self.chart_container: Optional[ft.Container] = None
         self.dow_text: Optional[ft.Text] = None
@@ -69,6 +75,8 @@ class IndexPage:
         self.trend_interpretation_table: Optional[ft.DataTable] = None
         self._last_snapshot_sort: tuple[int, bool] | None = None
         self._last_chain_sort: tuple[int, bool] | None = None
+        self.quick_fav_row: Optional[ft.Row] = None
+        self.quick_recent_row: Optional[ft.Row] = None
 
         self.schema_cache: Optional[Dict[str, str]] = None
         self._initial_draw_scheduled = False
@@ -96,13 +104,13 @@ class IndexPage:
                 ),
             )
         )
+        quicklinks_card = self._build_quicklinks_card()
 
         self.stock_input = ft.TextField(
             label="Osake (ticker, valinn.)",
             width=220,
             hint_text="Esim. AAPL",
             on_submit=self._on_stock_input_change,
-            on_change=self._on_stock_input_change,
         )
         self.show_market_checkbox = ft.Checkbox(
             label="Näytä market-indeksi", value=True, on_change=self._on_toggle_market
@@ -116,7 +124,6 @@ class IndexPage:
             label="Lookback (pv)",
             width=140,
             value=str(self.lookback_days),
-            on_change=self._on_lookback_change,
             on_submit=self._on_lookback_change,
             tooltip=(
                 "Kuinka monen viimeisen pörssipäivän hintaa käytetään trendin tunnistamiseen.\n"
@@ -128,7 +135,6 @@ class IndexPage:
             label="Pivot window",
             width=140,
             value=str(self.pivot_window),
-            on_change=self._on_pivot_window_change,
             on_submit=self._on_pivot_window_change,
             tooltip="Vaikuttaa graafiin ja trendiketjuihin. Snapshot käyttää hieman herkempiä pivotteja",
         )
@@ -151,6 +157,13 @@ class IndexPage:
             bgcolor=ft.Colors.BLUE_600,
             color=ft.Colors.WHITE,
         )
+        self.update_industry_button = ft.ElevatedButton(
+            "Päivitä industryjen indeksit",
+            icon=ft.Icons.UPDATE,
+            on_click=self._on_update_industry_click,
+            bgcolor=ft.Colors.GREY_200,
+            color=ft.Colors.BLACK,
+        )
         self.status_text = ft.Text("", color=ft.Colors.GREY_600)
         self.chart_container = ft.Container(
             height=620,
@@ -172,6 +185,7 @@ class IndexPage:
                         self.stock_input,
                         self.show_market_checkbox,
                         self.update_button,
+                        self.update_industry_button,
                         self.lookback_field,
                         self.pivot_window_field,
                         self.pivot_k_dropdown,
@@ -179,6 +193,7 @@ class IndexPage:
                     alignment=ft.MainAxisAlignment.START,
                     wrap=True,
                 ),
+                quicklinks_card,
                 sector_card,
                 ft.Row(
                     [self._build_range_buttons(), self.normalize_checkbox],
@@ -267,6 +282,146 @@ class IndexPage:
     def _refresh_stock_options(self):
         return
 
+    def _build_quicklinks_card(self) -> ft.Card:
+        def _link_row(ticker: str) -> ft.Row:
+            return ft.Row(
+                [
+                    ft.Checkbox(
+                        label=ticker,
+                        value=ticker in self.selected_stocks,
+                        on_change=lambda e, tk=ticker: self._on_toggle_stock(tk, e.control.value),
+                        width=180,
+                        label_style=ft.TextStyle(size=14),
+                    ),
+                ],
+                spacing=6,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            )
+
+        self.quick_fav_row = ft.Column(
+            [_link_row(t) for t in self.favorite_tickers],
+            spacing=6,
+        )
+        self.quick_recent_row = ft.Column(
+            spacing=6,
+        )
+        self._refresh_recent_links()
+        return ft.Card(
+            content=ft.Container(
+                padding=10,
+                content=ft.Column(
+                    [
+                        ft.Text("Pikalinkit", weight=ft.FontWeight.BOLD),
+                        ft.Row(
+                            [
+                                ft.Column(
+                                    [
+                                        ft.Text("Suositut:", weight=ft.FontWeight.BOLD),
+                                        self.quick_fav_row,
+                                    ],
+                                    spacing=4,
+                                    width=260,
+                                ),
+                                ft.Column(
+                                    [
+                                        ft.Text("Viimeksi valitut:", weight=ft.FontWeight.BOLD),
+                                        self.quick_recent_row,
+                                    ],
+                                    spacing=4,
+                                    width=260,
+                                ),
+                            ],
+                            spacing=12,
+                        ),
+                    ],
+                    spacing=6,
+                ),
+            )
+        )
+
+    def _refresh_recent_links(self):
+        if not self.quick_recent_row:
+            return
+        buttons = []
+        for t in self._recent_tickers:
+            buttons.append(
+                ft.Row(
+                    [
+                        ft.Checkbox(
+                            label=t,
+                            value=t in self.selected_stocks,
+                            on_change=lambda e, ticker=t: self._on_toggle_stock(ticker, e.control.value),
+                            width=180,
+                            label_style=ft.TextStyle(size=14),
+                        ),
+                    ],
+                    spacing=6,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                )
+            )
+        if not buttons:
+            buttons = [ft.Text("Ei historiatietoja", color=ft.Colors.GREY_600)]
+        self.quick_recent_row.controls = buttons
+
+    def _on_quick_select(self, ticker: str):
+        if self.stock_input:
+            self.stock_input.value = ticker
+        self._on_stock_input_change(None)
+        # quick select also toggles on if within limit
+        self._on_toggle_stock(ticker, True)
+
+    def _load_recent_tickers(self) -> List[str]:
+        try:
+            if self.recent_file.exists():
+                data = json.loads(self.recent_file.read_text(encoding="utf-8"))
+                if isinstance(data, list):
+                    return [
+                        str(t).strip().upper()
+                        for t in data
+                        if isinstance(t, str) and str(t).strip()
+                    ][:5]
+        except Exception:
+            pass
+        return []
+
+    def _save_recent_tickers(self):
+        try:
+            self.recent_file.parent.mkdir(parents=True, exist_ok=True)
+            self.recent_file.write_text(json.dumps(self._recent_tickers), encoding="utf-8")
+        except Exception:
+            pass
+
+    def _add_recent_ticker(self, ticker: str):
+        t = (ticker or "").strip().upper()
+        if not t:
+            return
+        new_list = [t] + [x for x in self._recent_tickers if x != t]
+        self._recent_tickers = new_list[:5]
+        self._save_recent_tickers()
+        self._refresh_recent_links()
+
+    def _on_toggle_stock(self, ticker: str, show: bool):
+        t = (ticker or "").strip().upper()
+        if not t:
+            return
+        if show:
+            if t in self.selected_stocks:
+                self._add_recent_ticker(t)
+                return
+            if len(self.selected_stocks) >= 5:
+                self._set_status("Max 5 osaketta kerrallaan", ft.Colors.ORANGE_700)
+                return
+            self.selected_stocks.append(t)
+            self._add_recent_ticker(t)
+        else:
+            self.selected_stocks = [x for x in self.selected_stocks if x != t]
+        self._refresh_recent_links()
+        self._refresh_chart()
+        try:
+            self.page.update()
+        except Exception:
+            pass
+
     def _build_range_buttons(self) -> ft.Row:
         buttons = []
         self.range_buttons = {}
@@ -337,6 +492,12 @@ class IndexPage:
             self.page.update()
         except Exception:
             pass
+        # On successful overlay, update recents
+        try:
+            if ticker and stock_series_overlay:
+                self._add_recent_ticker(ticker)
+        except Exception:
+            pass
 
     def _set_status(self, text: str, color=ft.Colors.GREY_700):
         if self.status_text:
@@ -371,8 +532,20 @@ class IndexPage:
 
     def _on_stock_input_change(self, e):
         # Normalize and refresh chart
+        raw = (self.stock_input.value if self.stock_input else "") or ""
+        tokens = [t.strip().upper() for t in raw.split(",") if t.strip()]
+        added_any = False
+        for tk in tokens:
+            if tk in self.selected_stocks:
+                continue
+            if len(self.selected_stocks) >= 5:
+                self._set_status("Max 5 osaketta kerrallaan", ft.Colors.ORANGE_700)
+                break
+            self.selected_stocks.append(tk)
+            added_any = True
         if self.stock_input:
-            self.stock_input.value = (self.stock_input.value or "").strip().upper()
+            # normalize field to comma-joined cleaned tokens
+            self.stock_input.value = ", ".join(tokens)
         self._refresh_chart()
         try:
             self.page.update()
@@ -612,6 +785,10 @@ class IndexPage:
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def _on_update_industry_click(self, e):
+        # Dummy handler placeholder
+        self._set_status("Industry-indeksien päivitys ei vielä toteutettu.", ft.Colors.ORANGE_700)
+
     # ------------------ Chart ------------------ #
     def _refresh_chart(self):
         market = self.active_market
@@ -625,14 +802,15 @@ class IndexPage:
         ticker = (
             (self.stock_input.value or "").strip().upper() if self.stock_input else ""
         )
+        selected_stocks = list(self.selected_stocks)
         if not market:
             return
-        if (not sectors) and (not include_market):
+        if (not sectors) and (not include_market) and (not selected_stocks):
             self.chart_container.content = ft.Text(
                 "Valitse vähintään 1 sektori tai ruksaa 'Näytä market-indeksi'.",
                 color=ft.Colors.GREY_600,
             )
-            self._update_trend_tabs([], [])
+            self._update_trend_tabs([], [], [])
             try:
                 self.page.update()
             except Exception:
@@ -644,13 +822,12 @@ class IndexPage:
                     conn, market, sectors, include_market=True
                 )
 
-                # Stock series: keep RAW for trend calcs, separate overlay for plot
-                stock_series_raw: Optional[List[Dict]] = None
-                stock_series_overlay: Optional[List[Dict]] = None
-                stock_sector = None
-                stock_industry = None
+                # Stock series map for multiple overlays
+                stock_series_raw_map: Dict[str, List[Dict]] = {}
+                stock_series_overlay_map: Dict[str, List[Dict]] = {}
+                stock_meta_map: Dict[str, Tuple[Optional[str], Optional[str]]] = {}
 
-                if ticker:
+                if selected_stocks:
                     schema = self.schema_cache or introspect_schema(conn)
                     all_index_dates = [
                         row["date"]
@@ -663,20 +840,21 @@ class IndexPage:
                     max_date = (
                         max(all_index_dates).isoformat() if all_index_dates else None
                     )
-                    stock_rows = fetch_stock_series(
-                        conn, schema, ticker, date_from=min_date, date_to=max_date
-                    )
-                    if stock_rows:
-                        stock_series_raw = stock_rows
-                        stock_series_overlay = normalize_series_to_100(stock_rows)
-                    stock_sector, stock_industry = self._fetch_stock_meta(ticker)
-                else:
-                    stock_series_raw = None
-                    stock_series_overlay = None
-                    self._set_status(
-                        f"Ticker {ticker} ei löytynyt kannasta",
-                        ft.Colors.ORANGE_700,
-                    )
+                    for tk in selected_stocks:
+                        stock_rows = fetch_stock_series(
+                            conn, schema, tk, date_from=min_date, date_to=max_date
+                        )
+                        if stock_rows:
+                            stock_series_raw_map[tk] = stock_rows
+                            stock_series_overlay_map[tk] = normalize_series_to_100(
+                                stock_rows
+                            )
+                            stock_meta_map[tk] = self._fetch_stock_meta(tk)
+                        else:
+                            self._set_status(
+                                f"Ticker {tk} ei löytynyt kannasta",
+                                ft.Colors.ORANGE_700,
+                            )
 
                 # Range filter affects plot series; keep raw stock for trend calcs
                 vols_full = {
@@ -686,9 +864,9 @@ class IndexPage:
                     ]
                     for key, series in index_data_full.items()
                 }
-                index_data_full, vols_full, stock_series_overlay = (
+                index_data_full, vols_full, stock_series_overlay_map = (
                     self._apply_range_filter(
-                        index_data_full, vols_full, stock_series_overlay
+                        index_data_full, vols_full, stock_series_overlay_map
                     )
                 )
 
@@ -703,10 +881,11 @@ class IndexPage:
                     index_data = {
                         k: normalize_series_to_100(v) for k, v in index_data.items()
                     }
-                    if stock_series_overlay:
-                        stock_series_overlay = normalize_series_to_100(
-                            stock_series_overlay
-                        )
+                    if stock_series_overlay_map:
+                        stock_series_overlay_map = {
+                            k: normalize_series_to_100(v)
+                            for k, v in stock_series_overlay_map.items()
+                        }
 
             if not index_data:
                 self.chart_container.content = ft.Text(
@@ -722,7 +901,7 @@ class IndexPage:
             fig, summaries = build_index_plot(
                 index_data,
                 volumes,
-                stock_series=stock_series_overlay,
+                stock_series_map=stock_series_overlay_map if stock_series_overlay_map else None,
                 pivot_window=self.pivot_window,
             )
             html = fig.to_html(include_plotlyjs="cdn", full_html=False)
@@ -737,25 +916,17 @@ class IndexPage:
 
             summary_texts = [f"{k}: {v}" for k, v in summaries.items()]
             stock_meta_parts = []
-            if stock_series_overlay and ticker:
-                meta_parts = [ticker]
-                try:
-                    sector_txt = stock_sector or "ei löydetty"
-                    industry_txt = stock_industry or "ei löydetty"
-                    meta_parts.extend([sector_txt, industry_txt])
-                    stock_meta_parts.append(f"Sektori: {sector_txt}")
-                    stock_meta_parts.append(f"Industry: {industry_txt}")
-                except Exception:
-                    pass
-                if meta_parts:
-                    summary_texts.append("Osake: " + " / ".join(meta_parts))
+            if stock_series_overlay_map:
+                for tk, meta in stock_meta_map.items():
+                    sector_txt = (meta[0] if meta else None) or "ei löydetty"
+                    industry_txt = (meta[1] if meta else None) or "ei löydetty"
+                    stock_meta_parts.append(f"{tk} | Sektori: {sector_txt} | Industry: {industry_txt}")
+                summary_texts.extend(stock_meta_parts)
 
             self.dow_text.value = " | ".join(summary_texts)
             if self.stock_meta_text is not None:
-                if stock_meta_parts and ticker:
-                    self.stock_meta_text.value = f"{ticker} | " + " | ".join(
-                        stock_meta_parts
-                    )
+                if stock_meta_parts:
+                    self.stock_meta_text.value = " | ".join(stock_meta_parts)
                     self.stock_meta_text.visible = True
                 else:
                     self.stock_meta_text.value = ""
@@ -764,12 +935,20 @@ class IndexPage:
             self.dow_text.visible = False
 
             # pass full data + plotting data for trends so chains match visible pivots
+            # Update recents for all successfully loaded stocks
+            try:
+                if stock_series_overlay_map:
+                    for tk in stock_series_overlay_map.keys():
+                        self._add_recent_ticker(tk)
+            except Exception:
+                pass
+
             self._refresh_trends(
                 index_data_full,
                 index_data,
-                stock_series_overlay,
-                ticker if stock_series_overlay else None,
-                stock_sector if stock_series_overlay else None,
+                stock_series_overlay_map if stock_series_overlay_map else None,
+                list(stock_series_overlay_map.keys()) if stock_series_overlay_map else None,
+                stock_meta_map,
             )
 
             try:
@@ -791,16 +970,16 @@ class IndexPage:
         self,
         index_data_full: Dict[str, List[Dict]],
         index_data_plot: Dict[str, List[Dict]],
-        stock_series: Optional[List[Dict]],
-        ticker: Optional[str],
-        stock_sector: Optional[str] = None,
+        stock_series_map: Optional[Dict[str, List[Dict]]],
+        tickers: Optional[List[str]],
+        stock_meta_map: Optional[Dict[str, Tuple[Optional[str], Optional[str]]]] = None,
     ):
         # cache last datasets for lighter refresh on lookback/pivot changes
         self._last_trend_index_data_full = index_data_full
         self._last_trend_index_data_plot = index_data_plot
-        self._last_trend_stock_series = stock_series
-        self._last_trend_stock_ticker = ticker
-        self._last_trend_stock_sector = stock_sector
+        self._last_trend_stock_series_map = stock_series_map
+        self._last_trend_stock_tickers = tickers
+        self._last_trend_stock_meta_map = stock_meta_map
         lookback = self.lookback_days
         k = self.pivot_k
         pivot_window = self.pivot_window
@@ -831,17 +1010,21 @@ class IndexPage:
                     series, "MARKET", "MARKET", chain_lookback, pivot_window
                 )
             )
-        if stock_series and ticker:
-            snap = trend_calc.compute_snapshot(
-                stock_series, "STOCK", ticker, lookback, k
-            )
-            snapshots.append(snap)
-            chain_lookback = len(stock_series)
-            chains.extend(
-                trend_calc.compute_chains(
-                    stock_series, "STOCK", ticker, chain_lookback, pivot_window
+        if stock_series_map and tickers:
+            for tk in tickers:
+                series = stock_series_map.get(tk)
+                if not series:
+                    continue
+                snap = trend_calc.compute_snapshot(
+                    series, "STOCK", tk, lookback, k
                 )
-            )
+                snapshots.append(snap)
+                chain_lookback = len(series)
+                chains.extend(
+                    trend_calc.compute_chains(
+                        series, "STOCK", tk, chain_lookback, pivot_window
+                    )
+                )
         # sort chains
         chains.sort(key=lambda c: (c.confidence, c.end_date), reverse=True)
         # plotted objects: market if exists in full, sectors from plotted data, stock if exists
@@ -852,10 +1035,14 @@ class IndexPage:
             if key == "MARKET":
                 continue
             plotted_objects.append(("SECTOR", key))
-        if stock_series and ticker:
-            plotted_objects.append(("STOCK", ticker))
+        if stock_series_map and tickers:
+            for tk in tickers:
+                plotted_objects.append(("STOCK", tk))
         interpretations = trend_interpretation.build_interpretation_items(
-            snapshots, chains, plotted_objects, stock_sector=stock_sector
+            snapshots,
+            chains,
+            plotted_objects,
+            stock_sector=((stock_meta_map or {}).get(tickers[0], (None, None))[0] if tickers else None),
         )
         # update UI
         self._update_trend_tabs(snapshots, chains, interpretations)
@@ -863,25 +1050,25 @@ class IndexPage:
     def _refresh_trends_last(self):
         data_full = getattr(self, "_last_trend_index_data_full", None)
         data_plot = getattr(self, "_last_trend_index_data_plot", None)
-        stock = getattr(self, "_last_trend_stock_series", None)
-        ticker = getattr(self, "_last_trend_stock_ticker", None)
-        stock_sector = getattr(self, "_last_trend_stock_sector", None)
+        stock_map = getattr(self, "_last_trend_stock_series_map", None)
+        tickers = getattr(self, "_last_trend_stock_tickers", None)
+        stock_meta_map = getattr(self, "_last_trend_stock_meta_map", None)
         if data_full is None or data_plot is None:
             self._refresh_chart()
         else:
-            self._refresh_trends(data_full, data_plot, stock, ticker, stock_sector)
+            self._refresh_trends(data_full, data_plot, stock_map, tickers, stock_meta_map)
 
     def _apply_range_filter(
         self,
         index_data: Dict[str, List[Dict]],
         volumes: Dict[str, List[Dict]],
-        stock_series: Optional[List[Dict]],
+        stock_series_map: Optional[Dict[str, List[Dict]]],
     ):
         if self.selected_range == "ALL":
-            return index_data, volumes, stock_series
+            return index_data, volumes, stock_series_map
         all_dates = [row["date"] for series in index_data.values() for row in series]
         if not all_dates:
-            return index_data, volumes, stock_series
+            return index_data, volumes, stock_series_map
         max_date = max(all_dates)
         days_map = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365}
         days = days_map.get(self.selected_range, 0)
@@ -893,10 +1080,11 @@ class IndexPage:
         filtered_index = {k: (filt(v) if filt(v) else v) for k, v in index_data.items()}
         filtered_volumes = {k: (filt(v) if filt(v) else v) for k, v in volumes.items()}
 
-        filtered_stock = None
-        if stock_series:
-            filtered_stock = [r for r in stock_series if r["date"] >= start_date]
-            if not filtered_stock:
-                filtered_stock = stock_series
+        filtered_stock_map = None
+        if stock_series_map:
+            filtered_stock_map = {}
+            for tk, series in stock_series_map.items():
+                filtered = [r for r in series if r["date"] >= start_date]
+                filtered_stock_map[tk] = filtered if filtered else series
 
-        return filtered_index, filtered_volumes, filtered_stock
+        return filtered_index, filtered_volumes, filtered_stock_map

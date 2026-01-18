@@ -56,7 +56,8 @@ def test_update_sector_metadata_adds_columns_and_updates_values(tmp_path, fake_y
             ).fetchall()
         }
     assert rows["AAA"] == ("usa", "Technology", "Software")
-    assert rows["BBB"] == ("fin", "ei löydetty", "ei löydetty")
+    # Missing sector/industry are stored as "NULL"
+    assert rows["BBB"] == ("fin", "NULL", "NULL")
     assert summary["updated"] == 2
     assert summary["missing"] == 1
     assert "AAA | Technology | Software" in logs
