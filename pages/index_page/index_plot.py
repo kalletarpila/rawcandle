@@ -16,6 +16,7 @@ def build_index_plot(
     volume_series: Dict[str, IndexSeries],
     *,
     stock_series_map: Optional[Dict[str, IndexSeries]] = None,
+    display_names: Optional[Dict[str, str]] = None,
     pivot_window: int = 5,
 ) -> Tuple[go.Figure, Dict[str, str]]:
     fig = make_subplots(
@@ -27,7 +28,7 @@ def build_index_plot(
     )
 
     market_color = "#2563eb"
-    sector_colors = ["#f97316", "#16a34a", "#8b5cf6", "#0ea5e9", "#22c55e"]
+    sector_colors = ["#f97316", "#16a34a", "#8b5cf6", "#0ea5e9", "#22c55e", "#ef4444", "#10b981", "#6366f1", "#f59e0b"]
     sector_color_idx = 0
     sectors_present = any(k != "MARKET" for k in index_series.keys())
     allow_market_volume = not sectors_present
@@ -44,6 +45,7 @@ def build_index_plot(
         else:
             color = sector_colors[sector_color_idx % len(sector_colors)]
             sector_color_idx += 1
+        name = display_names.get(key, f"Indeksi {key}") if display_names else f"Indeksi {key}"
         dates = [row["date"] for row in series]
         vals = [row["value"] for row in series]
         dates_union.update(dates)
@@ -53,7 +55,7 @@ def build_index_plot(
                 x=dates,
                 y=vals,
                 mode="lines",
-                name=f"Indeksi {key}",
+                name=name,
                 line=dict(color=color, width=2),
             ),
             row=1,

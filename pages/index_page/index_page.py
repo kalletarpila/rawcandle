@@ -253,6 +253,7 @@ class IndexPage:
                 markets = get_available_markets(conn, self.schema_cache)
         except Exception:
             markets = []
+            print("[INDEX] Failed to load markets", flush=True)
         options = [ft.dropdown.Option(m) for m in markets]
         if self.market_dropdown:
             self.market_dropdown.options = options
@@ -287,12 +288,10 @@ class IndexPage:
             return ft.Row(
                 [
                     ft.Checkbox(
-                        label=ticker,
                         value=ticker in self.selected_stocks,
                         on_change=lambda e, tk=ticker: self._on_toggle_stock(tk, e.control.value),
-                        width=180,
-                        label_style=ft.TextStyle(size=14),
                     ),
+                    ft.Text(ticker, size=14),
                 ],
                 spacing=6,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -320,7 +319,7 @@ class IndexPage:
                                         self.quick_fav_row,
                                     ],
                                     spacing=4,
-                                    width=260,
+                                    width=220,
                                 ),
                                 ft.Column(
                                     [
@@ -328,7 +327,7 @@ class IndexPage:
                                         self.quick_recent_row,
                                     ],
                                     spacing=4,
-                                    width=260,
+                                    width=220,
                                 ),
                             ],
                             spacing=12,
@@ -348,12 +347,10 @@ class IndexPage:
                 ft.Row(
                     [
                         ft.Checkbox(
-                            label=t,
                             value=t in self.selected_stocks,
                             on_change=lambda e, ticker=t: self._on_toggle_stock(ticker, e.control.value),
-                            width=180,
-                            label_style=ft.TextStyle(size=14),
                         ),
+                        ft.Text(t, size=14),
                     ],
                     spacing=6,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -786,8 +783,52 @@ class IndexPage:
         threading.Thread(target=worker, daemon=True).start()
 
     def _on_update_industry_click(self, e):
-        # Dummy handler placeholder
-        self._set_status("Industry-indeksien päivitys ei vielä toteutettu.", ft.Colors.ORANGE_700)
+        if not self.active_market:
+            self._set_status("Valitse markkina", ft.Colors.RED_600)
+            return
+        try:
+            with self._connect() as conn:
+                schema = self.schema_cache or introspect_schema(conn)
+                ensure_ticker_metadata(conn, schema)
+                sectors_all = get_sectors_for_market(conn, schema, self.active_market)
+        except Exception:
+            sectors_all = []
+
+        btn = self.update_industry_button
+        if btn:
+            btn.disabled = True
+            btn.update()
+        self._set_status(
+            "🔄 Päivitetään industry-indeksit (kaikki sektorit)...",
+            ft.Colors.BLUE_600,
+        )
+
+        def worker():
+            try:
+                with self._connect() as conn:
+                    summary = compute_indices_incremental(
+                        conn,
+                        self.active_market,
+                        sectors_all,
+                        logger=lambda msg: print(msg),
+                        include_industries=True,
+                    )
+                msg = f"✅ Industry-indeksit päivitetty ({summary.get('updated_rows',0)} riviä)"
+                color = ft.Colors.GREEN_600
+            except Exception as exc:
+                msg = f"❌ Virhe industry-päivityksessä: {exc}"
+                color = ft.Colors.RED_600
+            finally:
+                try:
+                    if btn:
+                        btn.disabled = False
+                    self._set_status(msg, color)
+                    self._refresh_chart()
+                    self.page.update()
+                except Exception:
+                    pass
+
+        threading.Thread(target=worker, daemon=True).start()
 
     # ------------------ Chart ------------------ #
     def _refresh_chart(self):
@@ -822,6 +863,13 @@ class IndexPage:
                     conn, market, sectors, include_market=True
                 )
 
+                # Industry overlay for selected stocks
+                industry_meta: List[Tuple[str, str]] = []
+                industry_display: Dict[str, str] = {}
+                industry_series_full: Dict[str, List[Dict]] = {}
+                industry_vols_full: Dict[str, List[Dict]] = {}
+                industry_counts: Dict[str, int] = {}
+
                 # Stock series map for multiple overlays
                 stock_series_raw_map: Dict[str, List[Dict]] = {}
                 stock_series_overlay_map: Dict[str, List[Dict]] = {}
@@ -850,11 +898,44 @@ class IndexPage:
                                 stock_rows
                             )
                             stock_meta_map[tk] = self._fetch_stock_meta(tk)
+                            meta = stock_meta_map.get(tk)
+                            if meta:
+                                sec = meta[0] or ""
+                                ind = meta[1] or ""
+                                if sec and ind:
+                                    industry_meta.append((sec, ind))
                         else:
                             self._set_status(
                                 f"Ticker {tk} ei löytynyt kannasta",
                                 ft.Colors.ORANGE_700,
                             )
+
+                # fetch industry series
+                if industry_meta:
+                    industry_meta_uniq = list({(s, i) for s, i in industry_meta})
+                    for sec, ind in industry_meta_uniq:
+                        rows_ind = conn.execute(
+                            """
+                            SELECT date, index_value, volume_sum, n_stocks
+                            FROM index_daily
+                            WHERE level='industry' AND market=? AND sector=? AND industry=?
+                            ORDER BY date ASC
+                            """,
+                            (market, sec, ind),
+                        ).fetchall()
+                        if not rows_ind:
+                            continue
+                        key = f"INDUSTRY:{sec}:{ind}"
+                        industry_series_full[key] = [
+                            {"date": r["date"], "value": r["index_value"]} for r in rows_ind
+                        ]
+                        industry_vols_full[key] = [
+                            {"date": r["date"], "volume": r["volume_sum"] or 0.0}
+                            for r in rows_ind
+                        ]
+                        latest = rows_ind[-1]
+                        industry_counts[key] = latest["n_stocks"] or 0
+                        industry_display[key] = f"Industry {ind} (n={industry_counts[key]})"
 
                 # Range filter affects plot series; keep raw stock for trend calcs
                 vols_full = {
@@ -864,15 +945,19 @@ class IndexPage:
                     ]
                     for key, series in index_data_full.items()
                 }
-                index_data_full, vols_full, stock_series_overlay_map = (
+                index_data_full, vols_full, stock_series_overlay_map, industry_series_full, industry_vols_full = (
                     self._apply_range_filter(
-                        index_data_full, vols_full, stock_series_overlay_map
+                        index_data_full, vols_full, stock_series_overlay_map, industry_series_full, industry_vols_full
                     )
                 )
 
                 # Prepare plotting data with checkbox respect
                 index_data = dict(index_data_full)
                 volumes = dict(vols_full)
+                if industry_series_full:
+                    index_data.update(industry_series_full)
+                if industry_vols_full:
+                    volumes.update(industry_vols_full)
                 if not include_market and "MARKET" in index_data:
                     index_data.pop("MARKET", None)
                     volumes.pop("MARKET", None)
@@ -885,6 +970,10 @@ class IndexPage:
                         stock_series_overlay_map = {
                             k: normalize_series_to_100(v)
                             for k, v in stock_series_overlay_map.items()
+                        }
+                    if industry_series_full:
+                        industry_series_full = {
+                            k: normalize_series_to_100(v) for k, v in industry_series_full.items()
                         }
 
             if not index_data:
@@ -902,6 +991,7 @@ class IndexPage:
                 index_data,
                 volumes,
                 stock_series_map=stock_series_overlay_map if stock_series_overlay_map else None,
+                display_names=industry_display if industry_display else None,
                 pivot_window=self.pivot_window,
             )
             html = fig.to_html(include_plotlyjs="cdn", full_html=False)
@@ -949,6 +1039,9 @@ class IndexPage:
                 stock_series_overlay_map if stock_series_overlay_map else None,
                 list(stock_series_overlay_map.keys()) if stock_series_overlay_map else None,
                 stock_meta_map,
+                industry_series_full if industry_series_full else None,
+                industry_vols_full if industry_vols_full else None,
+                industry_display if industry_display else None,
             )
 
             try:
@@ -973,6 +1066,9 @@ class IndexPage:
         stock_series_map: Optional[Dict[str, List[Dict]]],
         tickers: Optional[List[str]],
         stock_meta_map: Optional[Dict[str, Tuple[Optional[str], Optional[str]]]] = None,
+        industry_series: Optional[Dict[str, List[Dict]]] = None,
+        industry_volumes: Optional[Dict[str, List[Dict]]] = None,
+        industry_display: Optional[Dict[str, str]] = None,
     ):
         # cache last datasets for lighter refresh on lookback/pivot changes
         self._last_trend_index_data_full = index_data_full
@@ -980,6 +1076,7 @@ class IndexPage:
         self._last_trend_stock_series_map = stock_series_map
         self._last_trend_stock_tickers = tickers
         self._last_trend_stock_meta_map = stock_meta_map
+        self._last_industry_series = industry_series
         lookback = self.lookback_days
         k = self.pivot_k
         pivot_window = self.pivot_window
@@ -1063,12 +1160,14 @@ class IndexPage:
         index_data: Dict[str, List[Dict]],
         volumes: Dict[str, List[Dict]],
         stock_series_map: Optional[Dict[str, List[Dict]]],
+        extra_series: Optional[Dict[str, List[Dict]]] = None,
+        extra_volumes: Optional[Dict[str, List[Dict]]] = None,
     ):
         if self.selected_range == "ALL":
-            return index_data, volumes, stock_series_map
+            return index_data, volumes, stock_series_map, extra_series, extra_volumes
         all_dates = [row["date"] for series in index_data.values() for row in series]
         if not all_dates:
-            return index_data, volumes, stock_series_map
+            return index_data, volumes, stock_series_map, extra_series, extra_volumes
         max_date = max(all_dates)
         days_map = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365}
         days = days_map.get(self.selected_range, 0)
@@ -1086,5 +1185,17 @@ class IndexPage:
             for tk, series in stock_series_map.items():
                 filtered = [r for r in series if r["date"] >= start_date]
                 filtered_stock_map[tk] = filtered if filtered else series
+        filtered_extra = None
+        if extra_series:
+            filtered_extra = {}
+            for k, series in extra_series.items():
+                filtered = [r for r in series if r["date"] >= start_date]
+                filtered_extra[k] = filtered if filtered else series
+        filtered_extra_vol = None
+        if extra_volumes:
+            filtered_extra_vol = {}
+            for k, series in extra_volumes.items():
+                filtered = [r for r in series if r["date"] >= start_date]
+                filtered_extra_vol[k] = filtered if filtered else series
 
-        return filtered_index, filtered_volumes, filtered_stock_map
+        return filtered_index, filtered_volumes, filtered_stock_map, filtered_extra, filtered_extra_vol

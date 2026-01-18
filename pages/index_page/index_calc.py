@@ -48,24 +48,61 @@ def introspect_schema(conn: sqlite3.Connection) -> SchemaMap:
 
 
 def ensure_index_table(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS index_daily (
-            date TEXT NOT NULL,
-            level TEXT NOT NULL,
-            market TEXT NOT NULL,
-            sector TEXT,
-            index_value REAL NOT NULL,
-            daily_return REAL,
-            volume_sum REAL,
-            n_stocks INTEGER,
-            UNIQUE(date, level, market, sector)
+    desired_unique = {"date", "level", "market", "sector", "industry"}
+    def _create_table():
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS index_daily (
+                date TEXT NOT NULL,
+                level TEXT NOT NULL,
+                market TEXT NOT NULL,
+                sector TEXT,
+                industry TEXT,
+                index_value REAL NOT NULL,
+                daily_return REAL,
+                volume_sum REAL,
+                n_stocks INTEGER,
+                UNIQUE(date, level, market, sector, industry)
+            )
+            """
         )
-        """
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_index_daily_level_market_sector_date ON index_daily(level, market, sector, date)"
-    )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_index_daily_level_market_sector_industry_date ON index_daily(level, market, sector, industry, date)"
+        )
+
+    # Create if missing
+    conn.execute("CREATE TABLE IF NOT EXISTS index_daily (date TEXT)")
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(index_daily)").fetchall()}
+    if "industry" not in cols:
+        conn.execute("ALTER TABLE index_daily ADD COLUMN industry TEXT")
+
+    # Check if unique includes industry; if not, rebuild table to avoid conflicts
+    def _has_desired_unique() -> bool:
+        for idx in conn.execute("PRAGMA index_list(index_daily)").fetchall():
+            idx_name = idx[1] if len(idx) > 1 else idx["name"]
+            idx_unique = idx[2] if len(idx) > 2 else idx.get("unique")
+            if not idx_unique:
+                continue
+            info = conn.execute(f"PRAGMA index_info({idx_name})").fetchall()
+            names = {r[2] for r in info}
+            if names == desired_unique:
+                return True
+        return False
+
+    if not _has_desired_unique():
+        # rebuild
+        conn.execute("ALTER TABLE index_daily RENAME TO index_daily_old")
+        _create_table()
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO index_daily (date, level, market, sector, industry, index_value, daily_return, volume_sum, n_stocks)
+            SELECT date, level, market, sector, industry, index_value, daily_return, volume_sum, n_stocks
+            FROM index_daily_old
+            """
+        )
+        conn.execute("DROP TABLE IF EXISTS index_daily_old")
+    else:
+        _create_table()
 
 
 def ensure_osakedata_indexes(conn: sqlite3.Connection, schema: SchemaMap) -> None:
@@ -152,12 +189,13 @@ def ensure_ticker_metadata(conn: sqlite3.Connection, schema: SchemaMap) -> None:
             UNION ALL
             SELECT * FROM last_any WHERE ticker NOT IN (SELECT ticker FROM last_with_sector)
         )
-        INSERT INTO ticker_meta (ticker, market, sector, industry)
-        SELECT ticker, market, sector, industry FROM combined
-        ON CONFLICT(ticker) DO UPDATE SET
-            market=excluded.market,
-            sector=COALESCE(ticker_meta.sector, excluded.sector),
-            industry=COALESCE(ticker_meta.industry, excluded.industry)
+        INSERT OR REPLACE INTO ticker_meta (ticker, market, sector, industry)
+        SELECT
+            c.ticker,
+            c.market,
+            COALESCE((SELECT t.sector FROM ticker_meta t WHERE t.ticker = c.ticker), c.sector),
+            COALESCE((SELECT t.industry FROM ticker_meta t WHERE t.ticker = c.ticker), c.industry)
+        FROM combined c
         """
     )
 
@@ -217,17 +255,26 @@ def get_tickers_for_market_sectors(
 
 
 def _fetch_last_index_info(
-    conn: sqlite3.Connection, market: str, sector: Optional[str]
+    conn: sqlite3.Connection, market: str, sector: Optional[str], industry: Optional[str] = None
 ) -> Tuple[Optional[str], Optional[float]]:
     cursor = conn.execute(
         """
         SELECT date, index_value
         FROM index_daily
-        WHERE level = ? AND market = ? AND (sector IS ? OR sector = ?)
+        WHERE level = ? AND market = ?
+          AND (sector IS ? OR sector = ?)
+          AND (industry IS ? OR industry = ?)
         ORDER BY date DESC
         LIMIT 1
         """,
-        ("sector" if sector else "market", market, sector, sector),
+        (
+            "industry" if industry else ("sector" if sector else "market"),
+            market,
+            sector,
+            sector,
+            industry,
+            industry,
+        ),
     )
     row = cursor.fetchone()
     if not row:
@@ -242,6 +289,7 @@ def compute_indices_incremental(
     *,
     start_date: str = "2024-01-01",
     logger=print,
+    include_industries: bool = False,
 ) -> Dict[str, int]:
     """Laske markkina- ja sektoritasoiset indeksit incrementaalisesti."""
     schema = introspect_schema(conn)
@@ -258,26 +306,62 @@ def compute_indices_incremental(
     ensure_osakedata_indexes(conn, schema)
 
     target_sectors = list(sectors or [])
-    groups = [("market", None)] + [("sector", sec) for sec in target_sectors]
+    groups: List[Tuple[str, Optional[str], Optional[str]]] = [("market", None, None)] + [
+        ("sector", sec, None) for sec in target_sectors
+    ]
+
+    industries_by_sector: Dict[str, List[str]] = {}
+    if include_industries:
+        params_ind: List[object] = [market]
+        sector_filter_ind = ""
+        if target_sectors:
+            placeholders = ",".join(["?"] * len(target_sectors))
+            sector_filter_ind = f" AND sector IN ({placeholders})"
+            params_ind.extend(target_sectors)
+        rows_ind = conn.execute(
+            f"""
+            SELECT DISTINCT sector, industry
+            FROM ticker_meta
+            WHERE LOWER(market) = LOWER(?)
+              {sector_filter_ind}
+              AND sector IS NOT NULL AND TRIM(sector) <> ''
+              AND industry IS NOT NULL AND TRIM(industry) <> ''
+            ORDER BY sector, industry
+            """,
+            params_ind,
+        ).fetchall()
+        for r in rows_ind:
+            sec = r[0]
+            ind = r[1]
+            industries_by_sector.setdefault(sec, []).append(ind)
+        for sec, inds in industries_by_sector.items():
+            for ind in inds:
+                groups.append(("industry", sec, ind))
 
     summary = {"updated_rows": 0, "groups": len(groups)}
 
-    for level, sector in groups:
-        last_date, last_value = _fetch_last_index_info(conn, market, sector)
+    for level, sector, industry in groups:
+        last_date, last_value = _fetch_last_index_info(conn, market, sector, industry)
         base_start = last_date or start_date
 
         logger(
-            f"[INDEX] {market} {('sector ' + sector) if sector else 'market'} start from {base_start} (last={last_date or 'none'})"
+            f"[INDEX] {market} {level} {sector or ''} {industry or ''} start from {base_start} (last={last_date or 'none'})"
         )
 
         params: List[object] = [market]
         sector_filter = ""
         sector_filter_prev = ""
+        industry_filter = ""
+        industry_filter_prev = ""
         exclude_index = " AND tm.ticker NOT LIKE '^%'"
         if sector:
             sector_filter = " AND tm.sector = ?"
             sector_filter_prev = " AND tm2.sector = ?"
             params.append(sector)
+        if industry:
+            industry_filter = " AND tm.industry = ?"
+            industry_filter_prev = " AND tm2.industry = ?"
+            params.append(industry)
 
         rows: List[sqlite3.Row] = []
         try:
@@ -301,6 +385,7 @@ def compute_indices_incremental(
                     JOIN ticker_meta tm ON tm.ticker = o.{ticker_col}
                     WHERE LOWER(tm.market) = LOWER(?)
                       {sector_filter}
+                      {industry_filter}
                       {exclude_index}
                       AND o.{date_col} >= ?
                 ),
@@ -318,6 +403,7 @@ def compute_indices_incremental(
                         JOIN ticker_meta tm2 ON tm2.ticker = {ticker_col}
                         WHERE LOWER(tm2.market) = LOWER(?)
                           {sector_filter_prev}
+                          {industry_filter_prev}
                           AND tm2.ticker NOT LIKE '^%'
                           AND {date_col} < ?
                         GROUP BY {ticker_col}
@@ -352,6 +438,7 @@ def compute_indices_incremental(
                 JOIN ticker_meta tm ON tm.ticker = o.{ticker_col}
                 WHERE LOWER(tm.market) = LOWER(?)
                   {sector_filter}
+                  {industry_filter}
                   AND tm.ticker NOT LIKE '^%'
                   AND o.{date_col} >= ?
                 ORDER BY o.{ticker_col} ASC, o.{date_col} ASC
@@ -406,14 +493,15 @@ def compute_indices_incremental(
             conn.execute(
                 """
                 INSERT OR REPLACE INTO index_daily
-                    (date, level, market, sector, index_value, daily_return, volume_sum, n_stocks)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (date, level, market, sector, industry, index_value, daily_return, volume_sum, n_stocks)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     d,
                     level,
                     market,
                     sector,
+                    industry,
                     index_value,
                     daily_ret_to_store,
                     per_date_volume.get(d, 0.0),
@@ -424,7 +512,7 @@ def compute_indices_incremental(
             inserted += 1
         summary["updated_rows"] += inserted
         logger(
-            f"[INDEX] {market} {('sector ' + sector) if sector else 'market'} inserted {inserted} rows"
+            f"[INDEX] {market} {level} {sector or ''} {industry or ''} inserted {inserted} rows"
         )
 
     conn.commit()

@@ -95,8 +95,13 @@ def update_sector_metadata(
                     VALUES (?, ?, ?, ?)
                     ON CONFLICT(ticker) DO UPDATE SET
                         market=excluded.market,
-                        sector=excluded.sector,
-                        industry=excluded.industry
+                        sector=COALESCE(excluded.sector, ticker_meta.sector),
+                        industry=COALESCE(
+                            NULLIF(excluded.industry, 'NULL'),
+                            NULLIF(ticker_meta.industry, 'NULL'),
+                            ticker_meta.industry,
+                            excluded.industry
+                        )
                     """,
                     (ticker, mkt, sector_val, industry_val),
                 )
