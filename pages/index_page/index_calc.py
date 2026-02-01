@@ -49,6 +49,7 @@ def introspect_schema(conn: sqlite3.Connection) -> SchemaMap:
 
 def ensure_index_table(conn: sqlite3.Connection) -> None:
     desired_unique = {"date", "level", "market", "sector", "industry"}
+
     def _create_table():
         conn.execute(
             """
@@ -72,7 +73,9 @@ def ensure_index_table(conn: sqlite3.Connection) -> None:
 
     # Create if missing
     conn.execute("CREATE TABLE IF NOT EXISTS index_daily (date TEXT)")
-    cols = {row["name"] for row in conn.execute("PRAGMA table_info(index_daily)").fetchall()}
+    cols = {
+        row["name"] for row in conn.execute("PRAGMA table_info(index_daily)").fetchall()
+    }
     if "industry" not in cols:
         conn.execute("ALTER TABLE index_daily ADD COLUMN industry TEXT")
 
@@ -147,7 +150,9 @@ def ensure_ticker_metadata(conn: sqlite3.Connection, schema: SchemaMap) -> None:
         )
         """
     )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_ticker_meta_market ON ticker_meta(market)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ticker_meta_market ON ticker_meta(market)"
+    )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_ticker_meta_market_sector ON ticker_meta(market, sector)"
     )
@@ -202,7 +207,9 @@ def ensure_ticker_metadata(conn: sqlite3.Connection, schema: SchemaMap) -> None:
 
 def get_available_markets(conn: sqlite3.Connection, schema: SchemaMap) -> List[str]:
     try:
-        conn.execute("CREATE TABLE IF NOT EXISTS ticker_meta (ticker TEXT PRIMARY KEY, market TEXT, sector TEXT, industry TEXT)")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS ticker_meta (ticker TEXT PRIMARY KEY, market TEXT, sector TEXT, industry TEXT)"
+        )
         cursor = conn.execute(
             "SELECT DISTINCT LOWER(market) AS m FROM ticker_meta WHERE market IS NOT NULL ORDER BY m"
         )
@@ -215,7 +222,9 @@ def get_sectors_for_market(
     conn: sqlite3.Connection, schema: SchemaMap, market: str
 ) -> List[str]:
     try:
-        conn.execute("CREATE TABLE IF NOT EXISTS ticker_meta (ticker TEXT PRIMARY KEY, market TEXT, sector TEXT, industry TEXT)")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS ticker_meta (ticker TEXT PRIMARY KEY, market TEXT, sector TEXT, industry TEXT)"
+        )
         cursor = conn.execute(
             """
             SELECT DISTINCT sector
@@ -255,7 +264,10 @@ def get_tickers_for_market_sectors(
 
 
 def _fetch_last_index_info(
-    conn: sqlite3.Connection, market: str, sector: Optional[str], industry: Optional[str] = None
+    conn: sqlite3.Connection,
+    market: str,
+    sector: Optional[str],
+    industry: Optional[str] = None,
 ) -> Tuple[Optional[str], Optional[float]]:
     cursor = conn.execute(
         """
@@ -306,9 +318,9 @@ def compute_indices_incremental(
     ensure_osakedata_indexes(conn, schema)
 
     target_sectors = list(sectors or [])
-    groups: List[Tuple[str, Optional[str], Optional[str]]] = [("market", None, None)] + [
-        ("sector", sec, None) for sec in target_sectors
-    ]
+    groups: List[Tuple[str, Optional[str], Optional[str]]] = [
+        ("market", None, None)
+    ] + [("sector", sec, None) for sec in target_sectors]
 
     industries_by_sector: Dict[str, List[str]] = {}
     if include_industries:
@@ -372,7 +384,9 @@ def compute_indices_incremental(
 
         if use_lag:
             base_params = list(params)  # [market] or [market, sector]
-            query_params = base_params + [base_start] + base_params + [base_start] + [base_start]
+            query_params = (
+                base_params + [base_start] + base_params + [base_start] + [base_start]
+            )
             rows = conn.execute(
                 f"""
                 WITH base_rows AS (
@@ -584,6 +598,8 @@ def fetch_stock_series(
     ticker_col = schema.get("ticker")
     date_col = schema.get("date")
     close_col = schema.get("close")
+    high_col = schema.get("high")
+    low_col = schema.get("low")
     if not (ticker_col and date_col and close_col):
         return []
     where = [f"{ticker_col} = ?"]
@@ -594,18 +610,32 @@ def fetch_stock_series(
     if date_to:
         where.append(f"{date_col} <= ?")
         params.append(date_to)
+
+    # Hae high ja low jos saatavilla
+    high_select = f"{high_col} AS high" if high_col else "NULL AS high"
+    low_select = f"{low_col} AS low" if low_col else "NULL AS low"
+
     query = f"""
-        SELECT {date_col} AS pvm, {close_col} AS close
+        SELECT {date_col} AS pvm, {close_col} AS close, {high_select}, {low_select}
         FROM osakedata
         WHERE {' AND '.join(where)}
         ORDER BY {date_col} ASC
     """
     rows = conn.execute(query, params).fetchall()
-    return [
-        {"date": dt.date.fromisoformat(r["pvm"]), "value": float(r["close"])}
-        for r in rows
-        if r["close"] is not None and r["pvm"]
-    ]
+    result = []
+    for r in rows:
+        if r["close"] is not None and r["pvm"]:
+            row_dict = {
+                "date": dt.date.fromisoformat(r["pvm"]),
+                "value": float(r["close"]),
+                "close": float(r["close"]),
+            }
+            if r["high"] is not None:
+                row_dict["high"] = float(r["high"])
+            if r["low"] is not None:
+                row_dict["low"] = float(r["low"])
+            result.append(row_dict)
+    return result
 
 
 def normalize_series_to_100(series: List[IndexRow]) -> List[IndexRow]:
@@ -614,10 +644,16 @@ def normalize_series_to_100(series: List[IndexRow]) -> List[IndexRow]:
     first = series[0]["value"]
     if not first:
         return series
-    return [
-        {
+    result = []
+    for row in series:
+        normalized = {
             **row,
             "value": (row["value"] / first) * 100.0 if first else row["value"],
         }
-        for row in series
-    ]
+        # Normalisoi myös high ja low jos olemassa
+        if "high" in row and row["high"] is not None:
+            normalized["high"] = (row["high"] / first) * 100.0
+        if "low" in row and row["low"] is not None:
+            normalized["low"] = (row["low"] / first) * 100.0
+        result.append(normalized)
+    return result
