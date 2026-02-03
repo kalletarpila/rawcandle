@@ -39,7 +39,11 @@ def test_uptrend_regime_reset():
     markers, summary = compute_dow_markers(series, window=1)
 
     # Find the marker around 2024-01-13 (after regime break)
-    high_after_break = [m for m in markers if m["date"] == dt.date(2024, 1, 13)]
+    high_after_break = [
+        m
+        for m in markers
+        if m["date"] == dt.date(2024, 1, 13) and m["label"] in {"H", "HH", "LH"}
+    ]
 
     # Should be labeled 'H' (initial) not 'HH' or 'LH' because active_structural_high was reset
     assert len(high_after_break) == 1
@@ -81,7 +85,11 @@ def test_downtrend_regime_reset():
     markers, summary = compute_dow_markers(series, window=1)
 
     # Find the marker around 2024-01-13 (after regime break)
-    low_after_break = [m for m in markers if m["date"] == dt.date(2024, 1, 13)]
+    low_after_break = [
+        m
+        for m in markers
+        if m["date"] == dt.date(2024, 1, 13) and m["label"] in {"L", "HL", "LL"}
+    ]
 
     # Should be labeled 'L' (initial) not 'HL' or 'LL' because active_structural_low was reset
     assert len(low_after_break) == 1

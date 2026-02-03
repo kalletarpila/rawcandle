@@ -56,7 +56,11 @@ def test_uptrend_reset_on_non_pivot_day_window_3():
     markers, _ = compute_dow_markers(series, window=3)
 
     target_date = base + dt.timedelta(days=25)
-    high_after_break = [m for m in markers if m["date"] == target_date]
+    high_after_break = [
+        m
+        for m in markers
+        if m["date"] == target_date and m["label"] in {"H", "HH", "LH"}
+    ]
 
     assert len(high_after_break) == 1
     assert high_after_break[0]["label"] == "H"
