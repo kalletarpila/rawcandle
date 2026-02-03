@@ -84,6 +84,41 @@ def compute_dow_markers(
         val = values[idx] if values[idx] is not None else pivot_val
         date = dates[idx]
 
+        # Update trend state based on current markers (before processing new pivot)
+        if markers:
+            highs_so_far = [
+                m for m in markers if m["label"].startswith("H") or m["label"] == "LH"
+            ]
+            lows_so_far = [
+                m for m in markers if m["label"].startswith("L") or m["label"] == "HL"
+            ]
+            if highs_so_far and lows_so_far:
+                last_high_label = highs_so_far[-1]["label"]
+                last_low_label = lows_so_far[-1]["label"]
+                if last_high_label == "HH" and last_low_label == "HL":
+                    trend = "UP"
+                elif last_high_label == "LH" and last_low_label == "LL":
+                    trend = "DOWN"
+                else:
+                    trend = "NEUTRAL"
+
+        # Regime-reset logic: check for regime death BEFORE processing pivot
+        # Guard: only one reset can trigger per iteration
+        if (
+            trend == "UP"
+            and active_structural_low is not None
+            and val < active_structural_low[1]
+        ):
+            # Uptrend regime broken: close breaks active_structural_low downwards
+            active_structural_high = None
+        elif (
+            trend == "DOWN"
+            and active_structural_low is not None
+            and val > active_structural_low[1]
+        ):
+            # Downtrend regime broken: close breaks active_structural_low upwards
+            active_structural_low = None
+
         if kind == "H":
             if active_structural_high is not None:
                 if pivot_val > active_structural_high[1]:
@@ -111,8 +146,8 @@ def compute_dow_markers(
         last_change_date = date
 
     if markers:
-        highs = [m for m in markers if m["label"].startswith("H")]
-        lows = [m for m in markers if m["label"].startswith("L")]
+        highs = [m for m in markers if m["label"].startswith("H") or m["label"] == "LH"]
+        lows = [m for m in markers if m["label"].startswith("L") or m["label"] == "HL"]
         if highs and lows:
             last_high_label = highs[-1]["label"]
             last_low_label = lows[-1]["label"]
