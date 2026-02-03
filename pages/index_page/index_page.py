@@ -46,7 +46,7 @@ class IndexPage:
         self.selected_range = "6M"
         self.lookback_days = 15
         self.pivot_k = 2
-        self.pivot_window = 5
+        self.pivot_window = 3
         self.favorite_tickers = ["^NDX", "^GSPC", "^OMXH25", "^DJI", "^DJT"]
         self._recent_tickers: List[str] = self._load_recent_tickers()
         self.selected_stocks: List[str] = []
@@ -590,7 +590,7 @@ class IndexPage:
 
     def _on_pivot_window_change(self, e):
         try:
-            val = int(self.pivot_window_field.value or "5")
+            val = int(self.pivot_window_field.value or "3")
         except Exception:
             val = 5
         if val < 2:
@@ -882,12 +882,16 @@ class IndexPage:
                         for series in index_data_full.values()
                         for row in series
                     ]
-                    min_date = (
-                        min(all_index_dates).isoformat() if all_index_dates else None
-                    )
-                    max_date = (
-                        max(all_index_dates).isoformat() if all_index_dates else None
-                    )
+                    def _to_iso(x):
+                        try:
+                            if isinstance(x, dt.date):
+                                return x.isoformat()
+                            return dt.date.fromisoformat(str(x)).isoformat()
+                        except Exception:
+                            return None
+                    all_index_dates_iso = [_to_iso(d) for d in all_index_dates if _to_iso(d)]
+                    min_date = min(all_index_dates_iso) if all_index_dates_iso else None
+                    max_date = max(all_index_dates_iso) if all_index_dates_iso else None
                     for tk in selected_stocks:
                         stock_rows = fetch_stock_series(
                             conn, schema, tk, date_from=min_date, date_to=max_date
@@ -1163,9 +1167,20 @@ class IndexPage:
         extra_series: Optional[Dict[str, List[Dict]]] = None,
         extra_volumes: Optional[Dict[str, List[Dict]]] = None,
     ):
+        def _to_date(val):
+            if isinstance(val, dt.date):
+                return val
+            try:
+                return dt.date.fromisoformat(str(val))
+            except Exception:
+                return None
+
         if self.selected_range == "ALL":
             return index_data, volumes, stock_series_map, extra_series, extra_volumes
-        all_dates = [row["date"] for series in index_data.values() for row in series]
+        all_dates = [_to_date(row["date"]) for series in index_data.values() for row in series]
+        if not all_dates:
+            return index_data, volumes, stock_series_map, extra_series, extra_volumes
+        all_dates = [d for d in all_dates if d is not None]
         if not all_dates:
             return index_data, volumes, stock_series_map, extra_series, extra_volumes
         max_date = max(all_dates)
@@ -1174,7 +1189,14 @@ class IndexPage:
         start_date = max_date - dt.timedelta(days=days)
 
         def filt(series):
-            return [r for r in series if r["date"] >= start_date]
+            filtered = []
+            for r in series:
+                rd = _to_date(r["date"])
+                if rd is None:
+                    filtered.append(r)
+                elif rd >= start_date:
+                    filtered.append(r)
+            return filtered
 
         filtered_index = {k: (filt(v) if filt(v) else v) for k, v in index_data.items()}
         filtered_volumes = {k: (filt(v) if filt(v) else v) for k, v in volumes.items()}
@@ -1183,19 +1205,31 @@ class IndexPage:
         if stock_series_map:
             filtered_stock_map = {}
             for tk, series in stock_series_map.items():
-                filtered = [r for r in series if r["date"] >= start_date]
+                filtered = []
+                for r in series:
+                    rd = _to_date(r["date"])
+                    if rd is None or rd >= start_date:
+                        filtered.append({**r, "date": rd or r["date"]})
                 filtered_stock_map[tk] = filtered if filtered else series
         filtered_extra = None
         if extra_series:
             filtered_extra = {}
             for k, series in extra_series.items():
-                filtered = [r for r in series if r["date"] >= start_date]
+                filtered = []
+                for r in series:
+                    rd = _to_date(r["date"])
+                    if rd is None or rd >= start_date:
+                        filtered.append({**r, "date": rd or r["date"]})
                 filtered_extra[k] = filtered if filtered else series
         filtered_extra_vol = None
         if extra_volumes:
             filtered_extra_vol = {}
             for k, series in extra_volumes.items():
-                filtered = [r for r in series if r["date"] >= start_date]
+                filtered = []
+                for r in series:
+                    rd = _to_date(r["date"])
+                    if rd is None or rd >= start_date:
+                        filtered.append({**r, "date": rd or r["date"]})
                 filtered_extra_vol[k] = filtered if filtered else series
 
         return filtered_index, filtered_volumes, filtered_stock_map, filtered_extra, filtered_extra_vol

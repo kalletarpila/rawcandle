@@ -26,8 +26,59 @@ def build_index_plot(
     *,
     stock_series_map: Optional[Dict[str, IndexSeries]] = None,
     display_names: Optional[Dict[str, str]] = None,
-    pivot_window: int = 5,
+    pivot_window: int = 3,
 ) -> Tuple[go.Figure, Dict[str, str]]:
+    def _derive_ud_events(markers: List[Dict[str, object]]) -> List[Dict[str, object]]:
+        high_labels = {"H", "HH", "LH"}
+        low_labels = {"L", "HL", "LL"}
+        last_reset_idx: Optional[int] = None
+        prev_trend = "NEUTRAL"
+        events: List[Dict[str, object]] = []
+
+        for i, marker in enumerate(markers):
+            label = marker.get("label")
+            if label == "R":
+                last_reset_idx = i
+                prev_trend = "NEUTRAL"
+                continue
+            if label not in high_labels and label not in low_labels:
+                continue
+            start_idx = (last_reset_idx + 1) if last_reset_idx is not None else 0
+            view = [
+                m
+                for m in markers[start_idx : i + 1]
+                if m.get("label") in high_labels | low_labels
+            ]
+            highs = [m for m in view if m.get("label") in high_labels]
+            lows = [m for m in view if m.get("label") in low_labels]
+            last_high = highs[-1]["label"] if highs else None
+            last_low = lows[-1]["label"] if lows else None
+            if last_high == "HH" and last_low == "HL":
+                trend = "UP"
+            elif last_high == "LH" and last_low == "LL":
+                trend = "DOWN"
+            else:
+                trend = "NEUTRAL"
+            if trend != prev_trend:
+                if trend in ("UP", "DOWN"):
+                    events.append(
+                        {
+                            "date": marker.get("date"),
+                            "value": marker.get("value"),
+                            "label": "U" if trend == "UP" else "D",
+                        }
+                    )
+                elif trend == "NEUTRAL" and prev_trend in ("UP", "DOWN"):
+                    events.append(
+                        {
+                            "date": marker.get("date"),
+                            "value": marker.get("value"),
+                            "label": "N",
+                        }
+                    )
+            prev_trend = trend
+        return events
+
     fig = make_subplots(
         rows=2,
         cols=1,
@@ -93,15 +144,15 @@ def build_index_plot(
             for m in markers:
                 label = m["label"]
                 customdata.append((label, m["date"]))
-                # Värikoodaus: LL=punainen, HL=oranssi, HH=sininen, LH=vihreä, H=sininen, L=punainen
+                # Värikoodaus: LL=punainen, HL=vihreä, HH=sininen, LH=oranssi, H=sininen, L=punainen
                 if label == "LL":
                     colors.append("#dc2626")  # Punainen
                 elif label == "HL":
-                    colors.append("#f97316")  # Oranssi
+                    colors.append("#16a34a")  # Vihreä
                 elif label == "HH":
                     colors.append("#2563eb")  # Sininen
                 elif label == "LH":
-                    colors.append("#16a34a")  # Vihreä
+                    colors.append("#f97316")  # Oranssi
                 elif label == "H":
                     colors.append("#2563eb")  # Sininen (ensimmäinen high)
                 elif label == "L":
@@ -122,6 +173,19 @@ def build_index_plot(
                 row=1,
                 col=1,
             )
+            r_markers = [m for m in markers if m.get("label") == "R"]
+            ud_markers = _derive_ud_events(markers)
+            for m in r_markers + ud_markers:
+                fig.add_annotation(
+                    x=m["date"],
+                    y=m["value"],
+                    text=str(m["label"]),
+                    showarrow=False,
+                    yshift=20,
+                    font=dict(color="#000000", size=10),
+                    xref="x1",
+                    yref="y1",
+                )
         vol = volume_series.get(key, [])
         if vol and (key != "MARKET" or allow_market_volume):
             fig.add_trace(
@@ -153,7 +217,7 @@ def build_index_plot(
                 col=1,
             )
             stock_markers, _ = compute_dow_markers(
-                stock_series, window=pivot_window, use_high_low=True
+                stock_series, window=pivot_window, use_high_low=False
             )
             if stock_markers:
                 colors_stock = []
@@ -161,15 +225,15 @@ def build_index_plot(
                 for m in stock_markers:
                     lab = m["label"]
                     customdata_stock.append((lab, m["date"]))
-                    # Värikoodaus: LL=punainen, HL=oranssi, HH=sininen, LH=vihreä, H=sininen, L=punainen
+                    # Värikoodaus: LL=punainen, HL=vihreä, HH=sininen, LH=oranssi, H=sininen, L=punainen
                     if lab == "LL":
                         colors_stock.append("#dc2626")  # Punainen
                     elif lab == "HL":
-                        colors_stock.append("#f97316")  # Oranssi
+                        colors_stock.append("#16a34a")  # Vihreä
                     elif lab == "HH":
                         colors_stock.append("#2563eb")  # Sininen
                     elif lab == "LH":
-                        colors_stock.append("#16a34a")  # Vihreä
+                        colors_stock.append("#f97316")  # Oranssi
                     elif lab == "H":
                         colors_stock.append("#2563eb")  # Sininen (ensimmäinen high)
                     elif lab == "L":
@@ -190,6 +254,19 @@ def build_index_plot(
                     row=1,
                     col=1,
                 )
+                r_stock_markers = [m for m in stock_markers if m.get("label") == "R"]
+                ud_stock_markers = _derive_ud_events(stock_markers)
+                for m in r_stock_markers + ud_stock_markers:
+                    fig.add_annotation(
+                        x=m["date"],
+                        y=m["value"],
+                        text=str(m["label"]),
+                        showarrow=False,
+                        yshift=20,
+                        font=dict(color="#000000", size=10),
+                        xref="x1",
+                        yref="y1",
+                    )
             color_idx += 1
 
     # add stock date sets for rangebreak calculation

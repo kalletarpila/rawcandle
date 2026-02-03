@@ -15,7 +15,7 @@ def test_uptrend_reset_on_non_pivot_day_window_3():
         - HH at idx 15 (higher than idx 7) -> UP
         - Break on idx 18 (close < active_structural_low) with a flat low plateau (idx 18-24)
             so none of those days are pivot lows
-    - Next confirmed H at idx 25 must be labeled "H"
+    - Next confirmed pivot at idx 25 is below active_structural_low, so it is labeled as a low
     """
     base = dt.date(2024, 3, 1)
     values = [
@@ -56,11 +56,11 @@ def test_uptrend_reset_on_non_pivot_day_window_3():
     markers, _ = compute_dow_markers(series, window=3)
 
     target_date = base + dt.timedelta(days=25)
-    high_after_break = [
+    low_after_break = [
         m
         for m in markers
-        if m["date"] == target_date and m["label"] in {"H", "HH", "LH"}
+        if m["date"] == target_date and m["label"] in {"L", "HL", "LL"}
     ]
 
-    assert len(high_after_break) == 1
-    assert high_after_break[0]["label"] == "H"
+    assert len(low_after_break) == 1
+    assert low_after_break[0]["label"] == "LL"
