@@ -27,7 +27,7 @@ def test_uptrend_regime_reset():
             "date": dt.date(2024, 1, 10),
             "value": 90.0,
         },  # Breaks active_structural_low (98) -> reset
-        {"date": dt.date(2024, 1, 11), "value": 95.0},
+        {"date": dt.date(2024, 1, 11), "value": 90.0},  # confirmation
         {"date": dt.date(2024, 1, 12), "value": 100.0},
         {
             "date": dt.date(2024, 1, 13),
@@ -56,7 +56,7 @@ def test_downtrend_regime_reset():
 
     Scenario:
     - Build series that creates DOWN trend (LH + LL)
-    - Add a pivot where close > active_structural_low (breaking upwards)
+    - Add a pivot where close > active_structural_high (breaking upwards)
     - Next low pivot should be labeled 'L' (not HL/LL)
     """
     series = [
@@ -71,9 +71,9 @@ def test_downtrend_regime_reset():
         {"date": dt.date(2024, 1, 9), "value": 95.0},
         {
             "date": dt.date(2024, 1, 10),
-            "value": 100.0,
-        },  # Breaks active_structural_low (90) upwards -> reset
-        {"date": dt.date(2024, 1, 11), "value": 95.0},
+            "value": 110.0,
+        },  # Breaks active_structural_high (105) upwards
+        {"date": dt.date(2024, 1, 11), "value": 110.0},  # confirmation
         {"date": dt.date(2024, 1, 12), "value": 90.0},
         {
             "date": dt.date(2024, 1, 13),

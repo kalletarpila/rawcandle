@@ -120,6 +120,10 @@ def compute_dow_markers(
             if is_low:
                 pivots.append((i, "L", lows[i]))
 
+    pivots_by_idx: Dict[int, List[Tuple[str, float]]] = {}
+    for idx, kind, pivot_val in pivots:
+        pivots_by_idx.setdefault(idx, []).append((kind, pivot_val))
+
     markers: List[Dict] = []
     active_structural_high = None
     active_structural_low = None
@@ -131,6 +135,8 @@ def compute_dow_markers(
     EPS_PCT = 0.0001
     HIGH_LABELS = {"H", "HH", "LH"}
     LOW_LABELS = {"L", "HL", "LL"}
+    bos_down_count = 0
+    bos_up_count = 0
 
     def _trend_from_markers(
         markers_list: List[Dict],
@@ -155,9 +161,9 @@ def compute_dow_markers(
             trend_value = "NEUTRAL"
         return trend_value, last_high_label, last_low_label
 
-    for idx, kind, pivot_val in pivots:
-        val = values[idx] if values[idx] is not None else pivot_val
-        date = dates[idx]
+    for i in range(n):
+        val = values[i]
+        date = dates[i]
         prev_trend = trend
         trend, last_high_label, last_low_label = _trend_from_markers(markers)
 
@@ -174,26 +180,28 @@ def compute_dow_markers(
                     f"[CALL {call_id}] [MARKER] {scope} | {name} | {date} | {markers[-1]['label']} | price={val}"
                 )
 
-        if kind == "H" and active_structural_high is not None:
-            ref_price = active_structural_high[1]
-            if ref_price:
-                rel_diff = abs(pivot_val - ref_price) / ref_price
-                if rel_diff < MEANINGLESS_PCT:
-                    continue
-        if kind == "L" and active_structural_low is not None:
-            ref_price = active_structural_low[1]
-            if ref_price:
-                rel_diff = abs(pivot_val - ref_price) / ref_price
-                if rel_diff < MEANINGLESS_PCT:
-                    continue
+        if trend == "NEUTRAL":
+            bos_down_count = 0
+            bos_up_count = 0
 
-        # Regime-reset logic: check for regime death BEFORE processing pivot
-        if (
-            trend == "UP"
-            and active_structural_low is not None
-            and val < active_structural_low[1]
-        ):
-            # Uptrend regime broken: close breaks active_structural_low downwards
+        # Regime-reset logic: check for regime death on every bar BEFORE pivots
+        if trend == "UP" and active_structural_low is not None and val is not None:
+            if val < active_structural_low[1]:
+                bos_down_count += 1
+            else:
+                bos_down_count = 0
+        else:
+            bos_down_count = 0
+
+        if trend == "DOWN" and active_structural_high is not None and val is not None:
+            if val > active_structural_high[1]:
+                bos_up_count += 1
+            else:
+                bos_up_count = 0
+        else:
+            bos_up_count = 0
+
+        if trend == "UP" and bos_down_count == 2:
             if debug:
                 print(
                     f"[CALL {call_id}] [RESET] {scope} | {name} | {date} | trend={trend} | break_price={val}"
@@ -204,6 +212,9 @@ def compute_dow_markers(
                     f"[CALL {call_id}] [MARKER] {scope} | {name} | {date} | R | price={val}"
                 )
             active_structural_high = None
+            active_structural_low = None
+            bos_down_count = 0
+            bos_up_count = 0
             updated_trend, last_high_label, last_low_label = _trend_from_markers(
                 markers
             )
@@ -214,15 +225,11 @@ def compute_dow_markers(
                         f"[CALL {call_id}] [TREND] {scope} | {name} | {date} | {trend} → {updated_trend} | last_high={last_high_label} | last_low={last_low_label}"
                     )
             trend = updated_trend
-        elif (
-            trend == "DOWN"
-            and active_structural_low is not None
-            and val > active_structural_low[1]
-        ):
-            # Downtrend regime broken: close breaks active_structural_low upwards
+            continue
+        if trend == "DOWN" and bos_up_count == 2:
             if debug:
                 print(
-                    f"[CALL {call_id}] [RESET] {scope} | {name} | {date} | trend={trend} | break_price={val}"
+                    f"[CALL {call_id}] [RESET] {scope} | {name} | {date} | trend={trend} | break_price={val} | ash={active_structural_high[1]}"
                 )
             markers.append({"date": date, "value": val, "label": "R"})
             if debug:
@@ -231,6 +238,8 @@ def compute_dow_markers(
                 )
             active_structural_low = None
             active_structural_high = None
+            bos_down_count = 0
+            bos_up_count = 0
             updated_trend, last_high_label, last_low_label = _trend_from_markers(
                 markers
             )
@@ -241,59 +250,85 @@ def compute_dow_markers(
                         f"[CALL {call_id}] [TREND] {scope} | {name} | {date} | {trend} → {updated_trend} | last_high={last_high_label} | last_low={last_low_label}"
                     )
             trend = updated_trend
+            continue
 
-        effective_kind = kind
-        if kind == "L" and active_structural_high is not None:
-            if pivot_val >= active_structural_high[1] * (1 - EPS_PCT):
-                effective_kind = "H"
-        elif kind == "H" and active_structural_low is not None:
-            if pivot_val <= active_structural_low[1] * (1 + EPS_PCT):
-                effective_kind = "L"
+        pivots_here = pivots_by_idx.get(i)
+        if not pivots_here:
+            continue
 
-        if debug:
-            ash_price = active_structural_high[1] if active_structural_high else None
-            asl_price = active_structural_low[1] if active_structural_low else None
-            print(
-                f"[CALL {call_id}] [PIVOT_CTX] {scope} | {name} | {date} | kind={kind} effective={effective_kind} pivot_val={pivot_val} val={val} trend={trend} | ash={ash_price} | asl={asl_price}"
-            )
+        pivots_here_sorted = sorted(
+            pivots_here, key=lambda item: 0 if item[0] == "H" else 1
+        )
+        for kind, pivot_val in pivots_here_sorted:
+            if kind == "H" and active_structural_high is not None:
+                ref_price = active_structural_high[1]
+                if ref_price:
+                    rel_diff = abs(pivot_val - ref_price) / ref_price
+                    if rel_diff < MEANINGLESS_PCT:
+                        continue
+            if kind == "L" and active_structural_low is not None:
+                ref_price = active_structural_low[1]
+                if ref_price:
+                    rel_diff = abs(pivot_val - ref_price) / ref_price
+                    if rel_diff < MEANINGLESS_PCT:
+                        continue
 
-        if effective_kind == "H":
-            if active_structural_high is not None:
-                if pivot_val > active_structural_high[1]:
-                    label = "HH"
-                    active_structural_high = (date, pivot_val)  # HH päivittää
+            effective_kind = kind
+            if kind == "L" and active_structural_high is not None:
+                if pivot_val >= active_structural_high[1] * (1 - EPS_PCT):
+                    effective_kind = "H"
+            elif kind == "H" and active_structural_low is not None:
+                if pivot_val <= active_structural_low[1] * (1 + EPS_PCT):
+                    effective_kind = "L"
+
+            if debug:
+                ash_price = (
+                    active_structural_high[1] if active_structural_high else None
+                )
+                asl_price = active_structural_low[1] if active_structural_low else None
+                print(
+                    f"[CALL {call_id}] [PIVOT_CTX] {scope} | {name} | {date} | kind={kind} effective={effective_kind} pivot_val={pivot_val} val={val} trend={trend} | ash={ash_price} | asl={asl_price}"
+                )
+
+            if effective_kind == "H":
+                if active_structural_high is not None:
+                    if pivot_val > active_structural_high[1]:
+                        label = "HH"
+                        active_structural_high = (date, pivot_val)  # HH päivittää
+                    else:
+                        label = "LH"
+                        # LH EI päivitä active_structural_high
                 else:
-                    label = "LH"
-                    # LH EI päivitä active_structural_high
-            else:
-                label = "H"
-                active_structural_high = (date, pivot_val)
-        else:  # effective_kind == "L"
-            if active_structural_low is not None:
-                if pivot_val > active_structural_low[1]:
-                    label = "HL"
+                    label = "H"
+                    active_structural_high = (date, pivot_val)
+            else:  # effective_kind == "L"
+                if active_structural_low is not None:
+                    if pivot_val > active_structural_low[1]:
+                        label = "HL"
+                    else:
+                        label = "LL"
+                    # Molemmat HL ja LL päivittävät active_structural_low
+                    active_structural_low = (date, pivot_val)
                 else:
-                    label = "LL"
-                # Molemmat HL ja LL päivittävät active_structural_low
-                active_structural_low = (date, pivot_val)
-            else:
-                label = "L"
-                active_structural_low = (date, pivot_val)
+                    label = "L"
+                    active_structural_low = (date, pivot_val)
 
-        markers.append({"date": date, "value": val, "label": label})
-        if debug:
-            print(
-                f"[CALL {call_id}] [MARKER] {scope} | {name} | {date} | {label} | price={val}"
-            )
-        last_change_date = date
-        updated_trend, last_high_label, last_low_label = _trend_from_markers(markers)
-        if updated_trend != trend:
-            last_trend_change_date = date
+            markers.append({"date": date, "value": val, "label": label})
             if debug:
                 print(
-                    f"[CALL {call_id}] [TREND] {scope} | {name} | {date} | {trend} → {updated_trend} | last_high={last_high_label} | last_low={last_low_label}"
+                    f"[CALL {call_id}] [MARKER] {scope} | {name} | {date} | {label} | price={val}"
                 )
-        trend = updated_trend
+            last_change_date = date
+            updated_trend, last_high_label, last_low_label = _trend_from_markers(
+                markers
+            )
+            if updated_trend != trend:
+                last_trend_change_date = date
+                if debug:
+                    print(
+                        f"[CALL {call_id}] [TREND] {scope} | {name} | {date} | {trend} → {updated_trend} | last_high={last_high_label} | last_low={last_low_label}"
+                    )
+            trend = updated_trend
 
     if markers:
         trend, last_high_label, last_low_label = _trend_from_markers(markers)

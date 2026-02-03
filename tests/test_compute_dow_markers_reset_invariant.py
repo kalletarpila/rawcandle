@@ -36,7 +36,7 @@ def test_reset_does_not_reuse_old_structure_window_3():
         180,
         170,  # 16-18 (after HH)
         100,  # 19 reset break (below active_structural_low)
-        130,
+        100,  # 20 confirmation
         140,
         150,  # 20-22 (after break)
         220,  # 23 first post-reset H (exceeds old HH)

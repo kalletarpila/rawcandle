@@ -10,7 +10,7 @@ def test_reset_does_not_reuse_old_down_structure_window_3():
 
     Plan:
     - Pre-reset DOWN regime: H -> L -> LH -> LL
-    - Reset via close > active_structural_low
+    - Reset via close > active_structural_high
     - Post-reset: first pivot-low must be "L" (initial)
     - Then a new LH forms
     - Then next pivot-low is "LL" (relative to new low)
@@ -36,10 +36,10 @@ def test_reset_does_not_reuse_old_down_structure_window_3():
         92,
         96,
         100,  # 16-18 (after LL)
-        110,  # 19 reset break (close > active_structural_low)
-        104,
+        125,  # 19 reset break (close > active_structural_high)
+        125,  # 20 confirmation
         100,
-        96,  # 20-22 (after break)
+        96,  # 21-22 (after break)
         80,  # 23 first post-reset L
         88,
         92,

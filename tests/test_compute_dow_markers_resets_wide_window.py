@@ -38,7 +38,7 @@ def test_uptrend_regime_reset_window_3():
         107,
         104,  # 16-18 (after HH)
         90,  # 19 break (val < active_structural_low 97)
-        95,
+        90,  # 20 confirmation
         98,
         100,  # 20-22 (after break)
         108,  # 23 next H -> should be "H" after reset
@@ -96,10 +96,10 @@ def test_downtrend_regime_reset_window_3():
         90,
         92,
         94,  # 16-18 (after LL)
-        100,  # 19 break (val > active_structural_low 85)
-        96,
-        94,
-        92,  # 20-22 (after break)
+        110,  # 19 break (val > active_structural_high 105)
+        110,  # 20 confirmation
+        106,
+        104,  # 20-22 (after break)
         88,  # 23 next L -> should be "L" after reset
         92,
         94,
