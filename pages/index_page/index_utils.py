@@ -185,6 +185,7 @@ def compute_dow_markers(
             bos_up_count = 0
 
         # Regime-reset logic: check for regime death on every bar BEFORE pivots
+        prev_bos_down_count = bos_down_count
         if trend == "UP" and active_structural_low is not None and val is not None:
             if val < active_structural_low[1]:
                 bos_down_count += 1
@@ -192,7 +193,18 @@ def compute_dow_markers(
                 bos_down_count = 0
         else:
             bos_down_count = 0
+        if debug and bos_down_count != prev_bos_down_count:
+            if bos_down_count:
+                asl_price = active_structural_low[1] if active_structural_low else None
+                print(
+                    f"[CALL {call_id}] [BoS] UP-break counter incremented | date={date} | price={val} | asl={asl_price} | bos_down_count={bos_down_count}"
+                )
+            else:
+                print(
+                    f"[CALL {call_id}] [BoS] UP-break counter reset | date={date} | price={val}"
+                )
 
+        prev_bos_up_count = bos_up_count
         if trend == "DOWN" and active_structural_high is not None and val is not None:
             if val > active_structural_high[1]:
                 bos_up_count += 1
@@ -200,11 +212,24 @@ def compute_dow_markers(
                 bos_up_count = 0
         else:
             bos_up_count = 0
-
-        if trend == "UP" and bos_down_count == 2:
-            if debug:
+        if debug and bos_up_count != prev_bos_up_count:
+            if bos_up_count:
+                ash_price = (
+                    active_structural_high[1] if active_structural_high else None
+                )
                 print(
-                    f"[CALL {call_id}] [RESET] {scope} | {name} | {date} | trend={trend} | break_price={val}"
+                    f"[CALL {call_id}] [BoS] DOWN-break counter incremented | date={date} | price={val} | ash={ash_price} | bos_up_count={bos_up_count}"
+                )
+            else:
+                print(
+                    f"[CALL {call_id}] [BoS] DOWN-break counter reset | date={date} | price={val}"
+                )
+
+        if trend == "UP" and bos_down_count >= 2:
+            if debug:
+                asl_price = active_structural_low[1] if active_structural_low else None
+                print(
+                    f"[CALL {call_id}] [RESET] {scope} | {name} | {date} | trend={trend} | break_price={val} | asl={asl_price} | bos_down_count={bos_down_count}"
                 )
             markers.append({"date": date, "value": val, "label": "R"})
             if debug:
@@ -226,10 +251,13 @@ def compute_dow_markers(
                     )
             trend = updated_trend
             continue
-        if trend == "DOWN" and bos_up_count == 2:
+        if trend == "DOWN" and bos_up_count >= 2:
             if debug:
+                ash_price = (
+                    active_structural_high[1] if active_structural_high else None
+                )
                 print(
-                    f"[CALL {call_id}] [RESET] {scope} | {name} | {date} | trend={trend} | break_price={val} | ash={active_structural_high[1]}"
+                    f"[CALL {call_id}] [RESET] {scope} | {name} | {date} | trend={trend} | break_price={val} | ash={ash_price} | bos_up_count={bos_up_count}"
                 )
             markers.append({"date": date, "value": val, "label": "R"})
             if debug:
