@@ -7,7 +7,10 @@ IndexSeries = List[Dict[str, object]]
 
 
 def compute_dow_markers(
-    series: IndexSeries, window: int = 5, use_high_low: bool = False
+    series: IndexSeries,
+    window: int = 5,
+    use_high_low: bool = False,
+    sensitive_down_reset: bool = False,
 ) -> Tuple[List[Dict], str]:
     """
     Laske pivotit (HH/HL/LH/LL) ja trendiyhteenveto.
@@ -16,6 +19,7 @@ def compute_dow_markers(
         series: Datasarja (value tai high/low)
         window: Pivot-ikkuna (N)
         use_high_low: Jos True, käytä 'high' ja 'low' kenttiä, muuten 'value'
+        sensitive_down_reset: Jos True, päivitä ASH myös LH-pivotista DOWN-tilassa
 
     Returns:
         markers: lista dict-olioita (date, value, label)
@@ -340,6 +344,19 @@ def compute_dow_markers(
                 else:
                     label = "L"
                     active_structural_low = (date, pivot_val)
+
+            if (
+                label == "LH"
+                and sensitive_down_reset
+                and trend == "DOWN"
+                and active_structural_high is not None
+            ):
+                old_ash = active_structural_high[1]
+                active_structural_high = (date, pivot_val)
+                if debug:
+                    print(
+                        f"[CALL {call_id}] [SENSITIVE_DOWN] ASH updated on LH | date={date} | old_ash={old_ash} | new_ash={pivot_val}"
+                    )
 
             markers.append({"date": date, "value": val, "label": label})
             if debug:

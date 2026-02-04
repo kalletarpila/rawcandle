@@ -94,3 +94,60 @@ def test_downtrend_regime_reset():
     # Should be labeled 'L' (initial) not 'HL' or 'LL' because active_structural_low was reset
     assert len(low_after_break) == 1
     assert low_after_break[0]["label"] == "L"
+
+
+def test_sensitive_down_reset_default_off():
+    base = dt.date(2024, 2, 1)
+    values = [
+        100.0,
+        110.0,  # H
+        100.0,
+        90.0,  # L
+        100.0,
+        105.0,  # LH
+        95.0,
+        80.0,  # LL -> DOWN
+        100.0,
+        106.0,  # LH below original ASH (110)
+        100.0,
+        100.0,
+        107.0,  # two closes above 106 but below 110
+        107.0,
+    ]
+    series = [
+        {"date": base + dt.timedelta(days=i), "value": v} for i, v in enumerate(values)
+    ]
+
+    markers, _ = compute_dow_markers(series, window=2, sensitive_down_reset=False)
+
+    reset_markers = [m for m in markers if m["label"] == "R"]
+    assert not reset_markers
+
+
+def test_sensitive_down_reset_triggers():
+    base = dt.date(2024, 2, 1)
+    values = [
+        100.0,
+        110.0,  # H
+        100.0,
+        90.0,  # L
+        100.0,
+        105.0,  # LH
+        95.0,
+        80.0,  # LL -> DOWN
+        100.0,
+        106.0,  # LH below original ASH (110), updates ASH when sensitive
+        100.0,
+        100.0,
+        107.0,  # two closes above 106 but below 110
+        107.0,
+    ]
+    series = [
+        {"date": base + dt.timedelta(days=i), "value": v} for i, v in enumerate(values)
+    ]
+
+    markers, _ = compute_dow_markers(series, window=2, sensitive_down_reset=True)
+
+    reset_dates = [m["date"] for m in markers if m["label"] == "R"]
+    assert reset_dates
+    assert reset_dates[0] == base + dt.timedelta(days=13)
