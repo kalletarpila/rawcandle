@@ -289,7 +289,9 @@ class IndexPage:
                 [
                     ft.Checkbox(
                         value=ticker in self.selected_stocks,
-                        on_change=lambda e, tk=ticker: self._on_toggle_stock(tk, e.control.value),
+                        on_change=lambda e, tk=ticker: self._on_toggle_stock(
+                            tk, e.control.value
+                        ),
                     ),
                     ft.Text(ticker, size=14),
                 ],
@@ -323,7 +325,10 @@ class IndexPage:
                                 ),
                                 ft.Column(
                                     [
-                                        ft.Text("Viimeksi valitut:", weight=ft.FontWeight.BOLD),
+                                        ft.Text(
+                                            "Viimeksi valitut:",
+                                            weight=ft.FontWeight.BOLD,
+                                        ),
                                         self.quick_recent_row,
                                     ],
                                     spacing=4,
@@ -348,7 +353,9 @@ class IndexPage:
                     [
                         ft.Checkbox(
                             value=t in self.selected_stocks,
-                            on_change=lambda e, ticker=t: self._on_toggle_stock(ticker, e.control.value),
+                            on_change=lambda e, ticker=t: self._on_toggle_stock(
+                                ticker, e.control.value
+                            ),
                         ),
                         ft.Text(t, size=14),
                     ],
@@ -384,7 +391,9 @@ class IndexPage:
     def _save_recent_tickers(self):
         try:
             self.recent_file.parent.mkdir(parents=True, exist_ok=True)
-            self.recent_file.write_text(json.dumps(self._recent_tickers), encoding="utf-8")
+            self.recent_file.write_text(
+                json.dumps(self._recent_tickers), encoding="utf-8"
+            )
         except Exception:
             pass
 
@@ -440,8 +449,12 @@ class IndexPage:
 
     def _build_trend_tabs_card(self) -> ft.Container:
         # Placeholder; content replaced in _update_trend_tabs
-        self.trend_snapshot_table = trend_ui.create_snapshot_table(on_sort=self._on_snapshot_sort)
-        self.trend_chain_table = trend_ui.create_chain_table(on_sort=self._on_chain_sort)
+        self.trend_snapshot_table = trend_ui.create_snapshot_table(
+            on_sort=self._on_snapshot_sort
+        )
+        self.trend_chain_table = trend_ui.create_chain_table(
+            on_sort=self._on_chain_sort
+        )
         self.trend_interpretation_table = trend_ui.create_interpretation_table()
         placeholder_card = trend_ui.build_trend_card(
             self.trend_snapshot_table,
@@ -611,8 +624,12 @@ class IndexPage:
         chain_rows = trend_ui.chain_rows(chains)
         interp_rows = trend_ui.interpretation_rows(interpretations)
         # Rebuild tables to ensure headers/tooltips/sort are fresh
-        self.trend_snapshot_table = trend_ui.create_snapshot_table(on_sort=self._on_snapshot_sort)
-        self.trend_chain_table = trend_ui.create_chain_table(on_sort=self._on_chain_sort)
+        self.trend_snapshot_table = trend_ui.create_snapshot_table(
+            on_sort=self._on_snapshot_sort
+        )
+        self.trend_chain_table = trend_ui.create_chain_table(
+            on_sort=self._on_chain_sort
+        )
         self.trend_interpretation_table = trend_ui.create_interpretation_table()
         self.trend_snapshot_table.rows = snap_rows
         self.trend_chain_table.rows = chain_rows
@@ -639,11 +656,15 @@ class IndexPage:
             asc = e.ascending
             self._last_snapshot_sort = (col, asc)
             # rebuild rows with sort applied
-            snap_rows = self.trend_snapshot_table.rows if self.trend_snapshot_table else []
+            snap_rows = (
+                self.trend_snapshot_table.rows if self.trend_snapshot_table else []
+            )
+
             def sort_key(row: ft.DataRow):
                 cells = row.cells
                 val = cells[col].content.value if col < len(cells) else ""
                 return val
+
             sorted_rows = sorted(snap_rows, key=sort_key, reverse=not asc)
             if self.trend_snapshot_table:
                 self.trend_snapshot_table.sort_column_index = col
@@ -660,11 +681,15 @@ class IndexPage:
             col = e.column_index
             asc = e.ascending
             self._last_chain_sort = (col, asc)
-            chain_rows = list(self.trend_chain_table.rows) if self.trend_chain_table else []
+            chain_rows = (
+                list(self.trend_chain_table.rows) if self.trend_chain_table else []
+            )
+
             def sort_key(row: ft.DataRow):
                 cells = row.cells
                 val = cells[col].content.value if col < len(cells) else ""
                 return val
+
             sorted_rows = sorted(chain_rows, key=sort_key, reverse=not asc)
             if self.trend_chain_table:
                 self.trend_chain_table.sort_column_index = col
@@ -882,6 +907,7 @@ class IndexPage:
                         for series in index_data_full.values()
                         for row in series
                     ]
+
                     def _to_iso(x):
                         try:
                             if isinstance(x, dt.date):
@@ -889,7 +915,10 @@ class IndexPage:
                             return dt.date.fromisoformat(str(x)).isoformat()
                         except Exception:
                             return None
-                    all_index_dates_iso = [_to_iso(d) for d in all_index_dates if _to_iso(d)]
+
+                    all_index_dates_iso = [
+                        _to_iso(d) for d in all_index_dates if _to_iso(d)
+                    ]
                     min_date = min(all_index_dates_iso) if all_index_dates_iso else None
                     max_date = max(all_index_dates_iso) if all_index_dates_iso else None
                     for tk in selected_stocks:
@@ -931,7 +960,8 @@ class IndexPage:
                             continue
                         key = f"INDUSTRY:{sec}:{ind}"
                         industry_series_full[key] = [
-                            {"date": r["date"], "value": r["index_value"]} for r in rows_ind
+                            {"date": r["date"], "value": r["index_value"]}
+                            for r in rows_ind
                         ]
                         industry_vols_full[key] = [
                             {"date": r["date"], "volume": r["volume_sum"] or 0.0}
@@ -939,7 +969,9 @@ class IndexPage:
                         ]
                         latest = rows_ind[-1]
                         industry_counts[key] = latest["n_stocks"] or 0
-                        industry_display[key] = f"Industry {ind} (n={industry_counts[key]})"
+                        industry_display[key] = (
+                            f"Industry {ind} (n={industry_counts[key]})"
+                        )
 
                 # Range filter affects plot series; keep raw stock for trend calcs
                 vols_full = {
@@ -949,10 +981,18 @@ class IndexPage:
                     ]
                     for key, series in index_data_full.items()
                 }
-                index_data_full, vols_full, stock_series_overlay_map, industry_series_full, industry_vols_full = (
-                    self._apply_range_filter(
-                        index_data_full, vols_full, stock_series_overlay_map, industry_series_full, industry_vols_full
-                    )
+                (
+                    index_data_full,
+                    vols_full,
+                    stock_series_overlay_map,
+                    industry_series_full,
+                    industry_vols_full,
+                ) = self._apply_range_filter(
+                    index_data_full,
+                    vols_full,
+                    stock_series_overlay_map,
+                    industry_series_full,
+                    industry_vols_full,
                 )
 
                 # Prepare plotting data with checkbox respect
@@ -977,7 +1017,8 @@ class IndexPage:
                         }
                     if industry_series_full:
                         industry_series_full = {
-                            k: normalize_series_to_100(v) for k, v in industry_series_full.items()
+                            k: normalize_series_to_100(v)
+                            for k, v in industry_series_full.items()
                         }
 
             if not index_data:
@@ -994,7 +1035,9 @@ class IndexPage:
             fig, summaries = build_index_plot(
                 index_data,
                 volumes,
-                stock_series_map=stock_series_overlay_map if stock_series_overlay_map else None,
+                stock_series_map=(
+                    stock_series_overlay_map if stock_series_overlay_map else None
+                ),
                 display_names=industry_display if industry_display else None,
                 pivot_window=self.pivot_window,
             )
@@ -1014,7 +1057,9 @@ class IndexPage:
                 for tk, meta in stock_meta_map.items():
                     sector_txt = (meta[0] if meta else None) or "ei löydetty"
                     industry_txt = (meta[1] if meta else None) or "ei löydetty"
-                    stock_meta_parts.append(f"{tk} | Sektori: {sector_txt} | Industry: {industry_txt}")
+                    stock_meta_parts.append(
+                        f"{tk} | Sektori: {sector_txt} | Industry: {industry_txt}"
+                    )
                 summary_texts.extend(stock_meta_parts)
 
             self.dow_text.value = " | ".join(summary_texts)
@@ -1041,7 +1086,11 @@ class IndexPage:
                 index_data_full,
                 index_data,
                 stock_series_overlay_map if stock_series_overlay_map else None,
-                list(stock_series_overlay_map.keys()) if stock_series_overlay_map else None,
+                (
+                    list(stock_series_overlay_map.keys())
+                    if stock_series_overlay_map
+                    else None
+                ),
                 stock_meta_map,
                 industry_series_full if industry_series_full else None,
                 industry_vols_full if industry_vols_full else None,
@@ -1116,9 +1165,7 @@ class IndexPage:
                 series = stock_series_map.get(tk)
                 if not series:
                     continue
-                snap = trend_calc.compute_snapshot(
-                    series, "STOCK", tk, lookback, k
-                )
+                snap = trend_calc.compute_snapshot(series, "STOCK", tk, lookback, k)
                 snapshots.append(snap)
                 chain_lookback = len(series)
                 chains.extend(
@@ -1143,7 +1190,11 @@ class IndexPage:
             snapshots,
             chains,
             plotted_objects,
-            stock_sector=((stock_meta_map or {}).get(tickers[0], (None, None))[0] if tickers else None),
+            stock_sector=(
+                (stock_meta_map or {}).get(tickers[0], (None, None))[0]
+                if tickers
+                else None
+            ),
         )
         # update UI
         self._update_trend_tabs(snapshots, chains, interpretations)
@@ -1157,7 +1208,9 @@ class IndexPage:
         if data_full is None or data_plot is None:
             self._refresh_chart()
         else:
-            self._refresh_trends(data_full, data_plot, stock_map, tickers, stock_meta_map)
+            self._refresh_trends(
+                data_full, data_plot, stock_map, tickers, stock_meta_map
+            )
 
     def _apply_range_filter(
         self,
@@ -1177,7 +1230,9 @@ class IndexPage:
 
         if self.selected_range == "ALL":
             return index_data, volumes, stock_series_map, extra_series, extra_volumes
-        all_dates = [_to_date(row["date"]) for series in index_data.values() for row in series]
+        all_dates = [
+            _to_date(row["date"]) for series in index_data.values() for row in series
+        ]
         if not all_dates:
             return index_data, volumes, stock_series_map, extra_series, extra_volumes
         all_dates = [d for d in all_dates if d is not None]
@@ -1232,4 +1287,10 @@ class IndexPage:
                         filtered.append({**r, "date": rd or r["date"]})
                 filtered_extra_vol[k] = filtered if filtered else series
 
-        return filtered_index, filtered_volumes, filtered_stock_map, filtered_extra, filtered_extra_vol
+        return (
+            filtered_index,
+            filtered_volumes,
+            filtered_stock_map,
+            filtered_extra,
+            filtered_extra_vol,
+        )

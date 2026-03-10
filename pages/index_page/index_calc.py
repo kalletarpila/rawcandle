@@ -566,7 +566,7 @@ def fetch_index_series(
     where_sql = " AND ".join(where_clauses)
     level_sql = " OR ".join(level_filters)
     query = f"""
-        SELECT date, level, market, sector, index_value, volume_sum, n_stocks
+        SELECT date, level, market, sector, industry, index_value, volume_sum, n_stocks
         FROM index_daily
         WHERE ({level_sql}) AND {where_sql}
         ORDER BY date ASC
@@ -576,6 +576,18 @@ def fetch_index_series(
     result: Dict[str, List[IndexRow]] = {}
     for row in rows:
         key = row["sector"] if row["level"] == "sector" else "MARKET"
+        level = row["level"]
+        market = row["market"]
+        sector = row["sector"]
+        industry = row["industry"]
+        if level == "market":
+            name = market
+        elif level == "sector":
+            name = " | ".join([p for p in (market, sector) if p])
+        elif level == "industry":
+            name = " | ".join([p for p in (market, sector, industry) if p])
+        else:
+            name = market
         result.setdefault(key, []).append(
             {
                 "date": dt.date.fromisoformat(row["date"]),
@@ -583,6 +595,8 @@ def fetch_index_series(
                 "volume": float(row["volume_sum"] or 0.0),
                 "n": int(row["n_stocks"] or 0),
                 "level": row["level"],
+                "scope": level,
+                "name": name,
             }
         )
     return result
@@ -629,6 +643,8 @@ def fetch_stock_series(
                 "date": dt.date.fromisoformat(r["pvm"]),
                 "value": float(r["close"]),
                 "close": float(r["close"]),
+                "scope": "equity",
+                "name": ticker,
             }
             if r["high"] is not None:
                 row_dict["high"] = float(r["high"])

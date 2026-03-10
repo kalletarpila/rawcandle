@@ -2620,7 +2620,6 @@ class RawCandleApp:
     def __init__(self, page: ft.Page):
         self.page = page
         self.setup_page()
-        self.setup_routing()
         self.data_dir = os.path.join(os.path.dirname(__file__), "data")
         self.osakedata_db_path = os.path.join(self.data_dir, "osakedata.db")
         self.analysis_db_path = os.path.join(self.data_dir, "analysis.db")
@@ -2703,6 +2702,8 @@ class RawCandleApp:
         self.regression_view = RegressionView(self.page, self.create_appbar)
         self.reverse_view = ReverseView(self.page, self.create_appbar)
         self.index_view = IndexPage(self.page, self.create_appbar, self.active_market)
+
+        self.setup_routing()
 
         # Aloita etusivulta (only if page supports go)
         try:
