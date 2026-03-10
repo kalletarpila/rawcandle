@@ -262,10 +262,10 @@ def is_bullish_divergence(
         return None
 
     # Tarkista onko nykyinen indeksi paikallinen minimi hinnan suhteen
-    # (alempi kuin 7 päivää ennen ja jälkeen)
+    # käyttäen vain mennyttä dataa (ei look-ahead)
     window = 7
     start_check = max(0, idx - window)
-    end_check = min(len(df), idx + window + 1)
+    end_check = idx + 1
     local_min_prices = df.iloc[start_check:end_check][close_col]
 
     if current_price != local_min_prices.min():
@@ -286,7 +286,7 @@ def is_bullish_divergence(
     for i in range(search_end, search_start - 1, -1):
         # Tarkista onko paikallinen minimi
         i_start = max(0, i - window)
-        i_end = min(len(df), i + window + 1)
+        i_end = i + 1
         i_local_prices = df.iloc[i_start:i_end][close_col]
         i_price = df.iloc[i][close_col]
         i_rsi = df.iloc[i]["RSI"]
@@ -387,9 +387,10 @@ def is_bearish_divergence(
         return None
 
     # Tarkista onko nykyinen indeksi paikallinen maksimi hinnan suhteen
+    # käyttäen vain mennyttä dataa (ei look-ahead)
     window = 7
     start_check = max(0, idx - window)
-    end_check = min(len(df), idx + window + 1)
+    end_check = idx + 1
     local_max_prices = df.iloc[start_check:end_check][close_col]
 
     if current_price != local_max_prices.max():
@@ -410,7 +411,7 @@ def is_bearish_divergence(
     for i in range(search_end, search_start - 1, -1):
         # Tarkista onko paikallinen maksimi
         i_start = max(0, i - window)
-        i_end = min(len(df), i + window + 1)
+        i_end = i + 1
         i_local_prices = df.iloc[i_start:i_end][close_col]
         i_price = df.iloc[i][close_col]
         i_rsi = df.iloc[i]["RSI"]
