@@ -114,6 +114,14 @@ def recompute_divergence_for_ticker(
         if not computed_rows:
             return True, 0, ""
 
+        missing_dates = None
+        if only_missing:
+            missing_dates = {
+                str(date_value)
+                for date_value in work_df["pvm"].astype(str).tolist()
+                if str(date_value) not in existing_dates
+            }
+
         records = [
             (
                 str(row["date"]),
@@ -122,14 +130,19 @@ def recompute_divergence_for_ticker(
                 None if row["rsi"] is None else float(row["rsi"]),
             )
             for row in computed_rows
+            if missing_dates is None or str(row["date"]) in missing_dates
         ]
 
-        with sqlite3.connect(analysis_path) as conn_an:
-            conn_an.execute(
-                "DELETE FROM divergence_data WHERE ticker = ? AND date >= ?",
-                (ticker, write_start_date),
-            )
-            conn_an.commit()
+        if not records:
+            return True, 0, ""
+
+        if not only_missing:
+            with sqlite3.connect(analysis_path) as conn_an:
+                conn_an.execute(
+                    "DELETE FROM divergence_data WHERE ticker = ? AND date >= ?",
+                    (ticker, write_start_date),
+                )
+                conn_an.commit()
 
         db_manager = DatabaseManager(db_path=str(analysis_path))
         success = db_manager.save_divergence_batch(ticker, records)

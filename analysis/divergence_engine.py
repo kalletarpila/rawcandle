@@ -25,7 +25,15 @@ def compute_divergence_for_date(
     close_t = closes[idx]
     rsi_t = rsi_values[idx]
 
-    if idx + 1 < MIN_HISTORY_DAYS or rsi_t is None or close_t <= 0.0:
+    if idx + 1 < MIN_HISTORY_DAYS:
+        return {
+            "date": dates[idx],
+            "bullish_strength": 0.0,
+            "bearish_strength": 0.0,
+            "rsi": None,
+        }
+
+    if rsi_t is None or close_t <= 0.0:
         return {
             "date": dates[idx],
             "bullish_strength": 0.0,
