@@ -1,0 +1,318 @@
+import sqlite3
+
+import pandas as pd
+import pytest
+
+from analysis.candlestick_patterns import (
+    is_bearish_divergence,
+    is_bullish_divergence,
+)
+from analysis.run_analysis import run_candlestick_analysis
+
+
+def test_run_candlestick_analysis_prefers_divergence_rsi(tmp_path):
+    osake_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+
+    # Luo minimikanta kahdella päivädatalla (bearish -> bullish engulfing)
+    with sqlite3.connect(osake_db) as conn:
+        conn.execute(
+            """
+            CREATE TABLE osakedata (
+                osake TEXT,
+                pvm TEXT,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                volume INTEGER,
+                market TEXT
+            )
+            """
+        )
+        conn.executemany(
+            """
+            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ("TEST", "2026-01-01", 10.0, 11.0, 9.0, 9.0, 1_000, "usa"),
+                ("TEST", "2026-01-02", 8.5, 11.0, 8.0, 10.5, 1_200, "usa"),
+            ],
+        )
+
+    # Lisää RSI divergence_data-tauluun, jotta analyysi voi käyttää sitä lyhyessä ikkunassa
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            CREATE TABLE divergence_data (
+                ticker TEXT NOT NULL,
+                date TEXT NOT NULL,
+                bullish_strength REAL DEFAULT 0,
+                bearish_strength REAL DEFAULT 0,
+                rsi REAL,
+                PRIMARY KEY (ticker, date)
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO divergence_data (ticker, date, rsi) VALUES (?, ?, ?)",
+            ("TEST", "2026-01-02", 55.5),
+        )
+
+    results = run_candlestick_analysis(
+        str(osake_db),
+        "TEST",
+        patterns=["Bullish Engulfing"],
+        start_date="2026-01-01",
+        end_date="2026-01-02",
+        progress_callback=None,
+        downtrend_filter=False,  # pieni datasetti -> ohita laskutrendi-ehto
+        min_decline_percent=3.0,
+        use_ma_filter=False,
+        use_volume_filter=False,
+        analysis_db_path=str(analysis_db),
+    )
+
+    key = "TEST|2026-01-02"
+    assert results and key in results
+    assert results[key][0]["rsi14"] == pytest.approx(55.5)
+
+
+def test_bullish_divergence_no_lookahead_uses_only_past_window():
+    idx = 40
+    close = [160.0 - i for i in range(60)]
+    close[30:42] = [120.0, 119.0, 118.0, 117.0, 116.0, 115.0, 114.0, 113.0, 112.0, 111.0, 110.0, 109.0]
+    rsi = [45.0 for _ in range(60)]
+    rsi[37] = 20.0
+    rsi[40] = 30.0
+
+    df = pd.DataFrame(
+        {
+            "pvm": pd.date_range("2025-01-01", periods=60, freq="D"),
+            "Close": close,
+            "RSI": rsi,
+        }
+    )
+
+    result = is_bullish_divergence(df, idx=idx, close_col="Close")
+    assert result is not None
+    assert result["found"] is True
+
+
+def test_bearish_divergence_no_lookahead_uses_only_past_window():
+    idx = 40
+    close = [80.0 + i for i in range(60)]
+    close[30:42] = [100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0, 109.0, 110.0, 111.0]
+    rsi = [55.0 for _ in range(60)]
+    rsi[37] = 70.0
+    rsi[40] = 60.0
+
+    df = pd.DataFrame(
+        {
+            "pvm": pd.date_range("2025-01-01", periods=60, freq="D"),
+            "Close": close,
+            "RSI": rsi,
+        }
+    )
+
+    result = is_bearish_divergence(df, idx=idx, close_col="Close")
+    assert result is not None
+    assert result["found"] is True
+
+
+def _create_candles_test_dbs(tmp_path):
+    osake_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+
+    with sqlite3.connect(osake_db) as conn:
+        conn.execute(
+            """
+            CREATE TABLE osakedata (
+                osake TEXT,
+                pvm TEXT,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                volume INTEGER,
+                market TEXT
+            )
+            """
+        )
+        conn.executemany(
+            """
+            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ("TEST", "2026-02-01", 10.0, 11.0, 9.0, 9.0, 1_000, "usa"),
+                ("TEST", "2026-02-02", 8.5, 11.0, 8.0, 10.5, 1_200, "usa"),
+            ],
+        )
+
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            CREATE TABLE divergence_data (
+                ticker TEXT NOT NULL,
+                date TEXT NOT NULL,
+                bullish_strength REAL DEFAULT 0,
+                bearish_strength REAL DEFAULT 0,
+                rsi REAL,
+                PRIMARY KEY (ticker, date)
+            )
+            """
+        )
+
+    return osake_db, analysis_db
+
+
+def test_run_candlestick_analysis_uses_db_backed_bullish_divergence(tmp_path):
+    osake_db, analysis_db = _create_candles_test_dbs(tmp_path)
+
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO divergence_data (ticker, date, bullish_strength, bearish_strength, rsi)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("TEST", "2026-02-02", 0.62, 0.0, 55.5),
+        )
+
+    results = run_candlestick_analysis(
+        str(osake_db),
+        "TEST",
+        patterns=["Bullish Divergence"],
+        start_date="2026-02-01",
+        end_date="2026-02-02",
+        progress_callback=None,
+        downtrend_filter=False,
+        min_decline_percent=3.0,
+        use_ma_filter=False,
+        use_volume_filter=False,
+        analysis_db_path=str(analysis_db),
+    )
+
+    key = "TEST|2026-02-02"
+    assert results and key in results
+    assert results[key][0]["pattern"] == "Bullish Divergence"
+    assert results[key][0]["strength"] == pytest.approx(0.62)
+    assert results[key][0]["rsi14"] == pytest.approx(55.5)
+
+
+def test_run_candlestick_analysis_skips_missing_db_bullish_divergence(tmp_path):
+    osake_db, analysis_db = _create_candles_test_dbs(tmp_path)
+
+    results = run_candlestick_analysis(
+        str(osake_db),
+        "TEST",
+        patterns=["Bullish Divergence"],
+        start_date="2026-02-01",
+        end_date="2026-02-02",
+        progress_callback=None,
+        downtrend_filter=False,
+        min_decline_percent=3.0,
+        use_ma_filter=False,
+        use_volume_filter=False,
+        analysis_db_path=str(analysis_db),
+    )
+
+    assert results == {}
+
+
+def test_run_candlestick_analysis_forms_combo_from_db_divergence(tmp_path):
+    osake_db, analysis_db = _create_candles_test_dbs(tmp_path)
+
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO divergence_data (ticker, date, bullish_strength, bearish_strength, rsi)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("TEST", "2026-02-02", 0.62, 0.0, 55.5),
+        )
+
+    results = run_candlestick_analysis(
+        str(osake_db),
+        "TEST",
+        patterns=["Bullish Engulfing", "Bullish Divergence"],
+        start_date="2026-02-01",
+        end_date="2026-02-02",
+        progress_callback=None,
+        downtrend_filter=False,
+        min_decline_percent=3.0,
+        use_ma_filter=False,
+        use_volume_filter=False,
+        analysis_db_path=str(analysis_db),
+    )
+
+    key = "TEST|2026-02-02"
+    assert results and key in results
+    assert len(results[key]) == 2
+    assert any(item["pattern"] == "BullDiv & Bullish Engulfing" for item in results[key])
+    assert any(item["pattern"] == "Bullish Divergence" for item in results[key])
+
+
+def test_run_candlestick_analysis_does_not_use_legacy_bullish_divergence(tmp_path, monkeypatch):
+    osake_db, analysis_db = _create_candles_test_dbs(tmp_path)
+
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO divergence_data (ticker, date, bullish_strength, bearish_strength, rsi)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("TEST", "2026-02-02", 0.62, 0.0, 55.5),
+        )
+
+    monkeypatch.setattr(
+        "analysis.run_analysis.is_bullish_divergence",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("legacy divergence should not be called")),
+    )
+
+    results = run_candlestick_analysis(
+        str(osake_db),
+        "TEST",
+        patterns=["Bullish Divergence"],
+        start_date="2026-02-01",
+        end_date="2026-02-02",
+        progress_callback=None,
+        downtrend_filter=False,
+        min_decline_percent=3.0,
+        use_ma_filter=False,
+        use_volume_filter=False,
+        analysis_db_path=str(analysis_db),
+    )
+
+    key = "TEST|2026-02-02"
+    assert results and key in results
+    assert results[key][0]["pattern"] == "Bullish Divergence"
+
+
+def test_run_candlestick_analysis_candle_only_behavior_unchanged(tmp_path, monkeypatch):
+    osake_db, analysis_db = _create_candles_test_dbs(tmp_path)
+
+    monkeypatch.setattr(
+        "analysis.run_analysis.is_bullish_divergence",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("legacy divergence should not be called")),
+    )
+
+    results = run_candlestick_analysis(
+        str(osake_db),
+        "TEST",
+        patterns=["Bullish Engulfing"],
+        start_date="2026-02-01",
+        end_date="2026-02-02",
+        progress_callback=None,
+        downtrend_filter=False,
+        min_decline_percent=3.0,
+        use_ma_filter=False,
+        use_volume_filter=False,
+        analysis_db_path=str(analysis_db),
+    )
+
+    key = "TEST|2026-02-02"
+    assert results and key in results
+    assert len(results[key]) == 1
+    assert results[key][0]["pattern"] == "Bullish Engulfing"

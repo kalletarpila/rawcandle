@@ -105,6 +105,50 @@ def _load_bullish_divergence_dates(ticker: str, analysis_db_path: str) -> set[st
         return set()
 
 
+def _load_divergence_snapshot(
+    ticker: str, analysis_db_path: str, start_date: str | None = None, end_date: str | None = None
+) -> tuple[dict[str, float], dict[str, float | None]]:
+    """
+    Load bullish divergence strengths and RSI values from divergence_data for the candles flow.
+    """
+    if not ticker or not analysis_db_path:
+        return {}, {}
+
+    try:
+        db_path = Path(analysis_db_path)
+        if not db_path.exists():
+            return {}, {}
+
+        with sqlite3.connect(db_path) as conn:
+            query = """
+                SELECT date, bullish_strength, rsi
+                FROM divergence_data
+                WHERE ticker = ?
+            """
+            params = [ticker]
+            if start_date and end_date:
+                query += " AND date >= ? AND date <= ?"
+                params += [start_date, end_date]
+            elif start_date:
+                query += " AND date >= ?"
+                params.append(start_date)
+            elif end_date:
+                query += " AND date <= ?"
+                params.append(end_date)
+
+            rows = conn.execute(query, params).fetchall()
+
+        bullish_strength_map: dict[str, float] = {}
+        rsi_map: dict[str, float | None] = {}
+        for date_value, bullish_strength, rsi in rows:
+            date_key = str(date_value)
+            bullish_strength_map[date_key] = float(bullish_strength or 0.0)
+            rsi_map[date_key] = None if rsi is None else float(rsi)
+        return bullish_strength_map, rsi_map
+    except Exception:
+        return {}, {}
+
+
 def run_candlestick_analysis(
     db_path: str,
     ticker: str,
@@ -202,28 +246,13 @@ def run_candlestick_analysis(
         df["pvm"] = pd.to_datetime(df["pvm"])
         df = df.sort_values("pvm").reset_index(drop=True)
 
+    bullish_divergence_map, divergence_rsi_map = _load_divergence_snapshot(
+        ticker, analysis_db_path, s_iso, e_iso
+    )
+
     # Täytä RSI ensisijaisesti divergence_data-taulusta, muutoin laske
-    rsi_map = {}
-    if analysis_db_path and os.path.exists(analysis_db_path):
-        try:
-            with sqlite3.connect(analysis_db_path) as conn:
-                rsi_query = "SELECT date, rsi FROM divergence_data WHERE ticker = ?"
-                rsi_params = [ticker]
-                if s_iso and e_iso:
-                    rsi_query += " AND date >= ? AND date <= ?"
-                    rsi_params += [s_iso, e_iso]
-                elif s_iso:
-                    rsi_query += " AND date >= ?"
-                    rsi_params.append(s_iso)
-                elif e_iso:
-                    rsi_query += " AND date <= ?"
-                    rsi_params.append(e_iso)
-                rsi_map = dict(conn.execute(rsi_query, rsi_params).fetchall())
-            if rsi_map:
-                df["RSI"] = df["pvm"].dt.strftime("%Y-%m-%d").map(rsi_map)
-        except Exception:
-            # Jos luku epäonnistuu, lasketaan RSI alla normaalisti
-            rsi_map = {}
+    if divergence_rsi_map:
+        df["RSI"] = df["pvm"].dt.strftime("%Y-%m-%d").map(divergence_rsi_map)
 
     # Laske puuttuvat RSI-arvot (tai kaikki, jos ei löytynyt valmiita)
     if "RSI" not in df.columns or df["RSI"].isna().any():
@@ -234,7 +263,9 @@ def run_candlestick_analysis(
         else:
             df["RSI"] = calc_rsi
     df = df.sort_values("pvm").reset_index(drop=True)
-    divergence_dates = _load_bullish_divergence_dates(ticker, analysis_db_path)
+    divergence_dates = {
+        date_value for date_value, strength in bullish_divergence_map.items() if strength > 0
+    }
 
     # Lisää apufunktiot downtrend-tarkistukseen
     from statistics import mean
@@ -437,22 +468,12 @@ def run_candlestick_analysis(
                 )
 
         if "Bullish Divergence" in patterns:
-            bull_div = is_bullish_divergence(
-                df,
-                idx=i,
-                lookback_days=30,
-                min_rsi_gain=3.0,
-                min_days_between=3,
-                close_col="Close",
-            )
-            if bull_div and bull_div.get("found"):
-                strength = bull_div.get("strength", 1.0)
+            strength = bullish_divergence_map.get(current_date, 0.0)
+            if strength > 0:
                 found.append(
                     {
                         "pattern": "Bullish Divergence",
                         "strength": strength,
-                        "price_change": bull_div.get("price_change"),
-                        "rsi_change": bull_div.get("rsi_change"),
                     }
                 )
                 if logger:
