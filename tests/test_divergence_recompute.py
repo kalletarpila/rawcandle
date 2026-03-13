@@ -82,22 +82,18 @@ def test_recompute_divergence_only_missing_writes_only_missing_tail(
     dates = divergence_dbs["dates"]
     _seed_divergence_rows(divergence_dbs["analysis_path"], ticker, dates[:90])
 
-    def fake_calculate_rsi(df, period=14, close_col="close"):
-        work = df.copy()
-        work["RSI"] = [float(i + 1) for i in range(len(work))]
-        return work
-
     monkeypatch.setattr(
-        "analysis.divergence_recompute.calculate_rsi",
-        fake_calculate_rsi,
-    )
-    monkeypatch.setattr(
-        "analysis.divergence_recompute.is_bullish_divergence",
-        lambda *args, **kwargs: None,
-    )
-    monkeypatch.setattr(
-        "analysis.divergence_recompute.is_bearish_divergence",
-        lambda *args, **kwargs: None,
+        "analysis.divergence_recompute.compute_divergence_series",
+        lambda df, start_date=None: [
+            {
+                "date": row["pvm"],
+                "bullish_strength": 0.0,
+                "bearish_strength": 0.0,
+                "rsi": float(idx + 1),
+            }
+            for idx, row in enumerate(df.to_dict("records"))
+            if start_date is None or str(row["pvm"]) >= start_date
+        ],
     )
 
     success, rows_written, err = recompute_divergence_for_ticker(
@@ -164,11 +160,6 @@ def test_recompute_divergence_only_missing_is_noop_when_nothing_missing(
     dates = divergence_dbs["dates"]
     _seed_divergence_rows(divergence_dbs["analysis_path"], ticker, dates)
 
-    monkeypatch.setattr(
-        "analysis.divergence_recompute.calculate_rsi",
-        lambda df, period=14, close_col="close": df.assign(RSI=1.0),
-    )
-
     success, rows_written, err = recompute_divergence_for_ticker(
         ticker,
         osakedata_path=divergence_dbs["osakedata_path"],
@@ -195,22 +186,18 @@ def test_recompute_divergence_full_recompute_rewrites_entire_history(
     dates = divergence_dbs["dates"]
     _seed_divergence_rows(divergence_dbs["analysis_path"], ticker, dates[:90])
 
-    def fake_calculate_rsi(df, period=14, close_col="close"):
-        work = df.copy()
-        work["RSI"] = [float(1000 + i) for i in range(len(work))]
-        return work
-
     monkeypatch.setattr(
-        "analysis.divergence_recompute.calculate_rsi",
-        fake_calculate_rsi,
-    )
-    monkeypatch.setattr(
-        "analysis.divergence_recompute.is_bullish_divergence",
-        lambda *args, **kwargs: None,
-    )
-    monkeypatch.setattr(
-        "analysis.divergence_recompute.is_bearish_divergence",
-        lambda *args, **kwargs: None,
+        "analysis.divergence_recompute.compute_divergence_series",
+        lambda df, start_date=None: [
+            {
+                "date": row["pvm"],
+                "bullish_strength": 0.0,
+                "bearish_strength": 0.0,
+                "rsi": float(1000 + idx),
+            }
+            for idx, row in enumerate(df.to_dict("records"))
+            if start_date is None or str(row["pvm"]) >= start_date
+        ],
     )
 
     success, rows_written, err = recompute_divergence_for_ticker(

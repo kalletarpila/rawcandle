@@ -170,97 +170,25 @@ def calculate_and_save_divergences(
     Returns:
         True jos onnistui
     """
-    import sqlite3
-    import pandas as pd
-    from analysis.candlestick_patterns import (
-        calculate_rsi,
-        is_bullish_divergence,
-        is_bearish_divergence,
-    )
-    from analysis.database_manager import DatabaseManager
+    from analysis.divergence_recompute import recompute_divergence_for_ticker
 
     # Normalisoi ticker: isot kirjaimet, trimmattu
     ticker = (ticker or "").strip().upper()
 
     try:
-        # Lue data
-        with sqlite3.connect(osakedata_db_path) as conn:
-            df = pd.read_sql_query(
-                "SELECT pvm, close FROM osakedata WHERE osake = ? ORDER BY pvm",
-                conn,
-                params=[ticker],
-            )
-
-        if df.empty:
-            print(f"⚠️ Ei dataa tickerille {ticker}")
-            return False
-
-        # Laske RSI
-        df = calculate_rsi(df, period=14, close_col="close")
-
-        if "RSI" not in df.columns:
-            print(f"⚠️ RSI-laskenta epäonnistui tickerille {ticker}")
-            return False
-
-        # Laske divergenssit kaikille päiville
-        divergence_records = []
-
-        for idx in range(len(df)):
-            date = str(df.iloc[idx]["pvm"])
-            rsi = df.iloc[idx]["RSI"]
-
-            bullish_strength = 0.0
-            bearish_strength = 0.0
-
-            # Tarvitaan vähintään 30 päivää historiaa divergenssien tunnistukseen
-            if idx >= 30 and not pd.isna(rsi):
-                # Bullish divergence
-                bullish_result = is_bullish_divergence(
-                    df,
-                    idx=idx,
-                    lookback_days=30,
-                    min_rsi_gain=3.0,
-                    min_days_between=3,
-                    close_col="close",
-                )
-
-                if bullish_result and bullish_result.get("found"):
-                    bullish_strength = bullish_result.get("strength", 1.0)
-
-                # Bearish divergence (vain jos ei bullish)
-                elif not bullish_strength:
-                    bearish_result = is_bearish_divergence(
-                        df,
-                        idx=idx,
-                        lookback_days=30,
-                        min_rsi_drop=3.0,
-                        min_days_between=3,
-                        close_col="close",
-                    )
-
-                    if bearish_result and bearish_result.get("found"):
-                        bearish_strength = bearish_result.get("strength", 1.0)
-
-            divergence_records.append(
-                (
-                    date,
-                    bullish_strength,
-                    bearish_strength,
-                    rsi if not pd.isna(rsi) else None,
-                )
-            )
-
-        # Tallenna tietokantaan
-        db_manager = DatabaseManager(db_path="data/analysis.db")
-        success = db_manager.save_divergence_batch(ticker, divergence_records)
-        db_manager.close()
-
+        success, rows_written, err = recompute_divergence_for_ticker(
+            ticker,
+            osakedata_path=osakedata_db_path,
+            analysis_path="data/analysis.db",
+            only_missing=False,
+        )
         if success:
             print(
-                f"✅ Tallennettu {len(divergence_records)} divergenssipäivää tickerille {ticker}"
+                f"✅ Tallennettu {rows_written} divergenssipäivää tickerille {ticker}"
             )
-
-        return success
+            return True
+        print(f"⚠️ Divergenssien laskenta epäonnistui tickerille {ticker}: {err}")
+        return False
 
     except Exception as e:
         print(f"❌ Divergenssien laskenta epäonnistui tickerille {ticker}: {e}")

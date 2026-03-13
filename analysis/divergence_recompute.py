@@ -6,18 +6,12 @@ from typing import Tuple
 
 import pandas as pd
 
-from analysis.candlestick_patterns import (
-    calculate_rsi,
-    is_bullish_divergence,
-    is_bearish_divergence,
-)
 from analysis.database_manager import DatabaseManager
+from .divergence_engine import compute_divergence_series
+from .divergence_v1 import CANDIDATE_WINDOW, LOOKBACK_DAYS, MIN_HISTORY_DAYS, RSI_PERIOD
 
-RSI_PERIOD = 14
-DIVERGENCE_LOOKBACK_DAYS = 30
-TREND_LOOKBACK_DAYS = 10
-MIN_DAYS_BETWEEN = 3
-RECALC_CONTEXT_DAYS = RSI_PERIOD + DIVERGENCE_LOOKBACK_DAYS + TREND_LOOKBACK_DAYS + 10
+
+RECALC_CONTEXT_ROWS = MIN_HISTORY_DAYS + LOOKBACK_DAYS + CANDIDATE_WINDOW + RSI_PERIOD
 
 
 def _load_existing_divergence_dates(
@@ -30,7 +24,7 @@ def _load_existing_divergence_dates(
                 "SELECT date FROM divergence_data WHERE ticker = ?",
                 (ticker,),
             )
-            return {row[0] for row in cur.fetchall() if row and row[0]}
+            return {str(row[0]) for row in cur.fetchall() if row and row[0]}
     except Exception:
         return set()
 
@@ -82,7 +76,7 @@ def _resolve_recompute_window(
         return None, None
 
     first_missing_idx = min(missing_indices)
-    recalc_start_idx = max(0, first_missing_idx - RECALC_CONTEXT_DAYS)
+    recalc_start_idx = max(0, first_missing_idx - RECALC_CONTEXT_ROWS)
     write_start_date = str(df.iloc[first_missing_idx]["pvm"])
     return df.iloc[recalc_start_idx:].copy(), write_start_date
 
@@ -112,60 +106,23 @@ def recompute_divergence_for_ticker(
         existing_dates = (
             _load_existing_divergence_dates(analysis_path, ticker) if only_missing else set()
         )
-        work_df, write_start_date = _resolve_recompute_window(
-            df, existing_dates, only_missing
-        )
+        work_df, write_start_date = _resolve_recompute_window(df, existing_dates, only_missing)
         if work_df is None or write_start_date is None:
             return True, 0, ""
 
-        work_df = calculate_rsi(work_df, period=RSI_PERIOD, close_col="close")
-        if "RSI" not in work_df.columns:
-            return False, 0, "RSI-laskenta epäonnistui"
-
-        records = []
-        for idx in range(len(work_df)):
-            date = str(work_df.iloc[idx]["pvm"])
-            if date < write_start_date:
-                continue
-
-            rsi = work_df.iloc[idx]["RSI"]
-            bullish_strength = 0.0
-            bearish_strength = 0.0
-
-            if idx >= DIVERGENCE_LOOKBACK_DAYS and not pd.isna(rsi):
-                bull = is_bullish_divergence(
-                    work_df,
-                    idx=idx,
-                    lookback_days=DIVERGENCE_LOOKBACK_DAYS,
-                    min_rsi_gain=3.0,
-                    min_days_between=MIN_DAYS_BETWEEN,
-                    close_col="close",
-                )
-                if bull and bull.get("found"):
-                    bullish_strength = bull.get("strength", 1.0)
-                elif not bullish_strength:
-                    bear = is_bearish_divergence(
-                        work_df,
-                        idx=idx,
-                        lookback_days=DIVERGENCE_LOOKBACK_DAYS,
-                        min_rsi_drop=3.0,
-                        min_days_between=MIN_DAYS_BETWEEN,
-                        close_col="close",
-                    )
-                    if bear and bear.get("found"):
-                        bearish_strength = bear.get("strength", 1.0)
-
-            records.append(
-                (
-                    date,
-                    bullish_strength,
-                    bearish_strength,
-                    rsi if not pd.isna(rsi) else None,
-                )
-            )
-
-        if not records:
+        computed_rows = compute_divergence_series(work_df, start_date=write_start_date)
+        if not computed_rows:
             return True, 0, ""
+
+        records = [
+            (
+                str(row["date"]),
+                float(row["bullish_strength"] or 0.0),
+                float(row["bearish_strength"] or 0.0),
+                None if row["rsi"] is None else float(row["rsi"]),
+            )
+            for row in computed_rows
+        ]
 
         with sqlite3.connect(analysis_path) as conn_an:
             conn_an.execute(
