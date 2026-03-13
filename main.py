@@ -3768,13 +3768,6 @@ Virheet: {error_count}"""
                                                         disabled=False,
                                                         tooltip="Näytä osakkeen historiatiedot kannasta",
                                                     ),
-                                                    ft.ElevatedButton(
-                                                        "Hae ja tallenna tiedot tiedostosta",
-                                                        icon=ft.Icons.FILE_DOWNLOAD,
-                                                        on_click=self.fetch_and_save_from_file,
-                                                        disabled=False,
-                                                        tooltip="Lataa osakkeiden tiedot tiedostosta ja tallenna tietokantaan",
-                                                    ),
                                                 ],
                                                 alignment=ft.MainAxisAlignment.CENTER,
                                                 spacing=10,
