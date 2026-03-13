@@ -581,7 +581,9 @@ class ResultsGenerator:
             pattern = finding["pattern"]
             signal_strength = finding["signal_strength"]
             rsi14_from_db = finding.get("rsi14")
-            RSI14_t0 = float(rsi14_from_db) if rsi14_from_db is not None else None
+            finding_rsi14_t0 = (
+                float(rsi14_from_db) if rsi14_from_db is not None else None
+            )
 
             # Tarkista onko ticker indeksi
             is_index = ticker.startswith("^")
@@ -1188,6 +1190,13 @@ class ResultsGenerator:
                     except (TypeError, ValueError):
                         continue
 
+            divergence_rsi_t0 = rsi_values_by_offset.get(0)
+            RSI14_t0 = (
+                divergence_rsi_t0
+                if divergence_rsi_t0 is not None
+                else finding_rsi14_t0
+            )
+
             rsi_t0_value = (
                 RSI14_t0 if RSI14_t0 is not None else rsi_values_by_offset.get(0)
             )
@@ -1203,7 +1212,6 @@ class ResultsGenerator:
 
             if BullDiv_recent_strength > 0:
                 bullish_divergence = BullDiv_recent_strength
-                bearish_divergence = 0.0
             else:
                 bullish_divergence = 0.0
 

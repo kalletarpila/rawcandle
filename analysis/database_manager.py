@@ -1328,31 +1328,6 @@ class DatabaseManager:
 
             placeholders = ",".join("?" * len(dates))
             query = f"""
-                SELECT date, pattern, signal_strength, rsi14
-                FROM analysis_findings
-                WHERE ticker = ? AND date IN ({placeholders})
-                AND pattern IN ('Bullish Divergence','Bearish Divergence')
-            """
-            cursor.execute(query, [ticker] + dates)
-            rows = cursor.fetchall()
-            records: dict[str, dict[str, float]] = {}
-            for date, pattern, strength, rsi in rows:
-                entry = records.setdefault(
-                    date, {"bullish_strength": 0.0, "bearish_strength": 0.0, "rsi": rsi}
-                )
-                if pattern == "Bullish Divergence":
-                    entry["bullish_strength"] = strength or 0.0
-                elif pattern == "Bearish Divergence":
-                    entry["bearish_strength"] = strength or 0.0
-                if rsi is not None:
-                    entry["rsi"] = rsi
-
-            if records:
-                return records
-
-            # Fallback to divergence_data for backward compatibility
-            placeholders = ",".join("?" * len(dates))
-            query = f"""
                 SELECT date, bullish_strength, bearish_strength, rsi
                 FROM divergence_data
                 WHERE ticker = ? AND date IN ({placeholders})

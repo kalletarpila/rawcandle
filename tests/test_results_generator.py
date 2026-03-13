@@ -274,6 +274,44 @@ class TestResultsGeneratorBasic(unittest.TestCase):
             finding, stock_df, ticker, "usa"
         )
 
+    def _insert_divergence_row(
+        self,
+        ticker: str,
+        date: str,
+        bullish_strength: float = 0.0,
+        bearish_strength: float = 0.0,
+        rsi: float | None = None,
+    ) -> None:
+        conn = self.db_manager.get_connection()
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO divergence_data
+            (ticker, date, bullish_strength, bearish_strength, rsi)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (ticker, date, bullish_strength, bearish_strength, rsi),
+        )
+        conn.commit()
+
+    def _insert_analysis_divergence_finding(
+        self,
+        ticker: str,
+        date: str,
+        pattern: str,
+        signal_strength: float,
+        rsi14: float | None = None,
+    ) -> None:
+        conn = self.db_manager.get_connection()
+        conn.execute(
+            """
+            INSERT INTO analysis_findings
+            (ticker, date, pattern, signal_strength, rsi14)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (ticker, date, pattern, signal_strength, rsi14),
+        )
+        conn.commit()
+
     def test_filter_divergence_combo_uses_date(self):
         findings = [
             {"ticker": "AAA", "date": "2024-01-01", "pattern": "Hammer"},
@@ -313,6 +351,162 @@ class TestResultsGeneratorBasic(unittest.TestCase):
         rows, _ = self.generator.generate_results()
         self.assertGreater(rows, 0)
         self.assertTrue(self.generator._parity_checked)
+
+    def test_t0_bullish_divergence_comes_from_divergence_data(self):
+        stock_df = self._get_stock_dataframe("AAPL")
+        self._insert_divergence_row("AAPL", "2024-10-15", bullish_strength=0.62, rsi=61.5)
+
+        finding = {
+            "ticker": "AAPL",
+            "date": "2024-10-15",
+            "pattern": "Hammer",
+            "signal_strength": 0.85,
+            "rsi14": 55.0,
+        }
+        result = self.generator._process_finding(finding, stock_df, "AAPL", "usa")
+
+        self.assertIsNotNone(result)
+        self.assertAlmostEqual(result["BullDiv_strength"], 0.62)
+        self.assertAlmostEqual(result["bullish_divergence"], 0.62)
+        self.assertEqual(result["Has_BullDiv_recent"], 1)
+        self.assertEqual(result["BullDiv_recent_offset"], 0)
+        self.assertAlmostEqual(result["RSI14_t0"], 61.5)
+
+    def test_analysis_findings_divergence_row_is_not_used_as_source_of_truth(self):
+        stock_df = self._get_stock_dataframe("AAPL")
+        self._insert_analysis_divergence_finding(
+            "AAPL", "2024-10-15", "Bullish Divergence", 0.99, 77.0
+        )
+
+        records = self.db_manager.get_divergence_records("AAPL", ["2024-10-15"])
+        self.assertEqual(records, {})
+
+        finding = {
+            "ticker": "AAPL",
+            "date": "2024-10-15",
+            "pattern": "Hammer",
+            "signal_strength": 0.85,
+            "rsi14": 55.0,
+        }
+        result = self.generator._process_finding(finding, stock_df, "AAPL", "usa")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["BullDiv_strength"], 0.0)
+        self.assertEqual(result["bullish_divergence"], 0.0)
+        self.assertEqual(result["Has_BullDiv_recent"], 0)
+
+    def test_recent_bullish_divergence_metrics_use_divergence_data_history(self):
+        stock_df = self._get_stock_dataframe("AAPL")
+        self._insert_divergence_row("AAPL", "2024-10-13", bullish_strength=0.48, rsi=49.0)
+
+        finding = {
+            "ticker": "AAPL",
+            "date": "2024-10-15",
+            "pattern": "Hammer",
+            "signal_strength": 0.85,
+            "rsi14": 55.0,
+        }
+        result = self.generator._process_finding(finding, stock_df, "AAPL", "usa")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["BullDiv_strength"], 0.0)
+        self.assertAlmostEqual(result["BullDiv_recent_strength"], 0.48)
+        self.assertEqual(result["BullDiv_recent_offset"], 2)
+        self.assertEqual(result["Has_BullDiv_recent"], 1)
+        self.assertAlmostEqual(result["bullish_divergence"], 0.48)
+
+    def test_bearish_divergence_comes_from_divergence_data(self):
+        stock_df = self._get_stock_dataframe("AAPL")
+        self._insert_divergence_row("AAPL", "2024-10-14", bearish_strength=0.37, rsi=52.0)
+
+        finding = {
+            "ticker": "AAPL",
+            "date": "2024-10-15",
+            "pattern": "Hammer",
+            "signal_strength": 0.85,
+            "rsi14": 55.0,
+        }
+        result = self.generator._process_finding(finding, stock_df, "AAPL", "usa")
+
+        self.assertIsNotNone(result)
+        self.assertAlmostEqual(result["bearish_divergence"], 0.37)
+        self.assertEqual(result["bullish_divergence"], 0.0)
+
+    def test_bearish_divergence_is_not_zeroed_by_recent_bullish_divergence(self):
+        stock_df = self._get_stock_dataframe("AAPL")
+        self._insert_divergence_row("AAPL", "2024-10-15", bullish_strength=0.62, rsi=70.0)
+        self._insert_divergence_row("AAPL", "2024-10-14", bearish_strength=0.37, rsi=52.0)
+
+        finding = {
+            "ticker": "AAPL",
+            "date": "2024-10-15",
+            "pattern": "Hammer",
+            "signal_strength": 0.85,
+            "rsi14": 55.0,
+        }
+        result = self.generator._process_finding(finding, stock_df, "AAPL", "usa")
+
+        self.assertIsNotNone(result)
+        self.assertAlmostEqual(result["bullish_divergence"], 0.62)
+        self.assertAlmostEqual(result["bearish_divergence"], 0.37)
+
+    def test_rsi_slope_5_uses_divergence_data_rsi_values(self):
+        stock_df = self._get_stock_dataframe("AAPL")
+        self._insert_divergence_row("AAPL", "2024-10-15", bullish_strength=0.0, rsi=70.0)
+        self._insert_divergence_row("AAPL", "2024-10-10", bullish_strength=0.0, rsi=45.0)
+
+        finding = {
+            "ticker": "AAPL",
+            "date": "2024-10-15",
+            "pattern": "Hammer",
+            "signal_strength": 0.85,
+            "rsi14": 55.0,
+        }
+        result = self.generator._process_finding(finding, stock_df, "AAPL", "usa")
+
+        self.assertIsNotNone(result)
+        self.assertAlmostEqual(result["RSI14_t0"], 70.0)
+        self.assertAlmostEqual(result["RSI_slope_5"], 5.0)
+
+    def test_rsi14_t0_falls_back_to_analysis_findings_when_divergence_rsi_missing(self):
+        stock_df = self._get_stock_dataframe("AAPL")
+
+        finding = {
+            "ticker": "AAPL",
+            "date": "2024-10-15",
+            "pattern": "Hammer",
+            "signal_strength": 0.85,
+            "rsi14": 55.0,
+        }
+        result = self.generator._process_finding(finding, stock_df, "AAPL", "usa")
+
+        self.assertIsNotNone(result)
+        self.assertAlmostEqual(result["RSI14_t0"], 55.0)
+
+    def test_non_divergence_fields_remain_unchanged_without_divergence_data(self):
+        stock_df = self._get_stock_dataframe("AAPL")
+        finding = {
+            "ticker": "AAPL",
+            "date": "2024-10-15",
+            "pattern": "Hammer",
+            "signal_strength": 0.85,
+            "rsi14": 55.0,
+        }
+
+        original_get_divergence_records = self.generator.db_manager.get_divergence_records
+        try:
+            self.generator.db_manager.get_divergence_records = lambda *args, **kwargs: {}
+            baseline = self.generator._process_finding(finding, stock_df, "AAPL", "usa")
+        finally:
+            self.generator.db_manager.get_divergence_records = original_get_divergence_records
+
+        result = self.generator._process_finding(finding, stock_df, "AAPL", "usa")
+
+        self.assertIsNotNone(baseline)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["t_5"], baseline["t_5"])
+        self.assertEqual(result["t0_close_norm"], baseline["t0_close_norm"])
+        self.assertEqual(result["signal_strength"], baseline["signal_strength"])
 
 
 class TestDatabaseMethods(unittest.TestCase):
