@@ -71,7 +71,15 @@ Thumbs.db
 # Test files
 test_*.py
 *_test.py
+!tests/test_*.py
+!tests/*_test.py
 
 # Logs
 *.log
 logs/
+
+# Never commit these file types (artifacts/reports/exports)
+*.txt
+*.log
+*.xlsx
+*.html
