@@ -13,6 +13,49 @@ from analysis.candlestick_patterns import (
 )
 from analysis.database_manager import DatabaseManager
 
+RSI_PERIOD = 14
+DIVERGENCE_LOOKBACK_DAYS = 30
+TREND_LOOKBACK_DAYS = 10
+MIN_DAYS_BETWEEN = 3
+RECALC_CONTEXT_DAYS = RSI_PERIOD + DIVERGENCE_LOOKBACK_DAYS + TREND_LOOKBACK_DAYS + 10
+
+
+def _load_existing_divergence_dates(
+    analysis_path: Path | str, ticker: str
+) -> set[str]:
+    try:
+        with sqlite3.connect(analysis_path) as conn_an:
+            cur = conn_an.cursor()
+            cur.execute(
+                "SELECT date FROM divergence_data WHERE ticker = ?",
+                (ticker,),
+            )
+            return {row[0] for row in cur.fetchall() if row and row[0]}
+    except Exception:
+        return set()
+
+
+def _resolve_recompute_window(
+    df: pd.DataFrame, existing_dates: set[str], only_missing: bool
+) -> tuple[pd.DataFrame, str] | tuple[None, None]:
+    if not only_missing:
+        if df.empty:
+            return None, None
+        return df.copy(), str(df.iloc[0]["pvm"])
+
+    missing_indices = [
+        idx
+        for idx, date_value in enumerate(df["pvm"].astype(str).tolist())
+        if date_value not in existing_dates
+    ]
+    if not missing_indices:
+        return None, None
+
+    first_missing_idx = min(missing_indices)
+    recalc_start_idx = max(0, first_missing_idx - RECALC_CONTEXT_DAYS)
+    write_start_date = str(df.iloc[first_missing_idx]["pvm"])
+    return df.iloc[recalc_start_idx:].copy(), write_start_date
+
 
 def recompute_divergence_for_ticker(
     ticker: str,
@@ -36,51 +79,47 @@ def recompute_divergence_for_ticker(
         if df.empty:
             return False, 0, f"Ei dataa tickerille {ticker}"
 
-        df = calculate_rsi(df, period=14, close_col="close")
-        if "RSI" not in df.columns:
+        existing_dates = (
+            _load_existing_divergence_dates(analysis_path, ticker) if only_missing else set()
+        )
+        work_df, write_start_date = _resolve_recompute_window(
+            df, existing_dates, only_missing
+        )
+        if work_df is None or write_start_date is None:
+            return True, 0, ""
+
+        work_df = calculate_rsi(work_df, period=RSI_PERIOD, close_col="close")
+        if "RSI" not in work_df.columns:
             return False, 0, "RSI-laskenta epäonnistui"
 
-        existing_dates = set()
-        if only_missing:
-            try:
-                with sqlite3.connect(analysis_path) as conn_an:
-                    cur = conn_an.cursor()
-                    cur.execute(
-                        "SELECT date FROM divergence_data WHERE ticker = ?",
-                        (ticker,),
-                    )
-                    existing_dates = {row[0] for row in cur.fetchall()}
-            except Exception:
-                existing_dates = set()
-
         records = []
-        for idx in range(len(df)):
-            date = str(df.iloc[idx]["pvm"])
-            if only_missing and date in existing_dates:
+        for idx in range(len(work_df)):
+            date = str(work_df.iloc[idx]["pvm"])
+            if date < write_start_date:
                 continue
 
-            rsi = df.iloc[idx]["RSI"]
+            rsi = work_df.iloc[idx]["RSI"]
             bullish_strength = 0.0
             bearish_strength = 0.0
 
-            if idx >= 30 and not pd.isna(rsi):
+            if idx >= DIVERGENCE_LOOKBACK_DAYS and not pd.isna(rsi):
                 bull = is_bullish_divergence(
-                    df,
+                    work_df,
                     idx=idx,
-                    lookback_days=30,
+                    lookback_days=DIVERGENCE_LOOKBACK_DAYS,
                     min_rsi_gain=3.0,
-                    min_days_between=3,
+                    min_days_between=MIN_DAYS_BETWEEN,
                     close_col="close",
                 )
                 if bull and bull.get("found"):
                     bullish_strength = bull.get("strength", 1.0)
                 elif not bullish_strength:
                     bear = is_bearish_divergence(
-                        df,
+                        work_df,
                         idx=idx,
-                        lookback_days=30,
+                        lookback_days=DIVERGENCE_LOOKBACK_DAYS,
                         min_rsi_drop=3.0,
-                        min_days_between=3,
+                        min_days_between=MIN_DAYS_BETWEEN,
                         close_col="close",
                     )
                     if bear and bear.get("found"):
@@ -98,6 +137,13 @@ def recompute_divergence_for_ticker(
         if not records:
             return True, 0, ""
 
+        with sqlite3.connect(analysis_path) as conn_an:
+            conn_an.execute(
+                "DELETE FROM divergence_data WHERE ticker = ? AND date >= ?",
+                (ticker, write_start_date),
+            )
+            conn_an.commit()
+
         db_manager = DatabaseManager(db_path=str(analysis_path))
         success = db_manager.save_divergence_batch(ticker, records)
         db_manager.close()
@@ -106,4 +152,3 @@ def recompute_divergence_for_ticker(
         return False, 0, "Tallennus epäonnistui"
     except Exception as exc:
         return False, 0, str(exc)
-

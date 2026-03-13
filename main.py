@@ -175,11 +175,11 @@ class RawCandleApp:
     def _maybe_backfill_splits_for_ticker(self, ticker: str):
         """Jos splits_data:ssa on korjaamattomia splittejä, refetcha hinnat 2018- alkaen."""
         if not ticker:
-            return
+            return False
         try:
             with sqlite3.connect(self.osakedata_db_path) as conn:
                 if not has_uncorrected_splits(conn, ticker):
-                    return
+                    return False
                 print(f"[SPLIT] Havaittu korjaamaton split tickerille {ticker}, korjataan hinnat ja divergence.")
                 start_ts = time.time()
                 delete_prices_from_2018(conn, ticker, start_date="2018-01-01")
@@ -212,6 +212,7 @@ class RawCandleApp:
                         print(
                             f"✅ Splittikorjaus tehty tickerille {ticker}, lisätty {added} riviä, divergence päivitetty ({days} päivää)."
                         )
+                        return True
                     else:
                         print(f"⚠️ Divergenssin päivitys epäonnistui ({ticker}): {err}")
                 else:
@@ -233,6 +234,7 @@ class RawCandleApp:
             self.page.update()
         except Exception:
             pass
+        return False
 
     def _show_snackbar(self, message: str, color: str = ft.Colors.BLUE_600):
         """Näytä SnackBar turvallisesti."""
@@ -2562,14 +2564,17 @@ class RawCandleApp:
                 except Exception as exc:
                     print(f"⚠️ Splittien päivitys epäonnistui ({ticker}): {exc}")
 
-                self._maybe_backfill_splits_for_ticker(ticker)
+                split_recomputed = self._maybe_backfill_splits_for_ticker(ticker)
 
                 saved_count += 1
                 existing_tickers.add(ticker)
 
-                div_success, div_days, _ = self._calculate_and_save_divergences(
-                    ticker, only_missing=True
-                )
+                if split_recomputed:
+                    div_success, div_days, _ = (True, 0, "")
+                else:
+                    div_success, div_days, _ = self._calculate_and_save_divergences(
+                        ticker, only_missing=True
+                    )
                 if div_success and div_days > 0:
                     divergences_calculated += 1
 
@@ -3539,116 +3544,18 @@ Virheet: {error_count}"""
             (success: bool, days_calculated: int, error_message: str)
         """
         import os
-        import sqlite3
-        import pandas as pd
-        from analysis.candlestick_patterns import (
-            calculate_rsi,
-            is_bullish_divergence,
-            is_bearish_divergence,
-        )
-        from analysis.database_manager import DatabaseManager
+        from analysis.divergence_recompute import recompute_divergence_for_ticker
 
         try:
             data_dir = os.path.join(os.path.dirname(__file__), "data")
             osakedata_path = os.path.join(data_dir, "osakedata.db")
             analysis_path = os.path.join(data_dir, "analysis.db")
-
-            # Lue osakedata
-            with sqlite3.connect(osakedata_path) as conn:
-                df = pd.read_sql_query(
-                    "SELECT pvm, close FROM osakedata WHERE osake = ? ORDER BY pvm",
-                    conn,
-                    params=[ticker],
-                )
-
-            if df.empty:
-                return (False, 0, f"Ei dataa tickerille {ticker}")
-
-            # Laske RSI
-            df = calculate_rsi(df, period=14, close_col="close")
-
-            if "RSI" not in df.columns:
-                return (False, 0, "RSI-laskenta epäonnistui")
-
-            # Hae olemassa olevat divergenssit jos only_missing
-            existing_dates = set()
-            if only_missing:
-                try:
-                    with sqlite3.connect(analysis_path) as conn:
-                        cursor = conn.cursor()
-                        cursor.execute(
-                            "SELECT date FROM divergence_data WHERE ticker = ?",
-                            (ticker,),
-                        )
-                        existing_dates = {row[0] for row in cursor.fetchall()}
-                except Exception:
-                    pass  # Taulu ei ehkä ole vielä olemassa
-
-            # Laske divergenssit
-            divergence_records = []
-
-            for idx in range(len(df)):
-                date = str(df.iloc[idx]["pvm"])
-
-                # Ohita jos jo laskettu
-                if only_missing and date in existing_dates:
-                    continue
-
-                rsi = df.iloc[idx]["RSI"]
-                bullish_strength = 0.0
-                bearish_strength = 0.0
-
-                # Tarvitaan vähintään 30 päivää historiaa
-                if idx >= 30 and not pd.isna(rsi):
-                    # Bullish divergence
-                    bullish_result = is_bullish_divergence(
-                        df,
-                        idx=idx,
-                        lookback_days=30,
-                        min_rsi_gain=3.0,
-                        min_days_between=3,
-                        close_col="close",
-                    )
-
-                    if bullish_result and bullish_result.get("found"):
-                        bullish_strength = bullish_result.get("strength", 1.0)
-
-                    # Bearish divergence (vain jos ei bullish)
-                    elif not bullish_strength:
-                        bearish_result = is_bearish_divergence(
-                            df,
-                            idx=idx,
-                            lookback_days=30,
-                            min_rsi_drop=3.0,
-                            min_days_between=3,
-                            close_col="close",
-                        )
-
-                        if bearish_result and bearish_result.get("found"):
-                            bearish_strength = bearish_result.get("strength", 1.0)
-
-                divergence_records.append(
-                    (
-                        date,
-                        bullish_strength,
-                        bearish_strength,
-                        rsi if not pd.isna(rsi) else None,
-                    )
-                )
-
-            # Tallenna kantaan
-            if divergence_records:
-                db_manager = DatabaseManager(db_path=analysis_path)
-                success = db_manager.save_divergence_batch(ticker, divergence_records)
-                db_manager.close()
-
-                if success:
-                    return (True, len(divergence_records), "")
-                else:
-                    return (False, 0, "Tallennus epäonnistui")
-            else:
-                return (True, 0, "")  # Ei uusia laskettavia
-
+            return recompute_divergence_for_ticker(
+                ticker,
+                osakedata_path=osakedata_path,
+                analysis_path=analysis_path,
+                only_missing=only_missing,
+            )
         except Exception as ex:
             return (False, 0, str(ex))
 
@@ -4284,12 +4191,15 @@ Virheet: {error_count}"""
                     print(f"⚠️ Splittien päivitys epäonnistui ({ticker}): {exc}")
 
                 # Korjaa hinnat jos splitit vaativat sitä
-                self._maybe_backfill_splits_for_ticker(ticker)
+                split_recomputed = self._maybe_backfill_splits_for_ticker(ticker)
 
                 # Laske ja tallenna divergenssit
-                div_success, div_days, div_error = (
-                    self._calculate_and_save_divergences(ticker, only_missing=True)
-                )
+                if split_recomputed:
+                    div_success, div_days, div_error = (True, 0, "")
+                else:
+                    div_success, div_days, div_error = self._calculate_and_save_divergences(
+                        ticker, only_missing=True
+                    )
 
                 # Aja kynttiläanalyysi lisätylle aikavälille
                 try:
