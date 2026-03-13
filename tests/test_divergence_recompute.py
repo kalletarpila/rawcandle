@@ -4,7 +4,10 @@ from datetime import date, timedelta
 import pytest
 
 from analysis.database_manager import DatabaseManager
-from analysis.divergence_recompute import recompute_divergence_for_ticker
+from analysis.divergence_recompute import (
+    recompute_divergence_for_ticker,
+    ticker_has_missing_divergence_dates,
+)
 
 
 def _create_osakedata_db(path: str, ticker: str, days: int = 100) -> list[str]:
@@ -122,6 +125,36 @@ def test_recompute_divergence_only_missing_writes_only_missing_tail(
     assert len(rows) == 100
     assert [row[1] for row in rows[:90]] == [-1.0] * 90
     assert all(row[1] != -1.0 for row in rows[90:])
+
+
+def test_ticker_has_missing_divergence_dates_detects_partial_history(divergence_dbs):
+    ticker = divergence_dbs["ticker"]
+    dates = divergence_dbs["dates"]
+    _seed_divergence_rows(divergence_dbs["analysis_path"], ticker, dates[:90])
+
+    assert (
+        ticker_has_missing_divergence_dates(
+            ticker,
+            osakedata_path=divergence_dbs["osakedata_path"],
+            analysis_path=divergence_dbs["analysis_path"],
+        )
+        is True
+    )
+
+
+def test_ticker_has_missing_divergence_dates_false_when_history_complete(divergence_dbs):
+    ticker = divergence_dbs["ticker"]
+    dates = divergence_dbs["dates"]
+    _seed_divergence_rows(divergence_dbs["analysis_path"], ticker, dates)
+
+    assert (
+        ticker_has_missing_divergence_dates(
+            ticker,
+            osakedata_path=divergence_dbs["osakedata_path"],
+            analysis_path=divergence_dbs["analysis_path"],
+        )
+        is False
+    )
 
 
 def test_recompute_divergence_only_missing_is_noop_when_nothing_missing(

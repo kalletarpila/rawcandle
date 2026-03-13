@@ -35,6 +35,36 @@ def _load_existing_divergence_dates(
         return set()
 
 
+def ticker_has_missing_divergence_dates(
+    ticker: str,
+    osakedata_path: Path | str,
+    analysis_path: Path | str,
+) -> bool:
+    if not ticker:
+        return False
+
+    try:
+        with sqlite3.connect(osakedata_path) as conn_osake:
+            price_dates = {
+                str(row[0])
+                for row in conn_osake.execute(
+                    "SELECT pvm FROM osakedata WHERE osake = ? ORDER BY pvm",
+                    (ticker,),
+                ).fetchall()
+                if row and row[0]
+            }
+        if not price_dates:
+            return False
+
+        divergence_dates = _load_existing_divergence_dates(analysis_path, ticker)
+        if not divergence_dates:
+            return True
+
+        return any(date_value not in divergence_dates for date_value in price_dates)
+    except Exception:
+        return False
+
+
 def _resolve_recompute_window(
     df: pd.DataFrame, existing_dates: set[str], only_missing: bool
 ) -> tuple[pd.DataFrame, str] | tuple[None, None]:

@@ -12,7 +12,10 @@ from stock.view import StockView
 from regression.view import RegressionView
 from reverse.view import ReverseView
 from stock.splits import sync_splits_for_ticker
-from analysis.divergence_recompute import recompute_divergence_for_ticker
+from analysis.divergence_recompute import (
+    recompute_divergence_for_ticker,
+    ticker_has_missing_divergence_dates,
+)
 from pages.index_page.index_page import IndexPage
 from analysis.splits_price_backfill import (
     has_uncorrected_splits,
@@ -3279,17 +3282,14 @@ Virheet: {error_count}"""
                 self.page.update()
                 return
 
-            # Tarkista mitkä tarvitsevat divergenssit
-            from analysis.database_manager import DatabaseManager
-
-            db_manager = DatabaseManager(db_path=analysis_path)
             tickers_needing_calc = []
-
             for ticker in all_tickers:
-                if not db_manager.has_divergence_data(ticker):
+                if ticker_has_missing_divergence_dates(
+                    ticker,
+                    osakedata_path=osakedata_path,
+                    analysis_path=analysis_path,
+                ):
                     tickers_needing_calc.append(ticker)
-
-            db_manager.close()
 
             if not tickers_needing_calc:
                 self.loading_text.value = (
@@ -3317,7 +3317,7 @@ Virheet: {error_count}"""
                     self.page.update()
 
                     success, days, error = self._calculate_and_save_divergences(
-                        ticker, only_missing=False
+                        ticker, only_missing=True
                     )
 
                     if success:
