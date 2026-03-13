@@ -4385,6 +4385,8 @@ Virheet: {error_count}"""
             color = ft.Colors.RED_600
         if summary["skipped"]:
             parts.append("⏭️ " + " | ".join(summary["skipped"]))
+            if not summary["ok"]:
+                color = ft.Colors.BLUE_600
         if summary["errors"]:
             parts.append("❌ " + " | ".join(summary["errors"]))
             if not summary["ok"]:
@@ -4392,9 +4394,9 @@ Virheet: {error_count}"""
             else:
                 color = ft.Colors.ORANGE_700
 
-            self.loading_text.value = "\n".join(parts) if parts else "Ei muutoksia"
-            self.loading_text.color = color
-            self.page.update()
+        self.loading_text.value = "\n".join(parts) if parts else "Ei muutoksia"
+        self.loading_text.color = color
+        self.page.update()
 
     def close_dialog(self, dialog):
         """Public wrapper that safely closes dialogs and removes them from overlay."""

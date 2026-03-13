@@ -539,42 +539,54 @@ class AnalysisView:
         if not hasattr(self, "pattern_counts_text") or not self.pattern_counts_text:
             return
 
-        # Kynttilöiden numerointi (sama kuin generate_results.py)
-        PATTERN_ORDER = {
-            "downtrend": 0,
-            "Hammer": 1,
-            "Bullish Engulfing": 2,
-            "Piercing Pattern": 3,
-            "Three White Soldiers": 4,
-            "Morning Star": 5,
-            "Dragonfly Doji": 6,
-            "Bullish Divergence": 7,
+        # Peruskuviot näkyvät vanhan dashboardin mukaisesti nimillä.
+        pattern_order = [
+            "downtrend",
+            "Hammer",
+            "Bullish Engulfing",
+            "Piercing Pattern",
+            "Three White Soldiers",
+            "Morning Star",
+            "Dragonfly Doji",
+            "Bullish Divergence",
+        ]
+        combo_pattern_codes = {
+            "BullDiv & Hammer": 71,
+            "BullDiv & Bullish Engulfing": 72,
+            "BullDiv & Piercing Pattern": 73,
+            "BullDiv & Three White Soldiers": 74,
+            "BullDiv & Morning Star": 75,
+            "BullDiv & Dragonfly Doji": 76,
         }
 
-        # Laske määrät kynttilätyypeittäin koko kannasta (ei suodatetuista)
-        pattern_counts = {pattern: 0 for pattern in PATTERN_ORDER.keys()}
+        # Laske määrät koko kannasta (ei suodatetuista).
+        pattern_counts = {pattern: 0 for pattern in pattern_order}
+        combo_counts = {code: 0 for code in combo_pattern_codes.values()}
 
         for finding in self.all_findings:
             pattern = finding.get("pattern", "")
-            if pattern in pattern_counts:
-                pattern_counts[pattern] += 1
-        # Laske myös koodatut kombot 71–76 candle_pattern-kentästä
-        combo_counts: Dict[int, int] = {}
-        for finding in self.all_findings:
-            code = finding.get("candle_pattern")
-            if isinstance(code, int) and 71 <= code <= 76:
-                combo_counts[code] = combo_counts.get(code, 0) + 1
+            if not pattern:
+                continue
+            if pattern in combo_pattern_codes:
+                combo_counts[combo_pattern_codes[pattern]] += 1
+                continue
+            pattern_counts[pattern] = pattern_counts.get(pattern, 0) + 1
 
-        # Järjestä sisäisen numeron mukaan ja muodosta teksti
-        sorted_patterns = sorted(
-            pattern_counts.items(), key=lambda x: PATTERN_ORDER[x[0]]
+        # Mahdolliset uudet/odottamattomat patternit lisätään loppuun, eivätkä katoa UI:sta.
+        remaining_patterns = sorted(
+            p
+            for p in pattern_counts.keys()
+            if p not in pattern_order and p not in combo_pattern_codes
         )
-        parts = [f"{pattern}: {count}" for pattern, count in sorted_patterns]
-        if combo_counts:
-            combo_text = " | ".join(
-                f"{code}: {count}" for code, count in sorted(combo_counts.items())
-            )
-            parts.append(f"Kombot 71-76: {combo_text}")
+        ordered_patterns = pattern_order + remaining_patterns
+        parts = [
+            f"{pattern}: {pattern_counts.get(pattern, 0)}"
+            for pattern in ordered_patterns
+        ]
+        combo_text = " | ".join(
+            f"{code}: {combo_counts.get(code, 0)}" for code in sorted(combo_counts)
+        )
+        parts.append(f"Kombot 71-76: {combo_text}")
         counts_text = " | ".join(parts)
 
         self.pattern_counts_text.value = counts_text
