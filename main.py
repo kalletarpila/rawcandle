@@ -9,7 +9,6 @@ import pandas as pd
 import yfinance as yf
 from simu import SimuView, SimulationService
 from stock.view import StockView
-from reverse.view import ReverseView
 from stock.splits import sync_splits_for_ticker
 from analysis.divergence_recompute import (
     recompute_divergence_for_ticker,
@@ -2706,7 +2705,6 @@ class RawCandleApp:
         self.simu_service = SimulationService()
         self.simu_view = SimuView(self.page, self.create_appbar, self.simu_service)
         self.stock_view = StockView(self.page, self.create_appbar)
-        self.reverse_view = ReverseView(self.page, self.create_appbar)
         self.index_view = IndexPage(self.page, self.create_appbar, self.active_market)
 
         self.setup_routing()
@@ -2789,11 +2787,6 @@ class RawCandleApp:
                     ft.Icons.ANALYTICS,
                     tooltip="Analysis Dashboard",
                     on_click=lambda _: self.page.go("/analysis"),
-                ),
-                ft.IconButton(
-                    ft.Icons.BAR_CHART,
-                    tooltip="Reverse",
-                    on_click=lambda _: self.page.go("/reverse"),
                 ),
                 ft.IconButton(
                     ft.Icons.TABLE_CHART,
@@ -3931,8 +3924,6 @@ Virheet: {error_count}"""
             self.page.views.append(self.simu_view.create_view())
         elif self.page.route == "/analysis":
             self.page.views.append(self.create_analysis_view())
-        elif self.page.route == "/reverse":
-            self.page.views.append(self.reverse_view.create_view())
         elif self.page.route == "/findings":
             self.page.views.append(self.create_findings_view())
         elif self.page.route == "/tulokset":
