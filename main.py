@@ -33,7 +33,7 @@ from market_repository import (
     validate_market,
     MARKET_VOLUME_DEFAULTS,
 )
-from sector_update import update_sector_metadata
+from sector_update import refresh_single_ticker_metadata, update_sector_metadata
 
 
 # Compatibility shim: ensure ft.Colors/ft.colors and ft.Icons/ft.icons exist
@@ -4180,6 +4180,16 @@ Virheet: {error_count}"""
                         rows_added += 1
 
                     conn.commit()
+
+                try:
+                    refresh_single_ticker_metadata(
+                        db_path,
+                        ticker,
+                        market=target_market,
+                        logger=lambda msg: print(f"[SECTOR] {msg}"),
+                    )
+                except Exception as exc:
+                    print(f"⚠️ Metadata refresh failed ({ticker}): {exc}")
 
                 try:
                     splits_inserted = sync_splits_for_ticker(
