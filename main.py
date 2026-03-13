@@ -3828,20 +3828,6 @@ Virheet: {error_count}"""
                                                 wrap=True,
                                             ),
                                             ft.Divider(height=20),
-                                            ft.Row(
-                                                [
-                                                    ft.ElevatedButton(
-                                                        "Poista osake",
-                                                        icon=ft.Icons.DELETE_OUTLINE,
-                                                        on_click=self.show_delete_stock_dialog,
-                                                        bgcolor=ft.Colors.ORANGE_700,
-                                                        color=ft.Colors.WHITE,
-                                                        tooltip="Poista yksittäinen osake kannasta",
-                                                    ),
-                                                ],
-                                                alignment=ft.MainAxisAlignment.CENTER,
-                                                spacing=10,
-                                            ),
                                         ],
                                         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                                         spacing=10,
