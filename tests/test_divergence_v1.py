@@ -45,3 +45,25 @@ def test_bearish_overbought_score_steps():
     assert bearish_overbought_score(67.0) == 0.7
     assert bearish_overbought_score(62.0) == 0.4
     assert bearish_overbought_score(50.0) == 0.1
+
+
+def test_compute_bullish_candidate_strength_exact_numeric_output():
+    strength = compute_bullish_candidate_strength(
+        close_p=100.0,
+        close_t=96.0,
+        rsi_p=20.0,
+        rsi_t=25.0,
+    )
+
+    assert strength == 0.55
+
+
+def test_compute_bearish_candidate_strength_exact_numeric_output():
+    strength = compute_bearish_candidate_strength(
+        close_p=100.0,
+        close_t=104.0,
+        rsi_p=75.0,
+        rsi_t=70.0,
+    )
+
+    assert strength == 0.55
