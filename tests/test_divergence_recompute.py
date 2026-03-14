@@ -107,7 +107,7 @@ def test_recompute_divergence_only_missing_writes_only_missing_tail(
 
     assert success is True
     assert err == ""
-    assert rows_written == 10
+    assert rows_written == 30
 
     with sqlite3.connect(divergence_dbs["analysis_path"]) as conn:
         rows = conn.execute(
@@ -121,11 +121,11 @@ def test_recompute_divergence_only_missing_writes_only_missing_tail(
         ).fetchall()
 
     assert len(rows) == 100
-    assert [row[1] for row in rows[:90]] == [-1.0] * 90
-    assert all(row[1] != -1.0 for row in rows[90:])
+    assert [row[1] for row in rows[:70]] == [-1.0] * 70
+    assert all(row[1] != -1.0 for row in rows[70:])
 
 
-def test_recompute_divergence_only_missing_does_not_rewrite_existing_later_rows(
+def test_recompute_divergence_only_missing_rewrites_recent_buffer_for_v2_updates(
     divergence_dbs, monkeypatch
 ):
     ticker = divergence_dbs["ticker"]
@@ -156,7 +156,7 @@ def test_recompute_divergence_only_missing_does_not_rewrite_existing_later_rows(
 
     assert success is True
     assert err == ""
-    assert rows_written == 10
+    assert rows_written == 70
 
     with sqlite3.connect(divergence_dbs["analysis_path"]) as conn:
         rows = conn.execute(
@@ -171,12 +171,12 @@ def test_recompute_divergence_only_missing_does_not_rewrite_existing_later_rows(
 
     assert len(rows) == 100
     rsi_by_date = {row[0]: row[1] for row in rows}
-    for date_value in dates[:50]:
+    for date_value in dates[:30]:
         assert rsi_by_date[date_value] == -1.0
-    for date_value in dates[50:60]:
+    for date_value in dates[30:60]:
         assert rsi_by_date[date_value] != -1.0
     for date_value in dates[60:]:
-        assert rsi_by_date[date_value] == -1.0
+        assert rsi_by_date[date_value] != -1.0
 
 
 def test_ticker_has_missing_divergence_dates_detects_partial_history(divergence_dbs):
@@ -327,14 +327,22 @@ def test_recompute_divergence_full_recompute_uses_real_v1_engine(divergence_dbs)
     assert rows_written == len(custom_dates)
 
     expected_rows = compute_divergence_series(
-        pd.DataFrame({"pvm": custom_dates, "close": custom_closes})
+        pd.DataFrame(
+            {
+                "pvm": custom_dates,
+                "low": [value - 1.0 for value in custom_closes],
+                "high": [value + 1.0 for value in custom_closes],
+                "close": custom_closes,
+            }
+        )
     )
     expected_last = expected_rows[-1]
 
     with sqlite3.connect(analysis_path) as conn:
         stored_rows = conn.execute(
             """
-            SELECT date, bullish_strength, bearish_strength, rsi
+            SELECT date, bullish_strength, bearish_strength, rsi,
+                   is_bullish_divergence, is_bearish_divergence
             FROM divergence_data
             WHERE ticker = ?
             ORDER BY date
@@ -348,3 +356,112 @@ def test_recompute_divergence_full_recompute_uses_real_v1_engine(divergence_dbs)
     assert stored_last[1] == expected_last["bullish_strength"]
     assert stored_last[2] == expected_last["bearish_strength"]
     assert stored_last[3] == expected_last["rsi"]
+    assert stored_last[4] == expected_last["is_bullish_divergence"]
+    assert stored_last[5] == expected_last["is_bearish_divergence"]
+
+
+def test_recompute_divergence_only_missing_updates_v2_flags_for_recent_existing_rows(
+    tmp_path, monkeypatch
+):
+    ticker = "TEST"
+    osakedata_path = tmp_path / "osakedata.db"
+    analysis_path = tmp_path / "analysis.db"
+
+    with sqlite3.connect(osakedata_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE osakedata (
+                osake TEXT NOT NULL,
+                pvm TEXT NOT NULL,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                volume INTEGER,
+                market TEXT NOT NULL DEFAULT 'usa',
+                PRIMARY KEY (osake, pvm)
+            )
+            """
+        )
+        initial_rows = [
+            ("2024-06-01", 10.0, 20.0, 100.0),
+            ("2024-06-02", 9.0, 20.0, 100.0),
+            ("2024-06-03", 8.0, 20.0, 100.0),
+            ("2024-06-04", 9.0, 20.0, 100.0),
+            ("2024-06-05", 10.0, 20.0, 100.0),
+            ("2024-06-06", 9.0, 20.0, 100.0),
+            ("2024-06-07", 7.0, 20.0, 100.0),
+            ("2024-06-08", 6.0, 20.0, 100.0),
+            ("2024-06-09", 7.0, 20.0, 100.0),
+        ]
+        conn.executemany(
+            """
+            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [(ticker, d, c, h, l, c, 1000, "usa") for d, l, h, c in initial_rows],
+        )
+        conn.commit()
+
+    DatabaseManager(str(analysis_path)).close()
+
+    from analysis import divergence_engine as divergence_engine_module
+
+    original_compute_rsi_wilder = divergence_engine_module.compute_rsi_wilder
+
+    def fake_compute_rsi_wilder(closes, period=14):
+        if len(closes) == 9:
+            return [40.0, 35.0, 20.0, 36.0, 37.0, 35.0, 32.0, 30.0, 33.0]
+        if len(closes) == 11:
+            return [40.0, 35.0, 20.0, 36.0, 37.0, 35.0, 32.0, 30.0, 33.0, 36.0, 38.0]
+        return original_compute_rsi_wilder(closes, period=period)
+
+    monkeypatch.setattr("analysis.divergence_engine.compute_rsi_wilder", fake_compute_rsi_wilder)
+
+    success, rows_written, err = recompute_divergence_for_ticker(
+        ticker,
+        osakedata_path=str(osakedata_path),
+        analysis_path=str(analysis_path),
+        only_missing=False,
+    )
+
+    assert success is True
+    assert err == ""
+    assert rows_written == 9
+
+    with sqlite3.connect(osakedata_path) as conn:
+        conn.executemany(
+            """
+            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (ticker, "2024-06-10", 8.0, 20.0, 8.0, 100.0, 1000, "usa"),
+                (ticker, "2024-06-11", 9.0, 20.0, 9.0, 100.0, 1000, "usa"),
+            ],
+        )
+        conn.commit()
+
+    success, rows_written, err = recompute_divergence_for_ticker(
+        ticker,
+        osakedata_path=str(osakedata_path),
+        analysis_path=str(analysis_path),
+        only_missing=True,
+    )
+
+    assert success is True
+    assert err == ""
+    assert rows_written == 11
+
+    with sqlite3.connect(analysis_path) as conn:
+        row = conn.execute(
+            """
+            SELECT is_bullish_divergence
+            FROM divergence_data
+            WHERE ticker = ? AND date = ?
+            """,
+            (ticker, "2024-06-10"),
+        ).fetchone()
+
+    assert row is not None
+    assert row[0] == 1

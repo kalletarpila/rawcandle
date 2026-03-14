@@ -80,3 +80,185 @@ def test_compute_divergence_for_date_uses_max_over_valid_candidates():
     expected = max(candidate_one, candidate_two)
 
     assert result["bullish_strength"] == expected
+
+
+def test_compute_divergence_series_sets_v2_bullish_event_on_confirmed_date(monkeypatch):
+    df = pd.DataFrame(
+        {
+            "pvm": [f"2024-06-{day:02d}" for day in range(1, 12)],
+            "close": [100.0] * 11,
+            "low": [10.0, 9.0, 8.0, 9.0, 10.0, 9.0, 7.0, 6.0, 7.0, 8.0, 9.0],
+            "high": [20.0] * 11,
+        }
+    )
+    monkeypatch.setattr(
+        "analysis.divergence_engine.compute_rsi_wilder",
+        lambda closes, period=14: [40.0, 35.0, 20.0, 36.0, 37.0, 35.0, 32.0, 30.0, 33.0, 36.0, 38.0],
+    )
+
+    rows = compute_divergence_series(df)
+
+    bullish_dates = [row["date"] for row in rows if row["is_bullish_divergence"] == 1]
+
+    assert bullish_dates == ["2024-06-10"]
+
+
+def test_compute_divergence_series_sets_v2_bearish_event_on_confirmed_date(monkeypatch):
+    df = pd.DataFrame(
+        {
+            "pvm": [f"2024-07-{day:02d}" for day in range(1, 12)],
+            "close": [100.0] * 11,
+            "low": [5.0] * 11,
+            "high": [10.0, 11.0, 12.0, 11.0, 10.0, 11.0, 13.0, 14.0, 13.0, 12.0, 11.0],
+        }
+    )
+    monkeypatch.setattr(
+        "analysis.divergence_engine.compute_rsi_wilder",
+        lambda closes, period=14: [60.0, 65.0, 80.0, 66.0, 64.0, 65.0, 70.0, 75.0, 72.0, 68.0, 66.0],
+    )
+
+    rows = compute_divergence_series(df)
+
+    bearish_dates = [row["date"] for row in rows if row["is_bearish_divergence"] == 1]
+
+    assert bearish_dates == ["2024-07-10"]
+
+
+def test_compute_divergence_series_collapses_tied_price_pivot_clusters_to_last_row(monkeypatch):
+    df = pd.DataFrame(
+        {
+            "pvm": [f"2024-08-{day:02d}" for day in range(1, 14)],
+            "close": [100.0] * 13,
+            "low": [12.0, 11.0, 10.0, 10.0, 10.0, 11.0, 12.0, 11.0, 9.0, 8.0, 9.0, 10.0, 11.0],
+            "high": [20.0] * 13,
+        }
+    )
+    monkeypatch.setattr(
+        "analysis.divergence_engine.compute_rsi_wilder",
+        lambda closes, period=14: [42.0, 38.0, 20.0, 20.0, 20.0, 34.0, 35.0, 33.0, 31.0, 29.0, 32.0, 36.0, 37.0],
+    )
+
+    rows = compute_divergence_series(df)
+
+    bullish_dates = [row["date"] for row in rows if row["is_bullish_divergence"] == 1]
+
+    assert bullish_dates == ["2024-08-12"]
+
+
+def test_compute_divergence_series_accepts_rsi_pivot_at_p2_minus_1(monkeypatch):
+    df = pd.DataFrame(
+        {
+            "pvm": [f"2024-09-{day:02d}" for day in range(1, 12)],
+            "close": [100.0] * 11,
+            "low": [10.0, 9.0, 8.0, 9.0, 10.0, 8.0, 7.0, 8.0, 9.0, 10.0, 11.0],
+            "high": [20.0] * 11,
+        }
+    )
+    monkeypatch.setattr(
+        "analysis.divergence_engine.compute_rsi_wilder",
+        lambda closes, period=14: [40.0, 36.0, 30.0, 35.0, 36.0, 31.0, 34.0, 35.0, 38.0, 39.0, 40.0],
+    )
+
+    rows = compute_divergence_series(df)
+
+    bullish_dates = [row["date"] for row in rows if row["is_bullish_divergence"] == 1]
+
+    assert bullish_dates == ["2024-09-08"]
+
+
+def test_compute_divergence_series_rejects_rsi_pivot_outside_locality_window(monkeypatch):
+    df = pd.DataFrame(
+        {
+            "pvm": [f"2024-10-{day:02d}" for day in range(1, 12)],
+            "close": [100.0] * 11,
+            "low": [10.0, 9.0, 8.0, 9.0, 10.0, 9.0, 7.0, 8.0, 9.0, 10.0, 11.0],
+            "high": [20.0] * 11,
+        }
+    )
+    monkeypatch.setattr(
+        "analysis.divergence_engine.compute_rsi_wilder",
+        lambda closes, period=14: [40.0, 35.0, 30.0, 36.0, 37.0, 37.0, 35.0, 34.0, 31.0, 38.0, 39.0],
+    )
+
+    rows = compute_divergence_series(df)
+
+    assert all(row["is_bullish_divergence"] == 0 for row in rows)
+
+
+def test_compute_divergence_series_uses_only_consecutive_price_pivots(monkeypatch):
+    df = pd.DataFrame(
+        {
+            "pvm": [f"2024-11-{day:02d}" for day in range(1, 16)],
+            "close": [100.0] * 15,
+            "low": [12.0, 11.0, 10.0, 11.0, 12.0, 11.0, 9.0, 10.0, 11.0, 10.0, 8.0, 9.0, 10.0, 11.0, 12.0],
+            "high": [20.0] * 15,
+        }
+    )
+    monkeypatch.setattr(
+        "analysis.divergence_engine.compute_rsi_wilder",
+        lambda closes, period=14: [45.0, 40.0, 20.0, 41.0, 42.0, 19.0, 50.0, 18.0, 45.0, 35.0, 30.0, 31.0, 32.0, 34.0, 36.0],
+    )
+
+    rows = compute_divergence_series(df)
+
+    assert all(row["is_bullish_divergence"] == 0 for row in rows)
+
+
+def test_compute_divergence_series_rejects_missing_rsi_anchor(monkeypatch):
+    df = pd.DataFrame(
+        {
+            "pvm": [f"2024-12-{day:02d}" for day in range(1, 12)],
+            "close": [100.0] * 11,
+            "low": [10.0, 9.0, 8.0, 9.0, 10.0, 9.0, 7.0, 6.0, 7.0, 8.0, 9.0],
+            "high": [20.0] * 11,
+        }
+    )
+    monkeypatch.setattr(
+        "analysis.divergence_engine.compute_rsi_wilder",
+        lambda closes, period=14: [40.0, 35.0, None, 36.0, 37.0, 35.0, 32.0, 30.0, 33.0, 36.0, 38.0],
+    )
+
+    rows = compute_divergence_series(df)
+
+    assert all(row["is_bullish_divergence"] == 0 for row in rows)
+
+
+def test_compute_divergence_series_does_not_mark_boundary_rows_as_pivots(monkeypatch):
+    df = pd.DataFrame(
+        {
+            "pvm": [f"2025-01-{day:02d}" for day in range(1, 9)],
+            "close": [100.0] * 8,
+            "low": [5.0, 4.0, 6.0, 7.0, 8.0, 7.0, 6.0, 3.0],
+            "high": [20.0] * 8,
+        }
+    )
+    monkeypatch.setattr(
+        "analysis.divergence_engine.compute_rsi_wilder",
+        lambda closes, period=14: [40.0, 30.0, 35.0, 36.0, 37.0, 38.0, 39.0, 25.0],
+    )
+
+    rows = compute_divergence_series(df)
+
+    assert all(row["is_bullish_divergence"] == 0 for row in rows)
+
+
+def test_compute_divergence_series_keeps_event_flag_binary_on_collision(monkeypatch):
+    df = pd.DataFrame(
+        {
+            "pvm": [f"2025-02-{day:02d}" for day in range(1, 16)],
+            "close": [100.0] * 15,
+            "low": [12.0, 11.0, 10.0, 11.0, 12.0, 11.0, 9.0, 8.0, 9.0, 11.0, 8.0, 9.0, 10.0, 11.0, 12.0],
+            "high": [20.0] * 15,
+        }
+    )
+    monkeypatch.setattr(
+        "analysis.divergence_engine.compute_rsi_wilder",
+        lambda closes, period=14: [45.0, 40.0, 20.0, 41.0, 42.0, 39.0, 30.0, 25.0, 31.0, 35.0, 26.0, 32.0, 36.0, 37.0, 38.0],
+    )
+
+    rows = compute_divergence_series(df)
+
+    flagged_rows = [row for row in rows if row["is_bullish_divergence"] == 1]
+
+    assert len(flagged_rows) == 1
+    assert flagged_rows[0]["date"] == "2025-02-10"

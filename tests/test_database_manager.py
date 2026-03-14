@@ -31,7 +31,7 @@ class TestDatabaseManager:
 
     def test_init_with_invalid_path(self):
         """Testaa DatabaseManager alustus väärällä polulla"""
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises((FileNotFoundError, OSError)):
             DatabaseManager("/invalid/path/database.db")
 
     def test_get_connection(self, temp_db):

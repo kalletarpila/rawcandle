@@ -11,6 +11,7 @@ from .divergence_engine import compute_divergence_series
 from .divergence_v1 import CANDIDATE_WINDOW, LOOKBACK_DAYS, MIN_HISTORY_DAYS, RSI_PERIOD
 
 
+V2_INCREMENTAL_RECOMPUTE_BUFFER = 20
 RECALC_CONTEXT_ROWS = MIN_HISTORY_DAYS + LOOKBACK_DAYS + CANDIDATE_WINDOW + RSI_PERIOD
 
 
@@ -77,7 +78,8 @@ def _resolve_recompute_window(
 
     first_missing_idx = min(missing_indices)
     recalc_start_idx = max(0, first_missing_idx - RECALC_CONTEXT_ROWS)
-    write_start_date = str(df.iloc[first_missing_idx]["pvm"])
+    affected_start_idx = max(0, first_missing_idx - V2_INCREMENTAL_RECOMPUTE_BUFFER)
+    write_start_date = str(df.iloc[affected_start_idx]["pvm"])
     return df.iloc[recalc_start_idx:].copy(), write_start_date
 
 
@@ -95,7 +97,7 @@ def recompute_divergence_for_ticker(
     try:
         with sqlite3.connect(osakedata_path) as conn_osake:
             df = pd.read_sql_query(
-                "SELECT pvm, close FROM osakedata WHERE osake = ? ORDER BY pvm",
+                "SELECT pvm, low, high, close FROM osakedata WHERE osake = ? ORDER BY pvm",
                 conn_osake,
                 params=[ticker],
             )
@@ -114,35 +116,27 @@ def recompute_divergence_for_ticker(
         if not computed_rows:
             return True, 0, ""
 
-        missing_dates = None
-        if only_missing:
-            missing_dates = {
-                str(date_value)
-                for date_value in work_df["pvm"].astype(str).tolist()
-                if str(date_value) not in existing_dates
-            }
-
         records = [
             (
                 str(row["date"]),
                 float(row["bullish_strength"] or 0.0),
                 float(row["bearish_strength"] or 0.0),
                 None if row["rsi"] is None else float(row["rsi"]),
+                int(row.get("is_bullish_divergence", 0) or 0),
+                int(row.get("is_bearish_divergence", 0) or 0),
             )
             for row in computed_rows
-            if missing_dates is None or str(row["date"]) in missing_dates
         ]
 
         if not records:
             return True, 0, ""
 
-        if not only_missing:
-            with sqlite3.connect(analysis_path) as conn_an:
-                conn_an.execute(
-                    "DELETE FROM divergence_data WHERE ticker = ? AND date >= ?",
-                    (ticker, write_start_date),
-                )
-                conn_an.commit()
+        with sqlite3.connect(analysis_path) as conn_an:
+            conn_an.execute(
+                "DELETE FROM divergence_data WHERE ticker = ? AND date >= ?",
+                (ticker, write_start_date),
+            )
+            conn_an.commit()
 
         db_manager = DatabaseManager(db_path=str(analysis_path))
         success = db_manager.save_divergence_batch(ticker, records)
