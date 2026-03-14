@@ -5,7 +5,6 @@ from pathlib import Path
 import pandas as pd
 
 from .candlestick_patterns import (
-    calculate_rsi,
     is_bullish_divergence,
     is_bullish_engulfing,
     is_dragonfly_doji,
@@ -14,6 +13,7 @@ from .candlestick_patterns import (
     is_piercing_pattern,
     is_three_white_soldiers,
 )
+from .divergence_v1 import compute_rsi_wilder
 
 
 def _calculate_signal_strength(
@@ -254,10 +254,13 @@ def run_candlestick_analysis(
     if divergence_rsi_map:
         df["RSI"] = df["pvm"].dt.strftime("%Y-%m-%d").map(divergence_rsi_map)
 
-    # Laske puuttuvat RSI-arvot (tai kaikki, jos ei löytynyt valmiita)
+    # Laske puuttuvat RSI-arvot Wilder RSI(14) -menetelmällä.
     if "RSI" not in df.columns or df["RSI"].isna().any():
-        calc_df = calculate_rsi(df, period=14, close_col="Close")
-        calc_rsi = calc_df["RSI"]
+        calc_rsi = pd.Series(
+            compute_rsi_wilder(df["Close"].astype(float).tolist(), period=14),
+            index=df.index,
+            dtype="float64",
+        )
         if "RSI" in df.columns:
             df["RSI"] = df["RSI"].fillna(calc_rsi)
         else:

@@ -4,9 +4,11 @@ import pandas as pd
 import pytest
 
 from analysis.candlestick_patterns import (
+    calculate_rsi,
     is_bearish_divergence,
     is_bullish_divergence,
 )
+from analysis.divergence_v1 import compute_rsi_wilder
 from analysis.run_analysis import run_candlestick_analysis
 
 
@@ -316,3 +318,82 @@ def test_run_candlestick_analysis_candle_only_behavior_unchanged(tmp_path, monke
     assert results and key in results
     assert len(results[key]) == 1
     assert results[key][0]["pattern"] == "Bullish Engulfing"
+
+
+def test_run_candlestick_analysis_uses_wilder_rsi_fallback(tmp_path):
+    osake_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+
+    closes = [100]
+    for delta in ([1] * 12 + [-12] + [1] * 2):
+        closes.append(closes[-1] + delta)
+
+    with sqlite3.connect(osake_db) as conn:
+        conn.execute(
+            """
+            CREATE TABLE osakedata (
+                osake TEXT,
+                pvm TEXT,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                volume INTEGER,
+                market TEXT
+            )
+            """
+        )
+        rows = []
+        for idx, close in enumerate(closes, start=1):
+            date = f"2026-03-{idx:02d}"
+            if idx == len(closes):
+                rows.append(("TEST", date, close, close + 0.1, close - 6.0, close + 1.0, 1_000, "usa"))
+            else:
+                rows.append(("TEST", date, close, close, close, close, 1_000, "usa"))
+        conn.executemany(
+            """
+            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            CREATE TABLE divergence_data (
+                ticker TEXT NOT NULL,
+                date TEXT NOT NULL,
+                bullish_strength REAL DEFAULT 0,
+                bearish_strength REAL DEFAULT 0,
+                rsi REAL,
+                PRIMARY KEY (ticker, date)
+            )
+            """
+        )
+
+    results = run_candlestick_analysis(
+        str(osake_db),
+        "TEST",
+        patterns=["Hammer"],
+        start_date="2026-03-01",
+        end_date="2026-03-16",
+        progress_callback=None,
+        downtrend_filter=False,
+        min_decline_percent=3.0,
+        use_ma_filter=False,
+        use_volume_filter=False,
+        analysis_db_path=str(analysis_db),
+    )
+
+    key = "TEST|2026-03-16"
+    assert results and key in results
+
+    actual_closes = closes[:-1] + [closes[-1] + 1.0]
+    closes_df = pd.DataFrame({"Close": actual_closes})
+    rolling_rsi = float(calculate_rsi(closes_df, period=14, close_col="Close")["RSI"].iloc[-1])
+    wilder_rsi = compute_rsi_wilder([float(value) for value in actual_closes], period=14)[-1]
+
+    assert wilder_rsi is not None
+    assert rolling_rsi != pytest.approx(wilder_rsi)
+    assert results[key][0]["rsi14"] == pytest.approx(wilder_rsi)

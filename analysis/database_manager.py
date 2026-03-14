@@ -370,10 +370,23 @@ class DatabaseManager:
                     bullish_strength REAL DEFAULT 0,
                     bearish_strength REAL DEFAULT 0,
                     rsi REAL,
+                    is_bullish_divergence INTEGER DEFAULT 0,
+                    is_bearish_divergence INTEGER DEFAULT 0,
                     PRIMARY KEY (ticker, date)
                 )
             """
             )
+
+            cursor.execute("PRAGMA table_info(divergence_data)")
+            divergence_columns = {row[1] for row in cursor.fetchall()}
+            if "is_bullish_divergence" not in divergence_columns:
+                cursor.execute(
+                    "ALTER TABLE divergence_data ADD COLUMN is_bullish_divergence INTEGER DEFAULT 0"
+                )
+            if "is_bearish_divergence" not in divergence_columns:
+                cursor.execute(
+                    "ALTER TABLE divergence_data ADD COLUMN is_bearish_divergence INTEGER DEFAULT 0"
+                )
 
             # Luo indeksit divergence_data tauluun
             cursor.execute(
@@ -1286,16 +1299,46 @@ class DatabaseManager:
             cursor = conn.cursor()
 
             # Prepare data with ticker
-            records_with_ticker = [
-                (ticker, date, bullish, bearish, rsi)
-                for date, bullish, bearish, rsi in divergence_records
-            ]
+            records_with_ticker = []
+            for record in divergence_records:
+                if len(record) == 4:
+                    date, bullish, bearish, rsi = record
+                    is_bullish_divergence = 0
+                    is_bearish_divergence = 0
+                else:
+                    (
+                        date,
+                        bullish,
+                        bearish,
+                        rsi,
+                        is_bullish_divergence,
+                        is_bearish_divergence,
+                    ) = record
+                records_with_ticker.append(
+                    (
+                        ticker,
+                        date,
+                        bullish,
+                        bearish,
+                        rsi,
+                        is_bullish_divergence,
+                        is_bearish_divergence,
+                    )
+                )
 
             cursor.executemany(
                 """
                 INSERT OR REPLACE INTO divergence_data 
-                (ticker, date, bullish_strength, bearish_strength, rsi)
-                VALUES (?, ?, ?, ?, ?)
+                (
+                    ticker,
+                    date,
+                    bullish_strength,
+                    bearish_strength,
+                    rsi,
+                    is_bullish_divergence,
+                    is_bearish_divergence
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
                 records_with_ticker,
             )
