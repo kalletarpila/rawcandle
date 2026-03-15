@@ -17,6 +17,8 @@ from .divergence_v1 import (
 
 PIVOT_RADIUS_R2 = 2
 PIVOT_RADIUS_R3 = 3
+MIN_V2_PIVOT_GAP = 5
+MAX_V2_PIVOT_GAP = 24
 
 
 def compute_divergence_for_date(
@@ -135,13 +137,15 @@ def _compute_v2_event_flags_for_radius(
     rsi_values: List[Optional[float]],
     *,
     radius: int,
-) -> tuple[List[int], List[int]]:
+) -> tuple[List[int], List[int], List[Optional[int]], List[Optional[float]]]:
     size = len(rsi_values)
     bullish_flags = [0] * size
     bearish_flags = [0] * size
+    pivot_gaps: List[Optional[int]] = [None] * size
+    pivot_drop_pcts: List[Optional[float]] = [None] * size
 
     if not lows or not highs or len(lows) != size or len(highs) != size:
-        return bullish_flags, bearish_flags
+        return bullish_flags, bearish_flags, pivot_gaps, pivot_drop_pcts
 
     raw_price_pivot_lows = _compute_raw_pivot_candidates(lows, radius=radius, is_low=True)
     raw_price_pivot_highs = _compute_raw_pivot_candidates(highs, radius=radius, is_low=False)
@@ -163,6 +167,9 @@ def _compute_v2_event_flags_for_radius(
     for pivot_idx in range(1, len(price_pivot_lows)):
         p1 = price_pivot_lows[pivot_idx - 1]
         p2 = price_pivot_lows[pivot_idx]
+        pivot_gap = p2 - p1
+        if pivot_gap < MIN_V2_PIVOT_GAP or pivot_gap > MAX_V2_PIVOT_GAP:
+            continue
 
         if lows[p2] >= lows[p1]:
             continue
@@ -170,6 +177,7 @@ def _compute_v2_event_flags_for_radius(
             continue
 
         anchor_rsi = rsi_values[p1]
+        pivot_drop_pct = ((lows[p1] - lows[p2]) / lows[p1]) * 100.0
         for r2 in [p2 - 1, p2, p2 + 1]:
             if r2 < 0 or r2 >= size:
                 continue
@@ -183,11 +191,16 @@ def _compute_v2_event_flags_for_radius(
             if event_idx >= size:
                 continue
             bullish_flags[event_idx] = 1
+            pivot_gaps[event_idx] = pivot_gap
+            pivot_drop_pcts[event_idx] = pivot_drop_pct
             break
 
     for pivot_idx in range(1, len(price_pivot_highs)):
         p1 = price_pivot_highs[pivot_idx - 1]
         p2 = price_pivot_highs[pivot_idx]
+        pivot_gap = p2 - p1
+        if pivot_gap < MIN_V2_PIVOT_GAP or pivot_gap > MAX_V2_PIVOT_GAP:
+            continue
 
         if highs[p2] <= highs[p1]:
             continue
@@ -195,6 +208,7 @@ def _compute_v2_event_flags_for_radius(
             continue
 
         anchor_rsi = rsi_values[p1]
+        pivot_drop_pct = ((highs[p2] - highs[p1]) / highs[p1]) * 100.0
         for r2 in [p2 - 1, p2, p2 + 1]:
             if r2 < 0 or r2 >= size:
                 continue
@@ -208,9 +222,11 @@ def _compute_v2_event_flags_for_radius(
             if event_idx >= size:
                 continue
             bearish_flags[event_idx] = 1
+            pivot_gaps[event_idx] = pivot_gap
+            pivot_drop_pcts[event_idx] = pivot_drop_pct
             break
 
-    return bullish_flags, bearish_flags
+    return bullish_flags, bearish_flags, pivot_gaps, pivot_drop_pcts
 
 
 def compute_divergence_series(
@@ -239,10 +255,20 @@ def compute_divergence_series(
         if "high" in work_df.columns
         else []
     )
-    bullish_event_flags_r2, bearish_event_flags_r2 = _compute_v2_event_flags_for_radius(
+    (
+        bullish_event_flags_r2,
+        bearish_event_flags_r2,
+        pivot_gaps_r2,
+        pivot_drop_pcts_r2,
+    ) = _compute_v2_event_flags_for_radius(
         lows, highs, rsi_values, radius=PIVOT_RADIUS_R2
     )
-    bullish_event_flags_r3, bearish_event_flags_r3 = _compute_v2_event_flags_for_radius(
+    (
+        bullish_event_flags_r3,
+        bearish_event_flags_r3,
+        pivot_gaps_r3,
+        pivot_drop_pcts_r3,
+    ) = _compute_v2_event_flags_for_radius(
         lows, highs, rsi_values, radius=PIVOT_RADIUS_R3
     )
 
@@ -256,6 +282,12 @@ def compute_divergence_series(
         row["is_bearish_divergence_r2"] = bearish_event_flags_r2[idx]
         row["is_bullish_divergence_r3"] = bullish_event_flags_r3[idx]
         row["is_bearish_divergence_r3"] = bearish_event_flags_r3[idx]
+        row["pivot_gap_r2"] = pivot_gaps_r2[idx]
+        row["pivot_drop_pct_r2"] = pivot_drop_pcts_r2[idx]
+        row["pivot_gap_r3"] = pivot_gaps_r3[idx]
+        row["pivot_drop_pct_r3"] = pivot_drop_pcts_r3[idx]
+        row["pivot_gap"] = pivot_gaps_r2[idx]
+        row["pivot_drop_pct"] = pivot_drop_pcts_r2[idx]
         # Legacy compatibility: generic fields mirror radius-2 semantics.
         row["is_bullish_divergence"] = bullish_event_flags_r2[idx]
         row["is_bearish_divergence"] = bearish_event_flags_r2[idx]

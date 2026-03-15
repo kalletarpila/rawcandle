@@ -344,7 +344,10 @@ def test_recompute_divergence_full_recompute_uses_real_v1_engine(divergence_dbs)
             SELECT date, bullish_strength, bearish_strength, rsi,
                    is_bullish_divergence, is_bearish_divergence,
                    is_bullish_divergence_r2, is_bearish_divergence_r2,
-                   is_bullish_divergence_r3, is_bearish_divergence_r3
+                   is_bullish_divergence_r3, is_bearish_divergence_r3,
+                   pivot_gap, pivot_drop_pct,
+                   pivot_gap_r2, pivot_drop_pct_r2,
+                   pivot_gap_r3, pivot_drop_pct_r3
             FROM divergence_data
             WHERE ticker = ?
             ORDER BY date
@@ -364,6 +367,12 @@ def test_recompute_divergence_full_recompute_uses_real_v1_engine(divergence_dbs)
     assert stored_last[7] == expected_last["is_bearish_divergence_r2"]
     assert stored_last[8] == expected_last["is_bullish_divergence_r3"]
     assert stored_last[9] == expected_last["is_bearish_divergence_r3"]
+    assert stored_last[10] == expected_last["pivot_gap"]
+    assert stored_last[11] == expected_last["pivot_drop_pct"]
+    assert stored_last[12] == expected_last["pivot_gap_r2"]
+    assert stored_last[13] == expected_last["pivot_drop_pct_r2"]
+    assert stored_last[14] == expected_last["pivot_gap_r3"]
+    assert stored_last[15] == expected_last["pivot_drop_pct_r3"]
 
 
 def test_recompute_divergence_only_missing_updates_v2_flags_for_recent_existing_rows(
@@ -464,7 +473,13 @@ def test_recompute_divergence_only_missing_updates_v2_flags_for_recent_existing_
             """
             SELECT is_bullish_divergence,
                    is_bullish_divergence_r2,
-                   is_bullish_divergence_r3
+                   is_bullish_divergence_r3,
+                   pivot_gap,
+                   pivot_drop_pct,
+                   pivot_gap_r2,
+                   pivot_drop_pct_r2,
+                   pivot_gap_r3,
+                   pivot_drop_pct_r3
             FROM divergence_data
             WHERE ticker = ? AND date = ?
             """,
@@ -475,3 +490,102 @@ def test_recompute_divergence_only_missing_updates_v2_flags_for_recent_existing_
     assert row[0] == 1
     assert row[1] == 1
     assert row[2] == 0
+    assert row[3] == 5
+    assert row[4] == 25.0
+    assert row[5] == 5
+    assert row[6] == 25.0
+    assert row[7] is None
+    assert row[8] is None
+
+
+def test_recompute_divergence_persists_geometry_fields(tmp_path):
+    ticker = "TEST"
+    osakedata_path = tmp_path / "osakedata.db"
+    analysis_path = tmp_path / "analysis.db"
+
+    with sqlite3.connect(osakedata_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE osakedata (
+                osake TEXT NOT NULL,
+                pvm TEXT NOT NULL,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                volume INTEGER,
+                market TEXT NOT NULL DEFAULT 'usa',
+                PRIMARY KEY (osake, pvm)
+            )
+            """
+        )
+        rows = [
+            ("2024-06-01", 10.0, 20.0, 100.0),
+            ("2024-06-02", 9.0, 20.0, 100.0),
+            ("2024-06-03", 8.0, 20.0, 100.0),
+            ("2024-06-04", 9.0, 20.0, 100.0),
+            ("2024-06-05", 10.0, 20.0, 100.0),
+            ("2024-06-06", 9.0, 20.0, 100.0),
+            ("2024-06-07", 7.0, 20.0, 100.0),
+            ("2024-06-08", 6.0, 20.0, 100.0),
+            ("2024-06-09", 7.0, 20.0, 100.0),
+            ("2024-06-10", 8.0, 20.0, 100.0),
+            ("2024-06-11", 9.0, 20.0, 100.0),
+        ]
+        conn.executemany(
+            """
+            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [(ticker, d, c, h, l, c, 1000, "usa") for d, l, h, c in rows],
+        )
+        conn.commit()
+
+    DatabaseManager(str(analysis_path)).close()
+
+    from analysis import divergence_engine as divergence_engine_module
+
+    original_compute_rsi_wilder = divergence_engine_module.compute_rsi_wilder
+
+    def fake_compute_rsi_wilder(closes, period=14):
+        if len(closes) == 11:
+            return [40.0, 35.0, 20.0, 36.0, 37.0, 35.0, 32.0, 30.0, 33.0, 36.0, 38.0]
+        return original_compute_rsi_wilder(closes, period=period)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("analysis.divergence_engine.compute_rsi_wilder", fake_compute_rsi_wilder)
+        success, rows_written, err = recompute_divergence_for_ticker(
+            ticker,
+            osakedata_path=str(osakedata_path),
+            analysis_path=str(analysis_path),
+            only_missing=False,
+        )
+
+    assert success is True
+    assert err == ""
+    assert rows_written == 11
+
+    with sqlite3.connect(analysis_path) as conn:
+        event_row = conn.execute(
+            """
+            SELECT pivot_gap, pivot_drop_pct,
+                   pivot_gap_r2, pivot_drop_pct_r2,
+                   pivot_gap_r3, pivot_drop_pct_r3
+            FROM divergence_data
+            WHERE ticker = ? AND date = ?
+            """,
+            (ticker, "2024-06-10"),
+        ).fetchone()
+        non_event_row = conn.execute(
+            """
+            SELECT pivot_gap, pivot_drop_pct,
+                   pivot_gap_r2, pivot_drop_pct_r2,
+                   pivot_gap_r3, pivot_drop_pct_r3
+            FROM divergence_data
+            WHERE ticker = ? AND date = ?
+            """,
+            (ticker, "2024-06-09"),
+        ).fetchone()
+
+    assert event_row == (5, 25.0, 5, 25.0, None, None)
+    assert non_event_row == (None, None, None, None, None, None)

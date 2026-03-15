@@ -128,6 +128,12 @@ def recompute_divergence_for_ticker(
                 int(row.get("is_bearish_divergence_r2", 0) or 0),
                 int(row.get("is_bullish_divergence_r3", 0) or 0),
                 int(row.get("is_bearish_divergence_r3", 0) or 0),
+                row.get("pivot_gap"),
+                row.get("pivot_drop_pct"),
+                row.get("pivot_gap_r2"),
+                row.get("pivot_drop_pct_r2"),
+                row.get("pivot_gap_r3"),
+                row.get("pivot_drop_pct_r3"),
             )
             for row in computed_rows
         ]
