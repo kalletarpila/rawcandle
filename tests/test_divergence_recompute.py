@@ -342,7 +342,9 @@ def test_recompute_divergence_full_recompute_uses_real_v1_engine(divergence_dbs)
         stored_rows = conn.execute(
             """
             SELECT date, bullish_strength, bearish_strength, rsi,
-                   is_bullish_divergence, is_bearish_divergence
+                   is_bullish_divergence, is_bearish_divergence,
+                   is_bullish_divergence_r2, is_bearish_divergence_r2,
+                   is_bullish_divergence_r3, is_bearish_divergence_r3
             FROM divergence_data
             WHERE ticker = ?
             ORDER BY date
@@ -358,6 +360,10 @@ def test_recompute_divergence_full_recompute_uses_real_v1_engine(divergence_dbs)
     assert stored_last[3] == expected_last["rsi"]
     assert stored_last[4] == expected_last["is_bullish_divergence"]
     assert stored_last[5] == expected_last["is_bearish_divergence"]
+    assert stored_last[6] == expected_last["is_bullish_divergence_r2"]
+    assert stored_last[7] == expected_last["is_bearish_divergence_r2"]
+    assert stored_last[8] == expected_last["is_bullish_divergence_r3"]
+    assert stored_last[9] == expected_last["is_bearish_divergence_r3"]
 
 
 def test_recompute_divergence_only_missing_updates_v2_flags_for_recent_existing_rows(
@@ -456,7 +462,9 @@ def test_recompute_divergence_only_missing_updates_v2_flags_for_recent_existing_
     with sqlite3.connect(analysis_path) as conn:
         row = conn.execute(
             """
-            SELECT is_bullish_divergence
+            SELECT is_bullish_divergence,
+                   is_bullish_divergence_r2,
+                   is_bullish_divergence_r3
             FROM divergence_data
             WHERE ticker = ? AND date = ?
             """,
@@ -465,3 +473,5 @@ def test_recompute_divergence_only_missing_updates_v2_flags_for_recent_existing_
 
     assert row is not None
     assert row[0] == 1
+    assert row[1] == 1
+    assert row[2] == 0

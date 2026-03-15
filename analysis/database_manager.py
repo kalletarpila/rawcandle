@@ -372,6 +372,10 @@ class DatabaseManager:
                     rsi REAL,
                     is_bullish_divergence INTEGER DEFAULT 0,
                     is_bearish_divergence INTEGER DEFAULT 0,
+                    is_bullish_divergence_r2 INTEGER DEFAULT 0,
+                    is_bearish_divergence_r2 INTEGER DEFAULT 0,
+                    is_bullish_divergence_r3 INTEGER DEFAULT 0,
+                    is_bearish_divergence_r3 INTEGER DEFAULT 0,
                     PRIMARY KEY (ticker, date)
                 )
             """
@@ -386,6 +390,30 @@ class DatabaseManager:
             if "is_bearish_divergence" not in divergence_columns:
                 cursor.execute(
                     "ALTER TABLE divergence_data ADD COLUMN is_bearish_divergence INTEGER DEFAULT 0"
+                )
+            if "is_bullish_divergence_r2" not in divergence_columns:
+                cursor.execute(
+                    "ALTER TABLE divergence_data ADD COLUMN is_bullish_divergence_r2 INTEGER DEFAULT 0"
+                )
+                if "is_bullish_divergence" in divergence_columns:
+                    cursor.execute(
+                        "UPDATE divergence_data SET is_bullish_divergence_r2 = COALESCE(is_bullish_divergence, 0)"
+                    )
+            if "is_bearish_divergence_r2" not in divergence_columns:
+                cursor.execute(
+                    "ALTER TABLE divergence_data ADD COLUMN is_bearish_divergence_r2 INTEGER DEFAULT 0"
+                )
+                if "is_bearish_divergence" in divergence_columns:
+                    cursor.execute(
+                        "UPDATE divergence_data SET is_bearish_divergence_r2 = COALESCE(is_bearish_divergence, 0)"
+                    )
+            if "is_bullish_divergence_r3" not in divergence_columns:
+                cursor.execute(
+                    "ALTER TABLE divergence_data ADD COLUMN is_bullish_divergence_r3 INTEGER DEFAULT 0"
+                )
+            if "is_bearish_divergence_r3" not in divergence_columns:
+                cursor.execute(
+                    "ALTER TABLE divergence_data ADD COLUMN is_bearish_divergence_r3 INTEGER DEFAULT 0"
                 )
 
             # Luo indeksit divergence_data tauluun
@@ -1305,6 +1333,23 @@ class DatabaseManager:
                     date, bullish, bearish, rsi = record
                     is_bullish_divergence = 0
                     is_bearish_divergence = 0
+                    is_bullish_divergence_r2 = 0
+                    is_bearish_divergence_r2 = 0
+                    is_bullish_divergence_r3 = 0
+                    is_bearish_divergence_r3 = 0
+                elif len(record) == 6:
+                    (
+                        date,
+                        bullish,
+                        bearish,
+                        rsi,
+                        is_bullish_divergence,
+                        is_bearish_divergence,
+                    ) = record
+                    is_bullish_divergence_r2 = is_bullish_divergence
+                    is_bearish_divergence_r2 = is_bearish_divergence
+                    is_bullish_divergence_r3 = 0
+                    is_bearish_divergence_r3 = 0
                 else:
                     (
                         date,
@@ -1313,6 +1358,10 @@ class DatabaseManager:
                         rsi,
                         is_bullish_divergence,
                         is_bearish_divergence,
+                        is_bullish_divergence_r2,
+                        is_bearish_divergence_r2,
+                        is_bullish_divergence_r3,
+                        is_bearish_divergence_r3,
                     ) = record
                 records_with_ticker.append(
                     (
@@ -1323,6 +1372,10 @@ class DatabaseManager:
                         rsi,
                         is_bullish_divergence,
                         is_bearish_divergence,
+                        is_bullish_divergence_r2,
+                        is_bearish_divergence_r2,
+                        is_bullish_divergence_r3,
+                        is_bearish_divergence_r3,
                     )
                 )
 
@@ -1336,9 +1389,13 @@ class DatabaseManager:
                     bearish_strength,
                     rsi,
                     is_bullish_divergence,
-                    is_bearish_divergence
+                    is_bearish_divergence,
+                    is_bullish_divergence_r2,
+                    is_bearish_divergence_r2,
+                    is_bullish_divergence_r3,
+                    is_bearish_divergence_r3
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 records_with_ticker,
             )

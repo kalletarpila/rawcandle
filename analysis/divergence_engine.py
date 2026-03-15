@@ -15,8 +15,8 @@ from .divergence_v1 import (
     is_rolling_low_candidate,
 )
 
-PIVOT_RADIUS = 2
-EVENT_CONFIRMATION_LAG = PIVOT_RADIUS
+PIVOT_RADIUS_R2 = 2
+PIVOT_RADIUS_R3 = 3
 
 
 def compute_divergence_for_date(
@@ -77,7 +77,7 @@ def compute_divergence_for_date(
     }
 
 
-def _is_valid_pivot_index(size: int, idx: int, radius: int = PIVOT_RADIUS) -> bool:
+def _is_valid_pivot_index(size: int, idx: int, radius: int) -> bool:
     return idx - radius >= 0 and idx + radius < size
 
 
@@ -92,7 +92,7 @@ def _window_has_null(values: List[Optional[float]], start: int, end: int) -> boo
 def _compute_raw_pivot_candidates(
     values: List[Optional[float]],
     *,
-    radius: int = PIVOT_RADIUS,
+    radius: int,
     is_low: bool,
 ) -> List[bool]:
     size = len(values)
@@ -129,10 +129,12 @@ def _collapse_tied_clusters(raw_candidates: List[bool], values: List[Optional[fl
     return final
 
 
-def _compute_v2_event_flags(
+def _compute_v2_event_flags_for_radius(
     lows: List[Optional[float]],
     highs: List[Optional[float]],
     rsi_values: List[Optional[float]],
+    *,
+    radius: int,
 ) -> tuple[List[int], List[int]]:
     size = len(rsi_values)
     bullish_flags = [0] * size
@@ -141,10 +143,14 @@ def _compute_v2_event_flags(
     if not lows or not highs or len(lows) != size or len(highs) != size:
         return bullish_flags, bearish_flags
 
-    raw_price_pivot_lows = _compute_raw_pivot_candidates(lows, is_low=True)
-    raw_price_pivot_highs = _compute_raw_pivot_candidates(highs, is_low=False)
-    raw_rsi_pivot_lows = _compute_raw_pivot_candidates(rsi_values, is_low=True)
-    raw_rsi_pivot_highs = _compute_raw_pivot_candidates(rsi_values, is_low=False)
+    raw_price_pivot_lows = _compute_raw_pivot_candidates(lows, radius=radius, is_low=True)
+    raw_price_pivot_highs = _compute_raw_pivot_candidates(highs, radius=radius, is_low=False)
+    raw_rsi_pivot_lows = _compute_raw_pivot_candidates(
+        rsi_values, radius=radius, is_low=True
+    )
+    raw_rsi_pivot_highs = _compute_raw_pivot_candidates(
+        rsi_values, radius=radius, is_low=False
+    )
 
     final_price_pivot_lows = _collapse_tied_clusters(raw_price_pivot_lows, lows)
     final_price_pivot_highs = _collapse_tied_clusters(raw_price_pivot_highs, highs)
@@ -173,7 +179,7 @@ def _compute_v2_event_flags(
                 continue
             if rsi_values[r2] <= anchor_rsi:
                 continue
-            event_idx = r2 + EVENT_CONFIRMATION_LAG
+            event_idx = r2 + radius
             if event_idx >= size:
                 continue
             bullish_flags[event_idx] = 1
@@ -198,7 +204,7 @@ def _compute_v2_event_flags(
                 continue
             if rsi_values[r2] >= anchor_rsi:
                 continue
-            event_idx = r2 + EVENT_CONFIRMATION_LAG
+            event_idx = r2 + radius
             if event_idx >= size:
                 continue
             bearish_flags[event_idx] = 1
@@ -233,7 +239,12 @@ def compute_divergence_series(
         if "high" in work_df.columns
         else []
     )
-    bullish_event_flags, bearish_event_flags = _compute_v2_event_flags(lows, highs, rsi_values)
+    bullish_event_flags_r2, bearish_event_flags_r2 = _compute_v2_event_flags_for_radius(
+        lows, highs, rsi_values, radius=PIVOT_RADIUS_R2
+    )
+    bullish_event_flags_r3, bearish_event_flags_r3 = _compute_v2_event_flags_for_radius(
+        lows, highs, rsi_values, radius=PIVOT_RADIUS_R3
+    )
 
     results: List[Dict[str, Any]] = []
     for idx in range(len(work_df)):
@@ -241,8 +252,13 @@ def compute_divergence_series(
         if start_date is not None and date_value < start_date:
             continue
         row = compute_divergence_for_date(dates, closes, rsi_values, idx)
-        row["is_bullish_divergence"] = bullish_event_flags[idx]
-        row["is_bearish_divergence"] = bearish_event_flags[idx]
+        row["is_bullish_divergence_r2"] = bullish_event_flags_r2[idx]
+        row["is_bearish_divergence_r2"] = bearish_event_flags_r2[idx]
+        row["is_bullish_divergence_r3"] = bullish_event_flags_r3[idx]
+        row["is_bearish_divergence_r3"] = bearish_event_flags_r3[idx]
+        # Legacy compatibility: generic fields mirror radius-2 semantics.
+        row["is_bullish_divergence"] = bullish_event_flags_r2[idx]
+        row["is_bearish_divergence"] = bearish_event_flags_r2[idx]
         results.append(row)
 
     return results

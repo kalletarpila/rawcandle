@@ -34,6 +34,54 @@ class TestDatabaseManager:
         with pytest.raises((FileNotFoundError, OSError)):
             DatabaseManager("/invalid/path/database.db")
 
+    def test_divergence_schema_migration_adds_radius_columns(self, temp_db):
+        raw_conn = sqlite3.connect(temp_db)
+        raw_conn.execute(
+            """
+            CREATE TABLE divergence_data (
+                ticker TEXT NOT NULL,
+                date TEXT NOT NULL,
+                bullish_strength REAL DEFAULT 0,
+                bearish_strength REAL DEFAULT 0,
+                rsi REAL,
+                is_bullish_divergence INTEGER DEFAULT 1,
+                is_bearish_divergence INTEGER DEFAULT 0,
+                PRIMARY KEY (ticker, date)
+            )
+            """
+        )
+        raw_conn.execute(
+            """
+            INSERT INTO divergence_data
+            (ticker, date, bullish_strength, bearish_strength, rsi, is_bullish_divergence, is_bearish_divergence)
+            VALUES ('AAA', '2025-01-01', 0.5, 0.0, 45.0, 1, 0)
+            """
+        )
+        raw_conn.commit()
+        raw_conn.close()
+
+        manager = DatabaseManager(temp_db)
+        conn = manager.get_connection()
+        columns = {
+            row[1]: row[4]
+            for row in conn.execute("PRAGMA table_info(divergence_data)").fetchall()
+        }
+        row = conn.execute(
+            """
+            SELECT is_bullish_divergence, is_bearish_divergence,
+                   is_bullish_divergence_r2, is_bearish_divergence_r2,
+                   is_bullish_divergence_r3, is_bearish_divergence_r3
+            FROM divergence_data
+            WHERE ticker = 'AAA' AND date = '2025-01-01'
+            """
+        ).fetchone()
+
+        assert "is_bullish_divergence_r2" in columns
+        assert "is_bearish_divergence_r2" in columns
+        assert "is_bullish_divergence_r3" in columns
+        assert "is_bearish_divergence_r3" in columns
+        assert tuple(row) == (1, 0, 1, 0, 0, 0)
+
     def test_get_connection(self, temp_db):
         """Testaa tietokantayhteyden muodostaminen"""
         manager = DatabaseManager(temp_db)

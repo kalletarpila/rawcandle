@@ -124,6 +124,10 @@ def recompute_divergence_for_ticker(
                 None if row["rsi"] is None else float(row["rsi"]),
                 int(row.get("is_bullish_divergence", 0) or 0),
                 int(row.get("is_bearish_divergence", 0) or 0),
+                int(row.get("is_bullish_divergence_r2", 0) or 0),
+                int(row.get("is_bearish_divergence_r2", 0) or 0),
+                int(row.get("is_bullish_divergence_r3", 0) or 0),
+                int(row.get("is_bearish_divergence_r3", 0) or 0),
             )
             for row in computed_rows
         ]
