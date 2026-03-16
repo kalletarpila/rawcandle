@@ -11,6 +11,9 @@ import logging
 
 from .combo_features import BULL_DIV_GENERAL_FEATURES, CANDLE_PATTERN_TO_SLUG
 
+SQLITE_BUSY_TIMEOUT_MS = 30_000
+SQLITE_CONNECT_TIMEOUT_SECONDS = 30.0
+
 RESULTS_BASE_COLUMNS: List[str] = [
     "ticker",
     "date",
@@ -834,8 +837,18 @@ class DatabaseManager:
             SQLite yhteys
         """
         if self._connection is None:
-            self._connection = sqlite3.connect(self.db_path)
+            self._connection = sqlite3.connect(
+                self.db_path,
+                timeout=SQLITE_CONNECT_TIMEOUT_SECONDS,
+            )
             self._connection.row_factory = sqlite3.Row
+            self._connection.execute(
+                f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}"
+            )
+            try:
+                self._connection.execute("PRAGMA journal_mode = WAL")
+            except sqlite3.OperationalError:
+                pass
         return self._connection
 
     def close(self) -> None:
