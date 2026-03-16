@@ -153,6 +153,33 @@ def test_fetch_divergence_events_classifies_event_rows_correctly(tmp_path):
     assert by_ticker["CCC"] == "R2_AND_R3"
 
 
+def test_fetch_divergence_events_supports_r2_and_r3_event_class_filters(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    stock_db = tmp_path / "osakedata.db"
+    _create_analysis_db(str(analysis_db))
+    _create_stock_db(str(stock_db))
+
+    rows_r2 = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        event_class="R2",
+        limit=20,
+        sort_by="ticker",
+        sort_desc=False,
+    )
+    rows_r3 = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        event_class="R3",
+        limit=20,
+        sort_by="ticker",
+        sort_desc=False,
+    )
+
+    assert [row["ticker"] for row in rows_r2] == ["AAA", "CCC"]
+    assert [row["ticker"] for row in rows_r3] == ["BBB", "CCC"]
+
+
 def test_fetch_divergence_events_uses_trading_day_offsets_for_returns(tmp_path):
     analysis_db = tmp_path / "analysis.db"
     stock_db = tmp_path / "osakedata.db"
@@ -201,6 +228,25 @@ def test_fetch_divergence_events_filters_by_radius_specific_gap_and_drop(tmp_pat
 
     assert [row["ticker"] for row in rows_r2] == ["CCC"]
     assert {row["ticker"] for row in rows_r3} == {"BBB", "CCC"}
+
+
+def test_fetch_divergence_events_filters_by_rsi_range(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    stock_db = tmp_path / "osakedata.db"
+    _create_analysis_db(str(analysis_db))
+    _create_stock_db(str(stock_db))
+
+    rows = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        min_rsi=30.0,
+        max_rsi=32.0,
+        limit=20,
+        sort_by="ticker",
+        sort_desc=False,
+    )
+
+    assert [row["ticker"] for row in rows] == ["AAA"]
 
 
 def test_fetch_divergence_events_excludes_active_excluded_tickers(tmp_path):

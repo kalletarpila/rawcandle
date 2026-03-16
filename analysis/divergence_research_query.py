@@ -9,7 +9,7 @@ from statistics import median
 from typing import Any
 
 
-VALID_EVENT_CLASSES = {"R2_ONLY", "R3_ONLY", "R2_AND_R3"}
+VALID_EVENT_CLASSES = {"R2", "R3", "R2_ONLY", "R3_ONLY", "R2_AND_R3"}
 VALID_RADII = {"ALL", "R2", "R3"}
 VALID_SORT_COLUMNS = {
     "ticker": "e.ticker",
@@ -108,6 +108,8 @@ def _build_where_clause(
     max_gap: int,
     min_drop: float,
     max_drop: float,
+    min_rsi: float,
+    max_rsi: float,
     start_date: str | None,
     end_date: str | None,
     exclude_active_tickers: bool,
@@ -128,6 +130,13 @@ def _build_where_clause(
         clauses.append(
             "NOT EXISTS (SELECT 1 FROM excluded_tickers x WHERE x.ticker = d.ticker AND x.active = 1)"
         )
+    clauses.extend(
+        [
+            "d.rsi >= ?",
+            "d.rsi <= ?",
+        ]
+    )
+    params.extend([min_rsi, max_rsi])
     if radius_value != "ALL":
         gap_col = "d.pivot_gap_r2" if radius_value == "R2" else "d.pivot_gap_r3"
         drop_col = "d.pivot_drop_pct_r2" if radius_value == "R2" else "d.pivot_drop_pct_r3"
@@ -140,7 +149,11 @@ def _build_where_clause(
             ]
         )
         params.extend([min_gap, max_gap, min_drop, max_drop])
-    if event_class is not None:
+    if event_class == "R2":
+        clauses.append("d.is_bullish_divergence_r2 = 1")
+    elif event_class == "R3":
+        clauses.append("d.is_bullish_divergence_r3 = 1")
+    elif event_class is not None:
         clauses.append(f"{class_sql} = ?")
         params.append(event_class)
     if start_date_value is not None:
@@ -161,6 +174,8 @@ def _fetch_event_rows(
     max_gap: int,
     min_drop: float,
     max_drop: float,
+    min_rsi: float,
+    max_rsi: float,
     start_date: str | None = None,
     end_date: str | None = None,
     stock_db_path: str | None = None,
@@ -178,6 +193,8 @@ def _fetch_event_rows(
         max_gap,
         min_drop,
         max_drop,
+        min_rsi,
+        max_rsi,
         start_date,
         end_date,
         exclude_active_tickers,
@@ -273,6 +290,8 @@ def fetch_divergence_events(
     max_gap: int = 24,
     min_drop: float = 0.0,
     max_drop: float = 50.0,
+    min_rsi: float = 1.0,
+    max_rsi: float = 100.0,
     start_date: str | None = None,
     end_date: str | None = None,
     limit: int = 500,
@@ -291,6 +310,8 @@ def fetch_divergence_events(
         max_gap=max_gap,
         min_drop=min_drop,
         max_drop=max_drop,
+        min_rsi=min_rsi,
+        max_rsi=max_rsi,
         start_date=start_date,
         end_date=end_date,
         stock_db_path=stock_db_path,
@@ -309,6 +330,8 @@ def summarize_divergence_events(
     max_gap: int = 24,
     min_drop: float = 0.0,
     max_drop: float = 50.0,
+    min_rsi: float = 1.0,
+    max_rsi: float = 100.0,
     start_date: str | None = None,
     end_date: str | None = None,
     stock_db_path: str | None = None,
@@ -323,6 +346,8 @@ def summarize_divergence_events(
             max_gap=max_gap,
             min_drop=min_drop,
             max_drop=max_drop,
+            min_rsi=min_rsi,
+            max_rsi=max_rsi,
             start_date=start_date,
             end_date=end_date,
             stock_db_path=stock_db_path,
@@ -363,6 +388,8 @@ def fetch_divergence_heatmap(
     max_gap: int = 24,
     min_drop: float = 0.0,
     max_drop: float = 50.0,
+    min_rsi: float = 1.0,
+    max_rsi: float = 100.0,
     start_date: str | None = None,
     end_date: str | None = None,
     stock_db_path: str | None = None,
@@ -378,6 +405,8 @@ def fetch_divergence_heatmap(
         max_gap=max_gap,
         min_drop=min_drop,
         max_drop=max_drop,
+        min_rsi=min_rsi,
+        max_rsi=max_rsi,
         start_date=start_date,
         end_date=end_date,
         stock_db_path=stock_db_path,
@@ -413,6 +442,8 @@ def export_divergence_events_csv(
     max_gap: int = 24,
     min_drop: float = 0.0,
     max_drop: float = 50.0,
+    min_rsi: float = 1.0,
+    max_rsi: float = 100.0,
     start_date: str | None = None,
     end_date: str | None = None,
     export_path: str | None = None,
@@ -426,6 +457,8 @@ def export_divergence_events_csv(
         max_gap=max_gap,
         min_drop=min_drop,
         max_drop=max_drop,
+        min_rsi=min_rsi,
+        max_rsi=max_rsi,
         start_date=start_date,
         end_date=end_date,
         limit=1_000_000_000,

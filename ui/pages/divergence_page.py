@@ -38,6 +38,8 @@ class DivergencePage:
         self.max_gap_slider: ft.Slider | None = None
         self.min_drop_slider: ft.Slider | None = None
         self.max_drop_slider: ft.Slider | None = None
+        self.min_rsi_slider: ft.Slider | None = None
+        self.max_rsi_slider: ft.Slider | None = None
         self.start_date_field: ft.TextField | None = None
         self.end_date_field: ft.TextField | None = None
         self.summary_text: ft.Text | None = None
@@ -54,6 +56,8 @@ class DivergencePage:
             value="All",
             options=[
                 ft.dropdown.Option("All"),
+                ft.dropdown.Option("R2"),
+                ft.dropdown.Option("R3"),
                 ft.dropdown.Option("R2_ONLY"),
                 ft.dropdown.Option("R3_ONLY"),
                 ft.dropdown.Option("R2_AND_R3"),
@@ -71,6 +75,8 @@ class DivergencePage:
         self.max_gap_slider = ft.Slider(min=5, max=24, divisions=19, value=24, label="{value}", on_change_end=self._on_filter_change)
         self.min_drop_slider = ft.Slider(min=0, max=50, divisions=50, value=0, label="{value}", on_change_end=self._on_filter_change)
         self.max_drop_slider = ft.Slider(min=0, max=50, divisions=50, value=50, label="{value}", on_change_end=self._on_filter_change)
+        self.min_rsi_slider = ft.Slider(min=1, max=100, divisions=99, value=1, label="{value}", on_change_end=self._on_filter_change)
+        self.max_rsi_slider = ft.Slider(min=1, max=100, divisions=99, value=100, label="{value}", on_change_end=self._on_filter_change)
         self.start_date_field = ft.TextField(
             label="Start date",
             width=160,
@@ -158,6 +164,14 @@ class DivergencePage:
                                                 ],
                                                 spacing=16,
                                             ),
+                                            ft.Text("RSI"),
+                                            ft.Row(
+                                                [
+                                                    ft.Column([ft.Text("Min RSI"), self.min_rsi_slider], expand=True),
+                                                    ft.Column([ft.Text("Max RSI"), self.max_rsi_slider], expand=True),
+                                                ],
+                                                spacing=16,
+                                            ),
                                         ],
                                         spacing=12,
                                     ),
@@ -224,10 +238,14 @@ class DivergencePage:
         max_gap = int(self.max_gap_slider.value)
         min_drop = float(self.min_drop_slider.value)
         max_drop = float(self.max_drop_slider.value)
+        min_rsi = float(self.min_rsi_slider.value)
+        max_rsi = float(self.max_rsi_slider.value)
         if min_gap > max_gap:
             min_gap, max_gap = max_gap, min_gap
         if min_drop > max_drop:
             min_drop, max_drop = max_drop, min_drop
+        if min_rsi > max_rsi:
+            min_rsi, max_rsi = max_rsi, min_rsi
         event_class = self.event_class_dropdown.value
         if event_class == "All":
             event_class = None
@@ -243,6 +261,8 @@ class DivergencePage:
             "max_gap": max_gap,
             "min_drop": min_drop,
             "max_drop": max_drop,
+            "min_rsi": min_rsi,
+            "max_rsi": max_rsi,
             "start_date": start_date or None,
             "end_date": end_date or None,
         }
