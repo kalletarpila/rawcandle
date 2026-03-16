@@ -48,6 +48,7 @@ class DivergencePage:
         self.sort_desc = True
         self.page_size = 100
         self.page_index = 0
+        self.current_rows: list[dict[str, Any]] = []
 
         self.event_class_dropdown: ft.Dropdown | None = None
         self.market_dropdown: ft.Dropdown | None = None
@@ -433,6 +434,7 @@ class DivergencePage:
     def _update_table(self, rows: list[dict[str, Any]]) -> None:
         if self.table is None:
             return
+        self.current_rows = list(rows)
         self.table.rows = [
             ft.DataRow(
                 cells=[
@@ -452,6 +454,21 @@ class DivergencePage:
             )
             for row in rows
         ]
+
+    def _sorted_current_rows(self) -> list[dict[str, Any]]:
+        def sort_value(row: dict[str, Any]) -> tuple[int, Any]:
+            value = row.get(self.sort_by)
+            if value is None:
+                return (1, "")
+            if isinstance(value, str):
+                return (0, value)
+            return (0, float(value))
+
+        return sorted(
+            self.current_rows,
+            key=sort_value,
+            reverse=self.sort_desc,
+        )
 
     def _update_heatmap(self, heatmap_rows: list[dict[str, Any]]) -> None:
         if self.heatmap_container is None:
@@ -513,8 +530,9 @@ class DivergencePage:
         if self.table is not None:
             self.table.sort_column_index = self._sort_column_index()
             self.table.sort_ascending = not self.sort_desc
-        self.page_index = 0
-        self._refresh()
+        if self.current_rows:
+            self._update_table(self._sorted_current_rows())
+        self.page.update()
 
     def _prev_page(self, _e) -> None:
         if self.page_index > 0:
