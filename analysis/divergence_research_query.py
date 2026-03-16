@@ -10,7 +10,6 @@ from typing import Any
 
 
 VALID_EVENT_CLASSES = {"R2", "R3", "R2_ONLY", "R3_ONLY", "R2_AND_R3"}
-VALID_RADII = {"ALL", "R2", "R3"}
 VALID_SORT_COLUMNS = {
     "ticker": "e.ticker",
     "date": "e.date",
@@ -89,6 +88,14 @@ def _validate_date_value(value: str | None) -> str | None:
     return stripped
 
 
+def _geometry_scope(event_class: str | None) -> str:
+    if event_class in {"R2", "R2_ONLY"}:
+        return "R2"
+    if event_class in {"R3", "R3_ONLY"}:
+        return "R3"
+    return "BOTH"
+
+
 def _has_excluded_tickers_table(db_path: str) -> bool:
     with sqlite3.connect(db_path) as conn:
         row = conn.execute(
@@ -103,7 +110,6 @@ def _has_excluded_tickers_table(db_path: str) -> bool:
 
 def _build_where_clause(
     event_class: str | None,
-    radius: str,
     min_gap: int,
     max_gap: int,
     min_drop: float,
@@ -115,9 +121,6 @@ def _build_where_clause(
     end_date: str | None,
     exclude_active_tickers: bool,
 ) -> tuple[str, list[Any]]:
-    radius_value = radius.upper()
-    if radius_value not in VALID_RADII:
-        raise ValueError(f"Unsupported radius: {radius}")
     if event_class is not None and event_class not in VALID_EVENT_CLASSES:
         raise ValueError(f"Unsupported event class: {event_class}")
     market_value = (market or "").strip().lower() or None
@@ -139,18 +142,49 @@ def _build_where_clause(
         ]
     )
     params.extend([min_rsi, max_rsi])
-    if radius_value != "ALL":
-        gap_col = "d.pivot_gap_r2" if radius_value == "R2" else "d.pivot_gap_r3"
-        drop_col = "d.pivot_drop_pct_r2" if radius_value == "R2" else "d.pivot_drop_pct_r3"
+    geometry_scope = _geometry_scope(event_class)
+    if geometry_scope == "R2":
         clauses.extend(
             [
-                f"{gap_col} >= ?",
-                f"{gap_col} <= ?",
-                f"{drop_col} >= ?",
-                f"{drop_col} <= ?",
+                "d.pivot_gap_r2 >= ?",
+                "d.pivot_gap_r2 <= ?",
+                "d.pivot_drop_pct_r2 >= ?",
+                "d.pivot_drop_pct_r2 <= ?",
             ]
         )
         params.extend([min_gap, max_gap, min_drop, max_drop])
+    elif geometry_scope == "R3":
+        clauses.extend(
+            [
+                "d.pivot_gap_r3 >= ?",
+                "d.pivot_gap_r3 <= ?",
+                "d.pivot_drop_pct_r3 >= ?",
+                "d.pivot_drop_pct_r3 <= ?",
+            ]
+        )
+        params.extend([min_gap, max_gap, min_drop, max_drop])
+    else:
+        clauses.append(
+            """
+            (
+                (d.pivot_gap_r2 >= ? AND d.pivot_gap_r2 <= ? AND d.pivot_drop_pct_r2 >= ? AND d.pivot_drop_pct_r2 <= ?)
+                OR
+                (d.pivot_gap_r3 >= ? AND d.pivot_gap_r3 <= ? AND d.pivot_drop_pct_r3 >= ? AND d.pivot_drop_pct_r3 <= ?)
+            )
+            """
+        )
+        params.extend(
+            [
+                min_gap,
+                max_gap,
+                min_drop,
+                max_drop,
+                min_gap,
+                max_gap,
+                min_drop,
+                max_drop,
+            ]
+        )
     if event_class == "R2":
         clauses.append("d.is_bullish_divergence_r2 = 1")
     elif event_class == "R3":
@@ -176,7 +210,6 @@ def _fetch_event_rows(
     db_path: str,
     *,
     event_class: str | None,
-    radius: str,
     min_gap: int,
     max_gap: int,
     min_drop: float,
@@ -196,7 +229,6 @@ def _fetch_event_rows(
     exclude_active_tickers = _has_excluded_tickers_table(db_path)
     where_sql, where_params = _build_where_clause(
         event_class,
-        radius,
         min_gap,
         max_gap,
         min_drop,
@@ -294,7 +326,6 @@ def _fetch_event_rows(
 def fetch_divergence_events(
     db_path: str,
     event_class: str | None = None,
-    radius: str = "ALL",
     min_gap: int = 5,
     max_gap: int = 24,
     min_drop: float = 0.0,
@@ -315,7 +346,6 @@ def fetch_divergence_events(
     rows = _fetch_event_rows(
         db_path,
         event_class=event_class,
-        radius=radius,
         min_gap=min_gap,
         max_gap=max_gap,
         min_drop=min_drop,
@@ -336,7 +366,6 @@ def fetch_divergence_events(
 def summarize_divergence_events(
     db_path: str,
     event_class: str | None = None,
-    radius: str = "ALL",
     min_gap: int = 5,
     max_gap: int = 24,
     min_drop: float = 0.0,
@@ -353,7 +382,6 @@ def summarize_divergence_events(
         for row in _fetch_event_rows(
             db_path,
             event_class=event_class,
-            radius=radius,
             min_gap=min_gap,
             max_gap=max_gap,
             min_drop=min_drop,
@@ -396,7 +424,6 @@ def summarize_divergence_events(
 def fetch_divergence_heatmap(
     db_path: str,
     event_class: str | None = None,
-    radius: str = "R3",
     min_gap: int = 5,
     max_gap: int = 24,
     min_drop: float = 0.0,
@@ -408,13 +435,10 @@ def fetch_divergence_heatmap(
     end_date: str | None = None,
     stock_db_path: str | None = None,
 ) -> list[dict[str, Any]]:
-    radius_value = radius.upper()
-    gap_col = "pivot_gap_r2" if radius_value == "R2" else "pivot_gap_r3"
-    drop_col = "pivot_drop_pct_r2" if radius_value == "R2" else "pivot_drop_pct_r3"
+    geometry_scope = _geometry_scope(event_class)
     rows = _fetch_event_rows(
         db_path,
         event_class=event_class,
-        radius=radius_value,
         min_gap=min_gap,
         max_gap=max_gap,
         min_drop=min_drop,
@@ -429,13 +453,19 @@ def fetch_divergence_heatmap(
     )
     grouped: dict[tuple[int, int], list[float]] = {}
     for row in rows:
-        gap_value = row[gap_col]
-        drop_value = row[drop_col]
         ret_30d = row["ret_30d"]
-        if gap_value is None or drop_value is None or ret_30d is None:
+        if ret_30d is None:
             continue
-        key = (int(gap_value), int(drop_value))
-        grouped.setdefault(key, []).append(float(ret_30d))
+        geometry_values: list[tuple[Any, Any]] = []
+        if geometry_scope in {"R2", "BOTH"}:
+            geometry_values.append((row["pivot_gap_r2"], row["pivot_drop_pct_r2"]))
+        if geometry_scope in {"R3", "BOTH"}:
+            geometry_values.append((row["pivot_gap_r3"], row["pivot_drop_pct_r3"]))
+        for gap_value, drop_value in geometry_values:
+            if gap_value is None or drop_value is None:
+                continue
+            key = (int(gap_value), int(drop_value))
+            grouped.setdefault(key, []).append(float(ret_30d))
     result = []
     for (gap_value, drop_value), values in sorted(grouped.items()):
         result.append(
@@ -452,7 +482,6 @@ def fetch_divergence_heatmap(
 def export_divergence_events_csv(
     db_path: str,
     event_class: str | None = None,
-    radius: str = "R3",
     min_gap: int = 5,
     max_gap: int = 24,
     min_drop: float = 0.0,
@@ -468,7 +497,6 @@ def export_divergence_events_csv(
     rows = fetch_divergence_events(
         db_path,
         event_class=event_class,
-        radius=radius,
         min_gap=min_gap,
         max_gap=max_gap,
         min_drop=min_drop,

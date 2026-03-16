@@ -212,7 +212,6 @@ def test_fetch_divergence_events_uses_trading_day_offsets_for_returns(tmp_path):
         str(analysis_db),
         stock_db_path=str(stock_db),
         event_class="R2_ONLY",
-        radius="R2",
         limit=20,
     )
 
@@ -230,7 +229,7 @@ def test_fetch_divergence_events_filters_by_radius_specific_gap_and_drop(tmp_pat
     rows_r2 = fetch_divergence_events(
         str(analysis_db),
         stock_db_path=str(stock_db),
-        radius="R2",
+        event_class="R2",
         min_gap=7,
         max_gap=8,
         min_drop=2.8,
@@ -240,7 +239,7 @@ def test_fetch_divergence_events_filters_by_radius_specific_gap_and_drop(tmp_pat
     rows_r3 = fetch_divergence_events(
         str(analysis_db),
         stock_db_path=str(stock_db),
-        radius="R3",
+        event_class="R3",
         min_gap=9,
         max_gap=10,
         min_drop=7.0,
@@ -398,9 +397,8 @@ def test_summary_and_heatmap_respect_market_filtering(tmp_path):
     )
 
     assert usa_summary["n"] == 2
-    assert len(suomi_heatmap) == 1
-    assert suomi_heatmap[0]["gap"] == 10
-    assert suomi_heatmap[0]["drop"] == 8
+    assert len(suomi_heatmap) == 2
+    assert {(row["gap"], row["drop"]) for row in suomi_heatmap} == {(7, 3), (10, 8)}
 
 
 def test_divergence_page_validates_date_range():
@@ -432,7 +430,6 @@ def test_export_divergence_events_csv_writes_expected_columns_and_path(tmp_path)
         str(analysis_db),
         stock_db_path=str(stock_db),
         event_class="R3_ONLY",
-        radius="R3",
         min_gap=9,
         max_gap=10,
         min_drop=7.0,

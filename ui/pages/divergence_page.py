@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 import math
+import threading
 from typing import Any
 
 import flet as ft
@@ -16,6 +17,21 @@ from market_repository import list_markets
 
 
 class DivergencePage:
+    TABLE_COLUMNS = [
+        ("ticker", "Ticker"),
+        ("date", "Date"),
+        ("event_class", "Event class"),
+        ("pivot_gap_r2", "Gap R2"),
+        ("pivot_drop_pct_r2", "Drop R2"),
+        ("pivot_gap_r3", "Gap R3"),
+        ("pivot_drop_pct_r3", "Drop R3"),
+        ("rsi", "RSI"),
+        ("ret_5d", "Ret 5d"),
+        ("ret_10d", "Ret 10d"),
+        ("ret_20d", "Ret 20d"),
+        ("ret_30d", "Ret 30d"),
+    ]
+
     def __init__(
         self,
         page: ft.Page,
@@ -35,7 +51,6 @@ class DivergencePage:
 
         self.event_class_dropdown: ft.Dropdown | None = None
         self.market_dropdown: ft.Dropdown | None = None
-        self.radius_dropdown: ft.Dropdown | None = None
         self.min_gap_slider: ft.Slider | None = None
         self.max_gap_slider: ft.Slider | None = None
         self.min_drop_slider: ft.Slider | None = None
@@ -50,6 +65,10 @@ class DivergencePage:
         self.table: ft.DataTable | None = None
         self.pagination_text: ft.Text | None = None
         self.heatmap_container: ft.Column | None = None
+        self.refresh_dialog: ft.AlertDialog | None = None
+        self.refresh_progress_text: ft.Text | None = None
+        self._refresh_cancelled = False
+        self._refresh_generation = 0
 
     def create_view(self) -> ft.View:
         self.event_class_dropdown = ft.Dropdown(
@@ -75,13 +94,6 @@ class DivergencePage:
             width=180,
             value="All Markets",
             options=market_options,
-            on_change=self._on_filter_change,
-        )
-        self.radius_dropdown = ft.Dropdown(
-            label="Radius",
-            width=140,
-            value="R3",
-            options=[ft.dropdown.Option("R2"), ft.dropdown.Option("R3")],
             on_change=self._on_filter_change,
         )
         self.min_gap_slider = ft.Slider(min=5, max=24, divisions=19, value=5, label="{value}", on_change_end=self._on_filter_change)
@@ -151,7 +163,6 @@ class DivergencePage:
                                                 [
                                                     self.event_class_dropdown,
                                                     self.market_dropdown,
-                                                    self.radius_dropdown,
                                                     self.start_date_field,
                                                     self.end_date_field,
                                                     refresh_button,
@@ -221,20 +232,12 @@ class DivergencePage:
     def _build_table(self) -> ft.DataTable:
         return ft.DataTable(
             columns=[
-                self._sortable_column("ticker", "Ticker"),
-                self._sortable_column("date", "Date"),
-                self._sortable_column("event_class", "Event class"),
-                self._sortable_column("pivot_gap_r2", "Gap R2"),
-                self._sortable_column("pivot_drop_pct_r2", "Drop R2"),
-                self._sortable_column("pivot_gap_r3", "Gap R3"),
-                self._sortable_column("pivot_drop_pct_r3", "Drop R3"),
-                self._sortable_column("rsi", "RSI"),
-                self._sortable_column("ret_5d", "Ret 5d"),
-                self._sortable_column("ret_10d", "Ret 10d"),
-                self._sortable_column("ret_20d", "Ret 20d"),
-                self._sortable_column("ret_30d", "Ret 30d"),
+                self._sortable_column(key, label)
+                for key, label in self.TABLE_COLUMNS
             ],
             rows=[],
+            sort_column_index=self._sort_column_index(),
+            sort_ascending=not self.sort_desc,
             border=ft.border.all(1, ft.Colors.GREY_400),
             border_radius=8,
             vertical_lines=ft.border.BorderSide(1, ft.Colors.GREY_300),
@@ -246,6 +249,12 @@ class DivergencePage:
             ft.Text(label, weight=ft.FontWeight.BOLD),
             on_sort=lambda e, sort_key=key: self._sort(sort_key),
         )
+
+    def _sort_column_index(self) -> int:
+        for index, (key, _label) in enumerate(self.TABLE_COLUMNS):
+            if key == self.sort_by:
+                return index
+        return 0
 
     def _get_filters(self) -> dict[str, Any]:
         min_gap = int(self.min_gap_slider.value)
@@ -274,7 +283,6 @@ class DivergencePage:
         return {
             "event_class": event_class,
             "market": market,
-            "radius": self.radius_dropdown.value,
             "min_gap": min_gap,
             "max_gap": max_gap,
             "min_drop": min_drop,
@@ -296,31 +304,123 @@ class DivergencePage:
             return
         if self.filter_error_text is not None:
             self.filter_error_text.value = ""
-        summary = summarize_divergence_events(
-            self.analysis_db_path,
-            stock_db_path=self.stock_db_path,
-            **filters,
+        self._start_refresh_worker(filters)
+
+    def _start_refresh_worker(self, filters: dict[str, Any]) -> None:
+        self._refresh_generation += 1
+        generation = self._refresh_generation
+        self._refresh_cancelled = False
+        self._show_refresh_dialog()
+
+        def set_progress(message: str) -> None:
+            if generation != self._refresh_generation or self._refresh_cancelled:
+                return
+            if self.refresh_progress_text is not None:
+                self.refresh_progress_text.value = message
+            try:
+                self.page.update()
+            except Exception:
+                pass
+
+        def worker() -> None:
+            try:
+                set_progress("Loading summary...")
+                summary = summarize_divergence_events(
+                    self.analysis_db_path,
+                    stock_db_path=self.stock_db_path,
+                    **filters,
+                )
+                if generation != self._refresh_generation or self._refresh_cancelled:
+                    return
+
+                set_progress("Loading event rows...")
+                events = fetch_divergence_events(
+                    self.analysis_db_path,
+                    stock_db_path=self.stock_db_path,
+                    limit=self.page_size,
+                    offset=self.page_index * self.page_size,
+                    sort_by=self.sort_by,
+                    sort_desc=self.sort_desc,
+                    **filters,
+                )
+                if generation != self._refresh_generation or self._refresh_cancelled:
+                    return
+
+                set_progress("Building heatmap...")
+                heatmap = fetch_divergence_heatmap(
+                    self.analysis_db_path,
+                    stock_db_path=self.stock_db_path,
+                    **filters,
+                )
+                if generation != self._refresh_generation or self._refresh_cancelled:
+                    return
+
+                self._update_summary(summary)
+                self._update_table(events)
+                self._update_heatmap(heatmap)
+                if self.pagination_text is not None:
+                    self.pagination_text.value = f"Page {self.page_index + 1}"
+                self._close_refresh_dialog()
+                self.page.update()
+            except Exception as exc:
+                if generation != self._refresh_generation:
+                    return
+                self._close_refresh_dialog()
+                if self.filter_error_text is not None:
+                    self.filter_error_text.value = f"Refresh failed: {exc}"
+                try:
+                    self.page.update()
+                except Exception:
+                    pass
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _show_refresh_dialog(self) -> None:
+        progress_ring = ft.ProgressRing(width=36, height=36)
+        self.refresh_progress_text = ft.Text("Loading summary...", size=14)
+
+        def cancel_refresh(_e) -> None:
+            self._refresh_cancelled = True
+            self._refresh_generation += 1
+            self._close_refresh_dialog()
+
+        self.refresh_dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Refreshing divergence research"),
+            content=ft.Column(
+                [
+                    ft.Row([progress_ring, self.refresh_progress_text], spacing=16),
+                    ft.Text(
+                        "Query is running. You can cancel before results are applied.",
+                        size=12,
+                        color=ft.Colors.GREY_600,
+                    ),
+                ],
+                tight=True,
+                spacing=12,
+            ),
+            actions=[ft.TextButton("Cancel", on_click=cancel_refresh)],
         )
-        events = fetch_divergence_events(
-            self.analysis_db_path,
-            stock_db_path=self.stock_db_path,
-            limit=self.page_size,
-            offset=self.page_index * self.page_size,
-            sort_by=self.sort_by,
-            sort_desc=self.sort_desc,
-            **filters,
-        )
-        heatmap = fetch_divergence_heatmap(
-            self.analysis_db_path,
-            stock_db_path=self.stock_db_path,
-            **filters,
-        )
-        self._update_summary(summary)
-        self._update_table(events)
-        self._update_heatmap(heatmap)
-        if self.pagination_text is not None:
-            self.pagination_text.value = f"Page {self.page_index + 1}"
-        self.page.update()
+        if self.refresh_dialog not in self.page.overlay:
+            self.page.overlay.append(self.refresh_dialog)
+        self.refresh_dialog.open = True
+        try:
+            self.page.update()
+        except Exception:
+            pass
+
+    def _close_refresh_dialog(self) -> None:
+        dialog = self.refresh_dialog
+        self.refresh_dialog = None
+        self.refresh_progress_text = None
+        if dialog is None:
+            return
+        try:
+            dialog.open = False
+            if dialog in self.page.overlay:
+                self.page.overlay.remove(dialog)
+        except Exception:
+            pass
 
     def _update_summary(self, summary: dict[str, Any]) -> None:
         if self.summary_text is None:
@@ -398,8 +498,8 @@ class DivergencePage:
                     )
                 )
         self.heatmap_container.controls = [
-            ft.Row(cells[idx : idx + 6], spacing=6)
-            for idx in range(0, len(cells), 6)
+            ft.Row(cells[idx : idx + 10], spacing=6)
+            for idx in range(0, len(cells), 10)
         ] or [ft.Text("No heatmap cells for current filters.")]
 
     def _sort(self, sort_key: str) -> None:
@@ -408,6 +508,9 @@ class DivergencePage:
         else:
             self.sort_by = sort_key
             self.sort_desc = True
+        if self.table is not None:
+            self.table.sort_column_index = self._sort_column_index()
+            self.table.sort_ascending = not self.sort_desc
         self.page_index = 0
         self._refresh()
 
