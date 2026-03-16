@@ -475,12 +475,16 @@ class DivergencePage:
             return
         cells: list[ft.Control] = []
         if heatmap_rows:
-            max_abs = max(abs(row["avg_ret_30d"]) for row in heatmap_rows) or 1.0
             for row in heatmap_rows[:80]:
-                intensity = min(1.0, abs(row["avg_ret_30d"]) / max_abs)
-                green = int(80 + 120 * intensity) if row["avg_ret_30d"] >= 0 else 80
-                red = int(80 + 120 * intensity) if row["avg_ret_30d"] < 0 else 80
-                color = f"#{red:02x}{green:02x}80"
+                winsor_ret_30d = float(row["winsor_ret_30d"])
+                if winsor_ret_30d < 0:
+                    color = "#c44e52"
+                elif winsor_ret_30d > 20:
+                    color = "#55a868"
+                elif winsor_ret_30d >= 0:
+                    color = "#ddcc77"
+                else:
+                    color = "#505080"
                 cells.append(
                     ft.Container(
                         width=90,
