@@ -1,6 +1,12 @@
 import sqlite3
+from datetime import date, timedelta
 
-from analysis.divergence_research_query import fetch_divergence_events
+from analysis.divergence_research_query import (
+    fetch_divergence_events,
+    fetch_divergence_heatmap,
+    summarize_divergence_events,
+)
+from ui.pages.divergence_page import DivergencePage
 
 
 def _create_analysis_db(path: str) -> None:
@@ -44,8 +50,8 @@ def _create_analysis_db(path: str) -> None:
             """,
             [
                 ("AAA", "2025-01-02", 31.0, 1, 0, 6, 2.5, None, None),
-                ("BBB", "2025-01-02", 28.0, 0, 1, None, None, 9, 7.5),
-                ("CCC", "2025-01-02", 35.0, 1, 1, 7, 3.0, 10, 8.0),
+                ("BBB", "2025-06-02", 28.0, 0, 1, None, None, 9, 7.5),
+                ("CCC", "2025-12-02", 35.0, 1, 1, 7, 3.0, 10, 8.0),
                 ("DDD", "2025-01-02", 40.0, 0, 0, None, None, None, None),
             ],
         )
@@ -53,6 +59,15 @@ def _create_analysis_db(path: str) -> None:
 
 
 def _create_stock_db(path: str) -> None:
+    def build_trading_dates(start_iso: str, count: int) -> list[str]:
+        current = date.fromisoformat(start_iso)
+        result: list[str] = []
+        while len(result) < count:
+            if current.weekday() < 5:
+                result.append(current.isoformat())
+            current += timedelta(days=1)
+        return result
+
     with sqlite3.connect(path) as conn:
         conn.execute(
             """
@@ -71,13 +86,21 @@ def _create_stock_db(path: str) -> None:
         )
         rows = []
         for ticker, closes in {
-            "AAA": [100, 101, 102, 103, 104, 105, 106],
-            "BBB": [50, 51, 52, 53, 54, 55, 56],
-            "CCC": [200, 202, 204, 206, 208, 210, 212],
-            "DDD": [10, 10, 10, 10, 10, 10, 10],
+            "AAA": [100 + idx for idx in range(40)],
+            "BBB": [50 + idx for idx in range(40)],
+            "CCC": [200 + 2 * idx for idx in range(40)],
+            "DDD": [10 for _ in range(40)],
         }.items():
             for idx, close in enumerate(closes):
-                date_value = ["2025-01-02", "2025-01-03", "2025-01-06", "2025-01-07", "2025-01-08", "2025-01-09", "2025-01-10"][idx]
+                if ticker == "AAA":
+                    dates = build_trading_dates("2025-01-02", len(closes))
+                elif ticker == "BBB":
+                    dates = build_trading_dates("2025-06-02", len(closes))
+                elif ticker == "CCC":
+                    dates = build_trading_dates("2025-12-02", len(closes))
+                else:
+                    dates = build_trading_dates("2025-01-02", len(closes))
+                date_value = dates[idx]
                 rows.append((ticker, date_value, close, close, close, close, 1000, "usa"))
         conn.executemany(
             """
@@ -163,3 +186,82 @@ def test_fetch_divergence_events_filters_by_radius_specific_gap_and_drop(tmp_pat
 
     assert [row["ticker"] for row in rows_r2] == ["CCC"]
     assert {row["ticker"] for row in rows_r3} == {"BBB", "CCC"}
+
+
+def test_fetch_divergence_events_filters_by_date_range(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    stock_db = tmp_path / "osakedata.db"
+    _create_analysis_db(str(analysis_db))
+    _create_stock_db(str(stock_db))
+
+    rows_from_start = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        start_date="2025-06-01",
+        limit=20,
+    )
+    rows_to_end = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        end_date="2025-06-30",
+        limit=20,
+    )
+    rows_between = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        start_date="2025-06-01",
+        end_date="2025-11-30",
+        limit=20,
+    )
+
+    assert {row["ticker"] for row in rows_from_start} == {"BBB", "CCC"}
+    assert {row["ticker"] for row in rows_to_end} == {"AAA", "BBB"}
+    assert {row["ticker"] for row in rows_between} == {"BBB"}
+
+
+def test_summary_and_heatmap_respect_date_filtering(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    stock_db = tmp_path / "osakedata.db"
+    _create_analysis_db(str(analysis_db))
+    _create_stock_db(str(stock_db))
+
+    full_summary = summarize_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+    )
+    filtered_summary = summarize_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        start_date="2025-06-01",
+        end_date="2025-11-30",
+    )
+    filtered_heatmap = fetch_divergence_heatmap(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        start_date="2025-06-01",
+        end_date="2025-11-30",
+    )
+
+    assert full_summary["n"] == 3
+    assert filtered_summary["n"] == 1
+    assert len(filtered_heatmap) == 1
+    assert filtered_heatmap[0]["gap"] == 9
+    assert filtered_heatmap[0]["drop"] == 7
+
+
+def test_divergence_page_validates_date_range():
+    assert DivergencePage.validate_date_range("", "") is None
+    assert DivergencePage.validate_date_range("2025-01-01", "") is None
+    assert DivergencePage.validate_date_range("", "2025-12-31") is None
+    assert (
+        DivergencePage.validate_date_range("2025/01/01", "") ==
+        "Start date must use YYYY-MM-DD format."
+    )
+    assert (
+        DivergencePage.validate_date_range("", "2025/12/31") ==
+        "End date must use YYYY-MM-DD format."
+    )
+    assert (
+        DivergencePage.validate_date_range("2025-12-31", "2025-01-01") ==
+        "Start date cannot be after end date."
+    )

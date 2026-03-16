@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 import math
 from typing import Any
 
@@ -36,7 +37,10 @@ class DivergencePage:
         self.max_gap_slider: ft.Slider | None = None
         self.min_drop_slider: ft.Slider | None = None
         self.max_drop_slider: ft.Slider | None = None
+        self.start_date_field: ft.TextField | None = None
+        self.end_date_field: ft.TextField | None = None
         self.summary_text: ft.Text | None = None
+        self.filter_error_text: ft.Text | None = None
         self.table: ft.DataTable | None = None
         self.pagination_text: ft.Text | None = None
         self.heatmap_container: ft.Column | None = None
@@ -65,8 +69,23 @@ class DivergencePage:
         self.max_gap_slider = ft.Slider(min=5, max=24, divisions=19, value=24, label="{value}", on_change_end=self._on_filter_change)
         self.min_drop_slider = ft.Slider(min=0, max=50, divisions=50, value=0, label="{value}", on_change_end=self._on_filter_change)
         self.max_drop_slider = ft.Slider(min=0, max=50, divisions=50, value=50, label="{value}", on_change_end=self._on_filter_change)
+        self.start_date_field = ft.TextField(
+            label="Start date",
+            width=160,
+            hint_text="YYYY-MM-DD",
+            on_submit=self._on_filter_change,
+            on_blur=self._on_filter_change,
+        )
+        self.end_date_field = ft.TextField(
+            label="End date",
+            width=160,
+            hint_text="YYYY-MM-DD",
+            on_submit=self._on_filter_change,
+            on_blur=self._on_filter_change,
+        )
 
         self.summary_text = ft.Text(size=14)
+        self.filter_error_text = ft.Text(size=12, color=ft.Colors.RED_700)
         self.pagination_text = ft.Text("Page 1", size=12)
         self.table = self._build_table()
         self.heatmap_container = ft.Column(spacing=4)
@@ -105,11 +124,14 @@ class DivergencePage:
                                                 [
                                                     self.event_class_dropdown,
                                                     self.radius_dropdown,
+                                                    self.start_date_field,
+                                                    self.end_date_field,
                                                     refresh_button,
                                                 ],
                                                 wrap=True,
                                                 spacing=16,
                                             ),
+                                            self.filter_error_text,
                                             ft.Text("Pivot gap"),
                                             ft.Row(
                                                 [
@@ -198,6 +220,11 @@ class DivergencePage:
         event_class = self.event_class_dropdown.value
         if event_class == "All":
             event_class = None
+        start_date = (self.start_date_field.value or "").strip()
+        end_date = (self.end_date_field.value or "").strip()
+        validation_error = self.validate_date_range(start_date, end_date)
+        if validation_error is not None:
+            raise ValueError(validation_error)
         return {
             "event_class": event_class,
             "radius": self.radius_dropdown.value,
@@ -205,10 +232,21 @@ class DivergencePage:
             "max_gap": max_gap,
             "min_drop": min_drop,
             "max_drop": max_drop,
+            "start_date": start_date or None,
+            "end_date": end_date or None,
         }
 
     def _refresh(self, _e=None) -> None:
-        filters = self._get_filters()
+        try:
+            filters = self._get_filters()
+        except ValueError as exc:
+            if self.filter_error_text is not None:
+                self.filter_error_text.value = str(exc)
+            if self.page is not None:
+                self.page.update()
+            return
+        if self.filter_error_text is not None:
+            self.filter_error_text.value = ""
         summary = summarize_divergence_events(
             self.analysis_db_path,
             stock_db_path=self.stock_db_path,
@@ -323,6 +361,26 @@ class DivergencePage:
     def _on_filter_change(self, _e) -> None:
         self.page_index = 0
         self._refresh()
+
+    @staticmethod
+    def validate_date_range(start_date: str, end_date: str) -> str | None:
+        start_value = start_date.strip()
+        end_value = end_date.strip()
+        start_parsed = None
+        end_parsed = None
+        if start_value:
+            try:
+                start_parsed = date.fromisoformat(start_value)
+            except ValueError:
+                return "Start date must use YYYY-MM-DD format."
+        if end_value:
+            try:
+                end_parsed = date.fromisoformat(end_value)
+            except ValueError:
+                return "End date must use YYYY-MM-DD format."
+        if start_parsed is not None and end_parsed is not None and start_parsed > end_parsed:
+            return "Start date cannot be after end date."
+        return None
 
     @staticmethod
     def _fmt_num(value: Any) -> str:

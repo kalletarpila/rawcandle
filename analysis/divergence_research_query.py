@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 import os
 import sqlite3
 from statistics import median
@@ -40,6 +41,16 @@ def _classification_sql() -> str:
     """
 
 
+def _validate_date_value(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    date.fromisoformat(stripped)
+    return stripped
+
+
 def _build_where_clause(
     event_class: str | None,
     radius: str,
@@ -47,12 +58,16 @@ def _build_where_clause(
     max_gap: int,
     min_drop: float,
     max_drop: float,
+    start_date: str | None,
+    end_date: str | None,
 ) -> tuple[str, list[Any]]:
     radius_value = radius.upper()
     if radius_value not in VALID_RADII:
         raise ValueError(f"Unsupported radius: {radius}")
     if event_class is not None and event_class not in VALID_EVENT_CLASSES:
         raise ValueError(f"Unsupported event class: {event_class}")
+    start_date_value = _validate_date_value(start_date)
+    end_date_value = _validate_date_value(end_date)
 
     class_sql = _classification_sql()
 
@@ -73,6 +88,12 @@ def _build_where_clause(
     if event_class is not None:
         clauses.append(f"{class_sql} = ?")
         params.append(event_class)
+    if start_date_value is not None:
+        clauses.append("d.date >= ?")
+        params.append(start_date_value)
+    if end_date_value is not None:
+        clauses.append("d.date <= ?")
+        params.append(end_date_value)
     return " AND ".join(clauses), params
 
 
@@ -85,6 +106,8 @@ def _fetch_event_rows(
     max_gap: int,
     min_drop: float,
     max_drop: float,
+    start_date: str | None = None,
+    end_date: str | None = None,
     stock_db_path: str | None = None,
     extra_select: str = "",
     order_by: str = "",
@@ -93,7 +116,7 @@ def _fetch_event_rows(
 ) -> list[sqlite3.Row]:
     stock_path = _resolve_stock_db_path(db_path, stock_db_path)
     where_sql, where_params = _build_where_clause(
-        event_class, radius, min_gap, max_gap, min_drop, max_drop
+        event_class, radius, min_gap, max_gap, min_drop, max_drop, start_date, end_date
     )
     class_sql = _classification_sql()
     params = list(where_params)
@@ -178,6 +201,8 @@ def fetch_divergence_events(
     max_gap: int = 24,
     min_drop: float = 0.0,
     max_drop: float = 50.0,
+    start_date: str | None = None,
+    end_date: str | None = None,
     limit: int = 500,
     offset: int = 0,
     sort_by: str = "date",
@@ -194,6 +219,8 @@ def fetch_divergence_events(
         max_gap=max_gap,
         min_drop=min_drop,
         max_drop=max_drop,
+        start_date=start_date,
+        end_date=end_date,
         stock_db_path=stock_db_path,
         order_by=f"ORDER BY {sort_col} {direction}, e.ticker ASC, e.date ASC",
         limit_clause="LIMIT ? OFFSET ?",
@@ -210,6 +237,8 @@ def summarize_divergence_events(
     max_gap: int = 24,
     min_drop: float = 0.0,
     max_drop: float = 50.0,
+    start_date: str | None = None,
+    end_date: str | None = None,
     stock_db_path: str | None = None,
 ) -> dict[str, Any]:
     rows = [
@@ -222,6 +251,8 @@ def summarize_divergence_events(
             max_gap=max_gap,
             min_drop=min_drop,
             max_drop=max_drop,
+            start_date=start_date,
+            end_date=end_date,
             stock_db_path=stock_db_path,
         )
     ]
@@ -260,6 +291,8 @@ def fetch_divergence_heatmap(
     max_gap: int = 24,
     min_drop: float = 0.0,
     max_drop: float = 50.0,
+    start_date: str | None = None,
+    end_date: str | None = None,
     stock_db_path: str | None = None,
 ) -> list[dict[str, Any]]:
     radius_value = radius.upper()
@@ -273,6 +306,8 @@ def fetch_divergence_heatmap(
         max_gap=max_gap,
         min_drop=min_drop,
         max_drop=max_drop,
+        start_date=start_date,
+        end_date=end_date,
         stock_db_path=stock_db_path,
         extra_select="",
     )
