@@ -99,6 +99,27 @@ def _create_stock_db(path: str) -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE markets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                abbreviation TEXT NOT NULL UNIQUE,
+                yahoo_suffix TEXT NOT NULL DEFAULT '',
+                min_volume INTEGER NOT NULL DEFAULT 100000
+            )
+            """
+        )
+        conn.executemany(
+            """
+            INSERT INTO markets (name, abbreviation, yahoo_suffix, min_volume)
+            VALUES (?, ?, ?, ?)
+            """,
+            [
+                ("United States", "usa", "", 100000),
+                ("Finland", "suomi", ".HE", 25000),
+            ],
+        )
         rows = []
         for ticker, closes in {
             "AAA": [100 + idx for idx in range(40)],
@@ -116,7 +137,8 @@ def _create_stock_db(path: str) -> None:
                 else:
                     dates = build_trading_dates("2025-01-02", len(closes))
                 date_value = dates[idx]
-                rows.append((ticker, date_value, close, close, close, close, 1000, "usa"))
+                market = "suomi" if ticker == "CCC" else "usa"
+                rows.append((ticker, date_value, close, close, close, close, 1000, market))
         conn.executemany(
             """
             INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
@@ -249,6 +271,33 @@ def test_fetch_divergence_events_filters_by_rsi_range(tmp_path):
     assert [row["ticker"] for row in rows] == ["AAA"]
 
 
+def test_fetch_divergence_events_filters_by_market(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    stock_db = tmp_path / "osakedata.db"
+    _create_analysis_db(str(analysis_db))
+    _create_stock_db(str(stock_db))
+
+    usa_rows = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        market="usa",
+        limit=20,
+        sort_by="ticker",
+        sort_desc=False,
+    )
+    suomi_rows = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        market="suomi",
+        limit=20,
+        sort_by="ticker",
+        sort_desc=False,
+    )
+
+    assert [row["ticker"] for row in usa_rows] == ["AAA", "BBB"]
+    assert [row["ticker"] for row in suomi_rows] == ["CCC"]
+
+
 def test_fetch_divergence_events_excludes_active_excluded_tickers(tmp_path):
     analysis_db = tmp_path / "analysis.db"
     stock_db = tmp_path / "osakedata.db"
@@ -329,6 +378,29 @@ def test_summary_and_heatmap_respect_date_filtering(tmp_path):
     assert len(filtered_heatmap) == 1
     assert filtered_heatmap[0]["gap"] == 9
     assert filtered_heatmap[0]["drop"] == 7
+
+
+def test_summary_and_heatmap_respect_market_filtering(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    stock_db = tmp_path / "osakedata.db"
+    _create_analysis_db(str(analysis_db))
+    _create_stock_db(str(stock_db))
+
+    usa_summary = summarize_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        market="usa",
+    )
+    suomi_heatmap = fetch_divergence_heatmap(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        market="suomi",
+    )
+
+    assert usa_summary["n"] == 2
+    assert len(suomi_heatmap) == 1
+    assert suomi_heatmap[0]["gap"] == 10
+    assert suomi_heatmap[0]["drop"] == 8
 
 
 def test_divergence_page_validates_date_range():

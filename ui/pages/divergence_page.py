@@ -12,6 +12,7 @@ from analysis.divergence_research_query import (
     fetch_divergence_heatmap,
     summarize_divergence_events,
 )
+from market_repository import list_markets
 
 
 class DivergencePage:
@@ -33,6 +34,7 @@ class DivergencePage:
         self.page_index = 0
 
         self.event_class_dropdown: ft.Dropdown | None = None
+        self.market_dropdown: ft.Dropdown | None = None
         self.radius_dropdown: ft.Dropdown | None = None
         self.min_gap_slider: ft.Slider | None = None
         self.max_gap_slider: ft.Slider | None = None
@@ -62,6 +64,17 @@ class DivergencePage:
                 ft.dropdown.Option("R3_ONLY"),
                 ft.dropdown.Option("R2_AND_R3"),
             ],
+            on_change=self._on_filter_change,
+        )
+        market_options = [ft.dropdown.Option("All Markets")] + [
+            ft.dropdown.Option(market["abbreviation"])
+            for market in list_markets(self.stock_db_path)
+        ]
+        self.market_dropdown = ft.Dropdown(
+            label="Markets",
+            width=180,
+            value="All Markets",
+            options=market_options,
             on_change=self._on_filter_change,
         )
         self.radius_dropdown = ft.Dropdown(
@@ -137,6 +150,7 @@ class DivergencePage:
                                             ft.Row(
                                                 [
                                                     self.event_class_dropdown,
+                                                    self.market_dropdown,
                                                     self.radius_dropdown,
                                                     self.start_date_field,
                                                     self.end_date_field,
@@ -249,6 +263,9 @@ class DivergencePage:
         event_class = self.event_class_dropdown.value
         if event_class == "All":
             event_class = None
+        market = self.market_dropdown.value
+        if market == "All Markets":
+            market = None
         start_date = (self.start_date_field.value or "").strip()
         end_date = (self.end_date_field.value or "").strip()
         validation_error = self.validate_date_range(start_date, end_date)
@@ -256,6 +273,7 @@ class DivergencePage:
             raise ValueError(validation_error)
         return {
             "event_class": event_class,
+            "market": market,
             "radius": self.radius_dropdown.value,
             "min_gap": min_gap,
             "max_gap": max_gap,

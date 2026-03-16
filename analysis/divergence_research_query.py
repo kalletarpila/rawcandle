@@ -110,6 +110,7 @@ def _build_where_clause(
     max_drop: float,
     min_rsi: float,
     max_rsi: float,
+    market: str | None,
     start_date: str | None,
     end_date: str | None,
     exclude_active_tickers: bool,
@@ -119,6 +120,7 @@ def _build_where_clause(
         raise ValueError(f"Unsupported radius: {radius}")
     if event_class is not None and event_class not in VALID_EVENT_CLASSES:
         raise ValueError(f"Unsupported event class: {event_class}")
+    market_value = (market or "").strip().lower() or None
     start_date_value = _validate_date_value(start_date)
     end_date_value = _validate_date_value(end_date)
 
@@ -162,6 +164,11 @@ def _build_where_clause(
     if end_date_value is not None:
         clauses.append("d.date <= ?")
         params.append(end_date_value)
+    if market_value is not None:
+        clauses.append(
+            "EXISTS (SELECT 1 FROM marketdb.osakedata m WHERE m.osake = d.ticker AND m.pvm = d.date AND LOWER(m.market) = ?)"
+        )
+        params.append(market_value)
     return " AND ".join(clauses), params
 
 
@@ -176,6 +183,7 @@ def _fetch_event_rows(
     max_drop: float,
     min_rsi: float,
     max_rsi: float,
+    market: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
     stock_db_path: str | None = None,
@@ -195,6 +203,7 @@ def _fetch_event_rows(
         max_drop,
         min_rsi,
         max_rsi,
+        market,
         start_date,
         end_date,
         exclude_active_tickers,
@@ -292,6 +301,7 @@ def fetch_divergence_events(
     max_drop: float = 50.0,
     min_rsi: float = 1.0,
     max_rsi: float = 100.0,
+    market: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
     limit: int = 500,
@@ -312,6 +322,7 @@ def fetch_divergence_events(
         max_drop=max_drop,
         min_rsi=min_rsi,
         max_rsi=max_rsi,
+        market=market,
         start_date=start_date,
         end_date=end_date,
         stock_db_path=stock_db_path,
@@ -332,6 +343,7 @@ def summarize_divergence_events(
     max_drop: float = 50.0,
     min_rsi: float = 1.0,
     max_rsi: float = 100.0,
+    market: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
     stock_db_path: str | None = None,
@@ -348,6 +360,7 @@ def summarize_divergence_events(
             max_drop=max_drop,
             min_rsi=min_rsi,
             max_rsi=max_rsi,
+            market=market,
             start_date=start_date,
             end_date=end_date,
             stock_db_path=stock_db_path,
@@ -390,6 +403,7 @@ def fetch_divergence_heatmap(
     max_drop: float = 50.0,
     min_rsi: float = 1.0,
     max_rsi: float = 100.0,
+    market: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
     stock_db_path: str | None = None,
@@ -407,6 +421,7 @@ def fetch_divergence_heatmap(
         max_drop=max_drop,
         min_rsi=min_rsi,
         max_rsi=max_rsi,
+        market=market,
         start_date=start_date,
         end_date=end_date,
         stock_db_path=stock_db_path,
@@ -444,6 +459,7 @@ def export_divergence_events_csv(
     max_drop: float = 50.0,
     min_rsi: float = 1.0,
     max_rsi: float = 100.0,
+    market: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
     export_path: str | None = None,
@@ -459,6 +475,7 @@ def export_divergence_events_csv(
         max_drop=max_drop,
         min_rsi=min_rsi,
         max_rsi=max_rsi,
+        market=market,
         start_date=start_date,
         end_date=end_date,
         limit=1_000_000_000,
