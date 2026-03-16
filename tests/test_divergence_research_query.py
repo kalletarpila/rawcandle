@@ -377,6 +377,7 @@ def test_summary_and_heatmap_respect_date_filtering(tmp_path):
     assert len(filtered_heatmap) == 1
     assert filtered_heatmap[0]["gap"] == 9
     assert filtered_heatmap[0]["drop"] == 7
+    assert "winsor_ret_30d" in filtered_heatmap[0]
 
 
 def test_summary_and_heatmap_respect_market_filtering(tmp_path):

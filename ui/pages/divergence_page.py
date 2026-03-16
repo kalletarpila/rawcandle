@@ -469,7 +469,7 @@ class DivergencePage:
                 cells.append(
                     ft.Container(
                         width=90,
-                        height=56,
+                        height=72,
                         bgcolor=color,
                         border_radius=6,
                         padding=6,
@@ -484,6 +484,11 @@ class DivergencePage:
                                     self._fmt_pct(row["avg_ret_30d"]),
                                     size=11,
                                     weight=ft.FontWeight.BOLD,
+                                    color=ft.Colors.WHITE,
+                                ),
+                                ft.Text(
+                                    f"W {self._fmt_pct(row['winsor_ret_30d'])}",
+                                    size=9,
                                     color=ft.Colors.WHITE,
                                 ),
                                 ft.Text(

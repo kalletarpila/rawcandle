@@ -473,6 +473,10 @@ def fetch_divergence_heatmap(
                 "gap": gap_value,
                 "drop": drop_value,
                 "avg_ret_30d": sum(values) / len(values),
+                "winsor_ret_30d": sum(
+                    max(-50.0, min(50.0, value)) for value in values
+                )
+                / len(values),
                 "n": len(values),
             }
         )
