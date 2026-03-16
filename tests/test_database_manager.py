@@ -91,6 +91,61 @@ class TestDatabaseManager:
         assert "pivot_drop_pct_r3" in columns
         assert tuple(row) == (1, 0, 1, 0, 0, 0, None, None, None, None, None, None)
 
+    def test_excluded_tickers_table_created(self, temp_db):
+        manager = DatabaseManager(temp_db)
+        conn = manager.get_connection()
+        columns = {
+            row[1]: row[2] for row in conn.execute("PRAGMA table_info(excluded_tickers)")
+        }
+
+        assert "ticker" in columns
+        assert "reason" in columns
+        assert "category" in columns
+        assert "active" in columns
+        assert "created_at" in columns
+        assert "updated_at" in columns
+
+    def test_excluded_ticker_crud_flow(self, temp_db):
+        manager = DatabaseManager(temp_db)
+
+        assert manager.upsert_excluded_ticker(
+            ticker="spy",
+            reason="ETF",
+            category="etf",
+            active=True,
+        )
+
+        rows = manager.list_excluded_tickers()
+        assert len(rows) == 1
+        assert rows[0]["ticker"] == "SPY"
+        assert rows[0]["reason"] == "ETF"
+        assert rows[0]["category"] == "etf"
+        assert rows[0]["active"] == 1
+
+        assert manager.set_excluded_ticker_active("SPY", False)
+        rows = manager.list_excluded_tickers(active_only=False)
+        assert rows[0]["active"] == 0
+
+        active_rows = manager.list_excluded_tickers(active_only=True)
+        assert active_rows == []
+
+        inactive_rows = manager.list_excluded_tickers(active_only=False)
+        assert len(inactive_rows) == 1
+
+        assert manager.upsert_excluded_ticker(
+            ticker="SPY",
+            reason="ETF fund",
+            category="fund",
+            active=True,
+        )
+        rows = manager.list_excluded_tickers()
+        assert rows[0]["reason"] == "ETF fund"
+        assert rows[0]["category"] == "fund"
+        assert rows[0]["active"] == 1
+
+        assert manager.delete_excluded_ticker("SPY")
+        assert manager.list_excluded_tickers() == []
+
     def test_get_connection(self, temp_db):
         """Testaa tietokantayhteyden muodostaminen"""
         manager = DatabaseManager(temp_db)

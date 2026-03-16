@@ -474,6 +474,47 @@ class DatabaseManager:
                 "CREATE INDEX IF NOT EXISTS idx_blackout_date ON blackout_dates(date)"
             )
 
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS excluded_tickers (
+                    ticker TEXT PRIMARY KEY,
+                    reason TEXT,
+                    category TEXT,
+                    active INTEGER NOT NULL DEFAULT 1,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            """
+            )
+            cursor.execute("PRAGMA table_info(excluded_tickers)")
+            excluded_columns = {row[1] for row in cursor.fetchall()}
+            if "reason" not in excluded_columns:
+                cursor.execute(
+                    "ALTER TABLE excluded_tickers ADD COLUMN reason TEXT"
+                )
+            if "category" not in excluded_columns:
+                cursor.execute(
+                    "ALTER TABLE excluded_tickers ADD COLUMN category TEXT"
+                )
+            if "active" not in excluded_columns:
+                cursor.execute(
+                    "ALTER TABLE excluded_tickers ADD COLUMN active INTEGER NOT NULL DEFAULT 1"
+                )
+                cursor.execute(
+                    "UPDATE excluded_tickers SET active = 1 WHERE active IS NULL"
+                )
+            if "created_at" not in excluded_columns:
+                cursor.execute(
+                    "ALTER TABLE excluded_tickers ADD COLUMN created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                )
+            if "updated_at" not in excluded_columns:
+                cursor.execute(
+                    "ALTER TABLE excluded_tickers ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_excluded_tickers_active ON excluded_tickers(active)"
+            )
+
             # Luo results_data taulu
             # Tallentaa prosessoidut tulokset (vain kynttiläkuviopäivät)
             # Perussarakkeet (market + alkuperäiset kentät)
@@ -857,6 +898,110 @@ class DatabaseManager:
 
         except Exception as e:
             self.logger.error(f"Insert finding failed: {e}")
+            return False
+
+    def list_excluded_tickers(
+        self, active_only: Optional[bool] = None
+    ) -> List[Dict[str, Any]]:
+        """Return excluded tickers from analysis database."""
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            query = """
+                SELECT ticker, reason, category, active, created_at, updated_at
+                FROM excluded_tickers
+            """
+            params: List[Any] = []
+            if active_only is not None:
+                query += " WHERE active = ?"
+                params.append(1 if active_only else 0)
+            query += " ORDER BY active DESC, ticker ASC"
+            cursor.execute(query, tuple(params))
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            self.logger.error(f"List excluded tickers failed: {e}")
+            return []
+
+    def upsert_excluded_ticker(
+        self,
+        ticker: str,
+        reason: Optional[str] = None,
+        category: Optional[str] = None,
+        active: bool = True,
+    ) -> bool:
+        """Insert or update an excluded ticker entry."""
+        normalized_ticker = (ticker or "").strip().upper()
+        if not normalized_ticker:
+            raise ValueError("Ticker is required")
+
+        normalized_reason = (reason or "").strip() or None
+        normalized_category = (category or "").strip() or None
+
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO excluded_tickers
+                    (ticker, reason, category, active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT(ticker) DO UPDATE SET
+                    reason = excluded.reason,
+                    category = excluded.category,
+                    active = excluded.active,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    normalized_ticker,
+                    normalized_reason,
+                    normalized_category,
+                    1 if active else 0,
+                ),
+            )
+            conn.commit()
+            return True
+        except Exception as e:
+            self.logger.error(f"Upsert excluded ticker failed: {e}")
+            return False
+
+    def set_excluded_ticker_active(self, ticker: str, active: bool) -> bool:
+        """Activate or deactivate an excluded ticker."""
+        normalized_ticker = (ticker or "").strip().upper()
+        if not normalized_ticker:
+            raise ValueError("Ticker is required")
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE excluded_tickers
+                SET active = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE ticker = ?
+                """,
+                (1 if active else 0, normalized_ticker),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            self.logger.error(f"Set excluded ticker active failed: {e}")
+            return False
+
+    def delete_excluded_ticker(self, ticker: str) -> bool:
+        """Delete an excluded ticker."""
+        normalized_ticker = (ticker or "").strip().upper()
+        if not normalized_ticker:
+            raise ValueError("Ticker is required")
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM excluded_tickers WHERE ticker = ?",
+                (normalized_ticker,),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            self.logger.error(f"Delete excluded ticker failed: {e}")
             return False
 
     def save_finding(

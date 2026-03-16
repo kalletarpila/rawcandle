@@ -294,6 +294,16 @@ class RawCandleApp:
         self._update_update_market_dropdown()
         self._update_market_list()
 
+    def _refresh_excluded_tickers(self):
+        from analysis.database_manager import DatabaseManager
+
+        dbm = DatabaseManager(db_path=self.analysis_db_path)
+        try:
+            self.excluded_tickers = dbm.list_excluded_tickers()
+        finally:
+            dbm.close()
+        self._update_excluded_ticker_list()
+
     def _load_market_stats(self):
         """Laske markkinakohtaiset osake- ja blackout-lukumäärät."""
         stats: dict[str, dict[str, int]] = {}
@@ -393,6 +403,18 @@ class RawCandleApp:
         except Exception:
             pass
 
+    def _update_excluded_ticker_list(self):
+        if not getattr(self, "excluded_ticker_list_column", None):
+            return
+        self.excluded_ticker_list_column.controls = [
+            self._build_excluded_ticker_row(item)
+            for item in getattr(self, "excluded_tickers", [])
+        ]
+        try:
+            self.excluded_ticker_list_column.update()
+        except Exception:
+            pass
+
     def _build_market_row(self, market: dict) -> ft.Container:
         """Luo yhden markkinarivin asetussivulle."""
         min_vol = market.get("min_volume")
@@ -437,6 +459,57 @@ class RawCandleApp:
                                 on_click=lambda e, mid=market[
                                     "id"
                                 ]: self._delete_market(mid),
+                            ),
+                        ]
+                    ),
+                ],
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=10,
+            bgcolor=ft.Colors.GREY_50,
+            border_radius=8,
+        )
+
+    def _build_excluded_ticker_row(self, item: dict) -> ft.Container:
+        ticker = item.get("ticker", "")
+        reason = item.get("reason") or "-"
+        category = item.get("category") or "-"
+        is_active = bool(item.get("active"))
+        return ft.Container(
+            content=ft.Row(
+                [
+                    ft.Column(
+                        [
+                            ft.Text(ticker, weight=ft.FontWeight.BOLD),
+                            ft.Text(
+                                f"Category: {category} | Reason: {reason} | "
+                                f"Status: {'Active' if is_active else 'Inactive'}",
+                                size=12,
+                                color=ft.Colors.GREY_600,
+                            ),
+                        ],
+                        expand=True,
+                    ),
+                    ft.Row(
+                        [
+                            ft.TextButton(
+                                "Delete",
+                                icon=ft.Icons.DELETE_OUTLINE,
+                                on_click=lambda e, symbol=ticker: self._delete_excluded_ticker(
+                                    symbol
+                                ),
+                            ),
+                            ft.ElevatedButton(
+                                "Deactivate" if is_active else "Activate",
+                                icon=(
+                                    ft.Icons.TOGGLE_OFF_OUTLINED
+                                    if is_active
+                                    else ft.Icons.TOGGLE_ON_OUTLINED
+                                ),
+                                on_click=lambda e, symbol=ticker, new_state=not is_active: self._set_excluded_ticker_active(
+                                    symbol, new_state
+                                ),
                             ),
                         ]
                     ),
@@ -537,8 +610,85 @@ class RawCandleApp:
         except ValueError as err:
             self._show_snackbar(f"❌ {err}", ft.Colors.RED_600)
 
-    def create_settings_view(self):
-        """Luo asetussivun markkinapaikkojen hallinnalle."""
+    def _reset_excluded_ticker_form(self, _=None):
+        for control, value in (
+            (getattr(self, "excluded_ticker_input", None), ""),
+            (getattr(self, "excluded_reason_input", None), ""),
+            (getattr(self, "excluded_category_input", None), ""),
+        ):
+            if control:
+                control.value = value
+                try:
+                    control.update()
+                except Exception:
+                    pass
+        if getattr(self, "excluded_active_checkbox", None):
+            self.excluded_active_checkbox.value = True
+            try:
+                self.excluded_active_checkbox.update()
+            except Exception:
+                pass
+
+    def _save_excluded_ticker_form(self, e):
+        from analysis.database_manager import DatabaseManager
+
+        ticker = (self.excluded_ticker_input.value or "").strip().upper()
+        reason = (self.excluded_reason_input.value or "").strip()
+        category = (self.excluded_category_input.value or "").strip()
+        if not ticker:
+            self._show_snackbar("Ticker is required", ft.Colors.RED_600)
+            return
+
+        dbm = DatabaseManager(db_path=self.analysis_db_path)
+        try:
+            success = dbm.upsert_excluded_ticker(
+                ticker=ticker,
+                reason=reason,
+                category=category,
+                active=bool(self.excluded_active_checkbox.value),
+            )
+        finally:
+            dbm.close()
+
+        if success:
+            self._show_snackbar("Excluded ticker saved", ft.Colors.GREEN_600)
+            self._reset_excluded_ticker_form()
+            self._refresh_excluded_tickers()
+        else:
+            self._show_snackbar("Failed to save excluded ticker", ft.Colors.RED_600)
+
+    def _set_excluded_ticker_active(self, ticker: str, active: bool):
+        from analysis.database_manager import DatabaseManager
+
+        dbm = DatabaseManager(db_path=self.analysis_db_path)
+        try:
+            success = dbm.set_excluded_ticker_active(ticker, active)
+        finally:
+            dbm.close()
+
+        if success:
+            self._show_snackbar("Excluded ticker updated", ft.Colors.GREEN_600)
+            self._refresh_excluded_tickers()
+        else:
+            self._show_snackbar("Excluded ticker not found", ft.Colors.RED_600)
+
+    def _delete_excluded_ticker(self, ticker: str):
+        from analysis.database_manager import DatabaseManager
+
+        dbm = DatabaseManager(db_path=self.analysis_db_path)
+        try:
+            success = dbm.delete_excluded_ticker(ticker)
+        finally:
+            dbm.close()
+
+        if success:
+            self._show_snackbar("Excluded ticker deleted", ft.Colors.GREEN_600)
+            self._refresh_excluded_tickers()
+        else:
+            self._show_snackbar("Excluded ticker not found", ft.Colors.RED_600)
+
+    def create_settings_view(self, route: str = "/settings"):
+        """Create settings/config view."""
         self.market_name_input = ft.TextField(
             label="Markkinan nimi",
             hint_text="Esim. Yhdysvallat",
@@ -571,6 +721,32 @@ class RawCandleApp:
 
         self.market_list_column = ft.Column(spacing=10, expand=True)
         self._update_market_list()
+        self.excluded_ticker_input = ft.TextField(
+            label="Ticker",
+            hint_text="e.g. SPY",
+            width=180,
+        )
+        self.excluded_reason_input = ft.TextField(
+            label="Reason",
+            hint_text="e.g. ETF",
+            width=220,
+        )
+        self.excluded_category_input = ft.TextField(
+            label="Category",
+            hint_text="e.g. index",
+            width=200,
+        )
+        self.excluded_active_checkbox = ft.Checkbox(label="Active", value=True)
+        self.excluded_ticker_list_column = ft.Column(spacing=10, expand=True)
+        self._refresh_excluded_tickers()
+        excluded_cancel_button = ft.TextButton(
+            "Clear form", on_click=self._reset_excluded_ticker_form
+        )
+        excluded_save_button = ft.ElevatedButton(
+            "Add or update ticker",
+            icon=ft.Icons.ADD,
+            on_click=self._save_excluded_ticker_form,
+        )
 
         content = ft.Column(
             [
@@ -605,12 +781,36 @@ class RawCandleApp:
                     border_radius=8,
                     expand=True,
                 ),
+                ft.Divider(),
+                ft.Text("Excluded tickers", weight=ft.FontWeight.BOLD),
+                ft.Text(
+                    "Manage tickers excluded from research and return calculations.",
+                    color=ft.Colors.GREY_600,
+                ),
+                ft.Row(
+                    controls=[
+                        self.excluded_ticker_input,
+                        self.excluded_reason_input,
+                        self.excluded_category_input,
+                        self.excluded_active_checkbox,
+                    ],
+                    spacing=20,
+                    wrap=True,
+                ),
+                ft.Row([excluded_save_button, excluded_cancel_button], spacing=10),
+                ft.Container(
+                    content=self.excluded_ticker_list_column,
+                    padding=10,
+                    bgcolor=ft.Colors.GREY_50,
+                    border_radius=8,
+                    expand=True,
+                ),
             ],
             spacing=16,
         )
 
         return ft.View(
-            "/settings",
+            route,
             [
                 self.create_appbar(),
                 ft.Container(content=content, padding=40, expand=True),
@@ -2637,11 +2837,17 @@ class RawCandleApp:
         self.active_market: str = ""
         self.market_form_id = None
         self.market_list_column = None
+        self.excluded_tickers: list[dict] = []
+        self.excluded_ticker_list_column = None
         self.market_name_input = None
         self.market_abbr_input = None
         self.market_suffix_input = None
         self.market_min_volume_input = None
         self.market_save_button = None
+        self.excluded_ticker_input = None
+        self.excluded_reason_input = None
+        self.excluded_category_input = None
+        self.excluded_active_checkbox = None
 
         # Osakedata-komponentit
         self.ticker_field = ft.TextField(
@@ -3919,8 +4125,8 @@ Virheet: {error_count}"""
         # Lisää näkymä reitin perusteella
         if self.page.route == "/" or self.page.route == "/home":
             self.page.views.append(self.create_home_view())
-        elif self.page.route == "/settings":
-            self.page.views.append(self.create_settings_view())
+        elif self.page.route == "/settings" or self.page.route == "/config":
+            self.page.views.append(self.create_settings_view(route=self.page.route))
         elif self.page.route == "/candles":
             self.page.views.append(self.create_candles_view())
         elif self.page.route == "/index":
