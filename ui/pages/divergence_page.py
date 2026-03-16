@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import date
 import math
-import threading
 from typing import Any
 
 import flet as ft
@@ -309,69 +309,73 @@ class DivergencePage:
         generation = self._refresh_generation
         self._refresh_cancelled = False
         self._show_refresh_dialog()
+        self.page.run_task(self._run_refresh_task, generation, filters)
 
-        def set_progress(message: str) -> None:
+    async def _run_refresh_task(
+        self, generation: int, filters: dict[str, Any]
+    ) -> None:
+        try:
+            await self._set_refresh_progress(generation, "Loading summary...")
+            summary = await asyncio.to_thread(
+                summarize_divergence_events,
+                self.analysis_db_path,
+                stock_db_path=self.stock_db_path,
+                **filters,
+            )
             if generation != self._refresh_generation or self._refresh_cancelled:
                 return
-            if self.refresh_progress_text is not None:
-                self.refresh_progress_text.value = message
+
+            await self._set_refresh_progress(generation, "Loading event rows...")
+            events = await asyncio.to_thread(
+                fetch_divergence_events,
+                self.analysis_db_path,
+                stock_db_path=self.stock_db_path,
+                limit=self.page_size,
+                offset=self.page_index * self.page_size,
+                sort_by=self.sort_by,
+                sort_desc=self.sort_desc,
+                **filters,
+            )
+            if generation != self._refresh_generation or self._refresh_cancelled:
+                return
+
+            await self._set_refresh_progress(generation, "Building heatmap...")
+            heatmap = await asyncio.to_thread(
+                fetch_divergence_heatmap,
+                self.analysis_db_path,
+                stock_db_path=self.stock_db_path,
+                **filters,
+            )
+            if generation != self._refresh_generation or self._refresh_cancelled:
+                return
+
+            self._update_summary(summary)
+            self._update_table(events)
+            self._update_heatmap(heatmap)
+            if self.pagination_text is not None:
+                self.pagination_text.value = f"Page {self.page_index + 1}"
+            self._close_refresh_dialog()
+            self.page.update()
+        except Exception as exc:
+            if generation != self._refresh_generation:
+                return
+            self._close_refresh_dialog()
+            if self.filter_error_text is not None:
+                self.filter_error_text.value = f"Refresh failed: {exc}"
             try:
                 self.page.update()
             except Exception:
                 pass
 
-        def worker() -> None:
-            try:
-                set_progress("Loading summary...")
-                summary = summarize_divergence_events(
-                    self.analysis_db_path,
-                    stock_db_path=self.stock_db_path,
-                    **filters,
-                )
-                if generation != self._refresh_generation or self._refresh_cancelled:
-                    return
-
-                set_progress("Loading event rows...")
-                events = fetch_divergence_events(
-                    self.analysis_db_path,
-                    stock_db_path=self.stock_db_path,
-                    limit=self.page_size,
-                    offset=self.page_index * self.page_size,
-                    sort_by=self.sort_by,
-                    sort_desc=self.sort_desc,
-                    **filters,
-                )
-                if generation != self._refresh_generation or self._refresh_cancelled:
-                    return
-
-                set_progress("Building heatmap...")
-                heatmap = fetch_divergence_heatmap(
-                    self.analysis_db_path,
-                    stock_db_path=self.stock_db_path,
-                    **filters,
-                )
-                if generation != self._refresh_generation or self._refresh_cancelled:
-                    return
-
-                self._update_summary(summary)
-                self._update_table(events)
-                self._update_heatmap(heatmap)
-                if self.pagination_text is not None:
-                    self.pagination_text.value = f"Page {self.page_index + 1}"
-                self._close_refresh_dialog()
-                self.page.update()
-            except Exception as exc:
-                if generation != self._refresh_generation:
-                    return
-                self._close_refresh_dialog()
-                if self.filter_error_text is not None:
-                    self.filter_error_text.value = f"Refresh failed: {exc}"
-                try:
-                    self.page.update()
-                except Exception:
-                    pass
-
-        threading.Thread(target=worker, daemon=True).start()
+    async def _set_refresh_progress(self, generation: int, message: str) -> None:
+        if generation != self._refresh_generation or self._refresh_cancelled:
+            return
+        if self.refresh_progress_text is not None:
+            self.refresh_progress_text.value = message
+        try:
+            self.page.update()
+        except Exception:
+            pass
 
     def _show_refresh_dialog(self) -> None:
         progress_ring = ft.ProgressRing(width=36, height=36)
@@ -399,11 +403,8 @@ class DivergencePage:
             ),
             actions=[ft.TextButton("Cancel", on_click=cancel_refresh)],
         )
-        if self.refresh_dialog not in self.page.overlay:
-            self.page.overlay.append(self.refresh_dialog)
-        self.refresh_dialog.open = True
         try:
-            self.page.update()
+            self.page.open(self.refresh_dialog)
         except Exception:
             pass
 
@@ -412,10 +413,7 @@ class DivergencePage:
         if dialog is None:
             return
         try:
-            dialog.open = False
-            if dialog in self.page.overlay:
-                self.page.overlay.remove(dialog)
-            self.page.update()
+            self.page.close(dialog)
         except Exception:
             pass
         self.refresh_dialog = None
