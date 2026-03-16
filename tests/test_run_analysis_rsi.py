@@ -53,13 +53,14 @@ def test_run_candlestick_analysis_prefers_divergence_rsi(tmp_path):
                 bullish_strength REAL DEFAULT 0,
                 bearish_strength REAL DEFAULT 0,
                 rsi REAL,
+                is_bullish_divergence_r3 INTEGER DEFAULT 0,
                 PRIMARY KEY (ticker, date)
             )
             """
         )
         conn.execute(
-            "INSERT INTO divergence_data (ticker, date, rsi) VALUES (?, ?, ?)",
-            ("TEST", "2026-01-02", 55.5),
+            "INSERT INTO divergence_data (ticker, date, rsi, is_bullish_divergence_r3) VALUES (?, ?, ?, ?)",
+            ("TEST", "2026-01-02", 55.5, 0),
         )
 
     results = run_candlestick_analysis(
@@ -162,6 +163,7 @@ def _create_candles_test_dbs(tmp_path):
                 bullish_strength REAL DEFAULT 0,
                 bearish_strength REAL DEFAULT 0,
                 rsi REAL,
+                is_bullish_divergence_r3 INTEGER DEFAULT 0,
                 PRIMARY KEY (ticker, date)
             )
             """
@@ -176,10 +178,10 @@ def test_run_candlestick_analysis_uses_db_backed_bullish_divergence(tmp_path):
     with sqlite3.connect(analysis_db) as conn:
         conn.execute(
             """
-            INSERT INTO divergence_data (ticker, date, bullish_strength, bearish_strength, rsi)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO divergence_data (ticker, date, bullish_strength, bearish_strength, rsi, is_bullish_divergence_r3)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            ("TEST", "2026-02-02", 0.62, 0.0, 55.5),
+            ("TEST", "2026-02-02", 0.62, 0.0, 55.5, 1),
         )
 
     results = run_candlestick_analysis(
@@ -223,16 +225,45 @@ def test_run_candlestick_analysis_skips_missing_db_bullish_divergence(tmp_path):
     assert results == {}
 
 
+def test_run_candlestick_analysis_requires_r3_event_for_bullish_divergence(tmp_path):
+    osake_db, analysis_db = _create_candles_test_dbs(tmp_path)
+
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO divergence_data (ticker, date, bullish_strength, bearish_strength, rsi, is_bullish_divergence_r3)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ("TEST", "2026-02-02", 0.62, 0.0, 55.5, 0),
+        )
+
+    results = run_candlestick_analysis(
+        str(osake_db),
+        "TEST",
+        patterns=["Bullish Divergence"],
+        start_date="2026-02-01",
+        end_date="2026-02-02",
+        progress_callback=None,
+        downtrend_filter=False,
+        min_decline_percent=3.0,
+        use_ma_filter=False,
+        use_volume_filter=False,
+        analysis_db_path=str(analysis_db),
+    )
+
+    assert results == {}
+
+
 def test_run_candlestick_analysis_forms_combo_from_db_divergence(tmp_path):
     osake_db, analysis_db = _create_candles_test_dbs(tmp_path)
 
     with sqlite3.connect(analysis_db) as conn:
         conn.execute(
             """
-            INSERT INTO divergence_data (ticker, date, bullish_strength, bearish_strength, rsi)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO divergence_data (ticker, date, bullish_strength, bearish_strength, rsi, is_bullish_divergence_r3)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            ("TEST", "2026-02-02", 0.62, 0.0, 55.5),
+            ("TEST", "2026-02-02", 0.62, 0.0, 55.5, 1),
         )
 
     results = run_candlestick_analysis(
@@ -262,10 +293,10 @@ def test_run_candlestick_analysis_does_not_use_legacy_bullish_divergence(tmp_pat
     with sqlite3.connect(analysis_db) as conn:
         conn.execute(
             """
-            INSERT INTO divergence_data (ticker, date, bullish_strength, bearish_strength, rsi)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO divergence_data (ticker, date, bullish_strength, bearish_strength, rsi, is_bullish_divergence_r3)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            ("TEST", "2026-02-02", 0.62, 0.0, 55.5),
+            ("TEST", "2026-02-02", 0.62, 0.0, 55.5, 1),
         )
 
     monkeypatch.setattr(
@@ -367,6 +398,7 @@ def test_run_candlestick_analysis_uses_wilder_rsi_fallback(tmp_path):
                 bullish_strength REAL DEFAULT 0,
                 bearish_strength REAL DEFAULT 0,
                 rsi REAL,
+                is_bullish_divergence_r3 INTEGER DEFAULT 0,
                 PRIMARY KEY (ticker, date)
             )
             """
