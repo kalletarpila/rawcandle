@@ -269,6 +269,10 @@ class RawCandleApp:
 
     def _default_market_code(self) -> str:
         if self.markets:
+            for market in self.markets:
+                abbrev = (market.get("abbreviation") or "").strip().lower()
+                if abbrev == "usa":
+                    return "usa"
             abbrev = self.markets[0].get("abbreviation") or "usa"
             return abbrev.strip().lower() or "usa"
         return "usa"
