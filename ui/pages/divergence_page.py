@@ -137,8 +137,6 @@ class DivergencePage:
         prev_button = ft.OutlinedButton("Prev", on_click=self._prev_page)
         next_button = ft.OutlinedButton("Next", on_click=self._next_page)
 
-        self._refresh()
-
         return ft.View(
             "/divergence",
             [
@@ -411,16 +409,17 @@ class DivergencePage:
 
     def _close_refresh_dialog(self) -> None:
         dialog = self.refresh_dialog
-        self.refresh_dialog = None
-        self.refresh_progress_text = None
         if dialog is None:
             return
         try:
             dialog.open = False
             if dialog in self.page.overlay:
                 self.page.overlay.remove(dialog)
+            self.page.update()
         except Exception:
             pass
+        self.refresh_dialog = None
+        self.refresh_progress_text = None
 
     def _update_summary(self, summary: dict[str, Any]) -> None:
         if self.summary_text is None:
@@ -525,7 +524,6 @@ class DivergencePage:
 
     def _on_filter_change(self, _e) -> None:
         self.page_index = 0
-        self._refresh()
 
     def _export_csv(self, _e) -> None:
         try:
