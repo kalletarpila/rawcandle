@@ -187,6 +187,7 @@ class DivergencePage:
                     ),
                 ),
             ],
+            scroll=ft.ScrollMode.AUTO,
         )
 
     def _build_table(self) -> ft.DataTable:
@@ -337,9 +338,22 @@ class DivergencePage:
                         padding=6,
                         content=ft.Column(
                             [
-                                ft.Text(f"G{row['gap']} D{row['drop']}", size=10),
-                                ft.Text(self._fmt_pct(row["avg_ret_30d"]), size=11, weight=ft.FontWeight.BOLD),
-                                ft.Text(f"n={row['n']}", size=10),
+                                ft.Text(
+                                    f"G{row['gap']} D{row['drop']}",
+                                    size=10,
+                                    color=ft.Colors.WHITE,
+                                ),
+                                ft.Text(
+                                    self._fmt_pct(row["avg_ret_30d"]),
+                                    size=11,
+                                    weight=ft.FontWeight.BOLD,
+                                    color=ft.Colors.WHITE,
+                                ),
+                                ft.Text(
+                                    f"n={row['n']}",
+                                    size=10,
+                                    color=ft.Colors.WHITE,
+                                ),
                             ],
                             spacing=1,
                         ),

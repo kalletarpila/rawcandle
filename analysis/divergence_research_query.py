@@ -89,6 +89,18 @@ def _validate_date_value(value: str | None) -> str | None:
     return stripped
 
 
+def _has_excluded_tickers_table(db_path: str) -> bool:
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'excluded_tickers'
+            """
+        ).fetchone()
+    return row is not None
+
+
 def _build_where_clause(
     event_class: str | None,
     radius: str,
@@ -98,6 +110,7 @@ def _build_where_clause(
     max_drop: float,
     start_date: str | None,
     end_date: str | None,
+    exclude_active_tickers: bool,
 ) -> tuple[str, list[Any]]:
     radius_value = radius.upper()
     if radius_value not in VALID_RADII:
@@ -111,6 +124,10 @@ def _build_where_clause(
 
     clauses = ["(d.is_bullish_divergence_r2 = 1 OR d.is_bullish_divergence_r3 = 1)"]
     params: list[Any] = []
+    if exclude_active_tickers:
+        clauses.append(
+            "NOT EXISTS (SELECT 1 FROM excluded_tickers x WHERE x.ticker = d.ticker AND x.active = 1)"
+        )
     if radius_value != "ALL":
         gap_col = "d.pivot_gap_r2" if radius_value == "R2" else "d.pivot_gap_r3"
         drop_col = "d.pivot_drop_pct_r2" if radius_value == "R2" else "d.pivot_drop_pct_r3"
@@ -153,8 +170,17 @@ def _fetch_event_rows(
     params_tail: list[Any] | None = None,
 ) -> list[sqlite3.Row]:
     stock_path = _resolve_stock_db_path(db_path, stock_db_path)
+    exclude_active_tickers = _has_excluded_tickers_table(db_path)
     where_sql, where_params = _build_where_clause(
-        event_class, radius, min_gap, max_gap, min_drop, max_drop, start_date, end_date
+        event_class,
+        radius,
+        min_gap,
+        max_gap,
+        min_drop,
+        max_drop,
+        start_date,
+        end_date,
+        exclude_active_tickers,
     )
     class_sql = _classification_sql()
     params = list(where_params)

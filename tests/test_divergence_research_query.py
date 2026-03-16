@@ -58,6 +58,18 @@ def _create_analysis_db(path: str) -> None:
                 ("DDD", "2025-01-02", 40.0, 0, 0, None, None, None, None),
             ],
         )
+        conn.execute(
+            """
+            CREATE TABLE excluded_tickers (
+                ticker TEXT PRIMARY KEY,
+                reason TEXT,
+                category TEXT,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
         conn.commit()
 
 
@@ -189,6 +201,27 @@ def test_fetch_divergence_events_filters_by_radius_specific_gap_and_drop(tmp_pat
 
     assert [row["ticker"] for row in rows_r2] == ["CCC"]
     assert {row["ticker"] for row in rows_r3} == {"BBB", "CCC"}
+
+
+def test_fetch_divergence_events_excludes_active_excluded_tickers(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    stock_db = tmp_path / "osakedata.db"
+    _create_analysis_db(str(analysis_db))
+    _create_stock_db(str(stock_db))
+
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO excluded_tickers (ticker, reason, category, active)
+            VALUES ('BBB', 'ETF', 'test', 1)
+            """
+        )
+        conn.commit()
+
+    rows = fetch_divergence_events(str(analysis_db), stock_db_path=str(stock_db), limit=20)
+
+    tickers = {row["ticker"] for row in rows}
+    assert tickers == {"AAA", "CCC"}
 
 
 def test_fetch_divergence_events_filters_by_date_range(tmp_path):
