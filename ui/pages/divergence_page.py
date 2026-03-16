@@ -7,6 +7,7 @@ from typing import Any
 import flet as ft
 
 from analysis.divergence_research_query import (
+    export_divergence_events_csv,
     fetch_divergence_events,
     fetch_divergence_heatmap,
     summarize_divergence_events,
@@ -41,6 +42,7 @@ class DivergencePage:
         self.end_date_field: ft.TextField | None = None
         self.summary_text: ft.Text | None = None
         self.filter_error_text: ft.Text | None = None
+        self.export_status_text: ft.Text | None = None
         self.table: ft.DataTable | None = None
         self.pagination_text: ft.Text | None = None
         self.heatmap_container: ft.Column | None = None
@@ -86,6 +88,7 @@ class DivergencePage:
 
         self.summary_text = ft.Text(size=14)
         self.filter_error_text = ft.Text(size=12, color=ft.Colors.RED_700)
+        self.export_status_text = ft.Text(size=12)
         self.pagination_text = ft.Text("Page 1", size=12)
         self.table = self._build_table()
         self.heatmap_container = ft.Column(spacing=4)
@@ -94,6 +97,11 @@ class DivergencePage:
             "Refresh",
             icon=ft.Icons.REFRESH,
             on_click=self._refresh,
+        )
+        export_button = ft.ElevatedButton(
+            "Export CSV",
+            icon=ft.Icons.DOWNLOAD,
+            on_click=self._export_csv,
         )
         prev_button = ft.OutlinedButton("Prev", on_click=self._prev_page)
         next_button = ft.OutlinedButton("Next", on_click=self._next_page)
@@ -127,11 +135,13 @@ class DivergencePage:
                                                     self.start_date_field,
                                                     self.end_date_field,
                                                     refresh_button,
+                                                    export_button,
                                                 ],
                                                 wrap=True,
                                                 spacing=16,
                                             ),
                                             self.filter_error_text,
+                                            self.export_status_text,
                                             ft.Text("Pivot gap"),
                                             ft.Row(
                                                 [
@@ -361,6 +371,33 @@ class DivergencePage:
     def _on_filter_change(self, _e) -> None:
         self.page_index = 0
         self._refresh()
+
+    def _export_csv(self, _e) -> None:
+        try:
+            filters = self._get_filters()
+        except ValueError as exc:
+            if self.filter_error_text is not None:
+                self.filter_error_text.value = str(exc)
+            if self.export_status_text is not None:
+                self.export_status_text.value = ""
+            self.page.update()
+            return
+        if self.filter_error_text is not None:
+            self.filter_error_text.value = ""
+        try:
+            saved_path = export_divergence_events_csv(
+                self.analysis_db_path,
+                stock_db_path=self.stock_db_path,
+                **filters,
+            )
+            if self.export_status_text is not None:
+                self.export_status_text.value = f"Exported CSV: {saved_path}"
+                self.export_status_text.color = ft.Colors.GREEN_700
+        except Exception as exc:
+            if self.export_status_text is not None:
+                self.export_status_text.value = f"CSV export failed: {exc}"
+                self.export_status_text.color = ft.Colors.RED_700
+        self.page.update()
 
     @staticmethod
     def validate_date_range(start_date: str, end_date: str) -> str | None:

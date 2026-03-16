@@ -1,7 +1,10 @@
+import csv
 import sqlite3
 from datetime import date, timedelta
 
 from analysis.divergence_research_query import (
+    EXPORT_COLUMNS,
+    export_divergence_events_csv,
     fetch_divergence_events,
     fetch_divergence_heatmap,
     summarize_divergence_events,
@@ -265,3 +268,53 @@ def test_divergence_page_validates_date_range():
         DivergencePage.validate_date_range("2025-12-31", "2025-01-01") ==
         "Start date cannot be after end date."
     )
+
+
+def test_export_divergence_events_csv_writes_expected_columns_and_path(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    stock_db = tmp_path / "osakedata.db"
+    export_dir = tmp_path / "exports"
+    _create_analysis_db(str(analysis_db))
+    _create_stock_db(str(stock_db))
+
+    saved_path = export_divergence_events_csv(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        event_class="R3_ONLY",
+        radius="R3",
+        min_gap=9,
+        max_gap=10,
+        min_drop=7.0,
+        max_drop=8.1,
+        start_date="2025-06-01",
+        end_date="2025-06-30",
+        export_path=str(export_dir),
+    )
+
+    assert saved_path.endswith(".csv")
+    with open(saved_path, "r", encoding="utf-8", newline="") as csv_file:
+        rows = list(csv.DictReader(csv_file))
+
+    assert rows[0]["ticker"] == "BBB"
+    assert list(rows[0].keys()) == EXPORT_COLUMNS
+
+
+def test_export_divergence_events_csv_zero_rows_still_writes_header_only(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    stock_db = tmp_path / "osakedata.db"
+    export_path = tmp_path / "empty.csv"
+    _create_analysis_db(str(analysis_db))
+    _create_stock_db(str(stock_db))
+
+    saved_path = export_divergence_events_csv(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        start_date="2026-01-01",
+        export_path=str(export_path),
+    )
+
+    assert saved_path == str(export_path)
+    with open(saved_path, "r", encoding="utf-8", newline="") as csv_file:
+        rows = list(csv.reader(csv_file))
+
+    assert rows == [EXPORT_COLUMNS]

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import csv
 from datetime import date
+from datetime import datetime
 import os
 import sqlite3
 from statistics import median
@@ -23,12 +25,48 @@ VALID_SORT_COLUMNS = {
     "ret_20d": "ret_20d",
     "ret_30d": "ret_30d",
 }
+EXPORT_COLUMNS = [
+    "ticker",
+    "date",
+    "event_class",
+    "is_bullish_divergence_r2",
+    "is_bullish_divergence_r3",
+    "pivot_gap_r2",
+    "pivot_drop_pct_r2",
+    "pivot_gap_r3",
+    "pivot_drop_pct_r3",
+    "rsi",
+    "bullish_strength",
+    "bearish_strength",
+    "ret_5d",
+    "ret_10d",
+    "ret_20d",
+    "ret_30d",
+]
 
 
 def _resolve_stock_db_path(db_path: str, stock_db_path: str | None = None) -> str:
     if stock_db_path:
         return stock_db_path
     return os.path.join(os.path.dirname(os.path.abspath(db_path)), "osakedata.db")
+
+
+def _resolve_export_path(db_path: str, export_path: str | None = None) -> str:
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"divergence_export_{timestamp}.csv"
+    if export_path:
+        abs_path = os.path.abspath(export_path)
+        if abs_path.lower().endswith(".csv"):
+            directory = os.path.dirname(abs_path)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+            return abs_path
+        os.makedirs(abs_path, exist_ok=True)
+        return os.path.join(abs_path, filename)
+    export_dir = os.path.join(os.path.dirname(os.path.abspath(db_path)), "..", "exports")
+    export_dir = os.path.abspath(export_dir)
+    os.makedirs(export_dir, exist_ok=True)
+    return os.path.join(export_dir, filename)
 
 
 def _classification_sql() -> str:
@@ -139,11 +177,15 @@ def _fetch_event_rows(
                 d.ticker,
                 d.date,
                 {class_sql} AS event_class,
+                d.is_bullish_divergence_r2,
+                d.is_bullish_divergence_r3,
                 d.pivot_gap_r2,
                 d.pivot_drop_pct_r2,
                 d.pivot_gap_r3,
                 d.pivot_drop_pct_r3,
-                d.rsi
+                d.rsi,
+                d.bullish_strength,
+                d.bearish_strength
             FROM divergence_data d
             WHERE {where_sql}
         )
@@ -151,11 +193,15 @@ def _fetch_event_rows(
             e.ticker,
             e.date,
             e.event_class,
+            e.is_bullish_divergence_r2,
+            e.is_bullish_divergence_r3,
             e.pivot_gap_r2,
             e.pivot_drop_pct_r2,
             e.pivot_gap_r3,
             e.pivot_drop_pct_r3,
             e.rsi,
+            e.bullish_strength,
+            e.bearish_strength,
             ((p5.close / p0.close) - 1.0) * 100.0 AS ret_5d,
             ((p10.close / p0.close) - 1.0) * 100.0 AS ret_10d,
             ((p20.close / p0.close) - 1.0) * 100.0 AS ret_20d,
@@ -331,3 +377,41 @@ def fetch_divergence_heatmap(
             }
         )
     return result
+
+
+def export_divergence_events_csv(
+    db_path: str,
+    event_class: str | None = None,
+    radius: str = "R3",
+    min_gap: int = 5,
+    max_gap: int = 24,
+    min_drop: float = 0.0,
+    max_drop: float = 50.0,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    export_path: str | None = None,
+    stock_db_path: str | None = None,
+) -> str:
+    rows = fetch_divergence_events(
+        db_path,
+        event_class=event_class,
+        radius=radius,
+        min_gap=min_gap,
+        max_gap=max_gap,
+        min_drop=min_drop,
+        max_drop=max_drop,
+        start_date=start_date,
+        end_date=end_date,
+        limit=1_000_000_000,
+        offset=0,
+        sort_by="date",
+        sort_desc=True,
+        stock_db_path=stock_db_path,
+    )
+    target_path = _resolve_export_path(db_path, export_path)
+    with open(target_path, "w", encoding="utf-8", newline="") as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=EXPORT_COLUMNS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({column: row.get(column) for column in EXPORT_COLUMNS})
+    return target_path
