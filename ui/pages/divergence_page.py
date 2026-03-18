@@ -51,6 +51,7 @@ class DivergencePage:
         self.current_rows: list[dict[str, Any]] = []
 
         self.event_class_dropdown: ft.Dropdown | None = None
+        self.trend_filter_dropdown: ft.Dropdown | None = None
         self.market_dropdown: ft.Dropdown | None = None
         self.min_gap_slider: ft.Slider | None = None
         self.max_gap_slider: ft.Slider | None = None
@@ -83,6 +84,16 @@ class DivergencePage:
                 ft.dropdown.Option("R2_ONLY"),
                 ft.dropdown.Option("R3_ONLY"),
                 ft.dropdown.Option("R2_AND_R3"),
+            ],
+            on_change=self._on_filter_change,
+        )
+        self.trend_filter_dropdown = ft.Dropdown(
+            label="Trend filter",
+            width=240,
+            value="All BullDiv events",
+            options=[
+                ft.dropdown.Option("All BullDiv events"),
+                ft.dropdown.Option("Only events during downtrend"),
             ],
             on_change=self._on_filter_change,
         )
@@ -161,6 +172,7 @@ class DivergencePage:
                                             ft.Row(
                                                 [
                                                     self.event_class_dropdown,
+                                                    self.trend_filter_dropdown,
                                                     self.market_dropdown,
                                                     self.start_date_field,
                                                     self.end_date_field,
@@ -271,6 +283,11 @@ class DivergencePage:
         event_class = self.event_class_dropdown.value
         if event_class == "All":
             event_class = None
+        trend_filter = self.trend_filter_dropdown.value
+        if trend_filter == "Only events during downtrend":
+            trend_filter = "downtrend_only"
+        else:
+            trend_filter = "all"
         market = self.market_dropdown.value
         if market == "All Markets":
             market = None
@@ -281,6 +298,7 @@ class DivergencePage:
             raise ValueError(validation_error)
         return {
             "event_class": event_class,
+            "trend_filter": trend_filter,
             "market": market,
             "min_gap": min_gap,
             "max_gap": max_gap,

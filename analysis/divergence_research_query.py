@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 from datetime import date
 from datetime import datetime
+from datetime import timedelta
 import os
 import sqlite3
 from statistics import median
@@ -11,18 +12,18 @@ from typing import Any
 
 VALID_EVENT_CLASSES = {"R2", "R3", "R2_ONLY", "R3_ONLY", "R2_AND_R3"}
 VALID_SORT_COLUMNS = {
-    "ticker": "e.ticker",
-    "date": "e.date",
-    "event_class": "e.event_class",
-    "pivot_gap_r2": "e.pivot_gap_r2",
-    "pivot_drop_pct_r2": "e.pivot_drop_pct_r2",
-    "pivot_gap_r3": "e.pivot_gap_r3",
-    "pivot_drop_pct_r3": "e.pivot_drop_pct_r3",
-    "rsi": "e.rsi",
-    "ret_5d": "ret_5d",
-    "ret_10d": "ret_10d",
-    "ret_20d": "ret_20d",
-    "ret_30d": "ret_30d",
+    "ticker",
+    "date",
+    "event_class",
+    "pivot_gap_r2",
+    "pivot_drop_pct_r2",
+    "pivot_gap_r3",
+    "pivot_drop_pct_r3",
+    "rsi",
+    "ret_5d",
+    "ret_10d",
+    "ret_20d",
+    "ret_30d",
 }
 EXPORT_COLUMNS = [
     "ticker",
@@ -42,6 +43,7 @@ EXPORT_COLUMNS = [
     "ret_20d",
     "ret_30d",
 ]
+VALID_TREND_FILTERS = {"all", "downtrend_only"}
 
 
 def _resolve_stock_db_path(db_path: str, stock_db_path: str | None = None) -> str:
@@ -88,6 +90,12 @@ def _validate_date_value(value: str | None) -> str | None:
     return stripped
 
 
+def _validate_trend_filter(trend_filter: str) -> str:
+    if trend_filter not in VALID_TREND_FILTERS:
+        raise ValueError(f"Unsupported trend filter: {trend_filter}")
+    return trend_filter
+
+
 def _geometry_scope(event_class: str | None) -> str:
     if event_class in {"R2", "R2_ONLY"}:
         return "R2"
@@ -128,20 +136,17 @@ def _build_where_clause(
     end_date_value = _validate_date_value(end_date)
 
     class_sql = _classification_sql()
-
     clauses = ["(d.is_bullish_divergence_r2 = 1 OR d.is_bullish_divergence_r3 = 1)"]
     params: list[Any] = []
+
     if exclude_active_tickers:
         clauses.append(
             "NOT EXISTS (SELECT 1 FROM excluded_tickers x WHERE x.ticker = d.ticker AND x.active = 1)"
         )
-    clauses.extend(
-        [
-            "d.rsi >= ?",
-            "d.rsi <= ?",
-        ]
-    )
+
+    clauses.extend(["d.rsi >= ?", "d.rsi <= ?"])
     params.extend([min_rsi, max_rsi])
+
     geometry_scope = _geometry_scope(event_class)
     if geometry_scope == "R2":
         clauses.extend(
@@ -185,6 +190,7 @@ def _build_where_clause(
                 max_drop,
             ]
         )
+
     if event_class == "R2":
         clauses.append("d.is_bullish_divergence_r2 = 1")
     elif event_class == "R3":
@@ -192,6 +198,7 @@ def _build_where_clause(
     elif event_class is not None:
         clauses.append(f"{class_sql} = ?")
         params.append(event_class)
+
     if start_date_value is not None:
         clauses.append("d.date >= ?")
         params.append(start_date_value)
@@ -206,7 +213,15 @@ def _build_where_clause(
     return " AND ".join(clauses), params
 
 
-def _fetch_event_rows(
+def _chunked(values: list[str], size: int = 500) -> list[list[str]]:
+    return [values[idx : idx + size] for idx in range(0, len(values), size)]
+
+
+def _parse_iso_date(value: str) -> date:
+    return date.fromisoformat(str(value))
+
+
+def _fetch_base_divergence_rows(
     db_path: str,
     *,
     event_class: str | None,
@@ -220,14 +235,10 @@ def _fetch_event_rows(
     start_date: str | None = None,
     end_date: str | None = None,
     stock_db_path: str | None = None,
-    extra_select: str = "",
-    order_by: str = "",
-    limit_clause: str = "",
-    params_tail: list[Any] | None = None,
-) -> list[sqlite3.Row]:
+) -> list[dict[str, Any]]:
     stock_path = _resolve_stock_db_path(db_path, stock_db_path)
     exclude_active_tickers = _has_excluded_tickers_table(db_path)
-    where_sql, where_params = _build_where_clause(
+    where_sql, params = _build_where_clause(
         event_class,
         min_gap,
         max_gap,
@@ -241,86 +252,247 @@ def _fetch_event_rows(
         exclude_active_tickers,
     )
     class_sql = _classification_sql()
-    params = list(where_params)
-    if params_tail:
-        params.extend(params_tail)
-
     query = f"""
-        ATTACH DATABASE ? AS marketdb;
-
-        WITH prices AS (
-            SELECT
-                osake AS ticker,
-                pvm AS date,
-                close,
-                ROW_NUMBER() OVER (PARTITION BY osake ORDER BY pvm) AS rn
-            FROM marketdb.osakedata
-        ),
-        events AS (
-            SELECT
-                d.ticker,
-                d.date,
-                {class_sql} AS event_class,
-                d.is_bullish_divergence_r2,
-                d.is_bullish_divergence_r3,
-                d.pivot_gap_r2,
-                d.pivot_drop_pct_r2,
-                d.pivot_gap_r3,
-                d.pivot_drop_pct_r3,
-                d.rsi,
-                d.bullish_strength,
-                d.bearish_strength
-            FROM divergence_data d
-            WHERE {where_sql}
-        )
         SELECT
-            e.ticker,
-            e.date,
-            e.event_class,
-            e.is_bullish_divergence_r2,
-            e.is_bullish_divergence_r3,
-            e.pivot_gap_r2,
-            e.pivot_drop_pct_r2,
-            e.pivot_gap_r3,
-            e.pivot_drop_pct_r3,
-            e.rsi,
-            e.bullish_strength,
-            e.bearish_strength,
-            ((p5.close / p0.close) - 1.0) * 100.0 AS ret_5d,
-            ((p10.close / p0.close) - 1.0) * 100.0 AS ret_10d,
-            ((p20.close / p0.close) - 1.0) * 100.0 AS ret_20d,
-            ((p30.close / p0.close) - 1.0) * 100.0 AS ret_30d
-            {extra_select}
-        FROM events e
-        JOIN prices p0
-          ON p0.ticker = e.ticker
-         AND p0.date = e.date
-        LEFT JOIN prices p5
-          ON p5.ticker = e.ticker
-         AND p5.rn = p0.rn + 5
-        LEFT JOIN prices p10
-          ON p10.ticker = e.ticker
-         AND p10.rn = p0.rn + 10
-        LEFT JOIN prices p20
-          ON p20.ticker = e.ticker
-         AND p20.rn = p0.rn + 20
-        LEFT JOIN prices p30
-          ON p30.ticker = e.ticker
-         AND p30.rn = p0.rn + 30
-        {order_by}
-        {limit_clause}
+            d.ticker,
+            d.date,
+            {class_sql} AS event_class,
+            d.is_bullish_divergence_r2,
+            d.is_bullish_divergence_r3,
+            d.pivot_gap_r2,
+            d.pivot_drop_pct_r2,
+            d.pivot_gap_r3,
+            d.pivot_drop_pct_r3,
+            d.rsi,
+            d.bullish_strength,
+            d.bearish_strength
+        FROM divergence_data d
+        WHERE {where_sql}
     """
 
     with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = OFF")
-        conn.executescript("PRAGMA temp_store = MEMORY;")
         conn.execute("ATTACH DATABASE ? AS marketdb", (stock_path,))
         try:
-            sql = query.replace("ATTACH DATABASE ? AS marketdb;", "")
-            return conn.execute(sql, params).fetchall()
+            rows = conn.execute(query, params).fetchall()
         finally:
             conn.execute("DETACH DATABASE marketdb")
+    return [dict(row) for row in rows]
+
+
+def _fetch_price_history(
+    stock_db_path: str,
+    tickers: list[str],
+    start_date: str,
+    end_date: str,
+) -> list[sqlite3.Row]:
+    if not tickers:
+        return []
+    result: list[sqlite3.Row] = []
+    with sqlite3.connect(stock_db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        for ticker_chunk in _chunked(sorted(tickers)):
+            placeholders = ",".join("?" for _ in ticker_chunk)
+            query = f"""
+                SELECT osake AS ticker, pvm AS date, close
+                FROM osakedata
+                WHERE osake IN ({placeholders})
+                  AND pvm >= ?
+                  AND pvm <= ?
+                ORDER BY osake, pvm
+            """
+            result.extend(conn.execute(query, [*ticker_chunk, start_date, end_date]).fetchall())
+    return result
+
+
+def _attach_downtrend_flags(
+    rows: list[dict[str, Any]],
+    stock_db_path: str,
+) -> list[dict[str, Any]]:
+    if not rows:
+        return []
+
+    min_event_date = min(_parse_iso_date(row["date"]) for row in rows)
+    max_event_date = max(_parse_iso_date(row["date"]) for row in rows)
+    price_rows = _fetch_price_history(
+        stock_db_path,
+        tickers=sorted({str(row["ticker"]) for row in rows}),
+        start_date=(min_event_date - timedelta(days=60)).isoformat(),
+        end_date=max_event_date.isoformat(),
+    )
+
+    by_ticker: dict[str, list[tuple[str, float]]] = {}
+    for price_row in price_rows:
+        close_value = price_row["close"]
+        if close_value is None:
+            continue
+        by_ticker.setdefault(str(price_row["ticker"]), []).append(
+            (str(price_row["date"]), float(close_value))
+        )
+
+    downtrend_flags: dict[tuple[str, str], bool] = {}
+    for ticker, series in by_ticker.items():
+        closes = [close_value for _date_value, close_value in series]
+        dates = [date_value for date_value, _close_value in series]
+        for idx, date_value in enumerate(dates):
+            qualified = False
+            if idx >= 10:
+                t0 = closes[idx]
+                t_2 = closes[idx - 2]
+                t_5 = closes[idx - 5]
+                t_10 = closes[idx - 10]
+                if t_10 > 0 and t_10 > t_5 > t_2 > t0:
+                    decline_percent = ((t_10 - t0) / t_10) * 100.0
+                    if decline_percent >= 3.0:
+                        ma5 = sum(closes[idx - 4 : idx + 1]) / 5.0
+                        ma10 = sum(closes[idx - 9 : idx + 1]) / 10.0
+                        if t0 < ma10 and ma5 < ma10:
+                            qualified = True
+            downtrend_flags[(ticker, date_value)] = qualified
+
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        row_copy = dict(row)
+        row_copy["is_downtrend_qualified"] = bool(
+            downtrend_flags.get((str(row["ticker"]), str(row["date"])), False)
+        )
+        result.append(row_copy)
+    return result
+
+
+def _apply_trend_filter(
+    rows: list[dict[str, Any]],
+    trend_filter: str,
+) -> list[dict[str, Any]]:
+    _validate_trend_filter(trend_filter)
+    if trend_filter == "all":
+        return rows
+    return [row for row in rows if row.get("is_downtrend_qualified") is True]
+
+
+def _attach_forward_returns(
+    rows: list[dict[str, Any]],
+    stock_db_path: str,
+) -> list[dict[str, Any]]:
+    if not rows:
+        return []
+
+    min_event_date = min(_parse_iso_date(row["date"]) for row in rows)
+    max_event_date = max(_parse_iso_date(row["date"]) for row in rows)
+    price_rows = _fetch_price_history(
+        stock_db_path,
+        tickers=sorted({str(row["ticker"]) for row in rows}),
+        start_date=min_event_date.isoformat(),
+        end_date=(max_event_date + timedelta(days=60)).isoformat(),
+    )
+
+    price_index: dict[str, dict[str, Any]] = {}
+    for price_row in price_rows:
+        ticker = str(price_row["ticker"])
+        close_value = price_row["close"]
+        if close_value is None:
+            continue
+        ticker_state = price_index.setdefault(
+            ticker,
+            {"dates": [], "closes": [], "positions": {}},
+        )
+        date_value = str(price_row["date"])
+        ticker_state["positions"][date_value] = len(ticker_state["dates"])
+        ticker_state["dates"].append(date_value)
+        ticker_state["closes"].append(float(close_value))
+
+    def calc_return(closes: list[float], start_idx: int, offset: int) -> float | None:
+        future_idx = start_idx + offset
+        if future_idx >= len(closes):
+            return None
+        start_close = closes[start_idx]
+        future_close = closes[future_idx]
+        if start_close == 0:
+            return None
+        return ((future_close / start_close) - 1.0) * 100.0
+
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        row_copy = dict(row)
+        ticker_state = price_index.get(str(row["ticker"]))
+        if ticker_state is None:
+            row_copy["ret_5d"] = None
+            row_copy["ret_10d"] = None
+            row_copy["ret_20d"] = None
+            row_copy["ret_30d"] = None
+            result.append(row_copy)
+            continue
+        start_idx = ticker_state["positions"].get(str(row["date"]))
+        if start_idx is None:
+            row_copy["ret_5d"] = None
+            row_copy["ret_10d"] = None
+            row_copy["ret_20d"] = None
+            row_copy["ret_30d"] = None
+            result.append(row_copy)
+            continue
+        closes = ticker_state["closes"]
+        row_copy["ret_5d"] = calc_return(closes, start_idx, 5)
+        row_copy["ret_10d"] = calc_return(closes, start_idx, 10)
+        row_copy["ret_20d"] = calc_return(closes, start_idx, 20)
+        row_copy["ret_30d"] = calc_return(closes, start_idx, 30)
+        result.append(row_copy)
+    return result
+
+
+def _finalize_filtered_rows(
+    db_path: str,
+    *,
+    event_class: str | None,
+    min_gap: int,
+    max_gap: int,
+    min_drop: float,
+    max_drop: float,
+    min_rsi: float,
+    max_rsi: float,
+    market: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    trend_filter: str = "all",
+    stock_db_path: str | None = None,
+) -> list[dict[str, Any]]:
+    stock_path = _resolve_stock_db_path(db_path, stock_db_path)
+    rows = _fetch_base_divergence_rows(
+        db_path,
+        event_class=event_class,
+        min_gap=min_gap,
+        max_gap=max_gap,
+        min_drop=min_drop,
+        max_drop=max_drop,
+        min_rsi=min_rsi,
+        max_rsi=max_rsi,
+        market=market,
+        start_date=start_date,
+        end_date=end_date,
+        stock_db_path=stock_path,
+    )
+    rows = _attach_downtrend_flags(rows, stock_path)
+    rows = _apply_trend_filter(rows, trend_filter)
+    return _attach_forward_returns(rows, stock_path)
+
+
+def _sort_rows(
+    rows: list[dict[str, Any]],
+    sort_by: str,
+    sort_desc: bool,
+) -> list[dict[str, Any]]:
+    sort_key_name = sort_by if sort_by in VALID_SORT_COLUMNS else "date"
+
+    def sort_key(row: dict[str, Any]) -> tuple[int, Any, str, str]:
+        value = row.get(sort_key_name)
+        if value is None:
+            normalized: Any = ""
+            marker = 1
+        else:
+            marker = 0
+            normalized = value.lower() if isinstance(value, str) else float(value)
+        return (marker, normalized, str(row["ticker"]), str(row["date"]))
+
+    return sorted(rows, key=sort_key, reverse=sort_desc)
 
 
 def fetch_divergence_events(
@@ -335,15 +507,14 @@ def fetch_divergence_events(
     market: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
+    trend_filter: str = "all",
     limit: int = 500,
     offset: int = 0,
     sort_by: str = "date",
     sort_desc: bool = True,
     stock_db_path: str | None = None,
 ) -> list[dict[str, Any]]:
-    sort_col = VALID_SORT_COLUMNS.get(sort_by, "e.date")
-    direction = "DESC" if sort_desc else "ASC"
-    rows = _fetch_event_rows(
+    rows = _finalize_filtered_rows(
         db_path,
         event_class=event_class,
         min_gap=min_gap,
@@ -355,12 +526,11 @@ def fetch_divergence_events(
         market=market,
         start_date=start_date,
         end_date=end_date,
+        trend_filter=trend_filter,
         stock_db_path=stock_db_path,
-        order_by=f"ORDER BY {sort_col} {direction}, e.ticker ASC, e.date ASC",
-        limit_clause="LIMIT ? OFFSET ?",
-        params_tail=[limit, offset],
     )
-    return [dict(row) for row in rows]
+    sorted_rows = _sort_rows(rows, sort_by, sort_desc)
+    return sorted_rows[offset : offset + limit]
 
 
 def summarize_divergence_events(
@@ -375,25 +545,24 @@ def summarize_divergence_events(
     market: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
+    trend_filter: str = "all",
     stock_db_path: str | None = None,
 ) -> dict[str, Any]:
-    rows = [
-        dict(row)
-        for row in _fetch_event_rows(
-            db_path,
-            event_class=event_class,
-            min_gap=min_gap,
-            max_gap=max_gap,
-            min_drop=min_drop,
-            max_drop=max_drop,
-            min_rsi=min_rsi,
-            max_rsi=max_rsi,
-            market=market,
-            start_date=start_date,
-            end_date=end_date,
-            stock_db_path=stock_db_path,
-        )
-    ]
+    rows = _finalize_filtered_rows(
+        db_path,
+        event_class=event_class,
+        min_gap=min_gap,
+        max_gap=max_gap,
+        min_drop=min_drop,
+        max_drop=max_drop,
+        min_rsi=min_rsi,
+        max_rsi=max_rsi,
+        market=market,
+        start_date=start_date,
+        end_date=end_date,
+        trend_filter=trend_filter,
+        stock_db_path=stock_db_path,
+    )
     ret30_values = [row["ret_30d"] for row in rows if row["ret_30d"] is not None]
     if not rows:
         return {
@@ -433,10 +602,11 @@ def fetch_divergence_heatmap(
     market: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
+    trend_filter: str = "all",
     stock_db_path: str | None = None,
 ) -> list[dict[str, Any]]:
     geometry_scope = _geometry_scope(event_class)
-    rows = _fetch_event_rows(
+    rows = _finalize_filtered_rows(
         db_path,
         event_class=event_class,
         min_gap=min_gap,
@@ -448,8 +618,8 @@ def fetch_divergence_heatmap(
         market=market,
         start_date=start_date,
         end_date=end_date,
+        trend_filter=trend_filter,
         stock_db_path=stock_db_path,
-        extra_select="",
     )
     grouped: dict[tuple[int, int], list[float]] = {}
     for row in rows:
@@ -495,6 +665,7 @@ def export_divergence_events_csv(
     market: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
+    trend_filter: str = "all",
     export_path: str | None = None,
     stock_db_path: str | None = None,
 ) -> str:
@@ -510,6 +681,7 @@ def export_divergence_events_csv(
         market=market,
         start_date=start_date,
         end_date=end_date,
+        trend_filter=trend_filter,
         limit=1_000_000_000,
         offset=0,
         sort_by="date",

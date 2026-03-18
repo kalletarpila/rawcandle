@@ -12,7 +12,20 @@ from analysis.divergence_research_query import (
 from ui.pages.divergence_page import DivergencePage
 
 
+def _build_trading_dates(start_iso: str, count: int) -> list[str]:
+    current = date.fromisoformat(start_iso)
+    result: list[str] = []
+    while len(result) < count:
+        if current.weekday() < 5:
+            result.append(current.isoformat())
+        current += timedelta(days=1)
+    return result
+
+
 def _create_analysis_db(path: str) -> None:
+    aaa_event_date = _build_trading_dates("2025-01-02", 50)[15]
+    bbb_event_date = _build_trading_dates("2025-06-02", 50)[15]
+    ccc_event_date = _build_trading_dates("2025-12-02", 50)[15]
     with sqlite3.connect(path) as conn:
         conn.execute(
             """
@@ -52,9 +65,9 @@ def _create_analysis_db(path: str) -> None:
             VALUES (?, ?, 0, 0, ?, 0, 0, ?, 0, ?, 0, NULL, NULL, ?, ?, ?, ?)
             """,
             [
-                ("AAA", "2025-01-02", 31.0, 1, 0, 6, 2.5, None, None),
-                ("BBB", "2025-06-02", 28.0, 0, 1, None, None, 9, 7.5),
-                ("CCC", "2025-12-02", 35.0, 1, 1, 7, 3.0, 10, 8.0),
+                ( "AAA", aaa_event_date, 31.0, 1, 0, 6, 2.5, None, None),
+                ( "BBB", bbb_event_date, 28.0, 0, 1, None, None, 9, 7.5),
+                ( "CCC", ccc_event_date, 35.0, 1, 1, 7, 3.0, 10, 8.0),
                 ("DDD", "2025-01-02", 40.0, 0, 0, None, None, None, None),
             ],
         )
@@ -74,15 +87,6 @@ def _create_analysis_db(path: str) -> None:
 
 
 def _create_stock_db(path: str) -> None:
-    def build_trading_dates(start_iso: str, count: int) -> list[str]:
-        current = date.fromisoformat(start_iso)
-        result: list[str] = []
-        while len(result) < count:
-            if current.weekday() < 5:
-                result.append(current.isoformat())
-            current += timedelta(days=1)
-        return result
-
     with sqlite3.connect(path) as conn:
         conn.execute(
             """
@@ -121,21 +125,22 @@ def _create_stock_db(path: str) -> None:
             ],
         )
         rows = []
-        for ticker, closes in {
-            "AAA": [100 + idx for idx in range(40)],
-            "BBB": [50 + idx for idx in range(40)],
-            "CCC": [200 + 2 * idx for idx in range(40)],
-            "DDD": [10 for _ in range(40)],
-        }.items():
+        price_map = {
+            "AAA": [120 - idx for idx in range(16)] + [106 + idx for idx in range(34)],
+            "BBB": [50 + idx for idx in range(50)],
+            "CCC": [220 - (2 * idx) for idx in range(16)] + [192 + (2 * idx) for idx in range(34)],
+            "DDD": [10 for _ in range(50)],
+        }
+        for ticker, closes in price_map.items():
+            if ticker == "AAA":
+                dates = _build_trading_dates("2025-01-02", len(closes))
+            elif ticker == "BBB":
+                dates = _build_trading_dates("2025-06-02", len(closes))
+            elif ticker == "CCC":
+                dates = _build_trading_dates("2025-12-02", len(closes))
+            else:
+                dates = _build_trading_dates("2025-01-02", len(closes))
             for idx, close in enumerate(closes):
-                if ticker == "AAA":
-                    dates = build_trading_dates("2025-01-02", len(closes))
-                elif ticker == "BBB":
-                    dates = build_trading_dates("2025-06-02", len(closes))
-                elif ticker == "CCC":
-                    dates = build_trading_dates("2025-12-02", len(closes))
-                else:
-                    dates = build_trading_dates("2025-01-02", len(closes))
                 date_value = dates[idx]
                 market = "suomi" if ticker == "CCC" else "usa"
                 rows.append((ticker, date_value, close, close, close, close, 1000, market))
@@ -217,7 +222,7 @@ def test_fetch_divergence_events_uses_trading_day_offsets_for_returns(tmp_path):
 
     row = rows[0]
     assert row["ticker"] == "AAA"
-    assert round(row["ret_5d"], 6) == 5.0
+    assert round(row["ret_5d"], 6) == round(((110.0 / 105.0) - 1.0) * 100.0, 6)
 
 
 def test_fetch_divergence_events_filters_by_radius_specific_gap_and_drop(tmp_path):
@@ -400,6 +405,166 @@ def test_summary_and_heatmap_respect_market_filtering(tmp_path):
     assert usa_summary["n"] == 2
     assert len(suomi_heatmap) == 2
     assert {(row["gap"], row["drop"]) for row in suomi_heatmap} == {(7, 3), (10, 8)}
+
+
+def test_fetch_divergence_events_trend_filter_all_matches_current_behavior(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    stock_db = tmp_path / "osakedata.db"
+    _create_analysis_db(str(analysis_db))
+    _create_stock_db(str(stock_db))
+
+    base_rows = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        limit=20,
+        sort_by="ticker",
+        sort_desc=False,
+    )
+    trend_rows = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        trend_filter="all",
+        limit=20,
+        sort_by="ticker",
+        sort_desc=False,
+    )
+
+    assert base_rows == trend_rows
+
+
+def test_fetch_divergence_events_trend_filter_downtrend_only_keeps_and_removes_rows(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    stock_db = tmp_path / "osakedata.db"
+    _create_analysis_db(str(analysis_db))
+    _create_stock_db(str(stock_db))
+
+    rows = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        trend_filter="downtrend_only",
+        limit=20,
+        sort_by="ticker",
+        sort_desc=False,
+    )
+
+    assert [row["ticker"] for row in rows] == ["AAA", "CCC"]
+
+
+def test_fetch_divergence_events_trend_filter_matches_candles_rule_conditions(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    stock_db = tmp_path / "osakedata.db"
+    _create_analysis_db(str(analysis_db))
+    _create_stock_db(str(stock_db))
+
+    rows = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        trend_filter="downtrend_only",
+        event_class="R2",
+        limit=20,
+        sort_by="ticker",
+        sort_desc=False,
+    )
+
+    assert [row["ticker"] for row in rows] == ["AAA", "CCC"]
+
+
+def test_fetch_divergence_events_trend_filter_insufficient_history_is_false(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    stock_db = tmp_path / "osakedata.db"
+    _create_analysis_db(str(analysis_db))
+    _create_stock_db(str(stock_db))
+
+    event_date = _build_trading_dates("2025-03-03", 8)[5]
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO divergence_data (
+                ticker, date, bullish_strength, bearish_strength, rsi,
+                is_bullish_divergence, is_bearish_divergence,
+                is_bullish_divergence_r2, is_bearish_divergence_r2,
+                is_bullish_divergence_r3, is_bearish_divergence_r3,
+                pivot_gap, pivot_drop_pct,
+                pivot_gap_r2, pivot_drop_pct_r2,
+                pivot_gap_r3, pivot_drop_pct_r3
+            )
+            VALUES (?, ?, 0, 0, ?, 0, 0, ?, 0, ?, 0, NULL, NULL, ?, ?, ?, ?)
+            """,
+            ("EEE", event_date, 30.0, 0, 1, 6, 4.0, None, None),
+        )
+        conn.commit()
+    with sqlite3.connect(stock_db) as conn:
+        dates = _build_trading_dates("2025-03-03", 8)
+        conn.executemany(
+            """
+            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [("EEE", day, 20 + idx, 20 + idx, 20 + idx, 20 + idx, 1000, "usa") for idx, day in enumerate(dates)],
+        )
+        conn.commit()
+
+    rows = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        event_class="R2_ONLY",
+        trend_filter="downtrend_only",
+        limit=20,
+        sort_by="ticker",
+        sort_desc=False,
+    )
+
+    assert [row["ticker"] for row in rows] == ["AAA"]
+
+
+def test_summary_heatmap_and_export_respect_downtrend_filter(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    stock_db = tmp_path / "osakedata.db"
+    export_path = tmp_path / "downtrend.csv"
+    _create_analysis_db(str(analysis_db))
+    _create_stock_db(str(stock_db))
+
+    summary = summarize_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        trend_filter="downtrend_only",
+    )
+    heatmap = fetch_divergence_heatmap(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        trend_filter="downtrend_only",
+    )
+    saved_path = export_divergence_events_csv(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        trend_filter="downtrend_only",
+        export_path=str(export_path),
+    )
+
+    assert summary["n"] == 2
+    assert {(row["gap"], row["drop"]) for row in heatmap} == {(6, 2), (7, 3), (10, 8)}
+    with open(saved_path, "r", encoding="utf-8", newline="") as csv_file:
+        exported_rows = list(csv.DictReader(csv_file))
+    assert {row["ticker"] for row in exported_rows} == {"AAA", "CCC"}
+
+
+def test_fetch_divergence_events_combines_trend_filter_with_event_class_and_date_range(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    stock_db = tmp_path / "osakedata.db"
+    _create_analysis_db(str(analysis_db))
+    _create_stock_db(str(stock_db))
+
+    rows = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        event_class="R3",
+        start_date="2025-06-01",
+        end_date="2025-06-30",
+        trend_filter="downtrend_only",
+        limit=20,
+    )
+
+    assert rows == []
 
 
 def test_divergence_page_validates_date_range():
