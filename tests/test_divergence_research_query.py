@@ -45,8 +45,10 @@ def _create_analysis_db(path: str) -> None:
                 pivot_drop_pct REAL,
                 pivot_gap_r2 INTEGER,
                 pivot_drop_pct_r2 REAL,
+                pivot2_date_r2 TEXT,
                 pivot_gap_r3 INTEGER,
                 pivot_drop_pct_r3 REAL,
+                pivot2_date_r3 TEXT,
                 PRIMARY KEY (ticker, date)
             )
             """
@@ -60,15 +62,17 @@ def _create_analysis_db(path: str) -> None:
                 is_bullish_divergence_r3, is_bearish_divergence_r3,
                 pivot_gap, pivot_drop_pct,
                 pivot_gap_r2, pivot_drop_pct_r2,
-                pivot_gap_r3, pivot_drop_pct_r3
+                pivot2_date_r2,
+                pivot_gap_r3, pivot_drop_pct_r3,
+                pivot2_date_r3
             )
-            VALUES (?, ?, 0, 0, ?, 0, 0, ?, 0, ?, 0, NULL, NULL, ?, ?, ?, ?)
+            VALUES (?, ?, 0, 0, ?, 0, 0, ?, 0, ?, 0, NULL, NULL, ?, ?, ?, ?, ?, ?)
             """,
             [
-                ( "AAA", aaa_event_date, 31.0, 1, 0, 6, 2.5, None, None),
-                ( "BBB", bbb_event_date, 28.0, 0, 1, None, None, 9, 7.5),
-                ( "CCC", ccc_event_date, 35.0, 1, 1, 7, 3.0, 10, 8.0),
-                ("DDD", "2025-01-02", 40.0, 0, 0, None, None, None, None),
+                ("AAA", aaa_event_date, 31.0, 1, 0, 6, 2.5, "2025-01-17", None, None, None),
+                ("BBB", bbb_event_date, 28.0, 0, 1, None, None, None, 9, 7.5, "2025-06-17"),
+                ("CCC", ccc_event_date, 35.0, 1, 1, 7, 3.0, "2025-12-17", 10, 8.0, "2025-12-16"),
+                ("DDD", "2025-01-02", 40.0, 0, 0, None, None, None, None, None, None),
             ],
         )
         conn.execute(
@@ -546,6 +550,207 @@ def test_summary_heatmap_and_export_respect_downtrend_filter(tmp_path):
     with open(saved_path, "r", encoding="utf-8", newline="") as csv_file:
         exported_rows = list(csv.DictReader(csv_file))
     assert {row["ticker"] for row in exported_rows} == {"AAA", "CCC"}
+
+
+def test_fetch_divergence_events_excludes_rows_with_null_selected_pivot2_date(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    stock_db = tmp_path / "osakedata.db"
+    _create_analysis_db(str(analysis_db))
+    _create_stock_db(str(stock_db))
+
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO divergence_data (
+                ticker, date, bullish_strength, bearish_strength, rsi,
+                is_bullish_divergence, is_bearish_divergence,
+                is_bullish_divergence_r2, is_bearish_divergence_r2,
+                is_bullish_divergence_r3, is_bearish_divergence_r3,
+                pivot_gap, pivot_drop_pct,
+                pivot_gap_r2, pivot_drop_pct_r2, pivot2_date_r2,
+                pivot_gap_r3, pivot_drop_pct_r3, pivot2_date_r3
+            )
+            VALUES ('EEE', '2025-02-03', 0, 0, 30.0, 0, 0, 1, 0, 0, 0, NULL, NULL, 6, 3.0, NULL, NULL, NULL, NULL)
+            """
+        )
+        conn.commit()
+    with sqlite3.connect(stock_db) as conn:
+        dates = _build_trading_dates("2025-02-03", 40)
+        conn.executemany(
+            """
+            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [("EEE", day, 30 + idx, 30 + idx, 30 + idx, 30 + idx, 1000, "usa") for idx, day in enumerate(dates)],
+        )
+        conn.commit()
+
+    rows = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        event_class="R2",
+        anchor="pivot2",
+        limit=20,
+        sort_by="ticker",
+        sort_desc=False,
+    )
+
+    assert [row["ticker"] for row in rows] == ["AAA", "CCC"]
+
+
+def test_fetch_divergence_events_switches_returns_when_anchor_changes(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    stock_db = tmp_path / "osakedata.db"
+    _create_analysis_db(str(analysis_db))
+    _create_stock_db(str(stock_db))
+
+    event_rows = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        event_class="R2_ONLY",
+        anchor="event",
+        limit=20,
+    )
+    pivot_rows = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        event_class="R2_ONLY",
+        anchor="pivot2",
+        limit=20,
+    )
+
+    assert event_rows[0]["ticker"] == "AAA"
+    assert pivot_rows[0]["ticker"] == "AAA"
+    assert event_rows[0]["ret_5d"] != pivot_rows[0]["ret_5d"]
+    assert event_rows[0]["anchor_type"] == "event"
+    assert event_rows[0]["anchor_date"] == event_rows[0]["date"]
+    assert pivot_rows[0]["anchor_type"] == "pivot2"
+    assert pivot_rows[0]["anchor_date"] == "2025-01-17"
+
+
+def test_fetch_divergence_events_date_filter_depends_on_anchor(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    stock_db = tmp_path / "osakedata.db"
+    _create_analysis_db(str(analysis_db))
+    _create_stock_db(str(stock_db))
+
+    event_rows = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        event_class="R2_ONLY",
+        anchor="event",
+        start_date="2025-01-20",
+        end_date="2025-01-24",
+        limit=20,
+    )
+    pivot_rows = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        event_class="R2_ONLY",
+        anchor="pivot2",
+        start_date="2025-01-16",
+        end_date="2025-01-18",
+        limit=20,
+    )
+
+    assert [row["ticker"] for row in event_rows] == ["AAA"]
+    assert [row["ticker"] for row in pivot_rows] == ["AAA"]
+
+
+def test_fetch_divergence_events_uses_radius_specific_pivot2_dates(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    stock_db = tmp_path / "osakedata.db"
+    _create_analysis_db(str(analysis_db))
+    _create_stock_db(str(stock_db))
+
+    rows_r2 = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        event_class="R2",
+        anchor="pivot2",
+        limit=20,
+        sort_by="ticker",
+        sort_desc=False,
+    )
+    rows_r3 = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        event_class="R3",
+        anchor="pivot2",
+        limit=20,
+        sort_by="ticker",
+        sort_desc=False,
+    )
+
+    aaa_r2 = next(row for row in rows_r2 if row["ticker"] == "AAA")
+    bbb_r3 = next(row for row in rows_r3 if row["ticker"] == "BBB")
+    ccc_r2 = next(row for row in rows_r2 if row["ticker"] == "CCC")
+    ccc_r3 = next(row for row in rows_r3 if row["ticker"] == "CCC")
+
+    assert aaa_r2["anchor_date"] == "2025-01-17"
+    assert bbb_r3["anchor_date"] == "2025-06-17"
+    assert ccc_r2["anchor_date"] == "2025-12-17"
+    assert ccc_r3["anchor_date"] == "2025-12-16"
+
+
+def test_summary_and_heatmap_change_with_anchor_switch(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    stock_db = tmp_path / "osakedata.db"
+    _create_analysis_db(str(analysis_db))
+    _create_stock_db(str(stock_db))
+
+    event_summary = summarize_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        event_class="R2",
+        anchor="event",
+    )
+    pivot_summary = summarize_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        event_class="R2",
+        anchor="pivot2",
+    )
+    event_heatmap = fetch_divergence_heatmap(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        event_class="R2",
+        anchor="event",
+    )
+    pivot_heatmap = fetch_divergence_heatmap(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        event_class="R2",
+        anchor="pivot2",
+    )
+
+    assert event_summary["mean_ret_30d"] != pivot_summary["mean_ret_30d"]
+    assert event_heatmap != pivot_heatmap
+
+
+def test_export_divergence_events_csv_includes_anchor_fields_and_uses_selected_anchor(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    stock_db = tmp_path / "osakedata.db"
+    export_path = tmp_path / "pivot2.csv"
+    _create_analysis_db(str(analysis_db))
+    _create_stock_db(str(stock_db))
+
+    saved_path = export_divergence_events_csv(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        event_class="R2_ONLY",
+        anchor="pivot2",
+        export_path=str(export_path),
+    )
+
+    with open(saved_path, "r", encoding="utf-8", newline="") as csv_file:
+        rows = list(csv.DictReader(csv_file))
+
+    assert rows[0]["pivot2_date_r2"] == "2025-01-17"
+    assert rows[0]["pivot2_date_r3"] == ""
+    assert rows[0]["anchor_type"] == "pivot2"
+    assert rows[0]["anchor_date"] == "2025-01-17"
+    assert float(rows[0]["ret_5d"]) != round(((110.0 / 105.0) - 1.0) * 100.0, 6)
 
 
 def test_fetch_divergence_events_combines_trend_filter_with_event_class_and_date_range(tmp_path):

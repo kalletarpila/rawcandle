@@ -21,6 +21,10 @@ class DivergencePage:
         ("ticker", "Ticker"),
         ("date", "Date"),
         ("event_class", "Event class"),
+        ("pivot2_date_r2", "Pivot2 R2"),
+        ("pivot2_date_r3", "Pivot2 R3"),
+        ("anchor_type", "Anchor type"),
+        ("anchor_date", "Anchor date"),
         ("pivot_gap_r2", "Gap R2"),
         ("pivot_drop_pct_r2", "Drop R2"),
         ("pivot_gap_r3", "Gap R3"),
@@ -51,6 +55,7 @@ class DivergencePage:
         self.current_rows: list[dict[str, Any]] = []
 
         self.event_class_dropdown: ft.Dropdown | None = None
+        self.anchor_dropdown: ft.Dropdown | None = None
         self.trend_filter_dropdown: ft.Dropdown | None = None
         self.market_dropdown: ft.Dropdown | None = None
         self.min_gap_slider: ft.Slider | None = None
@@ -94,6 +99,16 @@ class DivergencePage:
             options=[
                 ft.dropdown.Option("All BullDiv events"),
                 ft.dropdown.Option("Only events during downtrend"),
+            ],
+            on_change=self._on_filter_change,
+        )
+        self.anchor_dropdown = ft.Dropdown(
+            label="Anchor",
+            width=160,
+            value="Event",
+            options=[
+                ft.dropdown.Option("Event"),
+                ft.dropdown.Option("Pivot2"),
             ],
             on_change=self._on_filter_change,
         )
@@ -172,6 +187,7 @@ class DivergencePage:
                                             ft.Row(
                                                 [
                                                     self.event_class_dropdown,
+                                                    self.anchor_dropdown,
                                                     self.trend_filter_dropdown,
                                                     self.market_dropdown,
                                                     self.start_date_field,
@@ -283,6 +299,11 @@ class DivergencePage:
         event_class = self.event_class_dropdown.value
         if event_class == "All":
             event_class = None
+        anchor = self.anchor_dropdown.value
+        if anchor == "Pivot2":
+            anchor = "pivot2"
+        else:
+            anchor = "event"
         trend_filter = self.trend_filter_dropdown.value
         if trend_filter == "Only events during downtrend":
             trend_filter = "downtrend_only"
@@ -298,6 +319,7 @@ class DivergencePage:
             raise ValueError(validation_error)
         return {
             "event_class": event_class,
+            "anchor": anchor,
             "trend_filter": trend_filter,
             "market": market,
             "min_gap": min_gap,
@@ -459,6 +481,10 @@ class DivergencePage:
                     ft.DataCell(ft.Text(str(row["ticker"]))),
                     ft.DataCell(ft.Text(str(row["date"]))),
                     ft.DataCell(ft.Text(str(row["event_class"]))),
+                    ft.DataCell(ft.Text(str(row.get("pivot2_date_r2") or ""))),
+                    ft.DataCell(ft.Text(str(row.get("pivot2_date_r3") or ""))),
+                    ft.DataCell(ft.Text(str(row.get("anchor_type") or ""))),
+                    ft.DataCell(ft.Text(str(row.get("anchor_date") or ""))),
                     ft.DataCell(ft.Text(self._fmt_int(row["pivot_gap_r2"]))),
                     ft.DataCell(ft.Text(self._fmt_pct(row["pivot_drop_pct_r2"]))),
                     ft.DataCell(ft.Text(self._fmt_int(row["pivot_gap_r3"]))),

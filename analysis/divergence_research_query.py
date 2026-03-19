@@ -15,6 +15,10 @@ VALID_SORT_COLUMNS = {
     "ticker",
     "date",
     "event_class",
+    "pivot2_date_r2",
+    "pivot2_date_r3",
+    "anchor_type",
+    "anchor_date",
     "pivot_gap_r2",
     "pivot_drop_pct_r2",
     "pivot_gap_r3",
@@ -33,8 +37,12 @@ EXPORT_COLUMNS = [
     "is_bullish_divergence_r3",
     "pivot_gap_r2",
     "pivot_drop_pct_r2",
+    "pivot2_date_r2",
     "pivot_gap_r3",
     "pivot_drop_pct_r3",
+    "pivot2_date_r3",
+    "anchor_type",
+    "anchor_date",
     "rsi",
     "bullish_strength",
     "bearish_strength",
@@ -44,6 +52,7 @@ EXPORT_COLUMNS = [
     "ret_30d",
 ]
 VALID_TREND_FILTERS = {"all", "downtrend_only"}
+VALID_ANCHORS = {"event", "pivot2"}
 
 
 def _resolve_stock_db_path(db_path: str, stock_db_path: str | None = None) -> str:
@@ -96,12 +105,50 @@ def _validate_trend_filter(trend_filter: str) -> str:
     return trend_filter
 
 
+def _validate_anchor(anchor: str) -> str:
+    if anchor not in VALID_ANCHORS:
+        raise ValueError(f"Unsupported anchor: {anchor}")
+    return anchor
+
+
 def _geometry_scope(event_class: str | None) -> str:
     if event_class in {"R2", "R2_ONLY"}:
         return "R2"
     if event_class in {"R3", "R3_ONLY"}:
         return "R3"
     return "BOTH"
+
+
+def _anchor_date_sql(event_class: str | None, anchor: str) -> str:
+    _validate_anchor(anchor)
+    if anchor == "event":
+        return "d.date"
+
+    geometry_scope = _geometry_scope(event_class)
+    if geometry_scope == "R2":
+        return "d.pivot2_date_r2"
+    if geometry_scope == "R3":
+        return "d.pivot2_date_r3"
+    return "COALESCE(d.pivot2_date_r2, d.pivot2_date_r3)"
+
+
+def _select_anchor_date(row: dict[str, Any], event_class: str | None, anchor: str) -> str | None:
+    _validate_anchor(anchor)
+    if anchor == "event":
+        return str(row["date"])
+
+    geometry_scope = _geometry_scope(event_class)
+    if geometry_scope == "R2":
+        value = row.get("pivot2_date_r2")
+        return None if value is None else str(value)
+    if geometry_scope == "R3":
+        value = row.get("pivot2_date_r3")
+        return None if value is None else str(value)
+    value = row.get("pivot2_date_r2")
+    if value is not None:
+        return str(value)
+    value = row.get("pivot2_date_r3")
+    return None if value is None else str(value)
 
 
 def _has_excluded_tickers_table(db_path: str) -> bool:
@@ -118,6 +165,7 @@ def _has_excluded_tickers_table(db_path: str) -> bool:
 
 def _build_where_clause(
     event_class: str | None,
+    anchor: str,
     min_gap: int,
     max_gap: int,
     min_drop: float,
@@ -131,11 +179,13 @@ def _build_where_clause(
 ) -> tuple[str, list[Any]]:
     if event_class is not None and event_class not in VALID_EVENT_CLASSES:
         raise ValueError(f"Unsupported event class: {event_class}")
+    _validate_anchor(anchor)
     market_value = (market or "").strip().lower() or None
     start_date_value = _validate_date_value(start_date)
     end_date_value = _validate_date_value(end_date)
 
     class_sql = _classification_sql()
+    anchor_date_sql = _anchor_date_sql(event_class, anchor)
     clauses = ["(d.is_bullish_divergence_r2 = 1 OR d.is_bullish_divergence_r3 = 1)"]
     params: list[Any] = []
 
@@ -199,11 +249,13 @@ def _build_where_clause(
         clauses.append(f"{class_sql} = ?")
         params.append(event_class)
 
+    if anchor == "pivot2":
+        clauses.append(f"{anchor_date_sql} IS NOT NULL")
     if start_date_value is not None:
-        clauses.append("d.date >= ?")
+        clauses.append(f"{anchor_date_sql} >= ?")
         params.append(start_date_value)
     if end_date_value is not None:
-        clauses.append("d.date <= ?")
+        clauses.append(f"{anchor_date_sql} <= ?")
         params.append(end_date_value)
     if market_value is not None:
         clauses.append(
@@ -225,6 +277,7 @@ def _fetch_base_divergence_rows(
     db_path: str,
     *,
     event_class: str | None,
+    anchor: str,
     min_gap: int,
     max_gap: int,
     min_drop: float,
@@ -240,6 +293,7 @@ def _fetch_base_divergence_rows(
     exclude_active_tickers = _has_excluded_tickers_table(db_path)
     where_sql, params = _build_where_clause(
         event_class,
+        anchor,
         min_gap,
         max_gap,
         min_drop,
@@ -261,8 +315,10 @@ def _fetch_base_divergence_rows(
             d.is_bullish_divergence_r3,
             d.pivot_gap_r2,
             d.pivot_drop_pct_r2,
+            d.pivot2_date_r2,
             d.pivot_gap_r3,
             d.pivot_drop_pct_r3,
+            d.pivot2_date_r3,
             d.rsi,
             d.bullish_strength,
             d.bearish_strength
@@ -370,18 +426,35 @@ def _apply_trend_filter(
     return [row for row in rows if row.get("is_downtrend_qualified") is True]
 
 
+def _attach_anchor_fields(
+    rows: list[dict[str, Any]],
+    *,
+    event_class: str | None,
+    anchor: str,
+) -> list[dict[str, Any]]:
+    _validate_anchor(anchor)
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        row_copy = dict(row)
+        row_copy["anchor_type"] = anchor
+        row_copy["anchor_date"] = _select_anchor_date(row_copy, event_class, anchor)
+        result.append(row_copy)
+    return result
+
+
 def _attach_forward_returns(
     rows: list[dict[str, Any]],
     stock_db_path: str,
 ) -> list[dict[str, Any]]:
-    if not rows:
+    anchored_rows = [row for row in rows if row.get("anchor_date") is not None]
+    if not anchored_rows:
         return []
 
-    min_event_date = min(_parse_iso_date(row["date"]) for row in rows)
-    max_event_date = max(_parse_iso_date(row["date"]) for row in rows)
+    min_event_date = min(_parse_iso_date(str(row["anchor_date"])) for row in anchored_rows)
+    max_event_date = max(_parse_iso_date(str(row["anchor_date"])) for row in anchored_rows)
     price_rows = _fetch_price_history(
         stock_db_path,
-        tickers=sorted({str(row["ticker"]) for row in rows}),
+        tickers=sorted({str(row["ticker"]) for row in anchored_rows}),
         start_date=min_event_date.isoformat(),
         end_date=(max_event_date + timedelta(days=60)).isoformat(),
     )
@@ -412,7 +485,7 @@ def _attach_forward_returns(
         return ((future_close / start_close) - 1.0) * 100.0
 
     result: list[dict[str, Any]] = []
-    for row in rows:
+    for row in anchored_rows:
         row_copy = dict(row)
         ticker_state = price_index.get(str(row["ticker"]))
         if ticker_state is None:
@@ -422,7 +495,7 @@ def _attach_forward_returns(
             row_copy["ret_30d"] = None
             result.append(row_copy)
             continue
-        start_idx = ticker_state["positions"].get(str(row["date"]))
+        start_idx = ticker_state["positions"].get(str(row["anchor_date"]))
         if start_idx is None:
             row_copy["ret_5d"] = None
             row_copy["ret_10d"] = None
@@ -443,6 +516,7 @@ def _finalize_filtered_rows(
     db_path: str,
     *,
     event_class: str | None,
+    anchor: str = "event",
     min_gap: int,
     max_gap: int,
     min_drop: float,
@@ -455,10 +529,12 @@ def _finalize_filtered_rows(
     trend_filter: str = "all",
     stock_db_path: str | None = None,
 ) -> list[dict[str, Any]]:
+    _validate_anchor(anchor)
     stock_path = _resolve_stock_db_path(db_path, stock_db_path)
     rows = _fetch_base_divergence_rows(
         db_path,
         event_class=event_class,
+        anchor=anchor,
         min_gap=min_gap,
         max_gap=max_gap,
         min_drop=min_drop,
@@ -472,6 +548,7 @@ def _finalize_filtered_rows(
     )
     rows = _attach_downtrend_flags(rows, stock_path)
     rows = _apply_trend_filter(rows, trend_filter)
+    rows = _attach_anchor_fields(rows, event_class=event_class, anchor=anchor)
     return _attach_forward_returns(rows, stock_path)
 
 
@@ -498,6 +575,7 @@ def _sort_rows(
 def fetch_divergence_events(
     db_path: str,
     event_class: str | None = None,
+    anchor: str = "event",
     min_gap: int = 5,
     max_gap: int = 24,
     min_drop: float = 0.0,
@@ -517,6 +595,7 @@ def fetch_divergence_events(
     rows = _finalize_filtered_rows(
         db_path,
         event_class=event_class,
+        anchor=anchor,
         min_gap=min_gap,
         max_gap=max_gap,
         min_drop=min_drop,
@@ -536,6 +615,7 @@ def fetch_divergence_events(
 def summarize_divergence_events(
     db_path: str,
     event_class: str | None = None,
+    anchor: str = "event",
     min_gap: int = 5,
     max_gap: int = 24,
     min_drop: float = 0.0,
@@ -551,6 +631,7 @@ def summarize_divergence_events(
     rows = _finalize_filtered_rows(
         db_path,
         event_class=event_class,
+        anchor=anchor,
         min_gap=min_gap,
         max_gap=max_gap,
         min_drop=min_drop,
@@ -593,6 +674,7 @@ def summarize_divergence_events(
 def fetch_divergence_heatmap(
     db_path: str,
     event_class: str | None = None,
+    anchor: str = "event",
     min_gap: int = 5,
     max_gap: int = 24,
     min_drop: float = 0.0,
@@ -609,6 +691,7 @@ def fetch_divergence_heatmap(
     rows = _finalize_filtered_rows(
         db_path,
         event_class=event_class,
+        anchor=anchor,
         min_gap=min_gap,
         max_gap=max_gap,
         min_drop=min_drop,
@@ -656,6 +739,7 @@ def fetch_divergence_heatmap(
 def export_divergence_events_csv(
     db_path: str,
     event_class: str | None = None,
+    anchor: str = "event",
     min_gap: int = 5,
     max_gap: int = 24,
     min_drop: float = 0.0,
@@ -672,6 +756,7 @@ def export_divergence_events_csv(
     rows = fetch_divergence_events(
         db_path,
         event_class=event_class,
+        anchor=anchor,
         min_gap=min_gap,
         max_gap=max_gap,
         min_drop=min_drop,
