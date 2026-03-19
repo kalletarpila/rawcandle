@@ -2,6 +2,7 @@ import csv
 import sqlite3
 from datetime import date, timedelta
 
+import ui.pages.divergence_page as divergence_page_module
 from analysis.divergence_research_query import (
     EXPORT_COLUMNS,
     export_divergence_events_csv,
@@ -788,6 +789,127 @@ def test_divergence_page_validates_date_range():
         DivergencePage.validate_date_range("2025-12-31", "2025-01-01") ==
         "Start date cannot be after end date."
     )
+
+
+class _FakePage:
+    def update(self) -> None:
+        pass
+
+    def run_task(self, *args, **kwargs) -> None:
+        pass
+
+    def open(self, *args, **kwargs) -> None:
+        pass
+
+    def close(self, *args, **kwargs) -> None:
+        pass
+
+
+def _build_divergence_page(monkeypatch) -> DivergencePage:
+    monkeypatch.setattr(
+        divergence_page_module,
+        "list_markets",
+        lambda _path: [{"abbreviation": "usa"}],
+    )
+    page = DivergencePage(_FakePage(), lambda: None)
+    page.create_view()
+    return page
+
+
+def test_divergence_page_presets_define_required_entries():
+    required_presets = {
+        "Default / All Bullish",
+        "R3_ONLY Event",
+        "R3_ONLY Pivot2",
+        "R3 Long Swing",
+        "R3 Long Swing Pivot2",
+        "R2_ONLY Event",
+        "R2_AND_R3 Event",
+    }
+    assert required_presets.issubset(DivergencePage.PRESETS.keys())
+    for preset_name in required_presets:
+        preset = DivergencePage.PRESETS[preset_name]
+        assert preset is not None
+        assert set(
+            [
+                "event_class",
+                "anchor",
+                "radius",
+                "min_gap",
+                "max_gap",
+                "min_drop",
+                "max_drop",
+                "start_date",
+                "end_date",
+            ]
+        ).issubset(preset.keys())
+
+
+def test_divergence_page_apply_preset_populates_controls_and_triggers_refresh(monkeypatch):
+    page = _build_divergence_page(monkeypatch)
+    refresh_calls: list[dict[str, object]] = []
+
+    def fake_refresh(_e=None) -> None:
+        refresh_calls.append(page._get_filters())
+
+    page._refresh = fake_refresh
+    page.preset_dropdown.value = "R3 Long Swing Pivot2"
+
+    page._apply_preset()
+
+    assert page.event_class_dropdown.value == "R3_ONLY"
+    assert page.anchor_dropdown.value == "Pivot2"
+    assert page.min_gap_slider.value == 19
+    assert page.max_gap_slider.value == 24
+    assert page.min_drop_slider.value == 5
+    assert page.max_drop_slider.value == 20
+    assert page.start_date_field.value == ""
+    assert page.end_date_field.value == ""
+    assert page.filter_error_text.value == ""
+    assert refresh_calls == [
+        {
+            "event_class": "R3_ONLY",
+            "anchor": "pivot2",
+            "trend_filter": "all",
+            "market": None,
+            "min_gap": 19,
+            "max_gap": 24,
+            "min_drop": 5.0,
+            "max_drop": 20.0,
+            "min_rsi": 1.0,
+            "max_rsi": 100.0,
+            "start_date": None,
+            "end_date": None,
+        }
+    ]
+
+
+def test_divergence_page_apply_preset_supports_date_range(monkeypatch):
+    page = _build_divergence_page(monkeypatch)
+    page._refresh = lambda _e=None: None
+    page.preset_dropdown.value = "2025 R3 Long Swing"
+
+    page._apply_preset()
+
+    assert page.event_class_dropdown.value == "R3_ONLY"
+    assert page.anchor_dropdown.value == "Event"
+    assert page.start_date_field.value == "2025-01-01"
+    assert page.end_date_field.value == "2025-12-31"
+    assert page._get_filters()["start_date"] == "2025-01-01"
+    assert page._get_filters()["end_date"] == "2025-12-31"
+
+
+def test_divergence_page_manual_filter_change_keeps_manual_behavior(monkeypatch):
+    page = _build_divergence_page(monkeypatch)
+    page._refresh = lambda _e=None: None
+    page.preset_dropdown.value = "R2_ONLY Event"
+    page._apply_preset()
+
+    page.min_gap_slider.value = 8
+    page._on_filter_change(None)
+
+    assert page.preset_dropdown.value == "Custom"
+    assert page._get_filters()["min_gap"] == 8
 
 
 def test_export_divergence_events_csv_writes_expected_columns_and_path(tmp_path):

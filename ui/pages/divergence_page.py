@@ -17,6 +17,129 @@ from market_repository import list_markets
 
 
 class DivergencePage:
+    PRESETS = {
+        "Custom": None,
+        "Default / All Bullish": {
+            "event_class": "All",
+            "anchor": "Event",
+            "radius": "R3",
+            "trend_filter": "All BullDiv events",
+            "market": "All Markets",
+            "min_gap": 5,
+            "max_gap": 24,
+            "min_drop": 0,
+            "max_drop": 50,
+            "min_rsi": 1,
+            "max_rsi": 100,
+            "start_date": "",
+            "end_date": "",
+        },
+        "R3_ONLY Event": {
+            "event_class": "R3_ONLY",
+            "anchor": "Event",
+            "radius": "R3",
+            "trend_filter": "All BullDiv events",
+            "market": "All Markets",
+            "min_gap": 5,
+            "max_gap": 24,
+            "min_drop": 0,
+            "max_drop": 50,
+            "min_rsi": 1,
+            "max_rsi": 100,
+            "start_date": "",
+            "end_date": "",
+        },
+        "R3_ONLY Pivot2": {
+            "event_class": "R3_ONLY",
+            "anchor": "Pivot2",
+            "radius": "R3",
+            "trend_filter": "All BullDiv events",
+            "market": "All Markets",
+            "min_gap": 5,
+            "max_gap": 24,
+            "min_drop": 0,
+            "max_drop": 50,
+            "min_rsi": 1,
+            "max_rsi": 100,
+            "start_date": "",
+            "end_date": "",
+        },
+        "R3 Long Swing": {
+            "event_class": "R3_ONLY",
+            "anchor": "Event",
+            "radius": "R3",
+            "trend_filter": "All BullDiv events",
+            "market": "All Markets",
+            "min_gap": 19,
+            "max_gap": 24,
+            "min_drop": 5,
+            "max_drop": 20,
+            "min_rsi": 1,
+            "max_rsi": 100,
+            "start_date": "",
+            "end_date": "",
+        },
+        "R3 Long Swing Pivot2": {
+            "event_class": "R3_ONLY",
+            "anchor": "Pivot2",
+            "radius": "R3",
+            "trend_filter": "All BullDiv events",
+            "market": "All Markets",
+            "min_gap": 19,
+            "max_gap": 24,
+            "min_drop": 5,
+            "max_drop": 20,
+            "min_rsi": 1,
+            "max_rsi": 100,
+            "start_date": "",
+            "end_date": "",
+        },
+        "R2_ONLY Event": {
+            "event_class": "R2_ONLY",
+            "anchor": "Event",
+            "radius": "R2",
+            "trend_filter": "All BullDiv events",
+            "market": "All Markets",
+            "min_gap": 5,
+            "max_gap": 24,
+            "min_drop": 0,
+            "max_drop": 50,
+            "min_rsi": 1,
+            "max_rsi": 100,
+            "start_date": "",
+            "end_date": "",
+        },
+        "R2_AND_R3 Event": {
+            "event_class": "R2_AND_R3",
+            "anchor": "Event",
+            "radius": "R3",
+            "trend_filter": "All BullDiv events",
+            "market": "All Markets",
+            "min_gap": 5,
+            "max_gap": 24,
+            "min_drop": 0,
+            "max_drop": 50,
+            "min_rsi": 1,
+            "max_rsi": 100,
+            "start_date": "",
+            "end_date": "",
+        },
+        "2025 R3 Long Swing": {
+            "event_class": "R3_ONLY",
+            "anchor": "Event",
+            "radius": "R3",
+            "trend_filter": "All BullDiv events",
+            "market": "All Markets",
+            "min_gap": 19,
+            "max_gap": 24,
+            "min_drop": 5,
+            "max_drop": 20,
+            "min_rsi": 1,
+            "max_rsi": 100,
+            "start_date": "2025-01-01",
+            "end_date": "2025-12-31",
+        },
+    }
     TABLE_COLUMNS = [
         ("ticker", "Ticker"),
         ("date", "Date"),
@@ -55,6 +178,7 @@ class DivergencePage:
         self.current_rows: list[dict[str, Any]] = []
 
         self.event_class_dropdown: ft.Dropdown | None = None
+        self.preset_dropdown: ft.Dropdown | None = None
         self.anchor_dropdown: ft.Dropdown | None = None
         self.trend_filter_dropdown: ft.Dropdown | None = None
         self.market_dropdown: ft.Dropdown | None = None
@@ -78,6 +202,12 @@ class DivergencePage:
         self._refresh_generation = 0
 
     def create_view(self) -> ft.View:
+        self.preset_dropdown = ft.Dropdown(
+            label="Preset",
+            width=220,
+            value="Custom",
+            options=[ft.dropdown.Option(name) for name in self.PRESETS],
+        )
         self.event_class_dropdown = ft.Dropdown(
             label="Event class",
             width=180,
@@ -161,6 +291,11 @@ class DivergencePage:
             icon=ft.Icons.DOWNLOAD,
             on_click=self._export_csv,
         )
+        apply_preset_button = ft.ElevatedButton(
+            "Apply Preset",
+            icon=ft.Icons.TUNE,
+            on_click=self._apply_preset,
+        )
         prev_button = ft.OutlinedButton("Prev", on_click=self._prev_page)
         next_button = ft.OutlinedButton("Next", on_click=self._next_page)
 
@@ -186,6 +321,8 @@ class DivergencePage:
                                             ft.Text("Filters", weight=ft.FontWeight.BOLD, size=18),
                                             ft.Row(
                                                 [
+                                                    self.preset_dropdown,
+                                                    apply_preset_button,
                                                     self.event_class_dropdown,
                                                     self.anchor_dropdown,
                                                     self.trend_filter_dropdown,
@@ -331,6 +468,28 @@ class DivergencePage:
             "start_date": start_date or None,
             "end_date": end_date or None,
         }
+
+    def _apply_preset(self, _e=None) -> None:
+        preset_name = self.preset_dropdown.value if self.preset_dropdown is not None else "Custom"
+        preset = self.PRESETS.get(preset_name)
+        if not preset:
+            return
+        self.event_class_dropdown.value = preset["event_class"]
+        self.anchor_dropdown.value = preset["anchor"]
+        self.trend_filter_dropdown.value = preset["trend_filter"]
+        self.market_dropdown.value = preset["market"]
+        self.min_gap_slider.value = preset["min_gap"]
+        self.max_gap_slider.value = preset["max_gap"]
+        self.min_drop_slider.value = preset["min_drop"]
+        self.max_drop_slider.value = preset["max_drop"]
+        self.min_rsi_slider.value = preset["min_rsi"]
+        self.max_rsi_slider.value = preset["max_rsi"]
+        self.start_date_field.value = preset["start_date"]
+        self.end_date_field.value = preset["end_date"]
+        if self.filter_error_text is not None:
+            self.filter_error_text.value = ""
+        self.page_index = 0
+        self._refresh()
 
     def _refresh(self, _e=None) -> None:
         try:
@@ -593,6 +752,8 @@ class DivergencePage:
 
     def _on_filter_change(self, _e) -> None:
         self.page_index = 0
+        if self.preset_dropdown is not None:
+            self.preset_dropdown.value = "Custom"
 
     def _export_csv(self, _e) -> None:
         try:
