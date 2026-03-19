@@ -53,14 +53,15 @@ def test_run_candlestick_analysis_prefers_divergence_rsi(tmp_path):
                 bullish_strength REAL DEFAULT 0,
                 bearish_strength REAL DEFAULT 0,
                 rsi REAL,
+                pivot2_date_r3 TEXT,
                 is_bullish_divergence_r3 INTEGER DEFAULT 0,
                 PRIMARY KEY (ticker, date)
             )
             """
         )
         conn.execute(
-            "INSERT INTO divergence_data (ticker, date, rsi, is_bullish_divergence_r3) VALUES (?, ?, ?, ?)",
-            ("TEST", "2026-01-02", 55.5, 0),
+            "INSERT INTO divergence_data (ticker, date, rsi, pivot2_date_r3, is_bullish_divergence_r3) VALUES (?, ?, ?, ?, ?)",
+            ("TEST", "2026-01-02", 55.5, None, 0),
         )
 
     results = run_candlestick_analysis(
@@ -163,6 +164,7 @@ def _create_candles_test_dbs(tmp_path):
                 bullish_strength REAL DEFAULT 0,
                 bearish_strength REAL DEFAULT 0,
                 rsi REAL,
+                pivot2_date_r3 TEXT,
                 is_bullish_divergence_r3 INTEGER DEFAULT 0,
                 PRIMARY KEY (ticker, date)
             )
@@ -178,10 +180,10 @@ def test_run_candlestick_analysis_uses_db_backed_bullish_divergence(tmp_path):
     with sqlite3.connect(analysis_db) as conn:
         conn.execute(
             """
-            INSERT INTO divergence_data (ticker, date, bullish_strength, bearish_strength, rsi, is_bullish_divergence_r3)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO divergence_data (ticker, date, bullish_strength, bearish_strength, rsi, pivot2_date_r3, is_bullish_divergence_r3)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            ("TEST", "2026-02-02", 0.62, 0.0, 55.5, 1),
+            ("TEST", "2026-02-02", 0.62, 0.0, 55.5, None, 1),
         )
 
     results = run_candlestick_analysis(
@@ -231,10 +233,10 @@ def test_run_candlestick_analysis_requires_r3_event_for_bullish_divergence(tmp_p
     with sqlite3.connect(analysis_db) as conn:
         conn.execute(
             """
-            INSERT INTO divergence_data (ticker, date, bullish_strength, bearish_strength, rsi, is_bullish_divergence_r3)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO divergence_data (ticker, date, bullish_strength, bearish_strength, rsi, pivot2_date_r3, is_bullish_divergence_r3)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            ("TEST", "2026-02-02", 0.62, 0.0, 55.5, 0),
+            ("TEST", "2026-02-02", 0.62, 0.0, 55.5, None, 0),
         )
 
     results = run_candlestick_analysis(
@@ -254,16 +256,93 @@ def test_run_candlestick_analysis_requires_r3_event_for_bullish_divergence(tmp_p
     assert results == {}
 
 
+def test_run_candlestick_analysis_checks_bulldiv_downtrend_at_pivot2_date_r3(tmp_path):
+    osake_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+
+    closes = [120.0, 119.0, 118.0, 117.0, 116.0, 110.0, 109.0, 108.0, 105.0, 104.0, 100.0, 108.0, 112.0]
+    dates = [f"2026-03-{day:02d}" for day in range(2, 15)]
+    pivot2_date = dates[10]
+    event_date = dates[12]
+
+    with sqlite3.connect(osake_db) as conn:
+        conn.execute(
+            """
+            CREATE TABLE osakedata (
+                osake TEXT,
+                pvm TEXT,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                volume INTEGER,
+                market TEXT
+            )
+            """
+        )
+        conn.executemany(
+            """
+            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ("TEST", date_value, close_value, close_value, close_value, close_value, 1_000, "usa")
+                for date_value, close_value in zip(dates, closes)
+            ],
+        )
+
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            CREATE TABLE divergence_data (
+                ticker TEXT NOT NULL,
+                date TEXT NOT NULL,
+                bullish_strength REAL DEFAULT 0,
+                bearish_strength REAL DEFAULT 0,
+                rsi REAL,
+                pivot2_date_r3 TEXT,
+                is_bullish_divergence_r3 INTEGER DEFAULT 0,
+                PRIMARY KEY (ticker, date)
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO divergence_data (ticker, date, bullish_strength, bearish_strength, rsi, pivot2_date_r3, is_bullish_divergence_r3)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("TEST", event_date, 0.62, 0.0, 55.5, pivot2_date, 1),
+        )
+
+    results = run_candlestick_analysis(
+        str(osake_db),
+        "TEST",
+        patterns=["Bullish Divergence"],
+        start_date=dates[0],
+        end_date=dates[-1],
+        progress_callback=None,
+        downtrend_filter=True,
+        min_decline_percent=3.0,
+        use_ma_filter=True,
+        use_volume_filter=False,
+        analysis_db_path=str(analysis_db),
+    )
+
+    key = f"TEST|{event_date}"
+    assert results and key in results
+    assert results[key][0]["pattern"] == "Bullish Divergence"
+
+
 def test_run_candlestick_analysis_forms_combo_from_db_divergence(tmp_path):
     osake_db, analysis_db = _create_candles_test_dbs(tmp_path)
 
     with sqlite3.connect(analysis_db) as conn:
         conn.execute(
             """
-            INSERT INTO divergence_data (ticker, date, bullish_strength, bearish_strength, rsi, is_bullish_divergence_r3)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO divergence_data (ticker, date, bullish_strength, bearish_strength, rsi, pivot2_date_r3, is_bullish_divergence_r3)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            ("TEST", "2026-02-02", 0.62, 0.0, 55.5, 1),
+            ("TEST", "2026-02-02", 0.62, 0.0, 55.5, None, 1),
         )
 
     results = run_candlestick_analysis(
@@ -287,16 +366,97 @@ def test_run_candlestick_analysis_forms_combo_from_db_divergence(tmp_path):
     assert any(item["pattern"] == "Bullish Divergence" for item in results[key])
 
 
+def test_run_candlestick_analysis_forms_combo_within_pivot2_window(tmp_path):
+    osake_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+
+    rows = [
+        ("TEST", "2026-02-01", 10.0, 10.0, 10.0, 10.0, 1_000, "usa"),
+        ("TEST", "2026-02-02", 9.8, 9.8, 9.8, 9.8, 1_000, "usa"),
+        ("TEST", "2026-02-03", 9.6, 9.6, 9.6, 9.6, 1_000, "usa"),
+        ("TEST", "2026-02-04", 10.0, 10.0, 9.0, 9.0, 1_000, "usa"),
+        ("TEST", "2026-02-05", 8.5, 11.0, 8.0, 10.5, 1_200, "usa"),
+        ("TEST", "2026-02-06", 10.5, 10.6, 10.4, 10.5, 1_000, "usa"),
+        ("TEST", "2026-02-07", 10.5, 10.6, 10.4, 10.5, 1_000, "usa"),
+        ("TEST", "2026-02-08", 10.5, 10.6, 10.4, 10.5, 1_000, "usa"),
+    ]
+
+    with sqlite3.connect(osake_db) as conn:
+        conn.execute(
+            """
+            CREATE TABLE osakedata (
+                osake TEXT,
+                pvm TEXT,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                volume INTEGER,
+                market TEXT
+            )
+            """
+        )
+        conn.executemany(
+            """
+            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            CREATE TABLE divergence_data (
+                ticker TEXT NOT NULL,
+                date TEXT NOT NULL,
+                bullish_strength REAL DEFAULT 0,
+                bearish_strength REAL DEFAULT 0,
+                rsi REAL,
+                pivot2_date_r3 TEXT,
+                is_bullish_divergence_r3 INTEGER DEFAULT 0,
+                PRIMARY KEY (ticker, date)
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO divergence_data (ticker, date, bullish_strength, bearish_strength, rsi, pivot2_date_r3, is_bullish_divergence_r3)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("TEST", "2026-02-08", 0.62, 0.0, 55.5, "2026-02-06", 1),
+        )
+
+    results = run_candlestick_analysis(
+        str(osake_db),
+        "TEST",
+        patterns=["Bullish Engulfing", "Bullish Divergence"],
+        start_date="2026-02-01",
+        end_date="2026-02-08",
+        progress_callback=None,
+        downtrend_filter=False,
+        min_decline_percent=3.0,
+        use_ma_filter=False,
+        use_volume_filter=False,
+        analysis_db_path=str(analysis_db),
+    )
+
+    key = "TEST|2026-02-05"
+    assert results and key in results
+    assert any(item["pattern"] == "BullDiv & Bullish Engulfing" for item in results[key])
+    assert not any(item["pattern"] == "Bullish Divergence" for item in results[key])
+
+
 def test_run_candlestick_analysis_does_not_use_legacy_bullish_divergence(tmp_path, monkeypatch):
     osake_db, analysis_db = _create_candles_test_dbs(tmp_path)
 
     with sqlite3.connect(analysis_db) as conn:
         conn.execute(
             """
-            INSERT INTO divergence_data (ticker, date, bullish_strength, bearish_strength, rsi, is_bullish_divergence_r3)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO divergence_data (ticker, date, bullish_strength, bearish_strength, rsi, pivot2_date_r3, is_bullish_divergence_r3)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            ("TEST", "2026-02-02", 0.62, 0.0, 55.5, 1),
+            ("TEST", "2026-02-02", 0.62, 0.0, 55.5, None, 1),
         )
 
     monkeypatch.setattr(
@@ -398,6 +558,7 @@ def test_run_candlestick_analysis_uses_wilder_rsi_fallback(tmp_path):
                 bullish_strength REAL DEFAULT 0,
                 bearish_strength REAL DEFAULT 0,
                 rsi REAL,
+                pivot2_date_r3 TEXT,
                 is_bullish_divergence_r3 INTEGER DEFAULT 0,
                 PRIMARY KEY (ticker, date)
             )

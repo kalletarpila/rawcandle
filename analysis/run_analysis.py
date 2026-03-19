@@ -107,21 +107,21 @@ def _load_bullish_divergence_dates(ticker: str, analysis_db_path: str) -> set[st
 
 def _load_divergence_snapshot(
     ticker: str, analysis_db_path: str, start_date: str | None = None, end_date: str | None = None
-) -> tuple[dict[str, float], dict[str, float | None], set[str]]:
+) -> tuple[dict[str, float], dict[str, float | None], set[str], dict[str, str | None]]:
     """
     Load bullish divergence strengths and RSI values from divergence_data for the candles flow.
     """
     if not ticker or not analysis_db_path:
-        return {}, {}, set()
+        return {}, {}, set(), {}
 
     try:
         db_path = Path(analysis_db_path)
         if not db_path.exists():
-            return {}, {}, set()
+            return {}, {}, set(), {}
 
         with sqlite3.connect(db_path) as conn:
             query = """
-                SELECT date, bullish_strength, rsi, is_bullish_divergence_r3
+                SELECT date, bullish_strength, rsi, is_bullish_divergence_r3, pivot2_date_r3
                 FROM divergence_data
                 WHERE ticker = ?
             """
@@ -141,15 +141,17 @@ def _load_divergence_snapshot(
         bullish_strength_map: dict[str, float] = {}
         rsi_map: dict[str, float | None] = {}
         bullish_event_dates: set[str] = set()
-        for date_value, bullish_strength, rsi, is_bullish_divergence_r3 in rows:
+        pivot2_date_map: dict[str, str | None] = {}
+        for date_value, bullish_strength, rsi, is_bullish_divergence_r3, pivot2_date_r3 in rows:
             date_key = str(date_value)
             bullish_strength_map[date_key] = float(bullish_strength or 0.0)
             rsi_map[date_key] = None if rsi is None else float(rsi)
+            pivot2_date_map[date_key] = None if pivot2_date_r3 is None else str(pivot2_date_r3)
             if int(is_bullish_divergence_r3 or 0) == 1:
                 bullish_event_dates.add(date_key)
-        return bullish_strength_map, rsi_map, bullish_event_dates
+        return bullish_strength_map, rsi_map, bullish_event_dates, pivot2_date_map
     except Exception:
-        return {}, {}, set()
+        return {}, {}, set(), {}
 
 
 def run_candlestick_analysis(
@@ -249,9 +251,22 @@ def run_candlestick_analysis(
         df["pvm"] = pd.to_datetime(df["pvm"])
         df = df.sort_values("pvm").reset_index(drop=True)
 
-    bullish_divergence_map, divergence_rsi_map, divergence_dates = _load_divergence_snapshot(
+    bullish_divergence_map, divergence_rsi_map, divergence_dates, divergence_pivot2_map = _load_divergence_snapshot(
         ticker, analysis_db_path, s_iso, e_iso
     )
+    date_to_index = {
+        pvm.date().isoformat(): idx for idx, pvm in enumerate(df["pvm"])
+    }
+    combo_eligible_dates = set(divergence_dates)
+    for event_date in divergence_dates:
+        pivot2_date = divergence_pivot2_map.get(event_date)
+        pivot2_idx = date_to_index.get(pivot2_date) if pivot2_date else None
+        if pivot2_idx is None:
+            continue
+        start_idx = max(0, pivot2_idx - 3)
+        end_idx = min(len(df) - 1, pivot2_idx + 3)
+        for window_idx in range(start_idx, end_idx + 1):
+            combo_eligible_dates.add(df.iloc[window_idx]["pvm"].date().isoformat())
 
     # Täytä RSI ensisijaisesti divergence_data-taulusta, muutoin laske
     if divergence_rsi_map:
@@ -365,14 +380,13 @@ def run_candlestick_analysis(
     for i, row in df.iterrows():
         current_date = row["pvm"].date().isoformat()
 
-        # Downtrend-suodatus
+        current_in_downtrend = True
         if downtrend_filter:
-            if not _is_in_downtrend_local(df, "Close", "Volume", i):
-                continue  # Ohita kynttilät jotka eivät ole laskutrendissä
+            current_in_downtrend = _is_in_downtrend_local(df, "Close", "Volume", i)
 
         found = []
         # Check each pattern and log the result per pattern
-        if "Hammer" in patterns and is_hammer(row):
+        if current_in_downtrend and "Hammer" in patterns and is_hammer(row):
             strength = _calculate_signal_strength(
                 "Hammer",
                 row["Open"],
@@ -387,7 +401,7 @@ def run_candlestick_analysis(
                     f"{ticker} {row['pvm'].date().isoformat()} Hammer checked - FOUND (strength {strength})"
                 )
 
-        if i > 0 and "Bullish Engulfing" in patterns:
+        if current_in_downtrend and i > 0 and "Bullish Engulfing" in patterns:
             prev_row = df.iloc[i - 1]
             ok = is_bullish_engulfing(prev_row, row)
             if ok:
@@ -405,7 +419,7 @@ def run_candlestick_analysis(
                         f"{ticker} {row['pvm'].date().isoformat()} Bullish Engulfing checked - FOUND (strength {strength})"
                     )
 
-        if i > 0 and "Piercing Pattern" in patterns:
+        if current_in_downtrend and i > 0 and "Piercing Pattern" in patterns:
             prev_row = df.iloc[i - 1]
             if is_piercing_pattern(prev_row, row):
                 strength = _calculate_signal_strength(
@@ -422,7 +436,7 @@ def run_candlestick_analysis(
                         f"{ticker} {row['pvm'].date().isoformat()} Piercing Pattern checked - FOUND (strength {strength})"
                     )
 
-        if i >= 2 and "Three White Soldiers" in patterns:
+        if current_in_downtrend and i >= 2 and "Three White Soldiers" in patterns:
             if is_three_white_soldiers(df, i):
                 strength = _calculate_signal_strength(
                     "Three White Soldiers",
@@ -438,7 +452,7 @@ def run_candlestick_analysis(
                         f"{ticker} {row['pvm'].date().isoformat()} Three White Soldiers checked - FOUND (strength {strength})"
                     )
 
-        if i >= 2 and "Morning Star" in patterns:
+        if current_in_downtrend and i >= 2 and "Morning Star" in patterns:
             if is_morning_star(df, i):
                 strength = _calculate_signal_strength(
                     "Morning Star",
@@ -454,7 +468,7 @@ def run_candlestick_analysis(
                         f"{ticker} {row['pvm'].date().isoformat()} Morning Star checked - FOUND (strength {strength})"
                     )
 
-        if "Dragonfly Doji" in patterns and is_dragonfly_doji(row):
+        if current_in_downtrend and "Dragonfly Doji" in patterns and is_dragonfly_doji(row):
             strength = _calculate_signal_strength(
                 "Doji",
                 row["Open"],
@@ -471,21 +485,30 @@ def run_candlestick_analysis(
 
         if "Bullish Divergence" in patterns:
             if current_date in divergence_dates:
-                strength = bullish_divergence_map.get(current_date, 0.0)
-                found.append(
-                    {
-                        "pattern": "Bullish Divergence",
-                        "strength": strength,
-                    }
-                )
-                if logger:
-                    logger.info(
-                        f"{ticker} {row['pvm'].date().isoformat()} Bullish Divergence checked - FOUND (strength {strength})"
+                divergence_in_downtrend = True
+                if downtrend_filter:
+                    pivot2_date = divergence_pivot2_map.get(current_date)
+                    pivot2_idx = date_to_index.get(pivot2_date) if pivot2_date else None
+                    divergence_in_downtrend = (
+                        pivot2_idx is not None
+                        and _is_in_downtrend_local(df, "Close", "Volume", pivot2_idx)
                     )
+                if divergence_in_downtrend:
+                    strength = bullish_divergence_map.get(current_date, 0.0)
+                    found.append(
+                        {
+                            "pattern": "Bullish Divergence",
+                            "strength": strength,
+                        }
+                    )
+                    if logger:
+                        logger.info(
+                            f"{ticker} {row['pvm'].date().isoformat()} Bullish Divergence checked - FOUND (strength {strength})"
+                        )
 
         # Yhdistelmäkuviot: jos samalle päivälle on Bullish Divergence ja kynttilä (1-6),
         # vaihdetaan pienimmän koodin mukainen kynttilä komboksi (71-76).
-        if found and current_date in divergence_dates:
+        if found and current_date in combo_eligible_dates:
             chosen_idx = None
             chosen_pattern = None
             for base_pattern in BASE_CANDLE_ORDER:
