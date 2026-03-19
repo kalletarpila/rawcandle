@@ -383,8 +383,10 @@ class DatabaseManager:
                     pivot_drop_pct REAL,
                     pivot_gap_r2 INTEGER,
                     pivot_drop_pct_r2 REAL,
+                    pivot2_date_r2 TEXT,
                     pivot_gap_r3 INTEGER,
                     pivot_drop_pct_r3 REAL,
+                    pivot2_date_r3 TEXT,
                     PRIMARY KEY (ticker, date)
                 )
             """
@@ -440,6 +442,10 @@ class DatabaseManager:
                 cursor.execute(
                     "ALTER TABLE divergence_data ADD COLUMN pivot_drop_pct_r2 REAL"
                 )
+            if "pivot2_date_r2" not in divergence_columns:
+                cursor.execute(
+                    "ALTER TABLE divergence_data ADD COLUMN pivot2_date_r2 TEXT"
+                )
             if "pivot_gap_r3" not in divergence_columns:
                 cursor.execute(
                     "ALTER TABLE divergence_data ADD COLUMN pivot_gap_r3 INTEGER"
@@ -447,6 +453,10 @@ class DatabaseManager:
             if "pivot_drop_pct_r3" not in divergence_columns:
                 cursor.execute(
                     "ALTER TABLE divergence_data ADD COLUMN pivot_drop_pct_r3 REAL"
+                )
+            if "pivot2_date_r3" not in divergence_columns:
+                cursor.execute(
+                    "ALTER TABLE divergence_data ADD COLUMN pivot2_date_r3 TEXT"
                 )
 
             # Luo indeksit divergence_data tauluun
@@ -1529,8 +1539,10 @@ class DatabaseManager:
                     pivot_drop_pct = None
                     pivot_gap_r2 = None
                     pivot_drop_pct_r2 = None
+                    pivot2_date_r2 = None
                     pivot_gap_r3 = None
                     pivot_drop_pct_r3 = None
+                    pivot2_date_r3 = None
                 elif len(record) == 6:
                     (
                         date,
@@ -1548,8 +1560,10 @@ class DatabaseManager:
                     pivot_drop_pct = None
                     pivot_gap_r2 = None
                     pivot_drop_pct_r2 = None
+                    pivot2_date_r2 = None
                     pivot_gap_r3 = None
                     pivot_drop_pct_r3 = None
+                    pivot2_date_r3 = None
                 elif len(record) == 10:
                     (
                         date,
@@ -1567,8 +1581,10 @@ class DatabaseManager:
                     pivot_drop_pct = None
                     pivot_gap_r2 = None
                     pivot_drop_pct_r2 = None
+                    pivot2_date_r2 = None
                     pivot_gap_r3 = None
                     pivot_drop_pct_r3 = None
+                    pivot2_date_r3 = None
                 elif len(record) == 12:
                     (
                         date,
@@ -1586,9 +1602,11 @@ class DatabaseManager:
                     ) = record
                     pivot_gap_r2 = None
                     pivot_drop_pct_r2 = None
+                    pivot2_date_r2 = None
                     pivot_gap_r3 = None
                     pivot_drop_pct_r3 = None
-                else:
+                    pivot2_date_r3 = None
+                elif len(record) == 16:
                     (
                         date,
                         bullish,
@@ -1606,6 +1624,29 @@ class DatabaseManager:
                         pivot_drop_pct_r2,
                         pivot_gap_r3,
                         pivot_drop_pct_r3,
+                    ) = record
+                    pivot2_date_r2 = None
+                    pivot2_date_r3 = None
+                else:
+                    (
+                        date,
+                        bullish,
+                        bearish,
+                        rsi,
+                        is_bullish_divergence,
+                        is_bearish_divergence,
+                        is_bullish_divergence_r2,
+                        is_bearish_divergence_r2,
+                        is_bullish_divergence_r3,
+                        is_bearish_divergence_r3,
+                        pivot_gap,
+                        pivot_drop_pct,
+                        pivot_gap_r2,
+                        pivot_drop_pct_r2,
+                        pivot2_date_r2,
+                        pivot_gap_r3,
+                        pivot_drop_pct_r3,
+                        pivot2_date_r3,
                     ) = record
                 records_with_ticker.append(
                     (
@@ -1624,8 +1665,10 @@ class DatabaseManager:
                         pivot_drop_pct,
                         pivot_gap_r2,
                         pivot_drop_pct_r2,
+                        pivot2_date_r2,
                         pivot_gap_r3,
                         pivot_drop_pct_r3,
+                        pivot2_date_r3,
                     )
                 )
 
@@ -1648,10 +1691,12 @@ class DatabaseManager:
                     pivot_drop_pct,
                     pivot_gap_r2,
                     pivot_drop_pct_r2,
+                    pivot2_date_r2,
                     pivot_gap_r3,
-                    pivot_drop_pct_r3
+                    pivot_drop_pct_r3,
+                    pivot2_date_r3
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 records_with_ticker,
             )

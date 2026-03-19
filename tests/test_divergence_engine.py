@@ -102,6 +102,9 @@ def test_compute_divergence_series_sets_v2_bullish_event_on_confirmed_date(monke
 
     assert bullish_dates == ["2024-06-10"]
     assert [row["date"] for row in rows if row["is_bullish_divergence"] == 1] == ["2024-06-10"]
+    event_row = next(row for row in rows if row["is_bullish_divergence_r2"] == 1)
+    assert event_row["pivot2_date_r2"] == "2024-06-08"
+    assert event_row["pivot2_date_r3"] is None
 
 
 def test_compute_divergence_series_sets_v2_bearish_event_on_confirmed_date(monkeypatch):
@@ -285,6 +288,9 @@ def test_compute_divergence_series_sets_v2_bullish_event_for_radius_3(monkeypatc
     bullish_dates_r3 = [row["date"] for row in rows if row["is_bullish_divergence_r3"] == 1]
 
     assert bullish_dates_r3 == ["2025-03-14"]
+    event_row = next(row for row in rows if row["is_bullish_divergence_r3"] == 1)
+    assert event_row["pivot2_date_r3"] == "2025-03-11"
+    assert event_row["pivot2_date_r2"] is None
 
 
 def test_compute_divergence_series_keeps_r2_and_r3_separate(monkeypatch):
@@ -393,8 +399,10 @@ def test_compute_divergence_series_persists_bullish_geometry(monkeypatch):
     assert event_row["pivot_drop_pct"] == 25.0
     assert event_row["pivot_gap_r2"] == 5
     assert event_row["pivot_drop_pct_r2"] == 25.0
+    assert event_row["pivot2_date_r2"] == "2025-08-08"
     assert event_row["pivot_gap_r3"] is None
     assert event_row["pivot_drop_pct_r3"] is None
+    assert event_row["pivot2_date_r3"] is None
 
 
 def test_compute_divergence_series_persists_bearish_geometry(monkeypatch):
@@ -418,8 +426,10 @@ def test_compute_divergence_series_persists_bearish_geometry(monkeypatch):
     assert event_row["pivot_drop_pct"] == 16.666666666666664
     assert event_row["pivot_gap_r2"] == 5
     assert event_row["pivot_drop_pct_r2"] == 16.666666666666664
+    assert event_row["pivot2_date_r2"] == "2025-09-08"
     assert event_row["pivot_gap_r3"] is None
     assert event_row["pivot_drop_pct_r3"] is None
+    assert event_row["pivot2_date_r3"] is None
 
 
 def test_compute_divergence_series_keeps_geometry_null_for_non_event_rows(monkeypatch):
@@ -442,11 +452,13 @@ def test_compute_divergence_series_keeps_geometry_null_for_non_event_rows(monkey
     assert all(row["pivot_drop_pct"] is None for row in rows)
     assert all(row["pivot_gap_r2"] is None for row in rows)
     assert all(row["pivot_drop_pct_r2"] is None for row in rows)
+    assert all(row["pivot2_date_r2"] is None for row in rows)
     assert all(row["pivot_gap_r3"] is None for row in rows)
     assert all(row["pivot_drop_pct_r3"] is None for row in rows)
+    assert all(row["pivot2_date_r3"] is None for row in rows)
 
 
-def test_compute_divergence_series_keeps_r2_and_r3_geometry_separate_on_same_row(monkeypatch):
+def test_compute_divergence_series_keeps_r2_and_r3_geometry_and_pivot2_dates_separate_on_same_row(monkeypatch):
     df = pd.DataFrame(
         {
             "pvm": [f"2025-11-{day:02d}" for day in range(1, 8)],
@@ -460,19 +472,21 @@ def test_compute_divergence_series_keeps_r2_and_r3_geometry_separate_on_same_row
         lambda closes, period=14: [40.0] * 7,
     )
 
-    def fake_flags(lows, highs, rsi_values, *, radius):
+    def fake_flags(dates, lows, highs, rsi_values, *, radius):
         if radius == 2:
             return (
                 [0, 0, 0, 0, 0, 1, 0],
                 [0, 0, 0, 0, 0, 0, 0],
                 [None, None, None, None, None, 5, None],
                 [None, None, None, None, None, 25.0, None],
+                [None, None, None, None, None, "2025-11-04", None],
             )
         return (
             [0, 0, 0, 0, 0, 1, 0],
             [0, 0, 0, 0, 0, 0, 0],
             [None, None, None, None, None, 8, None],
             [None, None, None, None, None, 12.5, None],
+            [None, None, None, None, None, "2025-11-03", None],
         )
 
     monkeypatch.setattr(
@@ -487,5 +501,7 @@ def test_compute_divergence_series_keeps_r2_and_r3_geometry_separate_on_same_row
     assert event_row["is_bullish_divergence_r3"] == 1
     assert event_row["pivot_gap_r2"] == 5
     assert event_row["pivot_drop_pct_r2"] == 25.0
+    assert event_row["pivot2_date_r2"] == "2025-11-04"
     assert event_row["pivot_gap_r3"] == 8
     assert event_row["pivot_drop_pct_r3"] == 12.5
+    assert event_row["pivot2_date_r3"] == "2025-11-03"

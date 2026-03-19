@@ -132,20 +132,28 @@ def _collapse_tied_clusters(raw_candidates: List[bool], values: List[Optional[fl
 
 
 def _compute_v2_event_flags_for_radius(
+    dates: List[str],
     lows: List[Optional[float]],
     highs: List[Optional[float]],
     rsi_values: List[Optional[float]],
     *,
     radius: int,
-) -> tuple[List[int], List[int], List[Optional[int]], List[Optional[float]]]:
+) -> tuple[
+    List[int],
+    List[int],
+    List[Optional[int]],
+    List[Optional[float]],
+    List[Optional[str]],
+]:
     size = len(rsi_values)
     bullish_flags = [0] * size
     bearish_flags = [0] * size
     pivot_gaps: List[Optional[int]] = [None] * size
     pivot_drop_pcts: List[Optional[float]] = [None] * size
+    pivot2_dates: List[Optional[str]] = [None] * size
 
     if not lows or not highs or len(lows) != size or len(highs) != size:
-        return bullish_flags, bearish_flags, pivot_gaps, pivot_drop_pcts
+        return bullish_flags, bearish_flags, pivot_gaps, pivot_drop_pcts, pivot2_dates
 
     raw_price_pivot_lows = _compute_raw_pivot_candidates(lows, radius=radius, is_low=True)
     raw_price_pivot_highs = _compute_raw_pivot_candidates(highs, radius=radius, is_low=False)
@@ -193,6 +201,7 @@ def _compute_v2_event_flags_for_radius(
             bullish_flags[event_idx] = 1
             pivot_gaps[event_idx] = pivot_gap
             pivot_drop_pcts[event_idx] = pivot_drop_pct
+            pivot2_dates[event_idx] = dates[p2]
             break
 
     for pivot_idx in range(1, len(price_pivot_highs)):
@@ -224,9 +233,10 @@ def _compute_v2_event_flags_for_radius(
             bearish_flags[event_idx] = 1
             pivot_gaps[event_idx] = pivot_gap
             pivot_drop_pcts[event_idx] = pivot_drop_pct
+            pivot2_dates[event_idx] = dates[p2]
             break
 
-    return bullish_flags, bearish_flags, pivot_gaps, pivot_drop_pcts
+    return bullish_flags, bearish_flags, pivot_gaps, pivot_drop_pcts, pivot2_dates
 
 
 def compute_divergence_series(
@@ -260,16 +270,18 @@ def compute_divergence_series(
         bearish_event_flags_r2,
         pivot_gaps_r2,
         pivot_drop_pcts_r2,
+        pivot2_dates_r2,
     ) = _compute_v2_event_flags_for_radius(
-        lows, highs, rsi_values, radius=PIVOT_RADIUS_R2
+        dates, lows, highs, rsi_values, radius=PIVOT_RADIUS_R2
     )
     (
         bullish_event_flags_r3,
         bearish_event_flags_r3,
         pivot_gaps_r3,
         pivot_drop_pcts_r3,
+        pivot2_dates_r3,
     ) = _compute_v2_event_flags_for_radius(
-        lows, highs, rsi_values, radius=PIVOT_RADIUS_R3
+        dates, lows, highs, rsi_values, radius=PIVOT_RADIUS_R3
     )
 
     results: List[Dict[str, Any]] = []
@@ -284,8 +296,10 @@ def compute_divergence_series(
         row["is_bearish_divergence_r3"] = bearish_event_flags_r3[idx]
         row["pivot_gap_r2"] = pivot_gaps_r2[idx]
         row["pivot_drop_pct_r2"] = pivot_drop_pcts_r2[idx]
+        row["pivot2_date_r2"] = pivot2_dates_r2[idx]
         row["pivot_gap_r3"] = pivot_gaps_r3[idx]
         row["pivot_drop_pct_r3"] = pivot_drop_pcts_r3[idx]
+        row["pivot2_date_r3"] = pivot2_dates_r3[idx]
         row["pivot_gap"] = pivot_gaps_r2[idx]
         row["pivot_drop_pct"] = pivot_drop_pcts_r2[idx]
         # Legacy compatibility: generic fields mirror radius-2 semantics.

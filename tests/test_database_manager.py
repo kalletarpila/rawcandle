@@ -34,7 +34,7 @@ class TestDatabaseManager:
         with pytest.raises((FileNotFoundError, OSError)):
             DatabaseManager("/invalid/path/database.db")
 
-    def test_divergence_schema_migration_adds_radius_and_geometry_columns(self, temp_db):
+    def test_divergence_schema_migration_adds_radius_geometry_and_pivot2_columns(self, temp_db):
         raw_conn = sqlite3.connect(temp_db)
         raw_conn.execute(
             """
@@ -73,7 +73,9 @@ class TestDatabaseManager:
                    is_bullish_divergence_r3, is_bearish_divergence_r3,
                    pivot_gap, pivot_drop_pct,
                    pivot_gap_r2, pivot_drop_pct_r2,
-                   pivot_gap_r3, pivot_drop_pct_r3
+                   pivot2_date_r2,
+                   pivot_gap_r3, pivot_drop_pct_r3,
+                   pivot2_date_r3
             FROM divergence_data
             WHERE ticker = 'AAA' AND date = '2025-01-01'
             """
@@ -87,9 +89,11 @@ class TestDatabaseManager:
         assert "pivot_drop_pct" in columns
         assert "pivot_gap_r2" in columns
         assert "pivot_drop_pct_r2" in columns
+        assert "pivot2_date_r2" in columns
         assert "pivot_gap_r3" in columns
         assert "pivot_drop_pct_r3" in columns
-        assert tuple(row) == (1, 0, 1, 0, 0, 0, None, None, None, None, None, None)
+        assert "pivot2_date_r3" in columns
+        assert tuple(row) == (1, 0, 1, 0, 0, 0, None, None, None, None, None, None, None, None)
 
     def test_excluded_tickers_table_created(self, temp_db):
         manager = DatabaseManager(temp_db)

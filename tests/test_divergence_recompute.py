@@ -346,8 +346,8 @@ def test_recompute_divergence_full_recompute_uses_real_v1_engine(divergence_dbs)
                    is_bullish_divergence_r2, is_bearish_divergence_r2,
                    is_bullish_divergence_r3, is_bearish_divergence_r3,
                    pivot_gap, pivot_drop_pct,
-                   pivot_gap_r2, pivot_drop_pct_r2,
-                   pivot_gap_r3, pivot_drop_pct_r3
+                   pivot_gap_r2, pivot_drop_pct_r2, pivot2_date_r2,
+                   pivot_gap_r3, pivot_drop_pct_r3, pivot2_date_r3
             FROM divergence_data
             WHERE ticker = ?
             ORDER BY date
@@ -371,8 +371,10 @@ def test_recompute_divergence_full_recompute_uses_real_v1_engine(divergence_dbs)
     assert stored_last[11] == expected_last["pivot_drop_pct"]
     assert stored_last[12] == expected_last["pivot_gap_r2"]
     assert stored_last[13] == expected_last["pivot_drop_pct_r2"]
-    assert stored_last[14] == expected_last["pivot_gap_r3"]
-    assert stored_last[15] == expected_last["pivot_drop_pct_r3"]
+    assert stored_last[14] == expected_last["pivot2_date_r2"]
+    assert stored_last[15] == expected_last["pivot_gap_r3"]
+    assert stored_last[16] == expected_last["pivot_drop_pct_r3"]
+    assert stored_last[17] == expected_last["pivot2_date_r3"]
 
 
 def test_recompute_divergence_only_missing_updates_v2_flags_for_recent_existing_rows(
@@ -478,8 +480,10 @@ def test_recompute_divergence_only_missing_updates_v2_flags_for_recent_existing_
                    pivot_drop_pct,
                    pivot_gap_r2,
                    pivot_drop_pct_r2,
+                   pivot2_date_r2,
                    pivot_gap_r3,
-                   pivot_drop_pct_r3
+                   pivot_drop_pct_r3,
+                   pivot2_date_r3
             FROM divergence_data
             WHERE ticker = ? AND date = ?
             """,
@@ -494,8 +498,9 @@ def test_recompute_divergence_only_missing_updates_v2_flags_for_recent_existing_
     assert row[4] == 25.0
     assert row[5] == 5
     assert row[6] == 25.0
-    assert row[7] is None
+    assert row[7] == "2024-06-08"
     assert row[8] is None
+    assert row[9] is None
 
 
 def test_recompute_divergence_persists_geometry_fields(tmp_path):
@@ -569,8 +574,8 @@ def test_recompute_divergence_persists_geometry_fields(tmp_path):
         event_row = conn.execute(
             """
             SELECT pivot_gap, pivot_drop_pct,
-                   pivot_gap_r2, pivot_drop_pct_r2,
-                   pivot_gap_r3, pivot_drop_pct_r3
+                   pivot_gap_r2, pivot_drop_pct_r2, pivot2_date_r2,
+                   pivot_gap_r3, pivot_drop_pct_r3, pivot2_date_r3
             FROM divergence_data
             WHERE ticker = ? AND date = ?
             """,
@@ -579,13 +584,73 @@ def test_recompute_divergence_persists_geometry_fields(tmp_path):
         non_event_row = conn.execute(
             """
             SELECT pivot_gap, pivot_drop_pct,
-                   pivot_gap_r2, pivot_drop_pct_r2,
-                   pivot_gap_r3, pivot_drop_pct_r3
+                   pivot_gap_r2, pivot_drop_pct_r2, pivot2_date_r2,
+                   pivot_gap_r3, pivot_drop_pct_r3, pivot2_date_r3
             FROM divergence_data
             WHERE ticker = ? AND date = ?
             """,
             (ticker, "2024-06-09"),
         ).fetchone()
 
-    assert event_row == (5, 25.0, 5, 25.0, None, None)
-    assert non_event_row == (None, None, None, None, None, None)
+    assert event_row == (5, 25.0, 5, 25.0, "2024-06-08", None, None, None)
+    assert non_event_row == (None, None, None, None, None, None, None, None)
+
+
+def test_recompute_divergence_persists_radius_specific_pivot2_dates_independently(tmp_path, monkeypatch):
+    ticker = "TEST"
+    osakedata_path = tmp_path / "osakedata.db"
+    analysis_path = tmp_path / "analysis.db"
+
+    _create_osakedata_db(str(osakedata_path), ticker=ticker, days=20)
+    DatabaseManager(str(analysis_path)).close()
+
+    monkeypatch.setattr(
+        "analysis.divergence_recompute.compute_divergence_series",
+        lambda df, start_date=None: [
+            {
+                "date": str(row["pvm"]),
+                "bullish_strength": 0.0,
+                "bearish_strength": 0.0,
+                "rsi": float(idx),
+                "is_bullish_divergence": 1 if str(row["pvm"]) == "2024-01-15" else 0,
+                "is_bearish_divergence": 0,
+                "is_bullish_divergence_r2": 1 if str(row["pvm"]) == "2024-01-15" else 0,
+                "is_bearish_divergence_r2": 0,
+                "is_bullish_divergence_r3": 1 if str(row["pvm"]) == "2024-01-15" else 0,
+                "is_bearish_divergence_r3": 0,
+                "pivot_gap": 5 if str(row["pvm"]) == "2024-01-15" else None,
+                "pivot_drop_pct": 10.0 if str(row["pvm"]) == "2024-01-15" else None,
+                "pivot_gap_r2": 5 if str(row["pvm"]) == "2024-01-15" else None,
+                "pivot_drop_pct_r2": 10.0 if str(row["pvm"]) == "2024-01-15" else None,
+                "pivot2_date_r2": "2024-01-13" if str(row["pvm"]) == "2024-01-15" else None,
+                "pivot_gap_r3": 8 if str(row["pvm"]) == "2024-01-15" else None,
+                "pivot_drop_pct_r3": 12.0 if str(row["pvm"]) == "2024-01-15" else None,
+                "pivot2_date_r3": "2024-01-12" if str(row["pvm"]) == "2024-01-15" else None,
+            }
+            for idx, row in enumerate(df.to_dict("records"))
+            if start_date is None or str(row["pvm"]) >= start_date
+        ],
+    )
+
+    success, rows_written, err = recompute_divergence_for_ticker(
+        ticker,
+        osakedata_path=str(osakedata_path),
+        analysis_path=str(analysis_path),
+        only_missing=False,
+    )
+
+    assert success is True
+    assert err == ""
+    assert rows_written == 20
+
+    with sqlite3.connect(analysis_path) as conn:
+        row = conn.execute(
+            """
+            SELECT pivot2_date_r2, pivot2_date_r3
+            FROM divergence_data
+            WHERE ticker = ? AND date = ?
+            """,
+            (ticker, "2024-01-15"),
+        ).fetchone()
+
+    assert row == ("2024-01-13", "2024-01-12")
