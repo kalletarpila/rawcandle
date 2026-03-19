@@ -834,15 +834,19 @@ def test_divergence_page_presets_define_required_entries():
             [
                 "event_class",
                 "anchor",
-                "radius",
+                "trend_filter",
+                "market",
                 "min_gap",
                 "max_gap",
                 "min_drop",
                 "max_drop",
+                "min_rsi",
+                "max_rsi",
                 "start_date",
                 "end_date",
             ]
-        ).issubset(preset.keys())
+        ) == set(preset.keys())
+        assert "radius" not in preset
 
 
 def test_divergence_page_apply_preset_populates_controls_and_triggers_refresh(monkeypatch):

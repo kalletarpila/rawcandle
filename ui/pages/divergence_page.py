@@ -22,7 +22,6 @@ class DivergencePage:
         "Default / All Bullish": {
             "event_class": "All",
             "anchor": "Event",
-            "radius": "R3",
             "trend_filter": "All BullDiv events",
             "market": "All Markets",
             "min_gap": 5,
@@ -37,7 +36,6 @@ class DivergencePage:
         "R3_ONLY Event": {
             "event_class": "R3_ONLY",
             "anchor": "Event",
-            "radius": "R3",
             "trend_filter": "All BullDiv events",
             "market": "All Markets",
             "min_gap": 5,
@@ -52,7 +50,6 @@ class DivergencePage:
         "R3_ONLY Pivot2": {
             "event_class": "R3_ONLY",
             "anchor": "Pivot2",
-            "radius": "R3",
             "trend_filter": "All BullDiv events",
             "market": "All Markets",
             "min_gap": 5,
@@ -67,7 +64,6 @@ class DivergencePage:
         "R3 Long Swing": {
             "event_class": "R3_ONLY",
             "anchor": "Event",
-            "radius": "R3",
             "trend_filter": "All BullDiv events",
             "market": "All Markets",
             "min_gap": 19,
@@ -82,7 +78,6 @@ class DivergencePage:
         "R3 Long Swing Pivot2": {
             "event_class": "R3_ONLY",
             "anchor": "Pivot2",
-            "radius": "R3",
             "trend_filter": "All BullDiv events",
             "market": "All Markets",
             "min_gap": 19,
@@ -97,7 +92,6 @@ class DivergencePage:
         "R2_ONLY Event": {
             "event_class": "R2_ONLY",
             "anchor": "Event",
-            "radius": "R2",
             "trend_filter": "All BullDiv events",
             "market": "All Markets",
             "min_gap": 5,
@@ -112,7 +106,6 @@ class DivergencePage:
         "R2_AND_R3 Event": {
             "event_class": "R2_AND_R3",
             "anchor": "Event",
-            "radius": "R3",
             "trend_filter": "All BullDiv events",
             "market": "All Markets",
             "min_gap": 5,
@@ -127,7 +120,6 @@ class DivergencePage:
         "2025 R3 Long Swing": {
             "event_class": "R3_ONLY",
             "anchor": "Event",
-            "radius": "R3",
             "trend_filter": "All BullDiv events",
             "market": "All Markets",
             "min_gap": 19,
