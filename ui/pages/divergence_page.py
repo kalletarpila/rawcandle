@@ -303,8 +303,8 @@ class DivergencePage:
             ],
             on_change=self._on_filter_change,
         )
-        self.min_gap_slider = ft.Slider(min=5, max=24, divisions=19, value=5, label="{value}", on_change_end=self._on_filter_change)
-        self.max_gap_slider = ft.Slider(min=5, max=24, divisions=19, value=24, label="{value}", on_change_end=self._on_filter_change)
+        self.min_gap_slider = ft.Slider(min=5, max=30, divisions=25, value=5, label="{value}", on_change_end=self._on_filter_change)
+        self.max_gap_slider = ft.Slider(min=5, max=30, divisions=25, value=24, label="{value}", on_change_end=self._on_filter_change)
         self.min_drop_slider = ft.Slider(min=0, max=50, divisions=50, value=0, label="{value}", on_change_end=self._on_filter_change)
         self.max_drop_slider = ft.Slider(min=0, max=50, divisions=50, value=50, label="{value}", on_change_end=self._on_filter_change)
         self.min_rsi_slider = ft.Slider(min=1, max=100, divisions=99, value=1, label="{value}", on_change_end=self._on_filter_change)
