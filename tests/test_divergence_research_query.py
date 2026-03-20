@@ -88,6 +88,30 @@ def _create_analysis_db(path: str) -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE analysis_findings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                date TEXT NOT NULL,
+                pattern TEXT,
+                signal_strength REAL,
+                rsi14 REAL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.executemany(
+            """
+            INSERT INTO analysis_findings (ticker, date, pattern, signal_strength, rsi14)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                ("BBB", bbb_event_date, "BullDiv & Hammer", 0.7, 28.0),
+                ("BBB", bbb_event_date, "BullDiv & Piercing Pattern", 0.8, 28.0),
+                ("CCC", ccc_event_date, "BullDiv & Bullish Engulfing", 0.9, 35.0),
+            ],
+        )
         conn.commit()
 
 
@@ -149,6 +173,94 @@ def _create_stock_db(path: str) -> None:
                 date_value = dates[idx]
                 market = "suomi" if ticker == "CCC" else "usa"
                 rows.append((ticker, date_value, close, close, close, close, 1000, market))
+        conn.executemany(
+            """
+            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+        conn.commit()
+
+
+def _insert_divergence_row(
+    analysis_db: str,
+    *,
+    ticker: str,
+    event_date: str,
+    rsi: float = 30.0,
+    is_r2: int = 0,
+    is_r3: int = 1,
+    pivot_gap_r2: int | None = None,
+    pivot_drop_pct_r2: float | None = None,
+    pivot2_date_r2: str | None = None,
+    pivot_gap_r3: int | None = 19,
+    pivot_drop_pct_r3: float | None = 8.0,
+    pivot2_date_r3: str | None = None,
+) -> None:
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO divergence_data (
+                ticker, date, bullish_strength, bearish_strength, rsi,
+                is_bullish_divergence, is_bearish_divergence,
+                is_bullish_divergence_r2, is_bearish_divergence_r2,
+                is_bullish_divergence_r3, is_bearish_divergence_r3,
+                pivot_gap, pivot_drop_pct,
+                pivot_gap_r2, pivot_drop_pct_r2, pivot2_date_r2,
+                pivot_gap_r3, pivot_drop_pct_r3, pivot2_date_r3
+            )
+            VALUES (?, ?, 0, 0, ?, 0, 0, ?, 0, ?, 0, NULL, NULL, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                ticker,
+                event_date,
+                rsi,
+                is_r2,
+                is_r3,
+                pivot_gap_r2,
+                pivot_drop_pct_r2,
+                pivot2_date_r2,
+                pivot_gap_r3,
+                pivot_drop_pct_r3,
+                pivot2_date_r3,
+            ),
+        )
+        conn.commit()
+
+
+def _insert_combo_finding(
+    analysis_db: str,
+    *,
+    ticker: str,
+    event_date: str,
+    pattern: str,
+) -> None:
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO analysis_findings (ticker, date, pattern, signal_strength, rsi14)
+            VALUES (?, ?, ?, 1.0, 30.0)
+            """,
+            (ticker, event_date, pattern),
+        )
+        conn.commit()
+
+
+def _insert_stock_series(
+    stock_db: str,
+    *,
+    ticker: str,
+    start_iso: str,
+    count: int = 60,
+    market: str = "usa",
+) -> None:
+    dates = _build_trading_dates(start_iso, count)
+    rows = [
+        (ticker, day, 100 + idx, 100 + idx, 100 + idx, 100 + idx, 1000, market)
+        for idx, day in enumerate(dates)
+    ]
+    with sqlite3.connect(stock_db) as conn:
         conn.executemany(
             """
             INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
@@ -771,6 +883,291 @@ def test_fetch_divergence_events_combines_trend_filter_with_event_class_and_date
     )
 
     assert rows == []
+
+
+def test_fetch_divergence_events_computes_combo_offset_correctly(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    stock_db = tmp_path / "osakedata.db"
+    _create_analysis_db(str(analysis_db))
+    _create_stock_db(str(stock_db))
+
+    eee_dates = _build_trading_dates("2025-07-01", 30)
+    _insert_divergence_row(
+        str(analysis_db),
+        ticker="EEE",
+        event_date=eee_dates[12],
+        pivot_gap_r3=19,
+        pivot_drop_pct_r3=8.0,
+        pivot2_date_r3=eee_dates[10],
+    )
+    _insert_combo_finding(
+        str(analysis_db),
+        ticker="EEE",
+        event_date=eee_dates[12],
+        pattern="BullDiv & Hammer",
+    )
+    _insert_stock_series(str(stock_db), ticker="EEE", start_iso="2025-07-01")
+
+    rows = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        event_class="R3_ONLY",
+        combo_pattern="BullDiv & Hammer",
+        start_date=eee_dates[12],
+        end_date=eee_dates[12],
+        limit=20,
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["ticker"] == "EEE"
+    assert rows[0]["pivot2_date_r3"] == eee_dates[10]
+    assert rows[0]["combo_pattern"] == "BullDiv & Hammer"
+    assert rows[0]["combo_offset"] == 2
+
+
+def test_fetch_divergence_events_filters_combo_offset_range_minus1_plus1(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    stock_db = tmp_path / "osakedata.db"
+    _create_analysis_db(str(analysis_db))
+    _create_stock_db(str(stock_db))
+
+    fff_dates = _build_trading_dates("2025-08-01", 30)
+    ggg_dates = _build_trading_dates("2025-09-01", 30)
+    hhh_dates = _build_trading_dates("2025-10-01", 30)
+    iii_dates = _build_trading_dates("2025-11-03", 30)
+    for ticker, dates, event_idx, pivot_idx in [
+        ("FFF", fff_dates, 9, 10),
+        ("GGG", ggg_dates, 10, 10),
+        ("HHH", hhh_dates, 11, 10),
+        ("III", iii_dates, 12, 10),
+    ]:
+        _insert_divergence_row(
+            str(analysis_db),
+            ticker=ticker,
+            event_date=dates[event_idx],
+            pivot_gap_r3=19,
+            pivot_drop_pct_r3=8.0,
+            pivot2_date_r3=dates[pivot_idx],
+        )
+        _insert_combo_finding(
+            str(analysis_db),
+            ticker=ticker,
+            event_date=dates[event_idx],
+            pattern="BullDiv & Hammer",
+        )
+        _insert_stock_series(str(stock_db), ticker=ticker, start_iso=dates[0])
+
+    rows = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        event_class="R3_ONLY",
+        combo_pattern="BullDiv & Hammer",
+        combo_offset_min=-1,
+        combo_offset_max=1,
+        limit=50,
+        sort_by="ticker",
+        sort_desc=False,
+    )
+
+    assert [row["ticker"] for row in rows] == ["FFF", "GGG", "HHH"]
+    assert [row["combo_offset"] for row in rows] == [-1, 0, 1]
+
+
+def test_fetch_divergence_events_filters_combo_offset_range_0_plus1(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    stock_db = tmp_path / "osakedata.db"
+    _create_analysis_db(str(analysis_db))
+    _create_stock_db(str(stock_db))
+
+    jjj_dates = _build_trading_dates("2025-07-15", 30)
+    kkk_dates = _build_trading_dates("2025-08-15", 30)
+    lll_dates = _build_trading_dates("2025-09-15", 30)
+    for ticker, dates, event_idx, pivot_idx in [
+        ("JJJ", jjj_dates, 9, 10),
+        ("KKK", kkk_dates, 10, 10),
+        ("LLL", lll_dates, 11, 10),
+    ]:
+        _insert_divergence_row(
+            str(analysis_db),
+            ticker=ticker,
+            event_date=dates[event_idx],
+            pivot_gap_r3=19,
+            pivot_drop_pct_r3=8.0,
+            pivot2_date_r3=dates[pivot_idx],
+        )
+        _insert_combo_finding(
+            str(analysis_db),
+            ticker=ticker,
+            event_date=dates[event_idx],
+            pattern="BullDiv & Hammer",
+        )
+        _insert_stock_series(str(stock_db), ticker=ticker, start_iso=dates[0])
+
+    rows = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        event_class="R3_ONLY",
+        combo_pattern="BullDiv & Hammer",
+        combo_offset_min=0,
+        combo_offset_max=1,
+        limit=50,
+        sort_by="ticker",
+        sort_desc=False,
+    )
+
+    assert [row["ticker"] for row in rows] == ["KKK", "LLL"]
+    assert [row["combo_offset"] for row in rows] == [0, 1]
+
+
+def test_fetch_divergence_events_filters_combo_pattern_exact_match(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    stock_db = tmp_path / "osakedata.db"
+    _create_analysis_db(str(analysis_db))
+    _create_stock_db(str(stock_db))
+
+    mmm_dates = _build_trading_dates("2025-07-21", 30)
+    nnn_dates = _build_trading_dates("2025-08-21", 30)
+    for ticker, pattern, dates in [
+        ("MMM", "BullDiv & Bullish Engulfing", mmm_dates),
+        ("NNN", "BullDiv & Piercing Pattern", nnn_dates),
+    ]:
+        _insert_divergence_row(
+            str(analysis_db),
+            ticker=ticker,
+            event_date=dates[11],
+            pivot_gap_r3=19,
+            pivot_drop_pct_r3=8.0,
+            pivot2_date_r3=dates[10],
+        )
+        _insert_combo_finding(
+            str(analysis_db),
+            ticker=ticker,
+            event_date=dates[11],
+            pattern=pattern,
+        )
+        _insert_stock_series(str(stock_db), ticker=ticker, start_iso=dates[0])
+
+    engulfing_rows = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        event_class="R3_ONLY",
+        combo_pattern="BullDiv & Bullish Engulfing",
+        limit=50,
+        sort_by="ticker",
+        sort_desc=False,
+    )
+    piercing_rows = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        event_class="R3_ONLY",
+        combo_pattern="BullDiv & Piercing Pattern",
+        limit=50,
+        sort_by="ticker",
+        sort_desc=False,
+    )
+
+    assert [row["ticker"] for row in engulfing_rows] == ["MMM"]
+    assert [row["ticker"] for row in piercing_rows] == ["NNN"]
+
+
+def test_fetch_divergence_events_combined_combo_filters_keep_only_intended_rows(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    stock_db = tmp_path / "osakedata.db"
+    _create_analysis_db(str(analysis_db))
+    _create_stock_db(str(stock_db))
+
+    ooo_dates = _build_trading_dates("2025-10-15", 30)
+    ppp_dates = _build_trading_dates("2025-11-15", 30)
+    qqq_dates = _build_trading_dates("2025-12-15", 30)
+    for ticker, dates, gap_value, drop_value, pattern, event_idx in [
+        ("OOO", ooo_dates, 20, 6.0, "BullDiv & Bullish Engulfing", 11),
+        ("PPP", ppp_dates, 18, 6.0, "BullDiv & Bullish Engulfing", 11),
+        ("QQQ", qqq_dates, 20, 21.0, "BullDiv & Bullish Engulfing", 11),
+    ]:
+        _insert_divergence_row(
+            str(analysis_db),
+            ticker=ticker,
+            event_date=dates[event_idx],
+            pivot_gap_r3=gap_value,
+            pivot_drop_pct_r3=drop_value,
+            pivot2_date_r3=dates[10],
+        )
+        _insert_combo_finding(
+            str(analysis_db),
+            ticker=ticker,
+            event_date=dates[event_idx],
+            pattern=pattern,
+        )
+        _insert_stock_series(str(stock_db), ticker=ticker, start_iso=dates[0])
+
+    rows = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        event_class="R3_ONLY",
+        combo_pattern="BullDiv & Bullish Engulfing",
+        combo_offset_min=0,
+        combo_offset_max=1,
+        min_gap=19,
+        max_gap=24,
+        min_drop=5.0,
+        max_drop=20.0,
+        limit=50,
+        sort_by="ticker",
+        sort_desc=False,
+    )
+
+    assert [row["ticker"] for row in rows] == ["OOO"]
+    assert rows[0]["combo_pattern"] == "BullDiv & Bullish Engulfing"
+    assert rows[0]["combo_offset"] == 1
+
+
+def test_fetch_divergence_events_collapses_duplicate_same_day_combo_deterministically(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    stock_db = tmp_path / "osakedata.db"
+    _create_analysis_db(str(analysis_db))
+    _create_stock_db(str(stock_db))
+
+    rows = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        event_class="R3_ONLY",
+        limit=20,
+        sort_by="ticker",
+        sort_desc=False,
+    )
+
+    bbb_row = next(row for row in rows if row["ticker"] == "BBB")
+    assert bbb_row["combo_pattern"] == "BullDiv & Hammer"
+
+
+def test_fetch_divergence_events_without_combo_filters_keeps_legacy_rows(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    stock_db = tmp_path / "osakedata.db"
+    _create_analysis_db(str(analysis_db))
+    _create_stock_db(str(stock_db))
+
+    base_rows = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        event_class="R3_ONLY",
+        limit=20,
+        sort_by="ticker",
+        sort_desc=False,
+    )
+    all_rows = fetch_divergence_events(
+        str(analysis_db),
+        stock_db_path=str(stock_db),
+        event_class="R3_ONLY",
+        combo_pattern="ALL",
+        limit=20,
+        sort_by="ticker",
+        sort_desc=False,
+    )
+
+    assert [row["ticker"] for row in base_rows] == ["BBB"]
+    assert [row["ticker"] for row in all_rows] == ["BBB"]
+    assert base_rows[0]["combo_pattern"] == "BullDiv & Hammer"
+    assert all_rows[0]["combo_pattern"] == "BullDiv & Hammer"
 
 
 def test_divergence_page_validates_date_range():

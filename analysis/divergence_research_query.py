@@ -15,6 +15,8 @@ VALID_SORT_COLUMNS = {
     "ticker",
     "date",
     "event_class",
+    "combo_pattern",
+    "combo_offset",
     "pivot2_date_r2",
     "pivot2_date_r3",
     "anchor_type",
@@ -41,6 +43,8 @@ EXPORT_COLUMNS = [
     "pivot_gap_r3",
     "pivot_drop_pct_r3",
     "pivot2_date_r3",
+    "combo_pattern",
+    "combo_offset",
     "anchor_type",
     "anchor_date",
     "rsi",
@@ -53,6 +57,12 @@ EXPORT_COLUMNS = [
 ]
 VALID_TREND_FILTERS = {"all", "downtrend_only"}
 VALID_ANCHORS = {"event", "pivot2"}
+VALID_COMBO_PATTERNS = {
+    "ALL",
+    "BullDiv & Hammer",
+    "BullDiv & Piercing Pattern",
+    "BullDiv & Bullish Engulfing",
+}
 
 
 def _resolve_stock_db_path(db_path: str, stock_db_path: str | None = None) -> str:
@@ -158,6 +168,18 @@ def _has_excluded_tickers_table(db_path: str) -> bool:
             SELECT name
             FROM sqlite_master
             WHERE type = 'table' AND name = 'excluded_tickers'
+            """
+        ).fetchone()
+    return row is not None
+
+
+def _has_analysis_findings_table(db_path: str) -> bool:
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'analysis_findings'
             """
         ).fetchone()
     return row is not None
@@ -442,6 +464,117 @@ def _attach_anchor_fields(
     return result
 
 
+def _attach_combo_fields(
+    rows: list[dict[str, Any]],
+    db_path: str,
+    stock_db_path: str,
+) -> list[dict[str, Any]]:
+    if not rows:
+        return []
+    if not _has_analysis_findings_table(db_path):
+        return [{**row, "combo_pattern": None, "combo_offset": None} for row in rows]
+
+    combo_map: dict[tuple[str, str], str] = {}
+    tickers = sorted({str(row["ticker"]) for row in rows})
+    dates = sorted({str(row["date"]) for row in rows})
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        for ticker_chunk in _chunked(tickers):
+            ticker_placeholders = ",".join("?" for _ in ticker_chunk)
+            for date_chunk in _chunked(dates):
+                date_placeholders = ",".join("?" for _ in date_chunk)
+                query = f"""
+                    SELECT ticker, date, pattern
+                    FROM analysis_findings
+                    WHERE ticker IN ({ticker_placeholders})
+                      AND date IN ({date_placeholders})
+                      AND pattern LIKE 'BullDiv & %'
+                    ORDER BY ticker, date, pattern ASC
+                """
+                combo_rows = conn.execute(
+                    query, [*ticker_chunk, *date_chunk]
+                ).fetchall()
+                for combo_row in combo_rows:
+                    key = (str(combo_row["ticker"]), str(combo_row["date"]))
+                    combo_map.setdefault(key, str(combo_row["pattern"]))
+
+    combo_rows = [
+        row
+        for row in rows
+        if combo_map.get((str(row["ticker"]), str(row["date"]))) is not None
+        and row.get("pivot2_date_r3") is not None
+    ]
+    if combo_rows:
+        min_index_date = min(
+            min(_parse_iso_date(str(row["date"])), _parse_iso_date(str(row["pivot2_date_r3"])))
+            for row in combo_rows
+        )
+        max_index_date = max(
+            max(_parse_iso_date(str(row["date"])), _parse_iso_date(str(row["pivot2_date_r3"])))
+            for row in combo_rows
+        )
+        price_rows = _fetch_price_history(
+            stock_db_path,
+            tickers=sorted({str(row["ticker"]) for row in combo_rows}),
+            start_date=min_index_date.isoformat(),
+            end_date=max_index_date.isoformat(),
+        )
+    else:
+        price_rows = []
+
+    positions_by_ticker: dict[str, dict[str, int]] = {}
+    for price_row in price_rows:
+        ticker = str(price_row["ticker"])
+        positions = positions_by_ticker.setdefault(ticker, {})
+        positions[str(price_row["date"])] = len(positions)
+
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        row_copy = dict(row)
+        combo_pattern = combo_map.get((str(row["ticker"]), str(row["date"])))
+        row_copy["combo_pattern"] = combo_pattern
+        combo_offset: int | None = None
+        if combo_pattern is not None:
+            pivot2_date_r3 = row.get("pivot2_date_r3")
+            if pivot2_date_r3 is not None:
+                ticker_positions = positions_by_ticker.get(str(row["ticker"]), {})
+                combo_idx = ticker_positions.get(str(row["date"]))
+                pivot_idx = ticker_positions.get(str(pivot2_date_r3))
+                if combo_idx is not None and pivot_idx is not None:
+                    combo_offset = combo_idx - pivot_idx
+        row_copy["combo_offset"] = combo_offset
+        result.append(row_copy)
+    return result
+
+
+def _apply_combo_filters(
+    rows: list[dict[str, Any]],
+    combo_pattern: str | None,
+    combo_offset_min: int | None,
+    combo_offset_max: int | None,
+) -> list[dict[str, Any]]:
+    if combo_pattern not in {None, "ALL"} and combo_pattern not in VALID_COMBO_PATTERNS:
+        raise ValueError(f"Unsupported combo pattern: {combo_pattern}")
+
+    result = rows
+    if combo_pattern not in {None, "ALL"}:
+        result = [row for row in result if row.get("combo_pattern") == combo_pattern]
+
+    if combo_offset_min is not None or combo_offset_max is not None:
+        filtered: list[dict[str, Any]] = []
+        for row in result:
+            combo_offset = row.get("combo_offset")
+            if combo_offset is None:
+                continue
+            if combo_offset_min is not None and combo_offset < combo_offset_min:
+                continue
+            if combo_offset_max is not None and combo_offset > combo_offset_max:
+                continue
+            filtered.append(row)
+        result = filtered
+    return result
+
+
 def _attach_forward_returns(
     rows: list[dict[str, Any]],
     stock_db_path: str,
@@ -527,6 +660,9 @@ def _finalize_filtered_rows(
     start_date: str | None = None,
     end_date: str | None = None,
     trend_filter: str = "all",
+    combo_pattern: str | None = None,
+    combo_offset_min: int | None = None,
+    combo_offset_max: int | None = None,
     stock_db_path: str | None = None,
 ) -> list[dict[str, Any]]:
     _validate_anchor(anchor)
@@ -549,6 +685,8 @@ def _finalize_filtered_rows(
     rows = _attach_downtrend_flags(rows, stock_path)
     rows = _apply_trend_filter(rows, trend_filter)
     rows = _attach_anchor_fields(rows, event_class=event_class, anchor=anchor)
+    rows = _attach_combo_fields(rows, db_path, stock_path)
+    rows = _apply_combo_filters(rows, combo_pattern, combo_offset_min, combo_offset_max)
     return _attach_forward_returns(rows, stock_path)
 
 
@@ -586,6 +724,9 @@ def fetch_divergence_events(
     start_date: str | None = None,
     end_date: str | None = None,
     trend_filter: str = "all",
+    combo_pattern: str | None = None,
+    combo_offset_min: int | None = None,
+    combo_offset_max: int | None = None,
     limit: int = 500,
     offset: int = 0,
     sort_by: str = "date",
@@ -606,6 +747,9 @@ def fetch_divergence_events(
         start_date=start_date,
         end_date=end_date,
         trend_filter=trend_filter,
+        combo_pattern=combo_pattern,
+        combo_offset_min=combo_offset_min,
+        combo_offset_max=combo_offset_max,
         stock_db_path=stock_db_path,
     )
     sorted_rows = _sort_rows(rows, sort_by, sort_desc)
@@ -626,6 +770,9 @@ def summarize_divergence_events(
     start_date: str | None = None,
     end_date: str | None = None,
     trend_filter: str = "all",
+    combo_pattern: str | None = None,
+    combo_offset_min: int | None = None,
+    combo_offset_max: int | None = None,
     stock_db_path: str | None = None,
 ) -> dict[str, Any]:
     rows = _finalize_filtered_rows(
@@ -642,6 +789,9 @@ def summarize_divergence_events(
         start_date=start_date,
         end_date=end_date,
         trend_filter=trend_filter,
+        combo_pattern=combo_pattern,
+        combo_offset_min=combo_offset_min,
+        combo_offset_max=combo_offset_max,
         stock_db_path=stock_db_path,
     )
     ret30_values = [row["ret_30d"] for row in rows if row["ret_30d"] is not None]
@@ -685,6 +835,9 @@ def fetch_divergence_heatmap(
     start_date: str | None = None,
     end_date: str | None = None,
     trend_filter: str = "all",
+    combo_pattern: str | None = None,
+    combo_offset_min: int | None = None,
+    combo_offset_max: int | None = None,
     stock_db_path: str | None = None,
 ) -> list[dict[str, Any]]:
     geometry_scope = _geometry_scope(event_class)
@@ -702,6 +855,9 @@ def fetch_divergence_heatmap(
         start_date=start_date,
         end_date=end_date,
         trend_filter=trend_filter,
+        combo_pattern=combo_pattern,
+        combo_offset_min=combo_offset_min,
+        combo_offset_max=combo_offset_max,
         stock_db_path=stock_db_path,
     )
     grouped: dict[tuple[int, int], list[float]] = {}
@@ -750,6 +906,9 @@ def export_divergence_events_csv(
     start_date: str | None = None,
     end_date: str | None = None,
     trend_filter: str = "all",
+    combo_pattern: str | None = None,
+    combo_offset_min: int | None = None,
+    combo_offset_max: int | None = None,
     export_path: str | None = None,
     stock_db_path: str | None = None,
 ) -> str:
@@ -767,6 +926,9 @@ def export_divergence_events_csv(
         start_date=start_date,
         end_date=end_date,
         trend_filter=trend_filter,
+        combo_pattern=combo_pattern,
+        combo_offset_min=combo_offset_min,
+        combo_offset_max=combo_offset_max,
         limit=1_000_000_000,
         offset=0,
         sort_by="date",
