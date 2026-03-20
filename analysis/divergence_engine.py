@@ -18,7 +18,7 @@ from .divergence_v1 import (
 PIVOT_RADIUS_R2 = 2
 PIVOT_RADIUS_R3 = 3
 MIN_V2_PIVOT_GAP = 5
-MAX_V2_PIVOT_GAP = 24
+MAX_V2_PIVOT_GAP = 30
 
 
 def compute_divergence_for_date(

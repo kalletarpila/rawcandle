@@ -355,7 +355,7 @@ def test_compute_divergence_series_accepts_v2_pair_with_gap_24(monkeypatch):
     assert [row["date"] for row in rows if row["is_bullish_divergence_r2"] == 1] == ["2025-06-29"]
 
 
-def test_compute_divergence_series_rejects_v2_pair_with_gap_25(monkeypatch):
+def test_compute_divergence_series_accepts_v2_pair_with_gap_25(monkeypatch):
     lows = [20.0, 19.0, 18.0, 19.0, 20.0] + list(range(21, 43)) + [17.0, 18.0, 19.0, 20.0]
     df = pd.DataFrame(
         {
@@ -375,7 +375,9 @@ def test_compute_divergence_series_rejects_v2_pair_with_gap_25(monkeypatch):
 
     rows = compute_divergence_series(df)
 
-    assert all(row["is_bullish_divergence_r2"] == 0 for row in rows)
+    event_rows = [row for row in rows if row["is_bullish_divergence_r2"] == 1]
+    assert len(event_rows) == 1
+    assert event_rows[0]["pivot_gap_r2"] == 25
 
 
 def test_compute_divergence_series_persists_bullish_geometry(monkeypatch):
