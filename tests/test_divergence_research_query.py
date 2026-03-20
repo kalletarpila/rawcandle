@@ -1222,6 +1222,7 @@ def test_divergence_page_presets_define_required_entries():
         "R3 Long Swing Pivot2",
         "R2_ONLY Event",
         "R2_AND_R3 Event",
+        "R3 Strong Combo (0,+1)",
     }
     assert required_presets.issubset(DivergencePage.PRESETS.keys())
     for preset_name in required_presets:
@@ -1233,6 +1234,9 @@ def test_divergence_page_presets_define_required_entries():
                 "anchor",
                 "trend_filter",
                 "market",
+                "combo_pattern",
+                "combo_offset_min",
+                "combo_offset_max",
                 "min_gap",
                 "max_gap",
                 "min_drop",
@@ -1260,10 +1264,13 @@ def test_divergence_page_apply_preset_populates_controls_and_triggers_refresh(mo
 
     assert page.event_class_dropdown.value == "R3_ONLY"
     assert page.anchor_dropdown.value == "Pivot2"
+    assert page.combo_pattern_dropdown.value == "All"
     assert page.min_gap_slider.value == 19
     assert page.max_gap_slider.value == 24
     assert page.min_drop_slider.value == 5
     assert page.max_drop_slider.value == 20
+    assert page.combo_offset_min_slider.value == -3
+    assert page.combo_offset_max_slider.value == 3
     assert page.start_date_field.value == ""
     assert page.end_date_field.value == ""
     assert page.filter_error_text.value == ""
@@ -1273,6 +1280,9 @@ def test_divergence_page_apply_preset_populates_controls_and_triggers_refresh(mo
             "anchor": "pivot2",
             "trend_filter": "all",
             "market": None,
+            "combo_pattern": "ALL",
+            "combo_offset_min": -3,
+            "combo_offset_max": 3,
             "min_gap": 19,
             "max_gap": 24,
             "min_drop": 5.0,
@@ -1298,6 +1308,67 @@ def test_divergence_page_apply_preset_supports_date_range(monkeypatch):
     assert page.end_date_field.value == "2025-12-31"
     assert page._get_filters()["start_date"] == "2025-01-01"
     assert page._get_filters()["end_date"] == "2025-12-31"
+
+
+def test_divergence_page_get_filters_maps_combo_controls(monkeypatch):
+    page = _build_divergence_page(monkeypatch)
+
+    page.combo_pattern_dropdown.value = "Piercing"
+    page.combo_offset_min_slider.value = 0
+    page.combo_offset_max_slider.value = 1
+
+    filters = page._get_filters()
+
+    assert filters["combo_pattern"] == "BullDiv & Piercing Pattern"
+    assert filters["combo_offset_min"] == 0
+    assert filters["combo_offset_max"] == 1
+
+
+def test_divergence_page_strong_combo_preset_sets_locked_values(monkeypatch):
+    page = _build_divergence_page(monkeypatch)
+    page._refresh = lambda _e=None: None
+    page.preset_dropdown.value = "R3 Strong Combo (0,+1)"
+
+    page._apply_preset()
+
+    filters = page._get_filters()
+    assert filters["event_class"] == "R3_ONLY"
+    assert filters["anchor"] == "pivot2"
+    assert filters["min_gap"] == 19
+    assert filters["min_drop"] == 5.0
+    assert filters["max_drop"] == 20.0
+    assert filters["combo_offset_min"] == 0
+    assert filters["combo_offset_max"] == 1
+    assert filters["combo_pattern"] == "ALL"
+
+
+def test_divergence_page_refresh_and_export_use_same_combo_filters(monkeypatch):
+    page = _build_divergence_page(monkeypatch)
+    page.combo_pattern_dropdown.value = "Hammer"
+    page.combo_offset_min_slider.value = 0
+    page.combo_offset_max_slider.value = 1
+
+    captured: dict[str, list[dict[str, object]]] = {"refresh": [], "export": []}
+
+    def fake_start_refresh_worker(filters):
+        captured["refresh"].append(filters)
+
+    def fake_export(*args, **kwargs):
+        captured["export"].append(kwargs)
+        return "/tmp/out.csv"
+
+    page._start_refresh_worker = fake_start_refresh_worker
+    monkeypatch.setattr(divergence_page_module, "export_divergence_events_csv", fake_export)
+
+    page._refresh()
+    page._export_csv(None)
+
+    assert captured["refresh"][0]["combo_pattern"] == "BullDiv & Hammer"
+    assert captured["refresh"][0]["combo_offset_min"] == 0
+    assert captured["refresh"][0]["combo_offset_max"] == 1
+    assert captured["export"][0]["combo_pattern"] == "BullDiv & Hammer"
+    assert captured["export"][0]["combo_offset_min"] == 0
+    assert captured["export"][0]["combo_offset_max"] == 1
 
 
 def test_divergence_page_manual_filter_change_keeps_manual_behavior(monkeypatch):

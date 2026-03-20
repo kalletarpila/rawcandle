@@ -24,6 +24,9 @@ class DivergencePage:
             "anchor": "Event",
             "trend_filter": "All BullDiv events",
             "market": "All Markets",
+            "combo_pattern": "All",
+            "combo_offset_min": -3,
+            "combo_offset_max": 3,
             "min_gap": 5,
             "max_gap": 24,
             "min_drop": 0,
@@ -38,6 +41,9 @@ class DivergencePage:
             "anchor": "Event",
             "trend_filter": "All BullDiv events",
             "market": "All Markets",
+            "combo_pattern": "All",
+            "combo_offset_min": -3,
+            "combo_offset_max": 3,
             "min_gap": 5,
             "max_gap": 24,
             "min_drop": 0,
@@ -52,6 +58,9 @@ class DivergencePage:
             "anchor": "Pivot2",
             "trend_filter": "All BullDiv events",
             "market": "All Markets",
+            "combo_pattern": "All",
+            "combo_offset_min": -3,
+            "combo_offset_max": 3,
             "min_gap": 5,
             "max_gap": 24,
             "min_drop": 0,
@@ -66,6 +75,9 @@ class DivergencePage:
             "anchor": "Event",
             "trend_filter": "All BullDiv events",
             "market": "All Markets",
+            "combo_pattern": "All",
+            "combo_offset_min": -3,
+            "combo_offset_max": 3,
             "min_gap": 19,
             "max_gap": 24,
             "min_drop": 5,
@@ -80,6 +92,9 @@ class DivergencePage:
             "anchor": "Pivot2",
             "trend_filter": "All BullDiv events",
             "market": "All Markets",
+            "combo_pattern": "All",
+            "combo_offset_min": -3,
+            "combo_offset_max": 3,
             "min_gap": 19,
             "max_gap": 24,
             "min_drop": 5,
@@ -94,6 +109,9 @@ class DivergencePage:
             "anchor": "Event",
             "trend_filter": "All BullDiv events",
             "market": "All Markets",
+            "combo_pattern": "All",
+            "combo_offset_min": -3,
+            "combo_offset_max": 3,
             "min_gap": 5,
             "max_gap": 24,
             "min_drop": 0,
@@ -108,6 +126,9 @@ class DivergencePage:
             "anchor": "Event",
             "trend_filter": "All BullDiv events",
             "market": "All Markets",
+            "combo_pattern": "All",
+            "combo_offset_min": -3,
+            "combo_offset_max": 3,
             "min_gap": 5,
             "max_gap": 24,
             "min_drop": 0,
@@ -122,6 +143,9 @@ class DivergencePage:
             "anchor": "Event",
             "trend_filter": "All BullDiv events",
             "market": "All Markets",
+            "combo_pattern": "All",
+            "combo_offset_min": -3,
+            "combo_offset_max": 3,
             "min_gap": 19,
             "max_gap": 24,
             "min_drop": 5,
@@ -131,6 +155,23 @@ class DivergencePage:
             "start_date": "2025-01-01",
             "end_date": "2025-12-31",
         },
+        "R3 Strong Combo (0,+1)": {
+            "event_class": "R3_ONLY",
+            "anchor": "Pivot2",
+            "trend_filter": "All BullDiv events",
+            "market": "All Markets",
+            "combo_pattern": "All",
+            "combo_offset_min": 0,
+            "combo_offset_max": 1,
+            "min_gap": 19,
+            "max_gap": 24,
+            "min_drop": 5,
+            "max_drop": 20,
+            "min_rsi": 1,
+            "max_rsi": 100,
+            "start_date": "",
+            "end_date": "",
+        },
     }
     TABLE_COLUMNS = [
         ("ticker", "Ticker"),
@@ -138,6 +179,8 @@ class DivergencePage:
         ("event_class", "Event class"),
         ("pivot2_date_r2", "Pivot2 R2"),
         ("pivot2_date_r3", "Pivot2 R3"),
+        ("combo_pattern", "Combo"),
+        ("combo_offset", "Combo offset"),
         ("anchor_type", "Anchor type"),
         ("anchor_date", "Anchor date"),
         ("pivot_gap_r2", "Gap R2"),
@@ -174,12 +217,15 @@ class DivergencePage:
         self.anchor_dropdown: ft.Dropdown | None = None
         self.trend_filter_dropdown: ft.Dropdown | None = None
         self.market_dropdown: ft.Dropdown | None = None
+        self.combo_pattern_dropdown: ft.Dropdown | None = None
         self.min_gap_slider: ft.Slider | None = None
         self.max_gap_slider: ft.Slider | None = None
         self.min_drop_slider: ft.Slider | None = None
         self.max_drop_slider: ft.Slider | None = None
         self.min_rsi_slider: ft.Slider | None = None
         self.max_rsi_slider: ft.Slider | None = None
+        self.combo_offset_min_slider: ft.Slider | None = None
+        self.combo_offset_max_slider: ft.Slider | None = None
         self.start_date_field: ft.TextField | None = None
         self.end_date_field: ft.TextField | None = None
         self.summary_text: ft.Text | None = None
@@ -245,12 +291,40 @@ class DivergencePage:
             options=market_options,
             on_change=self._on_filter_change,
         )
+        self.combo_pattern_dropdown = ft.Dropdown(
+            label="Combo pattern",
+            width=180,
+            value="All",
+            options=[
+                ft.dropdown.Option("All"),
+                ft.dropdown.Option("Engulfing"),
+                ft.dropdown.Option("Piercing"),
+                ft.dropdown.Option("Hammer"),
+            ],
+            on_change=self._on_filter_change,
+        )
         self.min_gap_slider = ft.Slider(min=5, max=24, divisions=19, value=5, label="{value}", on_change_end=self._on_filter_change)
         self.max_gap_slider = ft.Slider(min=5, max=24, divisions=19, value=24, label="{value}", on_change_end=self._on_filter_change)
         self.min_drop_slider = ft.Slider(min=0, max=50, divisions=50, value=0, label="{value}", on_change_end=self._on_filter_change)
         self.max_drop_slider = ft.Slider(min=0, max=50, divisions=50, value=50, label="{value}", on_change_end=self._on_filter_change)
         self.min_rsi_slider = ft.Slider(min=1, max=100, divisions=99, value=1, label="{value}", on_change_end=self._on_filter_change)
         self.max_rsi_slider = ft.Slider(min=1, max=100, divisions=99, value=100, label="{value}", on_change_end=self._on_filter_change)
+        self.combo_offset_min_slider = ft.Slider(
+            min=-3,
+            max=3,
+            divisions=6,
+            value=-3,
+            label="{value}",
+            on_change_end=self._on_filter_change,
+        )
+        self.combo_offset_max_slider = ft.Slider(
+            min=-3,
+            max=3,
+            divisions=6,
+            value=3,
+            label="{value}",
+            on_change_end=self._on_filter_change,
+        )
         self.start_date_field = ft.TextField(
             label="Start date",
             width=160,
@@ -319,6 +393,7 @@ class DivergencePage:
                                                     self.anchor_dropdown,
                                                     self.trend_filter_dropdown,
                                                     self.market_dropdown,
+                                                    self.combo_pattern_dropdown,
                                                     self.start_date_field,
                                                     self.end_date_field,
                                                     refresh_button,
@@ -350,6 +425,14 @@ class DivergencePage:
                                                 [
                                                     ft.Column([ft.Text("Min RSI"), self.min_rsi_slider], expand=True),
                                                     ft.Column([ft.Text("Max RSI"), self.max_rsi_slider], expand=True),
+                                                ],
+                                                spacing=16,
+                                            ),
+                                            ft.Text("Combo offset"),
+                                            ft.Row(
+                                                [
+                                                    ft.Column([ft.Text("Min offset"), self.combo_offset_min_slider], expand=True),
+                                                    ft.Column([ft.Text("Max offset"), self.combo_offset_max_slider], expand=True),
                                                 ],
                                                 spacing=16,
                                             ),
@@ -419,12 +502,16 @@ class DivergencePage:
         max_drop = float(self.max_drop_slider.value)
         min_rsi = float(self.min_rsi_slider.value)
         max_rsi = float(self.max_rsi_slider.value)
+        combo_offset_min = int(self.combo_offset_min_slider.value)
+        combo_offset_max = int(self.combo_offset_max_slider.value)
         if min_gap > max_gap:
             min_gap, max_gap = max_gap, min_gap
         if min_drop > max_drop:
             min_drop, max_drop = max_drop, min_drop
         if min_rsi > max_rsi:
             min_rsi, max_rsi = max_rsi, min_rsi
+        if combo_offset_min > combo_offset_max:
+            combo_offset_min, combo_offset_max = combo_offset_max, combo_offset_min
         event_class = self.event_class_dropdown.value
         if event_class == "All":
             event_class = None
@@ -441,6 +528,14 @@ class DivergencePage:
         market = self.market_dropdown.value
         if market == "All Markets":
             market = None
+        combo_pattern_label = self.combo_pattern_dropdown.value
+        combo_pattern_map = {
+            "All": "ALL",
+            "Engulfing": "BullDiv & Bullish Engulfing",
+            "Piercing": "BullDiv & Piercing Pattern",
+            "Hammer": "BullDiv & Hammer",
+        }
+        combo_pattern = combo_pattern_map.get(combo_pattern_label or "All", "ALL")
         start_date = (self.start_date_field.value or "").strip()
         end_date = (self.end_date_field.value or "").strip()
         validation_error = self.validate_date_range(start_date, end_date)
@@ -451,6 +546,9 @@ class DivergencePage:
             "anchor": anchor,
             "trend_filter": trend_filter,
             "market": market,
+            "combo_pattern": combo_pattern,
+            "combo_offset_min": combo_offset_min,
+            "combo_offset_max": combo_offset_max,
             "min_gap": min_gap,
             "max_gap": max_gap,
             "min_drop": min_drop,
@@ -470,6 +568,9 @@ class DivergencePage:
         self.anchor_dropdown.value = preset["anchor"]
         self.trend_filter_dropdown.value = preset["trend_filter"]
         self.market_dropdown.value = preset["market"]
+        self.combo_pattern_dropdown.value = preset["combo_pattern"]
+        self.combo_offset_min_slider.value = preset["combo_offset_min"]
+        self.combo_offset_max_slider.value = preset["combo_offset_max"]
         self.min_gap_slider.value = preset["min_gap"]
         self.max_gap_slider.value = preset["max_gap"]
         self.min_drop_slider.value = preset["min_drop"]
@@ -634,6 +735,8 @@ class DivergencePage:
                     ft.DataCell(ft.Text(str(row["event_class"]))),
                     ft.DataCell(ft.Text(str(row.get("pivot2_date_r2") or ""))),
                     ft.DataCell(ft.Text(str(row.get("pivot2_date_r3") or ""))),
+                    ft.DataCell(ft.Text(str(row.get("combo_pattern") or ""))),
+                    ft.DataCell(ft.Text(self._fmt_int(row.get("combo_offset")))),
                     ft.DataCell(ft.Text(str(row.get("anchor_type") or ""))),
                     ft.DataCell(ft.Text(str(row.get("anchor_date") or ""))),
                     ft.DataCell(ft.Text(self._fmt_int(row["pivot_gap_r2"]))),
