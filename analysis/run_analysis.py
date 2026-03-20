@@ -506,31 +506,34 @@ def run_candlestick_analysis(
                             f"{ticker} {row['pvm'].date().isoformat()} Bullish Divergence checked - FOUND (strength {strength})"
                         )
 
-        # Yhdistelmäkuviot: jos samalle päivälle on Bullish Divergence ja kynttilä (1-6),
-        # vaihdetaan pienimmän koodin mukainen kynttilä komboksi (71-76).
+        # Yhdistelmäkuviot: jos päivä on comboikkunassa ja samalla päivällä on
+        # Bullish Divergence + yksi tai useampi peruskynttilä, lisää jokaisesta
+        # kelvollisesta peruskynttilästä oma combo-rivi säilyttäen alkuperäiset löydöt.
         if found and current_date in combo_eligible_dates:
-            chosen_idx = None
-            chosen_pattern = None
-            for base_pattern in BASE_CANDLE_ORDER:
-                for idx_found, entry in enumerate(found):
-                    if entry.get("pattern") == base_pattern:
-                        chosen_idx = idx_found
-                        chosen_pattern = base_pattern
-                        break
-                if chosen_idx is not None:
-                    break
-
-            if chosen_pattern:
-                combo_name = COMBO_PATTERN_MAP.get(chosen_pattern)
-                if combo_name:
-                    found_entry = found[chosen_idx]
-                    found_entry["pattern"] = combo_name
-                    if "description" in found_entry and isinstance(
-                        found_entry["description"], str
-                    ):
-                        found_entry["description"] = found_entry[
-                            "description"
-                        ].replace(chosen_pattern, combo_name)
+            existing_patterns = {
+                str(entry.get("pattern"))
+                for entry in found
+                if entry.get("pattern") is not None
+            }
+            combo_entries = []
+            for entry in found:
+                base_pattern = entry.get("pattern")
+                if base_pattern not in BASE_CANDLE_ORDER:
+                    continue
+                combo_name = COMBO_PATTERN_MAP.get(base_pattern)
+                if not combo_name or combo_name in existing_patterns:
+                    continue
+                combo_entry = dict(entry)
+                combo_entry["pattern"] = combo_name
+                if "description" in combo_entry and isinstance(
+                    combo_entry["description"], str
+                ):
+                    combo_entry["description"] = combo_entry[
+                        "description"
+                    ].replace(str(base_pattern), combo_name)
+                combo_entries.append(combo_entry)
+                existing_patterns.add(combo_name)
+            found.extend(combo_entries)
 
         if found:
             # Lisää RSI-arvo jokaiseen löydökseen

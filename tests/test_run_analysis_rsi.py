@@ -361,9 +361,59 @@ def test_run_candlestick_analysis_forms_combo_from_db_divergence(tmp_path):
 
     key = "TEST|2026-02-02"
     assert results and key in results
-    assert len(results[key]) == 2
+    assert len(results[key]) == 3
+    assert any(item["pattern"] == "Bullish Engulfing" for item in results[key])
     assert any(item["pattern"] == "BullDiv & Bullish Engulfing" for item in results[key])
     assert any(item["pattern"] == "Bullish Divergence" for item in results[key])
+
+
+def test_run_candlestick_analysis_forms_all_eligible_combos_for_same_day(tmp_path):
+    osake_db, analysis_db = _create_candles_test_dbs(tmp_path)
+
+    with sqlite3.connect(osake_db) as conn:
+        conn.execute("DELETE FROM osakedata WHERE osake = ?", ("TEST",))
+        conn.executemany(
+            """
+            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ("TEST", "2026-02-01", 10.0, 10.0, 9.0, 9.0, 1_000, "usa"),
+                ("TEST", "2026-02-02", 10.00, 10.08, 9.00, 10.05, 1_200, "usa"),
+            ],
+        )
+
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO divergence_data (ticker, date, bullish_strength, bearish_strength, rsi, pivot2_date_r3, is_bullish_divergence_r3)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("TEST", "2026-02-02", 0.62, 0.0, 55.5, None, 1),
+        )
+
+    results = run_candlestick_analysis(
+        str(osake_db),
+        "TEST",
+        patterns=["Hammer", "Dragonfly Doji", "Bullish Divergence"],
+        start_date="2026-02-01",
+        end_date="2026-02-02",
+        progress_callback=None,
+        downtrend_filter=False,
+        min_decline_percent=3.0,
+        use_ma_filter=False,
+        use_volume_filter=False,
+        analysis_db_path=str(analysis_db),
+    )
+
+    key = "TEST|2026-02-02"
+    assert results and key in results
+    patterns = [item["pattern"] for item in results[key]]
+    assert "Hammer" in patterns
+    assert "Dragonfly Doji" in patterns
+    assert "Bullish Divergence" in patterns
+    assert "BullDiv & Hammer" in patterns
+    assert "BullDiv & Dragonfly Doji" in patterns
 
 
 def test_run_candlestick_analysis_forms_combo_within_pivot2_window(tmp_path):
@@ -443,6 +493,7 @@ def test_run_candlestick_analysis_forms_combo_within_pivot2_window(tmp_path):
 
     key = "TEST|2026-02-05"
     assert results and key in results
+    assert any(item["pattern"] == "Bullish Engulfing" for item in results[key])
     assert any(item["pattern"] == "BullDiv & Bullish Engulfing" for item in results[key])
     assert not any(item["pattern"] == "Bullish Divergence" for item in results[key])
 
@@ -509,6 +560,58 @@ def test_run_candlestick_analysis_candle_only_behavior_unchanged(tmp_path, monke
     assert results and key in results
     assert len(results[key]) == 1
     assert results[key][0]["pattern"] == "Bullish Engulfing"
+    assert not any(item["pattern"].startswith("BullDiv & ") for item in results[key])
+
+
+def test_run_candlestick_analysis_duplicate_combo_protection(tmp_path, monkeypatch):
+    osake_db, analysis_db = _create_candles_test_dbs(tmp_path)
+
+    with sqlite3.connect(osake_db) as conn:
+        conn.execute("DELETE FROM osakedata WHERE osake = ?", ("TEST",))
+        conn.executemany(
+            """
+            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ("TEST", "2026-02-01", 10.0, 10.0, 9.0, 9.0, 1_000, "usa"),
+                ("TEST", "2026-02-02", 10.00, 10.08, 9.00, 10.05, 1_200, "usa"),
+            ],
+        )
+
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO divergence_data (ticker, date, bullish_strength, bearish_strength, rsi, pivot2_date_r3, is_bullish_divergence_r3)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("TEST", "2026-02-02", 0.62, 0.0, 55.5, None, 1),
+        )
+
+    monkeypatch.setitem(
+        __import__("analysis.run_analysis", fromlist=["COMBO_PATTERN_MAP"]).COMBO_PATTERN_MAP,
+        "Dragonfly Doji",
+        "BullDiv & Hammer",
+    )
+
+    results = run_candlestick_analysis(
+        str(osake_db),
+        "TEST",
+        patterns=["Hammer", "Dragonfly Doji", "Bullish Divergence"],
+        start_date="2026-02-01",
+        end_date="2026-02-02",
+        progress_callback=None,
+        downtrend_filter=False,
+        min_decline_percent=3.0,
+        use_ma_filter=False,
+        use_volume_filter=False,
+        analysis_db_path=str(analysis_db),
+    )
+
+    key = "TEST|2026-02-02"
+    assert results and key in results
+    combo_patterns = [item["pattern"] for item in results[key] if item["pattern"].startswith("BullDiv & ")]
+    assert combo_patterns.count("BullDiv & Hammer") == 1
 
 
 def test_run_candlestick_analysis_uses_wilder_rsi_fallback(tmp_path):
