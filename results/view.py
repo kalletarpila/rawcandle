@@ -1459,7 +1459,6 @@ def create_results_view(app) -> ft.View:
                             spacing=10,
                         ),
                         width=400,
-                        height=200,
                     ),
                     actions=[
                         ft.TextButton("Peruuta", on_click=close_dialog),
