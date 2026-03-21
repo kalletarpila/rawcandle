@@ -140,3 +140,84 @@ def test_excel_exporter_includes_market_column(tmp_path):
     headers = [ws.cell(row=1, column=idx).value for idx in range(1, 6)]
     assert headers[:4] == ["ticker", "date", "market", "candle_pattern"]
     assert ws["C2"].value == "usa"
+
+
+def test_excel_exporter_excludes_removed_bulldiv_columns(tmp_path):
+    db_path = _prepare_results_db(Path(tmp_path))
+    exporter = ExcelExporter(db_path)
+
+    output_file = Path(tmp_path) / "no_bulldiv_extra.xlsx"
+    success, message = exporter.export_to_excel(str(output_file))
+
+    assert success, message
+    wb = load_workbook(output_file)
+    ws = wb.active
+    headers = [cell.value for cell in ws[1]]
+
+    removed_headers = [
+        "BullDiv_recent_strength",
+        "BullDiv_recent_offset",
+        "Has_BullDiv_recent",
+        "bearish_divergence",
+        "bullish_divergence",
+        "bullDiv_last_1d",
+        "bullDiv_last_2d",
+        "bullDiv_last_3d",
+        "bullDiv_last_3d_any",
+        "is_Hammer_only_t0",
+        "is_Hammer_and_BullDiv_t0",
+        "is_Hammer_and_BullDiv_recent_2d",
+        "is_Hammer_and_BullDiv_recent_3d",
+        "is_Hammer_and_BullDiv_recent_5d",
+        "is_Bullish_Engulfing_only_t0",
+        "is_Bullish_Engulfing_and_BullDiv_t0",
+        "is_Bullish_Engulfing_and_BullDiv_recent_2d",
+        "is_Bullish_Engulfing_and_BullDiv_recent_3d",
+        "is_Bullish_Engulfing_and_BullDiv_recent_5d",
+        "is_Piercing_Pattern_only_t0",
+        "is_Piercing_Pattern_and_BullDiv_t0",
+        "is_Piercing_Pattern_and_BullDiv_recent_2d",
+        "is_Piercing_Pattern_and_BullDiv_recent_3d",
+        "is_Piercing_Pattern_and_BullDiv_recent_5d",
+        "is_Three_White_Soldiers_only_t0",
+        "is_Three_White_Soldiers_and_BullDiv_t0",
+        "is_Three_White_Soldiers_and_BullDiv_recent_2d",
+        "is_Three_White_Soldiers_and_BullDiv_recent_3d",
+        "is_Three_White_Soldiers_and_BullDiv_recent_5d",
+        "is_Morning_Star_only_t0",
+        "is_Morning_Star_and_BullDiv_t0",
+        "is_Morning_Star_and_BullDiv_recent_2d",
+        "is_Morning_Star_and_BullDiv_recent_3d",
+        "is_Morning_Star_and_BullDiv_recent_5d",
+        "is_Dragonfly_Doji_only_t0",
+        "is_Dragonfly_Doji_and_BullDiv_t0",
+        "is_Dragonfly_Doji_and_BullDiv_recent_2d",
+        "is_Dragonfly_Doji_and_BullDiv_recent_3d",
+        "is_Dragonfly_Doji_and_BullDiv_recent_5d",
+        "is_candle_day",
+        "signal_combo_code",
+        "num_candles_same_day",
+        "has_multi_candle_combo",
+        "has_bullish_divergence_same_day",
+        "signal_count_same_day",
+        "unique_patterns_same_day",
+        "max_strength_same_day",
+        "second_best_strength_same_day",
+        "sum_strength_same_day",
+        "is_crisis",
+        "has_blackout_data",
+        "is_earnings_t0",
+        "is_earnings_window",
+        "is_dividend_t0",
+        "is_dividend_window",
+        "is_blackout_t0",
+        "is_blackout_window",
+        "exclude_from_regression",
+        "pivot_low_strength_3",
+        "pivot_low_strength_5",
+        "pivot_high_strength_3",
+        "pivot_high_strength_5",
+    ]
+
+    for header in removed_headers:
+        assert header not in headers
