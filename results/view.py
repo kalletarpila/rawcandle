@@ -1273,9 +1273,12 @@ def create_results_view(app) -> ft.View:
 
                 def on_mode_change(e_mode):
                     """Aktivoi/deaktivoi määräkenttä."""
-                    current_value = getattr(e_mode.control, "value", None)
+                    current_value = getattr(e_mode, "data", None) or getattr(
+                        e_mode.control, "value", None
+                    )
                     is_random = current_value == "random"
                     sample_size_field.current.disabled = not is_random
+                    sample_size_field.current.read_only = not is_random
                     if is_random and not sample_size_field.current.value:
                         sample_size_field.current.value = str(total_count)
                     sample_size_field.current.update()
