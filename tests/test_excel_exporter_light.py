@@ -69,7 +69,8 @@ def test_excel_exporter_writes_rows(tmp_path):
     wb = load_workbook(output_file)
     ws = wb.active
     assert ws["A2"].value == "AAA"
-    assert ws["C2"].value == 1
+    assert ws["C2"].value == "0"
+    assert ws["D2"].value == 1
 
 
 def test_excel_exporter_applies_filters(tmp_path):
@@ -96,7 +97,7 @@ def test_excel_exporter_applies_filters(tmp_path):
     assert ws.max_row == 2  # header + 1 row
     assert ws["A2"].value == "BBB"
     assert ws["B2"].value == "2024-02-10"
-    assert ws["C2"].value == 0
+    assert ws["D2"].value == 0
 
 
 def test_excel_exporter_extreme_filters_drop_rows(tmp_path):
@@ -121,3 +122,21 @@ def test_excel_exporter_extreme_filters_drop_rows(tmp_path):
     # Vain BBB jää (ei ylitä 150, ei alita 80, eikä None-arvoja)
     assert ws.max_row == 2  # header + BBB
     assert ws["A2"].value == "BBB"
+
+
+def test_excel_exporter_includes_market_column(tmp_path):
+    db_path = _prepare_results_db(
+        Path(tmp_path),
+        [{"ticker": "AAA", "market": "usa", "candle_pattern": 1}],
+    )
+    exporter = ExcelExporter(db_path)
+
+    output_file = Path(tmp_path) / "market.xlsx"
+    success, message = exporter.export_to_excel(str(output_file))
+
+    assert success, message
+    wb = load_workbook(output_file)
+    ws = wb.active
+    headers = [ws.cell(row=1, column=idx).value for idx in range(1, 6)]
+    assert headers[:4] == ["ticker", "date", "market", "candle_pattern"]
+    assert ws["C2"].value == "usa"

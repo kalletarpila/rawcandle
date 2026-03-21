@@ -43,6 +43,7 @@ class ExcelExporter:
     HEADERS = [
         "ticker",
         "date",
+        "market",
         "candle_pattern",
         "signal_strength",
         "t_1_alin",
