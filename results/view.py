@@ -1271,17 +1271,24 @@ def create_results_view(app) -> ft.View:
                 export_mode = ft.Ref[ft.RadioGroup]()
                 sample_size_field = ft.Ref[ft.TextField]()
 
+                def set_sample_size_editable(is_random: bool):
+                    """Toggle sample size field editability deterministically."""
+                    if sample_size_field.current is None:
+                        return
+                    sample_size_field.current.disabled = False
+                    sample_size_field.current.read_only = not is_random
+                    sample_size_field.current.can_request_focus = is_random
+                    if is_random and not sample_size_field.current.value:
+                        sample_size_field.current.value = str(total_count)
+                    sample_size_field.current.update()
+
                 def on_mode_change(e_mode):
                     """Aktivoi/deaktivoi määräkenttä."""
                     current_value = getattr(e_mode, "data", None) or getattr(
                         e_mode.control, "value", None
                     )
                     is_random = current_value == "random"
-                    sample_size_field.current.disabled = not is_random
-                    sample_size_field.current.read_only = not is_random
-                    if is_random and not sample_size_field.current.value:
-                        sample_size_field.current.value = str(total_count)
-                    sample_size_field.current.update()
+                    set_sample_size_editable(is_random)
                     e.page.update()
 
                 def close_dialog(e_close):
@@ -1440,7 +1447,9 @@ def create_results_view(app) -> ft.View:
                                         label="Tapahtumien määrä",
                                         hint_text=f"1 - {total_count}",
                                         keyboard_type=ft.KeyboardType.NUMBER,
-                                        disabled=True,
+                                        disabled=False,
+                                        read_only=True,
+                                        can_request_focus=False,
                                         width=200,
                                     ),
                                     padding=ft.padding.only(left=30),
