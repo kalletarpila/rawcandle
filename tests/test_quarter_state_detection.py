@@ -288,8 +288,10 @@ class _FakePage:
 class _QuarterlessTicker:
     def __init__(self):
         self.quarterly_income_stmt = pd.DataFrame()
+        self.history_calls = []
 
     def history(self, start=None, end=None):
+        self.history_calls.append((start, end))
         index = pd.to_datetime(["2026-05-05"])
         return pd.DataFrame(
             {
@@ -357,3 +359,58 @@ def test_update_stock_data_counts_missing_quarter_detection(tmp_path, monkeypatc
     assert row is not None
     assert row[4] is None
     assert row[5] == 0
+
+
+def test_update_stock_data_fetches_only_forward_from_latest_db_day(tmp_path, monkeypatch):
+    price_db = tmp_path / "osakedata.db"
+    conn = sqlite3.connect(price_db)
+    conn.execute(
+        """
+        CREATE TABLE osakedata (
+            osake TEXT NOT NULL,
+            pvm TEXT NOT NULL,
+            open REAL,
+            high REAL,
+            low REAL,
+            close REAL,
+            volume INTEGER,
+            market TEXT NOT NULL DEFAULT 'usa',
+            PRIMARY KEY (osake, pvm)
+        )
+        """
+    )
+    conn.executemany(
+        """
+        INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            ("AAA", "2026-04-15", 10.0, 11.0, 9.0, 10.5, 100000, "usa"),
+            ("AAA", "2026-05-01", 10.2, 11.2, 9.2, 10.7, 120000, "usa"),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    app = _build_app(tmp_path)
+    app.osakedata_db_path = str(price_db)
+    app.analysis_db_path = str(tmp_path / "analysis.db")
+    app.loading_text = SimpleNamespace(value="", color=None)
+    app.page = _FakePage()
+    app.update_start_input = SimpleNamespace(value="")
+    app.update_market_dropdown = SimpleNamespace(value="")
+    app._calculate_and_save_divergences = lambda ticker, only_missing=True: (True, 0, "")
+
+    fake_ticker = _QuarterlessTicker()
+    monkeypatch.setattr(main.yf, "Ticker", lambda ticker: fake_ticker)
+    monkeypatch.setattr(main, "validate_market", lambda market, db_path=None: True)
+    monkeypatch.setattr(main.time, "sleep", lambda *args, **kwargs: None)
+
+    import analysis.run_analysis
+
+    monkeypatch.setattr(analysis.run_analysis, "run_candlestick_analysis", lambda *args, **kwargs: {})
+
+    app.update_stock_data(None)
+
+    assert fake_ticker.history_calls
+    assert fake_ticker.history_calls[0][0] == "2026-05-02"

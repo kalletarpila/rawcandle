@@ -14,7 +14,11 @@ class _FakePage:
 
 
 class _FakeTicker:
+    def __init__(self):
+        self.history_calls = []
+
     def history(self, start=None, end=None):
+        self.history_calls.append((start, end))
         index = pd.to_datetime(["2026-01-02", "2026-01-05"])
         return pd.DataFrame(
             {
@@ -30,8 +34,9 @@ class _FakeTicker:
 
 def test_fetch_stock_data_calls_single_ticker_metadata_refresh(tmp_path, monkeypatch):
     called = []
+    fake_ticker = _FakeTicker()
 
-    monkeypatch.setattr(main.yf, "Ticker", lambda ticker: _FakeTicker())
+    monkeypatch.setattr(main.yf, "Ticker", lambda ticker: fake_ticker)
     monkeypatch.setattr(main, "validate_market", lambda market, db_path=None: True)
     monkeypatch.setattr(main, "sync_splits_for_ticker", lambda *args, **kwargs: 0)
     monkeypatch.setattr(
@@ -65,4 +70,3 @@ def test_fetch_stock_data_calls_single_ticker_metadata_refresh(tmp_path, monkeyp
     app.fetch_stock_data(None)
 
     assert called == [(app.osakedata_db_path, "AAA", "usa")]
-

@@ -3345,25 +3345,19 @@ class RawCandleApp:
             self.loading_text.color = ft.Colors.BLUE_600
             self.page.update()
 
-            for idx, (ticker, first_date, last_date, ticker_market) in enumerate(
+            for idx, (_ticker, _first_date, _last_date, _ticker_market) in enumerate(
                 stocks, 1
             ):
+                ticker = _ticker
+                last_date = _last_date
+                ticker_market = _ticker_market
                 ticker_market = (ticker_market or "usa").strip().lower()
                 if not validate_market(ticker_market, db_path=self.osakedata_db_path):
                     ticker_market = "usa"
 
                 needs_update = last_date < yesterday
-                needs_historical = first_date > "2018-01-02"
-                historical_end = "2023-06-30"
 
-                if start_override:
-                    # Jos annettu aloituspäivä, käytä sitä laskennassa
-                    needs_historical = first_date > start_override
-                    historical_start = start_override
-                else:
-                    historical_start = "2018-01-02"
-
-                if not needs_update and not needs_historical:
+                if not needs_update:
                     skipped_count += 1
                     if idx % 10 == 0:
                         self.loading_text.value = (
@@ -3381,16 +3375,6 @@ class RawCandleApp:
                 )
 
                 date_ranges = []
-                if needs_historical:
-                    hist_end = min(
-                        historical_end,
-                        (
-                            datetime.fromisoformat(first_date) - timedelta(days=1)
-                        ).strftime("%Y-%m-%d"),
-                    )
-                    if hist_end >= historical_start:
-                        date_ranges.append((historical_start, hist_end))
-
                 if needs_update:
                     effective_start = update_start
                     if start_override:
