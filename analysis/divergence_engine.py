@@ -169,6 +169,8 @@ def _compute_v2_event_flags_for_radius(
     List[int],
     List[Optional[int]],
     List[Optional[float]],
+    List[Optional[int]],
+    List[Optional[float]],
     List[Optional[str]],
 ]:
     size = len(rsi_values)
@@ -176,6 +178,8 @@ def _compute_v2_event_flags_for_radius(
     bearish_flags = [0] * size
     hidden_bullish_flags = [0] * size
     hidden_bearish_flags = [0] * size
+    hidden_pivot_gaps: List[Optional[int]] = [None] * size
+    hidden_pivot_drop_pcts: List[Optional[float]] = [None] * size
     pivot_gaps: List[Optional[int]] = [None] * size
     pivot_drop_pcts: List[Optional[float]] = [None] * size
     pivot2_dates: List[Optional[str]] = [None] * size
@@ -186,6 +190,8 @@ def _compute_v2_event_flags_for_radius(
             bearish_flags,
             hidden_bullish_flags,
             hidden_bearish_flags,
+            hidden_pivot_gaps,
+            hidden_pivot_drop_pcts,
             pivot_gaps,
             pivot_drop_pcts,
             pivot2_dates,
@@ -254,6 +260,12 @@ def _compute_v2_event_flags_for_radius(
             if event_idx >= size:
                 continue
             hidden_bullish_flags[event_idx] = 1
+            if hidden_pivot_gaps[event_idx] is None:
+                hidden_pivot_gaps[event_idx] = pivot_gap
+            if hidden_pivot_drop_pcts[event_idx] is None:
+                hidden_pivot_drop_pcts[event_idx] = (
+                    (lows[p1] - lows[p2]) / lows[p1]
+                ) * 100.0
             break
 
     for pivot_idx in range(1, len(price_pivot_highs)):
@@ -302,6 +314,12 @@ def _compute_v2_event_flags_for_radius(
             if event_idx >= size:
                 continue
             hidden_bearish_flags[event_idx] = 1
+            if hidden_pivot_gaps[event_idx] is None:
+                hidden_pivot_gaps[event_idx] = pivot_gap
+            if hidden_pivot_drop_pcts[event_idx] is None:
+                hidden_pivot_drop_pcts[event_idx] = (
+                    (highs[p2] - highs[p1]) / highs[p1]
+                ) * 100.0
             break
 
     return (
@@ -309,6 +327,8 @@ def _compute_v2_event_flags_for_radius(
         bearish_flags,
         hidden_bullish_flags,
         hidden_bearish_flags,
+        hidden_pivot_gaps,
+        hidden_pivot_drop_pcts,
         pivot_gaps,
         pivot_drop_pcts,
         pivot2_dates,
@@ -346,6 +366,8 @@ def compute_divergence_series(
         bearish_event_flags_r2,
         hidden_bullish_event_flags_r2,
         hidden_bearish_event_flags_r2,
+        hidden_pivot_gaps_r2,
+        hidden_pivot_drop_pcts_r2,
         pivot_gaps_r2,
         pivot_drop_pcts_r2,
         pivot2_dates_r2,
@@ -357,6 +379,8 @@ def compute_divergence_series(
         bearish_event_flags_r3,
         hidden_bullish_event_flags_r3,
         hidden_bearish_event_flags_r3,
+        hidden_pivot_gaps_r3,
+        hidden_pivot_drop_pcts_r3,
         pivot_gaps_r3,
         pivot_drop_pcts_r3,
         pivot2_dates_r3,
@@ -378,6 +402,10 @@ def compute_divergence_series(
         row["is_hidden_bearish_divergence_r2"] = hidden_bearish_event_flags_r2[idx]
         row["is_hidden_bullish_divergence_r3"] = hidden_bullish_event_flags_r3[idx]
         row["is_hidden_bearish_divergence_r3"] = hidden_bearish_event_flags_r3[idx]
+        row["hidden_pivot_gap_r2"] = hidden_pivot_gaps_r2[idx]
+        row["hidden_pivot_drop_pct_r2"] = hidden_pivot_drop_pcts_r2[idx]
+        row["hidden_pivot_gap_r3"] = hidden_pivot_gaps_r3[idx]
+        row["hidden_pivot_drop_pct_r3"] = hidden_pivot_drop_pcts_r3[idx]
         row["pivot_gap_r2"] = pivot_gaps_r2[idx]
         row["pivot_drop_pct_r2"] = pivot_drop_pcts_r2[idx]
         row["pivot2_date_r2"] = pivot2_dates_r2[idx]

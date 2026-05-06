@@ -77,8 +77,10 @@ class TestDatabaseManager:
                    is_hidden_bullish_divergence_r3, is_hidden_bearish_divergence_r3,
                    pivot_gap, pivot_drop_pct,
                    pivot_gap_r2, pivot_drop_pct_r2,
+                   hidden_pivot_gap_r2, hidden_pivot_drop_pct_r2,
                    pivot2_date_r2,
                    pivot_gap_r3, pivot_drop_pct_r3,
+                   hidden_pivot_gap_r3, hidden_pivot_drop_pct_r3,
                    pivot2_date_r3
             FROM divergence_data
             WHERE ticker = 'AAA' AND date = '2025-01-01'
@@ -101,9 +103,13 @@ class TestDatabaseManager:
         assert "pivot_drop_pct" in columns
         assert "pivot_gap_r2" in columns
         assert "pivot_drop_pct_r2" in columns
+        assert "hidden_pivot_gap_r2" in columns
+        assert "hidden_pivot_drop_pct_r2" in columns
         assert "pivot2_date_r2" in columns
         assert "pivot_gap_r3" in columns
         assert "pivot_drop_pct_r3" in columns
+        assert "hidden_pivot_gap_r3" in columns
+        assert "hidden_pivot_drop_pct_r3" in columns
         assert "pivot2_date_r3" in columns
         assert tuple(row) == (
             1,
@@ -120,6 +126,10 @@ class TestDatabaseManager:
             0,
             0,
             0,
+            None,
+            None,
+            None,
+            None,
             None,
             None,
             None,
@@ -159,6 +169,10 @@ class TestDatabaseManager:
         assert "is_hidden_bearish_divergence_r2" in columns
         assert "is_hidden_bullish_divergence_r3" in columns
         assert "is_hidden_bearish_divergence_r3" in columns
+        assert "hidden_pivot_gap_r2" in columns
+        assert "hidden_pivot_drop_pct_r2" in columns
+        assert "hidden_pivot_gap_r3" in columns
+        assert "hidden_pivot_drop_pct_r3" in columns
 
     def test_excluded_tickers_table_created(self, temp_db):
         manager = DatabaseManager(temp_db)

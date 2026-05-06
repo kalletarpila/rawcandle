@@ -391,9 +391,13 @@ class DatabaseManager:
                     pivot_drop_pct REAL,
                     pivot_gap_r2 INTEGER,
                     pivot_drop_pct_r2 REAL,
+                    hidden_pivot_gap_r2 INTEGER,
+                    hidden_pivot_drop_pct_r2 REAL,
                     pivot2_date_r2 TEXT,
                     pivot_gap_r3 INTEGER,
                     pivot_drop_pct_r3 REAL,
+                    hidden_pivot_gap_r3 INTEGER,
+                    hidden_pivot_drop_pct_r3 REAL,
                     pivot2_date_r3 TEXT,
                     PRIMARY KEY (ticker, date)
                 )
@@ -490,6 +494,14 @@ class DatabaseManager:
                 cursor.execute(
                     "ALTER TABLE divergence_data ADD COLUMN pivot_drop_pct_r2 REAL"
                 )
+            if "hidden_pivot_gap_r2" not in divergence_columns:
+                cursor.execute(
+                    "ALTER TABLE divergence_data ADD COLUMN hidden_pivot_gap_r2 INTEGER"
+                )
+            if "hidden_pivot_drop_pct_r2" not in divergence_columns:
+                cursor.execute(
+                    "ALTER TABLE divergence_data ADD COLUMN hidden_pivot_drop_pct_r2 REAL"
+                )
             if "pivot2_date_r2" not in divergence_columns:
                 cursor.execute(
                     "ALTER TABLE divergence_data ADD COLUMN pivot2_date_r2 TEXT"
@@ -501,6 +513,14 @@ class DatabaseManager:
             if "pivot_drop_pct_r3" not in divergence_columns:
                 cursor.execute(
                     "ALTER TABLE divergence_data ADD COLUMN pivot_drop_pct_r3 REAL"
+                )
+            if "hidden_pivot_gap_r3" not in divergence_columns:
+                cursor.execute(
+                    "ALTER TABLE divergence_data ADD COLUMN hidden_pivot_gap_r3 INTEGER"
+                )
+            if "hidden_pivot_drop_pct_r3" not in divergence_columns:
+                cursor.execute(
+                    "ALTER TABLE divergence_data ADD COLUMN hidden_pivot_drop_pct_r3 REAL"
                 )
             if "pivot2_date_r3" not in divergence_columns:
                 cursor.execute(
@@ -1595,9 +1615,13 @@ class DatabaseManager:
                     pivot_drop_pct = None
                     pivot_gap_r2 = None
                     pivot_drop_pct_r2 = None
+                    hidden_pivot_gap_r2 = None
+                    hidden_pivot_drop_pct_r2 = None
                     pivot2_date_r2 = None
                     pivot_gap_r3 = None
                     pivot_drop_pct_r3 = None
+                    hidden_pivot_gap_r3 = None
+                    hidden_pivot_drop_pct_r3 = None
                     pivot2_date_r3 = None
                 elif len(record) == 6:
                     (
@@ -1624,9 +1648,13 @@ class DatabaseManager:
                     pivot_drop_pct = None
                     pivot_gap_r2 = None
                     pivot_drop_pct_r2 = None
+                    hidden_pivot_gap_r2 = None
+                    hidden_pivot_drop_pct_r2 = None
                     pivot2_date_r2 = None
                     pivot_gap_r3 = None
                     pivot_drop_pct_r3 = None
+                    hidden_pivot_gap_r3 = None
+                    hidden_pivot_drop_pct_r3 = None
                     pivot2_date_r3 = None
                 elif len(record) == 10:
                     (
@@ -1653,9 +1681,13 @@ class DatabaseManager:
                     pivot_drop_pct = None
                     pivot_gap_r2 = None
                     pivot_drop_pct_r2 = None
+                    hidden_pivot_gap_r2 = None
+                    hidden_pivot_drop_pct_r2 = None
                     pivot2_date_r2 = None
                     pivot_gap_r3 = None
                     pivot_drop_pct_r3 = None
+                    hidden_pivot_gap_r3 = None
+                    hidden_pivot_drop_pct_r3 = None
                     pivot2_date_r3 = None
                 elif len(record) == 12:
                     (
@@ -1682,9 +1714,13 @@ class DatabaseManager:
                     is_hidden_bearish_divergence_r3 = 0
                     pivot_gap_r2 = None
                     pivot_drop_pct_r2 = None
+                    hidden_pivot_gap_r2 = None
+                    hidden_pivot_drop_pct_r2 = None
                     pivot2_date_r2 = None
                     pivot_gap_r3 = None
                     pivot_drop_pct_r3 = None
+                    hidden_pivot_gap_r3 = None
+                    hidden_pivot_drop_pct_r3 = None
                     pivot2_date_r3 = None
                 elif len(record) == 16:
                     (
@@ -1713,6 +1749,10 @@ class DatabaseManager:
                     is_hidden_bearish_divergence_r2 = 0
                     is_hidden_bullish_divergence_r3 = 0
                     is_hidden_bearish_divergence_r3 = 0
+                    hidden_pivot_gap_r2 = None
+                    hidden_pivot_drop_pct_r2 = None
+                    hidden_pivot_gap_r3 = None
+                    hidden_pivot_drop_pct_r3 = None
                     pivot2_date_r2 = None
                     pivot2_date_r3 = None
                 elif len(record) == 18:
@@ -1744,6 +1784,10 @@ class DatabaseManager:
                     is_hidden_bearish_divergence_r2 = 0
                     is_hidden_bullish_divergence_r3 = 0
                     is_hidden_bearish_divergence_r3 = 0
+                    hidden_pivot_gap_r2 = None
+                    hidden_pivot_drop_pct_r2 = None
+                    hidden_pivot_gap_r3 = None
+                    hidden_pivot_drop_pct_r3 = None
                 elif len(record) == 26:
                     (
                         date,
@@ -1773,6 +1817,43 @@ class DatabaseManager:
                         pivot_drop_pct_r3,
                         pivot2_date_r3,
                     ) = record
+                    hidden_pivot_gap_r2 = None
+                    hidden_pivot_drop_pct_r2 = None
+                    hidden_pivot_gap_r3 = None
+                    hidden_pivot_drop_pct_r3 = None
+                elif len(record) == 30:
+                    (
+                        date,
+                        bullish,
+                        bearish,
+                        hidden_bullish,
+                        hidden_bearish,
+                        rsi,
+                        is_bullish_divergence,
+                        is_bearish_divergence,
+                        is_hidden_bullish_divergence,
+                        is_hidden_bearish_divergence,
+                        is_bullish_divergence_r2,
+                        is_bearish_divergence_r2,
+                        is_hidden_bullish_divergence_r2,
+                        is_hidden_bearish_divergence_r2,
+                        is_bullish_divergence_r3,
+                        is_bearish_divergence_r3,
+                        is_hidden_bullish_divergence_r3,
+                        is_hidden_bearish_divergence_r3,
+                        pivot_gap,
+                        pivot_drop_pct,
+                        pivot_gap_r2,
+                        pivot_drop_pct_r2,
+                        pivot2_date_r2,
+                        pivot_gap_r3,
+                        pivot_drop_pct_r3,
+                        pivot2_date_r3,
+                        hidden_pivot_gap_r2,
+                        hidden_pivot_drop_pct_r2,
+                        hidden_pivot_gap_r3,
+                        hidden_pivot_drop_pct_r3,
+                    ) = record
                 else:
                     (
                         date,
@@ -1801,6 +1882,10 @@ class DatabaseManager:
                         pivot_gap_r3,
                         pivot_drop_pct_r3,
                         pivot2_date_r3,
+                        hidden_pivot_gap_r2,
+                        hidden_pivot_drop_pct_r2,
+                        hidden_pivot_gap_r3,
+                        hidden_pivot_drop_pct_r3,
                     ) = record
                 records_with_ticker.append(
                     (
@@ -1827,9 +1912,13 @@ class DatabaseManager:
                         pivot_drop_pct,
                         pivot_gap_r2,
                         pivot_drop_pct_r2,
+                        hidden_pivot_gap_r2,
+                        hidden_pivot_drop_pct_r2,
                         pivot2_date_r2,
                         pivot_gap_r3,
                         pivot_drop_pct_r3,
+                        hidden_pivot_gap_r3,
+                        hidden_pivot_drop_pct_r3,
                         pivot2_date_r3,
                     )
                 )
@@ -1861,12 +1950,16 @@ class DatabaseManager:
                     pivot_drop_pct,
                     pivot_gap_r2,
                     pivot_drop_pct_r2,
+                    hidden_pivot_gap_r2,
+                    hidden_pivot_drop_pct_r2,
                     pivot2_date_r2,
                     pivot_gap_r3,
                     pivot_drop_pct_r3,
+                    hidden_pivot_gap_r3,
+                    hidden_pivot_drop_pct_r3,
                     pivot2_date_r3
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 records_with_ticker,
             )

@@ -184,6 +184,27 @@ def test_hidden_bullish_r2_event_flag(monkeypatch):
     ]
 
 
+def test_hidden_bullish_r2_pivot_metadata(monkeypatch):
+    df = pd.DataFrame(
+        {
+            "pvm": [f"2024-07-{day:02d}" for day in range(1, 12)],
+            "close": [100.0] * 11,
+            "low": [10.0, 9.0, 8.0, 9.0, 10.0, 11.0, 12.0, 11.0, 10.0, 11.0, 12.0],
+            "high": [20.0] * 11,
+        }
+    )
+    monkeypatch.setattr(
+        "analysis.divergence_engine.compute_rsi_wilder",
+        lambda closes, period=14: [40.0, 35.0, 25.0, 36.0, 37.0, 34.0, 30.0, 24.0, 20.0, 30.0, 32.0],
+    )
+
+    rows = compute_divergence_series(df)
+    event_row = next(row for row in rows if row["is_hidden_bullish_divergence_r2"] == 1)
+
+    assert event_row["hidden_pivot_gap_r2"] == 6
+    assert event_row["hidden_pivot_drop_pct_r2"] == -25.0
+
+
 def test_hidden_bearish_r2_event_flag(monkeypatch):
     df = pd.DataFrame(
         {
@@ -203,6 +224,27 @@ def test_hidden_bearish_r2_event_flag(monkeypatch):
     assert [row["date"] for row in rows if row["is_hidden_bearish_divergence_r2"] == 1] == [
         "2024-08-11"
     ]
+
+
+def test_hidden_bearish_r2_pivot_metadata(monkeypatch):
+    df = pd.DataFrame(
+        {
+            "pvm": [f"2024-08-{day:02d}" for day in range(1, 12)],
+            "close": [100.0] * 11,
+            "low": [5.0] * 11,
+            "high": [12.0, 13.0, 14.0, 13.0, 12.0, 11.0, 10.0, 11.0, 12.0, 11.0, 10.0],
+        }
+    )
+    monkeypatch.setattr(
+        "analysis.divergence_engine.compute_rsi_wilder",
+        lambda closes, period=14: [60.0, 65.0, 75.0, 66.0, 64.0, 67.0, 70.0, 74.0, 80.0, 70.0, 68.0],
+    )
+
+    rows = compute_divergence_series(df)
+    event_row = next(row for row in rows if row["is_hidden_bearish_divergence_r2"] == 1)
+
+    assert event_row["hidden_pivot_gap_r2"] == 6
+    assert event_row["hidden_pivot_drop_pct_r2"] == -14.285714285714285
 
 
 def test_hidden_generic_flags_mirror_r2(monkeypatch):
@@ -578,6 +620,8 @@ def test_compute_divergence_series_keeps_r2_and_r3_geometry_and_pivot2_dates_sep
                 [0, 0, 0, 0, 0, 0, 0],
                 [0, 0, 0, 0, 0, 0, 0],
                 [0, 0, 0, 0, 0, 0, 0],
+                [None, None, None, None, None, None, None],
+                [None, None, None, None, None, None, None],
                 [None, None, None, None, None, 5, None],
                 [None, None, None, None, None, 25.0, None],
                 [None, None, None, None, None, "2025-11-04", None],
@@ -587,6 +631,8 @@ def test_compute_divergence_series_keeps_r2_and_r3_geometry_and_pivot2_dates_sep
             [0, 0, 0, 0, 0, 0, 0],
             [0, 0, 0, 0, 0, 0, 0],
             [0, 0, 0, 0, 0, 0, 0],
+            [None, None, None, None, None, None, None],
+            [None, None, None, None, None, None, None],
             [None, None, None, None, None, 8, None],
             [None, None, None, None, None, 12.5, None],
             [None, None, None, None, None, "2025-11-03", None],

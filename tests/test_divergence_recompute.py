@@ -707,6 +707,10 @@ def test_recompute_persists_hidden_fields(divergence_dbs, monkeypatch):
                 "pivot_gap_r3": None,
                 "pivot_drop_pct_r3": None,
                 "pivot2_date_r3": None,
+                "hidden_pivot_gap_r2": 6,
+                "hidden_pivot_drop_pct_r2": -25.0,
+                "hidden_pivot_gap_r3": 7,
+                "hidden_pivot_drop_pct_r3": -20.0,
             }
             for idx, row in enumerate(df.to_dict("records"))
             if start_date is None or str(row["pvm"]) >= start_date
@@ -734,7 +738,11 @@ def test_recompute_persists_hidden_fields(divergence_dbs, monkeypatch):
                    is_hidden_bullish_divergence_r2,
                    is_hidden_bearish_divergence_r2,
                    is_hidden_bullish_divergence_r3,
-                   is_hidden_bearish_divergence_r3
+                   is_hidden_bearish_divergence_r3,
+                   hidden_pivot_gap_r2,
+                   hidden_pivot_drop_pct_r2,
+                   hidden_pivot_gap_r3,
+                   hidden_pivot_drop_pct_r3
             FROM divergence_data
             WHERE ticker = ?
             ORDER BY date DESC
@@ -743,4 +751,4 @@ def test_recompute_persists_hidden_fields(divergence_dbs, monkeypatch):
             (ticker,),
         ).fetchone()
 
-    assert row == (0.3, 0.4, 1, 0, 1, 0, 0, 1)
+    assert row == (0.3, 0.4, 1, 0, 1, 0, 0, 1, 6, -25.0, 7, -20.0)

@@ -144,6 +144,10 @@ def recompute_divergence_for_ticker(
                 row.get("pivot_gap_r3"),
                 row.get("pivot_drop_pct_r3"),
                 row.get("pivot2_date_r3"),
+                row.get("hidden_pivot_gap_r2"),
+                row.get("hidden_pivot_drop_pct_r2"),
+                row.get("hidden_pivot_gap_r3"),
+                row.get("hidden_pivot_drop_pct_r3"),
             )
             for row in computed_rows
         ]
