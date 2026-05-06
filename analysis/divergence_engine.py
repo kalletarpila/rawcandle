@@ -155,6 +155,14 @@ def _collapse_tied_clusters(raw_candidates: List[bool], values: List[Optional[fl
     return final
 
 
+def _compute_signed_change_pct(base_value: Optional[float], next_value: Optional[float]) -> Optional[float]:
+    if base_value in (None, 0):
+        return None
+    if next_value is None:
+        return None
+    return ((next_value - base_value) / base_value) * 100.0
+
+
 def _compute_v2_event_flags_for_radius(
     dates: List[str],
     lows: List[Optional[float]],
@@ -225,7 +233,9 @@ def _compute_v2_event_flags_for_radius(
             continue
 
         anchor_rsi = rsi_values[p1]
-        pivot_drop_pct = ((lows[p1] - lows[p2]) / lows[p1]) * 100.0
+        pivot_drop_pct = _compute_signed_change_pct(lows[p1], lows[p2])
+        if pivot_drop_pct is not None:
+            pivot_drop_pct = -pivot_drop_pct
         if lows[p2] < lows[p1]:
             for r2 in [p2 - 1, p2, p2 + 1]:
                 if r2 < 0 or r2 >= size:
@@ -263,9 +273,10 @@ def _compute_v2_event_flags_for_radius(
             if hidden_pivot_gaps[event_idx] is None:
                 hidden_pivot_gaps[event_idx] = pivot_gap
             if hidden_pivot_drop_pcts[event_idx] is None:
+                hidden_pct = _compute_signed_change_pct(lows[p1], lows[p2])
                 hidden_pivot_drop_pcts[event_idx] = (
-                    (lows[p1] - lows[p2]) / lows[p1]
-                ) * 100.0
+                    None if hidden_pct is None else -hidden_pct
+                )
             break
 
     for pivot_idx in range(1, len(price_pivot_highs)):
@@ -279,7 +290,7 @@ def _compute_v2_event_flags_for_radius(
             continue
 
         anchor_rsi = rsi_values[p1]
-        pivot_drop_pct = ((highs[p2] - highs[p1]) / highs[p1]) * 100.0
+        pivot_drop_pct = _compute_signed_change_pct(highs[p1], highs[p2])
         if highs[p2] > highs[p1]:
             for r2 in [p2 - 1, p2, p2 + 1]:
                 if r2 < 0 or r2 >= size:
@@ -317,9 +328,7 @@ def _compute_v2_event_flags_for_radius(
             if hidden_pivot_gaps[event_idx] is None:
                 hidden_pivot_gaps[event_idx] = pivot_gap
             if hidden_pivot_drop_pcts[event_idx] is None:
-                hidden_pivot_drop_pcts[event_idx] = (
-                    (highs[p2] - highs[p1]) / highs[p1]
-                ) * 100.0
+                hidden_pivot_drop_pcts[event_idx] = _compute_signed_change_pct(highs[p1], highs[p2])
             break
 
     return (

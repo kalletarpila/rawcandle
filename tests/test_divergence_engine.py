@@ -205,6 +205,27 @@ def test_hidden_bullish_r2_pivot_metadata(monkeypatch):
     assert event_row["hidden_pivot_drop_pct_r2"] == -25.0
 
 
+def test_hidden_bullish_zero_base_pivot_drop_pct_does_not_crash(monkeypatch):
+    df = pd.DataFrame(
+        {
+            "pvm": [f"2024-07-{day:02d}" for day in range(1, 12)],
+            "close": [100.0] * 11,
+            "low": [2.0, 1.0, 0.0, 1.0, 2.0, 3.0, 4.0, 3.0, 2.0, 3.0, 4.0],
+            "high": [20.0] * 11,
+        }
+    )
+    monkeypatch.setattr(
+        "analysis.divergence_engine.compute_rsi_wilder",
+        lambda closes, period=14: [40.0, 35.0, 25.0, 36.0, 37.0, 34.0, 30.0, 24.0, 20.0, 30.0, 32.0],
+    )
+
+    rows = compute_divergence_series(df)
+    event_row = next(row for row in rows if row["is_hidden_bullish_divergence_r2"] == 1)
+
+    assert event_row["hidden_pivot_gap_r2"] == 6
+    assert event_row["hidden_pivot_drop_pct_r2"] is None
+
+
 def test_hidden_bearish_r2_event_flag(monkeypatch):
     df = pd.DataFrame(
         {
