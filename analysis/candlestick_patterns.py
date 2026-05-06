@@ -213,6 +213,127 @@ def is_dragonfly_doji(row):
     )
 
 
+def _candle_geometry(row):
+    open_ = row["Open"]
+    close = row["Close"]
+    high = row["High"]
+    low = row["Low"]
+    candle_range = high - low
+    body = abs(close - open_)
+    upper_shadow = high - max(open_, close)
+    lower_shadow = min(open_, close) - low
+    body_top = max(open_, close)
+    body_bottom = min(open_, close)
+    return {
+        "open": open_,
+        "close": close,
+        "high": high,
+        "low": low,
+        "candle_range": candle_range,
+        "body": body,
+        "upper_shadow": upper_shadow,
+        "lower_shadow": lower_shadow,
+        "body_top": body_top,
+        "body_bottom": body_bottom,
+    }
+
+
+def is_bearish_engulfing(prev_row, row):
+    return (
+        prev_row["Close"] > prev_row["Open"]
+        and row["Close"] < row["Open"]
+        and row["Open"] >= prev_row["Close"]
+        and row["Close"] <= prev_row["Open"]
+    )
+
+
+def is_shooting_star(row):
+    geometry = _candle_geometry(row)
+    candle_range = geometry["candle_range"]
+    if candle_range <= 0:
+        return False
+
+    body = geometry["body"]
+    upper_shadow = geometry["upper_shadow"]
+    lower_shadow = geometry["lower_shadow"]
+    low = geometry["low"]
+    close = geometry["close"]
+    body_top = geometry["body_top"]
+    small_body_floor = max(candle_range * 0.05, 1e-9)
+
+    return (
+        body / candle_range <= 0.35
+        and upper_shadow >= 2.0 * max(body, small_body_floor)
+        and lower_shadow <= 0.5 * max(body, small_body_floor)
+        and (body_top <= low + 0.45 * candle_range or close <= low + 0.45 * candle_range)
+    )
+
+
+def is_dark_cloud_cover(prev_row, row):
+    prev_open = prev_row["Open"]
+    prev_close = prev_row["Close"]
+    return (
+        prev_close > prev_open
+        and row["Close"] < row["Open"]
+        and row["Open"] > prev_close
+        and row["Close"] < prev_open + 0.5 * (prev_close - prev_open)
+        and row["Close"] > prev_open
+    )
+
+
+def is_evening_star(df, idx):
+    if idx < 2:
+        return False
+
+    c1 = df.iloc[idx - 2]
+    c2 = df.iloc[idx - 1]
+    c3 = df.iloc[idx]
+    g1 = _candle_geometry(c1)
+    g2 = _candle_geometry(c2)
+
+    if g1["candle_range"] <= 0 or g2["candle_range"] <= 0:
+        return False
+
+    c1_open = c1["Open"]
+    c1_close = c1["Close"]
+    c2_body = g2["body"]
+    c3_open = c3["Open"]
+    c3_close = c3["Close"]
+
+    return (
+        c1_close > c1_open
+        and g1["body"] / g1["candle_range"] >= 0.45
+        and c2_body / g2["candle_range"] <= 0.35
+        and c3_close < c3_open
+        and c3_close < c1_open + 0.5 * (c1_close - c1_open)
+    )
+
+
+def is_hanging_man(row):
+    geometry = _candle_geometry(row)
+    candle_range = geometry["candle_range"]
+    if candle_range <= 0:
+        return False
+
+    body = geometry["body"]
+    lower_shadow = geometry["lower_shadow"]
+    upper_shadow = geometry["upper_shadow"]
+    low = geometry["low"]
+    close = geometry["close"]
+    body_bottom = geometry["body_bottom"]
+    small_body_floor = max(candle_range * 0.05, 1e-9)
+
+    return (
+        body / candle_range <= 0.35
+        and lower_shadow >= 2.0 * max(body, small_body_floor)
+        and upper_shadow <= 0.5 * max(body, small_body_floor)
+        and (
+            body_bottom >= low + 0.55 * candle_range
+            or close >= low + 0.55 * candle_range
+        )
+    )
+
+
 def is_bullish_divergence(
     df, idx, lookback_days=30, min_rsi_gain=3.0, min_days_between=3, close_col="Close"
 ):

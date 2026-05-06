@@ -5,12 +5,17 @@ from pathlib import Path
 import pandas as pd
 
 from .candlestick_patterns import (
+    is_bearish_engulfing,
     is_bullish_divergence,
     is_bullish_engulfing,
+    is_dark_cloud_cover,
     is_dragonfly_doji,
     is_hammer,
+    is_hanging_man,
+    is_evening_star,
     is_morning_star,
     is_piercing_pattern,
+    is_shooting_star,
     is_three_white_soldiers,
 )
 from .divergence_v1 import compute_rsi_wilder
@@ -48,7 +53,19 @@ def _calculate_signal_strength(
         if body_size > 0:
             shadow_to_body_ratio = upper_shadow / body_size
             base_strength = min(0.9, shadow_to_body_ratio / 3.0)
+    elif pattern == "Hanging Man":
+        body_bottom = min(open_price, close)
+        lower_shadow = body_bottom - low
+        if body_size > 0:
+            shadow_to_body_ratio = lower_shadow / body_size
+            base_strength = min(0.9, shadow_to_body_ratio / 3.0)
     elif pattern == "Engulfing":
+        base_strength = 0.8
+    elif pattern == "Dark Cloud Cover":
+        body_midpoint = open_price + (close - open_price) * 0.5
+        penetration = abs(close - body_midpoint) / total_range
+        base_strength = min(0.9, 0.6 + penetration)
+    elif pattern == "Evening Star":
         base_strength = 0.8
 
     if volume and volume > 100000:
@@ -481,6 +498,86 @@ def run_candlestick_analysis(
             if logger:
                 logger.info(
                     f"{ticker} {row['pvm'].date().isoformat()} Dragonfly Doji checked - FOUND (strength {strength})"
+                )
+
+        if i > 0 and "Bearish Engulfing" in patterns:
+            prev_row = df.iloc[i - 1]
+            if is_bearish_engulfing(prev_row, row):
+                strength = _calculate_signal_strength(
+                    "Engulfing",
+                    row["Open"],
+                    row["High"],
+                    row["Low"],
+                    row["Close"],
+                    row.get("Volume"),
+                )
+                found.append({"pattern": "Bearish Engulfing", "strength": strength})
+                if logger:
+                    logger.info(
+                        f"{ticker} {row['pvm'].date().isoformat()} Bearish Engulfing checked - FOUND (strength {strength})"
+                    )
+
+        if "Shooting Star" in patterns and is_shooting_star(row):
+            strength = _calculate_signal_strength(
+                "Shooting Star",
+                row["Open"],
+                row["High"],
+                row["Low"],
+                row["Close"],
+                row.get("Volume"),
+            )
+            found.append({"pattern": "Shooting Star", "strength": strength})
+            if logger:
+                logger.info(
+                    f"{ticker} {row['pvm'].date().isoformat()} Shooting Star checked - FOUND (strength {strength})"
+                )
+
+        if i > 0 and "Dark Cloud Cover" in patterns:
+            prev_row = df.iloc[i - 1]
+            if is_dark_cloud_cover(prev_row, row):
+                strength = _calculate_signal_strength(
+                    "Dark Cloud Cover",
+                    row["Open"],
+                    row["High"],
+                    row["Low"],
+                    row["Close"],
+                    row.get("Volume"),
+                )
+                found.append({"pattern": "Dark Cloud Cover", "strength": strength})
+                if logger:
+                    logger.info(
+                        f"{ticker} {row['pvm'].date().isoformat()} Dark Cloud Cover checked - FOUND (strength {strength})"
+                    )
+
+        if i >= 2 and "Evening Star" in patterns:
+            if is_evening_star(df, i):
+                strength = _calculate_signal_strength(
+                    "Evening Star",
+                    row["Open"],
+                    row["High"],
+                    row["Low"],
+                    row["Close"],
+                    row.get("Volume"),
+                )
+                found.append({"pattern": "Evening Star", "strength": strength})
+                if logger:
+                    logger.info(
+                        f"{ticker} {row['pvm'].date().isoformat()} Evening Star checked - FOUND (strength {strength})"
+                    )
+
+        if "Hanging Man" in patterns and is_hanging_man(row):
+            strength = _calculate_signal_strength(
+                "Hanging Man",
+                row["Open"],
+                row["High"],
+                row["Low"],
+                row["Close"],
+                row.get("Volume"),
+            )
+            found.append({"pattern": "Hanging Man", "strength": strength})
+            if logger:
+                logger.info(
+                    f"{ticker} {row['pvm'].date().isoformat()} Hanging Man checked - FOUND (strength {strength})"
                 )
 
         if "Bullish Divergence" in patterns:

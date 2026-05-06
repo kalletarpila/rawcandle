@@ -39,6 +39,11 @@ class ResultsGenerator:
         "Dragonfly Doji": 6,
         "Bullish Divergence": 7,
         "Bearish Divergence": 8,
+        "Bearish Engulfing": 9,
+        "Shooting Star": 10,
+        "Dark Cloud Cover": 11,
+        "Evening Star": 12,
+        "Hanging Man": 13,
         "BullDiv & Hammer": 71,
         "BullDiv & Bullish Engulfing": 72,
         "BullDiv & Piercing Pattern": 73,
@@ -1217,7 +1222,9 @@ class ResultsGenerator:
 
             # Pattern numero (3)
             candle_pattern = self.PATTERN_MAPPING.get(pattern, 0)
-            is_candle_day = int(candle_pattern in {1, 2, 3, 4, 5, 6, 71, 72, 73, 74, 75, 76})
+            is_candle_day = int(
+                candle_pattern in {1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 71, 72, 73, 74, 75, 76}
+            )
 
             bull_div_offset_value = (
                 BullDiv_recent_offset if BullDiv_recent_offset != -1 else 99

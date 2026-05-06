@@ -157,6 +157,11 @@ class AnalysisView:
                 ft.dropdown.Option("Three White Soldiers", "Three White Soldiers"),
                 ft.dropdown.Option("Morning Star", "Morning Star"),
                 ft.dropdown.Option("Dragonfly Doji", "Dragonfly Doji"),
+                ft.dropdown.Option("Bearish Engulfing", "Bearish Engulfing"),
+                ft.dropdown.Option("Shooting Star", "Shooting Star"),
+                ft.dropdown.Option("Dark Cloud Cover", "Dark Cloud Cover"),
+                ft.dropdown.Option("Evening Star", "Evening Star"),
+                ft.dropdown.Option("Hanging Man", "Hanging Man"),
                 ft.dropdown.Option("BullDiv & Hammer", "BullDiv & Hammer"),
                 ft.dropdown.Option(
                     "BullDiv & Bullish Engulfing", "BullDiv & Bullish Engulfing"
@@ -548,6 +553,11 @@ class AnalysisView:
             "Three White Soldiers",
             "Morning Star",
             "Dragonfly Doji",
+            "Bearish Engulfing",
+            "Shooting Star",
+            "Dark Cloud Cover",
+            "Evening Star",
+            "Hanging Man",
             "Bullish Divergence",
         ]
         combo_pattern_codes = {

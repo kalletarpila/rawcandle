@@ -230,6 +230,68 @@ class AnalysisEngine:
 
         return upper_shadow >= body_size * 2 and lower_shadow <= body_size * 0.5
 
+    def detect_dark_cloud_cover(
+        self,
+        prev_candle: Tuple[float, float, float, float],
+        curr_candle: Tuple[float, float, float, float],
+    ) -> bool:
+        prev_open, _, _, prev_close = prev_candle
+        curr_open, _, _, curr_close = curr_candle
+        return (
+            prev_close > prev_open
+            and curr_close < curr_open
+            and curr_open > prev_close
+            and curr_close < prev_open + 0.5 * (prev_close - prev_open)
+            and curr_close > prev_open
+        )
+
+    def detect_evening_star(
+        self,
+        c1: Tuple[float, float, float, float],
+        c2: Tuple[float, float, float, float],
+        c3: Tuple[float, float, float, float],
+    ) -> bool:
+        c1_open, c1_high, c1_low, c1_close = c1
+        c2_open, c2_high, c2_low, c2_close = c2
+        c3_open, _, _, c3_close = c3
+
+        c1_range = c1_high - c1_low
+        c2_range = c2_high - c2_low
+        if c1_range <= 0 or c2_range <= 0:
+            return False
+
+        c1_body = abs(c1_close - c1_open)
+        c2_body = abs(c2_close - c2_open)
+
+        return (
+            c1_close > c1_open
+            and c1_body / c1_range >= 0.45
+            and c2_body / c2_range <= 0.35
+            and c3_close < c3_open
+            and c3_close < c1_open + 0.5 * (c1_close - c1_open)
+        )
+
+    def detect_hanging_man(
+        self, open_price: float, high: float, low: float, close: float
+    ) -> bool:
+        if high == low:
+            return False
+
+        candle_range = high - low
+        body_top = max(open_price, close)
+        body_bottom = min(open_price, close)
+        lower_shadow = body_bottom - low
+        upper_shadow = high - body_top
+        body_size = abs(close - open_price)
+        small_body_floor = max(candle_range * 0.05, 1e-9)
+
+        return (
+            body_size / candle_range <= 0.35
+            and lower_shadow >= 2.0 * max(body_size, small_body_floor)
+            and upper_shadow <= 0.5 * max(body_size, small_body_floor)
+            and (body_bottom >= low + 0.55 * candle_range or close >= low + 0.55 * candle_range)
+        )
+
     def detect_engulfing(
         self,
         prev_candle: Tuple[float, float, float, float],
@@ -315,9 +377,22 @@ class AnalysisEngine:
                 shadow_to_body_ratio = upper_shadow / body_size
                 base_strength = min(0.9, shadow_to_body_ratio / 3.0)
 
+        elif pattern == "Hanging Man":
+            body_bottom = min(open_price, close)
+            lower_shadow = body_bottom - low
+            if body_size > 0:
+                shadow_to_body_ratio = lower_shadow / body_size
+                base_strength = min(0.9, shadow_to_body_ratio / 3.0)
+
         elif pattern == "Engulfing":
             # Engulfing vahvuus riippuu siitä kuinka paljon se "nielee"
             base_strength = 0.8  # Yleensä vahva signaali
+
+        elif pattern == "Dark Cloud Cover":
+            base_strength = 0.75
+
+        elif pattern == "Evening Star":
+            base_strength = 0.8
 
         # Volyymin vaikutus (jos saatavilla)
         if volume and volume > 100000:  # Korkea volyymi vahvistaa
@@ -365,9 +440,9 @@ class AnalysisEngine:
                 date = candle["date"]
                 symbol = candle.get("symbol", "UNKNOWN")
 
-                # Downtrend-suodatus
+                current_in_downtrend = True
                 if downtrend_filter and df is not None:
-                    if not _is_in_downtrend(
+                    current_in_downtrend = _is_in_downtrend(
                         df,
                         "close",
                         "volume",
@@ -375,11 +450,10 @@ class AnalysisEngine:
                         min_decline_percent,
                         use_ma_filter,
                         use_volume_filter,
-                    ):
-                        continue  # Ohita kynttilät jotka eivät ole laskutrendissä
+                    )
 
                 # Tunnista yksittäisen kynttilän kuviot
-                if self.detect_doji(open_price, high, low, close):
+                if current_in_downtrend and self.detect_doji(open_price, high, low, close):
                     strength = self.calculate_signal_strength(
                         "Doji", open_price, high, low, close, volume
                     )
@@ -396,7 +470,7 @@ class AnalysisEngine:
                         }
                     )
 
-                if self.detect_hammer(open_price, high, low, close):
+                if current_in_downtrend and self.detect_hammer(open_price, high, low, close):
                     strength = self.calculate_signal_strength(
                         "Hammer", open_price, high, low, close, volume
                     )
@@ -427,6 +501,23 @@ class AnalysisEngine:
                             "price": close,
                             "volume": volume,
                             "description": f"Shooting Star pattern detected (strength: {strength})",
+                        }
+                    )
+
+                if self.detect_hanging_man(open_price, high, low, close):
+                    strength = self.calculate_signal_strength(
+                        "Hanging Man", open_price, high, low, close, volume
+                    )
+                    findings.append(
+                        {
+                            "symbol": symbol,
+                            "date": date,
+                            "pattern": "hanging_man",
+                            "signal_strength": strength,
+                            "strength": strength,
+                            "price": close,
+                            "volume": volume,
+                            "description": f"Hanging Man pattern detected (strength: {strength})",
                         }
                     )
 
@@ -466,6 +557,60 @@ class AnalysisEngine:
                                 "price": close,
                                 "volume": volume,
                                 "description": f"{pattern_type.replace('_', ' ').title()} pattern detected (strength: {strength})",
+                            }
+                        )
+
+                    if self.detect_dark_cloud_cover(
+                        (prev_open, prev_high, prev_low, prev_close),
+                        (open_price, high, low, close),
+                    ):
+                        strength = self.calculate_signal_strength(
+                            "Dark Cloud Cover", open_price, high, low, close, volume
+                        )
+                        findings.append(
+                            {
+                                "symbol": symbol,
+                                "date": date,
+                                "pattern": "dark_cloud_cover",
+                                "signal_strength": strength,
+                                "strength": strength,
+                                "price": close,
+                                "volume": volume,
+                                "description": f"Dark Cloud Cover pattern detected (strength: {strength})",
+                            }
+                        )
+
+                if i > 1:
+                    c1 = price_data[i - 2]
+                    c2 = price_data[i - 1]
+                    if self.detect_evening_star(
+                        (
+                            float(c1["open"]),
+                            float(c1["high"]),
+                            float(c1["low"]),
+                            float(c1["close"]),
+                        ),
+                        (
+                            float(c2["open"]),
+                            float(c2["high"]),
+                            float(c2["low"]),
+                            float(c2["close"]),
+                        ),
+                        (open_price, high, low, close),
+                    ):
+                        strength = self.calculate_signal_strength(
+                            "Evening Star", open_price, high, low, close, volume
+                        )
+                        findings.append(
+                            {
+                                "symbol": symbol,
+                                "date": date,
+                                "pattern": "evening_star",
+                                "signal_strength": strength,
+                                "strength": strength,
+                                "price": close,
+                                "volume": volume,
+                                "description": f"Evening Star pattern detected (strength: {strength})",
                             }
                         )
 
