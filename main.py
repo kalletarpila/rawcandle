@@ -2834,6 +2834,12 @@ class RawCandleApp:
         self.data_dir = os.path.join(os.path.dirname(__file__), "data")
         self.osakedata_db_path = os.path.join(self.data_dir, "osakedata.db")
         self.analysis_db_path = os.path.join(self.data_dir, "analysis.db")
+        self.fundamentals_fin_db_path = (
+            "/home/kalle/projects/swingmaster/fundamentals_fin.db"
+        )
+        self.fundamentals_usa_db_path = (
+            "/home/kalle/projects/swingmaster/fundamentals_usa.db"
+        )
         ensure_market_schema(self.osakedata_db_path)
         self.markets = list_markets(self.osakedata_db_path)
         self._market_stats: dict[str, dict[str, int]] = {}
@@ -3026,6 +3032,229 @@ class RawCandleApp:
             ],
         )
 
+    def _quarter_state_db_path_for_market(self, market: str) -> Optional[str]:
+        normalized = (market or "").strip().lower()
+        if normalized == "omxh":
+            return getattr(
+                self,
+                "fundamentals_fin_db_path",
+                "/home/kalle/projects/swingmaster/fundamentals_fin.db",
+            )
+        if normalized == "usa":
+            return getattr(
+                self,
+                "fundamentals_usa_db_path",
+                "/home/kalle/projects/swingmaster/fundamentals_usa.db",
+            )
+        return None
+
+    def _quarter_state_primary_source_for_market(self, market: str) -> Optional[str]:
+        normalized = (market or "").strip().lower()
+        if normalized == "omxh":
+            return "yahoo"
+        if normalized == "usa":
+            return "sec_edgar"
+        return None
+
+    def _quarter_detection_run_id(self) -> str:
+        return datetime.datetime.now(datetime.timezone.utc).strftime(
+            "ohlcv-quarter-detect-%Y%m%dT%H%M%SZ"
+        )
+
+    def _quarter_state_timestamp_utc(self) -> str:
+        return (
+            datetime.datetime.now(datetime.timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+
+    def _extract_yahoo_latest_quarter_period_end_date(self, stock) -> Optional[str]:
+        """Return latest Yahoo quarterly period end date as ISO string, if available."""
+        try:
+            quarterly_df = getattr(stock, "quarterly_income_stmt", None)
+        except Exception:
+            return None
+        if quarterly_df is None or getattr(quarterly_df, "empty", True):
+            return None
+
+        candidates = []
+        for raw_value in getattr(quarterly_df, "columns", []):
+            normalized = self._normalize_period_end_date(raw_value)
+            if normalized:
+                candidates.append(normalized)
+        if not candidates:
+            for raw_value in getattr(quarterly_df, "index", []):
+                normalized = self._normalize_period_end_date(raw_value)
+                if normalized:
+                    candidates.append(normalized)
+        if not candidates:
+            return None
+        return max(candidates)
+
+    def _normalize_period_end_date(self, raw_value) -> Optional[str]:
+        if raw_value is None:
+            return None
+        try:
+            if hasattr(raw_value, "to_pydatetime"):
+                raw_value = raw_value.to_pydatetime()
+            if isinstance(raw_value, datetime.datetime):
+                return raw_value.date().isoformat()
+            if isinstance(raw_value, datetime.date):
+                return raw_value.isoformat()
+        except Exception:
+            return None
+        if isinstance(raw_value, str):
+            value = raw_value.strip()
+            if not value:
+                return None
+            try:
+                return datetime.datetime.fromisoformat(
+                    value.replace("Z", "+00:00")
+                ).date().isoformat()
+            except ValueError:
+                try:
+                    return datetime.date.fromisoformat(value[:10]).isoformat()
+                except ValueError:
+                    return None
+        return None
+
+    def _update_quarter_state_from_yahoo_detection(
+        self,
+        ticker: str,
+        market: str,
+        yahoo_latest_period_end_date: Optional[str],
+        run_id: str,
+        checked_at_utc: str,
+    ) -> dict[str, bool]:
+        outcome = {
+            "checked": False,
+            "new_detected": False,
+            "existing_flag_preserved": False,
+            "row_inserted": False,
+            "row_updated": False,
+            "detection_missing": False,
+        }
+        normalized_market = (market or "").strip().lower()
+        db_path = self._quarter_state_db_path_for_market(normalized_market)
+        primary_source = self._quarter_state_primary_source_for_market(normalized_market)
+        if not db_path or not primary_source:
+            return outcome
+
+        outcome["checked"] = True
+
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT latest_db_period_end_date,
+                       detected_source_period_end_date,
+                       new_quarter_available
+                FROM rc_fundamental_quarter_state
+                WHERE ticker = ? AND market = ?
+                """,
+                (ticker, normalized_market),
+            )
+            row = cursor.fetchone()
+            row_exists = row is not None
+            latest_db_period_end_date = row[0] if row else None
+            current_detected_period_end_date = row[1] if row else None
+            current_flag = int(row[2] or 0) if row else 0
+
+            has_detection = bool(yahoo_latest_period_end_date)
+            if not has_detection:
+                outcome["detection_missing"] = True
+            should_raise_flag = (
+                has_detection
+                and (
+                    latest_db_period_end_date is None
+                    or yahoo_latest_period_end_date > latest_db_period_end_date
+                )
+            )
+            state_changed = should_raise_flag and (
+                current_flag != 1
+                or current_detected_period_end_date is None
+                or yahoo_latest_period_end_date > current_detected_period_end_date
+            )
+            outcome["new_detected"] = state_changed
+
+            preserve_existing_flag = (
+                current_flag == 1
+                and current_detected_period_end_date is not None
+                and (
+                    not has_detection
+                    or not should_raise_flag
+                    or yahoo_latest_period_end_date
+                    <= current_detected_period_end_date
+                )
+            )
+            outcome["existing_flag_preserved"] = preserve_existing_flag
+
+            cursor.execute(
+                """
+                INSERT INTO rc_fundamental_quarter_state (
+                    ticker,
+                    market,
+                    primary_source,
+                    latest_db_period_end_date,
+                    detected_source_period_end_date,
+                    new_quarter_available,
+                    last_checked_at_utc,
+                    last_updated_at_utc,
+                    last_detection_run_id,
+                    last_ingest_run_id
+                ) VALUES (
+                    ?, ?, ?, NULL,
+                    CASE WHEN ? THEN ? ELSE NULL END,
+                    CASE WHEN ? THEN 1 ELSE 0 END,
+                    ?, ?, ?, NULL
+                )
+                ON CONFLICT(ticker, market) DO UPDATE SET
+                    primary_source = excluded.primary_source,
+                    detected_source_period_end_date = CASE
+                        WHEN ? AND (
+                            rc_fundamental_quarter_state.detected_source_period_end_date IS NULL
+                            OR excluded.detected_source_period_end_date
+                               > rc_fundamental_quarter_state.detected_source_period_end_date
+                        ) THEN excluded.detected_source_period_end_date
+                        ELSE rc_fundamental_quarter_state.detected_source_period_end_date
+                    END,
+                    new_quarter_available = CASE
+                        WHEN ? THEN 1
+                        ELSE rc_fundamental_quarter_state.new_quarter_available
+                    END,
+                    last_checked_at_utc = excluded.last_checked_at_utc,
+                    last_updated_at_utc = CASE
+                        WHEN ? THEN excluded.last_updated_at_utc
+                        ELSE rc_fundamental_quarter_state.last_updated_at_utc
+                    END,
+                    last_detection_run_id = CASE
+                        WHEN ? THEN excluded.last_detection_run_id
+                        ELSE rc_fundamental_quarter_state.last_detection_run_id
+                    END
+                """,
+                (
+                    ticker,
+                    normalized_market,
+                    primary_source,
+                    should_raise_flag,
+                    yahoo_latest_period_end_date,
+                    should_raise_flag,
+                    checked_at_utc,
+                    checked_at_utc,
+                    run_id,
+                    should_raise_flag,
+                    should_raise_flag,
+                    state_changed,
+                    state_changed,
+                ),
+            )
+            conn.commit()
+
+        outcome["row_inserted"] = not row_exists
+        outcome["row_updated"] = row_exists
+        return outcome
+
     def update_stock_data(self, e):
         """Päivitä olemassa olevien osakkeiden tiedot Yahoosta"""
         import sqlite3
@@ -3098,6 +3327,15 @@ class RawCandleApp:
             updated_count = 0
             skipped_count = 0
             error_count = 0
+            quarter_run_id = self._quarter_detection_run_id()
+            quarter_summary = {
+                "quarter_state_checked": 0,
+                "quarter_state_new_detected": 0,
+                "quarter_state_existing_flag_preserved": 0,
+                "quarter_state_rows_inserted": 0,
+                "quarter_state_rows_updated": 0,
+                "quarter_state_detection_missing": 0,
+            }
 
             self.loading_text.value = (
                 f"🔄 Aloitetaan päivitys {total_stocks} osakkeelle..."
@@ -3209,6 +3447,30 @@ class RawCandleApp:
                             hist = stock.history(start=start_date, end=end_date)
                             if not hist.empty:
                                 all_hist = pd.concat([all_hist, hist])
+
+                    quarter_result = self._update_quarter_state_from_yahoo_detection(
+                        ticker=ticker,
+                        market=ticker_market,
+                        yahoo_latest_period_end_date=self._extract_yahoo_latest_quarter_period_end_date(
+                            stock
+                        ),
+                        run_id=quarter_run_id,
+                        checked_at_utc=self._quarter_state_timestamp_utc(),
+                    )
+                    summary_key_map = {
+                        "checked": "quarter_state_checked",
+                        "new_detected": "quarter_state_new_detected",
+                        "existing_flag_preserved": (
+                            "quarter_state_existing_flag_preserved"
+                        ),
+                        "row_inserted": "quarter_state_rows_inserted",
+                        "row_updated": "quarter_state_rows_updated",
+                        "detection_missing": "quarter_state_detection_missing",
+                    }
+                    for key, value in quarter_result.items():
+                        summary_key = summary_key_map.get(key)
+                        if value and summary_key:
+                            quarter_summary[summary_key] += 1
 
                     # Poista duplikaatit ja järjestä
                     if not all_hist.empty:
@@ -3385,6 +3647,8 @@ Virheet: {error_count}"""
             self.loading_text.value = summary
             self.loading_text.color = ft.Colors.GREEN_600
             self.page.update()
+            for key, value in quarter_summary.items():
+                print(f"SUMMARY {key}={value}")
 
         except Exception as ex:
             self.loading_text.value = f"❌ Virhe päivityksessä: {str(ex)}"
