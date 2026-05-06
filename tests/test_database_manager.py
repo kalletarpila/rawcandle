@@ -69,8 +69,12 @@ class TestDatabaseManager:
         row = conn.execute(
             """
             SELECT is_bullish_divergence, is_bearish_divergence,
+                   hidden_bullish_strength, hidden_bearish_strength,
+                   is_hidden_bullish_divergence, is_hidden_bearish_divergence,
                    is_bullish_divergence_r2, is_bearish_divergence_r2,
+                   is_hidden_bullish_divergence_r2, is_hidden_bearish_divergence_r2,
                    is_bullish_divergence_r3, is_bearish_divergence_r3,
+                   is_hidden_bullish_divergence_r3, is_hidden_bearish_divergence_r3,
                    pivot_gap, pivot_drop_pct,
                    pivot_gap_r2, pivot_drop_pct_r2,
                    pivot2_date_r2,
@@ -85,6 +89,14 @@ class TestDatabaseManager:
         assert "is_bearish_divergence_r2" in columns
         assert "is_bullish_divergence_r3" in columns
         assert "is_bearish_divergence_r3" in columns
+        assert "hidden_bullish_strength" in columns
+        assert "hidden_bearish_strength" in columns
+        assert "is_hidden_bullish_divergence" in columns
+        assert "is_hidden_bearish_divergence" in columns
+        assert "is_hidden_bullish_divergence_r2" in columns
+        assert "is_hidden_bearish_divergence_r2" in columns
+        assert "is_hidden_bullish_divergence_r3" in columns
+        assert "is_hidden_bearish_divergence_r3" in columns
         assert "pivot_gap" in columns
         assert "pivot_drop_pct" in columns
         assert "pivot_gap_r2" in columns
@@ -93,7 +105,60 @@ class TestDatabaseManager:
         assert "pivot_gap_r3" in columns
         assert "pivot_drop_pct_r3" in columns
         assert "pivot2_date_r3" in columns
-        assert tuple(row) == (1, 0, 1, 0, 0, 0, None, None, None, None, None, None, None, None)
+        assert tuple(row) == (
+            1,
+            0,
+            0.0,
+            0.0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+
+    def test_database_manager_adds_hidden_columns_to_existing_divergence_table(self, temp_db):
+        raw_conn = sqlite3.connect(temp_db)
+        raw_conn.execute(
+            """
+            CREATE TABLE divergence_data (
+                ticker TEXT NOT NULL,
+                date TEXT NOT NULL,
+                bullish_strength REAL DEFAULT 0,
+                bearish_strength REAL DEFAULT 0,
+                rsi REAL,
+                PRIMARY KEY (ticker, date)
+            )
+            """
+        )
+        raw_conn.commit()
+        raw_conn.close()
+
+        manager = DatabaseManager(temp_db)
+        conn = manager.get_connection()
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(divergence_data)")}
+
+        assert "hidden_bullish_strength" in columns
+        assert "hidden_bearish_strength" in columns
+        assert "is_hidden_bullish_divergence" in columns
+        assert "is_hidden_bearish_divergence" in columns
+        assert "is_hidden_bullish_divergence_r2" in columns
+        assert "is_hidden_bearish_divergence_r2" in columns
+        assert "is_hidden_bullish_divergence_r3" in columns
+        assert "is_hidden_bearish_divergence_r3" in columns
 
     def test_excluded_tickers_table_created(self, temp_db):
         manager = DatabaseManager(temp_db)

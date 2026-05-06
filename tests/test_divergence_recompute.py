@@ -91,6 +91,8 @@ def test_recompute_divergence_only_missing_writes_only_missing_tail(
                 "date": row["pvm"],
                 "bullish_strength": 0.0,
                 "bearish_strength": 0.0,
+                "hidden_bullish_strength": 0.0,
+                "hidden_bearish_strength": 0.0,
                 "rsi": float(idx + 1),
             }
             for idx, row in enumerate(df.to_dict("records"))
@@ -140,6 +142,8 @@ def test_recompute_divergence_only_missing_rewrites_recent_buffer_for_v2_updates
                 "date": row["pvm"],
                 "bullish_strength": 0.0,
                 "bearish_strength": 0.0,
+                "hidden_bullish_strength": 0.0,
+                "hidden_bearish_strength": 0.0,
                 "rsi": float(5000 + idx),
             }
             for idx, row in enumerate(df.to_dict("records"))
@@ -249,6 +253,8 @@ def test_recompute_divergence_full_recompute_rewrites_entire_history(
                 "date": row["pvm"],
                 "bullish_strength": 0.0,
                 "bearish_strength": 0.0,
+                "hidden_bullish_strength": 0.0,
+                "hidden_bearish_strength": 0.0,
                 "rsi": float(1000 + idx),
             }
             for idx, row in enumerate(df.to_dict("records"))
@@ -341,10 +347,14 @@ def test_recompute_divergence_full_recompute_uses_real_v1_engine(divergence_dbs)
     with sqlite3.connect(analysis_path) as conn:
         stored_rows = conn.execute(
             """
-            SELECT date, bullish_strength, bearish_strength, rsi,
+            SELECT date, bullish_strength, bearish_strength,
+                   hidden_bullish_strength, hidden_bearish_strength, rsi,
                    is_bullish_divergence, is_bearish_divergence,
+                   is_hidden_bullish_divergence, is_hidden_bearish_divergence,
                    is_bullish_divergence_r2, is_bearish_divergence_r2,
+                   is_hidden_bullish_divergence_r2, is_hidden_bearish_divergence_r2,
                    is_bullish_divergence_r3, is_bearish_divergence_r3,
+                   is_hidden_bullish_divergence_r3, is_hidden_bearish_divergence_r3,
                    pivot_gap, pivot_drop_pct,
                    pivot_gap_r2, pivot_drop_pct_r2, pivot2_date_r2,
                    pivot_gap_r3, pivot_drop_pct_r3, pivot2_date_r3
@@ -360,21 +370,29 @@ def test_recompute_divergence_full_recompute_uses_real_v1_engine(divergence_dbs)
     assert stored_last[0] == expected_last["date"]
     assert stored_last[1] == expected_last["bullish_strength"]
     assert stored_last[2] == expected_last["bearish_strength"]
-    assert stored_last[3] == expected_last["rsi"]
-    assert stored_last[4] == expected_last["is_bullish_divergence"]
-    assert stored_last[5] == expected_last["is_bearish_divergence"]
-    assert stored_last[6] == expected_last["is_bullish_divergence_r2"]
-    assert stored_last[7] == expected_last["is_bearish_divergence_r2"]
-    assert stored_last[8] == expected_last["is_bullish_divergence_r3"]
-    assert stored_last[9] == expected_last["is_bearish_divergence_r3"]
-    assert stored_last[10] == expected_last["pivot_gap"]
-    assert stored_last[11] == expected_last["pivot_drop_pct"]
-    assert stored_last[12] == expected_last["pivot_gap_r2"]
-    assert stored_last[13] == expected_last["pivot_drop_pct_r2"]
-    assert stored_last[14] == expected_last["pivot2_date_r2"]
-    assert stored_last[15] == expected_last["pivot_gap_r3"]
-    assert stored_last[16] == expected_last["pivot_drop_pct_r3"]
-    assert stored_last[17] == expected_last["pivot2_date_r3"]
+    assert stored_last[3] == expected_last["hidden_bullish_strength"]
+    assert stored_last[4] == expected_last["hidden_bearish_strength"]
+    assert stored_last[5] == expected_last["rsi"]
+    assert stored_last[6] == expected_last["is_bullish_divergence"]
+    assert stored_last[7] == expected_last["is_bearish_divergence"]
+    assert stored_last[8] == expected_last["is_hidden_bullish_divergence"]
+    assert stored_last[9] == expected_last["is_hidden_bearish_divergence"]
+    assert stored_last[10] == expected_last["is_bullish_divergence_r2"]
+    assert stored_last[11] == expected_last["is_bearish_divergence_r2"]
+    assert stored_last[12] == expected_last["is_hidden_bullish_divergence_r2"]
+    assert stored_last[13] == expected_last["is_hidden_bearish_divergence_r2"]
+    assert stored_last[14] == expected_last["is_bullish_divergence_r3"]
+    assert stored_last[15] == expected_last["is_bearish_divergence_r3"]
+    assert stored_last[16] == expected_last["is_hidden_bullish_divergence_r3"]
+    assert stored_last[17] == expected_last["is_hidden_bearish_divergence_r3"]
+    assert stored_last[18] == expected_last["pivot_gap"]
+    assert stored_last[19] == expected_last["pivot_drop_pct"]
+    assert stored_last[20] == expected_last["pivot_gap_r2"]
+    assert stored_last[21] == expected_last["pivot_drop_pct_r2"]
+    assert stored_last[22] == expected_last["pivot2_date_r2"]
+    assert stored_last[23] == expected_last["pivot_gap_r3"]
+    assert stored_last[24] == expected_last["pivot_drop_pct_r3"]
+    assert stored_last[25] == expected_last["pivot2_date_r3"]
 
 
 def test_recompute_divergence_only_missing_updates_v2_flags_for_recent_existing_rows(
@@ -654,3 +672,75 @@ def test_recompute_divergence_persists_radius_specific_pivot2_dates_independentl
         ).fetchone()
 
     assert row == ("2024-01-13", "2024-01-12")
+
+
+def test_recompute_persists_hidden_fields(divergence_dbs, monkeypatch):
+    ticker = divergence_dbs["ticker"]
+
+    monkeypatch.setattr(
+        "analysis.divergence_recompute.compute_divergence_series",
+        lambda df, start_date=None: [
+            {
+                "date": str(row["pvm"]),
+                "bullish_strength": 0.1,
+                "bearish_strength": 0.2,
+                "hidden_bullish_strength": 0.3,
+                "hidden_bearish_strength": 0.4,
+                "rsi": float(idx),
+                "is_bullish_divergence": 1,
+                "is_bearish_divergence": 0,
+                "is_hidden_bullish_divergence": 1,
+                "is_hidden_bearish_divergence": 0,
+                "is_bullish_divergence_r2": 1,
+                "is_bearish_divergence_r2": 0,
+                "is_hidden_bullish_divergence_r2": 1,
+                "is_hidden_bearish_divergence_r2": 0,
+                "is_bullish_divergence_r3": 0,
+                "is_bearish_divergence_r3": 1,
+                "is_hidden_bullish_divergence_r3": 0,
+                "is_hidden_bearish_divergence_r3": 1,
+                "pivot_gap": None,
+                "pivot_drop_pct": None,
+                "pivot_gap_r2": None,
+                "pivot_drop_pct_r2": None,
+                "pivot2_date_r2": None,
+                "pivot_gap_r3": None,
+                "pivot_drop_pct_r3": None,
+                "pivot2_date_r3": None,
+            }
+            for idx, row in enumerate(df.to_dict("records"))
+            if start_date is None or str(row["pvm"]) >= start_date
+        ],
+    )
+
+    success, rows_written, err = recompute_divergence_for_ticker(
+        ticker,
+        osakedata_path=divergence_dbs["osakedata_path"],
+        analysis_path=divergence_dbs["analysis_path"],
+        only_missing=False,
+    )
+
+    assert success is True
+    assert err == ""
+    assert rows_written == len(divergence_dbs["dates"])
+
+    with sqlite3.connect(divergence_dbs["analysis_path"]) as conn:
+        row = conn.execute(
+            """
+            SELECT hidden_bullish_strength,
+                   hidden_bearish_strength,
+                   is_hidden_bullish_divergence,
+                   is_hidden_bearish_divergence,
+                   is_hidden_bullish_divergence_r2,
+                   is_hidden_bearish_divergence_r2,
+                   is_hidden_bullish_divergence_r3,
+                   is_hidden_bearish_divergence_r3
+            FROM divergence_data
+            WHERE ticker = ?
+            ORDER BY date DESC
+            LIMIT 1
+            """,
+            (ticker,),
+        ).fetchone()
+
+    assert row == (0.3, 0.4, 1, 0, 1, 0, 0, 1)

@@ -132,3 +132,43 @@ def compute_bearish_candidate_strength(
     overbought_score = bearish_overbought_score(rsi_t)
     score = 0.45 * price_score + 0.45 * rsi_score + 0.10 * overbought_score
     return clamp01(score)
+
+
+def compute_hidden_bullish_candidate_strength(
+    close_p: float,
+    close_t: float,
+    rsi_p: float,
+    rsi_t: float,
+) -> float:
+    if close_p <= 0.0 or close_t <= 0.0:
+        return 0.0
+
+    price_rebound_pct = (close_t - close_p) / close_p
+    price_score = clamp01(price_rebound_pct / 0.08)
+
+    rsi_drop = rsi_p - rsi_t
+    rsi_score = clamp01(rsi_drop / 10.0)
+
+    oversold_score = bullish_oversold_score(rsi_t)
+    score = 0.45 * price_score + 0.45 * rsi_score + 0.10 * oversold_score
+    return clamp01(score)
+
+
+def compute_hidden_bearish_candidate_strength(
+    close_p: float,
+    close_t: float,
+    rsi_p: float,
+    rsi_t: float,
+) -> float:
+    if close_p <= 0.0 or close_t <= 0.0:
+        return 0.0
+
+    price_pullback_pct = (close_p - close_t) / close_p
+    price_score = clamp01(price_pullback_pct / 0.08)
+
+    rsi_rise = rsi_t - rsi_p
+    rsi_score = clamp01(rsi_rise / 10.0)
+
+    overbought_score = bearish_overbought_score(rsi_t)
+    score = 0.45 * price_score + 0.45 * rsi_score + 0.10 * overbought_score
+    return clamp01(score)

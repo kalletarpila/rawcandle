@@ -10,6 +10,8 @@ from .divergence_v1 import (
     RSI_PERIOD,
     compute_bearish_candidate_strength,
     compute_bullish_candidate_strength,
+    compute_hidden_bearish_candidate_strength,
+    compute_hidden_bullish_candidate_strength,
     compute_rsi_wilder,
     is_rolling_high_candidate,
     is_rolling_low_candidate,
@@ -35,6 +37,8 @@ def compute_divergence_for_date(
             "date": dates[idx],
             "bullish_strength": 0.0,
             "bearish_strength": 0.0,
+            "hidden_bullish_strength": 0.0,
+            "hidden_bearish_strength": 0.0,
             "rsi": None,
         }
 
@@ -43,11 +47,15 @@ def compute_divergence_for_date(
             "date": dates[idx],
             "bullish_strength": 0.0,
             "bearish_strength": 0.0,
+            "hidden_bullish_strength": 0.0,
+            "hidden_bearish_strength": 0.0,
             "rsi": rsi_t,
         }
 
     bullish_best = 0.0
     bearish_best = 0.0
+    hidden_bullish_best = 0.0
+    hidden_bearish_best = 0.0
 
     lookback_start = max(0, idx - LOOKBACK_DAYS)
     for prev_idx in range(lookback_start, idx):
@@ -63,6 +71,13 @@ def compute_divergence_for_date(
                     bullish_best,
                     compute_bullish_candidate_strength(close_p, close_t, rsi_p, rsi_t),
                 )
+            if close_t > close_p and rsi_t < rsi_p:
+                hidden_bullish_best = max(
+                    hidden_bullish_best,
+                    compute_hidden_bullish_candidate_strength(
+                        close_p, close_t, rsi_p, rsi_t
+                    ),
+                )
 
         if is_rolling_high_candidate(closes, prev_idx):
             if close_t > close_p and rsi_t < rsi_p:
@@ -70,11 +85,20 @@ def compute_divergence_for_date(
                     bearish_best,
                     compute_bearish_candidate_strength(close_p, close_t, rsi_p, rsi_t),
                 )
+            if close_t < close_p and rsi_t > rsi_p:
+                hidden_bearish_best = max(
+                    hidden_bearish_best,
+                    compute_hidden_bearish_candidate_strength(
+                        close_p, close_t, rsi_p, rsi_t
+                    ),
+                )
 
     return {
         "date": dates[idx],
         "bullish_strength": bullish_best,
         "bearish_strength": bearish_best,
+        "hidden_bullish_strength": hidden_bullish_best,
+        "hidden_bearish_strength": hidden_bearish_best,
         "rsi": rsi_t,
     }
 
@@ -141,6 +165,8 @@ def _compute_v2_event_flags_for_radius(
 ) -> tuple[
     List[int],
     List[int],
+    List[int],
+    List[int],
     List[Optional[int]],
     List[Optional[float]],
     List[Optional[str]],
@@ -148,12 +174,22 @@ def _compute_v2_event_flags_for_radius(
     size = len(rsi_values)
     bullish_flags = [0] * size
     bearish_flags = [0] * size
+    hidden_bullish_flags = [0] * size
+    hidden_bearish_flags = [0] * size
     pivot_gaps: List[Optional[int]] = [None] * size
     pivot_drop_pcts: List[Optional[float]] = [None] * size
     pivot2_dates: List[Optional[str]] = [None] * size
 
     if not lows or not highs or len(lows) != size or len(highs) != size:
-        return bullish_flags, bearish_flags, pivot_gaps, pivot_drop_pcts, pivot2_dates
+        return (
+            bullish_flags,
+            bearish_flags,
+            hidden_bullish_flags,
+            hidden_bearish_flags,
+            pivot_gaps,
+            pivot_drop_pcts,
+            pivot2_dates,
+        )
 
     raw_price_pivot_lows = _compute_raw_pivot_candidates(lows, radius=radius, is_low=True)
     raw_price_pivot_highs = _compute_raw_pivot_candidates(highs, radius=radius, is_low=False)
@@ -179,13 +215,30 @@ def _compute_v2_event_flags_for_radius(
         if pivot_gap < MIN_V2_PIVOT_GAP or pivot_gap > MAX_V2_PIVOT_GAP:
             continue
 
-        if lows[p2] >= lows[p1]:
-            continue
         if rsi_values[p1] is None:
             continue
 
         anchor_rsi = rsi_values[p1]
         pivot_drop_pct = ((lows[p1] - lows[p2]) / lows[p1]) * 100.0
+        if lows[p2] < lows[p1]:
+            for r2 in [p2 - 1, p2, p2 + 1]:
+                if r2 < 0 or r2 >= size:
+                    continue
+                if not final_rsi_pivot_lows[r2]:
+                    continue
+                if rsi_values[r2] is None:
+                    continue
+                if rsi_values[r2] <= anchor_rsi:
+                    continue
+                event_idx = r2 + radius
+                if event_idx >= size:
+                    continue
+                bullish_flags[event_idx] = 1
+                pivot_gaps[event_idx] = pivot_gap
+                pivot_drop_pcts[event_idx] = pivot_drop_pct
+                pivot2_dates[event_idx] = dates[p2]
+                break
+
         for r2 in [p2 - 1, p2, p2 + 1]:
             if r2 < 0 or r2 >= size:
                 continue
@@ -193,15 +246,14 @@ def _compute_v2_event_flags_for_radius(
                 continue
             if rsi_values[r2] is None:
                 continue
-            if rsi_values[r2] <= anchor_rsi:
+            if lows[p2] <= lows[p1]:
+                continue
+            if rsi_values[r2] >= anchor_rsi:
                 continue
             event_idx = r2 + radius
             if event_idx >= size:
                 continue
-            bullish_flags[event_idx] = 1
-            pivot_gaps[event_idx] = pivot_gap
-            pivot_drop_pcts[event_idx] = pivot_drop_pct
-            pivot2_dates[event_idx] = dates[p2]
+            hidden_bullish_flags[event_idx] = 1
             break
 
     for pivot_idx in range(1, len(price_pivot_highs)):
@@ -211,13 +263,30 @@ def _compute_v2_event_flags_for_radius(
         if pivot_gap < MIN_V2_PIVOT_GAP or pivot_gap > MAX_V2_PIVOT_GAP:
             continue
 
-        if highs[p2] <= highs[p1]:
-            continue
         if rsi_values[p1] is None:
             continue
 
         anchor_rsi = rsi_values[p1]
         pivot_drop_pct = ((highs[p2] - highs[p1]) / highs[p1]) * 100.0
+        if highs[p2] > highs[p1]:
+            for r2 in [p2 - 1, p2, p2 + 1]:
+                if r2 < 0 or r2 >= size:
+                    continue
+                if not final_rsi_pivot_highs[r2]:
+                    continue
+                if rsi_values[r2] is None:
+                    continue
+                if rsi_values[r2] >= anchor_rsi:
+                    continue
+                event_idx = r2 + radius
+                if event_idx >= size:
+                    continue
+                bearish_flags[event_idx] = 1
+                pivot_gaps[event_idx] = pivot_gap
+                pivot_drop_pcts[event_idx] = pivot_drop_pct
+                pivot2_dates[event_idx] = dates[p2]
+                break
+
         for r2 in [p2 - 1, p2, p2 + 1]:
             if r2 < 0 or r2 >= size:
                 continue
@@ -225,18 +294,25 @@ def _compute_v2_event_flags_for_radius(
                 continue
             if rsi_values[r2] is None:
                 continue
-            if rsi_values[r2] >= anchor_rsi:
+            if highs[p2] >= highs[p1]:
+                continue
+            if rsi_values[r2] <= anchor_rsi:
                 continue
             event_idx = r2 + radius
             if event_idx >= size:
                 continue
-            bearish_flags[event_idx] = 1
-            pivot_gaps[event_idx] = pivot_gap
-            pivot_drop_pcts[event_idx] = pivot_drop_pct
-            pivot2_dates[event_idx] = dates[p2]
+            hidden_bearish_flags[event_idx] = 1
             break
 
-    return bullish_flags, bearish_flags, pivot_gaps, pivot_drop_pcts, pivot2_dates
+    return (
+        bullish_flags,
+        bearish_flags,
+        hidden_bullish_flags,
+        hidden_bearish_flags,
+        pivot_gaps,
+        pivot_drop_pcts,
+        pivot2_dates,
+    )
 
 
 def compute_divergence_series(
@@ -268,6 +344,8 @@ def compute_divergence_series(
     (
         bullish_event_flags_r2,
         bearish_event_flags_r2,
+        hidden_bullish_event_flags_r2,
+        hidden_bearish_event_flags_r2,
         pivot_gaps_r2,
         pivot_drop_pcts_r2,
         pivot2_dates_r2,
@@ -277,6 +355,8 @@ def compute_divergence_series(
     (
         bullish_event_flags_r3,
         bearish_event_flags_r3,
+        hidden_bullish_event_flags_r3,
+        hidden_bearish_event_flags_r3,
         pivot_gaps_r3,
         pivot_drop_pcts_r3,
         pivot2_dates_r3,
@@ -294,6 +374,10 @@ def compute_divergence_series(
         row["is_bearish_divergence_r2"] = bearish_event_flags_r2[idx]
         row["is_bullish_divergence_r3"] = bullish_event_flags_r3[idx]
         row["is_bearish_divergence_r3"] = bearish_event_flags_r3[idx]
+        row["is_hidden_bullish_divergence_r2"] = hidden_bullish_event_flags_r2[idx]
+        row["is_hidden_bearish_divergence_r2"] = hidden_bearish_event_flags_r2[idx]
+        row["is_hidden_bullish_divergence_r3"] = hidden_bullish_event_flags_r3[idx]
+        row["is_hidden_bearish_divergence_r3"] = hidden_bearish_event_flags_r3[idx]
         row["pivot_gap_r2"] = pivot_gaps_r2[idx]
         row["pivot_drop_pct_r2"] = pivot_drop_pcts_r2[idx]
         row["pivot2_date_r2"] = pivot2_dates_r2[idx]
@@ -305,6 +389,8 @@ def compute_divergence_series(
         # Legacy compatibility: generic fields mirror radius-2 semantics.
         row["is_bullish_divergence"] = bullish_event_flags_r2[idx]
         row["is_bearish_divergence"] = bearish_event_flags_r2[idx]
+        row["is_hidden_bullish_divergence"] = hidden_bullish_event_flags_r2[idx]
+        row["is_hidden_bearish_divergence"] = hidden_bearish_event_flags_r2[idx]
         results.append(row)
 
     return results

@@ -372,13 +372,21 @@ class DatabaseManager:
                     date TEXT NOT NULL,
                     bullish_strength REAL DEFAULT 0,
                     bearish_strength REAL DEFAULT 0,
+                    hidden_bullish_strength REAL DEFAULT 0,
+                    hidden_bearish_strength REAL DEFAULT 0,
                     rsi REAL,
                     is_bullish_divergence INTEGER DEFAULT 0,
                     is_bearish_divergence INTEGER DEFAULT 0,
+                    is_hidden_bullish_divergence INTEGER DEFAULT 0,
+                    is_hidden_bearish_divergence INTEGER DEFAULT 0,
                     is_bullish_divergence_r2 INTEGER DEFAULT 0,
                     is_bearish_divergence_r2 INTEGER DEFAULT 0,
+                    is_hidden_bullish_divergence_r2 INTEGER DEFAULT 0,
+                    is_hidden_bearish_divergence_r2 INTEGER DEFAULT 0,
                     is_bullish_divergence_r3 INTEGER DEFAULT 0,
                     is_bearish_divergence_r3 INTEGER DEFAULT 0,
+                    is_hidden_bullish_divergence_r3 INTEGER DEFAULT 0,
+                    is_hidden_bearish_divergence_r3 INTEGER DEFAULT 0,
                     pivot_gap INTEGER,
                     pivot_drop_pct REAL,
                     pivot_gap_r2 INTEGER,
@@ -402,6 +410,22 @@ class DatabaseManager:
                 cursor.execute(
                     "ALTER TABLE divergence_data ADD COLUMN is_bearish_divergence INTEGER DEFAULT 0"
                 )
+            if "hidden_bullish_strength" not in divergence_columns:
+                cursor.execute(
+                    "ALTER TABLE divergence_data ADD COLUMN hidden_bullish_strength REAL DEFAULT 0"
+                )
+            if "hidden_bearish_strength" not in divergence_columns:
+                cursor.execute(
+                    "ALTER TABLE divergence_data ADD COLUMN hidden_bearish_strength REAL DEFAULT 0"
+                )
+            if "is_hidden_bullish_divergence" not in divergence_columns:
+                cursor.execute(
+                    "ALTER TABLE divergence_data ADD COLUMN is_hidden_bullish_divergence INTEGER DEFAULT 0"
+                )
+            if "is_hidden_bearish_divergence" not in divergence_columns:
+                cursor.execute(
+                    "ALTER TABLE divergence_data ADD COLUMN is_hidden_bearish_divergence INTEGER DEFAULT 0"
+                )
             if "is_bullish_divergence_r2" not in divergence_columns:
                 cursor.execute(
                     "ALTER TABLE divergence_data ADD COLUMN is_bullish_divergence_r2 INTEGER DEFAULT 0"
@@ -418,6 +442,22 @@ class DatabaseManager:
                     cursor.execute(
                         "UPDATE divergence_data SET is_bearish_divergence_r2 = COALESCE(is_bearish_divergence, 0)"
                     )
+            if "is_hidden_bullish_divergence_r2" not in divergence_columns:
+                cursor.execute(
+                    "ALTER TABLE divergence_data ADD COLUMN is_hidden_bullish_divergence_r2 INTEGER DEFAULT 0"
+                )
+                if "is_hidden_bullish_divergence" in divergence_columns:
+                    cursor.execute(
+                        "UPDATE divergence_data SET is_hidden_bullish_divergence_r2 = COALESCE(is_hidden_bullish_divergence, 0)"
+                    )
+            if "is_hidden_bearish_divergence_r2" not in divergence_columns:
+                cursor.execute(
+                    "ALTER TABLE divergence_data ADD COLUMN is_hidden_bearish_divergence_r2 INTEGER DEFAULT 0"
+                )
+                if "is_hidden_bearish_divergence" in divergence_columns:
+                    cursor.execute(
+                        "UPDATE divergence_data SET is_hidden_bearish_divergence_r2 = COALESCE(is_hidden_bearish_divergence, 0)"
+                    )
             if "is_bullish_divergence_r3" not in divergence_columns:
                 cursor.execute(
                     "ALTER TABLE divergence_data ADD COLUMN is_bullish_divergence_r3 INTEGER DEFAULT 0"
@@ -425,6 +465,14 @@ class DatabaseManager:
             if "is_bearish_divergence_r3" not in divergence_columns:
                 cursor.execute(
                     "ALTER TABLE divergence_data ADD COLUMN is_bearish_divergence_r3 INTEGER DEFAULT 0"
+                )
+            if "is_hidden_bullish_divergence_r3" not in divergence_columns:
+                cursor.execute(
+                    "ALTER TABLE divergence_data ADD COLUMN is_hidden_bullish_divergence_r3 INTEGER DEFAULT 0"
+                )
+            if "is_hidden_bearish_divergence_r3" not in divergence_columns:
+                cursor.execute(
+                    "ALTER TABLE divergence_data ADD COLUMN is_hidden_bearish_divergence_r3 INTEGER DEFAULT 0"
                 )
             if "pivot_gap" not in divergence_columns:
                 cursor.execute(
@@ -1529,12 +1577,20 @@ class DatabaseManager:
             for record in divergence_records:
                 if len(record) == 4:
                     date, bullish, bearish, rsi = record
+                    hidden_bullish = 0.0
+                    hidden_bearish = 0.0
                     is_bullish_divergence = 0
                     is_bearish_divergence = 0
+                    is_hidden_bullish_divergence = 0
+                    is_hidden_bearish_divergence = 0
                     is_bullish_divergence_r2 = 0
                     is_bearish_divergence_r2 = 0
+                    is_hidden_bullish_divergence_r2 = 0
+                    is_hidden_bearish_divergence_r2 = 0
                     is_bullish_divergence_r3 = 0
                     is_bearish_divergence_r3 = 0
+                    is_hidden_bullish_divergence_r3 = 0
+                    is_hidden_bearish_divergence_r3 = 0
                     pivot_gap = None
                     pivot_drop_pct = None
                     pivot_gap_r2 = None
@@ -1552,10 +1608,18 @@ class DatabaseManager:
                         is_bullish_divergence,
                         is_bearish_divergence,
                     ) = record
+                    hidden_bullish = 0.0
+                    hidden_bearish = 0.0
+                    is_hidden_bullish_divergence = 0
+                    is_hidden_bearish_divergence = 0
                     is_bullish_divergence_r2 = is_bullish_divergence
                     is_bearish_divergence_r2 = is_bearish_divergence
+                    is_hidden_bullish_divergence_r2 = 0
+                    is_hidden_bearish_divergence_r2 = 0
                     is_bullish_divergence_r3 = 0
                     is_bearish_divergence_r3 = 0
+                    is_hidden_bullish_divergence_r3 = 0
+                    is_hidden_bearish_divergence_r3 = 0
                     pivot_gap = None
                     pivot_drop_pct = None
                     pivot_gap_r2 = None
@@ -1577,6 +1641,14 @@ class DatabaseManager:
                         is_bullish_divergence_r3,
                         is_bearish_divergence_r3,
                     ) = record
+                    hidden_bullish = 0.0
+                    hidden_bearish = 0.0
+                    is_hidden_bullish_divergence = 0
+                    is_hidden_bearish_divergence = 0
+                    is_hidden_bullish_divergence_r2 = 0
+                    is_hidden_bearish_divergence_r2 = 0
+                    is_hidden_bullish_divergence_r3 = 0
+                    is_hidden_bearish_divergence_r3 = 0
                     pivot_gap = None
                     pivot_drop_pct = None
                     pivot_gap_r2 = None
@@ -1600,6 +1672,14 @@ class DatabaseManager:
                         pivot_gap,
                         pivot_drop_pct,
                     ) = record
+                    hidden_bullish = 0.0
+                    hidden_bearish = 0.0
+                    is_hidden_bullish_divergence = 0
+                    is_hidden_bearish_divergence = 0
+                    is_hidden_bullish_divergence_r2 = 0
+                    is_hidden_bearish_divergence_r2 = 0
+                    is_hidden_bullish_divergence_r3 = 0
+                    is_hidden_bearish_divergence_r3 = 0
                     pivot_gap_r2 = None
                     pivot_drop_pct_r2 = None
                     pivot2_date_r2 = None
@@ -1625,9 +1705,17 @@ class DatabaseManager:
                         pivot_gap_r3,
                         pivot_drop_pct_r3,
                     ) = record
+                    hidden_bullish = 0.0
+                    hidden_bearish = 0.0
+                    is_hidden_bullish_divergence = 0
+                    is_hidden_bearish_divergence = 0
+                    is_hidden_bullish_divergence_r2 = 0
+                    is_hidden_bearish_divergence_r2 = 0
+                    is_hidden_bullish_divergence_r3 = 0
+                    is_hidden_bearish_divergence_r3 = 0
                     pivot2_date_r2 = None
                     pivot2_date_r3 = None
-                else:
+                elif len(record) == 18:
                     (
                         date,
                         bullish,
@@ -1648,19 +1736,93 @@ class DatabaseManager:
                         pivot_drop_pct_r3,
                         pivot2_date_r3,
                     ) = record
+                    hidden_bullish = 0.0
+                    hidden_bearish = 0.0
+                    is_hidden_bullish_divergence = 0
+                    is_hidden_bearish_divergence = 0
+                    is_hidden_bullish_divergence_r2 = 0
+                    is_hidden_bearish_divergence_r2 = 0
+                    is_hidden_bullish_divergence_r3 = 0
+                    is_hidden_bearish_divergence_r3 = 0
+                elif len(record) == 26:
+                    (
+                        date,
+                        bullish,
+                        bearish,
+                        hidden_bullish,
+                        hidden_bearish,
+                        rsi,
+                        is_bullish_divergence,
+                        is_bearish_divergence,
+                        is_hidden_bullish_divergence,
+                        is_hidden_bearish_divergence,
+                        is_bullish_divergence_r2,
+                        is_bearish_divergence_r2,
+                        is_hidden_bullish_divergence_r2,
+                        is_hidden_bearish_divergence_r2,
+                        is_bullish_divergence_r3,
+                        is_bearish_divergence_r3,
+                        is_hidden_bullish_divergence_r3,
+                        is_hidden_bearish_divergence_r3,
+                        pivot_gap,
+                        pivot_drop_pct,
+                        pivot_gap_r2,
+                        pivot_drop_pct_r2,
+                        pivot2_date_r2,
+                        pivot_gap_r3,
+                        pivot_drop_pct_r3,
+                        pivot2_date_r3,
+                    ) = record
+                else:
+                    (
+                        date,
+                        bullish,
+                        bearish,
+                        hidden_bullish,
+                        hidden_bearish,
+                        rsi,
+                        is_bullish_divergence,
+                        is_bearish_divergence,
+                        is_hidden_bullish_divergence,
+                        is_hidden_bearish_divergence,
+                        is_bullish_divergence_r2,
+                        is_bearish_divergence_r2,
+                        is_hidden_bullish_divergence_r2,
+                        is_hidden_bearish_divergence_r2,
+                        is_bullish_divergence_r3,
+                        is_bearish_divergence_r3,
+                        is_hidden_bullish_divergence_r3,
+                        is_hidden_bearish_divergence_r3,
+                        pivot_gap,
+                        pivot_drop_pct,
+                        pivot_gap_r2,
+                        pivot_drop_pct_r2,
+                        pivot2_date_r2,
+                        pivot_gap_r3,
+                        pivot_drop_pct_r3,
+                        pivot2_date_r3,
+                    ) = record
                 records_with_ticker.append(
                     (
                         ticker,
                         date,
                         bullish,
                         bearish,
+                        hidden_bullish,
+                        hidden_bearish,
                         rsi,
                         is_bullish_divergence,
                         is_bearish_divergence,
+                        is_hidden_bullish_divergence,
+                        is_hidden_bearish_divergence,
                         is_bullish_divergence_r2,
                         is_bearish_divergence_r2,
+                        is_hidden_bullish_divergence_r2,
+                        is_hidden_bearish_divergence_r2,
                         is_bullish_divergence_r3,
                         is_bearish_divergence_r3,
+                        is_hidden_bullish_divergence_r3,
+                        is_hidden_bearish_divergence_r3,
                         pivot_gap,
                         pivot_drop_pct,
                         pivot_gap_r2,
@@ -1680,13 +1842,21 @@ class DatabaseManager:
                     date,
                     bullish_strength,
                     bearish_strength,
+                    hidden_bullish_strength,
+                    hidden_bearish_strength,
                     rsi,
                     is_bullish_divergence,
                     is_bearish_divergence,
+                    is_hidden_bullish_divergence,
+                    is_hidden_bearish_divergence,
                     is_bullish_divergence_r2,
                     is_bearish_divergence_r2,
+                    is_hidden_bullish_divergence_r2,
+                    is_hidden_bearish_divergence_r2,
                     is_bullish_divergence_r3,
                     is_bearish_divergence_r3,
+                    is_hidden_bullish_divergence_r3,
+                    is_hidden_bearish_divergence_r3,
                     pivot_gap,
                     pivot_drop_pct,
                     pivot_gap_r2,
@@ -1696,7 +1866,7 @@ class DatabaseManager:
                     pivot_drop_pct_r3,
                     pivot2_date_r3
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 records_with_ticker,
             )
