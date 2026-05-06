@@ -229,7 +229,7 @@ def test_quarter_state_newer_detection_supersedes_older_detected_date(tmp_path):
     assert row[5] == 1
 
 
-def test_quarter_state_missing_row_is_inserted_with_null_latest_db_date(tmp_path):
+def test_quarter_state_missing_row_is_not_inserted(tmp_path, capsys):
     app = _build_app(tmp_path)
 
     result = app._update_quarter_state_from_yahoo_detection(
@@ -240,11 +240,13 @@ def test_quarter_state_missing_row_is_inserted_with_null_latest_db_date(tmp_path
         checked_at_utc="2026-05-06T10:00:00Z",
     )
 
+    output = capsys.readouterr().out
     row = _fetch_state_row(app.fundamentals_usa_db_path, "QCOM", "usa")
-    assert result["row_inserted"] is True
-    assert row[3] is None
-    assert row[4] == "2026-03-31"
-    assert row[5] == 1
+    assert result["row_inserted"] is False
+    assert result["row_updated"] is False
+    assert result["state_missing"] is True
+    assert row is None
+    assert "state_row_missing" in output
 
 
 def test_quarter_state_preserves_newer_stored_detected_date(tmp_path):
@@ -355,10 +357,10 @@ def test_update_stock_data_counts_missing_quarter_detection(tmp_path, monkeypatc
     output = capsys.readouterr().out
     row = _fetch_state_row(app.fundamentals_usa_db_path, "AAA", "usa")
     assert "SUMMARY quarter_state_checked=1" in output
-    assert "SUMMARY quarter_state_detection_missing=1" in output
-    assert row is not None
-    assert row[4] is None
-    assert row[5] == 0
+    assert "SUMMARY quarter_state_rows_inserted=0" in output
+    assert "SUMMARY quarter_state_detection_missing=0" in output
+    assert "state_row_missing" in output
+    assert row is None
 
 
 def test_update_stock_data_fetches_only_forward_from_latest_db_day(tmp_path, monkeypatch):

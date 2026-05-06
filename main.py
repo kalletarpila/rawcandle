@@ -3134,6 +3134,7 @@ class RawCandleApp:
             "row_inserted": False,
             "row_updated": False,
             "detection_missing": False,
+            "state_missing": False,
         }
         normalized_market = (market or "").strip().lower()
         db_path = self._quarter_state_db_path_for_market(normalized_market)
@@ -3158,6 +3159,15 @@ class RawCandleApp:
             )
             row = cursor.fetchone()
             row_exists = row is not None
+            if not row_exists:
+                outcome["state_missing"] = True
+                print(
+                    "[QUARTER] "
+                    f"{ticker} market={normalized_market} "
+                    "state_row_missing fundamentals_db="
+                    f"{db_path}"
+                )
+                return outcome
             latest_db_period_end_date = row[0] if row else None
             current_detected_period_end_date = row[2] if row else None
             current_flag = int(row[3] or 0) if row else 0
@@ -3193,67 +3203,48 @@ class RawCandleApp:
 
             cursor.execute(
                 """
-                INSERT INTO rc_fundamental_quarter_state (
-                    ticker,
-                    market,
-                    primary_source,
-                    latest_db_period_end_date,
-                    detected_source_period_end_date,
-                    new_quarter_available,
-                    last_checked_at_utc,
-                    last_updated_at_utc,
-                    last_detection_run_id,
-                    last_ingest_run_id
-                ) VALUES (
-                    ?, ?, ?, NULL,
-                    CASE WHEN ? THEN ? ELSE NULL END,
-                    CASE WHEN ? THEN 1 ELSE 0 END,
-                    ?, ?, ?, NULL
-                )
-                ON CONFLICT(ticker) DO UPDATE SET
-                    market = excluded.market,
-                    primary_source = excluded.primary_source,
+                UPDATE rc_fundamental_quarter_state
+                SET market = ?,
+                    primary_source = ?,
                     detected_source_period_end_date = CASE
                         WHEN ? AND (
-                            rc_fundamental_quarter_state.detected_source_period_end_date IS NULL
-                            OR excluded.detected_source_period_end_date
-                               > rc_fundamental_quarter_state.detected_source_period_end_date
-                        ) THEN excluded.detected_source_period_end_date
-                        ELSE rc_fundamental_quarter_state.detected_source_period_end_date
+                            detected_source_period_end_date IS NULL
+                            OR ? > detected_source_period_end_date
+                        ) THEN ?
+                        ELSE detected_source_period_end_date
                     END,
                     new_quarter_available = CASE
                         WHEN ? THEN 1
-                        ELSE rc_fundamental_quarter_state.new_quarter_available
+                        ELSE new_quarter_available
                     END,
-                    last_checked_at_utc = excluded.last_checked_at_utc,
+                    last_checked_at_utc = ?,
                     last_updated_at_utc = CASE
-                        WHEN ? THEN excluded.last_updated_at_utc
-                        ELSE rc_fundamental_quarter_state.last_updated_at_utc
+                        WHEN ? THEN ?
+                        ELSE last_updated_at_utc
                     END,
                     last_detection_run_id = CASE
-                        WHEN ? THEN excluded.last_detection_run_id
-                        ELSE rc_fundamental_quarter_state.last_detection_run_id
+                        WHEN ? THEN ?
+                        ELSE last_detection_run_id
                     END
+                WHERE ticker = ?
                 """,
                 (
-                    ticker,
                     normalized_market,
                     primary_source,
                     should_raise_flag,
                     yahoo_latest_period_end_date,
+                    yahoo_latest_period_end_date,
                     should_raise_flag,
                     checked_at_utc,
+                    state_changed,
                     checked_at_utc,
+                    state_changed,
                     run_id,
-                    should_raise_flag,
-                    should_raise_flag,
-                    state_changed,
-                    state_changed,
+                    ticker,
                 ),
             )
             conn.commit()
 
-        outcome["row_inserted"] = not row_exists
         outcome["row_updated"] = row_exists
         return outcome
 
