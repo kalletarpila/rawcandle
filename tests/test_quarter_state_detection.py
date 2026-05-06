@@ -22,7 +22,7 @@ def _create_quarter_state_db(db_path):
             last_updated_at_utc TEXT,
             last_detection_run_id TEXT,
             last_ingest_run_id TEXT,
-            PRIMARY KEY (ticker, market)
+            PRIMARY KEY (ticker)
         )
         """
     )

@@ -3148,18 +3148,19 @@ class RawCandleApp:
             cursor.execute(
                 """
                 SELECT latest_db_period_end_date,
+                       market,
                        detected_source_period_end_date,
                        new_quarter_available
                 FROM rc_fundamental_quarter_state
-                WHERE ticker = ? AND market = ?
+                WHERE ticker = ?
                 """,
-                (ticker, normalized_market),
+                (ticker,),
             )
             row = cursor.fetchone()
             row_exists = row is not None
             latest_db_period_end_date = row[0] if row else None
-            current_detected_period_end_date = row[1] if row else None
-            current_flag = int(row[2] or 0) if row else 0
+            current_detected_period_end_date = row[2] if row else None
+            current_flag = int(row[3] or 0) if row else 0
 
             has_detection = bool(yahoo_latest_period_end_date)
             if not has_detection:
@@ -3209,7 +3210,8 @@ class RawCandleApp:
                     CASE WHEN ? THEN 1 ELSE 0 END,
                     ?, ?, ?, NULL
                 )
-                ON CONFLICT(ticker, market) DO UPDATE SET
+                ON CONFLICT(ticker) DO UPDATE SET
+                    market = excluded.market,
                     primary_source = excluded.primary_source,
                     detected_source_period_end_date = CASE
                         WHEN ? AND (
@@ -3471,6 +3473,19 @@ class RawCandleApp:
                         summary_key = summary_key_map.get(key)
                         if value and summary_key:
                             quarter_summary[summary_key] += 1
+                    if quarter_result.get("new_detected"):
+                        quarter_db_path = self._quarter_state_db_path_for_market(
+                            ticker_market
+                        )
+                        detected_period = (
+                            self._extract_yahoo_latest_quarter_period_end_date(stock)
+                        )
+                        print(
+                            "[QUARTER] "
+                            f"{ticker} market={ticker_market} "
+                            f"detected_period_end_date={detected_period} "
+                            f"fundamentals_db={quarter_db_path}"
+                        )
 
                     # Poista duplikaatit ja järjestä
                     if not all_hist.empty:
