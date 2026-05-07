@@ -92,10 +92,15 @@ class DowStructureState:
 @dataclass
 class TickerRunResult:
     ticker: str
+    market: str | None
     recalculation_mode: str
     explicit_recalc_applied: bool
     rows_deleted: int
     event_rows: list[dict[str, Any]]
+    calculated_from_date: str | None
+    calculated_through_date: str | None
+    latest_event_date: str | None
+    latest_event_confirmed_as_of_date: str | None
 
 
 def utc_now_iso() -> str:
@@ -197,6 +202,32 @@ def _create_stock_dow_structure_table(conn: sqlite3.Connection) -> None:
     )
 
 
+def _create_stock_dow_structure_status_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS stock_dow_structure_status (
+            ticker TEXT NOT NULL,
+            market TEXT NULL,
+            price_source TEXT NOT NULL,
+            pivot_radius INTEGER NOT NULL,
+            calculated_from_date TEXT NULL,
+            calculated_through_date TEXT NOT NULL,
+            latest_ohlcv_date_at_run TEXT NOT NULL,
+            latest_event_date TEXT NULL,
+            latest_event_confirmed_as_of_date TEXT NULL,
+            last_run_id TEXT NOT NULL,
+            last_run_mode TEXT NOT NULL,
+            last_rows_deleted INTEGER NOT NULL DEFAULT 0,
+            last_rows_inserted INTEGER NOT NULL DEFAULT 0,
+            last_status TEXT NOT NULL DEFAULT 'OK',
+            last_error_message TEXT NULL,
+            updated_at_utc TEXT NOT NULL,
+            PRIMARY KEY (ticker, price_source, pivot_radius)
+        )
+        """
+    )
+
+
 def _migrate_stock_dow_structure_table_if_needed(conn: sqlite3.Connection) -> None:
     table_name = "stock_dow_structure_events"
     old_columns = {
@@ -272,6 +303,7 @@ def _migrate_stock_dow_structure_table_if_needed(conn: sqlite3.Connection) -> No
 
 def ensure_stock_dow_structure_schema(conn: sqlite3.Connection) -> None:
     _migrate_stock_dow_structure_table_if_needed(conn)
+    _create_stock_dow_structure_status_table(conn)
     conn.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_stock_dow_events_ticker_confirmed
@@ -288,6 +320,18 @@ def ensure_stock_dow_structure_schema(conn: sqlite3.Connection) -> None:
         """
         CREATE INDEX IF NOT EXISTS idx_stock_dow_events_event_type
         ON stock_dow_structure_events(event_type)
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_stock_dow_status_market
+        ON stock_dow_structure_status(market)
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_stock_dow_status_calculated_through
+        ON stock_dow_structure_status(calculated_through_date)
         """
     )
     conn.commit()
@@ -539,6 +583,24 @@ def _fetch_latest_confirmed_as_of_date(
     return None if value is None else str(value)
 
 
+def _fetch_status_coverage_row(
+    conn: sqlite3.Connection,
+    ticker: str,
+    pivot_radius: int,
+    price_source: str,
+) -> sqlite3.Row | None:
+    return conn.execute(
+        """
+        SELECT *
+        FROM stock_dow_structure_status
+        WHERE ticker = ?
+          AND pivot_radius = ?
+          AND price_source = ?
+        """,
+        (ticker, pivot_radius, price_source),
+    ).fetchone()
+
+
 def _initialize_selection_summary(
     *,
     pivot_radius: int,
@@ -573,6 +635,81 @@ def _initialize_selection_summary(
     }
 
 
+def _upsert_status_row(
+    conn: sqlite3.Connection,
+    *,
+    ticker: str,
+    market: str | None,
+    pivot_radius: int,
+    calculated_from_date: str | None,
+    calculated_through_date: str,
+    latest_ohlcv_date_at_run: str,
+    latest_event_date: str | None,
+    latest_event_confirmed_as_of_date: str | None,
+    last_run_id: str,
+    last_run_mode: str,
+    last_rows_deleted: int,
+    last_rows_inserted: int,
+    last_status: str,
+    last_error_message: str | None,
+    updated_at_utc: str,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO stock_dow_structure_status (
+            ticker,
+            market,
+            price_source,
+            pivot_radius,
+            calculated_from_date,
+            calculated_through_date,
+            latest_ohlcv_date_at_run,
+            latest_event_date,
+            latest_event_confirmed_as_of_date,
+            last_run_id,
+            last_run_mode,
+            last_rows_deleted,
+            last_rows_inserted,
+            last_status,
+            last_error_message,
+            updated_at_utc
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(ticker, price_source, pivot_radius) DO UPDATE SET
+            market = excluded.market,
+            calculated_from_date = excluded.calculated_from_date,
+            calculated_through_date = excluded.calculated_through_date,
+            latest_ohlcv_date_at_run = excluded.latest_ohlcv_date_at_run,
+            latest_event_date = excluded.latest_event_date,
+            latest_event_confirmed_as_of_date = excluded.latest_event_confirmed_as_of_date,
+            last_run_id = excluded.last_run_id,
+            last_run_mode = excluded.last_run_mode,
+            last_rows_deleted = excluded.last_rows_deleted,
+            last_rows_inserted = excluded.last_rows_inserted,
+            last_status = excluded.last_status,
+            last_error_message = excluded.last_error_message,
+            updated_at_utc = excluded.updated_at_utc
+        """,
+        (
+            ticker,
+            market,
+            PRICE_SOURCE_CLOSE,
+            pivot_radius,
+            calculated_from_date,
+            calculated_through_date,
+            latest_ohlcv_date_at_run,
+            latest_event_date,
+            latest_event_confirmed_as_of_date,
+            last_run_id,
+            last_run_mode,
+            last_rows_deleted,
+            last_rows_inserted,
+            last_status,
+            last_error_message,
+            updated_at_utc,
+        ),
+    )
+
+
 def _run_bounded_initial_ticker_calculation(
     price_conn: sqlite3.Connection,
     *,
@@ -587,20 +724,30 @@ def _run_bounded_initial_ticker_calculation(
     if not bars:
         return TickerRunResult(
             ticker=normalized_ticker,
+            market=None,
             recalculation_mode="skipped",
             explicit_recalc_applied=False,
             rows_deleted=0,
             event_rows=[],
+            calculated_from_date=None,
+            calculated_through_date=None,
+            latest_event_date=None,
+            latest_event_confirmed_as_of_date=None,
         )
 
     bounded_bars = [bar for bar in bars if bar.date >= initial_from_date]
     if not bounded_bars:
         return TickerRunResult(
             ticker=normalized_ticker,
+            market=bars[-1].market,
             recalculation_mode="bounded_initial",
             explicit_recalc_applied=False,
             rows_deleted=0,
             event_rows=[],
+            calculated_from_date=None,
+            calculated_through_date=bars[-1].date,
+            latest_event_date=None,
+            latest_event_confirmed_as_of_date=None,
         )
 
     event_rows = calculate_ticker_events(
@@ -613,10 +760,17 @@ def _run_bounded_initial_ticker_calculation(
     )
     return TickerRunResult(
         ticker=normalized_ticker,
+        market=bounded_bars[-1].market,
         recalculation_mode="bounded_initial",
         explicit_recalc_applied=False,
         rows_deleted=0,
         event_rows=event_rows,
+        calculated_from_date=bounded_bars[0].date,
+        calculated_through_date=bars[-1].date,
+        latest_event_date=None if not event_rows else str(event_rows[-1]["event_date"]),
+        latest_event_confirmed_as_of_date=None
+        if not event_rows
+        else str(event_rows[-1]["confirmed_as_of_date"]),
     )
 
 
@@ -1253,10 +1407,15 @@ def run_ticker_calculation(
     if not bars:
         return TickerRunResult(
             ticker=normalized_ticker,
+            market=None,
             recalculation_mode="skipped",
             explicit_recalc_applied=False,
             rows_deleted=0,
             event_rows=[],
+            calculated_from_date=None,
+            calculated_through_date=None,
+            latest_event_date=None,
+            latest_event_confirmed_as_of_date=None,
         )
 
     if force_full:
@@ -1276,10 +1435,17 @@ def run_ticker_calculation(
         )
         return TickerRunResult(
             ticker=normalized_ticker,
+            market=bars[-1].market,
             recalculation_mode="full",
             explicit_recalc_applied=False,
             rows_deleted=rows_deleted,
             event_rows=event_rows,
+            calculated_from_date=bars[0].date,
+            calculated_through_date=bars[-1].date,
+            latest_event_date=None if not event_rows else str(event_rows[-1]["event_date"]),
+            latest_event_confirmed_as_of_date=None
+            if not event_rows
+            else str(event_rows[-1]["confirmed_as_of_date"]),
         )
 
     if recalc_from_date is not None:
@@ -1289,10 +1455,15 @@ def run_ticker_calculation(
         if recalc_from_date > latest_bar_date:
             return TickerRunResult(
                 ticker=normalized_ticker,
+                market=bars[-1].market,
                 recalculation_mode="explicit_noop",
                 explicit_recalc_applied=True,
                 rows_deleted=0,
                 event_rows=[],
+                calculated_from_date=recalc_from_date,
+                calculated_through_date=latest_bar_date,
+                latest_event_date=None,
+                latest_event_confirmed_as_of_date=None,
             )
 
         if recalc_from_date < first_bar_date:
@@ -1312,10 +1483,17 @@ def run_ticker_calculation(
             )
             return TickerRunResult(
                 ticker=normalized_ticker,
+                market=bars[-1].market,
                 recalculation_mode="full",
                 explicit_recalc_applied=False,
                 rows_deleted=rows_deleted,
                 event_rows=event_rows,
+                calculated_from_date=bars[0].date,
+                calculated_through_date=bars[-1].date,
+                latest_event_date=None if not event_rows else str(event_rows[-1]["event_date"]),
+                latest_event_confirmed_as_of_date=None
+                if not event_rows
+                else str(event_rows[-1]["confirmed_as_of_date"]),
             )
 
         start_confirmed_as_of_date = _find_first_trading_date_on_or_after(
@@ -1325,10 +1503,15 @@ def run_ticker_calculation(
         if start_confirmed_as_of_date is None:
             return TickerRunResult(
                 ticker=normalized_ticker,
+                market=bars[-1].market,
                 recalculation_mode="explicit_noop",
                 explicit_recalc_applied=True,
                 rows_deleted=0,
                 event_rows=[],
+                calculated_from_date=start_confirmed_as_of_date,
+                calculated_through_date=latest_bar_date,
+                latest_event_date=None,
+                latest_event_confirmed_as_of_date=None,
             )
 
         state = _load_latest_state_before(
@@ -1355,10 +1538,17 @@ def run_ticker_calculation(
             )
             return TickerRunResult(
                 ticker=normalized_ticker,
+                market=bars[-1].market,
                 recalculation_mode="fallback_full",
                 explicit_recalc_applied=False,
                 rows_deleted=rows_deleted,
                 event_rows=event_rows,
+                calculated_from_date=bars[0].date,
+                calculated_through_date=bars[-1].date,
+                latest_event_date=None if not event_rows else str(event_rows[-1]["event_date"]),
+                latest_event_confirmed_as_of_date=None
+                if not event_rows
+                else str(event_rows[-1]["confirmed_as_of_date"]),
             )
 
         rows_deleted = _delete_rows_from_date(
@@ -1378,10 +1568,17 @@ def run_ticker_calculation(
         )
         return TickerRunResult(
             ticker=normalized_ticker,
+            market=bars[-1].market,
             recalculation_mode="explicit",
             explicit_recalc_applied=True,
             rows_deleted=rows_deleted,
             event_rows=event_rows,
+            calculated_from_date=start_confirmed_as_of_date,
+            calculated_through_date=latest_bar_date,
+            latest_event_date=None if not event_rows else str(event_rows[-1]["event_date"]),
+            latest_event_confirmed_as_of_date=None
+            if not event_rows
+            else str(event_rows[-1]["confirmed_as_of_date"]),
         )
 
     latest_confirmed_as_of_date = _fetch_latest_confirmed_as_of_date(
@@ -1401,10 +1598,17 @@ def run_ticker_calculation(
         )
         return TickerRunResult(
             ticker=normalized_ticker,
+            market=bars[-1].market,
             recalculation_mode="full",
             explicit_recalc_applied=False,
             rows_deleted=0,
             event_rows=event_rows,
+            calculated_from_date=bars[0].date,
+            calculated_through_date=bars[-1].date,
+            latest_event_date=None if not event_rows else str(event_rows[-1]["event_date"]),
+            latest_event_confirmed_as_of_date=None
+            if not event_rows
+            else str(event_rows[-1]["confirmed_as_of_date"]),
         )
 
     recalc_start_date = _compute_recalc_start_date(
@@ -1436,10 +1640,17 @@ def run_ticker_calculation(
         )
         return TickerRunResult(
             ticker=normalized_ticker,
+            market=bars[-1].market,
             recalculation_mode="fallback_full",
             explicit_recalc_applied=False,
             rows_deleted=rows_deleted,
             event_rows=event_rows,
+            calculated_from_date=bars[0].date,
+            calculated_through_date=bars[-1].date,
+            latest_event_date=None if not event_rows else str(event_rows[-1]["event_date"]),
+            latest_event_confirmed_as_of_date=None
+            if not event_rows
+            else str(event_rows[-1]["confirmed_as_of_date"]),
         )
 
     rows_deleted = _delete_rows_from_date(
@@ -1459,10 +1670,17 @@ def run_ticker_calculation(
     )
     return TickerRunResult(
         ticker=normalized_ticker,
+        market=bars[-1].market,
         recalculation_mode="incremental",
         explicit_recalc_applied=False,
         rows_deleted=rows_deleted,
         event_rows=event_rows,
+        calculated_from_date=recalc_start_date,
+        calculated_through_date=bars[-1].date,
+        latest_event_date=None if not event_rows else str(event_rows[-1]["event_date"]),
+        latest_event_confirmed_as_of_date=None
+        if not event_rows
+        else str(event_rows[-1]["confirmed_as_of_date"]),
     )
 
 
@@ -1550,12 +1768,30 @@ def run_stock_dow_structure(
                 _accumulate_event_counts(summary, result.event_rows)
 
                 if dry_run:
-                    summary["rows_inserted"] = int(summary["rows_inserted"]) + len(
-                        result.event_rows
-                    )
+                    inserted = len(result.event_rows)
+                    summary["rows_inserted"] = int(summary["rows_inserted"]) + inserted
                 else:
                     inserted = insert_event_rows(analysis_conn, result.event_rows)
                     summary["rows_inserted"] = int(summary["rows_inserted"]) + inserted
+                    if result.calculated_through_date is not None:
+                        _upsert_status_row(
+                            analysis_conn,
+                            ticker=result.ticker,
+                            market=result.market,
+                            pivot_radius=pivot_radius,
+                            calculated_from_date=result.calculated_from_date,
+                            calculated_through_date=result.calculated_through_date,
+                            latest_ohlcv_date_at_run=result.calculated_through_date,
+                            latest_event_date=result.latest_event_date,
+                            latest_event_confirmed_as_of_date=result.latest_event_confirmed_as_of_date,
+                            last_run_id=run_id,
+                            last_run_mode=result.recalculation_mode,
+                            last_rows_deleted=result.rows_deleted,
+                            last_rows_inserted=inserted,
+                            last_status="OK",
+                            last_error_message=None,
+                            updated_at_utc=created_at_utc,
+                        )
             except Exception:
                 summary["errors"] = int(summary["errors"]) + 1
                 raise
@@ -1632,16 +1868,16 @@ def calculate_missing_or_outdated_stock_dow_structures(
 
         for normalized_ticker in sorted(latest_ohlcv_dates):
             latest_ohlcv_date = latest_ohlcv_dates[normalized_ticker]
-            latest_confirmed_as_of_date = _fetch_latest_confirmed_as_of_date(
+            status_row = _fetch_status_coverage_row(
                 analysis_conn,
                 normalized_ticker,
                 pivot_radius,
                 PRICE_SOURCE_CLOSE,
             )
-            if latest_confirmed_as_of_date is None:
+            if status_row is None:
                 summary["tickers_missing"] = int(summary["tickers_missing"]) + 1
                 classification = "missing"
-            elif latest_ohlcv_date > latest_confirmed_as_of_date:
+            elif latest_ohlcv_date > str(status_row["calculated_through_date"]):
                 summary["tickers_outdated"] = int(summary["tickers_outdated"]) + 1
                 classification = "outdated"
             else:
@@ -1694,12 +1930,30 @@ def calculate_missing_or_outdated_stock_dow_structures(
                 _accumulate_event_counts(summary, result.event_rows)
 
                 if dry_run:
-                    summary["rows_inserted"] = int(summary["rows_inserted"]) + len(
-                        result.event_rows
-                    )
+                    inserted = len(result.event_rows)
+                    summary["rows_inserted"] = int(summary["rows_inserted"]) + inserted
                 else:
                     inserted = insert_event_rows(analysis_conn, result.event_rows)
                     summary["rows_inserted"] = int(summary["rows_inserted"]) + inserted
+                    if result.calculated_through_date is not None:
+                        _upsert_status_row(
+                            analysis_conn,
+                            ticker=result.ticker,
+                            market=result.market,
+                            pivot_radius=pivot_radius,
+                            calculated_from_date=result.calculated_from_date,
+                            calculated_through_date=result.calculated_through_date,
+                            latest_ohlcv_date_at_run=result.calculated_through_date,
+                            latest_event_date=result.latest_event_date,
+                            latest_event_confirmed_as_of_date=result.latest_event_confirmed_as_of_date,
+                            last_run_id=run_id,
+                            last_run_mode=result.recalculation_mode,
+                            last_rows_deleted=result.rows_deleted,
+                            last_rows_inserted=inserted,
+                            last_status="OK",
+                            last_error_message=None,
+                            updated_at_utc=created_at_utc,
+                        )
             except Exception:
                 summary["errors"] = int(summary["errors"]) + 1
                 error_tickers.append(normalized_ticker)

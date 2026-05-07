@@ -3869,6 +3869,7 @@ Virheet: {error_count}"""
                 f"Vanhentuneet, inkrementaalisesti päivitetyt: {summary['tickers_incremental_recalculated']}",
                 f"Ohitetut ajan tasalla: {summary['tickers_up_to_date']}",
                 f"Rajatun alkulaskennan alkupäivä: {summary['bounded_initial_from_date']}",
+                "Ajan tasalla -tulkinta perustuu laskennan kattavuuspäivään, ei viimeisimpään Dow-eventtiin.",
                 f"Lisätyt eventit: {summary['rows_inserted']}",
                 f"Virheet: {summary['errors']}",
             ]

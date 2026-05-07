@@ -142,6 +142,21 @@ def _load_table_columns(db_path: Path) -> set[str]:
         }
 
 
+def _load_status_row(db_path: Path, ticker: str) -> sqlite3.Row | None:
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        return conn.execute(
+            """
+            SELECT *
+            FROM stock_dow_structure_status
+            WHERE ticker = ?
+              AND price_source = 'close'
+              AND pivot_radius = 3
+            """,
+            (ticker,),
+        ).fetchone()
+
+
 def _event_run_ids_by_boundary(
     db_path: Path,
     boundary_date: str,
@@ -187,6 +202,16 @@ def test_new_schema_uses_active_bos_columns_only(tmp_path):
     assert "structural_high_price" not in columns
     assert "structural_low_date" not in columns
     assert "structural_low_price" not in columns
+
+    with sqlite3.connect(analysis_db) as conn:
+        row = conn.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'stock_dow_structure_status'
+            """
+        ).fetchone()
+    assert row is not None
 
 
 def test_old_schema_migrates_to_active_bos_columns_and_preserves_values(tmp_path):
@@ -936,6 +961,7 @@ def test_missing_ticker_is_selected_for_calculation(tmp_path):
     )
 
     rows = _load_event_rows(analysis_db)
+    status_row = _load_status_row(analysis_db, "AAA")
 
     assert summary["tickers_checked"] == 1
     assert summary["tickers_missing"] == 1
@@ -947,6 +973,11 @@ def test_missing_ticker_is_selected_for_calculation(tmp_path):
     assert summary["bounded_initial_from_date"] == DEFAULT_BOUNDED_INITIAL_FROM_DATE
     assert summary["errors"] == 0
     assert rows
+    assert status_row is not None
+    assert status_row["calculated_from_date"] == DEFAULT_BOUNDED_INITIAL_FROM_DATE
+    assert status_row["calculated_through_date"] == "2024-01-07"
+    assert status_row["latest_ohlcv_date_at_run"] == "2024-01-07"
+    assert status_row["last_run_mode"] == "bounded_initial"
     assert min(row["event_date"] for row in rows) >= DEFAULT_BOUNDED_INITIAL_FROM_DATE
     assert all(
         row["structure_epoch_start_date"] == DEFAULT_BOUNDED_INITIAL_FROM_DATE
@@ -1078,6 +1109,121 @@ def test_selection_summary_counts_checked_needs_calculation_and_skipped(tmp_path
     assert summary["tickers_bounded_initial_recalculated"] == 1
     assert summary["tickers_incremental_recalculated"] == 1
     assert summary["errors"] == 0
+
+
+def test_zero_event_processed_ticker_writes_status_row(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    osakedata_db = tmp_path / "osakedata.db"
+    _create_analysis_db(analysis_db)
+    _create_osakedata_db(osakedata_db, [], ticker="AAA")
+    _insert_close_series_for_dates(
+        osakedata_db,
+        ["2024-01-01", "2024-01-02", "2024-01-03"],
+        [10, 11, 12],
+        ticker="AAA",
+    )
+
+    summary = calculate_missing_or_outdated_stock_dow_structures(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        dry_run=False,
+    )
+
+    rows = _load_event_rows(analysis_db)
+    status_row = _load_status_row(analysis_db, "AAA")
+
+    assert summary["rows_inserted"] == 0
+    assert rows == []
+    assert status_row is not None
+    assert status_row["calculated_from_date"] == "2024-01-01"
+    assert status_row["calculated_through_date"] == "2024-01-03"
+    assert status_row["latest_event_confirmed_as_of_date"] is None
+    assert status_row["last_status"] == "OK"
+
+    summary_second = calculate_missing_or_outdated_stock_dow_structures(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        dry_run=True,
+    )
+    assert summary_second["tickers_up_to_date"] == 1
+    assert summary_second["tickers_outdated"] == 0
+
+
+def test_manual_helper_uses_status_coverage_not_latest_event_confirmed_date(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    osakedata_db = tmp_path / "osakedata.db"
+    _create_analysis_db(analysis_db)
+    _create_osakedata_db(
+        osakedata_db,
+        [10, 11, 12, 15, 13, 11, 9, 7, 9, 12, 16, 13, 11, 9, 10, 12, 14],
+        ticker="AAA",
+    )
+
+    run_stock_dow_structure(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        ticker="AAA",
+        dry_run=False,
+        run_id="run1",
+    )
+    status_row = _load_status_row(analysis_db, "AAA")
+    assert status_row is not None
+    assert status_row["calculated_through_date"] == "2026-01-17"
+
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE stock_dow_structure_status
+            SET latest_event_confirmed_as_of_date = '2026-01-10'
+            WHERE ticker = 'AAA' AND price_source = 'close' AND pivot_radius = 3
+            """
+        )
+        conn.commit()
+
+    summary = calculate_missing_or_outdated_stock_dow_structures(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        dry_run=True,
+    )
+    assert summary["tickers_up_to_date"] == 1
+    assert summary["tickers_outdated"] == 0
+
+
+def test_outdated_by_status_coverage_is_selected(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    osakedata_db = tmp_path / "osakedata.db"
+    _create_analysis_db(analysis_db)
+    _create_osakedata_db(
+        osakedata_db,
+        [10, 11, 12, 15, 13, 11, 9, 7, 9, 12, 16, 13, 11, 9, 10, 12, 14],
+        ticker="AAA",
+    )
+
+    run_stock_dow_structure(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        ticker="AAA",
+        dry_run=False,
+        run_id="run1",
+    )
+
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE stock_dow_structure_status
+            SET calculated_through_date = '2026-01-10'
+            WHERE ticker = 'AAA' AND price_source = 'close' AND pivot_radius = 3
+            """
+        )
+        conn.commit()
+
+    summary = calculate_missing_or_outdated_stock_dow_structures(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        dry_run=True,
+    )
+    assert summary["tickers_outdated"] == 1
+    assert summary["tickers_up_to_date"] == 0
 
 
 def test_cli_dry_run_creates_table_and_prints_deterministic_summary(tmp_path, capsys):
