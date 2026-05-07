@@ -53,10 +53,10 @@ class PivotCandidate:
 @dataclass
 class DowStructureState:
     trend_state: str = "NEUTRAL"
-    structural_high_date: str | None = None
-    structural_high_price: float | None = None
-    structural_low_date: str | None = None
-    structural_low_price: float | None = None
+    active_bos_high_date: str | None = None
+    active_bos_high_price: float | None = None
+    active_bos_low_date: str | None = None
+    active_bos_low_price: float | None = None
     last_high_label: str | None = None
     last_high_label_date: str | None = None
     last_high_label_price: float | None = None
@@ -71,10 +71,10 @@ class DowStructureState:
     def clone(self) -> "DowStructureState":
         return DowStructureState(
             trend_state=self.trend_state,
-            structural_high_date=self.structural_high_date,
-            structural_high_price=self.structural_high_price,
-            structural_low_date=self.structural_low_date,
-            structural_low_price=self.structural_low_price,
+            active_bos_high_date=self.active_bos_high_date,
+            active_bos_high_price=self.active_bos_high_price,
+            active_bos_low_date=self.active_bos_low_date,
+            active_bos_low_price=self.active_bos_low_price,
             last_high_label=self.last_high_label,
             last_high_label_date=self.last_high_label_date,
             last_high_label_price=self.last_high_label_price,
@@ -92,6 +92,7 @@ class DowStructureState:
 class TickerRunResult:
     ticker: str
     recalculation_mode: str
+    explicit_recalc_applied: bool
     rows_deleted: int
     event_rows: list[dict[str, Any]]
 
@@ -110,10 +111,32 @@ def _connect_sqlite(db_path: Path | str) -> sqlite3.Connection:
     return conn
 
 
-def ensure_stock_dow_structure_schema(conn: sqlite3.Connection) -> None:
+def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    row = conn.execute(
+        """
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'table' AND name = ?
+        """,
+        (table_name,),
+    ).fetchone()
+    return row is not None
+
+
+def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+    columns: set[str] = set()
+    for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall():
+        if isinstance(row, sqlite3.Row):
+            columns.add(str(row["name"]))
+        else:
+            columns.add(str(row[1]))
+    return columns
+
+
+def _create_stock_dow_structure_table(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
-        CREATE TABLE IF NOT EXISTS stock_dow_structure_events (
+        CREATE TABLE stock_dow_structure_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             ticker TEXT NOT NULL,
             market TEXT NULL,
@@ -137,10 +160,10 @@ def ensure_stock_dow_structure_schema(conn: sqlite3.Connection) -> None:
             dow_label_high TEXT NULL,
             dow_label_low TEXT NULL,
             trend_state TEXT NOT NULL,
-            structural_high_date TEXT NULL,
-            structural_high_price REAL NULL,
-            structural_low_date TEXT NULL,
-            structural_low_price REAL NULL,
+            active_bos_high_date TEXT NULL,
+            active_bos_high_price REAL NULL,
+            active_bos_low_date TEXT NULL,
+            active_bos_low_price REAL NULL,
             last_high_label TEXT NULL,
             last_high_label_date TEXT NULL,
             last_high_label_price REAL NULL,
@@ -171,6 +194,83 @@ def ensure_stock_dow_structure_schema(conn: sqlite3.Connection) -> None:
         )
         """
     )
+
+
+def _migrate_stock_dow_structure_table_if_needed(conn: sqlite3.Connection) -> None:
+    table_name = "stock_dow_structure_events"
+    old_columns = {
+        "structural_high_date",
+        "structural_high_price",
+        "structural_low_date",
+        "structural_low_price",
+    }
+    new_columns = {
+        "active_bos_high_date",
+        "active_bos_high_price",
+        "active_bos_low_date",
+        "active_bos_low_price",
+    }
+
+    if not _table_exists(conn, table_name):
+        _create_stock_dow_structure_table(conn)
+        return
+
+    columns = _table_columns(conn, table_name)
+    has_old = bool(columns & old_columns)
+    has_new = bool(columns & new_columns)
+
+    if has_old and has_new:
+        raise RuntimeError(
+            "Ambiguous stock_dow_structure_events schema: both structural_* and "
+            "active_bos_* columns exist"
+        )
+
+    if has_new:
+        if not new_columns.issubset(columns):
+            raise RuntimeError(
+                "Incomplete stock_dow_structure_events schema: missing active_bos_* columns"
+            )
+        return
+
+    if has_old:
+        if not old_columns.issubset(columns):
+            raise RuntimeError(
+                "Incomplete stock_dow_structure_events schema: missing structural_* columns"
+            )
+        conn.execute(
+            """
+            ALTER TABLE stock_dow_structure_events
+            RENAME COLUMN structural_high_date TO active_bos_high_date
+            """
+        )
+        conn.execute(
+            """
+            ALTER TABLE stock_dow_structure_events
+            RENAME COLUMN structural_high_price TO active_bos_high_price
+            """
+        )
+        conn.execute(
+            """
+            ALTER TABLE stock_dow_structure_events
+            RENAME COLUMN structural_low_date TO active_bos_low_date
+            """
+        )
+        conn.execute(
+            """
+            ALTER TABLE stock_dow_structure_events
+            RENAME COLUMN structural_low_price TO active_bos_low_price
+            """
+        )
+        return
+
+    raise RuntimeError(
+        "Unsupported stock_dow_structure_events schema: missing both structural_* and "
+        "active_bos_* columns"
+    )
+
+
+def ensure_stock_dow_structure_schema(conn: sqlite3.Connection) -> None:
+    _migrate_stock_dow_structure_table_if_needed(conn)
     conn.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_stock_dow_events_ticker_confirmed
@@ -358,6 +458,16 @@ def _compute_recalc_start_date(
     return trading_dates[start_idx]
 
 
+def _find_first_trading_date_on_or_after(
+    bars: list[PriceBar],
+    boundary_date: str,
+) -> str | None:
+    for bar in bars:
+        if bar.date >= boundary_date:
+            return bar.date
+    return None
+
+
 def _fetch_latest_confirmed_as_of_date(
     conn: sqlite3.Connection,
     ticker: str,
@@ -383,18 +493,18 @@ def _fetch_latest_confirmed_as_of_date(
 def _state_from_row(row: sqlite3.Row) -> DowStructureState:
     return DowStructureState(
         trend_state=str(row["trend_state"]),
-        structural_high_date=None
-        if row["structural_high_date"] is None
-        else str(row["structural_high_date"]),
-        structural_high_price=None
-        if row["structural_high_price"] is None
-        else float(row["structural_high_price"]),
-        structural_low_date=None
-        if row["structural_low_date"] is None
-        else str(row["structural_low_date"]),
-        structural_low_price=None
-        if row["structural_low_price"] is None
-        else float(row["structural_low_price"]),
+        active_bos_high_date=None
+        if row["active_bos_high_date"] is None
+        else str(row["active_bos_high_date"]),
+        active_bos_high_price=None
+        if row["active_bos_high_price"] is None
+        else float(row["active_bos_high_price"]),
+        active_bos_low_date=None
+        if row["active_bos_low_date"] is None
+        else str(row["active_bos_low_date"]),
+        active_bos_low_price=None
+        if row["active_bos_low_price"] is None
+        else float(row["active_bos_low_price"]),
         last_high_label=None
         if row["last_high_label"] is None
         else str(row["last_high_label"]),
@@ -430,14 +540,14 @@ def _state_is_reconstructable(state: DowStructureState) -> bool:
     if state.trend_state == "UP":
         return (
             state.last_low_label == "HL"
-            and state.structural_low_date is not None
-            and state.structural_low_price is not None
+            and state.active_bos_low_date is not None
+            and state.active_bos_low_price is not None
         )
     if state.trend_state == "DOWN":
         return (
             state.last_high_label == "LH"
-            and state.structural_high_date is not None
-            and state.structural_high_price is not None
+            and state.active_bos_high_date is not None
+            and state.active_bos_high_price is not None
         )
     return True
 
@@ -538,22 +648,22 @@ def _compute_trend_state(state: DowStructureState) -> str:
     return "NEUTRAL"
 
 
-def _sync_structural_levels(state: DowStructureState) -> None:
+def _sync_active_bos_levels(state: DowStructureState) -> None:
     if state.trend_state == "UP" and state.last_low_label == "HL":
-        state.structural_low_date = state.last_low_label_date
-        state.structural_low_price = state.last_low_label_price
-        state.structural_high_date = None
-        state.structural_high_price = None
+        state.active_bos_low_date = state.last_low_label_date
+        state.active_bos_low_price = state.last_low_label_price
+        state.active_bos_high_date = None
+        state.active_bos_high_price = None
     elif state.trend_state == "DOWN" and state.last_high_label == "LH":
-        state.structural_high_date = state.last_high_label_date
-        state.structural_high_price = state.last_high_label_price
-        state.structural_low_date = None
-        state.structural_low_price = None
+        state.active_bos_high_date = state.last_high_label_date
+        state.active_bos_high_price = state.last_high_label_price
+        state.active_bos_low_date = None
+        state.active_bos_low_price = None
     else:
-        state.structural_high_date = None
-        state.structural_high_price = None
-        state.structural_low_date = None
-        state.structural_low_price = None
+        state.active_bos_high_date = None
+        state.active_bos_high_price = None
+        state.active_bos_low_date = None
+        state.active_bos_low_price = None
 
 
 def _build_event_row(
@@ -603,10 +713,10 @@ def _build_event_row(
         "dow_label_high": dow_label_high,
         "dow_label_low": dow_label_low,
         "trend_state": state.trend_state,
-        "structural_high_date": state.structural_high_date,
-        "structural_high_price": state.structural_high_price,
-        "structural_low_date": state.structural_low_date,
-        "structural_low_price": state.structural_low_price,
+        "active_bos_high_date": state.active_bos_high_date,
+        "active_bos_high_price": state.active_bos_high_price,
+        "active_bos_low_date": state.active_bos_low_date,
+        "active_bos_low_price": state.active_bos_low_price,
         "last_high_label": state.last_high_label,
         "last_high_label_date": state.last_high_label_date,
         "last_high_label_price": state.last_high_label_price,
@@ -640,10 +750,10 @@ def _reset_state(
 ) -> DowStructureState:
     return DowStructureState(
         trend_state="NEUTRAL",
-        structural_high_date=None,
-        structural_high_price=None,
-        structural_low_date=None,
-        structural_low_price=None,
+        active_bos_high_date=None,
+        active_bos_high_price=None,
+        active_bos_low_date=None,
+        active_bos_low_price=None,
         last_high_label=None,
         last_high_label_date=None,
         last_high_label_price=None,
@@ -714,7 +824,7 @@ def calculate_ticker_events(
                 state.last_high_label_date = pivot_bar.date
                 state.last_high_label_price = pivot_bar.close
                 state.trend_state = _compute_trend_state(state)
-                _sync_structural_levels(state)
+                _sync_active_bos_levels(state)
                 event_rows.append(
                     _build_event_row(
                         state=state,
@@ -735,7 +845,7 @@ def calculate_ticker_events(
                 state.last_low_label_date = pivot_bar.date
                 state.last_low_label_price = pivot_bar.close
                 state.trend_state = _compute_trend_state(state)
-                _sync_structural_levels(state)
+                _sync_active_bos_levels(state)
                 event_rows.append(
                     _build_event_row(
                         state=state,
@@ -763,7 +873,7 @@ def calculate_ticker_events(
 
         if state.trend_state == "UP":
             state.bos_up_count = 0
-            if state.structural_low_price is not None and confirmed_bar.close < state.structural_low_price:
+            if state.active_bos_low_price is not None and confirmed_bar.close < state.active_bos_low_price:
                 if state.bos_down_count == 0:
                     state.bos_down_count = 1
                     event_rows.append(
@@ -776,14 +886,14 @@ def calculate_ticker_events(
                             run_id=run_id,
                             created_at_utc=created_at_utc,
                             break_signal="DOWN",
-                            break_level_date=state.structural_low_date,
-                            break_level_price=state.structural_low_price,
+                            break_level_date=state.active_bos_low_date,
+                            break_level_price=state.active_bos_low_price,
                             break_close_price=confirmed_bar.close,
                         )
                     )
                 else:
-                    break_level_date = state.structural_low_date
-                    break_level_price = state.structural_low_price
+                    break_level_date = state.active_bos_low_date
+                    break_level_price = state.active_bos_low_price
                     previous_trend = state.trend_state
                     state = _reset_state(state, confirmed_date)
                     event_rows.append(
@@ -817,7 +927,7 @@ def calculate_ticker_events(
                 state.bos_down_count = 0
         elif state.trend_state == "DOWN":
             state.bos_down_count = 0
-            if state.structural_high_price is not None and confirmed_bar.close > state.structural_high_price:
+            if state.active_bos_high_price is not None and confirmed_bar.close > state.active_bos_high_price:
                 if state.bos_up_count == 0:
                     state.bos_up_count = 1
                     event_rows.append(
@@ -830,14 +940,14 @@ def calculate_ticker_events(
                             run_id=run_id,
                             created_at_utc=created_at_utc,
                             break_signal="UP",
-                            break_level_date=state.structural_high_date,
-                            break_level_price=state.structural_high_price,
+                            break_level_date=state.active_bos_high_date,
+                            break_level_price=state.active_bos_high_price,
                             break_close_price=confirmed_bar.close,
                         )
                     )
                 else:
-                    break_level_date = state.structural_high_date
-                    break_level_price = state.structural_high_price
+                    break_level_date = state.active_bos_high_date
+                    break_level_price = state.active_bos_high_price
                     previous_trend = state.trend_state
                     state = _reset_state(state, confirmed_date)
                     event_rows.append(
@@ -900,10 +1010,10 @@ def _event_insert_columns() -> list[str]:
         "dow_label_high",
         "dow_label_low",
         "trend_state",
-        "structural_high_date",
-        "structural_high_price",
-        "structural_low_date",
-        "structural_low_price",
+        "active_bos_high_date",
+        "active_bos_high_price",
+        "active_bos_low_date",
+        "active_bos_low_price",
         "last_high_label",
         "last_high_label_date",
         "last_high_label_price",
@@ -950,6 +1060,7 @@ def _initialize_summary(
     *,
     pivot_radius: int,
     dry_run: bool,
+    recalc_from_date: str | None,
 ) -> dict[str, int | str]:
     return {
         "tickers_requested": 0,
@@ -957,6 +1068,9 @@ def _initialize_summary(
         "tickers_full_recalculated": 0,
         "tickers_incremental_recalculated": 0,
         "tickers_fallback_full_recalculated": 0,
+        "recalc_from_date": recalc_from_date or "none",
+        "explicit_recalc_requested": 1 if recalc_from_date else 0,
+        "tickers_explicit_recalculated": 0,
         "rows_deleted": 0,
         "rows_inserted": 0,
         "pivot_high_events": 0,
@@ -999,6 +1113,7 @@ def run_ticker_calculation(
     ticker: str,
     pivot_radius: int,
     recalc_tail_trading_days: int,
+    recalc_from_date: str | None,
     force_full: bool,
     run_id: str,
     created_at_utc: str,
@@ -1009,6 +1124,7 @@ def run_ticker_calculation(
         return TickerRunResult(
             ticker=normalized_ticker,
             recalculation_mode="skipped",
+            explicit_recalc_applied=False,
             rows_deleted=0,
             event_rows=[],
         )
@@ -1031,6 +1147,109 @@ def run_ticker_calculation(
         return TickerRunResult(
             ticker=normalized_ticker,
             recalculation_mode="full",
+            explicit_recalc_applied=False,
+            rows_deleted=rows_deleted,
+            event_rows=event_rows,
+        )
+
+    if recalc_from_date is not None:
+        first_bar_date = bars[0].date
+        latest_bar_date = bars[-1].date
+
+        if recalc_from_date > latest_bar_date:
+            return TickerRunResult(
+                ticker=normalized_ticker,
+                recalculation_mode="explicit_noop",
+                explicit_recalc_applied=True,
+                rows_deleted=0,
+                event_rows=[],
+            )
+
+        if recalc_from_date < first_bar_date:
+            rows_deleted = _delete_all_rows_for_ticker(
+                analysis_conn,
+                normalized_ticker,
+                pivot_radius,
+                PRICE_SOURCE_CLOSE,
+            )
+            event_rows = calculate_ticker_events(
+                bars,
+                pivot_radius=pivot_radius,
+                start_confirmed_as_of_date=bars[0].date,
+                initial_state=None,
+                run_id=run_id,
+                created_at_utc=created_at_utc,
+            )
+            return TickerRunResult(
+                ticker=normalized_ticker,
+                recalculation_mode="full",
+                explicit_recalc_applied=False,
+                rows_deleted=rows_deleted,
+                event_rows=event_rows,
+            )
+
+        start_confirmed_as_of_date = _find_first_trading_date_on_or_after(
+            bars,
+            recalc_from_date,
+        )
+        if start_confirmed_as_of_date is None:
+            return TickerRunResult(
+                ticker=normalized_ticker,
+                recalculation_mode="explicit_noop",
+                explicit_recalc_applied=True,
+                rows_deleted=0,
+                event_rows=[],
+            )
+
+        state = _load_latest_state_before(
+            analysis_conn,
+            normalized_ticker,
+            recalc_from_date,
+            pivot_radius,
+            PRICE_SOURCE_CLOSE,
+        )
+        if state is None:
+            rows_deleted = _delete_all_rows_for_ticker(
+                analysis_conn,
+                normalized_ticker,
+                pivot_radius,
+                PRICE_SOURCE_CLOSE,
+            )
+            event_rows = calculate_ticker_events(
+                bars,
+                pivot_radius=pivot_radius,
+                start_confirmed_as_of_date=bars[0].date,
+                initial_state=None,
+                run_id=run_id,
+                created_at_utc=created_at_utc,
+            )
+            return TickerRunResult(
+                ticker=normalized_ticker,
+                recalculation_mode="fallback_full",
+                explicit_recalc_applied=False,
+                rows_deleted=rows_deleted,
+                event_rows=event_rows,
+            )
+
+        rows_deleted = _delete_rows_from_date(
+            analysis_conn,
+            normalized_ticker,
+            recalc_from_date,
+            pivot_radius,
+            PRICE_SOURCE_CLOSE,
+        )
+        event_rows = calculate_ticker_events(
+            bars,
+            pivot_radius=pivot_radius,
+            start_confirmed_as_of_date=start_confirmed_as_of_date,
+            initial_state=state,
+            run_id=run_id,
+            created_at_utc=created_at_utc,
+        )
+        return TickerRunResult(
+            ticker=normalized_ticker,
+            recalculation_mode="explicit",
+            explicit_recalc_applied=True,
             rows_deleted=rows_deleted,
             event_rows=event_rows,
         )
@@ -1053,6 +1272,7 @@ def run_ticker_calculation(
         return TickerRunResult(
             ticker=normalized_ticker,
             recalculation_mode="full",
+            explicit_recalc_applied=False,
             rows_deleted=0,
             event_rows=event_rows,
         )
@@ -1087,6 +1307,7 @@ def run_ticker_calculation(
         return TickerRunResult(
             ticker=normalized_ticker,
             recalculation_mode="fallback_full",
+            explicit_recalc_applied=False,
             rows_deleted=rows_deleted,
             event_rows=event_rows,
         )
@@ -1109,6 +1330,7 @@ def run_ticker_calculation(
     return TickerRunResult(
         ticker=normalized_ticker,
         recalculation_mode="incremental",
+        explicit_recalc_applied=False,
         rows_deleted=rows_deleted,
         event_rows=event_rows,
     )
@@ -1122,6 +1344,7 @@ def run_stock_dow_structure(
     market: str | None = None,
     pivot_radius: int = DEFAULT_PIVOT_RADIUS,
     recalc_tail_trading_days: int = DEFAULT_RECALC_TAIL_TRADING_DAYS,
+    recalc_from_date: str | None = None,
     mode: str = "upsert",
     force_full: bool = False,
     dry_run: bool = False,
@@ -1139,7 +1362,11 @@ def run_stock_dow_structure(
     if recalc_tail_trading_days < 0:
         raise ValueError("recalc_tail_trading_days must be non-negative")
 
-    summary = _initialize_summary(pivot_radius=pivot_radius, dry_run=dry_run)
+    summary = _initialize_summary(
+        pivot_radius=pivot_radius,
+        dry_run=dry_run,
+        recalc_from_date=recalc_from_date,
+    )
     run_id = run_id or generate_run_id()
     created_at_utc = created_at_utc or utc_now_iso()
 
@@ -1163,6 +1390,7 @@ def run_stock_dow_structure(
                     ticker=normalized_ticker,
                     pivot_radius=pivot_radius,
                     recalc_tail_trading_days=recalc_tail_trading_days,
+                    recalc_from_date=recalc_from_date,
                     force_full=force_full,
                     run_id=run_id,
                     created_at_utc=created_at_utc,
@@ -1182,6 +1410,10 @@ def run_stock_dow_structure(
                 elif result.recalculation_mode == "fallback_full":
                     summary["tickers_fallback_full_recalculated"] = (
                         int(summary["tickers_fallback_full_recalculated"]) + 1
+                    )
+                if result.explicit_recalc_applied:
+                    summary["tickers_explicit_recalculated"] = (
+                        int(summary["tickers_explicit_recalculated"]) + 1
                     )
 
                 summary["rows_deleted"] = int(summary["rows_deleted"]) + result.rows_deleted
@@ -1213,6 +1445,9 @@ def format_summary_lines(summary: dict[str, int | str]) -> list[str]:
         "tickers_full_recalculated",
         "tickers_incremental_recalculated",
         "tickers_fallback_full_recalculated",
+        "recalc_from_date",
+        "explicit_recalc_requested",
+        "tickers_explicit_recalculated",
         "rows_deleted",
         "rows_inserted",
         "pivot_high_events",

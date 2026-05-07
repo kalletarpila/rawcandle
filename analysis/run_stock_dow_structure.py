@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import datetime
 from pathlib import Path
 
 
@@ -22,7 +23,17 @@ from analysis.stock_dow_structure import (
 )
 
 
-def parse_args() -> argparse.Namespace:
+def parse_recalc_from_date(value: str) -> str:
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%d")
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"Invalid --recalc-from-date: {value}"
+        ) from exc
+    return parsed.date().isoformat()
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Calculate stock-level Dow structure events into analysis.db."
     )
@@ -63,6 +74,12 @@ def parse_args() -> argparse.Namespace:
         help="Incremental recalculation tail in trading days (default: 30)",
     )
     parser.add_argument(
+        "--recalc-from-date",
+        type=parse_recalc_from_date,
+        default=None,
+        help="Force recalculation from this confirmed_as_of_date boundary (YYYY-MM-DD)",
+    )
+    parser.add_argument(
         "--mode",
         type=str,
         default="upsert",
@@ -78,7 +95,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Do not write event rows, print SUMMARY only",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def main() -> int:
@@ -90,6 +107,7 @@ def main() -> int:
         market=args.market,
         pivot_radius=args.pivot_radius,
         recalc_tail_trading_days=args.recalc_tail_trading_days,
+        recalc_from_date=args.recalc_from_date,
         mode=args.mode,
         force_full=args.force_full,
         dry_run=args.dry_run,

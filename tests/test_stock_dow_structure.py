@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from analysis.run_stock_dow_structure import parse_args, parse_recalc_from_date
 from analysis.stock_dow_structure import (
     DEFAULT_PIVOT_RADIUS,
     calculate_ticker_events,
@@ -32,7 +33,7 @@ def _create_osakedata_db(
     with sqlite3.connect(path) as conn:
         conn.execute(
             """
-            CREATE TABLE osakedata (
+            CREATE TABLE IF NOT EXISTS osakedata (
                 osake TEXT NOT NULL,
                 pvm TEXT NOT NULL,
                 open REAL,
@@ -66,6 +67,47 @@ def _create_osakedata_db(
             """,
             rows,
         )
+        conn.commit()
+
+
+def _insert_osakedata_rows(
+    path: Path,
+    rows: list[tuple[str, str, float, float, float, float, int, str]],
+) -> None:
+    with sqlite3.connect(path) as conn:
+        conn.executemany(
+            """
+            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+        conn.commit()
+
+
+def _insert_close_series_for_dates(
+    path: Path,
+    dates: list[str],
+    closes: list[float],
+    *,
+    ticker: str = "TEST",
+    market: str = "usa",
+) -> None:
+    rows = []
+    for idx, (current_date, close_value) in enumerate(zip(dates, closes, strict=True)):
+        rows.append(
+            (
+                ticker,
+                current_date,
+                close_value - 0.25,
+                close_value + 1.0,
+                close_value - 1.0,
+                close_value,
+                1000 + idx,
+                market,
+            )
+        )
+    _insert_osakedata_rows(path, rows)
 
 
 def _load_event_rows(db_path: Path) -> list[sqlite3.Row]:
@@ -86,6 +128,28 @@ def _load_bars(db_path: Path, ticker: str = "TEST"):
         return fetch_price_bars(conn, ticker)
 
 
+def _load_table_columns(db_path: Path) -> set[str]:
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        return {
+            str(row["name"])
+            for row in conn.execute(
+                "PRAGMA table_info(stock_dow_structure_events)"
+            ).fetchall()
+        }
+
+
+def _event_run_ids_by_boundary(
+    db_path: Path,
+    boundary_date: str,
+) -> tuple[list[sqlite3.Row], list[sqlite3.Row]]:
+    rows = _load_event_rows(db_path)
+    return (
+        [row for row in rows if row["confirmed_as_of_date"] < boundary_date],
+        [row for row in rows if row["confirmed_as_of_date"] >= boundary_date],
+    )
+
+
 def test_pivot_confirmation_uses_event_date_and_confirmed_as_of_date(tmp_path):
     osakedata_db = tmp_path / "osakedata.db"
     closes = [10, 11, 12, 15, 12, 11, 10]
@@ -104,6 +168,149 @@ def test_pivot_confirmation_uses_event_date_and_confirmed_as_of_date(tmp_path):
     pivot_high = next(row for row in events if row["event_type"] == "PIVOT_HIGH")
     assert pivot_high["event_date"] == "2026-01-04"
     assert pivot_high["confirmed_as_of_date"] == "2026-01-07"
+
+
+def test_new_schema_uses_active_bos_columns_only(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+
+    columns = _load_table_columns(analysis_db)
+
+    assert "active_bos_high_date" in columns
+    assert "active_bos_high_price" in columns
+    assert "active_bos_low_date" in columns
+    assert "active_bos_low_price" in columns
+    assert "structural_high_date" not in columns
+    assert "structural_high_price" not in columns
+    assert "structural_low_date" not in columns
+    assert "structural_low_price" not in columns
+
+
+def test_old_schema_migrates_to_active_bos_columns_and_preserves_values(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            CREATE TABLE stock_dow_structure_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                market TEXT NULL,
+                event_date TEXT NOT NULL,
+                confirmed_as_of_date TEXT NOT NULL,
+                open REAL NULL,
+                high REAL NULL,
+                low REAL NULL,
+                close REAL NOT NULL,
+                volume INTEGER NULL,
+                price_source TEXT NOT NULL DEFAULT 'close',
+                structure_price REAL NOT NULL,
+                pivot_radius INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                is_pivot_high INTEGER NOT NULL DEFAULT 0,
+                is_pivot_low INTEGER NOT NULL DEFAULT 0,
+                pivot_high_date TEXT NULL,
+                pivot_high_price REAL NULL,
+                pivot_low_date TEXT NULL,
+                pivot_low_price REAL NULL,
+                dow_label_high TEXT NULL,
+                dow_label_low TEXT NULL,
+                trend_state TEXT NOT NULL,
+                structural_high_date TEXT NULL,
+                structural_high_price REAL NULL,
+                structural_low_date TEXT NULL,
+                structural_low_price REAL NULL,
+                last_high_label TEXT NULL,
+                last_high_label_date TEXT NULL,
+                last_high_label_price REAL NULL,
+                last_low_label TEXT NULL,
+                last_low_label_date TEXT NULL,
+                last_low_label_price REAL NULL,
+                bos_up_count INTEGER NOT NULL DEFAULT 0,
+                bos_down_count INTEGER NOT NULL DEFAULT 0,
+                break_signal TEXT NULL,
+                break_level_date TEXT NULL,
+                break_level_price REAL NULL,
+                break_close_price REAL NULL,
+                reset_marker TEXT NULL,
+                reset_reason TEXT NULL,
+                structure_epoch_id INTEGER NOT NULL DEFAULT 1,
+                structure_epoch_start_date TEXT NULL,
+                calc_version TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                created_at_utc TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO stock_dow_structure_events (
+                ticker, market, event_date, confirmed_as_of_date, close, price_source,
+                structure_price, pivot_radius, event_type, trend_state,
+                structural_high_date, structural_high_price,
+                structural_low_date, structural_low_price,
+                calc_version, run_id, created_at_utc
+            ) VALUES (
+                'TEST', 'usa', '2026-01-10', '2026-01-10', 10.0, 'close',
+                10.0, 3, 'RESET', 'NEUTRAL',
+                '2026-01-08', 15.5,
+                '2026-01-07', 9.5,
+                'stock_dow_v1', 'run-old', '2026-01-10T00:00:00+00:00'
+            )
+            """
+        )
+        conn.commit()
+        ensure_stock_dow_structure_schema(conn)
+
+    columns = _load_table_columns(analysis_db)
+    assert "active_bos_high_date" in columns
+    assert "active_bos_high_price" in columns
+    assert "active_bos_low_date" in columns
+    assert "active_bos_low_price" in columns
+    assert "structural_high_date" not in columns
+    assert "structural_high_price" not in columns
+    assert "structural_low_date" not in columns
+    assert "structural_low_price" not in columns
+
+    with sqlite3.connect(analysis_db) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT
+                active_bos_high_date,
+                active_bos_high_price,
+                active_bos_low_date,
+                active_bos_low_price
+            FROM stock_dow_structure_events
+            WHERE ticker = 'TEST'
+            """
+        ).fetchone()
+
+    assert row is not None
+    assert row["active_bos_high_date"] == "2026-01-08"
+    assert row["active_bos_high_price"] == 15.5
+    assert row["active_bos_low_date"] == "2026-01-07"
+    assert row["active_bos_low_price"] == 9.5
+
+
+def test_parse_recalc_from_date_accepts_valid_calendar_date():
+    args = parse_args(["--ticker", "TEST", "--recalc-from-date", "2025-01-31"])
+
+    assert parse_recalc_from_date("2025-01-31") == "2025-01-31"
+    assert args.recalc_from_date == "2025-01-31"
+
+
+@pytest.mark.parametrize(
+    "invalid_value",
+    ["2025-02-30", "2025/01/01", "abc"],
+)
+def test_parse_recalc_from_date_rejects_invalid_values(invalid_value, capsys):
+    with pytest.raises(SystemExit) as exc_info:
+        parse_args(["--ticker", "TEST", "--recalc-from-date", invalid_value])
+
+    assert exc_info.value.code != 0
+    stderr = capsys.readouterr().err
+    assert "Invalid --recalc-from-date:" in stderr
+    assert invalid_value in stderr
 
 
 def test_no_lookahead_skips_unconfirmed_last_three_trading_days(tmp_path):
@@ -262,8 +469,8 @@ def test_bos_down_then_reset_increments_epoch_and_clears_structure(tmp_path):
     assert reset["confirmed_as_of_date"] == "2026-01-19"
     assert reset["trend_state"] == "NEUTRAL"
     assert reset["structure_epoch_id"] == 2
-    assert reset["structural_high_date"] is None
-    assert reset["structural_low_date"] is None
+    assert reset["active_bos_high_date"] is None
+    assert reset["active_bos_low_date"] is None
     assert reset["last_high_label"] is None
     assert reset["last_low_label"] is None
     assert reset["bos_up_count"] == 0
@@ -320,6 +527,56 @@ def test_bos_counter_resets_when_price_recovers_before_second_break(tmp_path):
     assert summary["reset_events"] == 0
 
 
+def test_up_trend_bos_down_uses_active_bos_low(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    osakedata_db = tmp_path / "osakedata.db"
+    _create_analysis_db(analysis_db)
+    closes = [
+        10, 11, 12, 15, 13, 11, 9, 7, 9, 12, 16, 13, 11, 9, 10, 12, 14, 8, 7,
+    ]
+    _create_osakedata_db(osakedata_db, closes)
+
+    run_stock_dow_structure(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        ticker="TEST",
+        dry_run=False,
+    )
+
+    rows = _load_event_rows(analysis_db)
+    bos_down = next(row for row in rows if row["event_type"] == "BOS_DOWN")
+
+    assert bos_down["active_bos_low_date"] == "2026-01-14"
+    assert bos_down["active_bos_low_price"] == 9.0
+    assert bos_down["break_level_date"] == bos_down["active_bos_low_date"]
+    assert bos_down["break_level_price"] == bos_down["active_bos_low_price"]
+
+
+def test_down_trend_bos_up_uses_active_bos_high(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    osakedata_db = tmp_path / "osakedata.db"
+    _create_analysis_db(analysis_db)
+    closes = [
+        10, 12, 14, 17, 15, 13, 11, 8, 10, 12, 15, 13, 11, 6, 8, 10, 12, 16, 17,
+    ]
+    _create_osakedata_db(osakedata_db, closes)
+
+    run_stock_dow_structure(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        ticker="TEST",
+        dry_run=False,
+    )
+
+    rows = _load_event_rows(analysis_db)
+    bos_up = next(row for row in rows if row["event_type"] == "BOS_UP")
+
+    assert bos_up["active_bos_high_date"] == "2026-01-11"
+    assert bos_up["active_bos_high_price"] == 15.0
+    assert bos_up["break_level_date"] == bos_up["active_bos_high_date"]
+    assert bos_up["break_level_price"] == bos_up["active_bos_high_price"]
+
+
 def test_incremental_tail_deletes_and_rewrites_rows_from_recalc_start_date(tmp_path):
     analysis_db = tmp_path / "analysis.db"
     osakedata_db = tmp_path / "osakedata.db"
@@ -368,6 +625,281 @@ def test_incremental_tail_deletes_and_rewrites_rows_from_recalc_start_date(tmp_p
     assert new_rows
     assert all(row["confirmed_as_of_date"] < "2026-01-14" for row in old_rows)
     assert all(row["confirmed_as_of_date"] >= "2026-01-14" for row in new_rows)
+
+
+def test_explicit_recalc_boundary_preserves_older_rows_and_rewrites_from_boundary(
+    tmp_path,
+):
+    analysis_db = tmp_path / "analysis.db"
+    osakedata_db = tmp_path / "osakedata.db"
+    _create_analysis_db(analysis_db)
+    closes = [10, 11, 12, 15, 13, 11, 9, 7, 9, 12, 16, 13, 11, 9, 10, 12, 14]
+    _create_osakedata_db(osakedata_db, closes)
+
+    run_stock_dow_structure(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        ticker="TEST",
+        dry_run=False,
+        run_id="run1",
+    )
+
+    summary = run_stock_dow_structure(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        ticker="TEST",
+        dry_run=False,
+        recalc_from_date="2026-01-17",
+        recalc_tail_trading_days=30,
+        run_id="run2",
+    )
+
+    old_rows, new_rows = _event_run_ids_by_boundary(analysis_db, "2026-01-17")
+
+    assert summary["tickers_explicit_recalculated"] == 1
+    assert summary["tickers_incremental_recalculated"] == 0
+    assert summary["rows_deleted"] > 0
+    assert old_rows
+    assert new_rows
+    assert all(row["run_id"] == "run1" for row in old_rows)
+    assert all(row["run_id"] == "run2" for row in new_rows)
+
+
+def test_explicit_recalc_does_not_shift_boundary_back_with_tail(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    osakedata_db = tmp_path / "osakedata.db"
+    _create_analysis_db(analysis_db)
+    closes = [10, 11, 12, 15, 13, 11, 9, 7, 9, 12, 16, 13, 11, 9, 10, 12, 14]
+    _create_osakedata_db(osakedata_db, closes)
+
+    run_stock_dow_structure(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        ticker="TEST",
+        dry_run=False,
+        run_id="run1",
+    )
+
+    summary = run_stock_dow_structure(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        ticker="TEST",
+        dry_run=False,
+        recalc_from_date="2026-01-17",
+        recalc_tail_trading_days=99,
+        run_id="run2",
+    )
+
+    old_rows, new_rows = _event_run_ids_by_boundary(analysis_db, "2026-01-17")
+
+    assert summary["recalc_from_date"] == "2026-01-17"
+    assert old_rows
+    assert new_rows
+    assert all(row["confirmed_as_of_date"] < "2026-01-17" for row in old_rows)
+    assert all(row["confirmed_as_of_date"] >= "2026-01-17" for row in new_rows)
+
+
+def test_explicit_recalc_without_previous_event_falls_back_to_full(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    osakedata_db = tmp_path / "osakedata.db"
+    _create_analysis_db(analysis_db)
+    closes = [10, 11, 12, 15, 13, 11, 9, 7, 9, 12, 16, 13, 11, 9, 10, 12, 14]
+    _create_osakedata_db(osakedata_db, closes)
+
+    summary = run_stock_dow_structure(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        ticker="TEST",
+        dry_run=False,
+        recalc_from_date="2026-01-01",
+        run_id="run-explicit",
+    )
+
+    rows = _load_event_rows(analysis_db)
+
+    assert summary["tickers_fallback_full_recalculated"] == 1
+    assert summary["tickers_explicit_recalculated"] == 0
+    assert rows
+    assert all(row["run_id"] == "run-explicit" for row in rows)
+
+
+def test_force_full_wins_over_recalc_from_date(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    osakedata_db = tmp_path / "osakedata.db"
+    _create_analysis_db(analysis_db)
+    closes = [10, 11, 12, 15, 13, 11, 9, 7, 9, 12, 16, 13, 11, 9, 10, 12, 14]
+    _create_osakedata_db(osakedata_db, closes)
+
+    run_stock_dow_structure(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        ticker="TEST",
+        dry_run=False,
+        run_id="run1",
+    )
+
+    summary = run_stock_dow_structure(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        ticker="TEST",
+        dry_run=False,
+        recalc_from_date="2026-01-17",
+        force_full=True,
+        run_id="run2",
+    )
+
+    rows = _load_event_rows(analysis_db)
+
+    assert summary["tickers_full_recalculated"] == 1
+    assert summary["tickers_explicit_recalculated"] == 0
+    assert summary["tickers_incremental_recalculated"] == 0
+    assert all(row["run_id"] == "run2" for row in rows)
+
+
+def test_explicit_recalc_dry_run_reports_changes_without_writing(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    osakedata_db = tmp_path / "osakedata.db"
+    _create_analysis_db(analysis_db)
+    closes = [10, 11, 12, 15, 13, 11, 9, 7, 9, 12, 16, 13, 11, 9, 10, 12, 14]
+    _create_osakedata_db(osakedata_db, closes)
+
+    run_stock_dow_structure(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        ticker="TEST",
+        dry_run=False,
+        run_id="run1",
+    )
+    before_rows = _load_event_rows(analysis_db)
+
+    summary = run_stock_dow_structure(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        ticker="TEST",
+        dry_run=True,
+        recalc_from_date="2026-01-17",
+        run_id="run2",
+    )
+    after_rows = _load_event_rows(analysis_db)
+
+    assert summary["tickers_explicit_recalculated"] == 1
+    assert summary["rows_deleted"] > 0
+    assert summary["rows_inserted"] > 0
+    assert [dict(row) for row in before_rows] == [dict(row) for row in after_rows]
+
+
+def test_explicit_recalc_after_latest_ohlcv_is_noop(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    osakedata_db = tmp_path / "osakedata.db"
+    _create_analysis_db(analysis_db)
+    closes = [10, 11, 12, 15, 13, 11, 9, 7, 9, 12, 16, 13, 11, 9, 10, 12, 14]
+    _create_osakedata_db(osakedata_db, closes)
+
+    run_stock_dow_structure(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        ticker="TEST",
+        dry_run=False,
+        run_id="run1",
+    )
+
+    summary = run_stock_dow_structure(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        ticker="TEST",
+        dry_run=True,
+        recalc_from_date="2026-02-01",
+        run_id="run2",
+    )
+
+    assert summary["tickers_processed"] == 1
+    assert summary["tickers_explicit_recalculated"] == 1
+    assert summary["tickers_full_recalculated"] == 0
+    assert summary["tickers_incremental_recalculated"] == 0
+    assert summary["tickers_fallback_full_recalculated"] == 0
+    assert summary["rows_deleted"] == 0
+    assert summary["rows_inserted"] == 0
+
+
+def test_market_explicit_recalc_applies_boundary_per_ticker(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    osakedata_db = tmp_path / "osakedata.db"
+    _create_analysis_db(analysis_db)
+    closes = [10, 11, 12, 15, 13, 11, 9, 7, 9, 12, 16, 13, 11, 9, 10, 12, 14]
+    _create_osakedata_db(osakedata_db, closes, ticker="AAA", market="usa")
+    _create_osakedata_db(osakedata_db, closes, ticker="BBB", market="usa")
+
+    run_stock_dow_structure(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        market="usa",
+        dry_run=False,
+        run_id="run1",
+    )
+
+    summary = run_stock_dow_structure(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        market="usa",
+        dry_run=True,
+        recalc_from_date="2026-01-17",
+        run_id="run2",
+    )
+
+    assert summary["tickers_requested"] == 2
+    assert summary["tickers_processed"] == 2
+    assert summary["tickers_explicit_recalculated"] == 2
+
+
+def test_explicit_recalc_non_trading_boundary_uses_next_trading_date(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    osakedata_db = tmp_path / "osakedata.db"
+    _create_analysis_db(analysis_db)
+    _create_osakedata_db(osakedata_db, [], ticker="TEST")
+    _insert_close_series_for_dates(
+        osakedata_db,
+        [
+            "2026-01-05",
+            "2026-01-06",
+            "2026-01-07",
+            "2026-01-08",
+            "2026-01-09",
+            "2026-01-12",
+            "2026-01-13",
+            "2026-01-14",
+            "2026-01-15",
+            "2026-01-16",
+            "2026-01-19",
+            "2026-01-20",
+            "2026-01-21",
+            "2026-01-22",
+            "2026-01-23",
+            "2026-01-26",
+            "2026-01-27",
+        ],
+        [10, 11, 12, 15, 13, 11, 9, 7, 9, 12, 16, 13, 11, 9, 10, 12, 14],
+    )
+
+    run_stock_dow_structure(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        ticker="TEST",
+        dry_run=False,
+        run_id="run1",
+    )
+
+    summary = run_stock_dow_structure(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        ticker="TEST",
+        dry_run=True,
+        recalc_from_date="2026-01-18",
+        run_id="run2",
+    )
+
+    assert summary["tickers_explicit_recalculated"] == 1
+    assert summary["rows_deleted"] > 0
+    assert summary["rows_inserted"] > 0
 
 
 def test_cli_dry_run_creates_table_and_prints_deterministic_summary(tmp_path, capsys):
