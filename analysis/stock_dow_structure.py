@@ -13,6 +13,7 @@ DEFAULT_ANALYSIS_DB_PATH = Path("data/analysis.db")
 DEFAULT_OSAKEDATA_DB_PATH = Path("data/osakedata.db")
 DEFAULT_PIVOT_RADIUS = 3
 DEFAULT_RECALC_TAIL_TRADING_DAYS = 30
+DEFAULT_BOUNDED_INITIAL_FROM_DATE = "2024-01-01"
 PRICE_SOURCE_CLOSE = "close"
 CALC_VERSION = "stock_dow_v1"
 
@@ -405,6 +406,54 @@ def fetch_tickers_for_market(
     return [str(row["ticker"]).strip().upper() for row in rows if row["ticker"]]
 
 
+def fetch_all_tickers(
+    conn: sqlite3.Connection,
+) -> list[str]:
+    schema = _introspect_ohlcv_schema(conn)
+    rows = conn.execute(
+        f"""
+        SELECT DISTINCT {schema['ticker']} AS ticker
+        FROM osakedata
+        ORDER BY {schema['ticker']} ASC
+        """
+    ).fetchall()
+    return [str(row["ticker"]).strip().upper() for row in rows if row["ticker"]]
+
+
+def fetch_latest_ohlcv_dates(
+    conn: sqlite3.Connection,
+    market: str | None = None,
+) -> dict[str, str]:
+    schema = _introspect_ohlcv_schema(conn)
+    params: list[str] = []
+    where_clause = ""
+    market_col = schema.get("market")
+    if market:
+        if not market_col:
+            return {}
+        where_clause = f"WHERE LOWER({market_col}) = LOWER(?)"
+        params.append(market)
+    rows = conn.execute(
+        f"""
+        SELECT
+            {schema['ticker']} AS ticker,
+            MAX({schema['date']}) AS latest_date
+        FROM osakedata
+        {where_clause}
+        GROUP BY {schema['ticker']}
+        ORDER BY {schema['ticker']} ASC
+        """,
+        params,
+    ).fetchall()
+    latest_dates: dict[str, str] = {}
+    for row in rows:
+        ticker = row["ticker"]
+        latest_date = row["latest_date"]
+        if ticker and latest_date:
+            latest_dates[str(ticker).strip().upper()] = str(latest_date)
+    return latest_dates
+
+
 def _build_pivot_candidates(
     bars: list[PriceBar],
     pivot_radius: int,
@@ -488,6 +537,87 @@ def _fetch_latest_confirmed_as_of_date(
         return None
     value = row["confirmed_as_of_date"]
     return None if value is None else str(value)
+
+
+def _initialize_selection_summary(
+    *,
+    pivot_radius: int,
+    dry_run: bool,
+    recalc_tail_trading_days: int,
+    bounded_initial_from_date: str,
+) -> dict[str, int | str]:
+    return {
+        "tickers_checked": 0,
+        "tickers_missing": 0,
+        "tickers_outdated": 0,
+        "tickers_up_to_date": 0,
+        "tickers_processed": 0,
+        "tickers_bounded_initial_recalculated": 0,
+        "tickers_incremental_recalculated": 0,
+        "tickers_fallback_full_recalculated": 0,
+        "rows_deleted": 0,
+        "rows_inserted": 0,
+        "pivot_high_events": 0,
+        "pivot_low_events": 0,
+        "bos_up_events": 0,
+        "bos_down_events": 0,
+        "reset_events": 0,
+        "trend_change_events": 0,
+        "pivot_radius": pivot_radius,
+        "price_source": PRICE_SOURCE_CLOSE,
+        "bounded_initial_from_date": bounded_initial_from_date,
+        "recalc_tail_trading_days": recalc_tail_trading_days,
+        "dry_run": 1 if dry_run else 0,
+        "errors": 0,
+        "error_tickers": "",
+    }
+
+
+def _run_bounded_initial_ticker_calculation(
+    price_conn: sqlite3.Connection,
+    *,
+    ticker: str,
+    pivot_radius: int,
+    initial_from_date: str,
+    run_id: str,
+    created_at_utc: str,
+) -> TickerRunResult:
+    normalized_ticker = (ticker or "").strip().upper()
+    bars = fetch_price_bars(price_conn, normalized_ticker)
+    if not bars:
+        return TickerRunResult(
+            ticker=normalized_ticker,
+            recalculation_mode="skipped",
+            explicit_recalc_applied=False,
+            rows_deleted=0,
+            event_rows=[],
+        )
+
+    bounded_bars = [bar for bar in bars if bar.date >= initial_from_date]
+    if not bounded_bars:
+        return TickerRunResult(
+            ticker=normalized_ticker,
+            recalculation_mode="bounded_initial",
+            explicit_recalc_applied=False,
+            rows_deleted=0,
+            event_rows=[],
+        )
+
+    event_rows = calculate_ticker_events(
+        bounded_bars,
+        pivot_radius=pivot_radius,
+        start_confirmed_as_of_date=bounded_bars[0].date,
+        initial_state=None,
+        run_id=run_id,
+        created_at_utc=created_at_utc,
+    )
+    return TickerRunResult(
+        ticker=normalized_ticker,
+        recalculation_mode="bounded_initial",
+        explicit_recalc_applied=False,
+        rows_deleted=0,
+        event_rows=event_rows,
+    )
 
 
 def _state_from_row(row: sqlite3.Row) -> DowStructureState:
@@ -1462,3 +1592,124 @@ def format_summary_lines(summary: dict[str, int | str]) -> list[str]:
         "errors",
     ]
     return [f"SUMMARY {key}={summary[key]}" for key in ordered_keys]
+
+
+def calculate_missing_or_outdated_stock_dow_structures(
+    *,
+    analysis_db_path: Path | str = DEFAULT_ANALYSIS_DB_PATH,
+    osakedata_db_path: Path | str = DEFAULT_OSAKEDATA_DB_PATH,
+    market: str | None = None,
+    pivot_radius: int = DEFAULT_PIVOT_RADIUS,
+    bounded_initial_from_date: str = DEFAULT_BOUNDED_INITIAL_FROM_DATE,
+    recalc_tail_trading_days: int = DEFAULT_RECALC_TAIL_TRADING_DAYS,
+    dry_run: bool = False,
+    run_id: str | None = None,
+    created_at_utc: str | None = None,
+) -> dict[str, int | str]:
+    if pivot_radius <= 0:
+        raise ValueError("pivot_radius must be positive")
+    if recalc_tail_trading_days < 0:
+        raise ValueError("recalc_tail_trading_days must be non-negative")
+
+    normalized_market = (market or "").strip().lower() or None
+    summary = _initialize_selection_summary(
+        pivot_radius=pivot_radius,
+        dry_run=dry_run,
+        recalc_tail_trading_days=recalc_tail_trading_days,
+        bounded_initial_from_date=bounded_initial_from_date,
+    )
+    run_id = run_id or generate_run_id()
+    created_at_utc = created_at_utc or utc_now_iso()
+    error_tickers: list[str] = []
+
+    with _connect_sqlite(analysis_db_path) as analysis_conn, _connect_sqlite(
+        osakedata_db_path
+    ) as price_conn:
+        ensure_stock_dow_structure_schema(analysis_conn)
+
+        latest_ohlcv_dates = fetch_latest_ohlcv_dates(price_conn, normalized_market)
+        summary["tickers_checked"] = len(latest_ohlcv_dates)
+
+        for normalized_ticker in sorted(latest_ohlcv_dates):
+            latest_ohlcv_date = latest_ohlcv_dates[normalized_ticker]
+            latest_confirmed_as_of_date = _fetch_latest_confirmed_as_of_date(
+                analysis_conn,
+                normalized_ticker,
+                pivot_radius,
+                PRICE_SOURCE_CLOSE,
+            )
+            if latest_confirmed_as_of_date is None:
+                summary["tickers_missing"] = int(summary["tickers_missing"]) + 1
+                classification = "missing"
+            elif latest_ohlcv_date > latest_confirmed_as_of_date:
+                summary["tickers_outdated"] = int(summary["tickers_outdated"]) + 1
+                classification = "outdated"
+            else:
+                summary["tickers_up_to_date"] = int(summary["tickers_up_to_date"]) + 1
+                classification = "up_to_date"
+
+            if classification == "up_to_date":
+                continue
+
+            try:
+                if classification == "missing":
+                    result = _run_bounded_initial_ticker_calculation(
+                        price_conn,
+                        ticker=normalized_ticker,
+                        pivot_radius=pivot_radius,
+                        initial_from_date=bounded_initial_from_date,
+                        run_id=run_id,
+                        created_at_utc=created_at_utc,
+                    )
+                else:
+                    result = run_ticker_calculation(
+                        analysis_conn,
+                        price_conn,
+                        ticker=normalized_ticker,
+                        pivot_radius=pivot_radius,
+                        recalc_tail_trading_days=recalc_tail_trading_days,
+                        recalc_from_date=None,
+                        force_full=False,
+                        run_id=run_id,
+                        created_at_utc=created_at_utc,
+                    )
+                if result.recalculation_mode == "skipped":
+                    continue
+
+                summary["tickers_processed"] = int(summary["tickers_processed"]) + 1
+                if result.recalculation_mode == "bounded_initial":
+                    summary["tickers_bounded_initial_recalculated"] = (
+                        int(summary["tickers_bounded_initial_recalculated"]) + 1
+                    )
+                elif result.recalculation_mode == "incremental":
+                    summary["tickers_incremental_recalculated"] = (
+                        int(summary["tickers_incremental_recalculated"]) + 1
+                    )
+                elif result.recalculation_mode == "fallback_full":
+                    summary["tickers_fallback_full_recalculated"] = (
+                        int(summary["tickers_fallback_full_recalculated"]) + 1
+                    )
+
+                summary["rows_deleted"] = int(summary["rows_deleted"]) + result.rows_deleted
+                _accumulate_event_counts(summary, result.event_rows)
+
+                if dry_run:
+                    summary["rows_inserted"] = int(summary["rows_inserted"]) + len(
+                        result.event_rows
+                    )
+                else:
+                    inserted = insert_event_rows(analysis_conn, result.event_rows)
+                    summary["rows_inserted"] = int(summary["rows_inserted"]) + inserted
+            except Exception:
+                summary["errors"] = int(summary["errors"]) + 1
+                error_tickers.append(normalized_ticker)
+                continue
+
+        if dry_run:
+            analysis_conn.rollback()
+        else:
+            analysis_conn.commit()
+
+    if error_tickers:
+        summary["error_tickers"] = ",".join(error_tickers[:10])
+    return summary

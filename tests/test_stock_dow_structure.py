@@ -8,8 +8,11 @@ import pytest
 
 from analysis.run_stock_dow_structure import parse_args, parse_recalc_from_date
 from analysis.stock_dow_structure import (
+    DEFAULT_BOUNDED_INITIAL_FROM_DATE,
     DEFAULT_PIVOT_RADIUS,
+    DEFAULT_RECALC_TAIL_TRADING_DAYS,
     calculate_ticker_events,
+    calculate_missing_or_outdated_stock_dow_structures,
     ensure_stock_dow_structure_schema,
     fetch_price_bars,
     format_summary_lines,
@@ -900,6 +903,181 @@ def test_explicit_recalc_non_trading_boundary_uses_next_trading_date(tmp_path):
     assert summary["tickers_explicit_recalculated"] == 1
     assert summary["rows_deleted"] > 0
     assert summary["rows_inserted"] > 0
+
+
+def test_missing_ticker_is_selected_for_calculation(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    osakedata_db = tmp_path / "osakedata.db"
+    _create_analysis_db(analysis_db)
+    _create_osakedata_db(osakedata_db, [], ticker="AAA")
+    _insert_close_series_for_dates(
+        osakedata_db,
+        [
+            "2023-12-28",
+            "2023-12-29",
+            "2023-12-30",
+            "2023-12-31",
+            "2024-01-01",
+            "2024-01-02",
+            "2024-01-03",
+            "2024-01-04",
+            "2024-01-05",
+            "2024-01-06",
+            "2024-01-07",
+        ],
+        [1, 2, 3, 4, 10, 11, 12, 15, 12, 11, 10],
+        ticker="AAA",
+    )
+
+    summary = calculate_missing_or_outdated_stock_dow_structures(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        dry_run=False,
+    )
+
+    rows = _load_event_rows(analysis_db)
+
+    assert summary["tickers_checked"] == 1
+    assert summary["tickers_missing"] == 1
+    assert summary["tickers_outdated"] == 0
+    assert summary["tickers_up_to_date"] == 0
+    assert summary["tickers_processed"] == 1
+    assert summary["tickers_bounded_initial_recalculated"] == 1
+    assert summary["tickers_incremental_recalculated"] == 0
+    assert summary["bounded_initial_from_date"] == DEFAULT_BOUNDED_INITIAL_FROM_DATE
+    assert summary["errors"] == 0
+    assert rows
+    assert min(row["event_date"] for row in rows) >= DEFAULT_BOUNDED_INITIAL_FROM_DATE
+    assert all(
+        row["structure_epoch_start_date"] == DEFAULT_BOUNDED_INITIAL_FROM_DATE
+        for row in rows
+    )
+
+
+def test_outdated_ticker_is_selected_for_incremental_calculation(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    osakedata_db = tmp_path / "osakedata.db"
+    _create_analysis_db(analysis_db)
+    _create_osakedata_db(
+        osakedata_db,
+        [10, 11, 12, 15, 13, 11, 9, 7, 9, 12, 16, 13, 11, 9, 10, 12, 14],
+        ticker="AAA",
+    )
+
+    run_stock_dow_structure(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        ticker="AAA",
+        dry_run=False,
+        run_id="run1",
+    )
+
+    with sqlite3.connect(osakedata_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("AAA", "2026-01-18", 7.75, 9.0, 7.0, 8.0, 1018, "usa"),
+        )
+        conn.commit()
+
+    summary = calculate_missing_or_outdated_stock_dow_structures(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        dry_run=True,
+        recalc_tail_trading_days=DEFAULT_RECALC_TAIL_TRADING_DAYS,
+    )
+
+    assert summary["tickers_checked"] == 1
+    assert summary["tickers_missing"] == 0
+    assert summary["tickers_outdated"] == 1
+    assert summary["tickers_up_to_date"] == 0
+    assert summary["tickers_processed"] == 1
+    assert summary["tickers_incremental_recalculated"] == 1
+    assert summary["tickers_bounded_initial_recalculated"] == 0
+    assert summary["errors"] == 0
+
+
+def test_up_to_date_ticker_is_skipped(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    osakedata_db = tmp_path / "osakedata.db"
+    _create_analysis_db(analysis_db)
+    _create_osakedata_db(
+        osakedata_db,
+        [10, 11, 12, 15, 13, 11, 9, 7, 9, 12, 16, 13, 11, 9, 10, 12, 14],
+        ticker="AAA",
+    )
+
+    run_stock_dow_structure(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        ticker="AAA",
+        dry_run=False,
+        run_id="run1",
+    )
+
+    summary = calculate_missing_or_outdated_stock_dow_structures(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        dry_run=True,
+    )
+
+    assert summary["tickers_checked"] == 1
+    assert summary["tickers_missing"] == 0
+    assert summary["tickers_outdated"] == 0
+    assert summary["tickers_up_to_date"] == 1
+    assert summary["tickers_processed"] == 0
+    assert summary["errors"] == 0
+
+
+def test_selection_summary_counts_checked_needs_calculation_and_skipped(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    osakedata_db = tmp_path / "osakedata.db"
+    _create_analysis_db(analysis_db)
+    base_closes = [10, 11, 12, 15, 13, 11, 9, 7, 9, 12, 16, 13, 11, 9, 10, 12, 14]
+    _create_osakedata_db(osakedata_db, base_closes, ticker="AAA", market="usa")
+    _create_osakedata_db(osakedata_db, base_closes, ticker="BBB", market="usa")
+    _create_osakedata_db(osakedata_db, base_closes, ticker="CCC", market="usa")
+
+    run_stock_dow_structure(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        ticker="BBB",
+        dry_run=False,
+        run_id="bbb-run1",
+    )
+    run_stock_dow_structure(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        ticker="CCC",
+        dry_run=False,
+        run_id="ccc-run1",
+    )
+    with sqlite3.connect(osakedata_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("CCC", "2026-01-18", 7.75, 9.0, 7.0, 8.0, 1018, "usa"),
+        )
+        conn.commit()
+
+    summary = calculate_missing_or_outdated_stock_dow_structures(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        dry_run=True,
+    )
+
+    assert summary["tickers_checked"] == 3
+    assert summary["tickers_missing"] == 1
+    assert summary["tickers_outdated"] == 1
+    assert summary["tickers_up_to_date"] == 1
+    assert summary["tickers_processed"] == 2
+    assert summary["tickers_bounded_initial_recalculated"] == 1
+    assert summary["tickers_incremental_recalculated"] == 1
+    assert summary["errors"] == 0
 
 
 def test_cli_dry_run_creates_table_and_prints_deterministic_summary(tmp_path, capsys):

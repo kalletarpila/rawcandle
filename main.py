@@ -3816,6 +3816,78 @@ Virheet: {error_count}"""
             self.loading_text.color = ft.Colors.RED_600
             self.page.update()
 
+    def calculate_missing_stock_dow_structures(self, e):
+        import os
+
+        from analysis.stock_dow_structure import (
+            DEFAULT_BOUNDED_INITIAL_FROM_DATE,
+            DEFAULT_PIVOT_RADIUS,
+            DEFAULT_RECALC_TAIL_TRADING_DAYS,
+            calculate_missing_or_outdated_stock_dow_structures,
+        )
+
+        try:
+            data_dir = os.path.join(os.path.dirname(__file__), "data")
+            osakedata_path = os.path.join(data_dir, "osakedata.db")
+            analysis_path = os.path.join(data_dir, "analysis.db")
+
+            if not os.path.exists(osakedata_path):
+                self.loading_text.value = "❌ Osakedata-kantaa ei löydy!"
+                self.loading_text.color = ft.Colors.RED_600
+                self.page.update()
+                return
+
+            selected_market = ""
+            if getattr(self, "update_market_dropdown", None):
+                selected_market = (self.update_market_dropdown.value or "").strip().lower()
+
+            scope_label = (
+                f"markkinalle {selected_market.upper()}"
+                if selected_market
+                else "kaikille osakkeille"
+            )
+            self.loading_text.value = (
+                f"🔄 Lasketaan puuttuvia Dow-rakenteita {scope_label}..."
+            )
+            self.loading_text.color = ft.Colors.BLUE_600
+            self.page.update()
+
+            summary = calculate_missing_or_outdated_stock_dow_structures(
+                analysis_db_path=analysis_path,
+                osakedata_db_path=osakedata_path,
+                market=selected_market or None,
+                pivot_radius=DEFAULT_PIVOT_RADIUS,
+                bounded_initial_from_date=DEFAULT_BOUNDED_INITIAL_FROM_DATE,
+                recalc_tail_trading_days=DEFAULT_RECALC_TAIL_TRADING_DAYS,
+                dry_run=False,
+            )
+
+            message_lines = [
+                "✅ Dow-rakenteiden laskenta valmis.",
+                f"Tarkistetut osakkeet: {summary['tickers_checked']}",
+                f"Puuttuvat, rajatusti lasketut: {summary['tickers_bounded_initial_recalculated']}",
+                f"Vanhentuneet, inkrementaalisesti päivitetyt: {summary['tickers_incremental_recalculated']}",
+                f"Ohitetut ajan tasalla: {summary['tickers_up_to_date']}",
+                f"Rajatun alkulaskennan alkupäivä: {summary['bounded_initial_from_date']}",
+                f"Lisätyt eventit: {summary['rows_inserted']}",
+                f"Virheet: {summary['errors']}",
+            ]
+            if summary.get("error_tickers"):
+                message_lines.append(
+                    f"Virhetickerit: {summary['error_tickers']}"
+                )
+            self.loading_text.value = "\n".join(message_lines)
+            self.loading_text.color = (
+                ft.Colors.ORANGE_600
+                if int(summary["errors"]) > 0
+                else ft.Colors.GREEN_600
+            )
+            self.page.update()
+        except Exception as ex:
+            self.loading_text.value = f"❌ Virhe: {str(ex)}"
+            self.loading_text.color = ft.Colors.RED_600
+            self.page.update()
+
     def show_blackout_fetch_dialog(self, e):
         import threading
 
@@ -4269,6 +4341,14 @@ Virheet: {error_count}"""
                                                         bgcolor=ft.Colors.PURPLE_700,
                                                         color=ft.Colors.WHITE,
                                                         tooltip="Laske divergenssit osakkeille joilta ne puuttuvat",
+                                                    ),
+                                                    ft.ElevatedButton(
+                                                        "Laske puuttuvat Dow-rakenteet",
+                                                        icon=ft.Icons.ACCOUNT_TREE,
+                                                        on_click=self.calculate_missing_stock_dow_structures,
+                                                        bgcolor=ft.Colors.INDIGO_700,
+                                                        color=ft.Colors.WHITE,
+                                                        tooltip="Laske Dow-rakenteet osakkeille joilta ne puuttuvat tai ovat vanhentuneet",
                                                     ),
                                                     ft.ElevatedButton(
                                                         "Hae blackout-päivät",
