@@ -470,13 +470,14 @@ def fetch_latest_ohlcv_dates(
 ) -> dict[str, str]:
     schema = _introspect_ohlcv_schema(conn)
     params: list[str] = []
-    where_clause = ""
+    where_conditions = [f"{schema['close']} IS NOT NULL"]
     market_col = schema.get("market")
     if market:
         if not market_col:
             return {}
-        where_clause = f"WHERE LOWER({market_col}) = LOWER(?)"
+        where_conditions.append(f"LOWER({market_col}) = LOWER(?)")
         params.append(market)
+    where_clause = f"WHERE {' AND '.join(where_conditions)}"
     rows = conn.execute(
         f"""
         SELECT

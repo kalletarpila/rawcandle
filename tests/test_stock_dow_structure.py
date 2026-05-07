@@ -1261,6 +1261,122 @@ def test_registered_without_status_uses_incremental_recovery_and_writes_status(t
     assert status_row["last_run_mode"] == "incremental"
 
 
+def test_null_close_raw_tail_does_not_make_ticker_outdated(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    osakedata_db = tmp_path / "osakedata.db"
+    _create_analysis_db(analysis_db)
+    _create_osakedata_db(
+        osakedata_db,
+        [10, 11, 12, 15, 13, 11, 9, 7, 9, 12, 16, 13, 11, 9, 10, 12, 14],
+        ticker="AAA",
+    )
+
+    run_stock_dow_structure(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        ticker="AAA",
+        dry_run=False,
+        run_id="run1",
+    )
+
+    with sqlite3.connect(osakedata_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("AAA", "2026-01-18", 0.0, 0.0, 0.0, None, 1018, "usa"),
+        )
+        conn.commit()
+
+    status_row = _load_status_row(analysis_db, "AAA")
+    assert status_row is not None
+    assert status_row["calculated_through_date"] == "2026-01-17"
+
+    summary = calculate_missing_or_outdated_stock_dow_structures(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        dry_run=True,
+    )
+    assert summary["tickers_up_to_date"] == 1
+    assert summary["tickers_outdated"] == 0
+
+
+def test_older_than_latest_valid_close_date_is_outdated(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    osakedata_db = tmp_path / "osakedata.db"
+    _create_analysis_db(analysis_db)
+    _create_osakedata_db(
+        osakedata_db,
+        [10, 11, 12, 15, 13, 11, 9, 7, 9, 12, 16, 13, 11, 9, 10, 12, 14],
+        ticker="AAA",
+    )
+
+    run_stock_dow_structure(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        ticker="AAA",
+        dry_run=False,
+        run_id="run1",
+    )
+
+    with sqlite3.connect(osakedata_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("AAA", "2026-01-18", 7.75, 9.0, 7.0, 8.0, 1018, "usa"),
+        )
+        conn.execute(
+            """
+            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("AAA", "2026-01-19", 0.0, 0.0, 0.0, None, 1019, "usa"),
+        )
+        conn.commit()
+
+    summary = calculate_missing_or_outdated_stock_dow_structures(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        dry_run=True,
+    )
+    assert summary["tickers_outdated"] == 1
+    assert summary["tickers_up_to_date"] == 0
+
+
+def test_only_null_close_rows_are_handled_without_false_ok_coverage(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    osakedata_db = tmp_path / "osakedata.db"
+    _create_analysis_db(analysis_db)
+    _create_osakedata_db(osakedata_db, [], ticker="AAA")
+    with sqlite3.connect(osakedata_db) as conn:
+        conn.executemany(
+            """
+            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ("AAA", "2026-01-01", 0.0, 0.0, 0.0, None, 1000, "usa"),
+                ("AAA", "2026-01-02", 0.0, 0.0, 0.0, None, 1001, "usa"),
+            ],
+        )
+        conn.commit()
+
+    summary = calculate_missing_or_outdated_stock_dow_structures(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        dry_run=False,
+    )
+
+    status_row = _load_status_row(analysis_db, "AAA")
+
+    assert summary["tickers_checked"] == 0
+    assert summary["tickers_processed"] == 0
+    assert status_row is None
+
+
 def test_cli_dry_run_creates_table_and_prints_deterministic_summary(tmp_path, capsys):
     analysis_db = tmp_path / "analysis.db"
     osakedata_db = tmp_path / "osakedata.db"

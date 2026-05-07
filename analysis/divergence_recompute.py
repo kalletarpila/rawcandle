@@ -117,8 +117,7 @@ def recompute_divergence_for_ticker(
             return True, 0, ""
 
         records = [
-            (
-                str(row["date"]),
+            (                str(row["date"]),
                 float(row["bullish_strength"] or 0.0),
                 float(row["bearish_strength"] or 0.0),
                 float(row.get("hidden_bullish_strength") or 0.0),
