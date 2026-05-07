@@ -32,7 +32,6 @@ from market_repository import (
     MARKET_VOLUME_DEFAULTS,
 )
 from sector_update import refresh_single_ticker_metadata, update_sector_metadata
-from ui.pages.divergence_page import DivergencePage
 
 
 # Compatibility shim: ensure ft.Colors/ft.colors and ft.Icons/ft.icons exist
@@ -2930,8 +2929,6 @@ class RawCandleApp:
         self.simu_view = SimuView(self.page, self.create_appbar, self.simu_service)
         self.stock_view = StockView(self.page, self.create_appbar)
         self.index_view = IndexPage(self.page, self.create_appbar, self.active_market)
-        self.divergence_page = DivergencePage(self.page, self.create_appbar)
-
         self.setup_routing()
 
         # Aloita etusivulta (only if page supports go)
@@ -3022,11 +3019,6 @@ class RawCandleApp:
                     ft.Icons.INSIGHTS,
                     tooltip="Tulokset",
                     on_click=lambda _: self.page.go("/tulokset"),
-                ),
-                ft.IconButton(
-                    ft.Icons.BUBBLE_CHART,
-                    tooltip="Divergence Research",
-                    on_click=lambda _: self.page.go("/divergence"),
                 ),
                 ft.IconButton(
                     ft.Icons.EXIT_TO_APP,
@@ -4413,8 +4405,6 @@ Virheet: {error_count}"""
             self.page.views.append(self.create_findings_view())
         elif self.page.route == "/tulokset":
             self.page.views.append(self.create_results_view())
-        elif self.page.route == "/divergence":
-            self.page.views.append(self.divergence_page.create_view())
         else:
             # 404 - palaa etusivulle
             self.page.go("/")
