@@ -1372,9 +1372,49 @@ def test_only_null_close_rows_are_handled_without_false_ok_coverage(tmp_path):
 
     status_row = _load_status_row(analysis_db, "AAA")
 
-    assert summary["tickers_checked"] == 0
+    assert summary["tickers_checked"] == 1
+    assert summary["tickers_no_valid_close_data"] == 1
     assert summary["tickers_processed"] == 0
     assert status_row is None
+
+
+def test_tickers_no_valid_close_data_counted_separately_from_normal_tickers(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    osakedata_db = tmp_path / "osakedata.db"
+    _create_analysis_db(analysis_db)
+    # AAA has valid close data
+    _create_osakedata_db(
+        osakedata_db,
+        [10, 11, 12, 15, 13, 11, 9, 7, 9, 12, 16, 13, 11, 9, 10, 12, 14],
+        ticker="AAA",
+    )
+    # BBB has only NULL close rows
+    with sqlite3.connect(osakedata_db) as conn:
+        conn.executemany(
+            """
+            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ("BBB", "2026-01-01", 0.0, 0.0, 0.0, None, 500, "usa"),
+                ("BBB", "2026-01-02", 0.0, 0.0, 0.0, None, 501, "usa"),
+            ],
+        )
+        conn.commit()
+
+    summary = calculate_missing_or_outdated_stock_dow_structures(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        dry_run=False,
+    )
+
+    # BBB counted in no_valid_close_data, AAA counted as missing (processed)
+    assert summary["tickers_checked"] == 2
+    assert summary["tickers_no_valid_close_data"] == 1
+    assert summary["tickers_missing"] == 1
+    assert summary["tickers_bounded_initial_recalculated"] == 1
+    # BBB must not have a status row
+    assert _load_status_row(analysis_db, "BBB") is None
 
 
 def test_cli_dry_run_creates_table_and_prints_deterministic_summary(tmp_path, capsys):

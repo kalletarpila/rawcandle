@@ -181,7 +181,9 @@ class RawCandleApp:
             with sqlite3.connect(self.osakedata_db_path) as conn:
                 if not has_uncorrected_splits(conn, ticker):
                     return False
-                print(f"[SPLIT] Havaittu korjaamaton split tickerille {ticker}, korjataan hinnat ja divergence.")
+                print(
+                    f"[SPLIT] Havaittu korjaamaton split tickerille {ticker}, korjataan hinnat ja divergence."
+                )
                 start_ts = time.time()
                 delete_prices_from_2018(conn, ticker, start_date="2018-01-01")
                 added = refetch_prices_from_yahoo(
@@ -217,7 +219,9 @@ class RawCandleApp:
                     else:
                         print(f"⚠️ Divergenssin päivitys epäonnistui ({ticker}): {err}")
                 else:
-                    print(f"⚠️ Splittikorjaus epäonnistui tickerille {ticker} (ei lisätty rivejä).")
+                    print(
+                        f"⚠️ Splittikorjaus epäonnistui tickerille {ticker} (ei lisätty rivejä)."
+                    )
                 elapsed = time.time() - start_ts
                 if elapsed < 0.35:
                     time.sleep(0.35 - elapsed)
@@ -2641,8 +2645,7 @@ class RawCandleApp:
         try:
             with sqlite3.connect(db_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute(
-                    """
+                cursor.execute("""
                     CREATE TABLE IF NOT EXISTS osakedata (
                         osake TEXT NOT NULL,
                         pvm TEXT NOT NULL,
@@ -2654,10 +2657,8 @@ class RawCandleApp:
                         market TEXT NOT NULL DEFAULT 'usa',
                         PRIMARY KEY (osake, pvm)
                     )
-                    """
-                )
-                cursor.execute(
-                    """
+                    """)
+                cursor.execute("""
                     CREATE TABLE IF NOT EXISTS splits_data (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         osake TEXT NOT NULL,
@@ -2666,8 +2667,7 @@ class RawCandleApp:
                         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                         UNIQUE(osake, split_date)
                     )
-                    """
-                )
+                    """)
                 cursor.execute("SELECT DISTINCT osake FROM osakedata")
                 existing_tickers = {row[0] for row in cursor.fetchall()}
         except Exception as ex:
@@ -3108,9 +3108,11 @@ class RawCandleApp:
             if not value:
                 return None
             try:
-                return datetime.datetime.fromisoformat(
-                    value.replace("Z", "+00:00")
-                ).date().isoformat()
+                return (
+                    datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+                    .date()
+                    .isoformat()
+                )
             except ValueError:
                 try:
                     return datetime.date.fromisoformat(value[:10]).isoformat()
@@ -3137,7 +3139,9 @@ class RawCandleApp:
         }
         normalized_market = (market or "").strip().lower()
         db_path = self._quarter_state_db_path_for_market(normalized_market)
-        primary_source = self._quarter_state_primary_source_for_market(normalized_market)
+        primary_source = self._quarter_state_primary_source_for_market(
+            normalized_market
+        )
         if not db_path or not primary_source:
             return outcome
 
@@ -3174,12 +3178,9 @@ class RawCandleApp:
             has_detection = bool(yahoo_latest_period_end_date)
             if not has_detection:
                 outcome["detection_missing"] = True
-            should_raise_flag = (
-                has_detection
-                and (
-                    latest_db_period_end_date is None
-                    or yahoo_latest_period_end_date > latest_db_period_end_date
-                )
+            should_raise_flag = has_detection and (
+                latest_db_period_end_date is None
+                or yahoo_latest_period_end_date > latest_db_period_end_date
             )
             state_changed = should_raise_flag and (
                 current_flag != 1
@@ -3194,8 +3195,7 @@ class RawCandleApp:
                 and (
                     not has_detection
                     or not should_raise_flag
-                    or yahoo_latest_period_end_date
-                    <= current_detected_period_end_date
+                    or yahoo_latest_period_end_date <= current_detected_period_end_date
                 )
             )
             outcome["existing_flag_preserved"] = preserve_existing_flag
@@ -3256,7 +3256,8 @@ class RawCandleApp:
         db_path = self.osakedata_db_path
         start_override_raw = (
             self.update_start_input.value.strip()
-            if getattr(self, "update_start_input", None) and self.update_start_input.value
+            if getattr(self, "update_start_input", None)
+            and self.update_start_input.value
             else ""
         )
         start_override = None
@@ -3286,14 +3287,12 @@ class RawCandleApp:
             # Hae kaikki osakkeet ja niiden viimeisin sekä ensimmäinen päivämäärä
             with sqlite3.connect(db_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute(
-                    """
+                cursor.execute("""
                     SELECT osake, MIN(pvm) as ensimmainen_pvm, MAX(pvm) as viimeisin_pvm, MAX(market) as market
                     FROM osakedata
                     GROUP BY osake
                     ORDER BY osake
-                """
-                )
+                """)
                 stocks = cursor.fetchall()
 
             if not stocks:
@@ -3309,7 +3308,9 @@ class RawCandleApp:
                     if (row[3] or "").strip().lower() == selected_market.strip().lower()
                 ]
                 if not stocks:
-                    self.loading_text.value = f"❌ Ei osakkeita markkinalle {selected_market.upper()}"
+                    self.loading_text.value = (
+                        f"❌ Ei osakkeita markkinalle {selected_market.upper()}"
+                    )
                     self.loading_text.color = ft.Colors.RED_600
                     self.page.update()
                     return
@@ -3350,9 +3351,7 @@ class RawCandleApp:
                 if not needs_update:
                     skipped_count += 1
                     if idx % 10 == 0:
-                        self.loading_text.value = (
-                            f"⏭️ {idx}/{total_stocks}: {ticker} (ohitettu, data ajan tasalla)"
-                        )
+                        self.loading_text.value = f"⏭️ {idx}/{total_stocks}: {ticker} (ohitettu, data ajan tasalla)"
                         self.page.update()
                     continue
 
@@ -3374,9 +3373,7 @@ class RawCandleApp:
                 if not date_ranges:
                     skipped_count += 1
                     if idx % 10 == 0:
-                        self.loading_text.value = (
-                            f"⏭️ {idx}/{total_stocks}: {ticker} (ohitettu, data ajan tasalla)"
-                        )
+                        self.loading_text.value = f"⏭️ {idx}/{total_stocks}: {ticker} (ohitettu, data ajan tasalla)"
                         self.page.update()
                     continue
 
@@ -3574,9 +3571,7 @@ class RawCandleApp:
                             )
                             if analysis_results:
                                 try:
-                                    dbm = DatabaseManager(
-                                        db_path=self.analysis_db_path
-                                    )
+                                    dbm = DatabaseManager(db_path=self.analysis_db_path)
                                     for key, items in analysis_results.items():
                                         if "|" in key:
                                             _ticker_key, date_str = key.split("|", 1)
@@ -3634,17 +3629,82 @@ class RawCandleApp:
                     time.sleep(30)
 
             # Yhteenveto
-            summary = f"""✅ Päivitys valmis!
+            stock_summary = f"""✅ Päivitys valmis!
 Käsitelty: {total_stocks} osaketta
 Päivitetty: {updated_count} osaketta
 Ohitettu: {skipped_count} (data ajan tasalla)
 Virheet: {error_count}"""
 
-            self.loading_text.value = summary
+            self.loading_text.value = stock_summary
             self.loading_text.color = ft.Colors.GREEN_600
             self.page.update()
             for key, value in quarter_summary.items():
                 print(f"SUMMARY {key}={value}")
+
+            # Dow-rakenteiden post-processing osaketietojen päivityksen jälkeen
+            try:
+                import os as _os
+                from analysis.stock_dow_structure import (
+                    DEFAULT_BOUNDED_INITIAL_FROM_DATE,
+                    DEFAULT_PIVOT_RADIUS,
+                    DEFAULT_RECALC_TAIL_TRADING_DAYS,
+                    calculate_missing_or_outdated_stock_dow_structures,
+                )
+
+                _data_dir = _os.path.join(_os.path.dirname(__file__), "data")
+                _osakedata_path = _os.path.join(_data_dir, "osakedata.db")
+                _analysis_path = _os.path.join(_data_dir, "analysis.db")
+                _dow_market = (
+                    selected_market.strip().lower() if selected_market else None
+                )
+
+                self.loading_text.value = (
+                    stock_summary + "\n\n🔄 Päivitetään Dow-rakenteita..."
+                )
+                self.page.update()
+
+                dow_summary = calculate_missing_or_outdated_stock_dow_structures(
+                    analysis_db_path=_analysis_path,
+                    osakedata_db_path=_osakedata_path,
+                    market=_dow_market,
+                    pivot_radius=DEFAULT_PIVOT_RADIUS,
+                    bounded_initial_from_date=DEFAULT_BOUNDED_INITIAL_FROM_DATE,
+                    recalc_tail_trading_days=DEFAULT_RECALC_TAIL_TRADING_DAYS,
+                    dry_run=False,
+                )
+
+                dow_lines = [
+                    "\n── Dow-rakenteiden päivitys osaketietojen päivityksen jälkeen ──",
+                    f"Tarkistetut tickerit: {dow_summary['tickers_checked']}",
+                    f"Puuttuvat, rajatusti lasketut: {dow_summary['tickers_bounded_initial_recalculated']}",
+                    f"Aiemmin lasketut ilman status-riviä: {dow_summary['tickers_registered_without_status']}",
+                    f"Vanhentuneet, inkrementaalisesti päivitetyt: {dow_summary['tickers_incremental_recalculated']}",
+                    f"Ohitetut ajan tasalla: {dow_summary['tickers_up_to_date']}",
+                    f"Ei laskentakelpoista close-dataa: {dow_summary['tickers_no_valid_close_data']}",
+                    f"Lisätyt eventit: {dow_summary['rows_inserted']}",
+                    f"Poistetut/korvatut eventit: {dow_summary['rows_deleted']}",
+                    f"Virheet: {dow_summary['errors']}",
+                    f"Rajatun alkulaskennan alkupäivä: {dow_summary['bounded_initial_from_date']}",
+                    f"Inkrementaalisen päivityksen tail: {dow_summary['recalc_tail_trading_days']} kaupankäyntipäivää",
+                    "Ajan tasalla -tulkinta perustuu laskennan kattavuuspäivään, ei viimeisimpään Dow-eventtiin.",
+                ]
+                if dow_summary.get("error_tickers"):
+                    dow_lines.append(f"Virhetickerit: {dow_summary['error_tickers']}")
+
+                self.loading_text.value = stock_summary + "\n".join(dow_lines)
+                self.loading_text.color = (
+                    ft.Colors.ORANGE_600
+                    if int(dow_summary["errors"]) > 0
+                    else ft.Colors.GREEN_600
+                )
+                self.page.update()
+            except Exception as _dow_exc:
+                self.loading_text.value = (
+                    stock_summary
+                    + f"\n\n⚠️ Dow-rakenteiden päivitys epäonnistui: {_dow_exc}"
+                )
+                self.loading_text.color = ft.Colors.ORANGE_600
+                self.page.update()
 
         except Exception as ex:
             self.loading_text.value = f"❌ Virhe päivityksessä: {str(ex)}"
@@ -3839,7 +3899,9 @@ Virheet: {error_count}"""
 
             selected_market = ""
             if getattr(self, "update_market_dropdown", None):
-                selected_market = (self.update_market_dropdown.value or "").strip().lower()
+                selected_market = (
+                    (self.update_market_dropdown.value or "").strip().lower()
+                )
 
             scope_label = (
                 f"markkinalle {selected_market.upper()}"
@@ -3869,15 +3931,14 @@ Virheet: {error_count}"""
                 f"Vanhentuneet, inkrementaalisesti päivitetyt: {summary['tickers_incremental_recalculated']}",
                 f"Ohitetut ajan tasalla: {summary['tickers_up_to_date']}",
                 f"Aiemmin laskettuja ilman status-riviä: {summary['tickers_registered_without_status']}",
+                f"Ei laskentakelpoista close-dataa: {summary['tickers_no_valid_close_data']}",
                 f"Rajatun alkulaskennan alkupäivä: {summary['bounded_initial_from_date']}",
                 "Ajan tasalla -tulkinta perustuu laskennan kattavuuspäivään, ei viimeisimpään Dow-eventtiin.",
                 f"Lisätyt eventit: {summary['rows_inserted']}",
                 f"Virheet: {summary['errors']}",
             ]
             if summary.get("error_tickers"):
-                message_lines.append(
-                    f"Virhetickerit: {summary['error_tickers']}"
-                )
+                message_lines.append(f"Virhetickerit: {summary['error_tickers']}")
             self.loading_text.value = "\n".join(message_lines)
             self.loading_text.color = (
                 ft.Colors.ORANGE_600
@@ -4551,8 +4612,7 @@ Virheet: {error_count}"""
                     cursor = conn.cursor()
 
                     # Varmista että taulu on olemassa
-                    cursor.execute(
-                        """
+                    cursor.execute("""
                         CREATE TABLE IF NOT EXISTS osakedata (
                             osake TEXT NOT NULL,
                             pvm TEXT NOT NULL,
@@ -4564,10 +4624,8 @@ Virheet: {error_count}"""
                             market TEXT NOT NULL DEFAULT 'usa',
                             PRIMARY KEY (osake, pvm)
                         )
-                    """
-                    )
-                    cursor.execute(
-                        """
+                    """)
+                    cursor.execute("""
                         CREATE TABLE IF NOT EXISTS splits_data (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             osake TEXT NOT NULL,
@@ -4576,8 +4634,7 @@ Virheet: {error_count}"""
                             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                             UNIQUE(osake, split_date)
                         )
-                    """
-                    )
+                    """)
 
                     # Hae viimeisin päivämäärä kannasta tälle osakkeelle
                     cursor.execute(
@@ -4716,7 +4773,9 @@ Virheet: {error_count}"""
                         db_path, ticker, yf_ticker=stock
                     )
                     if splits_inserted:
-                        print(f"Lisättiin {splits_inserted} splitiä tickerille {ticker}")
+                        print(
+                            f"Lisättiin {splits_inserted} splitiä tickerille {ticker}"
+                        )
                 except Exception as exc:
                     print(f"⚠️ Splittien päivitys epäonnistui ({ticker}): {exc}")
 
@@ -4727,8 +4786,8 @@ Virheet: {error_count}"""
                 if split_recomputed:
                     div_success, div_days, div_error = (True, 0, "")
                 else:
-                    div_success, div_days, div_error = self._calculate_and_save_divergences(
-                        ticker, only_missing=True
+                    div_success, div_days, div_error = (
+                        self._calculate_and_save_divergences(ticker, only_missing=True)
                     )
 
                 # Aja kynttiläanalyysi lisätylle aikavälille

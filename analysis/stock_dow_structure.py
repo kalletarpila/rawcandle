@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-
 DEFAULT_ANALYSIS_DB_PATH = Path("data/analysis.db")
 DEFAULT_OSAKEDATA_DB_PATH = Path("data/osakedata.db")
 DEFAULT_PIVOT_RADIUS = 3
@@ -140,8 +139,7 @@ def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
 
 
 def _create_stock_dow_structure_table(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE stock_dow_structure_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             ticker TEXT NOT NULL,
@@ -198,13 +196,11 @@ def _create_stock_dow_structure_table(conn: sqlite3.Connection) -> None:
                 price_source
             )
         )
-        """
-    )
+        """)
 
 
 def _create_stock_dow_structure_status_table(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS stock_dow_structure_status (
             ticker TEXT NOT NULL,
             market TEXT NULL,
@@ -224,8 +220,7 @@ def _create_stock_dow_structure_status_table(conn: sqlite3.Connection) -> None:
             updated_at_utc TEXT NOT NULL,
             PRIMARY KEY (ticker, price_source, pivot_radius)
         )
-        """
-    )
+        """)
 
 
 def _migrate_stock_dow_structure_table_if_needed(conn: sqlite3.Connection) -> None:
@@ -269,30 +264,22 @@ def _migrate_stock_dow_structure_table_if_needed(conn: sqlite3.Connection) -> No
             raise RuntimeError(
                 "Incomplete stock_dow_structure_events schema: missing structural_* columns"
             )
-        conn.execute(
-            """
+        conn.execute("""
             ALTER TABLE stock_dow_structure_events
             RENAME COLUMN structural_high_date TO active_bos_high_date
-            """
-        )
-        conn.execute(
-            """
+            """)
+        conn.execute("""
             ALTER TABLE stock_dow_structure_events
             RENAME COLUMN structural_high_price TO active_bos_high_price
-            """
-        )
-        conn.execute(
-            """
+            """)
+        conn.execute("""
             ALTER TABLE stock_dow_structure_events
             RENAME COLUMN structural_low_date TO active_bos_low_date
-            """
-        )
-        conn.execute(
-            """
+            """)
+        conn.execute("""
             ALTER TABLE stock_dow_structure_events
             RENAME COLUMN structural_low_price TO active_bos_low_price
-            """
-        )
+            """)
         return
 
     raise RuntimeError(
@@ -304,36 +291,26 @@ def _migrate_stock_dow_structure_table_if_needed(conn: sqlite3.Connection) -> No
 def ensure_stock_dow_structure_schema(conn: sqlite3.Connection) -> None:
     _migrate_stock_dow_structure_table_if_needed(conn)
     _create_stock_dow_structure_status_table(conn)
-    conn.execute(
-        """
+    conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_stock_dow_events_ticker_confirmed
         ON stock_dow_structure_events(ticker, confirmed_as_of_date)
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_stock_dow_events_ticker_event
         ON stock_dow_structure_events(ticker, event_date)
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_stock_dow_events_event_type
         ON stock_dow_structure_events(event_type)
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_stock_dow_status_market
         ON stock_dow_structure_status(market)
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_stock_dow_status_calculated_through
         ON stock_dow_structure_status(calculated_through_date)
-        """
-    )
+        """)
     conn.commit()
 
 
@@ -414,17 +391,19 @@ def fetch_price_bars(
         bars.append(
             PriceBar(
                 ticker=str(row["ticker"]).strip().upper(),
-                market=None
-                if row["market"] is None
-                else str(row["market"]).strip().lower(),
+                market=(
+                    None
+                    if row["market"] is None
+                    else str(row["market"]).strip().lower()
+                ),
                 date=str(row["event_date"]),
                 open=None if row["open_value"] is None else float(row["open_value"]),
                 high=None if row["high_value"] is None else float(row["high_value"]),
                 low=None if row["low_value"] is None else float(row["low_value"]),
                 close=float(row["close_value"]),
-                volume=None
-                if row["volume_value"] is None
-                else int(row["volume_value"]),
+                volume=(
+                    None if row["volume_value"] is None else int(row["volume_value"])
+                ),
             )
         )
     return bars
@@ -454,13 +433,11 @@ def fetch_all_tickers(
     conn: sqlite3.Connection,
 ) -> list[str]:
     schema = _introspect_ohlcv_schema(conn)
-    rows = conn.execute(
-        f"""
+    rows = conn.execute(f"""
         SELECT DISTINCT {schema['ticker']} AS ticker
         FROM osakedata
         ORDER BY {schema['ticker']} ASC
-        """
-    ).fetchall()
+        """).fetchall()
     return [str(row["ticker"]).strip().upper() for row in rows if row["ticker"]]
 
 
@@ -497,6 +474,31 @@ def fetch_latest_ohlcv_dates(
         if ticker and latest_date:
             latest_dates[str(ticker).strip().upper()] = str(latest_date)
     return latest_dates
+
+
+def _fetch_all_tickers_in_scope(
+    conn: sqlite3.Connection,
+    market: str | None = None,
+) -> set[str]:
+    """Return all tickers present in osakedata for a given market scope, regardless of NULL close rows."""
+    schema = _introspect_ohlcv_schema(conn)
+    params: list[str] = []
+    market_col = schema.get("market")
+    where_clause = ""
+    if market:
+        if not market_col:
+            return set()
+        where_clause = f"WHERE LOWER({market_col}) = LOWER(?)"
+        params.append(market)
+    rows = conn.execute(
+        f"""
+        SELECT DISTINCT {schema['ticker']} AS ticker
+        FROM osakedata
+        {where_clause}
+        """,
+        params,
+    ).fetchall()
+    return {str(row["ticker"]).strip().upper() for row in rows if row["ticker"]}
 
 
 def _build_pivot_candidates(
@@ -635,6 +637,7 @@ def _initialize_selection_summary(
         "tickers_registered_without_status": 0,
         "tickers_outdated": 0,
         "tickers_up_to_date": 0,
+        "tickers_no_valid_close_data": 0,
         "tickers_processed": 0,
         "tickers_bounded_initial_recalculated": 0,
         "tickers_incremental_recalculated": 0,
@@ -790,51 +793,69 @@ def _run_bounded_initial_ticker_calculation(
         calculated_from_date=bounded_bars[0].date,
         calculated_through_date=bars[-1].date,
         latest_event_date=None if not event_rows else str(event_rows[-1]["event_date"]),
-        latest_event_confirmed_as_of_date=None
-        if not event_rows
-        else str(event_rows[-1]["confirmed_as_of_date"]),
+        latest_event_confirmed_as_of_date=(
+            None if not event_rows else str(event_rows[-1]["confirmed_as_of_date"])
+        ),
     )
 
 
 def _state_from_row(row: sqlite3.Row) -> DowStructureState:
     return DowStructureState(
         trend_state=str(row["trend_state"]),
-        active_bos_high_date=None
-        if row["active_bos_high_date"] is None
-        else str(row["active_bos_high_date"]),
-        active_bos_high_price=None
-        if row["active_bos_high_price"] is None
-        else float(row["active_bos_high_price"]),
-        active_bos_low_date=None
-        if row["active_bos_low_date"] is None
-        else str(row["active_bos_low_date"]),
-        active_bos_low_price=None
-        if row["active_bos_low_price"] is None
-        else float(row["active_bos_low_price"]),
-        last_high_label=None
-        if row["last_high_label"] is None
-        else str(row["last_high_label"]),
-        last_high_label_date=None
-        if row["last_high_label_date"] is None
-        else str(row["last_high_label_date"]),
-        last_high_label_price=None
-        if row["last_high_label_price"] is None
-        else float(row["last_high_label_price"]),
-        last_low_label=None
-        if row["last_low_label"] is None
-        else str(row["last_low_label"]),
-        last_low_label_date=None
-        if row["last_low_label_date"] is None
-        else str(row["last_low_label_date"]),
-        last_low_label_price=None
-        if row["last_low_label_price"] is None
-        else float(row["last_low_label_price"]),
+        active_bos_high_date=(
+            None
+            if row["active_bos_high_date"] is None
+            else str(row["active_bos_high_date"])
+        ),
+        active_bos_high_price=(
+            None
+            if row["active_bos_high_price"] is None
+            else float(row["active_bos_high_price"])
+        ),
+        active_bos_low_date=(
+            None
+            if row["active_bos_low_date"] is None
+            else str(row["active_bos_low_date"])
+        ),
+        active_bos_low_price=(
+            None
+            if row["active_bos_low_price"] is None
+            else float(row["active_bos_low_price"])
+        ),
+        last_high_label=(
+            None if row["last_high_label"] is None else str(row["last_high_label"])
+        ),
+        last_high_label_date=(
+            None
+            if row["last_high_label_date"] is None
+            else str(row["last_high_label_date"])
+        ),
+        last_high_label_price=(
+            None
+            if row["last_high_label_price"] is None
+            else float(row["last_high_label_price"])
+        ),
+        last_low_label=(
+            None if row["last_low_label"] is None else str(row["last_low_label"])
+        ),
+        last_low_label_date=(
+            None
+            if row["last_low_label_date"] is None
+            else str(row["last_low_label_date"])
+        ),
+        last_low_label_price=(
+            None
+            if row["last_low_label_price"] is None
+            else float(row["last_low_label_price"])
+        ),
         bos_up_count=int(row["bos_up_count"] or 0),
         bos_down_count=int(row["bos_down_count"] or 0),
         structure_epoch_id=int(row["structure_epoch_id"] or 1),
-        structure_epoch_start_date=None
-        if row["structure_epoch_start_date"] is None
-        else str(row["structure_epoch_start_date"]),
+        structure_epoch_start_date=(
+            None
+            if row["structure_epoch_start_date"] is None
+            else str(row["structure_epoch_start_date"])
+        ),
     )
 
 
@@ -1047,7 +1068,9 @@ def _build_event_row(
 
 def _make_initial_state(bars: list[PriceBar]) -> DowStructureState:
     epoch_start_date = bars[0].date if bars else None
-    return DowStructureState(structure_epoch_id=1, structure_epoch_start_date=epoch_start_date)
+    return DowStructureState(
+        structure_epoch_id=1, structure_epoch_start_date=epoch_start_date
+    )
 
 
 def _reset_state(
@@ -1112,7 +1135,11 @@ def calculate_ticker_events(
     candidates_by_confirm_index = _build_pivot_candidates(bars, pivot_radius)
     date_to_index = {bar.date: idx for idx, bar in enumerate(bars)}
     start_idx = date_to_index[start_confirmed_as_of_date]
-    state = initial_state.clone() if initial_state is not None else _make_initial_state(bars)
+    state = (
+        initial_state.clone()
+        if initial_state is not None
+        else _make_initial_state(bars)
+    )
 
     if state.structure_epoch_start_date is None:
         state.structure_epoch_start_date = bars[0].date
@@ -1179,7 +1206,10 @@ def calculate_ticker_events(
 
         if state.trend_state == "UP":
             state.bos_up_count = 0
-            if state.active_bos_low_price is not None and confirmed_bar.close < state.active_bos_low_price:
+            if (
+                state.active_bos_low_price is not None
+                and confirmed_bar.close < state.active_bos_low_price
+            ):
                 if state.bos_down_count == 0:
                     state.bos_down_count = 1
                     event_rows.append(
@@ -1233,7 +1263,10 @@ def calculate_ticker_events(
                 state.bos_down_count = 0
         elif state.trend_state == "DOWN":
             state.bos_down_count = 0
-            if state.active_bos_high_price is not None and confirmed_bar.close > state.active_bos_high_price:
+            if (
+                state.active_bos_high_price is not None
+                and confirmed_bar.close > state.active_bos_high_price
+            ):
                 if state.bos_up_count == 0:
                     state.bos_up_count = 1
                     event_rows.append(
@@ -1464,10 +1497,12 @@ def run_ticker_calculation(
             event_rows=event_rows,
             calculated_from_date=bars[0].date,
             calculated_through_date=bars[-1].date,
-            latest_event_date=None if not event_rows else str(event_rows[-1]["event_date"]),
-            latest_event_confirmed_as_of_date=None
-            if not event_rows
-            else str(event_rows[-1]["confirmed_as_of_date"]),
+            latest_event_date=(
+                None if not event_rows else str(event_rows[-1]["event_date"])
+            ),
+            latest_event_confirmed_as_of_date=(
+                None if not event_rows else str(event_rows[-1]["confirmed_as_of_date"])
+            ),
         )
 
     if recalc_from_date is not None:
@@ -1512,10 +1547,14 @@ def run_ticker_calculation(
                 event_rows=event_rows,
                 calculated_from_date=bars[0].date,
                 calculated_through_date=bars[-1].date,
-                latest_event_date=None if not event_rows else str(event_rows[-1]["event_date"]),
-                latest_event_confirmed_as_of_date=None
-                if not event_rows
-                else str(event_rows[-1]["confirmed_as_of_date"]),
+                latest_event_date=(
+                    None if not event_rows else str(event_rows[-1]["event_date"])
+                ),
+                latest_event_confirmed_as_of_date=(
+                    None
+                    if not event_rows
+                    else str(event_rows[-1]["confirmed_as_of_date"])
+                ),
             )
 
         start_confirmed_as_of_date = _find_first_trading_date_on_or_after(
@@ -1567,10 +1606,14 @@ def run_ticker_calculation(
                 event_rows=event_rows,
                 calculated_from_date=bars[0].date,
                 calculated_through_date=bars[-1].date,
-                latest_event_date=None if not event_rows else str(event_rows[-1]["event_date"]),
-                latest_event_confirmed_as_of_date=None
-                if not event_rows
-                else str(event_rows[-1]["confirmed_as_of_date"]),
+                latest_event_date=(
+                    None if not event_rows else str(event_rows[-1]["event_date"])
+                ),
+                latest_event_confirmed_as_of_date=(
+                    None
+                    if not event_rows
+                    else str(event_rows[-1]["confirmed_as_of_date"])
+                ),
             )
 
         rows_deleted = _delete_rows_from_date(
@@ -1597,10 +1640,12 @@ def run_ticker_calculation(
             event_rows=event_rows,
             calculated_from_date=start_confirmed_as_of_date,
             calculated_through_date=latest_bar_date,
-            latest_event_date=None if not event_rows else str(event_rows[-1]["event_date"]),
-            latest_event_confirmed_as_of_date=None
-            if not event_rows
-            else str(event_rows[-1]["confirmed_as_of_date"]),
+            latest_event_date=(
+                None if not event_rows else str(event_rows[-1]["event_date"])
+            ),
+            latest_event_confirmed_as_of_date=(
+                None if not event_rows else str(event_rows[-1]["confirmed_as_of_date"])
+            ),
         )
 
     latest_confirmed_as_of_date = _fetch_latest_confirmed_as_of_date(
@@ -1627,10 +1672,12 @@ def run_ticker_calculation(
             event_rows=event_rows,
             calculated_from_date=bars[0].date,
             calculated_through_date=bars[-1].date,
-            latest_event_date=None if not event_rows else str(event_rows[-1]["event_date"]),
-            latest_event_confirmed_as_of_date=None
-            if not event_rows
-            else str(event_rows[-1]["confirmed_as_of_date"]),
+            latest_event_date=(
+                None if not event_rows else str(event_rows[-1]["event_date"])
+            ),
+            latest_event_confirmed_as_of_date=(
+                None if not event_rows else str(event_rows[-1]["confirmed_as_of_date"])
+            ),
         )
 
     recalc_start_date = _compute_recalc_start_date(
@@ -1669,10 +1716,12 @@ def run_ticker_calculation(
             event_rows=event_rows,
             calculated_from_date=bars[0].date,
             calculated_through_date=bars[-1].date,
-            latest_event_date=None if not event_rows else str(event_rows[-1]["event_date"]),
-            latest_event_confirmed_as_of_date=None
-            if not event_rows
-            else str(event_rows[-1]["confirmed_as_of_date"]),
+            latest_event_date=(
+                None if not event_rows else str(event_rows[-1]["event_date"])
+            ),
+            latest_event_confirmed_as_of_date=(
+                None if not event_rows else str(event_rows[-1]["confirmed_as_of_date"])
+            ),
         )
 
     rows_deleted = _delete_rows_from_date(
@@ -1700,9 +1749,9 @@ def run_ticker_calculation(
         calculated_from_date=recalc_start_date,
         calculated_through_date=bars[-1].date,
         latest_event_date=None if not event_rows else str(event_rows[-1]["event_date"]),
-        latest_event_confirmed_as_of_date=None
-        if not event_rows
-        else str(event_rows[-1]["confirmed_as_of_date"]),
+        latest_event_confirmed_as_of_date=(
+            None if not event_rows else str(event_rows[-1]["confirmed_as_of_date"])
+        ),
     )
 
 
@@ -1748,7 +1797,9 @@ def run_stock_dow_structure(
         if ticker:
             tickers = [(ticker or "").strip().upper()]
         else:
-            tickers = fetch_tickers_for_market(price_conn, (market or "").strip().lower())
+            tickers = fetch_tickers_for_market(
+                price_conn, (market or "").strip().lower()
+            )
 
         summary["tickers_requested"] = len(tickers)
 
@@ -1786,7 +1837,9 @@ def run_stock_dow_structure(
                         int(summary["tickers_explicit_recalculated"]) + 1
                     )
 
-                summary["rows_deleted"] = int(summary["rows_deleted"]) + result.rows_deleted
+                summary["rows_deleted"] = (
+                    int(summary["rows_deleted"]) + result.rows_deleted
+                )
                 _accumulate_event_counts(summary, result.event_rows)
 
                 if dry_run:
@@ -1885,8 +1938,13 @@ def calculate_missing_or_outdated_stock_dow_structures(
     ) as price_conn:
         ensure_stock_dow_structure_schema(analysis_conn)
 
+        all_tickers_in_scope = _fetch_all_tickers_in_scope(
+            price_conn, normalized_market
+        )
         latest_ohlcv_dates = fetch_latest_ohlcv_dates(price_conn, normalized_market)
-        summary["tickers_checked"] = len(latest_ohlcv_dates)
+        no_valid_close = all_tickers_in_scope - set(latest_ohlcv_dates)
+        summary["tickers_checked"] = len(all_tickers_in_scope)
+        summary["tickers_no_valid_close_data"] = len(no_valid_close)
 
         for normalized_ticker in sorted(latest_ohlcv_dates):
             latest_ohlcv_date = latest_ohlcv_dates[normalized_ticker]
@@ -1959,7 +2017,9 @@ def calculate_missing_or_outdated_stock_dow_structures(
                         int(summary["tickers_fallback_full_recalculated"]) + 1
                     )
 
-                summary["rows_deleted"] = int(summary["rows_deleted"]) + result.rows_deleted
+                summary["rows_deleted"] = (
+                    int(summary["rows_deleted"]) + result.rows_deleted
+                )
                 _accumulate_event_counts(summary, result.event_rows)
 
                 if dry_run:
