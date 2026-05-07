@@ -1226,6 +1226,41 @@ def test_outdated_by_status_coverage_is_selected(tmp_path):
     assert summary["tickers_up_to_date"] == 0
 
 
+def test_registered_without_status_uses_incremental_recovery_and_writes_status(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    osakedata_db = tmp_path / "osakedata.db"
+    _create_analysis_db(analysis_db)
+    closes = [10, 11, 12, 15, 13, 11, 9, 7, 9, 12, 16, 13, 11, 9, 10, 12, 14]
+    _create_osakedata_db(osakedata_db, closes, ticker="AAA")
+
+    run_stock_dow_structure(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        ticker="AAA",
+        dry_run=False,
+        run_id="run1",
+    )
+
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute("DELETE FROM stock_dow_structure_status")
+        conn.commit()
+
+    summary = calculate_missing_or_outdated_stock_dow_structures(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        dry_run=False,
+    )
+
+    status_row = _load_status_row(analysis_db, "AAA")
+
+    assert summary["tickers_missing"] == 0
+    assert summary["tickers_registered_without_status"] == 1
+    assert summary["tickers_bounded_initial_recalculated"] == 0
+    assert summary["tickers_incremental_recalculated"] == 1
+    assert status_row is not None
+    assert status_row["last_run_mode"] == "incremental"
+
+
 def test_cli_dry_run_creates_table_and_prints_deterministic_summary(tmp_path, capsys):
     analysis_db = tmp_path / "analysis.db"
     osakedata_db = tmp_path / "osakedata.db"

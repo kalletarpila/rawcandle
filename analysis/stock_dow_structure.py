@@ -601,6 +601,26 @@ def _fetch_status_coverage_row(
     ).fetchone()
 
 
+def _has_event_rows(
+    conn: sqlite3.Connection,
+    ticker: str,
+    pivot_radius: int,
+    price_source: str,
+) -> bool:
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM stock_dow_structure_events
+        WHERE ticker = ?
+          AND pivot_radius = ?
+          AND price_source = ?
+        LIMIT 1
+        """,
+        (ticker, pivot_radius, price_source),
+    ).fetchone()
+    return row is not None
+
+
 def _initialize_selection_summary(
     *,
     pivot_radius: int,
@@ -611,6 +631,7 @@ def _initialize_selection_summary(
     return {
         "tickers_checked": 0,
         "tickers_missing": 0,
+        "tickers_registered_without_status": 0,
         "tickers_outdated": 0,
         "tickers_up_to_date": 0,
         "tickers_processed": 0,
@@ -1875,8 +1896,19 @@ def calculate_missing_or_outdated_stock_dow_structures(
                 PRICE_SOURCE_CLOSE,
             )
             if status_row is None:
-                summary["tickers_missing"] = int(summary["tickers_missing"]) + 1
-                classification = "missing"
+                if _has_event_rows(
+                    analysis_conn,
+                    normalized_ticker,
+                    pivot_radius,
+                    PRICE_SOURCE_CLOSE,
+                ):
+                    summary["tickers_registered_without_status"] = (
+                        int(summary["tickers_registered_without_status"]) + 1
+                    )
+                    classification = "registered_without_status"
+                else:
+                    summary["tickers_missing"] = int(summary["tickers_missing"]) + 1
+                    classification = "missing"
             elif latest_ohlcv_date > str(status_row["calculated_through_date"]):
                 summary["tickers_outdated"] = int(summary["tickers_outdated"]) + 1
                 classification = "outdated"
