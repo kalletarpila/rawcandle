@@ -1121,7 +1121,7 @@ class RawCandleApp:
         # Downtrend filters for Candles view
         self.candles_downtrend_filter = ft.Checkbox(
             label="🔻 Suodata vain laskutrendien kynttilät",
-            value=True,
+            value=False,
         )
 
         self.candles_min_decline_percent = ft.TextField(
@@ -1133,7 +1133,7 @@ class RawCandleApp:
 
         self.candles_ma_filter = ft.Checkbox(
             label="Lisää liukuva keskiarvo -suodatin",
-            value=True,
+            value=False,
         )
 
         self.candles_volume_filter = ft.Checkbox(
