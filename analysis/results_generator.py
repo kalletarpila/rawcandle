@@ -39,6 +39,8 @@ class ResultsGenerator:
         "Dragonfly Doji": 6,
         "Bullish Divergence": 7,
         "Bearish Divergence": 8,
+        "Hidden Bullish Divergence": 14,
+        "Hidden Bearish Divergence": 15,
         "Bearish Engulfing": 9,
         "Shooting Star": 10,
         "Dark Cloud Cover": 11,

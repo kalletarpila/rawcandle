@@ -32,6 +32,8 @@ PATTERN_NAMES = {
     5: "Morning Star",
     6: "Dragonfly Doji",
     7: "Bullish Divergence",
+    14: "Hidden Bullish Divergence",
+    15: "Hidden Bearish Divergence",
     71: "BullDiv & Hammer",
     72: "BullDiv & Bullish Engulfing",
     73: "BullDiv & Piercing Pattern",
@@ -187,6 +189,12 @@ class FindingsView:
                 ft.dropdown.Option("BullDiv & Morning Star", "BullDiv & Morning Star"),
                 ft.dropdown.Option("BullDiv & Dragonfly Doji", "BullDiv & Dragonfly Doji"),
                 ft.dropdown.Option("Bullish Divergence", "Bullish Divergence"),
+                ft.dropdown.Option(
+                    "Hidden Bullish Divergence", "Hidden Bullish Divergence"
+                ),
+                ft.dropdown.Option(
+                    "Hidden Bearish Divergence", "Hidden Bearish Divergence"
+                ),
             ],
             on_change=self._on_filter_change,
         )

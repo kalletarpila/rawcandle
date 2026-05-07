@@ -256,6 +256,60 @@ def test_run_candlestick_analysis_requires_r3_event_for_bullish_divergence(tmp_p
     assert results == {}
 
 
+def test_run_candlestick_analysis_uses_db_backed_hidden_divergences(tmp_path):
+    osake_db, analysis_db = _create_candles_test_dbs(tmp_path)
+
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute("ALTER TABLE divergence_data ADD COLUMN hidden_bullish_strength REAL DEFAULT 0")
+        conn.execute("ALTER TABLE divergence_data ADD COLUMN hidden_bearish_strength REAL DEFAULT 0")
+        conn.execute(
+            "ALTER TABLE divergence_data ADD COLUMN is_hidden_bullish_divergence_r3 INTEGER DEFAULT 0"
+        )
+        conn.execute(
+            "ALTER TABLE divergence_data ADD COLUMN is_hidden_bearish_divergence_r3 INTEGER DEFAULT 0"
+        )
+        conn.execute(
+            """
+            INSERT INTO divergence_data (
+                ticker,
+                date,
+                bullish_strength,
+                bearish_strength,
+                hidden_bullish_strength,
+                hidden_bearish_strength,
+                rsi,
+                pivot2_date_r3,
+                is_bullish_divergence_r3,
+                is_hidden_bullish_divergence_r3,
+                is_hidden_bearish_divergence_r3
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("TEST", "2026-02-02", 0.0, 0.0, 0.71, 0.48, 55.5, None, 0, 1, 1),
+        )
+
+    results = run_candlestick_analysis(
+        str(osake_db),
+        "TEST",
+        patterns=["Hidden Bullish Divergence", "Hidden Bearish Divergence"],
+        start_date="2026-02-01",
+        end_date="2026-02-02",
+        progress_callback=None,
+        downtrend_filter=False,
+        min_decline_percent=3.0,
+        use_ma_filter=False,
+        use_volume_filter=False,
+        analysis_db_path=str(analysis_db),
+    )
+
+    key = "TEST|2026-02-02"
+    assert results and key in results
+    patterns = {entry["pattern"]: entry for entry in results[key]}
+    assert patterns["Hidden Bullish Divergence"]["strength"] == pytest.approx(0.71)
+    assert patterns["Hidden Bearish Divergence"]["strength"] == pytest.approx(0.48)
+    assert patterns["Hidden Bullish Divergence"]["rsi14"] == pytest.approx(55.5)
+
+
 def test_run_candlestick_analysis_checks_bulldiv_downtrend_at_pivot2_date_r3(tmp_path):
     osake_db = tmp_path / "osakedata.db"
     analysis_db = tmp_path / "analysis.db"

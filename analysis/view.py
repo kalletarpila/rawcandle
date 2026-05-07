@@ -176,6 +176,12 @@ class AnalysisView:
                 ft.dropdown.Option("BullDiv & Morning Star", "BullDiv & Morning Star"),
                 ft.dropdown.Option("BullDiv & Dragonfly Doji", "BullDiv & Dragonfly Doji"),
                 ft.dropdown.Option("Bullish Divergence", "Bullish Divergence"),
+                ft.dropdown.Option(
+                    "Hidden Bullish Divergence", "Hidden Bullish Divergence"
+                ),
+                ft.dropdown.Option(
+                    "Hidden Bearish Divergence", "Hidden Bearish Divergence"
+                ),
             ],
             on_change=self._on_filter_change,
         )
@@ -559,6 +565,8 @@ class AnalysisView:
             "Evening Star",
             "Hanging Man",
             "Bullish Divergence",
+            "Hidden Bullish Divergence",
+            "Hidden Bearish Divergence",
         ]
         combo_pattern_codes = {
             "BullDiv & Hammer": 71,

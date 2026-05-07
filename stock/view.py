@@ -37,6 +37,8 @@ class StockView:
         ("Morning Star", "Morning Star"),
         ("Dragonfly Doji", "Dragonfly Doji"),
         ("Bullish Divergence", "Bullish Divergence"),
+        ("Hidden Bullish Divergence", "Hidden Bullish Divergence"),
+        ("Hidden Bearish Divergence", "Hidden Bearish Divergence"),
         ("BullDiv & Hammer", "BullDiv & Hammer"),
         ("BullDiv & Bullish Engulfing", "BullDiv & Bullish Engulfing"),
         ("BullDiv & Piercing Pattern", "BullDiv & Piercing Pattern"),
@@ -53,6 +55,8 @@ class StockView:
         "Morning Star": "#d97706",  # ruskea/oranssi
         "Dragonfly Doji": "#14b8a6",  # vihertävä sininen
         "Bullish Divergence": "#f43f5e",  # pinkki
+        "Hidden Bullish Divergence": "#be185d",
+        "Hidden Bearish Divergence": "#7c3aed",
         "BullDiv & Hammer": "#0284c7",
         "BullDiv & Bullish Engulfing": "#0f766e",
         "BullDiv & Piercing Pattern": "#ea580c",

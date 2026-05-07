@@ -271,9 +271,13 @@ def test_bearish_pattern_ids_are_registered():
     assert ResultsGenerator.PATTERN_MAPPING["Dark Cloud Cover"] == 11
     assert ResultsGenerator.PATTERN_MAPPING["Evening Star"] == 12
     assert ResultsGenerator.PATTERN_MAPPING["Hanging Man"] == 13
+    assert ResultsGenerator.PATTERN_MAPPING["Hidden Bullish Divergence"] == 14
+    assert ResultsGenerator.PATTERN_MAPPING["Hidden Bearish Divergence"] == 15
 
     assert ExcelExporter.PATTERN_NAMES[9] == "Bearish Engulfing"
     assert ExcelExporter.PATTERN_NAMES[10] == "Shooting Star"
     assert ExcelExporter.PATTERN_NAMES[11] == "Dark Cloud Cover"
     assert ExcelExporter.PATTERN_NAMES[12] == "Evening Star"
     assert ExcelExporter.PATTERN_NAMES[13] == "Hanging Man"
+    assert ExcelExporter.PATTERN_NAMES[14] == "Hidden Bullish Divergence"
+    assert ExcelExporter.PATTERN_NAMES[15] == "Hidden Bearish Divergence"

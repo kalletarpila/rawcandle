@@ -123,25 +123,65 @@ def _load_bullish_divergence_dates(ticker: str, analysis_db_path: str) -> set[st
 
 
 def _load_divergence_snapshot(
-    ticker: str, analysis_db_path: str, start_date: str | None = None, end_date: str | None = None
-) -> tuple[dict[str, float], dict[str, float | None], set[str], dict[str, str | None]]:
+    ticker: str,
+    analysis_db_path: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> tuple[
+    dict[str, dict[str, float]],
+    dict[str, float | None],
+    set[str],
+    dict[str, str | None],
+    set[str],
+    set[str],
+    set[str],
+]:
     """
-    Load bullish divergence strengths and RSI values from divergence_data for the candles flow.
+    Load divergence strengths and event flags from divergence_data for the candles flow.
     """
     if not ticker or not analysis_db_path:
-        return {}, {}, set(), {}
+        return {}, {}, set(), {}, set(), set(), set()
 
     try:
         db_path = Path(analysis_db_path)
         if not db_path.exists():
-            return {}, {}, set(), {}
+            return {}, {}, set(), {}, set(), set(), set()
 
         with sqlite3.connect(db_path) as conn:
+            columns = {
+                str(row[1])
+                for row in conn.execute("PRAGMA table_info(divergence_data)").fetchall()
+            }
+            if not columns:
+                return {}, {}, set(), {}, set(), set(), set()
+
+            def _select_expr(column: str, default: str = "0") -> str:
+                return column if column in columns else default
+
             query = """
-                SELECT date, bullish_strength, rsi, is_bullish_divergence_r3, pivot2_date_r3
+                SELECT
+                    date,
+                    bullish_strength,
+                    bearish_strength,
+                    {hidden_bullish_strength},
+                    {hidden_bearish_strength},
+                    rsi,
+                    {bullish_r3},
+                    {bearish_r3},
+                    {hidden_bullish_r3},
+                    {hidden_bearish_r3},
+                    {pivot2_date_r3}
                 FROM divergence_data
                 WHERE ticker = ?
-            """
+            """.format(
+                hidden_bullish_strength=_select_expr("hidden_bullish_strength"),
+                hidden_bearish_strength=_select_expr("hidden_bearish_strength"),
+                bullish_r3=_select_expr("is_bullish_divergence_r3"),
+                bearish_r3=_select_expr("is_bearish_divergence_r3"),
+                hidden_bullish_r3=_select_expr("is_hidden_bullish_divergence_r3"),
+                hidden_bearish_r3=_select_expr("is_hidden_bearish_divergence_r3"),
+                pivot2_date_r3=_select_expr("pivot2_date_r3", "NULL"),
+            )
             params = [ticker]
             if start_date and end_date:
                 query += " AND date >= ? AND date <= ?"
@@ -155,20 +195,54 @@ def _load_divergence_snapshot(
 
             rows = conn.execute(query, params).fetchall()
 
-        bullish_strength_map: dict[str, float] = {}
+        divergence_strength_map: dict[str, dict[str, float]] = {}
         rsi_map: dict[str, float | None] = {}
         bullish_event_dates: set[str] = set()
+        bearish_event_dates: set[str] = set()
+        hidden_bullish_event_dates: set[str] = set()
+        hidden_bearish_event_dates: set[str] = set()
         pivot2_date_map: dict[str, str | None] = {}
-        for date_value, bullish_strength, rsi, is_bullish_divergence_r3, pivot2_date_r3 in rows:
+        for (
+            date_value,
+            bullish_strength,
+            bearish_strength,
+            hidden_bullish_strength,
+            hidden_bearish_strength,
+            rsi,
+            is_bullish_divergence_r3,
+            is_bearish_divergence_r3,
+            is_hidden_bullish_divergence_r3,
+            is_hidden_bearish_divergence_r3,
+            pivot2_date_r3,
+        ) in rows:
             date_key = str(date_value)
-            bullish_strength_map[date_key] = float(bullish_strength or 0.0)
+            divergence_strength_map[date_key] = {
+                "Bullish Divergence": float(bullish_strength or 0.0),
+                "Bearish Divergence": float(bearish_strength or 0.0),
+                "Hidden Bullish Divergence": float(hidden_bullish_strength or 0.0),
+                "Hidden Bearish Divergence": float(hidden_bearish_strength or 0.0),
+            }
             rsi_map[date_key] = None if rsi is None else float(rsi)
             pivot2_date_map[date_key] = None if pivot2_date_r3 is None else str(pivot2_date_r3)
             if int(is_bullish_divergence_r3 or 0) == 1:
                 bullish_event_dates.add(date_key)
-        return bullish_strength_map, rsi_map, bullish_event_dates, pivot2_date_map
+            if int(is_bearish_divergence_r3 or 0) == 1:
+                bearish_event_dates.add(date_key)
+            if int(is_hidden_bullish_divergence_r3 or 0) == 1:
+                hidden_bullish_event_dates.add(date_key)
+            if int(is_hidden_bearish_divergence_r3 or 0) == 1:
+                hidden_bearish_event_dates.add(date_key)
+        return (
+            divergence_strength_map,
+            rsi_map,
+            bullish_event_dates,
+            pivot2_date_map,
+            bearish_event_dates,
+            hidden_bullish_event_dates,
+            hidden_bearish_event_dates,
+        )
     except Exception:
-        return {}, {}, set(), {}
+        return {}, {}, set(), {}, set(), set(), set()
 
 
 def run_candlestick_analysis(
@@ -268,7 +342,15 @@ def run_candlestick_analysis(
         df["pvm"] = pd.to_datetime(df["pvm"])
         df = df.sort_values("pvm").reset_index(drop=True)
 
-    bullish_divergence_map, divergence_rsi_map, divergence_dates, divergence_pivot2_map = _load_divergence_snapshot(
+    (
+        divergence_strength_map,
+        divergence_rsi_map,
+        divergence_dates,
+        divergence_pivot2_map,
+        bearish_divergence_dates,
+        hidden_bullish_divergence_dates,
+        hidden_bearish_divergence_dates,
+    ) = _load_divergence_snapshot(
         ticker, analysis_db_path, s_iso, e_iso
     )
     date_to_index = {
@@ -591,7 +673,9 @@ def run_candlestick_analysis(
                         and _is_in_downtrend_local(df, "Close", "Volume", pivot2_idx)
                     )
                 if divergence_in_downtrend:
-                    strength = bullish_divergence_map.get(current_date, 0.0)
+                    strength = divergence_strength_map.get(current_date, {}).get(
+                        "Bullish Divergence", 0.0
+                    )
                     found.append(
                         {
                             "pattern": "Bullish Divergence",
@@ -602,6 +686,57 @@ def run_candlestick_analysis(
                         logger.info(
                             f"{ticker} {row['pvm'].date().isoformat()} Bullish Divergence checked - FOUND (strength {strength})"
                         )
+
+        if "Bearish Divergence" in patterns and current_date in bearish_divergence_dates:
+            strength = divergence_strength_map.get(current_date, {}).get(
+                "Bearish Divergence", 0.0
+            )
+            found.append(
+                {
+                    "pattern": "Bearish Divergence",
+                    "strength": strength,
+                }
+            )
+            if logger:
+                logger.info(
+                    f"{ticker} {row['pvm'].date().isoformat()} Bearish Divergence checked - FOUND (strength {strength})"
+                )
+
+        if (
+            "Hidden Bullish Divergence" in patterns
+            and current_date in hidden_bullish_divergence_dates
+        ):
+            strength = divergence_strength_map.get(current_date, {}).get(
+                "Hidden Bullish Divergence", 0.0
+            )
+            found.append(
+                {
+                    "pattern": "Hidden Bullish Divergence",
+                    "strength": strength,
+                }
+            )
+            if logger:
+                logger.info(
+                    f"{ticker} {row['pvm'].date().isoformat()} Hidden Bullish Divergence checked - FOUND (strength {strength})"
+                )
+
+        if (
+            "Hidden Bearish Divergence" in patterns
+            and current_date in hidden_bearish_divergence_dates
+        ):
+            strength = divergence_strength_map.get(current_date, {}).get(
+                "Hidden Bearish Divergence", 0.0
+            )
+            found.append(
+                {
+                    "pattern": "Hidden Bearish Divergence",
+                    "strength": strength,
+                }
+            )
+            if logger:
+                logger.info(
+                    f"{ticker} {row['pvm'].date().isoformat()} Hidden Bearish Divergence checked - FOUND (strength {strength})"
+                )
 
         # Yhdistelmäkuviot: jos päivä on comboikkunassa ja samalla päivällä on
         # Bullish Divergence + yksi tai useampi peruskynttilä, lisää jokaisesta

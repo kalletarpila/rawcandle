@@ -31,6 +31,8 @@ class ExcelExporter:
         6: "Dragonfly Doji",
         7: "Bullish Divergence",
         8: "Bearish Divergence",
+        14: "Hidden Bullish Divergence",
+        15: "Hidden Bearish Divergence",
         9: "Bearish Engulfing",
         10: "Shooting Star",
         11: "Dark Cloud Cover",
