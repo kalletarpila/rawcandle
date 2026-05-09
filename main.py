@@ -274,6 +274,79 @@ class RawCandleApp:
             dry_run=False,
         )
 
+    def _run_incremental_candlestick_analysis(
+        self,
+        ticker: str,
+        analysis_start: str,
+        analysis_end: str,
+    ) -> tuple[int, str | None]:
+        """Run the shared candlestick/finding post-processing for one ticker and date range."""
+        from analysis.run_analysis import run_candlestick_analysis
+        from analysis.database_manager import DatabaseManager
+
+        pattern_names = [
+            "Hammer",
+            "Bullish Engulfing",
+            "Piercing Pattern",
+            "Three White Soldiers",
+            "Morning Star",
+            "Dragonfly Doji",
+            "Bearish Engulfing",
+            "Shooting Star",
+            "Dark Cloud Cover",
+            "Evening Star",
+            "Hanging Man",
+            "Bullish Divergence",
+            "Bearish Divergence",
+            "Hidden Bullish Divergence",
+            "Hidden Bearish Divergence",
+            "BullDiv & Hammer",
+            "BullDiv & Bullish Engulfing",
+            "BullDiv & Piercing Pattern",
+            "BullDiv & Three White Soldiers",
+            "BullDiv & Morning Star",
+            "BullDiv & Dragonfly Doji",
+        ]
+
+        analysis_results = run_candlestick_analysis(
+            self.osakedata_db_path,
+            ticker,
+            pattern_names,
+            analysis_start,
+            analysis_end,
+            progress_callback=None,
+            downtrend_filter=True,
+            min_decline_percent=3.0,
+            use_ma_filter=True,
+            use_volume_filter=False,
+            analysis_db_path=self.analysis_db_path,
+        )
+        if not analysis_results:
+            return 0, None
+
+        analysis_total = 0
+        try:
+            dbm = DatabaseManager(db_path=self.analysis_db_path)
+            for key, items in analysis_results.items():
+                if "|" in key:
+                    _ticker_key, date_str = key.split("|", 1)
+                else:
+                    date_str = key
+                for item in items:
+                    dbm.insert_finding(
+                        ticker=ticker,
+                        date=date_str,
+                        pattern=item.get("pattern"),
+                        signal_strength=item.get("strength"),
+                        rsi14=item.get("rsi14"),
+                    )
+                    analysis_total += 1
+            dbm.close()
+        except Exception as exc:
+            return 0, f"finding-save {exc}"
+
+        return analysis_total, None
+
     def _show_snackbar(self, message: str, color: str = ft.Colors.BLUE_600):
         """Näytä SnackBar turvallisesti."""
         try:
@@ -3348,8 +3421,8 @@ class RawCandleApp:
                     self.page.update()
                     return
 
-            yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-            fetch_until_exclusive = _exclusive_end_date(yesterday)
+            today = datetime.now().strftime("%Y-%m-%d")
+            fetch_until_exclusive = _today_exclusive_end_date()
             total_stocks = len(stocks)
             updated_count = 0
             skipped_count = 0
@@ -3380,7 +3453,7 @@ class RawCandleApp:
                 if not validate_market(ticker_market, db_path=self.osakedata_db_path):
                     ticker_market = "usa"
 
-                needs_update = last_date < yesterday
+                needs_update = last_date < today
 
                 if not needs_update:
                     skipped_count += 1
@@ -3580,67 +3653,15 @@ class RawCandleApp:
                     if rows_added > 0:
                         # Aja kynttiläanalyysi lisätylle aikavälille
                         try:
-                            from analysis.run_analysis import run_candlestick_analysis
-                            from analysis.database_manager import DatabaseManager
-
                             analysis_start = min(start for start, _ in date_ranges)
                             analysis_end = max(end for _, end in date_ranges)
-                            pattern_names = [
-                                "Hammer",
-                                "Bullish Engulfing",
-                                "Piercing Pattern",
-                                "Three White Soldiers",
-                                "Morning Star",
-                                "Dragonfly Doji",
-                                "Bearish Engulfing",
-                                "Shooting Star",
-                                "Dark Cloud Cover",
-                                "Evening Star",
-                                "Hanging Man",
-                                "Bullish Divergence",
-                                "Bearish Divergence",
-                                "Hidden Bullish Divergence",
-                                "Hidden Bearish Divergence",
-                                "BullDiv & Hammer",
-                                "BullDiv & Bullish Engulfing",
-                                "BullDiv & Piercing Pattern",
-                                "BullDiv & Three White Soldiers",
-                                "BullDiv & Morning Star",
-                                "BullDiv & Dragonfly Doji",
-                            ]
-                            analysis_results = run_candlestick_analysis(
-                                db_path,
-                                ticker,
-                                pattern_names,
-                                analysis_start,
-                                analysis_end,
-                                progress_callback=None,
-                                downtrend_filter=True,
-                                min_decline_percent=3.0,
-                                use_ma_filter=True,
-                                use_volume_filter=False,
-                                analysis_db_path=self.analysis_db_path,
+                            analysis_total, analysis_error = (
+                                self._run_incremental_candlestick_analysis(
+                                    ticker,
+                                    analysis_start,
+                                    analysis_end,
+                                )
                             )
-                            if analysis_results:
-                                try:
-                                    dbm = DatabaseManager(db_path=self.analysis_db_path)
-                                    for key, items in analysis_results.items():
-                                        if "|" in key:
-                                            _ticker_key, date_str = key.split("|", 1)
-                                        else:
-                                            date_str = key
-                                        for item in items:
-                                            dbm.insert_finding(
-                                                ticker=ticker,
-                                                date=date_str,
-                                                pattern=item.get("pattern"),
-                                                signal_strength=item.get("strength"),
-                                                rsi14=item.get("rsi14"),
-                                            )
-                                            analysis_total += 1
-                                    dbm.close()
-                                except Exception:
-                                    analysis_total = 0
                         except Exception as exc:
                             analysis_error = str(exc)
 
@@ -4844,71 +4865,13 @@ Virheet: {error_count}"""
 
                 # Aja kynttiläanalyysi lisätylle aikavälille
                 try:
-                    from analysis.run_analysis import run_candlestick_analysis
-                    from analysis.database_manager import DatabaseManager
-
-                    analysis_start = start_date
-                    analysis_end = end_date
-
-                    pattern_names = [
-                        "Hammer",
-                        "Bullish Engulfing",
-                        "Piercing Pattern",
-                        "Three White Soldiers",
-                        "Morning Star",
-                        "Dragonfly Doji",
-                        "Bearish Engulfing",
-                        "Shooting Star",
-                        "Dark Cloud Cover",
-                        "Evening Star",
-                        "Hanging Man",
-                        "Bullish Divergence",
-                        "Bearish Divergence",
-                        "Hidden Bullish Divergence",
-                        "Hidden Bearish Divergence",
-                        "BullDiv & Hammer",
-                        "BullDiv & Bullish Engulfing",
-                        "BullDiv & Piercing Pattern",
-                        "BullDiv & Three White Soldiers",
-                        "BullDiv & Morning Star",
-                        "BullDiv & Dragonfly Doji",
-                    ]
-
-                    analysis_results = run_candlestick_analysis(
-                        db_path,
-                        ticker,
-                        pattern_names,
-                        analysis_start,
-                        analysis_end,
-                        progress_callback=None,
-                        downtrend_filter=True,
-                        min_decline_percent=3.0,
-                        use_ma_filter=True,
-                        use_volume_filter=False,
-                        analysis_db_path=self.analysis_db_path,
+                    analysis_total, analysis_error = (
+                        self._run_incremental_candlestick_analysis(
+                            ticker,
+                            start_date,
+                            end_date,
+                        )
                     )
-                    if analysis_results:
-                        try:
-                            from analysis.database_manager import DatabaseManager
-
-                            dbm = DatabaseManager(db_path=self.analysis_db_path)
-                            for key, items in analysis_results.items():
-                                if "|" in key:
-                                    _ticker_key, date_str = key.split("|", 1)
-                                else:
-                                    date_str = key
-                                for item in items:
-                                    dbm.insert_finding(
-                                        ticker=ticker,
-                                        date=date_str,
-                                        pattern=item.get("pattern"),
-                                        signal_strength=item.get("strength"),
-                                        rsi14=item.get("rsi14"),
-                                    )
-                                    analysis_total += 1
-                            dbm.close()
-                        except Exception as exc:
-                            analysis_error = f"finding-save {exc}"
                 except Exception as exc:
                     summary["errors"].append(f"{ticker}: analyysivirhe {exc}")
 

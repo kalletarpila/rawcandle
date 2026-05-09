@@ -37,6 +37,9 @@ class _FakeTicker:
 def test_fetch_stock_data_calls_single_ticker_metadata_refresh(tmp_path, monkeypatch):
     called = []
     dow_calls = []
+    div_calls = []
+    candle_calls = []
+    expected_end = (datetime.now().date() + timedelta(days=1)).strftime("%Y-%m-%d")
     fake_ticker = _FakeTicker()
 
     monkeypatch.setattr(main.yf, "Ticker", lambda ticker: fake_ticker)
@@ -51,10 +54,8 @@ def test_fetch_stock_data_calls_single_ticker_metadata_refresh(tmp_path, monkeyp
         or True,
     )
 
-    import analysis.run_analysis
     import analysis.stock_dow_structure
 
-    monkeypatch.setattr(analysis.run_analysis, "run_candlestick_analysis", lambda *args, **kwargs: {})
     monkeypatch.setattr(
         analysis.stock_dow_structure,
         "calculate_missing_or_outdated_stock_dow_structures",
@@ -74,11 +75,22 @@ def test_fetch_stock_data_calls_single_ticker_metadata_refresh(tmp_path, monkeyp
     app._infer_market_from_ticker = lambda ticker: None
     app._get_market_min_volume_requirement = lambda market: 0
     app._maybe_backfill_splits_for_ticker = lambda ticker: False
-    app._calculate_and_save_divergences = lambda ticker, only_missing=True: (True, 0, "")
+    app._calculate_and_save_divergences = (
+        lambda ticker, only_missing=True: div_calls.append((ticker, only_missing))
+        or (True, 0, "")
+    )
+    app._run_incremental_candlestick_analysis = (
+        lambda ticker, analysis_start, analysis_end: candle_calls.append(
+            (ticker, analysis_start, analysis_end)
+        )
+        or (0, None)
+    )
 
     app.fetch_stock_data(None)
 
     assert called == [(app.osakedata_db_path, "AAA", "usa")]
+    assert div_calls == [("AAA", True)]
+    assert candle_calls == [("AAA", "2018-01-02", expected_end)]
     assert dow_calls == [
         {
             "analysis_db_path": app.analysis_db_path,
@@ -106,7 +118,8 @@ def test_update_stock_data_includes_latest_available_day(tmp_path, monkeypatch):
     today = datetime.now().date()
     yesterday = (today - timedelta(days=1)).strftime("%Y-%m-%d")
     two_days_ago = (today - timedelta(days=2)).strftime("%Y-%m-%d")
-    expected_end = today.strftime("%Y-%m-%d")
+    today_str = today.strftime("%Y-%m-%d")
+    expected_end = (today + timedelta(days=1)).strftime("%Y-%m-%d")
 
     db_path = tmp_path / "osakedata.db"
     with sqlite3.connect(db_path) as conn:
@@ -136,17 +149,19 @@ def test_update_stock_data_includes_latest_available_day(tmp_path, monkeypatch):
 
     fake_hist = pd.DataFrame(
         {
-            "Open": [10.5],
-            "High": [11.5],
-            "Low": [10.0],
-            "Close": [11.0],
-            "Volume": [210000],
+            "Open": [10.5, 11.0],
+            "High": [11.5, 12.0],
+            "Low": [10.0, 10.5],
+            "Close": [11.0, 11.5],
+            "Volume": [210000, 230000],
         },
-        index=pd.to_datetime([yesterday]),
+        index=pd.to_datetime([yesterday, today_str]),
     )
     fake_ticker = _FakeUpdateTicker(fake_hist)
     split_sync_calls = []
     split_backfill_calls = []
+    div_calls = []
+    candle_calls = []
 
     monkeypatch.setattr(main.yf, "Ticker", lambda ticker: fake_ticker)
     monkeypatch.setattr(main, "validate_market", lambda market, db_path=None: True)
@@ -160,10 +175,8 @@ def test_update_stock_data_includes_latest_available_day(tmp_path, monkeypatch):
         or 0,
     )
 
-    import analysis.run_analysis
     import analysis.stock_dow_structure
 
-    monkeypatch.setattr(analysis.run_analysis, "run_candlestick_analysis", lambda *args, **kwargs: {})
     monkeypatch.setattr(
         analysis.stock_dow_structure,
         "calculate_missing_or_outdated_stock_dow_structures",
@@ -192,16 +205,27 @@ def test_update_stock_data_includes_latest_available_day(tmp_path, monkeypatch):
     app._extract_yahoo_latest_quarter_period_end_date = lambda stock: None
     app._quarter_state_timestamp_utc = lambda: "2026-01-01T00:00:00Z"
     app._quarter_state_db_path_for_market = lambda market: str(tmp_path / "fundamentals.db")
-    app._calculate_and_save_divergences = lambda ticker, only_missing=True: (True, 0, "")
+    app._calculate_and_save_divergences = (
+        lambda ticker, only_missing=True: div_calls.append((ticker, only_missing))
+        or (True, 0, "")
+    )
     app._maybe_backfill_splits_for_ticker = lambda ticker: split_backfill_calls.append(ticker) or False
+    app._run_incremental_candlestick_analysis = (
+        lambda ticker, analysis_start, analysis_end: candle_calls.append(
+            (ticker, analysis_start, analysis_end)
+        )
+        or (0, None)
+    )
 
     app.update_stock_data(None)
 
     assert fake_ticker.history_calls == [(yesterday, expected_end)]
     assert split_sync_calls == [(app.osakedata_db_path, "AAA", fake_ticker)]
     assert split_backfill_calls == ["AAA"]
+    assert div_calls == [("AAA", True)]
+    assert candle_calls == [("AAA", yesterday, expected_end)]
     with sqlite3.connect(db_path) as conn:
         max_date = conn.execute(
             "SELECT MAX(pvm) FROM osakedata WHERE osake = ?", ("AAA",)
         ).fetchone()[0]
-    assert max_date == yesterday
+    assert max_date == today_str
