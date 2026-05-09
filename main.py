@@ -315,7 +315,7 @@ class RawCandleApp:
             analysis_start,
             analysis_end,
             progress_callback=None,
-            downtrend_filter=True,
+            downtrend_filter=False,
             min_decline_percent=3.0,
             use_ma_filter=True,
             use_volume_filter=False,
