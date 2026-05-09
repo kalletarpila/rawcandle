@@ -80,18 +80,26 @@ def test_refetch_and_mark(monkeypatch, tmp_path):
         },
         index=pd.to_datetime(["2024-01-02", "2024-01-03"]),
     )
+    history_calls = []
     monkeypatch.setattr(
         spb,
         "yf",
-        SimpleNamespace(Ticker=lambda ticker: SimpleNamespace(history=lambda start, end: df)),
+        SimpleNamespace(
+            Ticker=lambda ticker: SimpleNamespace(
+                history=lambda start, end: history_calls.append((start, end)) or df
+            )
+        ),
     )
 
     conn = sqlite3.connect(db_path)
     deleted = spb.delete_prices_from_2018(conn, "AAA")
     assert deleted == 2
 
-    added = spb.refetch_prices_from_yahoo(conn, "AAA")
+    added = spb.refetch_prices_from_yahoo(
+        conn, "AAA", start_date="2024-01-02", end_date="2024-01-03"
+    )
     assert added == 2
+    assert history_calls == [("2024-01-02", "2024-01-04")]
 
     updated = spb.mark_splits_corrected(conn, "AAA")
     assert updated == 1
@@ -100,6 +108,10 @@ def test_refetch_and_mark(monkeypatch, tmp_path):
         "SELECT is_price_data_corrected FROM splits_data WHERE osake='AAA'"
     ).fetchone()[0]
     assert flag == 1
+    max_date = conn.execute(
+        "SELECT MAX(pvm) FROM osakedata WHERE osake='AAA'"
+    ).fetchone()[0]
+    assert max_date == "2024-01-03"
     conn.close()
 
 

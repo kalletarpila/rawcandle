@@ -34,6 +34,18 @@ from market_repository import (
 from sector_update import refresh_single_ticker_metadata, update_sector_metadata
 
 
+def _exclusive_end_date(date_str: str) -> str:
+    """Convert an inclusive YYYY-MM-DD date to the exclusive end date yfinance expects."""
+    return (datetime.datetime.fromisoformat(date_str) + datetime.timedelta(days=1)).strftime(
+        "%Y-%m-%d"
+    )
+
+
+def _today_exclusive_end_date() -> str:
+    """Return tomorrow in YYYY-MM-DD format so today's bar can be included."""
+    return (datetime.datetime.now() + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+
+
 # Compatibility shim: ensure ft.Colors/ft.colors and ft.Icons/ft.icons exist
 # Provide a defensive Colors object that contains common color constants used
 # throughout the codebase and in tests. If the flet runtime exposes colors,
@@ -187,7 +199,7 @@ class RawCandleApp:
                 start_ts = time.time()
                 delete_prices_from_2018(conn, ticker, start_date="2018-01-01")
                 added = refetch_prices_from_yahoo(
-                    conn, ticker, start_date="2018-01-01", end_date="2025-11-28"
+                    conn, ticker, start_date="2018-01-01"
                 )
                 if added > 0:
                     # Puhdista analysis ja laske divergence uudelleen
@@ -2686,7 +2698,7 @@ class RawCandleApp:
         divergences_calculated = 0
 
         start_date = "2018-01-02"
-        end_date = datetime.now().strftime("%Y-%m-%d")
+        end_date = _today_exclusive_end_date()
 
         self.loading_text.value = f"🔄 Aloitetaan haku {total} osakkeelle..."
         self.loading_text.color = ft.Colors.BLUE_600
@@ -3316,6 +3328,7 @@ class RawCandleApp:
                     return
 
             yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+            fetch_until_exclusive = _exclusive_end_date(yesterday)
             total_stocks = len(stocks)
             updated_count = 0
             skipped_count = 0
@@ -3368,7 +3381,7 @@ class RawCandleApp:
                     effective_start = update_start
                     if start_override:
                         effective_start = max(update_start, start_override)
-                    date_ranges.append((effective_start, yesterday))
+                    date_ranges.append((effective_start, fetch_until_exclusive))
 
                 if not date_ranges:
                     skipped_count += 1
@@ -3520,10 +3533,28 @@ class RawCandleApp:
                         if rows_added > 0:
                             conn.commit()
 
+                    try:
+                        splits_inserted = sync_splits_for_ticker(
+                            db_path, ticker, yf_ticker=stock
+                        )
+                        if splits_inserted:
+                            print(
+                                f"Lisättiin {splits_inserted} splitiä tickerille {ticker}"
+                            )
+                    except Exception as exc:
+                        print(f"⚠️ Splittien päivitys epäonnistui ({ticker}): {exc}")
+
+                    split_recomputed = self._maybe_backfill_splits_for_ticker(ticker)
+
                     # Laske divergenssit päivitetylle osakkeelle
-                    div_success, div_days, div_error = (
-                        self._calculate_and_save_divergences(ticker, only_missing=True)
-                    )
+                    if split_recomputed:
+                        div_success, div_days, div_error = (True, 0, "")
+                    else:
+                        div_success, div_days, div_error = (
+                            self._calculate_and_save_divergences(
+                                ticker, only_missing=True
+                            )
+                        )
 
                     if rows_added > 0:
                         # Aja kynttiläanalyysi lisätylle aikavälille
@@ -4690,7 +4721,7 @@ Virheet: {error_count}"""
                     self.page.update()
 
                 stock = yf.Ticker(ticker)
-                end_date = datetime.now().strftime("%Y-%m-%d")
+                end_date = _today_exclusive_end_date()
 
                 # Hae historiallinen data
                 hist = stock.history(start=start_date, end=end_date)

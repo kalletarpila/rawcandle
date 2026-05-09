@@ -14,7 +14,7 @@ import argparse
 import logging
 import sqlite3
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable, List, Optional
 
@@ -36,7 +36,16 @@ from analysis.divergence_recompute import recompute_divergence_for_ticker
 logger = logging.getLogger(__name__)
 
 DEFAULT_START = "2018-01-01"
-DEFAULT_END = "2025-11-28"
+
+
+def default_inclusive_end_date() -> str:
+    """Return today's date as the inclusive end date for local callers."""
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def _exclusive_end_date(date_str: str) -> str:
+    """Convert an inclusive YYYY-MM-DD date to the exclusive end date yfinance expects."""
+    return (datetime.fromisoformat(date_str) + timedelta(days=1)).strftime("%Y-%m-%d")
 
 
 def get_tickers_with_uncorrected_splits(conn: sqlite3.Connection) -> List[str]:
@@ -87,20 +96,27 @@ def refetch_prices_from_yahoo(
     conn: sqlite3.Connection,
     ticker: str,
     start_date: str = DEFAULT_START,
-    end_date: str = DEFAULT_END,
+    end_date: Optional[str] = None,
 ) -> int:
     """
     Hakee hinnat ja tallettaa osakedata-tauluun. Palauttaa lisättyjen rivien määrän.
     """
+    inclusive_end_date = end_date or default_inclusive_end_date()
+    yahoo_end_date = _exclusive_end_date(inclusive_end_date)
     try:
         stock = yf.Ticker(ticker)
-        hist = stock.history(start=start_date, end=end_date)
+        hist = stock.history(start=start_date, end=yahoo_end_date)
     except Exception as exc:
         logger.warning("Yahoo-haku epäonnistui (%s): %s", ticker, exc)
         return 0
 
     if hist is None or hist.empty:
-        logger.info("Ei dataa tickerille %s (ajanjakso %s-%s)", ticker, start_date, end_date)
+        logger.info(
+            "Ei dataa tickerille %s (ajanjakso %s-%s)",
+            ticker,
+            start_date,
+            inclusive_end_date,
+        )
         return 0
 
     market = _infer_market(conn, ticker)
@@ -160,7 +176,7 @@ def backfill_uncorrected(
     limit: Optional[int] = None,
     tickers_override: Optional[List[str]] = None,
     start_date: str = DEFAULT_START,
-    end_date: str = DEFAULT_END,
+    end_date: Optional[str] = None,
 ) -> List[str]:
     ensure_market_schema(str(db_path))
     conn = sqlite3.connect(db_path)

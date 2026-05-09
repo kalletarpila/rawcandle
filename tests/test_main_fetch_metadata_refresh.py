@@ -1,4 +1,6 @@
 from types import SimpleNamespace
+import sqlite3
+from datetime import datetime, timedelta
 
 import pandas as pd
 
@@ -70,3 +72,118 @@ def test_fetch_stock_data_calls_single_ticker_metadata_refresh(tmp_path, monkeyp
     app.fetch_stock_data(None)
 
     assert called == [(app.osakedata_db_path, "AAA", "usa")]
+
+
+class _FakeUpdateTicker:
+    def __init__(self, hist):
+        self.hist = hist
+        self.history_calls = []
+
+    def history(self, start=None, end=None):
+        self.history_calls.append((start, end))
+        return self.hist.copy()
+
+
+def test_update_stock_data_includes_latest_available_day(tmp_path, monkeypatch):
+    today = datetime.now().date()
+    yesterday = (today - timedelta(days=1)).strftime("%Y-%m-%d")
+    two_days_ago = (today - timedelta(days=2)).strftime("%Y-%m-%d")
+    expected_end = today.strftime("%Y-%m-%d")
+
+    db_path = tmp_path / "osakedata.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE osakedata (
+                osake TEXT NOT NULL,
+                pvm TEXT NOT NULL,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                volume INTEGER,
+                market TEXT NOT NULL DEFAULT 'usa',
+                PRIMARY KEY (osake, pvm)
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("AAA", two_days_ago, 10.0, 11.0, 9.5, 10.5, 100000, "usa"),
+        )
+        conn.commit()
+
+    fake_hist = pd.DataFrame(
+        {
+            "Open": [10.5],
+            "High": [11.5],
+            "Low": [10.0],
+            "Close": [11.0],
+            "Volume": [210000],
+        },
+        index=pd.to_datetime([yesterday]),
+    )
+    fake_ticker = _FakeUpdateTicker(fake_hist)
+    split_sync_calls = []
+    split_backfill_calls = []
+
+    monkeypatch.setattr(main.yf, "Ticker", lambda ticker: fake_ticker)
+    monkeypatch.setattr(main, "validate_market", lambda market, db_path=None: True)
+    monkeypatch.setattr(main.time, "sleep", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        main,
+        "sync_splits_for_ticker",
+        lambda db_path_arg, ticker, yf_ticker=None: split_sync_calls.append(
+            (db_path_arg, ticker, yf_ticker)
+        )
+        or 0,
+    )
+
+    import analysis.run_analysis
+    import analysis.stock_dow_structure
+
+    monkeypatch.setattr(analysis.run_analysis, "run_candlestick_analysis", lambda *args, **kwargs: {})
+    monkeypatch.setattr(
+        analysis.stock_dow_structure,
+        "calculate_missing_or_outdated_stock_dow_structures",
+        lambda **kwargs: {
+            "tickers_checked": 0,
+            "tickers_bounded_initial_recalculated": 0,
+            "tickers_registered_without_status": 0,
+            "tickers_incremental_recalculated": 0,
+            "tickers_up_to_date": 0,
+            "tickers_no_valid_close_data": 0,
+            "rows_inserted": 0,
+            "rows_deleted": 0,
+        },
+    )
+
+    app = main.RawCandleApp.__new__(main.RawCandleApp)
+    app.osakedata_db_path = str(db_path)
+    app.analysis_db_path = str(tmp_path / "analysis.db")
+    app.data_dir = str(tmp_path)
+    app.loading_text = SimpleNamespace(value="", color=None)
+    app.page = _FakePage()
+    app.update_start_input = SimpleNamespace(value="")
+    app.update_market_dropdown = SimpleNamespace(value="")
+    app._quarter_detection_run_id = lambda: "run-1"
+    app._update_quarter_state_from_yahoo_detection = lambda **kwargs: {}
+    app._extract_yahoo_latest_quarter_period_end_date = lambda stock: None
+    app._quarter_state_timestamp_utc = lambda: "2026-01-01T00:00:00Z"
+    app._quarter_state_db_path_for_market = lambda market: str(tmp_path / "fundamentals.db")
+    app._calculate_and_save_divergences = lambda ticker, only_missing=True: (True, 0, "")
+    app._maybe_backfill_splits_for_ticker = lambda ticker: split_backfill_calls.append(ticker) or False
+
+    app.update_stock_data(None)
+
+    assert fake_ticker.history_calls == [(yesterday, expected_end)]
+    assert split_sync_calls == [(app.osakedata_db_path, "AAA", fake_ticker)]
+    assert split_backfill_calls == ["AAA"]
+    with sqlite3.connect(db_path) as conn:
+        max_date = conn.execute(
+            "SELECT MAX(pvm) FROM osakedata WHERE osake = ?", ("AAA",)
+        ).fetchone()[0]
+    assert max_date == yesterday
