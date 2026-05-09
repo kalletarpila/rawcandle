@@ -42,6 +42,7 @@ class ResultsGenerator:
         "Bull Rectangle": 19,
         "Ascending Triangle": 22,
         "Bullish Pennant": 23,
+        "Cup and Handle": 26,
         "Bullish Divergence": 7,
         "Bearish Divergence": 8,
         "Hidden Bullish Divergence": 14,
@@ -225,7 +226,7 @@ class ResultsGenerator:
         Suodata vain kynttilämalli + divergenssi yhdistelmät.
 
         Palauttaa vain ne findings joissa samalla tickerillä samana päivänä on sekä:
-        - Kynttilämalli (pattern: Hammer, Bullish Engulfing, Piercing Pattern, Three White Soldiers, Morning Star, Dragonfly Doji, Bullish Abandoned Baby, Bullish Flag, Bull Rectangle, Ascending Triangle, Bullish Pennant, Falling Three Methods, Bearish Flag, Bear Rectangle, Descending Triangle, Bearish Pennant)
+        - Kynttilämalli (pattern: Hammer, Bullish Engulfing, Piercing Pattern, Three White Soldiers, Morning Star, Dragonfly Doji, Bullish Abandoned Baby, Bullish Flag, Bull Rectangle, Ascending Triangle, Bullish Pennant, Cup and Handle, Falling Three Methods, Bearish Flag, Bear Rectangle, Descending Triangle, Bearish Pennant)
         - Divergenssi (pattern: Bullish Divergence, Bearish Divergence)
 
         Args:
@@ -248,6 +249,7 @@ class ResultsGenerator:
             "Bull Rectangle",
             "Ascending Triangle",
             "Bullish Pennant",
+            "Cup and Handle",
             "Bearish Flag",
             "Bear Rectangle",
             "Descending Triangle",

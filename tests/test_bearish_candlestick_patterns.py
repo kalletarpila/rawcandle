@@ -398,6 +398,7 @@ def test_bearish_pattern_ids_are_registered():
     assert ResultsGenerator.PATTERN_MAPPING["Bullish Pennant"] == 23
     assert ResultsGenerator.PATTERN_MAPPING["Descending Triangle"] == 24
     assert ResultsGenerator.PATTERN_MAPPING["Bearish Pennant"] == 25
+    assert ResultsGenerator.PATTERN_MAPPING["Cup and Handle"] == 26
 
     assert ExcelExporter.PATTERN_NAMES[9] == "Bearish Engulfing"
     assert ExcelExporter.PATTERN_NAMES[10] == "Shooting Star"
@@ -416,3 +417,4 @@ def test_bearish_pattern_ids_are_registered():
     assert ExcelExporter.PATTERN_NAMES[23] == "Bullish Pennant"
     assert ExcelExporter.PATTERN_NAMES[24] == "Descending Triangle"
     assert ExcelExporter.PATTERN_NAMES[25] == "Bearish Pennant"
+    assert ExcelExporter.PATTERN_NAMES[26] == "Cup and Handle"

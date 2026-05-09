@@ -34,6 +34,7 @@ class ExcelExporter:
         19: "Bull Rectangle",
         22: "Ascending Triangle",
         23: "Bullish Pennant",
+        26: "Cup and Handle",
         7: "Bullish Divergence",
         8: "Bearish Divergence",
         14: "Hidden Bullish Divergence",

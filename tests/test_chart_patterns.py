@@ -1,6 +1,7 @@
 import pandas as pd
 
 from analysis.chart_patterns import (
+    is_cup_and_handle,
     is_ascending_triangle,
     is_bear_rectangle,
     is_bearish_pennant,
@@ -14,6 +15,92 @@ from analysis.chart_patterns import (
 
 def _df(rows):
     return pd.DataFrame(rows)
+
+
+def _ohlcv(close: float, volume: float) -> dict:
+    return {
+        "Open": close - 0.4,
+        "High": close + 0.8,
+        "Low": close - 0.8,
+        "Close": close,
+        "Volume": volume,
+    }
+
+
+def _build_cup_and_handle_rows(
+    *,
+    v_bottom: bool = False,
+    deep_handle: bool = False,
+    wet_handle: bool = False,
+):
+    rows = []
+    for i in range(170):
+        close = 100.0 + (20.0 * i / 169.0)
+        rows.append(_ohlcv(close, 1200.0))
+
+    cup_closes = [
+        120.0,
+        118.5,
+        117.0,
+        115.0,
+        113.0,
+        111.0,
+        108.5,
+        106.0,
+        103.5,
+        101.0,
+        98.5,
+        96.5,
+        95.0,
+        94.0,
+        93.0,
+        92.5,
+        92.0,
+        92.3,
+        92.8,
+        93.1,
+        93.5,
+        94.0,
+        95.0,
+        96.2,
+        97.8,
+        99.5,
+        101.5,
+        103.8,
+        106.0,
+        108.5,
+        111.0,
+        113.0,
+        115.0,
+        116.5,
+        117.8,
+        118.8,
+        119.5,
+    ]
+    cup_volumes = (
+        [1400.0] * 11
+        + [700.0] * 15
+        + [1600.0] * 11
+    )
+    if v_bottom:
+        cup_volumes[12:27] = [1500.0] * 15
+    for close, volume in zip(cup_closes, cup_volumes):
+        rows.append(_ohlcv(close, volume))
+
+    handle_closes = [118.5, 117.8, 117.2, 116.8]
+    handle_volumes = [900.0, 850.0, 820.0, 800.0]
+    if deep_handle:
+        handle_closes = [117.0, 113.0, 109.0, 105.0]
+    if wet_handle:
+        handle_volumes = [1500.0, 1480.0, 1460.0, 1440.0]
+    for close, volume in zip(handle_closes, handle_volumes):
+        rows.append(_ohlcv(close, volume))
+
+    breakout = _ohlcv(121.8, 1800.0)
+    breakout["High"] = 122.8
+    breakout["Low"] = 120.8
+    rows.append(breakout)
+    return rows
 
 
 def test_bullish_flag_detected():
@@ -155,3 +242,34 @@ def test_bearish_pennant_detected():
     )
 
     assert is_bearish_pennant(df, 6) is True
+
+
+def test_cup_and_handle_detected():
+    df = _df(_build_cup_and_handle_rows())
+
+    assert is_cup_and_handle(df, len(df) - 1) is True
+
+
+def test_cup_and_handle_rejects_v_bottom():
+    rows = _build_cup_and_handle_rows()
+    base = 170
+    rows[base + 12]["Low"] = 91.5
+    rows[base + 12]["Close"] = 92.0
+    rows[base + 13]["Close"] = 96.5
+    rows[base + 14]["Close"] = 99.0
+    rows[base + 15]["Close"] = 101.0
+    df = _df(rows)
+
+    assert is_cup_and_handle(df, len(df) - 1) is False
+
+
+def test_cup_and_handle_rejects_deep_handle():
+    df = _df(_build_cup_and_handle_rows(deep_handle=True))
+
+    assert is_cup_and_handle(df, len(df) - 1) is False
+
+
+def test_cup_and_handle_rejects_missing_volume_dry_up():
+    df = _df(_build_cup_and_handle_rows(wet_handle=True))
+
+    assert is_cup_and_handle(df, len(df) - 1) is False

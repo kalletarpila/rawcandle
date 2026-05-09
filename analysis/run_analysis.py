@@ -21,6 +21,7 @@ from .candlestick_patterns import (
     is_three_white_soldiers,
 )
 from .chart_patterns import (
+    is_cup_and_handle,
     is_bear_rectangle,
     is_bearish_pennant,
     is_bearish_flag,
@@ -99,6 +100,8 @@ def _calculate_signal_strength(
         base_strength = 0.82
     elif pattern == "Bearish Pennant":
         base_strength = 0.82
+    elif pattern == "Cup and Handle":
+        base_strength = 0.84
 
     if volume and volume > 100000:
         base_strength = min(1.0, base_strength * 1.1)
@@ -118,6 +121,7 @@ BASE_CANDLE_ORDER = [
     "Bull Rectangle",
     "Ascending Triangle",
     "Bullish Pennant",
+    "Cup and Handle",
 ]
 
 COMBO_PATTERN_MAP = {
@@ -697,6 +701,22 @@ def run_candlestick_analysis(
                 if logger:
                     logger.info(
                         f"{ticker} {row['pvm'].date().isoformat()} Bullish Pennant checked - FOUND (strength {strength})"
+                    )
+
+        if current_in_downtrend and i >= 204 and "Cup and Handle" in patterns:
+            if is_cup_and_handle(df, i):
+                strength = _calculate_signal_strength(
+                    "Cup and Handle",
+                    row["Open"],
+                    row["High"],
+                    row["Low"],
+                    row["Close"],
+                    row.get("Volume"),
+                )
+                found.append({"pattern": "Cup and Handle", "strength": strength})
+                if logger:
+                    logger.info(
+                        f"{ticker} {row['pvm'].date().isoformat()} Cup and Handle checked - FOUND (strength {strength})"
                     )
 
         if i > 0 and "Bearish Engulfing" in patterns:
