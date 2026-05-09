@@ -281,7 +281,11 @@ def test_incremental_candlestick_helper_includes_new_patterns_and_no_downtrend_f
     assert "Bullish Abandoned Baby" in captured["patterns"]
     assert "Bullish Flag" in captured["patterns"]
     assert "Bull Rectangle" in captured["patterns"]
+    assert "Ascending Triangle" in captured["patterns"]
+    assert "Bullish Pennant" in captured["patterns"]
     assert "Falling Three Methods" in captured["patterns"]
     assert "Bearish Flag" in captured["patterns"]
     assert "Bear Rectangle" in captured["patterns"]
+    assert "Descending Triangle" in captured["patterns"]
+    assert "Bearish Pennant" in captured["patterns"]
     assert captured["downtrend_filter"] is False

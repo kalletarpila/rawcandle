@@ -23,6 +23,21 @@ def _range_width(window: pd.DataFrame) -> float:
     return (high - low) / midpoint
 
 
+def _level_span(values: pd.Series) -> float:
+    midpoint = max(abs(float(values.mean())), 1e-9)
+    return (float(values.max()) - float(values.min())) / midpoint
+
+
+def _strictly_rising(values: pd.Series) -> bool:
+    seq = [float(v) for v in values]
+    return all(right > left for left, right in zip(seq, seq[1:]))
+
+
+def _strictly_falling(values: pd.Series) -> bool:
+    seq = [float(v) for v in values]
+    return all(right < left for left, right in zip(seq, seq[1:]))
+
+
 def is_bullish_flag(df: pd.DataFrame, idx: int) -> bool:
     window = _window(df, idx, 6)
     if window is None or len(window) < 6:
@@ -140,4 +155,124 @@ def is_bear_rectangle(df: pd.DataFrame, idx: int) -> bool:
     return (
         float(breakdown["Close"]) < float(breakdown["Open"])
         and float(breakdown["Close"]) < rect_low
+    )
+
+
+def is_ascending_triangle(df: pd.DataFrame, idx: int) -> bool:
+    window = _window(df, idx, 7)
+    if window is None or len(window) < 7:
+        return False
+
+    triangle = window.iloc[:6]
+    breakout = window.iloc[6]
+
+    resistance_tests = triangle.iloc[1::2]["High"]
+    rising_lows = triangle.iloc[0::2]["Low"]
+
+    if len(resistance_tests) != 3 or len(rising_lows) != 3:
+        return False
+
+    if _level_span(resistance_tests) > 0.02:
+        return False
+
+    if not _strictly_rising(rising_lows):
+        return False
+
+    if float(triangle.iloc[-1]["Close"]) <= float(triangle.iloc[0]["Close"]):
+        return False
+
+    resistance = float(resistance_tests.max())
+    return (
+        float(breakout["Close"]) > float(breakout["Open"])
+        and float(breakout["Close"]) > resistance
+    )
+
+
+def is_descending_triangle(df: pd.DataFrame, idx: int) -> bool:
+    window = _window(df, idx, 7)
+    if window is None or len(window) < 7:
+        return False
+
+    triangle = window.iloc[:6]
+    breakdown = window.iloc[6]
+
+    support_tests = triangle.iloc[1::2]["Low"]
+    falling_highs = triangle.iloc[0::2]["High"]
+
+    if len(support_tests) != 3 or len(falling_highs) != 3:
+        return False
+
+    if _level_span(support_tests) > 0.02:
+        return False
+
+    if not _strictly_falling(falling_highs):
+        return False
+
+    if float(triangle.iloc[-1]["Close"]) >= float(triangle.iloc[0]["Close"]):
+        return False
+
+    support = float(support_tests.min())
+    return (
+        float(breakdown["Close"]) < float(breakdown["Open"])
+        and float(breakdown["Close"]) < support
+    )
+
+
+def is_bullish_pennant(df: pd.DataFrame, idx: int) -> bool:
+    window = _window(df, idx, 7)
+    if window is None or len(window) < 7:
+        return False
+
+    pole = window.iloc[:3]
+    pennant = window.iloc[3:6]
+    breakout = window.iloc[6]
+
+    pole_gain = _pct_change(float(pole.iloc[0]["Open"]), float(pole.iloc[-1]["Close"]))
+    if pole_gain < 0.05:
+        return False
+
+    highs = pennant["High"]
+    lows = pennant["Low"]
+    if not _strictly_falling(highs):
+        return False
+    if not _strictly_rising(lows):
+        return False
+
+    if _range_width(pennant) > 0.05:
+        return False
+
+    resistance = float(highs.max())
+    return (
+        float(breakout["Close"]) > float(breakout["Open"])
+        and float(breakout["Close"]) > resistance
+    )
+
+
+def is_bearish_pennant(df: pd.DataFrame, idx: int) -> bool:
+    window = _window(df, idx, 7)
+    if window is None or len(window) < 7:
+        return False
+
+    pole = window.iloc[:3]
+    pennant = window.iloc[3:6]
+    breakdown = window.iloc[6]
+
+    pole_drop = _pct_change(float(pole.iloc[0]["Open"]), float(pole.iloc[-1]["Close"]))
+    if pole_drop > -0.05:
+        return False
+
+    highs = pennant["High"]
+    lows = pennant["Low"]
+    if not _strictly_falling(highs):
+        return False
+    if not _strictly_rising(lows):
+        return False
+
+    if _range_width(pennant) > 0.05:
+        return False
+
+    support = float(lows.min())
+    return (
+        float(breakdown["Close"]) < float(breakdown["Open"])
+        and float(breakdown["Close"]) < support
     )

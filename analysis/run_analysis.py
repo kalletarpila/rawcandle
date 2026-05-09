@@ -22,9 +22,13 @@ from .candlestick_patterns import (
 )
 from .chart_patterns import (
     is_bear_rectangle,
+    is_bearish_pennant,
     is_bearish_flag,
     is_bull_rectangle,
+    is_bullish_pennant,
     is_bullish_flag,
+    is_ascending_triangle,
+    is_descending_triangle,
 )
 from .divergence_v1 import compute_rsi_wilder
 
@@ -87,6 +91,14 @@ def _calculate_signal_strength(
         base_strength = 0.79
     elif pattern == "Bear Rectangle":
         base_strength = 0.79
+    elif pattern == "Ascending Triangle":
+        base_strength = 0.8
+    elif pattern == "Descending Triangle":
+        base_strength = 0.8
+    elif pattern == "Bullish Pennant":
+        base_strength = 0.82
+    elif pattern == "Bearish Pennant":
+        base_strength = 0.82
 
     if volume and volume > 100000:
         base_strength = min(1.0, base_strength * 1.1)
@@ -104,6 +116,8 @@ BASE_CANDLE_ORDER = [
     "Bullish Abandoned Baby",
     "Bullish Flag",
     "Bull Rectangle",
+    "Ascending Triangle",
+    "Bullish Pennant",
 ]
 
 COMBO_PATTERN_MAP = {
@@ -653,6 +667,38 @@ def run_candlestick_analysis(
                         f"{ticker} {row['pvm'].date().isoformat()} Bull Rectangle checked - FOUND (strength {strength})"
                     )
 
+        if current_in_downtrend and i >= 6 and "Ascending Triangle" in patterns:
+            if is_ascending_triangle(df, i):
+                strength = _calculate_signal_strength(
+                    "Ascending Triangle",
+                    row["Open"],
+                    row["High"],
+                    row["Low"],
+                    row["Close"],
+                    row.get("Volume"),
+                )
+                found.append({"pattern": "Ascending Triangle", "strength": strength})
+                if logger:
+                    logger.info(
+                        f"{ticker} {row['pvm'].date().isoformat()} Ascending Triangle checked - FOUND (strength {strength})"
+                    )
+
+        if current_in_downtrend and i >= 6 and "Bullish Pennant" in patterns:
+            if is_bullish_pennant(df, i):
+                strength = _calculate_signal_strength(
+                    "Bullish Pennant",
+                    row["Open"],
+                    row["High"],
+                    row["Low"],
+                    row["Close"],
+                    row.get("Volume"),
+                )
+                found.append({"pattern": "Bullish Pennant", "strength": strength})
+                if logger:
+                    logger.info(
+                        f"{ticker} {row['pvm'].date().isoformat()} Bullish Pennant checked - FOUND (strength {strength})"
+                    )
+
         if i > 0 and "Bearish Engulfing" in patterns:
             prev_row = df.iloc[i - 1]
             if is_bearish_engulfing(prev_row, row):
@@ -779,6 +825,38 @@ def run_candlestick_analysis(
                 if logger:
                     logger.info(
                         f"{ticker} {row['pvm'].date().isoformat()} Bear Rectangle checked - FOUND (strength {strength})"
+                    )
+
+        if i >= 6 and "Descending Triangle" in patterns:
+            if is_descending_triangle(df, i):
+                strength = _calculate_signal_strength(
+                    "Descending Triangle",
+                    row["Open"],
+                    row["High"],
+                    row["Low"],
+                    row["Close"],
+                    row.get("Volume"),
+                )
+                found.append({"pattern": "Descending Triangle", "strength": strength})
+                if logger:
+                    logger.info(
+                        f"{ticker} {row['pvm'].date().isoformat()} Descending Triangle checked - FOUND (strength {strength})"
+                    )
+
+        if i >= 6 and "Bearish Pennant" in patterns:
+            if is_bearish_pennant(df, i):
+                strength = _calculate_signal_strength(
+                    "Bearish Pennant",
+                    row["Open"],
+                    row["High"],
+                    row["Low"],
+                    row["Close"],
+                    row.get("Volume"),
+                )
+                found.append({"pattern": "Bearish Pennant", "strength": strength})
+                if logger:
+                    logger.info(
+                        f"{ticker} {row['pvm'].date().isoformat()} Bearish Pennant checked - FOUND (strength {strength})"
                     )
 
         if "Bullish Divergence" in patterns:
