@@ -229,3 +229,55 @@ def test_update_stock_data_includes_latest_available_day(tmp_path, monkeypatch):
             "SELECT MAX(pvm) FROM osakedata WHERE osake = ?", ("AAA",)
         ).fetchone()[0]
     assert max_date == today_str
+
+
+def test_incremental_candlestick_helper_includes_new_patterns_and_no_downtrend_filter(
+    tmp_path, monkeypatch
+):
+    captured = {}
+
+    def _fake_run_candlestick_analysis(
+        db_path,
+        ticker,
+        patterns,
+        start_date,
+        end_date,
+        progress_callback=None,
+        downtrend_filter=False,
+        min_decline_percent=0.0,
+        use_ma_filter=False,
+        use_volume_filter=False,
+        analysis_db_path=None,
+    ):
+        captured["patterns"] = list(patterns)
+        captured["downtrend_filter"] = downtrend_filter
+        captured["db_path"] = db_path
+        captured["ticker"] = ticker
+        captured["start_date"] = start_date
+        captured["end_date"] = end_date
+        captured["analysis_db_path"] = analysis_db_path
+        return {}
+
+    import analysis.run_analysis
+
+    monkeypatch.setattr(
+        analysis.run_analysis,
+        "run_candlestick_analysis",
+        _fake_run_candlestick_analysis,
+    )
+
+    app = main.RawCandleApp.__new__(main.RawCandleApp)
+    app.osakedata_db_path = str(tmp_path / "osakedata.db")
+    app.analysis_db_path = str(tmp_path / "analysis.db")
+
+    analysis_total, analysis_error = app._run_incremental_candlestick_analysis(
+        "AAA",
+        "2026-01-01",
+        "2026-01-31",
+    )
+
+    assert analysis_total == 0
+    assert analysis_error is None
+    assert "Bullish Abandoned Baby" in captured["patterns"]
+    assert "Falling Three Methods" in captured["patterns"]
+    assert captured["downtrend_filter"] is False

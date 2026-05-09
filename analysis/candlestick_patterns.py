@@ -238,6 +238,11 @@ def _candle_geometry(row):
     }
 
 
+def _gap_tolerance(*prices):
+    reference = max((abs(float(price)) for price in prices if pd.notna(price)), default=0.0)
+    return max(reference * 0.001, 1e-9)
+
+
 def is_bearish_engulfing(prev_row, row):
     return (
         prev_row["Close"] > prev_row["Open"]
@@ -331,6 +336,81 @@ def is_hanging_man(row):
             body_bottom >= low + 0.55 * candle_range
             or close >= low + 0.55 * candle_range
         )
+    )
+
+
+def is_bullish_abandoned_baby(df, idx):
+    if idx < 2:
+        return False
+
+    c1 = df.iloc[idx - 2]
+    c2 = df.iloc[idx - 1]
+    c3 = df.iloc[idx]
+    g1 = _candle_geometry(c1)
+    g2 = _candle_geometry(c2)
+    g3 = _candle_geometry(c3)
+
+    if g1["candle_range"] <= 0 or g2["candle_range"] <= 0 or g3["candle_range"] <= 0:
+        return False
+
+    tol = _gap_tolerance(
+        c1["Open"],
+        c1["Close"],
+        c2["Open"],
+        c2["Close"],
+        c3["Open"],
+        c3["Close"],
+    )
+    midpoint_c1 = c1["Close"] + 0.5 * (c1["Open"] - c1["Close"])
+
+    return (
+        c1["Close"] < c1["Open"]
+        and g1["body"] / g1["candle_range"] >= 0.45
+        and g2["body"] / g2["candle_range"] <= 0.12
+        and c2["High"] < c1["Low"] + tol
+        and c3["Close"] > c3["Open"]
+        and g3["body"] / g3["candle_range"] >= 0.45
+        and c3["Low"] > c2["High"] - tol
+        and c3["Close"] > midpoint_c1
+    )
+
+
+def is_falling_three_methods(df, idx):
+    if idx < 4:
+        return False
+
+    c1 = df.iloc[idx - 4]
+    c2 = df.iloc[idx - 3]
+    c3 = df.iloc[idx - 2]
+    c4 = df.iloc[idx - 1]
+    c5 = df.iloc[idx]
+    g1 = _candle_geometry(c1)
+    g5 = _candle_geometry(c5)
+
+    if g1["candle_range"] <= 0 or g5["candle_range"] <= 0:
+        return False
+
+    tol = _gap_tolerance(c1["Open"], c1["Close"], c5["Open"], c5["Close"])
+    inner_rows = [c2, c3, c4]
+    body1 = max(g1["body"], 1e-9)
+
+    for inner in inner_rows:
+        gi = _candle_geometry(inner)
+        if gi["candle_range"] <= 0:
+            return False
+        if gi["body"] > body1 * 0.6:
+            return False
+        if inner["High"] >= c1["Open"] + tol:
+            return False
+        if inner["Low"] <= c1["Close"] - tol:
+            return False
+
+    return (
+        c1["Close"] < c1["Open"]
+        and g1["body"] / g1["candle_range"] >= 0.45
+        and c5["Close"] < c5["Open"]
+        and g5["body"] / g5["candle_range"] >= 0.45
+        and c5["Close"] < c1["Close"] - tol
     )
 
 

@@ -6,11 +6,13 @@ import pandas as pd
 
 from .candlestick_patterns import (
     is_bearish_engulfing,
+    is_bullish_abandoned_baby,
     is_bullish_divergence,
     is_bullish_engulfing,
     is_dark_cloud_cover,
     is_dragonfly_doji,
     is_hammer,
+    is_falling_three_methods,
     is_hanging_man,
     is_evening_star,
     is_morning_star,
@@ -67,6 +69,10 @@ def _calculate_signal_strength(
         base_strength = min(0.9, 0.6 + penetration)
     elif pattern == "Evening Star":
         base_strength = 0.8
+    elif pattern == "Bullish Abandoned Baby":
+        base_strength = 0.85
+    elif pattern == "Falling Three Methods":
+        base_strength = 0.82
 
     if volume and volume > 100000:
         base_strength = min(1.0, base_strength * 1.1)
@@ -81,6 +87,7 @@ BASE_CANDLE_ORDER = [
     "Three White Soldiers",
     "Morning Star",
     "Dragonfly Doji",
+    "Bullish Abandoned Baby",
 ]
 
 COMBO_PATTERN_MAP = {
@@ -582,6 +589,22 @@ def run_candlestick_analysis(
                     f"{ticker} {row['pvm'].date().isoformat()} Dragonfly Doji checked - FOUND (strength {strength})"
                 )
 
+        if current_in_downtrend and i >= 2 and "Bullish Abandoned Baby" in patterns:
+            if is_bullish_abandoned_baby(df, i):
+                strength = _calculate_signal_strength(
+                    "Bullish Abandoned Baby",
+                    row["Open"],
+                    row["High"],
+                    row["Low"],
+                    row["Close"],
+                    row.get("Volume"),
+                )
+                found.append({"pattern": "Bullish Abandoned Baby", "strength": strength})
+                if logger:
+                    logger.info(
+                        f"{ticker} {row['pvm'].date().isoformat()} Bullish Abandoned Baby checked - FOUND (strength {strength})"
+                    )
+
         if i > 0 and "Bearish Engulfing" in patterns:
             prev_row = df.iloc[i - 1]
             if is_bearish_engulfing(prev_row, row):
@@ -661,6 +684,22 @@ def run_candlestick_analysis(
                 logger.info(
                     f"{ticker} {row['pvm'].date().isoformat()} Hanging Man checked - FOUND (strength {strength})"
                 )
+
+        if i >= 4 and "Falling Three Methods" in patterns:
+            if is_falling_three_methods(df, i):
+                strength = _calculate_signal_strength(
+                    "Falling Three Methods",
+                    row["Open"],
+                    row["High"],
+                    row["Low"],
+                    row["Close"],
+                    row.get("Volume"),
+                )
+                found.append({"pattern": "Falling Three Methods", "strength": strength})
+                if logger:
+                    logger.info(
+                        f"{ticker} {row['pvm'].date().isoformat()} Falling Three Methods checked - FOUND (strength {strength})"
+                    )
 
         if "Bullish Divergence" in patterns:
             if current_date in divergence_dates:
