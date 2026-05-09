@@ -38,6 +38,8 @@ class ResultsGenerator:
         "Morning Star": 5,
         "Dragonfly Doji": 6,
         "Bullish Abandoned Baby": 16,
+        "Bullish Flag": 18,
+        "Bull Rectangle": 19,
         "Bullish Divergence": 7,
         "Bearish Divergence": 8,
         "Hidden Bullish Divergence": 14,
@@ -48,6 +50,8 @@ class ResultsGenerator:
         "Evening Star": 12,
         "Hanging Man": 13,
         "Falling Three Methods": 17,
+        "Bearish Flag": 20,
+        "Bear Rectangle": 21,
         "BullDiv & Hammer": 71,
         "BullDiv & Bullish Engulfing": 72,
         "BullDiv & Piercing Pattern": 73,
@@ -217,7 +221,7 @@ class ResultsGenerator:
         Suodata vain kynttilämalli + divergenssi yhdistelmät.
 
         Palauttaa vain ne findings joissa samalla tickerillä samana päivänä on sekä:
-        - Kynttilämalli (pattern: Hammer, Bullish Engulfing, Piercing Pattern, Three White Soldiers, Morning Star, Dragonfly Doji)
+        - Kynttilämalli (pattern: Hammer, Bullish Engulfing, Piercing Pattern, Three White Soldiers, Morning Star, Dragonfly Doji, Bullish Abandoned Baby, Bullish Flag, Bull Rectangle, Falling Three Methods, Bearish Flag, Bear Rectangle)
         - Divergenssi (pattern: Bullish Divergence, Bearish Divergence)
 
         Args:
@@ -235,6 +239,12 @@ class ResultsGenerator:
             "Three White Soldiers",
             "Morning Star",
             "Dragonfly Doji",
+            "Bullish Abandoned Baby",
+            "Bullish Flag",
+            "Bull Rectangle",
+            "Bearish Flag",
+            "Bear Rectangle",
+            "Falling Three Methods",
         }
 
         # Valmiiksi koodatut kombokuviot (71–76)

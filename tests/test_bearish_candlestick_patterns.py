@@ -246,6 +246,53 @@ def test_run_candlestick_analysis_detects_new_patterns_without_downtrend_filter(
     assert "Falling Three Methods" in detected_patterns
 
 
+def test_run_candlestick_analysis_detects_first_chart_pattern_package(tmp_path):
+    osake_db, analysis_db = _create_candles_test_dbs(
+        tmp_path,
+        [
+            ("TEST", "2026-03-01", 100.0, 104.0, 99.0, 103.0, 1_000, "usa"),
+            ("TEST", "2026-03-02", 103.0, 107.0, 102.0, 106.0, 1_100, "usa"),
+            ("TEST", "2026-03-03", 106.0, 111.0, 105.5, 110.0, 1_150, "usa"),
+            ("TEST", "2026-03-04", 109.5, 110.0, 108.5, 109.0, 900, "usa"),
+            ("TEST", "2026-03-05", 109.0, 109.2, 108.0, 108.6, 920, "usa"),
+            ("TEST", "2026-03-06", 108.8, 111.5, 108.7, 111.2, 1_350, "usa"),
+            ("TEST", "2026-03-07", 110.0, 110.5, 106.5, 107.0, 1_200, "usa"),
+            ("TEST", "2026-03-08", 107.0, 107.2, 103.5, 104.0, 1_220, "usa"),
+            ("TEST", "2026-03-09", 104.0, 104.2, 100.5, 101.0, 1_240, "usa"),
+            ("TEST", "2026-03-10", 101.3, 101.6, 100.6, 101.0, 950, "usa"),
+            ("TEST", "2026-03-11", 101.2, 101.7, 100.8, 101.1, 940, "usa"),
+            ("TEST", "2026-03-12", 101.0, 101.5, 100.7, 101.0, 930, "usa"),
+            ("TEST", "2026-03-13", 100.8, 101.0, 98.0, 98.4, 1_500, "usa"),
+        ],
+    )
+
+    results = run_candlestick_analysis(
+        str(osake_db),
+        "TEST",
+        patterns=[
+            "Bullish Flag",
+            "Bearish Flag",
+            "Bull Rectangle",
+            "Bear Rectangle",
+        ],
+        start_date="2026-03-01",
+        end_date="2026-03-13",
+        progress_callback=None,
+        downtrend_filter=False,
+        use_ma_filter=False,
+        use_volume_filter=False,
+        analysis_db_path=str(analysis_db),
+    )
+
+    detected_patterns = {
+        finding["pattern"]
+        for findings in results.values()
+        for finding in findings
+    }
+    assert "Bullish Flag" in detected_patterns
+    assert "Bear Rectangle" in detected_patterns
+
+
 def test_analysis_engine_detects_new_bearish_patterns(tmp_path):
     analysis_db = tmp_path / "analysis.db"
     stock_db = tmp_path / "stock.db"
@@ -343,6 +390,10 @@ def test_bearish_pattern_ids_are_registered():
     assert ResultsGenerator.PATTERN_MAPPING["Hidden Bearish Divergence"] == 15
     assert ResultsGenerator.PATTERN_MAPPING["Bullish Abandoned Baby"] == 16
     assert ResultsGenerator.PATTERN_MAPPING["Falling Three Methods"] == 17
+    assert ResultsGenerator.PATTERN_MAPPING["Bullish Flag"] == 18
+    assert ResultsGenerator.PATTERN_MAPPING["Bull Rectangle"] == 19
+    assert ResultsGenerator.PATTERN_MAPPING["Bearish Flag"] == 20
+    assert ResultsGenerator.PATTERN_MAPPING["Bear Rectangle"] == 21
 
     assert ExcelExporter.PATTERN_NAMES[9] == "Bearish Engulfing"
     assert ExcelExporter.PATTERN_NAMES[10] == "Shooting Star"
@@ -353,3 +404,7 @@ def test_bearish_pattern_ids_are_registered():
     assert ExcelExporter.PATTERN_NAMES[15] == "Hidden Bearish Divergence"
     assert ExcelExporter.PATTERN_NAMES[16] == "Bullish Abandoned Baby"
     assert ExcelExporter.PATTERN_NAMES[17] == "Falling Three Methods"
+    assert ExcelExporter.PATTERN_NAMES[18] == "Bullish Flag"
+    assert ExcelExporter.PATTERN_NAMES[19] == "Bull Rectangle"
+    assert ExcelExporter.PATTERN_NAMES[20] == "Bearish Flag"
+    assert ExcelExporter.PATTERN_NAMES[21] == "Bear Rectangle"

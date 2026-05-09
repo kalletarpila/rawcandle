@@ -20,6 +20,12 @@ from .candlestick_patterns import (
     is_shooting_star,
     is_three_white_soldiers,
 )
+from .chart_patterns import (
+    is_bear_rectangle,
+    is_bearish_flag,
+    is_bull_rectangle,
+    is_bullish_flag,
+)
 from .divergence_v1 import compute_rsi_wilder
 
 
@@ -73,6 +79,14 @@ def _calculate_signal_strength(
         base_strength = 0.85
     elif pattern == "Falling Three Methods":
         base_strength = 0.82
+    elif pattern == "Bullish Flag":
+        base_strength = 0.81
+    elif pattern == "Bearish Flag":
+        base_strength = 0.81
+    elif pattern == "Bull Rectangle":
+        base_strength = 0.79
+    elif pattern == "Bear Rectangle":
+        base_strength = 0.79
 
     if volume and volume > 100000:
         base_strength = min(1.0, base_strength * 1.1)
@@ -88,6 +102,8 @@ BASE_CANDLE_ORDER = [
     "Morning Star",
     "Dragonfly Doji",
     "Bullish Abandoned Baby",
+    "Bullish Flag",
+    "Bull Rectangle",
 ]
 
 COMBO_PATTERN_MAP = {
@@ -605,6 +621,38 @@ def run_candlestick_analysis(
                         f"{ticker} {row['pvm'].date().isoformat()} Bullish Abandoned Baby checked - FOUND (strength {strength})"
                     )
 
+        if current_in_downtrend and i >= 5 and "Bullish Flag" in patterns:
+            if is_bullish_flag(df, i):
+                strength = _calculate_signal_strength(
+                    "Bullish Flag",
+                    row["Open"],
+                    row["High"],
+                    row["Low"],
+                    row["Close"],
+                    row.get("Volume"),
+                )
+                found.append({"pattern": "Bullish Flag", "strength": strength})
+                if logger:
+                    logger.info(
+                        f"{ticker} {row['pvm'].date().isoformat()} Bullish Flag checked - FOUND (strength {strength})"
+                    )
+
+        if current_in_downtrend and i >= 6 and "Bull Rectangle" in patterns:
+            if is_bull_rectangle(df, i):
+                strength = _calculate_signal_strength(
+                    "Bull Rectangle",
+                    row["Open"],
+                    row["High"],
+                    row["Low"],
+                    row["Close"],
+                    row.get("Volume"),
+                )
+                found.append({"pattern": "Bull Rectangle", "strength": strength})
+                if logger:
+                    logger.info(
+                        f"{ticker} {row['pvm'].date().isoformat()} Bull Rectangle checked - FOUND (strength {strength})"
+                    )
+
         if i > 0 and "Bearish Engulfing" in patterns:
             prev_row = df.iloc[i - 1]
             if is_bearish_engulfing(prev_row, row):
@@ -699,6 +747,38 @@ def run_candlestick_analysis(
                 if logger:
                     logger.info(
                         f"{ticker} {row['pvm'].date().isoformat()} Falling Three Methods checked - FOUND (strength {strength})"
+                    )
+
+        if i >= 5 and "Bearish Flag" in patterns:
+            if is_bearish_flag(df, i):
+                strength = _calculate_signal_strength(
+                    "Bearish Flag",
+                    row["Open"],
+                    row["High"],
+                    row["Low"],
+                    row["Close"],
+                    row.get("Volume"),
+                )
+                found.append({"pattern": "Bearish Flag", "strength": strength})
+                if logger:
+                    logger.info(
+                        f"{ticker} {row['pvm'].date().isoformat()} Bearish Flag checked - FOUND (strength {strength})"
+                    )
+
+        if i >= 6 and "Bear Rectangle" in patterns:
+            if is_bear_rectangle(df, i):
+                strength = _calculate_signal_strength(
+                    "Bear Rectangle",
+                    row["Open"],
+                    row["High"],
+                    row["Low"],
+                    row["Close"],
+                    row.get("Volume"),
+                )
+                found.append({"pattern": "Bear Rectangle", "strength": strength})
+                if logger:
+                    logger.info(
+                        f"{ticker} {row['pvm'].date().isoformat()} Bear Rectangle checked - FOUND (strength {strength})"
                     )
 
         if "Bullish Divergence" in patterns:
