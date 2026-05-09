@@ -36,6 +36,7 @@ class _FakeTicker:
 
 def test_fetch_stock_data_calls_single_ticker_metadata_refresh(tmp_path, monkeypatch):
     called = []
+    dow_calls = []
     fake_ticker = _FakeTicker()
 
     monkeypatch.setattr(main.yf, "Ticker", lambda ticker: fake_ticker)
@@ -51,8 +52,14 @@ def test_fetch_stock_data_calls_single_ticker_metadata_refresh(tmp_path, monkeyp
     )
 
     import analysis.run_analysis
+    import analysis.stock_dow_structure
 
     monkeypatch.setattr(analysis.run_analysis, "run_candlestick_analysis", lambda *args, **kwargs: {})
+    monkeypatch.setattr(
+        analysis.stock_dow_structure,
+        "calculate_missing_or_outdated_stock_dow_structures",
+        lambda **kwargs: dow_calls.append(kwargs) or {"rows_inserted": 0},
+    )
 
     app = main.RawCandleApp.__new__(main.RawCandleApp)
     app.data_dir = str(tmp_path)
@@ -72,6 +79,17 @@ def test_fetch_stock_data_calls_single_ticker_metadata_refresh(tmp_path, monkeyp
     app.fetch_stock_data(None)
 
     assert called == [(app.osakedata_db_path, "AAA", "usa")]
+    assert dow_calls == [
+        {
+            "analysis_db_path": app.analysis_db_path,
+            "osakedata_db_path": app.osakedata_db_path,
+            "ticker": "AAA",
+            "pivot_radius": analysis.stock_dow_structure.DEFAULT_PIVOT_RADIUS,
+            "bounded_initial_from_date": analysis.stock_dow_structure.DEFAULT_BOUNDED_INITIAL_FROM_DATE,
+            "recalc_tail_trading_days": analysis.stock_dow_structure.DEFAULT_RECALC_TAIL_TRADING_DAYS,
+            "dry_run": False,
+        }
+    ]
 
 
 class _FakeUpdateTicker:

@@ -1111,6 +1111,35 @@ def test_selection_summary_counts_checked_needs_calculation_and_skipped(tmp_path
     assert summary["errors"] == 0
 
 
+def test_calculate_missing_or_outdated_can_be_scoped_to_single_ticker(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    osakedata_db = tmp_path / "osakedata.db"
+    _create_analysis_db(analysis_db)
+    base_closes = [10, 11, 12, 15, 13, 11, 9, 7, 9, 12, 16, 13, 11, 9, 10, 12, 14]
+    _create_osakedata_db(osakedata_db, base_closes, ticker="AAA", market="usa")
+    _create_osakedata_db(osakedata_db, base_closes, ticker="BBB", market="usa")
+
+    summary = calculate_missing_or_outdated_stock_dow_structures(
+        analysis_db_path=analysis_db,
+        osakedata_db_path=osakedata_db,
+        ticker="BBB",
+        dry_run=False,
+    )
+
+    rows = _load_event_rows(analysis_db)
+    aaa_status = _load_status_row(analysis_db, "AAA")
+    bbb_status = _load_status_row(analysis_db, "BBB")
+
+    assert summary["tickers_checked"] == 1
+    assert summary["tickers_missing"] == 1
+    assert summary["tickers_processed"] == 1
+    assert summary["errors"] == 0
+    assert rows
+    assert {row["ticker"] for row in rows} == {"BBB"}
+    assert aaa_status is None
+    assert bbb_status is not None
+
+
 def test_zero_event_processed_ticker_writes_status_row(tmp_path):
     analysis_db = tmp_path / "analysis.db"
     osakedata_db = tmp_path / "osakedata.db"

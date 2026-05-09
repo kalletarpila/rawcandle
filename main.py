@@ -253,6 +253,27 @@ class RawCandleApp:
             pass
         return False
 
+    def _update_single_ticker_dow_structures(self, ticker: str):
+        """Run the same Dow post-processing path as batch update, scoped to one ticker."""
+        if not ticker:
+            return None
+        from analysis.stock_dow_structure import (
+            DEFAULT_BOUNDED_INITIAL_FROM_DATE,
+            DEFAULT_PIVOT_RADIUS,
+            DEFAULT_RECALC_TAIL_TRADING_DAYS,
+            calculate_missing_or_outdated_stock_dow_structures,
+        )
+
+        return calculate_missing_or_outdated_stock_dow_structures(
+            analysis_db_path=self.analysis_db_path,
+            osakedata_db_path=self.osakedata_db_path,
+            ticker=ticker,
+            pivot_radius=DEFAULT_PIVOT_RADIUS,
+            bounded_initial_from_date=DEFAULT_BOUNDED_INITIAL_FROM_DATE,
+            recalc_tail_trading_days=DEFAULT_RECALC_TAIL_TRADING_DAYS,
+            dry_run=False,
+        )
+
     def _show_snackbar(self, message: str, color: str = ft.Colors.BLUE_600):
         """Näytä SnackBar turvallisesti."""
         try:
@@ -4891,6 +4912,14 @@ Virheet: {error_count}"""
                 except Exception as exc:
                     summary["errors"].append(f"{ticker}: analyysivirhe {exc}")
 
+                dow_total = 0
+                try:
+                    dow_summary = self._update_single_ticker_dow_structures(ticker)
+                    if dow_summary:
+                        dow_total = int(dow_summary.get("rows_inserted", 0))
+                except Exception as exc:
+                    summary["errors"].append(f"{ticker}: dow-virhe {exc}")
+
                 if last_date_in_db:
                     msg = f"{ticker}: +{rows_added} päivää (aiemmin: {last_date_in_db})"
                 else:
@@ -4900,9 +4929,10 @@ Virheet: {error_count}"""
                 if div_error and not div_success:
                     msg += f" ⚠️ Divergenssit: {div_error}"
                 msg += f" | Kynttilät {analysis_total}"
+                msg += f" | Dow {dow_total}"
                 # Tulosta terminaaliin selkeä status tästä tickeristä
                 print(
-                    f"[FETCH] {ticker}: haetut päivät={rows_added}, div-päivät={div_days if div_success else 'virhe'}, kynttilät={analysis_total}"
+                    f"[FETCH] {ticker}: haetut päivät={rows_added}, div-päivät={div_days if div_success else 'virhe'}, kynttilät={analysis_total}, dow={dow_total}"
                 )
                 summary["ok"].append(msg)
                 # Säilytä viimeinen haettu data UI tallennukseen

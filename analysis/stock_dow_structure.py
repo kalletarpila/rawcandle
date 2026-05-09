@@ -1909,6 +1909,7 @@ def calculate_missing_or_outdated_stock_dow_structures(
     *,
     analysis_db_path: Path | str = DEFAULT_ANALYSIS_DB_PATH,
     osakedata_db_path: Path | str = DEFAULT_OSAKEDATA_DB_PATH,
+    ticker: str | None = None,
     market: str | None = None,
     pivot_radius: int = DEFAULT_PIVOT_RADIUS,
     bounded_initial_from_date: str = DEFAULT_BOUNDED_INITIAL_FROM_DATE,
@@ -1917,11 +1918,14 @@ def calculate_missing_or_outdated_stock_dow_structures(
     run_id: str | None = None,
     created_at_utc: str | None = None,
 ) -> dict[str, int | str]:
+    if ticker and market:
+        raise ValueError("Use either ticker or market, not both")
     if pivot_radius <= 0:
         raise ValueError("pivot_radius must be positive")
     if recalc_tail_trading_days < 0:
         raise ValueError("recalc_tail_trading_days must be non-negative")
 
+    normalized_ticker = (ticker or "").strip().upper() or None
     normalized_market = (market or "").strip().lower() or None
     summary = _initialize_selection_summary(
         pivot_radius=pivot_radius,
@@ -1942,6 +1946,17 @@ def calculate_missing_or_outdated_stock_dow_structures(
             price_conn, normalized_market
         )
         latest_ohlcv_dates = fetch_latest_ohlcv_dates(price_conn, normalized_market)
+        if normalized_ticker:
+            all_tickers_in_scope = (
+                {normalized_ticker}
+                if normalized_ticker in all_tickers_in_scope
+                else set()
+            )
+            latest_ohlcv_dates = (
+                {normalized_ticker: latest_ohlcv_dates[normalized_ticker]}
+                if normalized_ticker in latest_ohlcv_dates
+                else {}
+            )
         no_valid_close = all_tickers_in_scope - set(latest_ohlcv_dates)
         summary["tickers_checked"] = len(all_tickers_in_scope)
         summary["tickers_no_valid_close_data"] = len(no_valid_close)
