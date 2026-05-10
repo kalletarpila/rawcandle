@@ -2992,6 +2992,8 @@ class RawCandleApp:
         self.excluded_reason_input = None
         self.excluded_category_input = None
         self.excluded_active_checkbox = None
+        self._stock_update_in_progress = False
+        self.update_stock_button = None
 
         # Osakedata-komponentit
         self.ticker_field = ft.TextField(
@@ -3014,6 +3016,14 @@ class RawCandleApp:
             width=220,
             options=[],
             on_change=self._on_update_market_change,
+        )
+        self.update_stock_button = ft.ElevatedButton(
+            "Päivitä osaketiedot",
+            icon=ft.Icons.UPDATE,
+            on_click=self.update_stock_data,
+            bgcolor=ft.Colors.BLUE_700,
+            color=ft.Colors.WHITE,
+            tooltip="Hae puuttuvat päivät kaikille kannassa oleville osakkeille",
         )
         self._update_update_market_dropdown()
         try:
@@ -3381,6 +3391,12 @@ class RawCandleApp:
         import time
         from datetime import datetime, timedelta
 
+        if self._stock_update_in_progress:
+            self.loading_text.value = "⏳ Osaketietojen päivitys on jo käynnissä"
+            self.loading_text.color = ft.Colors.ORANGE_600
+            self.page.update()
+            return
+
         db_path = self.osakedata_db_path
         start_override_raw = (
             self.update_start_input.value.strip()
@@ -3410,6 +3426,11 @@ class RawCandleApp:
             self.loading_text.color = ft.Colors.RED_600
             self.page.update()
             return
+
+        self._stock_update_in_progress = True
+        if self.update_stock_button is not None:
+            self.update_stock_button.disabled = True
+            self.page.update()
 
         try:
             # Hae kaikki osakkeet ja niiden viimeisin sekä ensimmäinen päivämäärä
@@ -3804,6 +3825,11 @@ Virheet: {error_count}"""
         except Exception as ex:
             self.loading_text.value = f"❌ Virhe päivityksessä: {str(ex)}"
             self.loading_text.color = ft.Colors.RED_600
+            self.page.update()
+        finally:
+            self._stock_update_in_progress = False
+            if self.update_stock_button is not None:
+                self.update_stock_button.disabled = False
             self.page.update()
 
     def update_sectors_from_ui(self, e):
@@ -4471,14 +4497,7 @@ Virheet: {error_count}"""
                                                     self.stock_count_text,
                                                     self.update_start_input,
                                                     self.update_market_dropdown,
-                                                    ft.ElevatedButton(
-                                                        "Päivitä osaketiedot",
-                                                        icon=ft.Icons.UPDATE,
-                                                        on_click=self.update_stock_data,
-                                                        bgcolor=ft.Colors.BLUE_700,
-                                                        color=ft.Colors.WHITE,
-                                                        tooltip="Hae puuttuvat päivät kaikille kannassa oleville osakkeille",
-                                                    ),
+                                                    self.update_stock_button,
                                                 ],
                                                 alignment=ft.MainAxisAlignment.CENTER,
                                                 spacing=15,
