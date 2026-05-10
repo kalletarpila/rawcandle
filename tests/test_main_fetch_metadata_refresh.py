@@ -255,6 +255,7 @@ def test_incremental_candlestick_helper_includes_new_patterns_and_no_downtrend_f
         captured["ticker"] = ticker
         captured["start_date"] = start_date
         captured["end_date"] = end_date
+        captured["use_ma_filter"] = use_ma_filter
         captured["analysis_db_path"] = analysis_db_path
         return {}
 
@@ -290,3 +291,4 @@ def test_incremental_candlestick_helper_includes_new_patterns_and_no_downtrend_f
     assert "Descending Triangle" in captured["patterns"]
     assert "Bearish Pennant" in captured["patterns"]
     assert captured["downtrend_filter"] is False
+    assert captured["use_ma_filter"] is False

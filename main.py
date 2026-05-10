@@ -328,7 +328,7 @@ class RawCandleApp:
             progress_callback=None,
             downtrend_filter=False,
             min_decline_percent=3.0,
-            use_ma_filter=True,
+            use_ma_filter=False,
             use_volume_filter=False,
             analysis_db_path=self.analysis_db_path,
         )
@@ -3391,7 +3391,7 @@ class RawCandleApp:
         import time
         from datetime import datetime, timedelta
 
-        if self._stock_update_in_progress:
+        if getattr(self, "_stock_update_in_progress", False):
             self.loading_text.value = "⏳ Osaketietojen päivitys on jo käynnissä"
             self.loading_text.color = ft.Colors.ORANGE_600
             self.page.update()
@@ -3428,7 +3428,7 @@ class RawCandleApp:
             return
 
         self._stock_update_in_progress = True
-        if self.update_stock_button is not None:
+        if getattr(self, "update_stock_button", None) is not None:
             self.update_stock_button.disabled = True
             self.page.update()
 
@@ -3828,7 +3828,7 @@ Virheet: {error_count}"""
             self.page.update()
         finally:
             self._stock_update_in_progress = False
-            if self.update_stock_button is not None:
+            if getattr(self, "update_stock_button", None) is not None:
                 self.update_stock_button.disabled = False
             self.page.update()
 
