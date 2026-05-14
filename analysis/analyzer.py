@@ -487,7 +487,9 @@ class AnalysisEngine:
                         }
                     )
 
-                if self.detect_shooting_star(open_price, high, low, close):
+                if current_in_downtrend and self.detect_shooting_star(
+                    open_price, high, low, close
+                ):
                     strength = self.calculate_signal_strength(
                         "Shooting Star", open_price, high, low, close, volume
                     )
@@ -504,7 +506,9 @@ class AnalysisEngine:
                         }
                     )
 
-                if self.detect_hanging_man(open_price, high, low, close):
+                if current_in_downtrend and self.detect_hanging_man(
+                    open_price, high, low, close
+                ):
                     strength = self.calculate_signal_strength(
                         "Hanging Man", open_price, high, low, close, volume
                     )
@@ -522,7 +526,7 @@ class AnalysisEngine:
                     )
 
                 # Tunnista kahden kynttilän kuviot
-                if i > 0:
+                if current_in_downtrend and i > 0:
                     prev_candle = price_data[i - 1]
                     prev_open = float(prev_candle["open"])
                     prev_high = float(prev_candle["high"])
@@ -580,7 +584,7 @@ class AnalysisEngine:
                             }
                         )
 
-                if i > 1:
+                if current_in_downtrend and i > 1:
                     c1 = price_data[i - 2]
                     c2 = price_data[i - 1]
                     if self.detect_evening_star(

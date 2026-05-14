@@ -557,6 +557,86 @@ class DatabaseManager:
 
             cursor.execute(
                 """
+                CREATE TABLE IF NOT EXISTS dc_ecosystem_membership (
+                    taxonomy_version TEXT NOT NULL,
+                    ticker TEXT NOT NULL,
+                    layer TEXT NOT NULL,
+                    subindustry TEXT NOT NULL,
+                    report_group_status TEXT NOT NULL,
+                    is_primary INTEGER NOT NULL DEFAULT 0,
+                    role_weight REAL NOT NULL DEFAULT 1.0,
+                    notes TEXT NULL,
+                    created_at_utc TEXT NOT NULL,
+                    PRIMARY KEY (taxonomy_version, ticker, layer, subindustry)
+                )
+            """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_dc_membership_layer
+                ON dc_ecosystem_membership (taxonomy_version, layer)
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_dc_membership_subindustry
+                ON dc_ecosystem_membership (taxonomy_version, subindustry)
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_dc_membership_ticker
+                ON dc_ecosystem_membership (taxonomy_version, ticker)
+                """
+            )
+
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS dc_group_index_daily (
+                    index_date TEXT NOT NULL,
+                    taxonomy_version TEXT NOT NULL,
+                    group_type TEXT NOT NULL,
+                    group_name TEXT NOT NULL,
+                    member_count INTEGER NOT NULL,
+                    eligible_count INTEGER NOT NULL,
+                    ma50_eligible_count INTEGER NOT NULL DEFAULT 0,
+                    ma200_eligible_count INTEGER NOT NULL DEFAULT 0,
+                    daily_return_equal REAL NULL,
+                    median_return REAL NULL,
+                    pct_positive REAL NULL,
+                    pct_above_ma50 REAL NULL,
+                    pct_above_ma200 REAL NULL,
+                    index_level_equal REAL NULL,
+                    return_20d REAL NULL,
+                    return_60d REAL NULL,
+                    return_120d REAL NULL,
+                    volatility_20d REAL NULL,
+                    volatility_60d REAL NULL,
+                    relative_strength_spy_60d REAL NULL,
+                    relative_strength_qqq_60d REAL NULL,
+                    data_quality_status TEXT NOT NULL,
+                    calc_version TEXT NOT NULL,
+                    run_id TEXT NOT NULL,
+                    created_at_utc TEXT NOT NULL,
+                    PRIMARY KEY (index_date, taxonomy_version, group_type, group_name)
+                )
+            """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_dc_group_index_group_date
+                ON dc_group_index_daily (taxonomy_version, group_type, group_name, index_date)
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_dc_group_index_date
+                ON dc_group_index_daily (index_date)
+                """
+            )
+
+            cursor.execute(
+                """
                 CREATE TABLE IF NOT EXISTS excluded_tickers (
                     ticker TEXT PRIMARY KEY,
                     reason TEXT,

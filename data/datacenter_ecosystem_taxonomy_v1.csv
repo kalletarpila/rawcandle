@@ -1,0 +1,13 @@
+taxonomy_version,ticker,layer,subindustry,report_group_status,is_primary,role_weight,notes
+DC_TAXONOMY_V1,VRT,Electrical & power systems,"UPS, switchgear, PDU",CORE,1,1.0,
+DC_TAXONOMY_V1,VRT,Cooling,Ilma- ja nestejäähdytys,CORE,0,1.0,
+DC_TAXONOMY_V1,ETN,Electrical & power systems,"UPS, switchgear, PDU",CORE,1,1.0,
+DC_TAXONOMY_V1,NVT,Electrical & power systems,"UPS, switchgear, PDU",CORE,1,1.0,
+DC_TAXONOMY_V1,HUBB,Electrical & power systems,Electrical components & controls,CORE,1,1.0,
+DC_TAXONOMY_V1,POWL,Electrical & power systems,"UPS, switchgear, PDU",CORE,1,1.0,
+DC_TAXONOMY_V1,AEIS,Electrical & power systems,Power conversion & precision power,CORE,1,1.0,
+DC_TAXONOMY_V1,ANET,Verkot,"Kytkimet, NIC, DPU, switch ASIC",CORE,1,1.0,
+DC_TAXONOMY_V1,APH,Verkot,Connectivity / components / EMS,CORE,1,1.0,
+DC_TAXONOMY_V1,EQIX,Kiinteistö,Colocation / datacenter REIT,CORE,1,1.0,
+DC_TAXONOMY_V1,DLR,Kiinteistö,Colocation / datacenter REIT,CORE,1,1.0,
+DC_TAXONOMY_V1,FCX,Upstream materials,Kupari,WATCH_ONLY,1,1.0,

@@ -172,6 +172,7 @@ def _load_divergence_snapshot(
     dict[str, dict[str, float]],
     dict[str, float | None],
     set[str],
+    set[str],
     dict[str, str | None],
     set[str],
     set[str],
@@ -181,12 +182,12 @@ def _load_divergence_snapshot(
     Load divergence strengths and event flags from divergence_data for the candles flow.
     """
     if not ticker or not analysis_db_path:
-        return {}, {}, set(), {}, set(), set(), set()
+        return {}, {}, set(), set(), {}, set(), set(), set()
 
     try:
         db_path = Path(analysis_db_path)
         if not db_path.exists():
-            return {}, {}, set(), {}, set(), set(), set()
+            return {}, {}, set(), set(), {}, set(), set(), set()
 
         with sqlite3.connect(db_path) as conn:
             columns = {
@@ -194,7 +195,7 @@ def _load_divergence_snapshot(
                 for row in conn.execute("PRAGMA table_info(divergence_data)").fetchall()
             }
             if not columns:
-                return {}, {}, set(), {}, set(), set(), set()
+                return {}, {}, set(), set(), {}, set(), set(), set()
 
             def _select_expr(column: str, default: str = "0") -> str:
                 return column if column in columns else default
@@ -239,6 +240,7 @@ def _load_divergence_snapshot(
         divergence_strength_map: dict[str, dict[str, float]] = {}
         rsi_map: dict[str, float | None] = {}
         bullish_event_dates: set[str] = set()
+        bullish_combo_dates: set[str] = set()
         bearish_event_dates: set[str] = set()
         hidden_bullish_event_dates: set[str] = set()
         hidden_bearish_event_dates: set[str] = set()
@@ -265,8 +267,17 @@ def _load_divergence_snapshot(
             }
             rsi_map[date_key] = None if rsi is None else float(rsi)
             pivot2_date_map[date_key] = None if pivot2_date_r3 is None else str(pivot2_date_r3)
+            if float(bullish_strength or 0.0) > 0.0:
+                bullish_combo_dates.add(date_key)
+            if float(bearish_strength or 0.0) > 0.0:
+                bearish_event_dates.add(date_key)
+            if float(hidden_bullish_strength or 0.0) > 0.0:
+                hidden_bullish_event_dates.add(date_key)
+            if float(hidden_bearish_strength or 0.0) > 0.0:
+                hidden_bearish_event_dates.add(date_key)
             if int(is_bullish_divergence_r3 or 0) == 1:
                 bullish_event_dates.add(date_key)
+                bullish_combo_dates.add(date_key)
             if int(is_bearish_divergence_r3 or 0) == 1:
                 bearish_event_dates.add(date_key)
             if int(is_hidden_bullish_divergence_r3 or 0) == 1:
@@ -277,13 +288,14 @@ def _load_divergence_snapshot(
             divergence_strength_map,
             rsi_map,
             bullish_event_dates,
+            bullish_combo_dates,
             pivot2_date_map,
             bearish_event_dates,
             hidden_bullish_event_dates,
             hidden_bearish_event_dates,
         )
     except Exception:
-        return {}, {}, set(), {}, set(), set(), set()
+        return {}, {}, set(), set(), {}, set(), set(), set()
 
 
 def run_candlestick_analysis(
@@ -387,6 +399,7 @@ def run_candlestick_analysis(
         divergence_strength_map,
         divergence_rsi_map,
         divergence_dates,
+        combo_divergence_dates,
         divergence_pivot2_map,
         bearish_divergence_dates,
         hidden_bullish_divergence_dates,
@@ -397,8 +410,8 @@ def run_candlestick_analysis(
     date_to_index = {
         pvm.date().isoformat(): idx for idx, pvm in enumerate(df["pvm"])
     }
-    combo_eligible_dates = set(divergence_dates)
-    for event_date in divergence_dates:
+    combo_eligible_dates = set(combo_divergence_dates)
+    for event_date in combo_divergence_dates:
         pivot2_date = divergence_pivot2_map.get(event_date)
         pivot2_idx = date_to_index.get(pivot2_date) if pivot2_date else None
         if pivot2_idx is None:
@@ -956,33 +969,67 @@ def run_candlestick_analysis(
                 )
 
         # Yhdistelmäkuviot: jos päivä on comboikkunassa ja samalla päivällä on
-        # Bullish Divergence + yksi tai useampi peruskynttilä, lisää jokaisesta
-        # kelvollisesta peruskynttilästä oma combo-rivi säilyttäen alkuperäiset löydöt.
+        # Bullish Divergence + yksi tai useampi peruskynttilä:
+        # - kun Bullish Divergence on pyydetty mukaan, säilytä peruskuviot ja lisää
+        #   kaikki kelvolliset combo-rivit
+        # - muuten korvaa korkein prioriteetti combo-kynttilällä
         if found and current_date in combo_eligible_dates:
-            existing_patterns = {
-                str(entry.get("pattern"))
-                for entry in found
-                if entry.get("pattern") is not None
-            }
-            combo_entries = []
-            for entry in found:
-                base_pattern = entry.get("pattern")
-                if base_pattern not in BASE_CANDLE_ORDER:
-                    continue
-                combo_name = COMBO_PATTERN_MAP.get(base_pattern)
-                if not combo_name or combo_name in existing_patterns:
-                    continue
-                combo_entry = dict(entry)
-                combo_entry["pattern"] = combo_name
-                if "description" in combo_entry and isinstance(
-                    combo_entry["description"], str
+            if "Bullish Divergence" in patterns:
+                existing_patterns = {
+                    str(entry.get("pattern"))
+                    for entry in found
+                    if entry.get("pattern") is not None
+                }
+                combo_entries = []
+                for entry in found:
+                    base_pattern = entry.get("pattern")
+                    if base_pattern not in BASE_CANDLE_ORDER:
+                        continue
+                    combo_name = COMBO_PATTERN_MAP.get(base_pattern)
+                    if not combo_name or combo_name in existing_patterns:
+                        continue
+                    combo_entry = dict(entry)
+                    combo_entry["pattern"] = combo_name
+                    if "description" in combo_entry and isinstance(
+                        combo_entry["description"], str
+                    ):
+                        combo_entry["description"] = combo_entry[
+                            "description"
+                        ].replace(str(base_pattern), combo_name)
+                    combo_entries.append(combo_entry)
+                    existing_patterns.add(combo_name)
+                found.extend(combo_entries)
+            else:
+                combo_index = None
+                combo_name = None
+                base_pattern = None
+                for candidate in BASE_CANDLE_ORDER:
+                    for idx_found, entry in enumerate(found):
+                        if entry.get("pattern") != candidate:
+                            continue
+                        mapped_name = COMBO_PATTERN_MAP.get(candidate)
+                        if mapped_name:
+                            combo_index = idx_found
+                            combo_name = mapped_name
+                            base_pattern = candidate
+                            break
+                    if combo_index is not None:
+                        break
+
+                if (
+                    combo_index is not None
+                    and combo_name is not None
+                    and base_pattern is not None
                 ):
-                    combo_entry["description"] = combo_entry[
-                        "description"
-                    ].replace(str(base_pattern), combo_name)
-                combo_entries.append(combo_entry)
-                existing_patterns.add(combo_name)
-            found.extend(combo_entries)
+                    combo_entry = dict(found[combo_index])
+                    combo_entry["pattern"] = combo_name
+                    if "description" in combo_entry and isinstance(
+                        combo_entry["description"], str
+                    ):
+                        combo_entry["description"] = combo_entry[
+                            "description"
+                        ].replace(str(base_pattern), combo_name)
+                    found[combo_index] = combo_entry
 
         if found:
             # Lisää RSI-arvo jokaiseen löydökseen
