@@ -25,7 +25,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--analysis-db", type=Path, required=True, help="Path to analysis.db")
     parser.add_argument("--taxonomy-csv", type=Path, required=True, help="Path to datacenter taxonomy CSV")
     parser.add_argument("--taxonomy-version", type=str, required=True, help="Taxonomy version to calculate")
-    parser.add_argument("--market", type=str, required=True, help="Market value to filter from osakedata")
+    parser.add_argument("--market", type=str, default=None, help="Optional market value to filter from osakedata")
     parser.add_argument("--start-date", type=str, required=True, help="Write range start date (YYYY-MM-DD)")
     parser.add_argument("--end-date", type=str, required=True, help="Write range end date (YYYY-MM-DD)")
     parser.add_argument("--write-mode", type=str, required=True, help="Write mode (only replace-range is supported)")

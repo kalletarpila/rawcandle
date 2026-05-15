@@ -151,6 +151,7 @@ def test_cli_writes_rows_and_prints_deterministic_summary(tmp_path, capsys):
     assert exit_code == 0
     lines = capsys.readouterr().out.strip().splitlines()
     assert lines[0] == "SUMMARY taxonomy_version=DC_TAXONOMY_V1"
+    assert lines[1] == "SUMMARY market=usa"
     assert lines[4] == "SUMMARY write_mode=replace-range"
     assert lines[-1] == "SUMMARY write_status=OK"
 
@@ -260,3 +261,56 @@ def test_cli_missing_spy_or_qqq_or_taxonomy_prices_does_not_fail(tmp_path):
             """
         ).fetchone()[0]
     assert rows == 0
+
+
+def test_cli_market_is_optional_and_prints_market_all(tmp_path, capsys):
+    ohlcv_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    taxonomy_csv = _write_taxonomy_csv(tmp_path)
+    _create_ohlcv_db(ohlcv_db)
+    _create_analysis_db(analysis_db)
+    rows = []
+    start = date(2024, 1, 1)
+    taxonomy_tickers = ["AAA", "BBB", "CCC", "DDD", "EEE", "FFF", "GGG", "HHH", "III", "JJJ"]
+    for offset in range(70):
+        current_date = (start + timedelta(days=offset)).isoformat()
+        for idx, ticker in enumerate(taxonomy_tickers):
+            market = "usa" if idx % 2 == 0 else "omxh"
+            close = 100.0 + (idx * 10.0) + offset
+            rows.append((ticker, current_date, close, close, close, close, 1000, market))
+        spy_close = 300.0 + (offset * 0.25)
+        qqq_close = 400.0 + (offset * 0.3)
+        rows.append(("SPY", current_date, spy_close, spy_close, spy_close, spy_close, 1000, "usa"))
+        rows.append(("QQQ", current_date, qqq_close, qqq_close, qqq_close, qqq_close, 1000, "nasdaq"))
+        rows.append(("ZZZ", current_date, 500.0, 500.0, 500.0, 500.0, 1000, "omxh"))
+    _insert_ohlcv_rows(ohlcv_db, rows)
+
+    exit_code = run_datacenter_indices_main(
+        [
+            "--ohlcv-db",
+            str(ohlcv_db),
+            "--analysis-db",
+            str(analysis_db),
+            "--taxonomy-csv",
+            str(taxonomy_csv),
+            "--taxonomy-version",
+            "DC_TAXONOMY_V1",
+            "--start-date",
+            "2024-03-01",
+            "--end-date",
+            "2024-03-10",
+            "--write-mode",
+            "replace-range",
+            "--created-at-utc",
+            "2026-05-15T01:02:03Z",
+        ]
+    )
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert lines[1] == "SUMMARY market=ALL"
+    assert lines[-1] == "SUMMARY write_status=OK"
+
+    with sqlite3.connect(analysis_db) as conn:
+        count = conn.execute("SELECT COUNT(*) FROM dc_group_index_daily").fetchone()[0]
+    assert count > 0

@@ -144,6 +144,34 @@ def test_ohlcv_reader_applies_market_filter_and_prior_history_read(tmp_path):
     ]
 
 
+def test_ohlcv_reader_reads_relevant_tickers_from_all_markets_when_market_is_omitted(tmp_path):
+    taxonomy_csv = _write_taxonomy_csv(tmp_path)
+    taxonomy_rows = load_datacenter_taxonomy_for_version(taxonomy_csv, "DC_TAXONOMY_V1")
+    ohlcv_db = tmp_path / "osakedata.db"
+    _create_ohlcv_db(ohlcv_db)
+    _insert_ohlcv_rows(
+        ohlcv_db,
+        [
+            ("AAA", "2024-01-01", 1, 1, 1, 100, 1000, "usa"),
+            ("BBB", "2024-01-01", 1, 1, 1, 101, 1000, "omxh"),
+            ("SPY", "2024-01-01", 1, 1, 1, 300, 1000, "usa"),
+            ("QQQ", "2024-01-01", 1, 1, 1, 400, 1000, "nasdaq"),
+            ("ZZZ", "2024-01-01", 1, 1, 1, 999, 1000, "omxh"),
+        ],
+    )
+
+    result = read_ohlcv_price_rows(
+        ohlcv_db_path=ohlcv_db,
+        taxonomy_rows=taxonomy_rows,
+        market=None,
+        end_date="2024-01-31",
+    )
+
+    assert [row.ticker for row in result.price_rows] == ["AAA", "BBB", "QQQ", "SPY"]
+    assert result.requested_tickers == ("AAA", "BBB", "QQQ", "SPY")
+    assert result.found_tickers == ("AAA", "BBB", "QQQ", "SPY")
+
+
 def test_ohlcv_reader_fails_on_relevant_null_close_before_write(tmp_path):
     taxonomy_csv = _write_taxonomy_csv(tmp_path)
     taxonomy_rows = load_datacenter_taxonomy_for_version(taxonomy_csv, "DC_TAXONOMY_V1")

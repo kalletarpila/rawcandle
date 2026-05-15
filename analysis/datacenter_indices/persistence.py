@@ -125,7 +125,7 @@ def read_ohlcv_price_rows(
     *,
     ohlcv_db_path: str | Path,
     taxonomy_rows: Sequence[DatacenterTaxonomyRow],
-    market: str,
+    market: str | None,
     end_date: str,
     spy_ticker: str = "SPY",
     qqq_ticker: str = "QQQ",
@@ -141,17 +141,29 @@ def read_ohlcv_price_rows(
         return DatacenterOhlcvReadResult(price_rows=[], requested_tickers=(), found_tickers=())
 
     placeholders = ", ".join("?" for _ in requested_tickers)
-    params = [market, normalized_end_date, *requested_tickers]
-    query = f"""
-        SELECT TRIM(osake) AS osake,
-               pvm,
-               close
-        FROM osakedata
-        WHERE market = ?
-          AND pvm <= ?
-          AND UPPER(TRIM(osake)) IN ({placeholders})
-        ORDER BY UPPER(TRIM(osake)) ASC, pvm ASC
-    """
+    if market is not None:
+        params = [market, normalized_end_date, *requested_tickers]
+        query = f"""
+            SELECT TRIM(osake) AS osake,
+                   pvm,
+                   close
+            FROM osakedata
+            WHERE market = ?
+              AND pvm <= ?
+              AND UPPER(TRIM(osake)) IN ({placeholders})
+            ORDER BY UPPER(TRIM(osake)) ASC, pvm ASC
+        """
+    else:
+        params = [normalized_end_date, *requested_tickers]
+        query = f"""
+            SELECT TRIM(osake) AS osake,
+                   pvm,
+                   close
+            FROM osakedata
+            WHERE pvm <= ?
+              AND UPPER(TRIM(osake)) IN ({placeholders})
+            ORDER BY UPPER(TRIM(osake)) ASC, pvm ASC
+        """
 
     price_rows: list[DatacenterPriceRow] = []
     found_tickers: set[str] = set()
@@ -313,7 +325,7 @@ def run_datacenter_indices(
     analysis_db_path: str | Path,
     taxonomy_csv: str | Path,
     taxonomy_version: str,
-    market: str,
+    market: str | None = None,
     start_date: str,
     end_date: str,
     write_mode: str,
@@ -381,7 +393,7 @@ def run_datacenter_indices(
     distinct_groups = {(row.group_type, row.group_name) for row in rows_in_write_range}
     summary = {
         "taxonomy_version": taxonomy_version,
-        "market": market,
+        "market": market if market is not None else "ALL",
         "start_date": normalized_start_date,
         "end_date": normalized_end_date,
         "write_mode": write_mode,
