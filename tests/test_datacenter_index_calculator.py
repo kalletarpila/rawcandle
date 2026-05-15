@@ -49,6 +49,18 @@ def _find_row(rows, index_date: str, group_type: str, group_name: str):
     )
 
 
+def _build_price_series(
+    ticker: str,
+    closes: list[float],
+    *,
+    start: date = date(2024, 1, 1),
+) -> list[DatacenterPriceRow]:
+    return [
+        _price_row(ticker, (start + timedelta(days=offset)).isoformat(), close)
+        for offset, close in enumerate(closes)
+    ]
+
+
 def test_calculator_rejects_empty_taxonomy_rows():
     with pytest.raises(ValueError, match="taxonomy_version"):
         calculate_datacenter_group_indices(
@@ -474,3 +486,244 @@ def test_output_sorting_is_deterministic():
         ("2024-01-02", "subindustry", "A"),
         ("2024-01-02", "subindustry", "B"),
     ]
+
+
+def test_benchmark_tickers_are_used_but_not_included_in_membership():
+    taxonomy_rows = [_taxonomy_row("AAA")]
+    aaa_closes = [100.0 + float(idx) for idx in range(62)]
+    spy_closes = [200.0 + float(idx) for idx in range(62)]
+    qqq_closes = [300.0 + float(idx) for idx in range(62)]
+    rows = calculate_datacenter_group_indices(
+        taxonomy_rows=taxonomy_rows,
+        price_rows=[
+            *_build_price_series("AAA", aaa_closes),
+            *_build_price_series("SPY", spy_closes),
+            *_build_price_series("QQQ", qqq_closes),
+        ],
+        taxonomy_version="DC_TAXONOMY_V1",
+        min_eligible_count_ecosystem=1,
+        min_eligible_count_layer=1,
+        min_eligible_count_subindustry=1,
+    )
+
+    row = _find_row(rows, "2024-03-02", "ecosystem", "DC_ECOSYSTEM_TOTAL")
+    assert row.member_count == 1
+    assert row.relative_strength_spy_60d is not None
+    assert row.relative_strength_qqq_60d is not None
+
+
+def test_relative_strength_is_none_when_group_return_60d_is_none():
+    rows = calculate_datacenter_group_indices(
+        taxonomy_rows=[_taxonomy_row("AAA")],
+        price_rows=[
+            *_build_price_series("AAA", [100.0, 101.0, 102.0]),
+            *_build_price_series("SPY", [200.0 + float(idx) for idx in range(62)]),
+            *_build_price_series("QQQ", [300.0 + float(idx) for idx in range(62)]),
+        ],
+        taxonomy_version="DC_TAXONOMY_V1",
+        min_eligible_count_ecosystem=1,
+        min_eligible_count_layer=1,
+        min_eligible_count_subindustry=1,
+    )
+
+    row = _find_row(rows, "2024-01-03", "ecosystem", "DC_ECOSYSTEM_TOTAL")
+    assert row.return_60d is None
+    assert row.relative_strength_spy_60d is None
+    assert row.relative_strength_qqq_60d is None
+
+
+def test_relative_strength_is_none_when_benchmark_history_is_insufficient():
+    rows = calculate_datacenter_group_indices(
+        taxonomy_rows=[_taxonomy_row("AAA")],
+        price_rows=[
+            *_build_price_series("AAA", [100.0 + float(idx) for idx in range(62)]),
+            *_build_price_series("SPY", [200.0 + float(idx) for idx in range(60)]),
+            *_build_price_series("QQQ", [300.0 + float(idx) for idx in range(60)]),
+        ],
+        taxonomy_version="DC_TAXONOMY_V1",
+        min_eligible_count_ecosystem=1,
+        min_eligible_count_layer=1,
+        min_eligible_count_subindustry=1,
+    )
+
+    row = _find_row(rows, "2024-03-02", "ecosystem", "DC_ECOSYSTEM_TOTAL")
+    assert row.return_60d is not None
+    assert row.relative_strength_spy_60d is None
+    assert row.relative_strength_qqq_60d is None
+
+
+def test_relative_strength_is_calculated_correctly_for_spy_and_qqq():
+    rows = calculate_datacenter_group_indices(
+        taxonomy_rows=[_taxonomy_row("AAA")],
+        price_rows=[
+            *_build_price_series("AAA", [100.0 + 2.0 * idx for idx in range(62)]),
+            *_build_price_series("SPY", [200.0 + 1.0 * idx for idx in range(62)]),
+            *_build_price_series("QQQ", [300.0 + 0.5 * idx for idx in range(62)]),
+        ],
+        taxonomy_version="DC_TAXONOMY_V1",
+        min_eligible_count_ecosystem=1,
+        min_eligible_count_layer=1,
+        min_eligible_count_subindustry=1,
+    )
+
+    row = _find_row(rows, "2024-03-02", "ecosystem", "DC_ECOSYSTEM_TOTAL")
+    expected_group_return_60d = (222.0 / 102.0) - 1.0
+    expected_spy_return_60d = (261.0 / 201.0) - 1.0
+    expected_qqq_return_60d = (330.5 / 300.5) - 1.0
+    assert row.return_60d == pytest.approx(expected_group_return_60d)
+    assert row.relative_strength_spy_60d == pytest.approx(
+        expected_group_return_60d - expected_spy_return_60d
+    )
+    assert row.relative_strength_qqq_60d == pytest.approx(
+        expected_group_return_60d - expected_qqq_return_60d
+    )
+
+
+def test_benchmark_history_before_start_date_is_used_for_relative_strength():
+    start = date(2024, 1, 1)
+    aaa_prices = []
+    spy_prices = []
+    qqq_prices = []
+    for offset in range(80):
+        current_date = (start + timedelta(days=offset)).isoformat()
+        if offset >= 10:
+            aaa_prices.append(_price_row("AAA", current_date, 100.0 + float(offset)))
+        spy_prices.append(_price_row("SPY", current_date, 200.0 + float(offset)))
+        qqq_prices.append(_price_row("QQQ", current_date, 300.0 + float(offset)))
+
+    rows = calculate_datacenter_group_indices(
+        taxonomy_rows=[_taxonomy_row("AAA")],
+        price_rows=[*aaa_prices, *spy_prices, *qqq_prices],
+        taxonomy_version="DC_TAXONOMY_V1",
+        start_date="2024-01-11",
+        end_date="2024-03-20",
+        min_eligible_count_ecosystem=1,
+        min_eligible_count_layer=1,
+        min_eligible_count_subindustry=1,
+    )
+
+    row = _find_row(rows, "2024-03-20", "ecosystem", "DC_ECOSYSTEM_TOTAL")
+    assert row.return_60d is not None
+    assert row.relative_strength_spy_60d is not None
+    assert row.relative_strength_qqq_60d is not None
+
+
+def test_missing_exact_benchmark_date_results_in_none_without_forward_fill():
+    spy_rows = _build_price_series("SPY", [200.0 + float(idx) for idx in range(62)])
+    qqq_rows = _build_price_series("QQQ", [300.0 + float(idx) for idx in range(62)])
+    spy_rows = [row for row in spy_rows if row.date != "2024-03-02"]
+    qqq_rows = [row for row in qqq_rows if row.date != "2024-03-02"]
+    rows = calculate_datacenter_group_indices(
+        taxonomy_rows=[_taxonomy_row("AAA")],
+        price_rows=[
+            *_build_price_series("AAA", [100.0 + float(idx) for idx in range(62)]),
+            *spy_rows,
+            *qqq_rows,
+        ],
+        taxonomy_version="DC_TAXONOMY_V1",
+        min_eligible_count_ecosystem=1,
+        min_eligible_count_layer=1,
+        min_eligible_count_subindustry=1,
+    )
+
+    row = _find_row(rows, "2024-03-02", "ecosystem", "DC_ECOSYSTEM_TOTAL")
+    assert row.return_60d is not None
+    assert row.relative_strength_spy_60d is None
+    assert row.relative_strength_qqq_60d is None
+
+
+def test_duplicate_benchmark_rows_are_rejected():
+    with pytest.raises(ValueError, match="Duplicate price row"):
+        calculate_datacenter_group_indices(
+            taxonomy_rows=[_taxonomy_row("AAA")],
+            price_rows=[
+                _price_row("AAA", "2024-01-01", 100.0),
+                _price_row("SPY", "2024-01-01", 200.0),
+                _price_row("SPY", "2024-01-01", 201.0),
+            ],
+            taxonomy_version="DC_TAXONOMY_V1",
+        )
+
+    with pytest.raises(ValueError, match="Duplicate price row"):
+        calculate_datacenter_group_indices(
+            taxonomy_rows=[_taxonomy_row("AAA")],
+            price_rows=[
+                _price_row("AAA", "2024-01-01", 100.0),
+                _price_row("QQQ", "2024-01-01", 300.0),
+                _price_row("QQQ", "2024-01-01", 301.0),
+            ],
+            taxonomy_version="DC_TAXONOMY_V1",
+        )
+
+
+def test_non_positive_benchmark_close_is_rejected():
+    with pytest.raises(ValueError, match="greater than 0"):
+        calculate_datacenter_group_indices(
+            taxonomy_rows=[_taxonomy_row("AAA")],
+            price_rows=[
+                _price_row("AAA", "2024-01-01", 100.0),
+                _price_row("SPY", "2024-01-01", 0.0),
+            ],
+            taxonomy_version="DC_TAXONOMY_V1",
+        )
+
+    with pytest.raises(ValueError, match="greater than 0"):
+        calculate_datacenter_group_indices(
+            taxonomy_rows=[_taxonomy_row("AAA")],
+            price_rows=[
+                _price_row("AAA", "2024-01-01", 100.0),
+                _price_row("QQQ", "2024-01-01", -1.0),
+            ],
+            taxonomy_version="DC_TAXONOMY_V1",
+        )
+
+
+def test_irrelevant_non_taxonomy_non_benchmark_rows_are_ignored():
+    rows = calculate_datacenter_group_indices(
+        taxonomy_rows=[_taxonomy_row("AAA")],
+        price_rows=[
+            _price_row("AAA", "2024-01-01", 100.0),
+            _price_row("AAA", "2024-01-02", 110.0),
+            _price_row("XYZ", "2024-01-01", 999.0),
+            _price_row("XYZ", "2024-01-02", 0.0),
+        ],
+        taxonomy_version="DC_TAXONOMY_V1",
+        min_eligible_count_ecosystem=1,
+        min_eligible_count_layer=1,
+        min_eligible_count_subindustry=1,
+    )
+
+    row = _find_row(rows, "2024-01-02", "ecosystem", "DC_ECOSYSTEM_TOTAL")
+    assert row.member_count == 1
+    assert row.daily_return_equal == pytest.approx(0.10)
+
+
+def test_spy_ticker_overlapping_taxonomy_raises_value_error():
+    with pytest.raises(ValueError, match="spy_ticker overlaps taxonomy ticker set"):
+        calculate_datacenter_group_indices(
+            taxonomy_rows=[_taxonomy_row("AAA")],
+            price_rows=[_price_row("AAA", "2024-01-01", 100.0)],
+            taxonomy_version="DC_TAXONOMY_V1",
+            spy_ticker=" aaa ",
+        )
+
+
+def test_qqq_ticker_overlapping_taxonomy_raises_value_error():
+    with pytest.raises(ValueError, match="qqq_ticker overlaps taxonomy ticker set"):
+        calculate_datacenter_group_indices(
+            taxonomy_rows=[_taxonomy_row("AAA")],
+            price_rows=[_price_row("AAA", "2024-01-01", 100.0)],
+            taxonomy_version="DC_TAXONOMY_V1",
+            qqq_ticker=" aaa ",
+        )
+
+
+def test_identical_benchmark_tickers_raise_value_error():
+    with pytest.raises(ValueError, match="must not be the same"):
+        calculate_datacenter_group_indices(
+            taxonomy_rows=[_taxonomy_row("AAA")],
+            price_rows=[_price_row("AAA", "2024-01-01", 100.0)],
+            taxonomy_version="DC_TAXONOMY_V1",
+            spy_ticker=" spy ",
+            qqq_ticker="SPY",
+        )
