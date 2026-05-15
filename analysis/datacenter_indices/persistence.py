@@ -16,6 +16,7 @@ from .taxonomy import DatacenterTaxonomyRow, load_datacenter_taxonomy_csv
 DATACENTER_INDEX_SUMMARY_ORDER = [
     "taxonomy_version",
     "market",
+    "index_base_date",
     "start_date",
     "end_date",
     "write_mode",
@@ -95,15 +96,17 @@ def resolve_created_at_utc(created_at_utc: str | None = None) -> str:
 
 def build_datacenter_run_id(
     taxonomy_version: str,
+    index_base_date: str,
     start_date: str,
     end_date: str,
     run_id: str | None = None,
 ) -> str:
     if run_id is not None:
         return run_id
+    compact_base = index_base_date.replace("-", "")
     compact_start = start_date.replace("-", "")
     compact_end = end_date.replace("-", "")
-    value = f"DC_INDEX_{taxonomy_version}_{compact_start}_{compact_end}"
+    value = f"DC_INDEX_{taxonomy_version}_BASE{compact_base}_{compact_start}_{compact_end}"
     return value.replace(" ", "_").replace("-", "")
 
 
@@ -326,6 +329,7 @@ def run_datacenter_indices(
     taxonomy_csv: str | Path,
     taxonomy_version: str,
     market: str | None = None,
+    index_base_date: str = "2020-01-01",
     start_date: str,
     end_date: str,
     write_mode: str,
@@ -334,8 +338,13 @@ def run_datacenter_indices(
     run_id: str | None = None,
     created_at_utc: str | None = None,
 ) -> dict[str, int | str]:
+    normalized_index_base_date = _parse_iso_date(index_base_date, "index_base_date")
     normalized_start_date = _parse_iso_date(start_date, "start_date")
     normalized_end_date = _parse_iso_date(end_date, "end_date")
+    if normalized_start_date < normalized_index_base_date:
+        raise ValueError(
+            f"Invalid date range: start_date {normalized_start_date} is earlier than index_base_date {normalized_index_base_date}"
+        )
     if normalized_start_date > normalized_end_date:
         raise ValueError(
             f"Invalid date range: start_date {normalized_start_date} is after end_date {normalized_end_date}"
@@ -347,6 +356,7 @@ def run_datacenter_indices(
     normalized_qqq_ticker = _normalize_ticker(qqq_ticker)
     resolved_run_id = build_datacenter_run_id(
         taxonomy_version=taxonomy_version,
+        index_base_date=normalized_index_base_date,
         start_date=normalized_start_date,
         end_date=normalized_end_date,
         run_id=run_id,
@@ -369,7 +379,7 @@ def run_datacenter_indices(
         taxonomy_rows=taxonomy_rows,
         price_rows=ohlcv_result.price_rows,
         taxonomy_version=taxonomy_version,
-        start_date=None,
+        start_date=normalized_index_base_date,
         end_date=normalized_end_date,
         spy_ticker=normalized_spy_ticker,
         qqq_ticker=normalized_qqq_ticker,
@@ -394,6 +404,7 @@ def run_datacenter_indices(
     summary = {
         "taxonomy_version": taxonomy_version,
         "market": market if market is not None else "ALL",
+        "index_base_date": normalized_index_base_date,
         "start_date": normalized_start_date,
         "end_date": normalized_end_date,
         "write_mode": write_mode,

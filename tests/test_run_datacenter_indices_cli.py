@@ -152,7 +152,9 @@ def test_cli_writes_rows_and_prints_deterministic_summary(tmp_path, capsys):
     lines = capsys.readouterr().out.strip().splitlines()
     assert lines[0] == "SUMMARY taxonomy_version=DC_TAXONOMY_V1"
     assert lines[1] == "SUMMARY market=usa"
-    assert lines[4] == "SUMMARY write_mode=replace-range"
+    assert lines[2] == "SUMMARY index_base_date=2020-01-01"
+    assert lines[5] == "SUMMARY write_mode=replace-range"
+    assert "SUMMARY run_id=DC_INDEX_DC_TAXONOMY_V1_BASE20200101_20240301_20240310" in lines
     assert lines[-1] == "SUMMARY write_status=OK"
 
     with sqlite3.connect(analysis_db) as conn:
@@ -215,6 +217,65 @@ def test_cli_replace_range_is_idempotent_and_respects_explicit_run_id(tmp_path):
         }
     assert total_rows == distinct_rows
     assert run_ids == {"explicit_run"}
+
+
+def test_cli_accepts_explicit_index_base_date_and_validates_start_date(tmp_path, capsys):
+    ohlcv_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    taxonomy_csv = _write_taxonomy_csv(tmp_path)
+    _create_ohlcv_db(ohlcv_db)
+    _create_analysis_db(analysis_db)
+    _insert_ohlcv_rows(ohlcv_db, _build_cli_dataset_rows())
+
+    ok_exit_code = run_datacenter_indices_main(
+        [
+            "--ohlcv-db",
+            str(ohlcv_db),
+            "--analysis-db",
+            str(analysis_db),
+            "--taxonomy-csv",
+            str(taxonomy_csv),
+            "--taxonomy-version",
+            "DC_TAXONOMY_V1",
+            "--index-base-date",
+            "2020-01-01",
+            "--start-date",
+            "2024-03-01",
+            "--end-date",
+            "2024-03-10",
+            "--write-mode",
+            "replace-range",
+            "--created-at-utc",
+            "2026-05-15T01:02:03Z",
+        ]
+    )
+    assert ok_exit_code == 0
+    assert "SUMMARY index_base_date=2020-01-01" in capsys.readouterr().out
+
+    bad_exit_code = run_datacenter_indices_main(
+        [
+            "--ohlcv-db",
+            str(ohlcv_db),
+            "--analysis-db",
+            str(analysis_db),
+            "--taxonomy-csv",
+            str(taxonomy_csv),
+            "--taxonomy-version",
+            "DC_TAXONOMY_V1",
+            "--index-base-date",
+            "2024-03-05",
+            "--start-date",
+            "2024-03-01",
+            "--end-date",
+            "2024-03-10",
+            "--write-mode",
+            "replace-range",
+            "--created-at-utc",
+            "2026-05-15T01:02:03Z",
+        ]
+    )
+    assert bad_exit_code == 1
+    assert "start_date 2024-03-01 is earlier than index_base_date 2024-03-05" in capsys.readouterr().err
 
 
 def test_cli_missing_spy_or_qqq_or_taxonomy_prices_does_not_fail(tmp_path):
@@ -309,8 +370,67 @@ def test_cli_market_is_optional_and_prints_market_all(tmp_path, capsys):
     assert exit_code == 0
     lines = capsys.readouterr().out.strip().splitlines()
     assert lines[1] == "SUMMARY market=ALL"
+    assert lines[2] == "SUMMARY index_base_date=2020-01-01"
     assert lines[-1] == "SUMMARY write_status=OK"
 
     with sqlite3.connect(analysis_db) as conn:
         count = conn.execute("SELECT COUNT(*) FROM dc_group_index_daily").fetchone()[0]
     assert count > 0
+
+
+def test_cli_anchors_index_level_at_base_date_even_with_prior_price_history(tmp_path):
+    ohlcv_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    taxonomy_csv = _write_taxonomy_csv(tmp_path)
+    _create_ohlcv_db(ohlcv_db)
+    _create_analysis_db(analysis_db)
+
+    rows = []
+    tickers = ["AAA", "BBB", "CCC", "DDD", "EEE", "FFF", "GGG", "HHH", "III", "JJJ"]
+    for index, ticker in enumerate(tickers):
+        rows.append((ticker, "2019-12-31", 1, 1, 1, 100.0 + index, 1000, "usa"))
+        rows.append((ticker, "2020-01-01", 1, 1, 1, 101.0 + index, 1000, "usa"))
+        rows.append((ticker, "2020-01-02", 1, 1, 1, 102.0 + index, 1000, "usa"))
+    rows.append(("SPY", "2019-12-31", 1, 1, 1, 300.0, 1000, "usa"))
+    rows.append(("SPY", "2020-01-01", 1, 1, 1, 301.0, 1000, "usa"))
+    rows.append(("SPY", "2020-01-02", 1, 1, 1, 302.0, 1000, "usa"))
+    rows.append(("QQQ", "2019-12-31", 1, 1, 1, 400.0, 1000, "usa"))
+    rows.append(("QQQ", "2020-01-01", 1, 1, 1, 401.0, 1000, "usa"))
+    rows.append(("QQQ", "2020-01-02", 1, 1, 1, 402.0, 1000, "usa"))
+    _insert_ohlcv_rows(ohlcv_db, rows)
+
+    exit_code = run_datacenter_indices_main(
+        [
+            "--ohlcv-db",
+            str(ohlcv_db),
+            "--analysis-db",
+            str(analysis_db),
+            "--taxonomy-csv",
+            str(taxonomy_csv),
+            "--taxonomy-version",
+            "DC_TAXONOMY_V1",
+            "--start-date",
+            "2020-01-01",
+            "--end-date",
+            "2020-01-02",
+            "--write-mode",
+            "replace-range",
+            "--created-at-utc",
+            "2026-05-15T01:02:03Z",
+        ]
+    )
+
+    assert exit_code == 0
+    with sqlite3.connect(analysis_db) as conn:
+        row = conn.execute(
+            """
+            SELECT index_level_equal
+            FROM dc_group_index_daily
+            WHERE taxonomy_version = 'DC_TAXONOMY_V1'
+              AND group_type = 'ecosystem'
+              AND group_name = 'DC_ECOSYSTEM_TOTAL'
+              AND index_date = '2020-01-01'
+            """
+        ).fetchone()
+    assert row is not None
+    assert row[0] == 100.0

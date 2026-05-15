@@ -7,11 +7,13 @@ import pytest
 
 from analysis.database_manager import DatabaseManager
 from analysis.datacenter_indices.calculator import DatacenterGroupIndexRow
+from analysis.datacenter_indices import persistence as persistence_module
 from analysis.datacenter_indices.persistence import (
     build_datacenter_run_id,
     load_datacenter_taxonomy_for_version,
     read_ohlcv_price_rows,
     resolve_created_at_utc,
+    run_datacenter_indices,
     write_datacenter_group_index_rows,
 )
 
@@ -307,9 +309,121 @@ def test_writer_inserts_all_required_columns_and_respects_explicit_created_at(tm
 
 def test_run_id_and_created_at_helpers_are_deterministic_and_validated():
     assert (
-        build_datacenter_run_id("DC_TAXONOMY_V1", "2024-01-01", "2026-05-13")
-        == "DC_INDEX_DC_TAXONOMY_V1_20240101_20260513"
+        build_datacenter_run_id("DC_TAXONOMY_V1", "2020-01-01", "2024-01-01", "2026-05-13")
+        == "DC_INDEX_DC_TAXONOMY_V1_BASE20200101_20240101_20260513"
     )
     assert resolve_created_at_utc("2026-05-15T01:02:03Z") == "2026-05-15T01:02:03Z"
     with pytest.raises(ValueError, match="created_at_utc"):
         resolve_created_at_utc("2026-05-15")
+
+
+def test_run_datacenter_indices_passes_index_base_date_to_calculator_and_reads_prior_history(
+    tmp_path,
+    monkeypatch,
+):
+    taxonomy_csv = _write_taxonomy_csv(tmp_path)
+    ohlcv_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _create_ohlcv_db(ohlcv_db)
+    DatabaseManager(str(analysis_db)).close()
+    _insert_ohlcv_rows(
+        ohlcv_db,
+        [
+            ("AAA", "2019-12-31", 1, 1, 1, 99, 1000, "usa"),
+            ("AAA", "2020-01-01", 1, 1, 1, 100, 1000, "usa"),
+            ("AAA", "2020-01-02", 1, 1, 1, 101, 1000, "usa"),
+            ("BBB", "2019-12-31", 1, 1, 1, 199, 1000, "usa"),
+            ("BBB", "2020-01-01", 1, 1, 1, 200, 1000, "usa"),
+            ("BBB", "2020-01-02", 1, 1, 1, 202, 1000, "usa"),
+            ("SPY", "2019-12-31", 1, 1, 1, 299, 1000, "usa"),
+            ("SPY", "2020-01-01", 1, 1, 1, 300, 1000, "usa"),
+            ("SPY", "2020-01-02", 1, 1, 1, 301, 1000, "usa"),
+            ("QQQ", "2019-12-31", 1, 1, 1, 399, 1000, "usa"),
+            ("QQQ", "2020-01-01", 1, 1, 1, 400, 1000, "usa"),
+            ("QQQ", "2020-01-02", 1, 1, 1, 401, 1000, "usa"),
+        ],
+    )
+
+    captured: dict[str, object] = {}
+
+    def fake_calculate_datacenter_group_indices(**kwargs):
+        captured["start_date"] = kwargs["start_date"]
+        captured["end_date"] = kwargs["end_date"]
+        captured["price_dates"] = sorted({row.date for row in kwargs["price_rows"]})
+        return [
+            DatacenterGroupIndexRow(
+                index_date="2020-01-01",
+                taxonomy_version="DC_TAXONOMY_V1",
+                group_type="ecosystem",
+                group_name="DC_ECOSYSTEM_TOTAL",
+                member_count=2,
+                eligible_count=2,
+                ma50_eligible_count=0,
+                ma200_eligible_count=0,
+                daily_return_equal=0.01,
+                median_return=0.01,
+                pct_positive=50.0,
+                pct_above_ma50=None,
+                pct_above_ma200=None,
+                index_level_equal=100.0,
+                return_20d=None,
+                return_60d=None,
+                return_120d=None,
+                volatility_20d=None,
+                volatility_60d=None,
+                relative_strength_spy_60d=None,
+                relative_strength_qqq_60d=None,
+                data_quality_status="OK",
+                calc_version="DC_INDEX_CALC_V1",
+            ),
+            DatacenterGroupIndexRow(
+                index_date="2020-01-02",
+                taxonomy_version="DC_TAXONOMY_V1",
+                group_type="ecosystem",
+                group_name="DC_ECOSYSTEM_TOTAL",
+                member_count=2,
+                eligible_count=2,
+                ma50_eligible_count=0,
+                ma200_eligible_count=0,
+                daily_return_equal=0.01,
+                median_return=0.01,
+                pct_positive=50.0,
+                pct_above_ma50=None,
+                pct_above_ma200=None,
+                index_level_equal=101.0,
+                return_20d=None,
+                return_60d=None,
+                return_120d=None,
+                volatility_20d=None,
+                volatility_60d=None,
+                relative_strength_spy_60d=None,
+                relative_strength_qqq_60d=None,
+                data_quality_status="OK",
+                calc_version="DC_INDEX_CALC_V1",
+            ),
+        ]
+
+    monkeypatch.setattr(
+        persistence_module,
+        "calculate_datacenter_group_indices",
+        fake_calculate_datacenter_group_indices,
+    )
+
+    summary = run_datacenter_indices(
+        ohlcv_db_path=ohlcv_db,
+        analysis_db_path=analysis_db,
+        taxonomy_csv=taxonomy_csv,
+        taxonomy_version="DC_TAXONOMY_V1",
+        market="usa",
+        index_base_date="2020-01-01",
+        start_date="2020-01-02",
+        end_date="2020-01-02",
+        write_mode="replace-range",
+        created_at_utc="2026-05-15T01:02:03Z",
+    )
+
+    assert captured["start_date"] == "2020-01-01"
+    assert captured["end_date"] == "2020-01-02"
+    assert captured["price_dates"] == ["2019-12-31", "2020-01-01", "2020-01-02"]
+    assert summary["index_base_date"] == "2020-01-01"
+    assert summary["rows_in_write_range"] == 1
