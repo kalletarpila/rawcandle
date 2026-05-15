@@ -7,6 +7,7 @@ from analysis.database_manager import DatabaseManager
 from analysis.datacenter_indices.reporting import (
     build_csv_report,
     build_markdown_report,
+    load_datacenter_ticker_performance_rows,
     load_datacenter_report_rows,
 )
 
@@ -27,6 +28,55 @@ def _insert_rows(path: Path, rows: list[tuple]) -> None:
                 volatility_20d, volatility_60d, relative_strength_spy_60d, relative_strength_qqq_60d,
                 data_quality_status, calc_version, run_id, created_at_utc
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+        conn.commit()
+
+
+def _write_taxonomy_csv(tmp_path: Path) -> Path:
+    path = tmp_path / "taxonomy.csv"
+    path.write_text(
+        "\n".join(
+            [
+                "taxonomy_version,ticker,layer,subindustry,report_group_status,is_primary,role_weight,notes",
+                "DC_TAXONOMY_FULL_V1,AAA,LayerA,SubA,CORE,1,1.0,",
+                "DC_TAXONOMY_FULL_V1,AAA,LayerB,SubB,CORE,0,1.0,",
+                "DC_TAXONOMY_FULL_V1,BBB,LayerA,SubA,CORE,1,1.0,",
+                "DC_TAXONOMY_FULL_V1,CCC,LayerC,SubC,CORE,1,1.0,",
+                "DC_TAXONOMY_FULL_V1,DDD,LayerD,SubD,CORE,1,1.0,",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _create_ohlcv_db(path: Path) -> None:
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE osakedata (
+                osake TEXT,
+                pvm TEXT,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                volume INTEGER,
+                market TEXT
+            )
+            """
+        )
+        conn.commit()
+
+
+def _insert_ohlcv_rows(path: Path, rows: list[tuple]) -> None:
+    with sqlite3.connect(path) as conn:
+        conn.executemany(
+            """
+            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )
@@ -158,6 +208,7 @@ def test_markdown_report_contains_expected_headings_and_all_ok_message(tmp_path)
     assert "## 1. Metadata" in markdown
     assert "## 11. Data quality summary" in markdown
     assert "All groups have data_quality_status=OK." in markdown
+    assert "## 12. Ticker performance by subindustry" not in markdown
 
 
 def test_csv_report_contains_expected_section_names_and_none_rendering(tmp_path):
@@ -196,3 +247,149 @@ def test_report_rankings_and_top_n_are_deterministic(tmp_path):
     assert "best_subindustry_by_return_60d | UPS" in markdown
     assert "worst_subindustry_by_return_60d | Cooling infra" in markdown
     assert markdown.count("| UPS | 10 | 10 | 123.45 | 5.00% | 40.00% | 20.00% | 70.00% | 55.00% | 20.00% | 2.00% | OK |") >= 1
+
+
+def test_ticker_performance_sections_and_rankings_are_correct(tmp_path):
+    analysis_db = _build_report_fixture_db(tmp_path)
+    taxonomy_csv = _write_taxonomy_csv(tmp_path)
+    ohlcv_db = tmp_path / "osakedata.db"
+    _create_ohlcv_db(ohlcv_db)
+    rows = []
+    for day in range(131):
+        date_value = f"2026-01-{day + 1:02d}" if day < 31 else None
+        if date_value is None:
+            from datetime import date, timedelta
+            date_value = (date(2026, 1, 1) + timedelta(days=day)).isoformat()
+        rows.append(("AAA", date_value, 1, 1, 1, 100 + day, 1000, "usa"))
+        rows.append(("BBB", date_value, 1, 1, 1, 200 + (day * 2), 1000, "omxh"))
+        if day < 40:
+            rows.append(("CCC", date_value, 1, 1, 1, 300 + day, 1000, "usa"))
+        if day >= 91:
+            rows.append(("DDD", date_value, 1, 1, 1, 400 + day, 1000, "usa"))
+    _insert_ohlcv_rows(ohlcv_db, rows)
+
+    report_rows = load_datacenter_report_rows(analysis_db, "DC_TAXONOMY_FULL_V1", "2026-05-11")
+    ticker_rows = load_datacenter_ticker_performance_rows(
+        ohlcv_db_path=ohlcv_db,
+        taxonomy_csv=taxonomy_csv,
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        as_of_date="2026-05-11",
+        market=None,
+    )
+    markdown = build_markdown_report(
+        report_rows,
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        as_of_date="2026-05-11",
+        top_n=2,
+        ticker_performance_rows=ticker_rows,
+    )
+    csv_report = build_csv_report(
+        report_rows,
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        as_of_date="2026-05-11",
+        top_n=2,
+        ticker_performance_rows=ticker_rows,
+    )
+
+    assert "## 12. Ticker performance by subindustry" in markdown
+    assert "## 13. Top tickers by 60d return" in markdown
+    assert "## 14. Bottom tickers by 60d return" in markdown
+    assert "### SubA" in markdown
+    assert csv_report.count("ticker_performance_by_subindustry;SubA;LayerA;AAA;1;") == 1
+    assert csv_report.count("ticker_performance_by_subindustry;SubB;LayerB;AAA;0;") == 1
+    assert "ticker_performance_by_subindustry;SubA;LayerA;AAA;1;" in csv_report
+    assert "ticker_performance_by_subindustry;SubB;LayerB;AAA;0;" in csv_report
+    assert "top_ticker_return_60d;AAA;LayerA;SubA;" in csv_report
+    assert "top_ticker_return_60d;BBB;LayerA;SubA;" in csv_report
+    assert "bottom_ticker_return_60d;AAA;LayerA;SubA;" in csv_report
+    assert "NO_AS_OF_PRICE" in markdown
+    assert "INSUFFICIENT_60D" in markdown
+
+
+def test_ticker_performance_market_filter_and_validation(tmp_path):
+    taxonomy_csv = _write_taxonomy_csv(tmp_path)
+    ohlcv_db = tmp_path / "osakedata.db"
+    _create_ohlcv_db(ohlcv_db)
+    _insert_ohlcv_rows(
+        ohlcv_db,
+        [
+            ("AAA", "2026-05-11", 1, 1, 1, 100, 1000, "usa"),
+            ("AAA", "2026-05-11", 1, 1, 1, 101, 1000, "omxh"),
+        ],
+    )
+    try:
+        load_datacenter_ticker_performance_rows(
+            ohlcv_db_path=ohlcv_db,
+            taxonomy_csv=taxonomy_csv,
+            taxonomy_version="DC_TAXONOMY_FULL_V1",
+            as_of_date="2026-05-11",
+            market=None,
+        )
+        assert False, "expected duplicate ticker+date failure"
+    except ValueError as exc:
+        assert "Duplicate price row for ticker AAA on 2026-05-11" in str(exc)
+
+    with sqlite3.connect(ohlcv_db) as conn:
+        conn.execute("DELETE FROM osakedata")
+        conn.execute(
+            "INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("AAA", "2026-05-11", 1, 1, 1, None, 1000, "usa"),
+        )
+        conn.commit()
+    try:
+        load_datacenter_ticker_performance_rows(
+            ohlcv_db_path=ohlcv_db,
+            taxonomy_csv=taxonomy_csv,
+            taxonomy_version="DC_TAXONOMY_FULL_V1",
+            as_of_date="2026-05-11",
+            market="usa",
+        )
+        assert False, "expected null close failure"
+    except ValueError as exc:
+        assert "NULL close for ticker AAA on 2026-05-11" in str(exc)
+
+    with sqlite3.connect(ohlcv_db) as conn:
+        conn.execute("DELETE FROM osakedata")
+        conn.execute(
+            "INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("AAA", "2026-05-11", 1, 1, 1, 0, 1000, "usa"),
+        )
+        conn.commit()
+    try:
+        load_datacenter_ticker_performance_rows(
+            ohlcv_db_path=ohlcv_db,
+            taxonomy_csv=taxonomy_csv,
+            taxonomy_version="DC_TAXONOMY_FULL_V1",
+            as_of_date="2026-05-11",
+            market="usa",
+        )
+        assert False, "expected non-positive close failure"
+    except ValueError as exc:
+        assert "Price row close must be greater than 0 for ticker AAA on 2026-05-11" in str(exc)
+
+
+def test_ticker_performance_explicit_market_filter_preserves_behavior(tmp_path):
+    taxonomy_csv = _write_taxonomy_csv(tmp_path)
+    ohlcv_db = tmp_path / "osakedata.db"
+    _create_ohlcv_db(ohlcv_db)
+    rows = []
+    from datetime import date, timedelta
+    start = date(2026, 1, 1)
+    for offset in range(61):
+        current = (start + timedelta(days=offset)).isoformat()
+        rows.append(("AAA", current, 1, 1, 1, 100 + offset, 1000, "usa"))
+        rows.append(("BBB", current, 1, 1, 1, 200 + offset, 1000, "omxh"))
+    _insert_ohlcv_rows(ohlcv_db, rows)
+
+    ticker_rows = load_datacenter_ticker_performance_rows(
+        ohlcv_db_path=ohlcv_db,
+        taxonomy_csv=taxonomy_csv,
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        as_of_date="2026-03-02",
+        market="usa",
+    )
+
+    aaa_rows = [row for row in ticker_rows if row.ticker == "AAA"]
+    bbb_rows = [row for row in ticker_rows if row.ticker == "BBB"]
+    assert aaa_rows[0].price_data_status == "OK"
+    assert all(row.price_data_status == "NO_AS_OF_PRICE" for row in bbb_rows)
