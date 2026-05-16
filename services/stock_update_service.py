@@ -97,6 +97,14 @@ class StockOhlcvInsertResult:
 
 
 @dataclass
+class StockHistoryFetchResult:
+    ticker: str
+    histories: List[Any] = field(default_factory=list)
+    ranges_requested: int = 0
+    ranges_returned: int = 0
+
+
+@dataclass
 class StockUpdateProgressEvent:
     event_type: str
     message: Optional[str] = None
@@ -391,6 +399,42 @@ def convert_history_to_ohlcv_rows(
                 volume=None
                 if _is_missing_ohlcv_value(volume_value)
                 else int(volume_value),
+                market=market,
+            )
+        )
+    return rows
+
+
+def fetch_history_for_date_ranges(
+    *,
+    stock: Any,
+    ticker: str,
+    date_ranges: List[StockUpdateDateRange],
+) -> StockHistoryFetchResult:
+    result = StockHistoryFetchResult(ticker=ticker)
+    for date_range in date_ranges:
+        result.ranges_requested += 1
+        history = stock.history(
+            start=date_range.start_date,
+            end=date_range.end_date_exclusive,
+        )
+        result.histories.append(history)
+        result.ranges_returned += 1
+    return result
+
+
+def convert_histories_to_ohlcv_rows(
+    *,
+    histories: List[Any],
+    ticker: str,
+    market: str,
+) -> List[StockOhlcvRow]:
+    rows: List[StockOhlcvRow] = []
+    for history in histories:
+        rows.extend(
+            convert_history_to_ohlcv_rows(
+                history=history,
+                ticker=ticker,
                 market=market,
             )
         )
