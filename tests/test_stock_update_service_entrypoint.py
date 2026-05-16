@@ -334,8 +334,10 @@ def test_run_stock_data_update_result_lists_are_new_objects(tmp_path, monkeypatc
 @pytest.mark.parametrize(
     ("dow_summary", "expected"),
     [
-        ({"updated": 7}, 7),
-        ({"inserted": 5}, 5),
+        ({"updated": 7, "inserted": 5, "rows_inserted": 3}, 7),
+        ({"inserted": 5, "rows_inserted": 3}, 5),
+        ({"rows_inserted": 621, "rows_deleted": 603}, 621),
+        ({"rows_deleted": 603}, None),
         ({"processed": 10}, None),
     ],
 )
@@ -378,6 +380,49 @@ def test_run_stock_data_update_dow_structures_updated_mapping(
     )
 
     assert result.dow_structures_updated == expected
+
+
+def test_run_stock_data_update_summary_lines_reflect_rows_inserted_dow_mapping(
+    tmp_path, monkeypatch
+):
+    def fake_orchestration(**kwargs):
+        return sus.StockUpdateOrchestrationResult(
+            batch_result=sus.StockUpdateBatchExecutionResult(market="omxh"),
+            dow_result=sus.StockUpdateDowResult(
+                attempted=True,
+                success=True,
+                dow_summary={"rows_inserted": 621, "rows_deleted": 603},
+                warning=None,
+            ),
+            warnings=[],
+            errors=[],
+        )
+
+    monkeypatch.setattr(sus, "execute_stock_update_orchestration", fake_orchestration)
+
+    db_path = tmp_path / "osakedata.db"
+    _create_osakedata_table(db_path)
+    result = sus.run_stock_data_update(
+        osakedata_db_path=str(db_path),
+        analysis_db_path="analysis.db",
+        market="omxh",
+        start_override=None,
+        today="2026-05-10",
+        fetch_until_exclusive="2026-05-17",
+        stock_factory=lambda ticker: None,
+        sync_splits=lambda ticker, stock: 0,
+        maybe_backfill_splits=lambda ticker: False,
+        calculate_divergences=lambda ticker, only_missing: (True, 1, ""),
+        run_candlestick_analysis=lambda ticker, analysis_start, analysis_end: (0, None),
+        calculate_dow_structures=lambda **kwargs: {"status": "OK"},
+        pivot_radius=7,
+        bounded_initial_from_date="2020-01-01",
+        recalc_tail_trading_days=50,
+    )
+
+    assert "SUMMARY dow_structures_updated=621" in sus.format_stock_update_summary_lines(
+        result
+    )
 
 
 def test_run_stock_data_update_conservative_aggregate_fields_remain_zero(tmp_path, monkeypatch):

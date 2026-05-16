@@ -922,6 +922,8 @@ def run_stock_data_update(
             dow_structures_updated = dow_summary["updated"]
         elif "inserted" in dow_summary:
             dow_structures_updated = dow_summary["inserted"]
+        elif "rows_inserted" in dow_summary:
+            dow_structures_updated = dow_summary["rows_inserted"]
 
     warnings = list(orchestration_result.warnings)
     errors = list(orchestration_result.errors)
