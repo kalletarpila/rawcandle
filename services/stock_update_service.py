@@ -120,6 +120,25 @@ class StockTickerOhlcvUpdateResult:
 
 
 @dataclass
+class StockTickerDownstreamResult:
+    ticker: str
+    split_sync_attempted: bool = False
+    split_sync_inserted: int = 0
+    split_sync_warning: Optional[str] = None
+    split_backfill_attempted: bool = False
+    split_backfill_recomputed: bool = False
+    divergence_attempted: bool = False
+    divergence_skipped_reason: Optional[str] = None
+    divergence_success: Optional[bool] = None
+    divergence_days: Optional[int] = None
+    divergence_error: Optional[str] = None
+    candlestick_attempted: bool = False
+    candlestick_total: Optional[int] = None
+    candlestick_error: Optional[str] = None
+    warnings: List[str] = field(default_factory=list)
+
+
+@dataclass
 class StockUpdateProgressEvent:
     event_type: str
     message: Optional[str] = None
@@ -156,6 +175,10 @@ class StockUpdateResult:
 
 
 ProgressCallback = Optional[Callable[[StockUpdateProgressEvent], None]]
+SplitSyncCallable = Callable[[str, Any], int]
+SplitBackfillCallable = Callable[[str], bool]
+DivergenceUpdateCallable = Callable[[str, bool], tuple]
+CandlestickUpdateCallable = Callable[[str, str, str], tuple]
 
 
 def _parse_iso_date(value: str) -> date:
@@ -502,6 +525,70 @@ def execute_ticker_ohlcv_update_plan(
         ohlcv_rows_inserted=insert_result.rows_inserted,
         ohlcv_rows_skipped_existing=insert_result.rows_skipped_existing,
     )
+
+
+def execute_ticker_downstream_updates(
+    *,
+    ticker: str,
+    stock: Any,
+    ohlcv_rows_inserted: int,
+    date_ranges: List[StockUpdateDateRange],
+    sync_splits: SplitSyncCallable,
+    maybe_backfill_splits: SplitBackfillCallable,
+    calculate_divergences: DivergenceUpdateCallable,
+    run_candlestick_analysis: CandlestickUpdateCallable,
+) -> StockTickerDownstreamResult:
+    # This helper starts only after outer orchestration has already decided the
+    # ticker reached the post-OHLCV downstream section. Empty-history / no-data
+    # classification remains outside this helper.
+    result = StockTickerDownstreamResult(ticker=ticker)
+
+    result.split_sync_attempted = True
+    try:
+        result.split_sync_inserted = sync_splits(ticker, stock)
+    except Exception as exc:
+        warning = f"Splittien paivitys epaonnistui ({ticker}): {exc}"
+        result.split_sync_warning = warning
+        result.warnings.append(warning)
+
+    result.split_backfill_attempted = True
+    result.split_backfill_recomputed = bool(maybe_backfill_splits(ticker))
+
+    if result.split_backfill_recomputed:
+        result.divergence_attempted = False
+        result.divergence_skipped_reason = "split_backfill_recomputed"
+        result.divergence_success = True
+        result.divergence_days = 0
+        result.divergence_error = ""
+    else:
+        result.divergence_attempted = True
+        div_success, div_days, div_error = calculate_divergences(ticker, True)
+        result.divergence_success = div_success
+        result.divergence_days = div_days
+        result.divergence_error = div_error
+
+    if ohlcv_rows_inserted <= 0:
+        return result
+
+    analysis_start = min(date_range.start_date for date_range in date_ranges)
+    analysis_end = max(date_range.end_date_exclusive for date_range in date_ranges)
+
+    result.candlestick_attempted = True
+    try:
+        analysis_total, analysis_error = run_candlestick_analysis(
+            ticker,
+            analysis_start,
+            analysis_end,
+        )
+        result.candlestick_total = analysis_total
+        result.candlestick_error = analysis_error
+    except Exception as exc:
+        warning = f"Candlestick-analyysi epaonnistui ({ticker}): {exc}"
+        result.candlestick_total = 0
+        result.candlestick_error = str(exc)
+        result.warnings.append(warning)
+
+    return result
 
 
 def format_stock_update_summary_lines(result: StockUpdateResult) -> List[str]:
