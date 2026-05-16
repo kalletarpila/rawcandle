@@ -3,6 +3,30 @@ from __future__ import annotations
 import main
 
 
+class _FakeLoadingText:
+    def __init__(self):
+        self.value = ""
+        self.color = None
+
+
+class _FakeButton:
+    def __init__(self):
+        self.disabled = False
+
+
+class _FakePage:
+    def __init__(self):
+        self.update_calls = 0
+
+    def update(self):
+        self.update_calls += 1
+
+
+class _FakeField:
+    def __init__(self, value=""):
+        self.value = value
+
+
 def test_run_stock_update_via_service_calls_service_with_adapter_values(monkeypatch):
     app = main.RawCandleApp.__new__(main.RawCandleApp)
     app.osakedata_db_path = "/tmp/osakedata.db"
@@ -211,3 +235,123 @@ def test_format_stock_update_service_result_for_ui_does_not_require_ui_fields():
     formatted = app._format_stock_update_service_result_for_ui(result)
 
     assert "Markkina: omxh" in formatted
+
+
+def test_update_stock_data_via_service_ui_flow_success(monkeypatch):
+    app = main.RawCandleApp.__new__(main.RawCandleApp)
+    app.loading_text = _FakeLoadingText()
+    app.update_stock_button = _FakeButton()
+    app.page = _FakePage()
+    app.update_market_dropdown = _FakeField("usa")
+    app.update_start_input = _FakeField("")
+    app._stock_update_in_progress = False
+
+    called = {}
+
+    def fake_run_stock_update_via_service(**kwargs):
+        called.update(kwargs)
+        return main.StockUpdateResult(market="usa", status="OK")
+
+    monkeypatch.setattr(
+        app,
+        "_run_stock_update_via_service",
+        fake_run_stock_update_via_service,
+    )
+    monkeypatch.setattr(
+        app,
+        "_format_stock_update_service_result_for_ui",
+        lambda result: "FORMATTED RESULT",
+    )
+
+    app._update_stock_data_via_service_ui_flow()
+
+    assert called["market"] == "usa"
+    assert called["start_override"] is None
+    assert "today" in called
+    assert "fetch_until_exclusive" in called
+    assert app.loading_text.value == "FORMATTED RESULT"
+    assert app.update_stock_button.disabled is False
+    assert app._stock_update_in_progress is False
+    assert app.page.update_calls >= 1
+
+
+def test_update_stock_data_via_service_ui_flow_invalid_start_override_does_not_call_service(
+    monkeypatch,
+):
+    app = main.RawCandleApp.__new__(main.RawCandleApp)
+    app.loading_text = _FakeLoadingText()
+    app.update_stock_button = _FakeButton()
+    app.page = _FakePage()
+    app.update_market_dropdown = _FakeField("usa")
+    app.update_start_input = _FakeField("bad-date")
+    app._stock_update_in_progress = False
+
+    monkeypatch.setattr(
+        app,
+        "_run_stock_update_via_service",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("service should not run")),
+    )
+
+    app._update_stock_data_via_service_ui_flow()
+
+    assert "Aloituspäivä virheellinen" in app.loading_text.value
+    assert app.update_stock_button.disabled is False
+    assert app._stock_update_in_progress is False
+
+
+def test_update_stock_data_via_service_ui_flow_catches_service_exception():
+    app = main.RawCandleApp.__new__(main.RawCandleApp)
+    app.loading_text = _FakeLoadingText()
+    app.update_stock_button = _FakeButton()
+    app.page = _FakePage()
+    app.update_market_dropdown = _FakeField("usa")
+    app.update_start_input = _FakeField("")
+    app._stock_update_in_progress = False
+    app._run_stock_update_via_service = lambda **kwargs: (_ for _ in ()).throw(
+        RuntimeError("service failed")
+    )
+
+    app._update_stock_data_via_service_ui_flow()
+
+    assert "service failed" in app.loading_text.value
+    assert app.update_stock_button.disabled is False
+    assert app._stock_update_in_progress is False
+
+
+def test_update_stock_data_via_service_ui_flow_returns_early_when_already_running():
+    app = main.RawCandleApp.__new__(main.RawCandleApp)
+    app.loading_text = _FakeLoadingText()
+    app.update_stock_button = _FakeButton()
+    app.page = _FakePage()
+    app.update_market_dropdown = _FakeField("usa")
+    app.update_start_input = _FakeField("")
+    app._stock_update_in_progress = True
+    app._run_stock_update_via_service = lambda **kwargs: (_ for _ in ()).throw(
+        AssertionError("service should not run")
+    )
+
+    app._update_stock_data_via_service_ui_flow()
+
+    assert app.page.update_calls == 0
+
+
+def test_update_stock_data_via_service_ui_flow_does_not_call_old_update_stock_data():
+    app = main.RawCandleApp.__new__(main.RawCandleApp)
+    app.loading_text = _FakeLoadingText()
+    app.update_stock_button = _FakeButton()
+    app.page = _FakePage()
+    app.update_market_dropdown = _FakeField("usa")
+    app.update_start_input = _FakeField("")
+    app._stock_update_in_progress = False
+    app._run_stock_update_via_service = lambda **kwargs: main.StockUpdateResult(
+        market="usa",
+        status="OK",
+    )
+    app._format_stock_update_service_result_for_ui = lambda result: "FORMATTED RESULT"
+    app.update_stock_data = lambda e=None: (_ for _ in ()).throw(
+        AssertionError("old update_stock_data should not be called")
+    )
+
+    app._update_stock_data_via_service_ui_flow()
+
+    assert app.loading_text.value == "FORMATTED RESULT"

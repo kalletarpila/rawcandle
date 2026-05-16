@@ -356,6 +356,72 @@ class RawCandleApp:
             progress_callback=None,
         )
 
+    def _update_stock_data_via_service_ui_flow(self, e=None) -> None:
+        from datetime import datetime
+
+        if getattr(self, "_stock_update_in_progress", False):
+            return
+
+        start_override_raw = (
+            self.update_start_input.value.strip()
+            if getattr(self, "update_start_input", None)
+            and self.update_start_input.value
+            else ""
+        )
+        start_override = None
+        if start_override_raw:
+            try:
+                start_override = datetime.fromisoformat(start_override_raw).strftime(
+                    "%Y-%m-%d"
+                )
+            except ValueError:
+                self.loading_text.value = "❌ Aloituspäivä virheellinen (YYYY-MM-DD)"
+                self.loading_text.color = ft.Colors.RED_600
+                self.page.update()
+                return
+
+        selected_market = (
+            self.update_market_dropdown.value
+            if getattr(self, "update_market_dropdown", None)
+            else None
+        )
+        today = datetime.now().strftime("%Y-%m-%d")
+        fetch_until_exclusive = _today_exclusive_end_date()
+
+        self._stock_update_in_progress = True
+        if getattr(self, "update_stock_button", None) is not None:
+            self.update_stock_button.disabled = True
+
+        self.loading_text.value = "🔄 Päivitetään osaketietoja..."
+        self.loading_text.color = ft.Colors.BLUE_600
+        self.page.update()
+
+        try:
+            result = self._run_stock_update_via_service(
+                market=selected_market,
+                start_override=start_override,
+                today=today,
+                fetch_until_exclusive=fetch_until_exclusive,
+            )
+            self.loading_text.value = self._format_stock_update_service_result_for_ui(
+                result
+            )
+            self.loading_text.color = (
+                ft.Colors.ORANGE_600
+                if result.warnings or result.errors
+                else ft.Colors.GREEN_600
+            )
+            self.page.update()
+        except Exception as ex:
+            self.loading_text.value = f"❌ Virhe päivityksessä: {str(ex)}"
+            self.loading_text.color = ft.Colors.RED_600
+            self.page.update()
+        finally:
+            self._stock_update_in_progress = False
+            if getattr(self, "update_stock_button", None) is not None:
+                self.update_stock_button.disabled = False
+            self.page.update()
+
     def _format_stock_update_service_result_for_ui(
         self,
         result: StockUpdateResult,
