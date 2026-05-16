@@ -32,6 +32,7 @@ from market_repository import (
     MARKET_VOLUME_DEFAULTS,
 )
 from sector_update import refresh_single_ticker_metadata, update_sector_metadata
+from services.stock_update_service import run_stock_data_update, StockUpdateResult
 
 
 def _exclusive_end_date(date_str: str) -> str:
@@ -326,6 +327,34 @@ class RawCandleApp:
             "bounded_initial_from_date": DEFAULT_BOUNDED_INITIAL_FROM_DATE,
             "recalc_tail_trading_days": DEFAULT_RECALC_TAIL_TRADING_DAYS,
         }
+
+    def _run_stock_update_via_service(
+        self,
+        *,
+        market: Optional[str] = None,
+        start_override: Optional[str] = None,
+        today: str,
+        fetch_until_exclusive: str,
+    ) -> StockUpdateResult:
+        adapters = self._build_stock_update_service_adapters()
+        return run_stock_data_update(
+            osakedata_db_path=self.osakedata_db_path,
+            analysis_db_path=self.analysis_db_path,
+            market=market,
+            start_override=start_override,
+            today=today,
+            fetch_until_exclusive=fetch_until_exclusive,
+            stock_factory=adapters["stock_factory"],
+            sync_splits=adapters["sync_splits"],
+            maybe_backfill_splits=adapters["maybe_backfill_splits"],
+            calculate_divergences=adapters["calculate_divergences"],
+            run_candlestick_analysis=adapters["run_candlestick_analysis"],
+            calculate_dow_structures=adapters["calculate_dow_structures"],
+            pivot_radius=adapters["pivot_radius"],
+            bounded_initial_from_date=adapters["bounded_initial_from_date"],
+            recalc_tail_trading_days=adapters["recalc_tail_trading_days"],
+            progress_callback=None,
+        )
 
     def _run_incremental_candlestick_analysis(
         self,
