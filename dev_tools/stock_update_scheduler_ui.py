@@ -326,15 +326,16 @@ def run_app(page: ft.Page, config_path: str) -> None:
             summary_field.value = "\n".join(lines)
 
         logs_column.controls.clear()
-        for log_entry in list_scheduler_log_files(log_dir):
-            row_controls: List[ft.Control] = [
-                ft.Text(
-                    f"{log_entry['filename']} "
-                    f"(size={log_entry['size_bytes']}, modified_at={log_entry['modified_at']})"
-                ),
-                ft.TextField(value=log_entry["path"], read_only=True, expand=True),
-            ]
-            if log_entry["text_openable"]:
+        text_log_entries = [
+            log_entry
+            for log_entry in list_scheduler_log_files(log_dir)
+            if log_entry["text_openable"]
+        ]
+        if not text_log_entries:
+            logs_column.controls.append(ft.Text("No text log files found."))
+        else:
+            log_rows: List[ft.Control] = []
+            for log_entry in text_log_entries:
                 log_path = log_entry["path"]
 
                 def on_open_text_log(e, *, selected_log_path=log_path) -> None:
@@ -361,13 +362,27 @@ def run_app(page: ft.Page, config_path: str) -> None:
                         )
                     page.update()
 
-                row_controls.append(
-                    ft.ElevatedButton("Avaa .txt", on_click=on_open_text_log)
+                log_rows.append(
+                    ft.Row(
+                        controls=[
+                            ft.Text(
+                                f"{log_entry['filename']} "
+                                f"(size={log_entry['size_bytes']}, modified_at={log_entry['modified_at']})",
+                                expand=True,
+                            ),
+                            ft.ElevatedButton("Avaa .txt", on_click=on_open_text_log),
+                        ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    )
                 )
+
             logs_column.controls.append(
-                ft.Column(
-                    controls=row_controls,
-                    spacing=4,
+                ft.Card(
+                    content=ft.Container(
+                        content=ft.Column(controls=log_rows, spacing=8),
+                        padding=12,
+                    )
                 )
             )
         refresh_running_state(log_dir)
