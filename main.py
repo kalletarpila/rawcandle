@@ -4771,10 +4771,7 @@ Virheet: {error_count}"""
                     elif inferred_market:
                         target_market = inferred_market
                     elif "." in ticker:
-                        summary["errors"].append(
-                            f"{ticker}: tuntematon markkinasuffixi"
-                        )
-                        return
+                        target_market = "usa"
 
                 if not validate_market(target_market, db_path=self.osakedata_db_path):
                     target_market = self._default_market_code()

@@ -104,6 +104,111 @@ def test_fetch_stock_data_calls_single_ticker_metadata_refresh(tmp_path, monkeyp
     ]
 
 
+def test_fetch_stock_data_unknown_suffix_falls_back_to_usa_and_keeps_full_ticker(
+    tmp_path, monkeypatch
+):
+    called = []
+    expected_end = (datetime.now().date() + timedelta(days=1)).strftime("%Y-%m-%d")
+    fake_ticker = _FakeTicker()
+
+    monkeypatch.setattr(main.yf, "Ticker", lambda ticker: called.append(("yf", ticker)) or fake_ticker)
+    monkeypatch.setattr(main, "validate_market", lambda market, db_path=None: True)
+    monkeypatch.setattr(main, "sync_splits_for_ticker", lambda *args, **kwargs: 0)
+    monkeypatch.setattr(main, "refresh_single_ticker_metadata", lambda *args, **kwargs: True)
+
+    import analysis.stock_dow_structure
+
+    monkeypatch.setattr(
+        analysis.stock_dow_structure,
+        "calculate_missing_or_outdated_stock_dow_structures",
+        lambda **kwargs: {"rows_inserted": 0},
+    )
+
+    app = main.RawCandleApp.__new__(main.RawCandleApp)
+    app.data_dir = str(tmp_path)
+    app.osakedata_db_path = str(tmp_path / "osakedata.db")
+    app.analysis_db_path = str(tmp_path / "analysis.db")
+    app.loading_text = SimpleNamespace(value="", color=None)
+    app.page = _FakePage()
+    app.ticker_field = SimpleNamespace(value="ABC.XYZ")
+    app.stock_data = None
+    app.markets = []
+    app._default_market_code = lambda: "omxh"
+    app._infer_market_from_ticker = lambda ticker: None
+    app._get_market_min_volume_requirement = lambda market: 0
+    app._maybe_backfill_splits_for_ticker = lambda ticker: False
+    app._calculate_and_save_divergences = lambda ticker, only_missing=True: (True, 0, "")
+    app._run_incremental_candlestick_analysis = (
+        lambda ticker, analysis_start, analysis_end: (0, None)
+    )
+
+    app.fetch_stock_data(None)
+
+    assert called == [("yf", "ABC.XYZ")]
+    assert fake_ticker.history_calls == [("2018-01-02", expected_end)]
+    with sqlite3.connect(app.osakedata_db_path) as conn:
+        row = conn.execute(
+            "SELECT osake, market FROM osakedata WHERE osake = ?",
+            ("ABC.XYZ",),
+        ).fetchone()
+    assert row == ("ABC.XYZ", "usa")
+
+
+def test_fetch_stock_data_known_suffix_preserves_existing_market_inference(
+    tmp_path, monkeypatch
+):
+    called = []
+    fake_ticker = _FakeTicker()
+
+    monkeypatch.setattr(main.yf, "Ticker", lambda ticker: fake_ticker)
+    monkeypatch.setattr(main, "validate_market", lambda market, db_path=None: True)
+    monkeypatch.setattr(main, "sync_splits_for_ticker", lambda *args, **kwargs: 0)
+    monkeypatch.setattr(
+        main,
+        "refresh_single_ticker_metadata",
+        lambda db_path, ticker, market=None, logger=None: called.append(
+            (db_path, ticker, market)
+        )
+        or True,
+    )
+
+    import analysis.stock_dow_structure
+
+    monkeypatch.setattr(
+        analysis.stock_dow_structure,
+        "calculate_missing_or_outdated_stock_dow_structures",
+        lambda **kwargs: {"rows_inserted": 0},
+    )
+
+    app = main.RawCandleApp.__new__(main.RawCandleApp)
+    app.data_dir = str(tmp_path)
+    app.osakedata_db_path = str(tmp_path / "osakedata.db")
+    app.analysis_db_path = str(tmp_path / "analysis.db")
+    app.loading_text = SimpleNamespace(value="", color=None)
+    app.page = _FakePage()
+    app.ticker_field = SimpleNamespace(value="AAA.ST")
+    app.stock_data = None
+    app.markets = []
+    app._default_market_code = lambda: "usa"
+    app._infer_market_from_ticker = lambda ticker: "sweden"
+    app._get_market_min_volume_requirement = lambda market: 0
+    app._maybe_backfill_splits_for_ticker = lambda ticker: False
+    app._calculate_and_save_divergences = lambda ticker, only_missing=True: (True, 0, "")
+    app._run_incremental_candlestick_analysis = (
+        lambda ticker, analysis_start, analysis_end: (0, None)
+    )
+
+    app.fetch_stock_data(None)
+
+    assert called == [(app.osakedata_db_path, "AAA.ST", "sweden")]
+    with sqlite3.connect(app.osakedata_db_path) as conn:
+        row = conn.execute(
+            "SELECT osake, market FROM osakedata WHERE osake = ?",
+            ("AAA.ST",),
+        ).fetchone()
+    assert row == ("AAA.ST", "sweden")
+
+
 class _FakeUpdateTicker:
     def __init__(self, hist):
         self.hist = hist
