@@ -169,6 +169,14 @@ class StockUpdateDowResult:
 
 
 @dataclass
+class StockUpdateOrchestrationResult:
+    batch_result: StockUpdateBatchExecutionResult
+    dow_result: Optional[StockUpdateDowResult] = None
+    warnings: List[str] = field(default_factory=list)
+    errors: List[str] = field(default_factory=list)
+
+
+@dataclass
 class StockUpdateProgressEvent:
     event_type: str
     message: Optional[str] = None
@@ -773,6 +781,61 @@ def execute_final_dow_update(
             dow_summary=None,
             warning=f"Dow-rakenteiden paivitys epaonnistui: {exc}",
         )
+
+
+def execute_stock_update_orchestration(
+    *,
+    osakedata_db_path: str,
+    analysis_db_path: str,
+    market: str,
+    plans: List[StockUpdateTickerPlan],
+    stock_factory: StockFactory,
+    sync_splits: SplitSyncCallable,
+    maybe_backfill_splits: SplitBackfillCallable,
+    calculate_divergences: DivergenceUpdateCallable,
+    run_candlestick_analysis: CandlestickUpdateCallable,
+    calculate_dow_structures: DowUpdateCallable,
+    pivot_radius: Any,
+    bounded_initial_from_date: Any,
+    recalc_tail_trading_days: Any,
+    dow_dry_run: bool = False,
+    dow_run_id: Optional[str] = None,
+    dow_created_at_utc: Optional[str] = None,
+) -> StockUpdateOrchestrationResult:
+    batch_result = execute_stock_update_batch(
+        osakedata_db_path=osakedata_db_path,
+        market=market,
+        plans=plans,
+        stock_factory=stock_factory,
+        sync_splits=sync_splits,
+        maybe_backfill_splits=maybe_backfill_splits,
+        calculate_divergences=calculate_divergences,
+        run_candlestick_analysis=run_candlestick_analysis,
+    )
+    dow_result = execute_final_dow_update(
+        calculate_dow_structures=calculate_dow_structures,
+        analysis_db_path=analysis_db_path,
+        osakedata_db_path=osakedata_db_path,
+        market=market,
+        pivot_radius=pivot_radius,
+        bounded_initial_from_date=bounded_initial_from_date,
+        recalc_tail_trading_days=recalc_tail_trading_days,
+        dry_run=dow_dry_run,
+        run_id=dow_run_id,
+        created_at_utc=dow_created_at_utc,
+    )
+
+    warnings = list(batch_result.warnings)
+    if dow_result.warning is not None:
+        warnings.append(dow_result.warning)
+    errors = list(batch_result.errors)
+
+    return StockUpdateOrchestrationResult(
+        batch_result=batch_result,
+        dow_result=dow_result,
+        warnings=warnings,
+        errors=errors,
+    )
 
 
 def format_stock_update_summary_lines(result: StockUpdateResult) -> List[str]:
