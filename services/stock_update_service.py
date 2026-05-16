@@ -105,6 +105,21 @@ class StockHistoryFetchResult:
 
 
 @dataclass
+class StockTickerOhlcvUpdateResult:
+    ticker: str
+    needs_update: bool
+    skipped: bool = False
+    skip_reason: Optional[str] = None
+    ranges_requested: int = 0
+    ranges_returned: int = 0
+    history_objects_seen: int = 0
+    ohlcv_rows_converted: int = 0
+    ohlcv_rows_seen: int = 0
+    ohlcv_rows_inserted: int = 0
+    ohlcv_rows_skipped_existing: int = 0
+
+
+@dataclass
 class StockUpdateProgressEvent:
     event_type: str
     message: Optional[str] = None
@@ -439,6 +454,54 @@ def convert_histories_to_ohlcv_rows(
             )
         )
     return rows
+
+
+def execute_ticker_ohlcv_update_plan(
+    *,
+    osakedata_db_path: str,
+    stock: Any,
+    plan: StockUpdateTickerPlan,
+    market: str,
+) -> StockTickerOhlcvUpdateResult:
+    if plan.needs_update is False:
+        return StockTickerOhlcvUpdateResult(
+            ticker=plan.candidate.ticker,
+            needs_update=False,
+            skipped=True,
+            skip_reason=plan.skip_reason,
+        )
+
+    # Empty histories are preserved by fetch_history_for_date_ranges(...), but
+    # convert_histories_to_ohlcv_rows(...) turns them into zero rows, so this
+    # helper naturally yields zero converted/inserted rows when all histories are empty.
+    fetch_result = fetch_history_for_date_ranges(
+        stock=stock,
+        ticker=plan.candidate.ticker,
+        date_ranges=plan.date_ranges,
+    )
+    converted_rows = convert_histories_to_ohlcv_rows(
+        histories=fetch_result.histories,
+        ticker=plan.candidate.ticker,
+        market=market,
+    )
+    insert_result = insert_missing_ohlcv_rows(
+        osakedata_db_path=osakedata_db_path,
+        ticker=plan.candidate.ticker,
+        rows=converted_rows,
+    )
+    return StockTickerOhlcvUpdateResult(
+        ticker=plan.candidate.ticker,
+        needs_update=True,
+        skipped=False,
+        skip_reason=None,
+        ranges_requested=fetch_result.ranges_requested,
+        ranges_returned=fetch_result.ranges_returned,
+        history_objects_seen=len(fetch_result.histories),
+        ohlcv_rows_converted=len(converted_rows),
+        ohlcv_rows_seen=insert_result.rows_seen,
+        ohlcv_rows_inserted=insert_result.rows_inserted,
+        ohlcv_rows_skipped_existing=insert_result.rows_skipped_existing,
+    )
 
 
 def format_stock_update_summary_lines(result: StockUpdateResult) -> List[str]:
