@@ -27,6 +27,7 @@ _MARKET_LOG_FILENAME_RE = re.compile(
 _STATUS_OK_COLOR = "#43A047"
 _STATUS_WARNING_COLOR = "#EF6C00"
 _STATUS_ERROR_COLOR = "#E53935"
+SCHEDULER_UI_PORT = 8555
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -314,7 +315,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         raise FileNotFoundError(f"Missing scheduler config: {config_path}")
 
     app_view = ft.WEB_BROWSER if hasattr(ft, "WEB_BROWSER") else ft.AppView.WEB_BROWSER
-    ft.app(target=lambda page: run_app(page, config_path), view=app_view)
+    ft.app(
+        target=lambda page: run_app(page, config_path),
+        view=app_view,
+        port=SCHEDULER_UI_PORT,
+    )
     return 0
 
 

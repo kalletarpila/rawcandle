@@ -5,9 +5,11 @@ import json
 import pytest
 
 from dev_tools.stock_update_scheduler_ui import (
+    SCHEDULER_UI_PORT,
     build_config_from_ui_values,
     list_scheduler_log_files,
     load_latest_scheduler_summary,
+    main,
 )
 from rawcandle.scheduler.config import read_scheduler_config, write_scheduler_config
 
@@ -104,3 +106,38 @@ def test_config_write_read_roundtrip_through_existing_config_module(tmp_path):
     loaded = read_scheduler_config(str(path))
 
     assert loaded == config
+
+
+def test_scheduler_ui_port_constant_is_fixed():
+    assert SCHEDULER_UI_PORT == 8555
+
+
+def test_scheduler_ui_startup_passes_fixed_port_to_ft_app(tmp_path, monkeypatch):
+    config_path = tmp_path / "scheduler.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "analysis_db_path": "/tmp/analysis.db",
+                "enabled_markets": ["omxh", "omxs"],
+                "log_dir": "/tmp/logs",
+                "osakedata_db_path": "/tmp/osakedata.db",
+                "run_time": "05:30",
+                "timezone": "Europe/Helsinki",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    captured = {}
+
+    def fake_app(*, target, view, port):
+        captured["target"] = target
+        captured["view"] = view
+        captured["port"] = port
+
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.ft.app", fake_app)
+
+    code = main(["--config", str(config_path)])
+
+    assert code == 0
+    assert captured["port"] == SCHEDULER_UI_PORT
