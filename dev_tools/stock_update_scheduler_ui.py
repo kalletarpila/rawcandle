@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import inspect
 import json
 import os
 import re
@@ -201,6 +202,15 @@ def build_text_log_data_url(path: str) -> str:
     return f"data:text/plain;charset=utf-8;base64,{encoded_payload}"
 
 
+def launch_browser_url(page: ft.Page, url: str) -> None:
+    result = page.launch_url(url)
+    if inspect.isawaitable(result):
+        async def _await_launch() -> None:
+            await result
+
+        page.run_task(_await_launch)
+
+
 def _load_config_or_raise(config_path: str) -> StockUpdateSchedulerConfig:
     return read_scheduler_config(config_path)
 
@@ -333,7 +343,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
                 def on_open_text_log(e, *, selected_log_path=log_path) -> None:
                     try:
                         data_url = build_text_log_data_url(selected_log_path)
-                        page.launch_url(data_url)
+                        launch_browser_url(page, data_url)
                         _set_status(
                             status_field,
                             f"Opened text log: {selected_log_path}",

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
+from unittest.mock import Mock
 
 import pytest
 
@@ -13,6 +15,7 @@ from dev_tools.stock_update_scheduler_ui import (
     build_cancel_skip_next_run_config,
     build_skip_next_run_config,
     build_config_from_ui_values,
+    launch_browser_url,
     list_scheduler_log_files,
     load_latest_scheduler_summary,
     main,
@@ -99,6 +102,26 @@ def test_build_text_log_data_url_missing_file_raises(tmp_path):
 
     with pytest.raises(FileNotFoundError):
         build_text_log_data_url(str(missing_path))
+
+
+def test_launch_browser_url_awaits_launch_when_needed():
+    async def _fake_launch_result():
+        return None
+
+    def _run_task(handler, *args, **kwargs):
+        asyncio.run(handler(*args, **kwargs))
+        return Mock()
+
+    page = Mock()
+    page.launch_url = Mock(return_value=_fake_launch_result())
+    page.run_task = Mock(side_effect=_run_task)
+
+    launch_browser_url(page, "data:text/plain;charset=utf-8;base64,Zm9v")
+
+    page.launch_url.assert_called_once_with(
+        "data:text/plain;charset=utf-8;base64,Zm9v"
+    )
+    page.run_task.assert_called_once()
 
 
 def test_build_config_from_ui_values_normalizes_markets():
