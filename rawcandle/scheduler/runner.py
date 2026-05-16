@@ -16,7 +16,6 @@ from services.stock_update_service import (
     STATUS_FAILED,
     STATUS_OK,
     STATUS_OK_WITH_WARNINGS,
-    StockUpdateResult,
     format_stock_update_summary_lines,
 )
 
@@ -44,6 +43,48 @@ class ScheduledStockUpdateRunResult:
     summary_json_path: str = ""
     skipped: bool = False
     skip_reason: Optional[str] = None
+
+
+def scheduler_status_path(log_dir: str) -> str:
+    return str(Path(log_dir) / "stock_update_scheduler_status.json")
+
+
+def write_scheduler_status(
+    *,
+    log_dir: str,
+    is_running: bool,
+    started_at_utc: str,
+    finished_at_utc: Optional[str],
+    current_market: Optional[str],
+    last_status: str,
+    summary_json_path: Optional[str],
+    error: Optional[str],
+) -> str:
+    log_dir_path = Path(log_dir)
+    log_dir_path.mkdir(parents=True, exist_ok=True)
+    status_path = log_dir_path / "stock_update_scheduler_status.json"
+    payload = {
+        "current_market": current_market,
+        "error": error,
+        "finished_at_utc": finished_at_utc,
+        "is_running": is_running,
+        "last_status": last_status,
+        "started_at_utc": started_at_utc,
+        "summary_json_path": summary_json_path,
+    }
+    status_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return str(status_path)
+
+
+def read_scheduler_status(log_dir: str) -> Optional[dict]:
+    status_path = Path(scheduler_status_path(log_dir))
+    if not status_path.exists():
+        return None
+    with status_path.open("r", encoding="utf-8") as status_file:
+        return json.load(status_file)
 
 
 def _utc_now() -> datetime.datetime:
@@ -219,66 +260,123 @@ def run_scheduler_config(
     started_at_utc = _format_utc_timestamp(run_started_at)
     config = read_scheduler_config(config_path)
     _preflight_validate_config(config)
+    status_initialized = False
 
-    if config.skip_next_run:
-        reset_config = StockUpdateSchedulerConfig(
-            enabled_markets=list(config.enabled_markets),
-            run_time=config.run_time,
-            osakedata_db_path=config.osakedata_db_path,
-            analysis_db_path=config.analysis_db_path,
+    try:
+        write_scheduler_status(
             log_dir=config.log_dir,
-            timezone=config.timezone,
-            skip_next_run=False,
+            is_running=True,
+            started_at_utc=started_at_utc,
+            finished_at_utc=None,
+            current_market=None,
+            last_status="RUNNING",
+            summary_json_path=None,
+            error=None,
         )
-        write_scheduler_config(config_path, reset_config)
+        status_initialized = True
+
+        if config.skip_next_run:
+            reset_config = StockUpdateSchedulerConfig(
+                enabled_markets=list(config.enabled_markets),
+                run_time=config.run_time,
+                osakedata_db_path=config.osakedata_db_path,
+                analysis_db_path=config.analysis_db_path,
+                log_dir=config.log_dir,
+                timezone=config.timezone,
+                skip_next_run=False,
+            )
+            write_scheduler_config(config_path, reset_config)
+
+            result = ScheduledStockUpdateRunResult(
+                started_at_utc=started_at_utc,
+                finished_at_utc=_format_utc_timestamp(_utc_now()),
+                config_path=config_path,
+                enabled_markets=list(config.enabled_markets),
+                market_results=[],
+                overall_status=STATUS_OK,
+                skipped=True,
+                skip_reason="skip_next_run",
+            )
+            _write_summary_json(config=config, run_started_at=run_started_at, result=result)
+            write_scheduler_status(
+                log_dir=config.log_dir,
+                is_running=False,
+                started_at_utc=started_at_utc,
+                finished_at_utc=result.finished_at_utc,
+                current_market=None,
+                last_status=STATUS_OK,
+                summary_json_path=result.summary_json_path,
+                error=None,
+            )
+            return result
+
+        effective_today = datetime.datetime.now().strftime("%Y-%m-%d")
+        effective_fetch_until_exclusive = _today_exclusive_end_date()
+
+        market_results: List[ScheduledMarketRunResult] = []
+        for market in config.enabled_markets:
+            write_scheduler_status(
+                log_dir=config.log_dir,
+                is_running=True,
+                started_at_utc=started_at_utc,
+                finished_at_utc=None,
+                current_market=market,
+                last_status="RUNNING",
+                summary_json_path=None,
+                error=None,
+            )
+            market_results.append(
+                _run_one_market(
+                    config=config,
+                    market=market,
+                    run_started_at_utc=started_at_utc,
+                    effective_today=effective_today,
+                    effective_fetch_until_exclusive=effective_fetch_until_exclusive,
+                )
+            )
+
+        finished_at_utc = _format_utc_timestamp(_utc_now())
+        overall_status = _derive_overall_status(market_results)
+
+        log_dir = Path(config.log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        summary_json_path = log_dir / (
+            "stock_update_scheduler_summary_"
+            f"{_format_utc_filename_timestamp(run_started_at)}.json"
+        )
 
         result = ScheduledStockUpdateRunResult(
             started_at_utc=started_at_utc,
-            finished_at_utc=_format_utc_timestamp(_utc_now()),
+            finished_at_utc=finished_at_utc,
             config_path=config_path,
             enabled_markets=list(config.enabled_markets),
-            market_results=[],
-            overall_status=STATUS_OK,
-            skipped=True,
-            skip_reason="skip_next_run",
+            market_results=market_results,
+            overall_status=overall_status,
+            skipped=False,
+            skip_reason=None,
         )
         _write_summary_json(config=config, run_started_at=run_started_at, result=result)
-        return result
-
-    effective_today = datetime.datetime.now().strftime("%Y-%m-%d")
-    effective_fetch_until_exclusive = _today_exclusive_end_date()
-
-    market_results: List[ScheduledMarketRunResult] = []
-    for market in config.enabled_markets:
-        market_results.append(
-            _run_one_market(
-                config=config,
-                market=market,
-                run_started_at_utc=started_at_utc,
-                effective_today=effective_today,
-                effective_fetch_until_exclusive=effective_fetch_until_exclusive,
-            )
+        write_scheduler_status(
+            log_dir=config.log_dir,
+            is_running=False,
+            started_at_utc=started_at_utc,
+            finished_at_utc=result.finished_at_utc,
+            current_market=None,
+            last_status=result.overall_status,
+            summary_json_path=result.summary_json_path,
+            error=None,
         )
-
-    finished_at_utc = _format_utc_timestamp(_utc_now())
-    overall_status = _derive_overall_status(market_results)
-
-    log_dir = Path(config.log_dir)
-    log_dir.mkdir(parents=True, exist_ok=True)
-    summary_json_path = log_dir / (
-        "stock_update_scheduler_summary_"
-        f"{_format_utc_filename_timestamp(run_started_at)}.json"
-    )
-
-    result = ScheduledStockUpdateRunResult(
-        started_at_utc=started_at_utc,
-        finished_at_utc=finished_at_utc,
-        config_path=config_path,
-        enabled_markets=list(config.enabled_markets),
-        market_results=market_results,
-        overall_status=overall_status,
-        skipped=False,
-        skip_reason=None,
-    )
-    _write_summary_json(config=config, run_started_at=run_started_at, result=result)
-    return result
+        return result
+    except Exception as exc:
+        if status_initialized:
+            write_scheduler_status(
+                log_dir=config.log_dir,
+                is_running=False,
+                started_at_utc=started_at_utc,
+                finished_at_utc=_format_utc_timestamp(_utc_now()),
+                current_market=None,
+                last_status=STATUS_FAILED,
+                summary_json_path=None,
+                error=str(exc),
+            )
+        raise

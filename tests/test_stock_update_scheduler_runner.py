@@ -14,7 +14,9 @@ from rawcandle.scheduler.runner import (
     STATUS_FAILED,
     STATUS_OK,
     STATUS_OK_WITH_WARNINGS,
+    read_scheduler_status,
     run_scheduler_config,
+    scheduler_status_path,
 )
 from services.stock_update_service import StockUpdateResult
 
@@ -409,3 +411,177 @@ def test_scheduler_runner_skip_next_run_reset_write_failure_propagates(
 
     with pytest.raises(RuntimeError, match="write failed"):
         run_scheduler_config(config_path=str(config_path))
+
+
+def test_scheduler_status_path_returns_log_dir_status_json_path():
+    assert (
+        scheduler_status_path("/tmp/logs")
+        == "/tmp/logs/stock_update_scheduler_status.json"
+    )
+
+
+def test_read_scheduler_status_returns_none_when_file_missing(tmp_path):
+    assert read_scheduler_status(str(tmp_path / "missing_logs")) is None
+
+
+def test_scheduler_status_write_creates_log_dir_if_missing(tmp_path, monkeypatch):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    log_dir = tmp_path / "missing_logs"
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["omxh"],
+        log_dir=log_dir,
+    )
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+
+    run_scheduler_config(config_path=str(config_path))
+
+    assert log_dir.exists()
+    assert Path(scheduler_status_path(str(log_dir))).exists()
+
+
+def test_scheduler_runner_status_file_written_for_normal_run(tmp_path, monkeypatch):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(tmp_path, enabled_markets=["omxh", "omxs"])
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+    status = read_scheduler_status(str(tmp_path / "logs"))
+
+    assert status is not None
+    assert status["is_running"] is False
+    assert status["last_status"] == STATUS_OK
+    assert status["summary_json_path"] == result.summary_json_path
+    assert status["current_market"] is None
+
+
+def test_scheduler_runner_status_current_market_updates_during_execution(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(tmp_path, enabled_markets=["omxh", "omxs"])
+    seen_statuses = []
+
+    def fake_run(self, **kwargs):
+        status = read_scheduler_status(str(tmp_path / "logs"))
+        seen_statuses.append((kwargs["market"], status["current_market"]))
+        return StockUpdateResult(market=kwargs["market"], status=STATUS_OK)
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        fake_run,
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+
+    run_scheduler_config(config_path=str(config_path))
+
+    assert seen_statuses == [("omxh", "omxh"), ("omxs", "omxs")]
+
+
+def test_scheduler_runner_skip_next_run_writes_final_ok_status(tmp_path):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path, enabled_markets=["omxh", "omxs"], skip_next_run=True
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+    status = read_scheduler_status(str(tmp_path / "logs"))
+
+    assert result.skipped is True
+    assert status["is_running"] is False
+    assert status["last_status"] == STATUS_OK
+    assert status["summary_json_path"] == result.summary_json_path
+    assert status["error"] is None
+
+
+def test_scheduler_runner_failed_market_final_status_is_failed(tmp_path, monkeypatch):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(tmp_path, enabled_markets=["omxh", "omxs"])
+
+    def fake_run(self, **kwargs):
+        if kwargs["market"] == "omxh":
+            raise RuntimeError("boom")
+        return StockUpdateResult(market=kwargs["market"], status=STATUS_OK)
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        fake_run,
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+    status = read_scheduler_status(str(tmp_path / "logs"))
+
+    assert result.overall_status == STATUS_FAILED
+    assert status["is_running"] is False
+    assert status["last_status"] == STATUS_FAILED
+    assert status["current_market"] is None
+    assert status["summary_json_path"] == result.summary_json_path
+
+
+def test_scheduler_runner_unexpected_scheduler_exception_writes_failed_status(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(tmp_path, enabled_markets=["omxh"])
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._write_summary_json",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("summary write failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="summary write failed"):
+        run_scheduler_config(config_path=str(config_path))
+
+    status = read_scheduler_status(str(tmp_path / "logs"))
+    assert status["is_running"] is False
+    assert status["last_status"] == STATUS_FAILED
+    assert "summary write failed" in status["error"]
