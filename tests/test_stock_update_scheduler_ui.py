@@ -11,6 +11,7 @@ from dev_tools.stock_update_scheduler_ui import (
     apply_cancel_skip_next_run_to_config,
     apply_skip_next_run_to_config,
     build_text_log_browser_url,
+    format_run_now_error_message,
     build_cancel_skip_next_run_config,
     build_skip_next_run_config,
     build_config_from_ui_values,
@@ -23,6 +24,7 @@ from dev_tools.stock_update_scheduler_ui import (
     scheduler_skip_next_run_label,
 )
 from rawcandle.scheduler.config import StockUpdateSchedulerConfig, read_scheduler_config, write_scheduler_config
+from rawcandle.scheduler.runner import SchedulerAlreadyRunningError
 
 
 def test_load_latest_scheduler_summary_picks_newest_by_filename_timestamp(tmp_path):
@@ -110,6 +112,14 @@ def test_launch_browser_url_awaits_launch_when_needed():
         "/stock_update_omxh_20260516T020000Z.txt"
     )
     page.run_task.assert_called_once()
+
+
+def test_format_run_now_error_message_for_lock_conflict_is_concise():
+    message = format_run_now_error_message(
+        SchedulerAlreadyRunningError("already running")
+    )
+
+    assert message == "Run now blocked: scheduler run is already active."
 
 
 def test_build_config_from_ui_values_normalizes_markets():

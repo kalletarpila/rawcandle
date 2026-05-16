@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from typing import List, Optional
 
-from rawcandle.scheduler.runner import run_scheduler_config
+from rawcandle.scheduler.runner import SchedulerAlreadyRunningError, run_scheduler_config
 from services.stock_update_service import STATUS_FAILED, STATUS_OK, STATUS_OK_WITH_WARNINGS
 
 
@@ -17,7 +17,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
-    result = run_scheduler_config(config_path=args.config)
+    try:
+        result = run_scheduler_config(config_path=args.config)
+    except SchedulerAlreadyRunningError as exc:
+        print("SUMMARY scheduler_status=FAILED")
+        print("SUMMARY scheduler_skipped=0")
+        print("SUMMARY scheduler_skip_reason=")
+        print(f"SUMMARY error={exc}")
+        return 1
 
     markets_ok = sum(1 for item in result.market_results if item.summary_status == STATUS_OK)
     markets_ok_with_warnings = sum(

@@ -11,11 +11,15 @@ from rawcandle.scheduler.config import (
     write_scheduler_config,
 )
 from rawcandle.scheduler.runner import (
+    SchedulerAlreadyRunningError,
     STATUS_FAILED,
     STATUS_OK,
     STATUS_OK_WITH_WARNINGS,
+    acquire_scheduler_lock,
     read_scheduler_status,
+    release_scheduler_lock,
     run_scheduler_config,
+    scheduler_lock_path,
     scheduler_status_path,
 )
 from services.stock_update_service import StockUpdateResult
@@ -422,6 +426,10 @@ def test_scheduler_status_path_returns_log_dir_status_json_path():
     )
 
 
+def test_scheduler_lock_path_returns_log_dir_lock_path():
+    assert scheduler_lock_path("/tmp/logs") == "/tmp/logs/stock_update_scheduler.lock"
+
+
 def test_read_scheduler_status_returns_none_when_file_missing(tmp_path):
     assert read_scheduler_status(str(tmp_path / "missing_logs")) is None
 
@@ -477,6 +485,83 @@ def test_scheduler_runner_status_file_written_for_normal_run(tmp_path, monkeypat
     assert status["last_status"] == STATUS_OK
     assert status["summary_json_path"] == result.summary_json_path
     assert status["current_market"] is None
+
+
+def test_scheduler_runner_lock_conflict_raises_and_runs_no_markets(tmp_path, monkeypatch):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(tmp_path, enabled_markets=["omxh"])
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.acquire_scheduler_lock",
+        lambda log_dir: (_ for _ in ()).throw(
+            SchedulerAlreadyRunningError("already running")
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: (_ for _ in ()).throw(
+            AssertionError("market run should not be called")
+        ),
+    )
+
+    with pytest.raises(SchedulerAlreadyRunningError, match="already running"):
+        run_scheduler_config(config_path=str(config_path))
+
+
+def test_scheduler_runner_lock_conflict_does_not_consume_skip_next_run(tmp_path, monkeypatch):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(tmp_path, enabled_markets=["omxh"], skip_next_run=True)
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.acquire_scheduler_lock",
+        lambda log_dir: (_ for _ in ()).throw(
+            SchedulerAlreadyRunningError("already running")
+        ),
+    )
+
+    with pytest.raises(SchedulerAlreadyRunningError, match="already running"):
+        run_scheduler_config(config_path=str(config_path))
+
+    reloaded = read_scheduler_config(str(config_path))
+    assert reloaded.skip_next_run is True
+
+
+def test_scheduler_runner_lock_conflict_does_not_write_summary_json(tmp_path, monkeypatch):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    log_dir = tmp_path / "logs"
+    config_path = _write_config(tmp_path, enabled_markets=["omxh"], log_dir=log_dir)
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.acquire_scheduler_lock",
+        lambda log_dir: (_ for _ in ()).throw(
+            SchedulerAlreadyRunningError("already running")
+        ),
+    )
+
+    with pytest.raises(SchedulerAlreadyRunningError, match="already running"):
+        run_scheduler_config(config_path=str(config_path))
+
+    assert list(log_dir.glob("stock_update_scheduler_summary_*.json")) == []
+
+
+def test_scheduler_lock_is_released_after_normal_release(tmp_path):
+    log_dir = tmp_path / "logs"
+
+    first_lock = acquire_scheduler_lock(str(log_dir))
+    release_scheduler_lock(first_lock)
+    second_lock = acquire_scheduler_lock(str(log_dir))
+
+    assert Path(scheduler_lock_path(str(log_dir))).exists()
+    release_scheduler_lock(second_lock)
 
 
 def test_scheduler_runner_status_current_market_updates_during_execution(

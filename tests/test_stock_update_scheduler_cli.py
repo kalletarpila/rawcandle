@@ -6,6 +6,7 @@ from rawcandle.cli import run_stock_update_scheduler as cli
 from rawcandle.scheduler.runner import (
     ScheduledMarketRunResult,
     ScheduledStockUpdateRunResult,
+    SchedulerAlreadyRunningError,
     STATUS_FAILED,
     STATUS_OK,
     STATUS_OK_WITH_WARNINGS,
@@ -118,3 +119,24 @@ def test_scheduler_cli_skipped_run_prints_skip_summary(monkeypatch, capsys):
     assert "SUMMARY scheduler_skipped=1" in captured.out
     assert "SUMMARY scheduler_skip_reason=skip_next_run" in captured.out
     assert "SUMMARY markets_total=0" in captured.out
+
+
+def test_scheduler_cli_lock_conflict_prints_failed_summary_and_exits_one(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        cli,
+        "run_scheduler_config",
+        lambda config_path: (_ for _ in ()).throw(
+            SchedulerAlreadyRunningError("already running")
+        ),
+    )
+
+    code = cli.main(["--config", "/tmp/scheduler.json"])
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "SUMMARY scheduler_status=FAILED" in captured.out
+    assert "SUMMARY scheduler_skipped=0" in captured.out
+    assert "SUMMARY scheduler_skip_reason=" in captured.out
+    assert "SUMMARY error=already running" in captured.out

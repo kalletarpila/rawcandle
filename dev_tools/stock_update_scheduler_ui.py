@@ -17,7 +17,11 @@ from rawcandle.scheduler.config import (
     validate_scheduler_config,
     write_scheduler_config,
 )
-from rawcandle.scheduler.runner import read_scheduler_status, run_scheduler_config
+from rawcandle.scheduler.runner import (
+    SchedulerAlreadyRunningError,
+    read_scheduler_status,
+    run_scheduler_config,
+)
 
 
 _SUMMARY_FILENAME_RE = re.compile(
@@ -206,6 +210,12 @@ def launch_browser_url(page: ft.Page, url: str) -> None:
             await result
 
         page.run_task(_await_launch)
+
+
+def format_run_now_error_message(exc: Exception) -> str:
+    if isinstance(exc, SchedulerAlreadyRunningError):
+        return "Run now blocked: scheduler run is already active."
+    return f"Run now failed: {exc}"
 
 
 def _load_config_or_raise(config_path: str) -> StockUpdateSchedulerConfig:
@@ -427,7 +437,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
                 _STATUS_OK_COLOR if result.overall_status == "OK" else _STATUS_WARNING_COLOR,
             )
         except Exception as exc:
-            _set_status(status_field, f"Run now failed: {exc}", _STATUS_ERROR_COLOR)
+            _set_status(status_field, format_run_now_error_message(exc), _STATUS_ERROR_COLOR)
         page.update()
 
     def on_skip_next_run(e) -> None:
