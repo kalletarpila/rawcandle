@@ -139,6 +139,15 @@ class StockTickerDownstreamResult:
 
 
 @dataclass
+class StockTickerUpdateFlowResult:
+    ticker: str
+    skipped: bool = False
+    skip_reason: Optional[str] = None
+    ohlcv_result: Optional[StockTickerOhlcvUpdateResult] = None
+    downstream_result: Optional[StockTickerDownstreamResult] = None
+
+
+@dataclass
 class StockUpdateProgressEvent:
     event_type: str
     message: Optional[str] = None
@@ -589,6 +598,61 @@ def execute_ticker_downstream_updates(
         result.warnings.append(warning)
 
     return result
+
+
+def execute_ticker_update_flow(
+    *,
+    osakedata_db_path: str,
+    stock: Any,
+    plan: StockUpdateTickerPlan,
+    market: str,
+    sync_splits: SplitSyncCallable,
+    maybe_backfill_splits: SplitBackfillCallable,
+    calculate_divergences: DivergenceUpdateCallable,
+    run_candlestick_analysis: CandlestickUpdateCallable,
+) -> StockTickerUpdateFlowResult:
+    if plan.needs_update is False:
+        return StockTickerUpdateFlowResult(
+            ticker=plan.candidate.ticker,
+            skipped=True,
+            skip_reason=plan.skip_reason,
+            ohlcv_result=None,
+            downstream_result=None,
+        )
+
+    ohlcv_result = execute_ticker_ohlcv_update_plan(
+        osakedata_db_path=osakedata_db_path,
+        stock=stock,
+        plan=plan,
+        market=market,
+    )
+
+    if ohlcv_result.ohlcv_rows_converted == 0:
+        return StockTickerUpdateFlowResult(
+            ticker=plan.candidate.ticker,
+            skipped=True,
+            skip_reason="no_history_data",
+            ohlcv_result=ohlcv_result,
+            downstream_result=None,
+        )
+
+    downstream_result = execute_ticker_downstream_updates(
+        ticker=plan.candidate.ticker,
+        stock=stock,
+        ohlcv_rows_inserted=ohlcv_result.ohlcv_rows_inserted,
+        date_ranges=plan.date_ranges,
+        sync_splits=sync_splits,
+        maybe_backfill_splits=maybe_backfill_splits,
+        calculate_divergences=calculate_divergences,
+        run_candlestick_analysis=run_candlestick_analysis,
+    )
+    return StockTickerUpdateFlowResult(
+        ticker=plan.candidate.ticker,
+        skipped=False,
+        skip_reason=None,
+        ohlcv_result=ohlcv_result,
+        downstream_result=downstream_result,
+    )
 
 
 def format_stock_update_summary_lines(result: StockUpdateResult) -> List[str]:
