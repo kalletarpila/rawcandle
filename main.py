@@ -274,6 +274,59 @@ class RawCandleApp:
             dry_run=False,
         )
 
+    def _build_stock_update_service_adapters(self) -> dict:
+        from analysis.stock_dow_structure import (
+            DEFAULT_BOUNDED_INITIAL_FROM_DATE,
+            DEFAULT_PIVOT_RADIUS,
+            DEFAULT_RECALC_TAIL_TRADING_DAYS,
+            calculate_missing_or_outdated_stock_dow_structures,
+        )
+
+        def stock_factory(ticker: str):
+            return yf.Ticker(ticker)
+
+        def sync_splits(ticker: str, stock):
+            return sync_splits_for_ticker(
+                self.osakedata_db_path,
+                ticker,
+                yf_ticker=stock,
+            )
+
+        def maybe_backfill_splits(ticker: str) -> bool:
+            return bool(self._maybe_backfill_splits_for_ticker(ticker))
+
+        def calculate_divergences(ticker: str, only_missing: bool) -> tuple:
+            return self._calculate_and_save_divergences(
+                ticker,
+                only_missing=only_missing,
+            )
+
+        def run_candlestick_analysis(
+            ticker: str,
+            analysis_start: str,
+            analysis_end: str,
+        ) -> tuple:
+            return self._run_incremental_candlestick_analysis(
+                ticker,
+                analysis_start,
+                analysis_end,
+            )
+
+        def calculate_dow_structures(**kwargs) -> dict:
+            return calculate_missing_or_outdated_stock_dow_structures(**kwargs)
+
+        return {
+            "stock_factory": stock_factory,
+            "sync_splits": sync_splits,
+            "maybe_backfill_splits": maybe_backfill_splits,
+            "calculate_divergences": calculate_divergences,
+            "run_candlestick_analysis": run_candlestick_analysis,
+            "calculate_dow_structures": calculate_dow_structures,
+            "pivot_radius": DEFAULT_PIVOT_RADIUS,
+            "bounded_initial_from_date": DEFAULT_BOUNDED_INITIAL_FROM_DATE,
+            "recalc_tail_trading_days": DEFAULT_RECALC_TAIL_TRADING_DAYS,
+        }
+
     def _run_incremental_candlestick_analysis(
         self,
         ticker: str,
