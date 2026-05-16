@@ -148,6 +148,27 @@ class StockTickerUpdateFlowResult:
 
 
 @dataclass
+class StockUpdateBatchExecutionResult:
+    market: str
+    ticker_results: List[StockTickerUpdateFlowResult] = field(default_factory=list)
+    tickers_checked: int = 0
+    tickers_updated: int = 0
+    tickers_skipped: int = 0
+    tickers_failed: int = 0
+    ohlcv_rows_inserted: int = 0
+    warnings: List[str] = field(default_factory=list)
+    errors: List[str] = field(default_factory=list)
+
+
+@dataclass
+class StockUpdateDowResult:
+    attempted: bool = False
+    success: bool = False
+    dow_summary: Optional[Dict[str, Any]] = None
+    warning: Optional[str] = None
+
+
+@dataclass
 class StockUpdateProgressEvent:
     event_type: str
     message: Optional[str] = None
@@ -184,6 +205,8 @@ class StockUpdateResult:
 
 
 ProgressCallback = Optional[Callable[[StockUpdateProgressEvent], None]]
+StockFactory = Callable[[str], Any]
+DowUpdateCallable = Callable[..., Dict[str, Any]]
 SplitSyncCallable = Callable[[str, Any], int]
 SplitBackfillCallable = Callable[[str], bool]
 DivergenceUpdateCallable = Callable[[str, bool], tuple]
@@ -653,6 +676,103 @@ def execute_ticker_update_flow(
         ohlcv_result=ohlcv_result,
         downstream_result=downstream_result,
     )
+
+
+def execute_stock_update_batch(
+    *,
+    osakedata_db_path: str,
+    market: str,
+    plans: List[StockUpdateTickerPlan],
+    stock_factory: StockFactory,
+    sync_splits: SplitSyncCallable,
+    maybe_backfill_splits: SplitBackfillCallable,
+    calculate_divergences: DivergenceUpdateCallable,
+    run_candlestick_analysis: CandlestickUpdateCallable,
+) -> StockUpdateBatchExecutionResult:
+    result = StockUpdateBatchExecutionResult(market=market)
+
+    for plan in plans:
+        result.tickers_checked += 1
+        try:
+            if plan.needs_update is False:
+                stock = object()
+            else:
+                stock = stock_factory(plan.candidate.ticker)
+
+            ticker_result = execute_ticker_update_flow(
+                osakedata_db_path=osakedata_db_path,
+                stock=stock,
+                plan=plan,
+                market=market,
+                sync_splits=sync_splits,
+                maybe_backfill_splits=maybe_backfill_splits,
+                calculate_divergences=calculate_divergences,
+                run_candlestick_analysis=run_candlestick_analysis,
+            )
+            result.ticker_results.append(ticker_result)
+
+            if ticker_result.skipped:
+                result.tickers_skipped += 1
+            else:
+                result.tickers_updated += 1
+
+            if ticker_result.ohlcv_result is not None:
+                result.ohlcv_rows_inserted += (
+                    ticker_result.ohlcv_result.ohlcv_rows_inserted
+                )
+            if ticker_result.downstream_result is not None:
+                result.warnings.extend(ticker_result.downstream_result.warnings)
+        except Exception as exc:
+            result.tickers_failed += 1
+            result.errors.append(
+                f"Ticker update failed ({plan.candidate.ticker}): {exc}"
+            )
+
+    return result
+
+
+def execute_final_dow_update(
+    *,
+    calculate_dow_structures: DowUpdateCallable,
+    analysis_db_path: str,
+    osakedata_db_path: str,
+    market: Optional[str],
+    pivot_radius: Any,
+    bounded_initial_from_date: Any,
+    recalc_tail_trading_days: Any,
+    dry_run: bool = False,
+    run_id: Optional[str] = None,
+    created_at_utc: Optional[str] = None,
+) -> StockUpdateDowResult:
+    kwargs: Dict[str, Any] = {
+        "analysis_db_path": analysis_db_path,
+        "osakedata_db_path": osakedata_db_path,
+        "market": market,
+        "pivot_radius": pivot_radius,
+        "bounded_initial_from_date": bounded_initial_from_date,
+        "recalc_tail_trading_days": recalc_tail_trading_days,
+        "dry_run": dry_run,
+    }
+    if run_id is not None:
+        kwargs["run_id"] = run_id
+    if created_at_utc is not None:
+        kwargs["created_at_utc"] = created_at_utc
+
+    try:
+        summary = calculate_dow_structures(**kwargs)
+        return StockUpdateDowResult(
+            attempted=True,
+            success=True,
+            dow_summary=summary,
+            warning=None,
+        )
+    except Exception as exc:
+        return StockUpdateDowResult(
+            attempted=True,
+            success=False,
+            dow_summary=None,
+            warning=f"Dow-rakenteiden paivitys epaonnistui: {exc}",
+        )
 
 
 def format_stock_update_summary_lines(result: StockUpdateResult) -> List[str]:
