@@ -3571,6 +3571,9 @@ class RawCandleApp:
 
     def update_stock_data(self, e):
         """Päivitä olemassa olevien osakkeiden tiedot Yahoosta"""
+        if getattr(self, "_use_stock_update_service", False):
+            return self._update_stock_data_via_service_ui_flow(e)
+
         import sqlite3
         import time
         from datetime import datetime, timedelta

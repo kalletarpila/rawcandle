@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import inspect
+
 import main
 
 
@@ -355,3 +357,41 @@ def test_update_stock_data_via_service_ui_flow_does_not_call_old_update_stock_da
     app._update_stock_data_via_service_ui_flow()
 
     assert app.loading_text.value == "FORMATTED RESULT"
+
+
+def test_update_stock_data_opt_in_true_delegates_to_service_ui_flow():
+    app = main.RawCandleApp.__new__(main.RawCandleApp)
+    app._use_stock_update_service = True
+    called = []
+
+    def fake_service_ui_flow(event):
+        called.append(event)
+
+    app._update_stock_data_via_service_ui_flow = fake_service_ui_flow
+
+    app.update_stock_data("EVENT")
+
+    assert called == ["EVENT"]
+
+
+def test_update_stock_data_source_uses_missing_opt_in_flag_default_false():
+    source = inspect.getsource(main.RawCandleApp.update_stock_data)
+
+    assert 'getattr(self, "_use_stock_update_service", False)' in source
+    assert "return self._update_stock_data_via_service_ui_flow(e)" in source
+
+
+def test_update_stock_data_source_guards_service_branch_with_explicit_flag():
+    source = inspect.getsource(main.RawCandleApp.update_stock_data)
+
+    assert 'if getattr(self, "_use_stock_update_service", False):' in source
+
+
+def test_update_stock_button_on_click_handler_is_still_update_stock_data():
+    source = inspect.getsource(main.RawCandleApp.__init__)
+
+    assert "on_click=self.update_stock_data" in source
+
+
+def test_raw_candle_app_still_has_service_ui_flow_method():
+    assert hasattr(main.RawCandleApp, "_update_stock_data_via_service_ui_flow")
