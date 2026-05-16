@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import date, timedelta
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 DEFAULT_STOCK_UPDATE_MARKET = "omxh"
 FALLBACK_TICKER_MARKET = "usa"
+LONG_FETCH_RANGE_THRESHOLD_DAYS = 730
+LONG_FETCH_CHUNK_DAYS = 365
 
 STATUS_OK = "OK"
 STATUS_OK_WITH_WARNINGS = "OK_WITH_WARNINGS"
@@ -57,6 +60,22 @@ class StockUpdateTickerCandidate:
 
 
 @dataclass
+class StockUpdateDateRange:
+    start_date: str
+    end_date_exclusive: str
+
+
+@dataclass
+class StockUpdateTickerPlan:
+    candidate: StockUpdateTickerCandidate
+    needs_update: bool
+    update_start_date: Optional[str] = None
+    fetch_until_exclusive: Optional[str] = None
+    date_ranges: List[StockUpdateDateRange] = field(default_factory=list)
+    skip_reason: Optional[str] = None
+
+
+@dataclass
 class StockUpdateProgressEvent:
     event_type: str
     message: Optional[str] = None
@@ -93,6 +112,10 @@ class StockUpdateResult:
 
 
 ProgressCallback = Optional[Callable[[StockUpdateProgressEvent], None]]
+
+
+def _parse_iso_date(value: str) -> date:
+    return date.fromisoformat(value)
 
 
 def resolve_stock_update_market(market: Optional[str]) -> str:
@@ -145,6 +168,101 @@ def load_stock_update_candidates_for_market(
     selected_market = resolve_stock_update_market(market)
     candidates = load_grouped_stock_update_candidates(osakedata_db_path)
     return filter_stock_update_candidates_by_market(candidates, selected_market)
+
+
+def resolve_effective_update_start_date(
+    *,
+    last_date: str,
+    start_override: Optional[str] = None,
+) -> str:
+    base_update_start = (_parse_iso_date(last_date) + timedelta(days=1)).isoformat()
+    if start_override is None or not start_override.strip():
+        return base_update_start
+    parsed_start_override = _parse_iso_date(start_override.strip()).isoformat()
+    return max(base_update_start, parsed_start_override)
+
+
+def split_fetch_date_range(
+    *,
+    start_date: str,
+    end_date_exclusive: str,
+) -> List[StockUpdateDateRange]:
+    start = _parse_iso_date(start_date)
+    end = _parse_iso_date(end_date_exclusive)
+    if start >= end:
+        return []
+
+    if (end - start).days <= LONG_FETCH_RANGE_THRESHOLD_DAYS:
+        return [
+            StockUpdateDateRange(
+                start_date=start_date,
+                end_date_exclusive=end_date_exclusive,
+            )
+        ]
+
+    date_ranges: List[StockUpdateDateRange] = []
+    current_start = start
+    while current_start < end:
+        current_end = min(current_start + timedelta(days=LONG_FETCH_CHUNK_DAYS), end)
+        date_ranges.append(
+            StockUpdateDateRange(
+                start_date=current_start.isoformat(),
+                end_date_exclusive=current_end.isoformat(),
+            )
+        )
+        current_start = current_end
+    return date_ranges
+
+
+def plan_ticker_update(
+    *,
+    candidate: StockUpdateTickerCandidate,
+    today: str,
+    fetch_until_exclusive: str,
+    start_override: Optional[str] = None,
+) -> StockUpdateTickerPlan:
+    needs_update = candidate.last_date < today
+    if not needs_update:
+        return StockUpdateTickerPlan(
+            candidate=candidate,
+            needs_update=False,
+            skip_reason="already_current",
+        )
+
+    update_start_date = resolve_effective_update_start_date(
+        last_date=candidate.last_date,
+        start_override=start_override,
+    )
+    date_ranges = split_fetch_date_range(
+        start_date=update_start_date,
+        end_date_exclusive=fetch_until_exclusive,
+    )
+    return StockUpdateTickerPlan(
+        candidate=candidate,
+        needs_update=True,
+        update_start_date=update_start_date,
+        fetch_until_exclusive=fetch_until_exclusive,
+        date_ranges=date_ranges,
+        skip_reason=None,
+    )
+
+
+def plan_ticker_updates(
+    *,
+    candidates: List[StockUpdateTickerCandidate],
+    today: str,
+    fetch_until_exclusive: str,
+    start_override: Optional[str] = None,
+) -> List[StockUpdateTickerPlan]:
+    return [
+        plan_ticker_update(
+            candidate=candidate,
+            today=today,
+            fetch_until_exclusive=fetch_until_exclusive,
+            start_override=start_override,
+        )
+        for candidate in candidates
+    ]
 
 
 def format_stock_update_summary_lines(result: StockUpdateResult) -> List[str]:
