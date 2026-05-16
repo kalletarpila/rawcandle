@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 
 import pytest
@@ -8,6 +9,7 @@ from dev_tools.stock_update_scheduler_ui import (
     SCHEDULER_UI_PORT,
     apply_cancel_skip_next_run_to_config,
     apply_skip_next_run_to_config,
+    build_text_log_data_url,
     build_cancel_skip_next_run_config,
     build_skip_next_run_config,
     build_config_from_ui_values,
@@ -43,7 +45,7 @@ def test_list_scheduler_log_files_returns_recent_logs_newest_first(tmp_path):
     files = [
         tmp_path / "stock_update_scheduler_summary_20260516T010000Z.json",
         tmp_path / "stock_update_omxh_20260516T020000Z.log",
-        tmp_path / "stock_update_omxs_20260516T030000Z.log",
+        tmp_path / "stock_update_omxs_20260516T030000Z.txt",
         tmp_path / "ignore_me.txt",
     ]
     for path in files:
@@ -52,11 +54,51 @@ def test_list_scheduler_log_files_returns_recent_logs_newest_first(tmp_path):
     entries = list_scheduler_log_files(str(tmp_path))
 
     assert [entry["filename"] for entry in entries] == [
-        "stock_update_omxs_20260516T030000Z.log",
+        "stock_update_omxs_20260516T030000Z.txt",
         "stock_update_omxh_20260516T020000Z.log",
         "stock_update_scheduler_summary_20260516T010000Z.json",
     ]
-    assert entries[0]["path"].endswith("stock_update_omxs_20260516T030000Z.log")
+    assert entries[0]["path"].endswith("stock_update_omxs_20260516T030000Z.txt")
+    assert entries[0]["text_openable"] is True
+    assert entries[1]["text_openable"] is True
+    assert entries[2]["text_openable"] is False
+
+
+def test_list_scheduler_log_files_ignores_unrelated_files(tmp_path):
+    (tmp_path / "stock_update_scheduler_summary_20260516T010000Z.json").write_text(
+        "{}", encoding="utf-8"
+    )
+    (tmp_path / "stock_update_omxh_20260516T020000Z.txt").write_text(
+        "x", encoding="utf-8"
+    )
+    (tmp_path / "something_else.log").write_text("x", encoding="utf-8")
+    (tmp_path / "stock_update_foo_20260516T030000Z.txt").write_text("x", encoding="utf-8")
+
+    entries = list_scheduler_log_files(str(tmp_path))
+
+    assert [entry["filename"] for entry in entries] == [
+        "stock_update_omxh_20260516T020000Z.txt",
+        "stock_update_scheduler_summary_20260516T010000Z.json",
+    ]
+
+
+def test_build_text_log_data_url_returns_base64_text_plain_payload(tmp_path):
+    log_path = tmp_path / "stock_update_omxh_20260516T020000Z.txt"
+    log_path.write_text("hello\nworld\n", encoding="utf-8")
+
+    data_url = build_text_log_data_url(str(log_path))
+
+    assert data_url.startswith("data:text/plain;charset=utf-8;base64,")
+    encoded_payload = data_url.split(",", 1)[1]
+    decoded_payload = base64.b64decode(encoded_payload).decode("utf-8")
+    assert decoded_payload == "hello\nworld\n"
+
+
+def test_build_text_log_data_url_missing_file_raises(tmp_path):
+    missing_path = tmp_path / "missing.txt"
+
+    with pytest.raises(FileNotFoundError):
+        build_text_log_data_url(str(missing_path))
 
 
 def test_build_config_from_ui_values_normalizes_markets():

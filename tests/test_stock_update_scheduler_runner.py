@@ -207,6 +207,7 @@ def test_scheduler_runner_writes_log_file_per_market(tmp_path, monkeypatch):
     log_text = (tmp_path / "logs" / Path(log_path).name).read_text(encoding="utf-8")
 
     assert Path(log_path).exists()
+    assert log_path.endswith(".txt")
     assert "SUMMARY market=omxh" in log_text
     assert "market=omxh" in log_text
 
@@ -230,6 +231,7 @@ def test_scheduler_runner_writes_summary_json(tmp_path, monkeypatch):
     result = run_scheduler_config(config_path=str(config_path))
 
     summary_json_path = Path(result.summary_json_path)
+    assert str(summary_json_path).endswith(".json")
     assert summary_json_path.exists()
     payload = json.loads(summary_json_path.read_text(encoding="utf-8"))
     assert payload["overall_status"] == STATUS_OK

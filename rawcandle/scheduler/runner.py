@@ -200,7 +200,7 @@ def _run_one_market(
     log_dir = Path(config.log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / (
-        f"stock_update_{market}_{_format_utc_filename_timestamp(market_started_at)}.log"
+        f"stock_update_{market}_{_format_utc_filename_timestamp(market_started_at)}.txt"
     )
 
     app = _build_app(config)

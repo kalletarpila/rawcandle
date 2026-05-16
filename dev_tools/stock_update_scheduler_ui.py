@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import re
@@ -22,7 +23,7 @@ _SUMMARY_FILENAME_RE = re.compile(
     r"^stock_update_scheduler_summary_(\d{8}T\d{6}Z)\.json$"
 )
 _MARKET_LOG_FILENAME_RE = re.compile(
-    r"^stock_update_(omxh|omxs|usa)_(\d{8}T\d{6}Z)\.log$"
+    r"^stock_update_(omxh|omxs|usa)_(\d{8}T\d{6}Z)\.(txt|log)$"
 )
 _STATUS_OK_COLOR = "#43A047"
 _STATUS_WARNING_COLOR = "#EF6C00"
@@ -185,11 +186,19 @@ def list_scheduler_log_files(log_dir: str, limit: int = 20) -> List[Dict[str, An
                 "modified_at": str(int(stat_result.st_mtime)),
                 "timestamp": timestamp,
                 "type": entry_type,
+                "text_openable": entry_type == "market_log",
             }
         )
 
     entries.sort(key=lambda item: item["timestamp"], reverse=True)
     return entries[:limit]
+
+
+def build_text_log_data_url(path: str) -> str:
+    log_path = Path(path)
+    text_payload = log_path.read_text(encoding="utf-8")
+    encoded_payload = base64.b64encode(text_payload.encode("utf-8")).decode("ascii")
+    return f"data:text/plain;charset=utf-8;base64,{encoded_payload}"
 
 
 def _load_config_or_raise(config_path: str) -> StockUpdateSchedulerConfig:
@@ -311,15 +320,45 @@ def run_app(page: ft.Page, config_path: str) -> None:
 
         logs_column.controls.clear()
         for log_entry in list_scheduler_log_files(log_dir):
+            row_controls: List[ft.Control] = [
+                ft.Text(
+                    f"{log_entry['filename']} "
+                    f"(size={log_entry['size_bytes']}, modified_at={log_entry['modified_at']})"
+                ),
+                ft.TextField(value=log_entry["path"], read_only=True, expand=True),
+            ]
+            if log_entry["text_openable"]:
+                log_path = log_entry["path"]
+
+                def on_open_text_log(e, *, selected_log_path=log_path) -> None:
+                    try:
+                        data_url = build_text_log_data_url(selected_log_path)
+                        page.launch_url(data_url)
+                        _set_status(
+                            status_field,
+                            f"Opened text log: {selected_log_path}",
+                            _STATUS_OK_COLOR,
+                        )
+                    except FileNotFoundError:
+                        _set_status(
+                            status_field,
+                            f"Text log missing: {selected_log_path}",
+                            _STATUS_ERROR_COLOR,
+                        )
+                    except Exception as exc:
+                        _set_status(
+                            status_field,
+                            f"Open text log failed: {exc}",
+                            _STATUS_ERROR_COLOR,
+                        )
+                    page.update()
+
+                row_controls.append(
+                    ft.ElevatedButton("Avaa .txt", on_click=on_open_text_log)
+                )
             logs_column.controls.append(
                 ft.Column(
-                    controls=[
-                        ft.Text(
-                            f"{log_entry['filename']} "
-                            f"(size={log_entry['size_bytes']}, modified_at={log_entry['modified_at']})"
-                        ),
-                        ft.TextField(value=log_entry["path"], read_only=True, expand=True),
-                    ],
+                    controls=row_controls,
                     spacing=4,
                 )
             )
