@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import sqlite3
 from datetime import date, timedelta
 from dataclasses import dataclass, field
@@ -79,11 +80,11 @@ class StockUpdateTickerPlan:
 class StockOhlcvRow:
     ticker: str
     date: str
-    open: float
-    high: float
-    low: float
-    close: float
-    volume: int
+    open: Optional[float]
+    high: Optional[float]
+    low: Optional[float]
+    close: Optional[float]
+    volume: Optional[int]
     market: str
 
 
@@ -136,6 +137,19 @@ ProgressCallback = Optional[Callable[[StockUpdateProgressEvent], None]]
 
 def _parse_iso_date(value: str) -> date:
     return date.fromisoformat(value)
+
+
+def _is_missing_ohlcv_value(value: Any) -> bool:
+    if value is None:
+        return True
+    try:
+        return math.isnan(value)
+    except TypeError:
+        return False
+
+
+def _format_history_index_date(index_value: Any) -> str:
+    return index_value.strftime("%Y-%m-%d")
 
 
 def resolve_stock_update_market(market: Optional[str]) -> str:
@@ -340,6 +354,47 @@ def insert_missing_ohlcv_rows(
             conn.commit()
 
     return result
+
+
+def convert_history_to_ohlcv_rows(
+    *,
+    history: Any,
+    ticker: str,
+    market: str,
+) -> List[StockOhlcvRow]:
+    # Current main.py behavior formats the history index with strftime("%Y-%m-%d")
+    # and converts required columns directly by name, using pd.notna-style missing
+    # checks only for field-level NaN/None handling.
+    if history is None:
+        return []
+    if getattr(history, "empty", False):
+        return []
+
+    rows: List[StockOhlcvRow] = []
+    for history_index, row in history.iterrows():
+        open_value = row["Open"]
+        high_value = row["High"]
+        low_value = row["Low"]
+        close_value = row["Close"]
+        volume_value = row["Volume"]
+
+        rows.append(
+            StockOhlcvRow(
+                ticker=ticker,
+                date=_format_history_index_date(history_index),
+                open=None if _is_missing_ohlcv_value(open_value) else float(open_value),
+                high=None if _is_missing_ohlcv_value(high_value) else float(high_value),
+                low=None if _is_missing_ohlcv_value(low_value) else float(low_value),
+                close=None
+                if _is_missing_ohlcv_value(close_value)
+                else float(close_value),
+                volume=None
+                if _is_missing_ohlcv_value(volume_value)
+                else int(volume_value),
+                market=market,
+            )
+        )
+    return rows
 
 
 def format_stock_update_summary_lines(result: StockUpdateResult) -> List[str]:
