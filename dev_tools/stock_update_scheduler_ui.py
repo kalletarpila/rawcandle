@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import argparse
-import base64
 import inspect
 import json
 import os
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
 import flet as ft
 
@@ -195,11 +195,8 @@ def list_scheduler_log_files(log_dir: str, limit: int = 20) -> List[Dict[str, An
     return entries[:limit]
 
 
-def build_text_log_data_url(path: str) -> str:
-    log_path = Path(path)
-    text_payload = log_path.read_text(encoding="utf-8")
-    encoded_payload = base64.b64encode(text_payload.encode("utf-8")).decode("ascii")
-    return f"data:text/plain;charset=utf-8;base64,{encoded_payload}"
+def build_text_log_browser_url(path: str) -> str:
+    return f"/{quote(Path(path).name)}"
 
 
 def launch_browser_url(page: ft.Page, url: str) -> None:
@@ -342,8 +339,9 @@ def run_app(page: ft.Page, config_path: str) -> None:
 
                 def on_open_text_log(e, *, selected_log_path=log_path) -> None:
                     try:
-                        data_url = build_text_log_data_url(selected_log_path)
-                        launch_browser_url(page, data_url)
+                        if not Path(selected_log_path).exists():
+                            raise FileNotFoundError(selected_log_path)
+                        launch_browser_url(page, build_text_log_browser_url(selected_log_path))
                         _set_status(
                             status_field,
                             f"Opened text log: {selected_log_path}",
@@ -521,12 +519,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     config_path = args.config
     if not Path(config_path).exists():
         raise FileNotFoundError(f"Missing scheduler config: {config_path}")
+    initial_config = read_scheduler_config(config_path)
 
     app_view = ft.WEB_BROWSER if hasattr(ft, "WEB_BROWSER") else ft.AppView.WEB_BROWSER
     ft.app(
         target=lambda page: run_app(page, config_path),
         view=app_view,
         port=SCHEDULER_UI_PORT,
+        assets_dir=initial_config.log_dir,
     )
     return 0
 

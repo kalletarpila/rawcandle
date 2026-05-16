@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 from unittest.mock import Mock
 
@@ -11,7 +10,7 @@ from dev_tools.stock_update_scheduler_ui import (
     SCHEDULER_UI_PORT,
     apply_cancel_skip_next_run_to_config,
     apply_skip_next_run_to_config,
-    build_text_log_data_url,
+    build_text_log_browser_url,
     build_cancel_skip_next_run_config,
     build_skip_next_run_config,
     build_config_from_ui_values,
@@ -85,23 +84,12 @@ def test_list_scheduler_log_files_ignores_unrelated_files(tmp_path):
     ]
 
 
-def test_build_text_log_data_url_returns_base64_text_plain_payload(tmp_path):
-    log_path = tmp_path / "stock_update_omxh_20260516T020000Z.txt"
-    log_path.write_text("hello\nworld\n", encoding="utf-8")
+def test_build_text_log_browser_url_quotes_filename(tmp_path):
+    log_path = tmp_path / "stock_update_omxh 20260516T020000Z.txt"
 
-    data_url = build_text_log_data_url(str(log_path))
+    browser_url = build_text_log_browser_url(str(log_path))
 
-    assert data_url.startswith("data:text/plain;charset=utf-8;base64,")
-    encoded_payload = data_url.split(",", 1)[1]
-    decoded_payload = base64.b64decode(encoded_payload).decode("utf-8")
-    assert decoded_payload == "hello\nworld\n"
-
-
-def test_build_text_log_data_url_missing_file_raises(tmp_path):
-    missing_path = tmp_path / "missing.txt"
-
-    with pytest.raises(FileNotFoundError):
-        build_text_log_data_url(str(missing_path))
+    assert browser_url == "/stock_update_omxh%2020260516T020000Z.txt"
 
 
 def test_launch_browser_url_awaits_launch_when_needed():
@@ -116,10 +104,10 @@ def test_launch_browser_url_awaits_launch_when_needed():
     page.launch_url = Mock(return_value=_fake_launch_result())
     page.run_task = Mock(side_effect=_run_task)
 
-    launch_browser_url(page, "data:text/plain;charset=utf-8;base64,Zm9v")
+    launch_browser_url(page, "/stock_update_omxh_20260516T020000Z.txt")
 
     page.launch_url.assert_called_once_with(
-        "data:text/plain;charset=utf-8;base64,Zm9v"
+        "/stock_update_omxh_20260516T020000Z.txt"
     )
     page.run_task.assert_called_once()
 
@@ -202,10 +190,11 @@ def test_scheduler_ui_startup_passes_fixed_port_to_ft_app(tmp_path, monkeypatch)
 
     captured = {}
 
-    def fake_app(*, target, view, port):
+    def fake_app(*, target, view, port, assets_dir):
         captured["target"] = target
         captured["view"] = view
         captured["port"] = port
+        captured["assets_dir"] = assets_dir
 
     monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.ft.app", fake_app)
 
@@ -213,6 +202,7 @@ def test_scheduler_ui_startup_passes_fixed_port_to_ft_app(tmp_path, monkeypatch)
 
     assert code == 0
     assert captured["port"] == SCHEDULER_UI_PORT
+    assert captured["assets_dir"] == "/tmp/logs"
 
 
 def test_build_skip_next_run_config_sets_true_without_changing_other_fields():
