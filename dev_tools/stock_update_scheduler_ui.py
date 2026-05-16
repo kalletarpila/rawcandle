@@ -15,7 +15,7 @@ from rawcandle.scheduler.config import (
     validate_scheduler_config,
     write_scheduler_config,
 )
-from rawcandle.scheduler.runner import run_scheduler_config
+from rawcandle.scheduler.runner import read_scheduler_status, run_scheduler_config
 
 
 _SUMMARY_FILENAME_RE = re.compile(
@@ -56,6 +56,45 @@ def build_config_from_ui_values(
         timezone=timezone,
     )
     return validate_scheduler_config(config)
+
+
+def build_skip_next_run_config(
+    config: StockUpdateSchedulerConfig,
+) -> StockUpdateSchedulerConfig:
+    updated_config = StockUpdateSchedulerConfig(
+        enabled_markets=list(config.enabled_markets),
+        run_time=config.run_time,
+        osakedata_db_path=config.osakedata_db_path,
+        analysis_db_path=config.analysis_db_path,
+        log_dir=config.log_dir,
+        timezone=config.timezone,
+        skip_next_run=True,
+    )
+    return validate_scheduler_config(updated_config)
+
+
+def scheduler_running_state(status: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not status or not status.get("is_running"):
+        return {"is_running": False, "current_market": None, "skip_button_disabled": False}
+    return {
+        "is_running": True,
+        "current_market": status.get("current_market"),
+        "skip_button_disabled": True,
+    }
+
+
+def scheduler_skip_next_run_label(config: StockUpdateSchedulerConfig) -> str:
+    return f"Skip next run: {'true' if config.skip_next_run else 'false'}"
+
+
+def apply_skip_next_run_to_config(config_path: str) -> StockUpdateSchedulerConfig:
+    current_config = read_scheduler_config(config_path)
+    running_state = scheduler_running_state(read_scheduler_status(current_config.log_dir))
+    if running_state["is_running"]:
+        raise ValueError("Scheduler run is currently active.")
+    updated_config = build_skip_next_run_config(current_config)
+    write_scheduler_config(config_path, updated_config)
+    return updated_config
 
 
 def load_latest_scheduler_summary(log_dir: str) -> Optional[Dict[str, Any]]:
@@ -153,6 +192,9 @@ def run_app(page: ft.Page, config_path: str) -> None:
     omxh_checkbox = ft.Checkbox(label="OMXH")
     omxs_checkbox = ft.Checkbox(label="OMXS")
     usa_checkbox = ft.Checkbox(label="USA")
+    skip_next_run_text = ft.Text("")
+    running_status_text = ft.Text("")
+    skip_next_run_button = ft.ElevatedButton("Ohita seuraava ajastettu ajo")
 
     status_field = ft.TextField(
         label="Status",
@@ -190,10 +232,24 @@ def run_app(page: ft.Page, config_path: str) -> None:
         log_dir_field.value = config.log_dir
         timezone_field.value = config.timezone
         run_time_field.value = config.run_time
+        skip_next_run_text.value = scheduler_skip_next_run_label(config)
         enabled_markets = set(config.enabled_markets)
         omxh_checkbox.value = "omxh" in enabled_markets
         omxs_checkbox.value = "omxs" in enabled_markets
         usa_checkbox.value = "usa" in enabled_markets
+
+    def refresh_running_state(log_dir: str) -> None:
+        state = scheduler_running_state(read_scheduler_status(log_dir))
+        skip_next_run_button.disabled = state["skip_button_disabled"]
+        if state["is_running"]:
+            if state["current_market"]:
+                running_status_text.value = (
+                    f"Scheduler status: running ({state['current_market']})"
+                )
+            else:
+                running_status_text.value = "Scheduler status: running"
+        else:
+            running_status_text.value = "Scheduler status: not running"
 
     def refresh_logs_view(log_dir: str) -> None:
         latest_summary = load_latest_scheduler_summary(log_dir)
@@ -224,6 +280,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
                     spacing=4,
                 )
             )
+        refresh_running_state(log_dir)
 
     def on_save_config(e) -> None:
         try:
@@ -237,6 +294,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
             )
             write_scheduler_config(config_path, config)
             _set_status(status_field, f"Config saved: {config_path}", _STATUS_OK_COLOR)
+            update_ui_from_config(config)
             refresh_logs_view(config.log_dir)
         except Exception as exc:
             _set_status(status_field, f"Save failed: {exc}", _STATUS_ERROR_COLOR)
@@ -255,6 +313,8 @@ def run_app(page: ft.Page, config_path: str) -> None:
     def on_run_now(e) -> None:
         try:
             result = run_scheduler_config(config_path=config_path)
+            config = _load_config_or_raise(config_path)
+            update_ui_from_config(config)
             refresh_logs_view(log_dir_field.value)
             _set_status(
                 status_field,
@@ -263,6 +323,31 @@ def run_app(page: ft.Page, config_path: str) -> None:
             )
         except Exception as exc:
             _set_status(status_field, f"Run now failed: {exc}", _STATUS_ERROR_COLOR)
+        page.update()
+
+    def on_skip_next_run(e) -> None:
+        try:
+            current_config = _load_config_or_raise(config_path)
+            running_state = scheduler_running_state(read_scheduler_status(current_config.log_dir))
+            if running_state["is_running"]:
+                _set_status(
+                    status_field,
+                    "Skip next run blocked: scheduler run is currently active.",
+                    _STATUS_ERROR_COLOR,
+                )
+                refresh_logs_view(current_config.log_dir)
+                page.update()
+                return
+            updated_config = apply_skip_next_run_to_config(config_path)
+            update_ui_from_config(updated_config)
+            refresh_logs_view(updated_config.log_dir)
+            _set_status(
+                status_field,
+                "Next scheduled run will be skipped.",
+                _STATUS_OK_COLOR,
+            )
+        except Exception as exc:
+            _set_status(status_field, f"Skip next run failed: {exc}", _STATUS_ERROR_COLOR)
         page.update()
 
     def on_refresh_logs(e) -> None:
@@ -276,6 +361,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
     initial_config = _load_config_or_raise(config_path)
     update_ui_from_config(initial_config)
     refresh_logs_view(initial_config.log_dir)
+    skip_next_run_button.on_click = on_skip_next_run
 
     page.add(
         ft.Column(
@@ -288,11 +374,14 @@ def run_app(page: ft.Page, config_path: str) -> None:
                 timezone_field,
                 run_time_field,
                 ft.Row([omxh_checkbox, omxs_checkbox, usa_checkbox]),
+                skip_next_run_text,
+                running_status_text,
                 ft.Row(
                     [
                         ft.ElevatedButton("Save config", on_click=on_save_config),
                         ft.ElevatedButton("Reload config", on_click=on_reload_config),
                         ft.ElevatedButton("Run now", on_click=on_run_now),
+                        skip_next_run_button,
                         ft.ElevatedButton("Refresh logs", on_click=on_refresh_logs),
                     ]
                 ),
