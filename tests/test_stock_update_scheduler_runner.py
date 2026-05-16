@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from rawcandle.scheduler.config import create_default_scheduler_config, write_scheduler_config
+from rawcandle.scheduler.config import (
+    create_default_scheduler_config,
+    read_scheduler_config,
+    write_scheduler_config,
+)
 from rawcandle.scheduler.runner import (
     STATUS_FAILED,
     STATUS_OK,
@@ -19,7 +23,15 @@ def _touch(path):
     path.write_text("", encoding="utf-8")
 
 
-def _write_config(tmp_path, *, enabled_markets=None, osakedata_db=None, analysis_db=None, log_dir=None):
+def _write_config(
+    tmp_path,
+    *,
+    enabled_markets=None,
+    osakedata_db=None,
+    analysis_db=None,
+    log_dir=None,
+    skip_next_run=False,
+):
     osakedata_db = osakedata_db or (tmp_path / "osakedata.db")
     analysis_db = analysis_db or (tmp_path / "analysis.db")
     log_dir = log_dir or (tmp_path / "logs")
@@ -30,6 +42,7 @@ def _write_config(tmp_path, *, enabled_markets=None, osakedata_db=None, analysis
     )
     if enabled_markets is not None:
         config.enabled_markets = enabled_markets
+    config.skip_next_run = skip_next_run
     path = tmp_path / "scheduler_config.json"
     write_scheduler_config(str(path), config)
     return path
@@ -303,3 +316,96 @@ def test_scheduler_runner_does_not_call_rawcandleapp_init(tmp_path, monkeypatch)
 
     result = run_scheduler_config(config_path=str(config_path))
     assert result.overall_status == STATUS_OK
+
+
+def test_scheduler_runner_skip_next_run_skips_all_markets(tmp_path, monkeypatch):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path, enabled_markets=["omxh", "omxs"], skip_next_run=True
+    )
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: (_ for _ in ()).throw(
+            AssertionError("market run should not be called")
+        ),
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.market_results == []
+    assert result.overall_status == STATUS_OK
+    assert result.skipped is True
+    assert result.skip_reason == "skip_next_run"
+    assert result.enabled_markets == ["omxh", "omxs"]
+    summary_json_path = Path(result.summary_json_path)
+    assert summary_json_path.exists()
+    payload = json.loads(summary_json_path.read_text(encoding="utf-8"))
+    assert payload["skipped"] is True
+    assert payload["skip_reason"] == "skip_next_run"
+    assert payload["enabled_markets"] == ["omxh", "omxs"]
+    assert payload["market_results"] == []
+
+
+def test_scheduler_runner_skip_next_run_resets_config_to_false(tmp_path):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path, enabled_markets=["omxh", "omxs"], skip_next_run=True
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.skipped is True
+    reloaded = read_scheduler_config(str(config_path))
+    assert reloaded.skip_next_run is False
+    assert reloaded.enabled_markets == ["omxh", "omxs"]
+    assert reloaded.osakedata_db_path == str(osakedata_db)
+    assert reloaded.analysis_db_path == str(analysis_db)
+    assert reloaded.run_time == "05:30"
+    assert reloaded.timezone == "Europe/Helsinki"
+
+
+def test_scheduler_runner_skip_next_run_does_not_create_per_market_logs(tmp_path):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    log_dir = tmp_path / "logs"
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["omxh", "omxs"],
+        log_dir=log_dir,
+        skip_next_run=True,
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.skipped is True
+    assert list(log_dir.glob("stock_update_omxh_*.log")) == []
+    assert list(log_dir.glob("stock_update_omxs_*.log")) == []
+
+
+def test_scheduler_runner_skip_next_run_reset_write_failure_propagates(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path, enabled_markets=["omxh", "omxs"], skip_next_run=True
+    )
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.write_scheduler_config",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("write failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="write failed"):
+        run_scheduler_config(config_path=str(config_path))

@@ -7,7 +7,11 @@ from pathlib import Path
 from typing import List, Optional
 
 from main import RawCandleApp, _today_exclusive_end_date
-from rawcandle.scheduler.config import StockUpdateSchedulerConfig, read_scheduler_config
+from rawcandle.scheduler.config import (
+    StockUpdateSchedulerConfig,
+    read_scheduler_config,
+    write_scheduler_config,
+)
 from services.stock_update_service import (
     STATUS_FAILED,
     STATUS_OK,
@@ -38,6 +42,8 @@ class ScheduledStockUpdateRunResult:
     market_results: List[ScheduledMarketRunResult] = field(default_factory=list)
     overall_status: str = STATUS_OK
     summary_json_path: str = ""
+    skipped: bool = False
+    skip_reason: Optional[str] = None
 
 
 def _utc_now() -> datetime.datetime:
@@ -68,6 +74,27 @@ def _build_app(config: StockUpdateSchedulerConfig) -> RawCandleApp:
     app.analysis_db_path = config.analysis_db_path
     app.data_dir = str(osakedata_db_path.resolve().parent)
     return app
+
+
+def _write_summary_json(
+    *,
+    config: StockUpdateSchedulerConfig,
+    run_started_at: datetime.datetime,
+    result: ScheduledStockUpdateRunResult,
+) -> None:
+    log_dir = Path(config.log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    summary_json_path = log_dir / (
+        "stock_update_scheduler_summary_"
+        f"{_format_utc_filename_timestamp(run_started_at)}.json"
+    )
+    result.summary_json_path = str(summary_json_path)
+    summary_payload = asdict(result)
+    summary_payload["summary_json_path"] = str(summary_json_path)
+    summary_json_path.write_text(
+        json.dumps(summary_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _write_market_log(
@@ -193,6 +220,31 @@ def run_scheduler_config(
     config = read_scheduler_config(config_path)
     _preflight_validate_config(config)
 
+    if config.skip_next_run:
+        reset_config = StockUpdateSchedulerConfig(
+            enabled_markets=list(config.enabled_markets),
+            run_time=config.run_time,
+            osakedata_db_path=config.osakedata_db_path,
+            analysis_db_path=config.analysis_db_path,
+            log_dir=config.log_dir,
+            timezone=config.timezone,
+            skip_next_run=False,
+        )
+        write_scheduler_config(config_path, reset_config)
+
+        result = ScheduledStockUpdateRunResult(
+            started_at_utc=started_at_utc,
+            finished_at_utc=_format_utc_timestamp(_utc_now()),
+            config_path=config_path,
+            enabled_markets=list(config.enabled_markets),
+            market_results=[],
+            overall_status=STATUS_OK,
+            skipped=True,
+            skip_reason="skip_next_run",
+        )
+        _write_summary_json(config=config, run_started_at=run_started_at, result=result)
+        return result
+
     effective_today = datetime.datetime.now().strftime("%Y-%m-%d")
     effective_fetch_until_exclusive = _today_exclusive_end_date()
 
@@ -225,13 +277,8 @@ def run_scheduler_config(
         enabled_markets=list(config.enabled_markets),
         market_results=market_results,
         overall_status=overall_status,
-        summary_json_path=str(summary_json_path),
+        skipped=False,
+        skip_reason=None,
     )
-
-    summary_payload = asdict(result)
-    summary_payload["summary_json_path"] = str(summary_json_path)
-    summary_json_path.write_text(
-        json.dumps(summary_payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    _write_summary_json(config=config, run_started_at=run_started_at, result=result)
     return result

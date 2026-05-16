@@ -40,6 +40,22 @@ def _result(overall_status):
         ],
         overall_status=overall_status,
         summary_json_path="/tmp/logs/summary.json",
+        skipped=False,
+        skip_reason=None,
+    )
+
+
+def _skipped_result():
+    return ScheduledStockUpdateRunResult(
+        started_at_utc="2026-05-16T00:00:00Z",
+        finished_at_utc="2026-05-16T00:00:01Z",
+        config_path="/tmp/scheduler.json",
+        enabled_markets=["omxh", "omxs"],
+        market_results=[],
+        overall_status=STATUS_OK,
+        summary_json_path="/tmp/logs/summary.json",
+        skipped=True,
+        skip_reason="skip_next_run",
     )
 
 
@@ -58,6 +74,8 @@ def test_scheduler_cli_successful_run_prints_top_level_summary_lines(monkeypatch
     assert "SUMMARY scheduler_status=OK" in captured.out
     assert "SUMMARY markets_enabled=omxh,omxs" in captured.out
     assert "SUMMARY summary_json_path=/tmp/logs/summary.json" in captured.out
+    assert "SUMMARY scheduler_skipped=0" in captured.out
+    assert "SUMMARY scheduler_skip_reason=" in captured.out
 
 
 def test_scheduler_cli_ok_overall_status_exits_zero(monkeypatch):
@@ -87,3 +105,16 @@ def test_scheduler_cli_prints_per_market_status_and_log_lines(monkeypatch, capsy
     assert "SUMMARY market.omxh.log_path=/tmp/logs/omxh.log" in captured.out
     assert "SUMMARY market.omxs.status=OK" in captured.out
     assert "SUMMARY market.omxs.log_path=/tmp/logs/omxs.log" in captured.out
+
+
+def test_scheduler_cli_skipped_run_prints_skip_summary(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "run_scheduler_config", lambda config_path: _skipped_result())
+
+    code = cli.main(["--config", "/tmp/scheduler.json"])
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "SUMMARY scheduler_status=OK" in captured.out
+    assert "SUMMARY scheduler_skipped=1" in captured.out
+    assert "SUMMARY scheduler_skip_reason=skip_next_run" in captured.out
+    assert "SUMMARY markets_total=0" in captured.out
