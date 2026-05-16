@@ -131,3 +131,83 @@ def test_raw_candle_app_still_has_update_stock_data():
 
 def test_raw_candle_app_still_has_build_stock_update_service_adapters():
     assert hasattr(main.RawCandleApp, "_build_stock_update_service_adapters")
+
+
+def test_format_stock_update_service_result_for_ui_basic_ok_result():
+    app = main.RawCandleApp.__new__(main.RawCandleApp)
+    result = main.StockUpdateResult(
+        market="omxh",
+        tickers_checked=10,
+        tickers_updated=3,
+        tickers_skipped=7,
+        tickers_failed=0,
+        ohlcv_rows_inserted=12,
+        status="OK",
+    )
+
+    formatted = app._format_stock_update_service_result_for_ui(result)
+
+    assert "Markkina: omxh" in formatted
+    assert "Tarkistetut tickerit: 10" in formatted
+    assert "Päivitetyt tickerit: 3" in formatted
+    assert "Ohitetut tickerit: 7" in formatted
+    assert "Virheelliset tickerit: 0" in formatted
+    assert "Lisätyt OHLCV-rivit: 12" in formatted
+    assert "Status: OK" in formatted
+
+
+def test_format_stock_update_service_result_for_ui_includes_warnings_and_errors():
+    app = main.RawCandleApp.__new__(main.RawCandleApp)
+    result = main.StockUpdateResult(
+        market="omxh",
+        warnings=["varoitus 1", "varoitus 2"],
+        errors=["virhe 1", "virhe 2"],
+        status="OK_WITH_WARNINGS",
+    )
+
+    formatted = app._format_stock_update_service_result_for_ui(result)
+
+    assert "Varoitukset:" in formatted
+    assert "- varoitus 1" in formatted
+    assert "- varoitus 2" in formatted
+    assert "Virheet:" in formatted
+    assert "- virhe 1" in formatted
+    assert "- virhe 2" in formatted
+    assert formatted.index("- varoitus 1") < formatted.index("- varoitus 2")
+    assert formatted.index("- virhe 1") < formatted.index("- virhe 2")
+
+
+def test_format_stock_update_service_result_for_ui_includes_dow_structures_updated():
+    app = main.RawCandleApp.__new__(main.RawCandleApp)
+    result = main.StockUpdateResult(
+        market="omxh",
+        dow_structures_updated=5,
+    )
+
+    formatted = app._format_stock_update_service_result_for_ui(result)
+
+    assert "Dow-rakenteet päivitetty: 5" in formatted
+
+
+def test_format_stock_update_service_result_for_ui_includes_compact_dow_summary():
+    app = main.RawCandleApp.__new__(main.RawCandleApp)
+    result = main.StockUpdateResult(
+        market="omxh",
+        dow_summary={"updated": 3, "processed": 10},
+    )
+
+    formatted = app._format_stock_update_service_result_for_ui(result)
+
+    assert "Dow-yhteenveto:" in formatted
+    assert "processed=10" in formatted
+    assert "updated=3" in formatted
+    assert formatted.index("processed=10") < formatted.index("updated=3")
+
+
+def test_format_stock_update_service_result_for_ui_does_not_require_ui_fields():
+    app = main.RawCandleApp.__new__(main.RawCandleApp)
+    result = main.StockUpdateResult(market="omxh", status="OK")
+
+    formatted = app._format_stock_update_service_result_for_ui(result)
+
+    assert "Markkina: omxh" in formatted

@@ -356,6 +356,42 @@ class RawCandleApp:
             progress_callback=None,
         )
 
+    def _format_stock_update_service_result_for_ui(
+        self,
+        result: StockUpdateResult,
+    ) -> str:
+        lines = [
+            "Päivitys valmis.",
+            f"Markkina: {result.market}",
+            f"Tarkistetut tickerit: {result.tickers_checked}",
+            f"Päivitetyt tickerit: {result.tickers_updated}",
+            f"Ohitetut tickerit: {result.tickers_skipped}",
+            f"Virheelliset tickerit: {result.tickers_failed}",
+            f"Lisätyt OHLCV-rivit: {result.ohlcv_rows_inserted}",
+        ]
+        if result.dow_structures_updated is not None:
+            lines.append(f"Dow-rakenteet päivitetty: {result.dow_structures_updated}")
+        if result.dow_summary is not None:
+            dow_items = ", ".join(
+                f"{key}={str(result.dow_summary[key])}"
+                for key in sorted(result.dow_summary.keys())
+            )
+            lines.append(f"Dow-yhteenveto: {dow_items}")
+        lines.extend(
+            [
+                f"Varoitukset: {len(result.warnings)}",
+                f"Virheet: {len(result.errors)}",
+                f"Status: {result.status}",
+            ]
+        )
+        if result.warnings:
+            lines.append("Varoitukset:")
+            lines.extend(f"- {warning}" for warning in result.warnings)
+        if result.errors:
+            lines.append("Virheet:")
+            lines.extend(f"- {error}" for error in result.errors)
+        return "\n".join(lines)
+
     def _run_incremental_candlestick_analysis(
         self,
         ticker: str,
