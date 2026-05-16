@@ -69,10 +69,3 @@ def test_format_stock_update_summary_lines_formats_none_dow_as_empty():
     lines = format_stock_update_summary_lines(result)
     assert "SUMMARY dow_structures_updated=" in lines
 
-
-def test_run_stock_data_update_raises_not_implemented():
-    with pytest.raises(NotImplementedError, match="run_stock_data_update is not implemented yet"):
-        run_stock_data_update(
-            osakedata_db_path="data/osakedata.db",
-            analysis_db_path="data/analysis.db",
-        )

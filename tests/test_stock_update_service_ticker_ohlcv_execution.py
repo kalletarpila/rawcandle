@@ -443,10 +443,3 @@ def test_execute_ticker_ohlcv_update_plan_uses_market_argument_not_candidate_mar
         market = conn.execute("SELECT market FROM osakedata").fetchone()[0]
     assert market == "usa"
 
-
-def test_run_stock_data_update_still_raises_not_implemented():
-    with pytest.raises(NotImplementedError, match="run_stock_data_update is not implemented yet"):
-        run_stock_data_update(
-            osakedata_db_path="data/osakedata.db",
-            analysis_db_path="data/analysis.db",
-        )

@@ -211,13 +211,3 @@ def test_insert_missing_ohlcv_rows_propagates_sqlite_errors(tmp_path):
             rows=[StockOhlcvRow("AAA", "2026-01-02", 1.0, 2.0, 0.5, 1.5, 100, "usa")],
         )
 
-
-def test_run_stock_data_update_still_raises_not_implemented():
-    with pytest.raises(
-        NotImplementedError,
-        match="run_stock_data_update is not implemented yet",
-    ):
-        run_stock_data_update(
-            osakedata_db_path="data/osakedata.db",
-            analysis_db_path="data/analysis.db",
-        )

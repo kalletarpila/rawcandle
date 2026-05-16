@@ -167,10 +167,3 @@ def test_convert_histories_to_ohlcv_rows_propagates_conversion_exceptions():
             market="usa",
         )
 
-
-def test_run_stock_data_update_still_raises_not_implemented():
-    with pytest.raises(NotImplementedError, match="run_stock_data_update is not implemented yet"):
-        run_stock_data_update(
-            osakedata_db_path="data/osakedata.db",
-            analysis_db_path="data/analysis.db",
-        )

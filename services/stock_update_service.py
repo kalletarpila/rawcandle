@@ -865,8 +865,84 @@ def run_stock_data_update(
     analysis_db_path: str,
     market: Optional[str] = None,
     start_override: Optional[str] = None,
+    today: str,
+    fetch_until_exclusive: str,
+    stock_factory: StockFactory,
+    sync_splits: SplitSyncCallable,
+    maybe_backfill_splits: SplitBackfillCallable,
+    calculate_divergences: DivergenceUpdateCallable,
+    run_candlestick_analysis: CandlestickUpdateCallable,
+    calculate_dow_structures: DowUpdateCallable,
+    pivot_radius: Any,
+    bounded_initial_from_date: Any,
+    recalc_tail_trading_days: Any,
+    dow_dry_run: bool = False,
+    dow_run_id: Optional[str] = None,
+    dow_created_at_utc: Optional[str] = None,
     progress_callback: ProgressCallback = None,
 ) -> StockUpdateResult:
-    raise NotImplementedError(
-        "run_stock_data_update is not implemented yet; extraction will be done in a later step."
+    selected_market = resolve_stock_update_market(market)
+    candidates = load_grouped_stock_update_candidates(osakedata_db_path)
+    filtered_candidates = filter_stock_update_candidates_by_market(
+        candidates,
+        selected_market,
+    )
+    plans = plan_ticker_updates(
+        candidates=filtered_candidates,
+        today=today,
+        fetch_until_exclusive=fetch_until_exclusive,
+        start_override=start_override,
+    )
+    orchestration_result = execute_stock_update_orchestration(
+        osakedata_db_path=osakedata_db_path,
+        analysis_db_path=analysis_db_path,
+        market=selected_market,
+        plans=plans,
+        stock_factory=stock_factory,
+        sync_splits=sync_splits,
+        maybe_backfill_splits=maybe_backfill_splits,
+        calculate_divergences=calculate_divergences,
+        run_candlestick_analysis=run_candlestick_analysis,
+        calculate_dow_structures=calculate_dow_structures,
+        pivot_radius=pivot_radius,
+        bounded_initial_from_date=bounded_initial_from_date,
+        recalc_tail_trading_days=recalc_tail_trading_days,
+        dow_dry_run=dow_dry_run,
+        dow_run_id=dow_run_id,
+        dow_created_at_utc=dow_created_at_utc,
+    )
+    dow_summary = (
+        orchestration_result.dow_result.dow_summary
+        if orchestration_result.dow_result is not None
+        else None
+    )
+    dow_structures_updated = None
+    if isinstance(dow_summary, dict):
+        if "updated" in dow_summary:
+            dow_structures_updated = dow_summary["updated"]
+        elif "inserted" in dow_summary:
+            dow_structures_updated = dow_summary["inserted"]
+
+    warnings = list(orchestration_result.warnings)
+    errors = list(orchestration_result.errors)
+    status = (
+        STATUS_OK_WITH_WARNINGS
+        if orchestration_result.batch_result.tickers_failed > 0 or warnings
+        else STATUS_OK
+    )
+    return StockUpdateResult(
+        market=selected_market,
+        tickers_checked=orchestration_result.batch_result.tickers_checked,
+        tickers_updated=orchestration_result.batch_result.tickers_updated,
+        tickers_skipped=orchestration_result.batch_result.tickers_skipped,
+        tickers_failed=orchestration_result.batch_result.tickers_failed,
+        ohlcv_rows_inserted=orchestration_result.batch_result.ohlcv_rows_inserted,
+        splits_synced=0,
+        divergences_updated=0,
+        candlesticks_updated=0,
+        dow_structures_updated=dow_structures_updated,
+        dow_summary=dow_summary,
+        warnings=warnings,
+        errors=errors,
+        status=status,
     )

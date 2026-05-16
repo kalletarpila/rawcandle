@@ -529,10 +529,3 @@ def test_stock_ticker_update_flow_result_has_no_dow_fields() -> None:
     assert not hasattr(result, "dow_summary")
     assert not hasattr(result, "dow_structures_updated")
 
-
-def test_run_stock_data_update_raises_not_implemented_ticker_update_flow() -> None:
-    with pytest.raises(NotImplementedError):
-        run_stock_data_update(
-            osakedata_db_path="osakedata.db",
-            analysis_db_path="analysis.db",
-        )

@@ -142,10 +142,3 @@ def test_execute_stock_update_batch_signature_has_no_dow_callable() -> None:
     assert "dow_update" not in signature.parameters
     assert "dow_callable" not in signature.parameters
 
-
-def test_run_stock_data_update_raises_not_implemented_dow_execution() -> None:
-    with pytest.raises(NotImplementedError):
-        run_stock_data_update(
-            osakedata_db_path="osakedata.db",
-            analysis_db_path="analysis.db",
-        )

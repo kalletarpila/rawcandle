@@ -292,10 +292,3 @@ def test_candlestick_incompatible_return_shape_is_caught() -> None:
     assert result.candlestick_error
     assert result.warnings
 
-
-def test_run_stock_data_update_raises_not_implemented_downstream_step() -> None:
-    with pytest.raises(NotImplementedError):
-        run_stock_data_update(
-            osakedata_db_path="osakedata.db",
-            analysis_db_path="analysis.db",
-        )

@@ -183,10 +183,3 @@ def test_plan_ticker_updates_preserves_order_and_includes_skipped_and_updates():
     assert [plan.needs_update for plan in plans] == [False, True, False]
     assert [plan.skip_reason for plan in plans] == ["already_current", None, "already_current"]
 
-
-def test_run_stock_data_update_still_raises_not_implemented():
-    with pytest.raises(NotImplementedError, match="run_stock_data_update is not implemented yet"):
-        run_stock_data_update(
-            osakedata_db_path="data/osakedata.db",
-            analysis_db_path="data/analysis.db",
-        )

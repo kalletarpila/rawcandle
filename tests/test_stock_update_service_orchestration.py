@@ -429,10 +429,3 @@ def test_execute_stock_update_orchestration_warning_and_error_lists_are_new_obje
     assert result.warnings is not result.batch_result.warnings
     assert result.errors is not result.batch_result.errors
 
-
-def test_run_stock_data_update_raises_not_implemented_orchestration() -> None:
-    with pytest.raises(NotImplementedError):
-        run_stock_data_update(
-            osakedata_db_path="osakedata.db",
-            analysis_db_path="analysis.db",
-        )
