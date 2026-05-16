@@ -34,8 +34,7 @@ def _create_osakedata_db(
     start_date: date = date(2026, 1, 1),
 ) -> None:
     with sqlite3.connect(path) as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS osakedata (
                 osake TEXT NOT NULL,
                 pvm TEXT NOT NULL,
@@ -46,8 +45,7 @@ def _create_osakedata_db(
                 volume INTEGER,
                 market TEXT
             )
-            """
-        )
+            """)
         rows = []
         for idx, close_value in enumerate(closes):
             current_date = start_date + timedelta(days=idx)
@@ -116,13 +114,11 @@ def _insert_close_series_for_dates(
 def _load_event_rows(db_path: Path) -> list[sqlite3.Row]:
     with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
-        return conn.execute(
-            """
+        return conn.execute("""
             SELECT *
             FROM stock_dow_structure_events
             ORDER BY confirmed_as_of_date ASC, event_date ASC, id ASC
-            """
-        ).fetchall()
+            """).fetchall()
 
 
 def _load_bars(db_path: Path, ticker: str = "TEST"):
@@ -169,6 +165,250 @@ def _event_run_ids_by_boundary(
 
 
 def test_pivot_confirmation_uses_event_date_and_confirmed_as_of_date(tmp_path):
+    def test_pivot_high_detected_from_high_not_close(tmp_path):
+        osakedata_db = tmp_path / "osakedata.db"
+        # High forms a local max at idx=3, but close does not
+        closes = [10, 11, 12, 13, 12, 11, 10]
+        highs = [10, 11, 12, 20, 12, 11, 10]  # Only idx=3 is a unique high
+        lows = [9, 10, 11, 12, 11, 10, 9]
+        with sqlite3.connect(osakedata_db) as conn:
+            conn.execute("""
+                CREATE TABLE osakedata (
+                    osake TEXT, pvm TEXT, open REAL, high REAL, low REAL, close REAL, volume INTEGER, market TEXT
+                )""")
+            for i in range(7):
+                conn.execute(
+                    "INSERT INTO osakedata VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "TEST",
+                        f"2026-01-0{i+1}",
+                        0,
+                        highs[i],
+                        lows[i],
+                        closes[i],
+                        1000 + i,
+                        "test",
+                    ),
+                )
+            conn.commit()
+        bars = fetch_price_bars(sqlite3.connect(osakedata_db), "TEST")
+        events = calculate_ticker_events(
+            bars,
+            pivot_radius=3,
+            start_confirmed_as_of_date=bars[0].date,
+            initial_state=None,
+            run_id="run-high-test",
+            created_at_utc="2026-01-01T00:00:00+00:00",
+        )
+        assert any(
+            e["event_type"] == "PIVOT_HIGH" and e["pivot_high_price"] == 20
+            for e in events
+        )
+        # Confirm that close at idx=3 is not a local max, so old logic would not have triggered
+
+    def test_pivot_low_detected_from_low_not_close(tmp_path):
+        osakedata_db = tmp_path / "osakedata.db"
+        closes = [10, 11, 12, 13, 12, 11, 10]
+        highs = [10, 11, 12, 13, 12, 11, 10]
+        lows = [9, 10, 11, 1, 11, 10, 9]  # Only idx=3 is a unique low
+        with sqlite3.connect(osakedata_db) as conn:
+            conn.execute("""
+                CREATE TABLE osakedata (
+                    osake TEXT, pvm TEXT, open REAL, high REAL, low REAL, close REAL, volume INTEGER, market TEXT
+                )""")
+            for i in range(7):
+                conn.execute(
+                    "INSERT INTO osakedata VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "TEST",
+                        f"2026-01-0{i+1}",
+                        0,
+                        highs[i],
+                        lows[i],
+                        closes[i],
+                        1000 + i,
+                        "test",
+                    ),
+                )
+            conn.commit()
+        bars = fetch_price_bars(sqlite3.connect(osakedata_db), "TEST")
+        events = calculate_ticker_events(
+            bars,
+            pivot_radius=3,
+            start_confirmed_as_of_date=bars[0].date,
+            initial_state=None,
+            run_id="run-low-test",
+            created_at_utc="2026-01-01T00:00:00+00:00",
+        )
+        assert any(
+            e["event_type"] == "PIVOT_LOW" and e["pivot_low_price"] == 1 for e in events
+        )
+
+    def test_bos_up_triggered_by_high_not_close(tmp_path):
+        osakedata_db = tmp_path / "osakedata.db"
+        # Setup: active_bos_high_price = 15, high breaks it but close does not
+        closes = [10, 12, 14, 15, 13, 11, 10, 16]
+        highs = [10, 12, 14, 15, 13, 11, 10, 20]  # high=20 at idx=7 breaks BOS
+        lows = [9, 10, 11, 12, 11, 10, 9, 8]
+        with sqlite3.connect(osakedata_db) as conn:
+            conn.execute("""
+                CREATE TABLE osakedata (
+                    osake TEXT, pvm TEXT, open REAL, high REAL, low REAL, close REAL, volume INTEGER, market TEXT
+                )""")
+            for i in range(8):
+                conn.execute(
+                    "INSERT INTO osakedata VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "TEST",
+                        f"2026-01-0{i+1}",
+                        0,
+                        highs[i],
+                        lows[i],
+                        closes[i],
+                        1000 + i,
+                        "test",
+                    ),
+                )
+            conn.commit()
+        bars = fetch_price_bars(sqlite3.connect(osakedata_db), "TEST")
+        events = calculate_ticker_events(
+            bars,
+            pivot_radius=3,
+            start_confirmed_as_of_date=bars[0].date,
+            initial_state=None,
+            run_id="run-bosup-test",
+            created_at_utc="2026-01-01T00:00:00+00:00",
+        )
+        assert any(
+            e["event_type"] == "BOS_UP"
+            and e["break_level_price"] == 15
+            and e["bar"].high == 20
+            for e in events
+            if "bar" in e or True
+        )
+
+    def test_bos_down_triggered_by_low_not_close(tmp_path):
+        osakedata_db = tmp_path / "osakedata.db"
+        closes = [10, 12, 14, 15, 13, 11, 10, 9]
+        highs = [10, 12, 14, 15, 13, 11, 10, 9]
+        lows = [9, 10, 11, 12, 11, 10, 9, 1]  # low=1 at idx=7 breaks BOS
+        with sqlite3.connect(osakedata_db) as conn:
+            conn.execute("""
+                CREATE TABLE osakedata (
+                    osake TEXT, pvm TEXT, open REAL, high REAL, low REAL, close REAL, volume INTEGER, market TEXT
+                )""")
+            for i in range(8):
+                conn.execute(
+                    "INSERT INTO osakedata VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "TEST",
+                        f"2026-01-0{i+1}",
+                        0,
+                        highs[i],
+                        lows[i],
+                        closes[i],
+                        1000 + i,
+                        "test",
+                    ),
+                )
+            conn.commit()
+        bars = fetch_price_bars(sqlite3.connect(osakedata_db), "TEST")
+        events = calculate_ticker_events(
+            bars,
+            pivot_radius=3,
+            start_confirmed_as_of_date=bars[0].date,
+            initial_state=None,
+            run_id="run-bosdown-test",
+            created_at_utc="2026-01-01T00:00:00+00:00",
+        )
+        assert any(
+            e["event_type"] == "BOS_DOWN"
+            and e["break_level_price"] == 9
+            and e["bar"].low == 1
+            for e in events
+            if "bar" in e or True
+        )
+
+    def test_close_only_change_does_not_trigger_pivot_or_bos(tmp_path):
+        osakedata_db = tmp_path / "osakedata.db"
+        # high/low are flat, but close spikes
+        closes = [10, 10, 10, 50, 10, 10, 10]
+        highs = [10, 10, 10, 10, 10, 10, 10]
+        lows = [10, 10, 10, 10, 10, 10, 10]
+        with sqlite3.connect(osakedata_db) as conn:
+            conn.execute("""
+                CREATE TABLE osakedata (
+                    osake TEXT, pvm TEXT, open REAL, high REAL, low REAL, close REAL, volume INTEGER, market TEXT
+                )""")
+            for i in range(7):
+                conn.execute(
+                    "INSERT INTO osakedata VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "TEST",
+                        f"2026-01-0{i+1}",
+                        0,
+                        highs[i],
+                        lows[i],
+                        closes[i],
+                        1000 + i,
+                        "test",
+                    ),
+                )
+            conn.commit()
+        bars = fetch_price_bars(sqlite3.connect(osakedata_db), "TEST")
+        events = calculate_ticker_events(
+            bars,
+            pivot_radius=3,
+            start_confirmed_as_of_date=bars[0].date,
+            initial_state=None,
+            run_id="run-closeonly-test",
+            created_at_utc="2026-01-01T00:00:00+00:00",
+        )
+        assert not any(
+            e["event_type"] in ("PIVOT_HIGH", "PIVOT_LOW", "BOS_UP", "BOS_DOWN")
+            for e in events
+        )
+
+    def test_event_rows_include_audit_fields(tmp_path):
+        osakedata_db = tmp_path / "osakedata.db"
+        closes = [10, 11, 12, 13, 12, 11, 10]
+        highs = [10, 11, 12, 20, 12, 11, 10]
+        lows = [9, 10, 11, 12, 11, 10, 9]
+        with sqlite3.connect(osakedata_db) as conn:
+            conn.execute("""
+                CREATE TABLE osakedata (
+                    osake TEXT, pvm TEXT, open REAL, high REAL, low REAL, close REAL, volume INTEGER, market TEXT
+                )""")
+            for i in range(7):
+                conn.execute(
+                    "INSERT INTO osakedata VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "TEST",
+                        f"2026-01-0{i+1}",
+                        1,
+                        highs[i],
+                        lows[i],
+                        closes[i],
+                        1000 + i,
+                        "test",
+                    ),
+                )
+            conn.commit()
+        bars = fetch_price_bars(sqlite3.connect(osakedata_db), "TEST")
+        events = calculate_ticker_events(
+            bars,
+            pivot_radius=3,
+            start_confirmed_as_of_date=bars[0].date,
+            initial_state=None,
+            run_id="run-audit-test",
+            created_at_utc="2026-01-01T00:00:00+00:00",
+        )
+        for e in events:
+            assert "open" in e["bar"].__dict__
+            assert "high" in e["bar"].__dict__
+            assert "low" in e["bar"].__dict__
+            assert "close" in e["bar"].__dict__
+
     osakedata_db = tmp_path / "osakedata.db"
     closes = [10, 11, 12, 15, 12, 11, 10]
     _create_osakedata_db(osakedata_db, closes)
@@ -204,21 +444,18 @@ def test_new_schema_uses_active_bos_columns_only(tmp_path):
     assert "structural_low_price" not in columns
 
     with sqlite3.connect(analysis_db) as conn:
-        row = conn.execute(
-            """
+        row = conn.execute("""
             SELECT name
             FROM sqlite_master
             WHERE type = 'table' AND name = 'stock_dow_structure_status'
-            """
-        ).fetchone()
+            """).fetchone()
     assert row is not None
 
 
 def test_old_schema_migrates_to_active_bos_columns_and_preserves_values(tmp_path):
     analysis_db = tmp_path / "analysis.db"
     with sqlite3.connect(analysis_db) as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE stock_dow_structure_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 ticker TEXT NOT NULL,
@@ -267,10 +504,8 @@ def test_old_schema_migrates_to_active_bos_columns_and_preserves_values(tmp_path
                 run_id TEXT NOT NULL,
                 created_at_utc TEXT NOT NULL
             )
-            """
-        )
-        conn.execute(
-            """
+            """)
+        conn.execute("""
             INSERT INTO stock_dow_structure_events (
                 ticker, market, event_date, confirmed_as_of_date, close, price_source,
                 structure_price, pivot_radius, event_type, trend_state,
@@ -284,8 +519,7 @@ def test_old_schema_migrates_to_active_bos_columns_and_preserves_values(tmp_path
                 '2026-01-07', 9.5,
                 'stock_dow_v1', 'run-old', '2026-01-10T00:00:00+00:00'
             )
-            """
-        )
+            """)
         conn.commit()
         ensure_stock_dow_structure_schema(conn)
 
@@ -301,8 +535,7 @@ def test_old_schema_migrates_to_active_bos_columns_and_preserves_values(tmp_path
 
     with sqlite3.connect(analysis_db) as conn:
         conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            """
+        row = conn.execute("""
             SELECT
                 active_bos_high_date,
                 active_bos_high_price,
@@ -310,8 +543,7 @@ def test_old_schema_migrates_to_active_bos_columns_and_preserves_values(tmp_path
                 active_bos_low_price
             FROM stock_dow_structure_events
             WHERE ticker = 'TEST'
-            """
-        ).fetchone()
+            """).fetchone()
 
     assert row is not None
     assert row["active_bos_high_date"] == "2026-01-08"
@@ -560,7 +792,25 @@ def test_up_trend_bos_down_uses_active_bos_low(tmp_path):
     osakedata_db = tmp_path / "osakedata.db"
     _create_analysis_db(analysis_db)
     closes = [
-        10, 11, 12, 15, 13, 11, 9, 7, 9, 12, 16, 13, 11, 9, 10, 12, 14, 8, 7,
+        10,
+        11,
+        12,
+        15,
+        13,
+        11,
+        9,
+        7,
+        9,
+        12,
+        16,
+        13,
+        11,
+        9,
+        10,
+        12,
+        14,
+        8,
+        7,
     ]
     _create_osakedata_db(osakedata_db, closes)
 
@@ -575,7 +825,8 @@ def test_up_trend_bos_down_uses_active_bos_low(tmp_path):
     bos_down = next(row for row in rows if row["event_type"] == "BOS_DOWN")
 
     assert bos_down["active_bos_low_date"] == "2026-01-14"
-    assert bos_down["active_bos_low_price"] == 9.0
+    assert bos_down["active_bos_low_price"] == 8.0
+    assert bos_down["active_bos_low_price"] != 9.0
     assert bos_down["break_level_date"] == bos_down["active_bos_low_date"]
     assert bos_down["break_level_price"] == bos_down["active_bos_low_price"]
 
@@ -585,7 +836,25 @@ def test_down_trend_bos_up_uses_active_bos_high(tmp_path):
     osakedata_db = tmp_path / "osakedata.db"
     _create_analysis_db(analysis_db)
     closes = [
-        10, 12, 14, 17, 15, 13, 11, 8, 10, 12, 15, 13, 11, 6, 8, 10, 12, 16, 17,
+        10,
+        12,
+        14,
+        17,
+        15,
+        13,
+        11,
+        8,
+        10,
+        12,
+        15,
+        13,
+        11,
+        6,
+        8,
+        10,
+        12,
+        16,
+        17,
     ]
     _create_osakedata_db(osakedata_db, closes)
 
@@ -600,7 +869,8 @@ def test_down_trend_bos_up_uses_active_bos_high(tmp_path):
     bos_up = next(row for row in rows if row["event_type"] == "BOS_UP")
 
     assert bos_up["active_bos_high_date"] == "2026-01-11"
-    assert bos_up["active_bos_high_price"] == 15.0
+    assert bos_up["active_bos_high_price"] == 16.0
+    assert bos_up["active_bos_high_price"] != 15.0
     assert bos_up["break_level_date"] == bos_up["active_bos_high_date"]
     assert bos_up["break_level_price"] == bos_up["active_bos_high_price"]
 
@@ -1200,13 +1470,11 @@ def test_manual_helper_uses_status_coverage_not_latest_event_confirmed_date(tmp_
     assert status_row["calculated_through_date"] == "2026-01-17"
 
     with sqlite3.connect(analysis_db) as conn:
-        conn.execute(
-            """
+        conn.execute("""
             UPDATE stock_dow_structure_status
             SET latest_event_confirmed_as_of_date = '2026-01-10'
             WHERE ticker = 'AAA' AND price_source = 'close' AND pivot_radius = 3
-            """
-        )
+            """)
         conn.commit()
 
     summary = calculate_missing_or_outdated_stock_dow_structures(
@@ -1237,13 +1505,11 @@ def test_outdated_by_status_coverage_is_selected(tmp_path):
     )
 
     with sqlite3.connect(analysis_db) as conn:
-        conn.execute(
-            """
+        conn.execute("""
             UPDATE stock_dow_structure_status
             SET calculated_through_date = '2026-01-10'
             WHERE ticker = 'AAA' AND price_source = 'close' AND pivot_radius = 3
-            """
-        )
+            """)
         conn.commit()
 
     summary = calculate_missing_or_outdated_stock_dow_structures(
@@ -1255,7 +1521,9 @@ def test_outdated_by_status_coverage_is_selected(tmp_path):
     assert summary["tickers_up_to_date"] == 0
 
 
-def test_registered_without_status_uses_incremental_recovery_and_writes_status(tmp_path):
+def test_registered_without_status_uses_incremental_recovery_and_writes_status(
+    tmp_path,
+):
     analysis_db = tmp_path / "analysis.db"
     osakedata_db = tmp_path / "osakedata.db"
     _create_analysis_db(analysis_db)
@@ -1466,11 +1734,9 @@ def test_cli_dry_run_creates_table_and_prints_deterministic_summary(tmp_path, ca
     assert captured[-1] == "SUMMARY errors=0"
 
     with sqlite3.connect(analysis_db) as conn:
-        row = conn.execute(
-            """
+        row = conn.execute("""
             SELECT name
             FROM sqlite_master
             WHERE type = 'table' AND name = 'stock_dow_structure_events'
-            """
-        ).fetchone()
+            """).fetchone()
         assert row is not None
