@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
+DEFAULT_STOCK_UPDATE_MARKET = "omxh"
+FALLBACK_TICKER_MARKET = "usa"
 
 STATUS_OK = "OK"
 STATUS_OK_WITH_WARNINGS = "OK_WITH_WARNINGS"
@@ -46,6 +49,14 @@ VALID_STOCK_UPDATE_EVENT_TYPES = (
 
 
 @dataclass
+class StockUpdateTickerCandidate:
+    ticker: str
+    first_date: str
+    last_date: str
+    market: Optional[str] = None
+
+
+@dataclass
 class StockUpdateProgressEvent:
     event_type: str
     message: Optional[str] = None
@@ -82,6 +93,58 @@ class StockUpdateResult:
 
 
 ProgressCallback = Optional[Callable[[StockUpdateProgressEvent], None]]
+
+
+def resolve_stock_update_market(market: Optional[str]) -> str:
+    if market is None or not market.strip():
+        return DEFAULT_STOCK_UPDATE_MARKET
+    return market.strip().lower()
+
+
+def load_grouped_stock_update_candidates(
+    osakedata_db_path: str,
+) -> List[StockUpdateTickerCandidate]:
+    with sqlite3.connect(osakedata_db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT osake, MIN(pvm) as ensimmainen_pvm, MAX(pvm) as viimeisin_pvm, MAX(market) as market
+            FROM osakedata
+            GROUP BY osake
+            ORDER BY osake
+            """
+        )
+        rows = cursor.fetchall()
+
+    return [
+        StockUpdateTickerCandidate(
+            ticker=ticker,
+            first_date=first_date,
+            last_date=last_date,
+            market=market,
+        )
+        for ticker, first_date, last_date, market in rows
+    ]
+
+
+def filter_stock_update_candidates_by_market(
+    candidates: List[StockUpdateTickerCandidate],
+    selected_market: str,
+) -> List[StockUpdateTickerCandidate]:
+    return [
+        candidate
+        for candidate in candidates
+        if (candidate.market or "").strip().lower() == selected_market
+    ]
+
+
+def load_stock_update_candidates_for_market(
+    osakedata_db_path: str,
+    market: Optional[str],
+) -> List[StockUpdateTickerCandidate]:
+    selected_market = resolve_stock_update_market(market)
+    candidates = load_grouped_stock_update_candidates(osakedata_db_path)
+    return filter_stock_update_candidates_by_market(candidates, selected_market)
 
 
 def format_stock_update_summary_lines(result: StockUpdateResult) -> List[str]:
