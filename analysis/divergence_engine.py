@@ -28,9 +28,17 @@ def compute_divergence_for_date(
     closes: List[float],
     rsi_values: List[Optional[float]],
     idx: int,
+    lows: Optional[List[Optional[float]]] = None,
+    highs: Optional[List[Optional[float]]] = None,
 ) -> Dict[str, Any]:
     close_t = closes[idx]
     rsi_t = rsi_values[idx]
+    bullish_prices = lows if lows is not None and len(lows) == len(closes) else closes
+    bearish_prices = (
+        highs if highs is not None and len(highs) == len(closes) else closes
+    )
+    bullish_price_t = bullish_prices[idx]
+    bearish_price_t = bearish_prices[idx]
 
     if idx + 1 < MIN_HISTORY_DAYS:
         return {
@@ -59,37 +67,66 @@ def compute_divergence_for_date(
 
     lookback_start = max(0, idx - LOOKBACK_DAYS)
     for prev_idx in range(lookback_start, idx):
-        close_p = closes[prev_idx]
         rsi_p = rsi_values[prev_idx]
+        bullish_price_p = bullish_prices[prev_idx]
+        bearish_price_p = bearish_prices[prev_idx]
 
-        if rsi_p is None or close_p <= 0.0:
+        if rsi_p is None:
             continue
 
-        if is_rolling_low_candidate(closes, prev_idx):
-            if close_t < close_p and rsi_t > rsi_p:
+        if (
+            bullish_price_t is not None
+            and bullish_price_p is not None
+            and bullish_price_p > 0.0
+            and bullish_price_t > 0.0
+            and is_rolling_low_candidate(bullish_prices, prev_idx)
+        ):
+            if bullish_price_t < bullish_price_p and rsi_t > rsi_p:
                 bullish_best = max(
                     bullish_best,
-                    compute_bullish_candidate_strength(close_p, close_t, rsi_p, rsi_t),
+                    compute_bullish_candidate_strength(
+                        bullish_price_p,
+                        bullish_price_t,
+                        rsi_p,
+                        rsi_t,
+                    ),
                 )
-            if close_t > close_p and rsi_t < rsi_p:
+            if bullish_price_t > bullish_price_p and rsi_t < rsi_p:
                 hidden_bullish_best = max(
                     hidden_bullish_best,
                     compute_hidden_bullish_candidate_strength(
-                        close_p, close_t, rsi_p, rsi_t
+                        bullish_price_p,
+                        bullish_price_t,
+                        rsi_p,
+                        rsi_t,
                     ),
                 )
 
-        if is_rolling_high_candidate(closes, prev_idx):
-            if close_t > close_p and rsi_t < rsi_p:
+        if (
+            bearish_price_t is not None
+            and bearish_price_p is not None
+            and bearish_price_p > 0.0
+            and bearish_price_t > 0.0
+            and is_rolling_high_candidate(bearish_prices, prev_idx)
+        ):
+            if bearish_price_t > bearish_price_p and rsi_t < rsi_p:
                 bearish_best = max(
                     bearish_best,
-                    compute_bearish_candidate_strength(close_p, close_t, rsi_p, rsi_t),
+                    compute_bearish_candidate_strength(
+                        bearish_price_p,
+                        bearish_price_t,
+                        rsi_p,
+                        rsi_t,
+                    ),
                 )
-            if close_t < close_p and rsi_t > rsi_p:
+            if bearish_price_t < bearish_price_p and rsi_t > rsi_p:
                 hidden_bearish_best = max(
                     hidden_bearish_best,
                     compute_hidden_bearish_candidate_strength(
-                        close_p, close_t, rsi_p, rsi_t
+                        bearish_price_p,
+                        bearish_price_t,
+                        rsi_p,
+                        rsi_t,
                     ),
                 )
 
@@ -136,7 +173,9 @@ def _compute_raw_pivot_candidates(
     return raw
 
 
-def _collapse_tied_clusters(raw_candidates: List[bool], values: List[Optional[float]]) -> List[bool]:
+def _collapse_tied_clusters(
+    raw_candidates: List[bool], values: List[Optional[float]]
+) -> List[bool]:
     final = [False] * len(raw_candidates)
     idx = 0
     while idx < len(raw_candidates):
@@ -155,7 +194,9 @@ def _collapse_tied_clusters(raw_candidates: List[bool], values: List[Optional[fl
     return final
 
 
-def _compute_signed_change_pct(base_value: Optional[float], next_value: Optional[float]) -> Optional[float]:
+def _compute_signed_change_pct(
+    base_value: Optional[float], next_value: Optional[float]
+) -> Optional[float]:
     if base_value in (None, 0):
         return None
     if next_value is None:
@@ -205,8 +246,12 @@ def _compute_v2_event_flags_for_radius(
             pivot2_dates,
         )
 
-    raw_price_pivot_lows = _compute_raw_pivot_candidates(lows, radius=radius, is_low=True)
-    raw_price_pivot_highs = _compute_raw_pivot_candidates(highs, radius=radius, is_low=False)
+    raw_price_pivot_lows = _compute_raw_pivot_candidates(
+        lows, radius=radius, is_low=True
+    )
+    raw_price_pivot_highs = _compute_raw_pivot_candidates(
+        highs, radius=radius, is_low=False
+    )
     raw_rsi_pivot_lows = _compute_raw_pivot_candidates(
         rsi_values, radius=radius, is_low=True
     )
@@ -219,8 +264,12 @@ def _compute_v2_event_flags_for_radius(
     final_rsi_pivot_lows = _collapse_tied_clusters(raw_rsi_pivot_lows, rsi_values)
     final_rsi_pivot_highs = _collapse_tied_clusters(raw_rsi_pivot_highs, rsi_values)
 
-    price_pivot_lows = [idx for idx, is_pivot in enumerate(final_price_pivot_lows) if is_pivot]
-    price_pivot_highs = [idx for idx, is_pivot in enumerate(final_price_pivot_highs) if is_pivot]
+    price_pivot_lows = [
+        idx for idx, is_pivot in enumerate(final_price_pivot_lows) if is_pivot
+    ]
+    price_pivot_highs = [
+        idx for idx, is_pivot in enumerate(final_price_pivot_highs) if is_pivot
+    ]
 
     for pivot_idx in range(1, len(price_pivot_lows)):
         p1 = price_pivot_lows[pivot_idx - 1]
@@ -328,7 +377,9 @@ def _compute_v2_event_flags_for_radius(
             if hidden_pivot_gaps[event_idx] is None:
                 hidden_pivot_gaps[event_idx] = pivot_gap
             if hidden_pivot_drop_pcts[event_idx] is None:
-                hidden_pivot_drop_pcts[event_idx] = _compute_signed_change_pct(highs[p1], highs[p2])
+                hidden_pivot_drop_pcts[event_idx] = _compute_signed_change_pct(
+                    highs[p1], highs[p2]
+                )
             break
 
     return (
@@ -355,7 +406,11 @@ def compute_divergence_series(
     work_df = df.copy()
     work_df["pvm"] = work_df["pvm"].astype(str)
     work_df["close"] = pd.to_numeric(work_df["close"], errors="coerce")
-    work_df = work_df.dropna(subset=["pvm", "close"]).sort_values("pvm").reset_index(drop=True)
+    work_df = (
+        work_df.dropna(subset=["pvm", "close"])
+        .sort_values("pvm")
+        .reset_index(drop=True)
+    )
 
     dates = work_df["pvm"].tolist()
     closes = [float(value) for value in work_df["close"].tolist()]
@@ -402,7 +457,14 @@ def compute_divergence_series(
         date_value = dates[idx]
         if start_date is not None and date_value < start_date:
             continue
-        row = compute_divergence_for_date(dates, closes, rsi_values, idx)
+        row = compute_divergence_for_date(
+            dates,
+            closes,
+            rsi_values,
+            idx,
+            lows=lows,
+            highs=highs,
+        )
         row["is_bullish_divergence_r2"] = bullish_event_flags_r2[idx]
         row["is_bearish_divergence_r2"] = bearish_event_flags_r2[idx]
         row["is_bullish_divergence_r3"] = bullish_event_flags_r3[idx]

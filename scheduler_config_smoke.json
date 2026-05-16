@@ -1,0 +1,11 @@
+{
+  "analysis_db_path": "/home/kalle/projects/rawcandle/data_smoke_scheduler/analysis.db",
+  "enabled_markets": [
+    "omxh",
+    "omxs"
+  ],
+  "log_dir": "/home/kalle/projects/rawcandle/logs_smoke_scheduler",
+  "osakedata_db_path": "/home/kalle/projects/rawcandle/data_smoke_scheduler/osakedata.db",
+  "run_time": "05:30",
+  "timezone": "Europe/Helsinki"
+}

@@ -506,14 +506,18 @@ def _build_pivot_candidates(
     pivot_radius: int,
 ) -> dict[int, list[PivotCandidate]]:
     candidates: dict[int, list[PivotCandidate]] = defaultdict(list)
-    closes = [bar.close for bar in bars]
-    n_bars = len(closes)
+    highs = [bar.high for bar in bars]
+    lows = [bar.low for bar in bars]
+    n_bars = len(bars)
     for idx in range(pivot_radius, n_bars - pivot_radius):
-        window = closes[idx - pivot_radius : idx + pivot_radius + 1]
-        center = closes[idx]
-        max_value = max(window)
-        min_value = min(window)
-        if center == max_value and window.count(max_value) == 1:
+        # PIVOT_HIGH: high forms a unique local maximum
+        high_window = highs[idx - pivot_radius : idx + pivot_radius + 1]
+        high_center = highs[idx]
+        if (
+            high_center is not None
+            and high_center == max(high_window)
+            and high_window.count(high_center) == 1
+        ):
             candidates[idx + pivot_radius].append(
                 PivotCandidate(
                     event_type="PIVOT_HIGH",
@@ -521,7 +525,14 @@ def _build_pivot_candidates(
                     confirmed_index=idx + pivot_radius,
                 )
             )
-        if center == min_value and window.count(min_value) == 1:
+        # PIVOT_LOW: low forms a unique local minimum
+        low_window = lows[idx - pivot_radius : idx + pivot_radius + 1]
+        low_center = lows[idx]
+        if (
+            low_center is not None
+            and low_center == min(low_window)
+            and low_window.count(low_center) == 1
+        ):
             candidates[idx + pivot_radius].append(
                 PivotCandidate(
                     event_type="PIVOT_LOW",
@@ -1152,10 +1163,10 @@ def calculate_ticker_events(
             pivot_bar = bars[candidate.event_index]
             previous_trend = state.trend_state
             if candidate.event_type == "PIVOT_HIGH":
-                high_label = _determine_high_label(state, pivot_bar.close)
+                high_label = _determine_high_label(state, pivot_bar.high)
                 state.last_high_label = high_label
                 state.last_high_label_date = pivot_bar.date
-                state.last_high_label_price = pivot_bar.close
+                state.last_high_label_price = pivot_bar.high
                 state.trend_state = _compute_trend_state(state)
                 _sync_active_bos_levels(state)
                 event_rows.append(
@@ -1168,15 +1179,15 @@ def calculate_ticker_events(
                         run_id=run_id,
                         created_at_utc=created_at_utc,
                         pivot_high_date=pivot_bar.date,
-                        pivot_high_price=pivot_bar.close,
+                        pivot_high_price=pivot_bar.high,
                         dow_label_high=high_label,
                     )
                 )
             else:
-                low_label = _determine_low_label(state, pivot_bar.close)
+                low_label = _determine_low_label(state, pivot_bar.low)
                 state.last_low_label = low_label
                 state.last_low_label_date = pivot_bar.date
-                state.last_low_label_price = pivot_bar.close
+                state.last_low_label_price = pivot_bar.low
                 state.trend_state = _compute_trend_state(state)
                 _sync_active_bos_levels(state)
                 event_rows.append(
@@ -1189,7 +1200,7 @@ def calculate_ticker_events(
                         run_id=run_id,
                         created_at_utc=created_at_utc,
                         pivot_low_date=pivot_bar.date,
-                        pivot_low_price=pivot_bar.close,
+                        pivot_low_price=pivot_bar.low,
                         dow_label_low=low_label,
                     )
                 )
@@ -1208,7 +1219,8 @@ def calculate_ticker_events(
             state.bos_up_count = 0
             if (
                 state.active_bos_low_price is not None
-                and confirmed_bar.close < state.active_bos_low_price
+                and confirmed_bar.low is not None
+                and confirmed_bar.low < state.active_bos_low_price
             ):
                 if state.bos_down_count == 0:
                     state.bos_down_count = 1
@@ -1265,7 +1277,8 @@ def calculate_ticker_events(
             state.bos_down_count = 0
             if (
                 state.active_bos_high_price is not None
-                and confirmed_bar.close > state.active_bos_high_price
+                and confirmed_bar.high is not None
+                and confirmed_bar.high > state.active_bos_high_price
             ):
                 if state.bos_up_count == 0:
                     state.bos_up_count = 1

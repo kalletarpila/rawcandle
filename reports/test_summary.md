@@ -1,6 +1,6 @@
 # Testiraportti
 
-Generoitu: Thu Nov 13 18:44:12 EET 2025
+Generoitu: Fri Dec 12 11:40:44 EET 2025
 
 ## Testikattavuus
 - Katso: reports/coverage_all/index.html

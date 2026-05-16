@@ -90,5 +90,8 @@
   "spellright.language": [],
   "spellright.documentTypes": [],
   // Kaikki mahdolliset spell checkerit pois
-  "streetsidesoftware.codeSpellChecker.enabled": false
+  "streetsidesoftware.codeSpellChecker.enabled": false,
+  "chat.tools.terminal.autoApprove": {
+    "./venv/bin/python": true
+  }
 }
