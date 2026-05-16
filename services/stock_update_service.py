@@ -76,6 +76,26 @@ class StockUpdateTickerPlan:
 
 
 @dataclass
+class StockOhlcvRow:
+    ticker: str
+    date: str
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: int
+    market: str
+
+
+@dataclass
+class StockOhlcvInsertResult:
+    ticker: str
+    rows_seen: int = 0
+    rows_inserted: int = 0
+    rows_skipped_existing: int = 0
+
+
+@dataclass
 class StockUpdateProgressEvent:
     event_type: str
     message: Optional[str] = None
@@ -263,6 +283,63 @@ def plan_ticker_updates(
         )
         for candidate in candidates
     ]
+
+
+def load_existing_ohlcv_dates_for_ticker(
+    *,
+    osakedata_db_path: str,
+    ticker: str,
+) -> set[str]:
+    with sqlite3.connect(osakedata_db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT pvm FROM osakedata WHERE osake = ?", (ticker,))
+        return {row[0] for row in cursor.fetchall()}
+
+
+def insert_missing_ohlcv_rows(
+    *,
+    osakedata_db_path: str,
+    ticker: str,
+    rows: List[StockOhlcvRow],
+) -> StockOhlcvInsertResult:
+    existing_dates = load_existing_ohlcv_dates_for_ticker(
+        osakedata_db_path=osakedata_db_path,
+        ticker=ticker,
+    )
+    result = StockOhlcvInsertResult(ticker=ticker)
+
+    with sqlite3.connect(osakedata_db_path) as conn:
+        cursor = conn.cursor()
+        for row in rows:
+            result.rows_seen += 1
+            if row.date in existing_dates:
+                result.rows_skipped_existing += 1
+                continue
+
+            cursor.execute(
+                """
+                INSERT INTO osakedata
+                (osake, pvm, open, high, low, close, volume, market)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    row.ticker,
+                    row.date,
+                    row.open,
+                    row.high,
+                    row.low,
+                    row.close,
+                    row.volume,
+                    row.market,
+                ),
+            )
+            result.rows_inserted += 1
+            existing_dates.add(row.date)
+
+        if result.rows_inserted > 0:
+            conn.commit()
+
+    return result
 
 
 def format_stock_update_summary_lines(result: StockUpdateResult) -> List[str]:
