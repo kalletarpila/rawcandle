@@ -3420,6 +3420,9 @@ class RawCandleApp:
             if getattr(self, "update_market_dropdown", None)
             else ""
         )
+        selected_market = (
+            selected_market.strip().lower() if selected_market else "omxh"
+        )
 
         if not os.path.exists(db_path):
             self.loading_text.value = "❌ Osakedata.db ei löydy!"
@@ -3454,7 +3457,7 @@ class RawCandleApp:
                 stocks = [
                     row
                     for row in stocks
-                    if (row[3] or "").strip().lower() == selected_market.strip().lower()
+                    if (row[3] or "").strip().lower() == selected_market
                 ]
                 if not stocks:
                     self.loading_text.value = (
