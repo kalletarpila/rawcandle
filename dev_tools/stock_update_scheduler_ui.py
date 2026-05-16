@@ -73,6 +73,21 @@ def build_skip_next_run_config(
     return validate_scheduler_config(updated_config)
 
 
+def build_cancel_skip_next_run_config(
+    config: StockUpdateSchedulerConfig,
+) -> StockUpdateSchedulerConfig:
+    updated_config = StockUpdateSchedulerConfig(
+        enabled_markets=list(config.enabled_markets),
+        run_time=config.run_time,
+        osakedata_db_path=config.osakedata_db_path,
+        analysis_db_path=config.analysis_db_path,
+        log_dir=config.log_dir,
+        timezone=config.timezone,
+        skip_next_run=False,
+    )
+    return validate_scheduler_config(updated_config)
+
+
 def scheduler_running_state(status: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if not status or not status.get("is_running"):
         return {"is_running": False, "current_market": None, "skip_button_disabled": False}
@@ -87,12 +102,35 @@ def scheduler_skip_next_run_label(config: StockUpdateSchedulerConfig) -> str:
     return f"Skip next run: {'true' if config.skip_next_run else 'false'}"
 
 
+def scheduler_skip_button_state(
+    *,
+    config: StockUpdateSchedulerConfig,
+    status: Optional[Dict[str, Any]],
+) -> Dict[str, bool]:
+    running_state = scheduler_running_state(status)
+    if running_state["is_running"]:
+        return {"skip_enabled": False, "cancel_enabled": False}
+    if config.skip_next_run:
+        return {"skip_enabled": False, "cancel_enabled": True}
+    return {"skip_enabled": True, "cancel_enabled": False}
+
+
 def apply_skip_next_run_to_config(config_path: str) -> StockUpdateSchedulerConfig:
     current_config = read_scheduler_config(config_path)
     running_state = scheduler_running_state(read_scheduler_status(current_config.log_dir))
     if running_state["is_running"]:
         raise ValueError("Scheduler run is currently active.")
     updated_config = build_skip_next_run_config(current_config)
+    write_scheduler_config(config_path, updated_config)
+    return updated_config
+
+
+def apply_cancel_skip_next_run_to_config(config_path: str) -> StockUpdateSchedulerConfig:
+    current_config = read_scheduler_config(config_path)
+    running_state = scheduler_running_state(read_scheduler_status(current_config.log_dir))
+    if running_state["is_running"]:
+        raise ValueError("Scheduler run is currently active.")
+    updated_config = build_cancel_skip_next_run_config(current_config)
     write_scheduler_config(config_path, updated_config)
     return updated_config
 
@@ -195,6 +233,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
     skip_next_run_text = ft.Text("")
     running_status_text = ft.Text("")
     skip_next_run_button = ft.ElevatedButton("Ohita seuraava ajastettu ajo")
+    cancel_skip_next_run_button = ft.ElevatedButton("Peru seuraavan ajon ohitus")
 
     status_field = ft.TextField(
         label="Status",
@@ -239,8 +278,8 @@ def run_app(page: ft.Page, config_path: str) -> None:
         usa_checkbox.value = "usa" in enabled_markets
 
     def refresh_running_state(log_dir: str) -> None:
-        state = scheduler_running_state(read_scheduler_status(log_dir))
-        skip_next_run_button.disabled = state["skip_button_disabled"]
+        status = read_scheduler_status(log_dir)
+        state = scheduler_running_state(status)
         if state["is_running"]:
             if state["current_market"]:
                 running_status_text.value = (
@@ -250,6 +289,10 @@ def run_app(page: ft.Page, config_path: str) -> None:
                 running_status_text.value = "Scheduler status: running"
         else:
             running_status_text.value = "Scheduler status: not running"
+        current_config = _load_config_or_raise(config_path)
+        button_state = scheduler_skip_button_state(config=current_config, status=status)
+        skip_next_run_button.disabled = not button_state["skip_enabled"]
+        cancel_skip_next_run_button.disabled = not button_state["cancel_enabled"]
 
     def refresh_logs_view(log_dir: str) -> None:
         latest_summary = load_latest_scheduler_summary(log_dir)
@@ -350,6 +393,31 @@ def run_app(page: ft.Page, config_path: str) -> None:
             _set_status(status_field, f"Skip next run failed: {exc}", _STATUS_ERROR_COLOR)
         page.update()
 
+    def on_cancel_skip_next_run(e) -> None:
+        try:
+            current_config = _load_config_or_raise(config_path)
+            running_state = scheduler_running_state(read_scheduler_status(current_config.log_dir))
+            if running_state["is_running"]:
+                _set_status(
+                    status_field,
+                    "Cancel skip blocked: scheduler run is currently active.",
+                    _STATUS_ERROR_COLOR,
+                )
+                refresh_logs_view(current_config.log_dir)
+                page.update()
+                return
+            updated_config = apply_cancel_skip_next_run_to_config(config_path)
+            update_ui_from_config(updated_config)
+            refresh_logs_view(updated_config.log_dir)
+            _set_status(
+                status_field,
+                "Next scheduled run will NOT be skipped.",
+                _STATUS_OK_COLOR,
+            )
+        except Exception as exc:
+            _set_status(status_field, f"Cancel skip failed: {exc}", _STATUS_ERROR_COLOR)
+        page.update()
+
     def on_refresh_logs(e) -> None:
         try:
             refresh_logs_view(log_dir_field.value)
@@ -362,6 +430,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
     update_ui_from_config(initial_config)
     refresh_logs_view(initial_config.log_dir)
     skip_next_run_button.on_click = on_skip_next_run
+    cancel_skip_next_run_button.on_click = on_cancel_skip_next_run
 
     page.add(
         ft.Column(
@@ -382,6 +451,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
                         ft.ElevatedButton("Reload config", on_click=on_reload_config),
                         ft.ElevatedButton("Run now", on_click=on_run_now),
                         skip_next_run_button,
+                        cancel_skip_next_run_button,
                         ft.ElevatedButton("Refresh logs", on_click=on_refresh_logs),
                     ]
                 ),

@@ -6,12 +6,15 @@ import pytest
 
 from dev_tools.stock_update_scheduler_ui import (
     SCHEDULER_UI_PORT,
+    apply_cancel_skip_next_run_to_config,
     apply_skip_next_run_to_config,
+    build_cancel_skip_next_run_config,
     build_skip_next_run_config,
     build_config_from_ui_values,
     list_scheduler_log_files,
     load_latest_scheduler_summary,
     main,
+    scheduler_skip_button_state,
     scheduler_running_state,
     scheduler_skip_next_run_label,
 )
@@ -169,6 +172,28 @@ def test_build_skip_next_run_config_sets_true_without_changing_other_fields():
     assert updated.timezone == config.timezone
 
 
+def test_build_cancel_skip_next_run_config_sets_false_without_changing_other_fields():
+    config = StockUpdateSchedulerConfig(
+        enabled_markets=["omxh", "omxs"],
+        run_time="05:30",
+        osakedata_db_path="/tmp/osakedata.db",
+        analysis_db_path="/tmp/analysis.db",
+        log_dir="/tmp/logs",
+        timezone="Europe/Helsinki",
+        skip_next_run=True,
+    )
+
+    updated = build_cancel_skip_next_run_config(config)
+
+    assert updated.skip_next_run is False
+    assert updated.enabled_markets == config.enabled_markets
+    assert updated.run_time == config.run_time
+    assert updated.osakedata_db_path == config.osakedata_db_path
+    assert updated.analysis_db_path == config.analysis_db_path
+    assert updated.log_dir == config.log_dir
+    assert updated.timezone == config.timezone
+
+
 def test_scheduler_running_state_disables_skip_button_when_running():
     state = scheduler_running_state(
         {"is_running": True, "current_market": "omxh", "last_status": "RUNNING"}
@@ -241,6 +266,60 @@ def test_apply_skip_next_run_to_config_sets_flag_true(tmp_path, monkeypatch):
     assert reloaded.skip_next_run is True
 
 
+def test_apply_cancel_skip_next_run_to_config_sets_flag_false(tmp_path, monkeypatch):
+    path = tmp_path / "scheduler.json"
+    config = StockUpdateSchedulerConfig(
+        enabled_markets=["omxh", "omxs"],
+        run_time="05:30",
+        osakedata_db_path="/tmp/osakedata.db",
+        analysis_db_path="/tmp/analysis.db",
+        log_dir=str(tmp_path / "logs"),
+        timezone="Europe/Helsinki",
+        skip_next_run=True,
+    )
+    write_scheduler_config(str(path), config)
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_scheduler_status",
+        lambda log_dir: None,
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.run_scheduler_config",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not run scheduler")),
+    )
+
+    updated = apply_cancel_skip_next_run_to_config(str(path))
+    reloaded = read_scheduler_config(str(path))
+
+    assert updated.skip_next_run is False
+    assert reloaded.skip_next_run is False
+    assert reloaded.enabled_markets == ["omxh", "omxs"]
+
+
+def test_apply_cancel_skip_next_run_to_config_is_idempotent(tmp_path, monkeypatch):
+    path = tmp_path / "scheduler.json"
+    config = StockUpdateSchedulerConfig(
+        enabled_markets=["omxh", "omxs"],
+        run_time="05:30",
+        osakedata_db_path="/tmp/osakedata.db",
+        analysis_db_path="/tmp/analysis.db",
+        log_dir=str(tmp_path / "logs"),
+        timezone="Europe/Helsinki",
+        skip_next_run=False,
+    )
+    write_scheduler_config(str(path), config)
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_scheduler_status",
+        lambda log_dir: None,
+    )
+
+    updated = apply_cancel_skip_next_run_to_config(str(path))
+    reloaded = read_scheduler_config(str(path))
+
+    assert updated.skip_next_run is False
+    assert reloaded.skip_next_run is False
+    assert reloaded.enabled_markets == ["omxh", "omxs"]
+
+
 def test_skip_next_run_display_state_comes_from_config():
     config = StockUpdateSchedulerConfig(
         enabled_markets=["omxh", "omxs"],
@@ -253,3 +332,80 @@ def test_skip_next_run_display_state_comes_from_config():
     )
 
     assert scheduler_skip_next_run_label(config) == "Skip next run: true"
+
+
+def test_scheduler_skip_button_state_not_running_skip_false():
+    config = StockUpdateSchedulerConfig(
+        enabled_markets=["omxh", "omxs"],
+        run_time="05:30",
+        osakedata_db_path="/tmp/osakedata.db",
+        analysis_db_path="/tmp/analysis.db",
+        log_dir="/tmp/logs",
+        timezone="Europe/Helsinki",
+        skip_next_run=False,
+    )
+
+    state = scheduler_skip_button_state(config=config, status=None)
+
+    assert state == {"skip_enabled": True, "cancel_enabled": False}
+
+
+def test_scheduler_skip_button_state_not_running_skip_true():
+    config = StockUpdateSchedulerConfig(
+        enabled_markets=["omxh", "omxs"],
+        run_time="05:30",
+        osakedata_db_path="/tmp/osakedata.db",
+        analysis_db_path="/tmp/analysis.db",
+        log_dir="/tmp/logs",
+        timezone="Europe/Helsinki",
+        skip_next_run=True,
+    )
+
+    state = scheduler_skip_button_state(config=config, status=None)
+
+    assert state == {"skip_enabled": False, "cancel_enabled": True}
+
+
+def test_scheduler_skip_button_state_running_disables_both():
+    config = StockUpdateSchedulerConfig(
+        enabled_markets=["omxh", "omxs"],
+        run_time="05:30",
+        osakedata_db_path="/tmp/osakedata.db",
+        analysis_db_path="/tmp/analysis.db",
+        log_dir="/tmp/logs",
+        timezone="Europe/Helsinki",
+        skip_next_run=True,
+    )
+
+    state = scheduler_skip_button_state(
+        config=config,
+        status={"is_running": True, "current_market": "omxh"},
+    )
+
+    assert state == {"skip_enabled": False, "cancel_enabled": False}
+
+
+def test_apply_cancel_skip_next_run_to_config_does_not_modify_config_when_running(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "scheduler.json"
+    config = StockUpdateSchedulerConfig(
+        enabled_markets=["omxh", "omxs"],
+        run_time="05:30",
+        osakedata_db_path="/tmp/osakedata.db",
+        analysis_db_path="/tmp/analysis.db",
+        log_dir=str(tmp_path / "logs"),
+        timezone="Europe/Helsinki",
+        skip_next_run=True,
+    )
+    write_scheduler_config(str(path), config)
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_scheduler_status",
+        lambda log_dir: {"is_running": True, "current_market": "omxh"},
+    )
+
+    with pytest.raises(ValueError):
+        apply_cancel_skip_next_run_to_config(str(path))
+
+    reloaded = read_scheduler_config(str(path))
+    assert reloaded.skip_next_run is True
