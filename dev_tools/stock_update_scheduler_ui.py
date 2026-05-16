@@ -313,7 +313,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not Path(config_path).exists():
         raise FileNotFoundError(f"Missing scheduler config: {config_path}")
 
-    ft.app(target=lambda page: run_app(page, config_path))
+    app_view = ft.WEB_BROWSER if hasattr(ft, "WEB_BROWSER") else ft.AppView.WEB_BROWSER
+    ft.app(target=lambda page: run_app(page, config_path), view=app_view)
     return 0
 
 
