@@ -24,6 +24,7 @@ def test_default_scheduler_config_uses_omxh_and_omxs_not_usa():
     )
 
     assert config.enabled_markets == ["omxh", "omxs"]
+    assert config.skip_next_run is False
 
 
 def test_market_validation_normalizes_case_whitespace_and_deduplicates():
@@ -54,6 +55,7 @@ def test_scheduler_config_serialization_roundtrip():
         analysis_db_path="/tmp/analysis.db",
         log_dir="/tmp/logs",
         timezone=DEFAULT_TIMEZONE,
+        skip_next_run=False,
     )
 
     serialized = scheduler_config_to_dict(config)
@@ -66,6 +68,7 @@ def test_scheduler_config_serialization_roundtrip():
         analysis_db_path="/tmp/analysis.db",
         log_dir="/tmp/logs",
         timezone=DEFAULT_TIMEZONE,
+        skip_next_run=False,
     )
 
 
@@ -77,6 +80,7 @@ def test_scheduler_config_json_write_read_roundtrip(tmp_path):
         osakedata_db_path="/tmp/osakedata.db",
         analysis_db_path="/tmp/analysis.db",
         log_dir="/tmp/logs",
+        skip_next_run=True,
     )
 
     write_scheduler_config(str(path), config)
@@ -93,6 +97,7 @@ def test_write_scheduler_config_does_not_create_parent_directories(tmp_path):
         osakedata_db_path="/tmp/osakedata.db",
         analysis_db_path="/tmp/analysis.db",
         log_dir="/tmp/logs",
+        skip_next_run=False,
     )
 
     with pytest.raises(Exception):
@@ -132,6 +137,7 @@ def test_validate_scheduler_config_returns_new_instance():
         osakedata_db_path="/tmp/osakedata.db",
         analysis_db_path="/tmp/analysis.db",
         log_dir="/tmp/logs",
+        skip_next_run=True,
     )
 
     validated = validate_scheduler_config(config)
@@ -139,3 +145,64 @@ def test_validate_scheduler_config_returns_new_instance():
     assert validated is not config
     assert config.enabled_markets == [" OMXH ", "OMXS", "OMXH"]
     assert validated.enabled_markets == ["omxh", "omxs"]
+    assert config.skip_next_run is True
+    assert validated.skip_next_run is True
+
+
+def test_scheduler_config_to_dict_includes_skip_next_run():
+    config = StockUpdateSchedulerConfig(
+        enabled_markets=["omxh", "omxs"],
+        run_time="05:30",
+        osakedata_db_path="/tmp/osakedata.db",
+        analysis_db_path="/tmp/analysis.db",
+        log_dir="/tmp/logs",
+        skip_next_run=True,
+    )
+
+    data = scheduler_config_to_dict(config)
+
+    assert data["skip_next_run"] is True
+
+
+def test_scheduler_config_from_dict_defaults_missing_skip_next_run_to_false():
+    config = scheduler_config_from_dict(
+        {
+            "enabled_markets": ["omxh", "omxs"],
+            "run_time": "05:30",
+            "osakedata_db_path": "/tmp/osakedata.db",
+            "analysis_db_path": "/tmp/analysis.db",
+            "log_dir": "/tmp/logs",
+        }
+    )
+
+    assert config.skip_next_run is False
+
+
+def test_scheduler_config_from_dict_accepts_skip_next_run_true():
+    config = scheduler_config_from_dict(
+        {
+            "enabled_markets": ["omxh", "omxs"],
+            "run_time": "05:30",
+            "osakedata_db_path": "/tmp/osakedata.db",
+            "analysis_db_path": "/tmp/analysis.db",
+            "log_dir": "/tmp/logs",
+            "skip_next_run": True,
+        }
+    )
+
+    assert config.skip_next_run is True
+
+
+@pytest.mark.parametrize("skip_next_run", ["true", 1, None])
+def test_scheduler_config_from_dict_rejects_non_bool_skip_next_run(skip_next_run):
+    with pytest.raises(ValueError):
+        scheduler_config_from_dict(
+            {
+                "enabled_markets": ["omxh", "omxs"],
+                "run_time": "05:30",
+                "osakedata_db_path": "/tmp/osakedata.db",
+                "analysis_db_path": "/tmp/analysis.db",
+                "log_dir": "/tmp/logs",
+                "skip_next_run": skip_next_run,
+            }
+        )

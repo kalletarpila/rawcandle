@@ -18,7 +18,7 @@ _REQUIRED_CONFIG_KEYS = {
     "analysis_db_path",
     "log_dir",
 }
-_OPTIONAL_CONFIG_KEYS = {"timezone"}
+_OPTIONAL_CONFIG_KEYS = {"timezone", "skip_next_run"}
 
 
 @dataclass(eq=True)
@@ -29,6 +29,7 @@ class StockUpdateSchedulerConfig:
     analysis_db_path: str = ""
     log_dir: str = ""
     timezone: str = DEFAULT_TIMEZONE
+    skip_next_run: bool = False
 
 
 def validate_market_list(markets: List[str]) -> List[str]:
@@ -73,6 +74,8 @@ def validate_scheduler_config(
         raise ValueError("analysis_db_path must be non-empty")
     if not config.log_dir:
         raise ValueError("log_dir must be non-empty")
+    if type(config.skip_next_run) is not bool:
+        raise ValueError("skip_next_run must be a bool")
 
     return StockUpdateSchedulerConfig(
         enabled_markets=enabled_markets,
@@ -81,6 +84,7 @@ def validate_scheduler_config(
         analysis_db_path=config.analysis_db_path,
         log_dir=config.log_dir,
         timezone=config.timezone,
+        skip_next_run=config.skip_next_run,
     )
 
 
@@ -107,6 +111,7 @@ def scheduler_config_from_dict(data: Dict[str, Any]) -> StockUpdateSchedulerConf
         analysis_db_path=data["analysis_db_path"],
         log_dir=data["log_dir"],
         timezone=data.get("timezone", DEFAULT_TIMEZONE),
+        skip_next_run=data.get("skip_next_run", False),
     )
     return validate_scheduler_config(config)
 
@@ -136,5 +141,6 @@ def create_default_scheduler_config(
         analysis_db_path=analysis_db_path,
         log_dir=log_dir,
         timezone=DEFAULT_TIMEZONE,
+        skip_next_run=False,
     )
     return validate_scheduler_config(config)
