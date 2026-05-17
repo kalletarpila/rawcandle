@@ -9,6 +9,7 @@ from analysis.database_manager import DatabaseManager
 from analysis.datacenter_indices.swing_ticker_persistence import (
     classify_ticker_structure_freshness,
     classify_exit_risk_severity,
+    cleanup_non_trading_ticker_swing_rows,
     load_existing_ticker_signal_dates,
     load_bounded_ticker_ohlcv_history,
     load_bounded_ticker_ohlcv_histories,
@@ -180,6 +181,21 @@ def _insert_group_swing_row(path, row):
         conn.commit()
 
 
+def _insert_group_synthetic_row(path, row):
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """
+            INSERT INTO dc_group_synthetic_ohlc_daily (
+                ohlc_date, taxonomy_version, group_type, group_name,
+                member_count, eligible_count, synthetic_open, synthetic_high, synthetic_low,
+                synthetic_close, synthetic_volume, data_quality_status, calc_version, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            row,
+        )
+        conn.commit()
+
+
 def test_persistence_inserts_one_primary_taxonomy_ticker_row(tmp_path):
     taxonomy_csv = _write_taxonomy_csv(
         tmp_path,
@@ -244,6 +260,36 @@ DC_TAXONOMY_V1,AAA,Power,UPS,CORE,1,1.0,
     assert valid_dates == ["2024-01-12", "2024-01-15"]
 
 
+def test_load_valid_price_dates_for_market_can_scope_to_selected_taxonomy_version(tmp_path):
+    taxonomy_csv = _write_taxonomy_csv(
+        tmp_path,
+        """taxonomy_version,ticker,layer,subindustry,report_group_status,is_primary,role_weight,notes
+DC_TAXONOMY_V1,AAA,Power,UPS,CORE,1,1.0,
+OTHER_TAXONOMY,BBB,Cooling,Chillers,CORE,1,1.0,
+""",
+    )
+    price_db = tmp_path / "osakedata.db"
+    _create_price_db(price_db)
+    _insert_price_rows(
+        price_db,
+        [
+            ("AAA", "2024-01-12", 100, 101, 99, 100, 1000, "usa"),
+            ("BBB", "2024-01-15", 101, 102, 100, 101, 1000, "usa"),
+        ],
+    )
+
+    valid_dates = load_valid_price_dates_for_market(
+        price_db_path=price_db,
+        start_date="2024-01-12",
+        end_date="2024-01-15",
+        market="usa",
+        taxonomy_csv_path=taxonomy_csv,
+        taxonomy_version="DC_TAXONOMY_V1",
+    )
+
+    assert valid_dates == ["2024-01-12"]
+
+
 def test_load_existing_ticker_signal_dates_returns_only_existing_base_dates_in_ascending_order(tmp_path):
     analysis_db = tmp_path / "analysis.db"
     _create_analysis_db(analysis_db)
@@ -276,6 +322,236 @@ def test_load_existing_ticker_signal_dates_returns_only_existing_base_dates_in_a
     )
 
     assert dates == ["2024-01-10", "2024-01-12"]
+
+
+def test_load_existing_ticker_signal_dates_can_scope_to_taxonomy_version(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO dc_ticker_swing_signal_daily (
+                signal_date, taxonomy_version, ticker, primary_layer, primary_subindustry,
+                price_data_status, signal_version, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("2024-01-10", "DC_TAXONOMY_V1", "AAA", "Power", "UPS", "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+        )
+        conn.execute(
+            """
+            INSERT INTO dc_ticker_swing_signal_daily (
+                signal_date, taxonomy_version, ticker, primary_layer, primary_subindustry,
+                price_data_status, signal_version, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("2024-01-11", "OTHER_TAXONOMY", "AAA", "Power", "UPS", "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+        )
+        conn.commit()
+
+    dates = load_existing_ticker_signal_dates(
+        analysis_db_path=analysis_db,
+        start_date="2024-01-10",
+        end_date="2024-01-12",
+        signal_version="DC_SWING_SIGNAL_V1",
+        taxonomy_version="DC_TAXONOMY_V1",
+    )
+
+    assert dates == ["2024-01-10"]
+
+
+def test_cleanup_non_trading_ticker_rows_dry_run_identifies_candidates_without_deleting(tmp_path):
+    taxonomy_csv = _write_taxonomy_csv(
+        tmp_path,
+        """taxonomy_version,ticker,layer,subindustry,report_group_status,is_primary,role_weight,notes
+DC_TAXONOMY_V1,AAA,Power,UPS,CORE,1,1.0,
+""",
+    )
+    price_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _create_price_db(price_db)
+    _create_analysis_db(analysis_db)
+    _insert_price_rows(
+        price_db,
+        [("AAA", "2024-01-12", 100, 101, 99, 100, 1000, "usa")],
+    )
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO dc_ticker_swing_signal_daily (
+                signal_date, taxonomy_version, ticker, primary_layer, primary_subindustry,
+                price_data_status, signal_version, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("2024-01-12", "DC_TAXONOMY_V1", "AAA", "Power", "UPS", "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+        )
+        conn.execute(
+            """
+            INSERT INTO dc_ticker_swing_signal_daily (
+                signal_date, taxonomy_version, ticker, primary_layer, primary_subindustry,
+                price_data_status, signal_version, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("2024-01-13", "DC_TAXONOMY_V1", "AAA", "Power", "UPS", "MISSING_AS_OF_DATE", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+        )
+        conn.commit()
+
+    summary = cleanup_non_trading_ticker_swing_rows(
+        analysis_db_path=analysis_db,
+        price_db_path=price_db,
+        taxonomy_csv_path=taxonomy_csv,
+        start_date="2024-01-12",
+        end_date="2024-01-13",
+        taxonomy_version="DC_TAXONOMY_V1",
+        signal_version="DC_SWING_SIGNAL_V1",
+        market="usa",
+        apply=False,
+    )
+
+    with sqlite3.connect(analysis_db) as conn:
+        count = conn.execute("SELECT COUNT(*) FROM dc_ticker_swing_signal_daily").fetchone()[0]
+    assert summary["existing_signal_dates"] == 2
+    assert summary["valid_trading_dates"] == 1
+    assert summary["non_trading_signal_dates"] == 1
+    assert summary["candidate_rows"] == 1
+    assert summary["deleted_rows"] == 0
+    assert summary["dry_run"] == 1
+    assert summary["non_trading_dates"] == "2024-01-13"
+    assert count == 2
+
+
+def test_cleanup_non_trading_ticker_rows_apply_deletes_only_scoped_rows(tmp_path):
+    taxonomy_csv = _write_taxonomy_csv(
+        tmp_path,
+        """taxonomy_version,ticker,layer,subindustry,report_group_status,is_primary,role_weight,notes
+DC_TAXONOMY_V1,AAA,Power,UPS,CORE,1,1.0,
+OTHER_TAXONOMY,AAA,Power,UPS,CORE,1,1.0,
+""",
+    )
+    price_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _create_price_db(price_db)
+    _create_analysis_db(analysis_db)
+    _insert_price_rows(
+        price_db,
+        [
+            ("AAA", "2024-01-12", 100, 101, 99, 100, 1000, "usa"),
+            ("AAA", "2024-01-15", 101, 102, 100, 101, 1000, "usa"),
+            ("SPY", "2024-01-13", 400, 401, 399, 400, 5000, "usa"),
+        ],
+    )
+    with sqlite3.connect(analysis_db) as conn:
+        conn.executemany(
+            """
+            INSERT INTO dc_ticker_swing_signal_daily (
+                signal_date, taxonomy_version, ticker, primary_layer, primary_subindustry,
+                price_data_status, signal_version, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ("2024-01-12", "DC_TAXONOMY_V1", "AAA", "Power", "UPS", "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+                ("2024-01-13", "DC_TAXONOMY_V1", "AAA", "Power", "UPS", "MISSING_AS_OF_DATE", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+                ("2024-01-15", "DC_TAXONOMY_V1", "AAA", "Power", "UPS", "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+                ("2024-01-13", "OTHER_TAXONOMY", "AAA", "Power", "UPS", "MISSING_AS_OF_DATE", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+                ("2024-01-13", "DC_TAXONOMY_V1", "AAA", "Power", "UPS", "MISSING_AS_OF_DATE", "OTHER_SIGNAL", "seed", "2026-05-17T10:00:00Z"),
+                ("2024-01-20", "DC_TAXONOMY_V1", "AAA", "Power", "UPS", "MISSING_AS_OF_DATE", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+            ],
+        )
+        conn.commit()
+    _insert_group_swing_row(
+        analysis_db,
+        (
+            "2024-01-13", "DC_TAXONOMY_V1", "subindustry", "UPS",
+            1, 1, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None, "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+    )
+    _insert_group_synthetic_row(
+        analysis_db,
+        (
+            "2024-01-13", "DC_TAXONOMY_V1", "subindustry", "UPS",
+            1, 1, 1.0, 1.0, 1.0, 1.0, 100.0, "OK", "DC_SWING_OHLC_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+    )
+
+    summary = cleanup_non_trading_ticker_swing_rows(
+        analysis_db_path=analysis_db,
+        price_db_path=price_db,
+        taxonomy_csv_path=taxonomy_csv,
+        start_date="2024-01-12",
+        end_date="2024-01-15",
+        taxonomy_version="DC_TAXONOMY_V1",
+        signal_version="DC_SWING_SIGNAL_V1",
+        market="usa",
+        apply=True,
+    )
+
+    with sqlite3.connect(analysis_db) as conn:
+        ticker_rows = conn.execute(
+            """
+            SELECT signal_date, taxonomy_version, signal_version
+            FROM dc_ticker_swing_signal_daily
+            ORDER BY signal_date, taxonomy_version, signal_version
+            """
+        ).fetchall()
+        group_count = conn.execute("SELECT COUNT(*) FROM dc_group_swing_signal_daily").fetchone()[0]
+        synthetic_count = conn.execute("SELECT COUNT(*) FROM dc_group_synthetic_ohlc_daily").fetchone()[0]
+    assert summary["candidate_rows"] == 1
+    assert summary["deleted_rows"] == 1
+    assert summary["dry_run"] == 0
+    assert ticker_rows == [
+        ("2024-01-12", "DC_TAXONOMY_V1", "DC_SWING_SIGNAL_V1"),
+        ("2024-01-13", "DC_TAXONOMY_V1", "OTHER_SIGNAL"),
+        ("2024-01-13", "OTHER_TAXONOMY", "DC_SWING_SIGNAL_V1"),
+        ("2024-01-15", "DC_TAXONOMY_V1", "DC_SWING_SIGNAL_V1"),
+        ("2024-01-20", "DC_TAXONOMY_V1", "DC_SWING_SIGNAL_V1"),
+    ]
+    assert group_count == 1
+    assert synthetic_count == 1
+
+
+def test_cleanup_non_trading_ticker_rows_returns_ok_when_no_candidates_exist(tmp_path):
+    taxonomy_csv = _write_taxonomy_csv(
+        tmp_path,
+        """taxonomy_version,ticker,layer,subindustry,report_group_status,is_primary,role_weight,notes
+DC_TAXONOMY_V1,AAA,Power,UPS,CORE,1,1.0,
+""",
+    )
+    price_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _create_price_db(price_db)
+    _create_analysis_db(analysis_db)
+    _insert_price_rows(
+        price_db,
+        [("AAA", "2024-01-12", 100, 101, 99, 100, 1000, "usa")],
+    )
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO dc_ticker_swing_signal_daily (
+                signal_date, taxonomy_version, ticker, primary_layer, primary_subindustry,
+                price_data_status, signal_version, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("2024-01-12", "DC_TAXONOMY_V1", "AAA", "Power", "UPS", "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+        )
+        conn.commit()
+
+    summary = cleanup_non_trading_ticker_swing_rows(
+        analysis_db_path=analysis_db,
+        price_db_path=price_db,
+        taxonomy_csv_path=taxonomy_csv,
+        start_date="2024-01-12",
+        end_date="2024-01-12",
+        taxonomy_version="DC_TAXONOMY_V1",
+        signal_version="DC_SWING_SIGNAL_V1",
+        market="usa",
+        apply=False,
+    )
+
+    assert summary["candidate_rows"] == 0
+    assert summary["deleted_rows"] == 0
+    assert summary["non_trading_signal_dates"] == 0
+    assert summary["validation_status"] == "OK"
 
 
 def test_persistence_ignores_non_primary_taxonomy_rows(tmp_path):

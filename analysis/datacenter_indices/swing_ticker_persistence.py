@@ -84,6 +84,22 @@ TICKER_SCANNER_SUMMARY_ORDER = [
     "validation_status",
 ]
 
+TICKER_CLEANUP_SUMMARY_ORDER = [
+    "start_date",
+    "end_date",
+    "taxonomy_version",
+    "signal_version",
+    "market",
+    "existing_signal_dates",
+    "valid_trading_dates",
+    "non_trading_signal_dates",
+    "candidate_rows",
+    "deleted_rows",
+    "dry_run",
+    "non_trading_dates",
+    "validation_status",
+]
+
 ENTRY_ELIGIBLE_PRICE_STATUSES = {"OK", "INSUFFICIENT_HISTORY"}
 
 
@@ -180,6 +196,31 @@ def _load_primary_tickers_for_taxonomy(
     return sorted({_normalize_ticker(row.ticker) for row in primary_rows if _normalize_ticker(row.ticker)})
 
 
+def _load_primary_tickers_for_taxonomy_version(
+    taxonomy_csv_path: str | Path,
+    taxonomy_version: str,
+) -> list[str]:
+    taxonomy_rows = _load_taxonomy_rows(taxonomy_csv_path)
+    selected_rows = [
+        row
+        for row in taxonomy_rows
+        if str(row.taxonomy_version) == taxonomy_version
+    ]
+    if not selected_rows:
+        raise ValueError(f"taxonomy_version not found in taxonomy CSV: {taxonomy_version}")
+    primary_rows, _ = _select_primary_taxonomy_rows(selected_rows)
+    primary_tickers = sorted(
+        {
+            _normalize_ticker(row.ticker)
+            for row in primary_rows
+            if _normalize_ticker(row.ticker)
+        }
+    )
+    if not primary_tickers:
+        raise ValueError(f"taxonomy_version has no primary tickers: {taxonomy_version}")
+    return primary_tickers
+
+
 def load_valid_price_dates_for_market(
     *,
     price_db_path: str | Path,
@@ -187,6 +228,7 @@ def load_valid_price_dates_for_market(
     end_date: str,
     market: str | None,
     taxonomy_csv_path: str | Path | None = None,
+    taxonomy_version: str | None = None,
 ) -> list[str]:
     normalized_start_date = _parse_iso_date(start_date, "start_date")
     normalized_end_date = _parse_iso_date(end_date, "end_date")
@@ -197,7 +239,13 @@ def load_valid_price_dates_for_market(
 
     primary_tickers: list[str] = []
     if taxonomy_csv_path is not None:
-        primary_tickers = _load_primary_tickers_for_taxonomy(taxonomy_csv_path)
+        if taxonomy_version is not None:
+            primary_tickers = _load_primary_tickers_for_taxonomy_version(
+                taxonomy_csv_path,
+                taxonomy_version,
+            )
+        else:
+            primary_tickers = _load_primary_tickers_for_taxonomy(taxonomy_csv_path)
         if not primary_tickers:
             return []
 
@@ -234,6 +282,7 @@ def load_existing_ticker_signal_dates(
     start_date: str,
     end_date: str,
     signal_version: str,
+    taxonomy_version: str | None = None,
 ) -> list[str]:
     normalized_start_date = _parse_iso_date(start_date, "start_date")
     normalized_end_date = _parse_iso_date(end_date, "end_date")
@@ -245,20 +294,121 @@ def load_existing_ticker_signal_dates(
     conn = db_manager.get_connection()
     conn.row_factory = sqlite3.Row
     try:
+        params: list[object] = [normalized_start_date, normalized_end_date, signal_version]
+        taxonomy_sql = ""
+        if taxonomy_version is not None:
+            taxonomy_sql = " AND taxonomy_version = ?"
+            params.append(taxonomy_version)
         rows = conn.execute(
-            """
+            f"""
             SELECT DISTINCT signal_date
             FROM dc_ticker_swing_signal_daily
             WHERE signal_date >= ?
               AND signal_date <= ?
               AND signal_version = ?
+              {taxonomy_sql}
             ORDER BY signal_date ASC
             """,
-            (normalized_start_date, normalized_end_date, signal_version),
+            params,
         ).fetchall()
         return [str(row["signal_date"]) for row in rows]
     finally:
         db_manager.close()
+
+
+def cleanup_non_trading_ticker_swing_rows(
+    *,
+    analysis_db_path: str | Path,
+    price_db_path: str | Path,
+    taxonomy_csv_path: str | Path,
+    start_date: str,
+    end_date: str,
+    taxonomy_version: str,
+    signal_version: str,
+    market: str | None,
+    apply: bool = False,
+) -> dict[str, int | str]:
+    normalized_start_date = _parse_iso_date(start_date, "start_date")
+    normalized_end_date = _parse_iso_date(end_date, "end_date")
+    if normalized_start_date > normalized_end_date:
+        raise ValueError(
+            f"Invalid date range: start_date {normalized_start_date} is after end_date {normalized_end_date}"
+        )
+
+    _load_primary_tickers_for_taxonomy_version(taxonomy_csv_path, taxonomy_version)
+    valid_trading_dates = load_valid_price_dates_for_market(
+        price_db_path=price_db_path,
+        start_date=normalized_start_date,
+        end_date=normalized_end_date,
+        market=market,
+        taxonomy_csv_path=taxonomy_csv_path,
+        taxonomy_version=taxonomy_version,
+    )
+    existing_signal_dates = load_existing_ticker_signal_dates(
+        analysis_db_path=analysis_db_path,
+        start_date=normalized_start_date,
+        end_date=normalized_end_date,
+        signal_version=signal_version,
+        taxonomy_version=taxonomy_version,
+    )
+    valid_date_set = set(valid_trading_dates)
+    non_trading_dates = [
+        signal_date
+        for signal_date in existing_signal_dates
+        if signal_date not in valid_date_set
+    ]
+
+    deleted_rows = 0
+    candidate_rows = 0
+    db_manager = DatabaseManager(str(analysis_db_path))
+    conn = db_manager.get_connection()
+    try:
+        if non_trading_dates:
+            placeholders = ", ".join("?" for _ in non_trading_dates)
+            params: list[object] = [*non_trading_dates, taxonomy_version, signal_version]
+            candidate_rows = int(
+                conn.execute(
+                    f"""
+                    SELECT COUNT(*)
+                    FROM dc_ticker_swing_signal_daily
+                    WHERE signal_date IN ({placeholders})
+                      AND taxonomy_version = ?
+                      AND signal_version = ?
+                    """,
+                    params,
+                ).fetchone()[0]
+            )
+            if apply:
+                deleted_rows = int(
+                    conn.execute(
+                        f"""
+                        DELETE FROM dc_ticker_swing_signal_daily
+                        WHERE signal_date IN ({placeholders})
+                          AND taxonomy_version = ?
+                          AND signal_version = ?
+                        """,
+                        params,
+                    ).rowcount
+                )
+                conn.commit()
+    finally:
+        db_manager.close()
+
+    return {
+        "start_date": normalized_start_date,
+        "end_date": normalized_end_date,
+        "taxonomy_version": taxonomy_version,
+        "signal_version": signal_version,
+        "market": "" if market is None else market,
+        "existing_signal_dates": len(existing_signal_dates),
+        "valid_trading_dates": len(valid_trading_dates),
+        "non_trading_signal_dates": len(non_trading_dates),
+        "candidate_rows": candidate_rows,
+        "deleted_rows": deleted_rows,
+        "dry_run": 0 if apply else 1,
+        "non_trading_dates": ",".join(non_trading_dates),
+        "validation_status": "OK",
+    }
 
 
 def build_ticker_swing_run_id(
@@ -286,6 +436,10 @@ def format_ticker_swing_summary_lines(summary: dict[str, int | str]) -> list[str
 
 def format_ticker_scanner_summary_lines(summary: dict[str, int | str]) -> list[str]:
     return [f"SUMMARY {key}={summary[key]}" for key in TICKER_SCANNER_SUMMARY_ORDER if key in summary]
+
+
+def format_ticker_cleanup_summary_lines(summary: dict[str, int | str]) -> list[str]:
+    return [f"SUMMARY {key}={summary[key]}" for key in TICKER_CLEANUP_SUMMARY_ORDER if key in summary]
 
 
 def _match_lt(value: float | None, threshold: float) -> bool:
