@@ -637,6 +637,220 @@ class DatabaseManager:
 
             cursor.execute(
                 """
+                CREATE TABLE IF NOT EXISTS dc_ticker_swing_signal_daily (
+                    signal_date TEXT NOT NULL,
+                    taxonomy_version TEXT NOT NULL,
+                    ticker TEXT NOT NULL,
+                    primary_layer TEXT,
+                    primary_subindustry TEXT,
+                    close REAL,
+                    volume REAL,
+                    return_5d REAL,
+                    return_10d REAL,
+                    return_20d REAL,
+                    return_60d REAL,
+                    ma10 REAL,
+                    ema10 REAL,
+                    ema20 REAL,
+                    distance_to_ma10_pct REAL,
+                    distance_to_ema10_pct REAL,
+                    distance_to_ema20_pct REAL,
+                    above_ma10 INTEGER,
+                    above_ema10 INTEGER,
+                    above_ema20 INTEGER,
+                    ema10_slope_positive INTEGER,
+                    ema20_slope_positive INTEGER,
+                    ema10_slope_lookback INTEGER,
+                    ema20_slope_lookback INTEGER,
+                    highest_close_20d REAL,
+                    volume_avg_20d REAL,
+                    volume_vs_avg20 REAL,
+                    latest_structure_label TEXT,
+                    latest_structure_confirmed_as_of_date TEXT,
+                    bullish_divergence_signal INTEGER,
+                    bearish_divergence_signal INTEGER,
+                    hidden_bullish_divergence_signal INTEGER,
+                    hidden_bearish_divergence_signal INTEGER,
+                    bullish_candle_signal INTEGER,
+                    bearish_candle_signal INTEGER,
+                    breakout_signal INTEGER,
+                    fast_ema10_pullback_signal INTEGER,
+                    conservative_ema20_pullback_signal INTEGER,
+                    pullback_signal INTEGER,
+                    exit_risk_signal INTEGER,
+                    exit_reason TEXT,
+                    price_data_status TEXT,
+                    signal_version TEXT NOT NULL,
+                    run_id TEXT NOT NULL,
+                    created_at_utc TEXT NOT NULL,
+                    PRIMARY KEY (signal_date, taxonomy_version, ticker, signal_version)
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_dc_ticker_swing_signal_daily_date_version
+                ON dc_ticker_swing_signal_daily (signal_date, signal_version)
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_dc_ticker_swing_signal_daily_ticker_date
+                ON dc_ticker_swing_signal_daily (ticker, signal_date)
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_dc_ticker_swing_signal_daily_subindustry_date
+                ON dc_ticker_swing_signal_daily (primary_subindustry, signal_date)
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_dc_ticker_swing_signal_daily_breakout
+                ON dc_ticker_swing_signal_daily (signal_date, breakout_signal)
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_dc_ticker_swing_signal_daily_pullback
+                ON dc_ticker_swing_signal_daily (signal_date, pullback_signal)
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_dc_ticker_swing_signal_daily_exit_risk
+                ON dc_ticker_swing_signal_daily (signal_date, exit_risk_signal)
+                """
+            )
+
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS dc_group_swing_signal_daily (
+                    signal_date TEXT NOT NULL,
+                    taxonomy_version TEXT NOT NULL,
+                    group_type TEXT NOT NULL,
+                    group_name TEXT NOT NULL,
+                    member_count INTEGER,
+                    eligible_count INTEGER,
+                    return_5d REAL,
+                    return_10d REAL,
+                    return_20d REAL,
+                    return_60d REAL,
+                    pct_above_ma10 REAL,
+                    pct_above_ema20 REAL,
+                    pct_above_rising_ema20 REAL,
+                    ma10_breadth_delta_5d REAL,
+                    ema20_breadth_delta_5d REAL,
+                    trend_breadth REAL,
+                    weakness_breadth REAL,
+                    overheat_risk_level TEXT,
+                    timing_state TEXT,
+                    timing_reason TEXT,
+                    data_quality_status TEXT,
+                    signal_version TEXT NOT NULL,
+                    run_id TEXT NOT NULL,
+                    created_at_utc TEXT NOT NULL,
+                    PRIMARY KEY (signal_date, taxonomy_version, group_type, group_name, signal_version)
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_dc_group_swing_signal_daily_date_version
+                ON dc_group_swing_signal_daily (signal_date, signal_version)
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_dc_group_swing_signal_daily_group_date
+                ON dc_group_swing_signal_daily (group_type, group_name, signal_date)
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_dc_group_swing_signal_daily_timing_state
+                ON dc_group_swing_signal_daily (signal_date, timing_state)
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_dc_group_swing_signal_daily_risk
+                ON dc_group_swing_signal_daily (signal_date, overheat_risk_level)
+                """
+            )
+
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS dc_group_synthetic_ohlc_daily (
+                    ohlc_date TEXT NOT NULL,
+                    taxonomy_version TEXT NOT NULL,
+                    group_type TEXT NOT NULL,
+                    group_name TEXT NOT NULL,
+                    member_count INTEGER,
+                    eligible_count INTEGER,
+                    synthetic_open REAL,
+                    synthetic_high REAL,
+                    synthetic_low REAL,
+                    synthetic_close REAL,
+                    synthetic_volume REAL,
+                    ma20 REAL,
+                    ema20 REAL,
+                    distance_to_ema20_pct REAL,
+                    volatility_20d REAL,
+                    pivot_radius INTEGER,
+                    latest_pivot_high_date TEXT,
+                    latest_pivot_high_value REAL,
+                    latest_pivot_low_date TEXT,
+                    latest_pivot_low_value REAL,
+                    latest_structure_label TEXT,
+                    trend_classification TEXT,
+                    relative_base_window INTEGER,
+                    relative_open_20 REAL,
+                    relative_high_20 REAL,
+                    relative_low_20 REAL,
+                    relative_close_20 REAL,
+                    relative_upper_wick_20 REAL,
+                    relative_lower_wick_20 REAL,
+                    relative_close_extension_20 REAL,
+                    relative_high_extension_20 REAL,
+                    relative_low_extension_20 REAL,
+                    relative_eligible_count INTEGER,
+                    data_quality_status TEXT,
+                    calc_version TEXT NOT NULL,
+                    run_id TEXT NOT NULL,
+                    created_at_utc TEXT NOT NULL,
+                    PRIMARY KEY (ohlc_date, taxonomy_version, group_type, group_name, calc_version)
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_dc_group_synthetic_ohlc_daily_date_version
+                ON dc_group_synthetic_ohlc_daily (ohlc_date, calc_version)
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_dc_group_synthetic_ohlc_daily_group_date
+                ON dc_group_synthetic_ohlc_daily (group_type, group_name, ohlc_date)
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_dc_group_synthetic_ohlc_daily_structure
+                ON dc_group_synthetic_ohlc_daily (ohlc_date, latest_structure_label)
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_dc_group_synthetic_ohlc_daily_trend
+                ON dc_group_synthetic_ohlc_daily (ohlc_date, trend_classification)
+                """
+            )
+
+            cursor.execute(
+                """
                 CREATE TABLE IF NOT EXISTS excluded_tickers (
                     ticker TEXT PRIMARY KEY,
                     reason TEXT,
