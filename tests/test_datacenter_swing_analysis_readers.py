@@ -8,6 +8,11 @@ from analysis.datacenter_indices import (
     read_dow_structure_enrichment,
     read_ticker_analysis_enrichment,
 )
+from analysis.datacenter_indices.swing_analysis_readers import (
+    read_batch_candlestick_enrichment,
+    read_batch_divergence_enrichment,
+    read_batch_dow_structure_enrichment,
+)
 
 
 def _connect() -> sqlite3.Connection:
@@ -345,3 +350,84 @@ def test_combined_helper_composes_all_readers():
     assert snapshot.dow.latest_structure_label == "HH"
     assert snapshot.divergence.bullish_divergence_signal == 1
     assert snapshot.candlestick.bullish_patterns == ("Hammer",)
+
+
+def test_batch_enrichment_helpers_match_single_ticker_readers():
+    conn = _connect()
+    conn.execute(
+        """
+        CREATE TABLE stock_dow_structure_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            market TEXT NULL,
+            event_date TEXT NOT NULL,
+            confirmed_as_of_date TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            dow_label_high TEXT NULL,
+            dow_label_low TEXT NULL,
+            trend_state TEXT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE divergence_data (
+            ticker TEXT NOT NULL,
+            date TEXT NOT NULL,
+            bullish_strength REAL,
+            bearish_strength REAL,
+            hidden_bullish_strength REAL,
+            hidden_bearish_strength REAL,
+            rsi REAL,
+            is_bullish_divergence_r3 INTEGER,
+            is_bearish_divergence_r3 INTEGER,
+            is_hidden_bullish_divergence_r3 INTEGER,
+            is_hidden_bearish_divergence_r3 INTEGER
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE analysis_findings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            date TEXT NOT NULL,
+            pattern TEXT,
+            signal_strength REAL,
+            rsi14 REAL
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO stock_dow_structure_events (
+            ticker, market, event_date, confirmed_as_of_date, event_type,
+            dow_label_high, dow_label_low, trend_state
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("AAA", "usa", "2024-01-10", "2024-01-10", "PIVOT_HIGH", "HH", None, "UP"),
+    )
+    conn.execute(
+        """
+        INSERT INTO divergence_data VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("AAA", "2024-01-10", 1.0, 0.0, 0.0, 0.0, 55.0, 1, 0, 0, 0),
+    )
+    conn.execute(
+        """
+        INSERT INTO analysis_findings (ticker, date, pattern, signal_strength, rsi14)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        ("AAA", "2024-01-10", "Hammer", 0.9, 30.0),
+    )
+
+    batch_dow = read_batch_dow_structure_enrichment(conn, ["AAA", "BBB"], "usa", "2024-01-10")
+    batch_div = read_batch_divergence_enrichment(conn, ["AAA", "BBB"], "2024-01-10")
+    batch_candle = read_batch_candlestick_enrichment(conn, ["AAA", "BBB"], "2024-01-10")
+
+    assert batch_dow["AAA"] == read_dow_structure_enrichment(conn, "AAA", "usa", "2024-01-10")
+    assert batch_div["AAA"] == read_divergence_enrichment(conn, "AAA", "2024-01-10")
+    assert batch_candle["AAA"] == read_candlestick_enrichment(conn, "AAA", "2024-01-10")
+    assert batch_dow["BBB"].source_status == "NO_DOW_EVENT"
+    assert batch_div["BBB"].source_status == "NO_DIVERGENCE_ROW"
+    assert batch_candle["BBB"].source_status == "NO_CANDLE_FINDING"

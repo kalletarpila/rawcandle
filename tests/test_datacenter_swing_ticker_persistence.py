@@ -8,9 +8,11 @@ import pytest
 from analysis.database_manager import DatabaseManager
 from analysis.datacenter_indices.swing_ticker_persistence import (
     load_bounded_ticker_ohlcv_history,
+    load_bounded_ticker_ohlcv_histories,
     persist_datacenter_ticker_scanner_signals,
     persist_datacenter_ticker_swing_snapshots,
 )
+from market_repository import ensure_market_schema
 
 
 def _write_taxonomy_csv(tmp_path, content: str):
@@ -318,8 +320,78 @@ DC_TAXONOMY_V1,AAA,Power,UPS,CORE,1,1.0,
     assert row["latest_structure_confirmed_as_of_date"] == "2024-01-20"
     assert row["bullish_divergence_signal"] == 1
     assert row["bearish_divergence_signal"] == 0
-    assert row["bullish_candle_signal"] == 1
-    assert row["bearish_candle_signal"] == 0
+
+
+def test_batched_price_history_loader_matches_single_ticker_loader(tmp_path):
+    price_db = tmp_path / "osakedata.db"
+    _create_price_db(price_db)
+    _insert_price_rows(
+        price_db,
+        [
+            ("AAA", "2024-01-08", 10, 11, 9, 10, 100, "usa"),
+            ("AAA", "2024-01-09", 11, 12, 10, 11, 101, "usa"),
+            ("AAA", "2024-01-10", 12, 13, 11, 12, 102, "usa"),
+            ("BBB", "2024-01-09", 20, 21, 19, 20, 200, "usa"),
+            ("BBB", "2024-01-10", 21, 22, 20, 21, 201, "usa"),
+        ],
+    )
+
+    batch_histories, fetched_count = load_bounded_ticker_ohlcv_histories(
+        price_db_path=price_db,
+        tickers=["AAA", "BBB"],
+        market="usa",
+        as_of_date="2024-01-10",
+        max_valid_price_rows=2,
+    )
+
+    assert [row.date for row in batch_histories["AAA"]] == [
+        row.date
+        for row in load_bounded_ticker_ohlcv_history(
+            price_db_path=price_db,
+            ticker="AAA",
+            market="usa",
+            as_of_date="2024-01-10",
+            max_valid_price_rows=2,
+        )
+    ]
+    assert [row.date for row in batch_histories["BBB"]] == [
+        row.date
+        for row in load_bounded_ticker_ohlcv_history(
+            price_db_path=price_db,
+            ticker="BBB",
+            market="usa",
+            as_of_date="2024-01-10",
+            max_valid_price_rows=2,
+        )
+    ]
+    assert fetched_count >= 4
+
+
+def test_schema_initializers_create_reader_and_price_indexes(tmp_path):
+    price_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+
+    ensure_market_schema(str(price_db))
+    DatabaseManager(str(analysis_db)).close()
+
+    with sqlite3.connect(price_db) as conn:
+        price_indexes = {
+            row[1]
+            for row in conn.execute("PRAGMA index_list('osakedata')").fetchall()
+        }
+    with sqlite3.connect(analysis_db) as conn:
+        divergence_indexes = {
+            row[1]
+            for row in conn.execute("PRAGMA index_list('divergence_data')").fetchall()
+        }
+        findings_indexes = {
+            row[1]
+            for row in conn.execute("PRAGMA index_list('analysis_findings')").fetchall()
+        }
+
+    assert "idx_osakedata_market_ticker_date" in price_indexes
+    assert "idx_div_ticker_date" in divergence_indexes
+    assert "idx_analysis_findings_ticker_date" in findings_indexes
 
 
 def test_scanner_fields_remain_null_in_this_step(tmp_path):

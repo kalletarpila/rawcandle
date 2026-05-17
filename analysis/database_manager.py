@@ -360,6 +360,9 @@ class DatabaseManager:
                 "CREATE INDEX IF NOT EXISTS idx_date ON analysis_findings(date)"
             )
             cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_analysis_findings_ticker_date ON analysis_findings(ticker, date)"
+            )
+            cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_pattern ON analysis_findings(pattern)"
             )
 
@@ -533,6 +536,9 @@ class DatabaseManager:
             )
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_div_date ON divergence_data(date)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_div_ticker_date ON divergence_data(ticker, date)"
             )
 
             cursor.execute(

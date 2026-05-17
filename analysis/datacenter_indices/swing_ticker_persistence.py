@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -9,7 +10,11 @@ from typing import Sequence
 from analysis.database_manager import DatabaseManager
 
 from .persistence import resolve_created_at_utc
-from .swing_analysis_readers import read_ticker_analysis_enrichment
+from .swing_analysis_readers import (
+    read_batch_candlestick_enrichment,
+    read_batch_divergence_enrichment,
+    read_batch_dow_structure_enrichment,
+)
 from .swing_ticker_metrics import TickerOhlcvRow, calculate_ticker_swing_metrics
 from .taxonomy import DatacenterTaxonomyRow, load_datacenter_taxonomy_csv
 
@@ -38,6 +43,21 @@ TICKER_SWING_SUMMARY_ORDER = [
     "insufficient_history_count",
     "ok_price_count",
     "validation_status",
+]
+
+TICKER_SWING_PROFILE_SUMMARY_ORDER = [
+    "profile_enabled",
+    "profile_taxonomy_load_seconds",
+    "profile_price_load_seconds",
+    "profile_metric_calc_seconds",
+    "profile_dow_reader_seconds",
+    "profile_divergence_reader_seconds",
+    "profile_candle_reader_seconds",
+    "profile_db_write_seconds",
+    "profile_total_seconds",
+    "profile_tickers_processed",
+    "profile_price_rows_loaded",
+    "profile_rows_prepared",
 ]
 
 TICKER_SCANNER_SUMMARY_ORDER = [
@@ -122,6 +142,14 @@ def _parse_iso_date(value: str, field_name: str) -> str:
         raise ValueError(f"Invalid {field_name}: {value}") from exc
 
 
+def _chunked_values(values: Sequence[str], chunk_size: int = 900) -> list[list[str]]:
+    normalized_values = list(values)
+    return [
+        normalized_values[index:index + chunk_size]
+        for index in range(0, len(normalized_values), chunk_size)
+    ]
+
+
 def build_ticker_swing_run_id(
     *,
     as_of_date: str,
@@ -135,7 +163,14 @@ def build_ticker_swing_run_id(
 
 
 def format_ticker_swing_summary_lines(summary: dict[str, int | str]) -> list[str]:
-    return [f"SUMMARY {key}={summary[key]}" for key in TICKER_SWING_SUMMARY_ORDER]
+    lines = [f"SUMMARY {key}={summary[key]}" for key in TICKER_SWING_SUMMARY_ORDER]
+    if str(summary.get("profile_enabled", "0")) == "1":
+        lines.extend(
+            f"SUMMARY {key}={summary[key]}"
+            for key in TICKER_SWING_PROFILE_SUMMARY_ORDER
+            if key in summary
+        )
+    return lines
 
 
 def format_ticker_scanner_summary_lines(summary: dict[str, int | str]) -> list[str]:
@@ -259,7 +294,7 @@ def load_bounded_ticker_ohlcv_history(
               AND pvm <= ?
               AND close IS NOT NULL
               {market_sql}
-            ORDER BY pvm DESC
+            ORDER BY pvm DESC, rowid DESC
             LIMIT ?
             """,
             [*params, max_valid_price_rows],
@@ -286,6 +321,122 @@ def load_bounded_ticker_ohlcv_history(
                 volume=row["volume"],
             )
     return sorted(combined_by_date.values(), key=lambda row: row.date)
+
+
+def load_bounded_ticker_ohlcv_histories(
+    *,
+    price_db_path: str | Path,
+    tickers: Sequence[str],
+    market: str | None,
+    as_of_date: str,
+    max_valid_price_rows: int = DEFAULT_MAX_VALID_PRICE_ROWS,
+) -> tuple[dict[str, list[TickerOhlcvRow]], int]:
+    normalized_as_of_date = _parse_iso_date(as_of_date, "as_of_date")
+    normalized_tickers = sorted({_normalize_ticker(ticker) for ticker in tickers if _normalize_ticker(ticker)})
+    if max_valid_price_rows <= 0:
+        raise ValueError("max_valid_price_rows must be greater than 0")
+    if not normalized_tickers:
+        return {}, 0
+
+    histories: dict[str, dict[str, TickerOhlcvRow]] = {ticker: {} for ticker in normalized_tickers}
+    fetched_row_count = 0
+    with sqlite3.connect(price_db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        valid_market_sql = ""
+        exact_market_sql = ""
+        if market is not None:
+            valid_market_sql = " AND market = ?"
+            exact_market_sql = " AND market = ?"
+        for ticker_chunk in _chunked_values(normalized_tickers):
+            placeholders = ", ".join("?" for _ in ticker_chunk)
+            valid_params: list[object] = [*ticker_chunk, normalized_as_of_date]
+            exact_params: list[object] = [*ticker_chunk, normalized_as_of_date]
+            if market is not None:
+                valid_params.append(market)
+                exact_params.append(market)
+            valid_params.append(max_valid_price_rows)
+            valid_rows = conn.execute(
+                f"""
+                WITH ranked_valid AS (
+                    SELECT
+                        UPPER(TRIM(osake)) AS ticker,
+                        pvm,
+                        open,
+                        high,
+                        low,
+                        close,
+                        volume,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY UPPER(TRIM(osake))
+                            ORDER BY pvm DESC, rowid DESC
+                        ) AS valid_rank
+                    FROM osakedata
+                    WHERE UPPER(TRIM(osake)) IN ({placeholders})
+                      AND pvm <= ?
+                      AND close IS NOT NULL
+                      {valid_market_sql}
+                )
+                SELECT ticker, pvm, open, high, low, close, volume
+                FROM ranked_valid
+                WHERE valid_rank <= ?
+                """,
+                valid_params,
+            ).fetchall()
+            exact_rows = conn.execute(
+                f"""
+                WITH ranked_exact AS (
+                    SELECT
+                        UPPER(TRIM(osake)) AS ticker,
+                        pvm,
+                        open,
+                        high,
+                        low,
+                        close,
+                        volume,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY UPPER(TRIM(osake))
+                            ORDER BY rowid DESC
+                        ) AS exact_rank
+                    FROM osakedata
+                    WHERE UPPER(TRIM(osake)) IN ({placeholders})
+                      AND pvm = ?
+                      {exact_market_sql}
+                )
+                SELECT ticker, pvm, open, high, low, close, volume
+                FROM ranked_exact
+                WHERE exact_rank = 1
+                """,
+                exact_params,
+            ).fetchall()
+            fetched_row_count += len(valid_rows) + len(exact_rows)
+            for row in exact_rows:
+                ticker = str(row["ticker"])
+                combined_by_date = histories[ticker]
+                combined_by_date[str(row["pvm"])] = TickerOhlcvRow(
+                    date=str(row["pvm"]),
+                    open=row["open"],
+                    high=row["high"],
+                    low=row["low"],
+                    close=row["close"],
+                    volume=row["volume"],
+                )
+            for row in valid_rows:
+                ticker = str(row["ticker"])
+                combined_by_date = histories[ticker]
+                date_value = str(row["pvm"])
+                if date_value not in combined_by_date:
+                    combined_by_date[date_value] = TickerOhlcvRow(
+                        date=date_value,
+                        open=row["open"],
+                        high=row["high"],
+                        low=row["low"],
+                        close=row["close"],
+                        volume=row["volume"],
+                    )
+    return {
+        ticker: sorted(rows_by_date.values(), key=lambda row: row.date)
+        for ticker, rows_by_date in histories.items()
+    }, fetched_row_count
 
 
 def _row_key(
@@ -360,34 +511,78 @@ def build_ticker_swing_snapshot_rows(
     run_id: str,
     created_at_utc: str,
     max_valid_price_rows: int = DEFAULT_MAX_VALID_PRICE_ROWS,
+    profile: bool = False,
 ) -> tuple[list[DatacenterTickerSwingSnapshotRow], dict[str, int | str]]:
+    total_started_at = time.perf_counter()
     normalized_as_of_date = _parse_iso_date(as_of_date, "as_of_date")
+    taxonomy_started_at = time.perf_counter()
     taxonomy_rows = _load_taxonomy_rows(taxonomy_csv_path)
     primary_rows, duplicate_primary_rows = _select_primary_taxonomy_rows(taxonomy_rows)
+    taxonomy_elapsed = time.perf_counter() - taxonomy_started_at
+    normalized_tickers = [_normalize_ticker(row.ticker) for row in primary_rows]
+
+    price_started_at = time.perf_counter()
+    ohlcv_histories, fetched_price_row_count = load_bounded_ticker_ohlcv_histories(
+        price_db_path=price_db_path,
+        tickers=normalized_tickers,
+        market=market,
+        as_of_date=normalized_as_of_date,
+        max_valid_price_rows=max_valid_price_rows,
+    )
+    price_elapsed = time.perf_counter() - price_started_at
+
+    metric_started_at = time.perf_counter()
+    metrics_by_ticker = {
+        ticker: calculate_ticker_swing_metrics(
+            ohlcv_histories.get(ticker, []),
+            normalized_as_of_date,
+        )
+        for ticker in normalized_tickers
+    }
+    metric_elapsed = time.perf_counter() - metric_started_at
 
     rows: list[DatacenterTickerSwingSnapshotRow] = []
+    dow_elapsed = 0.0
+    divergence_elapsed = 0.0
+    candle_elapsed = 0.0
     with sqlite3.connect(analysis_db_path) as analysis_conn:
         analysis_conn.row_factory = sqlite3.Row
+        dow_started_at = time.perf_counter()
+        dow_by_ticker = read_batch_dow_structure_enrichment(
+            analysis_conn,
+            normalized_tickers,
+            market,
+            normalized_as_of_date,
+        )
+        dow_elapsed = time.perf_counter() - dow_started_at
+
+        divergence_started_at = time.perf_counter()
+        divergence_by_ticker = read_batch_divergence_enrichment(
+            analysis_conn,
+            normalized_tickers,
+            normalized_as_of_date,
+        )
+        divergence_elapsed = time.perf_counter() - divergence_started_at
+
+        candle_started_at = time.perf_counter()
+        candle_by_ticker = read_batch_candlestick_enrichment(
+            analysis_conn,
+            normalized_tickers,
+            normalized_as_of_date,
+        )
+        candle_elapsed = time.perf_counter() - candle_started_at
+
         for taxonomy_row in primary_rows:
-            ohlcv_rows = load_bounded_ticker_ohlcv_history(
-                price_db_path=price_db_path,
-                ticker=taxonomy_row.ticker,
-                market=market,
-                as_of_date=normalized_as_of_date,
-                max_valid_price_rows=max_valid_price_rows,
-            )
-            metrics = calculate_ticker_swing_metrics(ohlcv_rows, normalized_as_of_date)
-            enrichment = read_ticker_analysis_enrichment(
-                analysis_conn,
-                _normalize_ticker(taxonomy_row.ticker),
-                market,
-                normalized_as_of_date,
-            )
+            ticker = _normalize_ticker(taxonomy_row.ticker)
+            metrics = metrics_by_ticker[ticker]
+            dow_snapshot = dow_by_ticker[ticker]
+            divergence_snapshot = divergence_by_ticker[ticker]
+            candle_snapshot = candle_by_ticker[ticker]
             rows.append(
                 DatacenterTickerSwingSnapshotRow(
                     signal_date=normalized_as_of_date,
                     taxonomy_version=str(taxonomy_row.taxonomy_version),
-                    ticker=_normalize_ticker(taxonomy_row.ticker),
+                    ticker=ticker,
                     primary_layer=str(taxonomy_row.layer),
                     primary_subindustry=str(taxonomy_row.subindustry),
                     close=metrics.close,
@@ -412,14 +607,14 @@ def build_ticker_swing_snapshot_rows(
                     highest_close_20d=metrics.highest_close_20d,
                     volume_avg_20d=metrics.volume_avg_20d,
                     volume_vs_avg20=metrics.volume_vs_avg20,
-                    latest_structure_label=enrichment.dow.latest_structure_label,
-                    latest_structure_confirmed_as_of_date=enrichment.dow.latest_structure_confirmed_as_of_date,
-                    bullish_divergence_signal=enrichment.divergence.bullish_divergence_signal,
-                    bearish_divergence_signal=enrichment.divergence.bearish_divergence_signal,
-                    hidden_bullish_divergence_signal=enrichment.divergence.hidden_bullish_divergence_signal,
-                    hidden_bearish_divergence_signal=enrichment.divergence.hidden_bearish_divergence_signal,
-                    bullish_candle_signal=enrichment.candlestick.bullish_candle_signal,
-                    bearish_candle_signal=enrichment.candlestick.bearish_candle_signal,
+                    latest_structure_label=dow_snapshot.latest_structure_label,
+                    latest_structure_confirmed_as_of_date=dow_snapshot.latest_structure_confirmed_as_of_date,
+                    bullish_divergence_signal=divergence_snapshot.bullish_divergence_signal,
+                    bearish_divergence_signal=divergence_snapshot.bearish_divergence_signal,
+                    hidden_bullish_divergence_signal=divergence_snapshot.hidden_bullish_divergence_signal,
+                    hidden_bearish_divergence_signal=divergence_snapshot.hidden_bearish_divergence_signal,
+                    bullish_candle_signal=candle_snapshot.bullish_candle_signal,
+                    bearish_candle_signal=candle_snapshot.bearish_candle_signal,
                     breakout_signal=None,
                     fast_ema10_pullback_signal=None,
                     conservative_ema20_pullback_signal=None,
@@ -444,6 +639,22 @@ def build_ticker_swing_snapshot_rows(
         "insufficient_history_count": sum(1 for row in rows if row.price_data_status == "INSUFFICIENT_HISTORY"),
         "ok_price_count": sum(1 for row in rows if row.price_data_status == "OK"),
     }
+    if profile:
+        summary.update(
+            {
+                "profile_enabled": "1",
+                "profile_taxonomy_load_seconds": f"{taxonomy_elapsed:.3f}",
+                "profile_price_load_seconds": f"{price_elapsed:.3f}",
+                "profile_metric_calc_seconds": f"{metric_elapsed:.3f}",
+                "profile_dow_reader_seconds": f"{dow_elapsed:.3f}",
+                "profile_divergence_reader_seconds": f"{divergence_elapsed:.3f}",
+                "profile_candle_reader_seconds": f"{candle_elapsed:.3f}",
+                "profile_total_seconds": f"{(time.perf_counter() - total_started_at):.3f}",
+                "profile_tickers_processed": len(primary_rows),
+                "profile_price_rows_loaded": fetched_price_row_count,
+                "profile_rows_prepared": len(rows),
+            }
+        )
     return rows, summary
 
 
@@ -952,6 +1163,7 @@ def persist_datacenter_ticker_swing_snapshots(
     created_at_utc: str | None = None,
     write_mode: str = "upsert",
     max_valid_price_rows: int = DEFAULT_MAX_VALID_PRICE_ROWS,
+    profile: bool = False,
 ) -> dict[str, int | str]:
     normalized_as_of_date = _parse_iso_date(as_of_date, "as_of_date")
     if write_mode not in {"insert-missing", "upsert", "replace-date"}:
@@ -962,6 +1174,7 @@ def persist_datacenter_ticker_swing_snapshots(
         run_id=run_id,
     )
     resolved_created_at_utc = resolve_created_at_utc(created_at_utc)
+    total_started_at = time.perf_counter()
 
     rows, prep_summary = build_ticker_swing_snapshot_rows(
         analysis_db_path=analysis_db_path,
@@ -973,7 +1186,9 @@ def persist_datacenter_ticker_swing_snapshots(
         run_id=resolved_run_id,
         created_at_utc=resolved_created_at_utc,
         max_valid_price_rows=max_valid_price_rows,
+        profile=profile,
     )
+    write_started_at = time.perf_counter()
     write_summary = write_ticker_swing_snapshot_rows(
         analysis_db_path=analysis_db_path,
         rows=rows,
@@ -981,7 +1196,7 @@ def persist_datacenter_ticker_swing_snapshots(
         signal_version=signal_version,
         write_mode=write_mode,
     )
-    return {
+    summary = {
         "signal_date": normalized_as_of_date,
         "market": market if market is not None else "ALL",
         "write_mode": write_mode,
@@ -991,6 +1206,10 @@ def persist_datacenter_ticker_swing_snapshots(
         **write_summary,
         "validation_status": "OK",
     }
+    if profile:
+        summary["profile_db_write_seconds"] = f"{(time.perf_counter() - write_started_at):.3f}"
+        summary["profile_total_seconds"] = f"{(time.perf_counter() - total_started_at):.3f}"
+    return summary
 
 
 def persist_datacenter_ticker_scanner_signals(

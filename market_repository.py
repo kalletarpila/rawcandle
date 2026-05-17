@@ -125,6 +125,12 @@ def ensure_market_schema(db_path: Optional[str] = None) -> None:
     cursor.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_markets_abbrev ON markets(abbreviation)"
     )
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_osakedata_market_ticker_date
+        ON osakedata(market, osake, pvm)
+        """
+    )
 
     cursor.execute("PRAGMA table_info(markets)")
     market_columns = {row[1] for row in cursor.fetchall()}

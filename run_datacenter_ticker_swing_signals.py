@@ -38,6 +38,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--write-mode", type=str, required=True, help="Write mode: insert-missing, upsert, replace-date, update-existing, replace-scanner-range")
     parser.add_argument("--max-valid-price-rows", type=int, default=DEFAULT_MAX_VALID_PRICE_ROWS, help="Maximum valid OHLCV rows to load per ticker")
     parser.add_argument("--scanner-only", action="store_true", help="Update only scanner signal fields on existing ticker swing rows")
+    parser.add_argument("--profile", action="store_true", help="Print coarse timing SUMMARY lines for base ticker swing persistence")
     return parser.parse_args(argv)
 
 
@@ -73,6 +74,7 @@ def main(argv: list[str] | None = None) -> int:
                 created_at_utc=args.created_at_utc,
                 write_mode=args.write_mode,
                 max_valid_price_rows=args.max_valid_price_rows,
+                profile=args.profile,
             )
             lines = format_ticker_swing_summary_lines(summary)
     except Exception as exc:
