@@ -394,6 +394,20 @@ def run_candlestick_analysis(
         # Ensure pvm is datetime for correct sorting and comparisons
         df["pvm"] = pd.to_datetime(df["pvm"])
         df = df.sort_values("pvm").reset_index(drop=True)
+        valid_ohlc_mask = df[["Open", "High", "Low", "Close"]].notna().all(axis=1)
+        if not valid_ohlc_mask.all():
+            dropped_rows = int((~valid_ohlc_mask).sum())
+            if logger:
+                logger.warning(
+                    f"Ohitetaan {dropped_rows} OHLC-puutteellista candlestick-riviä tickerille {ticker}"
+                )
+            df = df.loc[valid_ohlc_mask].reset_index(drop=True)
+        if df.empty:
+            if logger:
+                logger.warning(
+                    f"Ei kelvollista OHLC-dataa tickerille: {ticker} (aikaväli: {s_iso or 'alku'} - {e_iso or 'loppu'})"
+                )
+            return None
 
     (
         divergence_strength_map,

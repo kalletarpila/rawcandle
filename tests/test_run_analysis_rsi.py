@@ -3,6 +3,7 @@ import sqlite3
 import pandas as pd
 import pytest
 
+from analysis import run_analysis as run_analysis_module
 from analysis.candlestick_patterns import (
     calculate_rsi,
     is_bearish_divergence,
@@ -10,6 +11,83 @@ from analysis.candlestick_patterns import (
 )
 from analysis.divergence_v1 import compute_rsi_wilder
 from analysis.run_analysis import run_candlestick_analysis
+
+
+def test_run_candlestick_analysis_skips_rows_with_missing_ohlc(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+):
+    osake_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+
+    with sqlite3.connect(osake_db) as conn:
+        conn.execute(
+            """
+            CREATE TABLE osakedata (
+                osake TEXT,
+                pvm TEXT,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                volume INTEGER,
+                market TEXT
+            )
+            """
+        )
+        conn.executemany(
+            """
+            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ("TEST", "2026-01-01", 10.0, 11.0, 9.0, 10.5, 1_000, "usa"),
+                ("TEST", "2026-01-02", 10.5, 11.2, 10.0, 10.8, 1_200, "usa"),
+                ("TEST", "2026-01-03", None, None, None, None, 1_300, "usa"),
+            ],
+        )
+
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            CREATE TABLE divergence_data (
+                ticker TEXT NOT NULL,
+                date TEXT NOT NULL,
+                bullish_strength REAL DEFAULT 0,
+                bearish_strength REAL DEFAULT 0,
+                rsi REAL,
+                pivot2_date_r3 TEXT,
+                is_bullish_divergence_r3 INTEGER DEFAULT 0,
+                PRIMARY KEY (ticker, date)
+            )
+            """
+        )
+
+    seen_dates = []
+
+    def _guard_no_missing_ohlc(row):
+        if row[["Open", "High", "Low", "Close"]].isna().any():
+            raise AssertionError("missing OHLC row reached candlestick detector")
+        seen_dates.append(row["pvm"].date().isoformat())
+        return False
+
+    monkeypatch.setattr(run_analysis_module, "is_hammer", _guard_no_missing_ohlc)
+
+    results = run_candlestick_analysis(
+        str(osake_db),
+        "TEST",
+        patterns=["Hammer"],
+        start_date="2026-01-01",
+        end_date="2026-01-03",
+        progress_callback=None,
+        downtrend_filter=False,
+        min_decline_percent=3.0,
+        use_ma_filter=False,
+        use_volume_filter=False,
+        analysis_db_path=str(analysis_db),
+    )
+
+    assert results == {}
+    assert seen_dates == ["2026-01-01", "2026-01-02"]
 
 
 def test_run_candlestick_analysis_prefers_divergence_rsi(tmp_path):
