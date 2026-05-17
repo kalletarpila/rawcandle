@@ -215,7 +215,7 @@ def test_format_stock_update_service_result_for_ui_includes_dow_structures_updat
     assert "Dow-rakenteet päivitetty: 5" in formatted
 
 
-def test_format_stock_update_service_result_for_ui_includes_compact_dow_summary():
+def test_format_stock_update_service_result_for_ui_includes_multiline_dow_summary():
     app = main.RawCandleApp.__new__(main.RawCandleApp)
     result = main.StockUpdateResult(
         market="omxh",
@@ -225,6 +225,7 @@ def test_format_stock_update_service_result_for_ui_includes_compact_dow_summary(
     formatted = app._format_stock_update_service_result_for_ui(result)
 
     assert "Dow-yhteenveto:" in formatted
+    assert "Dow-yhteenveto:\nprocessed=10\nupdated=3" in formatted
     assert "processed=10" in formatted
     assert "updated=3" in formatted
     assert formatted.index("processed=10") < formatted.index("updated=3")

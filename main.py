@@ -438,11 +438,11 @@ class RawCandleApp:
         if result.dow_structures_updated is not None:
             lines.append(f"Dow-rakenteet päivitetty: {result.dow_structures_updated}")
         if result.dow_summary is not None:
-            dow_items = ", ".join(
+            lines.append("Dow-yhteenveto:")
+            lines.extend(
                 f"{key}={str(result.dow_summary[key])}"
                 for key in sorted(result.dow_summary.keys())
             )
-            lines.append(f"Dow-yhteenveto: {dow_items}")
         lines.extend(
             [
                 f"Varoitukset: {len(result.warnings)}",
