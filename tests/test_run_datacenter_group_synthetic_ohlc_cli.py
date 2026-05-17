@@ -230,6 +230,12 @@ def test_cli_structure_only_updates_existing_rows_and_prints_deterministic_summa
                     "2026-05-17T10:00:00Z",
                 )
             )
+        normalized_rows = []
+        for row in rows:
+            values = list(row)
+            if len(values) == 37:
+                values[21:21] = [None, None]
+            normalized_rows.append(tuple(values))
         conn.executemany(
             """
             INSERT INTO dc_group_synthetic_ohlc_daily (
@@ -238,13 +244,14 @@ def test_cli_structure_only_updates_existing_rows_and_prints_deterministic_summa
                 ma20, ema20, distance_to_ema20_pct, volatility_20d,
                 pivot_radius, latest_pivot_high_date, latest_pivot_high_value,
                 latest_pivot_low_date, latest_pivot_low_value, latest_structure_label,
+                latest_structure_age_trading_days, latest_structure_freshness,
                 trend_classification, relative_base_window, relative_open_20, relative_high_20,
                 relative_low_20, relative_close_20, relative_upper_wick_20, relative_lower_wick_20,
                 relative_close_extension_20, relative_high_extension_20, relative_low_extension_20,
                 relative_eligible_count, data_quality_status, calc_version, run_id, created_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            rows,
+            normalized_rows,
         )
         conn.commit()
 

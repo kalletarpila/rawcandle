@@ -673,6 +673,8 @@ class DatabaseManager:
                     volume_vs_avg20 REAL,
                     latest_structure_label TEXT,
                     latest_structure_confirmed_as_of_date TEXT,
+                    latest_structure_age_trading_days INTEGER,
+                    latest_structure_freshness TEXT,
                     bullish_divergence_signal INTEGER,
                     bearish_divergence_signal INTEGER,
                     hidden_bullish_divergence_signal INTEGER,
@@ -735,6 +737,14 @@ class DatabaseManager:
             if "exit_risk_severity" not in ticker_swing_columns:
                 cursor.execute(
                     "ALTER TABLE dc_ticker_swing_signal_daily ADD COLUMN exit_risk_severity TEXT"
+                )
+            if "latest_structure_age_trading_days" not in ticker_swing_columns:
+                cursor.execute(
+                    "ALTER TABLE dc_ticker_swing_signal_daily ADD COLUMN latest_structure_age_trading_days INTEGER"
+                )
+            if "latest_structure_freshness" not in ticker_swing_columns:
+                cursor.execute(
+                    "ALTER TABLE dc_ticker_swing_signal_daily ADD COLUMN latest_structure_freshness TEXT"
                 )
 
             cursor.execute(
@@ -817,6 +827,8 @@ class DatabaseManager:
                     latest_pivot_low_date TEXT,
                     latest_pivot_low_value REAL,
                     latest_structure_label TEXT,
+                    latest_structure_age_trading_days INTEGER,
+                    latest_structure_freshness TEXT,
                     trend_classification TEXT,
                     relative_base_window INTEGER,
                     relative_open_20 REAL,
@@ -861,6 +873,16 @@ class DatabaseManager:
                 ON dc_group_synthetic_ohlc_daily (ohlc_date, trend_classification)
                 """
             )
+            cursor.execute("PRAGMA table_info(dc_group_synthetic_ohlc_daily)")
+            group_synth_columns = {str(row[1]) for row in cursor.fetchall()}
+            if "latest_structure_age_trading_days" not in group_synth_columns:
+                cursor.execute(
+                    "ALTER TABLE dc_group_synthetic_ohlc_daily ADD COLUMN latest_structure_age_trading_days INTEGER"
+                )
+            if "latest_structure_freshness" not in group_synth_columns:
+                cursor.execute(
+                    "ALTER TABLE dc_group_synthetic_ohlc_daily ADD COLUMN latest_structure_freshness TEXT"
+                )
 
             cursor.execute(
                 """

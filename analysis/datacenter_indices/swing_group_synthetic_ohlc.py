@@ -106,6 +106,8 @@ class DatacenterGroupSyntheticOhlcRow:
     latest_pivot_low_date: str | None
     latest_pivot_low_value: float | None
     latest_structure_label: str | None
+    latest_structure_age_trading_days: int | None
+    latest_structure_freshness: str | None
     trend_classification: str | None
     relative_base_window: int | None
     relative_open_20: float | None
@@ -521,6 +523,8 @@ def build_group_synthetic_ohlc_rows(
                         latest_pivot_low_date=None,
                         latest_pivot_low_value=None,
                         latest_structure_label=None,
+                        latest_structure_age_trading_days=None,
+                        latest_structure_freshness=None,
                         trend_classification=None,
                         relative_base_window=None,
                         relative_open_20=None,
@@ -884,8 +888,32 @@ def _structure_field_tuple_from_row(row: sqlite3.Row | dict[str, object]) -> tup
         row["latest_pivot_low_date"],
         row["latest_pivot_low_value"],
         row["latest_structure_label"],
+        row["latest_structure_age_trading_days"],
+        row["latest_structure_freshness"],
         row["trend_classification"],
     )
+
+
+def _classify_group_structure_freshness(
+    *,
+    group_type: str,
+    age_trading_days: int | None,
+) -> str | None:
+    if age_trading_days is None:
+        return None
+    if group_type == "subindustry":
+        if age_trading_days <= 30:
+            return "FRESH"
+        if age_trading_days <= 60:
+            return "AGING"
+        return "STALE"
+    if group_type == "layer":
+        if age_trading_days <= 60:
+            return "FRESH"
+        if age_trading_days <= 120:
+            return "AGING"
+        return "STALE"
+    return None
 
 
 def build_group_structure_updates(
@@ -937,9 +965,14 @@ def build_group_structure_updates(
         latest_pivot_low_date: str | None = None
         latest_pivot_low_value: float | None = None
         latest_structure_label: str | None = None
+        latest_structure_label_date: str | None = None
         previous_high_value: float | None = None
         previous_low_value: float | None = None
         applied_confirm_index = 0
+        valid_index_by_date = {
+            str(valid_row["ohlc_date"]): index
+            for index, valid_row in enumerate(valid_rows)
+        }
 
         for row in series_rows:
             while applied_confirm_index < len(valid_rows) and str(valid_rows[applied_confirm_index]["ohlc_date"]) <= str(row["ohlc_date"]):
@@ -954,6 +987,7 @@ def build_group_structure_updates(
                         latest_high_label = label
                         if label is not None:
                             latest_structure_label = label
+                            latest_structure_label_date = str(pivot_row["ohlc_date"])
                     else:
                         pivot_value = float(pivot_row["synthetic_low"])
                         label = None if previous_low_value is None else ("HL" if pivot_value > previous_low_value else "LL")
@@ -963,6 +997,7 @@ def build_group_structure_updates(
                         latest_low_label = label
                         if label is not None:
                             latest_structure_label = label
+                            latest_structure_label_date = str(pivot_row["ohlc_date"])
                 applied_confirm_index += 1
 
             if not (normalized_start_date <= str(row["ohlc_date"]) <= normalized_end_date):
@@ -980,9 +1015,25 @@ def build_group_structure_updates(
                     "latest_pivot_low_date": None,
                     "latest_pivot_low_value": None,
                     "latest_structure_label": None,
+                    "latest_structure_age_trading_days": None,
+                    "latest_structure_freshness": None,
                     "trend_classification": None,
                 }
             else:
+                current_valid_index = valid_index_by_date.get(str(row["ohlc_date"]))
+                label_valid_index = (
+                    None
+                    if latest_structure_label_date is None
+                    else valid_index_by_date.get(latest_structure_label_date)
+                )
+                latest_structure_age_trading_days = (
+                    None
+                    if latest_structure_label is None
+                    or latest_structure_label_date is None
+                    or current_valid_index is None
+                    or label_valid_index is None
+                    else current_valid_index - label_valid_index
+                )
                 computed = {
                     "pivot_radius": pivot_radius,
                     "latest_pivot_high_date": latest_pivot_high_date,
@@ -990,6 +1041,11 @@ def build_group_structure_updates(
                     "latest_pivot_low_date": latest_pivot_low_date,
                     "latest_pivot_low_value": latest_pivot_low_value,
                     "latest_structure_label": latest_structure_label,
+                    "latest_structure_age_trading_days": latest_structure_age_trading_days,
+                    "latest_structure_freshness": _classify_group_structure_freshness(
+                        group_type=group_type,
+                        age_trading_days=latest_structure_age_trading_days,
+                    ),
                     "trend_classification": _compute_group_trend_classification(
                         latest_high_label=latest_high_label,
                         latest_low_label=latest_low_label,
@@ -1055,6 +1111,8 @@ def _serialize_row(row: DatacenterGroupSyntheticOhlcRow) -> tuple[object, ...]:
         row.latest_pivot_low_date,
         row.latest_pivot_low_value,
         row.latest_structure_label,
+        row.latest_structure_age_trading_days,
+        row.latest_structure_freshness,
         row.trend_classification,
         row.relative_base_window,
         row.relative_open_20,
@@ -1140,11 +1198,12 @@ def write_group_synthetic_ohlc_rows(
                         ma20, ema20, distance_to_ema20_pct, volatility_20d,
                         pivot_radius, latest_pivot_high_date, latest_pivot_high_value,
                         latest_pivot_low_date, latest_pivot_low_value, latest_structure_label,
+                        latest_structure_age_trading_days, latest_structure_freshness,
                         trend_classification, relative_base_window, relative_open_20, relative_high_20,
                         relative_low_20, relative_close_20, relative_upper_wick_20, relative_lower_wick_20,
                         relative_close_extension_20, relative_high_extension_20, relative_low_extension_20,
                         relative_eligible_count, data_quality_status, calc_version, run_id, created_at_utc
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     _serialize_row(row),
                 )
@@ -1180,11 +1239,12 @@ def write_group_synthetic_ohlc_rows(
                             ma20, ema20, distance_to_ema20_pct, volatility_20d,
                             pivot_radius, latest_pivot_high_date, latest_pivot_high_value,
                             latest_pivot_low_date, latest_pivot_low_value, latest_structure_label,
+                            latest_structure_age_trading_days, latest_structure_freshness,
                             trend_classification, relative_base_window, relative_open_20, relative_high_20,
                             relative_low_20, relative_close_20, relative_upper_wick_20, relative_lower_wick_20,
                             relative_close_extension_20, relative_high_extension_20, relative_low_extension_20,
                             relative_eligible_count, data_quality_status, calc_version, run_id, created_at_utc
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         _serialize_row(row),
                     )
@@ -1201,11 +1261,12 @@ def write_group_synthetic_ohlc_rows(
                             ma20, ema20, distance_to_ema20_pct, volatility_20d,
                             pivot_radius, latest_pivot_high_date, latest_pivot_high_value,
                             latest_pivot_low_date, latest_pivot_low_value, latest_structure_label,
+                            latest_structure_age_trading_days, latest_structure_freshness,
                             trend_classification, relative_base_window, relative_open_20, relative_high_20,
                             relative_low_20, relative_close_20, relative_upper_wick_20, relative_lower_wick_20,
                             relative_close_extension_20, relative_high_extension_20, relative_low_extension_20,
                             relative_eligible_count, data_quality_status, calc_version, run_id, created_at_utc
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(ohlc_date, taxonomy_version, group_type, group_name, calc_version)
                         DO UPDATE SET
                             member_count = excluded.member_count,
@@ -1225,6 +1286,8 @@ def write_group_synthetic_ohlc_rows(
                             latest_pivot_low_date = excluded.latest_pivot_low_date,
                             latest_pivot_low_value = excluded.latest_pivot_low_value,
                             latest_structure_label = excluded.latest_structure_label,
+                            latest_structure_age_trading_days = excluded.latest_structure_age_trading_days,
+                            latest_structure_freshness = excluded.latest_structure_freshness,
                             trend_classification = excluded.trend_classification,
                             relative_base_window = excluded.relative_base_window,
                             relative_open_20 = excluded.relative_open_20,
@@ -1402,6 +1465,8 @@ def write_group_structure_updates(
                     latest_pivot_low_date = NULL,
                     latest_pivot_low_value = NULL,
                     latest_structure_label = NULL,
+                    latest_structure_age_trading_days = NULL,
+                    latest_structure_freshness = NULL,
                     trend_classification = NULL
                 WHERE ohlc_date >= ?
                   AND ohlc_date <= ?
@@ -1418,6 +1483,8 @@ def write_group_structure_updates(
                 or row["latest_pivot_high_date"] is not None
                 or row["latest_pivot_low_date"] is not None
                 or row["latest_structure_label"] is not None
+                or row["latest_structure_age_trading_days"] is not None
+                or row["latest_structure_freshness"] is not None
                 or row["trend_classification"] is not None
             ]
         else:
@@ -1432,6 +1499,8 @@ def write_group_structure_updates(
                     row["latest_pivot_low_date"],
                     row["latest_pivot_low_value"],
                     row["latest_structure_label"],
+                    row["latest_structure_age_trading_days"],
+                    row["latest_structure_freshness"],
                     row["trend_classification"],
                 )
             ]
@@ -1446,6 +1515,8 @@ def write_group_structure_updates(
                     latest_pivot_low_date = ?,
                     latest_pivot_low_value = ?,
                     latest_structure_label = ?,
+                    latest_structure_age_trading_days = ?,
+                    latest_structure_freshness = ?,
                     trend_classification = ?,
                     run_id = ?,
                     created_at_utc = ?
@@ -1462,6 +1533,8 @@ def write_group_structure_updates(
                     row["latest_pivot_low_date"],
                     row["latest_pivot_low_value"],
                     row["latest_structure_label"],
+                    row["latest_structure_age_trading_days"],
+                    row["latest_structure_freshness"],
                     row["trend_classification"],
                     row["run_id"],
                     row["created_at_utc"],

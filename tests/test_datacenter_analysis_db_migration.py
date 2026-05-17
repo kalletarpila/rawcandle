@@ -61,7 +61,16 @@ def test_database_manager_initializes_dc_ticker_swing_signal_daily_table(tmp_pat
     assert _table_exists(db_path, table_name)
 
     columns = _table_columns(db_path, table_name)
-    assert {"signal_date", "taxonomy_version", "ticker", "breakout_signal", "exit_risk_severity", "signal_version"}.issubset(columns)
+    assert {
+        "signal_date",
+        "taxonomy_version",
+        "ticker",
+        "breakout_signal",
+        "exit_risk_severity",
+        "latest_structure_age_trading_days",
+        "latest_structure_freshness",
+        "signal_version",
+    }.issubset(columns)
 
     assert _primary_key_columns(db_path, table_name) == [
         "signal_date",
@@ -142,6 +151,8 @@ def test_database_manager_adds_exit_risk_severity_to_existing_ticker_swing_table
 
     columns = _table_columns(db_path, "dc_ticker_swing_signal_daily")
     assert "exit_risk_severity" in columns
+    assert "latest_structure_age_trading_days" in columns
+    assert "latest_structure_freshness" in columns
 
 
 def test_database_manager_initializes_dc_group_swing_signal_daily_table(tmp_path):
@@ -181,7 +192,15 @@ def test_database_manager_initializes_dc_group_synthetic_ohlc_daily_table(tmp_pa
     assert _table_exists(db_path, table_name)
 
     columns = _table_columns(db_path, table_name)
-    assert {"ohlc_date", "taxonomy_version", "group_type", "latest_structure_label", "calc_version"}.issubset(columns)
+    assert {
+        "ohlc_date",
+        "taxonomy_version",
+        "group_type",
+        "latest_structure_label",
+        "latest_structure_age_trading_days",
+        "latest_structure_freshness",
+        "calc_version",
+    }.issubset(columns)
 
     assert _primary_key_columns(db_path, table_name) == [
         "ohlc_date",

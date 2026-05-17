@@ -35,6 +35,10 @@ def _insert_group_row(path, row):
 
 
 def _insert_ticker_row(path, row):
+    values = list(row)
+    if len(values) == 34:
+        values[18:18] = [None, None]
+        values.insert(32, None)
     with sqlite3.connect(path) as conn:
         conn.execute(
             """
@@ -43,20 +47,24 @@ def _insert_ticker_row(path, row):
                 close, return_5d, return_10d, return_20d, return_60d,
                 ma10, ema10, ema20, distance_to_ema10_pct, distance_to_ema20_pct,
                 volume_vs_avg20, highest_close_20d, latest_structure_label,
+                latest_structure_age_trading_days, latest_structure_freshness,
                 bullish_divergence_signal, bearish_divergence_signal,
                 hidden_bullish_divergence_signal, hidden_bearish_divergence_signal,
                 bullish_candle_signal, bearish_candle_signal,
                 breakout_signal, fast_ema10_pullback_signal, conservative_ema20_pullback_signal,
-                pullback_signal, exit_risk_signal, exit_reason, price_data_status,
+                pullback_signal, exit_risk_signal, exit_reason, exit_risk_severity, price_data_status,
                 signal_version, run_id, created_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            row,
+            tuple(values),
         )
         conn.commit()
 
 
 def _insert_synthetic_row(path, row):
+    values = list(row)
+    if len(values) == 37:
+        values[21:21] = [None, None]
     with sqlite3.connect(path) as conn:
         conn.execute(
             """
@@ -65,13 +73,14 @@ def _insert_synthetic_row(path, row):
                 member_count, eligible_count, synthetic_open, synthetic_high, synthetic_low, synthetic_close,
                 synthetic_volume, ma20, ema20, distance_to_ema20_pct, volatility_20d,
                 pivot_radius, latest_pivot_high_date, latest_pivot_high_value, latest_pivot_low_date, latest_pivot_low_value,
-                latest_structure_label, trend_classification, relative_base_window, relative_open_20, relative_high_20,
+                latest_structure_label, latest_structure_age_trading_days, latest_structure_freshness,
+                trend_classification, relative_base_window, relative_open_20, relative_high_20,
                 relative_low_20, relative_close_20, relative_upper_wick_20, relative_lower_wick_20,
                 relative_close_extension_20, relative_high_extension_20, relative_low_extension_20,
                 relative_eligible_count, data_quality_status, calc_version, run_id, created_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            row,
+            tuple(values),
         )
         conn.commit()
 
@@ -299,6 +308,8 @@ def test_generates_markdown_report_with_required_sections_and_filters(tmp_path):
     assert "| BBB | Infrastructure | Cloud |" in markdown
     assert "close_below_ema20;latest_structure_label_ll" in markdown
     assert "exit_risk_severity" in markdown
+    assert "latest_structure_age_trading_days" in markdown
+    assert "latest_structure_freshness" in markdown
     assert "HIGH" in markdown
     assert "synthetic_ohlc_rows_missing_relative_close_20" in markdown
     assert "ticker_rows_with_scanner_fields_null" in markdown

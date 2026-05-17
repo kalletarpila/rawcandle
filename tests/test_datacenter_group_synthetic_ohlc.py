@@ -7,6 +7,7 @@ import pytest
 
 from analysis.database_manager import DatabaseManager
 from analysis.datacenter_indices.swing_group_synthetic_ohlc import (
+    _classify_group_structure_freshness,
     persist_datacenter_group_relative_ohlc,
     persist_datacenter_group_structure,
     persist_datacenter_group_synthetic_ohlc,
@@ -55,6 +56,12 @@ def _create_analysis_db(path):
 
 
 def _insert_synthetic_rows(path, rows):
+    normalized_rows = []
+    for row in rows:
+        values = list(row)
+        if len(values) == 37:
+            values[21:21] = [None, None]
+        normalized_rows.append(tuple(values))
     with sqlite3.connect(path) as conn:
         conn.executemany(
             """
@@ -64,15 +71,28 @@ def _insert_synthetic_rows(path, rows):
                 ma20, ema20, distance_to_ema20_pct, volatility_20d,
                 pivot_radius, latest_pivot_high_date, latest_pivot_high_value,
                 latest_pivot_low_date, latest_pivot_low_value, latest_structure_label,
+                latest_structure_age_trading_days, latest_structure_freshness,
                 trend_classification, relative_base_window, relative_open_20, relative_high_20,
                 relative_low_20, relative_close_20, relative_upper_wick_20, relative_lower_wick_20,
                 relative_close_extension_20, relative_high_extension_20, relative_low_extension_20,
                 relative_eligible_count, data_quality_status, calc_version, run_id, created_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            rows,
+            normalized_rows,
         )
         conn.commit()
+
+
+def test_classify_group_structure_freshness_thresholds():
+    assert _classify_group_structure_freshness(group_type="subindustry", age_trading_days=None) is None
+    assert _classify_group_structure_freshness(group_type="subindustry", age_trading_days=30) == "FRESH"
+    assert _classify_group_structure_freshness(group_type="subindustry", age_trading_days=31) == "AGING"
+    assert _classify_group_structure_freshness(group_type="subindustry", age_trading_days=60) == "AGING"
+    assert _classify_group_structure_freshness(group_type="subindustry", age_trading_days=61) == "STALE"
+    assert _classify_group_structure_freshness(group_type="layer", age_trading_days=60) == "FRESH"
+    assert _classify_group_structure_freshness(group_type="layer", age_trading_days=61) == "AGING"
+    assert _classify_group_structure_freshness(group_type="layer", age_trading_days=120) == "AGING"
+    assert _classify_group_structure_freshness(group_type="layer", age_trading_days=121) == "STALE"
 
 
 def _fetch_rows(path):
@@ -1014,13 +1034,19 @@ def test_updates_subindustry_structure_fields_with_confirmation_lag_and_trend(tm
     assert first_confirm["latest_pivot_high_date"] == "2024-01-06"
     assert first_confirm["latest_pivot_high_value"] == pytest.approx(20.0)
     assert first_confirm["latest_structure_label"] is None
+    assert first_confirm["latest_structure_age_trading_days"] is None
+    assert first_confirm["latest_structure_freshness"] is None
     assert low_label_row["latest_pivot_low_date"] == "2024-01-15"
     assert low_label_row["latest_pivot_low_value"] == pytest.approx(6.5)
     assert low_label_row["latest_structure_label"] == "HL"
+    assert low_label_row["latest_structure_age_trading_days"] == 5
+    assert low_label_row["latest_structure_freshness"] == "FRESH"
     assert low_label_row["trend_classification"] == "NEUTRAL"
     assert high_label_row["latest_pivot_high_date"] == "2024-01-16"
     assert high_label_row["latest_pivot_high_value"] == pytest.approx(25.0)
     assert high_label_row["latest_structure_label"] == "HH"
+    assert high_label_row["latest_structure_age_trading_days"] == 5
+    assert high_label_row["latest_structure_freshness"] == "FRESH"
     assert high_label_row["trend_classification"] == "UP"
     assert final_row["relative_open_20"] == pytest.approx(1.1)
     assert final_row["synthetic_high"] == pytest.approx(10.0)
@@ -1164,8 +1190,10 @@ def test_structure_uses_valid_observations_not_calendar_days_and_handles_null_ro
     null_row = _find_row(rows_after, "subindustry", "UPS", "2024-03-08")
     assert before_valid_confirm["latest_pivot_high_date"] is None
     assert confirmed_on_valid["latest_pivot_high_date"] == "2024-03-06"
+    assert confirmed_on_valid["latest_structure_age_trading_days"] is None
     assert null_row["pivot_radius"] is None
     assert null_row["latest_structure_label"] is None
+    assert null_row["latest_structure_freshness"] is None
 
 
 def test_structure_update_does_not_insert_missing_rows_and_preserves_base_and_relative_fields(tmp_path):
@@ -1242,6 +1270,8 @@ def test_structure_update_does_not_insert_missing_rows_and_preserves_base_and_re
     assert row["synthetic_close"] == pytest.approx(125.0)
     assert row["relative_open_20"] == pytest.approx(1.11)
     assert row["relative_close_20"] == pytest.approx(1.05)
+    assert row["latest_structure_age_trading_days"] is None
+    assert row["latest_structure_freshness"] is None
 
 
 def test_structure_write_modes_update_only_matching_rows_and_replace_structure_range_only_clears_structure_fields(tmp_path):

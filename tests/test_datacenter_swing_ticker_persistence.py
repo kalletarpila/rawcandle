@@ -7,6 +7,7 @@ import pytest
 
 from analysis.database_manager import DatabaseManager
 from analysis.datacenter_indices.swing_ticker_persistence import (
+    classify_ticker_structure_freshness,
     classify_exit_risk_severity,
     load_existing_ticker_signal_dates,
     load_bounded_ticker_ohlcv_history,
@@ -131,6 +132,10 @@ def _fetch_ticker_rows(path):
 
 
 def _insert_ticker_swing_row(path, row):
+    values = list(row)
+    if len(values) == 45:
+        values[29:29] = [None, None]
+        values.insert(43, None)
     with sqlite3.connect(path) as conn:
         conn.execute(
             """
@@ -142,15 +147,16 @@ def _insert_ticker_swing_row(path, row):
                 ema10_slope_positive, ema20_slope_positive, ema10_slope_lookback,
                 ema20_slope_lookback, highest_close_20d, volume_avg_20d, volume_vs_avg20,
                 latest_structure_label, latest_structure_confirmed_as_of_date,
+                latest_structure_age_trading_days, latest_structure_freshness,
                 bullish_divergence_signal, bearish_divergence_signal,
                 hidden_bullish_divergence_signal, hidden_bearish_divergence_signal,
                 bullish_candle_signal, bearish_candle_signal, breakout_signal,
                 fast_ema10_pullback_signal, conservative_ema20_pullback_signal,
-                pullback_signal, exit_risk_signal, exit_reason, price_data_status,
+                pullback_signal, exit_risk_signal, exit_reason, exit_risk_severity, price_data_status,
                 signal_version, run_id, created_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            row,
+            tuple(values),
         )
         conn.commit()
 
@@ -205,6 +211,8 @@ DC_TAXONOMY_V1,AAA,Power,UPS,CORE,1,1.0,
     assert summary["inserted_count"] == 1
     assert len(rows) == 1
     assert rows[0]["ticker"] == "AAA"
+    assert rows[0]["latest_structure_age_trading_days"] is None
+    assert rows[0]["latest_structure_freshness"] is None
 
 
 def test_load_valid_price_dates_for_market_uses_primary_taxonomy_tickers_and_skips_weekend_dates(tmp_path):
@@ -497,6 +505,58 @@ DC_TAXONOMY_V1,AAA,Power,UPS,CORE,1,1.0,
     assert row["exit_risk_severity"] is None
 
 
+def test_classify_ticker_structure_freshness_thresholds():
+    assert classify_ticker_structure_freshness(None) is None
+    assert classify_ticker_structure_freshness(0) == "FRESH"
+    assert classify_ticker_structure_freshness(20) == "FRESH"
+    assert classify_ticker_structure_freshness(21) == "AGING"
+    assert classify_ticker_structure_freshness(40) == "AGING"
+    assert classify_ticker_structure_freshness(41) == "STALE"
+
+
+def test_structure_age_uses_valid_ticker_price_observations(tmp_path):
+    taxonomy_csv = _write_taxonomy_csv(
+        tmp_path,
+        """taxonomy_version,ticker,layer,subindustry,report_group_status,is_primary,role_weight,notes
+DC_TAXONOMY_V1,AAA,Power,UPS,CORE,1,1.0,
+""",
+    )
+    price_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _create_price_db(price_db)
+    _create_analysis_db(analysis_db)
+    _insert_price_rows(
+        price_db,
+        [
+            ("AAA", "2024-01-02", 100, 101, 99, 100, 1000, "usa"),
+            ("AAA", "2024-01-03", 101, 102, 100, 101, 1000, "usa"),
+            ("AAA", "2024-01-05", 102, 103, 101, 102, 1000, "usa"),
+            ("AAA", "2024-01-08", 103, 104, 102, 103, 1000, "usa"),
+        ],
+    )
+    _insert_dow_event(
+        analysis_db,
+        ("AAA", "usa", "2024-01-02", "2024-01-03", "PIVOT_HIGH", "HH", None, "UP"),
+    )
+
+    persist_datacenter_ticker_swing_snapshots(
+        analysis_db_path=analysis_db,
+        price_db_path=price_db,
+        taxonomy_csv_path=taxonomy_csv,
+        as_of_date="2024-01-08",
+        market="usa",
+        run_id="run1",
+        created_at_utc="2026-05-17T10:00:00Z",
+        write_mode="upsert",
+    )
+
+    row = _fetch_ticker_rows(analysis_db)[0]
+    assert row["latest_structure_label"] == "HH"
+    assert row["latest_structure_confirmed_as_of_date"] == "2024-01-03"
+    assert row["latest_structure_age_trading_days"] == 2
+    assert row["latest_structure_freshness"] == "FRESH"
+
+
 def test_classify_exit_risk_severity_is_deterministic():
     assert classify_exit_risk_severity(None) is None
     assert classify_exit_risk_severity("") is None
@@ -697,8 +757,8 @@ def test_scanner_updates_existing_rows_and_preserves_metric_and_enrichment_field
             120.0, 1000.0, 0.02, 0.03, 0.10, 0.20,
             118.0, 119.0, 115.0, 0.01, 0.01, 0.04,
             1, 1, 1, 1, 1, 3, 5, 120.0, 900.0, 1.6,
-            "HH", "2024-01-10", 0, 0, 0, 0, 0, 0,
-            None, None, None, None, None, None, "OK",
+            "HH", "2024-01-10", 0, "FRESH", 0, 0, 0, 0, 0, 0,
+            None, None, None, None, None, None, None, "OK",
             "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
         ),
     )
@@ -728,6 +788,8 @@ def test_scanner_updates_existing_rows_and_preserves_metric_and_enrichment_field
     assert row["close"] == pytest.approx(120.0)
     assert row["ema20"] == pytest.approx(115.0)
     assert row["latest_structure_label"] == "HH"
+    assert row["latest_structure_age_trading_days"] == 0
+    assert row["latest_structure_freshness"] == "FRESH"
     assert row["price_data_status"] == "OK"
 
 
