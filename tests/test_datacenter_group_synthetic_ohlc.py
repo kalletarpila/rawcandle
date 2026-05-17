@@ -7,6 +7,7 @@ import pytest
 
 from analysis.database_manager import DatabaseManager
 from analysis.datacenter_indices.swing_group_synthetic_ohlc import (
+    persist_datacenter_group_relative_ohlc,
     persist_datacenter_group_synthetic_ohlc,
 )
 
@@ -73,6 +74,33 @@ def _find_row(rows, group_type: str, group_name: str, ohlc_date: str):
         ):
             return row
     raise AssertionError(f"Missing row for {group_type} {group_name} {ohlc_date}")
+
+
+def _insert_constant_close_history(
+    price_db,
+    *,
+    ticker: str,
+    market: str,
+    start: date,
+    days: int,
+    close_value: float,
+):
+    rows = []
+    for offset in range(days):
+        current_date = (start + timedelta(days=offset)).isoformat()
+        rows.append(
+            (
+                ticker,
+                current_date,
+                close_value,
+                close_value,
+                close_value,
+                close_value,
+                1000,
+                market,
+            )
+        )
+    _insert_price_rows(price_db, rows)
 
 
 def test_inserts_synthetic_ohlc_rows_for_layer_and_subindustry_groups(tmp_path):
@@ -536,3 +564,355 @@ DC_TAXONOMY_V1,CCC,Power,UPS,CORE,1,1.0,
     assert upsert_summary["updated_count"] > 0
     assert replace_summary["deleted_count"] > 0
     assert any(row["calc_version"] == "OTHER_VERSION" for row in rows)
+
+
+def test_updates_relative_ohlc20_without_overwriting_base_fields_and_uses_taxonomy_membership(tmp_path):
+    taxonomy_csv = _write_taxonomy_csv(
+        tmp_path,
+        """taxonomy_version,ticker,layer,subindustry,report_group_status,is_primary,role_weight,notes
+DC_TAXONOMY_V1,AAA,Power,UPS,CORE,1,1.0,
+DC_TAXONOMY_V1,AAA,Cooling,Cooling services,CORE,0,1.0,
+DC_TAXONOMY_V1,BBB,Power,UPS,CORE,1,1.0,
+""",
+    )
+    price_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _create_price_db(price_db)
+    _create_analysis_db(analysis_db)
+
+    start_history = date(2024, 1, 1)
+    _insert_constant_close_history(
+        price_db,
+        ticker="AAA",
+        market="usa",
+        start=start_history,
+        days=19,
+        close_value=100.0,
+    )
+    _insert_constant_close_history(
+        price_db,
+        ticker="BBB",
+        market="usa",
+        start=start_history,
+        days=19,
+        close_value=100.0,
+    )
+    _insert_price_rows(
+        price_db,
+        [
+            ("AAA", "2024-01-20", 120.0, 110.0, 80.0, 130.0, 1000, "usa"),
+            ("BBB", "2024-01-20", 100.0, 95.0, 90.0, 110.0, 1000, "usa"),
+        ],
+    )
+
+    persist_datacenter_group_synthetic_ohlc(
+        analysis_db_path=analysis_db,
+        price_db_path=price_db,
+        taxonomy_csv_path=taxonomy_csv,
+        start_date="2024-01-20",
+        end_date="2024-01-20",
+        market="usa",
+        run_id="base-run",
+        created_at_utc="2026-05-17T12:00:00Z",
+        write_mode="upsert",
+    )
+    rows_before = _fetch_rows(analysis_db)
+    base_row_before = _find_row(rows_before, "layer", "Power", "2024-01-20")
+
+    summary = persist_datacenter_group_relative_ohlc(
+        analysis_db_path=analysis_db,
+        price_db_path=price_db,
+        taxonomy_csv_path=taxonomy_csv,
+        start_date="2024-01-20",
+        end_date="2024-01-20",
+        market="usa",
+        run_id="relative-run",
+        created_at_utc="2026-05-17T13:00:00Z",
+        write_mode="update-existing",
+    )
+
+    rows_after = _fetch_rows(analysis_db)
+    power_row = _find_row(rows_after, "layer", "Power", "2024-01-20")
+    cooling_row = _find_row(rows_after, "subindustry", "Cooling services", "2024-01-20")
+
+    aaa_base = ((19.0 * 100.0) + 130.0) / 20.0
+    bbb_base = ((19.0 * 100.0) + 110.0) / 20.0
+    expected_open = ((120.0 / aaa_base) + (100.0 / bbb_base)) / 2.0
+    unclamped_high = ((110.0 / aaa_base) + (95.0 / bbb_base)) / 2.0
+    expected_low = ((80.0 / aaa_base) + (90.0 / bbb_base)) / 2.0
+    expected_close = ((130.0 / aaa_base) + (110.0 / bbb_base)) / 2.0
+    expected_high = max(unclamped_high, expected_open, expected_close)
+
+    assert summary["updated_count"] == 4
+    assert summary["missing_base_row_count"] == 0
+    assert summary["relative_rows_with_values"] == 4
+    assert power_row["synthetic_open"] == pytest.approx(base_row_before["synthetic_open"])
+    assert power_row["synthetic_high"] == pytest.approx(base_row_before["synthetic_high"])
+    assert power_row["synthetic_low"] == pytest.approx(base_row_before["synthetic_low"])
+    assert power_row["synthetic_close"] == pytest.approx(base_row_before["synthetic_close"])
+    assert power_row["relative_base_window"] == 20
+    assert power_row["relative_open_20"] == pytest.approx(expected_open)
+    assert power_row["relative_high_20"] == pytest.approx(expected_high)
+    assert power_row["relative_low_20"] == pytest.approx(expected_low)
+    assert power_row["relative_close_20"] == pytest.approx(expected_close)
+    assert power_row["relative_high_20"] >= max(power_row["relative_open_20"], power_row["relative_close_20"])
+    assert power_row["relative_low_20"] <= min(power_row["relative_open_20"], power_row["relative_close_20"])
+    assert power_row["relative_upper_wick_20"] == pytest.approx(
+        power_row["relative_high_20"] - max(power_row["relative_open_20"], power_row["relative_close_20"])
+    )
+    assert power_row["relative_lower_wick_20"] == pytest.approx(
+        min(power_row["relative_open_20"], power_row["relative_close_20"]) - power_row["relative_low_20"]
+    )
+    assert power_row["relative_close_extension_20"] == pytest.approx(power_row["relative_close_20"] - 1.0)
+    assert power_row["relative_high_extension_20"] == pytest.approx(power_row["relative_high_20"] - 1.0)
+    assert power_row["relative_low_extension_20"] == pytest.approx(power_row["relative_low_20"] - 1.0)
+    assert power_row["relative_eligible_count"] == 2
+    assert power_row["data_quality_status"] == base_row_before["data_quality_status"]
+    assert power_row["latest_pivot_high_date"] is None
+    assert power_row["latest_structure_label"] is None
+    assert cooling_row["relative_eligible_count"] == 1
+    assert cooling_row["relative_open_20"] == pytest.approx(120.0 / aaa_base)
+
+
+def test_relative_update_requires_20_valid_closes_and_uses_pre_start_history(tmp_path):
+    taxonomy_csv = _write_taxonomy_csv(
+        tmp_path,
+        """taxonomy_version,ticker,layer,subindustry,report_group_status,is_primary,role_weight,notes
+DC_TAXONOMY_V1,AAA,Power,UPS,CORE,1,1.0,
+DC_TAXONOMY_V1,BBB,Power,UPS,CORE,1,1.0,
+DC_TAXONOMY_V1,CCC,Power,UPS,CORE,1,1.0,
+""",
+    )
+    price_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _create_price_db(price_db)
+    _create_analysis_db(analysis_db)
+
+    start_history = date(2024, 1, 1)
+    _insert_constant_close_history(price_db, ticker="AAA", market="usa", start=start_history, days=19, close_value=100.0)
+    _insert_constant_close_history(price_db, ticker="BBB", market="usa", start=start_history, days=19, close_value=100.0)
+    _insert_constant_close_history(price_db, ticker="CCC", market="usa", start=start_history, days=18, close_value=100.0)
+    _insert_price_rows(
+        price_db,
+        [
+            ("AAA", "2024-01-20", 120.0, 121.0, 119.0, 120.0, 1000, "usa"),
+            ("BBB", "2024-01-20", 80.0, 81.0, 79.0, 80.0, 1000, "usa"),
+            ("CCC", "2024-01-20", 150.0, 151.0, 149.0, 150.0, 1000, "usa"),
+        ],
+    )
+    persist_datacenter_group_synthetic_ohlc(
+        analysis_db_path=analysis_db,
+        price_db_path=price_db,
+        taxonomy_csv_path=taxonomy_csv,
+        start_date="2024-01-20",
+        end_date="2024-01-20",
+        market="usa",
+        run_id="base-run",
+        created_at_utc="2026-05-17T12:00:00Z",
+        write_mode="upsert",
+    )
+
+    persist_datacenter_group_relative_ohlc(
+        analysis_db_path=analysis_db,
+        price_db_path=price_db,
+        taxonomy_csv_path=taxonomy_csv,
+        start_date="2024-01-20",
+        end_date="2024-01-20",
+        market="usa",
+        run_id="relative-run",
+        created_at_utc="2026-05-17T13:00:00Z",
+        write_mode="update-existing",
+    )
+
+    row = _find_row(_fetch_rows(analysis_db), "layer", "Power", "2024-01-20")
+    assert row["relative_eligible_count"] == 2
+    assert row["relative_open_20"] == pytest.approx(((120.0 / 101.0) + (80.0 / 99.0)) / 2.0)
+
+
+def test_relative_update_does_not_insert_missing_base_rows_and_leaves_nulls_when_no_ticker_is_eligible(tmp_path):
+    taxonomy_csv = _write_taxonomy_csv(
+        tmp_path,
+        """taxonomy_version,ticker,layer,subindustry,report_group_status,is_primary,role_weight,notes
+DC_TAXONOMY_V1,AAA,Power,UPS,CORE,1,1.0,
+""",
+    )
+    price_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _create_price_db(price_db)
+    _create_analysis_db(analysis_db)
+
+    _insert_constant_close_history(
+        price_db,
+        ticker="AAA",
+        market="usa",
+        start=date(2024, 1, 1),
+        days=18,
+        close_value=100.0,
+    )
+    _insert_price_rows(
+        price_db,
+        [("AAA", "2024-01-20", 120.0, 121.0, 119.0, 120.0, 1000, "usa")],
+    )
+
+    missing_summary = persist_datacenter_group_relative_ohlc(
+        analysis_db_path=analysis_db,
+        price_db_path=price_db,
+        taxonomy_csv_path=taxonomy_csv,
+        start_date="2024-01-20",
+        end_date="2024-01-20",
+        market="usa",
+        run_id="relative-run",
+        created_at_utc="2026-05-17T13:00:00Z",
+        write_mode="update-existing",
+    )
+    assert missing_summary["updated_count"] == 0
+    assert missing_summary["missing_base_row_count"] == 2
+    assert _fetch_rows(analysis_db) == []
+
+    persist_datacenter_group_synthetic_ohlc(
+        analysis_db_path=analysis_db,
+        price_db_path=price_db,
+        taxonomy_csv_path=taxonomy_csv,
+        start_date="2024-01-20",
+        end_date="2024-01-20",
+        market="usa",
+        run_id="base-run",
+        created_at_utc="2026-05-17T12:00:00Z",
+        write_mode="upsert",
+    )
+    no_eligibility_summary = persist_datacenter_group_relative_ohlc(
+        analysis_db_path=analysis_db,
+        price_db_path=price_db,
+        taxonomy_csv_path=taxonomy_csv,
+        start_date="2024-01-20",
+        end_date="2024-01-20",
+        market="usa",
+        run_id="relative-run-2",
+        created_at_utc="2026-05-17T14:00:00Z",
+        write_mode="update-existing",
+    )
+
+    row = _find_row(_fetch_rows(analysis_db), "layer", "Power", "2024-01-20")
+    assert no_eligibility_summary["relative_rows_without_eligible_tickers"] == 2
+    assert row["relative_base_window"] == 20
+    assert row["relative_open_20"] is None
+    assert row["relative_high_20"] is None
+    assert row["relative_low_20"] is None
+    assert row["relative_close_20"] is None
+    assert row["relative_eligible_count"] == 0
+
+
+def test_relative_write_modes_update_only_matching_rows_and_replace_relative_range_only_clears_relative_fields(tmp_path):
+    taxonomy_csv = _write_taxonomy_csv(
+        tmp_path,
+        """taxonomy_version,ticker,layer,subindustry,report_group_status,is_primary,role_weight,notes
+DC_TAXONOMY_V1,AAA,Power,UPS,CORE,1,1.0,
+""",
+    )
+    price_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _create_price_db(price_db)
+    _create_analysis_db(analysis_db)
+
+    _insert_constant_close_history(
+        price_db,
+        ticker="AAA",
+        market="usa",
+        start=date(2024, 1, 1),
+        days=20,
+        close_value=100.0,
+    )
+    _insert_price_rows(
+        price_db,
+        [
+            ("AAA", "2024-01-21", 120.0, 121.0, 119.0, 120.0, 1000, "usa"),
+            ("AAA", "2024-01-22", 130.0, 131.0, 129.0, 130.0, 1000, "usa"),
+        ],
+    )
+    persist_datacenter_group_synthetic_ohlc(
+        analysis_db_path=analysis_db,
+        price_db_path=price_db,
+        taxonomy_csv_path=taxonomy_csv,
+        start_date="2024-01-21",
+        end_date="2024-01-22",
+        market="usa",
+        run_id="base-run",
+        created_at_utc="2026-05-17T12:00:00Z",
+        write_mode="upsert",
+    )
+    persist_datacenter_group_relative_ohlc(
+        analysis_db_path=analysis_db,
+        price_db_path=price_db,
+        taxonomy_csv_path=taxonomy_csv,
+        start_date="2024-01-21",
+        end_date="2024-01-21",
+        market="usa",
+        run_id="relative-run-1",
+        created_at_utc="2026-05-17T13:00:00Z",
+        write_mode="update-existing",
+    )
+    rows_before_replace = _fetch_rows(analysis_db)
+    base_day1_before = _find_row(rows_before_replace, "layer", "Power", "2024-01-21")
+    base_day2_before = _find_row(rows_before_replace, "layer", "Power", "2024-01-22")
+
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO dc_group_synthetic_ohlc_daily (
+                ohlc_date, taxonomy_version, group_type, group_name, synthetic_open,
+                data_quality_status, calc_version, run_id, created_at_utc,
+                relative_base_window, relative_open_20, relative_eligible_count
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "2024-01-21",
+                "DC_TAXONOMY_V1",
+                "layer",
+                "Power",
+                999.0,
+                "OK",
+                "OTHER_VERSION",
+                "keep",
+                "2026-05-17T11:00:00Z",
+                20,
+                7.77,
+                1,
+            ),
+        )
+        conn.commit()
+
+    summary = persist_datacenter_group_relative_ohlc(
+        analysis_db_path=analysis_db,
+        price_db_path=price_db,
+        taxonomy_csv_path=taxonomy_csv,
+        start_date="2024-01-21",
+        end_date="2024-01-22",
+        market="usa",
+        run_id="relative-run-2",
+        created_at_utc="2026-05-17T14:00:00Z",
+        write_mode="replace-relative-range",
+    )
+
+    rows = _fetch_rows(analysis_db)
+    row_day1 = _find_row(rows, "layer", "Power", "2024-01-21")
+    row_day2 = _find_row(rows, "layer", "Power", "2024-01-22")
+    assert summary["updated_count"] == 4
+    assert summary["cleared_count"] == 4
+    assert row_day1["synthetic_open"] == pytest.approx(base_day1_before["synthetic_open"])
+    assert row_day2["synthetic_open"] == pytest.approx(base_day2_before["synthetic_open"])
+    assert row_day1["relative_open_20"] is not None
+    assert row_day2["relative_open_20"] is not None
+
+    with sqlite3.connect(analysis_db) as conn:
+        other_row = conn.execute(
+            """
+            SELECT synthetic_open, relative_open_20
+            FROM dc_group_synthetic_ohlc_daily
+            WHERE ohlc_date = '2024-01-21'
+              AND taxonomy_version = 'DC_TAXONOMY_V1'
+              AND group_type = 'layer'
+              AND group_name = 'Power'
+              AND calc_version = 'OTHER_VERSION'
+            """
+        ).fetchone()
+    assert other_row == (999.0, 7.77)

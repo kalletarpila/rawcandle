@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import sqlite3
 
+from analysis.datacenter_indices.swing_group_synthetic_ohlc import (
+    persist_datacenter_group_synthetic_ohlc,
+)
 from run_datacenter_group_synthetic_ohlc import main as run_datacenter_group_synthetic_ohlc_main
 
 
@@ -88,3 +91,89 @@ def test_cli_writes_rows_and_prints_deterministic_summary(tmp_path, capsys):
     with sqlite3.connect(analysis_db) as conn:
         count = conn.execute("SELECT COUNT(*) FROM dc_group_synthetic_ohlc_daily").fetchone()[0]
     assert count == 8
+
+
+def test_cli_relative_only_updates_existing_rows_and_prints_deterministic_summary(tmp_path, capsys):
+    price_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    taxonomy_csv = _write_taxonomy_csv(tmp_path)
+    _create_price_db(price_db)
+
+    with sqlite3.connect(price_db) as conn:
+        rows = []
+        for day in range(1, 20):
+            current_date = f"2024-01-{day:02d}"
+            rows.extend(
+                [
+                    ("AAA", current_date, 100.0, 100.0, 100.0, 100.0, 1000, "usa"),
+                    ("BBB", current_date, 100.0, 100.0, 100.0, 100.0, 1000, "usa"),
+                    ("CCC", current_date, 100.0, 100.0, 100.0, 100.0, 1000, "usa"),
+                ]
+            )
+        rows.extend(
+            [
+                ("AAA", "2024-01-20", 120.0, 121.0, 119.0, 120.0, 1000, "usa"),
+                ("BBB", "2024-01-20", 110.0, 111.0, 109.0, 110.0, 1000, "usa"),
+                ("CCC", "2024-01-20", 130.0, 131.0, 129.0, 130.0, 1000, "usa"),
+            ]
+        )
+        conn.executemany(
+            """
+            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+        conn.commit()
+
+    persist_datacenter_group_synthetic_ohlc(
+        analysis_db_path=analysis_db,
+        price_db_path=price_db,
+        taxonomy_csv_path=taxonomy_csv,
+        start_date="2024-01-20",
+        end_date="2024-01-20",
+        market="usa",
+        run_id="base-run",
+        created_at_utc="2026-05-17T12:00:00Z",
+        write_mode="upsert",
+    )
+
+    exit_code = run_datacenter_group_synthetic_ohlc_main(
+        [
+            "--price-db",
+            str(price_db),
+            "--analysis-db",
+            str(analysis_db),
+            "--taxonomy-csv",
+            str(taxonomy_csv),
+            "--start-date",
+            "2024-01-20",
+            "--end-date",
+            "2024-01-20",
+            "--market",
+            "usa",
+            "--write-mode",
+            "update-existing",
+            "--relative-only",
+            "--created-at-utc",
+            "2026-05-17T12:30:00Z",
+        ]
+    )
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert lines[0] == "SUMMARY start_date=2024-01-20"
+    assert lines[1] == "SUMMARY end_date=2024-01-20"
+    assert lines[2] == "SUMMARY market=usa"
+    assert lines[5] == "SUMMARY relative_base_window=20"
+    assert lines[-1] == "SUMMARY validation_status=OK"
+
+    with sqlite3.connect(analysis_db) as conn:
+        count = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM dc_group_synthetic_ohlc_daily
+            WHERE relative_open_20 IS NOT NULL
+            """
+        ).fetchone()[0]
+    assert count == 4

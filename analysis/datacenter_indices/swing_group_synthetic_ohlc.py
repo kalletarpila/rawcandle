@@ -14,6 +14,7 @@ from .taxonomy import DatacenterTaxonomyRow, load_datacenter_taxonomy_csv
 
 
 DEFAULT_CALC_VERSION = "DC_SWING_OHLC_V1"
+DEFAULT_RELATIVE_BASE_WINDOW = 20
 DEFAULT_MIN_ELIGIBLE_COUNT = 3
 DEFAULT_MIN_COVERAGE_RATIO = 0.60
 
@@ -37,6 +38,25 @@ SYNTHETIC_OHLC_SUMMARY_ORDER = [
     "partial_data_group_date_count",
     "too_small_group_date_count",
     "no_data_group_date_count",
+    "validation_status",
+]
+
+RELATIVE_OHLC_SUMMARY_ORDER = [
+    "start_date",
+    "end_date",
+    "market",
+    "write_mode",
+    "calc_version",
+    "relative_base_window",
+    "run_id",
+    "taxonomy_rows",
+    "taxonomy_versions",
+    "group_types",
+    "updated_count",
+    "missing_base_row_count",
+    "cleared_count",
+    "relative_rows_with_values",
+    "relative_rows_without_eligible_tickers",
     "validation_status",
 ]
 
@@ -107,6 +127,14 @@ class _TickerDailySyntheticInput:
     volume: float | None
 
 
+@dataclass(frozen=True)
+class _TickerDailyRelativeInput:
+    relative_open: float
+    relative_high: float
+    relative_low: float
+    relative_close: float
+
+
 def _normalize_ticker(value: object) -> str:
     if value is None:
         return ""
@@ -137,6 +165,10 @@ def build_group_synthetic_ohlc_run_id(
 
 def format_group_synthetic_ohlc_summary_lines(summary: dict[str, int | str]) -> list[str]:
     return [f"SUMMARY {key}={summary[key]}" for key in SYNTHETIC_OHLC_SUMMARY_ORDER]
+
+
+def format_group_relative_ohlc_summary_lines(summary: dict[str, int | str]) -> list[str]:
+    return [f"SUMMARY {key}={summary[key]}" for key in RELATIVE_OHLC_SUMMARY_ORDER]
 
 
 def _load_taxonomy_rows(taxonomy_csv_path: str | Path) -> list[DatacenterTaxonomyRow]:
@@ -204,6 +236,15 @@ def _load_price_rows(
     ]
 
 
+def _build_in_range_dates(
+    all_dates: Sequence[str],
+    *,
+    start_date: str,
+    end_date: str,
+) -> list[str]:
+    return [value for value in all_dates if start_date <= value <= end_date]
+
+
 def _build_ticker_daily_inputs(
     price_rows: Sequence[_TickerPriceRow],
 ) -> tuple[dict[str, dict[str, _TickerDailySyntheticInput]], list[str]]:
@@ -235,6 +276,45 @@ def _build_ticker_daily_inputs(
                 )
             if row.close is not None:
                 previous_valid_close = row.close
+        result[ticker] = daily_map
+    return result, sorted(all_dates)
+
+
+def _build_ticker_daily_relative_inputs(
+    price_rows: Sequence[_TickerPriceRow],
+    *,
+    relative_base_window: int,
+) -> tuple[dict[str, dict[str, _TickerDailyRelativeInput]], list[str]]:
+    rows_by_ticker: dict[str, list[_TickerPriceRow]] = {}
+    all_dates: set[str] = set()
+    for row in price_rows:
+        rows_by_ticker.setdefault(row.ticker, []).append(row)
+        all_dates.add(row.date)
+
+    result: dict[str, dict[str, _TickerDailyRelativeInput]] = {}
+    for ticker, ticker_rows in rows_by_ticker.items():
+        valid_close_history: list[float] = []
+        daily_map: dict[str, _TickerDailyRelativeInput] = {}
+        for row in sorted(ticker_rows, key=lambda item: item.date):
+            if row.close is not None:
+                valid_close_history.append(row.close)
+            if (
+                row.open is not None
+                and row.high is not None
+                and row.low is not None
+                and row.close is not None
+                and len(valid_close_history) >= relative_base_window
+            ):
+                rolling_base = (
+                    sum(valid_close_history[-relative_base_window:]) / float(relative_base_window)
+                )
+                if rolling_base != 0:
+                    daily_map[row.date] = _TickerDailyRelativeInput(
+                        relative_open=row.open / rolling_base,
+                        relative_high=row.high / rolling_base,
+                        relative_low=row.low / rolling_base,
+                        relative_close=row.close / rolling_base,
+                    )
         result[ticker] = daily_map
     return result, sorted(all_dates)
 
@@ -312,11 +392,11 @@ def build_group_synthetic_ohlc_rows(
             end_date=normalized_end_date,
         )
         ticker_inputs, all_dates = _build_ticker_daily_inputs(price_rows)
-        in_range_dates = [
-            value
-            for value in all_dates
-            if normalized_start_date <= value <= normalized_end_date
-        ]
+        in_range_dates = _build_in_range_dates(
+            all_dates,
+            start_date=normalized_start_date,
+            end_date=normalized_end_date,
+        )
 
         for group_type, group_name, member_tickers in group_definitions:
             previous_valid_close: float | None = None
@@ -442,6 +522,226 @@ def build_group_synthetic_ohlc_rows(
             GROUP_TYPE_ORDER[row.group_type],
             row.group_name,
             row.ohlc_date,
+        ),
+    ), summary
+
+
+def _load_existing_group_synthetic_base_rows(
+    *,
+    analysis_db_path: str | Path,
+    start_date: str,
+    end_date: str,
+    calc_version: str,
+    taxonomy_versions: Sequence[str],
+    group_types: Sequence[str],
+) -> dict[tuple[str, str, str, str, str], sqlite3.Row]:
+    if not taxonomy_versions or not group_types:
+        return {}
+    db_manager = DatabaseManager(str(analysis_db_path))
+    conn = db_manager.get_connection()
+    conn.row_factory = sqlite3.Row
+    try:
+        version_placeholders = ", ".join("?" for _ in taxonomy_versions)
+        type_placeholders = ", ".join("?" for _ in group_types)
+        rows = conn.execute(
+            f"""
+            SELECT *
+            FROM dc_group_synthetic_ohlc_daily
+            WHERE ohlc_date >= ?
+              AND ohlc_date <= ?
+              AND calc_version = ?
+              AND taxonomy_version IN ({version_placeholders})
+              AND group_type IN ({type_placeholders})
+            """,
+            [start_date, end_date, calc_version, *taxonomy_versions, *group_types],
+        ).fetchall()
+        return {
+            (
+                str(row["ohlc_date"]),
+                str(row["taxonomy_version"]),
+                str(row["group_type"]),
+                str(row["group_name"]),
+                str(row["calc_version"]),
+            ): row
+            for row in rows
+        }
+    finally:
+        db_manager.close()
+
+
+def build_group_relative_ohlc_updates(
+    *,
+    analysis_db_path: str | Path,
+    price_db_path: str | Path,
+    taxonomy_csv_path: str | Path,
+    start_date: str,
+    end_date: str,
+    market: str | None,
+    calc_version: str,
+    run_id: str,
+    created_at_utc: str,
+    relative_base_window: int,
+) -> tuple[list[dict[str, object]], dict[str, int | str]]:
+    normalized_start_date = _parse_iso_date(start_date, "start_date")
+    normalized_end_date = _parse_iso_date(end_date, "end_date")
+    if normalized_start_date > normalized_end_date:
+        raise ValueError(
+            f"Invalid date range: start_date {normalized_start_date} is after end_date {normalized_end_date}"
+        )
+    if relative_base_window <= 0:
+        raise ValueError(f"relative_base_window must be positive: {relative_base_window}")
+
+    taxonomy_rows = _load_taxonomy_rows(taxonomy_csv_path)
+    taxonomy_versions = sorted({str(row.taxonomy_version) for row in taxonomy_rows})
+    group_types = ["layer", "subindustry"]
+    existing_rows = _load_existing_group_synthetic_base_rows(
+        analysis_db_path=analysis_db_path,
+        start_date=normalized_start_date,
+        end_date=normalized_end_date,
+        calc_version=calc_version,
+        taxonomy_versions=taxonomy_versions,
+        group_types=group_types,
+    )
+
+    updates: list[dict[str, object]] = []
+    missing_base_row_count = 0
+    relative_rows_with_values = 0
+    relative_rows_without_eligible_tickers = 0
+
+    for taxonomy_version in taxonomy_versions:
+        version_rows = [
+            row for row in taxonomy_rows if str(row.taxonomy_version) == taxonomy_version
+        ]
+        group_definitions = _build_group_definitions(version_rows)
+        relevant_tickers = sorted({_normalize_ticker(row.ticker) for row in version_rows})
+        price_rows = _load_price_rows(
+            price_db_path=price_db_path,
+            tickers=relevant_tickers,
+            market=market,
+            end_date=normalized_end_date,
+        )
+        ticker_inputs, all_dates = _build_ticker_daily_relative_inputs(
+            price_rows,
+            relative_base_window=relative_base_window,
+        )
+        in_range_dates = _build_in_range_dates(
+            all_dates,
+            start_date=normalized_start_date,
+            end_date=normalized_end_date,
+        )
+
+        for group_type, group_name, member_tickers in group_definitions:
+            for current_date in in_range_dates:
+                base_key = (
+                    current_date,
+                    taxonomy_version,
+                    group_type,
+                    group_name,
+                    calc_version,
+                )
+                if base_key not in existing_rows:
+                    missing_base_row_count += 1
+                    continue
+
+                eligible_inputs = [
+                    ticker_inputs[ticker][current_date]
+                    for ticker in member_tickers
+                    if ticker in ticker_inputs and current_date in ticker_inputs[ticker]
+                ]
+                relative_eligible_count = len(eligible_inputs)
+                if relative_eligible_count == 0:
+                    relative_rows_without_eligible_tickers += 1
+                    updates.append(
+                        {
+                            "ohlc_date": current_date,
+                            "taxonomy_version": taxonomy_version,
+                            "group_type": group_type,
+                            "group_name": group_name,
+                            "calc_version": calc_version,
+                            "relative_base_window": relative_base_window,
+                            "relative_open_20": None,
+                            "relative_high_20": None,
+                            "relative_low_20": None,
+                            "relative_close_20": None,
+                            "relative_upper_wick_20": None,
+                            "relative_lower_wick_20": None,
+                            "relative_close_extension_20": None,
+                            "relative_high_extension_20": None,
+                            "relative_low_extension_20": None,
+                            "relative_eligible_count": 0,
+                            "run_id": run_id,
+                            "created_at_utc": created_at_utc,
+                        }
+                    )
+                    continue
+
+                group_relative_open = (
+                    sum(item.relative_open for item in eligible_inputs)
+                    / float(relative_eligible_count)
+                )
+                group_relative_high = (
+                    sum(item.relative_high for item in eligible_inputs)
+                    / float(relative_eligible_count)
+                )
+                group_relative_low = (
+                    sum(item.relative_low for item in eligible_inputs)
+                    / float(relative_eligible_count)
+                )
+                group_relative_close = (
+                    sum(item.relative_close for item in eligible_inputs)
+                    / float(relative_eligible_count)
+                )
+                group_relative_high = max(
+                    group_relative_high,
+                    group_relative_open,
+                    group_relative_close,
+                )
+                group_relative_low = min(
+                    group_relative_low,
+                    group_relative_open,
+                    group_relative_close,
+                )
+                relative_rows_with_values += 1
+                updates.append(
+                    {
+                        "ohlc_date": current_date,
+                        "taxonomy_version": taxonomy_version,
+                        "group_type": group_type,
+                        "group_name": group_name,
+                        "calc_version": calc_version,
+                        "relative_base_window": relative_base_window,
+                        "relative_open_20": group_relative_open,
+                        "relative_high_20": group_relative_high,
+                        "relative_low_20": group_relative_low,
+                        "relative_close_20": group_relative_close,
+                        "relative_upper_wick_20": group_relative_high
+                        - max(group_relative_open, group_relative_close),
+                        "relative_lower_wick_20": min(group_relative_open, group_relative_close)
+                        - group_relative_low,
+                        "relative_close_extension_20": group_relative_close - 1.0,
+                        "relative_high_extension_20": group_relative_high - 1.0,
+                        "relative_low_extension_20": group_relative_low - 1.0,
+                        "relative_eligible_count": relative_eligible_count,
+                        "run_id": run_id,
+                        "created_at_utc": created_at_utc,
+                    }
+                )
+
+    summary = {
+        "taxonomy_rows": len(taxonomy_rows),
+        "taxonomy_versions": len(taxonomy_versions),
+        "group_types": "layer,subindustry",
+        "missing_base_row_count": missing_base_row_count,
+        "relative_rows_with_values": relative_rows_with_values,
+        "relative_rows_without_eligible_tickers": relative_rows_without_eligible_tickers,
+    }
+    return sorted(
+        updates,
+        key=lambda row: (
+            str(row["taxonomy_version"]),
+            GROUP_TYPE_ORDER[str(row["group_type"])],
+            str(row["group_name"]),
+            str(row["ohlc_date"]),
         ),
     ), summary
 
@@ -676,6 +976,113 @@ def write_group_synthetic_ohlc_rows(
         db_manager.close()
 
 
+def write_group_relative_ohlc_updates(
+    *,
+    analysis_db_path: str | Path,
+    updates: Sequence[dict[str, object]],
+    start_date: str,
+    end_date: str,
+    calc_version: str,
+    write_mode: str,
+) -> dict[str, int]:
+    normalized_start_date = _parse_iso_date(start_date, "start_date")
+    normalized_end_date = _parse_iso_date(end_date, "end_date")
+    if write_mode not in {"update-existing", "replace-relative-range"}:
+        raise ValueError(f"Unsupported write_mode: {write_mode}")
+
+    taxonomy_versions = sorted({str(row["taxonomy_version"]) for row in updates})
+    group_types = sorted({str(row["group_type"]) for row in updates})
+    db_manager = DatabaseManager(str(analysis_db_path))
+    conn = db_manager.get_connection()
+    cursor = conn.cursor()
+    updated_count = 0
+    cleared_count = 0
+    try:
+        cursor.execute("BEGIN")
+        if write_mode == "replace-relative-range" and taxonomy_versions and group_types:
+            version_placeholders = ", ".join("?" for _ in taxonomy_versions)
+            type_placeholders = ", ".join("?" for _ in group_types)
+            cursor.execute(
+                f"""
+                UPDATE dc_group_synthetic_ohlc_daily
+                SET relative_base_window = NULL,
+                    relative_open_20 = NULL,
+                    relative_high_20 = NULL,
+                    relative_low_20 = NULL,
+                    relative_close_20 = NULL,
+                    relative_upper_wick_20 = NULL,
+                    relative_lower_wick_20 = NULL,
+                    relative_close_extension_20 = NULL,
+                    relative_high_extension_20 = NULL,
+                    relative_low_extension_20 = NULL,
+                    relative_eligible_count = NULL
+                WHERE ohlc_date >= ?
+                  AND ohlc_date <= ?
+                  AND calc_version = ?
+                  AND taxonomy_version IN ({version_placeholders})
+                  AND group_type IN ({type_placeholders})
+                """,
+                [normalized_start_date, normalized_end_date, calc_version, *taxonomy_versions, *group_types],
+            )
+            cleared_count = cursor.rowcount
+
+        for row in updates:
+            cursor.execute(
+                """
+                UPDATE dc_group_synthetic_ohlc_daily
+                SET relative_base_window = ?,
+                    relative_open_20 = ?,
+                    relative_high_20 = ?,
+                    relative_low_20 = ?,
+                    relative_close_20 = ?,
+                    relative_upper_wick_20 = ?,
+                    relative_lower_wick_20 = ?,
+                    relative_close_extension_20 = ?,
+                    relative_high_extension_20 = ?,
+                    relative_low_extension_20 = ?,
+                    relative_eligible_count = ?,
+                    run_id = ?,
+                    created_at_utc = ?
+                WHERE ohlc_date = ?
+                  AND taxonomy_version = ?
+                  AND group_type = ?
+                  AND group_name = ?
+                  AND calc_version = ?
+                """,
+                (
+                    row["relative_base_window"],
+                    row["relative_open_20"],
+                    row["relative_high_20"],
+                    row["relative_low_20"],
+                    row["relative_close_20"],
+                    row["relative_upper_wick_20"],
+                    row["relative_lower_wick_20"],
+                    row["relative_close_extension_20"],
+                    row["relative_high_extension_20"],
+                    row["relative_low_extension_20"],
+                    row["relative_eligible_count"],
+                    row["run_id"],
+                    row["created_at_utc"],
+                    row["ohlc_date"],
+                    row["taxonomy_version"],
+                    row["group_type"],
+                    row["group_name"],
+                    row["calc_version"],
+                ),
+            )
+            updated_count += cursor.rowcount
+        conn.commit()
+        return {
+            "updated_count": updated_count,
+            "cleared_count": cleared_count,
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        db_manager.close()
+
+
 def persist_datacenter_group_synthetic_ohlc(
     *,
     analysis_db_path: str | Path,
@@ -729,6 +1136,65 @@ def persist_datacenter_group_synthetic_ohlc(
         "market": market if market is not None else "ALL",
         "write_mode": write_mode,
         "calc_version": calc_version,
+        "run_id": resolved_run_id,
+        **prep_summary,
+        **write_summary,
+        "validation_status": "OK",
+    }
+
+
+def persist_datacenter_group_relative_ohlc(
+    *,
+    analysis_db_path: str | Path,
+    price_db_path: str | Path,
+    taxonomy_csv_path: str | Path,
+    start_date: str,
+    end_date: str,
+    market: str | None,
+    calc_version: str = DEFAULT_CALC_VERSION,
+    run_id: str | None = None,
+    created_at_utc: str | None = None,
+    relative_base_window: int = DEFAULT_RELATIVE_BASE_WINDOW,
+    write_mode: str = "update-existing",
+) -> dict[str, int | str]:
+    normalized_start_date = _parse_iso_date(start_date, "start_date")
+    normalized_end_date = _parse_iso_date(end_date, "end_date")
+    if write_mode not in {"update-existing", "replace-relative-range"}:
+        raise ValueError(f"Unsupported write_mode: {write_mode}")
+    resolved_run_id = build_group_synthetic_ohlc_run_id(
+        start_date=normalized_start_date,
+        end_date=normalized_end_date,
+        calc_version=calc_version,
+        run_id=run_id,
+    )
+    resolved_created_at_utc = resolve_created_at_utc(created_at_utc)
+    updates, prep_summary = build_group_relative_ohlc_updates(
+        analysis_db_path=analysis_db_path,
+        price_db_path=price_db_path,
+        taxonomy_csv_path=taxonomy_csv_path,
+        start_date=normalized_start_date,
+        end_date=normalized_end_date,
+        market=market,
+        calc_version=calc_version,
+        run_id=resolved_run_id,
+        created_at_utc=resolved_created_at_utc,
+        relative_base_window=relative_base_window,
+    )
+    write_summary = write_group_relative_ohlc_updates(
+        analysis_db_path=analysis_db_path,
+        updates=updates,
+        start_date=normalized_start_date,
+        end_date=normalized_end_date,
+        calc_version=calc_version,
+        write_mode=write_mode,
+    )
+    return {
+        "start_date": normalized_start_date,
+        "end_date": normalized_end_date,
+        "market": market if market is not None else "ALL",
+        "write_mode": write_mode,
+        "calc_version": calc_version,
+        "relative_base_window": relative_base_window,
         "run_id": resolved_run_id,
         **prep_summary,
         **write_summary,
