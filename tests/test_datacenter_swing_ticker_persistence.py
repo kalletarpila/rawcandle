@@ -8,6 +8,7 @@ import pytest
 from analysis.database_manager import DatabaseManager
 from analysis.datacenter_indices.swing_ticker_persistence import (
     load_bounded_ticker_ohlcv_history,
+    persist_datacenter_ticker_scanner_signals,
     persist_datacenter_ticker_swing_snapshots,
 )
 
@@ -122,6 +123,50 @@ def _fetch_ticker_rows(path):
             ORDER BY taxonomy_version, ticker, signal_version
             """
         ).fetchall()
+
+
+def _insert_ticker_swing_row(path, row):
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """
+            INSERT INTO dc_ticker_swing_signal_daily (
+                signal_date, taxonomy_version, ticker, primary_layer, primary_subindustry,
+                close, volume, return_5d, return_10d, return_20d, return_60d,
+                ma10, ema10, ema20, distance_to_ma10_pct, distance_to_ema10_pct,
+                distance_to_ema20_pct, above_ma10, above_ema10, above_ema20,
+                ema10_slope_positive, ema20_slope_positive, ema10_slope_lookback,
+                ema20_slope_lookback, highest_close_20d, volume_avg_20d, volume_vs_avg20,
+                latest_structure_label, latest_structure_confirmed_as_of_date,
+                bullish_divergence_signal, bearish_divergence_signal,
+                hidden_bullish_divergence_signal, hidden_bearish_divergence_signal,
+                bullish_candle_signal, bearish_candle_signal, breakout_signal,
+                fast_ema10_pullback_signal, conservative_ema20_pullback_signal,
+                pullback_signal, exit_risk_signal, exit_reason, price_data_status,
+                signal_version, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            row,
+        )
+        conn.commit()
+
+
+def _insert_group_swing_row(path, row):
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """
+            INSERT INTO dc_group_swing_signal_daily (
+                signal_date, taxonomy_version, group_type, group_name,
+                member_count, eligible_count, return_5d, return_10d, return_20d, return_60d,
+                pct_above_ma10, pct_above_ema20, pct_above_rising_ema20,
+                ma10_breadth_delta_5d, ema20_breadth_delta_5d,
+                trend_breadth, weakness_breadth, overheat_risk_level,
+                timing_state, timing_reason, data_quality_status,
+                signal_version, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            row,
+        )
+        conn.commit()
 
 
 def test_persistence_inserts_one_primary_taxonomy_ticker_row(tmp_path):
@@ -488,3 +533,304 @@ def test_bounded_price_history_loader_limits_valid_rows(tmp_path):
     assert len(rows) == 220
     assert rows[0].date == (start + timedelta(days=80)).isoformat()
     assert rows[-1].date == (start + timedelta(days=299)).isoformat()
+
+
+def test_scanner_updates_existing_rows_and_preserves_metric_and_enrichment_fields(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    _insert_ticker_swing_row(
+        analysis_db,
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "AAA", "Power", "UPS",
+            120.0, 1000.0, 0.02, 0.03, 0.10, 0.20,
+            118.0, 119.0, 115.0, 0.01, 0.01, 0.04,
+            1, 1, 1, 1, 1, 3, 5, 120.0, 900.0, 1.6,
+            "HH", "2024-01-10", 0, 0, 0, 0, 0, 0,
+            None, None, None, None, None, None, "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+    )
+    _insert_group_swing_row(
+        analysis_db,
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "subindustry", "UPS",
+            5, 5, 0.02, 0.03, 0.10, 0.20,
+            80.0, 85.0, None, 0.0, 0.0, 60.0, 20.0, None,
+            "BUY_ZONE", "BUY_ZONE:existing", "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+    )
+
+    summary = persist_datacenter_ticker_scanner_signals(
+        analysis_db_path=analysis_db,
+        start_date="2024-01-10",
+        signal_version="DC_SWING_SIGNAL_V1",
+        run_id="scanner-run",
+        created_at_utc="2026-05-17T12:00:00Z",
+        write_mode="update-existing",
+    )
+
+    row = _fetch_ticker_rows(analysis_db)[0]
+    assert summary["updated_count"] == 1
+    assert row["breakout_signal"] == 1
+    assert row["close"] == pytest.approx(120.0)
+    assert row["ema20"] == pytest.approx(115.0)
+    assert row["latest_structure_label"] == "HH"
+    assert row["price_data_status"] == "OK"
+
+
+def test_scanner_does_not_insert_missing_base_rows(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    summary = persist_datacenter_ticker_scanner_signals(
+        analysis_db_path=analysis_db,
+        start_date="2024-01-10",
+        signal_version="DC_SWING_SIGNAL_V1",
+        run_id="scanner-run",
+        created_at_utc="2026-05-17T12:00:00Z",
+        write_mode="update-existing",
+    )
+    assert summary["updated_count"] == 0
+    assert _fetch_ticker_rows(analysis_db) == []
+
+
+def test_breakout_and_pullback_rules_and_missing_subindustry_state(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    rows = [
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "AAA", "Power", "UPS",
+            120.0, 1000.0, 0.02, 0.03, 0.10, 0.20,
+            118.0, 119.0, 115.0, None, None, None,
+            None, None, None, 1, 1, 3, 5, 120.0, 900.0, 1.6,
+            "HH", None, None, None, None, None, None, None,
+            None, None, None, None, None, None, "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "BBB", "Power", "UPS",
+            100.0, 1000.0, -0.02, 0.04, 0.10, 0.20,
+            99.0, 100.0, 98.0, None, None, None,
+            None, None, None, 1, 1, 3, 5, 110.0, 900.0, 1.0,
+            "HH", None, None, None, None, None, None, None,
+            None, None, None, None, None, None, "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "CCC", "Power", "UPS",
+            100.0, 1000.0, -0.03, 0.02, 0.15, 0.30,
+            100.0, 105.0, 99.0, None, None, None,
+            None, None, None, 1, 1, 3, 5, 110.0, 900.0, None,
+            "HH", None, None, None, None, None, None, None,
+            None, None, None, None, None, None, "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "DDD", "Power", "UPS",
+            102.0, 1000.0, -0.04, 0.02, 0.10, 0.30,
+            99.5, 100.0, 95.0, None, None, None,
+            None, None, None, 1, 1, 3, 5, 110.0, 900.0, 1.4,
+            "HH", None, None, None, None, None, None, None,
+            None, None, None, None, None, None, "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "EEE", "Power", "UPS",
+            101.0, 1000.0, -0.05, 0.01, 0.12, 0.25,
+            110.0, 120.0, 100.0, None, None, None,
+            None, None, None, 1, 1, 3, 5, 111.0, 900.0, 1.4,
+            "HH", None, None, None, None, None, None, None,
+            None, None, None, None, None, None, "MISSING_AS_OF_DATE",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "FFF", "Power", "Missing",
+            120.0, 1000.0, 0.02, 0.03, 0.10, 0.20,
+            118.0, 119.0, 115.0, None, None, None,
+            None, None, None, 1, 1, 3, 5, 120.0, 900.0, 1.6,
+            "HH", None, None, None, None, None, None, None,
+            None, None, None, None, None, None, "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+    ]
+    for row in rows:
+        _insert_ticker_swing_row(analysis_db, row)
+    _insert_group_swing_row(
+        analysis_db,
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "subindustry", "UPS",
+            5, 5, 0.02, 0.03, 0.10, 0.20,
+            80.0, 85.0, None, 0.0, 0.0, 60.0, 20.0, None,
+            "BUY_ZONE", "BUY_ZONE:existing", "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+    )
+
+    persist_datacenter_ticker_scanner_signals(
+        analysis_db_path=analysis_db,
+        start_date="2024-01-10",
+        signal_version="DC_SWING_SIGNAL_V1",
+        run_id="scanner-run",
+        created_at_utc="2026-05-17T12:00:00Z",
+        write_mode="update-existing",
+    )
+
+    rows_after = {row["ticker"]: row for row in _fetch_ticker_rows(analysis_db)}
+    assert rows_after["AAA"]["breakout_signal"] == 1
+    assert rows_after["BBB"]["fast_ema10_pullback_signal"] == 1
+    assert rows_after["CCC"]["breakout_signal"] == 0
+    assert rows_after["CCC"]["conservative_ema20_pullback_signal"] == 1
+    assert rows_after["BBB"]["pullback_signal"] == 1
+    assert rows_after["CCC"]["pullback_signal"] == 1
+    assert rows_after["DDD"]["breakout_signal"] == 0
+    assert rows_after["EEE"]["pullback_signal"] == 0
+    assert rows_after["FFF"]["breakout_signal"] == 0
+    assert rows_after["FFF"]["fast_ema10_pullback_signal"] == 0
+
+
+def test_exit_risk_rules_and_reason_order(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    rows = [
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "AAA", "Power", "UPS",
+            90.0, 1000.0, 0.01, -0.09, 0.10, 0.20,
+            95.0, 96.0, 100.0, None, None, None,
+            None, None, None, 0, 0, 3, 5, 100.0, 900.0, 1.0,
+            "LL", None, None, None, None, None, None, None,
+            None, None, None, None, None, None, "BAD_STATUS",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "BBB", "Power", "TRIM",
+            90.0, 1000.0, 0.01, 0.01, 0.10, 0.20,
+            100.0, 101.0, 95.0, None, None, None,
+            None, None, None, 0, 0, 3, 5, 100.0, 900.0, 1.0,
+            "HH", None, None, None, None, None, None, None,
+            None, None, None, None, None, None, "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "CCC", "Power", "NONE",
+            None, 1000.0, None, None, None, None,
+            None, None, None, None, None, None,
+            None, None, None, None, None, 3, 5, None, None, None,
+            None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None, "BAD_STATUS",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+    ]
+    for row in rows:
+        _insert_ticker_swing_row(analysis_db, row)
+    _insert_group_swing_row(
+        analysis_db,
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "subindustry", "UPS",
+            5, 5, 0.02, 0.03, 0.10, 0.20,
+            80.0, 85.0, None, 0.0, 0.0, 60.0, 20.0, None,
+            "EXIT_ZONE", "x", "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+    )
+    _insert_group_swing_row(
+        analysis_db,
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "subindustry", "TRIM",
+            5, 5, 0.02, 0.03, 0.10, 0.20,
+            80.0, 85.0, None, 0.0, 0.0, 60.0, 20.0, None,
+            "TRIM_WATCH", "x", "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+    )
+
+    persist_datacenter_ticker_scanner_signals(
+        analysis_db_path=analysis_db,
+        start_date="2024-01-10",
+        signal_version="DC_SWING_SIGNAL_V1",
+        run_id="scanner-run",
+        created_at_utc="2026-05-17T12:00:00Z",
+        write_mode="update-existing",
+    )
+
+    rows_after = {row["ticker"]: row for row in _fetch_ticker_rows(analysis_db)}
+    assert rows_after["AAA"]["exit_risk_signal"] == 1
+    assert rows_after["AAA"]["exit_reason"] == "close_below_ema20;return_10d_lt_minus_8pct;latest_structure_label_ll;subindustry_exit_zone"
+    assert rows_after["BBB"]["exit_risk_signal"] == 1
+    assert rows_after["BBB"]["exit_reason"] == "close_below_ema20;trim_watch_close_below_ma10"
+    assert rows_after["CCC"]["exit_risk_signal"] == 0
+    assert rows_after["CCC"]["exit_reason"] is None
+
+
+def test_scanner_write_modes_are_scoped(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    rows = [
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "AAA", "Power", "UPS",
+            120.0, 1000.0, 0.02, 0.03, 0.10, 0.20,
+            118.0, 119.0, 115.0, None, None, None,
+            None, None, None, 1, 1, 3, 5, 120.0, 900.0, 1.6,
+            "HH", None, None, None, None, None, None, None,
+            9, 9, 9, 9, 9, "old", "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+        (
+            "2024-01-11", "DC_TAXONOMY_V1", "AAA", "Power", "UPS",
+            120.0, 1000.0, 0.02, 0.03, 0.10, 0.20,
+            118.0, 119.0, 115.0, None, None, None,
+            None, None, None, 1, 1, 3, 5, 120.0, 900.0, 1.6,
+            "HH", None, None, None, None, None, None, None,
+            9, 9, 9, 9, 9, "old", "OK",
+            "DC_SWING_SIGNAL_V1",
+            "seed", "2026-05-17T10:00:00Z",
+        ),
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "AAA", "Power", "UPS",
+            120.0, 1000.0, 0.02, 0.03, 0.10, 0.20,
+            118.0, 119.0, 115.0, None, None, None,
+            None, None, None, 1, 1, 3, 5, 120.0, 900.0, 1.6,
+            "HH", None, None, None, None, None, None, None,
+            7, 7, 7, 7, 7, "keep", "OK",
+            "OTHER_SIGNAL", "seed", "2026-05-17T10:00:00Z",
+        ),
+    ]
+    for row in rows:
+        _insert_ticker_swing_row(analysis_db, row)
+    _insert_group_swing_row(
+        analysis_db,
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "subindustry", "UPS",
+            5, 5, 0.02, 0.03, 0.10, 0.20,
+            80.0, 85.0, None, 0.0, 0.0, 60.0, 20.0, None,
+            "BUY_ZONE", "x", "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+    )
+    _insert_group_swing_row(
+        analysis_db,
+        (
+            "2024-01-11", "DC_TAXONOMY_V1", "subindustry", "UPS",
+            5, 5, 0.02, 0.03, 0.10, 0.20,
+            80.0, 85.0, None, 0.0, 0.0, 60.0, 20.0, None,
+            "BUY_ZONE", "x", "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+    )
+
+    summary = persist_datacenter_ticker_scanner_signals(
+        analysis_db_path=analysis_db,
+        start_date="2024-01-10",
+        end_date="2024-01-11",
+        signal_version="DC_SWING_SIGNAL_V1",
+        run_id="scanner-run",
+        created_at_utc="2026-05-17T12:00:00Z",
+        write_mode="replace-scanner-range",
+    )
+
+    rows_after = _fetch_ticker_rows(analysis_db)
+    current_rows = [row for row in rows_after if row["signal_version"] == "DC_SWING_SIGNAL_V1"]
+    other_row = [row for row in rows_after if row["signal_version"] == "OTHER_SIGNAL"][0]
+    assert summary["cleared_count"] == 2
+    assert summary["updated_count"] == 2
+    assert all(row["breakout_signal"] in (0, 1) for row in current_rows)
+    assert other_row["breakout_signal"] == 7

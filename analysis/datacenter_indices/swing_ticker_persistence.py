@@ -40,6 +40,25 @@ TICKER_SWING_SUMMARY_ORDER = [
     "validation_status",
 ]
 
+TICKER_SCANNER_SUMMARY_ORDER = [
+    "start_date",
+    "end_date",
+    "write_mode",
+    "signal_version",
+    "run_id",
+    "updated_count",
+    "missing_base_row_count",
+    "cleared_count",
+    "breakout_count",
+    "fast_ema10_pullback_count",
+    "conservative_ema20_pullback_count",
+    "pullback_count",
+    "exit_risk_count",
+    "validation_status",
+]
+
+ENTRY_ELIGIBLE_PRICE_STATUSES = {"OK", "INSUFFICIENT_HISTORY"}
+
 
 @dataclass(frozen=True)
 class DatacenterTickerSwingSnapshotRow:
@@ -117,6 +136,26 @@ def build_ticker_swing_run_id(
 
 def format_ticker_swing_summary_lines(summary: dict[str, int | str]) -> list[str]:
     return [f"SUMMARY {key}={summary[key]}" for key in TICKER_SWING_SUMMARY_ORDER]
+
+
+def format_ticker_scanner_summary_lines(summary: dict[str, int | str]) -> list[str]:
+    return [f"SUMMARY {key}={summary[key]}" for key in TICKER_SCANNER_SUMMARY_ORDER]
+
+
+def _match_lt(value: float | None, threshold: float) -> bool:
+    return value is not None and value < threshold
+
+
+def _match_lte(value: float | None, threshold: float) -> bool:
+    return value is not None and value <= threshold
+
+
+def _match_gt(value: float | None, threshold: float) -> bool:
+    return value is not None and value > threshold
+
+
+def _match_gte(value: float | None, threshold: float) -> bool:
+    return value is not None and value >= threshold
 
 
 def _load_taxonomy_rows(
@@ -593,6 +632,314 @@ def write_ticker_swing_snapshot_rows(
         db_manager.close()
 
 
+def _load_existing_ticker_rows(
+    *,
+    analysis_db_path: str | Path,
+    start_date: str,
+    end_date: str,
+    signal_version: str,
+) -> list[sqlite3.Row]:
+    db_manager = DatabaseManager(str(analysis_db_path))
+    conn = db_manager.get_connection()
+    conn.row_factory = sqlite3.Row
+    try:
+        return conn.execute(
+            """
+            SELECT *
+            FROM dc_ticker_swing_signal_daily
+            WHERE signal_date >= ?
+              AND signal_date <= ?
+              AND signal_version = ?
+            ORDER BY signal_date ASC, taxonomy_version ASC, ticker ASC
+            """,
+            (start_date, end_date, signal_version),
+        ).fetchall()
+    finally:
+        db_manager.close()
+
+
+def _load_subindustry_state(
+    conn: sqlite3.Connection,
+    *,
+    signal_date: str,
+    taxonomy_version: str,
+    primary_subindustry: str | None,
+    signal_version: str,
+) -> str | None:
+    if primary_subindustry is None:
+        return None
+    row = conn.execute(
+        """
+        SELECT timing_state
+        FROM dc_group_swing_signal_daily
+        WHERE signal_date = ?
+          AND taxonomy_version = ?
+          AND group_type = 'subindustry'
+          AND group_name = ?
+          AND signal_version = ?
+        """,
+        (signal_date, taxonomy_version, primary_subindustry, signal_version),
+    ).fetchone()
+    if row is None or row["timing_state"] is None:
+        return None
+    return str(row["timing_state"])
+
+
+def _classify_scanner_fields(
+    row: sqlite3.Row,
+    *,
+    subindustry_state: str | None,
+) -> dict[str, object]:
+    close = None if row["close"] is None else float(row["close"])
+    highest_close_20d = None if row["highest_close_20d"] is None else float(row["highest_close_20d"])
+    volume_vs_avg20 = None if row["volume_vs_avg20"] is None else float(row["volume_vs_avg20"])
+    return_5d = None if row["return_5d"] is None else float(row["return_5d"])
+    return_10d = None if row["return_10d"] is None else float(row["return_10d"])
+    return_20d = None if row["return_20d"] is None else float(row["return_20d"])
+    return_60d = None if row["return_60d"] is None else float(row["return_60d"])
+    ema10 = None if row["ema10"] is None else float(row["ema10"])
+    ema20 = None if row["ema20"] is None else float(row["ema20"])
+    ma10 = None if row["ma10"] is None else float(row["ma10"])
+    latest_structure_label = None if row["latest_structure_label"] is None else str(row["latest_structure_label"])
+    price_data_status = None if row["price_data_status"] is None else str(row["price_data_status"])
+    entry_eligible = price_data_status in ENTRY_ELIGIBLE_PRICE_STATUSES
+    bullish_subindustry = subindustry_state in {"BUY_ZONE", "ADD_ON_PULLBACK"}
+
+    breakout_signal = int(
+        entry_eligible
+        and bullish_subindustry
+        and _match_gte(close, highest_close_20d)  # type: ignore[arg-type]
+        and _match_gt(volume_vs_avg20, 1.5)
+        and _match_gt(return_5d, 0.0)
+        and _match_gt(return_10d, 0.0)
+        and close is not None
+        and ema20 is not None
+        and close > ema20
+    )
+
+    ema10_slope_positive = row["ema10_slope_positive"] is not None and int(row["ema10_slope_positive"]) == 1
+    ema20_slope_positive = row["ema20_slope_positive"] is not None and int(row["ema20_slope_positive"]) == 1
+
+    fast_ema10_pullback_signal = int(
+        entry_eligible
+        and bullish_subindustry
+        and _match_gt(return_10d, 0.0)
+        and close is not None
+        and ema10 is not None
+        and ema20 is not None
+        and close >= (ema10 * 0.97)
+        and close <= (ema10 * 1.03)
+        and ema10_slope_positive
+        and _match_lte(return_5d, 0.0)
+        and _match_gte(return_5d, -0.06)
+        and close >= (ema20 * 0.98)
+    )
+
+    conservative_ema20_pullback_signal = int(
+        entry_eligible
+        and bullish_subindustry
+        and _match_gt(return_20d, 0.0)
+        and _match_gt(return_60d, 0.0)
+        and close is not None
+        and ema20 is not None
+        and close >= (ema20 * 0.98)
+        and close <= (ema20 * 1.03)
+        and ema20_slope_positive
+        and _match_lte(return_5d, 0.0)
+        and _match_gte(return_5d, -0.08)
+    )
+
+    pullback_signal = int(
+        fast_ema10_pullback_signal == 1 or conservative_ema20_pullback_signal == 1
+    )
+
+    exit_reasons: list[str] = []
+    if close is not None and ema20 is not None and close < ema20:
+        exit_reasons.append("close_below_ema20")
+    if _match_lt(return_10d, -0.08):
+        exit_reasons.append("return_10d_lt_minus_8pct")
+    if latest_structure_label == "LL":
+        exit_reasons.append("latest_structure_label_ll")
+    if subindustry_state == "EXIT_ZONE":
+        exit_reasons.append("subindustry_exit_zone")
+    if subindustry_state == "TRIM_WATCH" and close is not None and ma10 is not None and close < ma10:
+        exit_reasons.append("trim_watch_close_below_ma10")
+    exit_risk_signal = int(bool(exit_reasons))
+
+    return {
+        "breakout_signal": breakout_signal,
+        "fast_ema10_pullback_signal": fast_ema10_pullback_signal,
+        "conservative_ema20_pullback_signal": conservative_ema20_pullback_signal,
+        "pullback_signal": pullback_signal,
+        "exit_risk_signal": exit_risk_signal,
+        "exit_reason": ";".join(exit_reasons) if exit_reasons else None,
+    }
+
+
+def build_ticker_scanner_updates(
+    *,
+    analysis_db_path: str | Path,
+    start_date: str,
+    end_date: str,
+    signal_version: str,
+    run_id: str,
+    created_at_utc: str,
+) -> tuple[list[dict[str, object]], dict[str, int | str]]:
+    normalized_start_date = _parse_iso_date(start_date, "start_date")
+    normalized_end_date = _parse_iso_date(end_date, "end_date")
+    if normalized_start_date > normalized_end_date:
+        raise ValueError(
+            f"Invalid date range: start_date {normalized_start_date} is after end_date {normalized_end_date}"
+        )
+    rows = _load_existing_ticker_rows(
+        analysis_db_path=analysis_db_path,
+        start_date=normalized_start_date,
+        end_date=normalized_end_date,
+        signal_version=signal_version,
+    )
+    breakout_count = 0
+    fast_count = 0
+    conservative_count = 0
+    pullback_count = 0
+    exit_count = 0
+    updates: list[dict[str, object]] = []
+    with sqlite3.connect(analysis_db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        for row in rows:
+            subindustry_state = _load_subindustry_state(
+                conn,
+                signal_date=str(row["signal_date"]),
+                taxonomy_version=str(row["taxonomy_version"]),
+                primary_subindustry=None if row["primary_subindustry"] is None else str(row["primary_subindustry"]),
+                signal_version=str(row["signal_version"]),
+            )
+            scanner_fields = _classify_scanner_fields(row, subindustry_state=subindustry_state)
+            breakout_count += int(scanner_fields["breakout_signal"])
+            fast_count += int(scanner_fields["fast_ema10_pullback_signal"])
+            conservative_count += int(scanner_fields["conservative_ema20_pullback_signal"])
+            pullback_count += int(scanner_fields["pullback_signal"])
+            exit_count += int(scanner_fields["exit_risk_signal"])
+            updates.append(
+                {
+                    "signal_date": str(row["signal_date"]),
+                    "taxonomy_version": str(row["taxonomy_version"]),
+                    "ticker": str(row["ticker"]),
+                    "signal_version": str(row["signal_version"]),
+                    **scanner_fields,
+                    "run_id": run_id,
+                    "created_at_utc": created_at_utc,
+                    "existing_breakout_signal": row["breakout_signal"],
+                    "existing_fast_ema10_pullback_signal": row["fast_ema10_pullback_signal"],
+                    "existing_conservative_ema20_pullback_signal": row["conservative_ema20_pullback_signal"],
+                    "existing_pullback_signal": row["pullback_signal"],
+                    "existing_exit_risk_signal": row["exit_risk_signal"],
+                    "existing_exit_reason": row["exit_reason"],
+                }
+            )
+    return updates, {
+        "missing_base_row_count": 0,
+        "breakout_count": breakout_count,
+        "fast_ema10_pullback_count": fast_count,
+        "conservative_ema20_pullback_count": conservative_count,
+        "pullback_count": pullback_count,
+        "exit_risk_count": exit_count,
+    }
+
+
+def write_ticker_scanner_updates(
+    *,
+    analysis_db_path: str | Path,
+    updates: Sequence[dict[str, object]],
+    start_date: str,
+    end_date: str,
+    signal_version: str,
+    write_mode: str,
+) -> dict[str, int]:
+    normalized_start_date = _parse_iso_date(start_date, "start_date")
+    normalized_end_date = _parse_iso_date(end_date, "end_date")
+    if write_mode not in {"update-existing", "replace-scanner-range"}:
+        raise ValueError(f"Unsupported write_mode: {write_mode}")
+    db_manager = DatabaseManager(str(analysis_db_path))
+    conn = db_manager.get_connection()
+    cursor = conn.cursor()
+    updated_count = 0
+    cleared_count = 0
+    try:
+        cursor.execute("BEGIN")
+        if write_mode == "replace-scanner-range":
+            cursor.execute(
+                """
+                UPDATE dc_ticker_swing_signal_daily
+                SET breakout_signal = NULL,
+                    fast_ema10_pullback_signal = NULL,
+                    conservative_ema20_pullback_signal = NULL,
+                    pullback_signal = NULL,
+                    exit_risk_signal = NULL,
+                    exit_reason = NULL
+                WHERE signal_date >= ?
+                  AND signal_date <= ?
+                  AND signal_version = ?
+                """,
+                (normalized_start_date, normalized_end_date, signal_version),
+            )
+            cleared_count = cursor.rowcount
+            filtered_updates = list(updates)
+        else:
+            filtered_updates = [
+                row
+                for row in updates
+                if row["existing_breakout_signal"] != row["breakout_signal"]
+                or row["existing_fast_ema10_pullback_signal"] != row["fast_ema10_pullback_signal"]
+                or row["existing_conservative_ema20_pullback_signal"] != row["conservative_ema20_pullback_signal"]
+                or row["existing_pullback_signal"] != row["pullback_signal"]
+                or row["existing_exit_risk_signal"] != row["exit_risk_signal"]
+                or row["existing_exit_reason"] != row["exit_reason"]
+            ]
+        for row in filtered_updates:
+            cursor.execute(
+                """
+                UPDATE dc_ticker_swing_signal_daily
+                SET breakout_signal = ?,
+                    fast_ema10_pullback_signal = ?,
+                    conservative_ema20_pullback_signal = ?,
+                    pullback_signal = ?,
+                    exit_risk_signal = ?,
+                    exit_reason = ?,
+                    run_id = ?,
+                    created_at_utc = ?
+                WHERE signal_date = ?
+                  AND taxonomy_version = ?
+                  AND ticker = ?
+                  AND signal_version = ?
+                """,
+                (
+                    row["breakout_signal"],
+                    row["fast_ema10_pullback_signal"],
+                    row["conservative_ema20_pullback_signal"],
+                    row["pullback_signal"],
+                    row["exit_risk_signal"],
+                    row["exit_reason"],
+                    row["run_id"],
+                    row["created_at_utc"],
+                    row["signal_date"],
+                    row["taxonomy_version"],
+                    row["ticker"],
+                    row["signal_version"],
+                ),
+            )
+            updated_count += cursor.rowcount
+        conn.commit()
+        return {
+            "updated_count": updated_count,
+            "cleared_count": cleared_count,
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        db_manager.close()
+
+
 def persist_datacenter_ticker_swing_snapshots(
     *,
     analysis_db_path: str | Path,
@@ -637,6 +984,58 @@ def persist_datacenter_ticker_swing_snapshots(
     return {
         "signal_date": normalized_as_of_date,
         "market": market if market is not None else "ALL",
+        "write_mode": write_mode,
+        "signal_version": signal_version,
+        "run_id": resolved_run_id,
+        **prep_summary,
+        **write_summary,
+        "validation_status": "OK",
+    }
+
+
+def persist_datacenter_ticker_scanner_signals(
+    *,
+    analysis_db_path: str | Path,
+    start_date: str,
+    end_date: str | None = None,
+    signal_version: str = DEFAULT_SIGNAL_VERSION,
+    run_id: str | None = None,
+    created_at_utc: str | None = None,
+    write_mode: str = "update-existing",
+) -> dict[str, int | str]:
+    normalized_start_date = _parse_iso_date(start_date, "start_date")
+    normalized_end_date = _parse_iso_date(end_date or start_date, "end_date")
+    if write_mode not in {"update-existing", "replace-scanner-range"}:
+        raise ValueError(f"Unsupported write_mode: {write_mode}")
+    if normalized_start_date > normalized_end_date:
+        raise ValueError(
+            f"Invalid date range: start_date {normalized_start_date} is after end_date {normalized_end_date}"
+        )
+    resolved_run_id = build_ticker_swing_run_id(
+        as_of_date=normalized_end_date,
+        signal_version=signal_version,
+        run_id=run_id,
+    )
+    resolved_created_at_utc = resolve_created_at_utc(created_at_utc)
+    updates, prep_summary = build_ticker_scanner_updates(
+        analysis_db_path=analysis_db_path,
+        start_date=normalized_start_date,
+        end_date=normalized_end_date,
+        signal_version=signal_version,
+        run_id=resolved_run_id,
+        created_at_utc=resolved_created_at_utc,
+    )
+    write_summary = write_ticker_scanner_updates(
+        analysis_db_path=analysis_db_path,
+        updates=updates,
+        start_date=normalized_start_date,
+        end_date=normalized_end_date,
+        signal_version=signal_version,
+        write_mode=write_mode,
+    )
+    return {
+        "start_date": normalized_start_date,
+        "end_date": normalized_end_date,
         "write_mode": write_mode,
         "signal_version": signal_version,
         "run_id": resolved_run_id,
