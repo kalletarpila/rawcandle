@@ -15,6 +15,8 @@ from .taxonomy import DatacenterTaxonomyRow, load_datacenter_taxonomy_csv
 
 DEFAULT_CALC_VERSION = "DC_SWING_OHLC_V1"
 DEFAULT_RELATIVE_BASE_WINDOW = 20
+DEFAULT_GROUP_SUBINDUSTRY_PIVOT_RADIUS = 5
+DEFAULT_GROUP_LAYER_PIVOT_RADIUS = 10
 DEFAULT_MIN_ELIGIBLE_COUNT = 3
 DEFAULT_MIN_COVERAGE_RATIO = 0.60
 
@@ -57,6 +59,21 @@ RELATIVE_OHLC_SUMMARY_ORDER = [
     "cleared_count",
     "relative_rows_with_values",
     "relative_rows_without_eligible_tickers",
+    "validation_status",
+]
+
+STRUCTURE_OHLC_SUMMARY_ORDER = [
+    "start_date",
+    "end_date",
+    "write_mode",
+    "calc_version",
+    "run_id",
+    "group_types",
+    "updated_count",
+    "missing_base_row_count",
+    "cleared_count",
+    "structure_rows_with_label",
+    "structure_rows_without_label",
     "validation_status",
 ]
 
@@ -135,6 +152,13 @@ class _TickerDailyRelativeInput:
     relative_close: float
 
 
+@dataclass(frozen=True)
+class _GroupPivotCandidate:
+    event_type: str
+    event_index: int
+    confirmed_index: int
+
+
 def _normalize_ticker(value: object) -> str:
     if value is None:
         return ""
@@ -169,6 +193,10 @@ def format_group_synthetic_ohlc_summary_lines(summary: dict[str, int | str]) -> 
 
 def format_group_relative_ohlc_summary_lines(summary: dict[str, int | str]) -> list[str]:
     return [f"SUMMARY {key}={summary[key]}" for key in RELATIVE_OHLC_SUMMARY_ORDER]
+
+
+def format_group_structure_summary_lines(summary: dict[str, int | str]) -> list[str]:
+    return [f"SUMMARY {key}={summary[key]}" for key in STRUCTURE_OHLC_SUMMARY_ORDER]
 
 
 def _load_taxonomy_rows(taxonomy_csv_path: str | Path) -> list[DatacenterTaxonomyRow]:
@@ -352,6 +380,14 @@ def _calculate_ema_series(values: Sequence[float], window: int) -> list[float]:
         ema = (value * alpha) + (ema * (1.0 - alpha))
         series.append(ema)
     return series
+
+
+def _structure_pivot_radius_for_group_type(group_type: str) -> int:
+    if group_type == "subindustry":
+        return DEFAULT_GROUP_SUBINDUSTRY_PIVOT_RADIUS
+    if group_type == "layer":
+        return DEFAULT_GROUP_LAYER_PIVOT_RADIUS
+    raise ValueError(f"Unsupported group_type for structure calculation: {group_type}")
 
 
 def build_group_synthetic_ohlc_rows(
@@ -569,6 +605,45 @@ def _load_existing_group_synthetic_base_rows(
         db_manager.close()
 
 
+def _load_group_synthetic_rows_through_end_date(
+    *,
+    analysis_db_path: str | Path,
+    end_date: str,
+    calc_version: str,
+    group_types: Sequence[str],
+) -> dict[tuple[str, str, str, str], list[sqlite3.Row]]:
+    if not group_types:
+        return {}
+    db_manager = DatabaseManager(str(analysis_db_path))
+    conn = db_manager.get_connection()
+    conn.row_factory = sqlite3.Row
+    try:
+        type_placeholders = ", ".join("?" for _ in group_types)
+        rows = conn.execute(
+            f"""
+            SELECT *
+            FROM dc_group_synthetic_ohlc_daily
+            WHERE ohlc_date <= ?
+              AND calc_version = ?
+              AND group_type IN ({type_placeholders})
+            ORDER BY taxonomy_version ASC, group_type ASC, group_name ASC, ohlc_date ASC
+            """,
+            [end_date, calc_version, *group_types],
+        ).fetchall()
+        grouped: dict[tuple[str, str, str, str], list[sqlite3.Row]] = {}
+        for row in rows:
+            key = (
+                str(row["taxonomy_version"]),
+                str(row["group_type"]),
+                str(row["group_name"]),
+                str(row["calc_version"]),
+            )
+            grouped.setdefault(key, []).append(row)
+        return grouped
+    finally:
+        db_manager.close()
+
+
 def build_group_relative_ohlc_updates(
     *,
     analysis_db_path: str | Path,
@@ -734,6 +809,217 @@ def build_group_relative_ohlc_updates(
         "missing_base_row_count": missing_base_row_count,
         "relative_rows_with_values": relative_rows_with_values,
         "relative_rows_without_eligible_tickers": relative_rows_without_eligible_tickers,
+    }
+    return sorted(
+        updates,
+        key=lambda row: (
+            str(row["taxonomy_version"]),
+            GROUP_TYPE_ORDER[str(row["group_type"])],
+            str(row["group_name"]),
+            str(row["ohlc_date"]),
+        ),
+    ), summary
+
+
+def _build_group_pivot_candidates(
+    rows: Sequence[sqlite3.Row],
+    *,
+    pivot_radius: int,
+) -> dict[int, list[_GroupPivotCandidate]]:
+    candidates: dict[int, list[_GroupPivotCandidate]] = {}
+    highs = [None if row["synthetic_high"] is None else float(row["synthetic_high"]) for row in rows]
+    lows = [None if row["synthetic_low"] is None else float(row["synthetic_low"]) for row in rows]
+    row_count = len(rows)
+    for idx in range(pivot_radius, row_count - pivot_radius):
+        high_window = highs[idx - pivot_radius : idx + pivot_radius + 1]
+        high_center = highs[idx]
+        if (
+            high_center is not None
+            and high_center == max(high_window)
+            and high_window.count(high_center) == 1
+        ):
+            candidates.setdefault(idx + pivot_radius, []).append(
+                _GroupPivotCandidate(
+                    event_type="PIVOT_HIGH",
+                    event_index=idx,
+                    confirmed_index=idx + pivot_radius,
+                )
+            )
+        low_window = lows[idx - pivot_radius : idx + pivot_radius + 1]
+        low_center = lows[idx]
+        if (
+            low_center is not None
+            and low_center == min(low_window)
+            and low_window.count(low_center) == 1
+        ):
+            candidates.setdefault(idx + pivot_radius, []).append(
+                _GroupPivotCandidate(
+                    event_type="PIVOT_LOW",
+                    event_index=idx,
+                    confirmed_index=idx + pivot_radius,
+                )
+            )
+    for confirmed_index in candidates:
+        candidates[confirmed_index].sort(key=lambda item: (item.event_index, item.event_type))
+    return candidates
+
+
+def _compute_group_trend_classification(
+    *,
+    latest_high_label: str | None,
+    latest_low_label: str | None,
+) -> str:
+    if latest_high_label == "HH" and latest_low_label == "HL":
+        return "UP"
+    if latest_high_label == "LH" and latest_low_label == "LL":
+        return "DOWN"
+    return "NEUTRAL"
+
+
+def _structure_field_tuple_from_row(row: sqlite3.Row | dict[str, object]) -> tuple[object, ...]:
+    return (
+        row["pivot_radius"],
+        row["latest_pivot_high_date"],
+        row["latest_pivot_high_value"],
+        row["latest_pivot_low_date"],
+        row["latest_pivot_low_value"],
+        row["latest_structure_label"],
+        row["trend_classification"],
+    )
+
+
+def build_group_structure_updates(
+    *,
+    analysis_db_path: str | Path,
+    start_date: str,
+    end_date: str,
+    calc_version: str,
+    run_id: str,
+    created_at_utc: str,
+    group_types: Sequence[str] = ("layer", "subindustry"),
+) -> tuple[list[dict[str, object]], dict[str, int | str]]:
+    normalized_start_date = _parse_iso_date(start_date, "start_date")
+    normalized_end_date = _parse_iso_date(end_date, "end_date")
+    if normalized_start_date > normalized_end_date:
+        raise ValueError(
+            f"Invalid date range: start_date {normalized_start_date} is after end_date {normalized_end_date}"
+        )
+
+    grouped_rows = _load_group_synthetic_rows_through_end_date(
+        analysis_db_path=analysis_db_path,
+        end_date=normalized_end_date,
+        calc_version=calc_version,
+        group_types=group_types,
+    )
+    updates: list[dict[str, object]] = []
+    structure_rows_with_label = 0
+    structure_rows_without_label = 0
+
+    for group_key, series_rows in grouped_rows.items():
+        taxonomy_version, group_type, group_name, series_calc_version = group_key
+        pivot_radius = _structure_pivot_radius_for_group_type(group_type)
+        valid_rows = [
+            row
+            for row in series_rows
+            if row["synthetic_high"] is not None
+            and row["synthetic_low"] is not None
+            and row["synthetic_close"] is not None
+        ]
+        candidates_by_confirm_index = _build_group_pivot_candidates(
+            valid_rows,
+            pivot_radius=pivot_radius,
+        )
+
+        latest_high_label: str | None = None
+        latest_low_label: str | None = None
+        latest_pivot_high_date: str | None = None
+        latest_pivot_high_value: float | None = None
+        latest_pivot_low_date: str | None = None
+        latest_pivot_low_value: float | None = None
+        latest_structure_label: str | None = None
+        previous_high_value: float | None = None
+        previous_low_value: float | None = None
+        applied_confirm_index = 0
+
+        for row in series_rows:
+            while applied_confirm_index < len(valid_rows) and str(valid_rows[applied_confirm_index]["ohlc_date"]) <= str(row["ohlc_date"]):
+                for candidate in candidates_by_confirm_index.get(applied_confirm_index, []):
+                    pivot_row = valid_rows[candidate.event_index]
+                    if candidate.event_type == "PIVOT_HIGH":
+                        pivot_value = float(pivot_row["synthetic_high"])
+                        label = None if previous_high_value is None else ("HH" if pivot_value > previous_high_value else "LH")
+                        previous_high_value = pivot_value
+                        latest_pivot_high_date = str(pivot_row["ohlc_date"])
+                        latest_pivot_high_value = pivot_value
+                        latest_high_label = label
+                        if label is not None:
+                            latest_structure_label = label
+                    else:
+                        pivot_value = float(pivot_row["synthetic_low"])
+                        label = None if previous_low_value is None else ("HL" if pivot_value > previous_low_value else "LL")
+                        previous_low_value = pivot_value
+                        latest_pivot_low_date = str(pivot_row["ohlc_date"])
+                        latest_pivot_low_value = pivot_value
+                        latest_low_label = label
+                        if label is not None:
+                            latest_structure_label = label
+                applied_confirm_index += 1
+
+            if not (normalized_start_date <= str(row["ohlc_date"]) <= normalized_end_date):
+                continue
+
+            if (
+                row["synthetic_high"] is None
+                or row["synthetic_low"] is None
+                or row["synthetic_close"] is None
+            ):
+                computed = {
+                    "pivot_radius": None,
+                    "latest_pivot_high_date": None,
+                    "latest_pivot_high_value": None,
+                    "latest_pivot_low_date": None,
+                    "latest_pivot_low_value": None,
+                    "latest_structure_label": None,
+                    "trend_classification": None,
+                }
+            else:
+                computed = {
+                    "pivot_radius": pivot_radius,
+                    "latest_pivot_high_date": latest_pivot_high_date,
+                    "latest_pivot_high_value": latest_pivot_high_value,
+                    "latest_pivot_low_date": latest_pivot_low_date,
+                    "latest_pivot_low_value": latest_pivot_low_value,
+                    "latest_structure_label": latest_structure_label,
+                    "trend_classification": _compute_group_trend_classification(
+                        latest_high_label=latest_high_label,
+                        latest_low_label=latest_low_label,
+                    ),
+                }
+
+            if computed["latest_structure_label"] is None:
+                structure_rows_without_label += 1
+            else:
+                structure_rows_with_label += 1
+
+            updates.append(
+                {
+                    "ohlc_date": str(row["ohlc_date"]),
+                    "taxonomy_version": taxonomy_version,
+                    "group_type": group_type,
+                    "group_name": group_name,
+                    "calc_version": series_calc_version,
+                    **computed,
+                    "run_id": run_id,
+                    "created_at_utc": created_at_utc,
+                    "existing_fields": _structure_field_tuple_from_row(row),
+                }
+            )
+
+    summary = {
+        "group_types": ",".join(group_types),
+        "missing_base_row_count": 0,
+        "structure_rows_with_label": structure_rows_with_label,
+        "structure_rows_without_label": structure_rows_without_label,
     }
     return sorted(
         updates,
@@ -1083,6 +1369,122 @@ def write_group_relative_ohlc_updates(
         db_manager.close()
 
 
+def write_group_structure_updates(
+    *,
+    analysis_db_path: str | Path,
+    updates: Sequence[dict[str, object]],
+    start_date: str,
+    end_date: str,
+    calc_version: str,
+    write_mode: str,
+    group_types: Sequence[str] = ("layer", "subindustry"),
+) -> dict[str, int]:
+    normalized_start_date = _parse_iso_date(start_date, "start_date")
+    normalized_end_date = _parse_iso_date(end_date, "end_date")
+    if write_mode not in {"update-existing", "replace-structure-range"}:
+        raise ValueError(f"Unsupported write_mode: {write_mode}")
+
+    db_manager = DatabaseManager(str(analysis_db_path))
+    conn = db_manager.get_connection()
+    cursor = conn.cursor()
+    updated_count = 0
+    cleared_count = 0
+    try:
+        cursor.execute("BEGIN")
+        if write_mode == "replace-structure-range" and group_types:
+            type_placeholders = ", ".join("?" for _ in group_types)
+            cursor.execute(
+                f"""
+                UPDATE dc_group_synthetic_ohlc_daily
+                SET pivot_radius = NULL,
+                    latest_pivot_high_date = NULL,
+                    latest_pivot_high_value = NULL,
+                    latest_pivot_low_date = NULL,
+                    latest_pivot_low_value = NULL,
+                    latest_structure_label = NULL,
+                    trend_classification = NULL
+                WHERE ohlc_date >= ?
+                  AND ohlc_date <= ?
+                  AND calc_version = ?
+                  AND group_type IN ({type_placeholders})
+                """,
+                [normalized_start_date, normalized_end_date, calc_version, *group_types],
+            )
+            cleared_count = cursor.rowcount
+            filtered_updates = [
+                row
+                for row in updates
+                if row["pivot_radius"] is not None
+                or row["latest_pivot_high_date"] is not None
+                or row["latest_pivot_low_date"] is not None
+                or row["latest_structure_label"] is not None
+                or row["trend_classification"] is not None
+            ]
+        else:
+            filtered_updates = [
+                row
+                for row in updates
+                if row["existing_fields"]
+                != (
+                    row["pivot_radius"],
+                    row["latest_pivot_high_date"],
+                    row["latest_pivot_high_value"],
+                    row["latest_pivot_low_date"],
+                    row["latest_pivot_low_value"],
+                    row["latest_structure_label"],
+                    row["trend_classification"],
+                )
+            ]
+
+        for row in filtered_updates:
+            cursor.execute(
+                """
+                UPDATE dc_group_synthetic_ohlc_daily
+                SET pivot_radius = ?,
+                    latest_pivot_high_date = ?,
+                    latest_pivot_high_value = ?,
+                    latest_pivot_low_date = ?,
+                    latest_pivot_low_value = ?,
+                    latest_structure_label = ?,
+                    trend_classification = ?,
+                    run_id = ?,
+                    created_at_utc = ?
+                WHERE ohlc_date = ?
+                  AND taxonomy_version = ?
+                  AND group_type = ?
+                  AND group_name = ?
+                  AND calc_version = ?
+                """,
+                (
+                    row["pivot_radius"],
+                    row["latest_pivot_high_date"],
+                    row["latest_pivot_high_value"],
+                    row["latest_pivot_low_date"],
+                    row["latest_pivot_low_value"],
+                    row["latest_structure_label"],
+                    row["trend_classification"],
+                    row["run_id"],
+                    row["created_at_utc"],
+                    row["ohlc_date"],
+                    row["taxonomy_version"],
+                    row["group_type"],
+                    row["group_name"],
+                    row["calc_version"],
+                ),
+            )
+            updated_count += cursor.rowcount
+        conn.commit()
+        return {
+            "updated_count": updated_count,
+            "cleared_count": cleared_count,
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        db_manager.close()
+
+
 def persist_datacenter_group_synthetic_ohlc(
     *,
     analysis_db_path: str | Path,
@@ -1195,6 +1597,58 @@ def persist_datacenter_group_relative_ohlc(
         "write_mode": write_mode,
         "calc_version": calc_version,
         "relative_base_window": relative_base_window,
+        "run_id": resolved_run_id,
+        **prep_summary,
+        **write_summary,
+        "validation_status": "OK",
+    }
+
+
+def persist_datacenter_group_structure(
+    *,
+    analysis_db_path: str | Path,
+    start_date: str,
+    end_date: str,
+    calc_version: str = DEFAULT_CALC_VERSION,
+    run_id: str | None = None,
+    created_at_utc: str | None = None,
+    write_mode: str = "update-existing",
+    group_types: Sequence[str] = ("layer", "subindustry"),
+) -> dict[str, int | str]:
+    normalized_start_date = _parse_iso_date(start_date, "start_date")
+    normalized_end_date = _parse_iso_date(end_date, "end_date")
+    if write_mode not in {"update-existing", "replace-structure-range"}:
+        raise ValueError(f"Unsupported write_mode: {write_mode}")
+    resolved_run_id = build_group_synthetic_ohlc_run_id(
+        start_date=normalized_start_date,
+        end_date=normalized_end_date,
+        calc_version=calc_version,
+        run_id=run_id,
+    )
+    resolved_created_at_utc = resolve_created_at_utc(created_at_utc)
+    updates, prep_summary = build_group_structure_updates(
+        analysis_db_path=analysis_db_path,
+        start_date=normalized_start_date,
+        end_date=normalized_end_date,
+        calc_version=calc_version,
+        run_id=resolved_run_id,
+        created_at_utc=resolved_created_at_utc,
+        group_types=group_types,
+    )
+    write_summary = write_group_structure_updates(
+        analysis_db_path=analysis_db_path,
+        updates=updates,
+        start_date=normalized_start_date,
+        end_date=normalized_end_date,
+        calc_version=calc_version,
+        write_mode=write_mode,
+        group_types=group_types,
+    )
+    return {
+        "start_date": normalized_start_date,
+        "end_date": normalized_end_date,
+        "write_mode": write_mode,
+        "calc_version": calc_version,
         "run_id": resolved_run_id,
         **prep_summary,
         **write_summary,

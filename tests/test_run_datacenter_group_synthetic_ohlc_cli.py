@@ -177,3 +177,106 @@ def test_cli_relative_only_updates_existing_rows_and_prints_deterministic_summar
             """
         ).fetchone()[0]
     assert count == 4
+
+
+def test_cli_structure_only_updates_existing_rows_and_prints_deterministic_summary(tmp_path, capsys):
+    analysis_db = tmp_path / "analysis.db"
+    with sqlite3.connect(analysis_db) as conn:
+        from analysis.database_manager import DatabaseManager
+
+        DatabaseManager(str(analysis_db)).close()
+        rows = []
+        highs = [10, 11, 12, 13, 14, 20, 14, 13, 12, 11, 10]
+        lows = [10, 9, 8, 7, 6, 5, 6, 7, 8, 9, 10]
+        for day, (high_value, low_value) in enumerate(zip(highs, lows), start=1):
+            rows.append(
+                (
+                    f"2024-06-{day:02d}",
+                    "DC_TAXONOMY_V1",
+                    "subindustry",
+                    "UPS",
+                    2,
+                    2,
+                    100.0,
+                    float(high_value),
+                    float(low_value),
+                    100.0,
+                    1000.0,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    20,
+                    1.1,
+                    1.2,
+                    0.9,
+                    1.0,
+                    0.1,
+                    0.1,
+                    0.0,
+                    0.2,
+                    -0.1,
+                    2,
+                    "OK",
+                    "DC_SWING_OHLC_V1",
+                    "seed",
+                    "2026-05-17T10:00:00Z",
+                )
+            )
+        conn.executemany(
+            """
+            INSERT INTO dc_group_synthetic_ohlc_daily (
+                ohlc_date, taxonomy_version, group_type, group_name, member_count, eligible_count,
+                synthetic_open, synthetic_high, synthetic_low, synthetic_close, synthetic_volume,
+                ma20, ema20, distance_to_ema20_pct, volatility_20d,
+                pivot_radius, latest_pivot_high_date, latest_pivot_high_value,
+                latest_pivot_low_date, latest_pivot_low_value, latest_structure_label,
+                trend_classification, relative_base_window, relative_open_20, relative_high_20,
+                relative_low_20, relative_close_20, relative_upper_wick_20, relative_lower_wick_20,
+                relative_close_extension_20, relative_high_extension_20, relative_low_extension_20,
+                relative_eligible_count, data_quality_status, calc_version, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+        conn.commit()
+
+    exit_code = run_datacenter_group_synthetic_ohlc_main(
+        [
+            "--analysis-db",
+            str(analysis_db),
+            "--start-date",
+            "2024-06-01",
+            "--end-date",
+            "2024-06-11",
+            "--write-mode",
+            "update-existing",
+            "--structure-only",
+            "--created-at-utc",
+            "2026-05-17T12:30:00Z",
+        ]
+    )
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert lines[0] == "SUMMARY start_date=2024-06-01"
+    assert lines[1] == "SUMMARY end_date=2024-06-11"
+    assert lines[2] == "SUMMARY write_mode=update-existing"
+    assert lines[-1] == "SUMMARY validation_status=OK"
+
+    with sqlite3.connect(analysis_db) as conn:
+        label_count = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM dc_group_synthetic_ohlc_daily
+            WHERE latest_pivot_high_date IS NOT NULL OR latest_structure_label IS NOT NULL
+            """
+        ).fetchone()[0]
+    assert label_count > 0
