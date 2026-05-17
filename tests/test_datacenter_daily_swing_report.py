@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import pytest
 
 from analysis.database_manager import DatabaseManager
 from analysis.datacenter_indices.swing_daily_report import (
@@ -196,6 +197,43 @@ def _seed_report_db(path, *, with_ecosystem: bool = True):
         _insert_synthetic_row(path, row)
 
 
+def _seed_second_taxonomy_daily_rows(path):
+    _insert_group_row(
+        path,
+        (
+            "2024-01-10", "DC_TAXONOMY_OTHER_V1", "subindustry", "Other Taxonomy Group",
+            2, 2, 0.11, 0.22, 0.33, 0.44,
+            91.0, 92.0, 90.0, -1.0, -2.0,
+            80.0, 10.0, None, None, None,
+            "OK", "DC_SWING_SIGNAL_V1", "seed2", "2026-05-17T10:00:00Z",
+        ),
+    )
+    _insert_ticker_row(
+        path,
+        (
+            "2024-01-10", "DC_TAXONOMY_OTHER_V1", "ZZZ", "Other Layer", "Other Taxonomy Group",
+            200.0, 0.05, 0.06, 0.07, 0.08,
+            195.0, 196.0, 197.0, 0.02, 0.03,
+            1.5, 200.0, "HH",
+            1, 0, 1, 0, 1, 0,
+            None, None, None, None, None, None, "OK",
+            "DC_SWING_SIGNAL_V1", "seed2", "2026-05-17T10:00:00Z",
+        ),
+    )
+    _insert_synthetic_row(
+        path,
+        (
+            "2024-01-10", "DC_TAXONOMY_OTHER_V1", "subindustry", "Other Taxonomy Group",
+            2, 2, 100.0, 101.0, 99.0, 100.5,
+            50000.0, 99.0, 100.0, 0.005, 0.04,
+            5, None, None, None, None,
+            None, None, 20, None, None,
+            None, None, None, None,
+            None, None, None, 0, "OK", "DC_SWING_OHLC_V1", "seed2", "2026-05-17T10:00:00Z",
+        ),
+    )
+
+
 def test_generates_markdown_report_with_required_sections_and_filters(tmp_path):
     analysis_db = tmp_path / "analysis.db"
     _seed_report_db(analysis_db)
@@ -327,3 +365,54 @@ def test_report_generation_is_read_only(tmp_path):
             )
         }
     assert before_counts == after_counts
+
+
+def test_daily_report_scopes_rows_to_selected_taxonomy_version(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_report_db(analysis_db)
+    _seed_second_taxonomy_daily_rows(analysis_db)
+
+    report_data = load_daily_swing_report_data(
+        analysis_db_path=analysis_db,
+        signal_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+    )
+    markdown = build_markdown_daily_swing_report(
+        report_data,
+        generated_at_utc="2026-05-17T12:00:00Z",
+        top_n=20,
+    )
+
+    assert report_data["taxonomy_version"] == "DC_TAXONOMY_V1"
+    assert report_data["taxonomy_version_inferred"] == 0
+    assert len(report_data["group_rows"]) == 6
+    assert len(report_data["ticker_rows"]) == 4
+    assert len(report_data["synthetic_rows"]) == 2
+    assert "taxonomy_version: DC_TAXONOMY_V1" in markdown
+    assert "Other Taxonomy Group" not in markdown
+    assert "| ticker_rows_with_scanner_fields_null | 1 |" in markdown
+
+
+def test_daily_report_fails_without_taxonomy_version_when_multiple_versions_exist(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_report_db(analysis_db)
+    _seed_second_taxonomy_daily_rows(analysis_db)
+
+    with pytest.raises(ValueError, match="Multiple taxonomy_version values exist"):
+        load_daily_swing_report_data(
+            analysis_db_path=analysis_db,
+            signal_date="2024-01-10",
+        )
+
+
+def test_daily_report_infers_taxonomy_version_when_only_one_exists(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_report_db(analysis_db)
+
+    report_data = load_daily_swing_report_data(
+        analysis_db_path=analysis_db,
+        signal_date="2024-01-10",
+    )
+
+    assert report_data["taxonomy_version"] == "DC_TAXONOMY_V1"
+    assert report_data["taxonomy_version_inferred"] == 1

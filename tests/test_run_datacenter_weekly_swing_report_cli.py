@@ -17,6 +17,8 @@ def test_cli_writes_markdown_and_prints_deterministic_summary(tmp_path, capsys):
             str(analysis_db),
             "--end-date",
             "2024-01-10",
+            "--taxonomy-version",
+            "DC_TAXONOMY_V1",
             "--output-md",
             str(output_md),
             "--output-csv",
@@ -35,15 +37,17 @@ def test_cli_writes_markdown_and_prints_deterministic_summary(tmp_path, capsys):
     assert lines[0] == "SUMMARY end_date=2024-01-10"
     assert lines[1] == "SUMMARY signal_version=DC_SWING_SIGNAL_V1"
     assert lines[2] == "SUMMARY ohlc_calc_version=DC_SWING_OHLC_V1"
-    assert lines[3] == "SUMMARY valid_signal_dates_count=5"
-    assert lines[4] == "SUMMARY window_start_date=2024-01-02"
-    assert lines[5] == "SUMMARY window_end_date=2024-01-10"
-    assert lines[6] == "SUMMARY incomplete_window=NO"
-    assert lines[7] == "SUMMARY group_rows=20"
-    assert lines[8] == "SUMMARY ticker_rows=20"
-    assert lines[9] == "SUMMARY synthetic_ohlc_rows=10"
-    assert lines[10] == "SUMMARY repeated_breakout_tickers=1"
-    assert lines[11] == "SUMMARY repeated_pullback_tickers=1"
-    assert lines[12] == "SUMMARY repeated_exit_risk_tickers=1"
-    assert lines[13] == f"SUMMARY output_markdown={output_md}"
+    assert lines[3] == "SUMMARY taxonomy_version=DC_TAXONOMY_V1"
+    assert lines[4] == "SUMMARY taxonomy_version_inferred=0"
+    assert lines[5] == "SUMMARY valid_signal_dates_count=5"
+    assert lines[6] == "SUMMARY window_start_date=2024-01-02"
+    assert lines[7] == "SUMMARY window_end_date=2024-01-10"
+    assert lines[8] == "SUMMARY incomplete_window=NO"
+    assert lines[9] == "SUMMARY group_rows=20"
+    assert lines[10] == "SUMMARY ticker_rows=20"
+    assert lines[11] == "SUMMARY synthetic_ohlc_rows=10"
+    assert lines[12] == "SUMMARY repeated_breakout_tickers=1"
+    assert lines[13] == "SUMMARY repeated_pullback_tickers=1"
+    assert lines[14] == "SUMMARY repeated_exit_risk_tickers=1"
+    assert lines[15] == f"SUMMARY output_markdown={output_md}"
     assert lines[-1] == "SUMMARY validation_status=OK"

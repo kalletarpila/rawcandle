@@ -163,6 +163,7 @@ python3 run_datacenter_ticker_swing_signals.py \
 python3 run_datacenter_daily_signal_report.py \
   --analysis-db "${ANALYSIS_DB}" \
   --signal-date "${SIGNAL_DATE}" \
+  --taxonomy-version "${TAXONOMY_VERSION}" \
   --output-md reports/datacenter_daily_swing_signal_report_${SIGNAL_DATE}.md \
   --output-csv reports/datacenter_daily_swing_signal_report_${SIGNAL_DATE}.csv
 ```
@@ -199,6 +200,24 @@ Recommended normal daily usage with currently implemented modes:
   - `update-existing` for a narrower correction pass
 
 ## Backfill Guidance
+
+## Taxonomy Version Guidance
+
+- Production full taxonomy should use `data/datacenter_ecosystem_taxonomy_full_v1.csv`.
+- Daily and weekly swing reports must be run for the intended `taxonomy_version`.
+- Reports must not mix multiple taxonomy versions.
+- If more than one taxonomy version exists for the same `signal_version` date or date range, pass `--taxonomy-version` explicitly.
+
+Weekly swing report example:
+
+```bash
+python3 run_datacenter_weekly_swing_report.py \
+  --analysis-db "${ANALYSIS_DB}" \
+  --end-date "${SIGNAL_DATE}" \
+  --taxonomy-version "${TAXONOMY_VERSION}" \
+  --output-md reports/datacenter_weekly_swing_signal_report_${SIGNAL_DATE}.md \
+  --output-csv reports/datacenter_weekly_swing_signal_report_${SIGNAL_DATE}.csv
+```
 
 ### Synthetic OHLC
 

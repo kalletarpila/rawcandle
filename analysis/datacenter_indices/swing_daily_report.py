@@ -15,6 +15,8 @@ DAILY_REPORT_SUMMARY_ORDER = [
     "signal_date",
     "signal_version",
     "ohlc_calc_version",
+    "taxonomy_version",
+    "taxonomy_version_inferred",
     "group_rows",
     "ticker_rows",
     "synthetic_ohlc_rows",
@@ -122,21 +124,55 @@ def _count_by_field(rows: Sequence[dict[str, object]], field_name: str) -> list[
     return [{"value": key, "count": counts[key]} for key in sorted(counts)]
 
 
+def _resolve_daily_taxonomy_version(
+    conn: sqlite3.Connection,
+    *,
+    signal_date: str,
+    signal_version: str,
+    taxonomy_version: str | None,
+) -> tuple[str | None, int]:
+    if taxonomy_version is not None:
+        return taxonomy_version, 0
+    rows = conn.execute(
+        """
+        SELECT DISTINCT taxonomy_version
+        FROM dc_group_swing_signal_daily
+        WHERE signal_date = ?
+          AND signal_version = ?
+        ORDER BY taxonomy_version ASC
+        """,
+        (signal_date, signal_version),
+    ).fetchall()
+    versions = [str(row["taxonomy_version"]) for row in rows if row["taxonomy_version"] is not None]
+    if len(versions) == 1:
+        return versions[0], 1
+    if len(versions) > 1:
+        raise ValueError(
+            "Multiple taxonomy_version values exist for the selected signal_date and signal_version; "
+            "pass --taxonomy-version explicitly"
+        )
+    return None, 0
+
+
 def _load_group_rows(
     conn: sqlite3.Connection,
     *,
     signal_date: str,
     signal_version: str,
+    taxonomy_version: str | None,
 ) -> list[dict[str, object]]:
+    if taxonomy_version is None:
+        return []
     rows = conn.execute(
         """
         SELECT *
         FROM dc_group_swing_signal_daily
         WHERE signal_date = ?
           AND signal_version = ?
+          AND taxonomy_version = ?
         ORDER BY taxonomy_version ASC, group_type ASC, group_name ASC
         """,
-        (signal_date, signal_version),
+        (signal_date, signal_version, taxonomy_version),
     ).fetchall()
     return [_row_to_dict(row) for row in rows]
 
@@ -146,16 +182,20 @@ def _load_ticker_rows(
     *,
     signal_date: str,
     signal_version: str,
+    taxonomy_version: str | None,
 ) -> list[dict[str, object]]:
+    if taxonomy_version is None:
+        return []
     rows = conn.execute(
         """
         SELECT *
         FROM dc_ticker_swing_signal_daily
         WHERE signal_date = ?
           AND signal_version = ?
+          AND taxonomy_version = ?
         ORDER BY taxonomy_version ASC, ticker ASC
         """,
-        (signal_date, signal_version),
+        (signal_date, signal_version, taxonomy_version),
     ).fetchall()
     return [_row_to_dict(row) for row in rows]
 
@@ -165,16 +205,20 @@ def _load_synthetic_rows(
     *,
     signal_date: str,
     calc_version: str,
+    taxonomy_version: str | None,
 ) -> list[dict[str, object]]:
+    if taxonomy_version is None:
+        return []
     rows = conn.execute(
         """
         SELECT *
         FROM dc_group_synthetic_ohlc_daily
         WHERE ohlc_date = ?
           AND calc_version = ?
+          AND taxonomy_version = ?
         ORDER BY taxonomy_version ASC, group_type ASC, group_name ASC
         """,
-        (signal_date, calc_version),
+        (signal_date, calc_version, taxonomy_version),
     ).fetchall()
     return [_row_to_dict(row) for row in rows]
 
@@ -185,6 +229,7 @@ def load_daily_swing_report_data(
     signal_date: str,
     signal_version: str = DEFAULT_SIGNAL_VERSION,
     ohlc_calc_version: str = DEFAULT_OHLC_CALC_VERSION,
+    taxonomy_version: str | None = None,
 ) -> dict[str, object]:
     normalized_signal_date = _parse_iso_date(signal_date)
     with sqlite3.connect(analysis_db_path) as conn:
@@ -197,25 +242,36 @@ def load_daily_swing_report_data(
                 "dc_group_synthetic_ohlc_daily",
             ],
         )
+        resolved_taxonomy_version, taxonomy_version_inferred = _resolve_daily_taxonomy_version(
+            conn,
+            signal_date=normalized_signal_date,
+            signal_version=signal_version,
+            taxonomy_version=taxonomy_version,
+        )
         group_rows = _load_group_rows(
             conn,
             signal_date=normalized_signal_date,
             signal_version=signal_version,
+            taxonomy_version=resolved_taxonomy_version,
         )
         ticker_rows = _load_ticker_rows(
             conn,
             signal_date=normalized_signal_date,
             signal_version=signal_version,
+            taxonomy_version=resolved_taxonomy_version,
         )
         synthetic_rows = _load_synthetic_rows(
             conn,
             signal_date=normalized_signal_date,
             calc_version=ohlc_calc_version,
+            taxonomy_version=resolved_taxonomy_version,
         )
     return {
         "signal_date": normalized_signal_date,
         "signal_version": signal_version,
         "ohlc_calc_version": ohlc_calc_version,
+        "taxonomy_version": resolved_taxonomy_version,
+        "taxonomy_version_inferred": taxonomy_version_inferred,
         "group_rows": group_rows,
         "ticker_rows": ticker_rows,
         "synthetic_rows": synthetic_rows,
@@ -267,6 +323,7 @@ def build_markdown_daily_swing_report(
     signal_date = str(report_data["signal_date"])
     signal_version = str(report_data["signal_version"])
     ohlc_calc_version = str(report_data["ohlc_calc_version"])
+    taxonomy_version = "" if report_data.get("taxonomy_version") is None else str(report_data["taxonomy_version"])
     group_rows = list(report_data["group_rows"])  # type: ignore[arg-type]
     ticker_rows = list(report_data["ticker_rows"])  # type: ignore[arg-type]
     synthetic_rows = list(report_data["synthetic_rows"])  # type: ignore[arg-type]
@@ -380,6 +437,7 @@ def build_markdown_daily_swing_report(
         f"signal_date: {signal_date}",
         f"signal_version: {signal_version}",
         f"ohlc_calc_version: {ohlc_calc_version}",
+        f"taxonomy_version: {taxonomy_version}",
         f"generated_at_utc: {generated}",
         "source_tables: dc_group_swing_signal_daily, dc_ticker_swing_signal_daily, dc_group_synthetic_ohlc_daily",
         "",
@@ -683,6 +741,7 @@ def write_daily_swing_signal_report(
     signal_date: str,
     signal_version: str = DEFAULT_SIGNAL_VERSION,
     ohlc_calc_version: str = DEFAULT_OHLC_CALC_VERSION,
+    taxonomy_version: str | None = None,
     output_md: str | Path | None = None,
     output_csv: str | Path | None = None,
     top_n: int = 20,
@@ -693,6 +752,7 @@ def write_daily_swing_signal_report(
         signal_date=signal_date,
         signal_version=signal_version,
         ohlc_calc_version=ohlc_calc_version,
+        taxonomy_version=taxonomy_version,
     )
     markdown = build_markdown_daily_swing_report(
         report_data,
@@ -720,6 +780,8 @@ def write_daily_swing_signal_report(
         "signal_date": str(report_data["signal_date"]),
         "signal_version": str(report_data["signal_version"]),
         "ohlc_calc_version": str(report_data["ohlc_calc_version"]),
+        "taxonomy_version": "" if report_data.get("taxonomy_version") is None else str(report_data["taxonomy_version"]),
+        "taxonomy_version_inferred": int(report_data.get("taxonomy_version_inferred") or 0),
         "group_rows": len(report_data["group_rows"]),  # type: ignore[arg-type]
         "ticker_rows": len(report_data["ticker_rows"]),  # type: ignore[arg-type]
         "synthetic_ohlc_rows": len(report_data["synthetic_rows"]),  # type: ignore[arg-type]

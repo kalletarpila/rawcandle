@@ -27,6 +27,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--end-date", type=str, required=True, help="Weekly window end date (YYYY-MM-DD)")
     parser.add_argument("--signal-version", type=str, default=DEFAULT_SIGNAL_VERSION, help="Signal version to report")
     parser.add_argument("--ohlc-calc-version", type=str, default=DEFAULT_OHLC_CALC_VERSION, help="Synthetic OHLC calc version to report")
+    parser.add_argument("--taxonomy-version", type=str, default=None, help="Optional taxonomy_version to scope the report")
     parser.add_argument("--output-md", type=Path, default=None, help="Optional output Markdown path")
     parser.add_argument("--output-csv", type=Path, default=None, help="Optional output CSV path")
     parser.add_argument("--top-n", type=int, default=20, help="Maximum row count for ranking sections")
@@ -42,6 +43,7 @@ def main(argv: list[str] | None = None) -> int:
             end_date=args.end_date,
             signal_version=args.signal_version,
             ohlc_calc_version=args.ohlc_calc_version,
+            taxonomy_version=args.taxonomy_version,
             output_md=args.output_md,
             output_csv=args.output_csv,
             top_n=args.top_n,

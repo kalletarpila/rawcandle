@@ -17,6 +17,8 @@ def test_cli_writes_markdown_and_prints_deterministic_summary(tmp_path, capsys):
             str(analysis_db),
             "--signal-date",
             "2024-01-10",
+            "--taxonomy-version",
+            "DC_TAXONOMY_V1",
             "--output-md",
             str(output_md),
             "--output-csv",
@@ -37,12 +39,14 @@ def test_cli_writes_markdown_and_prints_deterministic_summary(tmp_path, capsys):
     assert lines[0] == "SUMMARY signal_date=2024-01-10"
     assert lines[1] == "SUMMARY signal_version=DC_SWING_SIGNAL_V1"
     assert lines[2] == "SUMMARY ohlc_calc_version=DC_SWING_OHLC_V1"
-    assert lines[3] == "SUMMARY group_rows=6"
-    assert lines[4] == "SUMMARY ticker_rows=4"
-    assert lines[5] == "SUMMARY synthetic_ohlc_rows=2"
-    assert lines[6] == "SUMMARY breakout_count=1"
-    assert lines[7] == "SUMMARY pullback_count=1"
-    assert lines[8] == "SUMMARY exit_risk_count=1"
-    assert lines[9] == f"SUMMARY output_markdown={output_md}"
-    assert lines[10] == f"SUMMARY output_csv={output_csv}"
+    assert lines[3] == "SUMMARY taxonomy_version=DC_TAXONOMY_V1"
+    assert lines[4] == "SUMMARY taxonomy_version_inferred=0"
+    assert lines[5] == "SUMMARY group_rows=6"
+    assert lines[6] == "SUMMARY ticker_rows=4"
+    assert lines[7] == "SUMMARY synthetic_ohlc_rows=2"
+    assert lines[8] == "SUMMARY breakout_count=1"
+    assert lines[9] == "SUMMARY pullback_count=1"
+    assert lines[10] == "SUMMARY exit_risk_count=1"
+    assert lines[11] == f"SUMMARY output_markdown={output_md}"
+    assert lines[12] == f"SUMMARY output_csv={output_csv}"
     assert lines[-1] == "SUMMARY validation_status=OK"
