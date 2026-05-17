@@ -36,6 +36,23 @@ GROUP_SWING_SUMMARY_ORDER = [
     "validation_status",
 ]
 
+GROUP_SWING_TIMING_SUMMARY_ORDER = [
+    "start_date",
+    "end_date",
+    "write_mode",
+    "signal_version",
+    "run_id",
+    "updated_count",
+    "missing_base_row_count",
+    "cleared_count",
+    "buy_zone_count",
+    "add_on_pullback_count",
+    "trim_watch_count",
+    "exit_zone_count",
+    "neutral_count",
+    "validation_status",
+]
+
 GROUP_TYPE_ORDER = {
     "ecosystem": 0,
     "layer": 1,
@@ -100,6 +117,78 @@ def build_group_swing_run_id(
 
 def format_group_swing_summary_lines(summary: dict[str, int | str]) -> list[str]:
     return [f"SUMMARY {key}={summary[key]}" for key in GROUP_SWING_SUMMARY_ORDER]
+
+
+def format_group_swing_timing_summary_lines(summary: dict[str, int | str]) -> list[str]:
+    return [f"SUMMARY {key}={summary[key]}" for key in GROUP_SWING_TIMING_SUMMARY_ORDER]
+
+
+def _match_lt(value: float | None, threshold: float) -> bool:
+    return value is not None and value < threshold
+
+
+def _match_gt(value: float | None, threshold: float) -> bool:
+    return value is not None and value > threshold
+
+
+def _match_gte(value: float | None, threshold: float) -> bool:
+    return value is not None and value >= threshold
+
+
+def _timing_state_and_reason(row: sqlite3.Row) -> tuple[str, str]:
+    data_quality_status = str(row["data_quality_status"]) if row["data_quality_status"] is not None else ""
+    return_5d = None if row["return_5d"] is None else float(row["return_5d"])
+    return_10d = None if row["return_10d"] is None else float(row["return_10d"])
+    return_20d = None if row["return_20d"] is None else float(row["return_20d"])
+    return_60d = None if row["return_60d"] is None else float(row["return_60d"])
+    pct_above_ma10 = None if row["pct_above_ma10"] is None else float(row["pct_above_ma10"])
+    pct_above_ema20 = None if row["pct_above_ema20"] is None else float(row["pct_above_ema20"])
+    ema20_breadth_delta_5d = None if row["ema20_breadth_delta_5d"] is None else float(row["ema20_breadth_delta_5d"])
+    weakness_breadth = None if row["weakness_breadth"] is None else float(row["weakness_breadth"])
+
+    exit_reasons: list[str] = []
+    if _match_lt(ema20_breadth_delta_5d, -15.0):
+        exit_reasons.append("ema20_breadth_delta_5d_lt_minus_15")
+    if _match_lt(return_20d, 0.0):
+        exit_reasons.append("return_20d_neg")
+    if _match_lt(pct_above_ema20, 40.0):
+        exit_reasons.append("pct_above_ema20_lt_40")
+    if _match_gt(weakness_breadth, 60.0):
+        exit_reasons.append("weakness_breadth_gt_60")
+    if exit_reasons:
+        return "EXIT_ZONE", "EXIT_ZONE:" + ";".join(exit_reasons)
+
+    trim_reasons: list[str] = []
+    if _match_lt(ema20_breadth_delta_5d, -10.0):
+        trim_reasons.append("ema20_breadth_delta_5d_lt_minus_10")
+    if _match_lt(return_10d, 0.0):
+        trim_reasons.append("return_10d_neg")
+    if _match_lt(pct_above_ma10, 50.0):
+        trim_reasons.append("pct_above_ma10_lt_50")
+    if trim_reasons:
+        return "TRIM_WATCH", "TRIM_WATCH:" + ";".join(trim_reasons)
+
+    add_on_checks = [
+        (_match_gt(return_20d, 0.0), "return_20d_pos"),
+        (_match_gt(return_60d, 0.0), "return_60d_pos"),
+        (_match_lt(return_5d, 0.0) and _match_gte(return_5d, -0.05), "return_5d_pullback_ge_minus_5pct"),
+        (_match_gte(pct_above_ema20, 65.0), "pct_above_ema20_ge_65"),
+        (data_quality_status == "OK", "data_quality_ok"),
+    ]
+    if all(matched for matched, _ in add_on_checks):
+        return "ADD_ON_PULLBACK", "ADD_ON_PULLBACK:" + ";".join(code for _, code in add_on_checks)
+
+    buy_checks = [
+        (_match_gt(return_5d, 0.0), "return_5d_pos"),
+        (_match_gt(return_10d, 0.0), "return_10d_pos"),
+        (_match_gte(pct_above_ema20, 80.0), "pct_above_ema20_ge_80"),
+        (_match_gte(ema20_breadth_delta_5d, -10.0), "ema20_breadth_delta_5d_ge_minus_10"),
+        (data_quality_status == "OK", "data_quality_ok"),
+    ]
+    if all(matched for matched, _ in buy_checks):
+        return "BUY_ZONE", "BUY_ZONE:" + ";".join(code for _, code in buy_checks)
+
+    return "NEUTRAL", "NEUTRAL:no_state_rule_matched"
 
 
 def _load_taxonomy_rows(
@@ -648,6 +737,190 @@ def write_group_swing_signal_rows(
         db_manager.close()
 
 
+def _load_existing_group_swing_rows(
+    *,
+    analysis_db_path: str | Path,
+    start_date: str,
+    end_date: str,
+    signal_version: str,
+    group_types: Sequence[str] | None = None,
+) -> list[sqlite3.Row]:
+    db_manager = DatabaseManager(str(analysis_db_path))
+    conn = db_manager.get_connection()
+    conn.row_factory = sqlite3.Row
+    try:
+        params: list[object] = [start_date, end_date, signal_version]
+        group_type_clause = ""
+        if group_types:
+            placeholders = ", ".join("?" for _ in group_types)
+            group_type_clause = f" AND group_type IN ({placeholders})"
+            params.extend(group_types)
+        return conn.execute(
+            f"""
+            SELECT *
+            FROM dc_group_swing_signal_daily
+            WHERE signal_date >= ?
+              AND signal_date <= ?
+              AND signal_version = ?
+              {group_type_clause}
+            ORDER BY signal_date ASC, taxonomy_version ASC, group_type ASC, group_name ASC
+            """,
+            params,
+        ).fetchall()
+    finally:
+        db_manager.close()
+
+
+def build_group_timing_updates(
+    *,
+    analysis_db_path: str | Path,
+    start_date: str,
+    end_date: str,
+    signal_version: str,
+    run_id: str,
+    created_at_utc: str,
+    group_types: Sequence[str] | None = None,
+) -> tuple[list[dict[str, object]], dict[str, int | str]]:
+    normalized_start_date = _parse_iso_date(start_date, "start_date")
+    normalized_end_date = _parse_iso_date(end_date, "end_date")
+    if normalized_start_date > normalized_end_date:
+        raise ValueError(
+            f"Invalid date range: start_date {normalized_start_date} is after end_date {normalized_end_date}"
+        )
+
+    rows = _load_existing_group_swing_rows(
+        analysis_db_path=analysis_db_path,
+        start_date=normalized_start_date,
+        end_date=normalized_end_date,
+        signal_version=signal_version,
+        group_types=group_types,
+    )
+    updates: list[dict[str, object]] = []
+    counts = {
+        "BUY_ZONE": 0,
+        "ADD_ON_PULLBACK": 0,
+        "TRIM_WATCH": 0,
+        "EXIT_ZONE": 0,
+        "NEUTRAL": 0,
+    }
+    for row in rows:
+        timing_state, timing_reason = _timing_state_and_reason(row)
+        counts[timing_state] += 1
+        updates.append(
+            {
+                "signal_date": str(row["signal_date"]),
+                "taxonomy_version": str(row["taxonomy_version"]),
+                "group_type": str(row["group_type"]),
+                "group_name": str(row["group_name"]),
+                "signal_version": str(row["signal_version"]),
+                "timing_state": timing_state,
+                "timing_reason": timing_reason,
+                "run_id": run_id,
+                "created_at_utc": created_at_utc,
+                "existing_timing_state": None if row["timing_state"] is None else str(row["timing_state"]),
+                "existing_timing_reason": None if row["timing_reason"] is None else str(row["timing_reason"]),
+            }
+        )
+    return updates, {
+        "missing_base_row_count": 0,
+        "buy_zone_count": counts["BUY_ZONE"],
+        "add_on_pullback_count": counts["ADD_ON_PULLBACK"],
+        "trim_watch_count": counts["TRIM_WATCH"],
+        "exit_zone_count": counts["EXIT_ZONE"],
+        "neutral_count": counts["NEUTRAL"],
+    }
+
+
+def write_group_timing_updates(
+    *,
+    analysis_db_path: str | Path,
+    updates: Sequence[dict[str, object]],
+    start_date: str,
+    end_date: str,
+    signal_version: str,
+    write_mode: str,
+    group_types: Sequence[str] | None = None,
+) -> dict[str, int]:
+    normalized_start_date = _parse_iso_date(start_date, "start_date")
+    normalized_end_date = _parse_iso_date(end_date, "end_date")
+    if write_mode not in {"update-existing", "replace-timing-range"}:
+        raise ValueError(f"Unsupported write_mode: {write_mode}")
+
+    db_manager = DatabaseManager(str(analysis_db_path))
+    conn = db_manager.get_connection()
+    cursor = conn.cursor()
+    updated_count = 0
+    cleared_count = 0
+    try:
+        cursor.execute("BEGIN")
+        if write_mode == "replace-timing-range":
+            params: list[object] = [normalized_start_date, normalized_end_date, signal_version]
+            group_type_clause = ""
+            if group_types:
+                placeholders = ", ".join("?" for _ in group_types)
+                group_type_clause = f" AND group_type IN ({placeholders})"
+                params.extend(group_types)
+            cursor.execute(
+                f"""
+                UPDATE dc_group_swing_signal_daily
+                SET timing_state = NULL,
+                    timing_reason = NULL
+                WHERE signal_date >= ?
+                  AND signal_date <= ?
+                  AND signal_version = ?
+                  {group_type_clause}
+                """,
+                params,
+            )
+            cleared_count = cursor.rowcount
+            filtered_updates = list(updates)
+        else:
+            filtered_updates = [
+                row
+                for row in updates
+                if row["existing_timing_state"] != row["timing_state"]
+                or row["existing_timing_reason"] != row["timing_reason"]
+            ]
+
+        for row in filtered_updates:
+            cursor.execute(
+                """
+                UPDATE dc_group_swing_signal_daily
+                SET timing_state = ?,
+                    timing_reason = ?,
+                    run_id = ?,
+                    created_at_utc = ?
+                WHERE signal_date = ?
+                  AND taxonomy_version = ?
+                  AND group_type = ?
+                  AND group_name = ?
+                  AND signal_version = ?
+                """,
+                (
+                    row["timing_state"],
+                    row["timing_reason"],
+                    row["run_id"],
+                    row["created_at_utc"],
+                    row["signal_date"],
+                    row["taxonomy_version"],
+                    row["group_type"],
+                    row["group_name"],
+                    row["signal_version"],
+                ),
+            )
+            updated_count += cursor.rowcount
+        conn.commit()
+        return {
+            "updated_count": updated_count,
+            "cleared_count": cleared_count,
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        db_manager.close()
+
+
 def persist_datacenter_group_swing_signals(
     *,
     analysis_db_path: str | Path,
@@ -688,6 +961,61 @@ def persist_datacenter_group_swing_signals(
     )
     return {
         "signal_date": normalized_signal_date,
+        "write_mode": write_mode,
+        "signal_version": signal_version,
+        "run_id": resolved_run_id,
+        **prep_summary,
+        **write_summary,
+        "validation_status": "OK",
+    }
+
+
+def persist_datacenter_group_timing_states(
+    *,
+    analysis_db_path: str | Path,
+    start_date: str,
+    end_date: str | None = None,
+    signal_version: str = DEFAULT_SIGNAL_VERSION,
+    run_id: str | None = None,
+    created_at_utc: str | None = None,
+    write_mode: str = "update-existing",
+    group_types: Sequence[str] | None = None,
+) -> dict[str, int | str]:
+    normalized_start_date = _parse_iso_date(start_date, "start_date")
+    normalized_end_date = _parse_iso_date(end_date or start_date, "end_date")
+    if write_mode not in {"update-existing", "replace-timing-range"}:
+        raise ValueError(f"Unsupported write_mode: {write_mode}")
+    if normalized_start_date > normalized_end_date:
+        raise ValueError(
+            f"Invalid date range: start_date {normalized_start_date} is after end_date {normalized_end_date}"
+        )
+    resolved_run_id = build_group_swing_run_id(
+        as_of_date=normalized_end_date,
+        signal_version=signal_version,
+        run_id=run_id,
+    )
+    resolved_created_at_utc = resolve_created_at_utc(created_at_utc)
+    updates, prep_summary = build_group_timing_updates(
+        analysis_db_path=analysis_db_path,
+        start_date=normalized_start_date,
+        end_date=normalized_end_date,
+        signal_version=signal_version,
+        run_id=resolved_run_id,
+        created_at_utc=resolved_created_at_utc,
+        group_types=group_types,
+    )
+    write_summary = write_group_timing_updates(
+        analysis_db_path=analysis_db_path,
+        updates=updates,
+        start_date=normalized_start_date,
+        end_date=normalized_end_date,
+        signal_version=signal_version,
+        write_mode=write_mode,
+        group_types=group_types,
+    )
+    return {
+        "start_date": normalized_start_date,
+        "end_date": normalized_end_date,
         "write_mode": write_mode,
         "signal_version": signal_version,
         "run_id": resolved_run_id,

@@ -6,6 +6,7 @@ import pytest
 
 from analysis.database_manager import DatabaseManager
 from analysis.datacenter_indices.swing_group_persistence import (
+    persist_datacenter_group_timing_states,
     persist_datacenter_group_swing_signals,
 )
 
@@ -63,6 +64,25 @@ def _fetch_group_rows(path):
             ORDER BY taxonomy_version, group_type, group_name, signal_version
             """
         ).fetchall()
+
+
+def _insert_group_swing_row(path, row):
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """
+            INSERT INTO dc_group_swing_signal_daily (
+                signal_date, taxonomy_version, group_type, group_name,
+                member_count, eligible_count, return_5d, return_10d, return_20d, return_60d,
+                pct_above_ma10, pct_above_ema20, pct_above_rising_ema20,
+                ma10_breadth_delta_5d, ema20_breadth_delta_5d,
+                trend_breadth, weakness_breadth, overheat_risk_level,
+                timing_state, timing_reason, data_quality_status,
+                signal_version, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            row,
+        )
+        conn.commit()
 
 
 def _group_row(rows, group_type: str, group_name: str, signal_date: str | None = None):
@@ -440,3 +460,178 @@ DC_TAXONOMY_V1,CCC,Power,UPS,CORE,1,1.0,
     assert layer_row["overheat_risk_level"] is None
     assert layer_row["timing_state"] is None
     assert layer_row["timing_reason"] is None
+
+
+def test_timing_updates_existing_group_rows_and_preserves_metric_fields(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    _insert_group_swing_row(
+        analysis_db,
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "layer", "Power",
+            5, 5, 0.02, 0.03, 0.10, 0.20,
+            82.0, 85.0, 70.0,
+            5.0, 2.0,
+            60.0, 20.0, "KEEP_RISK",
+            None, None, "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+    )
+
+    summary = persist_datacenter_group_timing_states(
+        analysis_db_path=analysis_db,
+        start_date="2024-01-10",
+        signal_version="DC_SWING_SIGNAL_V1",
+        run_id="timing-run",
+        created_at_utc="2026-05-17T12:00:00Z",
+        write_mode="update-existing",
+    )
+
+    row = _group_row(_fetch_group_rows(analysis_db), "layer", "Power", "2024-01-10")
+    assert summary["updated_count"] == 1
+    assert row["timing_state"] == "BUY_ZONE"
+    assert row["timing_reason"] == "BUY_ZONE:return_5d_pos;return_10d_pos;pct_above_ema20_ge_80;ema20_breadth_delta_5d_ge_minus_10;data_quality_ok"
+    assert row["return_20d"] == pytest.approx(0.10)
+    assert row["pct_above_ema20"] == pytest.approx(85.0)
+    assert row["trend_breadth"] == pytest.approx(60.0)
+    assert row["weakness_breadth"] == pytest.approx(20.0)
+    assert row["data_quality_status"] == "OK"
+    assert row["overheat_risk_level"] == "KEEP_RISK"
+
+
+def test_timing_does_not_insert_missing_base_rows(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+
+    summary = persist_datacenter_group_timing_states(
+        analysis_db_path=analysis_db,
+        start_date="2024-01-10",
+        signal_version="DC_SWING_SIGNAL_V1",
+        run_id="timing-run",
+        created_at_utc="2026-05-17T12:00:00Z",
+        write_mode="update-existing",
+    )
+
+    assert summary["updated_count"] == 0
+    assert _fetch_group_rows(analysis_db) == []
+
+
+def test_timing_classifies_buy_zone_add_on_pullback_trim_watch_exit_zone_and_neutral(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    rows = [
+        ("2024-01-10", "DC_TAXONOMY_V1", "layer", "Buy", 5, 5, 0.02, 0.03, 0.10, 0.20, 82.0, 85.0, None, None, 0.0, None, 20.0, None, None, None, "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+        ("2024-01-10", "DC_TAXONOMY_V1", "layer", "Add", 5, 5, -0.03, 0.01, 0.10, 0.20, 70.0, 70.0, None, None, 0.0, None, 20.0, None, None, None, "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+        ("2024-01-10", "DC_TAXONOMY_V1", "layer", "Trim", 5, 5, 0.01, 0.01, 0.01, 0.02, 40.0, 70.0, None, None, -11.0, None, 20.0, None, None, None, "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+        ("2024-01-10", "DC_TAXONOMY_V1", "layer", "Exit", 5, 5, 0.01, 0.01, -0.01, 0.02, 70.0, 39.0, None, None, -16.0, None, 61.0, None, None, None, "PARTIAL_DATA", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+        ("2024-01-10", "DC_TAXONOMY_V1", "layer", "Neutral", 5, 5, None, None, None, None, None, None, None, None, None, None, None, None, None, None, "TOO_SMALL", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+    ]
+    for row in rows:
+        _insert_group_swing_row(analysis_db, row)
+
+    summary = persist_datacenter_group_timing_states(
+        analysis_db_path=analysis_db,
+        start_date="2024-01-10",
+        signal_version="DC_SWING_SIGNAL_V1",
+        run_id="timing-run",
+        created_at_utc="2026-05-17T12:00:00Z",
+        write_mode="update-existing",
+    )
+
+    fetched = _fetch_group_rows(analysis_db)
+    assert _group_row(fetched, "layer", "Buy", "2024-01-10")["timing_state"] == "BUY_ZONE"
+    assert _group_row(fetched, "layer", "Add", "2024-01-10")["timing_state"] == "ADD_ON_PULLBACK"
+    assert _group_row(fetched, "layer", "Trim", "2024-01-10")["timing_state"] == "TRIM_WATCH"
+    assert _group_row(fetched, "layer", "Exit", "2024-01-10")["timing_state"] == "EXIT_ZONE"
+    assert _group_row(fetched, "layer", "Neutral", "2024-01-10")["timing_state"] == "NEUTRAL"
+    assert summary["buy_zone_count"] == 1
+    assert summary["add_on_pullback_count"] == 1
+    assert summary["trim_watch_count"] == 1
+    assert summary["exit_zone_count"] == 1
+    assert summary["neutral_count"] == 1
+
+
+def test_timing_priority_order_and_null_handling(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    rows = [
+        ("2024-01-10", "DC_TAXONOMY_V1", "layer", "ExitWins", 5, 5, -0.01, -0.01, -0.01, 0.10, 30.0, 35.0, None, None, -16.0, None, 70.0, None, None, None, "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+        ("2024-01-10", "DC_TAXONOMY_V1", "layer", "TrimWins", 5, 5, -0.03, 0.01, 0.10, 0.20, 45.0, 70.0, None, None, -11.0, None, 20.0, None, None, None, "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+        ("2024-01-10", "DC_TAXONOMY_V1", "layer", "AddWins", 5, 5, -0.02, 0.02, 0.10, 0.20, 90.0, 90.0, None, None, 0.0, None, 20.0, None, None, None, "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+        ("2024-01-10", "DC_TAXONOMY_V1", "layer", "NullSafe", 5, 5, None, None, None, None, None, None, None, None, None, None, None, None, None, None, "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+    ]
+    for row in rows:
+        _insert_group_swing_row(analysis_db, row)
+
+    persist_datacenter_group_timing_states(
+        analysis_db_path=analysis_db,
+        start_date="2024-01-10",
+        signal_version="DC_SWING_SIGNAL_V1",
+        run_id="timing-run",
+        created_at_utc="2026-05-17T12:00:00Z",
+        write_mode="update-existing",
+    )
+
+    fetched = _fetch_group_rows(analysis_db)
+    assert _group_row(fetched, "layer", "ExitWins", "2024-01-10")["timing_state"] == "EXIT_ZONE"
+    assert _group_row(fetched, "layer", "TrimWins", "2024-01-10")["timing_state"] == "TRIM_WATCH"
+    assert _group_row(fetched, "layer", "AddWins", "2024-01-10")["timing_state"] == "ADD_ON_PULLBACK"
+    assert _group_row(fetched, "layer", "NullSafe", "2024-01-10")["timing_state"] == "NEUTRAL"
+
+
+def test_positive_states_require_ok_and_risk_states_can_trigger_when_not_ok(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    rows = [
+        ("2024-01-10", "DC_TAXONOMY_V1", "layer", "PositiveBlocked", 5, 5, 0.02, 0.03, 0.10, 0.20, 82.0, 85.0, None, None, 0.0, None, 20.0, None, None, None, "PARTIAL_DATA", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+        ("2024-01-10", "DC_TAXONOMY_V1", "layer", "RiskAllowed", 5, 5, None, None, -0.01, None, None, 39.0, None, None, None, None, 61.0, None, None, None, "NO_DATA", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+    ]
+    for row in rows:
+        _insert_group_swing_row(analysis_db, row)
+
+    persist_datacenter_group_timing_states(
+        analysis_db_path=analysis_db,
+        start_date="2024-01-10",
+        signal_version="DC_SWING_SIGNAL_V1",
+        run_id="timing-run",
+        created_at_utc="2026-05-17T12:00:00Z",
+        write_mode="update-existing",
+    )
+
+    fetched = _fetch_group_rows(analysis_db)
+    assert _group_row(fetched, "layer", "PositiveBlocked", "2024-01-10")["timing_state"] == "NEUTRAL"
+    assert _group_row(fetched, "layer", "RiskAllowed", "2024-01-10")["timing_state"] == "EXIT_ZONE"
+
+
+def test_timing_reason_is_deterministic_and_write_modes_are_scoped(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    rows = [
+        ("2024-01-10", "DC_TAXONOMY_V1", "layer", "Power", 5, 5, None, None, -0.01, 0.02, 45.0, 39.0, None, None, -16.0, 30.0, 61.0, "KEEP_RISK", "OLD", "OLD", "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+        ("2024-01-11", "DC_TAXONOMY_V1", "layer", "Power", 5, 5, 0.02, 0.03, 0.10, 0.20, 82.0, 85.0, None, None, 0.0, 30.0, 20.0, "KEEP_RISK", "OLD", "OLD", "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+        ("2024-01-10", "DC_TAXONOMY_V1", "layer", "Power", 5, 5, 0.02, 0.03, 0.10, 0.20, 82.0, 85.0, None, None, 0.0, 30.0, 20.0, "KEEP_RISK", "KEEP", "KEEP", "OK", "OTHER_VERSION", "seed", "2026-05-17T10:00:00Z"),
+    ]
+    for row in rows:
+        _insert_group_swing_row(analysis_db, row)
+
+    summary = persist_datacenter_group_timing_states(
+        analysis_db_path=analysis_db,
+        start_date="2024-01-10",
+        end_date="2024-01-11",
+        signal_version="DC_SWING_SIGNAL_V1",
+        run_id="timing-run",
+        created_at_utc="2026-05-17T12:00:00Z",
+        write_mode="replace-timing-range",
+        group_types=("layer",),
+    )
+
+    fetched = _fetch_group_rows(analysis_db)
+    day1 = _group_row(fetched, "layer", "Power", "2024-01-10")
+    day2 = _group_row(fetched, "layer", "Power", "2024-01-11")
+    other_version = [row for row in fetched if row["signal_version"] == "OTHER_VERSION"][0]
+    assert summary["cleared_count"] == 2
+    assert summary["updated_count"] == 2
+    assert day1["timing_reason"] == "EXIT_ZONE:ema20_breadth_delta_5d_lt_minus_15;return_20d_neg;pct_above_ema20_lt_40;weakness_breadth_gt_60"
+    assert day2["timing_state"] == "BUY_ZONE"
+    assert day1["overheat_risk_level"] == "KEEP_RISK"
+    assert other_version["timing_state"] == "KEEP"
