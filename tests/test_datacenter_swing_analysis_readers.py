@@ -132,6 +132,85 @@ def test_dow_reader_returns_no_dow_event_when_no_eligible_row_exists():
     assert snapshot.latest_structure_label is None
 
 
+def test_dow_reader_ignores_raw_h_and_falls_back_to_latest_valid_structure_label():
+    conn = _connect()
+    conn.execute(
+        """
+        CREATE TABLE stock_dow_structure_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            market TEXT NULL,
+            event_date TEXT NOT NULL,
+            confirmed_as_of_date TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            dow_label_high TEXT NULL,
+            dow_label_low TEXT NULL,
+            trend_state TEXT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO stock_dow_structure_events (
+            ticker, market, event_date, confirmed_as_of_date, event_type,
+            dow_label_high, dow_label_low, trend_state
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("AAA", "usa", "2024-01-09", "2024-01-10", "PIVOT_HIGH", "HH", None, "UP"),
+    )
+    conn.execute(
+        """
+        INSERT INTO stock_dow_structure_events (
+            ticker, market, event_date, confirmed_as_of_date, event_type,
+            dow_label_high, dow_label_low, trend_state
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("AAA", "usa", "2024-01-11", "2024-01-12", "PIVOT_HIGH", "H", None, "UP"),
+    )
+
+    snapshot = read_dow_structure_enrichment(conn, "AAA", "usa", "2024-01-12")
+
+    assert snapshot.source_status == "OK"
+    assert snapshot.latest_structure_label == "HH"
+    assert snapshot.latest_structure_confirmed_as_of_date == "2024-01-10"
+    assert snapshot.latest_event_date == "2024-01-09"
+
+
+def test_dow_reader_ignores_raw_l_and_returns_none_when_only_first_pivot_labels_exist():
+    conn = _connect()
+    conn.execute(
+        """
+        CREATE TABLE stock_dow_structure_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            market TEXT NULL,
+            event_date TEXT NOT NULL,
+            confirmed_as_of_date TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            dow_label_high TEXT NULL,
+            dow_label_low TEXT NULL,
+            trend_state TEXT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO stock_dow_structure_events (
+            ticker, market, event_date, confirmed_as_of_date, event_type,
+            dow_label_high, dow_label_low, trend_state
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("AAA", "usa", "2024-01-11", "2024-01-12", "PIVOT_LOW", None, "L", "NEUTRAL"),
+    )
+
+    snapshot = read_dow_structure_enrichment(conn, "AAA", "usa", "2024-01-12")
+
+    assert snapshot.source_status == "NO_DOW_EVENT"
+    assert snapshot.latest_structure_label is None
+    assert snapshot.latest_structure_confirmed_as_of_date is None
+    assert snapshot.latest_event_date is None
+
+
 def test_divergence_reader_reads_latest_row_up_to_as_of_date_and_ignores_future_rows():
     conn = _connect()
     conn.execute(

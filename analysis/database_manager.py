@@ -685,6 +685,7 @@ class DatabaseManager:
                     pullback_signal INTEGER,
                     exit_risk_signal INTEGER,
                     exit_reason TEXT,
+                    exit_risk_severity TEXT,
                     price_data_status TEXT,
                     signal_version TEXT NOT NULL,
                     run_id TEXT NOT NULL,
@@ -729,6 +730,12 @@ class DatabaseManager:
                 ON dc_ticker_swing_signal_daily (signal_date, exit_risk_signal)
                 """
             )
+            cursor.execute("PRAGMA table_info(dc_ticker_swing_signal_daily)")
+            ticker_swing_columns = {str(row[1]) for row in cursor.fetchall()}
+            if "exit_risk_severity" not in ticker_swing_columns:
+                cursor.execute(
+                    "ALTER TABLE dc_ticker_swing_signal_daily ADD COLUMN exit_risk_severity TEXT"
+                )
 
             cursor.execute(
                 """

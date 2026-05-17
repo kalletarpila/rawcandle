@@ -52,6 +52,13 @@ TREND_PRIORITY = {
     None: 3,
 }
 
+EXIT_RISK_SEVERITY_PRIORITY = {
+    "HIGH": 0,
+    "MEDIUM": 1,
+    "LOW": 2,
+    None: 3,
+}
+
 
 def _parse_iso_date(value: str) -> str:
     try:
@@ -423,6 +430,7 @@ def build_markdown_daily_swing_report(
         ticker_rows,
         predicate=lambda row: row.get("exit_risk_signal") == 1,
         sort_key=lambda row: (
+            EXIT_RISK_SEVERITY_PRIORITY.get(row.get("exit_risk_severity"), 3),
             _float_value(row.get("return_10d")) if row.get("return_10d") is not None else float("inf"),
             _float_value(row.get("distance_to_ema20_pct")) if row.get("distance_to_ema20_pct") is not None else float("inf"),
             str(row.get("ticker") or ""),
@@ -610,6 +618,7 @@ def build_markdown_daily_swing_report(
                 "distance_to_ema20_pct",
                 "latest_structure_label",
                 "exit_reason",
+                "exit_risk_severity",
                 "bearish_candle_signal",
                 "bearish_divergence_signal",
                 "hidden_bearish_divergence_signal",

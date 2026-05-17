@@ -74,6 +74,9 @@ TICKER_SCANNER_SUMMARY_ORDER = [
     "conservative_ema20_pullback_count",
     "pullback_count",
     "exit_risk_count",
+    "high_exit_risk_count",
+    "medium_exit_risk_count",
+    "low_exit_risk_count",
     "validation_status",
 ]
 
@@ -123,6 +126,7 @@ class DatacenterTickerSwingSnapshotRow:
     pullback_signal: int | None
     exit_risk_signal: int | None
     exit_reason: str | None
+    exit_risk_severity: str | None
     price_data_status: str | None
     signal_version: str
     run_id: str
@@ -493,6 +497,7 @@ def _serialize_row(row: DatacenterTickerSwingSnapshotRow) -> tuple[object, ...]:
         row.pullback_signal,
         row.exit_risk_signal,
         row.exit_reason,
+        row.exit_risk_severity,
         row.price_data_status,
         row.signal_version,
         row.run_id,
@@ -621,6 +626,7 @@ def build_ticker_swing_snapshot_rows(
                     pullback_signal=None,
                     exit_risk_signal=None,
                     exit_reason=None,
+                    exit_risk_severity=None,
                     price_data_status=metrics.price_data_status,
                     signal_version=signal_version,
                     run_id=run_id,
@@ -708,9 +714,9 @@ def write_ticker_swing_snapshot_rows(
                         hidden_bullish_divergence_signal, hidden_bearish_divergence_signal,
                         bullish_candle_signal, bearish_candle_signal, breakout_signal,
                         fast_ema10_pullback_signal, conservative_ema20_pullback_signal,
-                        pullback_signal, exit_risk_signal, exit_reason, price_data_status,
+                        pullback_signal, exit_risk_signal, exit_reason, exit_risk_severity, price_data_status,
                         signal_version, run_id, created_at_utc
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     _serialize_row(row),
                 )
@@ -750,9 +756,9 @@ def write_ticker_swing_snapshot_rows(
                             hidden_bullish_divergence_signal, hidden_bearish_divergence_signal,
                             bullish_candle_signal, bearish_candle_signal, breakout_signal,
                             fast_ema10_pullback_signal, conservative_ema20_pullback_signal,
-                            pullback_signal, exit_risk_signal, exit_reason, price_data_status,
+                            pullback_signal, exit_risk_signal, exit_reason, exit_risk_severity, price_data_status,
                             signal_version, run_id, created_at_utc
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         _serialize_row(row),
                     )
@@ -775,9 +781,9 @@ def write_ticker_swing_snapshot_rows(
                             hidden_bullish_divergence_signal, hidden_bearish_divergence_signal,
                             bullish_candle_signal, bearish_candle_signal, breakout_signal,
                             fast_ema10_pullback_signal, conservative_ema20_pullback_signal,
-                            pullback_signal, exit_risk_signal, exit_reason, price_data_status,
+                            pullback_signal, exit_risk_signal, exit_reason, exit_risk_severity, price_data_status,
                             signal_version, run_id, created_at_utc
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(signal_date, taxonomy_version, ticker, signal_version)
                         DO UPDATE SET
                             primary_layer = excluded.primary_layer,
@@ -818,6 +824,7 @@ def write_ticker_swing_snapshot_rows(
                             pullback_signal = excluded.pullback_signal,
                             exit_risk_signal = excluded.exit_risk_signal,
                             exit_reason = excluded.exit_reason,
+                            exit_risk_severity = excluded.exit_risk_severity,
                             price_data_status = excluded.price_data_status,
                             run_id = excluded.run_id,
                             created_at_utc = excluded.created_at_utc
@@ -976,6 +983,7 @@ def _classify_scanner_fields(
     if subindustry_state == "TRIM_WATCH" and close is not None and ma10 is not None and close < ma10:
         exit_reasons.append("trim_watch_close_below_ma10")
     exit_risk_signal = int(bool(exit_reasons))
+    exit_reason = ";".join(exit_reasons) if exit_reasons else None
 
     return {
         "breakout_signal": breakout_signal,
@@ -983,8 +991,32 @@ def _classify_scanner_fields(
         "conservative_ema20_pullback_signal": conservative_ema20_pullback_signal,
         "pullback_signal": pullback_signal,
         "exit_risk_signal": exit_risk_signal,
-        "exit_reason": ";".join(exit_reasons) if exit_reasons else None,
+        "exit_reason": exit_reason,
+        "exit_risk_severity": classify_exit_risk_severity(exit_reason) if exit_risk_signal == 1 else None,
     }
+
+
+def classify_exit_risk_severity(exit_reason: str | None) -> str | None:
+    if exit_reason is None:
+        return None
+    reason_codes = [code.strip() for code in exit_reason.split(";") if code.strip()]
+    if not reason_codes:
+        return None
+    reason_set = set(reason_codes)
+    if (
+        "latest_structure_label_ll" in reason_set
+        or "return_10d_lt_minus_8pct" in reason_set
+        or ("subindustry_exit_zone" in reason_set and "close_below_ema20" in reason_set)
+        or len(reason_codes) >= 3
+    ):
+        return "HIGH"
+    if (
+        "subindustry_exit_zone" in reason_set
+        or "trim_watch_close_below_ma10" in reason_set
+        or "close_below_ema20" in reason_set
+    ):
+        return "MEDIUM"
+    return "LOW"
 
 
 def build_ticker_scanner_updates(
@@ -1045,8 +1077,12 @@ def build_ticker_scanner_updates(
                     "existing_pullback_signal": row["pullback_signal"],
                     "existing_exit_risk_signal": row["exit_risk_signal"],
                     "existing_exit_reason": row["exit_reason"],
+                    "existing_exit_risk_severity": row["exit_risk_severity"],
                 }
             )
+    high_exit_count = sum(1 for row in updates if row["exit_risk_severity"] == "HIGH")
+    medium_exit_count = sum(1 for row in updates if row["exit_risk_severity"] == "MEDIUM")
+    low_exit_count = sum(1 for row in updates if row["exit_risk_severity"] == "LOW")
     return updates, {
         "missing_base_row_count": 0,
         "breakout_count": breakout_count,
@@ -1054,6 +1090,9 @@ def build_ticker_scanner_updates(
         "conservative_ema20_pullback_count": conservative_count,
         "pullback_count": pullback_count,
         "exit_risk_count": exit_count,
+        "high_exit_risk_count": high_exit_count,
+        "medium_exit_risk_count": medium_exit_count,
+        "low_exit_risk_count": low_exit_count,
     }
 
 
@@ -1086,7 +1125,8 @@ def write_ticker_scanner_updates(
                     conservative_ema20_pullback_signal = NULL,
                     pullback_signal = NULL,
                     exit_risk_signal = NULL,
-                    exit_reason = NULL
+                    exit_reason = NULL,
+                    exit_risk_severity = NULL
                 WHERE signal_date >= ?
                   AND signal_date <= ?
                   AND signal_version = ?
@@ -1105,6 +1145,7 @@ def write_ticker_scanner_updates(
                 or row["existing_pullback_signal"] != row["pullback_signal"]
                 or row["existing_exit_risk_signal"] != row["exit_risk_signal"]
                 or row["existing_exit_reason"] != row["exit_reason"]
+                or row["existing_exit_risk_severity"] != row["exit_risk_severity"]
             ]
         for row in filtered_updates:
             cursor.execute(
@@ -1116,6 +1157,7 @@ def write_ticker_scanner_updates(
                     pullback_signal = ?,
                     exit_risk_signal = ?,
                     exit_reason = ?,
+                    exit_risk_severity = ?,
                     run_id = ?,
                     created_at_utc = ?
                 WHERE signal_date = ?
@@ -1130,6 +1172,7 @@ def write_ticker_scanner_updates(
                     row["pullback_signal"],
                     row["exit_risk_signal"],
                     row["exit_reason"],
+                    row["exit_risk_severity"],
                     row["run_id"],
                     row["created_at_utc"],
                     row["signal_date"],

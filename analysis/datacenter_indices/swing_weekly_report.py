@@ -9,6 +9,7 @@ from typing import Sequence
 from .swing_daily_report import (
     DEFAULT_OHLC_CALC_VERSION,
     DEFAULT_SIGNAL_VERSION,
+    EXIT_RISK_SEVERITY_PRIORITY,
     OVERHEAT_PRIORITY,
     TREND_PRIORITY,
     _check_required_tables,
@@ -292,6 +293,7 @@ def _build_repeated_ticker_rows(
             "last_volume_vs_avg20": last_row.get("volume_vs_avg20"),
             "last_latest_structure_label": last_row.get("latest_structure_label"),
             "last_exit_reason": last_row.get("exit_reason"),
+            "last_exit_risk_severity": last_row.get("exit_risk_severity"),
             "last_bullish_candle_signal": last_row.get("bullish_candle_signal"),
             "last_bearish_candle_signal": last_row.get("bearish_candle_signal"),
             "last_bullish_divergence_signal": last_row.get("bullish_divergence_signal"),
@@ -643,6 +645,7 @@ def build_markdown_weekly_swing_report(
     exit_rows.sort(
         key=lambda row: (
             -int(row["exit_risk_days"]),
+            EXIT_RISK_SEVERITY_PRIORITY.get(row.get("last_exit_risk_severity"), 3),
             _float_value(row.get("last_return_10d")) if row.get("last_return_10d") is not None else float("inf"),
             _float_value(row.get("last_distance_to_ema20_pct")) if row.get("last_distance_to_ema20_pct") is not None else float("inf"),
             str(row.get("ticker") or ""),
@@ -664,6 +667,7 @@ def build_markdown_weekly_swing_report(
                 "last_distance_to_ema20_pct",
                 "last_latest_structure_label",
                 "last_exit_reason",
+                "last_exit_risk_severity",
                 "last_bearish_candle_signal",
                 "last_bearish_divergence_signal",
                 "last_hidden_bearish_divergence_signal",

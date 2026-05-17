@@ -85,6 +85,20 @@ def _insert_synthetic_row(path, row):
         conn.commit()
 
 
+def _update_ticker_exit_risk_severity(path, *, ticker: str, signal_date: str, severity: str | None):
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET exit_risk_severity = ?
+            WHERE ticker = ?
+              AND signal_date = ?
+            """,
+            (severity, ticker, signal_date),
+        )
+        conn.commit()
+
+
 def _seed_weekly_report_db(path):
     _create_analysis_db(path)
     ai_timing = {
@@ -262,6 +276,13 @@ def _seed_second_taxonomy_weekly_rows(path):
 def test_finds_last_five_valid_signal_dates_and_generates_report(tmp_path):
     analysis_db = tmp_path / "analysis.db"
     _seed_weekly_report_db(analysis_db)
+    for signal_date in ("2024-01-02", "2024-01-03", "2024-01-08", "2024-01-10"):
+        _update_ticker_exit_risk_severity(
+            analysis_db,
+            ticker="CCC",
+            signal_date=signal_date,
+            severity="HIGH",
+        )
 
     report_data = load_weekly_swing_report_data(
         analysis_db_path=analysis_db,
@@ -298,6 +319,47 @@ def test_finds_last_five_valid_signal_dates_and_generates_report(tmp_path):
     assert "| BBB | 3 | 2 | 2 | 2024-01-03 | 2024-01-10 |" in markdown
     assert "| CCC | 4 | 2024-01-02 | 2024-01-10 |" in markdown
     assert "close_below_ema20;latest_structure_label_ll" in markdown
+    assert "last_exit_risk_severity" in markdown
+    assert "HIGH" in markdown
+
+
+def test_weekly_exit_risk_section_sorts_by_severity_after_day_count(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        for signal_date in ("2024-01-02", "2024-01-03", "2024-01-08", "2024-01-10"):
+            conn.execute(
+                """
+                UPDATE dc_ticker_swing_signal_daily
+                SET exit_risk_severity = 'HIGH'
+                WHERE ticker = 'CCC'
+                  AND signal_date = ?
+                """,
+                (signal_date,),
+            )
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET exit_risk_signal = 1,
+                exit_reason = 'subindustry_exit_zone',
+                exit_risk_severity = 'MEDIUM'
+            WHERE ticker = 'AAA'
+              AND signal_date IN ('2024-01-08', '2024-01-10')
+            """
+        )
+        conn.commit()
+
+    markdown = build_markdown_weekly_swing_report(
+        load_weekly_swing_report_data(
+            analysis_db_path=analysis_db,
+            end_date="2024-01-10",
+        ),
+        generated_at_utc="2026-05-17T12:00:00Z",
+        top_n=20,
+    )
+    ccc_index = markdown.index("| CCC | 4 | 2024-01-02 | 2024-01-10 |")
+    aaa_index = markdown.index("| AAA | 2 | 2024-01-08 | 2024-01-10 |")
+    assert ccc_index < aaa_index
 
 
 def test_marks_incomplete_window_when_fewer_than_five_valid_dates_exist(tmp_path):

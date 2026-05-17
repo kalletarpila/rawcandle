@@ -61,7 +61,7 @@ def test_database_manager_initializes_dc_ticker_swing_signal_daily_table(tmp_pat
     assert _table_exists(db_path, table_name)
 
     columns = _table_columns(db_path, table_name)
-    assert {"signal_date", "taxonomy_version", "ticker", "breakout_signal", "signal_version"}.issubset(columns)
+    assert {"signal_date", "taxonomy_version", "ticker", "breakout_signal", "exit_risk_severity", "signal_version"}.issubset(columns)
 
     assert _primary_key_columns(db_path, table_name) == [
         "signal_date",
@@ -79,6 +79,69 @@ def test_database_manager_initializes_dc_ticker_swing_signal_daily_table(tmp_pat
         "idx_dc_ticker_swing_signal_daily_pullback",
         "idx_dc_ticker_swing_signal_daily_exit_risk",
     }.issubset(indexes)
+
+
+def test_database_manager_adds_exit_risk_severity_to_existing_ticker_swing_table(tmp_path):
+    db_path = tmp_path / "analysis.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE dc_ticker_swing_signal_daily (
+                signal_date TEXT NOT NULL,
+                taxonomy_version TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                primary_layer TEXT,
+                primary_subindustry TEXT,
+                close REAL,
+                volume REAL,
+                return_5d REAL,
+                return_10d REAL,
+                return_20d REAL,
+                return_60d REAL,
+                ma10 REAL,
+                ema10 REAL,
+                ema20 REAL,
+                distance_to_ma10_pct REAL,
+                distance_to_ema10_pct REAL,
+                distance_to_ema20_pct REAL,
+                above_ma10 INTEGER,
+                above_ema10 INTEGER,
+                above_ema20 INTEGER,
+                ema10_slope_positive INTEGER,
+                ema20_slope_positive INTEGER,
+                ema10_slope_lookback INTEGER,
+                ema20_slope_lookback INTEGER,
+                highest_close_20d REAL,
+                volume_avg_20d REAL,
+                volume_vs_avg20 REAL,
+                latest_structure_label TEXT,
+                latest_structure_confirmed_as_of_date TEXT,
+                bullish_divergence_signal INTEGER,
+                bearish_divergence_signal INTEGER,
+                hidden_bullish_divergence_signal INTEGER,
+                hidden_bearish_divergence_signal INTEGER,
+                bullish_candle_signal INTEGER,
+                bearish_candle_signal INTEGER,
+                breakout_signal INTEGER,
+                fast_ema10_pullback_signal INTEGER,
+                conservative_ema20_pullback_signal INTEGER,
+                pullback_signal INTEGER,
+                exit_risk_signal INTEGER,
+                exit_reason TEXT,
+                price_data_status TEXT,
+                signal_version TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                created_at_utc TEXT NOT NULL,
+                PRIMARY KEY (signal_date, taxonomy_version, ticker, signal_version)
+            )
+            """
+        )
+        conn.commit()
+
+    DatabaseManager(str(db_path)).close()
+
+    columns = _table_columns(db_path, "dc_ticker_swing_signal_daily")
+    assert "exit_risk_severity" in columns
 
 
 def test_database_manager_initializes_dc_group_swing_signal_daily_table(tmp_path):

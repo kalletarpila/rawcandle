@@ -17,6 +17,8 @@ CANDLE_STATUS_OK = "OK"
 CANDLE_STATUS_NO_CANDLE_FINDING = "NO_CANDLE_FINDING"
 CANDLE_STATUS_MISSING_TABLE = "MISSING_TABLE"
 
+VALID_DOW_STRUCTURE_LABELS = frozenset({"HH", "HL", "LH", "LL"})
+
 
 BULLISH_PATTERN_NAMES = frozenset(
     {
@@ -128,14 +130,19 @@ def _resolve_label(row: sqlite3.Row) -> str | None:
     event_type = row["event_type"]
     if label_high and label_low:
         if event_type == "PIVOT_HIGH":
-            return str(label_high)
+            label = str(label_high)
+            return label if label in VALID_DOW_STRUCTURE_LABELS else None
         if event_type == "PIVOT_LOW":
-            return str(label_low)
-        return str(label_high)
+            label = str(label_low)
+            return label if label in VALID_DOW_STRUCTURE_LABELS else None
+        label = str(label_high)
+        return label if label in VALID_DOW_STRUCTURE_LABELS else None
     if label_high:
-        return str(label_high)
+        label = str(label_high)
+        return label if label in VALID_DOW_STRUCTURE_LABELS else None
     if label_low:
-        return str(label_low)
+        label = str(label_low)
+        return label if label in VALID_DOW_STRUCTURE_LABELS else None
     return None
 
 
@@ -179,7 +186,10 @@ def read_dow_structure_enrichment(
         FROM stock_dow_structure_events
         WHERE ticker = ?
           AND confirmed_as_of_date <= ?
-          AND (dow_label_high IS NOT NULL OR dow_label_low IS NOT NULL)
+          AND (
+                dow_label_high IN ('HH', 'HL', 'LH', 'LL')
+                OR dow_label_low IN ('HH', 'HL', 'LH', 'LL')
+          )
           {market_sql}
         ORDER BY confirmed_as_of_date DESC, event_date DESC, id DESC
         LIMIT 1
@@ -417,7 +427,10 @@ def read_batch_dow_structure_enrichment(
             FROM stock_dow_structure_events
             WHERE ticker IN ({placeholders})
               AND confirmed_as_of_date <= ?
-              AND (dow_label_high IS NOT NULL OR dow_label_low IS NOT NULL)
+              AND (
+                    dow_label_high IN ('HH', 'HL', 'LH', 'LL')
+                    OR dow_label_low IN ('HH', 'HL', 'LH', 'LL')
+              )
               {market_sql}
             ORDER BY ticker ASC, confirmed_as_of_date DESC, event_date DESC, id DESC
             """,

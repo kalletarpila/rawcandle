@@ -7,6 +7,7 @@ import pytest
 
 from analysis.database_manager import DatabaseManager
 from analysis.datacenter_indices.swing_ticker_persistence import (
+    classify_exit_risk_severity,
     load_bounded_ticker_ohlcv_history,
     load_bounded_ticker_ohlcv_histories,
     persist_datacenter_ticker_scanner_signals,
@@ -428,6 +429,20 @@ DC_TAXONOMY_V1,AAA,Power,UPS,CORE,1,1.0,
     assert row["pullback_signal"] is None
     assert row["exit_risk_signal"] is None
     assert row["exit_reason"] is None
+    assert row["exit_risk_severity"] is None
+
+
+def test_classify_exit_risk_severity_is_deterministic():
+    assert classify_exit_risk_severity(None) is None
+    assert classify_exit_risk_severity("") is None
+    assert classify_exit_risk_severity("subindustry_exit_zone") == "MEDIUM"
+    assert classify_exit_risk_severity("close_below_ema20") == "MEDIUM"
+    assert classify_exit_risk_severity("trim_watch_close_below_ma10") == "MEDIUM"
+    assert classify_exit_risk_severity("latest_structure_label_ll") == "HIGH"
+    assert classify_exit_risk_severity("return_10d_lt_minus_8pct") == "HIGH"
+    assert classify_exit_risk_severity("close_below_ema20;subindustry_exit_zone") == "HIGH"
+    assert classify_exit_risk_severity("subindustry_exit_zone;custom_reason") == "MEDIUM"
+    assert classify_exit_risk_severity("custom_reason") == "LOW"
 
 
 def test_insert_missing_skips_existing_primary_key_rows(tmp_path):
@@ -827,10 +842,13 @@ def test_exit_risk_rules_and_reason_order(tmp_path):
     rows_after = {row["ticker"]: row for row in _fetch_ticker_rows(analysis_db)}
     assert rows_after["AAA"]["exit_risk_signal"] == 1
     assert rows_after["AAA"]["exit_reason"] == "close_below_ema20;return_10d_lt_minus_8pct;latest_structure_label_ll;subindustry_exit_zone"
+    assert rows_after["AAA"]["exit_risk_severity"] == "HIGH"
     assert rows_after["BBB"]["exit_risk_signal"] == 1
     assert rows_after["BBB"]["exit_reason"] == "close_below_ema20;trim_watch_close_below_ma10"
+    assert rows_after["BBB"]["exit_risk_severity"] == "MEDIUM"
     assert rows_after["CCC"]["exit_risk_signal"] == 0
     assert rows_after["CCC"]["exit_reason"] is None
+    assert rows_after["CCC"]["exit_risk_severity"] is None
 
 
 def test_scanner_write_modes_are_scoped(tmp_path):
@@ -905,4 +923,5 @@ def test_scanner_write_modes_are_scoped(tmp_path):
     assert summary["cleared_count"] == 2
     assert summary["updated_count"] == 2
     assert all(row["breakout_signal"] in (0, 1) for row in current_rows)
+    assert all(row["exit_risk_severity"] in ("HIGH", "MEDIUM", "LOW", None) for row in current_rows)
     assert other_row["breakout_signal"] == 7

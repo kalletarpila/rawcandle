@@ -76,6 +76,20 @@ def _insert_synthetic_row(path, row):
         conn.commit()
 
 
+def _update_ticker_exit_risk_severity(path, *, ticker: str, signal_date: str, severity: str | None):
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET exit_risk_severity = ?
+            WHERE ticker = ?
+              AND signal_date = ?
+            """,
+            (severity, ticker, signal_date),
+        )
+        conn.commit()
+
+
 def _seed_report_db(path, *, with_ecosystem: bool = True):
     _create_analysis_db(path)
     group_rows = [
@@ -237,6 +251,12 @@ def _seed_second_taxonomy_daily_rows(path):
 def test_generates_markdown_report_with_required_sections_and_filters(tmp_path):
     analysis_db = tmp_path / "analysis.db"
     _seed_report_db(analysis_db)
+    _update_ticker_exit_risk_severity(
+        analysis_db,
+        ticker="CCC",
+        signal_date="2024-01-10",
+        severity="HIGH",
+    )
 
     report_data = load_daily_swing_report_data(
         analysis_db_path=analysis_db,
@@ -278,8 +298,49 @@ def test_generates_markdown_report_with_required_sections_and_filters(tmp_path):
     assert "| AAA | Infrastructure | AI Chips |" in markdown
     assert "| BBB | Infrastructure | Cloud |" in markdown
     assert "close_below_ema20;latest_structure_label_ll" in markdown
+    assert "exit_risk_severity" in markdown
+    assert "HIGH" in markdown
     assert "synthetic_ohlc_rows_missing_relative_close_20" in markdown
     assert "ticker_rows_with_scanner_fields_null" in markdown
+
+
+def test_daily_exit_risk_section_sorts_by_severity_before_return_and_distance(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_report_db(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET exit_risk_signal = 1,
+                exit_reason = 'subindustry_exit_zone',
+                exit_risk_severity = 'MEDIUM'
+            WHERE ticker = 'AAA'
+              AND signal_date = '2024-01-10'
+            """
+        )
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET exit_risk_severity = 'HIGH'
+            WHERE ticker = 'CCC'
+              AND signal_date = '2024-01-10'
+            """
+        )
+        conn.commit()
+
+    markdown = build_markdown_daily_swing_report(
+        load_daily_swing_report_data(
+            analysis_db_path=analysis_db,
+            signal_date="2024-01-10",
+        ),
+        generated_at_utc="2026-05-17T12:00:00Z",
+        top_n=20,
+    )
+    section_start = markdown.index("## 12. Exit-Risk Ticker Scanner")
+    exit_section = markdown[section_start:]
+    ccc_index = exit_section.index("| CCC | Infrastructure | Storage |")
+    aaa_index = exit_section.index("| AAA | Infrastructure | AI Chips |")
+    assert ccc_index < aaa_index
 
 
 def test_report_handles_missing_ecosystem_and_empty_sections_with_stable_messages(tmp_path):
