@@ -34,6 +34,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--start-date", type=str, required=False, help="Range start date (YYYY-MM-DD) for scanner-only updates")
     parser.add_argument("--end-date", type=str, required=False, help="Range end date (YYYY-MM-DD)")
     parser.add_argument("--market", type=str, default=None, help="Optional market value to filter from osakedata")
+    parser.add_argument("--taxonomy-version", type=str, default=None, help="Optional taxonomy version scope for scanner-only updates")
     parser.add_argument("--signal-version", type=str, default=DEFAULT_SIGNAL_VERSION, help="Signal version to persist")
     parser.add_argument("--run-id", type=str, default=None, help="Optional explicit run identifier")
     parser.add_argument("--created-at-utc", type=str, default=None, help="Optional explicit created_at_utc timestamp (YYYY-MM-DDTHH:MM:SSZ)")
@@ -57,16 +58,19 @@ def main(argv: list[str] | None = None) -> int:
                 start_date=selected_start_date,
                 end_date=selected_end_date,
                 signal_version=args.signal_version,
+                taxonomy_version=args.taxonomy_version,
             )
             summary = persist_datacenter_ticker_scanner_signals(
                 analysis_db_path=args.analysis_db,
                 start_date=selected_dates[0] if selected_dates else selected_start_date,
                 end_date=selected_dates[-1] if selected_dates else selected_end_date,
                 signal_version=args.signal_version,
+                taxonomy_version=args.taxonomy_version,
                 run_id=args.run_id,
                 created_at_utc=args.created_at_utc,
                 write_mode=args.write_mode,
             )
+            summary["taxonomy_version"] = args.taxonomy_version if args.taxonomy_version is not None else "ALL"
             if args.start_date is not None or args.end_date is not None:
                 requested_start_date = selected_start_date
                 requested_end_date = selected_end_date

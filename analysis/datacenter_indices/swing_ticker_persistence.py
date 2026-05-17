@@ -67,6 +67,7 @@ TICKER_SCANNER_SUMMARY_ORDER = [
     "requested_end_date",
     "valid_trading_dates",
     "skipped_non_trading_dates",
+    "taxonomy_version",
     "write_mode",
     "signal_version",
     "run_id",
@@ -1236,21 +1237,28 @@ def _load_existing_ticker_rows(
     start_date: str,
     end_date: str,
     signal_version: str,
+    taxonomy_version: str | None = None,
 ) -> list[sqlite3.Row]:
     db_manager = DatabaseManager(str(analysis_db_path))
     conn = db_manager.get_connection()
     conn.row_factory = sqlite3.Row
     try:
+        params: list[object] = [start_date, end_date, signal_version]
+        taxonomy_sql = ""
+        if taxonomy_version is not None:
+            taxonomy_sql = " AND taxonomy_version = ?"
+            params.append(taxonomy_version)
         return conn.execute(
-            """
+            f"""
             SELECT *
             FROM dc_ticker_swing_signal_daily
             WHERE signal_date >= ?
               AND signal_date <= ?
               AND signal_version = ?
+              {taxonomy_sql}
             ORDER BY signal_date ASC, taxonomy_version ASC, ticker ASC
             """,
-            (start_date, end_date, signal_version),
+            params,
         ).fetchall()
     finally:
         db_manager.close()
@@ -1405,6 +1413,7 @@ def build_ticker_scanner_updates(
     start_date: str,
     end_date: str,
     signal_version: str,
+    taxonomy_version: str | None,
     run_id: str,
     created_at_utc: str,
 ) -> tuple[list[dict[str, object]], dict[str, int | str]]:
@@ -1419,6 +1428,7 @@ def build_ticker_scanner_updates(
         start_date=normalized_start_date,
         end_date=normalized_end_date,
         signal_version=signal_version,
+        taxonomy_version=taxonomy_version,
     )
     breakout_count = 0
     fast_count = 0
@@ -1465,6 +1475,7 @@ def build_ticker_scanner_updates(
     low_exit_count = sum(1 for row in updates if row["exit_risk_severity"] == "LOW")
     return updates, {
         "missing_base_row_count": 0,
+        "taxonomy_version": taxonomy_version if taxonomy_version is not None else "ALL",
         "breakout_count": breakout_count,
         "fast_ema10_pullback_count": fast_count,
         "conservative_ema20_pullback_count": conservative_count,
@@ -1483,6 +1494,7 @@ def write_ticker_scanner_updates(
     start_date: str,
     end_date: str,
     signal_version: str,
+    taxonomy_version: str | None,
     write_mode: str,
 ) -> dict[str, int]:
     normalized_start_date = _parse_iso_date(start_date, "start_date")
@@ -1497,8 +1509,13 @@ def write_ticker_scanner_updates(
     try:
         cursor.execute("BEGIN")
         if write_mode == "replace-scanner-range":
+            params: list[object] = [normalized_start_date, normalized_end_date, signal_version]
+            taxonomy_sql = ""
+            if taxonomy_version is not None:
+                taxonomy_sql = " AND taxonomy_version = ?"
+                params.append(taxonomy_version)
             cursor.execute(
-                """
+                f"""
                 UPDATE dc_ticker_swing_signal_daily
                 SET breakout_signal = NULL,
                     fast_ema10_pullback_signal = NULL,
@@ -1510,8 +1527,9 @@ def write_ticker_scanner_updates(
                 WHERE signal_date >= ?
                   AND signal_date <= ?
                   AND signal_version = ?
+                  {taxonomy_sql}
                 """,
-                (normalized_start_date, normalized_end_date, signal_version),
+                params,
             )
             cleared_count = cursor.rowcount
             filtered_updates = list(updates)
@@ -1641,6 +1659,7 @@ def persist_datacenter_ticker_scanner_signals(
     start_date: str,
     end_date: str | None = None,
     signal_version: str = DEFAULT_SIGNAL_VERSION,
+    taxonomy_version: str | None = None,
     run_id: str | None = None,
     created_at_utc: str | None = None,
     write_mode: str = "update-existing",
@@ -1664,6 +1683,7 @@ def persist_datacenter_ticker_scanner_signals(
         start_date=normalized_start_date,
         end_date=normalized_end_date,
         signal_version=signal_version,
+        taxonomy_version=taxonomy_version,
         run_id=resolved_run_id,
         created_at_utc=resolved_created_at_utc,
     )
@@ -1673,11 +1693,13 @@ def persist_datacenter_ticker_scanner_signals(
         start_date=normalized_start_date,
         end_date=normalized_end_date,
         signal_version=signal_version,
+        taxonomy_version=taxonomy_version,
         write_mode=write_mode,
     )
     return {
         "start_date": normalized_start_date,
         "end_date": normalized_end_date,
+        "taxonomy_version": taxonomy_version if taxonomy_version is not None else "ALL",
         "write_mode": write_mode,
         "signal_version": signal_version,
         "run_id": resolved_run_id,
