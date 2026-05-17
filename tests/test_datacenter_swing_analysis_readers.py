@@ -64,6 +64,8 @@ def test_dow_reader_enforces_confirmed_as_of_date_and_ignores_future_confirmed_r
     assert snapshot.latest_structure_confirmed_as_of_date == "2024-01-10"
     assert snapshot.latest_event_date == "2024-01-10"
     assert snapshot.trend_state == "UP"
+    assert snapshot.latest_bos_event_type is None
+    assert snapshot.latest_reset_event_date is None
 
 
 def test_dow_reader_returns_latest_available_label_deterministically():
@@ -211,6 +213,74 @@ def test_dow_reader_ignores_raw_l_and_returns_none_when_only_first_pivot_labels_
     assert snapshot.latest_event_date is None
 
 
+def test_dow_reader_reads_latest_bos_and_reset_context_no_lookahead_safely():
+    conn = _connect()
+    conn.execute(
+        """
+        CREATE TABLE stock_dow_structure_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            market TEXT NULL,
+            event_date TEXT NOT NULL,
+            confirmed_as_of_date TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            dow_label_high TEXT NULL,
+            dow_label_low TEXT NULL,
+            trend_state TEXT NULL,
+            reset_reason TEXT NULL,
+            structure_epoch_id INTEGER NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO stock_dow_structure_events (
+            ticker, market, event_date, confirmed_as_of_date, event_type,
+            dow_label_high, dow_label_low, trend_state, reset_reason, structure_epoch_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("AAA", "usa", "2024-01-09", "2024-01-10", "PIVOT_HIGH", "HH", None, "UP", None, 1),
+    )
+    conn.execute(
+        """
+        INSERT INTO stock_dow_structure_events (
+            ticker, market, event_date, confirmed_as_of_date, event_type,
+            dow_label_high, dow_label_low, trend_state, reset_reason, structure_epoch_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("AAA", "usa", "2024-01-11", "2024-01-12", "BOS_DOWN", None, None, "UP", None, 1),
+    )
+    conn.execute(
+        """
+        INSERT INTO stock_dow_structure_events (
+            ticker, market, event_date, confirmed_as_of_date, event_type,
+            dow_label_high, dow_label_low, trend_state, reset_reason, structure_epoch_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("AAA", "usa", "2024-01-13", "2024-01-14", "RESET", None, None, "NEUTRAL", "DOUBLE_BOS_DOWN", 2),
+    )
+    conn.execute(
+        """
+        INSERT INTO stock_dow_structure_events (
+            ticker, market, event_date, confirmed_as_of_date, event_type,
+            dow_label_high, dow_label_low, trend_state, reset_reason, structure_epoch_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("AAA", "usa", "2024-01-15", "2024-01-16", "BOS_UP", None, None, "DOWN", None, 3),
+    )
+
+    snapshot = read_dow_structure_enrichment(conn, "AAA", "usa", "2024-01-14")
+
+    assert snapshot.trend_state == "NEUTRAL"
+    assert snapshot.structure_epoch_id == 2
+    assert snapshot.latest_bos_event_type == "BOS_DOWN"
+    assert snapshot.latest_bos_event_date == "2024-01-11"
+    assert snapshot.latest_bos_confirmed_as_of_date == "2024-01-12"
+    assert snapshot.latest_reset_event_date == "2024-01-13"
+    assert snapshot.latest_reset_confirmed_as_of_date == "2024-01-14"
+    assert snapshot.latest_reset_reason == "DOUBLE_BOS_DOWN"
+
+
 def test_divergence_reader_reads_latest_row_up_to_as_of_date_and_ignores_future_rows():
     conn = _connect()
     conn.execute(
@@ -350,7 +420,7 @@ def test_candlestick_reader_returns_no_candle_finding_when_no_matching_row_exist
 def test_missing_table_returns_missing_table_instead_of_crashing():
     conn = _connect()
 
-    snapshot = read_divergence_enrichment(conn, "AAA", "2024-01-10")
+    snapshot = read_dow_structure_enrichment(conn, "AAA", "usa", "2024-01-10")
 
     assert snapshot.source_status == "MISSING_TABLE"
 

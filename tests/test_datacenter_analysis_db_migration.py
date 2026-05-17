@@ -69,6 +69,18 @@ def test_database_manager_initializes_dc_ticker_swing_signal_daily_table(tmp_pat
         "exit_risk_severity",
         "latest_structure_age_trading_days",
         "latest_structure_freshness",
+        "ticker_trend_state",
+        "structure_epoch_id",
+        "latest_bos_event_type",
+        "latest_bos_event_date",
+        "latest_bos_confirmed_as_of_date",
+        "latest_bos_age_trading_days",
+        "latest_bos_freshness",
+        "latest_reset_event_date",
+        "latest_reset_confirmed_as_of_date",
+        "latest_reset_reason",
+        "latest_reset_age_trading_days",
+        "latest_reset_freshness",
         "signal_version",
     }.issubset(columns)
 
@@ -153,6 +165,18 @@ def test_database_manager_adds_exit_risk_severity_to_existing_ticker_swing_table
     assert "exit_risk_severity" in columns
     assert "latest_structure_age_trading_days" in columns
     assert "latest_structure_freshness" in columns
+    assert "ticker_trend_state" in columns
+    assert "structure_epoch_id" in columns
+    assert "latest_bos_event_type" in columns
+    assert "latest_bos_event_date" in columns
+    assert "latest_bos_confirmed_as_of_date" in columns
+    assert "latest_bos_age_trading_days" in columns
+    assert "latest_bos_freshness" in columns
+    assert "latest_reset_event_date" in columns
+    assert "latest_reset_confirmed_as_of_date" in columns
+    assert "latest_reset_reason" in columns
+    assert "latest_reset_age_trading_days" in columns
+    assert "latest_reset_freshness" in columns
 
 
 def test_database_manager_initializes_dc_group_swing_signal_daily_table(tmp_path):

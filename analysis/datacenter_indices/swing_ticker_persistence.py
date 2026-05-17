@@ -120,6 +120,18 @@ class DatacenterTickerSwingSnapshotRow:
     latest_structure_confirmed_as_of_date: str | None
     latest_structure_age_trading_days: int | None
     latest_structure_freshness: str | None
+    ticker_trend_state: str | None
+    structure_epoch_id: int | None
+    latest_bos_event_type: str | None
+    latest_bos_event_date: str | None
+    latest_bos_confirmed_as_of_date: str | None
+    latest_bos_age_trading_days: int | None
+    latest_bos_freshness: str | None
+    latest_reset_event_date: str | None
+    latest_reset_confirmed_as_of_date: str | None
+    latest_reset_reason: str | None
+    latest_reset_age_trading_days: int | None
+    latest_reset_freshness: str | None
     bullish_divergence_signal: int | None
     bearish_divergence_signal: int | None
     hidden_bullish_divergence_signal: int | None
@@ -582,6 +594,18 @@ def _serialize_row(row: DatacenterTickerSwingSnapshotRow) -> tuple[object, ...]:
         row.latest_structure_confirmed_as_of_date,
         row.latest_structure_age_trading_days,
         row.latest_structure_freshness,
+        row.ticker_trend_state,
+        row.structure_epoch_id,
+        row.latest_bos_event_type,
+        row.latest_bos_event_date,
+        row.latest_bos_confirmed_as_of_date,
+        row.latest_bos_age_trading_days,
+        row.latest_bos_freshness,
+        row.latest_reset_event_date,
+        row.latest_reset_confirmed_as_of_date,
+        row.latest_reset_reason,
+        row.latest_reset_age_trading_days,
+        row.latest_reset_freshness,
         row.bullish_divergence_signal,
         row.bearish_divergence_signal,
         row.hidden_bullish_divergence_signal,
@@ -626,6 +650,22 @@ def _compute_ticker_structure_age_trading_days(
         for row in history
         if row.close is not None
         and latest_structure_confirmed_as_of_date < row.date <= signal_date
+    )
+
+
+def _compute_ticker_event_age_trading_days(
+    *,
+    history: Sequence[TickerOhlcvRow],
+    latest_event_confirmed_as_of_date: str | None,
+    signal_date: str,
+) -> int | None:
+    if latest_event_confirmed_as_of_date is None:
+        return None
+    return sum(
+        1
+        for row in history
+        if row.close is not None
+        and latest_event_confirmed_as_of_date < row.date <= signal_date
     )
 
 
@@ -713,6 +753,16 @@ def build_ticker_swing_snapshot_rows(
                 latest_structure_confirmed_as_of_date=dow_snapshot.latest_structure_confirmed_as_of_date,
                 signal_date=normalized_as_of_date,
             )
+            latest_bos_age_trading_days = _compute_ticker_event_age_trading_days(
+                history=ohlcv_histories.get(ticker, []),
+                latest_event_confirmed_as_of_date=dow_snapshot.latest_bos_confirmed_as_of_date,
+                signal_date=normalized_as_of_date,
+            )
+            latest_reset_age_trading_days = _compute_ticker_event_age_trading_days(
+                history=ohlcv_histories.get(ticker, []),
+                latest_event_confirmed_as_of_date=dow_snapshot.latest_reset_confirmed_as_of_date,
+                signal_date=normalized_as_of_date,
+            )
             rows.append(
                 DatacenterTickerSwingSnapshotRow(
                     signal_date=normalized_as_of_date,
@@ -746,6 +796,18 @@ def build_ticker_swing_snapshot_rows(
                     latest_structure_confirmed_as_of_date=dow_snapshot.latest_structure_confirmed_as_of_date,
                     latest_structure_age_trading_days=latest_structure_age_trading_days,
                     latest_structure_freshness=classify_ticker_structure_freshness(latest_structure_age_trading_days),
+                    ticker_trend_state=dow_snapshot.trend_state,
+                    structure_epoch_id=dow_snapshot.structure_epoch_id,
+                    latest_bos_event_type=dow_snapshot.latest_bos_event_type,
+                    latest_bos_event_date=dow_snapshot.latest_bos_event_date,
+                    latest_bos_confirmed_as_of_date=dow_snapshot.latest_bos_confirmed_as_of_date,
+                    latest_bos_age_trading_days=latest_bos_age_trading_days,
+                    latest_bos_freshness=classify_ticker_structure_freshness(latest_bos_age_trading_days),
+                    latest_reset_event_date=dow_snapshot.latest_reset_event_date,
+                    latest_reset_confirmed_as_of_date=dow_snapshot.latest_reset_confirmed_as_of_date,
+                    latest_reset_reason=dow_snapshot.latest_reset_reason,
+                    latest_reset_age_trading_days=latest_reset_age_trading_days,
+                    latest_reset_freshness=classify_ticker_structure_freshness(latest_reset_age_trading_days),
                     bullish_divergence_signal=divergence_snapshot.bullish_divergence_signal,
                     bearish_divergence_signal=divergence_snapshot.bearish_divergence_signal,
                     hidden_bullish_divergence_signal=divergence_snapshot.hidden_bullish_divergence_signal,
@@ -843,13 +905,18 @@ def write_ticker_swing_snapshot_rows(
                         ema20_slope_lookback, highest_close_20d, volume_avg_20d, volume_vs_avg20,
                         latest_structure_label, latest_structure_confirmed_as_of_date,
                         latest_structure_age_trading_days, latest_structure_freshness,
+                        ticker_trend_state, structure_epoch_id,
+                        latest_bos_event_type, latest_bos_event_date, latest_bos_confirmed_as_of_date,
+                        latest_bos_age_trading_days, latest_bos_freshness,
+                        latest_reset_event_date, latest_reset_confirmed_as_of_date, latest_reset_reason,
+                        latest_reset_age_trading_days, latest_reset_freshness,
                         bullish_divergence_signal, bearish_divergence_signal,
                         hidden_bullish_divergence_signal, hidden_bearish_divergence_signal,
                         bullish_candle_signal, bearish_candle_signal, breakout_signal,
                         fast_ema10_pullback_signal, conservative_ema20_pullback_signal,
                         pullback_signal, exit_risk_signal, exit_reason, exit_risk_severity, price_data_status,
                         signal_version, run_id, created_at_utc
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     _serialize_row(row),
                 )
@@ -886,13 +953,18 @@ def write_ticker_swing_snapshot_rows(
                             ema20_slope_lookback, highest_close_20d, volume_avg_20d, volume_vs_avg20,
                             latest_structure_label, latest_structure_confirmed_as_of_date,
                             latest_structure_age_trading_days, latest_structure_freshness,
+                            ticker_trend_state, structure_epoch_id,
+                            latest_bos_event_type, latest_bos_event_date, latest_bos_confirmed_as_of_date,
+                            latest_bos_age_trading_days, latest_bos_freshness,
+                            latest_reset_event_date, latest_reset_confirmed_as_of_date, latest_reset_reason,
+                            latest_reset_age_trading_days, latest_reset_freshness,
                             bullish_divergence_signal, bearish_divergence_signal,
                             hidden_bullish_divergence_signal, hidden_bearish_divergence_signal,
                             bullish_candle_signal, bearish_candle_signal, breakout_signal,
                             fast_ema10_pullback_signal, conservative_ema20_pullback_signal,
                             pullback_signal, exit_risk_signal, exit_reason, exit_risk_severity, price_data_status,
                             signal_version, run_id, created_at_utc
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         _serialize_row(row),
                     )
@@ -912,13 +984,18 @@ def write_ticker_swing_snapshot_rows(
                             ema20_slope_lookback, highest_close_20d, volume_avg_20d, volume_vs_avg20,
                             latest_structure_label, latest_structure_confirmed_as_of_date,
                             latest_structure_age_trading_days, latest_structure_freshness,
+                            ticker_trend_state, structure_epoch_id,
+                            latest_bos_event_type, latest_bos_event_date, latest_bos_confirmed_as_of_date,
+                            latest_bos_age_trading_days, latest_bos_freshness,
+                            latest_reset_event_date, latest_reset_confirmed_as_of_date, latest_reset_reason,
+                            latest_reset_age_trading_days, latest_reset_freshness,
                             bullish_divergence_signal, bearish_divergence_signal,
                             hidden_bullish_divergence_signal, hidden_bearish_divergence_signal,
                             bullish_candle_signal, bearish_candle_signal, breakout_signal,
                             fast_ema10_pullback_signal, conservative_ema20_pullback_signal,
                             pullback_signal, exit_risk_signal, exit_reason, exit_risk_severity, price_data_status,
                             signal_version, run_id, created_at_utc
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(signal_date, taxonomy_version, ticker, signal_version)
                         DO UPDATE SET
                             primary_layer = excluded.primary_layer,
@@ -949,6 +1026,18 @@ def write_ticker_swing_snapshot_rows(
                             latest_structure_confirmed_as_of_date = excluded.latest_structure_confirmed_as_of_date,
                             latest_structure_age_trading_days = excluded.latest_structure_age_trading_days,
                             latest_structure_freshness = excluded.latest_structure_freshness,
+                            ticker_trend_state = excluded.ticker_trend_state,
+                            structure_epoch_id = excluded.structure_epoch_id,
+                            latest_bos_event_type = excluded.latest_bos_event_type,
+                            latest_bos_event_date = excluded.latest_bos_event_date,
+                            latest_bos_confirmed_as_of_date = excluded.latest_bos_confirmed_as_of_date,
+                            latest_bos_age_trading_days = excluded.latest_bos_age_trading_days,
+                            latest_bos_freshness = excluded.latest_bos_freshness,
+                            latest_reset_event_date = excluded.latest_reset_event_date,
+                            latest_reset_confirmed_as_of_date = excluded.latest_reset_confirmed_as_of_date,
+                            latest_reset_reason = excluded.latest_reset_reason,
+                            latest_reset_age_trading_days = excluded.latest_reset_age_trading_days,
+                            latest_reset_freshness = excluded.latest_reset_freshness,
                             bullish_divergence_signal = excluded.bullish_divergence_signal,
                             bearish_divergence_signal = excluded.bearish_divergence_signal,
                             hidden_bullish_divergence_signal = excluded.hidden_bullish_divergence_signal,

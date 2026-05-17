@@ -331,6 +331,11 @@ def test_finds_last_five_valid_signal_dates_and_generates_report(tmp_path):
     assert "last_exit_risk_severity" in markdown
     assert "last_latest_structure_age_trading_days" in markdown
     assert "last_latest_structure_freshness" in markdown
+    assert "last_ticker_trend_state" in markdown
+    assert "last_latest_bos_event_type" in markdown
+    assert "last_latest_bos_freshness" in markdown
+    assert "last_latest_reset_reason" in markdown
+    assert "last_latest_reset_freshness" in markdown
     assert "HIGH" in markdown
 
 

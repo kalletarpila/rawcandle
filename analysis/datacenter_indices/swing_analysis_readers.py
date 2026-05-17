@@ -62,6 +62,13 @@ class DowStructureEnrichmentSnapshot:
     latest_structure_confirmed_as_of_date: str | None
     latest_event_date: str | None
     trend_state: str | None
+    structure_epoch_id: int | None
+    latest_bos_event_type: str | None
+    latest_bos_event_date: str | None
+    latest_bos_confirmed_as_of_date: str | None
+    latest_reset_event_date: str | None
+    latest_reset_confirmed_as_of_date: str | None
+    latest_reset_reason: str | None
     source_status: str
 
 
@@ -146,6 +153,87 @@ def _resolve_label(row: sqlite3.Row) -> str | None:
     return None
 
 
+def _dow_event_select_sql(conn: sqlite3.Connection) -> str:
+    columns = {
+        str(row[1])
+        for row in conn.execute("PRAGMA table_info(stock_dow_structure_events)").fetchall()
+    }
+    structure_epoch_expr = (
+        "structure_epoch_id"
+        if "structure_epoch_id" in columns
+        else "NULL AS structure_epoch_id"
+    )
+    reset_reason_expr = (
+        "reset_reason"
+        if "reset_reason" in columns
+        else "NULL AS reset_reason"
+    )
+    return f"""
+        SELECT
+            id,
+            ticker,
+            market,
+            event_date,
+            confirmed_as_of_date,
+            event_type,
+            dow_label_high,
+            dow_label_low,
+            trend_state,
+            {structure_epoch_expr},
+            {reset_reason_expr}
+        FROM stock_dow_structure_events
+    """
+
+
+def _build_dow_snapshot_from_rows(
+    *,
+    ticker: str,
+    market: str | None,
+    as_of_date: str,
+    rows: list[sqlite3.Row],
+) -> DowStructureEnrichmentSnapshot:
+    latest_structure_row: sqlite3.Row | None = None
+    latest_bos_row: sqlite3.Row | None = None
+    latest_reset_row: sqlite3.Row | None = None
+    latest_trend_state: str | None = None
+    latest_structure_epoch_id: int | None = None
+
+    for row in rows:
+        if latest_trend_state is None and row["trend_state"] is not None:
+            latest_trend_state = str(row["trend_state"])
+            if row["structure_epoch_id"] is not None:
+                latest_structure_epoch_id = int(row["structure_epoch_id"])
+        if latest_structure_row is None and _resolve_label(row) is not None:
+            latest_structure_row = row
+        if latest_bos_row is None and str(row["event_type"]) in {"BOS_UP", "BOS_DOWN"}:
+            latest_bos_row = row
+        if latest_reset_row is None and str(row["event_type"]) == "RESET":
+            latest_reset_row = row
+
+    has_context = (
+        latest_structure_row is not None
+        or latest_bos_row is not None
+        or latest_reset_row is not None
+    )
+    return DowStructureEnrichmentSnapshot(
+        ticker=ticker,
+        market=market if market is not None else (rows[0]["market"] if rows else None),
+        as_of_date=as_of_date,
+        latest_structure_label=None if latest_structure_row is None else _resolve_label(latest_structure_row),
+        latest_structure_confirmed_as_of_date=None if latest_structure_row is None else str(latest_structure_row["confirmed_as_of_date"]),
+        latest_event_date=None if latest_structure_row is None else str(latest_structure_row["event_date"]),
+        trend_state=latest_trend_state,
+        structure_epoch_id=latest_structure_epoch_id,
+        latest_bos_event_type=None if latest_bos_row is None else str(latest_bos_row["event_type"]),
+        latest_bos_event_date=None if latest_bos_row is None else str(latest_bos_row["event_date"]),
+        latest_bos_confirmed_as_of_date=None if latest_bos_row is None else str(latest_bos_row["confirmed_as_of_date"]),
+        latest_reset_event_date=None if latest_reset_row is None else str(latest_reset_row["event_date"]),
+        latest_reset_confirmed_as_of_date=None if latest_reset_row is None else str(latest_reset_row["confirmed_as_of_date"]),
+        latest_reset_reason=None if latest_reset_row is None or latest_reset_row["reset_reason"] is None else str(latest_reset_row["reset_reason"]),
+        source_status=DOW_STATUS_OK if has_context else DOW_STATUS_NO_DOW_EVENT,
+    )
+
+
 def read_dow_structure_enrichment(
     conn: sqlite3.Connection,
     ticker: str,
@@ -162,6 +250,13 @@ def read_dow_structure_enrichment(
             latest_structure_confirmed_as_of_date=None,
             latest_event_date=None,
             trend_state=None,
+            structure_epoch_id=None,
+            latest_bos_event_type=None,
+            latest_bos_event_date=None,
+            latest_bos_confirmed_as_of_date=None,
+            latest_reset_event_date=None,
+            latest_reset_confirmed_as_of_date=None,
+            latest_reset_reason=None,
             source_status=DOW_STATUS_MISSING_TABLE,
         )
 
@@ -171,33 +266,18 @@ def read_dow_structure_enrichment(
         market_sql = " AND (market = ? OR market IS NULL)"
         params.append(market)
 
-    row = conn.execute(
+    rows = conn.execute(
         f"""
-        SELECT
-            id,
-            ticker,
-            market,
-            event_date,
-            confirmed_as_of_date,
-            event_type,
-            dow_label_high,
-            dow_label_low,
-            trend_state
-        FROM stock_dow_structure_events
+        {_dow_event_select_sql(conn)}
         WHERE ticker = ?
           AND confirmed_as_of_date <= ?
-          AND (
-                dow_label_high IN ('HH', 'HL', 'LH', 'LL')
-                OR dow_label_low IN ('HH', 'HL', 'LH', 'LL')
-          )
           {market_sql}
         ORDER BY confirmed_as_of_date DESC, event_date DESC, id DESC
-        LIMIT 1
         """,
         params,
-    ).fetchone()
+    ).fetchall()
 
-    if row is None:
+    if not rows:
         return DowStructureEnrichmentSnapshot(
             ticker=ticker,
             market=market,
@@ -206,18 +286,20 @@ def read_dow_structure_enrichment(
             latest_structure_confirmed_as_of_date=None,
             latest_event_date=None,
             trend_state=None,
+            structure_epoch_id=None,
+            latest_bos_event_type=None,
+            latest_bos_event_date=None,
+            latest_bos_confirmed_as_of_date=None,
+            latest_reset_event_date=None,
+            latest_reset_confirmed_as_of_date=None,
+            latest_reset_reason=None,
             source_status=DOW_STATUS_NO_DOW_EVENT,
         )
-
-    return DowStructureEnrichmentSnapshot(
-        ticker=str(row["ticker"]),
-        market=market if market is not None else row["market"],
+    return _build_dow_snapshot_from_rows(
+        ticker=ticker,
+        market=market,
         as_of_date=normalized_as_of_date,
-        latest_structure_label=_resolve_label(row),
-        latest_structure_confirmed_as_of_date=str(row["confirmed_as_of_date"]),
-        latest_event_date=str(row["event_date"]),
-        trend_state=None if row["trend_state"] is None else str(row["trend_state"]),
-        source_status=DOW_STATUS_OK,
+        rows=rows,
     )
 
 
@@ -395,6 +477,13 @@ def read_batch_dow_structure_enrichment(
             latest_structure_confirmed_as_of_date=None,
             latest_event_date=None,
             trend_state=None,
+            structure_epoch_id=None,
+            latest_bos_event_type=None,
+            latest_bos_event_date=None,
+            latest_bos_confirmed_as_of_date=None,
+            latest_reset_event_date=None,
+            latest_reset_confirmed_as_of_date=None,
+            latest_reset_reason=None,
             source_status=DOW_STATUS_MISSING_TABLE if not has_table else DOW_STATUS_NO_DOW_EVENT,
         )
         for ticker in tickers
@@ -408,49 +497,29 @@ def read_batch_dow_structure_enrichment(
         market_sql = " AND (market = ? OR market IS NULL)"
         market_params.append(market)
 
-    selected_rows: dict[str, sqlite3.Row] = {}
+    rows_by_ticker: dict[str, list[sqlite3.Row]] = {}
     for chunk in _chunked_values(tickers):
         placeholders = ", ".join("?" for _ in chunk)
         params: list[object] = [*chunk, normalized_as_of_date, *market_params]
         rows = conn.execute(
             f"""
-            SELECT
-                id,
-                ticker,
-                market,
-                event_date,
-                confirmed_as_of_date,
-                event_type,
-                dow_label_high,
-                dow_label_low,
-                trend_state
-            FROM stock_dow_structure_events
+            {_dow_event_select_sql(conn)}
             WHERE ticker IN ({placeholders})
               AND confirmed_as_of_date <= ?
-              AND (
-                    dow_label_high IN ('HH', 'HL', 'LH', 'LL')
-                    OR dow_label_low IN ('HH', 'HL', 'LH', 'LL')
-              )
               {market_sql}
             ORDER BY ticker ASC, confirmed_as_of_date DESC, event_date DESC, id DESC
             """,
             params,
         ).fetchall()
         for row in rows:
-            ticker = str(row["ticker"])
-            if ticker not in selected_rows:
-                selected_rows[ticker] = row
+            rows_by_ticker.setdefault(str(row["ticker"]), []).append(row)
 
-    for ticker, row in selected_rows.items():
-        snapshots[ticker] = DowStructureEnrichmentSnapshot(
+    for ticker, ticker_rows in rows_by_ticker.items():
+        snapshots[ticker] = _build_dow_snapshot_from_rows(
             ticker=ticker,
-            market=market if market is not None else row["market"],
+            market=market,
             as_of_date=normalized_as_of_date,
-            latest_structure_label=_resolve_label(row),
-            latest_structure_confirmed_as_of_date=str(row["confirmed_as_of_date"]),
-            latest_event_date=str(row["event_date"]),
-            trend_state=None if row["trend_state"] is None else str(row["trend_state"]),
-            source_status=DOW_STATUS_OK,
+            rows=ticker_rows,
         )
     return snapshots
 

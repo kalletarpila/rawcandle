@@ -392,8 +392,90 @@ DC_TAXONOMY_V1,AAA,Power,UPS,CORE,1,1.0,
     assert row["ema20"] == pytest.approx(109.5)
     assert row["latest_structure_label"] == "HH"
     assert row["latest_structure_confirmed_as_of_date"] == "2024-01-20"
+    assert row["ticker_trend_state"] == "UP"
+    assert row["latest_bos_event_type"] is None
+    assert row["latest_reset_event_date"] is None
     assert row["bullish_divergence_signal"] == 1
     assert row["bearish_divergence_signal"] == 0
+
+
+def test_persistence_stores_latest_bos_and_reset_context(tmp_path):
+    taxonomy_csv = _write_taxonomy_csv(
+        tmp_path,
+        """taxonomy_version,ticker,layer,subindustry,report_group_status,is_primary,role_weight,notes
+DC_TAXONOMY_V1,AAA,Power,UPS,CORE,1,1.0,
+""",
+    )
+    price_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _create_price_db(price_db)
+    _create_analysis_db(analysis_db)
+    _insert_price_rows(
+        price_db,
+        [
+            ("AAA", "2024-01-10", 100, 101, 99, 100, 1000, "usa"),
+            ("AAA", "2024-01-11", 101, 102, 100, 101, 1000, "usa"),
+            ("AAA", "2024-01-12", 102, 103, 101, 102, 1000, "usa"),
+            ("AAA", "2024-01-15", 103, 104, 102, 103, 1000, "usa"),
+            ("AAA", "2024-01-16", 104, 105, 103, 104, 1000, "usa"),
+        ],
+    )
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute("ALTER TABLE stock_dow_structure_events ADD COLUMN reset_reason TEXT")
+        conn.execute("ALTER TABLE stock_dow_structure_events ADD COLUMN structure_epoch_id INTEGER")
+        conn.execute(
+            """
+            INSERT INTO stock_dow_structure_events (
+                ticker, market, event_date, confirmed_as_of_date, event_type,
+                dow_label_high, dow_label_low, trend_state, reset_reason, structure_epoch_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("AAA", "usa", "2024-01-10", "2024-01-10", "PIVOT_HIGH", "HH", None, "UP", None, 1),
+        )
+        conn.execute(
+            """
+            INSERT INTO stock_dow_structure_events (
+                ticker, market, event_date, confirmed_as_of_date, event_type,
+                dow_label_high, dow_label_low, trend_state, reset_reason, structure_epoch_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("AAA", "usa", "2024-01-11", "2024-01-12", "BOS_DOWN", None, None, "UP", None, 1),
+        )
+        conn.execute(
+            """
+            INSERT INTO stock_dow_structure_events (
+                ticker, market, event_date, confirmed_as_of_date, event_type,
+                dow_label_high, dow_label_low, trend_state, reset_reason, structure_epoch_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("AAA", "usa", "2024-01-12", "2024-01-15", "RESET", None, None, "NEUTRAL", "DOUBLE_BOS_DOWN", 2),
+        )
+        conn.commit()
+
+    persist_datacenter_ticker_swing_snapshots(
+        analysis_db_path=analysis_db,
+        price_db_path=price_db,
+        taxonomy_csv_path=taxonomy_csv,
+        as_of_date="2024-01-16",
+        market="usa",
+        run_id="run1",
+        created_at_utc="2026-05-17T10:00:00Z",
+        write_mode="upsert",
+    )
+
+    row = _fetch_ticker_rows(analysis_db)[0]
+    assert row["ticker_trend_state"] == "NEUTRAL"
+    assert row["structure_epoch_id"] == 2
+    assert row["latest_bos_event_type"] == "BOS_DOWN"
+    assert row["latest_bos_event_date"] == "2024-01-11"
+    assert row["latest_bos_confirmed_as_of_date"] == "2024-01-12"
+    assert row["latest_bos_age_trading_days"] == 2
+    assert row["latest_bos_freshness"] == "FRESH"
+    assert row["latest_reset_event_date"] == "2024-01-12"
+    assert row["latest_reset_confirmed_as_of_date"] == "2024-01-15"
+    assert row["latest_reset_reason"] == "DOUBLE_BOS_DOWN"
+    assert row["latest_reset_age_trading_days"] == 1
+    assert row["latest_reset_freshness"] == "FRESH"
 
 
 def test_batched_price_history_loader_matches_single_ticker_loader(tmp_path):

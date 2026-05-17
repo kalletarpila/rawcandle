@@ -675,6 +675,18 @@ class DatabaseManager:
                     latest_structure_confirmed_as_of_date TEXT,
                     latest_structure_age_trading_days INTEGER,
                     latest_structure_freshness TEXT,
+                    ticker_trend_state TEXT,
+                    structure_epoch_id INTEGER,
+                    latest_bos_event_type TEXT,
+                    latest_bos_event_date TEXT,
+                    latest_bos_confirmed_as_of_date TEXT,
+                    latest_bos_age_trading_days INTEGER,
+                    latest_bos_freshness TEXT,
+                    latest_reset_event_date TEXT,
+                    latest_reset_confirmed_as_of_date TEXT,
+                    latest_reset_reason TEXT,
+                    latest_reset_age_trading_days INTEGER,
+                    latest_reset_freshness TEXT,
                     bullish_divergence_signal INTEGER,
                     bearish_divergence_signal INTEGER,
                     hidden_bullish_divergence_signal INTEGER,
@@ -745,6 +757,54 @@ class DatabaseManager:
             if "latest_structure_freshness" not in ticker_swing_columns:
                 cursor.execute(
                     "ALTER TABLE dc_ticker_swing_signal_daily ADD COLUMN latest_structure_freshness TEXT"
+                )
+            if "ticker_trend_state" not in ticker_swing_columns:
+                cursor.execute(
+                    "ALTER TABLE dc_ticker_swing_signal_daily ADD COLUMN ticker_trend_state TEXT"
+                )
+            if "structure_epoch_id" not in ticker_swing_columns:
+                cursor.execute(
+                    "ALTER TABLE dc_ticker_swing_signal_daily ADD COLUMN structure_epoch_id INTEGER"
+                )
+            if "latest_bos_event_type" not in ticker_swing_columns:
+                cursor.execute(
+                    "ALTER TABLE dc_ticker_swing_signal_daily ADD COLUMN latest_bos_event_type TEXT"
+                )
+            if "latest_bos_event_date" not in ticker_swing_columns:
+                cursor.execute(
+                    "ALTER TABLE dc_ticker_swing_signal_daily ADD COLUMN latest_bos_event_date TEXT"
+                )
+            if "latest_bos_confirmed_as_of_date" not in ticker_swing_columns:
+                cursor.execute(
+                    "ALTER TABLE dc_ticker_swing_signal_daily ADD COLUMN latest_bos_confirmed_as_of_date TEXT"
+                )
+            if "latest_bos_age_trading_days" not in ticker_swing_columns:
+                cursor.execute(
+                    "ALTER TABLE dc_ticker_swing_signal_daily ADD COLUMN latest_bos_age_trading_days INTEGER"
+                )
+            if "latest_bos_freshness" not in ticker_swing_columns:
+                cursor.execute(
+                    "ALTER TABLE dc_ticker_swing_signal_daily ADD COLUMN latest_bos_freshness TEXT"
+                )
+            if "latest_reset_event_date" not in ticker_swing_columns:
+                cursor.execute(
+                    "ALTER TABLE dc_ticker_swing_signal_daily ADD COLUMN latest_reset_event_date TEXT"
+                )
+            if "latest_reset_confirmed_as_of_date" not in ticker_swing_columns:
+                cursor.execute(
+                    "ALTER TABLE dc_ticker_swing_signal_daily ADD COLUMN latest_reset_confirmed_as_of_date TEXT"
+                )
+            if "latest_reset_reason" not in ticker_swing_columns:
+                cursor.execute(
+                    "ALTER TABLE dc_ticker_swing_signal_daily ADD COLUMN latest_reset_reason TEXT"
+                )
+            if "latest_reset_age_trading_days" not in ticker_swing_columns:
+                cursor.execute(
+                    "ALTER TABLE dc_ticker_swing_signal_daily ADD COLUMN latest_reset_age_trading_days INTEGER"
+                )
+            if "latest_reset_freshness" not in ticker_swing_columns:
+                cursor.execute(
+                    "ALTER TABLE dc_ticker_swing_signal_daily ADD COLUMN latest_reset_freshness TEXT"
                 )
 
             cursor.execute(

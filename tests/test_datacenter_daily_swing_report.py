@@ -310,6 +310,11 @@ def test_generates_markdown_report_with_required_sections_and_filters(tmp_path):
     assert "exit_risk_severity" in markdown
     assert "latest_structure_age_trading_days" in markdown
     assert "latest_structure_freshness" in markdown
+    assert "ticker_trend_state" in markdown
+    assert "latest_bos_event_type" in markdown
+    assert "latest_bos_freshness" in markdown
+    assert "latest_reset_reason" in markdown
+    assert "latest_reset_freshness" in markdown
     assert "HIGH" in markdown
     assert "synthetic_ohlc_rows_missing_relative_close_20" in markdown
     assert "ticker_rows_with_scanner_fields_null" in markdown
