@@ -63,6 +63,10 @@ TICKER_SWING_PROFILE_SUMMARY_ORDER = [
 TICKER_SCANNER_SUMMARY_ORDER = [
     "start_date",
     "end_date",
+    "requested_start_date",
+    "requested_end_date",
+    "valid_trading_dates",
+    "skipped_non_trading_dates",
     "write_mode",
     "signal_version",
     "run_id",
@@ -154,6 +158,95 @@ def _chunked_values(values: Sequence[str], chunk_size: int = 900) -> list[list[s
     ]
 
 
+def _load_primary_tickers_for_taxonomy(
+    taxonomy_csv_path: str | Path,
+) -> list[str]:
+    taxonomy_rows = _load_taxonomy_rows(taxonomy_csv_path)
+    primary_rows, _ = _select_primary_taxonomy_rows(taxonomy_rows)
+    return sorted({_normalize_ticker(row.ticker) for row in primary_rows if _normalize_ticker(row.ticker)})
+
+
+def load_valid_price_dates_for_market(
+    *,
+    price_db_path: str | Path,
+    start_date: str,
+    end_date: str,
+    market: str | None,
+    taxonomy_csv_path: str | Path | None = None,
+) -> list[str]:
+    normalized_start_date = _parse_iso_date(start_date, "start_date")
+    normalized_end_date = _parse_iso_date(end_date, "end_date")
+    if normalized_start_date > normalized_end_date:
+        raise ValueError(
+            f"Invalid date range: start_date {normalized_start_date} is after end_date {normalized_end_date}"
+        )
+
+    primary_tickers: list[str] = []
+    if taxonomy_csv_path is not None:
+        primary_tickers = _load_primary_tickers_for_taxonomy(taxonomy_csv_path)
+        if not primary_tickers:
+            return []
+
+    with sqlite3.connect(price_db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        params: list[object] = [normalized_start_date, normalized_end_date]
+        market_sql = ""
+        if market is not None:
+            market_sql = " AND market = ?"
+            params.append(market)
+        ticker_sql = ""
+        if primary_tickers:
+            placeholders = ", ".join("?" for _ in primary_tickers)
+            ticker_sql = f" AND UPPER(TRIM(osake)) IN ({placeholders})"
+            params.extend(primary_tickers)
+        rows = conn.execute(
+            f"""
+            SELECT DISTINCT pvm
+            FROM osakedata
+            WHERE pvm >= ?
+              AND pvm <= ?
+              {market_sql}
+              {ticker_sql}
+            ORDER BY pvm ASC
+            """,
+            params,
+        ).fetchall()
+    return [str(row["pvm"]) for row in rows]
+
+
+def load_existing_ticker_signal_dates(
+    *,
+    analysis_db_path: str | Path,
+    start_date: str,
+    end_date: str,
+    signal_version: str,
+) -> list[str]:
+    normalized_start_date = _parse_iso_date(start_date, "start_date")
+    normalized_end_date = _parse_iso_date(end_date, "end_date")
+    if normalized_start_date > normalized_end_date:
+        raise ValueError(
+            f"Invalid date range: start_date {normalized_start_date} is after end_date {normalized_end_date}"
+        )
+    db_manager = DatabaseManager(str(analysis_db_path))
+    conn = db_manager.get_connection()
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT signal_date
+            FROM dc_ticker_swing_signal_daily
+            WHERE signal_date >= ?
+              AND signal_date <= ?
+              AND signal_version = ?
+            ORDER BY signal_date ASC
+            """,
+            (normalized_start_date, normalized_end_date, signal_version),
+        ).fetchall()
+        return [str(row["signal_date"]) for row in rows]
+    finally:
+        db_manager.close()
+
+
 def build_ticker_swing_run_id(
     *,
     as_of_date: str,
@@ -178,7 +271,7 @@ def format_ticker_swing_summary_lines(summary: dict[str, int | str]) -> list[str
 
 
 def format_ticker_scanner_summary_lines(summary: dict[str, int | str]) -> list[str]:
-    return [f"SUMMARY {key}={summary[key]}" for key in TICKER_SCANNER_SUMMARY_ORDER]
+    return [f"SUMMARY {key}={summary[key]}" for key in TICKER_SCANNER_SUMMARY_ORDER if key in summary]
 
 
 def _match_lt(value: float | None, threshold: float) -> bool:

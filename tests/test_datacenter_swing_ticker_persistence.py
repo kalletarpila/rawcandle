@@ -8,8 +8,10 @@ import pytest
 from analysis.database_manager import DatabaseManager
 from analysis.datacenter_indices.swing_ticker_persistence import (
     classify_exit_risk_severity,
+    load_existing_ticker_signal_dates,
     load_bounded_ticker_ohlcv_history,
     load_bounded_ticker_ohlcv_histories,
+    load_valid_price_dates_for_market,
     persist_datacenter_ticker_scanner_signals,
     persist_datacenter_ticker_swing_snapshots,
 )
@@ -203,6 +205,69 @@ DC_TAXONOMY_V1,AAA,Power,UPS,CORE,1,1.0,
     assert summary["inserted_count"] == 1
     assert len(rows) == 1
     assert rows[0]["ticker"] == "AAA"
+
+
+def test_load_valid_price_dates_for_market_uses_primary_taxonomy_tickers_and_skips_weekend_dates(tmp_path):
+    taxonomy_csv = _write_taxonomy_csv(
+        tmp_path,
+        """taxonomy_version,ticker,layer,subindustry,report_group_status,is_primary,role_weight,notes
+DC_TAXONOMY_V1,AAA,Power,UPS,CORE,1,1.0,
+""",
+    )
+    price_db = tmp_path / "osakedata.db"
+    _create_price_db(price_db)
+    _insert_price_rows(
+        price_db,
+        [
+            ("AAA", "2024-01-12", 100, 101, 99, 100, 1000, "usa"),
+            ("AAA", "2024-01-15", 101, 102, 100, 101, 1001, "usa"),
+            ("SPY", "2024-01-13", 400, 401, 399, 400, 5000, "usa"),
+        ],
+    )
+
+    valid_dates = load_valid_price_dates_for_market(
+        price_db_path=price_db,
+        start_date="2024-01-12",
+        end_date="2024-01-15",
+        market="usa",
+        taxonomy_csv_path=taxonomy_csv,
+    )
+
+    assert valid_dates == ["2024-01-12", "2024-01-15"]
+
+
+def test_load_existing_ticker_signal_dates_returns_only_existing_base_dates_in_ascending_order(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO dc_ticker_swing_signal_daily (
+                signal_date, taxonomy_version, ticker, primary_layer, primary_subindustry,
+                price_data_status, signal_version, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("2024-01-10", "DC_TAXONOMY_V1", "AAA", "Power", "UPS", "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+        )
+        conn.execute(
+            """
+            INSERT INTO dc_ticker_swing_signal_daily (
+                signal_date, taxonomy_version, ticker, primary_layer, primary_subindustry,
+                price_data_status, signal_version, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("2024-01-12", "DC_TAXONOMY_V1", "AAA", "Power", "UPS", "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+        )
+        conn.commit()
+
+    dates = load_existing_ticker_signal_dates(
+        analysis_db_path=analysis_db,
+        start_date="2024-01-10",
+        end_date="2024-01-12",
+        signal_version="DC_SWING_SIGNAL_V1",
+    )
+
+    assert dates == ["2024-01-10", "2024-01-12"]
 
 
 def test_persistence_ignores_non_primary_taxonomy_rows(tmp_path):
