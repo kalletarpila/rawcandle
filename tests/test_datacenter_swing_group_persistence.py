@@ -6,6 +6,7 @@ import pytest
 
 from analysis.database_manager import DatabaseManager
 from analysis.datacenter_indices.swing_group_persistence import (
+    persist_datacenter_group_overheat_risk,
     persist_datacenter_group_timing_states,
     persist_datacenter_group_swing_signals,
 )
@@ -635,3 +636,180 @@ def test_timing_reason_is_deterministic_and_write_modes_are_scoped(tmp_path):
     assert day2["timing_state"] == "BUY_ZONE"
     assert day1["overheat_risk_level"] == "KEEP_RISK"
     assert other_version["timing_state"] == "KEEP"
+
+
+def test_overheat_updates_existing_rows_and_preserves_metric_and_timing_fields(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    _insert_group_swing_row(
+        analysis_db,
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "layer", "Power",
+            5, 5, 0.02, 0.03, 0.10, 0.20,
+            82.0, 85.0, 70.0,
+            -4.0, -4.0,
+            60.0, 20.0, None,
+            "BUY_ZONE", "BUY_ZONE:existing", "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+    )
+    _insert_group_index_row(
+        analysis_db,
+        ("2024-01-10", "DC_TAXONOMY_V1", "layer", "Power", 5, 5, 0, 0, 0.0, 0.0, 0.0, None, 65.0, 100.0, None, None, None, None, None, None, None, "OK", "DC_INDEX_CALC_V1", "seed", "2026-05-17T09:00:00Z"),
+    )
+
+    summary = persist_datacenter_group_overheat_risk(
+        analysis_db_path=analysis_db,
+        start_date="2024-01-10",
+        signal_version="DC_SWING_SIGNAL_V1",
+        run_id="overheat-run",
+        created_at_utc="2026-05-17T12:00:00Z",
+        write_mode="update-existing",
+    )
+
+    row = _group_row(_fetch_group_rows(analysis_db), "layer", "Power", "2024-01-10")
+    assert summary["updated_count"] == 1
+    assert row["overheat_risk_level"] == "LOW"
+    assert row["return_20d"] == pytest.approx(0.10)
+    assert row["pct_above_ema20"] == pytest.approx(85.0)
+    assert row["weakness_breadth"] == pytest.approx(20.0)
+    assert row["data_quality_status"] == "OK"
+    assert row["timing_state"] == "BUY_ZONE"
+    assert row["timing_reason"] == "BUY_ZONE:existing"
+
+
+def test_overheat_does_not_insert_missing_base_rows(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+
+    summary = persist_datacenter_group_overheat_risk(
+        analysis_db_path=analysis_db,
+        start_date="2024-01-10",
+        signal_version="DC_SWING_SIGNAL_V1",
+        run_id="overheat-run",
+        created_at_utc="2026-05-17T12:00:00Z",
+        write_mode="update-existing",
+    )
+
+    assert summary["updated_count"] == 0
+    assert _fetch_group_rows(analysis_db) == []
+
+
+def test_overheat_classifies_low_elevated_high_and_extreme(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    rows = [
+        ("2024-01-10", "DC_TAXONOMY_V1", "layer", "LowPct", 5, 5, 0.02, 0.03, 0.10, 0.20, 82.0, 85.0, None, -8.0, -6.0, None, 20.0, None, "BUY_ZONE", "x", "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+        ("2024-01-10", "DC_TAXONOMY_V1", "layer", "LowBreadth", 5, 5, 0.02, 0.03, 0.10, 0.20, 82.0, 85.0, None, -4.0, -4.0, None, 20.0, None, "BUY_ZONE", "x", "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+        ("2024-01-10", "DC_TAXONOMY_V1", "layer", "Elevated", 5, 5, 0.02, 0.03, 0.10, 0.20, 82.0, 85.0, None, -6.0, -6.0, None, 20.0, None, "BUY_ZONE", "x", "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+        ("2024-01-10", "DC_TAXONOMY_V1", "layer", "High", 5, 5, 0.02, 0.03, 0.10, 0.20, 82.0, 85.0, None, -11.0, -11.0, None, 20.0, None, "BUY_ZONE", "x", "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+        ("2024-01-09", "DC_TAXONOMY_V1", "layer", "Extreme", 5, 5, 0.02, 0.03, 0.10, 0.20, 82.0, 85.0, None, -11.0, -11.0, None, 20.0, None, "BUY_ZONE", "x", "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+        ("2024-01-10", "DC_TAXONOMY_V1", "layer", "Extreme", 5, 5, -0.01, -0.02, -0.01, 0.20, 82.0, 69.0, None, -11.0, -11.0, None, 55.0, None, "BUY_ZONE", "x", "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+    ]
+    for row in rows:
+        _insert_group_swing_row(analysis_db, row)
+    index_rows = [
+        ("2024-01-10", "DC_TAXONOMY_V1", "layer", "LowPct", 5, 5, 0, 0, 0.0, 0.0, 0.0, None, 65.0, 100.0, None, None, None, None, None, None, None, "OK", "DC_INDEX_CALC_V1", "seed", "2026-05-17T09:00:00Z"),
+        ("2024-01-10", "DC_TAXONOMY_V1", "layer", "LowBreadth", 5, 5, 0, 0, 0.0, 0.0, 0.0, None, 75.0, 100.0, None, None, None, None, None, None, None, "OK", "DC_INDEX_CALC_V1", "seed", "2026-05-17T09:00:00Z"),
+        ("2024-01-10", "DC_TAXONOMY_V1", "layer", "Elevated", 5, 5, 0, 0, 0.0, 0.0, 0.0, None, 80.0, 100.0, None, None, None, None, None, None, None, "OK", "DC_INDEX_CALC_V1", "seed", "2026-05-17T09:00:00Z"),
+        ("2024-01-10", "DC_TAXONOMY_V1", "layer", "High", 5, 5, 0, 0, 0.0, 0.0, 0.0, None, 85.0, 100.0, None, None, None, None, None, None, None, "OK", "DC_INDEX_CALC_V1", "seed", "2026-05-17T09:00:00Z"),
+        ("2024-01-09", "DC_TAXONOMY_V1", "layer", "Extreme", 5, 5, 0, 0, 0.0, 0.0, 0.0, None, 90.0, 100.0, None, None, None, None, None, None, None, "OK", "DC_INDEX_CALC_V1", "seed", "2026-05-17T09:00:00Z"),
+        ("2024-01-10", "DC_TAXONOMY_V1", "layer", "Extreme", 5, 5, 0, 0, 0.0, 0.0, 0.0, None, 90.0, 100.0, None, None, None, None, None, None, None, "OK", "DC_INDEX_CALC_V1", "seed", "2026-05-17T09:00:00Z"),
+    ]
+    for row in index_rows:
+        _insert_group_index_row(analysis_db, row)
+
+    summary = persist_datacenter_group_overheat_risk(
+        analysis_db_path=analysis_db,
+        start_date="2024-01-09",
+        end_date="2024-01-10",
+        signal_version="DC_SWING_SIGNAL_V1",
+        run_id="overheat-run",
+        created_at_utc="2026-05-17T12:00:00Z",
+        write_mode="update-existing",
+    )
+
+    fetched = _fetch_group_rows(analysis_db)
+    assert _group_row(fetched, "layer", "LowPct", "2024-01-10")["overheat_risk_level"] == "LOW"
+    assert _group_row(fetched, "layer", "LowBreadth", "2024-01-10")["overheat_risk_level"] == "LOW"
+    assert _group_row(fetched, "layer", "Elevated", "2024-01-10")["overheat_risk_level"] == "ELEVATED"
+    assert _group_row(fetched, "layer", "High", "2024-01-10")["overheat_risk_level"] == "HIGH"
+    assert _group_row(fetched, "layer", "Extreme", "2024-01-10")["overheat_risk_level"] == "EXTREME"
+    assert summary["low_count"] == 2
+    assert summary["elevated_count"] == 1
+    assert summary["high_count"] == 2
+    assert summary["extreme_count"] == 1
+
+
+def test_overheat_extreme_requires_two_consecutive_valid_days_and_confirming_weakness(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    rows = [
+        ("2024-01-08", "DC_TAXONOMY_V1", "layer", "NoPrev", 5, 5, 0.02, 0.03, 0.10, 0.20, 82.0, 85.0, None, -1.0, None, None, 20.0, None, "BUY_ZONE", "x", "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+        ("2024-01-10", "DC_TAXONOMY_V1", "layer", "NoPrev", 5, 5, -0.01, 0.03, 0.10, 0.20, 82.0, 69.0, None, -11.0, -11.0, None, 55.0, None, "BUY_ZONE", "x", "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+        ("2024-01-09", "DC_TAXONOMY_V1", "layer", "NoWeakness", 5, 5, 0.02, 0.03, 0.10, 0.20, 82.0, 85.0, None, -11.0, -11.0, None, 20.0, None, "BUY_ZONE", "x", "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+        ("2024-01-10", "DC_TAXONOMY_V1", "layer", "NoWeakness", 5, 5, 0.02, 0.03, 0.10, 0.20, 82.0, 75.0, None, -11.0, -11.0, None, 20.0, None, "BUY_ZONE", "x", "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+    ]
+    for row in rows:
+        _insert_group_swing_row(analysis_db, row)
+    for name in ["NoPrev", "NoWeakness"]:
+        _insert_group_index_row(
+            analysis_db,
+            ("2024-01-09", "DC_TAXONOMY_V1", "layer", name, 5, 5, 0, 0, 0.0, 0.0, 0.0, None, 90.0, 100.0, None, None, None, None, None, None, None, "OK", "DC_INDEX_CALC_V1", "seed", "2026-05-17T09:00:00Z"),
+        )
+        _insert_group_index_row(
+            analysis_db,
+            ("2024-01-10", "DC_TAXONOMY_V1", "layer", name, 5, 5, 0, 0, 0.0, 0.0, 0.0, None, 90.0, 100.0, None, None, None, None, None, None, None, "OK", "DC_INDEX_CALC_V1", "seed", "2026-05-17T09:00:00Z"),
+        )
+
+    persist_datacenter_group_overheat_risk(
+        analysis_db_path=analysis_db,
+        start_date="2024-01-08",
+        end_date="2024-01-10",
+        signal_version="DC_SWING_SIGNAL_V1",
+        run_id="overheat-run",
+        created_at_utc="2026-05-17T12:00:00Z",
+        write_mode="update-existing",
+    )
+
+    fetched = _fetch_group_rows(analysis_db)
+    assert _group_row(fetched, "layer", "NoPrev", "2024-01-10")["overheat_risk_level"] == "HIGH"
+    assert _group_row(fetched, "layer", "NoWeakness", "2024-01-10")["overheat_risk_level"] == "HIGH"
+
+
+def test_overheat_null_handling_and_scoped_write_modes(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    rows = [
+        ("2024-01-10", "DC_TAXONOMY_V1", "layer", "Nulls", 5, 5, None, None, None, None, None, None, None, None, None, None, None, "KEEP", "BUY_ZONE", "keep", "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+        ("2024-01-11", "DC_TAXONOMY_V1", "layer", "Scoped", 5, 5, 0.02, 0.03, 0.10, 0.20, 82.0, 85.0, None, -11.0, -11.0, None, 20.0, "OLD", "BUY_ZONE", "keep", "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+        ("2024-01-11", "DC_TAXONOMY_V1", "layer", "Scoped", 5, 5, 0.02, 0.03, 0.10, 0.20, 82.0, 85.0, None, -11.0, -11.0, None, 20.0, "KEEP_OTHER", "BUY_ZONE", "keep", "OK", "OTHER_VERSION", "seed", "2026-05-17T10:00:00Z"),
+    ]
+    for row in rows:
+        _insert_group_swing_row(analysis_db, row)
+    _insert_group_index_row(
+        analysis_db,
+        ("2024-01-11", "DC_TAXONOMY_V1", "layer", "Scoped", 5, 5, 0, 0, 0.0, 0.0, 0.0, None, 85.0, 100.0, None, None, None, None, None, None, None, "OK", "DC_INDEX_CALC_V1", "seed", "2026-05-17T09:00:00Z"),
+    )
+
+    summary = persist_datacenter_group_overheat_risk(
+        analysis_db_path=analysis_db,
+        start_date="2024-01-10",
+        end_date="2024-01-11",
+        signal_version="DC_SWING_SIGNAL_V1",
+        run_id="overheat-run",
+        created_at_utc="2026-05-17T12:00:00Z",
+        write_mode="replace-overheat-range",
+        group_types=("layer",),
+    )
+
+    fetched = _fetch_group_rows(analysis_db)
+    null_row = _group_row(fetched, "layer", "Nulls", "2024-01-10")
+    scoped_row = _group_row(fetched, "layer", "Scoped", "2024-01-11")
+    other_version = [row for row in fetched if row["signal_version"] == "OTHER_VERSION"][0]
+    assert summary["cleared_count"] == 2
+    assert summary["updated_count"] == 2
+    assert null_row["overheat_risk_level"] is None
+    assert scoped_row["overheat_risk_level"] == "HIGH"
+    assert scoped_row["timing_state"] == "BUY_ZONE"
+    assert other_version["overheat_risk_level"] == "KEEP_OTHER"

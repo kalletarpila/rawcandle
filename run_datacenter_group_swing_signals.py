@@ -13,8 +13,10 @@ if str(CURRENT_DIR) not in sys.path:
 
 from analysis.datacenter_indices.swing_group_persistence import (
     DEFAULT_SIGNAL_VERSION,
+    format_group_swing_overheat_summary_lines,
     format_group_swing_summary_lines,
     format_group_swing_timing_summary_lines,
+    persist_datacenter_group_overheat_risk,
     persist_datacenter_group_timing_states,
     persist_datacenter_group_swing_signals,
 )
@@ -32,15 +34,33 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--signal-version", type=str, default=DEFAULT_SIGNAL_VERSION, help="Signal version to persist")
     parser.add_argument("--run-id", type=str, default=None, help="Optional explicit run identifier")
     parser.add_argument("--created-at-utc", type=str, default=None, help="Optional explicit created_at_utc timestamp (YYYY-MM-DDTHH:MM:SSZ)")
-    parser.add_argument("--write-mode", type=str, required=True, help="Write mode: insert-missing, upsert, replace-date, update-existing, replace-timing-range")
+    parser.add_argument("--write-mode", type=str, required=True, help="Write mode: insert-missing, upsert, replace-date, update-existing, replace-timing-range, replace-overheat-range")
     parser.add_argument("--timing-only", action="store_true", help="Update only timing_state and timing_reason on existing group swing rows")
+    parser.add_argument("--overheat-only", action="store_true", help="Update only overheat_risk_level on existing group swing rows")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        if args.timing_only:
+        if sum(1 for flag in (args.timing_only, args.overheat_only) if flag) > 1:
+            raise ValueError("timing-only and overheat-only cannot be used together")
+        if args.overheat_only:
+            selected_start_date = args.start_date or args.signal_date
+            selected_end_date = args.end_date or args.signal_date or args.start_date
+            if selected_start_date is None:
+                raise ValueError("signal-date or start-date is required for overheat-only updates")
+            summary = persist_datacenter_group_overheat_risk(
+                analysis_db_path=args.analysis_db,
+                start_date=selected_start_date,
+                end_date=selected_end_date,
+                signal_version=args.signal_version,
+                run_id=args.run_id,
+                created_at_utc=args.created_at_utc,
+                write_mode=args.write_mode,
+            )
+            lines = format_group_swing_overheat_summary_lines(summary)
+        elif args.timing_only:
             selected_start_date = args.start_date or args.signal_date
             selected_end_date = args.end_date or args.signal_date or args.start_date
             if selected_start_date is None:

@@ -53,6 +53,24 @@ GROUP_SWING_TIMING_SUMMARY_ORDER = [
     "validation_status",
 ]
 
+GROUP_SWING_OVERHEAT_SUMMARY_ORDER = [
+    "start_date",
+    "end_date",
+    "write_mode",
+    "signal_version",
+    "run_id",
+    "updated_count",
+    "missing_base_row_count",
+    "cleared_count",
+    "low_count",
+    "elevated_count",
+    "high_count",
+    "extreme_count",
+    "null_overheat_count",
+    "unsupported_missing_ma200_count",
+    "validation_status",
+]
+
 GROUP_TYPE_ORDER = {
     "ecosystem": 0,
     "layer": 1,
@@ -123,6 +141,10 @@ def format_group_swing_timing_summary_lines(summary: dict[str, int | str]) -> li
     return [f"SUMMARY {key}={summary[key]}" for key in GROUP_SWING_TIMING_SUMMARY_ORDER]
 
 
+def format_group_swing_overheat_summary_lines(summary: dict[str, int | str]) -> list[str]:
+    return [f"SUMMARY {key}={summary[key]}" for key in GROUP_SWING_OVERHEAT_SUMMARY_ORDER]
+
+
 def _match_lt(value: float | None, threshold: float) -> bool:
     return value is not None and value < threshold
 
@@ -189,6 +211,111 @@ def _timing_state_and_reason(row: sqlite3.Row) -> tuple[str, str]:
         return "BUY_ZONE", "BUY_ZONE:" + ";".join(code for _, code in buy_checks)
 
     return "NEUTRAL", "NEUTRAL:no_state_rule_matched"
+
+
+def _load_pct_above_ma200_by_group(
+    conn: sqlite3.Connection,
+    *,
+    taxonomy_version: str,
+    group_type: str,
+    group_name: str,
+    signal_date: str,
+) -> float | None:
+    row = conn.execute(
+        """
+        SELECT pct_above_ma200
+        FROM dc_group_index_daily
+        WHERE taxonomy_version = ?
+          AND group_type = ?
+          AND group_name = ?
+          AND index_date = ?
+        """,
+        (taxonomy_version, group_type, group_name, signal_date),
+    ).fetchone()
+    if row is None or row["pct_above_ma200"] is None:
+        return None
+    return float(row["pct_above_ma200"])
+
+
+def _previous_valid_ema20_breadth_delta(
+    conn: sqlite3.Connection,
+    *,
+    signal_date: str,
+    taxonomy_version: str,
+    group_type: str,
+    group_name: str,
+    signal_version: str,
+) -> float | None:
+    row = conn.execute(
+        """
+        SELECT ema20_breadth_delta_5d
+        FROM dc_group_swing_signal_daily
+        WHERE signal_date < ?
+          AND taxonomy_version = ?
+          AND group_type = ?
+          AND group_name = ?
+          AND signal_version = ?
+          AND ema20_breadth_delta_5d IS NOT NULL
+        ORDER BY signal_date DESC
+        LIMIT 1
+        """,
+        (signal_date, taxonomy_version, group_type, group_name, signal_version),
+    ).fetchone()
+    if row is None or row["ema20_breadth_delta_5d"] is None:
+        return None
+    return float(row["ema20_breadth_delta_5d"])
+
+
+def _classify_overheat_risk(
+    *,
+    row: sqlite3.Row,
+    pct_above_ma200: float | None,
+    previous_valid_ema20_breadth_delta: float | None,
+) -> str | None:
+    return_10d = None if row["return_10d"] is None else float(row["return_10d"])
+    return_20d = None if row["return_20d"] is None else float(row["return_20d"])
+    pct_above_ema20 = None if row["pct_above_ema20"] is None else float(row["pct_above_ema20"])
+    ma10_breadth_delta_5d = None if row["ma10_breadth_delta_5d"] is None else float(row["ma10_breadth_delta_5d"])
+    ema20_breadth_delta_5d = None if row["ema20_breadth_delta_5d"] is None else float(row["ema20_breadth_delta_5d"])
+    weakness_breadth = None if row["weakness_breadth"] is None else float(row["weakness_breadth"])
+
+    if pct_above_ma200 is None:
+        return None
+
+    extreme_has_consecutive = (
+        _match_lt(ema20_breadth_delta_5d, -10.0)
+        and _match_lt(previous_valid_ema20_breadth_delta, -10.0)
+    )
+    extreme_has_weakness_confirm = any(
+        [
+            _match_lt(return_10d, 0.0),
+            _match_lt(return_20d, 0.0),
+            _match_lt(pct_above_ema20, 70.0),
+            _match_gt(weakness_breadth, 50.0),
+        ]
+    )
+    if (
+        _match_gte(pct_above_ma200, 90.0)
+        and extreme_has_consecutive
+        and _match_lt(ma10_breadth_delta_5d, -10.0)
+        and extreme_has_weakness_confirm
+    ):
+        return "EXTREME"
+
+    if (
+        _match_gte(pct_above_ma200, 85.0)
+        and _match_lt(ema20_breadth_delta_5d, -10.0)
+        and _match_lt(ma10_breadth_delta_5d, -10.0)
+    ):
+        return "HIGH"
+
+    if _match_gte(pct_above_ma200, 80.0) and _match_lt(ema20_breadth_delta_5d, -5.0):
+        return "ELEVATED"
+
+    if _match_lt(pct_above_ma200, 70.0) or _match_gte(ema20_breadth_delta_5d, -5.0):
+        return "LOW"
+
+    return None
 
 
 def _load_taxonomy_rows(
@@ -921,6 +1048,197 @@ def write_group_timing_updates(
         db_manager.close()
 
 
+def build_group_overheat_updates(
+    *,
+    analysis_db_path: str | Path,
+    start_date: str,
+    end_date: str,
+    signal_version: str,
+    run_id: str,
+    created_at_utc: str,
+    group_types: Sequence[str] | None = None,
+) -> tuple[list[dict[str, object]], dict[str, int | str]]:
+    normalized_start_date = _parse_iso_date(start_date, "start_date")
+    normalized_end_date = _parse_iso_date(end_date, "end_date")
+    if normalized_start_date > normalized_end_date:
+        raise ValueError(
+            f"Invalid date range: start_date {normalized_start_date} is after end_date {normalized_end_date}"
+        )
+
+    db_manager = DatabaseManager(str(analysis_db_path))
+    conn = db_manager.get_connection()
+    conn.row_factory = sqlite3.Row
+    try:
+        columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(dc_group_index_daily)").fetchall()
+        }
+        has_pct_above_ma200 = "pct_above_ma200" in columns
+        rows = _load_existing_group_swing_rows(
+            analysis_db_path=analysis_db_path,
+            start_date=normalized_start_date,
+            end_date=normalized_end_date,
+            signal_version=signal_version,
+            group_types=group_types,
+        )
+        updates: list[dict[str, object]] = []
+        low_count = 0
+        elevated_count = 0
+        high_count = 0
+        extreme_count = 0
+        null_overheat_count = 0
+        unsupported_missing_ma200_count = 0
+
+        for row in rows:
+            pct_above_ma200 = None
+            previous_valid_ema20_breadth_delta = None
+            if has_pct_above_ma200:
+                pct_above_ma200 = _load_pct_above_ma200_by_group(
+                    conn,
+                    taxonomy_version=str(row["taxonomy_version"]),
+                    group_type=str(row["group_type"]),
+                    group_name=str(row["group_name"]),
+                    signal_date=str(row["signal_date"]),
+                )
+                previous_valid_ema20_breadth_delta = _previous_valid_ema20_breadth_delta(
+                    conn,
+                    signal_date=str(row["signal_date"]),
+                    taxonomy_version=str(row["taxonomy_version"]),
+                    group_type=str(row["group_type"]),
+                    group_name=str(row["group_name"]),
+                    signal_version=str(row["signal_version"]),
+                )
+            else:
+                unsupported_missing_ma200_count += 1
+
+            overheat_risk_level = _classify_overheat_risk(
+                row=row,
+                pct_above_ma200=pct_above_ma200,
+                previous_valid_ema20_breadth_delta=previous_valid_ema20_breadth_delta,
+            )
+            if overheat_risk_level == "LOW":
+                low_count += 1
+            elif overheat_risk_level == "ELEVATED":
+                elevated_count += 1
+            elif overheat_risk_level == "HIGH":
+                high_count += 1
+            elif overheat_risk_level == "EXTREME":
+                extreme_count += 1
+            else:
+                null_overheat_count += 1
+
+            updates.append(
+                {
+                    "signal_date": str(row["signal_date"]),
+                    "taxonomy_version": str(row["taxonomy_version"]),
+                    "group_type": str(row["group_type"]),
+                    "group_name": str(row["group_name"]),
+                    "signal_version": str(row["signal_version"]),
+                    "overheat_risk_level": overheat_risk_level,
+                    "run_id": run_id,
+                    "created_at_utc": created_at_utc,
+                    "existing_overheat_risk_level": None if row["overheat_risk_level"] is None else str(row["overheat_risk_level"]),
+                }
+            )
+        return updates, {
+            "missing_base_row_count": 0,
+            "low_count": low_count,
+            "elevated_count": elevated_count,
+            "high_count": high_count,
+            "extreme_count": extreme_count,
+            "null_overheat_count": null_overheat_count,
+            "unsupported_missing_ma200_count": unsupported_missing_ma200_count,
+        }
+    finally:
+        db_manager.close()
+
+
+def write_group_overheat_updates(
+    *,
+    analysis_db_path: str | Path,
+    updates: Sequence[dict[str, object]],
+    start_date: str,
+    end_date: str,
+    signal_version: str,
+    write_mode: str,
+    group_types: Sequence[str] | None = None,
+) -> dict[str, int]:
+    normalized_start_date = _parse_iso_date(start_date, "start_date")
+    normalized_end_date = _parse_iso_date(end_date, "end_date")
+    if write_mode not in {"update-existing", "replace-overheat-range"}:
+        raise ValueError(f"Unsupported write_mode: {write_mode}")
+
+    db_manager = DatabaseManager(str(analysis_db_path))
+    conn = db_manager.get_connection()
+    cursor = conn.cursor()
+    updated_count = 0
+    cleared_count = 0
+    try:
+        cursor.execute("BEGIN")
+        if write_mode == "replace-overheat-range":
+            params: list[object] = [normalized_start_date, normalized_end_date, signal_version]
+            group_type_clause = ""
+            if group_types:
+                placeholders = ", ".join("?" for _ in group_types)
+                group_type_clause = f" AND group_type IN ({placeholders})"
+                params.extend(group_types)
+            cursor.execute(
+                f"""
+                UPDATE dc_group_swing_signal_daily
+                SET overheat_risk_level = NULL
+                WHERE signal_date >= ?
+                  AND signal_date <= ?
+                  AND signal_version = ?
+                  {group_type_clause}
+                """,
+                params,
+            )
+            cleared_count = cursor.rowcount
+            filtered_updates = list(updates)
+        else:
+            filtered_updates = [
+                row
+                for row in updates
+                if row["existing_overheat_risk_level"] != row["overheat_risk_level"]
+            ]
+
+        for row in filtered_updates:
+            cursor.execute(
+                """
+                UPDATE dc_group_swing_signal_daily
+                SET overheat_risk_level = ?,
+                    run_id = ?,
+                    created_at_utc = ?
+                WHERE signal_date = ?
+                  AND taxonomy_version = ?
+                  AND group_type = ?
+                  AND group_name = ?
+                  AND signal_version = ?
+                """,
+                (
+                    row["overheat_risk_level"],
+                    row["run_id"],
+                    row["created_at_utc"],
+                    row["signal_date"],
+                    row["taxonomy_version"],
+                    row["group_type"],
+                    row["group_name"],
+                    row["signal_version"],
+                ),
+            )
+            updated_count += cursor.rowcount
+        conn.commit()
+        return {
+            "updated_count": updated_count,
+            "cleared_count": cleared_count,
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        db_manager.close()
+
+
 def persist_datacenter_group_swing_signals(
     *,
     analysis_db_path: str | Path,
@@ -1005,6 +1323,61 @@ def persist_datacenter_group_timing_states(
         group_types=group_types,
     )
     write_summary = write_group_timing_updates(
+        analysis_db_path=analysis_db_path,
+        updates=updates,
+        start_date=normalized_start_date,
+        end_date=normalized_end_date,
+        signal_version=signal_version,
+        write_mode=write_mode,
+        group_types=group_types,
+    )
+    return {
+        "start_date": normalized_start_date,
+        "end_date": normalized_end_date,
+        "write_mode": write_mode,
+        "signal_version": signal_version,
+        "run_id": resolved_run_id,
+        **prep_summary,
+        **write_summary,
+        "validation_status": "OK",
+    }
+
+
+def persist_datacenter_group_overheat_risk(
+    *,
+    analysis_db_path: str | Path,
+    start_date: str,
+    end_date: str | None = None,
+    signal_version: str = DEFAULT_SIGNAL_VERSION,
+    run_id: str | None = None,
+    created_at_utc: str | None = None,
+    write_mode: str = "update-existing",
+    group_types: Sequence[str] | None = None,
+) -> dict[str, int | str]:
+    normalized_start_date = _parse_iso_date(start_date, "start_date")
+    normalized_end_date = _parse_iso_date(end_date or start_date, "end_date")
+    if write_mode not in {"update-existing", "replace-overheat-range"}:
+        raise ValueError(f"Unsupported write_mode: {write_mode}")
+    if normalized_start_date > normalized_end_date:
+        raise ValueError(
+            f"Invalid date range: start_date {normalized_start_date} is after end_date {normalized_end_date}"
+        )
+    resolved_run_id = build_group_swing_run_id(
+        as_of_date=normalized_end_date,
+        signal_version=signal_version,
+        run_id=run_id,
+    )
+    resolved_created_at_utc = resolve_created_at_utc(created_at_utc)
+    updates, prep_summary = build_group_overheat_updates(
+        analysis_db_path=analysis_db_path,
+        start_date=normalized_start_date,
+        end_date=normalized_end_date,
+        signal_version=signal_version,
+        run_id=resolved_run_id,
+        created_at_utc=resolved_created_at_utc,
+        group_types=group_types,
+    )
+    write_summary = write_group_overheat_updates(
         analysis_db_path=analysis_db_path,
         updates=updates,
         start_date=normalized_start_date,
