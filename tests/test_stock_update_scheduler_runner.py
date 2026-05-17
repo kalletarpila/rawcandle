@@ -212,6 +212,9 @@ def test_scheduler_runner_writes_log_file_per_market(tmp_path, monkeypatch):
 
     assert Path(log_path).exists()
     assert log_path.endswith(".txt")
+    assert "run_started_at_local=" in log_text
+    assert "run_finished_at_local=" in log_text
+    assert "run_started_at_utc=" not in log_text
     assert "SUMMARY market=omxh" in log_text
     assert "market=omxh" in log_text
 

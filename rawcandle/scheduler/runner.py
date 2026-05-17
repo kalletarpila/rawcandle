@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import IO, Iterator, List, Optional
+from zoneinfo import ZoneInfo
 
 from main import RawCandleApp, _today_exclusive_end_date
 from rawcandle.scheduler.config import (
@@ -141,6 +142,14 @@ def _format_utc_filename_timestamp(value: datetime.datetime) -> str:
     return value.strftime("%Y%m%dT%H%M%SZ")
 
 
+def _format_local_timestamp(
+    value: datetime.datetime,
+    timezone_name: str,
+) -> str:
+    local_value = value.astimezone(ZoneInfo(timezone_name))
+    return local_value.strftime("%Y-%m-%d %H:%M:%S %Z")
+
+
 def _derive_overall_status(market_results: List[ScheduledMarketRunResult]) -> str:
     statuses = [market_result.summary_status for market_result in market_results]
     if any(status == STATUS_FAILED for status in statuses):
@@ -184,16 +193,16 @@ def _write_market_log(
     *,
     log_path: Path,
     market: str,
-    started_at_utc: str,
-    finished_at_utc: str,
+    started_at_local: str,
+    finished_at_local: str,
     config: StockUpdateSchedulerConfig,
     summary_lines: List[str],
     ui_summary: str,
     error: Optional[str],
 ) -> None:
     lines = [
-        f"run_started_at_utc={started_at_utc}",
-        f"run_finished_at_utc={finished_at_utc}",
+        f"run_started_at_local={started_at_local}",
+        f"run_finished_at_local={finished_at_local}",
         f"market={market}",
         f"osakedata_db_path={config.osakedata_db_path}",
         f"analysis_db_path={config.analysis_db_path}",
@@ -239,6 +248,7 @@ def _run_one_market(
 ) -> ScheduledMarketRunResult:
     market_started_at = _utc_now()
     started_at_utc = _format_utc_timestamp(market_started_at)
+    started_at_local = _format_local_timestamp(market_started_at, config.timezone)
     log_dir = Path(config.log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / (
@@ -270,12 +280,14 @@ def _run_one_market(
         exit_code = 1
         ui_summary = error
 
-    finished_at_utc = _format_utc_timestamp(_utc_now())
+    market_finished_at = _utc_now()
+    finished_at_utc = _format_utc_timestamp(market_finished_at)
+    finished_at_local = _format_local_timestamp(market_finished_at, config.timezone)
     _write_market_log(
         log_path=log_path,
         market=market,
-        started_at_utc=started_at_utc,
-        finished_at_utc=finished_at_utc,
+        started_at_local=started_at_local,
+        finished_at_local=finished_at_local,
         config=config,
         summary_lines=summary_lines,
         ui_summary=ui_summary,
