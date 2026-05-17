@@ -5,6 +5,7 @@ import inspect
 import json
 import os
 import re
+import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
@@ -14,6 +15,7 @@ import flet as ft
 from rawcandle.scheduler.config import (
     StockUpdateSchedulerConfig,
     read_scheduler_config,
+    validate_run_time,
     validate_scheduler_config,
     write_scheduler_config,
 )
@@ -203,6 +205,165 @@ def build_text_log_browser_url(path: str) -> str:
     return f"/{quote(Path(path).name)}"
 
 
+def get_systemd_user_timer_path() -> Path:
+    return Path.home() / ".config" / "systemd" / "user" / "stock-update-scheduler.timer"
+
+
+def format_systemd_on_calendar(run_time: str) -> str:
+    validated_run_time = validate_run_time(run_time)
+    return f"*-*-* {validated_run_time}:00"
+
+
+def read_systemd_timer_on_calendar(timer_path: Path) -> Optional[str]:
+    if not timer_path.exists():
+        return None
+    for line in timer_path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("OnCalendar="):
+            return line.split("=", 1)[1]
+    return None
+
+
+def update_systemd_timer_on_calendar(
+    *,
+    timer_path: Path,
+    run_time: str,
+) -> None:
+    if not timer_path.exists():
+        raise FileNotFoundError(f"Missing systemd timer file: {timer_path}")
+    on_calendar = format_systemd_on_calendar(run_time)
+    lines = timer_path.read_text(encoding="utf-8").splitlines()
+    replaced = False
+    updated_lines: List[str] = []
+    for line in lines:
+        if not replaced and line.startswith("OnCalendar="):
+            updated_lines.append(f"OnCalendar={on_calendar}")
+            replaced = True
+        else:
+            updated_lines.append(line)
+    if not replaced:
+        raise ValueError(f"OnCalendar line not found in timer file: {timer_path}")
+    timer_path.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
+
+
+def reload_systemd_user_timer() -> None:
+    commands = [
+        ["systemctl", "--user", "daemon-reload"],
+        ["systemctl", "--user", "restart", "stock-update-scheduler.timer"],
+    ]
+    for command in commands:
+        completed = subprocess.run(command, capture_output=True, text=True, check=False)
+        if completed.returncode != 0:
+            error_text = (completed.stderr or completed.stdout).strip() or "unknown error"
+            raise RuntimeError(error_text)
+
+
+def read_systemd_user_timer_status() -> Dict[str, Any]:
+    timer_path = get_systemd_user_timer_path()
+    on_calendar = read_systemd_timer_on_calendar(timer_path)
+    if not timer_path.exists():
+        return {
+            "installed": False,
+            "timer_path": str(timer_path),
+            "on_calendar": None,
+            "status_summary": "timer file missing",
+            "error": None,
+        }
+
+    try:
+        completed = subprocess.run(
+            ["systemctl", "--user", "status", "stock-update-scheduler.timer"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception as exc:
+        return {
+            "installed": True,
+            "timer_path": str(timer_path),
+            "on_calendar": on_calendar,
+            "status_summary": "status read failed",
+            "error": str(exc),
+        }
+
+    stdout = completed.stdout or ""
+    stderr = completed.stderr or ""
+    combined = "\n".join(part for part in [stdout.strip(), stderr.strip()] if part).strip()
+    trigger_line = next(
+        (line.strip() for line in stdout.splitlines() if line.strip().startswith("Trigger:")),
+        None,
+    )
+    if completed.returncode == 0:
+        status_summary = trigger_line or "timer loaded"
+        return {
+            "installed": True,
+            "timer_path": str(timer_path),
+            "on_calendar": on_calendar,
+            "status_summary": status_summary,
+            "error": None,
+        }
+
+    lowered = combined.lower()
+    installed = "not-found" not in lowered and "could not be found" not in lowered
+    return {
+        "installed": installed,
+        "timer_path": str(timer_path),
+        "on_calendar": on_calendar,
+        "status_summary": trigger_line or "status read failed",
+        "error": combined or "systemctl status failed",
+    }
+
+
+def save_config_and_sync_systemd_timer(
+    *,
+    config_path: str,
+    config: StockUpdateSchedulerConfig,
+) -> Dict[str, Any]:
+    result = {
+        "config_saved": False,
+        "timer_file_found": False,
+        "timer_updated": False,
+        "systemd_reloaded": False,
+        "status": "FAILED",
+        "message": "",
+    }
+    try:
+        write_scheduler_config(config_path, config)
+    except Exception as exc:
+        result["message"] = f"Save failed: {exc}"
+        return result
+
+    result["config_saved"] = True
+    timer_path = get_systemd_user_timer_path()
+    if not timer_path.exists():
+        result["status"] = "WARNING"
+        result["message"] = "Config saved, but systemd timer file was not found."
+        return result
+
+    result["timer_file_found"] = True
+    try:
+        update_systemd_timer_on_calendar(timer_path=timer_path, run_time=config.run_time)
+        result["timer_updated"] = True
+    except Exception as exc:
+        result["status"] = "WARNING"
+        result["message"] = f"Config saved, but timer file update failed: {exc}"
+        return result
+
+    try:
+        reload_systemd_user_timer()
+        result["systemd_reloaded"] = True
+        result["status"] = "OK"
+        result["message"] = (
+            f"Config saved and systemd timer updated to {config.run_time}."
+        )
+        return result
+    except Exception as exc:
+        result["status"] = "WARNING"
+        result["message"] = (
+            f"Config saved, timer file updated, but systemd reload failed: {exc}"
+        )
+        return result
+
+
 def launch_browser_url(page: ft.Page, url: str) -> None:
     result = page.launch_url(url)
     if inspect.isawaitable(result):
@@ -279,6 +440,15 @@ def run_app(page: ft.Page, config_path: str) -> None:
         read_only=True,
         expand=True,
     )
+    timer_status_field = ft.TextField(
+        label="Systemd timer status",
+        value="",
+        multiline=True,
+        min_lines=5,
+        max_lines=8,
+        read_only=True,
+        expand=True,
+    )
     logs_column = ft.Column(spacing=8)
 
     def selected_markets_from_ui() -> List[str]:
@@ -303,6 +473,19 @@ def run_app(page: ft.Page, config_path: str) -> None:
         omxs_checkbox.value = "omxs" in enabled_markets
         usa_checkbox.value = "usa" in enabled_markets
 
+    def refresh_timer_status(config: StockUpdateSchedulerConfig) -> None:
+        timer_status = read_systemd_user_timer_status()
+        lines = [
+            f"timer_path={timer_status['timer_path']}",
+            f"desired_run_time={config.run_time}",
+            f"installed_on_calendar={timer_status['on_calendar'] or ''}",
+            f"timer_installed={1 if timer_status['installed'] else 0}",
+            f"timer_status={timer_status['status_summary']}",
+        ]
+        if timer_status["error"]:
+            lines.append(f"timer_error={timer_status['error']}")
+        timer_status_field.value = "\n".join(lines)
+
     def refresh_running_state(log_dir: str) -> None:
         status = read_scheduler_status(log_dir)
         state = scheduler_running_state(status)
@@ -319,6 +502,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
         button_state = scheduler_skip_button_state(config=current_config, status=status)
         skip_next_run_button.disabled = not button_state["skip_enabled"]
         cancel_skip_next_run_button.disabled = not button_state["cancel_enabled"]
+        refresh_timer_status(current_config)
 
     def refresh_logs_view(log_dir: str) -> None:
         latest_summary = load_latest_scheduler_summary(log_dir)
@@ -407,10 +591,18 @@ def run_app(page: ft.Page, config_path: str) -> None:
                 run_time=run_time_field.value,
                 selected_markets=selected_markets_from_ui(),
             )
-            write_scheduler_config(config_path, config)
-            _set_status(status_field, f"Config saved: {config_path}", _STATUS_OK_COLOR)
+            save_result = save_config_and_sync_systemd_timer(
+                config_path=config_path,
+                config=config,
+            )
             update_ui_from_config(config)
             refresh_logs_view(config.log_dir)
+            status_color = {
+                "OK": _STATUS_OK_COLOR,
+                "WARNING": _STATUS_WARNING_COLOR,
+                "FAILED": _STATUS_ERROR_COLOR,
+            }[save_result["status"]]
+            _set_status(status_field, save_result["message"], status_color)
         except Exception as exc:
             _set_status(status_field, f"Save failed: {exc}", _STATUS_ERROR_COLOR)
         page.update()
@@ -529,6 +721,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
                 ),
                 status_field,
                 summary_field,
+                timer_status_field,
                 ft.Text("Recent scheduler logs", size=18, weight=ft.FontWeight.BOLD),
                 logs_column,
             ],

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
+import subprocess
 from unittest.mock import Mock
 
 import pytest
@@ -11,17 +13,23 @@ from dev_tools.stock_update_scheduler_ui import (
     apply_cancel_skip_next_run_to_config,
     apply_skip_next_run_to_config,
     build_text_log_browser_url,
+    format_systemd_on_calendar,
     format_run_now_error_message,
     build_cancel_skip_next_run_config,
     build_skip_next_run_config,
     build_config_from_ui_values,
+    get_systemd_user_timer_path,
     launch_browser_url,
     list_scheduler_log_files,
     load_latest_scheduler_summary,
     main,
+    read_systemd_timer_on_calendar,
+    read_systemd_user_timer_status,
+    save_config_and_sync_systemd_timer,
     scheduler_skip_button_state,
     scheduler_running_state,
     scheduler_skip_next_run_label,
+    update_systemd_timer_on_calendar,
 )
 from rawcandle.scheduler.config import StockUpdateSchedulerConfig, read_scheduler_config, write_scheduler_config
 from rawcandle.scheduler.runner import SchedulerAlreadyRunningError
@@ -92,6 +100,208 @@ def test_build_text_log_browser_url_quotes_filename(tmp_path):
     browser_url = build_text_log_browser_url(str(log_path))
 
     assert browser_url == "/stock_update_omxh%2020260516T020000Z.txt"
+
+
+def test_format_systemd_on_calendar_formats_validated_time():
+    assert format_systemd_on_calendar("05:30") == "*-*-* 05:30:00"
+    assert format_systemd_on_calendar("06:30") == "*-*-* 06:30:00"
+
+
+def test_format_systemd_on_calendar_validates_input():
+    with pytest.raises(ValueError):
+        format_systemd_on_calendar("6:30")
+
+
+def test_read_systemd_timer_on_calendar_returns_value_when_line_exists(tmp_path):
+    timer_path = tmp_path / "stock-update-scheduler.timer"
+    timer_path.write_text("[Timer]\nOnCalendar=*-*-* 06:30:00\n", encoding="utf-8")
+
+    assert read_systemd_timer_on_calendar(timer_path) == "*-*-* 06:30:00"
+
+
+def test_read_systemd_timer_on_calendar_returns_none_when_missing(tmp_path):
+    assert read_systemd_timer_on_calendar(tmp_path / "missing.timer") is None
+
+
+def test_update_systemd_timer_on_calendar_replaces_only_oncalendar_line(tmp_path):
+    timer_path = tmp_path / "stock-update-scheduler.timer"
+    timer_path.write_text(
+        "[Unit]\nDescription=Test\n[Timer]\nOnCalendar=*-*-* 05:30:00\nPersistent=true\n",
+        encoding="utf-8",
+    )
+
+    update_systemd_timer_on_calendar(timer_path=timer_path, run_time="06:30")
+
+    assert (
+        timer_path.read_text(encoding="utf-8")
+        == "[Unit]\nDescription=Test\n[Timer]\nOnCalendar=*-*-* 06:30:00\nPersistent=true\n"
+    )
+
+
+def test_update_systemd_timer_on_calendar_raises_when_file_missing(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        update_systemd_timer_on_calendar(
+            timer_path=tmp_path / "missing.timer",
+            run_time="06:30",
+        )
+
+
+def test_update_systemd_timer_on_calendar_raises_when_oncalendar_missing(tmp_path):
+    timer_path = tmp_path / "stock-update-scheduler.timer"
+    timer_path.write_text("[Timer]\nPersistent=true\n", encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        update_systemd_timer_on_calendar(timer_path=timer_path, run_time="06:30")
+
+
+def test_read_systemd_user_timer_status_returns_missing_status_when_timer_missing(
+    tmp_path, monkeypatch
+):
+    timer_path = tmp_path / "stock-update-scheduler.timer"
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.get_systemd_user_timer_path",
+        lambda: timer_path,
+    )
+
+    status = read_systemd_user_timer_status()
+
+    assert status["installed"] is False
+    assert status["timer_path"] == str(timer_path)
+    assert status["on_calendar"] is None
+    assert status["error"] is None
+
+
+def test_read_systemd_user_timer_status_returns_stable_mocked_status(tmp_path, monkeypatch):
+    timer_path = tmp_path / "stock-update-scheduler.timer"
+    timer_path.write_text("[Timer]\nOnCalendar=*-*-* 06:30:00\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.get_systemd_user_timer_path",
+        lambda: timer_path,
+    )
+
+    def fake_run(command, capture_output, text, check):
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout="Trigger: Mon 2026-05-18 06:30:00 EEST\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.subprocess.run", fake_run)
+
+    status = read_systemd_user_timer_status()
+
+    assert status["installed"] is True
+    assert status["on_calendar"] == "*-*-* 06:30:00"
+    assert "Trigger:" in status["status_summary"]
+    assert status["error"] is None
+
+
+def test_save_config_and_sync_systemd_timer_reports_success(tmp_path, monkeypatch):
+    config_path = tmp_path / "scheduler.json"
+    timer_path = tmp_path / "stock-update-scheduler.timer"
+    timer_path.write_text("[Timer]\nOnCalendar=*-*-* 05:30:00\n", encoding="utf-8")
+    config = StockUpdateSchedulerConfig(
+        enabled_markets=["omxh", "omxs"],
+        run_time="06:30",
+        osakedata_db_path="/tmp/osakedata.db",
+        analysis_db_path="/tmp/analysis.db",
+        log_dir="/tmp/logs",
+        timezone="Europe/Helsinki",
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.get_systemd_user_timer_path",
+        lambda: timer_path,
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.reload_systemd_user_timer",
+        lambda: None,
+    )
+
+    result = save_config_and_sync_systemd_timer(
+        config_path=str(config_path),
+        config=config,
+    )
+
+    saved = read_scheduler_config(str(config_path))
+    assert saved.run_time == "06:30"
+    assert read_systemd_timer_on_calendar(timer_path) == "*-*-* 06:30:00"
+    assert result == {
+        "config_saved": True,
+        "timer_file_found": True,
+        "timer_updated": True,
+        "systemd_reloaded": True,
+        "status": "OK",
+        "message": "Config saved and systemd timer updated to 06:30.",
+    }
+
+
+def test_save_config_and_sync_systemd_timer_reports_missing_timer_warning(
+    tmp_path, monkeypatch
+):
+    config_path = tmp_path / "scheduler.json"
+    timer_path = tmp_path / "missing.timer"
+    config = StockUpdateSchedulerConfig(
+        enabled_markets=["omxh", "omxs"],
+        run_time="06:30",
+        osakedata_db_path="/tmp/osakedata.db",
+        analysis_db_path="/tmp/analysis.db",
+        log_dir="/tmp/logs",
+        timezone="Europe/Helsinki",
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.get_systemd_user_timer_path",
+        lambda: timer_path,
+    )
+    reloaded_called = {"value": False}
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.reload_systemd_user_timer",
+        lambda: reloaded_called.__setitem__("value", True),
+    )
+
+    result = save_config_and_sync_systemd_timer(
+        config_path=str(config_path),
+        config=config,
+    )
+
+    saved = read_scheduler_config(str(config_path))
+    assert saved.run_time == "06:30"
+    assert reloaded_called["value"] is False
+    assert result["status"] == "WARNING"
+    assert result["timer_file_found"] is False
+
+
+def test_save_config_and_sync_systemd_timer_reports_reload_warning(tmp_path, monkeypatch):
+    config_path = tmp_path / "scheduler.json"
+    timer_path = tmp_path / "stock-update-scheduler.timer"
+    timer_path.write_text("[Timer]\nOnCalendar=*-*-* 05:30:00\n", encoding="utf-8")
+    config = StockUpdateSchedulerConfig(
+        enabled_markets=["omxh", "omxs"],
+        run_time="06:30",
+        osakedata_db_path="/tmp/osakedata.db",
+        analysis_db_path="/tmp/analysis.db",
+        log_dir="/tmp/logs",
+        timezone="Europe/Helsinki",
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.get_systemd_user_timer_path",
+        lambda: timer_path,
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.reload_systemd_user_timer",
+        lambda: (_ for _ in ()).throw(RuntimeError("reload failed")),
+    )
+
+    result = save_config_and_sync_systemd_timer(
+        config_path=str(config_path),
+        config=config,
+    )
+
+    saved = read_scheduler_config(str(config_path))
+    assert saved.run_time == "06:30"
+    assert read_systemd_timer_on_calendar(timer_path) == "*-*-* 06:30:00"
+    assert result["status"] == "WARNING"
+    assert "reload failed" in result["message"]
 
 
 def test_launch_browser_url_awaits_launch_when_needed():
