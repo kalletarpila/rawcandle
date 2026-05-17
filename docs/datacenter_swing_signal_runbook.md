@@ -304,3 +304,9 @@ Before treating a daily report as complete:
 11. Confirm overheat update was run.
 12. Confirm ticker scanner update was run.
 13. Confirm the daily report renders without missing required tables or invalid-date errors.
+
+## Pipeline Smoke Test
+
+- The repository includes an end-to-end smoke test for the datacenter swing daily and weekly workflow.
+- The smoke test is not a production backtest.
+- It verifies pipeline wiring, persisted-table dependencies, and daily plus weekly report generation on deterministic fixture data.
