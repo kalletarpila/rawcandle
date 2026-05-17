@@ -269,9 +269,10 @@ The existing strategic datacenter index report remains the longer-horizon contex
 
 Current status:
 
-- There is no separate implemented 5 valid trading day weekly swing summary CLI yet.
+- The implemented 5 valid trading day weekly swing report CLI is `run_datacenter_weekly_swing_report.py`.
+- It is separate from `run_datacenter_index_report.py`, which remains the longer strategic datacenter index report.
 - `run_datacenter_index_report.py` remains the current strategic datacenter report entrypoint.
-- A true 5 trading day weekly swing summary is a follow-up task and should not be confused with a calendar week report.
+- The weekly swing report should not be confused with a calendar week report.
 
 ## Troubleshooting / Incomplete Pipeline Symptoms
 

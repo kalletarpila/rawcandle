@@ -1,0 +1,49 @@
+from __future__ import annotations
+
+from run_datacenter_weekly_swing_report import main as run_datacenter_weekly_swing_report_main
+
+from tests.test_datacenter_weekly_swing_report import _seed_weekly_report_db
+
+
+def test_cli_writes_markdown_and_prints_deterministic_summary(tmp_path, capsys):
+    analysis_db = tmp_path / "analysis.db"
+    output_md = tmp_path / "weekly_report.md"
+    output_csv = tmp_path / "weekly_report.csv"
+    _seed_weekly_report_db(analysis_db)
+
+    exit_code = run_datacenter_weekly_swing_report_main(
+        [
+            "--analysis-db",
+            str(analysis_db),
+            "--end-date",
+            "2024-01-10",
+            "--output-md",
+            str(output_md),
+            "--output-csv",
+            str(output_csv),
+            "--generated-at-utc",
+            "2026-05-17T12:00:00Z",
+        ]
+    )
+
+    assert exit_code == 0
+    assert output_md.exists()
+    assert output_csv.exists()
+    assert "# Datacenter Weekly Swing Report" in output_md.read_text(encoding="utf-8")
+
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert lines[0] == "SUMMARY end_date=2024-01-10"
+    assert lines[1] == "SUMMARY signal_version=DC_SWING_SIGNAL_V1"
+    assert lines[2] == "SUMMARY ohlc_calc_version=DC_SWING_OHLC_V1"
+    assert lines[3] == "SUMMARY valid_signal_dates_count=5"
+    assert lines[4] == "SUMMARY window_start_date=2024-01-02"
+    assert lines[5] == "SUMMARY window_end_date=2024-01-10"
+    assert lines[6] == "SUMMARY incomplete_window=NO"
+    assert lines[7] == "SUMMARY group_rows=20"
+    assert lines[8] == "SUMMARY ticker_rows=20"
+    assert lines[9] == "SUMMARY synthetic_ohlc_rows=10"
+    assert lines[10] == "SUMMARY repeated_breakout_tickers=1"
+    assert lines[11] == "SUMMARY repeated_pullback_tickers=1"
+    assert lines[12] == "SUMMARY repeated_exit_risk_tickers=1"
+    assert lines[13] == f"SUMMARY output_markdown={output_md}"
+    assert lines[-1] == "SUMMARY validation_status=OK"
