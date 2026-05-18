@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -140,6 +141,47 @@ def _format_table(headers: Sequence[str], rows: Sequence[dict[str, object]]) -> 
             "| " + " | ".join(_format_value(row.get(header)) for header in headers) + " |"
         )
     return "\n".join(lines) + "\n"
+
+
+def _localize_csv_text(value: str) -> str:
+    return re.sub(r"(?<=\d)\.(?=\d)", ",", value)
+
+
+def _parse_markdown_table_cells(line: str) -> list[str] | None:
+    if not line.startswith("|"):
+        return None
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def _is_markdown_table_separator(cells: Sequence[str]) -> bool:
+    if not cells:
+        return False
+    return all(cell != "" and set(cell) <= {"-", ":"} for cell in cells)
+
+
+def _build_csv_rows_from_markdown(markdown: str) -> list[list[str]]:
+    rows: list[list[str]] = []
+    current_section = "report"
+    for line in markdown.splitlines():
+        if line.startswith("## "):
+            current_section = line[3:]
+            rows.append([current_section])
+            continue
+        if line.startswith("# "):
+            current_section = line[2:]
+            rows.append([current_section])
+            continue
+        table_cells = _parse_markdown_table_cells(line)
+        if table_cells is not None:
+            if _is_markdown_table_separator(table_cells):
+                continue
+            rows.append([current_section, *(_localize_csv_text(cell) for cell in table_cells)])
+            continue
+        if line == "":
+            rows.append([current_section])
+            continue
+        rows.append([current_section, _localize_csv_text(line)])
+    return rows
 
 
 def _count_by_field(rows: Sequence[dict[str, object]], field_name: str) -> list[dict[str, object]]:
@@ -820,20 +862,13 @@ def build_csv_daily_swing_report(
         generated_at_utc=generated_at_utc,
         top_n=top_n,
     )
+    rows = _build_csv_rows_from_markdown(markdown)
     output = io.StringIO()
     writer = csv.writer(output, delimiter=";", lineterminator="\n")
-    writer.writerow(["section", "line"])
-    current_section = "report"
-    for line in markdown.splitlines():
-        if line.startswith("## "):
-            current_section = line[3:]
-            writer.writerow([current_section, ""])
-            continue
-        if line.startswith("# "):
-            current_section = line[2:]
-            writer.writerow([current_section, ""])
-            continue
-        writer.writerow([current_section, line])
+    max_columns = max((len(row) for row in rows), default=1)
+    writer.writerow(["section", *(f"value_{index}" for index in range(1, max_columns))])
+    for row in rows:
+        writer.writerow([*row, *([""] * (max_columns - len(row)))])
     return output.getvalue()
 
 

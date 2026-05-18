@@ -17,6 +17,7 @@ from .swing_daily_report import (
     TREND_PRIORITY,
     _check_required_tables,
     _float_value,
+    _build_csv_rows_from_markdown,
     _format_table,
     _normalize_path,
     _parse_iso_date,
@@ -1090,20 +1091,13 @@ def build_csv_weekly_swing_report(
         generated_at_utc=generated_at_utc,
         top_n=top_n,
     )
+    rows = _build_csv_rows_from_markdown(markdown)
     output = io.StringIO()
     writer = csv.writer(output, delimiter=";", lineterminator="\n")
-    writer.writerow(["section", "line"])
-    current_section = "report"
-    for line in markdown.splitlines():
-        if line.startswith("## "):
-            current_section = line[3:]
-            writer.writerow([current_section, ""])
-            continue
-        if line.startswith("# "):
-            current_section = line[2:]
-            writer.writerow([current_section, ""])
-            continue
-        writer.writerow([current_section, line])
+    max_columns = max((len(row) for row in rows), default=1)
+    writer.writerow(["section", *(f"value_{index}" for index in range(1, max_columns))])
+    for row in rows:
+        writer.writerow([*row, *([""] * (max_columns - len(row)))])
     return output.getvalue()
 
 

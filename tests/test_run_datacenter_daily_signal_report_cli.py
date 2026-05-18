@@ -36,6 +36,12 @@ def test_cli_writes_markdown_and_prints_deterministic_summary(tmp_path, capsys):
     assert expected_output_md.exists()
     assert expected_output_csv.exists()
     assert "# Datacenter Daily Swing Signal Report" in expected_output_md.read_text(encoding="utf-8")
+    csv_text = expected_output_csv.read_text(encoding="utf-8")
+    assert csv_text.startswith("section;value_1;")
+    assert "0,0476" in csv_text
+    assert "Dashboard;metric;value" in csv_text
+    assert "Data Quality;scope;group_type;status;count" in csv_text
+    assert "| metric | value |" not in csv_text
 
     lines = capsys.readouterr().out.strip().splitlines()
     assert lines[0] == "SUMMARY signal_date=2024-01-10"

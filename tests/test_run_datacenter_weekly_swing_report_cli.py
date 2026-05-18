@@ -34,8 +34,14 @@ def test_cli_writes_markdown_and_prints_deterministic_summary(tmp_path, capsys):
     assert expected_output_md.exists()
     assert expected_output_csv.exists()
     markdown = expected_output_md.read_text(encoding="utf-8")
+    csv_text = expected_output_csv.read_text(encoding="utf-8")
     assert "# Datacenter Rolling Swing Report" in markdown
     assert "# Datacenter Weekly Swing Report" not in markdown
+    assert csv_text.startswith("section;value_1;")
+    assert "0,02" in csv_text
+    assert "Window summary;metric;value" in csv_text
+    assert "Ecosystem window change;metric;first_value;last_value;change" in csv_text
+    assert "| metric | value |" not in csv_text
 
     lines = capsys.readouterr().out.strip().splitlines()
     assert lines[0] == "SUMMARY end_date=2024-01-10"
