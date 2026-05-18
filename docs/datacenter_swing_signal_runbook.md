@@ -77,6 +77,32 @@ The current intended order is:
 11. Run ticker scanner update with `run_datacenter_ticker_swing_signals.py --scanner-only`.
 12. Run the read-only daily report with `run_datacenter_daily_signal_report.py`.
 
+## Full Pipeline Command
+
+- `run_datacenter_swing_pipeline.py` runs the full datacenter swing V1 pipeline in the intended production-safe order.
+- The read-only audit runs before reports.
+- Reports are generated only if the audit result is `OK` or `WARN`.
+- The datacenter index stage uses `index_base_date` as its start date for safety.
+- Individual commands remain available for debugging and partial reruns.
+
+Example:
+
+```bash
+python3 run_datacenter_swing_pipeline.py \
+  --price-db data/osakedata.db \
+  --analysis-db data/analysis.db \
+  --taxonomy-csv data/datacenter_ecosystem_taxonomy_full_v1.csv \
+  --taxonomy-version DC_TAXONOMY_FULL_V1 \
+  --market usa \
+  --signal-date 2026-05-15 \
+  --start-date 2026-01-01 \
+  --index-base-date 2020-01-01 \
+  --output-dir /home/kalle/projects/rawcandle/swing_reports \
+  --expected-ticker-count 236 \
+  --expected-group-count 54 \
+  --expected-synthetic-ohlc-count 53
+```
+
 ## Exact CLI Sequence Template
 
 The commands below use the actual current CLI flags.
