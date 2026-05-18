@@ -111,12 +111,30 @@ python3 run_datacenter_swing_pipeline.py \
 - The read-only audit still verifies actual persisted rows from the core datacenter tables.
 - A later phase may use watermarks for incremental runs.
 
+### Pipeline Plan
+
+- `run_datacenter_swing_pipeline_plan.py` is a read-only planner based on pipeline watermarks.
+- It recommends which components are up to date, stale, or missing.
+- It does not skip stages automatically.
+- The main pipeline still runs stages unless explicit skip flags are used.
+- A later phase may use this plan for safe incremental execution.
+
 Example:
 
 ```bash
 python3 run_datacenter_pipeline_watermark.py \
   --analysis-db data/analysis.db \
   --taxonomy-version DC_TAXONOMY_FULL_V1
+```
+
+```bash
+python3 run_datacenter_swing_pipeline_plan.py \
+  --analysis-db data/analysis.db \
+  --taxonomy-version DC_TAXONOMY_FULL_V1 \
+  --market usa \
+  --signal-date 2026-05-15 \
+  --start-date 2026-01-01 \
+  --index-base-date 2020-01-01
 ```
 
 ## Exact CLI Sequence Template
