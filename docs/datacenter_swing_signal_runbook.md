@@ -85,6 +85,9 @@ The current intended order is:
 - The read-only audit runs before reports.
 - Reports are generated only if the audit result is `OK` or `WARN`.
 - The datacenter index stage uses `index_base_date` as its start date for safety.
+- The full pipeline defaults to `--weekly-window-size 20` for the rolling report stage.
+- Use `--weekly-window-size 5` in the full pipeline for a short weekly pulse.
+- Use `--weekly-window-size 60` in the full pipeline for a longer strategic rolling view.
 - Individual commands remain available for debugging and partial reruns.
 
 Example:
@@ -289,7 +292,7 @@ python3 run_datacenter_weekly_swing_report.py \
 
 - The generated Markdown title is `Datacenter Rolling Swing Report`.
 - The CLI remains `run_datacenter_weekly_swing_report.py` for backward compatibility.
-- The default rolling window is 5 valid trading days.
+- Direct `run_datacenter_weekly_swing_report.py` still defaults to a 5 valid trading day window.
 - Use `--window-size` for other rolling windows such as 20 or 60 valid trading days.
 - `Best relative subindustry changes` and `Weakest relative subindustry changes` are relative rankings within the selected window, not absolute buy/sell recommendations.
 

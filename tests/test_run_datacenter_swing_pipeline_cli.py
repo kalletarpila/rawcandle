@@ -55,6 +55,15 @@ def test_dry_run_prints_planned_stages_and_does_not_call_stage_runners(tmp_path,
     assert not (tmp_path / "reports").exists()
 
 
+def test_pipeline_default_weekly_window_size_is_20_and_used_in_dry_run(tmp_path, capsys):
+    exit_code = run_datacenter_swing_pipeline_main(_base_args(tmp_path) + ["--dry-run"])
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert any("--weekly-window-size 20" in line for line in lines if line.startswith("PLAN "))
+    assert lines[-1] == "SUMMARY pipeline_status=DRY_RUN"
+
+
 def test_pipeline_calls_stages_in_correct_order_and_uses_index_base_date(tmp_path, monkeypatch, capsys):
     calls: list[tuple[str, list[str] | dict[str, object]]] = []
     DatabaseManager(str(tmp_path / "analysis.db")).close()

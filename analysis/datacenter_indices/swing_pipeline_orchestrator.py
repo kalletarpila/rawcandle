@@ -196,7 +196,7 @@ def run_datacenter_swing_pipeline(
     expected_ticker_count: int | None = None,
     expected_group_count: int | None = None,
     expected_synthetic_ohlc_count: int | None = None,
-    weekly_window_size: int = 5,
+    weekly_window_size: int = 20,
     skip_index: bool = False,
     skip_audit: bool = False,
     skip_reports: bool = False,
