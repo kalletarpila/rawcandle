@@ -66,6 +66,20 @@ OVERHEAT_RANK = {
     "EXTREME": 4,
 }
 
+GROUP_TYPE_PRIORITY = {
+    "ecosystem": 0,
+    "layer": 1,
+    "subindustry": 2,
+}
+
+OVERHEAT_STATUS_PRIORITY = {
+    "EXTREME": 0,
+    "HIGH": 1,
+    "ELEVATED": 2,
+    "LOW": 3,
+    "NULL": 4,
+}
+
 
 def _count_by_date_and_field(
     rows: Sequence[dict[str, object]],
@@ -92,6 +106,41 @@ def _count_by_date_and_field(
             "count": counts[(date_value, group_value, field_value)],
         }
         for date_value, group_value, field_value in ordered_keys
+    ]
+
+
+def _count_by_date_group_type_and_field(
+    rows: Sequence[dict[str, object]],
+    *,
+    date_field: str,
+    value_field: str,
+) -> list[dict[str, object]]:
+    counts: dict[tuple[str, str, str], int] = {}
+    for row in rows:
+        date_value = str(row.get(date_field) or "")
+        group_type_value = row.get("group_type")
+        normalized_group_type = "NULL" if group_type_value is None else str(group_type_value)
+        field_value = "NULL" if row.get(value_field) is None else str(row.get(value_field))
+        key = (date_value, normalized_group_type, field_value)
+        counts[key] = counts.get(key, 0) + 1
+    ordered_keys = sorted(
+        counts,
+        key=lambda key: (
+            key[0],
+            GROUP_TYPE_PRIORITY.get(key[1], 3),
+            "" if key[1] == "NULL" else key[1],
+            OVERHEAT_STATUS_PRIORITY.get(key[2], 5),
+            "" if key[2] == "NULL" else key[2],
+        ),
+    )
+    return [
+        {
+            "signal_date": date_value,
+            "group_type": group_type_value,
+            "status": field_value,
+            "count": counts[(date_value, group_type_value, field_value)],
+        }
+        for date_value, group_type_value, field_value in ordered_keys
     ]
 
 
@@ -434,7 +483,7 @@ def build_markdown_weekly_swing_report(
     lines.extend(["", "## 4. Overheat / rotation risk progression"])
     if any(row.get("overheat_risk_level") == "EXTREME" for row in end_group_rows):
         lines.append("EXTREME RISK – TIGHTEN STOPS / NO NEW LONGS")
-    overheat_count_rows = _count_by_date_and_field(
+    overheat_count_rows = _count_by_date_group_type_and_field(
         group_rows,
         date_field="signal_date",
         value_field="overheat_risk_level",

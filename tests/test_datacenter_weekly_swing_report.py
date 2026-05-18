@@ -371,6 +371,68 @@ def test_finds_last_five_valid_signal_dates_and_generates_report(tmp_path):
     assert "| 2024-01-08 | subindustry | AI Chips | BOS_UP | 2024-01-08 | FRESH | DOUBLE_BOS_UP | 2024-01-08 | FRESH | HH | FRESH | UP | BUY_ZONE | HIGH |" in markdown
     assert "| layer | Infrastructure | BOS_DOWN | 2024-01-10 | FRESH |  |  |  | LH | FRESH | NEUTRAL | NEUTRAL | LOW |" in markdown
     assert "HIGH" in markdown
+    assert "| 2024-01-02 | ecosystem | LOW | 1 |" in markdown
+    assert "| 2024-01-02 | layer | LOW | 1 |" in markdown
+    assert "| 2024-01-02 | subindustry | HIGH | 1 |" in markdown
+    assert "| 2024-01-02 | subindustry | LOW | 1 |" in markdown
+
+
+def test_weekly_overheat_progression_groups_by_group_type_and_orders_deterministically(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+
+    markdown = build_markdown_weekly_swing_report(
+        load_weekly_swing_report_data(
+            analysis_db_path=analysis_db,
+            end_date="2024-01-10",
+        ),
+        generated_at_utc="2026-05-17T12:00:00Z",
+        top_n=20,
+    )
+    section_start = markdown.index("## 4. Overheat / rotation risk progression")
+    next_section = markdown.index("Worsened groups")
+    section = markdown[section_start:next_section]
+    assert "| 2024-01-10 | ecosystem | ELEVATED | 1 |" in section
+    assert "| 2024-01-10 | layer | LOW | 1 |" in section
+    assert "| 2024-01-10 | subindustry | EXTREME | 1 |" in section
+    assert "| 2024-01-10 | subindustry | HIGH | 1 |" in section
+    assert "| 2024-01-10 |  |" not in section
+
+    ecosystem_index = section.index("| 2024-01-10 | ecosystem | ELEVATED | 1 |")
+    layer_index = section.index("| 2024-01-10 | layer | LOW | 1 |")
+    subindustry_extreme_index = section.index("| 2024-01-10 | subindustry | EXTREME | 1 |")
+    subindustry_high_index = section.index("| 2024-01-10 | subindustry | HIGH | 1 |")
+    assert ecosystem_index < layer_index < subindustry_extreme_index < subindustry_high_index
+
+
+def test_weekly_overheat_progression_renders_null_status_deterministically(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_group_swing_signal_daily
+            SET overheat_risk_level = NULL
+            WHERE signal_date = '2024-01-10'
+              AND taxonomy_version = 'DC_TAXONOMY_V1'
+              AND group_type = 'layer'
+              AND group_name = 'Infrastructure'
+            """
+        )
+        conn.commit()
+
+    markdown = build_markdown_weekly_swing_report(
+        load_weekly_swing_report_data(
+            analysis_db_path=analysis_db,
+            end_date="2024-01-10",
+        ),
+        generated_at_utc="2026-05-17T12:00:00Z",
+        top_n=20,
+    )
+    section_start = markdown.index("## 4. Overheat / rotation risk progression")
+    next_section = markdown.index("Worsened groups")
+    section = markdown[section_start:next_section]
+    assert "| 2024-01-10 | layer | NULL | 1 |" in section
 
 
 def test_weekly_group_structure_break_reset_section_ignores_carried_forward_context(tmp_path):
