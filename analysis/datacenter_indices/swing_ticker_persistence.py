@@ -459,6 +459,22 @@ def _match_gte(value: float | None, threshold: float) -> bool:
     return value is not None and value >= threshold
 
 
+def _match_lt_values(left: float | None, right: float | None) -> bool:
+    return left is not None and right is not None and left < right
+
+
+def _match_lte_values(left: float | None, right: float | None) -> bool:
+    return left is not None and right is not None and left <= right
+
+
+def _match_gt_values(left: float | None, right: float | None) -> bool:
+    return left is not None and right is not None and left > right
+
+
+def _match_gte_values(left: float | None, right: float | None) -> bool:
+    return left is not None and right is not None and left >= right
+
+
 def _load_taxonomy_rows(
     taxonomy_csv_path: str | Path,
 ) -> list[DatacenterTaxonomyRow]:
@@ -1314,13 +1330,11 @@ def _classify_scanner_fields(
     breakout_signal = int(
         entry_eligible
         and bullish_subindustry
-        and _match_gte(close, highest_close_20d)  # type: ignore[arg-type]
+        and _match_gte_values(close, highest_close_20d)
         and _match_gt(volume_vs_avg20, 1.5)
         and _match_gt(return_5d, 0.0)
         and _match_gt(return_10d, 0.0)
-        and close is not None
-        and ema20 is not None
-        and close > ema20
+        and _match_gt_values(close, ema20)
     )
 
     ema10_slope_positive = row["ema10_slope_positive"] is not None and int(row["ema10_slope_positive"]) == 1
@@ -1330,15 +1344,12 @@ def _classify_scanner_fields(
         entry_eligible
         and bullish_subindustry
         and _match_gt(return_10d, 0.0)
-        and close is not None
-        and ema10 is not None
-        and ema20 is not None
-        and close >= (ema10 * 0.97)
-        and close <= (ema10 * 1.03)
+        and _match_gte_values(close, None if ema10 is None else (ema10 * 0.97))
+        and _match_lte_values(close, None if ema10 is None else (ema10 * 1.03))
         and ema10_slope_positive
         and _match_lte(return_5d, 0.0)
         and _match_gte(return_5d, -0.06)
-        and close >= (ema20 * 0.98)
+        and _match_gte_values(close, None if ema20 is None else (ema20 * 0.98))
     )
 
     conservative_ema20_pullback_signal = int(
@@ -1346,10 +1357,8 @@ def _classify_scanner_fields(
         and bullish_subindustry
         and _match_gt(return_20d, 0.0)
         and _match_gt(return_60d, 0.0)
-        and close is not None
-        and ema20 is not None
-        and close >= (ema20 * 0.98)
-        and close <= (ema20 * 1.03)
+        and _match_gte_values(close, None if ema20 is None else (ema20 * 0.98))
+        and _match_lte_values(close, None if ema20 is None else (ema20 * 1.03))
         and ema20_slope_positive
         and _match_lte(return_5d, 0.0)
         and _match_gte(return_5d, -0.08)
@@ -1360,7 +1369,7 @@ def _classify_scanner_fields(
     )
 
     exit_reasons: list[str] = []
-    if close is not None and ema20 is not None and close < ema20:
+    if _match_lt_values(close, ema20):
         exit_reasons.append("close_below_ema20")
     if _match_lt(return_10d, -0.08):
         exit_reasons.append("return_10d_lt_minus_8pct")
@@ -1368,7 +1377,7 @@ def _classify_scanner_fields(
         exit_reasons.append("latest_structure_label_ll")
     if subindustry_state == "EXIT_ZONE":
         exit_reasons.append("subindustry_exit_zone")
-    if subindustry_state == "TRIM_WATCH" and close is not None and ma10 is not None and close < ma10:
+    if subindustry_state == "TRIM_WATCH" and _match_lt_values(close, ma10):
         exit_reasons.append("trim_watch_close_below_ma10")
     exit_risk_signal = int(bool(exit_reasons))
     exit_reason = ";".join(exit_reasons) if exit_reasons else None

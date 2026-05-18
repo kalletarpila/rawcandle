@@ -1449,6 +1449,123 @@ def test_exit_risk_rules_and_reason_order(tmp_path):
     assert rows_after["CCC"]["exit_risk_severity"] is None
 
 
+def test_scanner_null_inputs_do_not_crash_and_only_independent_exit_conditions_trigger(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    rows = [
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "AAA", "Power", "UPS",
+            100.0, 1000.0, 0.02, 0.03, 0.10, 0.20,
+            98.0, 99.0, None, None, None, None,
+            None, None, None, 1, 1, 3, 5, None, 900.0, 1.6,
+            "HH", None, None, None, None, None, None, None,
+            None, None, None, None, None, None, "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "BBB", "Power", "UPS",
+            100.0, 1000.0, -0.02, 0.04, 0.10, 0.20,
+            98.0, None, 98.0, None, None, None,
+            None, None, None, 1, 1, 3, 5, 110.0, 900.0, 1.0,
+            "HH", None, None, None, None, None, None, None,
+            None, None, None, None, None, None, "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "CCC", "Power", "UPS",
+            100.0, 1000.0, -0.03, 0.02, 0.15, None,
+            100.0, 105.0, 99.0, None, None, None,
+            None, None, None, 1, 1, 3, 5, 110.0, 900.0, None,
+            "HH", None, None, None, None, None, None, None,
+            None, None, None, None, None, None, "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "DDD", "Power", "TRIM",
+            None, 1000.0, None, None, None, None,
+            None, None, None, None, None, None,
+            None, None, None, None, None, 3, 5, None, None, None,
+            None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None, "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "EEE", "Power", "EXIT",
+            None, 1000.0, None, None, None, None,
+            None, None, None, None, None, None,
+            None, None, None, None, None, 3, 5, None, None, None,
+            "HH", None, None, None, None, None, None, None,
+            None, None, None, None, None, None, "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "FFF", "Power", "NONE",
+            None, 1000.0, None, None, None, None,
+            None, None, None, None, None, None,
+            None, None, None, None, None, 3, 5, None, None, None,
+            "LL", None, None, None, None, None, None, None,
+            None, None, None, None, None, None, "BAD_STATUS",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+    ]
+    for row in rows:
+        _insert_ticker_swing_row(analysis_db, row)
+    _insert_group_swing_row(
+        analysis_db,
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "subindustry", "UPS",
+            5, 5, 0.02, 0.03, 0.10, 0.20,
+            80.0, 85.0, None, 0.0, 0.0, 60.0, 20.0, None,
+            "BUY_ZONE", "x", "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+    )
+    _insert_group_swing_row(
+        analysis_db,
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "subindustry", "TRIM",
+            5, 5, 0.02, 0.03, 0.10, 0.20,
+            80.0, 85.0, None, 0.0, 0.0, 60.0, 20.0, None,
+            "TRIM_WATCH", "x", "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+    )
+    _insert_group_swing_row(
+        analysis_db,
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "subindustry", "EXIT",
+            5, 5, 0.02, 0.03, 0.10, 0.20,
+            80.0, 85.0, None, 0.0, 0.0, 60.0, 20.0, None,
+            "EXIT_ZONE", "x", "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+    )
+
+    persist_datacenter_ticker_scanner_signals(
+        analysis_db_path=analysis_db,
+        start_date="2024-01-10",
+        signal_version="DC_SWING_SIGNAL_V1",
+        run_id="scanner-run",
+        created_at_utc="2026-05-17T12:00:00Z",
+        write_mode="update-existing",
+    )
+
+    rows_after = {row["ticker"]: row for row in _fetch_ticker_rows(analysis_db)}
+    assert rows_after["AAA"]["breakout_signal"] == 0
+    assert rows_after["AAA"]["fast_ema10_pullback_signal"] == 0
+    assert rows_after["BBB"]["fast_ema10_pullback_signal"] == 0
+    assert rows_after["CCC"]["conservative_ema20_pullback_signal"] == 0
+    assert rows_after["DDD"]["exit_risk_signal"] == 0
+    assert rows_after["DDD"]["exit_reason"] is None
+    assert rows_after["DDD"]["exit_risk_severity"] is None
+    assert rows_after["EEE"]["exit_risk_signal"] == 1
+    assert rows_after["EEE"]["exit_reason"] == "subindustry_exit_zone"
+    assert rows_after["EEE"]["exit_risk_severity"] == "MEDIUM"
+    assert rows_after["FFF"]["exit_risk_signal"] == 1
+    assert rows_after["FFF"]["exit_reason"] == "latest_structure_label_ll"
+    assert rows_after["FFF"]["exit_risk_severity"] == "HIGH"
+
+
 def test_scanner_write_modes_are_scoped(tmp_path):
     analysis_db = tmp_path / "analysis.db"
     _create_analysis_db(analysis_db)
