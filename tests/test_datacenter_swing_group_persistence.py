@@ -7,6 +7,7 @@ import pytest
 from analysis.database_manager import DatabaseManager
 from analysis.datacenter_indices.swing_group_persistence import (
     persist_datacenter_group_overheat_risk,
+    persist_datacenter_group_swing_signal_range,
     persist_datacenter_group_timing_states,
     persist_datacenter_group_swing_signals,
 )
@@ -126,6 +127,69 @@ DC_TAXONOMY_V1,BBB,Cooling,Chillers,CORE,1,1.0,
     assert summary["group_rows"] == 5
     assert _group_row(rows, "layer", "Power")["member_count"] == 1
     assert _group_row(rows, "subindustry", "UPS")["member_count"] == 1
+
+
+def test_range_base_processes_only_group_index_dates_in_ascending_order(tmp_path):
+    taxonomy_csv = _write_taxonomy_csv(
+        tmp_path,
+        """taxonomy_version,ticker,layer,subindustry,report_group_status,is_primary,role_weight,notes
+DC_TAXONOMY_V1,AAA,Power,UPS,CORE,1,1.0,
+DC_TAXONOMY_V1,BBB,Power,UPS,CORE,1,1.0,
+DC_TAXONOMY_V1,CCC,Power,UPS,CORE,1,1.0,
+""",
+    )
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    for signal_date in ("2024-01-02", "2024-01-05"):
+        for ticker in ["AAA", "BBB", "CCC"]:
+            _insert_ticker_snapshot(
+                analysis_db,
+                (signal_date, "DC_TAXONOMY_V1", ticker, "Power", "UPS", 1, 1, 1, "HH", "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+            )
+    for index_date in ("2024-01-02", "2024-01-05"):
+        _insert_group_index_row(
+            analysis_db,
+            (index_date, "DC_TAXONOMY_V1", "layer", "Power", 3, 3, 0, 0, 0.0, 0.0, 0.0, None, None, 100.0, None, None, None, None, None, None, None, "OK", "DC_INDEX_CALC_V1", "seed", "2026-05-17T09:00:00Z"),
+        )
+        _insert_group_index_row(
+            analysis_db,
+            (index_date, "DC_TAXONOMY_V1", "subindustry", "UPS", 3, 3, 0, 0, 0.0, 0.0, 0.0, None, None, 100.0, None, None, None, None, None, None, None, "OK", "DC_INDEX_CALC_V1", "seed", "2026-05-17T09:00:00Z"),
+        )
+        _insert_group_index_row(
+            analysis_db,
+            (index_date, "DC_TAXONOMY_V1", "ecosystem", "DC_ECOSYSTEM_TOTAL", 3, 3, 0, 0, 0.0, 0.0, 0.0, None, None, 100.0, None, None, None, None, None, None, None, "OK", "DC_INDEX_CALC_V1", "seed", "2026-05-17T09:00:00Z"),
+        )
+
+    summary = persist_datacenter_group_swing_signal_range(
+        analysis_db_path=analysis_db,
+        taxonomy_csv_path=taxonomy_csv,
+        start_date="2024-01-01",
+        end_date="2024-01-05",
+        signal_version="DC_SWING_SIGNAL_V1",
+        run_id="range-run",
+        created_at_utc="2026-05-17T11:00:00Z",
+        write_mode="replace-date",
+    )
+
+    rows = _fetch_group_rows(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        processed_dates = [
+            row[0]
+            for row in conn.execute(
+                """
+                SELECT DISTINCT signal_date
+                FROM dc_group_swing_signal_daily
+                ORDER BY signal_date ASC
+                """
+            ).fetchall()
+        ]
+    assert summary["requested_start_date"] == "2024-01-01"
+    assert summary["requested_end_date"] == "2024-01-05"
+    assert summary["valid_signal_dates"] == 2
+    assert summary["skipped_non_signal_dates"] == 3
+    assert summary["group_rows"] == 6
+    assert processed_dates == ["2024-01-02", "2024-01-05"]
+    assert {str(row["signal_date"]) for row in rows} == {"2024-01-02", "2024-01-05"}
 
 
 def test_uses_taxonomy_membership_and_not_snapshot_primary_subindustry_for_group_join(tmp_path):

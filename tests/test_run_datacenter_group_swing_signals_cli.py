@@ -72,6 +72,83 @@ def test_cli_writes_rows_and_prints_deterministic_summary(tmp_path, capsys):
     assert count == 3
 
 
+def test_cli_base_range_processes_only_group_index_dates_and_prints_aggregate_summary(tmp_path, capsys):
+    analysis_db = tmp_path / "analysis.db"
+    taxonomy_csv = _write_taxonomy_csv(tmp_path)
+    _create_analysis_db(analysis_db)
+
+    with sqlite3.connect(analysis_db) as conn:
+        for signal_date in ("2024-01-02", "2024-01-05"):
+            for ticker in ["AAA", "BBB", "CCC"]:
+                conn.execute(
+                    """
+                    INSERT INTO dc_ticker_swing_signal_daily (
+                        signal_date, taxonomy_version, ticker, primary_layer, primary_subindustry,
+                        above_ma10, above_ema20, ema20_slope_positive, latest_structure_label,
+                        price_data_status, signal_version, run_id, created_at_utc
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (signal_date, "DC_TAXONOMY_V1", ticker, "Power", "UPS", 1, 1, 1, "HH", "OK", "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z"),
+                )
+            for group_type, group_name in [
+                ("ecosystem", "DC_ECOSYSTEM_TOTAL"),
+                ("layer", "Power"),
+                ("subindustry", "UPS"),
+            ]:
+                conn.execute(
+                    """
+                    INSERT INTO dc_group_index_daily (
+                        index_date, taxonomy_version, group_type, group_name,
+                        member_count, eligible_count, ma50_eligible_count, ma200_eligible_count,
+                        daily_return_equal, median_return, pct_positive, pct_above_ma50, pct_above_ma200,
+                        index_level_equal, return_20d, return_60d, return_120d,
+                        volatility_20d, volatility_60d, relative_strength_spy_60d, relative_strength_qqq_60d,
+                        data_quality_status, calc_version, run_id, created_at_utc
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (signal_date, "DC_TAXONOMY_V1", group_type, group_name, 3, 3, 0, 0, 0.0, 0.0, 0.0, None, None, 100.0, None, None, None, None, None, None, None, "OK", "DC_INDEX_CALC_V1", "seed", "2026-05-17T09:00:00Z"),
+                )
+        conn.commit()
+
+    exit_code = run_datacenter_group_swing_signals_main(
+        [
+            "--analysis-db",
+            str(analysis_db),
+            "--taxonomy-csv",
+            str(taxonomy_csv),
+            "--start-date",
+            "2024-01-01",
+            "--end-date",
+            "2024-01-05",
+            "--write-mode",
+            "replace-date",
+            "--created-at-utc",
+            "2026-05-17T12:00:00Z",
+        ]
+    )
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert lines[0] == "SUMMARY start_date=2024-01-02"
+    assert lines[1] == "SUMMARY end_date=2024-01-05"
+    assert lines[2] == "SUMMARY requested_start_date=2024-01-01"
+    assert lines[3] == "SUMMARY requested_end_date=2024-01-05"
+    assert lines[4] == "SUMMARY valid_signal_dates=2"
+    assert lines[5] == "SUMMARY skipped_non_signal_dates=3"
+    assert lines[6] == "SUMMARY write_mode=replace-date"
+    assert lines[-1] == "SUMMARY validation_status=OK"
+
+    with sqlite3.connect(analysis_db) as conn:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT signal_date
+            FROM dc_group_swing_signal_daily
+            ORDER BY signal_date ASC
+            """
+        ).fetchall()
+    assert [row[0] for row in rows] == ["2024-01-02", "2024-01-05"]
+
+
 def test_cli_timing_only_updates_existing_rows_and_prints_deterministic_summary(tmp_path, capsys):
     analysis_db = tmp_path / "analysis.db"
     taxonomy_csv = _write_taxonomy_csv(tmp_path)

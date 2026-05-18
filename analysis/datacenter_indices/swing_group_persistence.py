@@ -36,6 +36,29 @@ GROUP_SWING_SUMMARY_ORDER = [
     "validation_status",
 ]
 
+GROUP_SWING_RANGE_SUMMARY_ORDER = [
+    "start_date",
+    "end_date",
+    "requested_start_date",
+    "requested_end_date",
+    "valid_signal_dates",
+    "skipped_non_signal_dates",
+    "write_mode",
+    "signal_version",
+    "taxonomy_versions",
+    "group_rows",
+    "inserted_count",
+    "updated_count",
+    "upserted_count",
+    "skipped_existing_count",
+    "deleted_count",
+    "ok_group_count",
+    "partial_data_group_count",
+    "too_small_group_count",
+    "no_data_group_count",
+    "validation_status",
+]
+
 GROUP_SWING_TIMING_SUMMARY_ORDER = [
     "start_date",
     "end_date",
@@ -135,6 +158,10 @@ def build_group_swing_run_id(
 
 def format_group_swing_summary_lines(summary: dict[str, int | str]) -> list[str]:
     return [f"SUMMARY {key}={summary[key]}" for key in GROUP_SWING_SUMMARY_ORDER]
+
+
+def format_group_swing_range_summary_lines(summary: dict[str, int | str]) -> list[str]:
+    return [f"SUMMARY {key}={summary[key]}" for key in GROUP_SWING_RANGE_SUMMARY_ORDER]
 
 
 def format_group_swing_timing_summary_lines(summary: dict[str, int | str]) -> list[str]:
@@ -347,6 +374,43 @@ def _build_group_definitions(
         for subindustry, tickers in sorted(subindustry_map.items())
     )
     return groups
+
+
+def _load_valid_group_index_dates(
+    *,
+    analysis_db_path: str | Path,
+    start_date: str,
+    end_date: str,
+    taxonomy_versions: Sequence[str],
+) -> list[str]:
+    normalized_start_date = _parse_iso_date(start_date, "start_date")
+    normalized_end_date = _parse_iso_date(end_date, "end_date")
+    if normalized_start_date > normalized_end_date:
+        raise ValueError(
+            f"Invalid date range: start_date {normalized_start_date} is after end_date {normalized_end_date}"
+        )
+    if not taxonomy_versions:
+        return []
+
+    db_manager = DatabaseManager(str(analysis_db_path))
+    conn = db_manager.get_connection()
+    conn.row_factory = sqlite3.Row
+    try:
+        placeholders = ", ".join("?" for _ in taxonomy_versions)
+        rows = conn.execute(
+            f"""
+            SELECT DISTINCT index_date
+            FROM dc_group_index_daily
+            WHERE index_date >= ?
+              AND index_date <= ?
+              AND taxonomy_version IN ({placeholders})
+            ORDER BY index_date ASC
+            """,
+            [normalized_start_date, normalized_end_date, *taxonomy_versions],
+        ).fetchall()
+        return [str(row["index_date"]) for row in rows]
+    finally:
+        db_manager.close()
 
 
 def _load_ticker_snapshots(
@@ -1285,6 +1349,84 @@ def persist_datacenter_group_swing_signals(
         **prep_summary,
         **write_summary,
         "validation_status": "OK",
+    }
+
+
+def persist_datacenter_group_swing_signal_range(
+    *,
+    analysis_db_path: str | Path,
+    taxonomy_csv_path: str | Path,
+    start_date: str,
+    end_date: str | None = None,
+    signal_version: str = DEFAULT_SIGNAL_VERSION,
+    run_id: str | None = None,
+    created_at_utc: str | None = None,
+    write_mode: str = "upsert",
+    min_eligible_count: int = DEFAULT_MIN_ELIGIBLE_COUNT,
+    min_coverage_ratio: float = DEFAULT_MIN_COVERAGE_RATIO,
+) -> dict[str, int | str]:
+    normalized_start_date = _parse_iso_date(start_date, "start_date")
+    normalized_end_date = _parse_iso_date(end_date or start_date, "end_date")
+    if normalized_start_date > normalized_end_date:
+        raise ValueError(
+            f"Invalid date range: start_date {normalized_start_date} is after end_date {normalized_end_date}"
+        )
+    if write_mode not in {"insert-missing", "upsert", "replace-date"}:
+        raise ValueError(f"Unsupported write_mode: {write_mode}")
+
+    taxonomy_rows = _load_taxonomy_rows(taxonomy_csv_path)
+    taxonomy_versions = sorted({str(row.taxonomy_version) for row in taxonomy_rows})
+    valid_signal_dates = _load_valid_group_index_dates(
+        analysis_db_path=analysis_db_path,
+        start_date=normalized_start_date,
+        end_date=normalized_end_date,
+        taxonomy_versions=taxonomy_versions,
+    )
+    requested_days = (
+        datetime.strptime(normalized_end_date, "%Y-%m-%d").date()
+        - datetime.strptime(normalized_start_date, "%Y-%m-%d").date()
+    ).days + 1
+    skipped_non_signal_dates = requested_days - len(valid_signal_dates)
+
+    aggregate = {
+        "group_rows": 0,
+        "inserted_count": 0,
+        "updated_count": 0,
+        "upserted_count": 0,
+        "skipped_existing_count": 0,
+        "deleted_count": 0,
+        "ok_group_count": 0,
+        "partial_data_group_count": 0,
+        "too_small_group_count": 0,
+        "no_data_group_count": 0,
+    }
+    for current_signal_date in valid_signal_dates:
+        summary = persist_datacenter_group_swing_signals(
+            analysis_db_path=analysis_db_path,
+            taxonomy_csv_path=taxonomy_csv_path,
+            signal_date=current_signal_date,
+            signal_version=signal_version,
+            run_id=run_id,
+            created_at_utc=created_at_utc,
+            write_mode=write_mode,
+            min_eligible_count=min_eligible_count,
+            min_coverage_ratio=min_coverage_ratio,
+        )
+        for key in aggregate:
+            aggregate[key] += int(summary[key])
+
+    return {
+        "start_date": valid_signal_dates[0] if valid_signal_dates else normalized_start_date,
+        "end_date": valid_signal_dates[-1] if valid_signal_dates else normalized_end_date,
+        "requested_start_date": normalized_start_date,
+        "requested_end_date": normalized_end_date,
+        "valid_signal_dates": len(valid_signal_dates),
+        "skipped_non_signal_dates": skipped_non_signal_dates,
+        "write_mode": write_mode,
+        "signal_version": signal_version,
+        "taxonomy_versions": len(taxonomy_versions),
+        **aggregate,
+        "validation_status": "OK" if valid_signal_dates else "WARN",
     }
 
 
