@@ -333,6 +333,24 @@ Before treating a daily report as complete:
 12. Confirm ticker scanner update was run.
 13. Confirm the daily report renders without missing required tables or invalid-date errors.
 
+## Pipeline Audit
+
+- `run_datacenter_swing_pipeline_audit.py` is a read-only audit CLI.
+- Run it after the pipeline stages complete and before interpreting the daily or weekly reports.
+- It checks persisted ticker, group, synthetic, and weekly-window readiness for the selected `signal_date` and `taxonomy_version`.
+
+Example full-taxonomy audit:
+
+```bash
+python3 run_datacenter_swing_pipeline_audit.py \
+  --analysis-db data/analysis.db \
+  --signal-date 2026-05-15 \
+  --taxonomy-version DC_TAXONOMY_FULL_V1 \
+  --expected-ticker-count 236 \
+  --expected-group-count 54 \
+  --expected-synthetic-ohlc-count 53
+```
+
 ## Pipeline Smoke Test
 
 - The repository includes an end-to-end smoke test for the datacenter swing daily and weekly workflow.
