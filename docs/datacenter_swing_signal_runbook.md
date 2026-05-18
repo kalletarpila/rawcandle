@@ -110,11 +110,19 @@ python3 run_datacenter_ticker_swing_signals.py \
   --market "${MARKET}" \
   --write-mode replace-date
 
-python3 run_datacenter_group_swing_signals.py \
-  --analysis-db "${ANALYSIS_DB}" \
-  --taxonomy-csv "${TAXONOMY_CSV}" \
-  --signal-date "${SIGNAL_DATE}" \
-  --write-mode replace-date
+# Current CLI shape: base group swing metrics are run per valid signal date.
+# Until the CLI supports base range execution directly, run this in a loop over
+# valid trading dates between START_DATE and END_DATE.
+while IFS= read -r VALID_SIGNAL_DATE; do
+  python3 run_datacenter_group_swing_signals.py \
+    --analysis-db "${ANALYSIS_DB}" \
+    --taxonomy-csv "${TAXONOMY_CSV}" \
+    --signal-date "${VALID_SIGNAL_DATE}" \
+    --signal-version DC_SWING_SIGNAL_V1 \
+    --write-mode replace-date
+done <<EOF
+<valid_trading_dates_between_START_DATE_and_END_DATE>
+EOF
 
 python3 run_datacenter_group_synthetic_ohlc.py \
   --price-db "${PRICE_DB}" \
@@ -157,6 +165,7 @@ python3 run_datacenter_group_swing_signals.py \
 python3 run_datacenter_ticker_swing_signals.py \
   --analysis-db "${ANALYSIS_DB}" \
   --as-of-date "${SIGNAL_DATE}" \
+  --taxonomy-version "${TAXONOMY_VERSION}" \
   --write-mode replace-scanner-range \
   --scanner-only
 
