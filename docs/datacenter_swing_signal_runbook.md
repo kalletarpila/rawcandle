@@ -25,11 +25,13 @@ SIGNAL_DATE=<previous_valid_trading_day>
 
 ### Weekly report
 
-- Weekly report means last 5 valid trading days.
+- Weekly report means last N valid trading days.
 - It is not a calendar week report.
 - The weekly window should end on the same previous valid trading day used by the daily report.
 - The 5 day window must be based on valid trading observations, not calendar days.
-- In documentation and operations, describe it as last 5 valid trading days or 5 trading day weekly report.
+- The default weekly window is last 5 valid trading days.
+- The window can be changed with `--window-size`.
+- In documentation and operations, describe it as last N valid trading days, not a calendar week.
 
 ## Data Sources
 
@@ -280,6 +282,19 @@ python3 run_datacenter_weekly_swing_report.py \
   --analysis-db "${ANALYSIS_DB}" \
   --end-date "${SIGNAL_DATE}" \
   --taxonomy-version "${TAXONOMY_VERSION}" \
+  --window-size 5 \
+  --output-md reports/datacenter_weekly_swing_signal_report_${SIGNAL_DATE}.md \
+  --output-csv reports/datacenter_weekly_swing_signal_report_${SIGNAL_DATE}.csv
+```
+
+20-valid-trading-day example:
+
+```bash
+python3 run_datacenter_weekly_swing_report.py \
+  --analysis-db "${ANALYSIS_DB}" \
+  --end-date "${SIGNAL_DATE}" \
+  --taxonomy-version "${TAXONOMY_VERSION}" \
+  --window-size 20 \
   --output-md reports/datacenter_weekly_swing_signal_report_${SIGNAL_DATE}.md \
   --output-csv reports/datacenter_weekly_swing_signal_report_${SIGNAL_DATE}.csv
 ```

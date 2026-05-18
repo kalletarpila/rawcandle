@@ -25,12 +25,15 @@ from .swing_daily_report import (
 )
 
 
+DEFAULT_WEEKLY_WINDOW_SIZE = 5
+
 WEEKLY_REPORT_SUMMARY_ORDER = [
     "end_date",
     "signal_version",
     "ohlc_calc_version",
     "taxonomy_version",
     "taxonomy_version_inferred",
+    "window_size",
     "valid_signal_dates_count",
     "window_start_date",
     "window_end_date",
@@ -121,7 +124,7 @@ def _load_valid_signal_dates(
     end_date: str,
     signal_version: str,
     taxonomy_version: str | None,
-    limit: int = 5,
+    limit: int = DEFAULT_WEEKLY_WINDOW_SIZE,
 ) -> list[str]:
     if taxonomy_version is None:
         return []
@@ -204,7 +207,10 @@ def load_weekly_swing_report_data(
     signal_version: str = DEFAULT_SIGNAL_VERSION,
     ohlc_calc_version: str = DEFAULT_OHLC_CALC_VERSION,
     taxonomy_version: str | None = None,
+    window_size: int = DEFAULT_WEEKLY_WINDOW_SIZE,
 ) -> dict[str, object]:
+    if window_size <= 0:
+        raise ValueError("window_size must be greater than 0")
     normalized_end_date = _parse_iso_date(end_date)
     with sqlite3.connect(analysis_db_path) as conn:
         conn.row_factory = sqlite3.Row
@@ -227,6 +233,7 @@ def load_weekly_swing_report_data(
             end_date=normalized_end_date,
             signal_version=signal_version,
             taxonomy_version=resolved_taxonomy_version,
+            limit=window_size,
         )
         group_rows = _load_rows_for_dates(
             conn,
@@ -261,6 +268,7 @@ def load_weekly_swing_report_data(
         "ohlc_calc_version": ohlc_calc_version,
         "taxonomy_version": resolved_taxonomy_version,
         "taxonomy_version_inferred": taxonomy_version_inferred,
+        "window_size": window_size,
         "valid_signal_dates": valid_signal_dates,
         "group_rows": group_rows,
         "ticker_rows": ticker_rows,
@@ -334,6 +342,7 @@ def build_markdown_weekly_swing_report(
     signal_version = str(report_data["signal_version"])
     ohlc_calc_version = str(report_data["ohlc_calc_version"])
     taxonomy_version = "" if report_data.get("taxonomy_version") is None else str(report_data["taxonomy_version"])
+    window_size = int(report_data.get("window_size") or DEFAULT_WEEKLY_WINDOW_SIZE)
     valid_signal_dates = list(report_data["valid_signal_dates"])  # type: ignore[arg-type]
     group_rows = list(report_data["group_rows"])  # type: ignore[arg-type]
     ticker_rows = list(report_data["ticker_rows"])  # type: ignore[arg-type]
@@ -341,7 +350,7 @@ def build_markdown_weekly_swing_report(
     generated = generated_at_utc or _utc_now_iso()
     window_start_date = valid_signal_dates[0] if valid_signal_dates else ""
     window_end_date = valid_signal_dates[-1] if valid_signal_dates else ""
-    incomplete_window = "YES" if len(valid_signal_dates) < 5 else "NO"
+    incomplete_window = "YES" if len(valid_signal_dates) < window_size else "NO"
     end_group_rows = [row for row in group_rows if row.get("signal_date") == window_end_date]
 
     ecosystem_rows = [
@@ -360,14 +369,15 @@ def build_markdown_weekly_swing_report(
         f"signal_version: {signal_version}",
         f"ohlc_calc_version: {ohlc_calc_version}",
         f"taxonomy_version: {taxonomy_version}",
+        f"window_size: {window_size}",
         f"generated_at_utc: {generated}",
         "source_tables: dc_group_swing_signal_daily, dc_ticker_swing_signal_daily, dc_group_synthetic_ohlc_daily",
-        "Window type: last 5 valid trading days, not calendar week",
+        f"Window type: last {window_size} valid trading days, not calendar week",
         "",
         "## 2. Window summary",
     ]
-    if len(valid_signal_dates) < 5:
-        lines.append("INCOMPLETE WINDOW – FEWER THAN 5 VALID SIGNAL DATES")
+    if len(valid_signal_dates) < window_size:
+        lines.append(f"INCOMPLETE WINDOW – FEWER THAN {window_size} VALID SIGNAL DATES")
     lines.append(
         _format_table(
             ["metric", "value"],
@@ -382,7 +392,7 @@ def build_markdown_weekly_swing_report(
         ).rstrip()
     )
 
-    lines.extend(["", "## 3. Ecosystem 5-day change"])
+    lines.extend(["", "## 3. Ecosystem window change"])
     if ecosystem_first is None or ecosystem_last is None:
         lines.append("Ecosystem row missing.")
     else:
@@ -1059,6 +1069,7 @@ def write_weekly_swing_report(
     signal_version: str = DEFAULT_SIGNAL_VERSION,
     ohlc_calc_version: str = DEFAULT_OHLC_CALC_VERSION,
     taxonomy_version: str | None = None,
+    window_size: int = DEFAULT_WEEKLY_WINDOW_SIZE,
     output_md: str | Path | None = None,
     output_csv: str | Path | None = None,
     top_n: int = 20,
@@ -1070,6 +1081,7 @@ def write_weekly_swing_report(
         signal_version=signal_version,
         ohlc_calc_version=ohlc_calc_version,
         taxonomy_version=taxonomy_version,
+        window_size=window_size,
     )
     markdown = build_markdown_weekly_swing_report(
         report_data,
@@ -1104,10 +1116,11 @@ def write_weekly_swing_report(
         "ohlc_calc_version": str(report_data["ohlc_calc_version"]),
         "taxonomy_version": "" if report_data.get("taxonomy_version") is None else str(report_data["taxonomy_version"]),
         "taxonomy_version_inferred": int(report_data.get("taxonomy_version_inferred") or 0),
+        "window_size": int(report_data.get("window_size") or DEFAULT_WEEKLY_WINDOW_SIZE),
         "valid_signal_dates_count": len(valid_signal_dates),
         "window_start_date": valid_signal_dates[0] if valid_signal_dates else "",
         "window_end_date": valid_signal_dates[-1] if valid_signal_dates else "",
-        "incomplete_window": "YES" if len(valid_signal_dates) < 5 else "NO",
+        "incomplete_window": "YES" if len(valid_signal_dates) < int(report_data.get("window_size") or DEFAULT_WEEKLY_WINDOW_SIZE) else "NO",
         "group_rows": len(report_data["group_rows"]),  # type: ignore[arg-type]
         "ticker_rows": len(report_data["ticker_rows"]),  # type: ignore[arg-type]
         "synthetic_ohlc_rows": len(report_data["synthetic_rows"]),  # type: ignore[arg-type]

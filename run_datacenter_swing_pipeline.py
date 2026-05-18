@@ -37,6 +37,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--expected-ticker-count", type=int, default=None, help="Optional expected ticker row count for audit")
     parser.add_argument("--expected-group-count", type=int, default=None, help="Optional expected group row count for audit")
     parser.add_argument("--expected-synthetic-ohlc-count", type=int, default=None, help="Optional expected synthetic OHLC row count for audit")
+    parser.add_argument("--weekly-window-size", type=int, default=5, help="Rolling valid-trading-day window size for audit and weekly report")
     parser.add_argument("--skip-index", action="store_true", help="Skip the datacenter base index stage")
     parser.add_argument("--skip-audit", action="store_true", help="Skip the read-only pipeline audit stage")
     parser.add_argument("--skip-reports", action="store_true", help="Skip daily and weekly report generation")
@@ -47,6 +48,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.weekly_window_size <= 0:
+        print("ERROR weekly-window-size must be greater than 0", file=sys.stderr)
+        return 1
     try:
         result = run_datacenter_swing_pipeline(
             price_db=args.price_db,
@@ -63,6 +67,7 @@ def main(argv: list[str] | None = None) -> int:
             expected_ticker_count=args.expected_ticker_count,
             expected_group_count=args.expected_group_count,
             expected_synthetic_ohlc_count=args.expected_synthetic_ohlc_count,
+            weekly_window_size=args.weekly_window_size,
             skip_index=args.skip_index,
             skip_audit=args.skip_audit,
             skip_reports=args.skip_reports,

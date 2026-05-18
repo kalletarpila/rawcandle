@@ -332,7 +332,7 @@ def test_finds_last_five_valid_signal_dates_and_generates_report(tmp_path):
         "# Datacenter Weekly Swing Report",
         "## 1. Title and run metadata",
         "## 2. Window summary",
-        "## 3. Ecosystem 5-day change",
+        "## 3. Ecosystem window change",
         "## 4. Overheat / rotation risk progression",
         "## 5. Subindustry timing persistence",
         "## 6. Subindustry improvement / deterioration",
@@ -347,6 +347,7 @@ def test_finds_last_five_valid_signal_dates_and_generates_report(tmp_path):
         assert heading in markdown
     assert "### A. BOS / RESET events during window" in markdown
     assert "### B. Latest BOS / RESET state at window end" in markdown
+    assert "window_size: 5" in markdown
     assert "Window type: last 5 valid trading days, not calendar week" in markdown
     assert "EXTREME RISK – TIGHTEN STOPS / NO NEW LONGS" in markdown
     assert "2024-01-02, 2024-01-03, 2024-01-05, 2024-01-08, 2024-01-10" in markdown
@@ -482,6 +483,52 @@ def test_marks_incomplete_window_when_fewer_than_five_valid_dates_exist(tmp_path
     )
     assert "INCOMPLETE WINDOW – FEWER THAN 5 VALID SIGNAL DATES" in markdown
     assert "incomplete_window | YES" in markdown or "YES" in markdown
+
+
+def test_supports_custom_window_size_and_selected_dates(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+
+    report_data = load_weekly_swing_report_data(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        window_size=3,
+    )
+    assert report_data["valid_signal_dates"] == ["2024-01-05", "2024-01-08", "2024-01-10"]
+
+    markdown = build_markdown_weekly_swing_report(
+        report_data,
+        generated_at_utc="2026-05-17T12:00:00Z",
+        top_n=20,
+    )
+    assert "window_size: 3" in markdown
+    assert "Window type: last 3 valid trading days, not calendar week" in markdown
+    assert "2024-01-05, 2024-01-08, 2024-01-10" in markdown
+    assert "| AAA | 2 | 2024-01-05 | 2024-01-10 |" in markdown
+    assert "| BBB | 2 | 1 | 2 | 2024-01-05 | 2024-01-10 |" in markdown
+    assert "| CCC | 2 | 2024-01-08 | 2024-01-10 |" in markdown
+
+
+def test_custom_window_size_marks_incomplete_when_fewer_than_requested_dates_exist(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+
+    report_data = load_weekly_swing_report_data(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        window_size=10,
+    )
+    assert report_data["valid_signal_dates"] == WINDOW_DATES
+
+    result = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        window_size=10,
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+    assert result["summary"]["window_size"] == 10
+    assert result["summary"]["valid_signal_dates_count"] == 6
+    assert result["summary"]["incomplete_window"] == "YES"
 
 
 def test_weekly_report_is_read_only(tmp_path):

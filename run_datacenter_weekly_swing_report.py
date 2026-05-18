@@ -15,6 +15,7 @@ if str(CURRENT_DIR) not in sys.path:
 from analysis.datacenter_indices.swing_weekly_report import (
     DEFAULT_OHLC_CALC_VERSION,
     DEFAULT_SIGNAL_VERSION,
+    DEFAULT_WEEKLY_WINDOW_SIZE,
     format_weekly_swing_report_summary_lines,
     write_weekly_swing_report,
 )
@@ -22,7 +23,7 @@ from analysis.datacenter_indices.swing_weekly_report import (
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Render a read-only datacenter weekly swing report for the last 5 valid trading days."
+        description="Render a read-only datacenter weekly swing report for the last N valid trading days."
     )
     parser.add_argument("--analysis-db", type=Path, required=True, help="Path to analysis.db")
     parser.add_argument("--end-date", type=str, required=True, help="Weekly window end date (YYYY-MM-DD)")
@@ -32,6 +33,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output-md", type=Path, default=None, help="Optional output Markdown path")
     parser.add_argument("--output-csv", type=Path, default=None, help="Optional output CSV path")
     parser.add_argument("--top-n", type=int, default=20, help="Maximum row count for ranking sections")
+    parser.add_argument("--window-size", type=int, default=DEFAULT_WEEKLY_WINDOW_SIZE, help="Rolling valid-trading-day window size")
     parser.add_argument("--generated-at-utc", type=str, default=None, help="Optional explicit generated_at_utc timestamp (YYYY-MM-DDTHH:MM:SSZ)")
     return parser.parse_args(argv)
 
@@ -54,6 +56,9 @@ def _timestamp_output_path(path: Path | None, *, date_value: str, hhmm: str) -> 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.window_size <= 0:
+        print("ERROR window-size must be greater than 0", file=sys.stderr)
+        return 1
     output_hhmm = _resolve_output_timestamp_hhmm(args.generated_at_utc)
     output_md = _timestamp_output_path(
         args.output_md,
@@ -72,6 +77,7 @@ def main(argv: list[str] | None = None) -> int:
             signal_version=args.signal_version,
             ohlc_calc_version=args.ohlc_calc_version,
             taxonomy_version=args.taxonomy_version,
+            window_size=args.window_size,
             output_md=output_md,
             output_csv=output_csv,
             top_n=args.top_n,

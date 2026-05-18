@@ -110,6 +110,7 @@ def _run_audit_stage(
     expected_ticker_count: int | None,
     expected_group_count: int | None,
     expected_synthetic_ohlc_count: int | None,
+    weekly_window_size: int,
     strict: bool,
 ) -> dict[str, object]:
     result = load_swing_pipeline_audit(
@@ -121,6 +122,7 @@ def _run_audit_stage(
         expected_ticker_count=expected_ticker_count,
         expected_group_count=expected_group_count,
         expected_synthetic_ohlc_count=expected_synthetic_ohlc_count,
+        weekly_window_size=weekly_window_size,
         strict=strict,
     )
     for line in format_swing_pipeline_audit_summary_lines(result["summary"]):
@@ -159,6 +161,7 @@ def _run_weekly_report_stage(
     signal_version: str,
     ohlc_calc_version: str,
     taxonomy_version: str,
+    window_size: int,
     output_md: Path,
     output_csv: Path,
 ) -> dict[str, object]:
@@ -168,6 +171,7 @@ def _run_weekly_report_stage(
         signal_version=signal_version,
         ohlc_calc_version=ohlc_calc_version,
         taxonomy_version=taxonomy_version,
+        window_size=window_size,
         output_md=output_md,
         output_csv=output_csv,
     )
@@ -192,6 +196,7 @@ def run_datacenter_swing_pipeline(
     expected_ticker_count: int | None = None,
     expected_group_count: int | None = None,
     expected_synthetic_ohlc_count: int | None = None,
+    weekly_window_size: int = 5,
     skip_index: bool = False,
     skip_audit: bool = False,
     skip_reports: bool = False,
@@ -556,6 +561,7 @@ def run_datacenter_swing_pipeline(
             audit_argv.extend(["--expected-group-count", str(expected_group_count)])
         if expected_synthetic_ohlc_count is not None:
             audit_argv.extend(["--expected-synthetic-ohlc-count", str(expected_synthetic_ohlc_count)])
+        audit_argv.extend(["--weekly-window-size", str(weekly_window_size)])
         if audit_strict:
             audit_argv.append("--strict")
         stages.append(
@@ -571,6 +577,7 @@ def run_datacenter_swing_pipeline(
                     expected_ticker_count=expected_ticker_count,
                     expected_group_count=expected_group_count,
                     expected_synthetic_ohlc_count=expected_synthetic_ohlc_count,
+                    weekly_window_size=weekly_window_size,
                     strict=audit_strict,
                 ),
                 watermark_builder=lambda result: {
@@ -615,6 +622,8 @@ def run_datacenter_swing_pipeline(
             ohlc_calc_version,
             "--taxonomy-version",
             taxonomy_version,
+            "--window-size",
+            str(weekly_window_size),
             "--output-md",
             str(output_dir / f"datacenter_weekly_{signal_date}_full.md"),
             "--output-csv",
@@ -656,6 +665,7 @@ def run_datacenter_swing_pipeline(
                     signal_version=signal_version,
                     ohlc_calc_version=ohlc_calc_version,
                     taxonomy_version=taxonomy_version,
+                    window_size=weekly_window_size,
                     output_md=weekly_output_md,
                     output_csv=weekly_output_csv,
                 ),

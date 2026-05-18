@@ -107,6 +107,8 @@ def test_pipeline_calls_stages_in_correct_order_and_uses_index_base_date(tmp_pat
             "54",
             "--expected-synthetic-ohlc-count",
             "53",
+            "--weekly-window-size",
+            "3",
         ]
     )
 
@@ -133,6 +135,9 @@ def test_pipeline_calls_stages_in_correct_order_and_uses_index_base_date(tmp_pat
     assert audit_kwargs["expected_ticker_count"] == 236
     assert audit_kwargs["expected_group_count"] == 54
     assert audit_kwargs["expected_synthetic_ohlc_count"] == 53
+    assert audit_kwargs["weekly_window_size"] == 3
+    weekly_kwargs = calls[11][1]
+    assert weekly_kwargs["window_size"] == 3
     lines = capsys.readouterr().out.strip().splitlines()
     assert lines[-4] == "SUMMARY audit_validation_status=OK"
     assert lines[-1] == "SUMMARY pipeline_status=OK"
