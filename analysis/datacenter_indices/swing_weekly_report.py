@@ -411,7 +411,7 @@ def build_markdown_weekly_swing_report(
     ecosystem_last = ecosystem_rows[-1] if ecosystem_rows else None
 
     lines = [
-        "# Datacenter Weekly Swing Report",
+        "# Datacenter Rolling Swing Report",
         "",
         "## 1. Title and run metadata",
         f"end_date: {requested_end_date}",
@@ -589,7 +589,7 @@ def build_markdown_weekly_swing_report(
         ).rstrip()
     )
 
-    lines.extend(["", "## 6. Subindustry improvement / deterioration", "", "### A. Most improved subindustries"])
+    lines.extend(["", "## 6. Subindustry improvement / deterioration", "", "### A. Best relative subindustry changes"])
     change_rows: list[dict[str, object]] = []
     for (_, _, group_name), current_rows in _group_rows_by_key(
         [row for row in group_rows if row.get("group_type") == "subindustry"],
@@ -637,7 +637,7 @@ def build_markdown_weekly_swing_report(
         "weakness_breadth_change",
     ]
     lines.append(_format_table(change_headers, improved_rows).rstrip())
-    lines.extend(["", "### B. Most deteriorated subindustries"])
+    lines.extend(["", "### B. Weakest relative subindustry changes"])
     lines.append(_format_table(change_headers, deteriorated_rows).rstrip())
 
     lines.extend(["", "## 7. Repeated breakout tickers"])

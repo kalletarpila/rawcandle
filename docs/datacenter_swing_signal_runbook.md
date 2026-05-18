@@ -284,8 +284,14 @@ python3 run_datacenter_weekly_swing_report.py \
   --taxonomy-version "${TAXONOMY_VERSION}" \
   --window-size 5 \
   --output-md reports/datacenter_weekly_swing_signal_report_${SIGNAL_DATE}.md \
-  --output-csv reports/datacenter_weekly_swing_signal_report_${SIGNAL_DATE}.csv
+ --output-csv reports/datacenter_weekly_swing_signal_report_${SIGNAL_DATE}.csv
 ```
+
+- The generated Markdown title is `Datacenter Rolling Swing Report`.
+- The CLI remains `run_datacenter_weekly_swing_report.py` for backward compatibility.
+- The default rolling window is 5 valid trading days.
+- Use `--window-size` for other rolling windows such as 20 or 60 valid trading days.
+- `Best relative subindustry changes` and `Weakest relative subindustry changes` are relative rankings within the selected window, not absolute buy/sell recommendations.
 
 20-valid-trading-day example:
 
@@ -345,15 +351,15 @@ It only renders persisted rows for one selected `signal_date`.
 
 ## Weekly Workflow Role
 
-The weekly workflow should mean a last 5 valid trading days summary ending on the same previous valid trading day used by the daily report.
+The weekly workflow should mean a rolling valid trading day summary ending on the same previous valid trading day used by the daily report.
 
 That weekly view should answer:
 
-- what changed over the last 5 valid trading days
-- which subindustries improved or weakened during the last 5 trading days
+- what changed over the selected rolling valid trading day window
+- which subindustries ranked best or weakest relatively during the selected rolling window
 - which scanner lists were repeatedly active
 - whether overheat risk increased or decreased
-- whether breadth deterioration persisted across the 5 day window
+- whether breadth deterioration persisted across the selected rolling window
 
 This weekly view is separate from the longer strategic datacenter index view.
 
@@ -368,10 +374,11 @@ The existing strategic datacenter index report remains the longer-horizon contex
 
 Current status:
 
-- The implemented 5 valid trading day weekly swing report CLI is `run_datacenter_weekly_swing_report.py`.
+- The generated report title is `Datacenter Rolling Swing Report`.
+- The weekly swing report CLI remains `run_datacenter_weekly_swing_report.py`.
 - It is separate from `run_datacenter_index_report.py`, which remains the longer strategic datacenter index report.
 - `run_datacenter_index_report.py` remains the current strategic datacenter report entrypoint.
-- The weekly swing report should not be confused with a calendar week report.
+- The rolling swing report defaults to a 5 valid trading day window and should not be confused with a calendar week report.
 
 ## Troubleshooting / Incomplete Pipeline Symptoms
 

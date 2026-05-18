@@ -329,7 +329,7 @@ def test_finds_last_five_valid_signal_dates_and_generates_report(tmp_path):
         top_n=20,
     )
     for heading in [
-        "# Datacenter Weekly Swing Report",
+        "# Datacenter Rolling Swing Report",
         "## 1. Title and run metadata",
         "## 2. Window summary",
         "## 3. Ecosystem window change",
@@ -349,6 +349,11 @@ def test_finds_last_five_valid_signal_dates_and_generates_report(tmp_path):
     assert "### B. Latest BOS / RESET state at window end" in markdown
     assert "window_size: 5" in markdown
     assert "Window type: last 5 valid trading days, not calendar week" in markdown
+    assert "# Datacenter Weekly Swing Report" not in markdown
+    assert "### A. Best relative subindustry changes" in markdown
+    assert "### B. Weakest relative subindustry changes" in markdown
+    assert "### A. Most improved subindustries" not in markdown
+    assert "### B. Most deteriorated subindustries" not in markdown
     assert "EXTREME RISK – TIGHTEN STOPS / NO NEW LONGS" in markdown
     assert "2024-01-02, 2024-01-03, 2024-01-05, 2024-01-08, 2024-01-10" in markdown
     assert "| AI Chips | BUY_ZONE | 4 | 1 | 0 | 0 |" in markdown
