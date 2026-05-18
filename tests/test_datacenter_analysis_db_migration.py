@@ -253,6 +253,45 @@ def test_database_manager_initializes_dc_group_synthetic_ohlc_daily_table(tmp_pa
     }.issubset(indexes)
 
 
+def test_database_manager_initializes_dc_pipeline_watermark_table(tmp_path):
+    db_path = tmp_path / "analysis.db"
+    manager = DatabaseManager(str(db_path))
+    manager.close()
+
+    table_name = "dc_pipeline_watermark"
+    assert _table_exists(db_path, table_name)
+
+    columns = _table_columns(db_path, table_name)
+    assert {
+        "component_name",
+        "taxonomy_version",
+        "market",
+        "signal_version",
+        "calc_version",
+        "start_date",
+        "end_date",
+        "row_count",
+        "status",
+        "last_successful_run_id",
+        "last_successful_at_utc",
+        "notes",
+    }.issubset(columns)
+
+    assert _primary_key_columns(db_path, table_name) == [
+        "component_name",
+        "taxonomy_version",
+        "market",
+        "signal_version",
+        "calc_version",
+    ]
+
+    indexes = _index_names(db_path, table_name)
+    assert {
+        "idx_dc_pipeline_watermark_component",
+        "idx_dc_pipeline_watermark_end_date",
+    }.issubset(indexes)
+
+
 def test_database_manager_adds_group_bos_reset_columns_to_existing_group_synth_table(tmp_path):
     db_path = tmp_path / "analysis.db"
     with sqlite3.connect(db_path) as conn:

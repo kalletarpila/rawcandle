@@ -996,6 +996,38 @@ class DatabaseManager:
 
             cursor.execute(
                 """
+                CREATE TABLE IF NOT EXISTS dc_pipeline_watermark (
+                    component_name TEXT NOT NULL,
+                    taxonomy_version TEXT NOT NULL,
+                    market TEXT NOT NULL DEFAULT '',
+                    signal_version TEXT NOT NULL DEFAULT '',
+                    calc_version TEXT NOT NULL DEFAULT '',
+                    start_date TEXT NOT NULL,
+                    end_date TEXT NOT NULL,
+                    row_count INTEGER,
+                    status TEXT NOT NULL,
+                    last_successful_run_id TEXT,
+                    last_successful_at_utc TEXT NOT NULL,
+                    notes TEXT,
+                    PRIMARY KEY (component_name, taxonomy_version, market, signal_version, calc_version)
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_dc_pipeline_watermark_component
+                ON dc_pipeline_watermark (component_name)
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_dc_pipeline_watermark_end_date
+                ON dc_pipeline_watermark (end_date)
+                """
+            )
+
+            cursor.execute(
+                """
                 CREATE TABLE IF NOT EXISTS excluded_tickers (
                     ticker TEXT PRIMARY KEY,
                     reason TEXT,

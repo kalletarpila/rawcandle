@@ -103,6 +103,22 @@ python3 run_datacenter_swing_pipeline.py \
   --expected-synthetic-ohlc-count 53
 ```
 
+## Pipeline Watermarks
+
+- `dc_pipeline_watermark` records the last successful completed date range by component.
+- It is visibility and audit metadata only in the current phase.
+- It is not yet used for automatic stage skipping.
+- The read-only audit still verifies actual persisted rows from the core datacenter tables.
+- A later phase may use watermarks for incremental runs.
+
+Example:
+
+```bash
+python3 run_datacenter_pipeline_watermark.py \
+  --analysis-db data/analysis.db \
+  --taxonomy-version DC_TAXONOMY_FULL_V1
+```
+
 ## Exact CLI Sequence Template
 
 The commands below use the actual current CLI flags.

@@ -15,6 +15,7 @@ from analysis.datacenter_indices.swing_pipeline_audit import (
     format_swing_pipeline_audit_summary_lines,
     load_swing_pipeline_audit,
 )
+from analysis.datacenter_indices.pipeline_watermark import upsert_pipeline_watermark
 from analysis.datacenter_indices.swing_weekly_report import (
     format_weekly_swing_report_summary_lines,
     write_weekly_swing_report,
@@ -47,6 +48,7 @@ class PipelineStage:
     heading: str
     argv: list[str]
     runner: Callable[[], dict[str, object] | None]
+    watermark_builder: Callable[[dict[str, object] | None], dict[str, object]] | None = None
 
 
 def _resolve_output_timestamp_hhmm(generated_at_utc: str | None) -> str:
@@ -79,6 +81,23 @@ def _run_cli_stage(main_func: Callable[[list[str]], int], argv: list[str]) -> di
     if exit_code != 0:
         raise RuntimeError(f"Stage failed with exit code {exit_code}: {' '.join(argv)}")
     return None
+
+
+def _write_stage_watermark(
+    *,
+    analysis_db: Path,
+    builder: Callable[[dict[str, object] | None], dict[str, object]] | None,
+    result: dict[str, object] | None,
+    generated_at_utc: str | None,
+) -> None:
+    if builder is None:
+        return
+    payload = builder(result)
+    upsert_pipeline_watermark(
+        analysis_db_path=analysis_db,
+        last_successful_at_utc=generated_at_utc,
+        **payload,
+    )
 
 
 def _run_audit_stage(
@@ -229,6 +248,17 @@ def run_datacenter_swing_pipeline(
                 heading="Datacenter base index",
                 argv=index_argv,
                 runner=lambda argv=index_argv: _run_cli_stage(run_datacenter_indices_main, argv),
+                watermark_builder=lambda _result: {
+                    "component_name": "GROUP_INDEX",
+                    "taxonomy_version": taxonomy_version,
+                    "market": market,
+                    "signal_version": "",
+                    "calc_version": "",
+                    "start_date": index_base_date,
+                    "end_date": signal_date,
+                    "row_count": None,
+                    "status": "OK",
+                },
             )
         )
 
@@ -255,6 +285,17 @@ def run_datacenter_swing_pipeline(
             heading="Ticker swing base snapshots",
             argv=ticker_base_argv,
             runner=lambda argv=ticker_base_argv: _run_cli_stage(run_datacenter_ticker_swing_signals_main, argv),
+            watermark_builder=lambda _result: {
+                "component_name": "TICKER_SWING_BASE",
+                "taxonomy_version": taxonomy_version,
+                "market": market,
+                "signal_version": signal_version,
+                "calc_version": "",
+                "start_date": start_date,
+                "end_date": signal_date,
+                "row_count": None,
+                "status": "OK",
+            },
         )
     )
 
@@ -277,6 +318,17 @@ def run_datacenter_swing_pipeline(
             heading="Group swing base metrics",
             argv=group_base_argv,
             runner=lambda argv=group_base_argv: _run_cli_stage(run_datacenter_group_swing_signals_main, argv),
+            watermark_builder=lambda _result: {
+                "component_name": "GROUP_SWING_BASE",
+                "taxonomy_version": taxonomy_version,
+                "market": "",
+                "signal_version": signal_version,
+                "calc_version": "",
+                "start_date": start_date,
+                "end_date": signal_date,
+                "row_count": None,
+                "status": "OK",
+            },
         )
     )
 
@@ -303,6 +355,17 @@ def run_datacenter_swing_pipeline(
             heading="Synthetic OHLC base",
             argv=synthetic_base_argv,
             runner=lambda argv=synthetic_base_argv: _run_cli_stage(run_datacenter_group_synthetic_ohlc_main, argv),
+            watermark_builder=lambda _result: {
+                "component_name": "SYNTHETIC_OHLC_BASE",
+                "taxonomy_version": taxonomy_version,
+                "market": market,
+                "signal_version": "",
+                "calc_version": ohlc_calc_version,
+                "start_date": start_date,
+                "end_date": signal_date,
+                "row_count": None,
+                "status": "OK",
+            },
         )
     )
 
@@ -330,6 +393,17 @@ def run_datacenter_swing_pipeline(
             heading="Relative OHLC20",
             argv=relative_argv,
             runner=lambda argv=relative_argv: _run_cli_stage(run_datacenter_group_synthetic_ohlc_main, argv),
+            watermark_builder=lambda _result: {
+                "component_name": "SYNTHETIC_OHLC_RELATIVE",
+                "taxonomy_version": taxonomy_version,
+                "market": market,
+                "signal_version": "",
+                "calc_version": ohlc_calc_version,
+                "start_date": start_date,
+                "end_date": signal_date,
+                "row_count": None,
+                "status": "OK",
+            },
         )
     )
 
@@ -351,6 +425,17 @@ def run_datacenter_swing_pipeline(
             heading="Group structure / BOS / RESET",
             argv=structure_argv,
             runner=lambda argv=structure_argv: _run_cli_stage(run_datacenter_group_synthetic_ohlc_main, argv),
+            watermark_builder=lambda _result: {
+                "component_name": "SYNTHETIC_OHLC_STRUCTURE",
+                "taxonomy_version": taxonomy_version,
+                "market": market,
+                "signal_version": "",
+                "calc_version": ohlc_calc_version,
+                "start_date": start_date,
+                "end_date": signal_date,
+                "row_count": None,
+                "status": "OK",
+            },
         )
     )
 
@@ -372,6 +457,17 @@ def run_datacenter_swing_pipeline(
             heading="Group timing states",
             argv=timing_argv,
             runner=lambda argv=timing_argv: _run_cli_stage(run_datacenter_group_swing_signals_main, argv),
+            watermark_builder=lambda _result: {
+                "component_name": "GROUP_TIMING",
+                "taxonomy_version": taxonomy_version,
+                "market": "",
+                "signal_version": signal_version,
+                "calc_version": "",
+                "start_date": start_date,
+                "end_date": signal_date,
+                "row_count": None,
+                "status": "OK",
+            },
         )
     )
 
@@ -393,6 +489,17 @@ def run_datacenter_swing_pipeline(
             heading="Group overheat risk",
             argv=overheat_argv,
             runner=lambda argv=overheat_argv: _run_cli_stage(run_datacenter_group_swing_signals_main, argv),
+            watermark_builder=lambda _result: {
+                "component_name": "GROUP_OVERHEAT",
+                "taxonomy_version": taxonomy_version,
+                "market": "",
+                "signal_version": signal_version,
+                "calc_version": "",
+                "start_date": start_date,
+                "end_date": signal_date,
+                "row_count": None,
+                "status": "OK",
+            },
         )
     )
 
@@ -416,6 +523,17 @@ def run_datacenter_swing_pipeline(
             heading="Ticker scanners",
             argv=scanner_argv,
             runner=lambda argv=scanner_argv: _run_cli_stage(run_datacenter_ticker_swing_signals_main, argv),
+            watermark_builder=lambda _result: {
+                "component_name": "TICKER_SCANNER",
+                "taxonomy_version": taxonomy_version,
+                "market": "",
+                "signal_version": signal_version,
+                "calc_version": "",
+                "start_date": start_date,
+                "end_date": signal_date,
+                "row_count": None,
+                "status": "OK",
+            },
         )
     )
 
@@ -455,6 +573,17 @@ def run_datacenter_swing_pipeline(
                     expected_synthetic_ohlc_count=expected_synthetic_ohlc_count,
                     strict=audit_strict,
                 ),
+                watermark_builder=lambda result: {
+                    "component_name": "PIPELINE_AUDIT",
+                    "taxonomy_version": taxonomy_version,
+                    "market": "",
+                    "signal_version": signal_version,
+                    "calc_version": ohlc_calc_version,
+                    "start_date": signal_date,
+                    "end_date": signal_date,
+                    "row_count": None,
+                    "status": str(result["summary"]["validation_status"]),
+                },
             )
         )
 
@@ -504,6 +633,17 @@ def run_datacenter_swing_pipeline(
                     output_md=daily_output_md,
                     output_csv=daily_output_csv,
                 ),
+                watermark_builder=lambda _result: {
+                    "component_name": "DAILY_REPORT",
+                    "taxonomy_version": taxonomy_version,
+                    "market": "",
+                    "signal_version": signal_version,
+                    "calc_version": ohlc_calc_version,
+                    "start_date": signal_date,
+                    "end_date": signal_date,
+                    "row_count": None,
+                    "status": "OK",
+                },
             )
         )
         stages.append(
@@ -519,6 +659,17 @@ def run_datacenter_swing_pipeline(
                     output_md=weekly_output_md,
                     output_csv=weekly_output_csv,
                 ),
+                watermark_builder=lambda result: {
+                    "component_name": "WEEKLY_REPORT",
+                    "taxonomy_version": taxonomy_version,
+                    "market": "",
+                    "signal_version": signal_version,
+                    "calc_version": ohlc_calc_version,
+                    "start_date": str(result["summary"].get("window_start_date", signal_date)),
+                    "end_date": signal_date,
+                    "row_count": None,
+                    "status": "OK",
+                },
             )
         )
 
@@ -559,6 +710,12 @@ def run_datacenter_swing_pipeline(
             break
         print(f"=== Stage {index}/{len(stages)}: {stage.heading} ===")
         result = stage.runner()
+        _write_stage_watermark(
+            analysis_db=analysis_db,
+            builder=stage.watermark_builder,
+            result=result,
+            generated_at_utc=generated_at_utc,
+        )
         completed_stage_count += 1
         if stage.heading == "Pipeline audit":
             audit_validation_status = str(result["summary"]["validation_status"])
