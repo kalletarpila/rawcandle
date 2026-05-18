@@ -59,6 +59,25 @@ EXIT_RISK_SEVERITY_PRIORITY = {
     None: 3,
 }
 
+FRESHNESS_PRIORITY = {
+    "FRESH": 0,
+    "AGING": 1,
+    "STALE": 2,
+    None: 3,
+}
+
+GROUP_RESET_PRIORITY = {
+    "DOUBLE_BOS_DOWN": 0,
+    "DOUBLE_BOS_UP": 1,
+    None: 2,
+}
+
+GROUP_BOS_PRIORITY = {
+    "BOS_DOWN": 0,
+    "BOS_UP": 1,
+    None: 2,
+}
+
 
 def _parse_iso_date(value: str) -> str:
     try:
@@ -405,6 +424,41 @@ def build_markdown_daily_swing_report(
             str(row.get("group_name") or ""),
         ),
     )
+    group_context_by_key = {
+        (row.get("group_type"), row.get("group_name")): row
+        for row in group_rows
+    }
+    structure_break_rows: list[dict[str, object]] = []
+    for row in synthetic_summary_rows:
+        if row.get("latest_bos_event_type") is None and row.get("latest_reset_reason") is None:
+            continue
+        group_context = group_context_by_key.get((row.get("group_type"), row.get("group_name")), {})
+        structure_break_rows.append(
+            {
+                "group_type": row.get("group_type"),
+                "group_name": row.get("group_name"),
+                "latest_bos_event_type": row.get("latest_bos_event_type"),
+                "latest_bos_event_date": row.get("latest_bos_event_date"),
+                "latest_bos_freshness": row.get("latest_bos_freshness"),
+                "latest_reset_reason": row.get("latest_reset_reason"),
+                "latest_reset_event_date": row.get("latest_reset_event_date"),
+                "latest_reset_freshness": row.get("latest_reset_freshness"),
+                "latest_structure_label": row.get("latest_structure_label"),
+                "latest_structure_freshness": row.get("latest_structure_freshness"),
+                "trend_classification": row.get("trend_classification"),
+                "timing_state": group_context.get("timing_state"),
+                "overheat_risk_level": group_context.get("overheat_risk_level"),
+            }
+        )
+    structure_break_rows.sort(
+        key=lambda row: (
+            GROUP_RESET_PRIORITY.get(row.get("latest_reset_reason"), 2),
+            GROUP_BOS_PRIORITY.get(row.get("latest_bos_event_type"), 2),
+            FRESHNESS_PRIORITY.get(row.get("latest_bos_freshness"), 3),
+            str(row.get("group_type") or ""),
+            str(row.get("group_name") or ""),
+        )
+    )
     breakout_rows = _section_rows(
         ticker_rows,
         predicate=lambda row: row.get("breakout_signal") == 1,
@@ -566,9 +620,31 @@ def build_markdown_daily_swing_report(
         ).rstrip()
     )
 
+    lines.extend(["", "## 10. Group Structure Breaks / Resets"])
+    lines.append(
+        _format_table(
+            [
+                "group_type",
+                "group_name",
+                "latest_bos_event_type",
+                "latest_bos_event_date",
+                "latest_bos_freshness",
+                "latest_reset_reason",
+                "latest_reset_event_date",
+                "latest_reset_freshness",
+                "latest_structure_label",
+                "latest_structure_freshness",
+                "trend_classification",
+                "timing_state",
+                "overheat_risk_level",
+            ],
+            structure_break_rows,
+        ).rstrip()
+    )
+
     ticker_section_specs = [
         (
-            "## 10. Breakout Ticker Scanner",
+            "## 11. Breakout Ticker Scanner",
             breakout_rows,
             [
                 "ticker",
@@ -594,7 +670,7 @@ def build_markdown_daily_swing_report(
             ],
         ),
         (
-            "## 11. Pullback Ticker Scanner",
+            "## 12. Pullback Ticker Scanner",
             pullback_rows,
             [
                 "ticker",
@@ -623,7 +699,7 @@ def build_markdown_daily_swing_report(
             ],
         ),
         (
-            "## 12. Exit-Risk Ticker Scanner",
+            "## 13. Exit-Risk Ticker Scanner",
             exit_risk_rows,
             [
                 "ticker",
@@ -655,7 +731,7 @@ def build_markdown_daily_swing_report(
         lines.extend(["", heading])
         lines.append(_format_table(headers, section_rows).rstrip())
 
-    lines.extend(["", "## 13. Data Quality"])
+    lines.extend(["", "## 14. Data Quality"])
     group_quality_rows: list[dict[str, object]] = []
     for group_type in sorted({str(row.get("group_type") or "") for row in group_rows}):
         subset = [row for row in group_rows if row.get("group_type") == group_type]
@@ -684,7 +760,7 @@ def build_markdown_daily_swing_report(
         ).rstrip()
     )
 
-    lines.extend(["", "## 14. Missing / Incomplete Inputs Summary"])
+    lines.extend(["", "## 15. Missing / Incomplete Inputs Summary"])
     missing_rows = [
         {
             "metric": "group_rows_missing_timing_state",

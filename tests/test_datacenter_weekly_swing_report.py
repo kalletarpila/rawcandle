@@ -234,7 +234,18 @@ def _seed_weekly_report_db(path):
                 4, 4, 100.0, 102.0 + index, 99.0, 100.0 + index * 2,
                 100000.0, 98.0 + index, 99.0 + index, 0.01 + index * 0.01, 0.10 + index * 0.01,
                 5, "2024-01-01", 100.0 + index, "2024-01-01", 95.0 + index,
-                "HH" if index >= 2 else "HL", "UP" if index >= 3 else "NEUTRAL", 20, 1.01, 1.03, 0.99, 1.0 + index * 0.01, 0.02, 0.01,
+                "HH" if index >= 2 else "HL", 1 if index >= 2 else 0, "FRESH" if index >= 2 else "FRESH",
+                "BOS_UP" if signal_date in {"2024-01-08", "2024-01-10"} else None,
+                "2024-01-08" if signal_date in {"2024-01-08", "2024-01-10"} else None,
+                "2024-01-08" if signal_date == "2024-01-08" else ("2024-01-08" if signal_date == "2024-01-10" else None),
+                0 if signal_date == "2024-01-08" else (1 if signal_date == "2024-01-10" else None),
+                "FRESH" if signal_date in {"2024-01-08", "2024-01-10"} else None,
+                "2024-01-08" if signal_date in {"2024-01-08", "2024-01-10"} else None,
+                "2024-01-08" if signal_date == "2024-01-08" else ("2024-01-08" if signal_date == "2024-01-10" else None),
+                "DOUBLE_BOS_UP" if signal_date in {"2024-01-08", "2024-01-10"} else None,
+                0 if signal_date == "2024-01-08" else (1 if signal_date == "2024-01-10" else None),
+                "FRESH" if signal_date in {"2024-01-08", "2024-01-10"} else None,
+                "UP" if index >= 3 else "NEUTRAL", 20, 1.01, 1.03, 0.99, 1.0 + index * 0.01, 0.02, 0.01,
                 0.01 + index * 0.01, 0.02, -0.01, 4, "OK", "DC_SWING_OHLC_V1", "seed", "2026-05-17T10:00:00Z",
             ),
             (
@@ -242,7 +253,14 @@ def _seed_weekly_report_db(path):
                 8, 7, 100.0, 101.0, 98.0, 100.0 + index,
                 200000.0, 99.0, 99.5, 0.005 + index * 0.002, 0.08 + index * 0.005,
                 10, "2024-01-01", 101.0, "2024-01-01", 97.0,
-                None, None, 20, None, None, None, None, None, None,
+                "LH", 2, "FRESH",
+                "BOS_DOWN" if signal_date == "2024-01-10" else None,
+                "2024-01-10" if signal_date == "2024-01-10" else None,
+                "2024-01-10" if signal_date == "2024-01-10" else None,
+                0 if signal_date == "2024-01-10" else None,
+                "FRESH" if signal_date == "2024-01-10" else None,
+                None, None, None, None, None,
+                "NEUTRAL", 20, None, None, None, None, None, None,
                 None, None, None, 0, "PARTIAL_DATA", "DC_SWING_OHLC_V1", "seed", "2026-05-17T10:00:00Z",
             ),
         ]
@@ -322,10 +340,13 @@ def test_finds_last_five_valid_signal_dates_and_generates_report(tmp_path):
         "## 8. Repeated pullback tickers",
         "## 9. Repeated exit-risk tickers",
         "## 10. Synthetic OHLC structure changes",
-        "## 11. Data quality over the window",
-        "## 12. Missing / incomplete inputs summary",
+        "## 11. Group Structure Break / Reset History",
+        "## 12. Data quality over the window",
+        "## 13. Missing / incomplete inputs summary",
     ]:
         assert heading in markdown
+    assert "### A. BOS / RESET events during window" in markdown
+    assert "### B. Latest BOS / RESET state at window end" in markdown
     assert "Window type: last 5 valid trading days, not calendar week" in markdown
     assert "EXTREME RISK – TIGHTEN STOPS / NO NEW LONGS" in markdown
     assert "2024-01-02, 2024-01-03, 2024-01-05, 2024-01-08, 2024-01-10" in markdown
@@ -346,7 +367,63 @@ def test_finds_last_five_valid_signal_dates_and_generates_report(tmp_path):
     assert "last_latest_bos_event_type" in markdown
     assert "first_latest_reset_reason" in markdown
     assert "last_latest_reset_reason" in markdown
+    assert "| 2024-01-08 | subindustry | AI Chips | BOS_UP | 2024-01-08 | FRESH | DOUBLE_BOS_UP | 2024-01-08 | FRESH | HH | FRESH | UP | BUY_ZONE | HIGH |" in markdown
+    assert "| layer | Infrastructure | BOS_DOWN | 2024-01-10 | FRESH |  |  |  | LH | FRESH | NEUTRAL | NEUTRAL | LOW |" in markdown
     assert "HIGH" in markdown
+
+
+def test_weekly_group_structure_break_reset_section_ignores_carried_forward_context(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+
+    markdown = build_markdown_weekly_swing_report(
+        load_weekly_swing_report_data(
+            analysis_db_path=analysis_db,
+            end_date="2024-01-10",
+        ),
+        generated_at_utc="2026-05-17T12:00:00Z",
+        top_n=20,
+    )
+    section_start = markdown.index("### A. BOS / RESET events during window")
+    next_section = markdown.index("### B. Latest BOS / RESET state at window end")
+    section = markdown[section_start:next_section]
+    assert "| 2024-01-08 | subindustry | AI Chips | BOS_UP | 2024-01-08 |" in section
+    assert "| 2024-01-10 | subindustry | AI Chips | BOS_UP | 2024-01-08 |" not in section
+
+
+def test_weekly_group_structure_break_reset_section_renders_no_rows_when_absent(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_group_synthetic_ohlc_daily
+            SET latest_bos_event_type = NULL,
+                latest_bos_event_date = NULL,
+                latest_bos_confirmed_as_of_date = NULL,
+                latest_bos_age_trading_days = NULL,
+                latest_bos_freshness = NULL,
+                latest_reset_event_date = NULL,
+                latest_reset_confirmed_as_of_date = NULL,
+                latest_reset_reason = NULL,
+                latest_reset_age_trading_days = NULL,
+                latest_reset_freshness = NULL
+            """
+        )
+        conn.commit()
+
+    markdown = build_markdown_weekly_swing_report(
+        load_weekly_swing_report_data(
+            analysis_db_path=analysis_db,
+            end_date="2024-01-10",
+        ),
+        generated_at_utc="2026-05-17T12:00:00Z",
+        top_n=20,
+    )
+    heading = markdown.index("## 11. Group Structure Break / Reset History")
+    next_heading = markdown.index("## 12. Data quality over the window")
+    section = markdown[heading:next_heading]
+    assert section.count("No rows.") == 2
 
 
 def test_weekly_exit_risk_section_sorts_by_severity_after_day_count(tmp_path):

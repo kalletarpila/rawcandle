@@ -10,6 +10,9 @@ from .swing_daily_report import (
     DEFAULT_OHLC_CALC_VERSION,
     DEFAULT_SIGNAL_VERSION,
     EXIT_RISK_SEVERITY_PRIORITY,
+    FRESHNESS_PRIORITY,
+    GROUP_BOS_PRIORITY,
+    GROUP_RESET_PRIORITY,
     OVERHEAT_PRIORITY,
     TREND_PRIORITY,
     _check_required_tables,
@@ -776,7 +779,136 @@ def build_markdown_weekly_swing_report(
         ).rstrip()
     )
 
-    lines.extend(["", "## 11. Data quality over the window"])
+    end_synthetic_rows = [row for row in synthetic_rows if row.get("ohlc_date") == window_end_date]
+    group_context_by_date_key = {
+        (row.get("signal_date"), row.get("group_type"), row.get("group_name")): row
+        for row in group_rows
+    }
+    structure_event_rows: list[dict[str, object]] = []
+    for row in synthetic_rows:
+        if row.get("group_type") not in {"subindustry", "layer"}:
+            continue
+        if (
+            row.get("latest_bos_confirmed_as_of_date") != row.get("ohlc_date")
+            and row.get("latest_reset_confirmed_as_of_date") != row.get("ohlc_date")
+        ):
+            continue
+        if row.get("latest_bos_event_type") is None and row.get("latest_reset_reason") is None:
+            continue
+        group_context = group_context_by_date_key.get(
+            (row.get("ohlc_date"), row.get("group_type"), row.get("group_name")),
+            {},
+        )
+        structure_event_rows.append(
+            {
+                "ohlc_date": row.get("ohlc_date"),
+                "group_type": row.get("group_type"),
+                "group_name": row.get("group_name"),
+                "latest_bos_event_type": row.get("latest_bos_event_type"),
+                "latest_bos_event_date": row.get("latest_bos_event_date"),
+                "latest_bos_freshness": row.get("latest_bos_freshness"),
+                "latest_reset_reason": row.get("latest_reset_reason"),
+                "latest_reset_event_date": row.get("latest_reset_event_date"),
+                "latest_reset_freshness": row.get("latest_reset_freshness"),
+                "latest_structure_label": row.get("latest_structure_label"),
+                "latest_structure_freshness": row.get("latest_structure_freshness"),
+                "trend_classification": row.get("trend_classification"),
+                "timing_state": group_context.get("timing_state"),
+                "overheat_risk_level": group_context.get("overheat_risk_level"),
+            }
+        )
+    structure_event_rows.sort(
+        key=lambda row: (
+            str(row.get("ohlc_date") or ""),
+            GROUP_RESET_PRIORITY.get(row.get("latest_reset_reason"), 2),
+            GROUP_BOS_PRIORITY.get(row.get("latest_bos_event_type"), 2),
+            str(row.get("group_type") or ""),
+            str(row.get("group_name") or ""),
+        )
+    )
+    end_structure_rows: list[dict[str, object]] = []
+    for row in end_synthetic_rows:
+        if row.get("group_type") not in {"subindustry", "layer"}:
+            continue
+        if row.get("latest_bos_event_type") is None and row.get("latest_reset_reason") is None:
+            continue
+        group_context = group_context_by_date_key.get(
+            (window_end_date, row.get("group_type"), row.get("group_name")),
+            {},
+        )
+        end_structure_rows.append(
+            {
+                "group_type": row.get("group_type"),
+                "group_name": row.get("group_name"),
+                "latest_bos_event_type": row.get("latest_bos_event_type"),
+                "latest_bos_event_date": row.get("latest_bos_event_date"),
+                "latest_bos_freshness": row.get("latest_bos_freshness"),
+                "latest_reset_reason": row.get("latest_reset_reason"),
+                "latest_reset_event_date": row.get("latest_reset_event_date"),
+                "latest_reset_freshness": row.get("latest_reset_freshness"),
+                "latest_structure_label": row.get("latest_structure_label"),
+                "latest_structure_freshness": row.get("latest_structure_freshness"),
+                "trend_classification": row.get("trend_classification"),
+                "timing_state": group_context.get("timing_state"),
+                "overheat_risk_level": group_context.get("overheat_risk_level"),
+            }
+        )
+    end_structure_rows.sort(
+        key=lambda row: (
+            GROUP_RESET_PRIORITY.get(row.get("latest_reset_reason"), 2),
+            GROUP_BOS_PRIORITY.get(row.get("latest_bos_event_type"), 2),
+            FRESHNESS_PRIORITY.get(row.get("latest_bos_freshness"), 3),
+            str(row.get("group_type") or ""),
+            str(row.get("group_name") or ""),
+        )
+    )
+
+    lines.extend(["", "## 11. Group Structure Break / Reset History"])
+    lines.extend(["", "### A. BOS / RESET events during window"])
+    lines.append(
+        _format_table(
+            [
+                "ohlc_date",
+                "group_type",
+                "group_name",
+                "latest_bos_event_type",
+                "latest_bos_event_date",
+                "latest_bos_freshness",
+                "latest_reset_reason",
+                "latest_reset_event_date",
+                "latest_reset_freshness",
+                "latest_structure_label",
+                "latest_structure_freshness",
+                "trend_classification",
+                "timing_state",
+                "overheat_risk_level",
+            ],
+            structure_event_rows,
+        ).rstrip()
+    )
+    lines.extend(["", "### B. Latest BOS / RESET state at window end"])
+    lines.append(
+        _format_table(
+            [
+                "group_type",
+                "group_name",
+                "latest_bos_event_type",
+                "latest_bos_event_date",
+                "latest_bos_freshness",
+                "latest_reset_reason",
+                "latest_reset_event_date",
+                "latest_reset_freshness",
+                "latest_structure_label",
+                "latest_structure_freshness",
+                "trend_classification",
+                "timing_state",
+                "overheat_risk_level",
+            ],
+            end_structure_rows,
+        ).rstrip()
+    )
+
+    lines.extend(["", "## 12. Data quality over the window"])
     group_quality_rows = _count_by_date_and_field(
         group_rows,
         date_field="signal_date",
@@ -822,8 +954,7 @@ def build_markdown_weekly_swing_report(
         ]
     )
 
-    lines.extend(["", "## 12. Missing / incomplete inputs summary"])
-    end_synthetic_rows = [row for row in synthetic_rows if row.get("ohlc_date") == window_end_date]
+    lines.extend(["", "## 13. Missing / incomplete inputs summary"])
     lines.append("Window-total counts")
     lines.append(
         _format_table(

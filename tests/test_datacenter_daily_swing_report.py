@@ -210,7 +210,10 @@ def _seed_report_db(path, *, with_ecosystem: bool = True):
             4, 4, 100.0, 105.0, 99.0, 104.0,
             100000.0, 98.0, 101.0, 0.0297, 0.12,
             5, "2024-01-08", 105.0, "2024-01-04", 95.0,
-            "HH", "UP", 20, 1.01, 1.06, 0.99, 1.04, 0.02, 0.02,
+            "HH", 2, "FRESH",
+            "BOS_UP", "2024-01-10", "2024-01-10", 0, "FRESH",
+            "2024-01-10", "2024-01-10", "DOUBLE_BOS_UP", 0, "FRESH",
+            "UP", 20, 1.01, 1.06, 0.99, 1.04, 0.02, 0.02,
             0.04, 0.06, -0.01, 4, "OK", "DC_SWING_OHLC_V1", "seed", "2026-05-17T10:00:00Z",
         ),
         (
@@ -218,7 +221,10 @@ def _seed_report_db(path, *, with_ecosystem: bool = True):
             8, 7, 100.0, 102.0, 98.0, 101.0,
             200000.0, 99.0, 100.0, 0.01, 0.09,
             10, "2024-01-07", 103.0, "2024-01-03", 97.0,
-            None, None, 20, None, None, None, None, None, None,
+            "LH", 4, "FRESH",
+            "BOS_DOWN", "2024-01-10", "2024-01-10", 0, "FRESH",
+            None, None, None, None, None,
+            "NEUTRAL", 20, None, None, None, None, None, None,
             None, None, None, 0, "PARTIAL_DATA", "DC_SWING_OHLC_V1", "seed", "2026-05-17T10:00:00Z",
         ),
     ]
@@ -294,11 +300,12 @@ def test_generates_markdown_report_with_required_sections_and_filters(tmp_path):
         "## 7. Trim/Watch Subindustries",
         "## 8. Exit-Zone Subindustries",
         "## 9. Synthetic OHLC Structure Summary",
-        "## 10. Breakout Ticker Scanner",
-        "## 11. Pullback Ticker Scanner",
-        "## 12. Exit-Risk Ticker Scanner",
-        "## 13. Data Quality",
-        "## 14. Missing / Incomplete Inputs Summary",
+        "## 10. Group Structure Breaks / Resets",
+        "## 11. Breakout Ticker Scanner",
+        "## 12. Pullback Ticker Scanner",
+        "## 13. Exit-Risk Ticker Scanner",
+        "## 14. Data Quality",
+        "## 15. Missing / Incomplete Inputs Summary",
     ]:
         assert heading in markdown
 
@@ -323,9 +330,46 @@ def test_generates_markdown_report_with_required_sections_and_filters(tmp_path):
     assert "latest_bos_freshness" in markdown
     assert "latest_reset_reason" in markdown
     assert "latest_reset_freshness" in markdown
+    assert "| subindustry | AI Chips | BOS_UP | 2024-01-10 | FRESH | DOUBLE_BOS_UP | 2024-01-10 | FRESH | HH | FRESH | UP | BUY_ZONE | LOW |" in markdown
+    assert "| layer | Infrastructure | BOS_DOWN | 2024-01-10 | FRESH |  |  |  | LH | FRESH | NEUTRAL | NEUTRAL | LOW |" in markdown
     assert "HIGH" in markdown
     assert "synthetic_ohlc_rows_missing_relative_close_20" in markdown
     assert "ticker_rows_with_scanner_fields_null" in markdown
+
+
+def test_daily_group_structure_breaks_section_renders_no_rows_when_absent(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_report_db(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_group_synthetic_ohlc_daily
+            SET latest_bos_event_type = NULL,
+                latest_bos_event_date = NULL,
+                latest_bos_confirmed_as_of_date = NULL,
+                latest_bos_age_trading_days = NULL,
+                latest_bos_freshness = NULL,
+                latest_reset_event_date = NULL,
+                latest_reset_confirmed_as_of_date = NULL,
+                latest_reset_reason = NULL,
+                latest_reset_age_trading_days = NULL,
+                latest_reset_freshness = NULL
+            """
+        )
+        conn.commit()
+
+    markdown = build_markdown_daily_swing_report(
+        load_daily_swing_report_data(
+            analysis_db_path=analysis_db,
+            signal_date="2024-01-10",
+        ),
+        generated_at_utc="2026-05-17T12:00:00Z",
+        top_n=20,
+    )
+    section_start = markdown.index("## 10. Group Structure Breaks / Resets")
+    next_section = markdown.index("## 11. Breakout Ticker Scanner")
+    section = markdown[section_start:next_section]
+    assert "No rows." in section
 
 
 def test_daily_exit_risk_section_sorts_by_severity_before_return_and_distance(tmp_path):
@@ -360,7 +404,7 @@ def test_daily_exit_risk_section_sorts_by_severity_before_return_and_distance(tm
         generated_at_utc="2026-05-17T12:00:00Z",
         top_n=20,
     )
-    section_start = markdown.index("## 12. Exit-Risk Ticker Scanner")
+    section_start = markdown.index("## 13. Exit-Risk Ticker Scanner")
     exit_section = markdown[section_start:]
     ccc_index = exit_section.index("| CCC | Infrastructure | Storage |")
     aaa_index = exit_section.index("| AAA | Infrastructure | AI Chips |")
