@@ -9,6 +9,8 @@ def test_cli_writes_markdown_and_prints_deterministic_summary(tmp_path, capsys):
     analysis_db = tmp_path / "analysis.db"
     output_md = tmp_path / "weekly_report.md"
     output_csv = tmp_path / "weekly_report.csv"
+    expected_output_md = tmp_path / "weekly_report_1200.md"
+    expected_output_csv = tmp_path / "weekly_report_1200.csv"
     _seed_weekly_report_db(analysis_db)
 
     exit_code = run_datacenter_weekly_swing_report_main(
@@ -29,9 +31,9 @@ def test_cli_writes_markdown_and_prints_deterministic_summary(tmp_path, capsys):
     )
 
     assert exit_code == 0
-    assert output_md.exists()
-    assert output_csv.exists()
-    assert "# Datacenter Weekly Swing Report" in output_md.read_text(encoding="utf-8")
+    assert expected_output_md.exists()
+    assert expected_output_csv.exists()
+    assert "# Datacenter Weekly Swing Report" in expected_output_md.read_text(encoding="utf-8")
 
     lines = capsys.readouterr().out.strip().splitlines()
     assert lines[0] == "SUMMARY end_date=2024-01-10"
@@ -49,5 +51,5 @@ def test_cli_writes_markdown_and_prints_deterministic_summary(tmp_path, capsys):
     assert lines[12] == "SUMMARY repeated_breakout_tickers=1"
     assert lines[13] == "SUMMARY repeated_pullback_tickers=1"
     assert lines[14] == "SUMMARY repeated_exit_risk_tickers=1"
-    assert lines[15] == f"SUMMARY output_markdown={output_md}"
+    assert lines[15] == f"SUMMARY output_markdown={expected_output_md}"
     assert lines[-1] == "SUMMARY validation_status=OK"

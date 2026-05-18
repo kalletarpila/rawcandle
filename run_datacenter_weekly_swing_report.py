@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import datetime
 from pathlib import Path
 
 
@@ -35,8 +36,35 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _resolve_output_timestamp_hhmm(generated_at_utc: str | None) -> str:
+    if generated_at_utc:
+        return datetime.strptime(generated_at_utc, "%Y-%m-%dT%H:%M:%SZ").strftime("%H%M")
+    return datetime.now().strftime("%H%M")
+
+
+def _timestamp_output_path(path: Path | None, *, date_value: str, hhmm: str) -> Path | None:
+    if path is None:
+        return None
+    stem = path.stem
+    for token in (date_value, date_value.replace("-", "_")):
+        if token in stem:
+            return path.with_name(f"{stem.replace(token, f'{token}_{hhmm}', 1)}{path.suffix}")
+    return path.with_name(f"{stem}_{hhmm}{path.suffix}")
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    output_hhmm = _resolve_output_timestamp_hhmm(args.generated_at_utc)
+    output_md = _timestamp_output_path(
+        args.output_md,
+        date_value=args.end_date,
+        hhmm=output_hhmm,
+    )
+    output_csv = _timestamp_output_path(
+        args.output_csv,
+        date_value=args.end_date,
+        hhmm=output_hhmm,
+    )
     try:
         result = write_weekly_swing_report(
             analysis_db_path=args.analysis_db,
@@ -44,8 +72,8 @@ def main(argv: list[str] | None = None) -> int:
             signal_version=args.signal_version,
             ohlc_calc_version=args.ohlc_calc_version,
             taxonomy_version=args.taxonomy_version,
-            output_md=args.output_md,
-            output_csv=args.output_csv,
+            output_md=output_md,
+            output_csv=output_csv,
             top_n=args.top_n,
             generated_at_utc=args.generated_at_utc,
         )
