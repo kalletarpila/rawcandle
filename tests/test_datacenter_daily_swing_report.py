@@ -64,7 +64,9 @@ def _insert_ticker_row(path, row):
 def _insert_synthetic_row(path, row):
     values = list(row)
     if len(values) == 37:
-        values[21:21] = [None, None]
+        values[21:21] = [None] * 12
+    elif len(values) == 39:
+        values[23:23] = [None] * 10
     with sqlite3.connect(path) as conn:
         conn.execute(
             """
@@ -74,11 +76,15 @@ def _insert_synthetic_row(path, row):
                 synthetic_volume, ma20, ema20, distance_to_ema20_pct, volatility_20d,
                 pivot_radius, latest_pivot_high_date, latest_pivot_high_value, latest_pivot_low_date, latest_pivot_low_value,
                 latest_structure_label, latest_structure_age_trading_days, latest_structure_freshness,
+                latest_bos_event_type, latest_bos_event_date, latest_bos_confirmed_as_of_date,
+                latest_bos_age_trading_days, latest_bos_freshness, latest_reset_event_date,
+                latest_reset_confirmed_as_of_date, latest_reset_reason,
+                latest_reset_age_trading_days, latest_reset_freshness,
                 trend_classification, relative_base_window, relative_open_20, relative_high_20,
                 relative_low_20, relative_close_20, relative_upper_wick_20, relative_lower_wick_20,
                 relative_close_extension_20, relative_high_extension_20, relative_low_extension_20,
                 relative_eligible_count, data_quality_status, calc_version, run_id, created_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             tuple(values),
         )
@@ -310,6 +316,8 @@ def test_generates_markdown_report_with_required_sections_and_filters(tmp_path):
     assert "exit_risk_severity" in markdown
     assert "latest_structure_age_trading_days" in markdown
     assert "latest_structure_freshness" in markdown
+    assert "latest_bos_age_trading_days" in markdown
+    assert "latest_reset_age_trading_days" in markdown
     assert "ticker_trend_state" in markdown
     assert "latest_bos_event_type" in markdown
     assert "latest_bos_freshness" in markdown

@@ -108,6 +108,16 @@ class DatacenterGroupSyntheticOhlcRow:
     latest_structure_label: str | None
     latest_structure_age_trading_days: int | None
     latest_structure_freshness: str | None
+    latest_bos_event_type: str | None
+    latest_bos_event_date: str | None
+    latest_bos_confirmed_as_of_date: str | None
+    latest_bos_age_trading_days: int | None
+    latest_bos_freshness: str | None
+    latest_reset_event_date: str | None
+    latest_reset_confirmed_as_of_date: str | None
+    latest_reset_reason: str | None
+    latest_reset_age_trading_days: int | None
+    latest_reset_freshness: str | None
     trend_classification: str | None
     relative_base_window: int | None
     relative_open_20: float | None
@@ -525,6 +535,16 @@ def build_group_synthetic_ohlc_rows(
                         latest_structure_label=None,
                         latest_structure_age_trading_days=None,
                         latest_structure_freshness=None,
+                        latest_bos_event_type=None,
+                        latest_bos_event_date=None,
+                        latest_bos_confirmed_as_of_date=None,
+                        latest_bos_age_trading_days=None,
+                        latest_bos_freshness=None,
+                        latest_reset_event_date=None,
+                        latest_reset_confirmed_as_of_date=None,
+                        latest_reset_reason=None,
+                        latest_reset_age_trading_days=None,
+                        latest_reset_freshness=None,
                         trend_classification=None,
                         relative_base_window=None,
                         relative_open_20=None,
@@ -880,6 +900,20 @@ def _compute_group_trend_classification(
     return "NEUTRAL"
 
 
+def _compute_group_event_age(
+    *,
+    current_valid_index: int | None,
+    confirmed_as_of_date: str | None,
+    valid_index_by_date: dict[str, int],
+) -> int | None:
+    if current_valid_index is None or confirmed_as_of_date is None:
+        return None
+    event_valid_index = valid_index_by_date.get(confirmed_as_of_date)
+    if event_valid_index is None:
+        return None
+    return current_valid_index - event_valid_index
+
+
 def _structure_field_tuple_from_row(row: sqlite3.Row | dict[str, object]) -> tuple[object, ...]:
     return (
         row["pivot_radius"],
@@ -890,6 +924,16 @@ def _structure_field_tuple_from_row(row: sqlite3.Row | dict[str, object]) -> tup
         row["latest_structure_label"],
         row["latest_structure_age_trading_days"],
         row["latest_structure_freshness"],
+        row["latest_bos_event_type"],
+        row["latest_bos_event_date"],
+        row["latest_bos_confirmed_as_of_date"],
+        row["latest_bos_age_trading_days"],
+        row["latest_bos_freshness"],
+        row["latest_reset_event_date"],
+        row["latest_reset_confirmed_as_of_date"],
+        row["latest_reset_reason"],
+        row["latest_reset_age_trading_days"],
+        row["latest_reset_freshness"],
         row["trend_classification"],
     )
 
@@ -966,8 +1010,19 @@ def build_group_structure_updates(
         latest_pivot_low_value: float | None = None
         latest_structure_label: str | None = None
         latest_structure_label_date: str | None = None
+        latest_hl_pivot_low_value: float | None = None
+        latest_lh_pivot_high_value: float | None = None
         previous_high_value: float | None = None
         previous_low_value: float | None = None
+        internal_bos_trend_state = "NEUTRAL"
+        bos_down_count = 0
+        bos_up_count = 0
+        latest_bos_event_type: str | None = None
+        latest_bos_event_date: str | None = None
+        latest_bos_confirmed_as_of_date: str | None = None
+        latest_reset_event_date: str | None = None
+        latest_reset_confirmed_as_of_date: str | None = None
+        latest_reset_reason: str | None = None
         applied_confirm_index = 0
         valid_index_by_date = {
             str(valid_row["ohlc_date"]): index
@@ -985,9 +1040,21 @@ def build_group_structure_updates(
                         latest_pivot_high_date = str(pivot_row["ohlc_date"])
                         latest_pivot_high_value = pivot_value
                         latest_high_label = label
+                        if label == "LH":
+                            latest_lh_pivot_high_value = pivot_value
                         if label is not None:
                             latest_structure_label = label
                             latest_structure_label_date = str(pivot_row["ohlc_date"])
+                            if label in {"HH", "HL"}:
+                                bos_down_count = 0
+                            elif label in {"LH", "LL"}:
+                                bos_up_count = 0
+                            current_structure_trend = _compute_group_trend_classification(
+                                latest_high_label=latest_high_label,
+                                latest_low_label=latest_low_label,
+                            )
+                            if current_structure_trend in {"UP", "DOWN"}:
+                                internal_bos_trend_state = current_structure_trend
                     else:
                         pivot_value = float(pivot_row["synthetic_low"])
                         label = None if previous_low_value is None else ("HL" if pivot_value > previous_low_value else "LL")
@@ -995,9 +1062,21 @@ def build_group_structure_updates(
                         latest_pivot_low_date = str(pivot_row["ohlc_date"])
                         latest_pivot_low_value = pivot_value
                         latest_low_label = label
+                        if label == "HL":
+                            latest_hl_pivot_low_value = pivot_value
                         if label is not None:
                             latest_structure_label = label
                             latest_structure_label_date = str(pivot_row["ohlc_date"])
+                            if label in {"HH", "HL"}:
+                                bos_down_count = 0
+                            elif label in {"LH", "LL"}:
+                                bos_up_count = 0
+                            current_structure_trend = _compute_group_trend_classification(
+                                latest_high_label=latest_high_label,
+                                latest_low_label=latest_low_label,
+                            )
+                            if current_structure_trend in {"UP", "DOWN"}:
+                                internal_bos_trend_state = current_structure_trend
                 applied_confirm_index += 1
 
             if not (normalized_start_date <= str(row["ohlc_date"]) <= normalized_end_date):
@@ -1017,22 +1096,100 @@ def build_group_structure_updates(
                     "latest_structure_label": None,
                     "latest_structure_age_trading_days": None,
                     "latest_structure_freshness": None,
+                    "latest_bos_event_type": None,
+                    "latest_bos_event_date": None,
+                    "latest_bos_confirmed_as_of_date": None,
+                    "latest_bos_age_trading_days": None,
+                    "latest_bos_freshness": None,
+                    "latest_reset_event_date": None,
+                    "latest_reset_confirmed_as_of_date": None,
+                    "latest_reset_reason": None,
+                    "latest_reset_age_trading_days": None,
+                    "latest_reset_freshness": None,
                     "trend_classification": None,
                 }
             else:
                 current_valid_index = valid_index_by_date.get(str(row["ohlc_date"]))
-                label_valid_index = (
-                    None
-                    if latest_structure_label_date is None
-                    else valid_index_by_date.get(latest_structure_label_date)
+                current_date = str(row["ohlc_date"])
+                latest_structure_age_trading_days = _compute_group_event_age(
+                    current_valid_index=current_valid_index,
+                    confirmed_as_of_date=latest_structure_label_date
+                    if latest_structure_label is not None
+                    else None,
+                    valid_index_by_date=valid_index_by_date,
                 )
-                latest_structure_age_trading_days = (
-                    None
-                    if latest_structure_label is None
-                    or latest_structure_label_date is None
-                    or current_valid_index is None
-                    or label_valid_index is None
-                    else current_valid_index - label_valid_index
+                trend_classification = _compute_group_trend_classification(
+                    latest_high_label=latest_high_label,
+                    latest_low_label=latest_low_label,
+                )
+                current_low = float(row["synthetic_low"])
+                current_high = float(row["synthetic_high"])
+                if internal_bos_trend_state == "UP":
+                    active_bos_low = (
+                        latest_hl_pivot_low_value
+                        if latest_hl_pivot_low_value is not None
+                        else latest_pivot_low_value
+                    )
+                    if active_bos_low is not None and current_low < active_bos_low:
+                        bos_down_count += 1
+                        latest_bos_event_type = "BOS_DOWN"
+                        latest_bos_event_date = current_date
+                        latest_bos_confirmed_as_of_date = current_date
+                        if bos_down_count >= 2:
+                            latest_reset_event_date = current_date
+                            latest_reset_confirmed_as_of_date = current_date
+                            latest_reset_reason = "DOUBLE_BOS_DOWN"
+                            internal_bos_trend_state = "NEUTRAL"
+                            bos_down_count = 0
+                            bos_up_count = 0
+                            latest_high_label = None
+                            latest_low_label = None
+                            latest_hl_pivot_low_value = None
+                            latest_lh_pivot_high_value = None
+                            latest_pivot_high_date = None
+                            latest_pivot_high_value = None
+                            latest_pivot_low_date = None
+                            latest_pivot_low_value = None
+                            latest_structure_label = None
+                            latest_structure_label_date = None
+                elif internal_bos_trend_state == "DOWN":
+                    active_bos_high = (
+                        latest_lh_pivot_high_value
+                        if latest_lh_pivot_high_value is not None
+                        else latest_pivot_high_value
+                    )
+                    if active_bos_high is not None and current_high > active_bos_high:
+                        bos_up_count += 1
+                        latest_bos_event_type = "BOS_UP"
+                        latest_bos_event_date = current_date
+                        latest_bos_confirmed_as_of_date = current_date
+                        if bos_up_count >= 2:
+                            latest_reset_event_date = current_date
+                            latest_reset_confirmed_as_of_date = current_date
+                            latest_reset_reason = "DOUBLE_BOS_UP"
+                            internal_bos_trend_state = "NEUTRAL"
+                            bos_down_count = 0
+                            bos_up_count = 0
+                            latest_high_label = None
+                            latest_low_label = None
+                            latest_hl_pivot_low_value = None
+                            latest_lh_pivot_high_value = None
+                            latest_pivot_high_date = None
+                            latest_pivot_high_value = None
+                            latest_pivot_low_date = None
+                            latest_pivot_low_value = None
+                            latest_structure_label = None
+                            latest_structure_label_date = None
+
+                latest_bos_age_trading_days = _compute_group_event_age(
+                    current_valid_index=current_valid_index,
+                    confirmed_as_of_date=latest_bos_confirmed_as_of_date,
+                    valid_index_by_date=valid_index_by_date,
+                )
+                latest_reset_age_trading_days = _compute_group_event_age(
+                    current_valid_index=current_valid_index,
+                    confirmed_as_of_date=latest_reset_confirmed_as_of_date,
+                    valid_index_by_date=valid_index_by_date,
                 )
                 computed = {
                     "pivot_radius": pivot_radius,
@@ -1046,10 +1203,23 @@ def build_group_structure_updates(
                         group_type=group_type,
                         age_trading_days=latest_structure_age_trading_days,
                     ),
-                    "trend_classification": _compute_group_trend_classification(
-                        latest_high_label=latest_high_label,
-                        latest_low_label=latest_low_label,
+                    "latest_bos_event_type": latest_bos_event_type,
+                    "latest_bos_event_date": latest_bos_event_date,
+                    "latest_bos_confirmed_as_of_date": latest_bos_confirmed_as_of_date,
+                    "latest_bos_age_trading_days": latest_bos_age_trading_days,
+                    "latest_bos_freshness": _classify_group_structure_freshness(
+                        group_type=group_type,
+                        age_trading_days=latest_bos_age_trading_days,
                     ),
+                    "latest_reset_event_date": latest_reset_event_date,
+                    "latest_reset_confirmed_as_of_date": latest_reset_confirmed_as_of_date,
+                    "latest_reset_reason": latest_reset_reason,
+                    "latest_reset_age_trading_days": latest_reset_age_trading_days,
+                    "latest_reset_freshness": _classify_group_structure_freshness(
+                        group_type=group_type,
+                        age_trading_days=latest_reset_age_trading_days,
+                    ),
+                    "trend_classification": trend_classification,
                 }
 
             if computed["latest_structure_label"] is None:
@@ -1113,6 +1283,16 @@ def _serialize_row(row: DatacenterGroupSyntheticOhlcRow) -> tuple[object, ...]:
         row.latest_structure_label,
         row.latest_structure_age_trading_days,
         row.latest_structure_freshness,
+        row.latest_bos_event_type,
+        row.latest_bos_event_date,
+        row.latest_bos_confirmed_as_of_date,
+        row.latest_bos_age_trading_days,
+        row.latest_bos_freshness,
+        row.latest_reset_event_date,
+        row.latest_reset_confirmed_as_of_date,
+        row.latest_reset_reason,
+        row.latest_reset_age_trading_days,
+        row.latest_reset_freshness,
         row.trend_classification,
         row.relative_base_window,
         row.relative_open_20,
@@ -1199,11 +1379,15 @@ def write_group_synthetic_ohlc_rows(
                         pivot_radius, latest_pivot_high_date, latest_pivot_high_value,
                         latest_pivot_low_date, latest_pivot_low_value, latest_structure_label,
                         latest_structure_age_trading_days, latest_structure_freshness,
+                        latest_bos_event_type, latest_bos_event_date, latest_bos_confirmed_as_of_date,
+                        latest_bos_age_trading_days, latest_bos_freshness, latest_reset_event_date,
+                        latest_reset_confirmed_as_of_date, latest_reset_reason,
+                        latest_reset_age_trading_days, latest_reset_freshness,
                         trend_classification, relative_base_window, relative_open_20, relative_high_20,
                         relative_low_20, relative_close_20, relative_upper_wick_20, relative_lower_wick_20,
                         relative_close_extension_20, relative_high_extension_20, relative_low_extension_20,
                         relative_eligible_count, data_quality_status, calc_version, run_id, created_at_utc
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     _serialize_row(row),
                 )
@@ -1240,11 +1424,15 @@ def write_group_synthetic_ohlc_rows(
                             pivot_radius, latest_pivot_high_date, latest_pivot_high_value,
                             latest_pivot_low_date, latest_pivot_low_value, latest_structure_label,
                             latest_structure_age_trading_days, latest_structure_freshness,
+                            latest_bos_event_type, latest_bos_event_date, latest_bos_confirmed_as_of_date,
+                            latest_bos_age_trading_days, latest_bos_freshness, latest_reset_event_date,
+                            latest_reset_confirmed_as_of_date, latest_reset_reason,
+                            latest_reset_age_trading_days, latest_reset_freshness,
                             trend_classification, relative_base_window, relative_open_20, relative_high_20,
                             relative_low_20, relative_close_20, relative_upper_wick_20, relative_lower_wick_20,
                             relative_close_extension_20, relative_high_extension_20, relative_low_extension_20,
                             relative_eligible_count, data_quality_status, calc_version, run_id, created_at_utc
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         _serialize_row(row),
                     )
@@ -1262,11 +1450,15 @@ def write_group_synthetic_ohlc_rows(
                             pivot_radius, latest_pivot_high_date, latest_pivot_high_value,
                             latest_pivot_low_date, latest_pivot_low_value, latest_structure_label,
                             latest_structure_age_trading_days, latest_structure_freshness,
+                            latest_bos_event_type, latest_bos_event_date, latest_bos_confirmed_as_of_date,
+                            latest_bos_age_trading_days, latest_bos_freshness, latest_reset_event_date,
+                            latest_reset_confirmed_as_of_date, latest_reset_reason,
+                            latest_reset_age_trading_days, latest_reset_freshness,
                             trend_classification, relative_base_window, relative_open_20, relative_high_20,
                             relative_low_20, relative_close_20, relative_upper_wick_20, relative_lower_wick_20,
                             relative_close_extension_20, relative_high_extension_20, relative_low_extension_20,
                             relative_eligible_count, data_quality_status, calc_version, run_id, created_at_utc
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(ohlc_date, taxonomy_version, group_type, group_name, calc_version)
                         DO UPDATE SET
                             member_count = excluded.member_count,
@@ -1288,6 +1480,16 @@ def write_group_synthetic_ohlc_rows(
                             latest_structure_label = excluded.latest_structure_label,
                             latest_structure_age_trading_days = excluded.latest_structure_age_trading_days,
                             latest_structure_freshness = excluded.latest_structure_freshness,
+                            latest_bos_event_type = excluded.latest_bos_event_type,
+                            latest_bos_event_date = excluded.latest_bos_event_date,
+                            latest_bos_confirmed_as_of_date = excluded.latest_bos_confirmed_as_of_date,
+                            latest_bos_age_trading_days = excluded.latest_bos_age_trading_days,
+                            latest_bos_freshness = excluded.latest_bos_freshness,
+                            latest_reset_event_date = excluded.latest_reset_event_date,
+                            latest_reset_confirmed_as_of_date = excluded.latest_reset_confirmed_as_of_date,
+                            latest_reset_reason = excluded.latest_reset_reason,
+                            latest_reset_age_trading_days = excluded.latest_reset_age_trading_days,
+                            latest_reset_freshness = excluded.latest_reset_freshness,
                             trend_classification = excluded.trend_classification,
                             relative_base_window = excluded.relative_base_window,
                             relative_open_20 = excluded.relative_open_20,
@@ -1467,6 +1669,16 @@ def write_group_structure_updates(
                     latest_structure_label = NULL,
                     latest_structure_age_trading_days = NULL,
                     latest_structure_freshness = NULL,
+                    latest_bos_event_type = NULL,
+                    latest_bos_event_date = NULL,
+                    latest_bos_confirmed_as_of_date = NULL,
+                    latest_bos_age_trading_days = NULL,
+                    latest_bos_freshness = NULL,
+                    latest_reset_event_date = NULL,
+                    latest_reset_confirmed_as_of_date = NULL,
+                    latest_reset_reason = NULL,
+                    latest_reset_age_trading_days = NULL,
+                    latest_reset_freshness = NULL,
                     trend_classification = NULL
                 WHERE ohlc_date >= ?
                   AND ohlc_date <= ?
@@ -1485,6 +1697,16 @@ def write_group_structure_updates(
                 or row["latest_structure_label"] is not None
                 or row["latest_structure_age_trading_days"] is not None
                 or row["latest_structure_freshness"] is not None
+                or row["latest_bos_event_type"] is not None
+                or row["latest_bos_event_date"] is not None
+                or row["latest_bos_confirmed_as_of_date"] is not None
+                or row["latest_bos_age_trading_days"] is not None
+                or row["latest_bos_freshness"] is not None
+                or row["latest_reset_event_date"] is not None
+                or row["latest_reset_confirmed_as_of_date"] is not None
+                or row["latest_reset_reason"] is not None
+                or row["latest_reset_age_trading_days"] is not None
+                or row["latest_reset_freshness"] is not None
                 or row["trend_classification"] is not None
             ]
         else:
@@ -1501,6 +1723,16 @@ def write_group_structure_updates(
                     row["latest_structure_label"],
                     row["latest_structure_age_trading_days"],
                     row["latest_structure_freshness"],
+                    row["latest_bos_event_type"],
+                    row["latest_bos_event_date"],
+                    row["latest_bos_confirmed_as_of_date"],
+                    row["latest_bos_age_trading_days"],
+                    row["latest_bos_freshness"],
+                    row["latest_reset_event_date"],
+                    row["latest_reset_confirmed_as_of_date"],
+                    row["latest_reset_reason"],
+                    row["latest_reset_age_trading_days"],
+                    row["latest_reset_freshness"],
                     row["trend_classification"],
                 )
             ]
@@ -1517,6 +1749,16 @@ def write_group_structure_updates(
                     latest_structure_label = ?,
                     latest_structure_age_trading_days = ?,
                     latest_structure_freshness = ?,
+                    latest_bos_event_type = ?,
+                    latest_bos_event_date = ?,
+                    latest_bos_confirmed_as_of_date = ?,
+                    latest_bos_age_trading_days = ?,
+                    latest_bos_freshness = ?,
+                    latest_reset_event_date = ?,
+                    latest_reset_confirmed_as_of_date = ?,
+                    latest_reset_reason = ?,
+                    latest_reset_age_trading_days = ?,
+                    latest_reset_freshness = ?,
                     trend_classification = ?,
                     run_id = ?,
                     created_at_utc = ?
@@ -1535,6 +1777,16 @@ def write_group_structure_updates(
                     row["latest_structure_label"],
                     row["latest_structure_age_trading_days"],
                     row["latest_structure_freshness"],
+                    row["latest_bos_event_type"],
+                    row["latest_bos_event_date"],
+                    row["latest_bos_confirmed_as_of_date"],
+                    row["latest_bos_age_trading_days"],
+                    row["latest_bos_freshness"],
+                    row["latest_reset_event_date"],
+                    row["latest_reset_confirmed_as_of_date"],
+                    row["latest_reset_reason"],
+                    row["latest_reset_age_trading_days"],
+                    row["latest_reset_freshness"],
                     row["trend_classification"],
                     row["run_id"],
                     row["created_at_utc"],

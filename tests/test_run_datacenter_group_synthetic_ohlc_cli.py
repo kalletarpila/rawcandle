@@ -234,7 +234,9 @@ def test_cli_structure_only_updates_existing_rows_and_prints_deterministic_summa
         for row in rows:
             values = list(row)
             if len(values) == 37:
-                values[21:21] = [None, None]
+                values[21:21] = [None] * 12
+            elif len(values) == 39:
+                values[23:23] = [None] * 10
             normalized_rows.append(tuple(values))
         conn.executemany(
             """
@@ -245,11 +247,15 @@ def test_cli_structure_only_updates_existing_rows_and_prints_deterministic_summa
                 pivot_radius, latest_pivot_high_date, latest_pivot_high_value,
                 latest_pivot_low_date, latest_pivot_low_value, latest_structure_label,
                 latest_structure_age_trading_days, latest_structure_freshness,
+                latest_bos_event_type, latest_bos_event_date, latest_bos_confirmed_as_of_date,
+                latest_bos_age_trading_days, latest_bos_freshness, latest_reset_event_date,
+                latest_reset_confirmed_as_of_date, latest_reset_reason,
+                latest_reset_age_trading_days, latest_reset_freshness,
                 trend_classification, relative_base_window, relative_open_20, relative_high_20,
                 relative_low_20, relative_close_20, relative_upper_wick_20, relative_lower_wick_20,
                 relative_close_extension_20, relative_high_extension_20, relative_low_extension_20,
                 relative_eligible_count, data_quality_status, calc_version, run_id, created_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             normalized_rows,
         )

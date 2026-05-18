@@ -223,6 +223,16 @@ def test_database_manager_initializes_dc_group_synthetic_ohlc_daily_table(tmp_pa
         "latest_structure_label",
         "latest_structure_age_trading_days",
         "latest_structure_freshness",
+        "latest_bos_event_type",
+        "latest_bos_event_date",
+        "latest_bos_confirmed_as_of_date",
+        "latest_bos_age_trading_days",
+        "latest_bos_freshness",
+        "latest_reset_event_date",
+        "latest_reset_confirmed_as_of_date",
+        "latest_reset_reason",
+        "latest_reset_age_trading_days",
+        "latest_reset_freshness",
         "calc_version",
     }.issubset(columns)
 
@@ -241,6 +251,72 @@ def test_database_manager_initializes_dc_group_synthetic_ohlc_daily_table(tmp_pa
         "idx_dc_group_synthetic_ohlc_daily_structure",
         "idx_dc_group_synthetic_ohlc_daily_trend",
     }.issubset(indexes)
+
+
+def test_database_manager_adds_group_bos_reset_columns_to_existing_group_synth_table(tmp_path):
+    db_path = tmp_path / "analysis.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE dc_group_synthetic_ohlc_daily (
+                ohlc_date TEXT NOT NULL,
+                taxonomy_version TEXT NOT NULL,
+                group_type TEXT NOT NULL,
+                group_name TEXT NOT NULL,
+                member_count INTEGER,
+                eligible_count INTEGER,
+                synthetic_open REAL,
+                synthetic_high REAL,
+                synthetic_low REAL,
+                synthetic_close REAL,
+                synthetic_volume REAL,
+                ma20 REAL,
+                ema20 REAL,
+                distance_to_ema20_pct REAL,
+                volatility_20d REAL,
+                pivot_radius INTEGER,
+                latest_pivot_high_date TEXT,
+                latest_pivot_high_value REAL,
+                latest_pivot_low_date TEXT,
+                latest_pivot_low_value REAL,
+                latest_structure_label TEXT,
+                trend_classification TEXT,
+                relative_base_window INTEGER,
+                relative_open_20 REAL,
+                relative_high_20 REAL,
+                relative_low_20 REAL,
+                relative_close_20 REAL,
+                relative_upper_wick_20 REAL,
+                relative_lower_wick_20 REAL,
+                relative_close_extension_20 REAL,
+                relative_high_extension_20 REAL,
+                relative_low_extension_20 REAL,
+                relative_eligible_count INTEGER,
+                data_quality_status TEXT,
+                calc_version TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                created_at_utc TEXT NOT NULL,
+                PRIMARY KEY (ohlc_date, taxonomy_version, group_type, group_name, calc_version)
+            )
+            """
+        )
+        conn.commit()
+
+    DatabaseManager(str(db_path)).close()
+
+    columns = _table_columns(db_path, "dc_group_synthetic_ohlc_daily")
+    assert "latest_structure_age_trading_days" in columns
+    assert "latest_structure_freshness" in columns
+    assert "latest_bos_event_type" in columns
+    assert "latest_bos_event_date" in columns
+    assert "latest_bos_confirmed_as_of_date" in columns
+    assert "latest_bos_age_trading_days" in columns
+    assert "latest_bos_freshness" in columns
+    assert "latest_reset_event_date" in columns
+    assert "latest_reset_confirmed_as_of_date" in columns
+    assert "latest_reset_reason" in columns
+    assert "latest_reset_age_trading_days" in columns
+    assert "latest_reset_freshness" in columns
 
 
 def test_dc_ecosystem_membership_primary_key_rejects_duplicates(tmp_path):

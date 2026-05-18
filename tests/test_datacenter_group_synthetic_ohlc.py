@@ -60,7 +60,9 @@ def _insert_synthetic_rows(path, rows):
     for row in rows:
         values = list(row)
         if len(values) == 37:
-            values[21:21] = [None, None]
+            values[21:21] = [None] * 12
+        elif len(values) == 39:
+            values[23:23] = [None] * 10
         normalized_rows.append(tuple(values))
     with sqlite3.connect(path) as conn:
         conn.executemany(
@@ -72,11 +74,15 @@ def _insert_synthetic_rows(path, rows):
                 pivot_radius, latest_pivot_high_date, latest_pivot_high_value,
                 latest_pivot_low_date, latest_pivot_low_value, latest_structure_label,
                 latest_structure_age_trading_days, latest_structure_freshness,
+                latest_bos_event_type, latest_bos_event_date, latest_bos_confirmed_as_of_date,
+                latest_bos_age_trading_days, latest_bos_freshness, latest_reset_event_date,
+                latest_reset_confirmed_as_of_date, latest_reset_reason,
+                latest_reset_age_trading_days, latest_reset_freshness,
                 trend_classification, relative_base_window, relative_open_20, relative_high_20,
                 relative_low_20, relative_close_20, relative_upper_wick_20, relative_lower_wick_20,
                 relative_close_extension_20, relative_high_extension_20, relative_low_extension_20,
                 relative_eligible_count, data_quality_status, calc_version, run_id, created_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             normalized_rows,
         )
@@ -1042,14 +1048,176 @@ def test_updates_subindustry_structure_fields_with_confirmation_lag_and_trend(tm
     assert low_label_row["latest_structure_age_trading_days"] == 5
     assert low_label_row["latest_structure_freshness"] == "FRESH"
     assert low_label_row["trend_classification"] == "NEUTRAL"
+    assert low_label_row["latest_bos_event_type"] is None
+    assert low_label_row["latest_reset_reason"] is None
     assert high_label_row["latest_pivot_high_date"] == "2024-01-16"
     assert high_label_row["latest_pivot_high_value"] == pytest.approx(25.0)
     assert high_label_row["latest_structure_label"] == "HH"
     assert high_label_row["latest_structure_age_trading_days"] == 5
     assert high_label_row["latest_structure_freshness"] == "FRESH"
     assert high_label_row["trend_classification"] == "UP"
+    assert high_label_row["latest_bos_event_type"] is None
+    assert high_label_row["latest_reset_reason"] is None
     assert final_row["relative_open_20"] == pytest.approx(1.1)
     assert final_row["synthetic_high"] == pytest.approx(10.0)
+
+
+def test_structure_creates_bos_down_then_reset_in_up_trend(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    highs = [10, 11, 12, 13, 14, 20, 14, 13, 12, 11, 10, 11, 12, 13, 14, 25, 14, 13, 12, 11, 10, 9, 8]
+    lows = [10, 9, 8, 7, 6, 7, 5, 6, 7, 8, 9, 8, 7.5, 7, 6.5, 7, 8, 9, 10, 9, 8, 4, 3]
+    rows = []
+    for offset, (high_value, low_value) in enumerate(zip(highs, lows), start=1):
+        rows.append(
+            (
+                date(2024, 6, offset).isoformat(),
+                "DC_TAXONOMY_V1",
+                "subindustry",
+                "UPS",
+                3,
+                3,
+                100.0,
+                float(high_value),
+                float(low_value),
+                100.0,
+                1000.0,
+                100.0,
+                100.0,
+                0.0,
+                0.0,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                20,
+                1.1,
+                1.2,
+                0.9,
+                1.0,
+                0.1,
+                0.1,
+                0.0,
+                0.2,
+                -0.1,
+                3,
+                "OK",
+                "DC_SWING_OHLC_V1",
+                "seed",
+                "2026-05-17T10:00:00Z",
+            )
+        )
+    _insert_synthetic_rows(analysis_db, rows)
+
+    persist_datacenter_group_structure(
+        analysis_db_path=analysis_db,
+        start_date="2024-06-01",
+        end_date="2024-06-23",
+        run_id="structure-run",
+        created_at_utc="2026-05-17T12:00:00Z",
+        write_mode="update-existing",
+    )
+
+    fetched = _fetch_rows(analysis_db)
+    trend_row = _find_row(fetched, "subindustry", "UPS", "2024-06-21")
+    first_bos_row = _find_row(fetched, "subindustry", "UPS", "2024-06-22")
+    reset_row = _find_row(fetched, "subindustry", "UPS", "2024-06-23")
+
+    assert trend_row["trend_classification"] == "UP"
+    assert first_bos_row["latest_bos_event_type"] == "BOS_DOWN"
+    assert first_bos_row["latest_bos_event_date"] == "2024-06-22"
+    assert first_bos_row["latest_bos_confirmed_as_of_date"] == "2024-06-22"
+    assert first_bos_row["latest_bos_age_trading_days"] == 0
+    assert first_bos_row["latest_bos_freshness"] == "FRESH"
+    assert first_bos_row["latest_reset_reason"] is None
+    assert reset_row["latest_bos_event_type"] == "BOS_DOWN"
+    assert reset_row["latest_reset_event_date"] == "2024-06-23"
+    assert reset_row["latest_reset_confirmed_as_of_date"] == "2024-06-23"
+    assert reset_row["latest_reset_reason"] == "DOUBLE_BOS_DOWN"
+    assert reset_row["latest_reset_age_trading_days"] == 0
+    assert reset_row["latest_reset_freshness"] == "FRESH"
+
+
+def test_structure_creates_bos_up_then_reset_in_down_trend(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    highs = [10, 11, 12, 13, 14, 20, 14, 13, 12, 11, 10, 11, 12, 13, 15, 14, 13, 12, 11, 10, 9, 16, 17]
+    lows = [10, 9, 8, 7, 6, 7, 5, 6, 7, 8, 9, 8, 7, 6, 3, 6, 7, 8, 9, 10, 11, 12, 13]
+    rows = []
+    for offset, (high_value, low_value) in enumerate(zip(highs, lows), start=1):
+        rows.append(
+            (
+                date(2024, 7, offset).isoformat(),
+                "DC_TAXONOMY_V1",
+                "subindustry",
+                "UPS",
+                3,
+                3,
+                100.0,
+                float(high_value),
+                float(low_value),
+                100.0,
+                1000.0,
+                100.0,
+                100.0,
+                0.0,
+                0.0,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                20,
+                1.1,
+                1.2,
+                0.9,
+                1.0,
+                0.1,
+                0.1,
+                0.0,
+                0.2,
+                -0.1,
+                3,
+                "OK",
+                "DC_SWING_OHLC_V1",
+                "seed",
+                "2026-05-17T10:00:00Z",
+            )
+        )
+    _insert_synthetic_rows(analysis_db, rows)
+
+    persist_datacenter_group_structure(
+        analysis_db_path=analysis_db,
+        start_date="2024-07-01",
+        end_date="2024-07-23",
+        run_id="structure-run",
+        created_at_utc="2026-05-17T12:00:00Z",
+        write_mode="update-existing",
+    )
+
+    fetched = _fetch_rows(analysis_db)
+    trend_row = _find_row(fetched, "subindustry", "UPS", "2024-07-20")
+    first_bos_row = _find_row(fetched, "subindustry", "UPS", "2024-07-22")
+    reset_row = _find_row(fetched, "subindustry", "UPS", "2024-07-23")
+
+    assert trend_row["trend_classification"] == "DOWN"
+    assert first_bos_row["latest_bos_event_type"] == "BOS_UP"
+    assert first_bos_row["latest_bos_event_date"] == "2024-07-22"
+    assert first_bos_row["latest_bos_confirmed_as_of_date"] == "2024-07-22"
+    assert first_bos_row["latest_bos_age_trading_days"] == 0
+    assert first_bos_row["latest_bos_freshness"] == "FRESH"
+    assert first_bos_row["latest_reset_reason"] is None
+    assert reset_row["latest_bos_event_type"] == "BOS_UP"
+    assert reset_row["latest_reset_reason"] == "DOUBLE_BOS_UP"
+    assert reset_row["latest_reset_event_date"] == "2024-07-23"
+    assert reset_row["latest_reset_confirmed_as_of_date"] == "2024-07-23"
+    assert reset_row["latest_reset_age_trading_days"] == 0
+    assert reset_row["latest_reset_freshness"] == "FRESH"
 
 
 def test_updates_layer_structure_fields_with_radius_10(tmp_path):
@@ -1381,4 +1549,6 @@ def test_structure_write_modes_update_only_matching_rows_and_replace_structure_r
     assert summary["cleared_count"] > 0
     assert summary["updated_count"] > 0
     assert updated_row["relative_open_20"] == pytest.approx(1.11)
+    assert updated_row["latest_bos_event_type"] is None
+    assert updated_row["latest_reset_reason"] is None
     assert old_version_row["latest_structure_label"] == "KEEP"

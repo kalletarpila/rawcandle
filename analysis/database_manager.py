@@ -889,6 +889,16 @@ class DatabaseManager:
                     latest_structure_label TEXT,
                     latest_structure_age_trading_days INTEGER,
                     latest_structure_freshness TEXT,
+                    latest_bos_event_type TEXT,
+                    latest_bos_event_date TEXT,
+                    latest_bos_confirmed_as_of_date TEXT,
+                    latest_bos_age_trading_days INTEGER,
+                    latest_bos_freshness TEXT,
+                    latest_reset_event_date TEXT,
+                    latest_reset_confirmed_as_of_date TEXT,
+                    latest_reset_reason TEXT,
+                    latest_reset_age_trading_days INTEGER,
+                    latest_reset_freshness TEXT,
                     trend_classification TEXT,
                     relative_base_window INTEGER,
                     relative_open_20 REAL,
@@ -942,6 +952,46 @@ class DatabaseManager:
             if "latest_structure_freshness" not in group_synth_columns:
                 cursor.execute(
                     "ALTER TABLE dc_group_synthetic_ohlc_daily ADD COLUMN latest_structure_freshness TEXT"
+                )
+            if "latest_bos_event_type" not in group_synth_columns:
+                cursor.execute(
+                    "ALTER TABLE dc_group_synthetic_ohlc_daily ADD COLUMN latest_bos_event_type TEXT"
+                )
+            if "latest_bos_event_date" not in group_synth_columns:
+                cursor.execute(
+                    "ALTER TABLE dc_group_synthetic_ohlc_daily ADD COLUMN latest_bos_event_date TEXT"
+                )
+            if "latest_bos_confirmed_as_of_date" not in group_synth_columns:
+                cursor.execute(
+                    "ALTER TABLE dc_group_synthetic_ohlc_daily ADD COLUMN latest_bos_confirmed_as_of_date TEXT"
+                )
+            if "latest_bos_age_trading_days" not in group_synth_columns:
+                cursor.execute(
+                    "ALTER TABLE dc_group_synthetic_ohlc_daily ADD COLUMN latest_bos_age_trading_days INTEGER"
+                )
+            if "latest_bos_freshness" not in group_synth_columns:
+                cursor.execute(
+                    "ALTER TABLE dc_group_synthetic_ohlc_daily ADD COLUMN latest_bos_freshness TEXT"
+                )
+            if "latest_reset_event_date" not in group_synth_columns:
+                cursor.execute(
+                    "ALTER TABLE dc_group_synthetic_ohlc_daily ADD COLUMN latest_reset_event_date TEXT"
+                )
+            if "latest_reset_confirmed_as_of_date" not in group_synth_columns:
+                cursor.execute(
+                    "ALTER TABLE dc_group_synthetic_ohlc_daily ADD COLUMN latest_reset_confirmed_as_of_date TEXT"
+                )
+            if "latest_reset_reason" not in group_synth_columns:
+                cursor.execute(
+                    "ALTER TABLE dc_group_synthetic_ohlc_daily ADD COLUMN latest_reset_reason TEXT"
+                )
+            if "latest_reset_age_trading_days" not in group_synth_columns:
+                cursor.execute(
+                    "ALTER TABLE dc_group_synthetic_ohlc_daily ADD COLUMN latest_reset_age_trading_days INTEGER"
+                )
+            if "latest_reset_freshness" not in group_synth_columns:
+                cursor.execute(
+                    "ALTER TABLE dc_group_synthetic_ohlc_daily ADD COLUMN latest_reset_freshness TEXT"
                 )
 
             cursor.execute(
