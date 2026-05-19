@@ -38,6 +38,9 @@ def test_cli_writes_markdown_and_prints_deterministic_summary(tmp_path, capsys):
     assert "# Datacenter Rolling Swing Report" in markdown
     assert "# Datacenter Weekly Swing Report" not in markdown
     assert "## Watchlist Summary" in markdown
+    assert "watchlist_subindustry_context_risk_count" in markdown
+    assert "watchlist_layer_context_risk_count" in markdown
+    assert "watchlist_both_context_risk_count" in markdown
     assert "subindustry_context_risk" in markdown
     assert "layer_context_risk" in markdown
     assert csv_text.startswith("section;value_1;")

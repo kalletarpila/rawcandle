@@ -38,6 +38,9 @@ def test_cli_writes_markdown_and_prints_deterministic_summary(tmp_path, capsys):
     markdown = expected_output_md.read_text(encoding="utf-8")
     assert "# Datacenter Daily Swing Signal Report" in markdown
     assert "## Watchlist Summary" in markdown
+    assert "watchlist_subindustry_context_risk_count" in markdown
+    assert "watchlist_layer_context_risk_count" in markdown
+    assert "watchlist_both_context_risk_count" in markdown
     assert "subindustry_context_risk" in markdown
     assert "layer_context_risk" in markdown
     csv_text = expected_output_csv.read_text(encoding="utf-8")
@@ -95,6 +98,9 @@ def test_cli_accepts_watchlist_file_and_renders_watchlist_summary(tmp_path, caps
     assert exit_code == 0
     markdown = expected_output_md.read_text(encoding="utf-8")
     assert "## Watchlist Summary" in markdown
+    assert "watchlist_subindustry_context_risk_count" in markdown
+    assert "watchlist_layer_context_risk_count" in markdown
+    assert "watchlist_both_context_risk_count" in markdown
     assert "subindustry_context_risk" in markdown
     assert "layer_context_risk" in markdown
     assert "NOT_PART_OF_DATACENTER_ECOSYSTEM" in markdown

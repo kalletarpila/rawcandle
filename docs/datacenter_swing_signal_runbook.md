@@ -373,6 +373,12 @@ It only renders persisted rows for one selected `signal_date`.
 - Reports now show:
   - `subindustry_context_risk`
   - `layer_context_risk`
+- Watchlist overview tables now summarize:
+  - `watchlist_subindustry_context_risk_count`
+  - `watchlist_layer_context_risk_count`
+  - `watchlist_both_context_risk_count`
+- These counts are based on current / end-date group context.
+- The rolling report does not count historical prior-day group risk for these summary metrics.
 - Watchlist status is monitoring context only, not a trading recommendation.
 
 Example watchlist:

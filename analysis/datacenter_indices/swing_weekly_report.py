@@ -603,11 +603,14 @@ def build_markdown_weekly_swing_report(
         {"metric": "watchlist_tickers_total", "value": len(watchlist_rows)},
         {"metric": "watchlist_in_datacenter_taxonomy", "value": sum(1 for row in watchlist_rows if row.get("in_datacenter_ecosystem") == "YES")},
         {"metric": "watchlist_not_in_datacenter_taxonomy", "value": sum(1 for row in watchlist_rows if row.get("in_datacenter_ecosystem") == "NO")},
+        {"metric": "watchlist_missing_price_end_date", "value": sum(1 for row in watchlist_rows if row.get("last_price_data_status") in WATCHLIST_MISSING_PRICE_STATUSES)},
+        {"metric": "watchlist_subindustry_context_risk_count", "value": sum(1 for row in watchlist_rows if row.get("in_datacenter_ecosystem") == "YES" and row.get("subindustry_context_risk") == "YES")},
+        {"metric": "watchlist_layer_context_risk_count", "value": sum(1 for row in watchlist_rows if row.get("in_datacenter_ecosystem") == "YES" and row.get("layer_context_risk") == "YES")},
+        {"metric": "watchlist_both_context_risk_count", "value": sum(1 for row in watchlist_rows if row.get("in_datacenter_ecosystem") == "YES" and row.get("subindustry_context_risk") == "YES" and row.get("layer_context_risk") == "YES")},
         {"metric": "watchlist_with_breakout_days", "value": sum(1 for row in watchlist_rows if (row.get("breakout_days") or 0) > 0)},
         {"metric": "watchlist_with_pullback_days", "value": sum(1 for row in watchlist_rows if (row.get("pullback_days") or 0) > 0)},
         {"metric": "watchlist_with_exit_risk_days", "value": sum(1 for row in watchlist_rows if (row.get("exit_risk_days") or 0) > 0)},
         {"metric": "watchlist_with_high_exit_risk_days", "value": sum(1 for row in watchlist_rows if (row.get("high_exit_risk_days") or 0) > 0)},
-        {"metric": "watchlist_missing_price_end_date", "value": sum(1 for row in watchlist_rows if row.get("last_price_data_status") in WATCHLIST_MISSING_PRICE_STATUSES)},
     ]
     lines.extend(
         [

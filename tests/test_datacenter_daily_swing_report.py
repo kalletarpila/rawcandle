@@ -388,6 +388,9 @@ def test_daily_watchlist_summary_renders_inside_outside_group_context_and_status
     assert "| watchlist_in_datacenter_taxonomy | 3 |" in markdown
     assert "| watchlist_not_in_datacenter_taxonomy | 1 |" in markdown
     assert "| watchlist_missing_price | 1 |" in markdown
+    assert "| watchlist_subindustry_context_risk_count | 1 |" in markdown
+    assert "| watchlist_layer_context_risk_count | 0 |" in markdown
+    assert "| watchlist_both_context_risk_count | 0 |" in markdown
     assert "| watchlist_breakout_count | 1 |" in markdown
     assert "| watchlist_pullback_count | 1 |" in markdown
     assert "| watchlist_high_exit_risk_count | 2 |" in markdown
@@ -439,6 +442,9 @@ def test_daily_watchlist_context_risk_fields_show_subindustry_layer_or_both(tmp_
         generated_at_utc="2026-05-17T12:00:00Z",
     )["markdown"]
 
+    assert "| watchlist_subindustry_context_risk_count | 1 |" in markdown
+    assert "| watchlist_layer_context_risk_count | 3 |" in markdown
+    assert "| watchlist_both_context_risk_count | 1 |" in markdown
     assert "| AAA | GROUP_RISK | NO | YES | YES |" in markdown
     assert "| BBB | PULLBACK_CANDIDATE | NO | YES | YES |" in markdown
     assert "| CCC | MISSING_PRICE | YES | YES | YES |" in markdown

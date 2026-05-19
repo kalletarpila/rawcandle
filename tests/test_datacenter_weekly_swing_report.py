@@ -427,11 +427,14 @@ def test_rolling_watchlist_summary_renders_counts_outside_ticker_and_last_group_
     assert "| watchlist_tickers_total | 4 |" in markdown
     assert "| watchlist_in_datacenter_taxonomy | 3 |" in markdown
     assert "| watchlist_not_in_datacenter_taxonomy | 1 |" in markdown
+    assert "| watchlist_missing_price_end_date | 1 |" in markdown
+    assert "| watchlist_subindustry_context_risk_count | 3 |" in markdown
+    assert "| watchlist_layer_context_risk_count | 0 |" in markdown
+    assert "| watchlist_both_context_risk_count | 0 |" in markdown
     assert "| watchlist_with_breakout_days | 1 |" in markdown
     assert "| watchlist_with_pullback_days | 1 |" in markdown
     assert "| watchlist_with_exit_risk_days | 2 |" in markdown
     assert "| watchlist_with_high_exit_risk_days | 2 |" in markdown
-    assert "| watchlist_missing_price_end_date | 1 |" in markdown
     assert "current_watchlist_status" in markdown
     assert "window_watchlist_status" in markdown
     assert "subindustry_context_risk" in markdown
@@ -556,6 +559,9 @@ def test_rolling_watchlist_context_risk_fields_show_subindustry_layer_or_both(tm
         generated_at_utc="2026-05-17T12:00:00Z",
     )["markdown"]
 
+    assert "| watchlist_subindustry_context_risk_count | 3 |" in markdown
+    assert "| watchlist_layer_context_risk_count | 3 |" in markdown
+    assert "| watchlist_both_context_risk_count | 3 |" in markdown
     assert "| AAA | GROUP_RISK | GROUP_RISK | YES | YES | YES |" in markdown
     assert "| BBB | PULLBACK_CANDIDATE | PULLBACK_CANDIDATE | YES | YES | YES |" in markdown
     assert "| CCC | MISSING_PRICE | MISSING_PRICE | YES | YES | YES |" in markdown
