@@ -219,6 +219,65 @@ def test_scheduler_runner_writes_log_file_per_market(tmp_path, monkeypatch):
     assert "market=omxh" in log_text
 
 
+def test_scheduler_runner_uses_minute_precision_log_filename(tmp_path, monkeypatch):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(tmp_path, enabled_markets=["omxh"])
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert Path(result.market_results[0].log_path).name.startswith("stock_update_omxh_")
+    assert Path(result.market_results[0].log_path).name.endswith(".txt")
+    assert "T" in Path(result.market_results[0].log_path).name
+    assert Path(result.market_results[0].log_path).stem.split("_")[-1].endswith("Z")
+    assert len(Path(result.market_results[0].log_path).stem.split("_")[-1]) == 14
+
+
+def test_scheduler_runner_avoids_overwriting_same_minute_log_filename(tmp_path, monkeypatch):
+    import datetime as real_datetime
+    original_datetime_class = real_datetime.datetime
+
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    (log_dir / "stock_update_omxh_20260516T1900Z.txt").write_text("old", encoding="utf-8")
+    config_path = _write_config(tmp_path, enabled_markets=["omxh"], log_dir=log_dir)
+
+    class FixedDateTime:
+        @staticmethod
+        def now(tz=None):
+            return original_datetime_class(2026, 5, 16, 19, 0, 30, tzinfo=tz)
+
+    monkeypatch.setattr("rawcandle.scheduler.runner.datetime.datetime", FixedDateTime)
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert Path(result.market_results[0].log_path).name == "stock_update_omxh_20260516T1900Z_2.txt"
+    assert (log_dir / "stock_update_omxh_20260516T1900Z.txt").read_text(encoding="utf-8") == "old"
+
+
 def test_scheduler_runner_writes_summary_json(tmp_path, monkeypatch):
     osakedata_db = tmp_path / "osakedata.db"
     analysis_db = tmp_path / "analysis.db"

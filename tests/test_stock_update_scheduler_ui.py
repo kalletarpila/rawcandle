@@ -56,8 +56,8 @@ def test_load_latest_scheduler_summary_returns_none_when_no_summary_exists(tmp_p
 def test_list_scheduler_log_files_returns_recent_logs_newest_first(tmp_path):
     files = [
         tmp_path / "stock_update_scheduler_summary_20260516T010000Z.json",
-        tmp_path / "stock_update_omxh_20260516T020000Z.log",
-        tmp_path / "stock_update_omxs_20260516T030000Z.txt",
+        tmp_path / "stock_update_omxh_20260516T0200Z.log",
+        tmp_path / "stock_update_omxs_20260516T0300Z.txt",
         tmp_path / "ignore_me.txt",
     ]
     for path in files:
@@ -66,11 +66,11 @@ def test_list_scheduler_log_files_returns_recent_logs_newest_first(tmp_path):
     entries = list_scheduler_log_files(str(tmp_path))
 
     assert [entry["filename"] for entry in entries] == [
-        "stock_update_omxs_20260516T030000Z.txt",
-        "stock_update_omxh_20260516T020000Z.log",
+        "stock_update_omxs_20260516T0300Z.txt",
+        "stock_update_omxh_20260516T0200Z.log",
         "stock_update_scheduler_summary_20260516T010000Z.json",
     ]
-    assert entries[0]["path"].endswith("stock_update_omxs_20260516T030000Z.txt")
+    assert entries[0]["path"].endswith("stock_update_omxs_20260516T0300Z.txt")
     assert entries[0]["text_openable"] is True
     assert entries[1]["text_openable"] is True
     assert entries[2]["text_openable"] is False
@@ -80,26 +80,48 @@ def test_list_scheduler_log_files_ignores_unrelated_files(tmp_path):
     (tmp_path / "stock_update_scheduler_summary_20260516T010000Z.json").write_text(
         "{}", encoding="utf-8"
     )
-    (tmp_path / "stock_update_omxh_20260516T020000Z.txt").write_text(
+    (tmp_path / "stock_update_omxh_20260516T0200Z.txt").write_text(
         "x", encoding="utf-8"
     )
     (tmp_path / "something_else.log").write_text("x", encoding="utf-8")
-    (tmp_path / "stock_update_foo_20260516T030000Z.txt").write_text("x", encoding="utf-8")
+    (tmp_path / "stock_update_foo_20260516T0300Z.txt").write_text("x", encoding="utf-8")
 
     entries = list_scheduler_log_files(str(tmp_path))
 
     assert [entry["filename"] for entry in entries] == [
-        "stock_update_omxh_20260516T020000Z.txt",
+        "stock_update_omxh_20260516T0200Z.txt",
         "stock_update_scheduler_summary_20260516T010000Z.json",
     ]
 
 
 def test_build_text_log_browser_url_quotes_filename(tmp_path):
-    log_path = tmp_path / "stock_update_omxh 20260516T020000Z.txt"
+    log_path = tmp_path / "stock_update_omxh 20260516T0200Z.txt"
 
     browser_url = build_text_log_browser_url(str(log_path))
 
-    assert browser_url == "/stock_update_omxh%2020260516T020000Z.txt"
+    assert browser_url == "/stock_update_omxh%2020260516T0200Z.txt"
+
+
+def test_list_scheduler_log_files_accepts_legacy_second_precision_name(tmp_path):
+    (tmp_path / "stock_update_omxh_20260516T020000Z.txt").write_text("x", encoding="utf-8")
+
+    entries = list_scheduler_log_files(str(tmp_path))
+
+    assert [entry["filename"] for entry in entries] == [
+        "stock_update_omxh_20260516T020000Z.txt",
+    ]
+
+
+def test_list_scheduler_log_files_sorts_same_minute_suffix_after_base(tmp_path):
+    (tmp_path / "stock_update_omxh_20260516T0200Z.txt").write_text("a", encoding="utf-8")
+    (tmp_path / "stock_update_omxh_20260516T0200Z_2.txt").write_text("b", encoding="utf-8")
+
+    entries = list_scheduler_log_files(str(tmp_path))
+
+    assert [entry["filename"] for entry in entries] == [
+        "stock_update_omxh_20260516T0200Z_2.txt",
+        "stock_update_omxh_20260516T0200Z.txt",
+    ]
 
 
 def test_format_systemd_on_calendar_formats_validated_time():

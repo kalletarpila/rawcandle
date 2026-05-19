@@ -142,6 +142,10 @@ def _format_utc_filename_timestamp(value: datetime.datetime) -> str:
     return value.strftime("%Y%m%dT%H%M%SZ")
 
 
+def _format_utc_filename_minute_timestamp(value: datetime.datetime) -> str:
+    return value.strftime("%Y%m%dT%H%MZ")
+
+
 def _format_local_timestamp(
     value: datetime.datetime,
     timezone_name: str,
@@ -215,6 +219,21 @@ def _write_market_log(
     log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _build_market_log_path(log_dir: Path, market: str, started_at: datetime.datetime) -> Path:
+    minute_timestamp = _format_utc_filename_minute_timestamp(started_at)
+    base_name = f"stock_update_{market}_{minute_timestamp}"
+    candidate = log_dir / f"{base_name}.txt"
+    if not candidate.exists():
+        return candidate
+
+    suffix = 2
+    while True:
+        candidate = log_dir / f"{base_name}_{suffix}.txt"
+        if not candidate.exists():
+            return candidate
+        suffix += 1
+
+
 def _preflight_validate_config(config: StockUpdateSchedulerConfig) -> None:
     osakedata_db_path = Path(config.osakedata_db_path)
     if not osakedata_db_path.exists():
@@ -251,9 +270,7 @@ def _run_one_market(
     started_at_local = _format_local_timestamp(market_started_at, config.timezone)
     log_dir = Path(config.log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / (
-        f"stock_update_{market}_{_format_utc_filename_timestamp(market_started_at)}.txt"
-    )
+    log_path = _build_market_log_path(log_dir, market, market_started_at)
 
     app = _build_app(config)
     error: Optional[str] = None

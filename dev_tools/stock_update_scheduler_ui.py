@@ -30,7 +30,7 @@ _SUMMARY_FILENAME_RE = re.compile(
     r"^stock_update_scheduler_summary_(\d{8}T\d{6}Z)\.json$"
 )
 _MARKET_LOG_FILENAME_RE = re.compile(
-    r"^stock_update_(omxh|omxs|usa)_(\d{8}T\d{6}Z)\.(txt|log)$"
+    r"^stock_update_(omxh|omxs|usa)_(\d{8}T\d{4,6}Z)(?:_(\d+))?\.(txt|log)$"
 )
 _STATUS_OK_COLOR = "#43A047"
 _STATUS_WARNING_COLOR = "#EF6C00"
@@ -180,6 +180,7 @@ def list_scheduler_log_files(log_dir: str, limit: int = 20) -> List[Dict[str, An
             entry_type = "summary_json"
         elif log_match:
             timestamp = log_match.group(2)
+            suffix = log_match.group(3) or "0"
             entry_type = "market_log"
         else:
             continue
@@ -192,12 +193,13 @@ def list_scheduler_log_files(log_dir: str, limit: int = 20) -> List[Dict[str, An
                 "size_bytes": stat_result.st_size,
                 "modified_at": str(int(stat_result.st_mtime)),
                 "timestamp": timestamp,
+                "sort_key": f"{timestamp}_{suffix}" if log_match else timestamp,
                 "type": entry_type,
                 "text_openable": entry_type == "market_log",
             }
         )
 
-    entries.sort(key=lambda item: item["timestamp"], reverse=True)
+    entries.sort(key=lambda item: item["sort_key"], reverse=True)
     return entries[:limit]
 
 
