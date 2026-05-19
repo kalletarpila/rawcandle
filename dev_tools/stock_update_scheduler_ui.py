@@ -6,6 +6,7 @@ import json
 import os
 import re
 import subprocess
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
@@ -36,6 +37,19 @@ _STATUS_OK_COLOR = "#43A047"
 _STATUS_WARNING_COLOR = "#EF6C00"
 _STATUS_ERROR_COLOR = "#E53935"
 SCHEDULER_UI_PORT = 8555
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_DATACENTER_PRICE_DB = "data/osakedata.db"
+DEFAULT_DATACENTER_ANALYSIS_DB = "data/analysis.db"
+DEFAULT_DATACENTER_TAXONOMY_CSV = "data/datacenter_ecosystem_taxonomy_full_v1.csv"
+DEFAULT_DATACENTER_TAXONOMY_VERSION = "DC_TAXONOMY_FULL_V1"
+DEFAULT_DATACENTER_MARKET = "usa"
+DEFAULT_DATACENTER_INDEX_BASE_DATE = "2020-01-01"
+DEFAULT_DATACENTER_OUTPUT_DIR = "/home/kalle/projects/rawcandle/swing_reports"
+DEFAULT_DATACENTER_EXPECTED_TICKER_COUNT = "236"
+DEFAULT_DATACENTER_EXPECTED_GROUP_COUNT = "54"
+DEFAULT_DATACENTER_EXPECTED_SYNTHETIC_OHLC_COUNT = "53"
+DEFAULT_DATACENTER_ROLLING_WINDOW_SIZE = "20"
+DEFAULT_DATACENTER_WATCHLIST_FILE = "/home/kalle/projects/rawcandle/swing_reports/datacenter_watchlist.txt"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -400,6 +414,240 @@ def _market_row_text(market_result: Dict[str, Any]) -> str:
     )
 
 
+def _datacenter_append_optional_arg(command: List[str], flag: str, value: str) -> None:
+    if value.strip():
+        command.extend([flag, value.strip()])
+
+
+def build_datacenter_pipeline_command(
+    *,
+    price_db: str,
+    analysis_db: str,
+    taxonomy_csv: str,
+    taxonomy_version: str,
+    market: str,
+    signal_date: str,
+    start_date: str,
+    index_base_date: str,
+    output_dir: str,
+    expected_ticker_count: str,
+    expected_group_count: str,
+    expected_synthetic_ohlc_count: str,
+    rolling_window_size: str,
+    watchlist_file: str,
+    dry_run: bool,
+) -> List[str]:
+    command = [
+        "python3",
+        "run_datacenter_swing_pipeline.py",
+        "--price-db",
+        price_db.strip(),
+        "--analysis-db",
+        analysis_db.strip(),
+        "--taxonomy-csv",
+        taxonomy_csv.strip(),
+        "--taxonomy-version",
+        taxonomy_version.strip(),
+        "--market",
+        market.strip(),
+        "--signal-date",
+        signal_date.strip(),
+        "--start-date",
+        start_date.strip(),
+        "--index-base-date",
+        index_base_date.strip(),
+        "--output-dir",
+        output_dir.strip(),
+        "--weekly-window-size",
+        rolling_window_size.strip(),
+        "--watchlist-file",
+        watchlist_file.strip(),
+    ]
+    _datacenter_append_optional_arg(command, "--expected-ticker-count", expected_ticker_count)
+    _datacenter_append_optional_arg(command, "--expected-group-count", expected_group_count)
+    _datacenter_append_optional_arg(command, "--expected-synthetic-ohlc-count", expected_synthetic_ohlc_count)
+    if dry_run:
+        command.append("--dry-run")
+    return command
+
+
+def build_datacenter_audit_command(
+    *,
+    analysis_db: str,
+    signal_date: str,
+    taxonomy_version: str,
+    expected_ticker_count: str,
+    expected_group_count: str,
+    expected_synthetic_ohlc_count: str,
+    rolling_window_size: str,
+) -> List[str]:
+    command = [
+        "python3",
+        "run_datacenter_swing_pipeline_audit.py",
+        "--analysis-db",
+        analysis_db.strip(),
+        "--signal-date",
+        signal_date.strip(),
+        "--taxonomy-version",
+        taxonomy_version.strip(),
+        "--weekly-window-size",
+        rolling_window_size.strip(),
+    ]
+    _datacenter_append_optional_arg(command, "--expected-ticker-count", expected_ticker_count)
+    _datacenter_append_optional_arg(command, "--expected-group-count", expected_group_count)
+    _datacenter_append_optional_arg(command, "--expected-synthetic-ohlc-count", expected_synthetic_ohlc_count)
+    return command
+
+
+def build_datacenter_daily_report_command(
+    *,
+    analysis_db: str,
+    signal_date: str,
+    taxonomy_version: str,
+    watchlist_file: str,
+    output_dir: str,
+) -> List[str]:
+    output_dir_path = Path(output_dir.strip())
+    return [
+        "python3",
+        "run_datacenter_daily_signal_report.py",
+        "--analysis-db",
+        analysis_db.strip(),
+        "--signal-date",
+        signal_date.strip(),
+        "--taxonomy-version",
+        taxonomy_version.strip(),
+        "--watchlist-file",
+        watchlist_file.strip(),
+        "--output-md",
+        str(output_dir_path / f"datacenter_daily_{signal_date.strip()}_full.md"),
+        "--output-csv",
+        str(output_dir_path / f"datacenter_daily_{signal_date.strip()}_full.csv"),
+    ]
+
+
+def build_datacenter_rolling_report_command(
+    *,
+    analysis_db: str,
+    signal_date: str,
+    taxonomy_version: str,
+    rolling_window_size: str,
+    watchlist_file: str,
+    output_dir: str,
+) -> List[str]:
+    output_dir_path = Path(output_dir.strip())
+    return [
+        "python3",
+        "run_datacenter_weekly_swing_report.py",
+        "--analysis-db",
+        analysis_db.strip(),
+        "--end-date",
+        signal_date.strip(),
+        "--taxonomy-version",
+        taxonomy_version.strip(),
+        "--window-size",
+        rolling_window_size.strip(),
+        "--watchlist-file",
+        watchlist_file.strip(),
+        "--output-md",
+        str(output_dir_path / f"datacenter_rolling_{signal_date.strip()}_{rolling_window_size.strip()}d_full.md"),
+        "--output-csv",
+        str(output_dir_path / f"datacenter_rolling_{signal_date.strip()}_{rolling_window_size.strip()}d_full.csv"),
+    ]
+
+
+def build_datacenter_pipeline_plan_command(
+    *,
+    analysis_db: str,
+    taxonomy_version: str,
+    market: str,
+    signal_date: str,
+    start_date: str,
+    index_base_date: str,
+) -> List[str]:
+    return [
+        "python3",
+        "run_datacenter_swing_pipeline_plan.py",
+        "--analysis-db",
+        analysis_db.strip(),
+        "--taxonomy-version",
+        taxonomy_version.strip(),
+        "--market",
+        market.strip(),
+        "--signal-date",
+        signal_date.strip(),
+        "--start-date",
+        start_date.strip(),
+        "--index-base-date",
+        index_base_date.strip(),
+    ]
+
+
+def build_datacenter_watermark_command(
+    *,
+    analysis_db: str,
+    taxonomy_version: str,
+) -> List[str]:
+    return [
+        "python3",
+        "run_datacenter_pipeline_watermark.py",
+        "--analysis-db",
+        analysis_db.strip(),
+        "--taxonomy-version",
+        taxonomy_version.strip(),
+    ]
+
+
+def run_datacenter_ui_command(
+    *,
+    page: ft.Page,
+    title: str,
+    command: List[str],
+    log_field: ft.TextField,
+    status_field: ft.TextField,
+    output_dir: str | None = None,
+) -> None:
+    def _append_log(message: str) -> None:
+        existing = log_field.value or ""
+        log_field.value = f"{existing}\n{message}".strip()
+
+    def _worker() -> None:
+        try:
+            if output_dir and output_dir.strip():
+                Path(output_dir.strip()).mkdir(parents=True, exist_ok=True)
+            _append_log(f"=== Datacenter: {title} ===")
+            _append_log("COMMAND " + " ".join(command))
+            page.update()
+            env = os.environ.copy()
+            env["PYTHONPATH"] = "."
+            completed = subprocess.run(
+                command,
+                cwd=str(REPO_ROOT),
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+            stdout = completed.stdout or ""
+            stderr = completed.stderr or ""
+            combined = "\n".join(part for part in [stdout.strip(), stderr.strip()] if part).strip()
+            if combined:
+                _append_log(combined)
+            if completed.returncode == 0:
+                _append_log(f"=== Datacenter: {title} completed ===")
+                _set_status(status_field, f"{title} completed.", _STATUS_OK_COLOR)
+            else:
+                _append_log(f"=== Datacenter: {title} failed (exit {completed.returncode}) ===")
+                _set_status(status_field, f"{title} failed with exit code {completed.returncode}.", _STATUS_ERROR_COLOR)
+            page.update()
+        except Exception as exc:
+            _append_log(f"=== Datacenter: {title} failed ({exc}) ===")
+            _set_status(status_field, f"{title} failed: {exc}", _STATUS_ERROR_COLOR)
+            page.update()
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
 def run_app(page: ft.Page, config_path: str) -> None:
     page.title = "Stock Update Scheduler Control Panel"
     page.scroll = ft.ScrollMode.AUTO
@@ -452,6 +700,38 @@ def run_app(page: ft.Page, config_path: str) -> None:
         expand=True,
     )
     logs_column = ft.Column(spacing=8)
+    datacenter_price_db_field = ft.TextField(label="price_db", value=DEFAULT_DATACENTER_PRICE_DB, expand=True)
+    datacenter_analysis_db_field = ft.TextField(label="analysis_db", value=DEFAULT_DATACENTER_ANALYSIS_DB, expand=True)
+    datacenter_taxonomy_csv_field = ft.TextField(label="taxonomy_csv", value=DEFAULT_DATACENTER_TAXONOMY_CSV, expand=True)
+    datacenter_taxonomy_version_field = ft.TextField(label="taxonomy_version", value=DEFAULT_DATACENTER_TAXONOMY_VERSION, expand=True)
+    datacenter_market_field = ft.TextField(label="market", value=DEFAULT_DATACENTER_MARKET, width=180)
+    datacenter_signal_date_field = ft.TextField(label="signal_date (previous valid trading day)", value="", width=220)
+    datacenter_start_date_field = ft.TextField(label="start_date (swing recalculation start)", value="", width=220)
+    datacenter_index_base_date_field = ft.TextField(label="index_base_date", value=DEFAULT_DATACENTER_INDEX_BASE_DATE, width=220)
+    datacenter_output_dir_field = ft.TextField(label="output_dir", value=DEFAULT_DATACENTER_OUTPUT_DIR, expand=True)
+    datacenter_expected_ticker_count_field = ft.TextField(label="expected_ticker_count", value=DEFAULT_DATACENTER_EXPECTED_TICKER_COUNT, width=180)
+    datacenter_expected_group_count_field = ft.TextField(label="expected_group_count", value=DEFAULT_DATACENTER_EXPECTED_GROUP_COUNT, width=180)
+    datacenter_expected_synthetic_ohlc_count_field = ft.TextField(label="expected_synthetic_ohlc_count", value=DEFAULT_DATACENTER_EXPECTED_SYNTHETIC_OHLC_COUNT, width=220)
+    datacenter_rolling_window_size_field = ft.TextField(label="rolling_window_size", value=DEFAULT_DATACENTER_ROLLING_WINDOW_SIZE, width=180)
+    datacenter_watchlist_file_field = ft.TextField(label="watchlist_file", value=DEFAULT_DATACENTER_WATCHLIST_FILE, expand=True)
+    datacenter_status_field = ft.TextField(
+        label="Datacenter status",
+        value="",
+        multiline=True,
+        min_lines=2,
+        max_lines=4,
+        read_only=True,
+        expand=True,
+    )
+    datacenter_log_field = ft.TextField(
+        label="Datacenter command log",
+        value="",
+        multiline=True,
+        min_lines=12,
+        max_lines=20,
+        read_only=True,
+        expand=True,
+    )
 
     def selected_markets_from_ui() -> List[str]:
         selected: List[str] = []
@@ -692,45 +972,244 @@ def run_app(page: ft.Page, config_path: str) -> None:
             _set_status(status_field, f"Refresh logs failed: {exc}", _STATUS_ERROR_COLOR)
         page.update()
 
+    def _datacenter_pipeline_command(*, dry_run: bool) -> List[str]:
+        return build_datacenter_pipeline_command(
+            price_db=datacenter_price_db_field.value,
+            analysis_db=datacenter_analysis_db_field.value,
+            taxonomy_csv=datacenter_taxonomy_csv_field.value,
+            taxonomy_version=datacenter_taxonomy_version_field.value,
+            market=datacenter_market_field.value,
+            signal_date=datacenter_signal_date_field.value,
+            start_date=datacenter_start_date_field.value,
+            index_base_date=datacenter_index_base_date_field.value,
+            output_dir=datacenter_output_dir_field.value,
+            expected_ticker_count=datacenter_expected_ticker_count_field.value,
+            expected_group_count=datacenter_expected_group_count_field.value,
+            expected_synthetic_ohlc_count=datacenter_expected_synthetic_ohlc_count_field.value,
+            rolling_window_size=datacenter_rolling_window_size_field.value,
+            watchlist_file=datacenter_watchlist_file_field.value,
+            dry_run=dry_run,
+        )
+
+    def on_datacenter_dry_run(e) -> None:
+        run_datacenter_ui_command(
+            page=page,
+            title="Dry Run Pipeline",
+            command=_datacenter_pipeline_command(dry_run=True),
+            log_field=datacenter_log_field,
+            status_field=datacenter_status_field,
+            output_dir=datacenter_output_dir_field.value,
+        )
+
+    def on_datacenter_run_pipeline(e) -> None:
+        run_datacenter_ui_command(
+            page=page,
+            title="Run Full Pipeline",
+            command=_datacenter_pipeline_command(dry_run=False),
+            log_field=datacenter_log_field,
+            status_field=datacenter_status_field,
+            output_dir=datacenter_output_dir_field.value,
+        )
+
+    def on_datacenter_run_audit(e) -> None:
+        run_datacenter_ui_command(
+            page=page,
+            title="Run Audit",
+            command=build_datacenter_audit_command(
+                analysis_db=datacenter_analysis_db_field.value,
+                signal_date=datacenter_signal_date_field.value,
+                taxonomy_version=datacenter_taxonomy_version_field.value,
+                expected_ticker_count=datacenter_expected_ticker_count_field.value,
+                expected_group_count=datacenter_expected_group_count_field.value,
+                expected_synthetic_ohlc_count=datacenter_expected_synthetic_ohlc_count_field.value,
+                rolling_window_size=datacenter_rolling_window_size_field.value,
+            ),
+            log_field=datacenter_log_field,
+            status_field=datacenter_status_field,
+        )
+
+    def on_datacenter_daily_report(e) -> None:
+        run_datacenter_ui_command(
+            page=page,
+            title="Generate Daily Report",
+            command=build_datacenter_daily_report_command(
+                analysis_db=datacenter_analysis_db_field.value,
+                signal_date=datacenter_signal_date_field.value,
+                taxonomy_version=datacenter_taxonomy_version_field.value,
+                watchlist_file=datacenter_watchlist_file_field.value,
+                output_dir=datacenter_output_dir_field.value,
+            ),
+            log_field=datacenter_log_field,
+            status_field=datacenter_status_field,
+            output_dir=datacenter_output_dir_field.value,
+        )
+
+    def on_datacenter_rolling_report(e) -> None:
+        run_datacenter_ui_command(
+            page=page,
+            title="Generate Rolling Report",
+            command=build_datacenter_rolling_report_command(
+                analysis_db=datacenter_analysis_db_field.value,
+                signal_date=datacenter_signal_date_field.value,
+                taxonomy_version=datacenter_taxonomy_version_field.value,
+                rolling_window_size=datacenter_rolling_window_size_field.value,
+                watchlist_file=datacenter_watchlist_file_field.value,
+                output_dir=datacenter_output_dir_field.value,
+            ),
+            log_field=datacenter_log_field,
+            status_field=datacenter_status_field,
+            output_dir=datacenter_output_dir_field.value,
+        )
+
+    def on_datacenter_plan(e) -> None:
+        run_datacenter_ui_command(
+            page=page,
+            title="Show Pipeline Plan",
+            command=build_datacenter_pipeline_plan_command(
+                analysis_db=datacenter_analysis_db_field.value,
+                taxonomy_version=datacenter_taxonomy_version_field.value,
+                market=datacenter_market_field.value,
+                signal_date=datacenter_signal_date_field.value,
+                start_date=datacenter_start_date_field.value,
+                index_base_date=datacenter_index_base_date_field.value,
+            ),
+            log_field=datacenter_log_field,
+            status_field=datacenter_status_field,
+        )
+
+    def on_datacenter_watermarks(e) -> None:
+        run_datacenter_ui_command(
+            page=page,
+            title="Show Watermarks",
+            command=build_datacenter_watermark_command(
+                analysis_db=datacenter_analysis_db_field.value,
+                taxonomy_version=datacenter_taxonomy_version_field.value,
+            ),
+            log_field=datacenter_log_field,
+            status_field=datacenter_status_field,
+        )
+
     initial_config = _load_config_or_raise(config_path)
     update_ui_from_config(initial_config)
     refresh_logs_view(initial_config.log_dir)
     skip_next_run_button.on_click = on_skip_next_run
     cancel_skip_next_run_button.on_click = on_cancel_skip_next_run
 
-    page.add(
-        ft.Column(
-            controls=[
-                ft.Text("Stock Update Scheduler Control Panel", size=24, weight=ft.FontWeight.BOLD),
-                config_path_field,
-                osakedata_db_field,
-                analysis_db_field,
-                log_dir_field,
-                timezone_field,
-                run_time_field,
-                ft.Row([omxh_checkbox, omxs_checkbox, usa_checkbox]),
-                skip_next_run_text,
-                running_status_text,
-                ft.Row(
-                    [
-                        ft.ElevatedButton("Save config", on_click=on_save_config),
-                        ft.ElevatedButton("Reload config", on_click=on_reload_config),
-                        ft.ElevatedButton("Run now", on_click=on_run_now),
-                        skip_next_run_button,
-                        cancel_skip_next_run_button,
-                        ft.ElevatedButton("Refresh logs", on_click=on_refresh_logs),
-                    ]
-                ),
-                status_field,
-                summary_field,
-                timer_status_field,
-                ft.Text("Recent scheduler logs", size=18, weight=ft.FontWeight.BOLD),
-                logs_column,
-            ],
-            spacing=12,
-            expand=True,
-        )
+    scheduler_content = ft.Column(
+        controls=[
+            ft.Text("Stock Update Scheduler Control Panel", size=24, weight=ft.FontWeight.BOLD),
+            config_path_field,
+            osakedata_db_field,
+            analysis_db_field,
+            log_dir_field,
+            timezone_field,
+            run_time_field,
+            ft.Row([omxh_checkbox, omxs_checkbox, usa_checkbox]),
+            skip_next_run_text,
+            running_status_text,
+            ft.Row(
+                [
+                    ft.ElevatedButton("Save config", on_click=on_save_config),
+                    ft.ElevatedButton("Reload config", on_click=on_reload_config),
+                    ft.ElevatedButton("Run now", on_click=on_run_now),
+                    skip_next_run_button,
+                    cancel_skip_next_run_button,
+                    ft.ElevatedButton("Refresh logs", on_click=on_refresh_logs),
+                ]
+            ),
+            status_field,
+            summary_field,
+            timer_status_field,
+            ft.Text("Recent scheduler logs", size=18, weight=ft.FontWeight.BOLD),
+            logs_column,
+        ],
+        spacing=12,
+        expand=True,
     )
+
+    datacenter_dry_run_button = ft.ElevatedButton("Dry Run Pipeline", on_click=on_datacenter_dry_run)
+    datacenter_run_pipeline_button = ft.ElevatedButton("Run Full Pipeline", on_click=on_datacenter_run_pipeline)
+    datacenter_audit_button = ft.ElevatedButton("Run Audit", on_click=on_datacenter_run_audit)
+    datacenter_daily_report_button = ft.ElevatedButton("Generate Daily Report", on_click=on_datacenter_daily_report)
+    datacenter_rolling_report_button = ft.ElevatedButton("Generate Rolling Report", on_click=on_datacenter_rolling_report)
+    datacenter_plan_button = ft.ElevatedButton("Show Pipeline Plan", on_click=on_datacenter_plan)
+    datacenter_watermarks_button = ft.ElevatedButton("Show Watermarks", on_click=on_datacenter_watermarks)
+    datacenter_buttons = ft.Row(
+        [
+            datacenter_dry_run_button,
+            datacenter_run_pipeline_button,
+            datacenter_audit_button,
+            datacenter_daily_report_button,
+            datacenter_rolling_report_button,
+            datacenter_plan_button,
+            datacenter_watermarks_button,
+        ],
+        wrap=True,
+    )
+    datacenter_content = ft.Column(
+        controls=[
+            ft.Text("Datacenter", size=24, weight=ft.FontWeight.BOLD),
+            ft.Text(
+                "Run Audit before interpreting reports. WARN may be acceptable; FAIL means do not interpret reports."
+            ),
+            datacenter_price_db_field,
+            datacenter_analysis_db_field,
+            datacenter_taxonomy_csv_field,
+            ft.Row([datacenter_taxonomy_version_field, datacenter_market_field]),
+            ft.Row([datacenter_signal_date_field, datacenter_start_date_field, datacenter_index_base_date_field]),
+            datacenter_output_dir_field,
+            ft.Row(
+                [
+                    datacenter_expected_ticker_count_field,
+                    datacenter_expected_group_count_field,
+                    datacenter_expected_synthetic_ohlc_count_field,
+                    datacenter_rolling_window_size_field,
+                ],
+                wrap=True,
+            ),
+            datacenter_watchlist_file_field,
+            datacenter_buttons,
+            datacenter_status_field,
+            datacenter_log_field,
+        ],
+        spacing=12,
+        expand=True,
+    )
+
+    page.datacenter_price_db_field = datacenter_price_db_field
+    page.datacenter_analysis_db_field = datacenter_analysis_db_field
+    page.datacenter_taxonomy_csv_field = datacenter_taxonomy_csv_field
+    page.datacenter_taxonomy_version_field = datacenter_taxonomy_version_field
+    page.datacenter_market_field = datacenter_market_field
+    page.datacenter_signal_date_field = datacenter_signal_date_field
+    page.datacenter_start_date_field = datacenter_start_date_field
+    page.datacenter_index_base_date_field = datacenter_index_base_date_field
+    page.datacenter_output_dir_field = datacenter_output_dir_field
+    page.datacenter_expected_ticker_count_field = datacenter_expected_ticker_count_field
+    page.datacenter_expected_group_count_field = datacenter_expected_group_count_field
+    page.datacenter_expected_synthetic_ohlc_count_field = datacenter_expected_synthetic_ohlc_count_field
+    page.datacenter_rolling_window_size_field = datacenter_rolling_window_size_field
+    page.datacenter_watchlist_file_field = datacenter_watchlist_file_field
+    page.datacenter_status_field = datacenter_status_field
+    page.datacenter_log_field = datacenter_log_field
+    page.datacenter_dry_run_button = datacenter_dry_run_button
+    page.datacenter_run_pipeline_button = datacenter_run_pipeline_button
+    page.datacenter_audit_button = datacenter_audit_button
+    page.datacenter_daily_report_button = datacenter_daily_report_button
+    page.datacenter_rolling_report_button = datacenter_rolling_report_button
+    page.datacenter_plan_button = datacenter_plan_button
+    page.datacenter_watermarks_button = datacenter_watermarks_button
+
+    tabs = ft.Tabs(
+        selected_index=0,
+        tabs=[
+            ft.Tab(text="Scheduler", content=scheduler_content),
+            ft.Tab(text="Datacenter", content=datacenter_content),
+        ],
+        expand=1,
+    )
+    page.datacenter_tabs = tabs
+    page.add(tabs)
     page.update()
 
 

@@ -9,10 +9,28 @@ from unittest.mock import Mock
 import pytest
 
 from dev_tools.stock_update_scheduler_ui import (
+    DEFAULT_DATACENTER_ANALYSIS_DB,
+    DEFAULT_DATACENTER_EXPECTED_GROUP_COUNT,
+    DEFAULT_DATACENTER_EXPECTED_SYNTHETIC_OHLC_COUNT,
+    DEFAULT_DATACENTER_EXPECTED_TICKER_COUNT,
+    DEFAULT_DATACENTER_INDEX_BASE_DATE,
+    DEFAULT_DATACENTER_MARKET,
+    DEFAULT_DATACENTER_OUTPUT_DIR,
+    DEFAULT_DATACENTER_PRICE_DB,
+    DEFAULT_DATACENTER_ROLLING_WINDOW_SIZE,
+    DEFAULT_DATACENTER_TAXONOMY_CSV,
+    DEFAULT_DATACENTER_TAXONOMY_VERSION,
+    DEFAULT_DATACENTER_WATCHLIST_FILE,
     SCHEDULER_UI_PORT,
     apply_cancel_skip_next_run_to_config,
     apply_skip_next_run_to_config,
+    build_datacenter_audit_command,
     build_text_log_browser_url,
+    build_datacenter_daily_report_command,
+    build_datacenter_pipeline_command,
+    build_datacenter_pipeline_plan_command,
+    build_datacenter_rolling_report_command,
+    build_datacenter_watermark_command,
     format_systemd_on_calendar,
     format_run_now_error_message,
     build_cancel_skip_next_run_config,
@@ -25,6 +43,7 @@ from dev_tools.stock_update_scheduler_ui import (
     main,
     read_systemd_timer_on_calendar,
     read_systemd_user_timer_status,
+    run_app,
     save_config_and_sync_systemd_timer,
     scheduler_skip_button_state,
     scheduler_running_state,
@@ -33,6 +52,19 @@ from dev_tools.stock_update_scheduler_ui import (
 )
 from rawcandle.scheduler.config import StockUpdateSchedulerConfig, read_scheduler_config, write_scheduler_config
 from rawcandle.scheduler.runner import SchedulerAlreadyRunningError
+
+
+class _FakePage:
+    def __init__(self):
+        self.controls = []
+        self.title = ""
+        self.scroll = None
+
+    def add(self, control):
+        self.controls.append(control)
+
+    def update(self):
+        pass
 
 
 def test_load_latest_scheduler_summary_picks_newest_by_filename_timestamp(tmp_path):
@@ -457,6 +489,172 @@ def test_scheduler_ui_startup_passes_fixed_port_to_ft_app(tmp_path, monkeypatch)
     assert code == 0
     assert captured["port"] == SCHEDULER_UI_PORT
     assert captured["assets_dir"] == "/tmp/logs"
+
+
+def test_datacenter_command_builders_use_expected_defaults_and_shapes():
+    pipeline_command = build_datacenter_pipeline_command(
+        price_db=DEFAULT_DATACENTER_PRICE_DB,
+        analysis_db=DEFAULT_DATACENTER_ANALYSIS_DB,
+        taxonomy_csv=DEFAULT_DATACENTER_TAXONOMY_CSV,
+        taxonomy_version=DEFAULT_DATACENTER_TAXONOMY_VERSION,
+        market=DEFAULT_DATACENTER_MARKET,
+        signal_date="2026-05-15",
+        start_date="2026-01-01",
+        index_base_date=DEFAULT_DATACENTER_INDEX_BASE_DATE,
+        output_dir=DEFAULT_DATACENTER_OUTPUT_DIR,
+        expected_ticker_count=DEFAULT_DATACENTER_EXPECTED_TICKER_COUNT,
+        expected_group_count=DEFAULT_DATACENTER_EXPECTED_GROUP_COUNT,
+        expected_synthetic_ohlc_count=DEFAULT_DATACENTER_EXPECTED_SYNTHETIC_OHLC_COUNT,
+        rolling_window_size=DEFAULT_DATACENTER_ROLLING_WINDOW_SIZE,
+        watchlist_file=DEFAULT_DATACENTER_WATCHLIST_FILE,
+        dry_run=True,
+    )
+    assert pipeline_command[:2] == ["python3", "run_datacenter_swing_pipeline.py"]
+    assert "--dry-run" in pipeline_command
+    assert pipeline_command[pipeline_command.index("--weekly-window-size") + 1] == "20"
+    assert pipeline_command[pipeline_command.index("--watchlist-file") + 1] == DEFAULT_DATACENTER_WATCHLIST_FILE
+
+    audit_command = build_datacenter_audit_command(
+        analysis_db=DEFAULT_DATACENTER_ANALYSIS_DB,
+        signal_date="2026-05-15",
+        taxonomy_version=DEFAULT_DATACENTER_TAXONOMY_VERSION,
+        expected_ticker_count=DEFAULT_DATACENTER_EXPECTED_TICKER_COUNT,
+        expected_group_count=DEFAULT_DATACENTER_EXPECTED_GROUP_COUNT,
+        expected_synthetic_ohlc_count=DEFAULT_DATACENTER_EXPECTED_SYNTHETIC_OHLC_COUNT,
+        rolling_window_size=DEFAULT_DATACENTER_ROLLING_WINDOW_SIZE,
+    )
+    assert audit_command[:2] == ["python3", "run_datacenter_swing_pipeline_audit.py"]
+    assert audit_command[audit_command.index("--weekly-window-size") + 1] == "20"
+
+    daily_command = build_datacenter_daily_report_command(
+        analysis_db=DEFAULT_DATACENTER_ANALYSIS_DB,
+        signal_date="2026-05-15",
+        taxonomy_version=DEFAULT_DATACENTER_TAXONOMY_VERSION,
+        watchlist_file=DEFAULT_DATACENTER_WATCHLIST_FILE,
+        output_dir=DEFAULT_DATACENTER_OUTPUT_DIR,
+    )
+    assert "run_datacenter_daily_signal_report.py" in daily_command
+    assert daily_command[daily_command.index("--output-md") + 1].endswith("datacenter_daily_2026-05-15_full.md")
+
+    rolling_command = build_datacenter_rolling_report_command(
+        analysis_db=DEFAULT_DATACENTER_ANALYSIS_DB,
+        signal_date="2026-05-15",
+        taxonomy_version=DEFAULT_DATACENTER_TAXONOMY_VERSION,
+        rolling_window_size="20",
+        watchlist_file=DEFAULT_DATACENTER_WATCHLIST_FILE,
+        output_dir=DEFAULT_DATACENTER_OUTPUT_DIR,
+    )
+    assert "run_datacenter_weekly_swing_report.py" in rolling_command
+    assert rolling_command[rolling_command.index("--window-size") + 1] == "20"
+    assert rolling_command[rolling_command.index("--output-md") + 1].endswith("datacenter_rolling_2026-05-15_20d_full.md")
+
+    plan_command = build_datacenter_pipeline_plan_command(
+        analysis_db=DEFAULT_DATACENTER_ANALYSIS_DB,
+        taxonomy_version=DEFAULT_DATACENTER_TAXONOMY_VERSION,
+        market=DEFAULT_DATACENTER_MARKET,
+        signal_date="2026-05-15",
+        start_date="2026-01-01",
+        index_base_date=DEFAULT_DATACENTER_INDEX_BASE_DATE,
+    )
+    assert plan_command[:2] == ["python3", "run_datacenter_swing_pipeline_plan.py"]
+
+    watermark_command = build_datacenter_watermark_command(
+        analysis_db=DEFAULT_DATACENTER_ANALYSIS_DB,
+        taxonomy_version=DEFAULT_DATACENTER_TAXONOMY_VERSION,
+    )
+    assert watermark_command[:2] == ["python3", "run_datacenter_pipeline_watermark.py"]
+
+
+def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(tmp_path, monkeypatch):
+    config_path = tmp_path / "scheduler.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "analysis_db_path": "/tmp/analysis.db",
+                "enabled_markets": ["omxh"],
+                "log_dir": "/tmp/logs",
+                "osakedata_db_path": "/tmp/osakedata.db",
+                "run_time": "05:30",
+                "timezone": "Europe/Helsinki",
+            }
+        ),
+        encoding="utf-8",
+    )
+    captured: list[dict[str, object]] = []
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.load_latest_scheduler_summary", lambda log_dir: None)
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.list_scheduler_log_files", lambda log_dir: [])
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.read_scheduler_status", lambda log_dir: None)
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
+        lambda: {"timer_path": "/tmp/timer", "on_calendar": "*-*-* 05:30:00", "installed": True, "status_summary": "ok", "error": None},
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.run_datacenter_ui_command",
+        lambda **kwargs: captured.append(kwargs),
+    )
+
+    page = _FakePage()
+    run_app(page, str(config_path))
+
+    assert page.datacenter_tabs.tabs[1].text == "Datacenter"
+    assert page.datacenter_price_db_field.value == DEFAULT_DATACENTER_PRICE_DB
+    assert page.datacenter_analysis_db_field.value == DEFAULT_DATACENTER_ANALYSIS_DB
+    assert page.datacenter_taxonomy_csv_field.value == DEFAULT_DATACENTER_TAXONOMY_CSV
+    assert page.datacenter_taxonomy_version_field.value == DEFAULT_DATACENTER_TAXONOMY_VERSION
+    assert page.datacenter_market_field.value == DEFAULT_DATACENTER_MARKET
+    assert page.datacenter_index_base_date_field.value == DEFAULT_DATACENTER_INDEX_BASE_DATE
+    assert page.datacenter_output_dir_field.value == DEFAULT_DATACENTER_OUTPUT_DIR
+    assert page.datacenter_expected_ticker_count_field.value == DEFAULT_DATACENTER_EXPECTED_TICKER_COUNT
+    assert page.datacenter_expected_group_count_field.value == DEFAULT_DATACENTER_EXPECTED_GROUP_COUNT
+    assert page.datacenter_expected_synthetic_ohlc_count_field.value == DEFAULT_DATACENTER_EXPECTED_SYNTHETIC_OHLC_COUNT
+    assert page.datacenter_rolling_window_size_field.value == DEFAULT_DATACENTER_ROLLING_WINDOW_SIZE
+    assert page.datacenter_watchlist_file_field.value == DEFAULT_DATACENTER_WATCHLIST_FILE
+
+    page.datacenter_signal_date_field.value = "2026-05-15"
+    page.datacenter_start_date_field.value = "2026-01-01"
+    page.datacenter_dry_run_button.on_click(None)
+    dry_run = captured[-1]
+    assert dry_run["title"] == "Dry Run Pipeline"
+    assert "--dry-run" in dry_run["command"]
+    assert dry_run["command"][dry_run["command"].index("--weekly-window-size") + 1] == "20"
+    assert dry_run["command"][dry_run["command"].index("--watchlist-file") + 1] == DEFAULT_DATACENTER_WATCHLIST_FILE
+
+    page.datacenter_run_pipeline_button.on_click(None)
+    full_run = captured[-1]
+    assert full_run["title"] == "Run Full Pipeline"
+    assert "--dry-run" not in full_run["command"]
+
+    page.datacenter_audit_button.on_click(None)
+    audit = captured[-1]
+    assert audit["title"] == "Run Audit"
+    assert "run_datacenter_swing_pipeline_audit.py" in audit["command"]
+
+    page.datacenter_daily_report_button.on_click(None)
+    daily = captured[-1]
+    assert daily["title"] == "Generate Daily Report"
+    assert daily["command"][daily["command"].index("--output-md") + 1].endswith("datacenter_daily_2026-05-15_full.md")
+
+    page.datacenter_rolling_report_button.on_click(None)
+    rolling = captured[-1]
+    assert rolling["title"] == "Generate Rolling Report"
+    assert rolling["command"][rolling["command"].index("--window-size") + 1] == "20"
+    assert rolling["command"][rolling["command"].index("--output-md") + 1].endswith("datacenter_rolling_2026-05-15_20d_full.md")
+
+    page.datacenter_signal_date_field.value = "2026-05-16"
+    page.datacenter_watchlist_file_field.value = "/tmp/custom_watchlist.txt"
+    page.datacenter_plan_button.on_click(None)
+    plan = captured[-1]
+    assert plan["title"] == "Show Pipeline Plan"
+    assert plan["command"][plan["command"].index("--signal-date") + 1] == "2026-05-16"
+
+    page.datacenter_watermarks_button.on_click(None)
+    watermark = captured[-1]
+    assert watermark["title"] == "Show Watermarks"
+    assert "run_datacenter_pipeline_watermark.py" in watermark["command"]
+
+    page.datacenter_daily_report_button.on_click(None)
+    daily_override = captured[-1]
+    assert daily_override["command"][daily_override["command"].index("--watchlist-file") + 1] == "/tmp/custom_watchlist.txt"
 
 
 def test_build_skip_next_run_config_sets_true_without_changing_other_fields():

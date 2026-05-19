@@ -381,6 +381,26 @@ It only renders persisted rows for one selected `signal_date`.
 - The rolling report does not count historical prior-day group risk for these summary metrics.
 - Watchlist status is monitoring context only, not a trading recommendation.
 
+## Datacenter UI
+
+- RawCandle UI now includes a `Datacenter` page/tab.
+- It can run:
+  - pipeline dry-run
+  - full pipeline
+  - pipeline audit
+  - daily report
+  - rolling report
+  - pipeline plan
+  - watermarks
+- Default paths:
+  - `data/osakedata.db`
+  - `data/analysis.db`
+  - `data/datacenter_ecosystem_taxonomy_full_v1.csv`
+  - `/home/kalle/projects/rawcandle/swing_reports`
+  - `/home/kalle/projects/rawcandle/swing_reports/datacenter_watchlist.txt`
+- Run Audit before interpreting reports. `WARN` may be acceptable; `FAIL` means do not interpret reports.
+- The UI does not change signal semantics; it calls the existing CLI commands.
+
 Example watchlist:
 
 ```text
