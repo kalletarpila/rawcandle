@@ -47,6 +47,7 @@ from dev_tools.stock_update_scheduler_ui import (
     read_systemd_timer_on_calendar,
     read_systemd_user_timer_status,
     run_app,
+    run_datacenter_ui_command,
     populate_datacenter_report_downloads,
     save_config_and_sync_systemd_timer,
     scheduler_skip_button_state,
@@ -619,6 +620,53 @@ def test_datacenter_report_downloads_are_discoverable_and_launchable(tmp_path):
     reports_column.controls[1].controls[2].on_click(None)
     assert page.launched_urls == ["/datacenter_downloads/datacenter_daily_2026-05-15_1200_full.csv"]
     assert (assets_root / "datacenter_downloads" / "datacenter_daily_2026-05-15_1200_full.csv").exists()
+
+
+def test_datacenter_command_log_prepends_newest_entries(monkeypatch, tmp_path):
+    class _ImmediateThread:
+        def __init__(self, *, target, daemon):
+            self._target = target
+
+        def start(self):
+            self._target()
+
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.threading.Thread", _ImmediateThread)
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0],
+            0,
+            stdout="stdout line\nsecond line\n",
+            stderr="stderr line\n",
+        ),
+    )
+
+    page = _FakePage()
+    log_field = Mock()
+    log_field.value = "older entry"
+    status_field = Mock()
+    status_field.value = ""
+    status_field.border_color = None
+
+    run_datacenter_ui_command(
+        page=page,
+        title="Dry Run Pipeline",
+        command=["python3", "run_datacenter_swing_pipeline.py", "--dry-run"],
+        log_field=log_field,
+        status_field=status_field,
+        output_dir=str(tmp_path),
+    )
+
+    expected_lines = [
+        "=== Datacenter: Dry Run Pipeline completed ===",
+        "stdout line",
+        "second line",
+        "stderr line",
+        "COMMAND python3 run_datacenter_swing_pipeline.py --dry-run",
+        "=== Datacenter: Dry Run Pipeline ===",
+        "older entry",
+    ]
+    assert log_field.value.splitlines() == expected_lines
 
 
 def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(tmp_path, monkeypatch):

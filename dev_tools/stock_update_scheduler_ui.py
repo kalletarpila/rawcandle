@@ -755,7 +755,7 @@ def run_datacenter_ui_command(
 ) -> None:
     def _append_log(message: str) -> None:
         existing = log_field.value or ""
-        log_field.value = f"{existing}\n{message}".strip()
+        log_field.value = f"{message}\n{existing}".strip()
 
     def _worker() -> None:
         try:
