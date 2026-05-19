@@ -5,8 +5,11 @@ import inspect
 import json
 import os
 import re
+import shutil
 import subprocess
 import threading
+import zipfile
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
@@ -50,6 +53,8 @@ DEFAULT_DATACENTER_EXPECTED_GROUP_COUNT = "54"
 DEFAULT_DATACENTER_EXPECTED_SYNTHETIC_OHLC_COUNT = "53"
 DEFAULT_DATACENTER_ROLLING_WINDOW_SIZE = "20"
 DEFAULT_DATACENTER_WATCHLIST_FILE = "/home/kalle/projects/rawcandle/swing_reports/datacenter_watchlist.txt"
+DEFAULT_DATACENTER_SIGNAL_DATE = (date.today() - timedelta(days=1)).isoformat()
+DEFAULT_DATACENTER_START_DATE = "2025-08-01"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -389,6 +394,141 @@ def launch_browser_url(page: ft.Page, url: str) -> None:
         page.run_task(_await_launch)
 
 
+def _datacenter_downloads_dir(assets_root: Path) -> Path:
+    return assets_root / "datacenter_downloads"
+
+
+def _stage_datacenter_download_asset(file_path: Path, assets_root: Path) -> Path:
+    downloads_dir = _datacenter_downloads_dir(assets_root)
+    downloads_dir.mkdir(parents=True, exist_ok=True)
+    staged_path = downloads_dir / file_path.name
+    shutil.copy2(file_path, staged_path)
+    return staged_path
+
+
+def _datacenter_asset_url(assets_root: Path, staged_path: Path) -> str:
+    relative_path = staged_path.relative_to(assets_root)
+    return "/" + "/".join(quote(part) for part in relative_path.parts)
+
+
+def _find_latest_matching_file(output_dir_path: Path, patterns: List[str]) -> Optional[Path]:
+    candidates: List[Path] = []
+    seen: set[Path] = set()
+    for pattern in patterns:
+        for candidate in output_dir_path.glob(pattern):
+            if candidate.is_file() and candidate not in seen:
+                candidates.append(candidate)
+                seen.add(candidate)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda path: (path.stat().st_mtime, path.name), reverse=True)
+    return candidates[0]
+
+
+def find_datacenter_generated_reports(
+    *,
+    output_dir: str,
+    signal_date: str,
+    rolling_window_size: str,
+    include_daily: bool,
+    include_rolling: bool,
+) -> List[Path]:
+    output_dir_path = Path(output_dir.strip())
+    if not output_dir_path.exists() or not output_dir_path.is_dir():
+        return []
+
+    report_paths: List[Path] = []
+    if include_daily:
+        for suffix in ("md", "csv"):
+            report_path = _find_latest_matching_file(
+                output_dir_path,
+                [
+                    f"datacenter_daily_{signal_date.strip()}_*_full.{suffix}",
+                    f"datacenter_daily_{signal_date.strip()}_full.{suffix}",
+                ],
+            )
+            if report_path is not None:
+                report_paths.append(report_path)
+
+    if include_rolling:
+        for suffix in ("md", "csv"):
+            report_path = _find_latest_matching_file(
+                output_dir_path,
+                [
+                    f"datacenter_rolling_{signal_date.strip()}_{rolling_window_size.strip()}d_*_full.{suffix}",
+                    f"datacenter_rolling_{signal_date.strip()}_{rolling_window_size.strip()}d_full.{suffix}",
+                ],
+            )
+            if report_path is not None:
+                report_paths.append(report_path)
+
+    return report_paths
+
+
+def populate_datacenter_report_downloads(
+    *,
+    page: ft.Page,
+    reports_column: ft.Column,
+    status_field: ft.TextField,
+    assets_root: Path,
+    report_paths: List[Path],
+) -> None:
+    reports_column.controls.clear()
+    if not report_paths:
+        reports_column.controls.append(ft.Text("No generated reports available."))
+        return
+
+    def _download_single(file_path: Path) -> None:
+        try:
+            staged_path = _stage_datacenter_download_asset(file_path, assets_root)
+            launch_browser_url(page, _datacenter_asset_url(assets_root, staged_path))
+            _set_status(status_field, f"Downloading report: {file_path.name}", _STATUS_OK_COLOR)
+        except Exception as exc:
+            _set_status(status_field, f"Report download failed: {exc}", _STATUS_ERROR_COLOR)
+        page.update()
+
+    def _download_all(_e) -> None:
+        try:
+            downloads_dir = _datacenter_downloads_dir(assets_root)
+            downloads_dir.mkdir(parents=True, exist_ok=True)
+            archive_name = f"datacenter_reports_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+            archive_path = downloads_dir / archive_name
+            with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
+                for report_path in report_paths:
+                    archive.write(report_path, arcname=report_path.name)
+            launch_browser_url(page, _datacenter_asset_url(assets_root, archive_path))
+            _set_status(status_field, f"Downloading report bundle: {archive_name}", _STATUS_OK_COLOR)
+        except Exception as exc:
+            _set_status(status_field, f"Report bundle download failed: {exc}", _STATUS_ERROR_COLOR)
+        page.update()
+
+    reports_column.controls.append(
+        ft.Row(
+            controls=[
+                ft.Text("Generated reports", weight=ft.FontWeight.BOLD, expand=True),
+                ft.ElevatedButton("Download All as ZIP", on_click=_download_all),
+            ],
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+    )
+    for report_path in report_paths:
+        reports_column.controls.append(
+            ft.Row(
+                controls=[
+                    ft.Text(report_path.name, expand=True),
+                    ft.Text(str(report_path), size=11, color="gray"),
+                    ft.ElevatedButton(
+                        "Download",
+                        on_click=lambda _e, selected_report=report_path: _download_single(selected_report),
+                    ),
+                ],
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            )
+        )
+
+
 def format_run_now_error_message(exc: Exception) -> str:
     if isinstance(exc, SchedulerAlreadyRunningError):
         return "Run now blocked: scheduler run is already active."
@@ -606,6 +746,12 @@ def run_datacenter_ui_command(
     log_field: ft.TextField,
     status_field: ft.TextField,
     output_dir: str | None = None,
+    reports_column: ft.Column | None = None,
+    assets_root: Path | None = None,
+    signal_date: str | None = None,
+    rolling_window_size: str | None = None,
+    include_daily_reports: bool = False,
+    include_rolling_reports: bool = False,
 ) -> None:
     def _append_log(message: str) -> None:
         existing = log_field.value or ""
@@ -634,8 +780,38 @@ def run_datacenter_ui_command(
             if combined:
                 _append_log(combined)
             if completed.returncode == 0:
+                generated_reports: List[Path] = []
+                if (
+                    reports_column is not None
+                    and assets_root is not None
+                    and output_dir
+                    and signal_date
+                    and (include_daily_reports or include_rolling_reports)
+                ):
+                    generated_reports = find_datacenter_generated_reports(
+                        output_dir=output_dir,
+                        signal_date=signal_date,
+                        rolling_window_size=rolling_window_size or "",
+                        include_daily=include_daily_reports,
+                        include_rolling=include_rolling_reports,
+                    )
+                    populate_datacenter_report_downloads(
+                        page=page,
+                        reports_column=reports_column,
+                        status_field=status_field,
+                        assets_root=assets_root,
+                        report_paths=generated_reports,
+                    )
                 _append_log(f"=== Datacenter: {title} completed ===")
-                _set_status(status_field, f"{title} completed.", _STATUS_OK_COLOR)
+                if generated_reports:
+                    generated_names = ", ".join(report_path.name for report_path in generated_reports)
+                    _set_status(
+                        status_field,
+                        f"{title} completed.\nGenerated reports: {generated_names}",
+                        _STATUS_OK_COLOR,
+                    )
+                else:
+                    _set_status(status_field, f"{title} completed.", _STATUS_OK_COLOR)
             else:
                 _append_log(f"=== Datacenter: {title} failed (exit {completed.returncode}) ===")
                 _set_status(status_field, f"{title} failed with exit code {completed.returncode}.", _STATUS_ERROR_COLOR)
@@ -705,8 +881,16 @@ def run_app(page: ft.Page, config_path: str) -> None:
     datacenter_taxonomy_csv_field = ft.TextField(label="taxonomy_csv", value=DEFAULT_DATACENTER_TAXONOMY_CSV, expand=True)
     datacenter_taxonomy_version_field = ft.TextField(label="taxonomy_version", value=DEFAULT_DATACENTER_TAXONOMY_VERSION, expand=True)
     datacenter_market_field = ft.TextField(label="market", value=DEFAULT_DATACENTER_MARKET, width=180)
-    datacenter_signal_date_field = ft.TextField(label="signal_date (previous valid trading day)", value="", width=220)
-    datacenter_start_date_field = ft.TextField(label="start_date (swing recalculation start)", value="", width=220)
+    datacenter_signal_date_field = ft.TextField(
+        label="signal_date (previous valid trading day)",
+        value=DEFAULT_DATACENTER_SIGNAL_DATE,
+        width=220,
+    )
+    datacenter_start_date_field = ft.TextField(
+        label="start_date (swing recalculation start)",
+        value=DEFAULT_DATACENTER_START_DATE,
+        width=220,
+    )
     datacenter_index_base_date_field = ft.TextField(label="index_base_date", value=DEFAULT_DATACENTER_INDEX_BASE_DATE, width=220)
     datacenter_output_dir_field = ft.TextField(label="output_dir", value=DEFAULT_DATACENTER_OUTPUT_DIR, expand=True)
     datacenter_expected_ticker_count_field = ft.TextField(label="expected_ticker_count", value=DEFAULT_DATACENTER_EXPECTED_TICKER_COUNT, width=180)
@@ -732,6 +916,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
         read_only=True,
         expand=True,
     )
+    datacenter_reports_column = ft.Column(spacing=8)
 
     def selected_markets_from_ui() -> List[str]:
         selected: List[str] = []
@@ -999,6 +1184,8 @@ def run_app(page: ft.Page, config_path: str) -> None:
             log_field=datacenter_log_field,
             status_field=datacenter_status_field,
             output_dir=datacenter_output_dir_field.value,
+            reports_column=datacenter_reports_column,
+            assets_root=datacenter_assets_root,
         )
 
     def on_datacenter_run_pipeline(e) -> None:
@@ -1009,6 +1196,12 @@ def run_app(page: ft.Page, config_path: str) -> None:
             log_field=datacenter_log_field,
             status_field=datacenter_status_field,
             output_dir=datacenter_output_dir_field.value,
+            reports_column=datacenter_reports_column,
+            assets_root=datacenter_assets_root,
+            signal_date=datacenter_signal_date_field.value,
+            rolling_window_size=datacenter_rolling_window_size_field.value,
+            include_daily_reports=True,
+            include_rolling_reports=True,
         )
 
     def on_datacenter_run_audit(e) -> None:
@@ -1042,6 +1235,10 @@ def run_app(page: ft.Page, config_path: str) -> None:
             log_field=datacenter_log_field,
             status_field=datacenter_status_field,
             output_dir=datacenter_output_dir_field.value,
+            reports_column=datacenter_reports_column,
+            assets_root=datacenter_assets_root,
+            signal_date=datacenter_signal_date_field.value,
+            include_daily_reports=True,
         )
 
     def on_datacenter_rolling_report(e) -> None:
@@ -1059,6 +1256,11 @@ def run_app(page: ft.Page, config_path: str) -> None:
             log_field=datacenter_log_field,
             status_field=datacenter_status_field,
             output_dir=datacenter_output_dir_field.value,
+            reports_column=datacenter_reports_column,
+            assets_root=datacenter_assets_root,
+            signal_date=datacenter_signal_date_field.value,
+            rolling_window_size=datacenter_rolling_window_size_field.value,
+            include_rolling_reports=True,
         )
 
     def on_datacenter_plan(e) -> None:
@@ -1090,6 +1292,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
         )
 
     initial_config = _load_config_or_raise(config_path)
+    datacenter_assets_root = Path(initial_config.log_dir)
     update_ui_from_config(initial_config)
     refresh_logs_view(initial_config.log_dir)
     skip_next_run_button.on_click = on_skip_next_run
@@ -1170,6 +1373,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
             datacenter_watchlist_file_field,
             datacenter_buttons,
             datacenter_status_field,
+            datacenter_reports_column,
             datacenter_log_field,
         ],
         spacing=12,
@@ -1191,6 +1395,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
     page.datacenter_rolling_window_size_field = datacenter_rolling_window_size_field
     page.datacenter_watchlist_file_field = datacenter_watchlist_file_field
     page.datacenter_status_field = datacenter_status_field
+    page.datacenter_reports_column = datacenter_reports_column
     page.datacenter_log_field = datacenter_log_field
     page.datacenter_dry_run_button = datacenter_dry_run_button
     page.datacenter_run_pipeline_button = datacenter_run_pipeline_button

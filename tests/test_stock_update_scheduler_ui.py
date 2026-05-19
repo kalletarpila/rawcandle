@@ -18,6 +18,8 @@ from dev_tools.stock_update_scheduler_ui import (
     DEFAULT_DATACENTER_OUTPUT_DIR,
     DEFAULT_DATACENTER_PRICE_DB,
     DEFAULT_DATACENTER_ROLLING_WINDOW_SIZE,
+    DEFAULT_DATACENTER_SIGNAL_DATE,
+    DEFAULT_DATACENTER_START_DATE,
     DEFAULT_DATACENTER_TAXONOMY_CSV,
     DEFAULT_DATACENTER_TAXONOMY_VERSION,
     DEFAULT_DATACENTER_WATCHLIST_FILE,
@@ -31,6 +33,7 @@ from dev_tools.stock_update_scheduler_ui import (
     build_datacenter_pipeline_plan_command,
     build_datacenter_rolling_report_command,
     build_datacenter_watermark_command,
+    find_datacenter_generated_reports,
     format_systemd_on_calendar,
     format_run_now_error_message,
     build_cancel_skip_next_run_config,
@@ -44,6 +47,7 @@ from dev_tools.stock_update_scheduler_ui import (
     read_systemd_timer_on_calendar,
     read_systemd_user_timer_status,
     run_app,
+    populate_datacenter_report_downloads,
     save_config_and_sync_systemd_timer,
     scheduler_skip_button_state,
     scheduler_running_state,
@@ -59,12 +63,21 @@ class _FakePage:
         self.controls = []
         self.title = ""
         self.scroll = None
+        self.launched_urls = []
+        self.tasks = []
 
     def add(self, control):
         self.controls.append(control)
 
     def update(self):
         pass
+
+    def launch_url(self, url):
+        self.launched_urls.append(url)
+        return None
+
+    def run_task(self, task):
+        self.tasks.append(task)
 
 
 def test_load_latest_scheduler_summary_picks_newest_by_filename_timestamp(tmp_path):
@@ -565,6 +578,49 @@ def test_datacenter_command_builders_use_expected_defaults_and_shapes():
     assert watermark_command[:2] == ["python3", "run_datacenter_pipeline_watermark.py"]
 
 
+def test_datacenter_report_downloads_are_discoverable_and_launchable(tmp_path):
+    output_dir = tmp_path / "reports"
+    output_dir.mkdir()
+    daily_csv = output_dir / "datacenter_daily_2026-05-15_1200_full.csv"
+    daily_md = output_dir / "datacenter_daily_2026-05-15_1200_full.md"
+    rolling_csv = output_dir / "datacenter_rolling_2026-05-15_20d_1200_full.csv"
+    for report_path in (daily_csv, daily_md, rolling_csv):
+        report_path.write_text("report", encoding="utf-8")
+
+    report_paths = find_datacenter_generated_reports(
+        output_dir=str(output_dir),
+        signal_date="2026-05-15",
+        rolling_window_size="20",
+        include_daily=True,
+        include_rolling=True,
+    )
+
+    assert daily_csv in report_paths
+    assert daily_md in report_paths
+    assert rolling_csv in report_paths
+
+    page = _FakePage()
+    reports_column = Mock()
+    reports_column.controls = []
+    status_field = Mock()
+    status_field.value = ""
+    status_field.border_color = None
+    assets_root = tmp_path / "assets"
+
+    populate_datacenter_report_downloads(
+        page=page,
+        reports_column=reports_column,
+        status_field=status_field,
+        assets_root=assets_root,
+        report_paths=[daily_csv],
+    )
+
+    assert reports_column.controls[0].controls[0].value == "Generated reports"
+    reports_column.controls[1].controls[2].on_click(None)
+    assert page.launched_urls == ["/datacenter_downloads/datacenter_daily_2026-05-15_1200_full.csv"]
+    assert (assets_root / "datacenter_downloads" / "datacenter_daily_2026-05-15_1200_full.csv").exists()
+
+
 def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(tmp_path, monkeypatch):
     config_path = tmp_path / "scheduler.json"
     config_path.write_text(
@@ -602,6 +658,8 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(tmp_path, mon
     assert page.datacenter_taxonomy_csv_field.value == DEFAULT_DATACENTER_TAXONOMY_CSV
     assert page.datacenter_taxonomy_version_field.value == DEFAULT_DATACENTER_TAXONOMY_VERSION
     assert page.datacenter_market_field.value == DEFAULT_DATACENTER_MARKET
+    assert page.datacenter_signal_date_field.value == DEFAULT_DATACENTER_SIGNAL_DATE
+    assert page.datacenter_start_date_field.value == DEFAULT_DATACENTER_START_DATE
     assert page.datacenter_index_base_date_field.value == DEFAULT_DATACENTER_INDEX_BASE_DATE
     assert page.datacenter_output_dir_field.value == DEFAULT_DATACENTER_OUTPUT_DIR
     assert page.datacenter_expected_ticker_count_field.value == DEFAULT_DATACENTER_EXPECTED_TICKER_COUNT
