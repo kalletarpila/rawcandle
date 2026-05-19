@@ -43,6 +43,10 @@ def test_cli_writes_markdown_and_prints_deterministic_summary(tmp_path, capsys):
     assert "watchlist_both_context_risk_count" in markdown
     assert "subindustry_context_risk" in markdown
     assert "layer_context_risk" in markdown
+    assert "subindustry_trend_classification" in markdown
+    assert "subindustry_latest_structure_label" in markdown
+    assert "layer_trend_classification" in markdown
+    assert "layer_latest_structure_label" in markdown
     csv_text = expected_output_csv.read_text(encoding="utf-8")
     assert csv_text.startswith("section;value_1;")
     assert "0,0476" in csv_text
@@ -103,4 +107,8 @@ def test_cli_accepts_watchlist_file_and_renders_watchlist_summary(tmp_path, caps
     assert "watchlist_both_context_risk_count" in markdown
     assert "subindustry_context_risk" in markdown
     assert "layer_context_risk" in markdown
+    assert "subindustry_trend_classification" in markdown
+    assert "subindustry_latest_structure_label" in markdown
+    assert "layer_trend_classification" in markdown
+    assert "layer_latest_structure_label" in markdown
     assert "NOT_PART_OF_DATACENTER_ECOSYSTEM" in markdown

@@ -439,10 +439,14 @@ def test_rolling_watchlist_summary_renders_counts_outside_ticker_and_last_group_
     assert "window_watchlist_status" in markdown
     assert "subindustry_context_risk" in markdown
     assert "layer_context_risk" in markdown
-    assert "| OUTSIDE | NOT_PART_OF_DATACENTER_ECOSYSTEM | NOT_PART_OF_DATACENTER_ECOSYSTEM |  |  | NO |" in markdown
-    assert "| AAA | BREAKOUT_CANDIDATE | BREAKOUT_CANDIDATE | YES | NO | YES | Infrastructure | AI Chips | 2024-01-02 | 2024-01-10 | 110 | 3 | 0 | 0 | 0 | 0 |  |  |  | HH |  |  |  |  |  | BUY_ZONE | HIGH | NEUTRAL | LOW | OK |" in markdown
-    assert "| BBB | HIGH_EXIT_RISK | HIGH_EXIT_RISK | YES | NO | YES | Infrastructure | AI Chips | 2024-01-02 | 2024-01-10 | 100 | 0 | 3 | 1 | 1 | 0 | HIGH | subindustry_exit_zone |  | HL |  |  |  |  |  | BUY_ZONE | HIGH | NEUTRAL | LOW | OK |" in markdown
-    assert "| CCC | MISSING_PRICE | MISSING_PRICE | YES | NO | YES | Infrastructure | Storage | 2024-01-02 | 2024-01-10 | 83 | 0 | 0 | 4 | 4 | 0 | HIGH | close_below_ema20;latest_structure_label_ll |  | LL |  |  |  |  |  | EXIT_ZONE | EXTREME | NEUTRAL | LOW | MISSING_AS_OF_DATE |" in markdown
+    assert "last_subindustry_trend_classification" in markdown
+    assert "last_subindustry_latest_structure_label" in markdown
+    assert "last_layer_trend_classification" in markdown
+    assert "last_layer_latest_structure_label" in markdown
+    assert "| OUTSIDE | NOT_PART_OF_DATACENTER_ECOSYSTEM | NOT_PART_OF_DATACENTER_ECOSYSTEM |  |  |  |  |  |  | NO |" in markdown
+    assert "| AAA | BREAKOUT_CANDIDATE | BREAKOUT_CANDIDATE | YES | NO | UP | HH | NEUTRAL | LH | YES | Infrastructure | AI Chips | 2024-01-02 | 2024-01-10 | 110 | 3 | 0 | 0 | 0 | 0 |  |  |  | HH |  |  |  |  |  | BUY_ZONE | HIGH | NEUTRAL | LOW | OK |" in markdown
+    assert "| BBB | HIGH_EXIT_RISK | HIGH_EXIT_RISK | YES | NO | UP | HH | NEUTRAL | LH | YES | Infrastructure | AI Chips | 2024-01-02 | 2024-01-10 | 100 | 0 | 3 | 1 | 1 | 0 | HIGH | subindustry_exit_zone |  | HL |  |  |  |  |  | BUY_ZONE | HIGH | NEUTRAL | LOW | OK |" in markdown
+    assert "| CCC | MISSING_PRICE | MISSING_PRICE | YES | NO |  |  | NEUTRAL | LH | YES | Infrastructure | Storage | 2024-01-02 | 2024-01-10 | 83 | 0 | 0 | 4 | 4 | 0 | HIGH | close_below_ema20;latest_structure_label_ll |  | LL |  |  |  |  |  | EXIT_ZONE | EXTREME | NEUTRAL | LOW | MISSING_AS_OF_DATE |" in markdown
 
 
 def test_rolling_watchlist_distinguishes_current_group_risk_from_prior_high_exit_risk(tmp_path):
@@ -478,7 +482,7 @@ def test_rolling_watchlist_distinguishes_current_group_risk_from_prior_high_exit
         generated_at_utc="2026-05-17T12:00:00Z",
     )["markdown"]
 
-    assert "| AAA | GROUP_RISK | HIGH_EXIT_RISK | YES | NO | YES |" in markdown
+    assert "| AAA | GROUP_RISK | HIGH_EXIT_RISK | YES | NO | UP | HH | NEUTRAL | LH | YES |" in markdown
 
 
 def test_rolling_watchlist_distinguishes_current_neutral_from_prior_pullback_days(tmp_path):
@@ -517,7 +521,7 @@ def test_rolling_watchlist_distinguishes_current_neutral_from_prior_pullback_day
         generated_at_utc="2026-05-17T12:00:00Z",
     )["markdown"]
 
-    assert "| BBB | NEUTRAL_MONITOR | PULLBACK_CANDIDATE | NO | NO | YES |" in markdown
+    assert "| BBB | NEUTRAL_MONITOR | PULLBACK_CANDIDATE | NO | NO |  |  | NEUTRAL | LH | YES |" in markdown
 
 
 def test_rolling_watchlist_context_risk_fields_show_subindustry_layer_or_both(tmp_path):
@@ -562,9 +566,9 @@ def test_rolling_watchlist_context_risk_fields_show_subindustry_layer_or_both(tm
     assert "| watchlist_subindustry_context_risk_count | 3 |" in markdown
     assert "| watchlist_layer_context_risk_count | 3 |" in markdown
     assert "| watchlist_both_context_risk_count | 3 |" in markdown
-    assert "| AAA | GROUP_RISK | GROUP_RISK | YES | YES | YES |" in markdown
-    assert "| BBB | PULLBACK_CANDIDATE | PULLBACK_CANDIDATE | YES | YES | YES |" in markdown
-    assert "| CCC | MISSING_PRICE | MISSING_PRICE | YES | YES | YES |" in markdown
+    assert "| AAA | GROUP_RISK | GROUP_RISK | YES | YES | UP | HH | NEUTRAL | LH | YES |" in markdown
+    assert "| BBB | PULLBACK_CANDIDATE | PULLBACK_CANDIDATE | YES | YES | UP | HH | NEUTRAL | LH | YES |" in markdown
+    assert "| CCC | MISSING_PRICE | MISSING_PRICE | YES | YES |  |  | NEUTRAL | LH | YES |" in markdown
 
 
 def test_weekly_overheat_progression_groups_by_group_type_and_orders_deterministically(tmp_path):

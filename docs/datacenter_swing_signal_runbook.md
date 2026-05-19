@@ -373,12 +373,24 @@ It only renders persisted rows for one selected `signal_date`.
 - Reports now show:
   - `subindustry_context_risk`
   - `layer_context_risk`
+- Daily watchlist rows also show group synthetic OHLC structure context:
+  - `subindustry_trend_classification`
+  - `subindustry_latest_structure_label`
+  - `layer_trend_classification`
+  - `layer_latest_structure_label`
+- Rolling watchlist rows also show end-window group synthetic OHLC structure context:
+  - `last_subindustry_trend_classification`
+  - `last_subindustry_latest_structure_label`
+  - `last_layer_trend_classification`
+  - `last_layer_latest_structure_label`
 - Watchlist overview tables now summarize:
   - `watchlist_subindustry_context_risk_count`
   - `watchlist_layer_context_risk_count`
   - `watchlist_both_context_risk_count`
 - These counts are based on current / end-date group context.
 - The rolling report does not count historical prior-day group risk for these summary metrics.
+- `ticker_trend_state` is ticker-level context.
+- `subindustry_trend_classification` and `layer_trend_classification` are group synthetic OHLC structure context.
 - Watchlist status is monitoring context only, not a trading recommendation.
 
 ## Datacenter UI

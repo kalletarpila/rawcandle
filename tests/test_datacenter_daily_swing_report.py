@@ -396,10 +396,14 @@ def test_daily_watchlist_summary_renders_inside_outside_group_context_and_status
     assert "| watchlist_high_exit_risk_count | 2 |" in markdown
     assert "subindustry_context_risk" in markdown
     assert "layer_context_risk" in markdown
-    assert "| OUTSIDE | NOT_PART_OF_DATACENTER_ECOSYSTEM |  |  | NO |" in markdown
-    assert "| AAA | BREAKOUT_CANDIDATE | NO | NO | YES | Infrastructure | AI Chips | 110 | 0.03 | 0.08 | 0.12 | 0.0476 |  | HH |  |  |  |  |  | 1 | 0 | 0 |  |  | BUY_ZONE | LOW | NEUTRAL | LOW | OK |" in markdown
-    assert "| BBB | HIGH_EXIT_RISK | NO | NO | YES | Infrastructure | Cloud | 102 | -0.02 | 0.04 | 0.15 | 0.0303 |  | HL |  |  |  |  |  | 0 | 1 | 1 | HIGH | subindustry_exit_zone | ADD_ON_PULLBACK | ELEVATED | NEUTRAL | LOW | OK |" in markdown
-    assert "| CCC | MISSING_PRICE | YES | NO | YES | Infrastructure | Storage | 90 | -0.04 | -0.1 | -0.15 | -0.0526 |  | LL |  |  |  |  |  | 0 | 0 | 1 | HIGH | close_below_ema20;latest_structure_label_ll | EXIT_ZONE | EXTREME | NEUTRAL | LOW | MISSING_AS_OF_DATE |" in markdown
+    assert "subindustry_trend_classification" in markdown
+    assert "subindustry_latest_structure_label" in markdown
+    assert "layer_trend_classification" in markdown
+    assert "layer_latest_structure_label" in markdown
+    assert "| OUTSIDE | NOT_PART_OF_DATACENTER_ECOSYSTEM |  |  |  |  |  |  | NO |" in markdown
+    assert "| AAA | BREAKOUT_CANDIDATE | NO | NO | UP | HH | NEUTRAL | LH | YES | Infrastructure | AI Chips | 110 | 0.03 | 0.08 | 0.12 | 0.0476 |  | HH |  |  |  |  |  | 1 | 0 | 0 |  |  | BUY_ZONE | LOW | NEUTRAL | LOW | OK |" in markdown
+    assert "| BBB | HIGH_EXIT_RISK | NO | NO |  |  | NEUTRAL | LH | YES | Infrastructure | Cloud | 102 | -0.02 | 0.04 | 0.15 | 0.0303 |  | HL |  |  |  |  |  | 0 | 1 | 1 | HIGH | subindustry_exit_zone | ADD_ON_PULLBACK | ELEVATED | NEUTRAL | LOW | OK |" in markdown
+    assert "| CCC | MISSING_PRICE | YES | NO |  |  | NEUTRAL | LH | YES | Infrastructure | Storage | 90 | -0.04 | -0.1 | -0.15 | -0.0526 |  | LL |  |  |  |  |  | 0 | 0 | 1 | HIGH | close_below_ema20;latest_structure_label_ll | EXIT_ZONE | EXTREME | NEUTRAL | LOW | MISSING_AS_OF_DATE |" in markdown
 
 
 def test_daily_watchlist_context_risk_fields_show_subindustry_layer_or_both(tmp_path):
@@ -445,9 +449,9 @@ def test_daily_watchlist_context_risk_fields_show_subindustry_layer_or_both(tmp_
     assert "| watchlist_subindustry_context_risk_count | 1 |" in markdown
     assert "| watchlist_layer_context_risk_count | 3 |" in markdown
     assert "| watchlist_both_context_risk_count | 1 |" in markdown
-    assert "| AAA | GROUP_RISK | NO | YES | YES |" in markdown
-    assert "| BBB | PULLBACK_CANDIDATE | NO | YES | YES |" in markdown
-    assert "| CCC | MISSING_PRICE | YES | YES | YES |" in markdown
+    assert "| AAA | GROUP_RISK | NO | YES | UP | HH | NEUTRAL | LH | YES |" in markdown
+    assert "| BBB | PULLBACK_CANDIDATE | NO | YES |  |  | NEUTRAL | LH | YES |" in markdown
+    assert "| CCC | MISSING_PRICE | YES | YES |  |  | NEUTRAL | LH | YES |" in markdown
 
 
 def test_daily_group_structure_breaks_section_renders_no_rows_when_absent(tmp_path):

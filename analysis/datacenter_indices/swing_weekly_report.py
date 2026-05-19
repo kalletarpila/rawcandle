@@ -18,6 +18,7 @@ from .swing_daily_report import (
     TREND_PRIORITY,
     WATCHLIST_MISSING_PRICE_STATUSES,
     _daily_context_risk_value,
+    _build_group_synthetic_context_by_key,
     _has_layer_context_risk,
     _has_subindustry_context_risk,
     _is_group_risk_state,
@@ -440,6 +441,7 @@ def _build_rolling_watchlist_rows(
     watchlist_tickers: Sequence[str],
     ticker_rows: Sequence[dict[str, object]],
     group_rows: Sequence[dict[str, object]],
+    synthetic_rows: Sequence[dict[str, object]],
 ) -> list[dict[str, object]]:
     ticker_rows_by_ticker: dict[str, list[dict[str, object]]] = {}
     for row in ticker_rows:
@@ -453,6 +455,10 @@ def _build_rolling_watchlist_rows(
         (row.get("signal_date"), row.get("group_type"), row.get("group_name")): row
         for row in group_rows
     }
+    synthetic_context_by_key = _build_group_synthetic_context_by_key(
+        synthetic_rows,
+        include_date=True,
+    )
     output_rows: list[dict[str, object]] = []
     for ticker in watchlist_tickers:
         current_rows = ticker_rows_by_ticker.get(ticker)
@@ -477,9 +483,21 @@ def _build_rolling_watchlist_rows(
             (last_row.get("signal_date"), "layer", last_row.get("primary_layer")),
             {},
         )
+        subindustry_structure_context = synthetic_context_by_key.get(
+            (last_row.get("signal_date"), "subindustry", last_row.get("primary_subindustry")),
+            {},
+        )
+        layer_structure_context = synthetic_context_by_key.get(
+            (last_row.get("signal_date"), "layer", last_row.get("primary_layer")),
+            {},
+        )
         output_row = {
             "ticker": ticker,
             "in_datacenter_ecosystem": "YES",
+            "last_subindustry_trend_classification": subindustry_structure_context.get("trend_classification"),
+            "last_subindustry_latest_structure_label": subindustry_structure_context.get("latest_structure_label"),
+            "last_layer_trend_classification": layer_structure_context.get("trend_classification"),
+            "last_layer_latest_structure_label": layer_structure_context.get("latest_structure_label"),
             "primary_layer": last_row.get("primary_layer"),
             "primary_subindustry": last_row.get("primary_subindustry"),
             "first_signal_date": current_rows[0].get("signal_date"),
@@ -598,6 +616,7 @@ def build_markdown_weekly_swing_report(
         watchlist_tickers=watchlist_tickers,
         ticker_rows=ticker_rows,
         group_rows=group_rows,
+        synthetic_rows=synthetic_rows,
     )
     watchlist_summary_rows = [
         {"metric": "watchlist_tickers_total", "value": len(watchlist_rows)},
@@ -634,6 +653,10 @@ def build_markdown_weekly_swing_report(
                         "window_watchlist_status",
                         "subindustry_context_risk",
                         "layer_context_risk",
+                        "last_subindustry_trend_classification",
+                        "last_subindustry_latest_structure_label",
+                        "last_layer_trend_classification",
+                        "last_layer_latest_structure_label",
                         "in_datacenter_ecosystem",
                         "primary_layer",
                         "primary_subindustry",
