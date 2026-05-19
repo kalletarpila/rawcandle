@@ -386,20 +386,41 @@ def _build_repeated_ticker_rows(
     return output_rows
 
 
-def _classify_rolling_watchlist_status(row: dict[str, object]) -> str:
+def _classify_rolling_current_watchlist_status(row: dict[str, object]) -> str:
     if row.get("in_datacenter_ecosystem") == "NO":
         return "NOT_PART_OF_DATACENTER_ECOSYSTEM"
     if row.get("last_price_data_status") in WATCHLIST_MISSING_PRICE_STATUSES:
         return "MISSING_PRICE"
-    if row.get("high_exit_risk_days", 0) > 0 and (
-        row.get("last_exit_risk_severity") == "HIGH" or row.get("last_exit_risk_severity") in {None, ""}
-    ):
+    if row.get("last_exit_risk_severity") == "HIGH":
         return "HIGH_EXIT_RISK"
-    if row.get("medium_exit_risk_days", 0) > 0:
+    if row.get("last_exit_risk_severity") == "MEDIUM":
         return "MEDIUM_EXIT_RISK"
-    if row.get("breakout_days", 0) > 0:
+    if row.get("last_breakout_signal") == 1:
         return "BREAKOUT_CANDIDATE"
-    if row.get("pullback_days", 0) > 0:
+    if row.get("last_pullback_signal") == 1:
+        return "PULLBACK_CANDIDATE"
+    if _is_group_risk_state(
+        subindustry_timing_state=row.get("last_subindustry_timing_state"),
+        subindustry_overheat_risk_level=row.get("last_subindustry_overheat_risk_level"),
+        layer_timing_state=row.get("last_layer_timing_state"),
+        layer_overheat_risk_level=row.get("last_layer_overheat_risk_level"),
+    ):
+        return "GROUP_RISK"
+    return "NEUTRAL_MONITOR"
+
+
+def _classify_rolling_window_watchlist_status(row: dict[str, object]) -> str:
+    if row.get("in_datacenter_ecosystem") == "NO":
+        return "NOT_PART_OF_DATACENTER_ECOSYSTEM"
+    if row.get("last_price_data_status") in WATCHLIST_MISSING_PRICE_STATUSES or row.get("all_price_rows_missing") is True:
+        return "MISSING_PRICE"
+    if (row.get("high_exit_risk_days") or 0) > 0:
+        return "HIGH_EXIT_RISK"
+    if (row.get("medium_exit_risk_days") or 0) > 0:
+        return "MEDIUM_EXIT_RISK"
+    if (row.get("breakout_days") or 0) > 0:
+        return "BREAKOUT_CANDIDATE"
+    if (row.get("pullback_days") or 0) > 0:
         return "PULLBACK_CANDIDATE"
     if _is_group_risk_state(
         subindustry_timing_state=row.get("last_subindustry_timing_state"),
@@ -436,7 +457,8 @@ def _build_rolling_watchlist_rows(
             output_rows.append(
                 {
                     "ticker": ticker,
-                    "watchlist_status": "NOT_PART_OF_DATACENTER_ECOSYSTEM",
+                    "current_watchlist_status": "NOT_PART_OF_DATACENTER_ECOSYSTEM",
+                    "window_watchlist_status": "NOT_PART_OF_DATACENTER_ECOSYSTEM",
                     "in_datacenter_ecosystem": "NO",
                 }
             )
@@ -458,6 +480,8 @@ def _build_rolling_watchlist_rows(
             "first_signal_date": current_rows[0].get("signal_date"),
             "last_signal_date": last_row.get("signal_date"),
             "last_close": last_row.get("close"),
+            "last_breakout_signal": last_row.get("breakout_signal"),
+            "last_pullback_signal": last_row.get("pullback_signal"),
             "breakout_days": sum(1 for row in current_rows if row.get("breakout_signal") == 1),
             "pullback_days": sum(1 for row in current_rows if row.get("pullback_signal") == 1),
             "exit_risk_days": sum(1 for row in current_rows if row.get("exit_risk_signal") == 1),
@@ -477,8 +501,10 @@ def _build_rolling_watchlist_rows(
             "last_layer_timing_state": layer_context.get("timing_state"),
             "last_layer_overheat_risk_level": layer_context.get("overheat_risk_level"),
             "last_price_data_status": last_row.get("price_data_status"),
+            "all_price_rows_missing": all(row.get("price_data_status") in WATCHLIST_MISSING_PRICE_STATUSES for row in current_rows),
         }
-        output_row["watchlist_status"] = _classify_rolling_watchlist_status(output_row)
+        output_row["current_watchlist_status"] = _classify_rolling_current_watchlist_status(output_row)
+        output_row["window_watchlist_status"] = _classify_rolling_window_watchlist_status(output_row)
         output_rows.append(output_row)
     return output_rows
 
@@ -582,7 +608,8 @@ def build_markdown_weekly_swing_report(
                 _format_table(
                     [
                         "ticker",
-                        "watchlist_status",
+                        "current_watchlist_status",
+                        "window_watchlist_status",
                         "in_datacenter_ecosystem",
                         "primary_layer",
                         "primary_subindustry",

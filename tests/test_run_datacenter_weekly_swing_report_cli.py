@@ -142,4 +142,6 @@ def test_cli_accepts_watchlist_file_and_renders_watchlist_summary(tmp_path, caps
     assert exit_code == 0
     markdown = expected_output_md.read_text(encoding="utf-8")
     assert "## Watchlist Summary" in markdown
+    assert "current_watchlist_status" in markdown
+    assert "window_watchlist_status" in markdown
     assert "NOT_PART_OF_DATACENTER_ECOSYSTEM" in markdown

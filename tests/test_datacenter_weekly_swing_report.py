@@ -432,10 +432,87 @@ def test_rolling_watchlist_summary_renders_counts_outside_ticker_and_last_group_
     assert "| watchlist_with_exit_risk_days | 2 |" in markdown
     assert "| watchlist_with_high_exit_risk_days | 2 |" in markdown
     assert "| watchlist_missing_price_end_date | 1 |" in markdown
-    assert "| OUTSIDE | NOT_PART_OF_DATACENTER_ECOSYSTEM | NO |" in markdown
-    assert "| AAA | BREAKOUT_CANDIDATE | YES | Infrastructure | AI Chips | 2024-01-02 | 2024-01-10 | 110 | 3 | 0 | 0 | 0 | 0 |  |  |  | HH |  |  |  |  |  | BUY_ZONE | HIGH | NEUTRAL | LOW | OK |" in markdown
-    assert "| BBB | HIGH_EXIT_RISK | YES | Infrastructure | AI Chips | 2024-01-02 | 2024-01-10 | 100 | 0 | 3 | 1 | 1 | 0 | HIGH | subindustry_exit_zone |  | HL |  |  |  |  |  | BUY_ZONE | HIGH | NEUTRAL | LOW | OK |" in markdown
-    assert "| CCC | MISSING_PRICE | YES | Infrastructure | Storage | 2024-01-02 | 2024-01-10 | 83 | 0 | 0 | 4 | 4 | 0 | HIGH | close_below_ema20;latest_structure_label_ll |  | LL |  |  |  |  |  | EXIT_ZONE | EXTREME | NEUTRAL | LOW | MISSING_AS_OF_DATE |" in markdown
+    assert "current_watchlist_status" in markdown
+    assert "window_watchlist_status" in markdown
+    assert "| OUTSIDE | NOT_PART_OF_DATACENTER_ECOSYSTEM | NOT_PART_OF_DATACENTER_ECOSYSTEM | NO |" in markdown
+    assert "| AAA | BREAKOUT_CANDIDATE | BREAKOUT_CANDIDATE | YES | Infrastructure | AI Chips | 2024-01-02 | 2024-01-10 | 110 | 3 | 0 | 0 | 0 | 0 |  |  |  | HH |  |  |  |  |  | BUY_ZONE | HIGH | NEUTRAL | LOW | OK |" in markdown
+    assert "| BBB | HIGH_EXIT_RISK | HIGH_EXIT_RISK | YES | Infrastructure | AI Chips | 2024-01-02 | 2024-01-10 | 100 | 0 | 3 | 1 | 1 | 0 | HIGH | subindustry_exit_zone |  | HL |  |  |  |  |  | BUY_ZONE | HIGH | NEUTRAL | LOW | OK |" in markdown
+    assert "| CCC | MISSING_PRICE | MISSING_PRICE | YES | Infrastructure | Storage | 2024-01-02 | 2024-01-10 | 83 | 0 | 0 | 4 | 4 | 0 | HIGH | close_below_ema20;latest_structure_label_ll |  | LL |  |  |  |  |  | EXIT_ZONE | EXTREME | NEUTRAL | LOW | MISSING_AS_OF_DATE |" in markdown
+
+
+def test_rolling_watchlist_distinguishes_current_group_risk_from_prior_high_exit_risk(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    watchlist_file = tmp_path / "watchlist.txt"
+    _seed_weekly_report_db(analysis_db)
+    watchlist_file.write_text("AAA\n", encoding="utf-8")
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET exit_risk_signal = 1,
+                exit_risk_severity = 'HIGH',
+                exit_reason = 'subindustry_exit_zone'
+            WHERE ticker = 'AAA'
+              AND signal_date = '2024-01-08'
+            """
+        )
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET breakout_signal = 0
+            WHERE ticker = 'AAA'
+              AND signal_date = '2024-01-10'
+            """
+        )
+        conn.commit()
+
+    markdown = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        watchlist_file=watchlist_file,
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )["markdown"]
+
+    assert "| AAA | GROUP_RISK | HIGH_EXIT_RISK | YES |" in markdown
+
+
+def test_rolling_watchlist_distinguishes_current_neutral_from_prior_pullback_days(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    watchlist_file = tmp_path / "watchlist.txt"
+    _seed_weekly_report_db(analysis_db)
+    watchlist_file.write_text("BBB\n", encoding="utf-8")
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET primary_subindustry = 'Cloud'
+            WHERE ticker = 'BBB'
+              AND signal_date = '2024-01-10'
+            """
+        )
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET fast_ema10_pullback_signal = 0,
+                conservative_ema20_pullback_signal = 0,
+                pullback_signal = 0,
+                exit_risk_signal = 0,
+                exit_risk_severity = NULL,
+                exit_reason = NULL
+            WHERE ticker = 'BBB'
+              AND signal_date = '2024-01-10'
+            """
+        )
+        conn.commit()
+
+    markdown = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        watchlist_file=watchlist_file,
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )["markdown"]
+
+    assert "| BBB | NEUTRAL_MONITOR | PULLBACK_CANDIDATE | YES |" in markdown
 
 
 def test_weekly_overheat_progression_groups_by_group_type_and_orders_deterministically(tmp_path):

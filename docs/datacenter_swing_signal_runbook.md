@@ -364,6 +364,11 @@ It only renders persisted rows for one selected `signal_date`.
 - Tickers are normalized to uppercase.
 - Tickers outside the datacenter ecosystem are shown as `NOT_PART_OF_DATACENTER_ECOSYSTEM`.
 - If the default watchlist file does not exist, report generation still succeeds and renders an empty watchlist section.
+- The daily report uses `watchlist_status` for the selected `signal_date`.
+- The rolling report uses:
+  - `current_watchlist_status` for the final day / last available row in the selected window
+  - `window_watchlist_status` for the strongest status seen anywhere in the selected rolling window
+- This avoids ambiguity when a ticker is currently only `GROUP_RISK` but had `HIGH_EXIT_RISK` earlier in the window.
 - Watchlist status is monitoring context only, not a trading recommendation.
 
 Example watchlist:
