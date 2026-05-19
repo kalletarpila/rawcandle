@@ -164,7 +164,7 @@ def load_latest_scheduler_summary(log_dir: str) -> Optional[Dict[str, Any]]:
         return json.load(summary_file)
 
 
-def list_scheduler_log_files(log_dir: str, limit: int = 20) -> List[Dict[str, Any]]:
+def list_scheduler_log_files(log_dir: str, limit: int = 10) -> List[Dict[str, Any]]:
     log_dir_path = Path(log_dir)
     if not log_dir_path.exists() or not log_dir_path.is_dir():
         return []

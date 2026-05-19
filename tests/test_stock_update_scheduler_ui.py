@@ -124,6 +124,18 @@ def test_list_scheduler_log_files_sorts_same_minute_suffix_after_base(tmp_path):
     ]
 
 
+def test_list_scheduler_log_files_defaults_to_10_newest_entries(tmp_path):
+    for minute in range(12):
+        path = tmp_path / f"stock_update_omxh_20260516T{minute:02d}00Z.txt"
+        path.write_text("x", encoding="utf-8")
+
+    entries = list_scheduler_log_files(str(tmp_path))
+
+    assert len(entries) == 10
+    assert entries[0]["filename"] == "stock_update_omxh_20260516T1100Z.txt"
+    assert entries[-1]["filename"] == "stock_update_omxh_20260516T0200Z.txt"
+
+
 def test_format_systemd_on_calendar_formats_validated_time():
     assert format_systemd_on_calendar("05:30") == "*-*-* 05:30:00"
     assert format_systemd_on_calendar("06:30") == "*-*-* 06:30:00"
