@@ -35,7 +35,9 @@ def test_cli_writes_markdown_and_prints_deterministic_summary(tmp_path, capsys):
     assert exit_code == 0
     assert expected_output_md.exists()
     assert expected_output_csv.exists()
-    assert "# Datacenter Daily Swing Signal Report" in expected_output_md.read_text(encoding="utf-8")
+    markdown = expected_output_md.read_text(encoding="utf-8")
+    assert "# Datacenter Daily Swing Signal Report" in markdown
+    assert "## Watchlist Summary" in markdown
     csv_text = expected_output_csv.read_text(encoding="utf-8")
     assert csv_text.startswith("section;value_1;")
     assert "0,0476" in csv_text

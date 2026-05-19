@@ -4,7 +4,10 @@ import sqlite3
 import pytest
 
 from analysis.database_manager import DatabaseManager
+from analysis.datacenter_indices import swing_daily_report as daily_report_module
+from analysis.datacenter_indices import swing_weekly_report as weekly_report_module
 from analysis.datacenter_indices.swing_weekly_report import (
+    DEFAULT_WATCHLIST_FILE,
     build_markdown_weekly_swing_report,
     load_weekly_swing_report_data,
     write_weekly_swing_report,
@@ -332,17 +335,18 @@ def test_finds_last_five_valid_signal_dates_and_generates_report(tmp_path):
         "# Datacenter Rolling Swing Report",
         "## 1. Title and run metadata",
         "## 2. Window summary",
-        "## 3. Ecosystem window change",
-        "## 4. Overheat / rotation risk progression",
-        "## 5. Subindustry timing persistence",
-        "## 6. Subindustry improvement / deterioration",
-        "## 7. Repeated breakout tickers",
-        "## 8. Repeated pullback tickers",
-        "## 9. Repeated exit-risk tickers",
-        "## 10. Synthetic OHLC structure changes",
-        "## 11. Group Structure Break / Reset History",
-        "## 12. Data quality over the window",
-        "## 13. Missing / incomplete inputs summary",
+        "## Watchlist Summary",
+        "## 4. Ecosystem window change",
+        "## 5. Overheat / rotation risk progression",
+        "## 6. Subindustry timing persistence",
+        "## 7. Subindustry improvement / deterioration",
+        "## 8. Repeated breakout tickers",
+        "## 9. Repeated pullback tickers",
+        "## 10. Repeated exit-risk tickers",
+        "## 11. Synthetic OHLC structure changes",
+        "## 12. Group Structure Break / Reset History",
+        "## 13. Data quality over the window",
+        "## 14. Missing / incomplete inputs summary",
     ]:
         assert heading in markdown
     assert "### A. BOS / RESET events during window" in markdown
@@ -419,7 +423,7 @@ def test_rolling_watchlist_summary_renders_counts_outside_ticker_and_last_group_
     markdown = result["markdown"]
 
     assert "## Watchlist Summary" in markdown
-    assert markdown.index("## Watchlist Summary") < markdown.index("## 3. Ecosystem window change")
+    assert markdown.index("## Watchlist Summary") < markdown.index("## 4. Ecosystem window change")
     assert "| watchlist_tickers_total | 4 |" in markdown
     assert "| watchlist_in_datacenter_taxonomy | 3 |" in markdown
     assert "| watchlist_not_in_datacenter_taxonomy | 1 |" in markdown
@@ -446,7 +450,7 @@ def test_weekly_overheat_progression_groups_by_group_type_and_orders_determinist
         generated_at_utc="2026-05-17T12:00:00Z",
         top_n=20,
     )
-    section_start = markdown.index("## 4. Overheat / rotation risk progression")
+    section_start = markdown.index("## 5. Overheat / rotation risk progression")
     next_section = markdown.index("Worsened groups")
     section = markdown[section_start:next_section]
     assert "| 2024-01-10 | ecosystem | ELEVATED | 1 |" in section
@@ -486,7 +490,7 @@ def test_weekly_overheat_progression_renders_null_status_deterministically(tmp_p
         generated_at_utc="2026-05-17T12:00:00Z",
         top_n=20,
     )
-    section_start = markdown.index("## 4. Overheat / rotation risk progression")
+    section_start = markdown.index("## 5. Overheat / rotation risk progression")
     next_section = markdown.index("Worsened groups")
     section = markdown[section_start:next_section]
     assert "| 2024-01-10 | layer | NULL | 1 |" in section
@@ -540,10 +544,34 @@ def test_weekly_group_structure_break_reset_section_renders_no_rows_when_absent(
         generated_at_utc="2026-05-17T12:00:00Z",
         top_n=20,
     )
-    heading = markdown.index("## 11. Group Structure Break / Reset History")
-    next_heading = markdown.index("## 12. Data quality over the window")
+    heading = markdown.index("## 12. Group Structure Break / Reset History")
+    next_heading = markdown.index("## 13. Data quality over the window")
     section = markdown[heading:next_heading]
     assert section.count("No rows.") == 2
+
+
+def test_weekly_report_uses_default_watchlist_path_and_missing_file_is_non_fatal(tmp_path, monkeypatch):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+    missing_watchlist = tmp_path / "missing_watchlist.txt"
+    monkeypatch.setattr(daily_report_module, "DEFAULT_WATCHLIST_FILE", str(missing_watchlist))
+    monkeypatch.setattr(weekly_report_module, "DEFAULT_WATCHLIST_FILE", str(missing_watchlist))
+
+    report_data = load_weekly_swing_report_data(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+    )
+    markdown = build_markdown_weekly_swing_report(
+        report_data,
+        generated_at_utc="2026-05-17T12:00:00Z",
+        top_n=20,
+    )
+
+    assert report_data["watchlist_file_path"] == str(missing_watchlist)
+    assert report_data["watchlist_file_missing"] is True
+    assert "## Watchlist Summary" in markdown
+    assert "| watchlist_tickers_total | 0 |" in markdown
+    assert f"No watchlist file found: {missing_watchlist}" in markdown
 
 
 def test_weekly_exit_risk_section_sorts_by_severity_after_day_count(tmp_path):

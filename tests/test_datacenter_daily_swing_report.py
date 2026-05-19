@@ -4,7 +4,9 @@ import sqlite3
 import pytest
 
 from analysis.database_manager import DatabaseManager
+from analysis.datacenter_indices import swing_daily_report as daily_report_module
 from analysis.datacenter_indices.swing_daily_report import (
+    DEFAULT_WATCHLIST_FILE,
     _load_watchlist_tickers,
     build_markdown_daily_swing_report,
     load_daily_swing_report_data,
@@ -293,20 +295,21 @@ def test_generates_markdown_report_with_required_sections_and_filters(tmp_path):
     for heading in [
         "# Datacenter Daily Swing Signal Report",
         "## 1. Title and run metadata",
-        "## 2. Dashboard",
-        "## 3. Rotation Risk / Overheat Index",
-        "## 4. Subindustry Timing States",
-        "## 5. Buy-Zone Subindustries",
-        "## 6. Add-On Pullback Subindustries",
-        "## 7. Trim/Watch Subindustries",
-        "## 8. Exit-Zone Subindustries",
-        "## 9. Synthetic OHLC Structure Summary",
-        "## 10. Group Structure Breaks / Resets",
-        "## 11. Breakout Ticker Scanner",
-        "## 12. Pullback Ticker Scanner",
-        "## 13. Exit-Risk Ticker Scanner",
-        "## 14. Data Quality",
-        "## 15. Missing / Incomplete Inputs Summary",
+        "## Watchlist Summary",
+        "## 3. Dashboard",
+        "## 4. Rotation Risk / Overheat Index",
+        "## 5. Subindustry Timing States",
+        "## 6. Buy-Zone Subindustries",
+        "## 7. Add-On Pullback Subindustries",
+        "## 8. Trim/Watch Subindustries",
+        "## 9. Exit-Zone Subindustries",
+        "## 10. Synthetic OHLC Structure Summary",
+        "## 11. Group Structure Breaks / Resets",
+        "## 12. Breakout Ticker Scanner",
+        "## 13. Pullback Ticker Scanner",
+        "## 14. Exit-Risk Ticker Scanner",
+        "## 15. Data Quality",
+        "## 16. Missing / Incomplete Inputs Summary",
     ]:
         assert heading in markdown
 
@@ -380,7 +383,7 @@ def test_daily_watchlist_summary_renders_inside_outside_group_context_and_status
     markdown = result["markdown"]
 
     assert "## Watchlist Summary" in markdown
-    assert markdown.index("## Watchlist Summary") < markdown.index("## 2. Dashboard")
+    assert markdown.index("## Watchlist Summary") < markdown.index("## 3. Dashboard")
     assert "| watchlist_tickers_total | 4 |" in markdown
     assert "| watchlist_in_datacenter_taxonomy | 3 |" in markdown
     assert "| watchlist_not_in_datacenter_taxonomy | 1 |" in markdown
@@ -423,10 +426,33 @@ def test_daily_group_structure_breaks_section_renders_no_rows_when_absent(tmp_pa
         generated_at_utc="2026-05-17T12:00:00Z",
         top_n=20,
     )
-    section_start = markdown.index("## 10. Group Structure Breaks / Resets")
-    next_section = markdown.index("## 11. Breakout Ticker Scanner")
+    section_start = markdown.index("## 11. Group Structure Breaks / Resets")
+    next_section = markdown.index("## 12. Breakout Ticker Scanner")
     section = markdown[section_start:next_section]
     assert "No rows." in section
+
+
+def test_daily_report_uses_default_watchlist_path_and_missing_file_is_non_fatal(tmp_path, monkeypatch):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_report_db(analysis_db)
+    missing_watchlist = tmp_path / "missing_watchlist.txt"
+    monkeypatch.setattr(daily_report_module, "DEFAULT_WATCHLIST_FILE", str(missing_watchlist))
+
+    report_data = load_daily_swing_report_data(
+        analysis_db_path=analysis_db,
+        signal_date="2024-01-10",
+    )
+    markdown = build_markdown_daily_swing_report(
+        report_data,
+        generated_at_utc="2026-05-17T12:00:00Z",
+        top_n=20,
+    )
+
+    assert report_data["watchlist_file_path"] == str(missing_watchlist)
+    assert report_data["watchlist_file_missing"] is True
+    assert "## Watchlist Summary" in markdown
+    assert "| watchlist_tickers_total | 0 |" in markdown
+    assert f"No watchlist file found: {missing_watchlist}" in markdown
 
 
 def test_daily_exit_risk_section_sorts_by_severity_before_return_and_distance(tmp_path):
@@ -461,7 +487,7 @@ def test_daily_exit_risk_section_sorts_by_severity_before_return_and_distance(tm
         generated_at_utc="2026-05-17T12:00:00Z",
         top_n=20,
     )
-    section_start = markdown.index("## 13. Exit-Risk Ticker Scanner")
+    section_start = markdown.index("## 14. Exit-Risk Ticker Scanner")
     exit_section = markdown[section_start:]
     ccc_index = exit_section.index("| CCC | Infrastructure | Storage |")
     aaa_index = exit_section.index("| AAA | Infrastructure | AI Chips |")

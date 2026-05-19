@@ -12,6 +12,7 @@ CURRENT_DIR = Path(__file__).resolve().parent
 if str(CURRENT_DIR) not in sys.path:
     sys.path.insert(0, str(CURRENT_DIR))
 
+from analysis.datacenter_indices.swing_daily_report import DEFAULT_WATCHLIST_FILE
 from analysis.datacenter_indices.swing_weekly_report import (
     DEFAULT_OHLC_CALC_VERSION,
     DEFAULT_SIGNAL_VERSION,
@@ -30,7 +31,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--signal-version", type=str, default=DEFAULT_SIGNAL_VERSION, help="Signal version to report")
     parser.add_argument("--ohlc-calc-version", type=str, default=DEFAULT_OHLC_CALC_VERSION, help="Synthetic OHLC calc version to report")
     parser.add_argument("--taxonomy-version", type=str, default=None, help="Optional taxonomy_version to scope the report")
-    parser.add_argument("--watchlist-file", type=Path, default=None, help="Optional plain-text watchlist file with one ticker per line")
+    parser.add_argument(
+        "--watchlist-file",
+        type=Path,
+        default=Path(DEFAULT_WATCHLIST_FILE),
+        help="Plain-text watchlist file with one ticker per line",
+    )
     parser.add_argument("--output-md", type=Path, default=None, help="Optional output Markdown path")
     parser.add_argument("--output-csv", type=Path, default=None, help="Optional output CSV path")
     parser.add_argument("--top-n", type=int, default=20, help="Maximum row count for ranking sections")

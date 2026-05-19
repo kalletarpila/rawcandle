@@ -354,12 +354,16 @@ It only renders persisted rows for one selected `signal_date`.
 
 ## Watchlist Summary
 
-- `--watchlist-file` is supported by both `run_datacenter_daily_signal_report.py` and `run_datacenter_weekly_swing_report.py`.
+- Daily and rolling reports always include `Watchlist Summary`.
+- The default watchlist path is `/home/kalle/projects/rawcandle/swing_reports/datacenter_watchlist.txt`.
+- `--watchlist-file` is supported by both `run_datacenter_daily_signal_report.py` and `run_datacenter_weekly_swing_report.py` and overrides the default path.
+- `run_datacenter_swing_pipeline.py` passes the same default watchlist path to both report stages unless `--watchlist-file` is provided there.
 - The watchlist file is plain text with one ticker per line.
 - Empty lines are ignored.
 - Lines starting with `#` are ignored.
 - Tickers are normalized to uppercase.
 - Tickers outside the datacenter ecosystem are shown as `NOT_PART_OF_DATACENTER_ECOSYSTEM`.
+- If the default watchlist file does not exist, report generation still succeeds and renders an empty watchlist section.
 - Watchlist status is monitoring context only, not a trading recommendation.
 
 Example watchlist:
@@ -376,6 +380,21 @@ AEIS
 OUTSIDE
 ```
 
+Create the default watchlist:
+
+```bash
+cat > /home/kalle/projects/rawcandle/swing_reports/datacenter_watchlist.txt <<'EOF'
+NVDA
+AVGO
+TSM
+ANET
+VRT
+ETN
+NVT
+AEIS
+EOF
+```
+
 Daily example:
 
 ```bash
@@ -383,7 +402,6 @@ python3 run_datacenter_daily_signal_report.py \
   --analysis-db data/analysis.db \
   --signal-date 2026-05-15 \
   --taxonomy-version DC_TAXONOMY_FULL_V1 \
-  --watchlist-file watchlist.txt \
   --output-md /home/kalle/projects/rawcandle/swing_reports/datacenter_daily_2026-05-15_watchlist_full.md \
   --output-csv /home/kalle/projects/rawcandle/swing_reports/datacenter_daily_2026-05-15_watchlist_full.csv
 ```
@@ -396,7 +414,6 @@ python3 run_datacenter_weekly_swing_report.py \
   --end-date 2026-05-15 \
   --taxonomy-version DC_TAXONOMY_FULL_V1 \
   --window-size 20 \
-  --watchlist-file watchlist.txt \
   --output-md /home/kalle/projects/rawcandle/swing_reports/datacenter_rolling_2026-05-15_20d_watchlist_full.md \
   --output-csv /home/kalle/projects/rawcandle/swing_reports/datacenter_rolling_2026-05-15_20d_watchlist_full.csv
 ```

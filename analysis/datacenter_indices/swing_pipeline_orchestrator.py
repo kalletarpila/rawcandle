@@ -8,6 +8,7 @@ from typing import Callable
 from analysis.datacenter_indices.swing_daily_report import (
     DEFAULT_OHLC_CALC_VERSION,
     DEFAULT_SIGNAL_VERSION,
+    DEFAULT_WATCHLIST_FILE,
     format_daily_swing_report_summary_lines,
     write_daily_swing_signal_report,
 )
@@ -137,6 +138,7 @@ def _run_daily_report_stage(
     signal_version: str,
     ohlc_calc_version: str,
     taxonomy_version: str,
+    watchlist_file: Path,
     output_md: Path,
     output_csv: Path,
 ) -> dict[str, object]:
@@ -146,6 +148,7 @@ def _run_daily_report_stage(
         signal_version=signal_version,
         ohlc_calc_version=ohlc_calc_version,
         taxonomy_version=taxonomy_version,
+        watchlist_file=watchlist_file,
         output_md=output_md,
         output_csv=output_csv,
     )
@@ -162,6 +165,7 @@ def _run_weekly_report_stage(
     ohlc_calc_version: str,
     taxonomy_version: str,
     window_size: int,
+    watchlist_file: Path,
     output_md: Path,
     output_csv: Path,
 ) -> dict[str, object]:
@@ -172,6 +176,7 @@ def _run_weekly_report_stage(
         ohlc_calc_version=ohlc_calc_version,
         taxonomy_version=taxonomy_version,
         window_size=window_size,
+        watchlist_file=watchlist_file,
         output_md=output_md,
         output_csv=output_csv,
     )
@@ -197,6 +202,7 @@ def run_datacenter_swing_pipeline(
     expected_group_count: int | None = None,
     expected_synthetic_ohlc_count: int | None = None,
     weekly_window_size: int = 20,
+    watchlist_file: Path | None = None,
     skip_index: bool = False,
     skip_audit: bool = False,
     skip_reports: bool = False,
@@ -204,6 +210,7 @@ def run_datacenter_swing_pipeline(
     dry_run: bool = False,
     generated_at_utc: str | None = None,
 ) -> dict[str, object]:
+    selected_watchlist_file = Path(DEFAULT_WATCHLIST_FILE) if watchlist_file is None else Path(watchlist_file)
     output_hhmm = _resolve_output_timestamp_hhmm(generated_at_utc)
     daily_output_md = _timestamp_output_path(
         output_dir / f"datacenter_daily_{signal_date}_full.md",
@@ -606,6 +613,8 @@ def run_datacenter_swing_pipeline(
             ohlc_calc_version,
             "--taxonomy-version",
             taxonomy_version,
+            "--watchlist-file",
+            str(selected_watchlist_file),
             "--output-md",
             str(output_dir / f"datacenter_daily_{signal_date}_full.md"),
             "--output-csv",
@@ -624,6 +633,8 @@ def run_datacenter_swing_pipeline(
             taxonomy_version,
             "--window-size",
             str(weekly_window_size),
+            "--watchlist-file",
+            str(selected_watchlist_file),
             "--output-md",
             str(output_dir / f"datacenter_weekly_{signal_date}_full.md"),
             "--output-csv",
@@ -639,6 +650,7 @@ def run_datacenter_swing_pipeline(
                     signal_version=signal_version,
                     ohlc_calc_version=ohlc_calc_version,
                     taxonomy_version=taxonomy_version,
+                    watchlist_file=selected_watchlist_file,
                     output_md=daily_output_md,
                     output_csv=daily_output_csv,
                 ),
@@ -666,6 +678,7 @@ def run_datacenter_swing_pipeline(
                     ohlc_calc_version=ohlc_calc_version,
                     taxonomy_version=taxonomy_version,
                     window_size=weekly_window_size,
+                    watchlist_file=selected_watchlist_file,
                     output_md=weekly_output_md,
                     output_csv=weekly_output_csv,
                 ),
