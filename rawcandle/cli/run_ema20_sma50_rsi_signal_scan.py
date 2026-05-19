@@ -382,6 +382,7 @@ def format_summary_lines(
     forward_window: int = 60,
     forward_returns_rows_with_data: int = 0,
     forward_returns_rows_without_data: int = 0,
+    forward_returns_positive_count: int = 0,
 ) -> list[str]:
     lines = [
         f"SUMMARY market={market}",
@@ -393,12 +394,19 @@ def format_summary_lines(
         f"SUMMARY returned={returned_count}",
     ]
     if include_forward_returns:
+        forward_returns_positive_pct = (
+            100.0 * forward_returns_positive_count / float(forward_returns_rows_with_data)
+            if forward_returns_rows_with_data > 0
+            else 0.0
+        )
         lines.extend(
             [
                 "SUMMARY forward_returns_included=1",
                 f"SUMMARY forward_window={forward_window}",
                 f"SUMMARY forward_returns_rows_with_data={forward_returns_rows_with_data}",
                 f"SUMMARY forward_returns_rows_without_data={forward_returns_rows_without_data}",
+                f"SUMMARY forward_returns_positive_count={forward_returns_positive_count}",
+                f"SUMMARY forward_returns_positive_pct={forward_returns_positive_pct:.4f}",
             ]
         )
     return lines
@@ -432,6 +440,7 @@ def main(argv: list[str] | None = None) -> int:
     limited_signals = signals[:limit]
     forward_rows_with_data = 0
     forward_rows_without_data = 0
+    forward_positive_count = 0
     forward_metrics_by_key: dict[tuple[str, str], ForwardReturnMetrics] = {}
     if args.include_forward_returns:
         for row in limited_signals:
@@ -445,6 +454,11 @@ def main(argv: list[str] | None = None) -> int:
                 forward_rows_without_data += 1
             else:
                 forward_rows_with_data += 1
+                if (
+                    metrics.max_forward_return_pct is not None
+                    and metrics.max_forward_return_pct > 0.0
+                ):
+                    forward_positive_count += 1
     if args.output_format == "csv":
         output_path = (
             Path(args.output)
@@ -477,6 +491,7 @@ def main(argv: list[str] | None = None) -> int:
         forward_window=forward_window,
         forward_returns_rows_with_data=forward_rows_with_data,
         forward_returns_rows_without_data=forward_rows_without_data,
+        forward_returns_positive_count=forward_positive_count,
     )
     if args.output_format == "csv":
         csv_lines.extend(summary_lines)
