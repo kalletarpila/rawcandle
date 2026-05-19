@@ -129,6 +129,8 @@ def test_cli_csv_output_detects_expected_rows_and_limit_ordering(tmp_path, capsy
     assert lines[1] == "AAA;2024-03-01;100.0952;100.0200;55.0000"
     assert "AAB;2024-03-01;100.0952;100.0200;65.0000" not in lines
     assert "BBB;2024-03-01;100.0952;100.0200;50.0000" not in lines
+    assert "DDD;2024-03-01;100.5238;100.3000;75.0000" not in lines
+    assert "FIN;2024-03-01;100.0952;100.0200;80.0000" not in lines
     assert lines[-7:] == [
         "SUMMARY market=usa",
         "SUMMARY start_date=2024-02-28",
@@ -173,6 +175,45 @@ def test_cli_summary_output_prints_only_summary_lines_and_respects_date_filter(t
         "SUMMARY market=usa",
         "SUMMARY start_date=2024-03-02",
         "SUMMARY end_date=2024-03-05",
+        "SUMMARY min_rsi=50.0000",
+        "SUMMARY limit=100",
+        "SUMMARY candidates=0",
+        "SUMMARY returned=0",
+    ]
+
+
+def test_cli_end_date_filter_excludes_cross_after_selected_range(tmp_path, capsys):
+    price_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _create_price_db(price_db)
+    _create_analysis_db(analysis_db)
+
+    _insert_price_series(price_db, "AAA", "usa", _base_cross_series())
+    _insert_rsi(analysis_db, "AAA", "2024-03-01", 55.0)
+
+    exit_code = signal_scan_main(
+        [
+            "--db",
+            str(price_db),
+            "--analysis-db",
+            str(analysis_db),
+            "--market",
+            "usa",
+            "--start-date",
+            "2024-02-28",
+            "--end-date",
+            "2024-02-29",
+            "--output-format",
+            "summary",
+        ]
+    )
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert lines == [
+        "SUMMARY market=usa",
+        "SUMMARY start_date=2024-02-28",
+        "SUMMARY end_date=2024-02-29",
         "SUMMARY min_rsi=50.0000",
         "SUMMARY limit=100",
         "SUMMARY candidates=0",
