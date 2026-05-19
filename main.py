@@ -313,6 +313,17 @@ class RawCandleApp:
                 analysis_end,
             )
 
+        def maybe_update_quarter_state(ticker: str, market: str, stock) -> dict:
+            return self._update_quarter_state_from_yahoo_detection(
+                ticker=ticker,
+                market=market,
+                yahoo_latest_period_end_date=self._extract_yahoo_latest_quarter_period_end_date(
+                    stock
+                ),
+                run_id=self._quarter_detection_run_id(),
+                checked_at_utc=self._quarter_state_timestamp_utc(),
+            )
+
         def calculate_dow_structures(**kwargs) -> dict:
             return calculate_missing_or_outdated_stock_dow_structures(**kwargs)
 
@@ -322,6 +333,7 @@ class RawCandleApp:
             "maybe_backfill_splits": maybe_backfill_splits,
             "calculate_divergences": calculate_divergences,
             "run_candlestick_analysis": run_candlestick_analysis,
+            "maybe_update_quarter_state": maybe_update_quarter_state,
             "calculate_dow_structures": calculate_dow_structures,
             "pivot_radius": DEFAULT_PIVOT_RADIUS,
             "bounded_initial_from_date": DEFAULT_BOUNDED_INITIAL_FROM_DATE,
@@ -349,6 +361,7 @@ class RawCandleApp:
             maybe_backfill_splits=adapters["maybe_backfill_splits"],
             calculate_divergences=adapters["calculate_divergences"],
             run_candlestick_analysis=adapters["run_candlestick_analysis"],
+            maybe_update_quarter_state=adapters["maybe_update_quarter_state"],
             calculate_dow_structures=adapters["calculate_dow_structures"],
             pivot_radius=adapters["pivot_radius"],
             bounded_initial_from_date=adapters["bounded_initial_from_date"],

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import sqlite3
+import time
 from datetime import date, timedelta
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
@@ -219,6 +220,13 @@ SplitSyncCallable = Callable[[str, Any], int]
 SplitBackfillCallable = Callable[[str], bool]
 DivergenceUpdateCallable = Callable[[str, bool], tuple]
 CandlestickUpdateCallable = Callable[[str, str, str], tuple]
+QuarterStateUpdateCallable = Callable[[str, str, Any], Any]
+
+YAHOO_SHORT_BRANCH_SLEEP_SECONDS = 0.5
+YAHOO_SUCCESS_LARGE_INSERT_SLEEP_SECONDS = 1.0
+YAHOO_SUCCESS_SMALL_INSERT_SLEEP_SECONDS = 1.5
+YAHOO_LARGE_BATCH_SLEEP_SECONDS = 30.0
+YAHOO_LARGE_BATCH_INTERVAL = 500
 
 
 def _parse_iso_date(value: str) -> date:
@@ -236,6 +244,25 @@ def _is_missing_ohlcv_value(value: Any) -> bool:
 
 def _format_history_index_date(index_value: Any) -> str:
     return index_value.strftime("%Y-%m-%d")
+
+
+def _sleep_yahoo_after_history_range() -> None:
+    time.sleep(YAHOO_SHORT_BRANCH_SLEEP_SECONDS)
+
+
+def _sleep_yahoo_after_ticker(rows_added: Optional[int]) -> None:
+    if rows_added is None:
+        time.sleep(YAHOO_SHORT_BRANCH_SLEEP_SECONDS)
+        return
+    if rows_added >= 50:
+        time.sleep(YAHOO_SUCCESS_LARGE_INSERT_SLEEP_SECONDS)
+        return
+    time.sleep(YAHOO_SUCCESS_SMALL_INSERT_SLEEP_SECONDS)
+
+
+def _sleep_yahoo_large_batch_if_needed(processed_count: int) -> None:
+    if processed_count % YAHOO_LARGE_BATCH_INTERVAL == 0:
+        time.sleep(YAHOO_LARGE_BATCH_SLEEP_SECONDS)
 
 
 def resolve_stock_update_market(market: Optional[str]) -> str:
@@ -498,6 +525,7 @@ def fetch_history_for_date_ranges(
         )
         result.histories.append(history)
         result.ranges_returned += 1
+        _sleep_yahoo_after_history_range()
     return result
 
 
@@ -641,6 +669,7 @@ def execute_ticker_update_flow(
     maybe_backfill_splits: SplitBackfillCallable,
     calculate_divergences: DivergenceUpdateCallable,
     run_candlestick_analysis: CandlestickUpdateCallable,
+    maybe_update_quarter_state: Optional[QuarterStateUpdateCallable] = None,
 ) -> StockTickerUpdateFlowResult:
     if plan.needs_update is False:
         return StockTickerUpdateFlowResult(
@@ -657,6 +686,16 @@ def execute_ticker_update_flow(
         plan=plan,
         market=market,
     )
+
+    if maybe_update_quarter_state is not None:
+        try:
+            maybe_update_quarter_state(
+                plan.candidate.ticker,
+                market,
+                stock,
+            )
+        except Exception:
+            pass
 
     if ohlcv_result.ohlcv_rows_converted == 0:
         return StockTickerUpdateFlowResult(
@@ -696,11 +735,13 @@ def execute_stock_update_batch(
     maybe_backfill_splits: SplitBackfillCallable,
     calculate_divergences: DivergenceUpdateCallable,
     run_candlestick_analysis: CandlestickUpdateCallable,
+    maybe_update_quarter_state: Optional[QuarterStateUpdateCallable] = None,
 ) -> StockUpdateBatchExecutionResult:
     result = StockUpdateBatchExecutionResult(market=market)
 
     for plan in plans:
         result.tickers_checked += 1
+        ticker_terminal_rows_added: Optional[int] = None
         try:
             if plan.needs_update is False:
                 stock = object()
@@ -716,6 +757,7 @@ def execute_stock_update_batch(
                 maybe_backfill_splits=maybe_backfill_splits,
                 calculate_divergences=calculate_divergences,
                 run_candlestick_analysis=run_candlestick_analysis,
+                maybe_update_quarter_state=maybe_update_quarter_state,
             )
             result.ticker_results.append(ticker_result)
 
@@ -723,6 +765,10 @@ def execute_stock_update_batch(
                 result.tickers_skipped += 1
             else:
                 result.tickers_updated += 1
+                if ticker_result.ohlcv_result is not None:
+                    ticker_terminal_rows_added = (
+                        ticker_result.ohlcv_result.ohlcv_rows_inserted
+                    )
 
             if ticker_result.ohlcv_result is not None:
                 result.ohlcv_rows_inserted += (
@@ -735,6 +781,9 @@ def execute_stock_update_batch(
             result.errors.append(
                 f"Ticker update failed ({plan.candidate.ticker}): {exc}"
             )
+        finally:
+            _sleep_yahoo_after_ticker(ticker_terminal_rows_added)
+            _sleep_yahoo_large_batch_if_needed(result.tickers_checked)
 
     return result
 
@@ -794,6 +843,7 @@ def execute_stock_update_orchestration(
     maybe_backfill_splits: SplitBackfillCallable,
     calculate_divergences: DivergenceUpdateCallable,
     run_candlestick_analysis: CandlestickUpdateCallable,
+    maybe_update_quarter_state: Optional[QuarterStateUpdateCallable],
     calculate_dow_structures: DowUpdateCallable,
     pivot_radius: Any,
     bounded_initial_from_date: Any,
@@ -811,6 +861,7 @@ def execute_stock_update_orchestration(
         maybe_backfill_splits=maybe_backfill_splits,
         calculate_divergences=calculate_divergences,
         run_candlestick_analysis=run_candlestick_analysis,
+        maybe_update_quarter_state=maybe_update_quarter_state,
     )
     dow_result = execute_final_dow_update(
         calculate_dow_structures=calculate_dow_structures,
@@ -872,6 +923,7 @@ def run_stock_data_update(
     maybe_backfill_splits: SplitBackfillCallable,
     calculate_divergences: DivergenceUpdateCallable,
     run_candlestick_analysis: CandlestickUpdateCallable,
+    maybe_update_quarter_state: Optional[QuarterStateUpdateCallable] = None,
     calculate_dow_structures: DowUpdateCallable,
     pivot_radius: Any,
     bounded_initial_from_date: Any,
@@ -903,6 +955,7 @@ def run_stock_data_update(
         maybe_backfill_splits=maybe_backfill_splits,
         calculate_divergences=calculate_divergences,
         run_candlestick_analysis=run_candlestick_analysis,
+        maybe_update_quarter_state=maybe_update_quarter_state,
         calculate_dow_structures=calculate_dow_structures,
         pivot_radius=pivot_radius,
         bounded_initial_from_date=bounded_initial_from_date,

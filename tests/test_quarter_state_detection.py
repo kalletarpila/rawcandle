@@ -341,7 +341,7 @@ def test_update_stock_data_counts_missing_quarter_detection(tmp_path, monkeypatc
     app.loading_text = SimpleNamespace(value="", color=None)
     app.page = _FakePage()
     app.update_start_input = SimpleNamespace(value="")
-    app.update_market_dropdown = SimpleNamespace(value="")
+    app.update_market_dropdown = SimpleNamespace(value="usa")
     app._calculate_and_save_divergences = lambda ticker, only_missing=True: (True, 0, "")
 
     monkeypatch.setattr(main.yf, "Ticker", lambda ticker: _QuarterlessTicker())
@@ -400,7 +400,7 @@ def test_update_stock_data_fetches_only_forward_from_latest_db_day(tmp_path, mon
     app.loading_text = SimpleNamespace(value="", color=None)
     app.page = _FakePage()
     app.update_start_input = SimpleNamespace(value="")
-    app.update_market_dropdown = SimpleNamespace(value="")
+    app.update_market_dropdown = SimpleNamespace(value="usa")
     app._calculate_and_save_divergences = lambda ticker, only_missing=True: (True, 0, "")
 
     fake_ticker = _QuarterlessTicker()

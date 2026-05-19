@@ -24,6 +24,7 @@ def test_build_stock_update_service_adapters_returns_expected_keys(monkeypatch):
         "maybe_backfill_splits",
         "calculate_divergences",
         "run_candlestick_analysis",
+        "maybe_update_quarter_state",
         "calculate_dow_structures",
         "pivot_radius",
         "bounded_initial_from_date",
@@ -146,6 +147,46 @@ def test_build_stock_update_service_adapters_candlestick_calls_app_method():
 
     assert result == (4, None)
     assert called == [("AAA", "2026-01-01", "2026-01-10")]
+
+
+def test_build_stock_update_service_adapters_quarter_detection_calls_app_methods():
+    fake_stock = object()
+    extract_calls = []
+    update_calls = []
+    app = main.RawCandleApp.__new__(main.RawCandleApp)
+    app.osakedata_db_path = "/tmp/osakedata.db"
+    app._maybe_backfill_splits_for_ticker = lambda ticker: False
+    app._calculate_and_save_divergences = lambda ticker, only_missing=True: (
+        True,
+        0,
+        "",
+    )
+    app._run_incremental_candlestick_analysis = (
+        lambda ticker, analysis_start, analysis_end: (0, None)
+    )
+    app._extract_yahoo_latest_quarter_period_end_date = (
+        lambda stock: extract_calls.append(stock) or "2026-03-31"
+    )
+    app._quarter_detection_run_id = lambda: "run-1"
+    app._quarter_state_timestamp_utc = lambda: "2026-05-19T10:00:00Z"
+    app._update_quarter_state_from_yahoo_detection = lambda **kwargs: update_calls.append(
+        kwargs
+    ) or {"checked": True}
+
+    adapters = app._build_stock_update_service_adapters()
+    result = adapters["maybe_update_quarter_state"]("AAA", "usa", fake_stock)
+
+    assert result == {"checked": True}
+    assert extract_calls == [fake_stock]
+    assert update_calls == [
+        {
+            "ticker": "AAA",
+            "market": "usa",
+            "yahoo_latest_period_end_date": "2026-03-31",
+            "run_id": "run-1",
+            "checked_at_utc": "2026-05-19T10:00:00Z",
+        }
+    ]
 
 
 def test_build_stock_update_service_adapters_dow_forwards_kwargs_exactly(monkeypatch):
