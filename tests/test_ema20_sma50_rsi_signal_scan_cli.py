@@ -86,6 +86,18 @@ def _already_above_series():
     return [100.0] * 50 + [101.0] * 15
 
 
+def _base_cross_series_with_forward_prices():
+    return _base_cross_series() + [110.0, 90.0, 110.0, 95.0]
+
+
+def _single_signal_with_no_future_series():
+    return [100.0] * 60 + [101.0]
+
+
+def _single_signal_with_immediate_forward_prices():
+    return [100.0] * 60 + [101.0, 110.0, 90.0, 110.0, 95.0]
+
+
 def test_cli_csv_output_detects_expected_rows_and_limit_ordering(tmp_path, capsys):
     price_db = tmp_path / "osakedata.db"
     analysis_db = tmp_path / "analysis.db"
@@ -294,3 +306,209 @@ def test_cli_respects_min_rsi_strictly_above_threshold(tmp_path, capsys):
         "SUMMARY candidates=0",
         "SUMMARY returned=0",
     ]
+
+
+def test_cli_forward_returns_default_output_stays_unchanged(tmp_path, capsys):
+    price_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _create_price_db(price_db)
+    _create_analysis_db(analysis_db)
+
+    _insert_price_series(price_db, "AAA", "usa", _single_signal_with_immediate_forward_prices())
+    _insert_rsi(analysis_db, "AAA", "2024-03-01", 55.0)
+
+    exit_code = signal_scan_main(
+        [
+            "--db",
+            str(price_db),
+            "--analysis-db",
+            str(analysis_db),
+            "--market",
+            "usa",
+            "--start-date",
+            "2024-02-28",
+            "--end-date",
+            "2024-03-05",
+        ]
+    )
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert lines[0] == "ticker;date;ema20;sma50;rsi"
+    assert not any("forward_returns" in line for line in lines)
+    assert lines[1] == "AAA;2024-03-01;100.0952;100.0200;55.0000"
+
+
+def test_cli_forward_returns_adds_csv_columns_and_uses_earliest_ties(tmp_path, capsys):
+    price_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _create_price_db(price_db)
+    _create_analysis_db(analysis_db)
+
+    _insert_price_series(price_db, "AAA", "usa", _single_signal_with_immediate_forward_prices())
+    _insert_rsi(analysis_db, "AAA", "2024-03-01", 55.0)
+
+    exit_code = signal_scan_main(
+        [
+            "--db",
+            str(price_db),
+            "--analysis-db",
+            str(analysis_db),
+            "--market",
+            "usa",
+            "--start-date",
+            "2024-02-28",
+            "--end-date",
+            "2024-03-05",
+            "--include-forward-returns",
+        ]
+    )
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert (
+        lines[0]
+        == "ticker;date;ema20;sma50;rsi;max_forward_return_pct;max_forward_return_days;min_forward_return_pct;min_forward_return_days"
+    )
+    assert lines[1] == "AAA;2024-03-01;100.0952;100.0200;55.0000;8.9109;1;-10.8911;2"
+    assert lines[-4:] == [
+        "SUMMARY forward_returns_included=1",
+        "SUMMARY forward_window=60",
+        "SUMMARY forward_returns_rows_with_data=1",
+        "SUMMARY forward_returns_rows_without_data=0",
+    ]
+
+
+def test_cli_forward_returns_respects_custom_window(tmp_path, capsys):
+    price_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _create_price_db(price_db)
+    _create_analysis_db(analysis_db)
+
+    _insert_price_series(price_db, "AAA", "usa", _single_signal_with_immediate_forward_prices())
+    _insert_rsi(analysis_db, "AAA", "2024-03-01", 55.0)
+
+    exit_code = signal_scan_main(
+        [
+            "--db",
+            str(price_db),
+            "--analysis-db",
+            str(analysis_db),
+            "--market",
+            "usa",
+            "--start-date",
+            "2024-02-28",
+            "--end-date",
+            "2024-03-05",
+            "--include-forward-returns",
+            "--forward-window",
+            "1",
+        ]
+    )
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert lines[1] == "AAA;2024-03-01;100.0952;100.0200;55.0000;8.9109;1;8.9109;1"
+    assert "SUMMARY forward_window=1" in lines
+
+
+def test_cli_forward_returns_handles_missing_future_data_and_summary_only(tmp_path, capsys):
+    price_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _create_price_db(price_db)
+    _create_analysis_db(analysis_db)
+
+    _insert_price_series(price_db, "AAA", "usa", _single_signal_with_no_future_series())
+    _insert_rsi(analysis_db, "AAA", "2024-03-01", 55.0)
+
+    exit_code = signal_scan_main(
+        [
+            "--db",
+            str(price_db),
+            "--analysis-db",
+            str(analysis_db),
+            "--market",
+            "usa",
+            "--start-date",
+            "2024-03-01",
+            "--end-date",
+            "2024-03-01",
+            "--include-forward-returns",
+        ]
+    )
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert lines[1] == "AAA;2024-03-01;100.0952;100.0200;55.0000;;;;"
+    assert lines[-4:] == [
+        "SUMMARY forward_returns_included=1",
+        "SUMMARY forward_window=60",
+        "SUMMARY forward_returns_rows_with_data=0",
+        "SUMMARY forward_returns_rows_without_data=1",
+    ]
+
+    exit_code = signal_scan_main(
+        [
+            "--db",
+            str(price_db),
+            "--analysis-db",
+            str(analysis_db),
+            "--market",
+            "usa",
+            "--start-date",
+            "2024-03-01",
+            "--end-date",
+            "2024-03-01",
+            "--include-forward-returns",
+            "--output-format",
+            "summary",
+        ]
+    )
+
+    assert exit_code == 0
+    summary_lines = capsys.readouterr().out.strip().splitlines()
+    assert all(line.startswith("SUMMARY ") for line in summary_lines)
+    assert summary_lines[-4:] == [
+        "SUMMARY forward_returns_included=1",
+        "SUMMARY forward_window=60",
+        "SUMMARY forward_returns_rows_with_data=0",
+        "SUMMARY forward_returns_rows_without_data=1",
+    ]
+
+
+def test_cli_forward_returns_limit_counts_returned_rows_only(tmp_path, capsys):
+    price_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _create_price_db(price_db)
+    _create_analysis_db(analysis_db)
+
+    _insert_price_series(price_db, "AAA", "usa", _single_signal_with_immediate_forward_prices())
+    _insert_price_series(price_db, "AAB", "usa", _single_signal_with_no_future_series())
+    _insert_rsi(analysis_db, "AAA", "2024-03-01", 55.0)
+    _insert_rsi(analysis_db, "AAB", "2024-03-01", 65.0)
+
+    exit_code = signal_scan_main(
+        [
+            "--db",
+            str(price_db),
+            "--analysis-db",
+            str(analysis_db),
+            "--market",
+            "usa",
+            "--start-date",
+            "2024-03-01",
+            "--end-date",
+            "2024-03-01",
+            "--limit",
+            "1",
+            "--include-forward-returns",
+        ]
+    )
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert lines[1].startswith("AAA;2024-03-01;")
+    assert "SUMMARY candidates=2" in lines
+    assert "SUMMARY returned=1" in lines
+    assert "SUMMARY forward_returns_rows_with_data=1" in lines
+    assert "SUMMARY forward_returns_rows_without_data=0" in lines
