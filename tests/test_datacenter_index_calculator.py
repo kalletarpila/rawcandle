@@ -153,7 +153,7 @@ def test_subindustry_groups_use_exact_subindustry_values():
     rows = calculate_datacenter_group_indices(
         taxonomy_rows=[
             _taxonomy_row("AAA", subindustry="UPS"),
-            _taxonomy_row("BBB", subindustry="Kupari"),
+            _taxonomy_row("BBB", subindustry="Copper"),
         ],
         price_rows=[
             _price_row("AAA", "2024-01-01", 100.0),
@@ -168,7 +168,7 @@ def test_subindustry_groups_use_exact_subindustry_values():
     )
 
     assert _find_row(rows, "2024-01-02", "subindustry", "UPS").member_count == 1
-    assert _find_row(rows, "2024-01-02", "subindustry", "Kupari").member_count == 1
+    assert _find_row(rows, "2024-01-02", "subindustry", "Copper").member_count == 1
 
 
 def test_group_daily_metrics_are_calculated_correctly():

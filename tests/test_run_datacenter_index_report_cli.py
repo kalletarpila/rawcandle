@@ -150,7 +150,7 @@ def test_report_cli_creates_output_files_and_parent_directories(tmp_path, capsys
         [
             _sample_row("ecosystem", "DC_ECOSYSTEM_TOTAL"),
             _sample_row("layer", "Cooling", return_60d=0.30),
-            _sample_row("layer", "Pilvi", return_60d=-0.10, data_quality_status="PARTIAL_DATA", eligible_count=6),
+            _sample_row("layer", "Cloud", return_60d=-0.10, data_quality_status="PARTIAL_DATA", eligible_count=6),
             _sample_row("subindustry", "UPS", return_60d=0.40, rs_spy=0.20),
             _sample_row("subindustry", "Cooling infra", return_60d=-0.20, rs_spy=-0.15),
         ],

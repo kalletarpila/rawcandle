@@ -34,7 +34,7 @@ def test_loader_normalizes_ticker_to_uppercase(tmp_path):
         tmp_path,
         (
             "taxonomy_version,ticker,layer,subindustry,report_group_status,is_primary,role_weight,notes\n"
-            'DC_TAXONOMY_V1, vrt ,Cooling,"Ilma- ja nestejäähdytys",CORE,1,1.0,\n'
+            'DC_TAXONOMY_V1, vrt ,Cooling,"Air and liquid cooling",CORE,1,1.0,\n'
         ),
     )
 
@@ -98,8 +98,8 @@ def test_loader_rejects_duplicate_normalized_taxonomy_rows(tmp_path):
         tmp_path,
         (
             "taxonomy_version,ticker,layer,subindustry,report_group_status,is_primary,role_weight,notes\n"
-            'DC_TAXONOMY_V1,vrt,Cooling,"Ilma- ja nestejäähdytys",CORE,1,1.0,\n'
-            ' DC_TAXONOMY_V1 , VRT , Cooling ,"Ilma- ja nestejäähdytys",CORE,1,1.0,\n'
+            'DC_TAXONOMY_V1,vrt,Cooling,"Air and liquid cooling",CORE,1,1.0,\n'
+            ' DC_TAXONOMY_V1 , VRT , Cooling ,"Air and liquid cooling",CORE,1,1.0,\n'
         ),
     )
 
@@ -112,7 +112,7 @@ def test_loader_allows_same_ticker_in_multiple_layer_subindustry_combinations(tm
         tmp_path,
         (
             "taxonomy_version,ticker,layer,subindustry,report_group_status,is_primary,role_weight,notes\n"
-            'DC_TAXONOMY_V1,VRT,Cooling,"Ilma- ja nestejäähdytys",CORE,1,1.0,\n'
+            'DC_TAXONOMY_V1,VRT,Cooling,"Air and liquid cooling",CORE,1,1.0,\n'
             'DC_TAXONOMY_V1,VRT,Electrical & power systems,"UPS, switchgear, PDU",CORE,0,1.0,\n'
         ),
     )

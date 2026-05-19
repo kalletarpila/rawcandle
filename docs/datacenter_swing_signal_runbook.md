@@ -46,6 +46,8 @@ SIGNAL_DATE=<previous_valid_trading_day>
   - persisted ticker-level Dow, divergence, and candlestick outputs used by the swing enrichment readers
 - Datacenter taxonomy CSV:
   - membership and taxonomy version input for index, ticker swing, group swing, and synthetic OHLC runs
+  - layer and subindustry labels are normalized to English in the source CSV
+  - persisted `analysis.db` rows keep older labels until the relevant pipeline ranges are rerun
 
 ## Required Existing Preconditions
 

@@ -143,8 +143,8 @@ def _build_report_fixture_db(tmp_path: Path) -> Path:
         [
             _sample_row("ecosystem", "DC_ECOSYSTEM_TOTAL", return_60d=0.08),
             _sample_row("layer", "Cooling", return_60d=0.30, pct_above_ma50=80.0, pct_above_ma200=75.0),
-            _sample_row("layer", "Pilvi", return_60d=-0.10, pct_above_ma50=40.0, pct_above_ma200=35.0, data_quality_status="PARTIAL_DATA", eligible_count=6),
-            _sample_row("layer", "Verkot", return_60d=None, pct_above_ma50=None, pct_above_ma200=None, rs_spy=None, rs_qqq=None),
+            _sample_row("layer", "Cloud", return_60d=-0.10, pct_above_ma50=40.0, pct_above_ma200=35.0, data_quality_status="PARTIAL_DATA", eligible_count=6),
+            _sample_row("layer", "Networking", return_60d=None, pct_above_ma50=None, pct_above_ma200=None, rs_spy=None, rs_qqq=None),
             _sample_row("subindustry", "UPS", return_60d=0.40, rs_spy=0.20),
             _sample_row("subindustry", "Cooling infra", return_60d=-0.20, rs_spy=-0.15, data_quality_status="NO_DATA", eligible_count=0, member_count=5, pct_above_ma50=None, pct_above_ma200=None, index_level_equal=None, return_20d=None, return_120d=None, rs_qqq=None, daily_return_equal=None, pct_positive=None),
             _sample_row("subindustry", "Networking", return_60d=0.10, rs_spy=0.05),
@@ -227,7 +227,7 @@ def test_csv_report_contains_expected_section_names_and_none_rendering(tmp_path)
     assert "layer_performance;Cooling;" in csv_report
     assert "top_subindustry_return_60d;UPS;" in csv_report
     assert "bottom_subindustry_rs_spy_60d;Cooling infra;" in csv_report
-    assert "non_ok_groups;layer;Pilvi;10;6;PARTIAL_DATA" in csv_report
+    assert "non_ok_groups;layer;Cloud;10;6;PARTIAL_DATA" in csv_report
     assert "Power semis;10;10;123.45;0.05;;0.2" in csv_report
 
 
@@ -243,7 +243,7 @@ def test_report_rankings_and_top_n_are_deterministic(tmp_path):
     )
 
     assert "best_layer_by_return_60d | Cooling" in markdown
-    assert "worst_layer_by_return_60d | Pilvi" in markdown
+    assert "worst_layer_by_return_60d | Cloud" in markdown
     assert "best_subindustry_by_return_60d | UPS" in markdown
     assert "worst_subindustry_by_return_60d | Cooling infra" in markdown
     assert markdown.count("| UPS | 10 | 10 | 123.45 | 5.00% | 40.00% | 20.00% | 70.00% | 55.00% | 20.00% | 2.00% | OK |") >= 1

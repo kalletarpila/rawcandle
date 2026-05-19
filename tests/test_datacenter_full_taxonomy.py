@@ -96,7 +96,7 @@ def test_full_taxonomy_erikoismetallit_contains_expected_tickers():
     tickers = {
         row.ticker
         for row in rows
-        if row.layer == "Upstream materials" and row.subindustry == "Erikoismetallit"
+        if row.layer == "Upstream materials" and row.subindustry == "Specialty metals"
     }
 
     assert {
@@ -124,7 +124,7 @@ def test_full_taxonomy_broadened_glass_subindustry_contains_expected_tickers():
         row.ticker
         for row in rows
         if row.layer == "Upstream materials"
-        and row.subindustry == "Lasi / optical materials / specialty glass"
+        and row.subindustry == "Glass / optical materials / specialty glass"
     }
 
     assert {"GLW", "COHR", "FN", "APD", "ATI", "AXTI", "IQE"}.issubset(tickers)
@@ -139,7 +139,7 @@ def test_full_taxonomy_alumiini_ja_teras_contains_cenx():
     tickers = {
         row.ticker
         for row in rows
-        if row.layer == "Upstream materials" and row.subindustry == "Alumiini ja teräs"
+        if row.layer == "Upstream materials" and row.subindustry == "Aluminum and steel"
     }
 
     assert "CENX" in tickers
@@ -171,7 +171,7 @@ def test_full_taxonomy_test_and_process_control_contains_aehr():
         row.ticker
         for row in rows
         if row.layer == "Semiconductor manufacturing"
-        and row.subindustry == "Testaus / prosessikontrolli"
+        and row.subindustry == "Test and process control"
     }
 
     assert "AEHR" in tickers
@@ -187,7 +187,7 @@ def test_full_taxonomy_semicap_contains_lpkf():
         row.ticker
         for row in rows
         if row.layer == "Semiconductor manufacturing"
-        and row.subindustry == "Puolijohdelaitteet / semicap"
+        and row.subindustry == "Semiconductor equipment / semicap"
     }
 
     assert "LPKF" in tickers
@@ -218,7 +218,7 @@ def test_full_taxonomy_ai_cloud_subindustry_exists_with_expected_tickers():
     tickers = {
         row.ticker
         for row in rows
-        if row.layer == "Pilvi"
+        if row.layer == "Cloud"
         and row.subindustry == "AI cloud / neocloud infrastructure"
     }
 
@@ -232,7 +232,7 @@ def test_full_taxonomy_hyperscalers_subindustry_still_exists():
     )
 
     assert any(
-        row.layer == "Pilvi"
+        row.layer == "Cloud"
         and row.subindustry == "Hyperscalers / cloud demand owners"
         for row in rows
     )
@@ -261,14 +261,14 @@ def test_full_taxonomy_cohr_primary_flags_match_expected():
         for row in rows
         if row.ticker == "COHR"
         and row.layer == "Upstream materials"
-        and row.subindustry == "Lasi / optical materials / specialty glass"
+        and row.subindustry == "Glass / optical materials / specialty glass"
     )
     verkot_row = next(
         row
         for row in rows
         if row.ticker == "COHR"
-        and row.layer == "Verkot"
-        and row.subindustry == "Optiikka / fotoniikka / high-speed connectivity"
+        and row.layer == "Networking"
+        and row.subindustry == "Optics / photonics / high-speed connectivity"
     )
 
     assert upstream_row.is_primary == 1
@@ -286,14 +286,14 @@ def test_full_taxonomy_fn_primary_flags_match_expected():
         for row in rows
         if row.ticker == "FN"
         and row.layer == "Upstream materials"
-        and row.subindustry == "Lasi / optical materials / specialty glass"
+        and row.subindustry == "Glass / optical materials / specialty glass"
     )
     verkot_row = next(
         row
         for row in rows
         if row.ticker == "FN"
-        and row.layer == "Verkot"
-        and row.subindustry == "Optiikka / fotoniikka / high-speed connectivity"
+        and row.layer == "Networking"
+        and row.subindustry == "Optics / photonics / high-speed connectivity"
     )
 
     assert upstream_row.is_primary == 1
@@ -311,14 +311,14 @@ def test_full_taxonomy_ati_primary_flags_match_expected():
         for row in rows
         if row.ticker == "ATI"
         and row.layer == "Upstream materials"
-        and row.subindustry == "Lasi / optical materials / specialty glass"
+        and row.subindustry == "Glass / optical materials / specialty glass"
     )
     special_metals_row = next(
         row
         for row in rows
         if row.ticker == "ATI"
         and row.layer == "Upstream materials"
-        and row.subindustry == "Erikoismetallit"
+        and row.subindustry == "Specialty metals"
     )
 
     assert glass_row.is_primary == 1
@@ -332,23 +332,23 @@ def test_full_taxonomy_new_single_occurrence_tickers_are_primary():
     )
 
     expected_rows = {
-        ("APD", "Upstream materials", "Lasi / optical materials / specialty glass"),
-        ("CENX", "Upstream materials", "Alumiini ja teräs"),
-        ("HWM", "Upstream materials", "Erikoismetallit"),
-        ("CRS", "Upstream materials", "Erikoismetallit"),
+        ("APD", "Upstream materials", "Glass / optical materials / specialty glass"),
+        ("CENX", "Upstream materials", "Aluminum and steel"),
+        ("HWM", "Upstream materials", "Specialty metals"),
+        ("CRS", "Upstream materials", "Specialty metals"),
         ("UMC", "Semiconductor manufacturing", "Foundry & packaging / OSAT"),
-        ("ALOY", "Upstream materials", "Erikoismetallit"),
-        ("ASPI", "Upstream materials", "Erikoismetallit"),
-        ("ILU.AX", "Upstream materials", "Erikoismetallit"),
-        ("AXTI", "Upstream materials", "Lasi / optical materials / specialty glass"),
-        ("IQE", "Upstream materials", "Lasi / optical materials / specialty glass"),
-        ("AEHR", "Semiconductor manufacturing", "Testaus / prosessikontrolli"),
-        ("LPKF", "Semiconductor manufacturing", "Puolijohdelaitteet / semicap"),
+        ("ALOY", "Upstream materials", "Specialty metals"),
+        ("ASPI", "Upstream materials", "Specialty metals"),
+        ("ILU.AX", "Upstream materials", "Specialty metals"),
+        ("AXTI", "Upstream materials", "Glass / optical materials / specialty glass"),
+        ("IQE", "Upstream materials", "Glass / optical materials / specialty glass"),
+        ("AEHR", "Semiconductor manufacturing", "Test and process control"),
+        ("LPKF", "Semiconductor manufacturing", "Semiconductor equipment / semicap"),
         ("AMSC", "Electrical & power systems", "Power conversion & precision power"),
-        ("NBIS", "Pilvi", "AI cloud / neocloud infrastructure"),
-        ("CRWV", "Pilvi", "AI cloud / neocloud infrastructure"),
-        ("IREN", "Pilvi", "AI cloud / neocloud infrastructure"),
-        ("HUT", "Pilvi", "AI cloud / neocloud infrastructure"),
+        ("NBIS", "Cloud", "AI cloud / neocloud infrastructure"),
+        ("CRWV", "Cloud", "AI cloud / neocloud infrastructure"),
+        ("IREN", "Cloud", "AI cloud / neocloud infrastructure"),
+        ("HUT", "Cloud", "AI cloud / neocloud infrastructure"),
     }
 
     actual_rows = {
@@ -358,23 +358,23 @@ def test_full_taxonomy_new_single_occurrence_tickers_are_primary():
     }
 
     assert actual_rows == {
-        ("APD", "Upstream materials", "Lasi / optical materials / specialty glass"): 1,
-        ("CENX", "Upstream materials", "Alumiini ja teräs"): 1,
-        ("HWM", "Upstream materials", "Erikoismetallit"): 1,
-        ("CRS", "Upstream materials", "Erikoismetallit"): 1,
+        ("APD", "Upstream materials", "Glass / optical materials / specialty glass"): 1,
+        ("CENX", "Upstream materials", "Aluminum and steel"): 1,
+        ("HWM", "Upstream materials", "Specialty metals"): 1,
+        ("CRS", "Upstream materials", "Specialty metals"): 1,
         ("UMC", "Semiconductor manufacturing", "Foundry & packaging / OSAT"): 1,
-        ("ALOY", "Upstream materials", "Erikoismetallit"): 1,
-        ("ASPI", "Upstream materials", "Erikoismetallit"): 1,
-        ("ILU.AX", "Upstream materials", "Erikoismetallit"): 1,
-        ("AXTI", "Upstream materials", "Lasi / optical materials / specialty glass"): 1,
-        ("IQE", "Upstream materials", "Lasi / optical materials / specialty glass"): 1,
-        ("AEHR", "Semiconductor manufacturing", "Testaus / prosessikontrolli"): 1,
-        ("LPKF", "Semiconductor manufacturing", "Puolijohdelaitteet / semicap"): 1,
+        ("ALOY", "Upstream materials", "Specialty metals"): 1,
+        ("ASPI", "Upstream materials", "Specialty metals"): 1,
+        ("ILU.AX", "Upstream materials", "Specialty metals"): 1,
+        ("AXTI", "Upstream materials", "Glass / optical materials / specialty glass"): 1,
+        ("IQE", "Upstream materials", "Glass / optical materials / specialty glass"): 1,
+        ("AEHR", "Semiconductor manufacturing", "Test and process control"): 1,
+        ("LPKF", "Semiconductor manufacturing", "Semiconductor equipment / semicap"): 1,
         ("AMSC", "Electrical & power systems", "Power conversion & precision power"): 1,
-        ("NBIS", "Pilvi", "AI cloud / neocloud infrastructure"): 1,
-        ("CRWV", "Pilvi", "AI cloud / neocloud infrastructure"): 1,
-        ("IREN", "Pilvi", "AI cloud / neocloud infrastructure"): 1,
-        ("HUT", "Pilvi", "AI cloud / neocloud infrastructure"): 1,
+        ("NBIS", "Cloud", "AI cloud / neocloud infrastructure"): 1,
+        ("CRWV", "Cloud", "AI cloud / neocloud infrastructure"): 1,
+        ("IREN", "Cloud", "AI cloud / neocloud infrastructure"): 1,
+        ("HUT", "Cloud", "AI cloud / neocloud infrastructure"): 1,
     }
 
 
@@ -413,3 +413,38 @@ def test_validation_cli_prints_summary_lines_for_full_csv(capsys):
         "SUMMARY duplicate_rows=0",
         "SUMMARY validation_status=OK",
     ]
+
+
+def test_full_taxonomy_labels_do_not_contain_known_finnish_fragments():
+    rows = load_datacenter_taxonomy_csv(
+        FULL_CSV_PATH,
+        expected_taxonomy_version="DC_TAXONOMY_FULL_V1",
+    )
+
+    forbidden_fragments = [
+        "ä",
+        "ö",
+        "å",
+        "Kaapelit",
+        "Pilvi",
+        "Rakentaminen",
+        "Varavoima",
+        "Verkot",
+        "Mekaaninen",
+        "Operointi",
+        "Kiinteistö",
+        "Sähkö",
+        "Hopea",
+        "Kupari",
+        "Alumiini",
+        "jäähdytys",
+        "Puolijohde",
+        "Kytkimet",
+        "Lasi",
+        "Optiikka",
+        "kyberturva",
+    ]
+
+    for row in rows:
+        combined = f"{row.layer} {row.subindustry}"
+        assert not any(fragment in combined for fragment in forbidden_fragments), combined
