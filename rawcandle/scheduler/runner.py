@@ -51,6 +51,7 @@ class ScheduledStockUpdateRunResult:
     datacenter_pipeline_attempted: int = 0
     datacenter_pipeline_status: str = "SKIPPED"
     datacenter_pipeline_market: str = "usa"
+    datacenter_pipeline_audit_validation_status: str = "SKIPPED"
 
 
 class SchedulerAlreadyRunningError(RuntimeError):
@@ -75,6 +76,7 @@ class DatacenterPostStepResult:
     attempted: int
     status: str
     market: str
+    audit_validation_status: str = "SKIPPED"
     signal_date: Optional[str] = None
     error: Optional[str] = None
 
@@ -213,6 +215,14 @@ def _previous_calendar_date(value: str) -> str:
     return (datetime.date.fromisoformat(value) - datetime.timedelta(days=1)).isoformat()
 
 
+def _parse_summary_value(stdout: str, key: str) -> Optional[str]:
+    prefix = f"SUMMARY {key}="
+    for line in stdout.splitlines():
+        if line.startswith(prefix):
+            return line[len(prefix) :]
+    return None
+
+
 def _run_datacenter_post_step(
     *,
     config: StockUpdateSchedulerConfig,
@@ -260,12 +270,18 @@ def _run_datacenter_post_step(
         command,
         cwd=str(_repo_root()),
         check=False,
+        capture_output=True,
+        text=True,
+    )
+    audit_validation_status = _parse_summary_value(
+        completed.stdout or "", "audit_validation_status"
     )
     if completed.returncode != 0:
         return DatacenterPostStepResult(
             attempted=1,
             status="FAILED",
             market=resolved.market,
+            audit_validation_status=audit_validation_status or "UNKNOWN",
             signal_date=signal_date,
             error=f"datacenter pipeline exited with code {completed.returncode}",
         )
@@ -273,6 +289,7 @@ def _run_datacenter_post_step(
         attempted=1,
         status="OK",
         market=resolved.market,
+        audit_validation_status=audit_validation_status or "UNKNOWN",
         signal_date=signal_date,
     )
 
@@ -485,6 +502,7 @@ def run_scheduler_config(
                     datacenter_pipeline_attempted=0,
                     datacenter_pipeline_status="SKIPPED",
                     datacenter_pipeline_market="usa",
+                    datacenter_pipeline_audit_validation_status="SKIPPED",
                 )
                 _write_summary_json(config=config, run_started_at=run_started_at, result=result)
                 write_scheduler_status(
@@ -565,6 +583,7 @@ def run_scheduler_config(
                 datacenter_pipeline_attempted=datacenter_result.attempted,
                 datacenter_pipeline_status=datacenter_result.status,
                 datacenter_pipeline_market=datacenter_result.market,
+                datacenter_pipeline_audit_validation_status=datacenter_result.audit_validation_status,
             )
             _write_summary_json(config=config, run_started_at=run_started_at, result=result)
             write_scheduler_status(

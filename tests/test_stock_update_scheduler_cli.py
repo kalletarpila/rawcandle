@@ -46,6 +46,7 @@ def _result(overall_status):
         datacenter_pipeline_attempted=0,
         datacenter_pipeline_status="SKIPPED",
         datacenter_pipeline_market="usa",
+        datacenter_pipeline_audit_validation_status="SKIPPED",
     )
 
 
@@ -63,6 +64,7 @@ def _skipped_result():
         datacenter_pipeline_attempted=0,
         datacenter_pipeline_status="SKIPPED",
         datacenter_pipeline_market="usa",
+        datacenter_pipeline_audit_validation_status="SKIPPED",
     )
 
 
@@ -86,6 +88,7 @@ def test_scheduler_cli_successful_run_prints_top_level_summary_lines(monkeypatch
     assert "SUMMARY datacenter_pipeline.attempted=0" in captured.out
     assert "SUMMARY datacenter_pipeline.status=SKIPPED" in captured.out
     assert "SUMMARY datacenter_pipeline.market=usa" in captured.out
+    assert "SUMMARY datacenter_pipeline.audit_validation_status=SKIPPED" in captured.out
 
 
 def test_scheduler_cli_ok_overall_status_exits_zero(monkeypatch):

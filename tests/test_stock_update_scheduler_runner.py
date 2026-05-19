@@ -30,8 +30,9 @@ def _touch(path):
 
 
 class _FakeCompletedProcess:
-    def __init__(self, returncode=0):
+    def __init__(self, returncode=0, stdout=""):
         self.returncode = returncode
+        self.stdout = stdout
 
 
 def _write_config(
@@ -589,9 +590,9 @@ def test_scheduler_runner_runs_datacenter_post_step_once_for_usa_success(
         lambda self, result: f"UI {result.market}",
     )
 
-    def fake_subprocess_run(command, cwd, check):
+    def fake_subprocess_run(command, cwd, check, capture_output, text):
         calls.append({"command": command, "cwd": cwd, "check": check})
-        return _FakeCompletedProcess(0)
+        return _FakeCompletedProcess(0, "SUMMARY audit_validation_status=OK\n")
 
     monkeypatch.setattr("rawcandle.scheduler.runner.subprocess.run", fake_subprocess_run)
 
@@ -616,6 +617,7 @@ def test_scheduler_runner_runs_datacenter_post_step_once_for_usa_success(
     assert result.datacenter_pipeline_attempted == 1
     assert result.datacenter_pipeline_status == "OK"
     assert result.datacenter_pipeline_market == "usa"
+    assert result.datacenter_pipeline_audit_validation_status == "OK"
     assert result.overall_status == STATUS_OK
 
 
@@ -640,7 +642,9 @@ def test_scheduler_runner_runs_datacenter_post_step_for_ok_with_warnings(
     )
     monkeypatch.setattr(
         "rawcandle.scheduler.runner.subprocess.run",
-        lambda *args, **kwargs: _FakeCompletedProcess(0),
+        lambda *args, **kwargs: _FakeCompletedProcess(
+            0, "SUMMARY audit_validation_status=WARN\n"
+        ),
     )
 
     result = run_scheduler_config(config_path=str(config_path))
@@ -648,6 +652,7 @@ def test_scheduler_runner_runs_datacenter_post_step_for_ok_with_warnings(
     assert result.datacenter_pipeline_attempted == 1
     assert result.datacenter_pipeline_status == "OK"
     assert result.datacenter_pipeline_market == "usa"
+    assert result.datacenter_pipeline_audit_validation_status == "WARN"
     assert result.overall_status == STATUS_OK_WITH_WARNINGS
 
 
@@ -680,6 +685,7 @@ def test_scheduler_runner_skips_datacenter_post_step_when_market_phase_failed(
     assert result.datacenter_pipeline_attempted == 0
     assert result.datacenter_pipeline_status == "SKIPPED"
     assert result.datacenter_pipeline_market == "usa"
+    assert result.datacenter_pipeline_audit_validation_status == "SKIPPED"
     assert result.overall_status == STATUS_FAILED
 
 
@@ -712,6 +718,7 @@ def test_scheduler_runner_skips_datacenter_post_step_when_usa_not_enabled(
     assert result.datacenter_pipeline_attempted == 0
     assert result.datacenter_pipeline_status == "SKIPPED"
     assert result.datacenter_pipeline_market == "usa"
+    assert result.datacenter_pipeline_audit_validation_status == "SKIPPED"
     assert result.overall_status == STATUS_OK
 
 
@@ -744,7 +751,8 @@ def test_scheduler_runner_derives_previous_signal_date_for_datacenter_post_step(
     )
     monkeypatch.setattr(
         "rawcandle.scheduler.runner.subprocess.run",
-        lambda command, **kwargs: calls.append(command) or _FakeCompletedProcess(0),
+        lambda command, **kwargs: calls.append(command)
+        or _FakeCompletedProcess(0, "SUMMARY audit_validation_status=OK\n"),
     )
 
     run_scheduler_config(config_path=str(config_path))
@@ -772,7 +780,9 @@ def test_scheduler_runner_datacenter_post_step_failure_fails_scheduler(
     )
     monkeypatch.setattr(
         "rawcandle.scheduler.runner.subprocess.run",
-        lambda *args, **kwargs: _FakeCompletedProcess(7),
+        lambda *args, **kwargs: _FakeCompletedProcess(
+            7, "SUMMARY audit_validation_status=FAIL\n"
+        ),
     )
 
     result = run_scheduler_config(config_path=str(config_path))
@@ -780,6 +790,7 @@ def test_scheduler_runner_datacenter_post_step_failure_fails_scheduler(
     assert result.datacenter_pipeline_attempted == 1
     assert result.datacenter_pipeline_status == "FAILED"
     assert result.datacenter_pipeline_market == "usa"
+    assert result.datacenter_pipeline_audit_validation_status == "FAIL"
     assert result.overall_status == STATUS_FAILED
 
 
@@ -810,6 +821,7 @@ def test_scheduler_runner_skip_next_run_marks_datacenter_post_step_skipped(
     assert result.datacenter_pipeline_attempted == 0
     assert result.datacenter_pipeline_status == "SKIPPED"
     assert result.datacenter_pipeline_market == "usa"
+    assert result.datacenter_pipeline_audit_validation_status == "SKIPPED"
 
     assert log_dir.exists()
     assert Path(scheduler_status_path(str(log_dir))).exists()
