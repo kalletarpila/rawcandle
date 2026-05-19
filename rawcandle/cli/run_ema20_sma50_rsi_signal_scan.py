@@ -8,6 +8,8 @@ from datetime import date
 from pathlib import Path
 from typing import Iterable
 
+DEFAULT_OUTPUT_DIR = Path("/home/kalle/projects/rawcandle/EMASMA_GC")
+
 
 @dataclass(frozen=True)
 class PriceRow:
@@ -64,6 +66,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=60,
         help="Number of future trading days to inspect for forward returns.",
+    )
+    parser.add_argument(
+        "--output",
+        default=None,
+        help="Optional CSV output path. When omitted, CSV is written under the default output directory.",
     )
     return parser
 
@@ -312,6 +319,57 @@ def _format_float(value: float) -> str:
     return f"{value:.4f}"
 
 
+def _format_csv_float(value: float) -> str:
+    return _format_float(value).replace(".", ",")
+
+
+def _default_output_path(
+    market: str,
+    start_date: str,
+    end_date: str,
+    include_forward_returns: bool,
+    forward_window: int,
+) -> Path:
+    suffix = (
+        f"_forward_{forward_window}d"
+        if include_forward_returns
+        else ""
+    )
+    filename = (
+        f"ema20_sma50_rsi_signal_scan_{market}_{start_date}_{end_date}{suffix}.csv"
+    )
+    return DEFAULT_OUTPUT_DIR / filename
+
+
+def _build_csv_lines(
+    rows: list[SignalRow],
+    include_forward_returns: bool,
+    forward_metrics_by_key: dict[tuple[str, str], ForwardReturnMetrics],
+) -> list[str]:
+    if include_forward_returns:
+        lines = [
+            "ticker;date;ema20;sma50;rsi;max_forward_return_pct;max_forward_return_days;min_forward_return_pct;min_forward_return_days"
+        ]
+    else:
+        lines = ["ticker;date;ema20;sma50;rsi"]
+
+    for row in rows:
+        line = (
+            f"{row.ticker};{row.date};{_format_csv_float(row.ema20)};{_format_csv_float(row.sma50)};{_format_csv_float(row.rsi)}"
+        )
+        if include_forward_returns:
+            metrics = forward_metrics_by_key[(row.ticker, row.date)]
+            line = (
+                f"{line};"
+                f"{'' if metrics.max_forward_return_pct is None else _format_csv_float(metrics.max_forward_return_pct)};"
+                f"{'' if metrics.max_forward_return_days is None else metrics.max_forward_return_days};"
+                f"{'' if metrics.min_forward_return_pct is None else _format_csv_float(metrics.min_forward_return_pct)};"
+                f"{'' if metrics.min_forward_return_days is None else metrics.min_forward_return_days}"
+            )
+        lines.append(line)
+    return lines
+
+
 def format_summary_lines(
     market: str,
     start_date: str,
@@ -388,26 +446,24 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 forward_rows_with_data += 1
     if args.output_format == "csv":
-        if args.include_forward_returns:
-            print(
-                "ticker;date;ema20;sma50;rsi;max_forward_return_pct;max_forward_return_days;min_forward_return_pct;min_forward_return_days"
+        output_path = (
+            Path(args.output)
+            if args.output is not None
+            else _default_output_path(
+                market=str(args.market),
+                start_date=start_date,
+                end_date=end_date,
+                include_forward_returns=bool(args.include_forward_returns),
+                forward_window=forward_window,
             )
-        else:
-            print("ticker;date;ema20;sma50;rsi")
-        for row in limited_signals:
-            line = (
-                f"{row.ticker};{row.date};{_format_float(row.ema20)};{_format_float(row.sma50)};{_format_float(row.rsi)}"
-            )
-            if args.include_forward_returns:
-                metrics = forward_metrics_by_key[(row.ticker, row.date)]
-                line = (
-                    f"{line};"
-                    f"{'' if metrics.max_forward_return_pct is None else _format_float(metrics.max_forward_return_pct)};"
-                    f"{'' if metrics.max_forward_return_days is None else metrics.max_forward_return_days};"
-                    f"{'' if metrics.min_forward_return_pct is None else _format_float(metrics.min_forward_return_pct)};"
-                    f"{'' if metrics.min_forward_return_days is None else metrics.min_forward_return_days}"
-                )
-            print(line)
+        )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        csv_lines = _build_csv_lines(
+            rows=limited_signals,
+            include_forward_returns=bool(args.include_forward_returns),
+            forward_metrics_by_key=forward_metrics_by_key,
+        )
+        output_path.write_text("\n".join(csv_lines) + "\n", encoding="utf-8")
 
     for line in format_summary_lines(
         market=str(args.market),

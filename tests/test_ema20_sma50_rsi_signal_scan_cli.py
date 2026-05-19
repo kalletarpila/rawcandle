@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import date, timedelta
+from pathlib import Path
 
-from rawcandle.cli.run_ema20_sma50_rsi_signal_scan import main as signal_scan_main
+from rawcandle.cli.run_ema20_sma50_rsi_signal_scan import (
+    DEFAULT_OUTPUT_DIR,
+    main as signal_scan_main,
+)
 
 
 def _create_price_db(path):
@@ -118,6 +122,7 @@ def test_cli_csv_output_detects_expected_rows_and_limit_ordering(tmp_path, capsy
     _insert_rsi(analysis_db, "DDD", "2024-03-01", 75.0)
     _insert_rsi(analysis_db, "FIN", "2024-03-01", 80.0)
 
+    output_path = tmp_path / "scan.csv"
     exit_code = signal_scan_main(
         [
             "--db",
@@ -132,18 +137,21 @@ def test_cli_csv_output_detects_expected_rows_and_limit_ordering(tmp_path, capsy
             "2024-03-05",
             "--limit",
             "1",
+            "--output",
+            str(output_path),
         ]
     )
 
     assert exit_code == 0
-    lines = capsys.readouterr().out.strip().splitlines()
-    assert lines[0] == "ticker;date;ema20;sma50;rsi"
-    assert lines[1] == "AAA;2024-03-01;100.0952;100.0200;55.0000"
-    assert "AAB;2024-03-01;100.0952;100.0200;65.0000" not in lines
-    assert "BBB;2024-03-01;100.0952;100.0200;50.0000" not in lines
-    assert "DDD;2024-03-01;100.5238;100.3000;75.0000" not in lines
-    assert "FIN;2024-03-01;100.0952;100.0200;80.0000" not in lines
-    assert lines[-7:] == [
+    stdout_lines = capsys.readouterr().out.strip().splitlines()
+    csv_lines = output_path.read_text(encoding="utf-8").strip().splitlines()
+    assert csv_lines[0] == "ticker;date;ema20;sma50;rsi"
+    assert csv_lines[1] == "AAA;2024-03-01;100,0952;100,0200;55,0000"
+    assert "AAB;2024-03-01;100,0952;100,0200;65,0000" not in csv_lines
+    assert "BBB;2024-03-01;100,0952;100,0200;50,0000" not in csv_lines
+    assert "DDD;2024-03-01;100,5238;100,3000;75,0000" not in csv_lines
+    assert "FIN;2024-03-01;100,0952;100,0200;80,0000" not in csv_lines
+    assert stdout_lines == [
         "SUMMARY market=usa",
         "SUMMARY start_date=2024-02-28",
         "SUMMARY end_date=2024-03-05",
@@ -246,6 +254,7 @@ def test_cli_no_lookahead_requires_history_before_start_date(tmp_path, capsys):
     _insert_rsi(analysis_db, "AAA", "2024-03-01", 55.0)
     _insert_rsi(analysis_db, "ZZZ", "2024-03-01", 60.0)
 
+    output_path = tmp_path / "scan.csv"
     exit_code = signal_scan_main(
         [
             "--db",
@@ -258,14 +267,17 @@ def test_cli_no_lookahead_requires_history_before_start_date(tmp_path, capsys):
             "2024-03-01",
             "--end-date",
             "2024-03-01",
+            "--output",
+            str(output_path),
         ]
     )
 
     assert exit_code == 0
-    lines = capsys.readouterr().out.strip().splitlines()
-    assert "AAA;2024-03-01;100.0952;100.0200;55.0000" in lines
-    assert not any(line.startswith("ZZZ;2024-03-01;") for line in lines)
-    assert "SUMMARY candidates=1" in lines
+    stdout_lines = capsys.readouterr().out.strip().splitlines()
+    csv_lines = output_path.read_text(encoding="utf-8").strip().splitlines()
+    assert "AAA;2024-03-01;100,0952;100,0200;55,0000" in csv_lines
+    assert not any(line.startswith("ZZZ;2024-03-01;") for line in csv_lines)
+    assert "SUMMARY candidates=1" in stdout_lines
 
 
 def test_cli_respects_min_rsi_strictly_above_threshold(tmp_path, capsys):
@@ -277,6 +289,7 @@ def test_cli_respects_min_rsi_strictly_above_threshold(tmp_path, capsys):
     _insert_price_series(price_db, "AAA", "usa", _base_cross_series())
     _insert_rsi(analysis_db, "AAA", "2024-03-01", 55.0)
 
+    output_path = tmp_path / "scan.csv"
     exit_code = signal_scan_main(
         [
             "--db",
@@ -291,13 +304,16 @@ def test_cli_respects_min_rsi_strictly_above_threshold(tmp_path, capsys):
             "2024-03-05",
             "--min-rsi",
             "55",
+            "--output",
+            str(output_path),
         ]
     )
 
     assert exit_code == 0
-    lines = capsys.readouterr().out.strip().splitlines()
-    assert lines[0] == "ticker;date;ema20;sma50;rsi"
-    assert lines[1:] == [
+    stdout_lines = capsys.readouterr().out.strip().splitlines()
+    csv_lines = output_path.read_text(encoding="utf-8").strip().splitlines()
+    assert csv_lines == ["ticker;date;ema20;sma50;rsi"]
+    assert stdout_lines == [
         "SUMMARY market=usa",
         "SUMMARY start_date=2024-02-28",
         "SUMMARY end_date=2024-03-05",
@@ -317,6 +333,7 @@ def test_cli_forward_returns_default_output_stays_unchanged(tmp_path, capsys):
     _insert_price_series(price_db, "AAA", "usa", _single_signal_with_immediate_forward_prices())
     _insert_rsi(analysis_db, "AAA", "2024-03-01", 55.0)
 
+    output_path = tmp_path / "scan.csv"
     exit_code = signal_scan_main(
         [
             "--db",
@@ -329,14 +346,17 @@ def test_cli_forward_returns_default_output_stays_unchanged(tmp_path, capsys):
             "2024-02-28",
             "--end-date",
             "2024-03-05",
+            "--output",
+            str(output_path),
         ]
     )
 
     assert exit_code == 0
-    lines = capsys.readouterr().out.strip().splitlines()
-    assert lines[0] == "ticker;date;ema20;sma50;rsi"
-    assert not any("forward_returns" in line for line in lines)
-    assert lines[1] == "AAA;2024-03-01;100.0952;100.0200;55.0000"
+    stdout_lines = capsys.readouterr().out.strip().splitlines()
+    csv_lines = output_path.read_text(encoding="utf-8").strip().splitlines()
+    assert csv_lines[0] == "ticker;date;ema20;sma50;rsi"
+    assert not any("forward_returns" in line for line in stdout_lines)
+    assert csv_lines[1] == "AAA;2024-03-01;100,0952;100,0200;55,0000"
 
 
 def test_cli_forward_returns_adds_csv_columns_and_uses_earliest_ties(tmp_path, capsys):
@@ -348,6 +368,7 @@ def test_cli_forward_returns_adds_csv_columns_and_uses_earliest_ties(tmp_path, c
     _insert_price_series(price_db, "AAA", "usa", _single_signal_with_immediate_forward_prices())
     _insert_rsi(analysis_db, "AAA", "2024-03-01", 55.0)
 
+    output_path = tmp_path / "scan.csv"
     exit_code = signal_scan_main(
         [
             "--db",
@@ -361,17 +382,20 @@ def test_cli_forward_returns_adds_csv_columns_and_uses_earliest_ties(tmp_path, c
             "--end-date",
             "2024-03-05",
             "--include-forward-returns",
+            "--output",
+            str(output_path),
         ]
     )
 
     assert exit_code == 0
-    lines = capsys.readouterr().out.strip().splitlines()
+    stdout_lines = capsys.readouterr().out.strip().splitlines()
+    csv_lines = output_path.read_text(encoding="utf-8").strip().splitlines()
     assert (
-        lines[0]
+        csv_lines[0]
         == "ticker;date;ema20;sma50;rsi;max_forward_return_pct;max_forward_return_days;min_forward_return_pct;min_forward_return_days"
     )
-    assert lines[1] == "AAA;2024-03-01;100.0952;100.0200;55.0000;8.9109;1;-10.8911;2"
-    assert lines[-4:] == [
+    assert csv_lines[1] == "AAA;2024-03-01;100,0952;100,0200;55,0000;8,9109;1;-10,8911;2"
+    assert stdout_lines[-4:] == [
         "SUMMARY forward_returns_included=1",
         "SUMMARY forward_window=60",
         "SUMMARY forward_returns_rows_with_data=1",
@@ -388,6 +412,7 @@ def test_cli_forward_returns_respects_custom_window(tmp_path, capsys):
     _insert_price_series(price_db, "AAA", "usa", _single_signal_with_immediate_forward_prices())
     _insert_rsi(analysis_db, "AAA", "2024-03-01", 55.0)
 
+    output_path = tmp_path / "scan.csv"
     exit_code = signal_scan_main(
         [
             "--db",
@@ -403,13 +428,16 @@ def test_cli_forward_returns_respects_custom_window(tmp_path, capsys):
             "--include-forward-returns",
             "--forward-window",
             "1",
+            "--output",
+            str(output_path),
         ]
     )
 
     assert exit_code == 0
-    lines = capsys.readouterr().out.strip().splitlines()
-    assert lines[1] == "AAA;2024-03-01;100.0952;100.0200;55.0000;8.9109;1;8.9109;1"
-    assert "SUMMARY forward_window=1" in lines
+    stdout_lines = capsys.readouterr().out.strip().splitlines()
+    csv_lines = output_path.read_text(encoding="utf-8").strip().splitlines()
+    assert csv_lines[1] == "AAA;2024-03-01;100,0952;100,0200;55,0000;8,9109;1;8,9109;1"
+    assert "SUMMARY forward_window=1" in stdout_lines
 
 
 def test_cli_forward_returns_handles_missing_future_data_and_summary_only(tmp_path, capsys):
@@ -421,6 +449,7 @@ def test_cli_forward_returns_handles_missing_future_data_and_summary_only(tmp_pa
     _insert_price_series(price_db, "AAA", "usa", _single_signal_with_no_future_series())
     _insert_rsi(analysis_db, "AAA", "2024-03-01", 55.0)
 
+    output_path = tmp_path / "scan.csv"
     exit_code = signal_scan_main(
         [
             "--db",
@@ -434,13 +463,16 @@ def test_cli_forward_returns_handles_missing_future_data_and_summary_only(tmp_pa
             "--end-date",
             "2024-03-01",
             "--include-forward-returns",
+            "--output",
+            str(output_path),
         ]
     )
 
     assert exit_code == 0
-    lines = capsys.readouterr().out.strip().splitlines()
-    assert lines[1] == "AAA;2024-03-01;100.0952;100.0200;55.0000;;;;"
-    assert lines[-4:] == [
+    stdout_lines = capsys.readouterr().out.strip().splitlines()
+    csv_lines = output_path.read_text(encoding="utf-8").strip().splitlines()
+    assert csv_lines[1] == "AAA;2024-03-01;100,0952;100,0200;55,0000;;;;"
+    assert stdout_lines[-4:] == [
         "SUMMARY forward_returns_included=1",
         "SUMMARY forward_window=60",
         "SUMMARY forward_returns_rows_with_data=0",
@@ -487,6 +519,7 @@ def test_cli_forward_returns_limit_counts_returned_rows_only(tmp_path, capsys):
     _insert_rsi(analysis_db, "AAA", "2024-03-01", 55.0)
     _insert_rsi(analysis_db, "AAB", "2024-03-01", 65.0)
 
+    output_path = tmp_path / "scan.csv"
     exit_code = signal_scan_main(
         [
             "--db",
@@ -502,13 +535,53 @@ def test_cli_forward_returns_limit_counts_returned_rows_only(tmp_path, capsys):
             "--limit",
             "1",
             "--include-forward-returns",
+            "--output",
+            str(output_path),
         ]
     )
 
     assert exit_code == 0
-    lines = capsys.readouterr().out.strip().splitlines()
-    assert lines[1].startswith("AAA;2024-03-01;")
-    assert "SUMMARY candidates=2" in lines
-    assert "SUMMARY returned=1" in lines
-    assert "SUMMARY forward_returns_rows_with_data=1" in lines
-    assert "SUMMARY forward_returns_rows_without_data=0" in lines
+    stdout_lines = capsys.readouterr().out.strip().splitlines()
+    csv_lines = output_path.read_text(encoding="utf-8").strip().splitlines()
+    assert csv_lines[1].startswith("AAA;2024-03-01;")
+    assert "SUMMARY candidates=2" in stdout_lines
+    assert "SUMMARY returned=1" in stdout_lines
+    assert "SUMMARY forward_returns_rows_with_data=1" in stdout_lines
+    assert "SUMMARY forward_returns_rows_without_data=0" in stdout_lines
+
+
+def test_cli_csv_writes_to_default_output_directory(tmp_path, monkeypatch, capsys):
+    default_dir = tmp_path / "EMASMA_GC"
+    monkeypatch.setattr(
+        "rawcandle.cli.run_ema20_sma50_rsi_signal_scan.DEFAULT_OUTPUT_DIR",
+        default_dir,
+    )
+
+    price_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _create_price_db(price_db)
+    _create_analysis_db(analysis_db)
+    _insert_price_series(price_db, "AAA", "usa", _base_cross_series())
+    _insert_rsi(analysis_db, "AAA", "2024-03-01", 55.0)
+
+    exit_code = signal_scan_main(
+        [
+            "--db",
+            str(price_db),
+            "--analysis-db",
+            str(analysis_db),
+            "--market",
+            "usa",
+            "--start-date",
+            "2024-02-28",
+            "--end-date",
+            "2024-03-05",
+        ]
+    )
+
+    assert exit_code == 0
+    stdout_lines = capsys.readouterr().out.strip().splitlines()
+    expected_path = default_dir / "ema20_sma50_rsi_signal_scan_usa_2024-02-28_2024-03-05.csv"
+    assert expected_path.exists()
+    assert expected_path.read_text(encoding="utf-8").startswith("ticker;date;ema20;sma50;rsi\n")
+    assert stdout_lines[0] == "SUMMARY market=usa"
