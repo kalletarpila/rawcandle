@@ -844,7 +844,7 @@ def test_execute_stock_update_batch_sets_new_quarter_available_when_yahoo_is_new
         date_ranges=[StockUpdateDateRange("2026-01-02", "2026-01-10")],
     )
 
-    execute_stock_update_batch(
+    result = execute_stock_update_batch(
         osakedata_db_path=str(db_path),
         market="usa",
         plans=[plan],
@@ -857,6 +857,11 @@ def test_execute_stock_update_batch_sets_new_quarter_available_when_yahoo_is_new
     )
 
     row = _fetch_quarter_state_row(quarter_db, "AAA")
+    assert result.quarter_state_checked == 1
+    assert result.quarter_state_new_detected == 1
+    assert result.quarter_state_detection_missing == 0
+    assert result.quarter_state_rows_updated == 1
+    assert result.quarter_state_errors == 0
     assert row[3] == "2025-12-31"
     assert row[4] == "2026-03-31"
     assert row[5] == 1
@@ -916,7 +921,7 @@ def test_execute_stock_update_batch_does_not_raise_quarter_flag_when_yahoo_same_
             date_ranges=[StockUpdateDateRange("2026-01-02", "2026-01-10")],
         )
 
-        execute_stock_update_batch(
+        result = execute_stock_update_batch(
             osakedata_db_path=str(db_path),
             market="usa",
             plans=[plan],
@@ -928,13 +933,23 @@ def test_execute_stock_update_batch_does_not_raise_quarter_flag_when_yahoo_same_
             maybe_update_quarter_state=adapters["maybe_update_quarter_state"],
         )
 
-        return _fetch_quarter_state_row(quarter_db, ticker)
+        return result, _fetch_quarter_state_row(quarter_db, ticker)
 
-    same_row = run_case("SAME", "2026-03-31", "2026-03-31")
-    older_row = run_case("OLDER", "2026-06-30", "2026-03-31")
+    same_result, same_row = run_case("SAME", "2026-03-31", "2026-03-31")
+    older_result, older_row = run_case("OLDER", "2026-06-30", "2026-03-31")
 
+    assert same_result.quarter_state_checked == 1
+    assert same_result.quarter_state_new_detected == 0
+    assert same_result.quarter_state_detection_missing == 0
+    assert same_result.quarter_state_rows_updated == 1
+    assert same_result.quarter_state_errors == 0
     assert same_row[4] is None
     assert same_row[5] == 0
+    assert older_result.quarter_state_checked == 1
+    assert older_result.quarter_state_new_detected == 0
+    assert older_result.quarter_state_detection_missing == 0
+    assert older_result.quarter_state_rows_updated == 1
+    assert older_result.quarter_state_errors == 0
     assert older_row[4] is None
     assert older_row[5] == 0
 
@@ -1014,9 +1029,19 @@ def test_execute_stock_update_batch_quarter_detection_empty_or_error_does_not_cr
     error_result, error_row = run_case("ERROR", error_stock)
 
     assert empty_result.tickers_updated == 1
+    assert empty_result.quarter_state_checked == 1
+    assert empty_result.quarter_state_new_detected == 0
+    assert empty_result.quarter_state_detection_missing == 1
+    assert empty_result.quarter_state_rows_updated == 1
+    assert empty_result.quarter_state_errors == 0
     assert empty_row[4] is None
     assert empty_row[5] == 0
     assert error_result.tickers_updated == 1
+    assert error_result.quarter_state_checked == 1
+    assert error_result.quarter_state_new_detected == 0
+    assert error_result.quarter_state_detection_missing == 1
+    assert error_result.quarter_state_rows_updated == 1
+    assert error_result.quarter_state_errors == 0
     assert error_row[4] is None
     assert error_row[5] == 0
 
@@ -1068,6 +1093,54 @@ def test_execute_stock_update_batch_quarter_detection_skips_cleanly_when_db_unav
 
     assert result.tickers_updated == 1
     assert result.tickers_failed == 0
+    assert result.quarter_state_checked == 0
+    assert result.quarter_state_new_detected == 0
+    assert result.quarter_state_detection_missing == 0
+    assert result.quarter_state_rows_updated == 0
+    assert result.quarter_state_errors == 0
+
+
+def test_execute_stock_update_batch_quarter_callback_error_increments_error_counter(
+    tmp_path,
+) -> None:
+    if pd is None:
+        pytest.skip("pandas not available")
+
+    db_path = tmp_path / "osakedata.db"
+    _create_osakedata_table(db_path)
+
+    history = pd.DataFrame(
+        {"Open": [10.0], "High": [11.0], "Low": [9.5], "Close": [10.8], "Volume": [1]},
+        index=pd.to_datetime(["2026-01-02"]),
+    )
+    plan = StockUpdateTickerPlan(
+        candidate=StockUpdateTickerCandidate("AAA", "2026-01-01", "2026-01-01", "usa"),
+        needs_update=True,
+        update_start_date="2026-01-02",
+        fetch_until_exclusive="2026-01-10",
+        date_ranges=[StockUpdateDateRange("2026-01-02", "2026-01-10")],
+    )
+
+    result = execute_stock_update_batch(
+        osakedata_db_path=str(db_path),
+        market="usa",
+        plans=[plan],
+        stock_factory=lambda ticker: _GuardStock(results=[history]),
+        sync_splits=lambda ticker, stock: 0,
+        maybe_backfill_splits=lambda ticker: False,
+        calculate_divergences=lambda ticker, only_missing: (True, 1, ""),
+        run_candlestick_analysis=lambda ticker, analysis_start, analysis_end: (0, None),
+        maybe_update_quarter_state=lambda ticker, market, stock: (_ for _ in ()).throw(
+            RuntimeError("quarter callback failed")
+        ),
+    )
+
+    assert result.tickers_updated == 1
+    assert result.quarter_state_checked == 0
+    assert result.quarter_state_new_detected == 0
+    assert result.quarter_state_detection_missing == 0
+    assert result.quarter_state_rows_updated == 0
+    assert result.quarter_state_errors == 1
 
 
 def test_stock_update_batch_execution_result_has_no_dow_fields() -> None:

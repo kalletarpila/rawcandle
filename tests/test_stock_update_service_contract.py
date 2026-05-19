@@ -38,6 +38,11 @@ def test_format_stock_update_summary_lines_is_deterministic():
         tickers_skipped=2,
         tickers_failed=2,
         ohlcv_rows_inserted=123,
+        quarter_state_checked=9,
+        quarter_state_new_detected=3,
+        quarter_state_detection_missing=2,
+        quarter_state_rows_updated=8,
+        quarter_state_errors=1,
         splits_synced=4,
         divergences_updated=5,
         candlesticks_updated=7,
@@ -54,6 +59,11 @@ def test_format_stock_update_summary_lines_is_deterministic():
         "SUMMARY tickers_skipped=2",
         "SUMMARY tickers_failed=2",
         "SUMMARY ohlcv_rows_inserted=123",
+        "SUMMARY quarter_state_checked=9",
+        "SUMMARY quarter_state_new_detected=3",
+        "SUMMARY quarter_state_detection_missing=2",
+        "SUMMARY quarter_state_rows_updated=8",
+        "SUMMARY quarter_state_errors=1",
         "SUMMARY splits_synced=4",
         "SUMMARY divergences_updated=5",
         "SUMMARY candlesticks_updated=7",
@@ -68,4 +78,3 @@ def test_format_stock_update_summary_lines_formats_none_dow_as_empty():
     result = StockUpdateResult(market="usa")
     lines = format_stock_update_summary_lines(result)
     assert "SUMMARY dow_structures_updated=" in lines
-

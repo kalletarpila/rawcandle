@@ -98,6 +98,64 @@ def test_run_stock_data_update_resolves_default_market_and_runs_flow(tmp_path):
     assert result.status == sus.STATUS_OK
 
 
+def test_run_stock_data_update_includes_quarter_counters_in_result_and_summary(
+    tmp_path, monkeypatch
+):
+    def fake_orchestration(**kwargs):
+        return sus.StockUpdateOrchestrationResult(
+            batch_result=sus.StockUpdateBatchExecutionResult(
+                market="omxh",
+                quarter_state_checked=4,
+                quarter_state_new_detected=2,
+                quarter_state_detection_missing=1,
+                quarter_state_rows_updated=3,
+                quarter_state_errors=1,
+            ),
+            dow_result=sus.StockUpdateDowResult(
+                attempted=True,
+                success=True,
+                dow_summary={"updated": 1},
+                warning=None,
+            ),
+            warnings=[],
+            errors=[],
+        )
+
+    monkeypatch.setattr(sus, "execute_stock_update_orchestration", fake_orchestration)
+
+    db_path = tmp_path / "osakedata.db"
+    _create_osakedata_table(db_path)
+
+    result = sus.run_stock_data_update(
+        osakedata_db_path=str(db_path),
+        analysis_db_path="analysis.db",
+        market="omxh",
+        start_override=None,
+        today="2026-05-10",
+        fetch_until_exclusive="2026-05-17",
+        stock_factory=lambda ticker: None,
+        sync_splits=lambda ticker, stock: 0,
+        maybe_backfill_splits=lambda ticker: False,
+        calculate_divergences=lambda ticker, only_missing: (True, 1, ""),
+        run_candlestick_analysis=lambda ticker, analysis_start, analysis_end: (0, None),
+        maybe_update_quarter_state=None,
+        calculate_dow_structures=lambda **kwargs: {"status": "OK"},
+        pivot_radius=7,
+        bounded_initial_from_date="2020-01-01",
+        recalc_tail_trading_days=50,
+    )
+
+    assert result.quarter_state_checked == 4
+    assert result.quarter_state_new_detected == 2
+    assert result.quarter_state_detection_missing == 1
+    assert result.quarter_state_rows_updated == 3
+    assert result.quarter_state_errors == 1
+    assert "SUMMARY quarter_state_checked=4" in sus.format_stock_update_summary_lines(result)
+    assert "SUMMARY quarter_state_new_detected=2" in sus.format_stock_update_summary_lines(
+        result
+    )
+
+
 def test_run_stock_data_update_filters_selected_market(tmp_path):
     if pd is None:
         pytest.skip("pandas not available")

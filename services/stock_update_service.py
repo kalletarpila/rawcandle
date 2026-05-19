@@ -146,6 +146,8 @@ class StockTickerUpdateFlowResult:
     skip_reason: Optional[str] = None
     ohlcv_result: Optional[StockTickerOhlcvUpdateResult] = None
     downstream_result: Optional[StockTickerDownstreamResult] = None
+    quarter_state_outcome: Optional[Dict[str, Any]] = None
+    quarter_state_error: bool = False
 
 
 @dataclass
@@ -157,6 +159,11 @@ class StockUpdateBatchExecutionResult:
     tickers_skipped: int = 0
     tickers_failed: int = 0
     ohlcv_rows_inserted: int = 0
+    quarter_state_checked: int = 0
+    quarter_state_new_detected: int = 0
+    quarter_state_detection_missing: int = 0
+    quarter_state_rows_updated: int = 0
+    quarter_state_errors: int = 0
     warnings: List[str] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
 
@@ -199,6 +206,11 @@ class StockUpdateResult:
     tickers_skipped: int = 0
     tickers_failed: int = 0
     ohlcv_rows_inserted: int = 0
+    quarter_state_checked: int = 0
+    quarter_state_new_detected: int = 0
+    quarter_state_detection_missing: int = 0
+    quarter_state_rows_updated: int = 0
+    quarter_state_errors: int = 0
     splits_synced: int = 0
     divergences_updated: int = 0
     candlesticks_updated: int = 0
@@ -687,15 +699,17 @@ def execute_ticker_update_flow(
         market=market,
     )
 
+    quarter_state_outcome: Optional[Dict[str, Any]] = None
+    quarter_state_error = False
     if maybe_update_quarter_state is not None:
         try:
-            maybe_update_quarter_state(
+            quarter_state_outcome = maybe_update_quarter_state(
                 plan.candidate.ticker,
                 market,
                 stock,
             )
         except Exception:
-            pass
+            quarter_state_error = True
 
     if ohlcv_result.ohlcv_rows_converted == 0:
         return StockTickerUpdateFlowResult(
@@ -704,6 +718,8 @@ def execute_ticker_update_flow(
             skip_reason="no_history_data",
             ohlcv_result=ohlcv_result,
             downstream_result=None,
+            quarter_state_outcome=quarter_state_outcome,
+            quarter_state_error=quarter_state_error,
         )
 
     downstream_result = execute_ticker_downstream_updates(
@@ -722,6 +738,8 @@ def execute_ticker_update_flow(
         skip_reason=None,
         ohlcv_result=ohlcv_result,
         downstream_result=downstream_result,
+        quarter_state_outcome=quarter_state_outcome,
+        quarter_state_error=quarter_state_error,
     )
 
 
@@ -776,6 +794,17 @@ def execute_stock_update_batch(
                 )
             if ticker_result.downstream_result is not None:
                 result.warnings.extend(ticker_result.downstream_result.warnings)
+            if ticker_result.quarter_state_error:
+                result.quarter_state_errors += 1
+            outcome = ticker_result.quarter_state_outcome or {}
+            if outcome.get("checked"):
+                result.quarter_state_checked += 1
+            if outcome.get("new_detected"):
+                result.quarter_state_new_detected += 1
+            if outcome.get("detection_missing"):
+                result.quarter_state_detection_missing += 1
+            if outcome.get("row_updated"):
+                result.quarter_state_rows_updated += 1
         except Exception as exc:
             result.tickers_failed += 1
             result.errors.append(
@@ -900,6 +929,11 @@ def format_stock_update_summary_lines(result: StockUpdateResult) -> List[str]:
         f"SUMMARY tickers_skipped={result.tickers_skipped}",
         f"SUMMARY tickers_failed={result.tickers_failed}",
         f"SUMMARY ohlcv_rows_inserted={result.ohlcv_rows_inserted}",
+        f"SUMMARY quarter_state_checked={result.quarter_state_checked}",
+        f"SUMMARY quarter_state_new_detected={result.quarter_state_new_detected}",
+        f"SUMMARY quarter_state_detection_missing={result.quarter_state_detection_missing}",
+        f"SUMMARY quarter_state_rows_updated={result.quarter_state_rows_updated}",
+        f"SUMMARY quarter_state_errors={result.quarter_state_errors}",
         f"SUMMARY splits_synced={result.splits_synced}",
         f"SUMMARY divergences_updated={result.divergences_updated}",
         f"SUMMARY candlesticks_updated={result.candlesticks_updated}",
@@ -992,6 +1026,11 @@ def run_stock_data_update(
         tickers_skipped=orchestration_result.batch_result.tickers_skipped,
         tickers_failed=orchestration_result.batch_result.tickers_failed,
         ohlcv_rows_inserted=orchestration_result.batch_result.ohlcv_rows_inserted,
+        quarter_state_checked=orchestration_result.batch_result.quarter_state_checked,
+        quarter_state_new_detected=orchestration_result.batch_result.quarter_state_new_detected,
+        quarter_state_detection_missing=orchestration_result.batch_result.quarter_state_detection_missing,
+        quarter_state_rows_updated=orchestration_result.batch_result.quarter_state_rows_updated,
+        quarter_state_errors=orchestration_result.batch_result.quarter_state_errors,
         splits_synced=0,
         divergences_updated=0,
         candlesticks_updated=0,
