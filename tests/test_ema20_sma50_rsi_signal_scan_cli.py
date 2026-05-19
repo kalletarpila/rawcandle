@@ -151,6 +151,15 @@ def test_cli_csv_output_detects_expected_rows_and_limit_ordering(tmp_path, capsy
     assert "BBB;2024-03-01;100,0952;100,0200;50,0000" not in csv_lines
     assert "DDD;2024-03-01;100,5238;100,3000;75,0000" not in csv_lines
     assert "FIN;2024-03-01;100,0952;100,0200;80,0000" not in csv_lines
+    assert csv_lines[-7:] == [
+        "SUMMARY market=usa",
+        "SUMMARY start_date=2024-02-28",
+        "SUMMARY end_date=2024-03-05",
+        "SUMMARY min_rsi=50.0000",
+        "SUMMARY limit=1",
+        "SUMMARY candidates=2",
+        "SUMMARY returned=1",
+    ]
     assert stdout_lines == [
         "SUMMARY market=usa",
         "SUMMARY start_date=2024-02-28",
@@ -277,6 +286,7 @@ def test_cli_no_lookahead_requires_history_before_start_date(tmp_path, capsys):
     csv_lines = output_path.read_text(encoding="utf-8").strip().splitlines()
     assert "AAA;2024-03-01;100,0952;100,0200;55,0000" in csv_lines
     assert not any(line.startswith("ZZZ;2024-03-01;") for line in csv_lines)
+    assert "SUMMARY candidates=1" in csv_lines
     assert "SUMMARY candidates=1" in stdout_lines
 
 
@@ -312,7 +322,16 @@ def test_cli_respects_min_rsi_strictly_above_threshold(tmp_path, capsys):
     assert exit_code == 0
     stdout_lines = capsys.readouterr().out.strip().splitlines()
     csv_lines = output_path.read_text(encoding="utf-8").strip().splitlines()
-    assert csv_lines == ["ticker;date;ema20;sma50;rsi"]
+    assert csv_lines == [
+        "ticker;date;ema20;sma50;rsi",
+        "SUMMARY market=usa",
+        "SUMMARY start_date=2024-02-28",
+        "SUMMARY end_date=2024-03-05",
+        "SUMMARY min_rsi=55.0000",
+        "SUMMARY limit=100",
+        "SUMMARY candidates=0",
+        "SUMMARY returned=0",
+    ]
     assert stdout_lines == [
         "SUMMARY market=usa",
         "SUMMARY start_date=2024-02-28",
@@ -357,6 +376,15 @@ def test_cli_forward_returns_default_output_stays_unchanged(tmp_path, capsys):
     assert csv_lines[0] == "ticker;date;ema20;sma50;rsi"
     assert not any("forward_returns" in line for line in stdout_lines)
     assert csv_lines[1] == "AAA;2024-03-01;100,0952;100,0200;55,0000"
+    assert csv_lines[-7:] == [
+        "SUMMARY market=usa",
+        "SUMMARY start_date=2024-02-28",
+        "SUMMARY end_date=2024-03-05",
+        "SUMMARY min_rsi=50.0000",
+        "SUMMARY limit=100",
+        "SUMMARY candidates=1",
+        "SUMMARY returned=1",
+    ]
 
 
 def test_cli_forward_returns_adds_csv_columns_and_uses_earliest_ties(tmp_path, capsys):
@@ -395,6 +423,19 @@ def test_cli_forward_returns_adds_csv_columns_and_uses_earliest_ties(tmp_path, c
         == "ticker;date;ema20;sma50;rsi;max_forward_return_pct;max_forward_return_days;min_forward_return_pct;min_forward_return_days"
     )
     assert csv_lines[1] == "AAA;2024-03-01;100,0952;100,0200;55,0000;8,9109;1;-10,8911;2"
+    assert csv_lines[-11:] == [
+        "SUMMARY market=usa",
+        "SUMMARY start_date=2024-02-28",
+        "SUMMARY end_date=2024-03-05",
+        "SUMMARY min_rsi=50.0000",
+        "SUMMARY limit=100",
+        "SUMMARY candidates=1",
+        "SUMMARY returned=1",
+        "SUMMARY forward_returns_included=1",
+        "SUMMARY forward_window=60",
+        "SUMMARY forward_returns_rows_with_data=1",
+        "SUMMARY forward_returns_rows_without_data=0",
+    ]
     assert stdout_lines[-4:] == [
         "SUMMARY forward_returns_included=1",
         "SUMMARY forward_window=60",
@@ -437,6 +478,7 @@ def test_cli_forward_returns_respects_custom_window(tmp_path, capsys):
     stdout_lines = capsys.readouterr().out.strip().splitlines()
     csv_lines = output_path.read_text(encoding="utf-8").strip().splitlines()
     assert csv_lines[1] == "AAA;2024-03-01;100,0952;100,0200;55,0000;8,9109;1;8,9109;1"
+    assert "SUMMARY forward_window=1" in csv_lines
     assert "SUMMARY forward_window=1" in stdout_lines
 
 
@@ -472,6 +514,12 @@ def test_cli_forward_returns_handles_missing_future_data_and_summary_only(tmp_pa
     stdout_lines = capsys.readouterr().out.strip().splitlines()
     csv_lines = output_path.read_text(encoding="utf-8").strip().splitlines()
     assert csv_lines[1] == "AAA;2024-03-01;100,0952;100,0200;55,0000;;;;"
+    assert csv_lines[-4:] == [
+        "SUMMARY forward_returns_included=1",
+        "SUMMARY forward_window=60",
+        "SUMMARY forward_returns_rows_with_data=0",
+        "SUMMARY forward_returns_rows_without_data=1",
+    ]
     assert stdout_lines[-4:] == [
         "SUMMARY forward_returns_included=1",
         "SUMMARY forward_window=60",
@@ -544,6 +592,10 @@ def test_cli_forward_returns_limit_counts_returned_rows_only(tmp_path, capsys):
     stdout_lines = capsys.readouterr().out.strip().splitlines()
     csv_lines = output_path.read_text(encoding="utf-8").strip().splitlines()
     assert csv_lines[1].startswith("AAA;2024-03-01;")
+    assert "SUMMARY candidates=2" in csv_lines
+    assert "SUMMARY returned=1" in csv_lines
+    assert "SUMMARY forward_returns_rows_with_data=1" in csv_lines
+    assert "SUMMARY forward_returns_rows_without_data=0" in csv_lines
     assert "SUMMARY candidates=2" in stdout_lines
     assert "SUMMARY returned=1" in stdout_lines
     assert "SUMMARY forward_returns_rows_with_data=1" in stdout_lines
@@ -584,4 +636,5 @@ def test_cli_csv_writes_to_default_output_directory(tmp_path, monkeypatch, capsy
     expected_path = default_dir / "ema20_sma50_rsi_signal_scan_usa_2024-02-28_2024-03-05.csv"
     assert expected_path.exists()
     assert expected_path.read_text(encoding="utf-8").startswith("ticker;date;ema20;sma50;rsi\n")
+    assert "SUMMARY market=usa" in expected_path.read_text(encoding="utf-8")
     assert stdout_lines[0] == "SUMMARY market=usa"

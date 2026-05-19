@@ -465,7 +465,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         output_path.write_text("\n".join(csv_lines) + "\n", encoding="utf-8")
 
-    for line in format_summary_lines(
+    summary_lines = format_summary_lines(
         market=str(args.market),
         start_date=start_date,
         end_date=end_date,
@@ -477,7 +477,12 @@ def main(argv: list[str] | None = None) -> int:
         forward_window=forward_window,
         forward_returns_rows_with_data=forward_rows_with_data,
         forward_returns_rows_without_data=forward_rows_without_data,
-    ):
+    )
+    if args.output_format == "csv":
+        csv_lines.extend(summary_lines)
+        output_path.write_text("\n".join(csv_lines) + "\n", encoding="utf-8")
+
+    for line in summary_lines:
         print(line)
     return 0
 
