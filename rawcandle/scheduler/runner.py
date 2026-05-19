@@ -4,6 +4,7 @@ import datetime
 import errno
 import fcntl
 import json
+import subprocess
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -47,10 +48,35 @@ class ScheduledStockUpdateRunResult:
     summary_json_path: str = ""
     skipped: bool = False
     skip_reason: Optional[str] = None
+    datacenter_pipeline_attempted: int = 0
+    datacenter_pipeline_status: str = "SKIPPED"
+    datacenter_pipeline_market: str = "usa"
 
 
 class SchedulerAlreadyRunningError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class DatacenterPostStepConfig:
+    market: str
+    taxonomy_csv: str
+    taxonomy_version: str
+    start_date: str
+    index_base_date: str
+    output_dir: str
+    expected_ticker_count: int
+    expected_group_count: int
+    expected_synthetic_ohlc_count: int
+
+
+@dataclass(frozen=True)
+class DatacenterPostStepResult:
+    attempted: int
+    status: str
+    market: str
+    signal_date: Optional[str] = None
+    error: Optional[str] = None
 
 
 def scheduler_status_path(log_dir: str) -> str:
@@ -161,6 +187,94 @@ def _derive_overall_status(market_results: List[ScheduledMarketRunResult]) -> st
     if any(status == STATUS_OK_WITH_WARNINGS for status in statuses):
         return STATUS_OK_WITH_WARNINGS
     return STATUS_OK
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _resolve_datacenter_post_step_config(market: str) -> Optional[DatacenterPostStepConfig]:
+    if market != "usa":
+        return None
+    return DatacenterPostStepConfig(
+        market="usa",
+        taxonomy_csv="data/datacenter_ecosystem_taxonomy_full_v1.csv",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        start_date="2025-08-01",
+        index_base_date="2020-01-01",
+        output_dir="/home/kalle/projects/rawcandle/swing_reports",
+        expected_ticker_count=236,
+        expected_group_count=54,
+        expected_synthetic_ohlc_count=53,
+    )
+
+
+def _previous_calendar_date(value: str) -> str:
+    return (datetime.date.fromisoformat(value) - datetime.timedelta(days=1)).isoformat()
+
+
+def _run_datacenter_post_step(
+    *,
+    config: StockUpdateSchedulerConfig,
+    target_market: str,
+    effective_today: str,
+) -> DatacenterPostStepResult:
+    resolved = _resolve_datacenter_post_step_config(target_market)
+    if resolved is None:
+        return DatacenterPostStepResult(
+            attempted=0,
+            status="SKIPPED",
+            market=target_market,
+        )
+
+    signal_date = _previous_calendar_date(effective_today)
+    command = [
+        "python3",
+        "run_datacenter_swing_pipeline.py",
+        "--price-db",
+        config.osakedata_db_path,
+        "--analysis-db",
+        config.analysis_db_path,
+        "--taxonomy-csv",
+        resolved.taxonomy_csv,
+        "--taxonomy-version",
+        resolved.taxonomy_version,
+        "--market",
+        resolved.market,
+        "--signal-date",
+        signal_date,
+        "--start-date",
+        resolved.start_date,
+        "--index-base-date",
+        resolved.index_base_date,
+        "--output-dir",
+        resolved.output_dir,
+        "--expected-ticker-count",
+        str(resolved.expected_ticker_count),
+        "--expected-group-count",
+        str(resolved.expected_group_count),
+        "--expected-synthetic-ohlc-count",
+        str(resolved.expected_synthetic_ohlc_count),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=str(_repo_root()),
+        check=False,
+    )
+    if completed.returncode != 0:
+        return DatacenterPostStepResult(
+            attempted=1,
+            status="FAILED",
+            market=resolved.market,
+            signal_date=signal_date,
+            error=f"datacenter pipeline exited with code {completed.returncode}",
+        )
+    return DatacenterPostStepResult(
+        attempted=1,
+        status="OK",
+        market=resolved.market,
+        signal_date=signal_date,
+    )
 
 
 def _build_app(config: StockUpdateSchedulerConfig) -> RawCandleApp:
@@ -368,6 +482,9 @@ def run_scheduler_config(
                     overall_status=STATUS_OK,
                     skipped=True,
                     skip_reason="skip_next_run",
+                    datacenter_pipeline_attempted=0,
+                    datacenter_pipeline_status="SKIPPED",
+                    datacenter_pipeline_market="usa",
                 )
                 _write_summary_json(config=config, run_started_at=run_started_at, result=result)
                 write_scheduler_status(
@@ -408,7 +525,26 @@ def run_scheduler_config(
                 )
 
             finished_at_utc = _format_utc_timestamp(_utc_now())
-            overall_status = _derive_overall_status(market_results)
+            market_update_phase_status = _derive_overall_status(market_results)
+            datacenter_result = DatacenterPostStepResult(
+                attempted=0,
+                status="SKIPPED",
+                market="usa",
+            )
+            if (
+                market_update_phase_status in (STATUS_OK, STATUS_OK_WITH_WARNINGS)
+                and datacenter_result.market in config.enabled_markets
+            ):
+                datacenter_result = _run_datacenter_post_step(
+                    config=config,
+                    target_market=datacenter_result.market,
+                    effective_today=effective_today,
+                )
+            overall_status = (
+                STATUS_FAILED
+                if datacenter_result.status == "FAILED"
+                else market_update_phase_status
+            )
 
             log_dir = Path(config.log_dir)
             log_dir.mkdir(parents=True, exist_ok=True)
@@ -426,6 +562,9 @@ def run_scheduler_config(
                 overall_status=overall_status,
                 skipped=False,
                 skip_reason=None,
+                datacenter_pipeline_attempted=datacenter_result.attempted,
+                datacenter_pipeline_status=datacenter_result.status,
+                datacenter_pipeline_market=datacenter_result.market,
             )
             _write_summary_json(config=config, run_started_at=run_started_at, result=result)
             write_scheduler_status(

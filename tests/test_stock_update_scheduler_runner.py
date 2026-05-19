@@ -29,6 +29,11 @@ def _touch(path):
     path.write_text("", encoding="utf-8")
 
 
+class _FakeCompletedProcess:
+    def __init__(self, returncode=0):
+        self.returncode = returncode
+
+
 def _write_config(
     tmp_path,
     *,
@@ -120,6 +125,10 @@ def test_scheduler_runner_runs_markets_in_config_order(tmp_path, monkeypatch):
         "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
         lambda self, result: f"UI {result.market}",
     )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda *args, **kwargs: _FakeCompletedProcess(0),
+    )
 
     result = run_scheduler_config(config_path=str(config_path))
 
@@ -147,6 +156,12 @@ def test_scheduler_runner_default_config_does_not_run_usa(tmp_path, monkeypatch)
     monkeypatch.setattr(
         "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
         lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("datacenter post-step should not run")
+        ),
     )
 
     run_scheduler_config(config_path=str(config_path))
@@ -178,6 +193,12 @@ def test_scheduler_runner_one_market_failure_does_not_stop_later_market(tmp_path
         "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
         lambda self, result: f"UI {result.market}",
     )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("datacenter post-step should not run")
+        ),
+    )
 
     result = run_scheduler_config(config_path=str(config_path))
 
@@ -204,6 +225,10 @@ def test_scheduler_runner_writes_log_file_per_market(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
         lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda *args, **kwargs: _FakeCompletedProcess(0),
     )
 
     result = run_scheduler_config(config_path=str(config_path))
@@ -233,6 +258,10 @@ def test_scheduler_runner_uses_minute_precision_log_filename(tmp_path, monkeypat
     monkeypatch.setattr(
         "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
         lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda *args, **kwargs: _FakeCompletedProcess(0),
     )
 
     result = run_scheduler_config(config_path=str(config_path))
@@ -293,6 +322,10 @@ def test_scheduler_runner_writes_summary_json(tmp_path, monkeypatch):
         "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
         lambda self, result: f"UI {result.market}",
     )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda *args, **kwargs: _FakeCompletedProcess(0),
+    )
 
     result = run_scheduler_config(config_path=str(config_path))
 
@@ -332,6 +365,10 @@ def test_scheduler_runner_overall_status_rules(tmp_path, monkeypatch, statuses, 
         "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
         lambda self, result: f"UI {result.market}",
     )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda *args, **kwargs: _FakeCompletedProcess(0),
+    )
 
     result = run_scheduler_config(config_path=str(config_path))
 
@@ -356,6 +393,10 @@ def test_scheduler_runner_does_not_call_update_stock_data(tmp_path, monkeypatch)
     monkeypatch.setattr(
         "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
         lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda *args, **kwargs: _FakeCompletedProcess(0),
     )
 
     result = run_scheduler_config(config_path=str(config_path))
@@ -382,6 +423,10 @@ def test_scheduler_runner_does_not_call_rawcandleapp_init(tmp_path, monkeypatch)
     monkeypatch.setattr(
         "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
         lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda *args, **kwargs: _FakeCompletedProcess(0),
     )
 
     result = run_scheduler_config(config_path=str(config_path))
@@ -516,8 +561,255 @@ def test_scheduler_status_write_creates_log_dir_if_missing(tmp_path, monkeypatch
         "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
         lambda self, result: f"UI {result.market}",
     )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda *args, **kwargs: _FakeCompletedProcess(0),
+    )
 
     run_scheduler_config(config_path=str(config_path))
+
+
+def test_scheduler_runner_runs_datacenter_post_step_once_for_usa_success(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(tmp_path, enabled_markets=["usa"])
+
+    calls = []
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+
+    def fake_subprocess_run(command, cwd, check):
+        calls.append({"command": command, "cwd": cwd, "check": check})
+        return _FakeCompletedProcess(0)
+
+    monkeypatch.setattr("rawcandle.scheduler.runner.subprocess.run", fake_subprocess_run)
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert len(calls) == 1
+    command = calls[0]["command"]
+    assert calls[0]["check"] is False
+    assert calls[0]["cwd"] == str(Path(__file__).resolve().parents[1])
+    assert command[:2] == ["python3", "run_datacenter_swing_pipeline.py"]
+    assert "--market" in command and command[command.index("--market") + 1] == "usa"
+    assert "--price-db" in command and command[command.index("--price-db") + 1] == str(osakedata_db)
+    assert "--analysis-db" in command and command[command.index("--analysis-db") + 1] == str(analysis_db)
+    assert "--taxonomy-csv" in command and command[command.index("--taxonomy-csv") + 1] == "data/datacenter_ecosystem_taxonomy_full_v1.csv"
+    assert "--taxonomy-version" in command and command[command.index("--taxonomy-version") + 1] == "DC_TAXONOMY_FULL_V1"
+    assert "--start-date" in command and command[command.index("--start-date") + 1] == "2025-08-01"
+    assert "--index-base-date" in command and command[command.index("--index-base-date") + 1] == "2020-01-01"
+    assert "--output-dir" in command and command[command.index("--output-dir") + 1] == "/home/kalle/projects/rawcandle/swing_reports"
+    assert "--expected-ticker-count" in command and command[command.index("--expected-ticker-count") + 1] == "236"
+    assert "--expected-group-count" in command and command[command.index("--expected-group-count") + 1] == "54"
+    assert "--expected-synthetic-ohlc-count" in command and command[command.index("--expected-synthetic-ohlc-count") + 1] == "53"
+    assert result.datacenter_pipeline_attempted == 1
+    assert result.datacenter_pipeline_status == "OK"
+    assert result.datacenter_pipeline_market == "usa"
+    assert result.overall_status == STATUS_OK
+
+
+def test_scheduler_runner_runs_datacenter_post_step_for_ok_with_warnings(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(tmp_path, enabled_markets=["usa"])
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(
+            market=kwargs["market"], status=STATUS_OK_WITH_WARNINGS
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda *args, **kwargs: _FakeCompletedProcess(0),
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.datacenter_pipeline_attempted == 1
+    assert result.datacenter_pipeline_status == "OK"
+    assert result.datacenter_pipeline_market == "usa"
+    assert result.overall_status == STATUS_OK_WITH_WARNINGS
+
+
+def test_scheduler_runner_skips_datacenter_post_step_when_market_phase_failed(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(tmp_path, enabled_markets=["usa"])
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_FAILED),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("datacenter post-step should not run")
+        ),
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.datacenter_pipeline_attempted == 0
+    assert result.datacenter_pipeline_status == "SKIPPED"
+    assert result.datacenter_pipeline_market == "usa"
+    assert result.overall_status == STATUS_FAILED
+
+
+def test_scheduler_runner_skips_datacenter_post_step_when_usa_not_enabled(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(tmp_path, enabled_markets=["omxh"])
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("datacenter post-step should not run")
+        ),
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.datacenter_pipeline_attempted == 0
+    assert result.datacenter_pipeline_status == "SKIPPED"
+    assert result.datacenter_pipeline_market == "usa"
+    assert result.overall_status == STATUS_OK
+
+
+def test_scheduler_runner_derives_previous_signal_date_for_datacenter_post_step(
+    tmp_path, monkeypatch
+):
+    import datetime as real_datetime
+
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(tmp_path, enabled_markets=["usa"])
+
+    class FixedDateTime(real_datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 5, 16, 8, 30, 0, tzinfo=tz)
+
+    calls = []
+
+    monkeypatch.setattr("rawcandle.scheduler.runner.datetime.datetime", FixedDateTime)
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda command, **kwargs: calls.append(command) or _FakeCompletedProcess(0),
+    )
+
+    run_scheduler_config(config_path=str(config_path))
+
+    command = calls[0]
+    assert command[command.index("--signal-date") + 1] == "2026-05-15"
+
+
+def test_scheduler_runner_datacenter_post_step_failure_fails_scheduler(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(tmp_path, enabled_markets=["usa"])
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda *args, **kwargs: _FakeCompletedProcess(7),
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.datacenter_pipeline_attempted == 1
+    assert result.datacenter_pipeline_status == "FAILED"
+    assert result.datacenter_pipeline_market == "usa"
+    assert result.overall_status == STATUS_FAILED
+
+
+def test_scheduler_runner_skip_next_run_marks_datacenter_post_step_skipped(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    log_dir = tmp_path / "logs"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        skip_next_run=True,
+    )
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("datacenter post-step should not run")
+        ),
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.skipped is True
+    assert result.datacenter_pipeline_attempted == 0
+    assert result.datacenter_pipeline_status == "SKIPPED"
+    assert result.datacenter_pipeline_market == "usa"
 
     assert log_dir.exists()
     assert Path(scheduler_status_path(str(log_dir))).exists()

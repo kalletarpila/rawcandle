@@ -43,6 +43,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"SUMMARY summary_json_path={result.summary_json_path}")
     print(f"SUMMARY scheduler_skipped={1 if result.skipped else 0}")
     print(f"SUMMARY scheduler_skip_reason={result.skip_reason or ''}")
+    print(f"SUMMARY datacenter_pipeline.attempted={result.datacenter_pipeline_attempted}")
+    print(f"SUMMARY datacenter_pipeline.status={result.datacenter_pipeline_status}")
+    print(f"SUMMARY datacenter_pipeline.market={result.datacenter_pipeline_market}")
 
     for market_result in result.market_results:
         print(f"SUMMARY market.{market_result.market}.status={market_result.summary_status}")

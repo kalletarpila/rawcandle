@@ -43,6 +43,9 @@ def _result(overall_status):
         summary_json_path="/tmp/logs/summary.json",
         skipped=False,
         skip_reason=None,
+        datacenter_pipeline_attempted=0,
+        datacenter_pipeline_status="SKIPPED",
+        datacenter_pipeline_market="usa",
     )
 
 
@@ -57,6 +60,9 @@ def _skipped_result():
         summary_json_path="/tmp/logs/summary.json",
         skipped=True,
         skip_reason="skip_next_run",
+        datacenter_pipeline_attempted=0,
+        datacenter_pipeline_status="SKIPPED",
+        datacenter_pipeline_market="usa",
     )
 
 
@@ -77,6 +83,9 @@ def test_scheduler_cli_successful_run_prints_top_level_summary_lines(monkeypatch
     assert "SUMMARY summary_json_path=/tmp/logs/summary.json" in captured.out
     assert "SUMMARY scheduler_skipped=0" in captured.out
     assert "SUMMARY scheduler_skip_reason=" in captured.out
+    assert "SUMMARY datacenter_pipeline.attempted=0" in captured.out
+    assert "SUMMARY datacenter_pipeline.status=SKIPPED" in captured.out
+    assert "SUMMARY datacenter_pipeline.market=usa" in captured.out
 
 
 def test_scheduler_cli_ok_overall_status_exits_zero(monkeypatch):
