@@ -106,6 +106,30 @@ def _single_signal_with_negative_only_future_prices():
     return [100.0] * 60 + [101.0, 100.0, 99.0, 98.0]
 
 
+def _single_signal_with_flat_future_prices():
+    return [100.0] * 60 + [101.0, 101.0, 101.0]
+
+
+def _single_signal_with_below_minus10_future_prices():
+    return [100.0] * 60 + [101.0, 80.0]
+
+
+def _single_signal_with_positive_0_to_10_future_prices():
+    return [100.0] * 60 + [101.0, 105.0]
+
+
+def _single_signal_with_positive_10_to_20_future_prices():
+    return [100.0] * 60 + [101.0, 115.0]
+
+
+def _single_signal_with_positive_20_to_50_future_prices():
+    return [100.0] * 60 + [101.0, 130.0]
+
+
+def _single_signal_with_positive_gt_50_future_prices():
+    return [100.0] * 60 + [101.0, 160.0]
+
+
 def test_cli_csv_output_detects_expected_rows_and_limit_ordering(tmp_path, capsys):
     price_db = tmp_path / "osakedata.db"
     analysis_db = tmp_path / "analysis.db"
@@ -427,7 +451,7 @@ def test_cli_forward_returns_adds_csv_columns_and_uses_earliest_ties(tmp_path, c
         == "ticker;date;ema20;sma50;rsi;max_forward_return_pct;max_forward_return_days;min_forward_return_pct;min_forward_return_days"
     )
     assert csv_lines[1] == "AAA;2024-03-01;100,0952;100,0200;55,0000;8,9109;1;-10,8911;2"
-    assert csv_lines[-13:] == [
+    for line in [
         "SUMMARY market=usa",
         "SUMMARY start_date=2024-02-28",
         "SUMMARY end_date=2024-03-05",
@@ -441,15 +465,11 @@ def test_cli_forward_returns_adds_csv_columns_and_uses_earliest_ties(tmp_path, c
         "SUMMARY forward_returns_rows_without_data=0",
         "SUMMARY forward_returns_positive_count=1",
         "SUMMARY forward_returns_positive_pct=100.0000",
-    ]
-    assert stdout_lines[-6:] == [
-        "SUMMARY forward_returns_included=1",
-        "SUMMARY forward_window=60",
-        "SUMMARY forward_returns_rows_with_data=1",
-        "SUMMARY forward_returns_rows_without_data=0",
-        "SUMMARY forward_returns_positive_count=1",
-        "SUMMARY forward_returns_positive_pct=100.0000",
-    ]
+        "SUMMARY forward_returns_bucket_0_to_10_count=1",
+        "SUMMARY forward_returns_bucket_0_to_10_pct=100.0000",
+    ]:
+        assert line in csv_lines
+        assert line in stdout_lines
 
 
 def test_cli_forward_returns_respects_custom_window(tmp_path, capsys):
@@ -528,14 +548,21 @@ def test_cli_forward_returns_handles_missing_future_data_and_summary_only(tmp_pa
     assert "SUMMARY forward_returns_rows_without_data=1" in csv_lines
     assert "SUMMARY forward_returns_positive_count=0" in csv_lines
     assert "SUMMARY forward_returns_positive_pct=0.0000" in csv_lines
-    assert stdout_lines[-6:] == [
+    for line in [
         "SUMMARY forward_returns_included=1",
         "SUMMARY forward_window=60",
         "SUMMARY forward_returns_rows_with_data=0",
         "SUMMARY forward_returns_rows_without_data=1",
         "SUMMARY forward_returns_positive_count=0",
         "SUMMARY forward_returns_positive_pct=0.0000",
-    ]
+        "SUMMARY forward_returns_bucket_lt_minus10_pct=0.0000",
+        "SUMMARY forward_returns_bucket_minus10_to_0_pct=0.0000",
+        "SUMMARY forward_returns_bucket_0_to_10_pct=0.0000",
+        "SUMMARY forward_returns_bucket_10_to_20_pct=0.0000",
+        "SUMMARY forward_returns_bucket_20_to_50_pct=0.0000",
+        "SUMMARY forward_returns_bucket_gt_50_pct=0.0000",
+    ]:
+        assert line in stdout_lines
 
     exit_code = signal_scan_main(
         [
@@ -558,14 +585,21 @@ def test_cli_forward_returns_handles_missing_future_data_and_summary_only(tmp_pa
     assert exit_code == 0
     summary_lines = capsys.readouterr().out.strip().splitlines()
     assert all(line.startswith("SUMMARY ") for line in summary_lines)
-    assert summary_lines[-6:] == [
+    for line in [
         "SUMMARY forward_returns_included=1",
         "SUMMARY forward_window=60",
         "SUMMARY forward_returns_rows_with_data=0",
         "SUMMARY forward_returns_rows_without_data=1",
         "SUMMARY forward_returns_positive_count=0",
         "SUMMARY forward_returns_positive_pct=0.0000",
-    ]
+        "SUMMARY forward_returns_bucket_lt_minus10_pct=0.0000",
+        "SUMMARY forward_returns_bucket_minus10_to_0_pct=0.0000",
+        "SUMMARY forward_returns_bucket_0_to_10_pct=0.0000",
+        "SUMMARY forward_returns_bucket_10_to_20_pct=0.0000",
+        "SUMMARY forward_returns_bucket_20_to_50_pct=0.0000",
+        "SUMMARY forward_returns_bucket_gt_50_pct=0.0000",
+    ]:
+        assert line in summary_lines
 
 
 def test_cli_forward_returns_limit_counts_returned_rows_only(tmp_path, capsys):
@@ -699,3 +733,105 @@ def test_cli_forward_returns_positive_summary_uses_rows_with_data_denominator(
     assert "SUMMARY forward_returns_positive_pct=50.0000" in csv_lines
     assert "SUMMARY forward_returns_positive_count=1" in stdout_lines
     assert "SUMMARY forward_returns_positive_pct=50.0000" in stdout_lines
+
+
+def test_cli_forward_returns_bucket_summary_distribution_and_zero_denominator(
+    tmp_path, capsys
+):
+    price_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    output_path = tmp_path / "scan.csv"
+    _create_price_db(price_db)
+    _create_analysis_db(analysis_db)
+
+    seeded = [
+        ("AAA", _single_signal_with_below_minus10_future_prices(), 55.0),
+        ("AAB", _single_signal_with_flat_future_prices(), 56.0),
+        ("AAC", _single_signal_with_positive_0_to_10_future_prices(), 57.0),
+        ("AAD", _single_signal_with_positive_10_to_20_future_prices(), 58.0),
+        ("AAE", _single_signal_with_positive_20_to_50_future_prices(), 59.0),
+        ("AAF", _single_signal_with_positive_gt_50_future_prices(), 60.0),
+        ("AAG", _single_signal_with_no_future_series(), 61.0),
+    ]
+    for ticker, series, rsi in seeded:
+        _insert_price_series(price_db, ticker, "usa", series)
+        _insert_rsi(analysis_db, ticker, "2024-03-01", rsi)
+
+    exit_code = signal_scan_main(
+        [
+            "--db",
+            str(price_db),
+            "--analysis-db",
+            str(analysis_db),
+            "--market",
+            "usa",
+            "--start-date",
+            "2024-03-01",
+            "--end-date",
+            "2024-03-01",
+            "--include-forward-returns",
+            "--output",
+            str(output_path),
+        ]
+    )
+
+    assert exit_code == 0
+    stdout_lines = capsys.readouterr().out.strip().splitlines()
+    csv_lines = output_path.read_text(encoding="utf-8").strip().splitlines()
+    for line in [
+        "SUMMARY forward_returns_rows_with_data=6",
+        "SUMMARY forward_returns_rows_without_data=1",
+        "SUMMARY forward_returns_bucket_lt_minus10_count=1",
+        "SUMMARY forward_returns_bucket_minus10_to_0_count=1",
+        "SUMMARY forward_returns_bucket_0_to_10_count=1",
+        "SUMMARY forward_returns_bucket_10_to_20_count=1",
+        "SUMMARY forward_returns_bucket_20_to_50_count=1",
+        "SUMMARY forward_returns_bucket_gt_50_count=1",
+        "SUMMARY forward_returns_bucket_lt_minus10_pct=16.6667",
+        "SUMMARY forward_returns_bucket_minus10_to_0_pct=16.6667",
+        "SUMMARY forward_returns_bucket_0_to_10_pct=16.6667",
+        "SUMMARY forward_returns_bucket_10_to_20_pct=16.6667",
+        "SUMMARY forward_returns_bucket_20_to_50_pct=16.6667",
+        "SUMMARY forward_returns_bucket_gt_50_pct=16.6667",
+    ]:
+        assert line in csv_lines
+        assert line in stdout_lines
+    assert all("forward_returns_bucket_" not in line for line in stdout_lines[:7])
+
+    zero_price_db = tmp_path / "zero_osakedata.db"
+    zero_analysis_db = tmp_path / "zero_analysis.db"
+    _create_price_db(zero_price_db)
+    _create_analysis_db(zero_analysis_db)
+    _insert_price_series(zero_price_db, "ZZZ", "usa", _single_signal_with_no_future_series())
+    _insert_rsi(zero_analysis_db, "ZZZ", "2024-03-01", 55.0)
+
+    zero_exit_code = signal_scan_main(
+        [
+            "--db",
+            str(zero_price_db),
+            "--analysis-db",
+            str(zero_analysis_db),
+            "--market",
+            "usa",
+            "--start-date",
+            "2024-03-01",
+            "--end-date",
+            "2024-03-01",
+            "--include-forward-returns",
+            "--limit",
+            "1",
+            "--output-format",
+            "summary",
+        ]
+    )
+
+    assert zero_exit_code == 0
+    zero_summary_lines = capsys.readouterr().out.strip().splitlines()
+    assert "SUMMARY forward_returns_rows_with_data=0" in zero_summary_lines
+    assert "SUMMARY forward_returns_rows_without_data=1" in zero_summary_lines
+    assert "SUMMARY forward_returns_bucket_lt_minus10_pct=0.0000" in zero_summary_lines
+    assert "SUMMARY forward_returns_bucket_minus10_to_0_pct=0.0000" in zero_summary_lines
+    assert "SUMMARY forward_returns_bucket_0_to_10_pct=0.0000" in zero_summary_lines
+    assert "SUMMARY forward_returns_bucket_10_to_20_pct=0.0000" in zero_summary_lines
+    assert "SUMMARY forward_returns_bucket_20_to_50_pct=0.0000" in zero_summary_lines
+    assert "SUMMARY forward_returns_bucket_gt_50_pct=0.0000" in zero_summary_lines

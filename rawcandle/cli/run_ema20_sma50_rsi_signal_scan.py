@@ -383,6 +383,12 @@ def format_summary_lines(
     forward_returns_rows_with_data: int = 0,
     forward_returns_rows_without_data: int = 0,
     forward_returns_positive_count: int = 0,
+    forward_returns_bucket_lt_minus10_count: int = 0,
+    forward_returns_bucket_minus10_to_0_count: int = 0,
+    forward_returns_bucket_0_to_10_count: int = 0,
+    forward_returns_bucket_10_to_20_count: int = 0,
+    forward_returns_bucket_20_to_50_count: int = 0,
+    forward_returns_bucket_gt_50_count: int = 0,
 ) -> list[str]:
     lines = [
         f"SUMMARY market={market}",
@@ -399,6 +405,48 @@ def format_summary_lines(
             if forward_returns_rows_with_data > 0
             else 0.0
         )
+        forward_returns_bucket_lt_minus10_pct = (
+            100.0
+            * forward_returns_bucket_lt_minus10_count
+            / float(forward_returns_rows_with_data)
+            if forward_returns_rows_with_data > 0
+            else 0.0
+        )
+        forward_returns_bucket_minus10_to_0_pct = (
+            100.0
+            * forward_returns_bucket_minus10_to_0_count
+            / float(forward_returns_rows_with_data)
+            if forward_returns_rows_with_data > 0
+            else 0.0
+        )
+        forward_returns_bucket_0_to_10_pct = (
+            100.0
+            * forward_returns_bucket_0_to_10_count
+            / float(forward_returns_rows_with_data)
+            if forward_returns_rows_with_data > 0
+            else 0.0
+        )
+        forward_returns_bucket_10_to_20_pct = (
+            100.0
+            * forward_returns_bucket_10_to_20_count
+            / float(forward_returns_rows_with_data)
+            if forward_returns_rows_with_data > 0
+            else 0.0
+        )
+        forward_returns_bucket_20_to_50_pct = (
+            100.0
+            * forward_returns_bucket_20_to_50_count
+            / float(forward_returns_rows_with_data)
+            if forward_returns_rows_with_data > 0
+            else 0.0
+        )
+        forward_returns_bucket_gt_50_pct = (
+            100.0
+            * forward_returns_bucket_gt_50_count
+            / float(forward_returns_rows_with_data)
+            if forward_returns_rows_with_data > 0
+            else 0.0
+        )
         lines.extend(
             [
                 "SUMMARY forward_returns_included=1",
@@ -407,6 +455,18 @@ def format_summary_lines(
                 f"SUMMARY forward_returns_rows_without_data={forward_returns_rows_without_data}",
                 f"SUMMARY forward_returns_positive_count={forward_returns_positive_count}",
                 f"SUMMARY forward_returns_positive_pct={forward_returns_positive_pct:.4f}",
+                f"SUMMARY forward_returns_bucket_lt_minus10_count={forward_returns_bucket_lt_minus10_count}",
+                f"SUMMARY forward_returns_bucket_minus10_to_0_count={forward_returns_bucket_minus10_to_0_count}",
+                f"SUMMARY forward_returns_bucket_0_to_10_count={forward_returns_bucket_0_to_10_count}",
+                f"SUMMARY forward_returns_bucket_10_to_20_count={forward_returns_bucket_10_to_20_count}",
+                f"SUMMARY forward_returns_bucket_20_to_50_count={forward_returns_bucket_20_to_50_count}",
+                f"SUMMARY forward_returns_bucket_gt_50_count={forward_returns_bucket_gt_50_count}",
+                f"SUMMARY forward_returns_bucket_lt_minus10_pct={forward_returns_bucket_lt_minus10_pct:.4f}",
+                f"SUMMARY forward_returns_bucket_minus10_to_0_pct={forward_returns_bucket_minus10_to_0_pct:.4f}",
+                f"SUMMARY forward_returns_bucket_0_to_10_pct={forward_returns_bucket_0_to_10_pct:.4f}",
+                f"SUMMARY forward_returns_bucket_10_to_20_pct={forward_returns_bucket_10_to_20_pct:.4f}",
+                f"SUMMARY forward_returns_bucket_20_to_50_pct={forward_returns_bucket_20_to_50_pct:.4f}",
+                f"SUMMARY forward_returns_bucket_gt_50_pct={forward_returns_bucket_gt_50_pct:.4f}",
             ]
         )
     return lines
@@ -441,6 +501,12 @@ def main(argv: list[str] | None = None) -> int:
     forward_rows_with_data = 0
     forward_rows_without_data = 0
     forward_positive_count = 0
+    forward_bucket_lt_minus10_count = 0
+    forward_bucket_minus10_to_0_count = 0
+    forward_bucket_0_to_10_count = 0
+    forward_bucket_10_to_20_count = 0
+    forward_bucket_20_to_50_count = 0
+    forward_bucket_gt_50_count = 0
     forward_metrics_by_key: dict[tuple[str, str], ForwardReturnMetrics] = {}
     if args.include_forward_returns:
         for row in limited_signals:
@@ -459,6 +525,19 @@ def main(argv: list[str] | None = None) -> int:
                     and metrics.max_forward_return_pct > 0.0
                 ):
                     forward_positive_count += 1
+                if metrics.max_forward_return_pct is not None:
+                    if metrics.max_forward_return_pct < -10.0:
+                        forward_bucket_lt_minus10_count += 1
+                    elif metrics.max_forward_return_pct <= 0.0:
+                        forward_bucket_minus10_to_0_count += 1
+                    elif metrics.max_forward_return_pct <= 10.0:
+                        forward_bucket_0_to_10_count += 1
+                    elif metrics.max_forward_return_pct <= 20.0:
+                        forward_bucket_10_to_20_count += 1
+                    elif metrics.max_forward_return_pct <= 50.0:
+                        forward_bucket_20_to_50_count += 1
+                    else:
+                        forward_bucket_gt_50_count += 1
     if args.output_format == "csv":
         output_path = (
             Path(args.output)
@@ -492,6 +571,12 @@ def main(argv: list[str] | None = None) -> int:
         forward_returns_rows_with_data=forward_rows_with_data,
         forward_returns_rows_without_data=forward_rows_without_data,
         forward_returns_positive_count=forward_positive_count,
+        forward_returns_bucket_lt_minus10_count=forward_bucket_lt_minus10_count,
+        forward_returns_bucket_minus10_to_0_count=forward_bucket_minus10_to_0_count,
+        forward_returns_bucket_0_to_10_count=forward_bucket_0_to_10_count,
+        forward_returns_bucket_10_to_20_count=forward_bucket_10_to_20_count,
+        forward_returns_bucket_20_to_50_count=forward_bucket_20_to_50_count,
+        forward_returns_bucket_gt_50_count=forward_bucket_gt_50_count,
     )
     if args.output_format == "csv":
         csv_lines.extend(summary_lines)
