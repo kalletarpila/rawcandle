@@ -58,3 +58,37 @@ def test_cli_writes_markdown_and_prints_deterministic_summary(tmp_path, capsys):
     assert lines[11] == f"SUMMARY output_markdown={expected_output_md}"
     assert lines[12] == f"SUMMARY output_csv={expected_output_csv}"
     assert lines[-1] == "SUMMARY validation_status=OK"
+
+
+def test_cli_accepts_watchlist_file_and_renders_watchlist_summary(tmp_path, capsys):
+    analysis_db = tmp_path / "analysis.db"
+    output_md = tmp_path / "daily_report.md"
+    output_csv = tmp_path / "daily_report.csv"
+    watchlist_file = tmp_path / "watchlist.txt"
+    expected_output_md = tmp_path / "daily_report_1200.md"
+    _seed_report_db(analysis_db)
+    watchlist_file.write_text("AAA\nOUTSIDE\n", encoding="utf-8")
+
+    exit_code = run_datacenter_daily_signal_report_main(
+        [
+            "--analysis-db",
+            str(analysis_db),
+            "--signal-date",
+            "2024-01-10",
+            "--taxonomy-version",
+            "DC_TAXONOMY_V1",
+            "--watchlist-file",
+            str(watchlist_file),
+            "--output-md",
+            str(output_md),
+            "--output-csv",
+            str(output_csv),
+            "--generated-at-utc",
+            "2026-05-17T12:00:00Z",
+        ]
+    )
+
+    assert exit_code == 0
+    markdown = expected_output_md.read_text(encoding="utf-8")
+    assert "## Watchlist Summary" in markdown
+    assert "NOT_PART_OF_DATACENTER_ECOSYSTEM" in markdown

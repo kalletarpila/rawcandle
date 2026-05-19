@@ -79,6 +79,8 @@ GROUP_BOS_PRIORITY = {
     None: 2,
 }
 
+WATCHLIST_MISSING_PRICE_STATUSES = {"MISSING_AS_OF_DATE", "MISSING_CLOSE_AS_OF_DATE"}
+
 
 def _parse_iso_date(value: str) -> str:
     try:
@@ -190,6 +192,129 @@ def _count_by_field(rows: Sequence[dict[str, object]], field_name: str) -> list[
         key = "NULL" if row.get(field_name) is None else str(row.get(field_name))
         counts[key] = counts.get(key, 0) + 1
     return [{"value": key, "count": counts[key]} for key in sorted(counts)]
+
+
+def _load_watchlist_tickers(path: str | Path | None) -> list[str]:
+    if path is None:
+        return []
+    tickers: list[str] = []
+    seen: set[str] = set()
+    for raw_line in Path(path).read_text(encoding="utf-8").splitlines():
+        value = raw_line.strip()
+        if not value or value.startswith("#"):
+            continue
+        ticker = value.upper()
+        if ticker in seen:
+            continue
+        seen.add(ticker)
+        tickers.append(ticker)
+    return tickers
+
+
+def _is_group_risk_state(
+    *,
+    subindustry_timing_state: object | None,
+    subindustry_overheat_risk_level: object | None,
+    layer_timing_state: object | None,
+    layer_overheat_risk_level: object | None,
+) -> bool:
+    return (
+        subindustry_timing_state in {"EXIT_ZONE", "TRIM_WATCH"}
+        or layer_timing_state in {"EXIT_ZONE", "TRIM_WATCH"}
+        or subindustry_overheat_risk_level in {"HIGH", "EXTREME"}
+        or layer_overheat_risk_level in {"HIGH", "EXTREME"}
+    )
+
+
+def _classify_daily_watchlist_status(row: dict[str, object]) -> str:
+    if row.get("in_datacenter_ecosystem") == "NO":
+        return "NOT_PART_OF_DATACENTER_ECOSYSTEM"
+    if row.get("price_data_status") in WATCHLIST_MISSING_PRICE_STATUSES:
+        return "MISSING_PRICE"
+    if row.get("exit_risk_severity") == "HIGH":
+        return "HIGH_EXIT_RISK"
+    if row.get("exit_risk_severity") == "MEDIUM":
+        return "MEDIUM_EXIT_RISK"
+    if row.get("breakout_signal") == 1:
+        return "BREAKOUT_CANDIDATE"
+    if row.get("pullback_signal") == 1:
+        return "PULLBACK_CANDIDATE"
+    if _is_group_risk_state(
+        subindustry_timing_state=row.get("subindustry_timing_state"),
+        subindustry_overheat_risk_level=row.get("subindustry_overheat_risk_level"),
+        layer_timing_state=row.get("layer_timing_state"),
+        layer_overheat_risk_level=row.get("layer_overheat_risk_level"),
+    ):
+        return "GROUP_RISK"
+    return "NEUTRAL_MONITOR"
+
+
+def _build_daily_watchlist_rows(
+    *,
+    watchlist_tickers: Sequence[str],
+    ticker_rows: Sequence[dict[str, object]],
+    group_rows: Sequence[dict[str, object]],
+) -> list[dict[str, object]]:
+    ticker_by_symbol = {
+        str(row.get("ticker") or ""): row
+        for row in ticker_rows
+        if row.get("ticker") is not None
+    }
+    group_context_by_key = {
+        (row.get("group_type"), row.get("group_name")): row
+        for row in group_rows
+    }
+    output_rows: list[dict[str, object]] = []
+    for ticker in watchlist_tickers:
+        ticker_row = ticker_by_symbol.get(ticker)
+        if ticker_row is None:
+            output_rows.append(
+                {
+                    "ticker": ticker,
+                    "watchlist_status": "NOT_PART_OF_DATACENTER_ECOSYSTEM",
+                    "in_datacenter_ecosystem": "NO",
+                }
+            )
+            continue
+        subindustry_context = group_context_by_key.get(
+            ("subindustry", ticker_row.get("primary_subindustry")),
+            {},
+        )
+        layer_context = group_context_by_key.get(
+            ("layer", ticker_row.get("primary_layer")),
+            {},
+        )
+        output_row = {
+            "ticker": ticker,
+            "in_datacenter_ecosystem": "YES",
+            "primary_layer": ticker_row.get("primary_layer"),
+            "primary_subindustry": ticker_row.get("primary_subindustry"),
+            "close": ticker_row.get("close"),
+            "return_5d": ticker_row.get("return_5d"),
+            "return_10d": ticker_row.get("return_10d"),
+            "return_20d": ticker_row.get("return_20d"),
+            "distance_to_ema20_pct": ticker_row.get("distance_to_ema20_pct"),
+            "ticker_trend_state": ticker_row.get("ticker_trend_state"),
+            "latest_structure_label": ticker_row.get("latest_structure_label"),
+            "latest_structure_freshness": ticker_row.get("latest_structure_freshness"),
+            "latest_bos_event_type": ticker_row.get("latest_bos_event_type"),
+            "latest_bos_freshness": ticker_row.get("latest_bos_freshness"),
+            "latest_reset_reason": ticker_row.get("latest_reset_reason"),
+            "latest_reset_freshness": ticker_row.get("latest_reset_freshness"),
+            "breakout_signal": ticker_row.get("breakout_signal"),
+            "pullback_signal": ticker_row.get("pullback_signal"),
+            "exit_risk_signal": ticker_row.get("exit_risk_signal"),
+            "exit_risk_severity": ticker_row.get("exit_risk_severity"),
+            "exit_reason": ticker_row.get("exit_reason"),
+            "subindustry_timing_state": subindustry_context.get("timing_state"),
+            "subindustry_overheat_risk_level": subindustry_context.get("overheat_risk_level"),
+            "layer_timing_state": layer_context.get("timing_state"),
+            "layer_overheat_risk_level": layer_context.get("overheat_risk_level"),
+            "price_data_status": ticker_row.get("price_data_status"),
+        }
+        output_row["watchlist_status"] = _classify_daily_watchlist_status(output_row)
+        output_rows.append(output_row)
+    return output_rows
 
 
 def _resolve_daily_taxonomy_version(
@@ -395,6 +520,7 @@ def build_markdown_daily_swing_report(
     group_rows = list(report_data["group_rows"])  # type: ignore[arg-type]
     ticker_rows = list(report_data["ticker_rows"])  # type: ignore[arg-type]
     synthetic_rows = list(report_data["synthetic_rows"])  # type: ignore[arg-type]
+    watchlist_tickers = list(report_data.get("watchlist_tickers") or [])
     generated = generated_at_utc or _utc_now_iso()
 
     ecosystem_row = next(
@@ -544,9 +670,65 @@ def build_markdown_daily_swing_report(
         f"taxonomy_version: {taxonomy_version}",
         f"generated_at_utc: {generated}",
         "source_tables: dc_group_swing_signal_daily, dc_ticker_swing_signal_daily, dc_group_synthetic_ohlc_daily",
-        "",
-        "## 2. Dashboard",
     ]
+    if watchlist_tickers:
+        watchlist_rows = _build_daily_watchlist_rows(
+            watchlist_tickers=watchlist_tickers,
+            ticker_rows=ticker_rows,
+            group_rows=group_rows,
+        )
+        watchlist_summary_rows = [
+            {"metric": "watchlist_tickers_total", "value": len(watchlist_rows)},
+            {"metric": "watchlist_in_datacenter_taxonomy", "value": sum(1 for row in watchlist_rows if row.get("in_datacenter_ecosystem") == "YES")},
+            {"metric": "watchlist_not_in_datacenter_taxonomy", "value": sum(1 for row in watchlist_rows if row.get("in_datacenter_ecosystem") == "NO")},
+            {"metric": "watchlist_missing_price", "value": sum(1 for row in watchlist_rows if row.get("watchlist_status") == "MISSING_PRICE")},
+            {"metric": "watchlist_breakout_count", "value": sum(1 for row in watchlist_rows if row.get("breakout_signal") == 1)},
+            {"metric": "watchlist_pullback_count", "value": sum(1 for row in watchlist_rows if row.get("pullback_signal") == 1)},
+            {"metric": "watchlist_high_exit_risk_count", "value": sum(1 for row in watchlist_rows if row.get("exit_risk_severity") == "HIGH")},
+            {"metric": "watchlist_medium_exit_risk_count", "value": sum(1 for row in watchlist_rows if row.get("exit_risk_severity") == "MEDIUM")},
+        ]
+        lines.extend(
+            [
+                "",
+                "## Watchlist Summary",
+                _format_table(["metric", "value"], watchlist_summary_rows).rstrip(),
+                "",
+                _format_table(
+                    [
+                        "ticker",
+                        "watchlist_status",
+                        "in_datacenter_ecosystem",
+                        "primary_layer",
+                        "primary_subindustry",
+                        "close",
+                        "return_5d",
+                        "return_10d",
+                        "return_20d",
+                        "distance_to_ema20_pct",
+                        "ticker_trend_state",
+                        "latest_structure_label",
+                        "latest_structure_freshness",
+                        "latest_bos_event_type",
+                        "latest_bos_freshness",
+                        "latest_reset_reason",
+                        "latest_reset_freshness",
+                        "breakout_signal",
+                        "pullback_signal",
+                        "exit_risk_signal",
+                        "exit_risk_severity",
+                        "exit_reason",
+                        "subindustry_timing_state",
+                        "subindustry_overheat_risk_level",
+                        "layer_timing_state",
+                        "layer_overheat_risk_level",
+                        "price_data_status",
+                    ],
+                    watchlist_rows,
+                ).rstrip(),
+            ]
+        )
+
+    lines.extend(["", "## 2. Dashboard"])
     if ecosystem_row is None:
         lines.append("Ecosystem row missing.")
     else:
@@ -889,6 +1071,7 @@ def write_daily_swing_signal_report(
     taxonomy_version: str | None = None,
     output_md: str | Path | None = None,
     output_csv: str | Path | None = None,
+    watchlist_file: str | Path | None = None,
     top_n: int = 20,
     generated_at_utc: str | None = None,
 ) -> dict[str, object]:
@@ -899,6 +1082,8 @@ def write_daily_swing_signal_report(
         ohlc_calc_version=ohlc_calc_version,
         taxonomy_version=taxonomy_version,
     )
+    if watchlist_file is not None:
+        report_data["watchlist_tickers"] = _load_watchlist_tickers(watchlist_file)
     markdown = build_markdown_daily_swing_report(
         report_data,
         generated_at_utc=generated_at_utc,

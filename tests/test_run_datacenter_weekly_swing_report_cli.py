@@ -108,3 +108,37 @@ def test_cli_supports_custom_window_size_and_invalid_zero(tmp_path, capsys):
         ]
     )
     assert invalid_exit_code != 0
+
+
+def test_cli_accepts_watchlist_file_and_renders_watchlist_summary(tmp_path, capsys):
+    analysis_db = tmp_path / "analysis.db"
+    output_md = tmp_path / "weekly_report.md"
+    output_csv = tmp_path / "weekly_report.csv"
+    watchlist_file = tmp_path / "watchlist.txt"
+    expected_output_md = tmp_path / "weekly_report_1200.md"
+    _seed_weekly_report_db(analysis_db)
+    watchlist_file.write_text("AAA\nOUTSIDE\n", encoding="utf-8")
+
+    exit_code = run_datacenter_weekly_swing_report_main(
+        [
+            "--analysis-db",
+            str(analysis_db),
+            "--end-date",
+            "2024-01-10",
+            "--taxonomy-version",
+            "DC_TAXONOMY_V1",
+            "--watchlist-file",
+            str(watchlist_file),
+            "--output-md",
+            str(output_md),
+            "--output-csv",
+            str(output_csv),
+            "--generated-at-utc",
+            "2026-05-17T12:00:00Z",
+        ]
+    )
+
+    assert exit_code == 0
+    markdown = expected_output_md.read_text(encoding="utf-8")
+    assert "## Watchlist Summary" in markdown
+    assert "NOT_PART_OF_DATACENTER_ECOSYSTEM" in markdown

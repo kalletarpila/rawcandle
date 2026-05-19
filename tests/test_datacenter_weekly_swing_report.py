@@ -382,6 +382,58 @@ def test_finds_last_five_valid_signal_dates_and_generates_report(tmp_path):
     assert "| 2024-01-02 | subindustry | LOW | 1 |" in markdown
 
 
+def test_rolling_watchlist_summary_renders_counts_outside_ticker_and_last_group_context(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    watchlist_file = tmp_path / "watchlist.txt"
+    _seed_weekly_report_db(analysis_db)
+    watchlist_file.write_text("aaa\nbbb\nccc\noutside\n", encoding="utf-8")
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET exit_risk_signal = 1,
+                exit_reason = 'subindustry_exit_zone',
+                exit_risk_severity = 'HIGH'
+            WHERE ticker = 'BBB'
+              AND signal_date = '2024-01-10'
+            """
+        )
+        for signal_date in ("2024-01-02", "2024-01-03", "2024-01-08", "2024-01-10"):
+            conn.execute(
+                """
+                UPDATE dc_ticker_swing_signal_daily
+                SET exit_risk_severity = 'HIGH'
+                WHERE ticker = 'CCC'
+                  AND signal_date = ?
+                """,
+                (signal_date,),
+            )
+        conn.commit()
+
+    result = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        watchlist_file=watchlist_file,
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+    markdown = result["markdown"]
+
+    assert "## Watchlist Summary" in markdown
+    assert markdown.index("## Watchlist Summary") < markdown.index("## 3. Ecosystem window change")
+    assert "| watchlist_tickers_total | 4 |" in markdown
+    assert "| watchlist_in_datacenter_taxonomy | 3 |" in markdown
+    assert "| watchlist_not_in_datacenter_taxonomy | 1 |" in markdown
+    assert "| watchlist_with_breakout_days | 1 |" in markdown
+    assert "| watchlist_with_pullback_days | 1 |" in markdown
+    assert "| watchlist_with_exit_risk_days | 2 |" in markdown
+    assert "| watchlist_with_high_exit_risk_days | 2 |" in markdown
+    assert "| watchlist_missing_price_end_date | 1 |" in markdown
+    assert "| OUTSIDE | NOT_PART_OF_DATACENTER_ECOSYSTEM | NO |" in markdown
+    assert "| AAA | BREAKOUT_CANDIDATE | YES | Infrastructure | AI Chips | 2024-01-02 | 2024-01-10 | 110 | 3 | 0 | 0 | 0 | 0 |  |  |  | HH |  |  |  |  |  | BUY_ZONE | HIGH | NEUTRAL | LOW | OK |" in markdown
+    assert "| BBB | HIGH_EXIT_RISK | YES | Infrastructure | AI Chips | 2024-01-02 | 2024-01-10 | 100 | 0 | 3 | 1 | 1 | 0 | HIGH | subindustry_exit_zone |  | HL |  |  |  |  |  | BUY_ZONE | HIGH | NEUTRAL | LOW | OK |" in markdown
+    assert "| CCC | MISSING_PRICE | YES | Infrastructure | Storage | 2024-01-02 | 2024-01-10 | 83 | 0 | 0 | 4 | 4 | 0 | HIGH | close_below_ema20;latest_structure_label_ll |  | LL |  |  |  |  |  | EXIT_ZONE | EXTREME | NEUTRAL | LOW | MISSING_AS_OF_DATE |" in markdown
+
+
 def test_weekly_overheat_progression_groups_by_group_type_and_orders_deterministically(tmp_path):
     analysis_db = tmp_path / "analysis.db"
     _seed_weekly_report_db(analysis_db)

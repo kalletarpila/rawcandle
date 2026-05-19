@@ -5,6 +5,7 @@ import pytest
 
 from analysis.database_manager import DatabaseManager
 from analysis.datacenter_indices.swing_daily_report import (
+    _load_watchlist_tickers,
     build_markdown_daily_swing_report,
     load_daily_swing_report_data,
     write_daily_swing_signal_report,
@@ -335,6 +336,62 @@ def test_generates_markdown_report_with_required_sections_and_filters(tmp_path):
     assert "HIGH" in markdown
     assert "synthetic_ohlc_rows_missing_relative_close_20" in markdown
     assert "ticker_rows_with_scanner_fields_null" in markdown
+
+
+def test_watchlist_file_parser_normalizes_comments_whitespace_case_and_duplicates(tmp_path):
+    watchlist_file = tmp_path / "watchlist.txt"
+    watchlist_file.write_text("\n nvda \n# comment\nAVGO\nnvda\n\n tsm \n", encoding="utf-8")
+
+    assert _load_watchlist_tickers(watchlist_file) == ["NVDA", "AVGO", "TSM"]
+
+
+def test_daily_watchlist_summary_renders_inside_outside_group_context_and_status_priority(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    watchlist_file = tmp_path / "watchlist.txt"
+    _seed_report_db(analysis_db)
+    watchlist_file.write_text("aaa\nbbb\nccc\noutside\nbbb\n", encoding="utf-8")
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET exit_risk_signal = 1,
+                exit_reason = 'subindustry_exit_zone',
+                exit_risk_severity = 'HIGH'
+            WHERE ticker = 'BBB'
+              AND signal_date = '2024-01-10'
+            """
+        )
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET exit_risk_severity = 'HIGH'
+            WHERE ticker = 'CCC'
+              AND signal_date = '2024-01-10'
+            """
+        )
+        conn.commit()
+
+    result = write_daily_swing_signal_report(
+        analysis_db_path=analysis_db,
+        signal_date="2024-01-10",
+        watchlist_file=watchlist_file,
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+    markdown = result["markdown"]
+
+    assert "## Watchlist Summary" in markdown
+    assert markdown.index("## Watchlist Summary") < markdown.index("## 2. Dashboard")
+    assert "| watchlist_tickers_total | 4 |" in markdown
+    assert "| watchlist_in_datacenter_taxonomy | 3 |" in markdown
+    assert "| watchlist_not_in_datacenter_taxonomy | 1 |" in markdown
+    assert "| watchlist_missing_price | 1 |" in markdown
+    assert "| watchlist_breakout_count | 1 |" in markdown
+    assert "| watchlist_pullback_count | 1 |" in markdown
+    assert "| watchlist_high_exit_risk_count | 2 |" in markdown
+    assert "| OUTSIDE | NOT_PART_OF_DATACENTER_ECOSYSTEM | NO |" in markdown
+    assert "| AAA | BREAKOUT_CANDIDATE | YES | Infrastructure | AI Chips | 110 | 0.03 | 0.08 | 0.12 | 0.0476 |  | HH |  |  |  |  |  | 1 | 0 | 0 |  |  | BUY_ZONE | LOW | NEUTRAL | LOW | OK |" in markdown
+    assert "| BBB | HIGH_EXIT_RISK | YES | Infrastructure | Cloud | 102 | -0.02 | 0.04 | 0.15 | 0.0303 |  | HL |  |  |  |  |  | 0 | 1 | 1 | HIGH | subindustry_exit_zone | ADD_ON_PULLBACK | ELEVATED | NEUTRAL | LOW | OK |" in markdown
+    assert "| CCC | MISSING_PRICE | YES | Infrastructure | Storage | 90 | -0.04 | -0.1 | -0.15 | -0.0526 |  | LL |  |  |  |  |  | 0 | 0 | 1 | HIGH | close_below_ema20;latest_structure_label_ll | EXIT_ZONE | EXTREME | NEUTRAL | LOW | MISSING_AS_OF_DATE |" in markdown
 
 
 def test_daily_group_structure_breaks_section_renders_no_rows_when_absent(tmp_path):

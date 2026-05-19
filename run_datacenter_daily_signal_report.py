@@ -29,6 +29,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--signal-version", type=str, default=DEFAULT_SIGNAL_VERSION, help="Signal version to report")
     parser.add_argument("--ohlc-calc-version", type=str, default=DEFAULT_OHLC_CALC_VERSION, help="Synthetic OHLC calc version to report")
     parser.add_argument("--taxonomy-version", type=str, default=None, help="Optional taxonomy_version to scope the report")
+    parser.add_argument("--watchlist-file", type=Path, default=None, help="Optional plain-text watchlist file with one ticker per line")
     parser.add_argument("--output-md", type=Path, default=None, help="Optional output Markdown path")
     parser.add_argument("--output-csv", type=Path, default=None, help="Optional output CSV path")
     parser.add_argument("--top-n", type=int, default=20, help="Maximum row count for scanner and ranking sections")
@@ -72,6 +73,7 @@ def main(argv: list[str] | None = None) -> int:
             signal_version=args.signal_version,
             ohlc_calc_version=args.ohlc_calc_version,
             taxonomy_version=args.taxonomy_version,
+            watchlist_file=args.watchlist_file,
             output_md=output_md,
             output_csv=output_csv,
             top_n=args.top_n,
