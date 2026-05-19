@@ -242,6 +242,34 @@ def _is_group_risk_state(
     )
 
 
+def _has_subindustry_context_risk(
+    *,
+    subindustry_timing_state: object | None,
+    subindustry_overheat_risk_level: object | None,
+) -> bool:
+    return (
+        subindustry_timing_state in {"EXIT_ZONE", "TRIM_WATCH"}
+        or subindustry_overheat_risk_level in {"HIGH", "EXTREME"}
+    )
+
+
+def _has_layer_context_risk(
+    *,
+    layer_timing_state: object | None,
+    layer_overheat_risk_level: object | None,
+) -> bool:
+    return (
+        layer_timing_state in {"EXIT_ZONE", "TRIM_WATCH"}
+        or layer_overheat_risk_level in {"HIGH", "EXTREME"}
+    )
+
+
+def _daily_context_risk_value(*, in_datacenter_ecosystem: object | None, has_risk: bool) -> str:
+    if in_datacenter_ecosystem == "NO":
+        return ""
+    return "YES" if has_risk else "NO"
+
+
 def _classify_daily_watchlist_status(row: dict[str, object]) -> str:
     if row.get("in_datacenter_ecosystem") == "NO":
         return "NOT_PART_OF_DATACENTER_ECOSYSTEM"
@@ -328,6 +356,20 @@ def _build_daily_watchlist_rows(
             "layer_overheat_risk_level": layer_context.get("overheat_risk_level"),
             "price_data_status": ticker_row.get("price_data_status"),
         }
+        output_row["subindustry_context_risk"] = _daily_context_risk_value(
+            in_datacenter_ecosystem=output_row["in_datacenter_ecosystem"],
+            has_risk=_has_subindustry_context_risk(
+                subindustry_timing_state=output_row.get("subindustry_timing_state"),
+                subindustry_overheat_risk_level=output_row.get("subindustry_overheat_risk_level"),
+            ),
+        )
+        output_row["layer_context_risk"] = _daily_context_risk_value(
+            in_datacenter_ecosystem=output_row["in_datacenter_ecosystem"],
+            has_risk=_has_layer_context_risk(
+                layer_timing_state=output_row.get("layer_timing_state"),
+                layer_overheat_risk_level=output_row.get("layer_overheat_risk_level"),
+            ),
+        )
         output_row["watchlist_status"] = _classify_daily_watchlist_status(output_row)
         output_rows.append(output_row)
     return output_rows
@@ -726,6 +768,8 @@ def build_markdown_daily_swing_report(
                     [
                         "ticker",
                         "watchlist_status",
+                        "subindustry_context_risk",
+                        "layer_context_risk",
                         "in_datacenter_ecosystem",
                         "primary_layer",
                         "primary_subindustry",

@@ -369,6 +369,10 @@ It only renders persisted rows for one selected `signal_date`.
   - `current_watchlist_status` for the final day / last available row in the selected window
   - `window_watchlist_status` for the strongest status seen anywhere in the selected rolling window
 - This avoids ambiguity when a ticker is currently only `GROUP_RISK` but had `HIGH_EXIT_RISK` earlier in the window.
+- `GROUP_RISK` is a combined context-risk status and may come from subindustry risk, layer risk, or both.
+- Reports now show:
+  - `subindustry_context_risk`
+  - `layer_context_risk`
 - Watchlist status is monitoring context only, not a trading recommendation.
 
 Example watchlist:

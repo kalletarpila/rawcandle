@@ -17,6 +17,9 @@ from .swing_daily_report import (
     OVERHEAT_PRIORITY,
     TREND_PRIORITY,
     WATCHLIST_MISSING_PRICE_STATUSES,
+    _daily_context_risk_value,
+    _has_layer_context_risk,
+    _has_subindustry_context_risk,
     _is_group_risk_state,
     _check_required_tables,
     _float_value,
@@ -459,6 +462,8 @@ def _build_rolling_watchlist_rows(
                     "ticker": ticker,
                     "current_watchlist_status": "NOT_PART_OF_DATACENTER_ECOSYSTEM",
                     "window_watchlist_status": "NOT_PART_OF_DATACENTER_ECOSYSTEM",
+                    "subindustry_context_risk": "",
+                    "layer_context_risk": "",
                     "in_datacenter_ecosystem": "NO",
                 }
             )
@@ -503,6 +508,20 @@ def _build_rolling_watchlist_rows(
             "last_price_data_status": last_row.get("price_data_status"),
             "all_price_rows_missing": all(row.get("price_data_status") in WATCHLIST_MISSING_PRICE_STATUSES for row in current_rows),
         }
+        output_row["subindustry_context_risk"] = _daily_context_risk_value(
+            in_datacenter_ecosystem=output_row["in_datacenter_ecosystem"],
+            has_risk=_has_subindustry_context_risk(
+                subindustry_timing_state=output_row.get("last_subindustry_timing_state"),
+                subindustry_overheat_risk_level=output_row.get("last_subindustry_overheat_risk_level"),
+            ),
+        )
+        output_row["layer_context_risk"] = _daily_context_risk_value(
+            in_datacenter_ecosystem=output_row["in_datacenter_ecosystem"],
+            has_risk=_has_layer_context_risk(
+                layer_timing_state=output_row.get("last_layer_timing_state"),
+                layer_overheat_risk_level=output_row.get("last_layer_overheat_risk_level"),
+            ),
+        )
         output_row["current_watchlist_status"] = _classify_rolling_current_watchlist_status(output_row)
         output_row["window_watchlist_status"] = _classify_rolling_window_watchlist_status(output_row)
         output_rows.append(output_row)
@@ -610,6 +629,8 @@ def build_markdown_weekly_swing_report(
                         "ticker",
                         "current_watchlist_status",
                         "window_watchlist_status",
+                        "subindustry_context_risk",
+                        "layer_context_risk",
                         "in_datacenter_ecosystem",
                         "primary_layer",
                         "primary_subindustry",

@@ -391,10 +391,57 @@ def test_daily_watchlist_summary_renders_inside_outside_group_context_and_status
     assert "| watchlist_breakout_count | 1 |" in markdown
     assert "| watchlist_pullback_count | 1 |" in markdown
     assert "| watchlist_high_exit_risk_count | 2 |" in markdown
-    assert "| OUTSIDE | NOT_PART_OF_DATACENTER_ECOSYSTEM | NO |" in markdown
-    assert "| AAA | BREAKOUT_CANDIDATE | YES | Infrastructure | AI Chips | 110 | 0.03 | 0.08 | 0.12 | 0.0476 |  | HH |  |  |  |  |  | 1 | 0 | 0 |  |  | BUY_ZONE | LOW | NEUTRAL | LOW | OK |" in markdown
-    assert "| BBB | HIGH_EXIT_RISK | YES | Infrastructure | Cloud | 102 | -0.02 | 0.04 | 0.15 | 0.0303 |  | HL |  |  |  |  |  | 0 | 1 | 1 | HIGH | subindustry_exit_zone | ADD_ON_PULLBACK | ELEVATED | NEUTRAL | LOW | OK |" in markdown
-    assert "| CCC | MISSING_PRICE | YES | Infrastructure | Storage | 90 | -0.04 | -0.1 | -0.15 | -0.0526 |  | LL |  |  |  |  |  | 0 | 0 | 1 | HIGH | close_below_ema20;latest_structure_label_ll | EXIT_ZONE | EXTREME | NEUTRAL | LOW | MISSING_AS_OF_DATE |" in markdown
+    assert "subindustry_context_risk" in markdown
+    assert "layer_context_risk" in markdown
+    assert "| OUTSIDE | NOT_PART_OF_DATACENTER_ECOSYSTEM |  |  | NO |" in markdown
+    assert "| AAA | BREAKOUT_CANDIDATE | NO | NO | YES | Infrastructure | AI Chips | 110 | 0.03 | 0.08 | 0.12 | 0.0476 |  | HH |  |  |  |  |  | 1 | 0 | 0 |  |  | BUY_ZONE | LOW | NEUTRAL | LOW | OK |" in markdown
+    assert "| BBB | HIGH_EXIT_RISK | NO | NO | YES | Infrastructure | Cloud | 102 | -0.02 | 0.04 | 0.15 | 0.0303 |  | HL |  |  |  |  |  | 0 | 1 | 1 | HIGH | subindustry_exit_zone | ADD_ON_PULLBACK | ELEVATED | NEUTRAL | LOW | OK |" in markdown
+    assert "| CCC | MISSING_PRICE | YES | NO | YES | Infrastructure | Storage | 90 | -0.04 | -0.1 | -0.15 | -0.0526 |  | LL |  |  |  |  |  | 0 | 0 | 1 | HIGH | close_below_ema20;latest_structure_label_ll | EXIT_ZONE | EXTREME | NEUTRAL | LOW | MISSING_AS_OF_DATE |" in markdown
+
+
+def test_daily_watchlist_context_risk_fields_show_subindustry_layer_or_both(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    watchlist_file = tmp_path / "watchlist.txt"
+    _seed_report_db(analysis_db)
+    watchlist_file.write_text("AAA\nBBB\nCCC\n", encoding="utf-8")
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET breakout_signal = 0,
+                fast_ema10_pullback_signal = 0,
+                conservative_ema20_pullback_signal = 0,
+                pullback_signal = 0,
+                exit_risk_signal = 0,
+                exit_risk_severity = NULL,
+                exit_reason = NULL
+            WHERE ticker = 'AAA'
+              AND signal_date = '2024-01-10'
+            """
+        )
+        conn.execute(
+            """
+            UPDATE dc_group_swing_signal_daily
+            SET timing_state = 'TRIM_WATCH',
+                overheat_risk_level = 'HIGH'
+            WHERE signal_date = '2024-01-10'
+              AND taxonomy_version = 'DC_TAXONOMY_V1'
+              AND group_type = 'layer'
+              AND group_name = 'Infrastructure'
+            """
+        )
+        conn.commit()
+
+    markdown = write_daily_swing_signal_report(
+        analysis_db_path=analysis_db,
+        signal_date="2024-01-10",
+        watchlist_file=watchlist_file,
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )["markdown"]
+
+    assert "| AAA | GROUP_RISK | NO | YES | YES |" in markdown
+    assert "| BBB | PULLBACK_CANDIDATE | NO | YES | YES |" in markdown
+    assert "| CCC | MISSING_PRICE | YES | YES | YES |" in markdown
 
 
 def test_daily_group_structure_breaks_section_renders_no_rows_when_absent(tmp_path):
