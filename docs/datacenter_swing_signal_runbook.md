@@ -395,6 +395,19 @@ It only renders persisted rows for one selected `signal_date`.
 - `subindustry_trend_classification` and `layer_trend_classification` are group synthetic OHLC structure context.
 - Watchlist status is monitoring context only, not a trading recommendation.
 
+## Datacenter Taxonomy Listing
+
+- Daily and rolling reports include `Datacenter Taxonomy Listing` by default.
+- The listing is hierarchical:
+  - layer
+  - subindustry
+  - ticker
+- The daily listing uses the selected `signal_date` ticker rows for the selected taxonomy and signal version.
+- The rolling listing shows one row per ticker using the last available row in the selected rolling window.
+- The listing uses the same status and context style as `Watchlist Summary`.
+- Disable the section with `--no-taxonomy-listing`.
+- This section is report-only and does not change signals.
+
 ## Datacenter UI
 
 - RawCandle UI now includes a `Datacenter` page/tab.

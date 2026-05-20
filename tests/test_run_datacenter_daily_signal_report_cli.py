@@ -38,6 +38,7 @@ def test_cli_writes_markdown_and_prints_deterministic_summary(tmp_path, capsys):
     markdown = expected_output_md.read_text(encoding="utf-8")
     assert "# Datacenter Daily Swing Signal Report" in markdown
     assert "## Watchlist Summary" in markdown
+    assert "## Datacenter Taxonomy Listing" in markdown
     assert "watchlist_subindustry_context_risk_count" in markdown
     assert "watchlist_layer_context_risk_count" in markdown
     assert "watchlist_both_context_risk_count" in markdown
@@ -69,6 +70,36 @@ def test_cli_writes_markdown_and_prints_deterministic_summary(tmp_path, capsys):
     assert lines[11] == f"SUMMARY output_markdown={expected_output_md}"
     assert lines[12] == f"SUMMARY output_csv={expected_output_csv}"
     assert lines[-1] == "SUMMARY validation_status=OK"
+
+
+def test_cli_can_omit_taxonomy_listing(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    output_md = tmp_path / "daily_report.md"
+    output_csv = tmp_path / "daily_report.csv"
+    expected_output_md = tmp_path / "daily_report_1200.md"
+    _seed_report_db(analysis_db)
+
+    exit_code = run_datacenter_daily_signal_report_main(
+        [
+            "--analysis-db",
+            str(analysis_db),
+            "--signal-date",
+            "2024-01-10",
+            "--taxonomy-version",
+            "DC_TAXONOMY_V1",
+            "--no-taxonomy-listing",
+            "--output-md",
+            str(output_md),
+            "--output-csv",
+            str(output_csv),
+            "--generated-at-utc",
+            "2026-05-17T12:00:00Z",
+        ]
+    )
+
+    assert exit_code == 0
+    markdown = expected_output_md.read_text(encoding="utf-8")
+    assert "## Datacenter Taxonomy Listing" not in markdown
 
 
 def test_cli_accepts_watchlist_file_and_renders_watchlist_summary(tmp_path, capsys):

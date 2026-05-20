@@ -347,6 +347,7 @@ def test_finds_last_five_valid_signal_dates_and_generates_report(tmp_path):
         "## 12. Group Structure Break / Reset History",
         "## 13. Data quality over the window",
         "## 14. Missing / incomplete inputs summary",
+        "## Datacenter Taxonomy Listing",
     ]:
         assert heading in markdown
     assert "### A. BOS / RESET events during window" in markdown
@@ -384,6 +385,8 @@ def test_finds_last_five_valid_signal_dates_and_generates_report(tmp_path):
     assert "| 2024-01-02 | layer | LOW | 1 |" in markdown
     assert "| 2024-01-02 | subindustry | HIGH | 1 |" in markdown
     assert "| 2024-01-02 | subindustry | LOW | 1 |" in markdown
+    assert "### Layer: Infrastructure" in markdown
+    assert "#### Subindustry: AI Chips" in markdown
 
 
 def test_rolling_watchlist_summary_renders_counts_outside_ticker_and_last_group_context(tmp_path):
@@ -705,6 +708,50 @@ def test_weekly_report_uses_default_watchlist_path_and_missing_file_is_non_fatal
     assert "## Watchlist Summary" in markdown
     assert "| watchlist_tickers_total | 0 |" in markdown
     assert f"No watchlist file found: {missing_watchlist}" in markdown
+
+
+def test_weekly_report_can_omit_taxonomy_listing(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+
+    markdown = build_markdown_weekly_swing_report(
+        load_weekly_swing_report_data(
+            analysis_db_path=analysis_db,
+            end_date="2024-01-10",
+        ),
+        generated_at_utc="2026-05-17T12:00:00Z",
+        top_n=20,
+        include_taxonomy_listing=False,
+    )
+
+    assert "## Datacenter Taxonomy Listing" not in markdown
+
+
+def test_weekly_taxonomy_listing_uses_last_available_row_per_ticker(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+
+    markdown = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )["markdown"]
+
+    section = markdown[markdown.index("## Datacenter Taxonomy Listing") :]
+    assert "### Layer: Infrastructure" in section
+    assert "#### Subindustry: AI Chips" in section
+    assert "#### Subindustry: Storage" in section
+    assert "current_watchlist_status" in section
+    assert "window_watchlist_status" in section
+    assert "subindustry_context_risk" in section
+    assert "layer_context_risk" in section
+    assert "exit_risk_days" in section
+    assert "last_price_data_status" in section
+    assert section.count("| AAA |") == 1
+    assert section.count("| BBB |") == 1
+    assert section.count("| CCC |") == 1
+    assert section.count("| DDD |") == 1
+    assert "| ZZZ |" not in section
 
 
 def test_weekly_exit_risk_section_sorts_by_severity_after_day_count(tmp_path):

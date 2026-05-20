@@ -546,11 +546,119 @@ def _build_rolling_watchlist_rows(
     return output_rows
 
 
+def _build_rolling_taxonomy_listing_rows(
+    *,
+    ticker_rows: Sequence[dict[str, object]],
+    group_rows: Sequence[dict[str, object]],
+    synthetic_rows: Sequence[dict[str, object]],
+) -> list[dict[str, object]]:
+    ticker_rows_by_ticker: dict[str, list[dict[str, object]]] = {}
+    for row in ticker_rows:
+        ticker = str(row.get("ticker") or "")
+        if not ticker:
+            continue
+        ticker_rows_by_ticker.setdefault(ticker, []).append(row)
+    for rows in ticker_rows_by_ticker.values():
+        rows.sort(key=lambda row: str(row.get("signal_date") or ""))
+    group_context_by_key = {
+        (row.get("signal_date"), row.get("group_type"), row.get("group_name")): row
+        for row in group_rows
+    }
+    synthetic_context_by_key = _build_group_synthetic_context_by_key(
+        synthetic_rows,
+        include_date=True,
+    )
+    output_rows: list[dict[str, object]] = []
+    for ticker in sorted(ticker_rows_by_ticker):
+        current_rows = ticker_rows_by_ticker[ticker]
+        last_row = current_rows[-1]
+        subindustry_context = group_context_by_key.get(
+            (last_row.get("signal_date"), "subindustry", last_row.get("primary_subindustry")),
+            {},
+        )
+        layer_context = group_context_by_key.get(
+            (last_row.get("signal_date"), "layer", last_row.get("primary_layer")),
+            {},
+        )
+        subindustry_structure_context = synthetic_context_by_key.get(
+            (last_row.get("signal_date"), "subindustry", last_row.get("primary_subindustry")),
+            {},
+        )
+        layer_structure_context = synthetic_context_by_key.get(
+            (last_row.get("signal_date"), "layer", last_row.get("primary_layer")),
+            {},
+        )
+        output_row = {
+            "ticker": ticker,
+            "in_datacenter_ecosystem": "YES",
+            "last_subindustry_trend_classification": subindustry_structure_context.get("trend_classification"),
+            "last_subindustry_latest_structure_label": subindustry_structure_context.get("latest_structure_label"),
+            "last_layer_trend_classification": layer_structure_context.get("trend_classification"),
+            "last_layer_latest_structure_label": layer_structure_context.get("latest_structure_label"),
+            "primary_layer": last_row.get("primary_layer"),
+            "primary_subindustry": last_row.get("primary_subindustry"),
+            "first_signal_date": current_rows[0].get("signal_date"),
+            "last_signal_date": last_row.get("signal_date"),
+            "last_close": last_row.get("close"),
+            "last_breakout_signal": last_row.get("breakout_signal"),
+            "last_pullback_signal": last_row.get("pullback_signal"),
+            "breakout_days": sum(1 for row in current_rows if row.get("breakout_signal") == 1),
+            "pullback_days": sum(1 for row in current_rows if row.get("pullback_signal") == 1),
+            "exit_risk_days": sum(1 for row in current_rows if row.get("exit_risk_signal") == 1),
+            "high_exit_risk_days": sum(1 for row in current_rows if row.get("exit_risk_severity") == "HIGH"),
+            "medium_exit_risk_days": sum(1 for row in current_rows if row.get("exit_risk_severity") == "MEDIUM"),
+            "last_exit_risk_severity": last_row.get("exit_risk_severity"),
+            "last_exit_reason": last_row.get("exit_reason"),
+            "last_ticker_trend_state": last_row.get("ticker_trend_state"),
+            "last_latest_structure_label": last_row.get("latest_structure_label"),
+            "last_latest_structure_freshness": last_row.get("latest_structure_freshness"),
+            "last_latest_bos_event_type": last_row.get("latest_bos_event_type"),
+            "last_latest_bos_freshness": last_row.get("latest_bos_freshness"),
+            "last_latest_reset_reason": last_row.get("latest_reset_reason"),
+            "last_latest_reset_freshness": last_row.get("latest_reset_freshness"),
+            "last_subindustry_timing_state": subindustry_context.get("timing_state"),
+            "last_subindustry_overheat_risk_level": subindustry_context.get("overheat_risk_level"),
+            "last_layer_timing_state": layer_context.get("timing_state"),
+            "last_layer_overheat_risk_level": layer_context.get("overheat_risk_level"),
+            "last_price_data_status": last_row.get("price_data_status"),
+            "all_price_rows_missing": all(
+                row.get("price_data_status") in WATCHLIST_MISSING_PRICE_STATUSES
+                for row in current_rows
+            ),
+        }
+        output_row["subindustry_context_risk"] = _daily_context_risk_value(
+            in_datacenter_ecosystem=output_row["in_datacenter_ecosystem"],
+            has_risk=_has_subindustry_context_risk(
+                subindustry_timing_state=output_row.get("last_subindustry_timing_state"),
+                subindustry_overheat_risk_level=output_row.get("last_subindustry_overheat_risk_level"),
+            ),
+        )
+        output_row["layer_context_risk"] = _daily_context_risk_value(
+            in_datacenter_ecosystem=output_row["in_datacenter_ecosystem"],
+            has_risk=_has_layer_context_risk(
+                layer_timing_state=output_row.get("last_layer_timing_state"),
+                layer_overheat_risk_level=output_row.get("last_layer_overheat_risk_level"),
+            ),
+        )
+        output_row["current_watchlist_status"] = _classify_rolling_current_watchlist_status(output_row)
+        output_row["window_watchlist_status"] = _classify_rolling_window_watchlist_status(output_row)
+        output_rows.append(output_row)
+    output_rows.sort(
+        key=lambda row: (
+            str(row.get("primary_layer") or ""),
+            str(row.get("primary_subindustry") or ""),
+            str(row.get("ticker") or ""),
+        )
+    )
+    return output_rows
+
+
 def build_markdown_weekly_swing_report(
     report_data: dict[str, object],
     *,
     generated_at_utc: str | None = None,
     top_n: int = 20,
+    include_taxonomy_listing: bool = True,
 ) -> str:
     if top_n <= 0:
         raise ValueError(f"Invalid top_n: {top_n}")
@@ -614,6 +722,11 @@ def build_markdown_weekly_swing_report(
 
     watchlist_rows = _build_rolling_watchlist_rows(
         watchlist_tickers=watchlist_tickers,
+        ticker_rows=ticker_rows,
+        group_rows=group_rows,
+        synthetic_rows=synthetic_rows,
+    )
+    taxonomy_listing_rows = _build_rolling_taxonomy_listing_rows(
         ticker_rows=ticker_rows,
         group_rows=group_rows,
         synthetic_rows=synthetic_rows,
@@ -1323,6 +1436,56 @@ def build_markdown_weekly_swing_report(
             ],
         ).rstrip()
     )
+    if include_taxonomy_listing:
+        lines.extend(["", "## Datacenter Taxonomy Listing"])
+        if not taxonomy_listing_rows:
+            lines.append("No rows.")
+        else:
+            current_layer = None
+            current_subindustry = None
+            taxonomy_headers = [
+                "ticker",
+                "current_watchlist_status",
+                "window_watchlist_status",
+                "subindustry_context_risk",
+                "layer_context_risk",
+                "last_close",
+                "breakout_days",
+                "pullback_days",
+                "exit_risk_days",
+                "high_exit_risk_days",
+                "medium_exit_risk_days",
+                "last_exit_risk_severity",
+                "last_exit_reason",
+                "last_ticker_trend_state",
+                "last_latest_structure_label",
+                "last_latest_structure_freshness",
+                "last_latest_bos_event_type",
+                "last_latest_bos_freshness",
+                "last_latest_reset_reason",
+                "last_latest_reset_freshness",
+                "last_price_data_status",
+            ]
+            current_subindustry_rows: list[dict[str, object]] = []
+            for row in taxonomy_listing_rows:
+                layer_name = str(row.get("primary_layer") or "")
+                subindustry_name = str(row.get("primary_subindustry") or "")
+                if layer_name != current_layer:
+                    if current_subindustry_rows:
+                        lines.append(_format_table(taxonomy_headers, current_subindustry_rows).rstrip())
+                        current_subindustry_rows = []
+                    lines.extend(["", f"### Layer: {layer_name}"])
+                    current_layer = layer_name
+                    current_subindustry = None
+                if subindustry_name != current_subindustry:
+                    if current_subindustry_rows:
+                        lines.append(_format_table(taxonomy_headers, current_subindustry_rows).rstrip())
+                        current_subindustry_rows = []
+                    lines.extend(["", f"#### Subindustry: {subindustry_name}"])
+                    current_subindustry = subindustry_name
+                current_subindustry_rows.append(row)
+            if current_subindustry_rows:
+                lines.append(_format_table(taxonomy_headers, current_subindustry_rows).rstrip())
     return "\n".join(lines).strip() + "\n"
 
 
@@ -1331,11 +1494,13 @@ def build_csv_weekly_swing_report(
     *,
     generated_at_utc: str | None = None,
     top_n: int = 20,
+    include_taxonomy_listing: bool = True,
 ) -> str:
     markdown = build_markdown_weekly_swing_report(
         report_data,
         generated_at_utc=generated_at_utc,
         top_n=top_n,
+        include_taxonomy_listing=include_taxonomy_listing,
     )
     rows = _build_csv_rows_from_markdown(markdown)
     output = io.StringIO()
@@ -1364,6 +1529,7 @@ def write_weekly_swing_report(
     watchlist_file: str | Path | None = None,
     top_n: int = 20,
     generated_at_utc: str | None = None,
+    include_taxonomy_listing: bool = True,
 ) -> dict[str, object]:
     report_data = load_weekly_swing_report_data(
         analysis_db_path=analysis_db_path,
@@ -1378,11 +1544,13 @@ def write_weekly_swing_report(
         report_data,
         generated_at_utc=generated_at_utc,
         top_n=top_n,
+        include_taxonomy_listing=include_taxonomy_listing,
     )
     csv_text = build_csv_weekly_swing_report(
         report_data,
         generated_at_utc=generated_at_utc,
         top_n=top_n,
+        include_taxonomy_listing=include_taxonomy_listing,
     )
     output_md_value = ""
     output_csv_value = ""

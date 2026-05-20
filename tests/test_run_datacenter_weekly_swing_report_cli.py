@@ -38,6 +38,7 @@ def test_cli_writes_markdown_and_prints_deterministic_summary(tmp_path, capsys):
     assert "# Datacenter Rolling Swing Report" in markdown
     assert "# Datacenter Weekly Swing Report" not in markdown
     assert "## Watchlist Summary" in markdown
+    assert "## Datacenter Taxonomy Listing" in markdown
     assert "watchlist_subindustry_context_risk_count" in markdown
     assert "watchlist_layer_context_risk_count" in markdown
     assert "watchlist_both_context_risk_count" in markdown
@@ -72,6 +73,36 @@ def test_cli_writes_markdown_and_prints_deterministic_summary(tmp_path, capsys):
     assert lines[15] == "SUMMARY repeated_exit_risk_tickers=1"
     assert lines[16] == f"SUMMARY output_markdown={expected_output_md}"
     assert lines[-1] == "SUMMARY validation_status=OK"
+
+
+def test_cli_can_omit_taxonomy_listing(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    output_md = tmp_path / "weekly_report.md"
+    output_csv = tmp_path / "weekly_report.csv"
+    expected_output_md = tmp_path / "weekly_report_1200.md"
+    _seed_weekly_report_db(analysis_db)
+
+    exit_code = run_datacenter_weekly_swing_report_main(
+        [
+            "--analysis-db",
+            str(analysis_db),
+            "--end-date",
+            "2024-01-10",
+            "--taxonomy-version",
+            "DC_TAXONOMY_V1",
+            "--no-taxonomy-listing",
+            "--output-md",
+            str(output_md),
+            "--output-csv",
+            str(output_csv),
+            "--generated-at-utc",
+            "2026-05-17T12:00:00Z",
+        ]
+    )
+
+    assert exit_code == 0
+    markdown = expected_output_md.read_text(encoding="utf-8")
+    assert "## Datacenter Taxonomy Listing" not in markdown
 
 
 def test_cli_supports_custom_window_size_and_invalid_zero(tmp_path, capsys):

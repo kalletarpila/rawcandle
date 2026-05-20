@@ -66,6 +66,7 @@ def test_pipeline_default_weekly_window_size_is_20_and_used_in_dry_run(tmp_path,
         for line in lines
         if line.startswith("PLAN ")
     )
+    assert not any("--no-taxonomy-listing" in line for line in lines if line.startswith("PLAN "))
     assert lines[-1] == "SUMMARY pipeline_status=DRY_RUN"
 
 
@@ -203,6 +204,59 @@ def test_pipeline_watchlist_override_is_passed_to_daily_and_weekly_report_stages
     assert exit_code == 0
     assert str(calls[0][1]["watchlist_file"]) == str(watchlist_file)
     assert str(calls[1][1]["watchlist_file"]) == str(watchlist_file)
+
+
+def test_pipeline_no_taxonomy_listing_flag_is_passed_to_daily_and_weekly_report_stages(tmp_path, monkeypatch, capsys):
+    calls: list[tuple[str, dict[str, object]]] = []
+    DatabaseManager(str(tmp_path / "analysis.db")).close()
+
+    def _runner(argv: list[str]) -> int:
+        return 0
+
+    def _audit(**kwargs):
+        return {"summary": {"validation_status": "OK"}}
+
+    def _daily(**kwargs):
+        calls.append(("daily", dict(kwargs)))
+        kwargs["output_md"].parent.mkdir(parents=True, exist_ok=True)
+        kwargs["output_md"].write_text("daily", encoding="utf-8")
+        kwargs["output_csv"].write_text("daily", encoding="utf-8")
+        return {"summary": {"output_markdown": str(kwargs["output_md"]), "output_csv": str(kwargs["output_csv"]), "validation_status": "OK"}}
+
+    def _weekly(**kwargs):
+        calls.append(("weekly", dict(kwargs)))
+        kwargs["output_md"].write_text("weekly", encoding="utf-8")
+        kwargs["output_csv"].write_text("weekly", encoding="utf-8")
+        return {"summary": {"output_markdown": str(kwargs["output_md"]), "output_csv": str(kwargs["output_csv"]), "validation_status": "OK"}}
+
+    monkeypatch.setattr(orchestrator, "run_datacenter_indices_main", _runner)
+    monkeypatch.setattr(orchestrator, "run_datacenter_ticker_swing_signals_main", _runner)
+    monkeypatch.setattr(orchestrator, "run_datacenter_group_swing_signals_main", _runner)
+    monkeypatch.setattr(orchestrator, "run_datacenter_group_synthetic_ohlc_main", _runner)
+    monkeypatch.setattr(orchestrator, "load_swing_pipeline_audit", _audit)
+    monkeypatch.setattr(orchestrator, "write_daily_swing_signal_report", _daily)
+    monkeypatch.setattr(orchestrator, "write_weekly_swing_report", _weekly)
+    monkeypatch.setattr(orchestrator, "format_swing_pipeline_audit_summary_lines", lambda summary: [])
+    monkeypatch.setattr(orchestrator, "format_daily_swing_report_summary_lines", lambda summary: [])
+    monkeypatch.setattr(orchestrator, "format_weekly_swing_report_summary_lines", lambda summary: [])
+
+    exit_code = run_datacenter_swing_pipeline_main(
+        _base_args(tmp_path) + ["--no-taxonomy-listing"]
+    )
+
+    assert exit_code == 0
+    assert calls[0][1]["include_taxonomy_listing"] is False
+    assert calls[1][1]["include_taxonomy_listing"] is False
+
+    dry_run_exit_code = run_datacenter_swing_pipeline_main(
+        _base_args(tmp_path) + ["--dry-run", "--no-taxonomy-listing"]
+    )
+    assert dry_run_exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert any(
+        line.startswith("PLAN ") and "--no-taxonomy-listing" in line
+        for line in lines
+    )
 
 
 def test_pipeline_generates_reports_on_audit_warn(tmp_path, monkeypatch, capsys):

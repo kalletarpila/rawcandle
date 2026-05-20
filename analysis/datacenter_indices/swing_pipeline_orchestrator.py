@@ -141,6 +141,7 @@ def _run_daily_report_stage(
     watchlist_file: Path,
     output_md: Path,
     output_csv: Path,
+    include_taxonomy_listing: bool,
 ) -> dict[str, object]:
     result = write_daily_swing_signal_report(
         analysis_db_path=analysis_db,
@@ -151,6 +152,7 @@ def _run_daily_report_stage(
         watchlist_file=watchlist_file,
         output_md=output_md,
         output_csv=output_csv,
+        include_taxonomy_listing=include_taxonomy_listing,
     )
     for line in format_daily_swing_report_summary_lines(result["summary"]):
         print(line)
@@ -168,6 +170,7 @@ def _run_weekly_report_stage(
     watchlist_file: Path,
     output_md: Path,
     output_csv: Path,
+    include_taxonomy_listing: bool,
 ) -> dict[str, object]:
     result = write_weekly_swing_report(
         analysis_db_path=analysis_db,
@@ -179,6 +182,7 @@ def _run_weekly_report_stage(
         watchlist_file=watchlist_file,
         output_md=output_md,
         output_csv=output_csv,
+        include_taxonomy_listing=include_taxonomy_listing,
     )
     for line in format_weekly_swing_report_summary_lines(result["summary"]):
         print(line)
@@ -203,6 +207,7 @@ def run_datacenter_swing_pipeline(
     expected_synthetic_ohlc_count: int | None = None,
     weekly_window_size: int = 20,
     watchlist_file: Path | None = None,
+    no_taxonomy_listing: bool = False,
     skip_index: bool = False,
     skip_audit: bool = False,
     skip_reports: bool = False,
@@ -640,6 +645,9 @@ def run_datacenter_swing_pipeline(
             "--output-csv",
             str(output_dir / f"datacenter_weekly_{signal_date}_full.csv"),
         ]
+        if no_taxonomy_listing:
+            daily_argv.append("--no-taxonomy-listing")
+            weekly_argv.append("--no-taxonomy-listing")
         stages.append(
             PipelineStage(
                 heading="Daily report",
@@ -653,6 +661,7 @@ def run_datacenter_swing_pipeline(
                     watchlist_file=selected_watchlist_file,
                     output_md=daily_output_md,
                     output_csv=daily_output_csv,
+                    include_taxonomy_listing=not no_taxonomy_listing,
                 ),
                 watermark_builder=lambda _result: {
                     "component_name": "DAILY_REPORT",
@@ -681,6 +690,7 @@ def run_datacenter_swing_pipeline(
                     watchlist_file=selected_watchlist_file,
                     output_md=weekly_output_md,
                     output_csv=weekly_output_csv,
+                    include_taxonomy_listing=not no_taxonomy_listing,
                 ),
                 watermark_builder=lambda result: {
                     "component_name": "WEEKLY_REPORT",
