@@ -81,6 +81,11 @@ The current intended order is:
 11. Run ticker scanner update with `run_datacenter_ticker_swing_signals.py --scanner-only`.
 12. Run the read-only daily report with `run_datacenter_daily_signal_report.py`.
 
+Current breakout scanner note:
+
+- Breakout remains a monitoring / attention signal, not an automatic buy decision.
+- The V1 volume confirmation threshold is `volume_vs_avg20 > 1.25`, which corresponds to 125% of 20-day average volume.
+
 ## Full Pipeline Command
 
 - `run_datacenter_swing_pipeline.py` runs the full datacenter swing V1 pipeline in the intended production-safe order.

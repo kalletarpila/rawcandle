@@ -1373,6 +1373,86 @@ def test_breakout_and_pullback_rules_and_missing_subindustry_state(tmp_path):
     assert rows_after["FFF"]["fast_ema10_pullback_signal"] == 0
 
 
+def test_breakout_volume_threshold_is_strictly_greater_than_125pct(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    rows = [
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "AAA", "Power", "UPS",
+            120.0, 1000.0, 0.02, 0.03, 0.10, 0.20,
+            118.0, 119.0, 115.0, None, None, None,
+            None, None, None, 1, 1, 3, 5, 120.0, 900.0, 1.20,
+            "HH", None, None, None, None, None, None, None,
+            None, None, None, None, None, None, "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "BBB", "Power", "UPS",
+            120.0, 1000.0, 0.02, 0.03, 0.10, 0.20,
+            118.0, 119.0, 115.0, None, None, None,
+            None, None, None, 1, 1, 3, 5, 120.0, 900.0, 1.25,
+            "HH", None, None, None, None, None, None, None,
+            None, None, None, None, None, None, "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "CCC", "Power", "UPS",
+            120.0, 1000.0, 0.02, 0.03, 0.10, 0.20,
+            118.0, 119.0, 115.0, None, None, None,
+            None, None, None, 1, 1, 3, 5, 120.0, 900.0, 1.26,
+            "HH", None, None, None, None, None, None, None,
+            None, None, None, None, None, None, "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "DDD", "Power", "UPS",
+            120.0, 1000.0, 0.02, 0.03, 0.10, 0.20,
+            118.0, 119.0, 115.0, None, None, None,
+            None, None, None, 1, 1, 3, 5, 120.0, 900.0, 1.50,
+            "HH", None, None, None, None, None, None, None,
+            None, None, None, None, None, None, "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "EEE", "Power", "UPS",
+            120.0, 1000.0, 0.02, 0.03, 0.10, 0.20,
+            118.0, 119.0, 115.0, None, None, None,
+            None, None, None, 1, 1, 3, 5, 120.0, 900.0, None,
+            "HH", None, None, None, None, None, None, None,
+            None, None, None, None, None, None, "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+    ]
+    for row in rows:
+        _insert_ticker_swing_row(analysis_db, row)
+    _insert_group_swing_row(
+        analysis_db,
+        (
+            "2024-01-10", "DC_TAXONOMY_V1", "subindustry", "UPS",
+            5, 5, 0.02, 0.03, 0.10, 0.20,
+            80.0, 85.0, None, 0.0, 0.0, 60.0, 20.0, None,
+            "BUY_ZONE", "BUY_ZONE:existing", "OK",
+            "DC_SWING_SIGNAL_V1", "seed", "2026-05-17T10:00:00Z",
+        ),
+    )
+
+    persist_datacenter_ticker_scanner_signals(
+        analysis_db_path=analysis_db,
+        start_date="2024-01-10",
+        signal_version="DC_SWING_SIGNAL_V1",
+        run_id="scanner-run",
+        created_at_utc="2026-05-17T12:00:00Z",
+        write_mode="update-existing",
+    )
+
+    rows_after = {row["ticker"]: row for row in _fetch_ticker_rows(analysis_db)}
+    assert rows_after["AAA"]["breakout_signal"] == 0
+    assert rows_after["BBB"]["breakout_signal"] == 0
+    assert rows_after["CCC"]["breakout_signal"] == 1
+    assert rows_after["DDD"]["breakout_signal"] == 1
+    assert rows_after["EEE"]["breakout_signal"] == 0
+
+
 def test_exit_risk_rules_and_reason_order(tmp_path):
     analysis_db = tmp_path / "analysis.db"
     _create_analysis_db(analysis_db)

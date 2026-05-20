@@ -102,6 +102,7 @@ TICKER_CLEANUP_SUMMARY_ORDER = [
 ]
 
 ENTRY_ELIGIBLE_PRICE_STATUSES = {"OK", "INSUFFICIENT_HISTORY"}
+BREAKOUT_VOLUME_VS_AVG20_THRESHOLD = 1.25
 
 
 @dataclass(frozen=True)
@@ -1331,7 +1332,7 @@ def _classify_scanner_fields(
         entry_eligible
         and bullish_subindustry
         and _match_gte_values(close, highest_close_20d)
-        and _match_gt(volume_vs_avg20, 1.5)
+        and _match_gt(volume_vs_avg20, BREAKOUT_VOLUME_VS_AVG20_THRESHOLD)
         and _match_gt(return_5d, 0.0)
         and _match_gt(return_10d, 0.0)
         and _match_gt_values(close, ema20)
