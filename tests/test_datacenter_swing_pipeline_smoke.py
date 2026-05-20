@@ -325,6 +325,8 @@ def test_datacenter_swing_pipeline_smoke(tmp_path, capsys):
     analysis_db = tmp_path / "analysis.db"
     daily_output_md = tmp_path / "daily_report.md"
     weekly_output_md = tmp_path / "weekly_report.md"
+    daily_expected_output_md = tmp_path / "daily_report_1200.md"
+    weekly_expected_output_md = tmp_path / "weekly_report_1200.md"
 
     all_dates = _business_dates(date(2025, 1, 2), 220)
     signal_dates = all_dates[-7:]
@@ -541,8 +543,8 @@ def test_datacenter_swing_pipeline_smoke(tmp_path, capsys):
     weekly_stdout = capsys.readouterr().out
     assert "SUMMARY valid_signal_dates_count=5" in weekly_stdout
 
-    daily_markdown = daily_output_md.read_text(encoding="utf-8")
-    weekly_markdown = weekly_output_md.read_text(encoding="utf-8")
+    daily_markdown = daily_expected_output_md.read_text(encoding="utf-8")
+    weekly_markdown = weekly_expected_output_md.read_text(encoding="utf-8")
 
     for heading in (
         "Datacenter Daily Swing Signal Report",
@@ -557,7 +559,7 @@ def test_datacenter_swing_pipeline_smoke(tmp_path, capsys):
     assert "Missing required tables" not in daily_markdown
 
     for heading in (
-        "Datacenter Weekly Swing Report",
+        "Datacenter Rolling Swing Report",
         "Window type: last 5 valid trading days, not calendar week",
         "Window summary",
         "Repeated breakout tickers",
