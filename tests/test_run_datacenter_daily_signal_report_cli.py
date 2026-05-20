@@ -39,6 +39,10 @@ def test_cli_writes_markdown_and_prints_deterministic_summary(tmp_path, capsys):
     assert "# Datacenter Daily Swing Signal Report" in markdown
     assert "## Watchlist Summary" in markdown
     assert "## Datacenter Taxonomy Listing" in markdown
+    assert "row_type" in markdown
+    assert "| LAYER |" in markdown
+    assert "| SUBINDUSTRY |" in markdown
+    assert "| TICKER |" in markdown
     assert "watchlist_subindustry_context_risk_count" in markdown
     assert "watchlist_layer_context_risk_count" in markdown
     assert "watchlist_both_context_risk_count" in markdown

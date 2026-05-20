@@ -386,7 +386,11 @@ def test_finds_last_five_valid_signal_dates_and_generates_report(tmp_path):
     assert "| 2024-01-02 | subindustry | HIGH | 1 |" in markdown
     assert "| 2024-01-02 | subindustry | LOW | 1 |" in markdown
     assert "### Layer: Infrastructure" in markdown
-    assert "#### Subindustry: AI Chips" in markdown
+    assert "| row_type | layer | subindustry | ticker | current_status | window_status |" in markdown
+    assert "last_trend_state" in markdown
+    assert "| LAYER | Infrastructure |  |  |" in markdown
+    assert "| SUBINDUSTRY | Infrastructure | AI Chips |  |" in markdown
+    assert "| TICKER | Infrastructure | AI Chips | AAA |" in markdown
 
 
 def test_rolling_watchlist_summary_renders_counts_outside_ticker_and_last_group_context(tmp_path):
@@ -739,19 +743,22 @@ def test_weekly_taxonomy_listing_uses_last_available_row_per_ticker(tmp_path):
 
     section = markdown[markdown.index("## Datacenter Taxonomy Listing") :]
     assert "### Layer: Infrastructure" in section
-    assert "#### Subindustry: AI Chips" in section
-    assert "#### Subindustry: Storage" in section
-    assert "current_watchlist_status" in section
-    assert "window_watchlist_status" in section
+    assert "row_type" in section
+    assert "current_status" in section
+    assert "window_status" in section
     assert "subindustry_context_risk" in section
     assert "layer_context_risk" in section
     assert "exit_risk_days" in section
     assert "last_price_data_status" in section
-    assert section.count("| AAA |") == 1
-    assert section.count("| BBB |") == 1
-    assert section.count("| CCC |") == 1
-    assert section.count("| DDD |") == 1
+    assert "| LAYER | Infrastructure |  |  |" in section
+    assert "| SUBINDUSTRY | Infrastructure | AI Chips |  |" in section
+    assert "| SUBINDUSTRY | Infrastructure | Storage |  |" in section
+    assert section.count("| TICKER | Infrastructure | AI Chips | AAA |") == 1
+    assert section.count("| TICKER | Infrastructure | AI Chips | BBB |") == 1
+    assert section.count("| TICKER | Infrastructure | Storage | CCC |") == 1
+    assert section.count("| TICKER | Infrastructure | Storage | DDD |") == 1
     assert "| ZZZ |" not in section
+    assert section.index("| LAYER | Infrastructure |") < section.index("| SUBINDUSTRY | Infrastructure | AI Chips |") < section.index("| TICKER | Infrastructure | AI Chips | AAA |")
 
 
 def test_weekly_exit_risk_section_sorts_by_severity_after_day_count(tmp_path):

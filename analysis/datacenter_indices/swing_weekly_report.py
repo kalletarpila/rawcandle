@@ -89,6 +89,15 @@ OVERHEAT_STATUS_PRIORITY = {
     "NULL": 4,
 }
 
+ROLLING_GROUP_STATUS_PRIORITY = {
+    "EXIT_ZONE": 0,
+    "TRIM_WATCH": 1,
+    "ADD_ON_PULLBACK": 2,
+    "BUY_ZONE": 3,
+    "NEUTRAL": 4,
+    None: 5,
+}
+
 
 def _count_by_date_and_field(
     rows: Sequence[dict[str, object]],
@@ -552,6 +561,14 @@ def _build_rolling_taxonomy_listing_rows(
     group_rows: Sequence[dict[str, object]],
     synthetic_rows: Sequence[dict[str, object]],
 ) -> list[dict[str, object]]:
+    def _most_severe_group_status(rows: Sequence[dict[str, object]]) -> object | None:
+        if not rows:
+            return None
+        return min(
+            (row.get("timing_state") for row in rows),
+            key=lambda value: ROLLING_GROUP_STATUS_PRIORITY.get(value, 6),
+        )
+
     ticker_rows_by_ticker: dict[str, list[dict[str, object]]] = {}
     for row in ticker_rows:
         ticker = str(row.get("ticker") or "")
@@ -568,88 +585,218 @@ def _build_rolling_taxonomy_listing_rows(
         synthetic_rows,
         include_date=True,
     )
-    output_rows: list[dict[str, object]] = []
-    for ticker in sorted(ticker_rows_by_ticker):
-        current_rows = ticker_rows_by_ticker[ticker]
-        last_row = current_rows[-1]
-        subindustry_context = group_context_by_key.get(
-            (last_row.get("signal_date"), "subindustry", last_row.get("primary_subindustry")),
-            {},
-        )
-        layer_context = group_context_by_key.get(
-            (last_row.get("signal_date"), "layer", last_row.get("primary_layer")),
-            {},
-        )
-        subindustry_structure_context = synthetic_context_by_key.get(
-            (last_row.get("signal_date"), "subindustry", last_row.get("primary_subindustry")),
-            {},
-        )
-        layer_structure_context = synthetic_context_by_key.get(
-            (last_row.get("signal_date"), "layer", last_row.get("primary_layer")),
-            {},
-        )
-        output_row = {
-            "ticker": ticker,
-            "in_datacenter_ecosystem": "YES",
-            "last_subindustry_trend_classification": subindustry_structure_context.get("trend_classification"),
-            "last_subindustry_latest_structure_label": subindustry_structure_context.get("latest_structure_label"),
-            "last_layer_trend_classification": layer_structure_context.get("trend_classification"),
-            "last_layer_latest_structure_label": layer_structure_context.get("latest_structure_label"),
-            "primary_layer": last_row.get("primary_layer"),
-            "primary_subindustry": last_row.get("primary_subindustry"),
-            "first_signal_date": current_rows[0].get("signal_date"),
-            "last_signal_date": last_row.get("signal_date"),
-            "last_close": last_row.get("close"),
-            "last_breakout_signal": last_row.get("breakout_signal"),
-            "last_pullback_signal": last_row.get("pullback_signal"),
-            "breakout_days": sum(1 for row in current_rows if row.get("breakout_signal") == 1),
-            "pullback_days": sum(1 for row in current_rows if row.get("pullback_signal") == 1),
-            "exit_risk_days": sum(1 for row in current_rows if row.get("exit_risk_signal") == 1),
-            "high_exit_risk_days": sum(1 for row in current_rows if row.get("exit_risk_severity") == "HIGH"),
-            "medium_exit_risk_days": sum(1 for row in current_rows if row.get("exit_risk_severity") == "MEDIUM"),
-            "last_exit_risk_severity": last_row.get("exit_risk_severity"),
-            "last_exit_reason": last_row.get("exit_reason"),
-            "last_ticker_trend_state": last_row.get("ticker_trend_state"),
-            "last_latest_structure_label": last_row.get("latest_structure_label"),
-            "last_latest_structure_freshness": last_row.get("latest_structure_freshness"),
-            "last_latest_bos_event_type": last_row.get("latest_bos_event_type"),
-            "last_latest_bos_freshness": last_row.get("latest_bos_freshness"),
-            "last_latest_reset_reason": last_row.get("latest_reset_reason"),
-            "last_latest_reset_freshness": last_row.get("latest_reset_freshness"),
-            "last_subindustry_timing_state": subindustry_context.get("timing_state"),
-            "last_subindustry_overheat_risk_level": subindustry_context.get("overheat_risk_level"),
-            "last_layer_timing_state": layer_context.get("timing_state"),
-            "last_layer_overheat_risk_level": layer_context.get("overheat_risk_level"),
-            "last_price_data_status": last_row.get("price_data_status"),
-            "all_price_rows_missing": all(
-                row.get("price_data_status") in WATCHLIST_MISSING_PRICE_STATUSES
-                for row in current_rows
-            ),
+    group_rows_by_group: dict[tuple[str, str], list[dict[str, object]]] = {}
+    synthetic_rows_by_group: dict[tuple[str, str], list[dict[str, object]]] = {}
+    layer_names = sorted(
+        {
+            str(row.get("primary_layer") or "")
+            for row in ticker_rows
+            if row.get("primary_layer")
         }
-        output_row["subindustry_context_risk"] = _daily_context_risk_value(
-            in_datacenter_ecosystem=output_row["in_datacenter_ecosystem"],
-            has_risk=_has_subindustry_context_risk(
-                subindustry_timing_state=output_row.get("last_subindustry_timing_state"),
-                subindustry_overheat_risk_level=output_row.get("last_subindustry_overheat_risk_level"),
-            ),
-        )
-        output_row["layer_context_risk"] = _daily_context_risk_value(
-            in_datacenter_ecosystem=output_row["in_datacenter_ecosystem"],
-            has_risk=_has_layer_context_risk(
-                layer_timing_state=output_row.get("last_layer_timing_state"),
-                layer_overheat_risk_level=output_row.get("last_layer_overheat_risk_level"),
-            ),
-        )
-        output_row["current_watchlist_status"] = _classify_rolling_current_watchlist_status(output_row)
-        output_row["window_watchlist_status"] = _classify_rolling_window_watchlist_status(output_row)
-        output_rows.append(output_row)
-    output_rows.sort(
-        key=lambda row: (
-            str(row.get("primary_layer") or ""),
-            str(row.get("primary_subindustry") or ""),
-            str(row.get("ticker") or ""),
-        )
     )
+    subindustries_by_layer: dict[str, set[str]] = {}
+    for row in ticker_rows:
+        layer_name = str(row.get("primary_layer") or "")
+        subindustry_name = str(row.get("primary_subindustry") or "")
+        if not layer_name or not subindustry_name:
+            continue
+        subindustries_by_layer.setdefault(layer_name, set()).add(subindustry_name)
+    for row in group_rows:
+        group_type = str(row.get("group_type") or "")
+        group_name = str(row.get("group_name") or "")
+        if group_type not in {"layer", "subindustry"} or not group_name:
+            continue
+        group_rows_by_group.setdefault((group_type, group_name), []).append(row)
+    for rows in group_rows_by_group.values():
+        rows.sort(key=lambda row: str(row.get("signal_date") or ""))
+    for row in synthetic_rows:
+        group_type = str(row.get("group_type") or "")
+        group_name = str(row.get("group_name") or "")
+        if group_type not in {"layer", "subindustry"} or not group_name:
+            continue
+        synthetic_rows_by_group.setdefault((group_type, group_name), []).append(row)
+    for rows in synthetic_rows_by_group.values():
+        rows.sort(key=lambda row: str(row.get("ohlc_date") or ""))
+    output_rows: list[dict[str, object]] = []
+    for layer_name in layer_names:
+        layer_group_window_rows = group_rows_by_group.get(("layer", layer_name), [])
+        layer_group_last_row = layer_group_window_rows[-1] if layer_group_window_rows else {}
+        layer_synthetic_window_rows = synthetic_rows_by_group.get(("layer", layer_name), [])
+        layer_synthetic_last_row = layer_synthetic_window_rows[-1] if layer_synthetic_window_rows else {}
+        output_rows.append(
+            {
+                "row_type": "LAYER",
+                "layer": layer_name,
+                "subindustry": "",
+                "ticker": "",
+                "current_status": layer_group_last_row.get("timing_state"),
+                "window_status": _most_severe_group_status(layer_group_window_rows),
+                "subindustry_context_risk": "",
+                "layer_context_risk": _daily_context_risk_value(
+                    in_datacenter_ecosystem="YES",
+                    has_risk=_has_layer_context_risk(
+                        layer_timing_state=layer_group_last_row.get("timing_state"),
+                        layer_overheat_risk_level=layer_group_last_row.get("overheat_risk_level"),
+                    ),
+                ),
+                "last_close": layer_synthetic_last_row.get("synthetic_close"),
+                "breakout_days": None,
+                "pullback_days": None,
+                "exit_risk_days": None,
+                "high_exit_risk_days": None,
+                "medium_exit_risk_days": None,
+                "last_exit_risk_severity": None,
+                "last_exit_reason": None,
+                "last_trend_state": layer_synthetic_last_row.get("trend_classification"),
+                "last_latest_structure_label": layer_synthetic_last_row.get("latest_structure_label"),
+                "last_latest_structure_freshness": layer_synthetic_last_row.get("latest_structure_freshness"),
+                "last_latest_bos_event_type": layer_synthetic_last_row.get("latest_bos_event_type"),
+                "last_latest_bos_freshness": layer_synthetic_last_row.get("latest_bos_freshness"),
+                "last_latest_reset_reason": layer_synthetic_last_row.get("latest_reset_reason"),
+                "last_latest_reset_freshness": layer_synthetic_last_row.get("latest_reset_freshness"),
+                "last_price_data_status": layer_group_last_row.get("data_quality_status"),
+            }
+        )
+        for subindustry_name in sorted(subindustries_by_layer.get(layer_name, set())):
+            subindustry_group_window_rows = group_rows_by_group.get(("subindustry", subindustry_name), [])
+            subindustry_group_last_row = subindustry_group_window_rows[-1] if subindustry_group_window_rows else {}
+            subindustry_synthetic_window_rows = synthetic_rows_by_group.get(("subindustry", subindustry_name), [])
+            subindustry_synthetic_last_row = subindustry_synthetic_window_rows[-1] if subindustry_synthetic_window_rows else {}
+            output_rows.append(
+                {
+                    "row_type": "SUBINDUSTRY",
+                    "layer": layer_name,
+                    "subindustry": subindustry_name,
+                    "ticker": "",
+                    "current_status": subindustry_group_last_row.get("timing_state"),
+                    "window_status": _most_severe_group_status(subindustry_group_window_rows),
+                    "subindustry_context_risk": _daily_context_risk_value(
+                        in_datacenter_ecosystem="YES",
+                        has_risk=_has_subindustry_context_risk(
+                            subindustry_timing_state=subindustry_group_last_row.get("timing_state"),
+                            subindustry_overheat_risk_level=subindustry_group_last_row.get("overheat_risk_level"),
+                        ),
+                    ),
+                    "layer_context_risk": _daily_context_risk_value(
+                        in_datacenter_ecosystem="YES",
+                        has_risk=_has_layer_context_risk(
+                            layer_timing_state=layer_group_last_row.get("timing_state"),
+                            layer_overheat_risk_level=layer_group_last_row.get("overheat_risk_level"),
+                        ),
+                    ),
+                    "last_close": subindustry_synthetic_last_row.get("synthetic_close"),
+                    "breakout_days": None,
+                    "pullback_days": None,
+                    "exit_risk_days": None,
+                    "high_exit_risk_days": None,
+                    "medium_exit_risk_days": None,
+                    "last_exit_risk_severity": None,
+                    "last_exit_reason": None,
+                    "last_trend_state": subindustry_synthetic_last_row.get("trend_classification"),
+                    "last_latest_structure_label": subindustry_synthetic_last_row.get("latest_structure_label"),
+                    "last_latest_structure_freshness": subindustry_synthetic_last_row.get("latest_structure_freshness"),
+                    "last_latest_bos_event_type": subindustry_synthetic_last_row.get("latest_bos_event_type"),
+                    "last_latest_bos_freshness": subindustry_synthetic_last_row.get("latest_bos_freshness"),
+                    "last_latest_reset_reason": subindustry_synthetic_last_row.get("latest_reset_reason"),
+                    "last_latest_reset_freshness": subindustry_synthetic_last_row.get("latest_reset_freshness"),
+                    "last_price_data_status": subindustry_group_last_row.get("data_quality_status"),
+                }
+            )
+            for ticker in sorted(
+                [
+                    ticker_name
+                    for ticker_name, current_rows in ticker_rows_by_ticker.items()
+                    if str(current_rows[-1].get("primary_layer") or "") == layer_name
+                    and str(current_rows[-1].get("primary_subindustry") or "") == subindustry_name
+                ]
+            ):
+                current_rows = ticker_rows_by_ticker[ticker]
+                last_row = current_rows[-1]
+                subindustry_context = group_context_by_key.get(
+                    (last_row.get("signal_date"), "subindustry", last_row.get("primary_subindustry")),
+                    {},
+                )
+                layer_context = group_context_by_key.get(
+                    (last_row.get("signal_date"), "layer", last_row.get("primary_layer")),
+                    {},
+                )
+                output_row = {
+                    "row_type": "TICKER",
+                    "layer": layer_name,
+                    "subindustry": subindustry_name,
+                    "ticker": ticker,
+                    "in_datacenter_ecosystem": "YES",
+                    "last_breakout_signal": last_row.get("breakout_signal"),
+                    "last_pullback_signal": last_row.get("pullback_signal"),
+                    "last_subindustry_timing_state": subindustry_context.get("timing_state"),
+                    "last_subindustry_overheat_risk_level": subindustry_context.get("overheat_risk_level"),
+                    "last_layer_timing_state": layer_context.get("timing_state"),
+                    "last_layer_overheat_risk_level": layer_context.get("overheat_risk_level"),
+                    "last_price_data_status": last_row.get("price_data_status"),
+                    "all_price_rows_missing": all(
+                        row.get("price_data_status") in WATCHLIST_MISSING_PRICE_STATUSES
+                        for row in current_rows
+                    ),
+                    "last_exit_risk_severity": last_row.get("exit_risk_severity"),
+                    "last_exit_reason": last_row.get("exit_reason"),
+                    "breakout_days": sum(1 for row in current_rows if row.get("breakout_signal") == 1),
+                    "pullback_days": sum(1 for row in current_rows if row.get("pullback_signal") == 1),
+                    "exit_risk_days": sum(1 for row in current_rows if row.get("exit_risk_signal") == 1),
+                    "high_exit_risk_days": sum(1 for row in current_rows if row.get("exit_risk_severity") == "HIGH"),
+                    "medium_exit_risk_days": sum(1 for row in current_rows if row.get("exit_risk_severity") == "MEDIUM"),
+                    "last_close": last_row.get("close"),
+                    "last_ticker_trend_state": last_row.get("ticker_trend_state"),
+                    "last_latest_structure_label": last_row.get("latest_structure_label"),
+                    "last_latest_structure_freshness": last_row.get("latest_structure_freshness"),
+                    "last_latest_bos_event_type": last_row.get("latest_bos_event_type"),
+                    "last_latest_bos_freshness": last_row.get("latest_bos_freshness"),
+                    "last_latest_reset_reason": last_row.get("latest_reset_reason"),
+                    "last_latest_reset_freshness": last_row.get("latest_reset_freshness"),
+                }
+                output_row["subindustry_context_risk"] = _daily_context_risk_value(
+                    in_datacenter_ecosystem=output_row["in_datacenter_ecosystem"],
+                    has_risk=_has_subindustry_context_risk(
+                        subindustry_timing_state=output_row.get("last_subindustry_timing_state"),
+                        subindustry_overheat_risk_level=output_row.get("last_subindustry_overheat_risk_level"),
+                    ),
+                )
+                output_row["layer_context_risk"] = _daily_context_risk_value(
+                    in_datacenter_ecosystem=output_row["in_datacenter_ecosystem"],
+                    has_risk=_has_layer_context_risk(
+                        layer_timing_state=output_row.get("last_layer_timing_state"),
+                        layer_overheat_risk_level=output_row.get("last_layer_overheat_risk_level"),
+                    ),
+                )
+                output_row["current_status"] = _classify_rolling_current_watchlist_status(output_row)
+                output_row["window_status"] = _classify_rolling_window_watchlist_status(output_row)
+                output_rows.append(
+                    {
+                        "row_type": "TICKER",
+                        "layer": layer_name,
+                        "subindustry": subindustry_name,
+                        "ticker": ticker,
+                        "current_status": output_row.get("current_status"),
+                        "window_status": output_row.get("window_status"),
+                        "subindustry_context_risk": output_row.get("subindustry_context_risk"),
+                        "layer_context_risk": output_row.get("layer_context_risk"),
+                        "last_close": output_row.get("last_close"),
+                        "breakout_days": output_row.get("breakout_days"),
+                        "pullback_days": output_row.get("pullback_days"),
+                        "exit_risk_days": output_row.get("exit_risk_days"),
+                        "high_exit_risk_days": output_row.get("high_exit_risk_days"),
+                        "medium_exit_risk_days": output_row.get("medium_exit_risk_days"),
+                        "last_exit_risk_severity": output_row.get("last_exit_risk_severity"),
+                        "last_exit_reason": output_row.get("last_exit_reason"),
+                        "last_trend_state": output_row.get("last_ticker_trend_state"),
+                        "last_latest_structure_label": output_row.get("last_latest_structure_label"),
+                        "last_latest_structure_freshness": output_row.get("last_latest_structure_freshness"),
+                        "last_latest_bos_event_type": output_row.get("last_latest_bos_event_type"),
+                        "last_latest_bos_freshness": output_row.get("last_latest_bos_freshness"),
+                        "last_latest_reset_reason": output_row.get("last_latest_reset_reason"),
+                        "last_latest_reset_freshness": output_row.get("last_latest_reset_freshness"),
+                        "last_price_data_status": output_row.get("last_price_data_status"),
+                    }
+                )
     return output_rows
 
 
@@ -1441,12 +1588,13 @@ def build_markdown_weekly_swing_report(
         if not taxonomy_listing_rows:
             lines.append("No rows.")
         else:
-            current_layer = None
-            current_subindustry = None
             taxonomy_headers = [
+                "row_type",
+                "layer",
+                "subindustry",
                 "ticker",
-                "current_watchlist_status",
-                "window_watchlist_status",
+                "current_status",
+                "window_status",
                 "subindustry_context_risk",
                 "layer_context_risk",
                 "last_close",
@@ -1457,7 +1605,7 @@ def build_markdown_weekly_swing_report(
                 "medium_exit_risk_days",
                 "last_exit_risk_severity",
                 "last_exit_reason",
-                "last_ticker_trend_state",
+                "last_trend_state",
                 "last_latest_structure_label",
                 "last_latest_structure_freshness",
                 "last_latest_bos_event_type",
@@ -1466,26 +1614,19 @@ def build_markdown_weekly_swing_report(
                 "last_latest_reset_freshness",
                 "last_price_data_status",
             ]
-            current_subindustry_rows: list[dict[str, object]] = []
+            current_layer = None
+            current_layer_rows: list[dict[str, object]] = []
             for row in taxonomy_listing_rows:
-                layer_name = str(row.get("primary_layer") or "")
-                subindustry_name = str(row.get("primary_subindustry") or "")
+                layer_name = str(row.get("layer") or "")
                 if layer_name != current_layer:
-                    if current_subindustry_rows:
-                        lines.append(_format_table(taxonomy_headers, current_subindustry_rows).rstrip())
-                        current_subindustry_rows = []
+                    if current_layer_rows:
+                        lines.append(_format_table(taxonomy_headers, current_layer_rows).rstrip())
+                        current_layer_rows = []
                     lines.extend(["", f"### Layer: {layer_name}"])
                     current_layer = layer_name
-                    current_subindustry = None
-                if subindustry_name != current_subindustry:
-                    if current_subindustry_rows:
-                        lines.append(_format_table(taxonomy_headers, current_subindustry_rows).rstrip())
-                        current_subindustry_rows = []
-                    lines.extend(["", f"#### Subindustry: {subindustry_name}"])
-                    current_subindustry = subindustry_name
-                current_subindustry_rows.append(row)
-            if current_subindustry_rows:
-                lines.append(_format_table(taxonomy_headers, current_subindustry_rows).rstrip())
+                current_layer_rows.append(row)
+            if current_layer_rows:
+                lines.append(_format_table(taxonomy_headers, current_layer_rows).rstrip())
     return "\n".join(lines).strip() + "\n"
 
 

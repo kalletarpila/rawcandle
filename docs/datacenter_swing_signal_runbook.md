@@ -402,9 +402,13 @@ It only renders persisted rows for one selected `signal_date`.
   - layer
   - subindustry
   - ticker
+- The listing now includes real `LAYER`, `SUBINDUSTRY`, and `TICKER` data rows with one shared schema.
+- This makes the exported CSV more self-contained for spreadsheet and dashboard use.
 - The daily listing uses the selected `signal_date` ticker rows for the selected taxonomy and signal version.
 - The rolling listing shows one row per ticker using the last available row in the selected rolling window.
 - The listing uses the same status and context style as `Watchlist Summary`.
+- `LAYER` and `SUBINDUSTRY` rows use group-level timing, synthetic OHLC, and structure context.
+- `TICKER` rows use ticker-level metrics and scanner context.
 - Disable the section with `--no-taxonomy-listing`.
 - This section is report-only and does not change signals.
 

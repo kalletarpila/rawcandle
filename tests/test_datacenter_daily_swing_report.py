@@ -341,9 +341,10 @@ def test_generates_markdown_report_with_required_sections_and_filters(tmp_path):
     assert "synthetic_ohlc_rows_missing_relative_close_20" in markdown
     assert "ticker_rows_with_scanner_fields_null" in markdown
     assert "### Layer: Infrastructure" in markdown
-    assert "#### Subindustry: AI Chips" in markdown
-    assert "#### Subindustry: Cloud" in markdown
-    assert "#### Subindustry: Storage" in markdown
+    assert "| row_type | layer | subindustry | ticker | status |" in markdown
+    assert "| LAYER | Infrastructure |  |  |" in markdown
+    assert "| SUBINDUSTRY | Infrastructure | AI Chips |  |" in markdown
+    assert "| TICKER | Infrastructure | AI Chips | AAA |" in markdown
 
 
 def test_watchlist_file_parser_normalizes_comments_whitespace_case_and_duplicates(tmp_path):
@@ -546,19 +547,25 @@ def test_daily_taxonomy_listing_includes_all_scoped_ticker_rows_with_compact_col
 
     section = markdown[markdown.index("## Datacenter Taxonomy Listing") :]
     assert "### Layer: Infrastructure" in section
-    assert "#### Subindustry: AI Chips" in section
-    assert "#### Subindustry: Cloud" in section
-    assert "#### Subindustry: Storage" in section
-    assert "watchlist_status" in section
+    assert "row_type" in section
+    assert "status" in section
+    assert "layer" in section
+    assert "subindustry" in section
     assert "subindustry_context_risk" in section
     assert "layer_context_risk" in section
     assert "exit_risk_severity" in section
     assert "price_data_status" in section
-    assert "| AAA | BREAKOUT_CANDIDATE |" in section
-    assert "| BBB | PULLBACK_CANDIDATE |" in section
-    assert "| CCC | MISSING_PRICE |" in section
-    assert "| DDD | MISSING_PRICE |" in section
+    assert "| trend_state |" in section
+    assert "| LAYER | Infrastructure |  |  | NEUTRAL |  | NO | 101 | 0 | 0.02 | 0.06 | 0.01 | NEUTRAL | LH | FRESH | BOS_DOWN | FRESH |  |  |  |  |  |  |  | OK |" in section
+    assert "| SUBINDUSTRY | Infrastructure | AI Chips |  | BUY_ZONE | NO | NO | 104 | 0.01 | 0.07 | 0.15 | 0.0297 | UP | HH | FRESH | BOS_UP | FRESH | DOUBLE_BOS_UP | FRESH |  |  |  |  |  | OK |" in section
+    assert "| TICKER | Infrastructure | AI Chips | AAA | BREAKOUT_CANDIDATE | NO | NO | 110 | 0.03 | 0.08 | 0.12 | 0.0476 |" in section
+    assert "| TICKER | Infrastructure | Cloud | BBB | PULLBACK_CANDIDATE | NO | NO | 102 | -0.02 | 0.04 | 0.15 | 0.0303 |" in section
+    assert "| TICKER | Infrastructure | Storage | CCC | MISSING_PRICE | YES | NO | 90 | -0.04 | -0.1 | -0.15 | -0.0526 |" in section
+    assert "close_below_ema20;latest_structure_label_ll | MISSING_AS_OF_DATE |" in section
+    assert "| TICKER | Infrastructure | Servers | DDD | MISSING_PRICE | YES | NO |" in section
+    assert "MISSING_CLOSE_AS_OF_DATE |" in section
     assert "| ZZZ |" not in section
+    assert section.index("| LAYER | Infrastructure |") < section.index("| SUBINDUSTRY | Infrastructure | AI Chips |") < section.index("| TICKER | Infrastructure | AI Chips | AAA |")
 
 
 def test_daily_exit_risk_section_sorts_by_severity_before_return_and_distance(tmp_path):
