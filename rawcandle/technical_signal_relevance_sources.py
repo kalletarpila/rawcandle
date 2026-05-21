@@ -170,6 +170,7 @@ def read_bar_dates(
     start_date: str,
     end_date: str,
     lookback_bars: int,
+    ohlcv_conn: sqlite3.Connection | None = None,
 ) -> list[str]:
     del timeframe
     normalized_start_date = _parse_iso_date(start_date, "start_date")
@@ -179,13 +180,16 @@ def read_bar_dates(
             f"Invalid date range: start_date {normalized_start_date} is after end_date {normalized_end_date}"
         )
 
-    ohlcv_conn, should_close = _resolve_ohlcv_connection(conn)
-    if ohlcv_conn is None or not _table_exists(ohlcv_conn, "osakedata"):
+    resolved_ohlcv_conn = ohlcv_conn
+    should_close = False
+    if resolved_ohlcv_conn is None:
+        resolved_ohlcv_conn, should_close = _resolve_ohlcv_connection(conn)
+    if resolved_ohlcv_conn is None or not _table_exists(resolved_ohlcv_conn, "osakedata"):
         return []
 
     try:
-        ticker_column, date_column = _introspect_ohlcv_schema(ohlcv_conn)
-        rows = ohlcv_conn.execute(
+        ticker_column, date_column = _introspect_ohlcv_schema(resolved_ohlcv_conn)
+        rows = resolved_ohlcv_conn.execute(
             f"""
             WITH in_range AS (
                 SELECT {date_column} AS bar_date
@@ -233,8 +237,17 @@ def build_bar_index(
     start_date: str,
     end_date: str,
     lookback_bars: int,
+    ohlcv_conn: sqlite3.Connection | None = None,
 ) -> TechnicalSignalBarIndex | None:
-    bar_dates = read_bar_dates(conn, ticker, timeframe, start_date, end_date, lookback_bars)
+    bar_dates = read_bar_dates(
+        conn,
+        ticker,
+        timeframe,
+        start_date,
+        end_date,
+        lookback_bars,
+        ohlcv_conn=ohlcv_conn,
+    )
     if not bar_dates:
         return None
     return TechnicalSignalBarIndex(bar_dates)
