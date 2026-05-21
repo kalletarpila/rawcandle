@@ -16,8 +16,8 @@ CREATE TABLE IF NOT EXISTS technical_signal_relevance (
     signal_close_price REAL NULL,
     signal_direction TEXT NULL,
     signal_family TEXT NULL,
-    signal_source_type TEXT NULL,
-    signal_source_id TEXT NULL,
+    signal_source_type TEXT NOT NULL,
+    signal_source_id TEXT NOT NULL,
     dow_trend_state TEXT NULL,
     dow_context_state TEXT NULL,
     latest_bos_direction TEXT NULL,
@@ -37,11 +37,13 @@ CREATE TABLE IF NOT EXISTS technical_signal_relevance (
     created_at_utc TEXT NOT NULL,
     run_id TEXT NOT NULL,
     PRIMARY KEY (
+        run_id,
         ticker,
         timeframe,
         signal_date,
         signal_name,
         signal_source_type,
+        signal_source_id,
         relevance_rule_version
     ),
     FOREIGN KEY (run_id) REFERENCES technical_signal_relevance_runs(run_id)

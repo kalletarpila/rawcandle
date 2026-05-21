@@ -12,6 +12,8 @@ from rawcandle.technical_signal_relevance import (
 )
 from rawcandle.technical_signal_relevance_persistence import (
     MIGRATION_SQL_PATH,
+    PERSISTED_UNKNOWN_SOURCE_ID,
+    PERSISTED_UNKNOWN_SOURCE_TYPE,
     apply_technical_signal_relevance_migration,
     build_relevance_run_row,
     build_relevance_stored_row,
@@ -49,6 +51,12 @@ def _columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
 def _indexes(conn: sqlite3.Connection, table_name: str) -> set[str]:
     rows = conn.execute(f"PRAGMA index_list({table_name})").fetchall()
     return {str(row[1]) for row in rows}
+
+
+def _primary_key_columns(conn: sqlite3.Connection, table_name: str) -> list[str]:
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    ordered = sorted((row for row in rows if int(row[5]) > 0), key=lambda row: int(row[5]))
+    return [str(row[1]) for row in ordered]
 
 
 def _relevant_record():
@@ -109,6 +117,21 @@ def test_migration_creates_required_indexes():
     }.issubset(indexes)
 
 
+def test_schema_primary_key_includes_run_id_and_source_columns():
+    conn = _connect()
+
+    assert _primary_key_columns(conn, "technical_signal_relevance") == [
+        "run_id",
+        "ticker",
+        "timeframe",
+        "signal_date",
+        "signal_name",
+        "signal_source_type",
+        "signal_source_id",
+        "relevance_rule_version",
+    ]
+
+
 def test_database_manager_initializes_technical_signal_relevance_tables(tmp_path):
     db_path = tmp_path / "analysis.db"
     manager = DatabaseManager(str(db_path))
@@ -161,7 +184,7 @@ def test_insert_and_read_one_relevant_relevance_record():
     assert loaded[0]["run_id"] == "RUN_002"
 
 
-def test_insert_and_read_unknown_signal_record_with_null_mapping_fields():
+def test_unknown_signal_record_persists_with_deterministic_non_null_source_sentinels():
     conn = _connect()
     run_row = build_relevance_run_row(
         run_id="RUN_003",
@@ -181,8 +204,8 @@ def test_insert_and_read_unknown_signal_record_with_null_mapping_fields():
     assert loaded["relevance_reason"] == "UNKNOWN_SIGNAL_NAME"
     assert loaded["signal_direction"] is None
     assert loaded["signal_family"] is None
-    assert loaded["signal_source_type"] is None
-    assert loaded["signal_source_id"] is None
+    assert loaded["signal_source_type"] == PERSISTED_UNKNOWN_SOURCE_TYPE
+    assert loaded["signal_source_id"] == PERSISTED_UNKNOWN_SOURCE_ID
 
 
 def test_boolean_like_fields_are_stored_as_zero_one():
@@ -265,6 +288,190 @@ def test_duplicate_relevance_primary_key_insert_fails():
     insert_relevance_records(conn, [stored_row])
     with pytest.raises(sqlite3.IntegrityError):
         insert_relevance_records(conn, [stored_row])
+
+
+def test_same_relevance_identity_can_exist_in_multiple_run_ids():
+    conn = _connect()
+    run_row_a = build_relevance_run_row(
+        run_id="RUN_A",
+        config=TechnicalSignalRelevanceConfig(),
+        created_at_utc="2026-05-21T10:00:09Z",
+    )
+    run_row_b = build_relevance_run_row(
+        run_id="RUN_B",
+        config=TechnicalSignalRelevanceConfig(),
+        created_at_utc="2026-05-21T10:00:10Z",
+    )
+    insert_relevance_run(conn, run_row_a)
+    insert_relevance_run(conn, run_row_b)
+    stored_row_a = build_relevance_stored_row(
+        _relevant_record(),
+        run_id="RUN_A",
+        created_at_utc="2026-05-21T10:00:11Z",
+    )
+    stored_row_b = build_relevance_stored_row(
+        _relevant_record(),
+        run_id="RUN_B",
+        created_at_utc="2026-05-21T10:00:12Z",
+    )
+
+    insert_relevance_records(conn, [stored_row_a])
+    insert_relevance_records(conn, [stored_row_b])
+
+    assert len(read_relevance_records_for_run(conn, "RUN_A")) == 1
+    assert len(read_relevance_records_for_run(conn, "RUN_B")) == 1
+
+
+def test_read_relevance_records_for_run_returns_only_requested_run_id_rows():
+    conn = _connect()
+    run_row_a = build_relevance_run_row(
+        run_id="RUN_ONLY_A",
+        config=TechnicalSignalRelevanceConfig(),
+        created_at_utc="2026-05-21T10:00:13Z",
+    )
+    run_row_b = build_relevance_run_row(
+        run_id="RUN_ONLY_B",
+        config=TechnicalSignalRelevanceConfig(),
+        created_at_utc="2026-05-21T10:00:14Z",
+    )
+    insert_relevance_run(conn, run_row_a)
+    insert_relevance_run(conn, run_row_b)
+    insert_relevance_records(
+        conn,
+        [
+            build_relevance_stored_row(
+                _relevant_record(),
+                run_id="RUN_ONLY_A",
+                created_at_utc="2026-05-21T10:00:15Z",
+            ),
+            build_relevance_stored_row(
+                _relevant_record(),
+                run_id="RUN_ONLY_B",
+                created_at_utc="2026-05-21T10:00:16Z",
+            ),
+        ],
+    )
+
+    loaded = read_relevance_records_for_run(conn, "RUN_ONLY_A")
+
+    assert len(loaded) == 1
+    assert loaded[0]["run_id"] == "RUN_ONLY_A"
+
+
+def test_migration_rebuilds_old_schema_and_preserves_existing_rows():
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        """
+        CREATE TABLE technical_signal_relevance_runs (
+            run_id TEXT PRIMARY KEY NOT NULL,
+            relevance_rule_version TEXT NOT NULL,
+            mapping_version TEXT NOT NULL,
+            reason_version TEXT NOT NULL,
+            config_snapshot_json TEXT NOT NULL,
+            created_at_utc TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE technical_signal_relevance (
+            ticker TEXT NOT NULL,
+            timeframe TEXT NOT NULL,
+            signal_date TEXT NOT NULL,
+            signal_confirmed_as_of_date TEXT NOT NULL,
+            signal_name TEXT NOT NULL,
+            signal_close_price REAL NULL,
+            signal_direction TEXT NULL,
+            signal_family TEXT NULL,
+            signal_source_type TEXT NULL,
+            signal_source_id TEXT NULL,
+            dow_trend_state TEXT NULL,
+            dow_context_state TEXT NULL,
+            latest_bos_direction TEXT NULL,
+            bars_since_latest_bos INTEGER NULL,
+            latest_reset_reason TEXT NULL,
+            bars_since_latest_reset INTEGER NULL,
+            near_latest_pivot INTEGER NOT NULL,
+            near_active_bos_level INTEGER NOT NULL,
+            is_trend_aligned INTEGER NOT NULL,
+            is_counter_trend INTEGER NOT NULL,
+            relevance_class TEXT NOT NULL,
+            relevance_reason TEXT NOT NULL,
+            relevance_rule_version TEXT NOT NULL,
+            mapping_version TEXT NOT NULL,
+            reason_version TEXT NOT NULL,
+            rule_trace TEXT NULL,
+            created_at_utc TEXT NOT NULL,
+            run_id TEXT NOT NULL,
+            PRIMARY KEY (
+                ticker,
+                timeframe,
+                signal_date,
+                signal_name,
+                signal_source_type,
+                relevance_rule_version
+            )
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO technical_signal_relevance_runs (
+            run_id, relevance_rule_version, mapping_version, reason_version, config_snapshot_json, created_at_utc
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        ("RUN_OLD", "TECH_SIGNAL_RELEVANCE_V1", "TECH_SIGNAL_MAPPING_V1", "TECH_SIGNAL_RELEVANCE_REASON_V1", "{}", "2026-05-21T10:00:17Z"),
+    )
+    conn.execute(
+        """
+        INSERT INTO technical_signal_relevance (
+            ticker, timeframe, signal_date, signal_confirmed_as_of_date, signal_name,
+            signal_close_price, signal_direction, signal_family, signal_source_type, signal_source_id,
+            dow_trend_state, dow_context_state, latest_bos_direction, bars_since_latest_bos,
+            latest_reset_reason, bars_since_latest_reset, near_latest_pivot, near_active_bos_level,
+            is_trend_aligned, is_counter_trend, relevance_class, relevance_reason,
+            relevance_rule_version, mapping_version, reason_version, rule_trace, created_at_utc, run_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "AAA",
+            "1D",
+            "2024-01-10",
+            "2024-01-10",
+            "Unknown Signal",
+            90.0,
+            None,
+            None,
+            None,
+            None,
+            "UP",
+            "NORMAL",
+            None,
+            None,
+            None,
+            None,
+            0,
+            0,
+            0,
+            0,
+            "WEAK_CONTEXT",
+            "UNKNOWN_SIGNAL_NAME",
+            "TECH_SIGNAL_RELEVANCE_V1",
+            "TECH_SIGNAL_MAPPING_V1",
+            "TECH_SIGNAL_RELEVANCE_REASON_V1",
+            "[]",
+            "2026-05-21T10:00:18Z",
+            "RUN_OLD",
+        ),
+    )
+
+    apply_technical_signal_relevance_migration(conn)
+    loaded = read_relevance_records_for_run(conn, "RUN_OLD")
+
+    assert _primary_key_columns(conn, "technical_signal_relevance")[0] == "run_id"
+    assert len(loaded) == 1
+    assert loaded[0]["signal_source_type"] == PERSISTED_UNKNOWN_SOURCE_TYPE
+    assert loaded[0]["signal_source_id"] == PERSISTED_UNKNOWN_SOURCE_ID
 
 
 def test_read_records_for_run_returns_deterministic_order():
