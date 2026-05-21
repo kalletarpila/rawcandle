@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, TypeVar
 
 from .technical_signal_relevance import (
     NOISE,
@@ -23,7 +23,8 @@ from .technical_signal_relevance_persistence import (
 )
 
 
-ObservationContextKey = tuple[str, str]
+ObservationContextKey = tuple[str, str] | tuple[str, str, str]
+T = TypeVar("T")
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,28 @@ def _context_key(observation: TechnicalSignalObservation) -> ObservationContextK
     return (observation.ticker, observation.timeframe)
 
 
+def _observation_as_of_context_key(
+    observation: TechnicalSignalObservation,
+) -> tuple[str, str, str]:
+    return (
+        observation.ticker,
+        observation.timeframe,
+        observation.signal_confirmed_as_of_date,
+    )
+
+
+def _resolve_context_value(
+    mapping: Mapping[ObservationContextKey, T],
+    observation: TechnicalSignalObservation,
+    default: T,
+) -> T:
+    observation_specific_key = _observation_as_of_context_key(observation)
+    if observation_specific_key in mapping:
+        return mapping[observation_specific_key]
+    coarse_key = _context_key(observation)
+    return mapping.get(coarse_key, default)
+
+
 def run_technical_signal_relevance_batch(
     conn: sqlite3.Connection,
     run_id: str,
@@ -83,12 +106,11 @@ def run_technical_signal_relevance_batch(
     missing_bar_index_count = 0
 
     for observation in sorted_observations:
-        key = _context_key(observation)
         record = classify_relevance(
             observation,
-            dow_snapshots_by_key.get(key),
-            events_by_key.get(key, []),
-            pivots_by_key.get(key, []),
+            _resolve_context_value(dow_snapshots_by_key, observation, None),
+            _resolve_context_value(events_by_key, observation, []),
+            _resolve_context_value(pivots_by_key, observation, []),
             config=config,
         )
         stored_rows.append(
