@@ -332,7 +332,7 @@ def test_bars_since_fields_do_not_use_calendar_fallback():
 
     assert record.bars_since_latest_bos is None
     assert record.bars_since_latest_reset is None
-    assert "missing_bar_index=true" in record.rule_trace
+    assert "missing_bar_index=false" in record.rule_trace
 
 
 def test_basic_classification_is_deterministic_for_same_input():
@@ -586,7 +586,7 @@ def test_rule_trace_contains_required_context_fields():
         "used_recent_bos=true",
         "used_near_pivot=true",
         "selected_relevance_reason=UP_TREND_BEARISH_DIVERGENCE_AFTER_BOS_DOWN",
-        "missing_bar_index=true",
+        "missing_bar_index=false",
         "missing_dow_context=false",
         "missing_event_context=false",
         "missing_signal_close_price=false",

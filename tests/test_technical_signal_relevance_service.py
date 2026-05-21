@@ -71,6 +71,23 @@ def _create_dow_events(conn: sqlite3.Connection) -> None:
     )
 
 
+def _create_osakedata(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE osakedata (
+            osake TEXT,
+            pvm TEXT,
+            open REAL,
+            high REAL,
+            low REAL,
+            close REAL,
+            volume REAL,
+            market TEXT DEFAULT 'usa'
+        )
+        """
+    )
+
+
 def test_service_reads_one_candlestick_observation_and_writes_one_relevance_row():
     conn = _connect()
     _create_analysis_findings(conn)
@@ -339,3 +356,156 @@ def test_summary_counts_match_written_records():
 
     assert summary.records_written == len(records)
     assert summary.relevant_count + summary.weak_context_count + summary.noise_count == len(records)
+
+
+def test_service_with_ohlcv_bars_fills_bars_since_latest_bos_for_recent_bos():
+    conn = _connect()
+    _create_analysis_findings(conn)
+    _create_dow_events(conn)
+    _create_osakedata(conn)
+    conn.execute(
+        "INSERT INTO analysis_findings (ticker, date, pattern, signal_strength, rsi14) VALUES (?, ?, ?, ?, ?)",
+        ("AAA", "2024-01-10", "Evening Star", 0.8, 50.0),
+    )
+    conn.execute(
+        """
+        INSERT INTO stock_dow_structure_events (
+            ticker, event_date, confirmed_as_of_date, event_type, trend_state, structure_epoch_id
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        ("AAA", "2024-01-09", "2024-01-09", "BOS_DOWN", "UP", 1),
+    )
+    conn.executemany(
+        """
+        INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            ("AAA", "2024-01-08", 10.0, 11.0, 9.0, 10.0, 1000.0, "usa"),
+            ("AAA", "2024-01-09", 10.0, 11.0, 9.0, 10.0, 1000.0, "usa"),
+            ("AAA", "2024-01-10", 10.0, 11.0, 9.0, 10.0, 1000.0, "usa"),
+        ],
+    )
+
+    summary = run_technical_signal_relevance_for_tickers(
+        conn, ["AAA"], "1d", "2024-01-01", "2024-01-31", "RUN_SERVICE_012", "2026-05-21T13:00:11Z"
+    )
+    record = read_relevance_records_for_run(conn, "RUN_SERVICE_012")[0]
+
+    assert summary.missing_bar_index_count == 0
+    assert record["latest_bos_direction"] == "BOS_DOWN"
+    assert record["bars_since_latest_bos"] == 1
+
+
+def test_service_with_ohlcv_bars_allows_recent_bos_down_to_upgrade_bearish_reversal():
+    conn = _connect()
+    _create_analysis_findings(conn)
+    _create_dow_events(conn)
+    _create_osakedata(conn)
+    conn.execute(
+        "INSERT INTO analysis_findings (ticker, date, pattern, signal_strength, rsi14) VALUES (?, ?, ?, ?, ?)",
+        ("AAA", "2024-01-10", "Evening Star", 0.8, 50.0),
+    )
+    conn.execute(
+        """
+        INSERT INTO stock_dow_structure_events (
+            ticker, event_date, confirmed_as_of_date, event_type, trend_state, structure_epoch_id
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        ("AAA", "2024-01-09", "2024-01-09", "BOS_DOWN", "UP", 1),
+    )
+    conn.executemany(
+        """
+        INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            ("AAA", "2024-01-08", 10.0, 11.0, 9.0, 10.0, 1000.0, "usa"),
+            ("AAA", "2024-01-09", 10.0, 11.0, 9.0, 10.0, 1000.0, "usa"),
+            ("AAA", "2024-01-10", 10.0, 11.0, 9.0, 10.0, 1000.0, "usa"),
+        ],
+    )
+
+    run_technical_signal_relevance_for_tickers(
+        conn, ["AAA"], "1d", "2024-01-01", "2024-01-31", "RUN_SERVICE_013", "2026-05-21T13:00:12Z"
+    )
+    record = read_relevance_records_for_run(conn, "RUN_SERVICE_013")[0]
+
+    assert record["relevance_class"] == "RELEVANT"
+    assert record["relevance_reason"] == "UP_TREND_BEARISH_REVERSAL_AFTER_BOS_DOWN"
+
+
+def test_service_with_ohlcv_bars_fills_near_latest_pivot_and_upgrades_bullish_reversal():
+    conn = _connect()
+    _create_analysis_findings(conn)
+    _create_dow_events(conn)
+    _create_osakedata(conn)
+    conn.execute(
+        "INSERT INTO analysis_findings (ticker, date, pattern, signal_strength, rsi14) VALUES (?, ?, ?, ?, ?)",
+        ("AAA", "2024-01-10", "Hammer", 0.8, 50.0),
+    )
+    conn.execute(
+        """
+        INSERT INTO stock_dow_structure_events (
+            ticker, event_date, confirmed_as_of_date, event_type, trend_state, structure_epoch_id
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        ("AAA", "2024-01-09", "2024-01-09", "PIVOT_LOW", "UP", 1),
+    )
+    conn.executemany(
+        """
+        INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            ("AAA", "2024-01-08", 10.0, 11.0, 9.0, 10.0, 1000.0, "usa"),
+            ("AAA", "2024-01-09", 10.0, 11.0, 9.0, 10.0, 1000.0, "usa"),
+            ("AAA", "2024-01-10", 10.0, 11.0, 9.0, 10.0, 1000.0, "usa"),
+        ],
+    )
+
+    run_technical_signal_relevance_for_tickers(
+        conn, ["AAA"], "1d", "2024-01-01", "2024-01-31", "RUN_SERVICE_014", "2026-05-21T13:00:13Z"
+    )
+    record = read_relevance_records_for_run(conn, "RUN_SERVICE_014")[0]
+
+    assert record["near_latest_pivot"] == 1
+    assert record["relevance_class"] == "RELEVANT"
+    assert record["relevance_reason"] == "UP_TREND_BULLISH_DIP_REVERSAL_NEAR_PIVOT_LOW"
+
+
+def test_service_does_not_use_calendar_day_fallback_when_ohlcv_rows_are_missing():
+    conn = _connect()
+    _create_analysis_findings(conn)
+    _create_dow_events(conn)
+    _create_osakedata(conn)
+    conn.execute(
+        "INSERT INTO analysis_findings (ticker, date, pattern, signal_strength, rsi14) VALUES (?, ?, ?, ?, ?)",
+        ("AAA", "2024-01-10", "Evening Star", 0.8, 50.0),
+    )
+    conn.execute(
+        """
+        INSERT INTO stock_dow_structure_events (
+            ticker, event_date, confirmed_as_of_date, event_type, trend_state, structure_epoch_id
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        ("AAA", "2024-01-09", "2024-01-09", "BOS_DOWN", "UP", 1),
+    )
+    conn.executemany(
+        """
+        INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            ("AAA", "2024-01-08", 10.0, 11.0, 9.0, 10.0, 1000.0, "usa"),
+            ("AAA", "2024-01-10", 10.0, 11.0, 9.0, 10.0, 1000.0, "usa"),
+        ],
+    )
+
+    summary = run_technical_signal_relevance_for_tickers(
+        conn, ["AAA"], "1d", "2024-01-01", "2024-01-31", "RUN_SERVICE_015", "2026-05-21T13:00:14Z"
+    )
+    record = read_relevance_records_for_run(conn, "RUN_SERVICE_015")[0]
+
+    assert summary.missing_bar_index_count == 1
+    assert record["bars_since_latest_bos"] is None

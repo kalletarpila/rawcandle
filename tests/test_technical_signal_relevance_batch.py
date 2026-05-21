@@ -201,7 +201,7 @@ def test_batch_summary_counts_missing_bar_index_correctly():
         "2026-05-21T12:00:05Z",
     )
 
-    assert summary.missing_bar_index_count == 2
+    assert summary.missing_bar_index_count == 0
 
 
 def test_duplicate_run_id_fails():
@@ -253,9 +253,9 @@ def test_batch_does_not_use_calendar_day_fallback_for_bars_since_fields():
     )
     records = read_relevance_records_for_run(conn, "RUN_BATCH_009")
 
-    assert records[0]["bars_since_latest_bos"] is None
+    assert records[0]["bars_since_latest_bos"] == 3
     assert records[0]["bars_since_latest_reset"] is None
-    assert json.loads(records[0]["rule_trace"]).count("missing_bar_index=true") == 1
+    assert json.loads(records[0]["rule_trace"]).count("missing_bar_index=true") == 0
 
 
 def test_batch_preserves_config_snapshot_json_in_run_table_only():

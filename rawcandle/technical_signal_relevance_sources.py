@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 from .technical_signal_relevance import (
@@ -76,6 +77,19 @@ _SIGNAL_NAME_ALIASES = {
 }
 
 
+class TechnicalSignalBarIndex:
+    def __init__(self, bar_dates: list[str]) -> None:
+        self.bar_dates = tuple(bar_dates)
+        self._date_to_index = {bar_date: index for index, bar_date in enumerate(self.bar_dates)}
+
+    def bars_since(self, confirmed_as_of_date: str, observation_confirmed_as_of_date: str) -> int | None:
+        start_index = self._date_to_index.get(confirmed_as_of_date)
+        end_index = self._date_to_index.get(observation_confirmed_as_of_date)
+        if start_index is None or end_index is None or end_index < start_index:
+            return None
+        return end_index - start_index
+
+
 def _parse_iso_date(value: str, field_name: str) -> str:
     try:
         return date.fromisoformat(str(value)).isoformat()
@@ -100,6 +114,40 @@ def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
     return {str(row[1]) for row in rows}
 
 
+def _resolve_ohlcv_connection(conn: sqlite3.Connection) -> tuple[sqlite3.Connection | None, bool]:
+    if _table_exists(conn, "osakedata"):
+        return conn, False
+
+    database_rows = conn.execute("PRAGMA database_list").fetchall()
+    main_path = None
+    for row in database_rows:
+        if str(row[1]) == "main":
+            main_path = str(row[2])
+            break
+    if not main_path:
+        return None, False
+
+    sibling_path = Path(main_path).resolve().with_name("osakedata.db")
+    if not sibling_path.is_file():
+        return None, False
+
+    ohlcv_conn = sqlite3.connect(str(sibling_path))
+    ohlcv_conn.row_factory = sqlite3.Row
+    return ohlcv_conn, True
+
+
+def _introspect_ohlcv_schema(conn: sqlite3.Connection) -> tuple[str, str]:
+    columns = {
+        str(row[1]).lower(): str(row[1])
+        for row in conn.execute("PRAGMA table_info(osakedata)").fetchall()
+    }
+    ticker_column = columns.get("osake") or columns.get("ticker")
+    date_column = columns.get("pvm") or columns.get("date")
+    if ticker_column is None or date_column is None:
+        raise RuntimeError("Missing required OHLCV columns in osakedata")
+    return ticker_column, date_column
+
+
 def _row_value(row: sqlite3.Row | dict[str, Any], field_name: str) -> Any:
     if isinstance(row, sqlite3.Row):
         return row[field_name]
@@ -113,6 +161,127 @@ def _build_fallback_event_id(
     confirmed_as_of_date: str,
 ) -> str:
     return f"{ticker}:{event_type}:{event_date}:{confirmed_as_of_date}"
+
+
+def read_bar_dates(
+    conn: sqlite3.Connection,
+    ticker: str,
+    timeframe: str,
+    start_date: str,
+    end_date: str,
+    lookback_bars: int,
+) -> list[str]:
+    del timeframe
+    normalized_start_date = _parse_iso_date(start_date, "start_date")
+    normalized_end_date = _parse_iso_date(end_date, "end_date")
+    if normalized_start_date > normalized_end_date:
+        raise ValueError(
+            f"Invalid date range: start_date {normalized_start_date} is after end_date {normalized_end_date}"
+        )
+
+    ohlcv_conn, should_close = _resolve_ohlcv_connection(conn)
+    if ohlcv_conn is None or not _table_exists(ohlcv_conn, "osakedata"):
+        return []
+
+    try:
+        ticker_column, date_column = _introspect_ohlcv_schema(ohlcv_conn)
+        rows = ohlcv_conn.execute(
+            f"""
+            WITH in_range AS (
+                SELECT {date_column} AS bar_date
+                FROM osakedata
+                WHERE UPPER(TRIM({ticker_column})) = UPPER(TRIM(?))
+                  AND {date_column} >= ?
+                  AND {date_column} <= ?
+                ORDER BY {date_column} ASC
+            ),
+            lookback AS (
+                SELECT {date_column} AS bar_date
+                FROM osakedata
+                WHERE UPPER(TRIM({ticker_column})) = UPPER(TRIM(?))
+                  AND {date_column} < ?
+                ORDER BY {date_column} DESC
+                LIMIT ?
+            )
+            SELECT bar_date
+            FROM (
+                SELECT bar_date FROM lookback
+                UNION
+                SELECT bar_date FROM in_range
+            )
+            ORDER BY bar_date ASC
+            """,
+            (
+                ticker,
+                normalized_start_date,
+                normalized_end_date,
+                ticker,
+                normalized_start_date,
+                int(lookback_bars),
+            ),
+        ).fetchall()
+        return [str(row["bar_date"]) for row in rows]
+    finally:
+        if should_close:
+            ohlcv_conn.close()
+
+
+def build_bar_index(
+    conn: sqlite3.Connection,
+    ticker: str,
+    timeframe: str,
+    start_date: str,
+    end_date: str,
+    lookback_bars: int,
+) -> TechnicalSignalBarIndex | None:
+    bar_dates = read_bar_dates(conn, ticker, timeframe, start_date, end_date, lookback_bars)
+    if not bar_dates:
+        return None
+    return TechnicalSignalBarIndex(bar_dates)
+
+
+def assign_event_bar_distances(
+    events: list[TechnicalSignalEvent],
+    observation_confirmed_as_of_date: str,
+    bar_index: TechnicalSignalBarIndex | None,
+) -> list[TechnicalSignalEvent]:
+    return [
+        TechnicalSignalEvent(
+            event_type=event.event_type,
+            event_date=event.event_date,
+            confirmed_as_of_date=event.confirmed_as_of_date,
+            event_id=event.event_id,
+            structure_epoch_id=event.structure_epoch_id,
+            bars_since_confirmation=(
+                None
+                if bar_index is None
+                else bar_index.bars_since(event.confirmed_as_of_date, observation_confirmed_as_of_date)
+            ),
+        )
+        for event in events
+    ]
+
+
+def assign_pivot_bar_distances(
+    pivots: list[TechnicalSignalPivot],
+    observation_confirmed_as_of_date: str,
+    bar_index: TechnicalSignalBarIndex | None,
+) -> list[TechnicalSignalPivot]:
+    return [
+        TechnicalSignalPivot(
+            event_type=pivot.event_type,
+            event_date=pivot.event_date,
+            confirmed_as_of_date=pivot.confirmed_as_of_date,
+            event_id=pivot.event_id,
+            structure_epoch_id=pivot.structure_epoch_id,
+            bars_since_confirmation=(
+                None
+                if bar_index is None
+                else bar_index.bars_since(pivot.confirmed_as_of_date, observation_confirmed_as_of_date)
+            ),
+        )
+        for pivot in pivots
+    ]
 
 
 def normalize_signal_name(raw_name: str | None) -> str | None:
@@ -519,8 +688,13 @@ def read_dow_pivots(
 
 
 __all__ = [
+    "TechnicalSignalBarIndex",
+    "assign_event_bar_distances",
+    "assign_pivot_bar_distances",
+    "build_bar_index",
     "normalize_candlestick_observation_row",
     "normalize_signal_name",
+    "read_bar_dates",
     "read_candlestick_observations",
     "read_divergence_observations",
     "read_dow_events",

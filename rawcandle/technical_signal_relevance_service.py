@@ -10,6 +10,9 @@ from .technical_signal_relevance_batch import (
     run_technical_signal_relevance_batch,
 )
 from .technical_signal_relevance_sources import (
+    assign_event_bar_distances,
+    assign_pivot_bar_distances,
+    build_bar_index,
     read_candlestick_observations,
     read_divergence_observations,
     read_dow_events,
@@ -35,6 +38,11 @@ def run_technical_signal_relevance_for_tickers(
 ) -> TechnicalSignalRelevanceBatchSummary:
     resolved_config = config or TechnicalSignalRelevanceConfig()
     normalized_tickers = _normalize_requested_tickers(tickers)
+    lookback_bars = max(
+        resolved_config.near_pivot_window_bars,
+        resolved_config.recent_bos_window_bars,
+        resolved_config.recent_reset_window_bars,
+    ) + 5
 
     observations = []
     for ticker in normalized_tickers:
@@ -57,6 +65,18 @@ def run_technical_signal_relevance_for_tickers(
             )
         )
 
+    bar_indexes = {
+        ticker: build_bar_index(
+            conn,
+            ticker,
+            timeframe,
+            start_date,
+            end_date,
+            lookback_bars,
+        )
+        for ticker in normalized_tickers
+    }
+
     dow_snapshots_by_key: dict[ObservationContextKey, object] = {}
     events_by_key: dict[ObservationContextKey, object] = {}
     pivots_by_key: dict[ObservationContextKey, object] = {}
@@ -74,17 +94,28 @@ def run_technical_signal_relevance_for_tickers(
             observation.timeframe,
             observation.signal_confirmed_as_of_date,
         )
-        events_by_key[key] = read_dow_events(
+        raw_events = read_dow_events(
             conn,
             observation.ticker,
             observation.timeframe,
             observation.signal_confirmed_as_of_date,
         )
-        pivots_by_key[key] = read_dow_pivots(
+        raw_pivots = read_dow_pivots(
             conn,
             observation.ticker,
             observation.timeframe,
             observation.signal_confirmed_as_of_date,
+        )
+        bar_index = bar_indexes.get(observation.ticker)
+        events_by_key[key] = assign_event_bar_distances(
+            raw_events,
+            observation.signal_confirmed_as_of_date,
+            bar_index,
+        )
+        pivots_by_key[key] = assign_pivot_bar_distances(
+            raw_pivots,
+            observation.signal_confirmed_as_of_date,
+            bar_index,
         )
 
     return run_technical_signal_relevance_batch(

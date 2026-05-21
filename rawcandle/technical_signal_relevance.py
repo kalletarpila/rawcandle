@@ -356,6 +356,35 @@ def _near_latest_pivot(
     return 0
 
 
+def _latest_relevant_pivot(
+    signal_direction: str | None,
+    pivots: list[TechnicalSignalPivot],
+    structure_epoch_id: int | None,
+    dow_context_state: str | None,
+) -> TechnicalSignalPivot | None:
+    if signal_direction == BULLISH:
+        expected_event_type = PIVOT_LOW
+    elif signal_direction == BEARISH:
+        expected_event_type = PIVOT_HIGH
+    else:
+        return None
+
+    candidates = [
+        pivot
+        for pivot in pivots
+        if pivot.event_type == expected_event_type
+        and (
+            dow_context_state == "AFTER_RESET"
+            or structure_epoch_id is None
+            or pivot.structure_epoch_id is None
+            or pivot.structure_epoch_id == structure_epoch_id
+        )
+    ]
+    if not candidates:
+        return None
+    return candidates[-1]
+
+
 def _recent_event_within_window(
     event: TechnicalSignalEvent | None,
     max_bars: int,
@@ -467,6 +496,10 @@ def classify_relevance(
     )
     latest_bos_direction = None if latest_bos_event is None else latest_bos_event.event_type
     latest_reset_reason = None if latest_reset_event is None else RESET
+    bars_since_latest_bos = None if latest_bos_event is None else latest_bos_event.bars_since_confirmation
+    bars_since_latest_reset = (
+        None if latest_reset_event is None else latest_reset_event.bars_since_confirmation
+    )
     derived_dow_context_state = _derive_dow_context_state(
         dow_snapshot,
         recent_bos,
@@ -478,7 +511,6 @@ def classify_relevance(
         f"reason_version={resolved_config.reason_version}",
         f"eligible_event_ids={','.join('' if event.event_id is None else str(event.event_id) for event in resolved_events)}",
         f"eligible_pivot_ids={','.join('' if pivot.event_id is None else str(pivot.event_id) for pivot in resolved_pivots)}",
-        "missing_bar_index=true",
     ]
     trace.append(f"dow_trend_state={None if dow_snapshot is None else dow_snapshot.trend_state}")
     trace.append(f"dow_structure_epoch_id={None if dow_snapshot is None or dow_snapshot.structure_epoch_id is None else dow_snapshot.structure_epoch_id}")
@@ -504,9 +536,9 @@ def classify_relevance(
         "dow_trend_state": None if dow_snapshot is None else dow_snapshot.trend_state,
         "dow_context_state": derived_dow_context_state,
         "latest_bos_direction": latest_bos_direction,
-        "bars_since_latest_bos": None,
+        "bars_since_latest_bos": bars_since_latest_bos,
         "latest_reset_reason": latest_reset_reason,
-        "bars_since_latest_reset": None,
+        "bars_since_latest_reset": bars_since_latest_reset,
         "relevance_rule_version": resolved_config.rule_version,
         "mapping_version": resolved_config.mapping_version,
         "reason_version": resolved_config.reason_version,
@@ -564,6 +596,25 @@ def classify_relevance(
         resolved_config,
         trace,
     )
+    latest_relevant_pivot = _latest_relevant_pivot(
+        mapping_entry.signal_direction,
+        resolved_pivots,
+        None if dow_snapshot is None else dow_snapshot.structure_epoch_id,
+        derived_dow_context_state,
+    )
+    missing_bar_index = int(
+        (
+            latest_bos_event is not None and latest_bos_event.bars_since_confirmation is None
+        )
+        or (
+            latest_reset_event is not None and latest_reset_event.bars_since_confirmation is None
+        )
+        or (
+            latest_relevant_pivot is not None
+            and latest_relevant_pivot.bars_since_confirmation is None
+        )
+    )
+    trace.append(f"missing_bar_index={'true' if missing_bar_index else 'false'}")
     trace.append(f"near_latest_pivot={near_pivot}")
     trace.append(f"used_near_pivot={'true' if near_pivot else 'false'}")
     trace.append(f"near_active_bos_level={near_active_level}")
