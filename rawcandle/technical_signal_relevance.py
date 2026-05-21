@@ -245,8 +245,26 @@ def _extract_latest_bos_direction(events: list[TechnicalSignalEvent]) -> str | N
 def _extract_latest_reset_reason(events: list[TechnicalSignalEvent]) -> str | None:
     for event in reversed(events):
         if event.event_type == RESET:
-            return str(event.event_id) if event.event_id is not None else RESET
+            return RESET
     return None
+
+
+def _derive_dow_context_state(
+    dow_snapshot: TechnicalSignalDowSnapshot | None,
+    latest_bos_direction: str | None,
+    latest_reset_reason: str | None,
+) -> str | None:
+    if dow_snapshot is None:
+        return None
+    if dow_snapshot.dow_context_state:
+        return dow_snapshot.dow_context_state
+    if latest_reset_reason is not None:
+        return "AFTER_RESET"
+    if latest_bos_direction is not None:
+        return "AFTER_BOS"
+    if dow_snapshot.trend_state:
+        return "NORMAL"
+    return "NO_STRUCTURE"
 
 
 def _is_trend_aligned(trend_state: str | None, signal_direction: str | None) -> int:
@@ -315,7 +333,7 @@ def _classify_with_context(
     signal_family: str,
     trend_state: str,
     latest_bos_direction: str | None,
-    latest_reset_reason: str | None,
+    dow_context_state: str | None,
     near_latest_pivot: int,
 ) -> tuple[str, str]:
     if trend_state == UP:
@@ -360,13 +378,13 @@ def _classify_with_context(
             return NOISE, "DOWN_TREND_COUNTER_BULLISH_REVERSAL_MEDIUM_WITHOUT_BOS"
         return NOISE, "DOWN_TREND_BULLISH_CONTINUATION_WITHOUT_BULLISH_STRUCTURE"
 
-    if latest_reset_reason is not None:
+    if dow_context_state == "AFTER_RESET":
         if signal_family == REVERSAL_STRONG:
-            return WEAK_CONTEXT, "NEUTRAL_AFTER_RESET_STRONG_REVERSAL"
+            return RELEVANT, "NEUTRAL_AFTER_RESET_STRONG_REVERSAL"
         if signal_family == REVERSAL_MEDIUM:
             return WEAK_CONTEXT, "NEUTRAL_AFTER_RESET_MEDIUM_REVERSAL_WEAK"
         if signal_family == DIVERGENCE:
-            return WEAK_CONTEXT, "NEUTRAL_AFTER_RESET_DIVERGENCE"
+            return RELEVANT, "NEUTRAL_AFTER_RESET_DIVERGENCE"
         if signal_family == HIDDEN_DIVERGENCE:
             return WEAK_CONTEXT, "NEUTRAL_AFTER_RESET_HIDDEN_DIVERGENCE_WEAK"
         return NOISE, "NEUTRAL_AFTER_RESET_CONTINUATION_WITHOUT_TREND"
@@ -400,6 +418,11 @@ def classify_relevance(
     )
     latest_bos_direction = _extract_latest_bos_direction(resolved_events)
     latest_reset_reason = _extract_latest_reset_reason(resolved_events)
+    derived_dow_context_state = _derive_dow_context_state(
+        dow_snapshot,
+        latest_bos_direction,
+        latest_reset_reason,
+    )
     trace = [
         f"rule_version={resolved_config.rule_version}",
         f"mapping_version={resolved_config.mapping_version}",
@@ -408,6 +431,8 @@ def classify_relevance(
         f"eligible_pivot_ids={','.join('' if pivot.event_id is None else str(pivot.event_id) for pivot in resolved_pivots)}",
         "missing_bar_index=true",
     ]
+    if derived_dow_context_state is not None:
+        trace.append(f"dow_context_state={derived_dow_context_state}")
 
     base_record = {
         "ticker": observation.ticker,
@@ -417,7 +442,7 @@ def classify_relevance(
         "signal_name": observation.signal_name,
         "signal_close_price": observation.signal_close_price,
         "dow_trend_state": None if dow_snapshot is None else dow_snapshot.trend_state,
-        "dow_context_state": None if dow_snapshot is None else dow_snapshot.dow_context_state,
+        "dow_context_state": derived_dow_context_state,
         "latest_bos_direction": latest_bos_direction,
         "bars_since_latest_bos": None,
         "latest_reset_reason": latest_reset_reason,
@@ -500,7 +525,7 @@ def classify_relevance(
         signal_family=mapping_entry.signal_family,
         trend_state=dow_snapshot.trend_state,
         latest_bos_direction=latest_bos_direction,
-        latest_reset_reason=latest_reset_reason,
+        dow_context_state=derived_dow_context_state,
         near_latest_pivot=near_pivot,
     )
     trace.append(f"classification={relevance_class}")

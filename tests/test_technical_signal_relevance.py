@@ -320,3 +320,36 @@ def test_basic_classification_is_deterministic_for_same_input():
     assert record_a.relevance_reason == record_b.relevance_reason
     assert record_a.config_snapshot_json == record_b.config_snapshot_json
     assert record_a.rule_trace == record_b.rule_trace
+
+
+def test_neutral_after_reset_strong_reversal_is_relevant_per_locked_spec():
+    record = classify_relevance(
+        _observation(signal_name="Bullish Engulfing"),
+        TechnicalSignalDowSnapshot(trend_state="NEUTRAL"),
+        events=[
+            TechnicalSignalEvent("RESET", "2024-01-09", "2024-01-10", event_id="reset-1"),
+        ],
+        pivots=[],
+        config=TechnicalSignalRelevanceConfig(),
+    )
+
+    assert record.dow_context_state == "AFTER_RESET"
+    assert record.latest_reset_reason == "RESET"
+    assert record.relevance_class == "RELEVANT"
+    assert record.relevance_reason == "NEUTRAL_AFTER_RESET_STRONG_REVERSAL"
+
+
+def test_neutral_after_reset_divergence_is_relevant_per_locked_spec():
+    record = classify_relevance(
+        _observation(signal_name="Bullish Divergence"),
+        TechnicalSignalDowSnapshot(trend_state="NEUTRAL"),
+        events=[
+            TechnicalSignalEvent("RESET", "2024-01-09", "2024-01-10"),
+        ],
+        pivots=[],
+        config=TechnicalSignalRelevanceConfig(),
+    )
+
+    assert record.dow_context_state == "AFTER_RESET"
+    assert record.relevance_class == "RELEVANT"
+    assert record.relevance_reason == "NEUTRAL_AFTER_RESET_DIVERGENCE"
