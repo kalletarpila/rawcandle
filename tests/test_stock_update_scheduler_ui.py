@@ -103,6 +103,7 @@ def test_list_scheduler_log_files_returns_recent_logs_newest_first(tmp_path):
     files = [
         tmp_path / "stock_update_scheduler_summary_20260516T010000Z.json",
         tmp_path / "stock_update_omxh_20260516T0200Z.log",
+        tmp_path / "datacenter_pipeline_usa_20260516T0250Z.txt",
         tmp_path / "stock_update_omxs_20260516T0300Z.txt",
         tmp_path / "ignore_me.txt",
     ]
@@ -113,13 +114,15 @@ def test_list_scheduler_log_files_returns_recent_logs_newest_first(tmp_path):
 
     assert [entry["filename"] for entry in entries] == [
         "stock_update_omxs_20260516T0300Z.txt",
+        "datacenter_pipeline_usa_20260516T0250Z.txt",
         "stock_update_omxh_20260516T0200Z.log",
         "stock_update_scheduler_summary_20260516T010000Z.json",
     ]
     assert entries[0]["path"].endswith("stock_update_omxs_20260516T0300Z.txt")
     assert entries[0]["text_openable"] is True
     assert entries[1]["text_openable"] is True
-    assert entries[2]["text_openable"] is False
+    assert entries[2]["text_openable"] is True
+    assert entries[3]["text_openable"] is False
 
 
 def test_list_scheduler_log_files_ignores_unrelated_files(tmp_path):
@@ -129,12 +132,16 @@ def test_list_scheduler_log_files_ignores_unrelated_files(tmp_path):
     (tmp_path / "stock_update_omxh_20260516T0200Z.txt").write_text(
         "x", encoding="utf-8"
     )
+    (tmp_path / "datacenter_pipeline_usa_20260516T0250Z.txt").write_text(
+        "x", encoding="utf-8"
+    )
     (tmp_path / "something_else.log").write_text("x", encoding="utf-8")
     (tmp_path / "stock_update_foo_20260516T0300Z.txt").write_text("x", encoding="utf-8")
 
     entries = list_scheduler_log_files(str(tmp_path))
 
     assert [entry["filename"] for entry in entries] == [
+        "datacenter_pipeline_usa_20260516T0250Z.txt",
         "stock_update_omxh_20260516T0200Z.txt",
         "stock_update_scheduler_summary_20260516T010000Z.json",
     ]
@@ -180,6 +187,71 @@ def test_list_scheduler_log_files_defaults_to_10_newest_entries(tmp_path):
     assert len(entries) == 10
     assert entries[0]["filename"] == "stock_update_omxh_20260516T1100Z.txt"
     assert entries[-1]["filename"] == "stock_update_omxh_20260516T0200Z.txt"
+
+
+def test_run_app_shows_datacenter_status_in_summary_and_datacenter_log_in_recent_logs(
+    tmp_path, monkeypatch
+):
+    config_path = tmp_path / "scheduler_config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "analysis_db_path": "/tmp/analysis.db",
+                "enabled_markets": ["omxh", "omxs", "usa"],
+                "log_dir": "/tmp/logs",
+                "osakedata_db_path": "/tmp/osakedata.db",
+                "run_time": "05:30",
+                "timezone": "Europe/Helsinki",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.load_latest_scheduler_summary",
+        lambda log_dir: {
+            "overall_status": "OK",
+            "enabled_markets": ["omxh", "omxs", "usa"],
+            "summary_json_path": "/tmp/logs/summary.json",
+            "datacenter_pipeline_status": "OK",
+            "datacenter_pipeline_market": "usa",
+            "datacenter_pipeline_audit_validation_status": "WARN",
+            "datacenter_pipeline_log_path": "/tmp/logs/datacenter_pipeline_usa_20260521T0822Z.txt",
+            "market_results": [],
+        },
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.list_scheduler_log_files",
+        lambda log_dir: [
+            {
+                "filename": "datacenter_pipeline_usa_20260521T0822Z.txt",
+                "path": "/tmp/logs/datacenter_pipeline_usa_20260521T0822Z.txt",
+                "size_bytes": 123,
+                "modified_at": "1",
+                "timestamp": "20260521T0822Z",
+                "sort_key": "20260521T0822Z_0",
+                "type": "datacenter_log",
+                "text_openable": True,
+            }
+        ],
+    )
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.read_scheduler_status", lambda log_dir: None)
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
+        lambda: {"timer_path": "/tmp/timer", "on_calendar": "*-*-* 05:30:00", "installed": True, "status_summary": "ok", "error": None},
+    )
+
+    page = _FakePage()
+    run_app(page, str(config_path))
+
+    assert "datacenter_pipeline.status=OK" in page.summary_field.value
+    assert "datacenter_pipeline.audit_validation_status=WARN" in page.summary_field.value
+    assert (
+        "datacenter_pipeline.log_path=/tmp/logs/datacenter_pipeline_usa_20260521T0822Z.txt"
+        in page.summary_field.value
+    )
+    card = page.logs_column.controls[0]
+    log_row = card.content.content.controls[0]
+    assert "datacenter_pipeline_usa_20260521T0822Z.txt" in log_row.controls[0].value
 
 
 def test_format_systemd_on_calendar_formats_validated_time():

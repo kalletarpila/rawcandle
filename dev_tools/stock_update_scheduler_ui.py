@@ -36,6 +36,9 @@ _SUMMARY_FILENAME_RE = re.compile(
 _MARKET_LOG_FILENAME_RE = re.compile(
     r"^stock_update_(omxh|omxs|usa)_(\d{8}T\d{4,6}Z)(?:_(\d+))?\.(txt|log)$"
 )
+_DATACENTER_LOG_FILENAME_RE = re.compile(
+    r"^datacenter_pipeline_([a-z0-9_]+)_(\d{8}T\d{4,6}Z)(?:_(\d+))?\.(txt|log)$"
+)
 _STATUS_OK_COLOR = "#43A047"
 _STATUS_WARNING_COLOR = "#EF6C00"
 _STATUS_ERROR_COLOR = "#E53935"
@@ -194,13 +197,19 @@ def list_scheduler_log_files(log_dir: str, limit: int = 10) -> List[Dict[str, An
             continue
         summary_match = _SUMMARY_FILENAME_RE.match(path.name)
         log_match = _MARKET_LOG_FILENAME_RE.match(path.name)
+        datacenter_log_match = _DATACENTER_LOG_FILENAME_RE.match(path.name)
         if summary_match:
             timestamp = summary_match.group(1)
             entry_type = "summary_json"
+            suffix = "0"
         elif log_match:
             timestamp = log_match.group(2)
             suffix = log_match.group(3) or "0"
             entry_type = "market_log"
+        elif datacenter_log_match:
+            timestamp = datacenter_log_match.group(2)
+            suffix = datacenter_log_match.group(3) or "0"
+            entry_type = "datacenter_log"
         else:
             continue
 
@@ -212,9 +221,9 @@ def list_scheduler_log_files(log_dir: str, limit: int = 10) -> List[Dict[str, An
                 "size_bytes": stat_result.st_size,
                 "modified_at": str(int(stat_result.st_mtime)),
                 "timestamp": timestamp,
-                "sort_key": f"{timestamp}_{suffix}" if log_match else timestamp,
+                "sort_key": f"{timestamp}_{suffix}",
                 "type": entry_type,
-                "text_openable": entry_type == "market_log",
+                "text_openable": entry_type in {"market_log", "datacenter_log"},
             }
         )
 
@@ -981,6 +990,14 @@ def run_app(page: ft.Page, config_path: str) -> None:
                 "enabled_markets="
                 + ",".join(latest_summary.get("enabled_markets", [])),
                 f"summary_json_path={latest_summary.get('summary_json_path', '')}",
+                "datacenter_pipeline.status="
+                f"{latest_summary.get('datacenter_pipeline_status', '')}",
+                "datacenter_pipeline.market="
+                f"{latest_summary.get('datacenter_pipeline_market', '')}",
+                "datacenter_pipeline.audit_validation_status="
+                f"{latest_summary.get('datacenter_pipeline_audit_validation_status', '')}",
+                "datacenter_pipeline.log_path="
+                f"{latest_summary.get('datacenter_pipeline_log_path', '')}",
             ]
             for market_result in latest_summary.get("market_results", []):
                 lines.append(_market_row_text(market_result))
@@ -1404,6 +1421,8 @@ def run_app(page: ft.Page, config_path: str) -> None:
     page.datacenter_rolling_report_button = datacenter_rolling_report_button
     page.datacenter_plan_button = datacenter_plan_button
     page.datacenter_watermarks_button = datacenter_watermarks_button
+    page.summary_field = summary_field
+    page.logs_column = logs_column
 
     tabs = ft.Tabs(
         selected_index=0,
