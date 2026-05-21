@@ -10,6 +10,9 @@ from datetime import datetime
 import logging
 
 from .combo_features import BULL_DIV_GENERAL_FEATURES, CANDLE_PATTERN_TO_SLUG
+from rawcandle.technical_signal_relevance_persistence import (
+    apply_technical_signal_relevance_migration,
+)
 
 SQLITE_BUSY_TIMEOUT_MS = 30_000
 SQLITE_CONNECT_TIMEOUT_SECONDS = 30.0
@@ -1287,8 +1290,10 @@ class DatabaseManager:
                     total_rows INTEGER,
                     processing_time_seconds REAL
                 )
-            """
+                """
             )
+
+            apply_technical_signal_relevance_migration(conn)
 
             conn.commit()
             self.logger.info("Analysis database initialized successfully")
