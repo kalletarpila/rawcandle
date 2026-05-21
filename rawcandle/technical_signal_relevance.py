@@ -99,6 +99,7 @@ class TechnicalSignalEvent:
     confirmed_as_of_date: str
     event_id: str | int | None = None
     structure_epoch_id: int | None = None
+    bars_since_confirmation: int | None = None
 
 
 @dataclass(frozen=True)
@@ -108,6 +109,7 @@ class TechnicalSignalPivot:
     confirmed_as_of_date: str
     event_id: str | int | None = None
     structure_epoch_id: int | None = None
+    bars_since_confirmation: int | None = None
 
 
 @dataclass(frozen=True)
@@ -233,34 +235,34 @@ def _filter_sort_eligible(items: list[T], confirmed_as_of_date: str) -> list[T]:
     return sorted(eligible, key=_event_sort_key)
 
 
-def _extract_latest_bos_direction(events: list[TechnicalSignalEvent]) -> str | None:
+def _extract_latest_bos_event(events: list[TechnicalSignalEvent]) -> TechnicalSignalEvent | None:
     for event in reversed(events):
         if event.event_type == BOS_UP:
-            return UP
+            return event
         if event.event_type == BOS_DOWN:
-            return DOWN
+            return event
     return None
 
 
-def _extract_latest_reset_reason(events: list[TechnicalSignalEvent]) -> str | None:
+def _extract_latest_reset_event(events: list[TechnicalSignalEvent]) -> TechnicalSignalEvent | None:
     for event in reversed(events):
         if event.event_type == RESET:
-            return RESET
+            return event
     return None
 
 
 def _derive_dow_context_state(
     dow_snapshot: TechnicalSignalDowSnapshot | None,
-    latest_bos_direction: str | None,
-    latest_reset_reason: str | None,
+    recent_bos: int,
+    recent_reset: int,
 ) -> str | None:
     if dow_snapshot is None:
         return None
     if dow_snapshot.dow_context_state:
         return dow_snapshot.dow_context_state
-    if latest_reset_reason is not None:
+    if recent_reset:
         return "AFTER_RESET"
-    if latest_bos_direction is not None:
+    if recent_bos:
         return "AFTER_BOS"
     if dow_snapshot.trend_state:
         return "NORMAL"
@@ -313,18 +315,54 @@ def _near_latest_pivot(
     observation: TechnicalSignalObservation,
     signal_direction: str | None,
     pivots: list[TechnicalSignalPivot],
+    structure_epoch_id: int | None,
+    dow_context_state: str | None,
+    config: TechnicalSignalRelevanceConfig,
+    trace: list[str],
 ) -> int:
     if signal_direction == BULLISH:
         expected_event_type = PIVOT_LOW
     elif signal_direction == BEARISH:
         expected_event_type = PIVOT_HIGH
     else:
+        trace.append("missing_pivot_context=true")
+        trace.append("latest_pivot_event_id=null")
         return 0
 
-    for pivot in reversed(pivots):
-        if pivot.event_type == expected_event_type and pivot.event_date == observation.signal_date:
-            return 1
+    candidates = [
+        pivot
+        for pivot in pivots
+        if pivot.event_type == expected_event_type
+        and (
+            dow_context_state == "AFTER_RESET"
+            or structure_epoch_id is None
+            or pivot.structure_epoch_id is None
+            or pivot.structure_epoch_id == structure_epoch_id
+        )
+    ]
+    if not candidates:
+        trace.append("missing_pivot_context=true")
+        trace.append("latest_pivot_event_id=null")
+        return 0
+
+    latest_pivot = candidates[-1]
+    trace.append(f"latest_pivot_event_id={latest_pivot.event_id if latest_pivot.event_id is not None else 'null'}")
+    if latest_pivot.bars_since_confirmation is None:
+        trace.append("missing_pivot_context=true")
+        return 0
+    trace.append("missing_pivot_context=false")
+    if latest_pivot.bars_since_confirmation <= config.near_pivot_window_bars:
+        return 1
     return 0
+
+
+def _recent_event_within_window(
+    event: TechnicalSignalEvent | None,
+    max_bars: int,
+) -> int:
+    if event is None or event.bars_since_confirmation is None:
+        return 0
+    return 1 if event.bars_since_confirmation <= max_bars else 0
 
 
 def _classify_with_context(
@@ -333,6 +371,7 @@ def _classify_with_context(
     signal_family: str,
     trend_state: str,
     latest_bos_direction: str | None,
+    recent_bos: int,
     dow_context_state: str | None,
     near_latest_pivot: int,
 ) -> tuple[str, str]:
@@ -347,9 +386,9 @@ def _classify_with_context(
             if near_latest_pivot:
                 return RELEVANT, "UP_TREND_BULLISH_DIP_REVERSAL_NEAR_PIVOT_LOW"
             return WEAK_CONTEXT, "UP_TREND_BULLISH_REVERSAL_WITHOUT_PIVOT_CONTEXT"
-        if signal_family == DIVERGENCE and latest_bos_direction == DOWN:
+        if signal_family == DIVERGENCE and recent_bos and latest_bos_direction == BOS_DOWN:
             return RELEVANT, "UP_TREND_BEARISH_DIVERGENCE_AFTER_BOS_DOWN"
-        if signal_family in {REVERSAL_STRONG, REVERSAL_MEDIUM} and latest_bos_direction == DOWN:
+        if signal_family in {REVERSAL_STRONG, REVERSAL_MEDIUM} and recent_bos and latest_bos_direction == BOS_DOWN:
             return RELEVANT, "UP_TREND_BEARISH_REVERSAL_AFTER_BOS_DOWN"
         if signal_family == REVERSAL_STRONG:
             return WEAK_CONTEXT, "UP_TREND_COUNTER_BEARISH_REVERSAL_STRONG_WITHOUT_BOS"
@@ -368,9 +407,9 @@ def _classify_with_context(
             if near_latest_pivot:
                 return RELEVANT, "DOWN_TREND_BEARISH_PULLBACK_REVERSAL_NEAR_PIVOT_HIGH"
             return WEAK_CONTEXT, "DOWN_TREND_BEARISH_REVERSAL_WITHOUT_PIVOT_CONTEXT"
-        if signal_family == DIVERGENCE and latest_bos_direction == UP:
+        if signal_family == DIVERGENCE and recent_bos and latest_bos_direction == BOS_UP:
             return RELEVANT, "DOWN_TREND_BULLISH_DIVERGENCE_AFTER_BOS_UP"
-        if signal_family in {REVERSAL_STRONG, REVERSAL_MEDIUM} and latest_bos_direction == UP:
+        if signal_family in {REVERSAL_STRONG, REVERSAL_MEDIUM} and recent_bos and latest_bos_direction == BOS_UP:
             return RELEVANT, "DOWN_TREND_BULLISH_REVERSAL_AFTER_BOS_UP"
         if signal_family == REVERSAL_STRONG:
             return WEAK_CONTEXT, "DOWN_TREND_COUNTER_BULLISH_REVERSAL_STRONG_WITHOUT_BOS"
@@ -389,8 +428,8 @@ def _classify_with_context(
             return WEAK_CONTEXT, "NEUTRAL_AFTER_RESET_HIDDEN_DIVERGENCE_WEAK"
         return NOISE, "NEUTRAL_AFTER_RESET_CONTINUATION_WITHOUT_TREND"
 
-    if signal_family in {CONTINUATION}:
-        return WEAK_CONTEXT, "NEUTRAL_CONTINUATION_NO_TREND"
+    if signal_family == CONTINUATION:
+        return NOISE, "NEUTRAL_CONTINUATION_NO_TREND"
     if signal_family == REVERSAL_STRONG:
         return WEAK_CONTEXT, "NEUTRAL_REVERSAL_STRONG_WEAK_CONTEXT"
     if signal_family == REVERSAL_MEDIUM:
@@ -416,21 +455,42 @@ def classify_relevance(
         list(pivots or []),
         observation.signal_confirmed_as_of_date,
     )
-    latest_bos_direction = _extract_latest_bos_direction(resolved_events)
-    latest_reset_reason = _extract_latest_reset_reason(resolved_events)
+    latest_bos_event = _extract_latest_bos_event(resolved_events)
+    latest_reset_event = _extract_latest_reset_event(resolved_events)
+    recent_bos = _recent_event_within_window(
+        latest_bos_event,
+        resolved_config.recent_bos_window_bars,
+    )
+    recent_reset = _recent_event_within_window(
+        latest_reset_event,
+        resolved_config.recent_reset_window_bars,
+    )
+    latest_bos_direction = None if latest_bos_event is None else latest_bos_event.event_type
+    latest_reset_reason = None if latest_reset_event is None else RESET
     derived_dow_context_state = _derive_dow_context_state(
         dow_snapshot,
-        latest_bos_direction,
-        latest_reset_reason,
+        recent_bos,
+        recent_reset,
     )
     trace = [
-        f"rule_version={resolved_config.rule_version}",
+        f"relevance_rule_version={resolved_config.rule_version}",
         f"mapping_version={resolved_config.mapping_version}",
         f"reason_version={resolved_config.reason_version}",
         f"eligible_event_ids={','.join('' if event.event_id is None else str(event.event_id) for event in resolved_events)}",
         f"eligible_pivot_ids={','.join('' if pivot.event_id is None else str(pivot.event_id) for pivot in resolved_pivots)}",
         "missing_bar_index=true",
     ]
+    trace.append(f"dow_trend_state={None if dow_snapshot is None else dow_snapshot.trend_state}")
+    trace.append(f"dow_structure_epoch_id={None if dow_snapshot is None or dow_snapshot.structure_epoch_id is None else dow_snapshot.structure_epoch_id}")
+    trace.append(f"latest_bos_event_id={latest_bos_event.event_id if latest_bos_event is not None and latest_bos_event.event_id is not None else 'null'}")
+    trace.append(f"latest_reset_event_id={latest_reset_event.event_id if latest_reset_event is not None and latest_reset_event.event_id is not None else 'null'}")
+    trace.append(f"latest_bos_direction={latest_bos_direction if latest_bos_direction is not None else 'null'}")
+    trace.append(f"recent_bos={'true' if recent_bos else 'false'}")
+    trace.append(f"recent_reset={'true' if recent_reset else 'false'}")
+    trace.append(f"missing_event_context={'true' if not resolved_events else 'false'}")
+    trace.append("missing_dow_context=false")
+    trace.append("missing_signal_close_price=false")
+    trace.append("unknown_signal_name=false")
     if derived_dow_context_state is not None:
         trace.append(f"dow_context_state={derived_dow_context_state}")
 
@@ -499,9 +559,15 @@ def classify_relevance(
         observation,
         mapping_entry.signal_direction,
         resolved_pivots,
+        None if dow_snapshot is None else dow_snapshot.structure_epoch_id,
+        derived_dow_context_state,
+        resolved_config,
+        trace,
     )
     trace.append(f"near_latest_pivot={near_pivot}")
+    trace.append(f"used_near_pivot={'true' if near_pivot else 'false'}")
     trace.append(f"near_active_bos_level={near_active_level}")
+    trace.append(f"used_recent_bos={'true' if recent_bos else 'false'}")
 
     if dow_snapshot is None or not dow_snapshot.trend_state:
         trace.append("missing_dow_context=true")
@@ -525,9 +591,11 @@ def classify_relevance(
         signal_family=mapping_entry.signal_family,
         trend_state=dow_snapshot.trend_state,
         latest_bos_direction=latest_bos_direction,
+        recent_bos=recent_bos,
         dow_context_state=derived_dow_context_state,
         near_latest_pivot=near_pivot,
     )
+    trace.append(f"selected_relevance_reason={relevance_reason}")
     trace.append(f"classification={relevance_class}")
     trace.append(f"reason={relevance_reason}")
     return TechnicalSignalRelevanceRecord(

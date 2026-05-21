@@ -1,3 +1,5 @@
+import pytest
+
 from rawcandle.technical_signal_relevance import (
     BEARISH,
     BOS_DOWN,
@@ -5,6 +7,8 @@ from rawcandle.technical_signal_relevance import (
     BULLISH,
     CANDLE,
     DIVERGENCE,
+    NOISE,
+    RELEVANT,
     RSI,
     TECH_SIGNAL_MAPPING_V1,
     TECH_SIGNAL_MAPPING_VERSION,
@@ -100,6 +104,39 @@ def _observation(
         signal_confirmed_as_of_date=signal_confirmed_as_of_date,
         signal_name=signal_name,
         signal_close_price=signal_close_price,
+    )
+
+
+def _pivot_low(*, bars_since_confirmation=None, confirmed_as_of_date="2024-01-10", event_id="pivot-low", structure_epoch_id=None):
+    return TechnicalSignalPivot(
+        event_type="PIVOT_LOW",
+        event_date="2024-01-09",
+        confirmed_as_of_date=confirmed_as_of_date,
+        event_id=event_id,
+        structure_epoch_id=structure_epoch_id,
+        bars_since_confirmation=bars_since_confirmation,
+    )
+
+
+def _pivot_high(*, bars_since_confirmation=None, confirmed_as_of_date="2024-01-10", event_id="pivot-high", structure_epoch_id=None):
+    return TechnicalSignalPivot(
+        event_type="PIVOT_HIGH",
+        event_date="2024-01-09",
+        confirmed_as_of_date=confirmed_as_of_date,
+        event_id=event_id,
+        structure_epoch_id=structure_epoch_id,
+        bars_since_confirmation=bars_since_confirmation,
+    )
+
+
+def _event(event_type, *, bars_since_confirmation=None, confirmed_as_of_date="2024-01-10", event_id=None, structure_epoch_id=None):
+    return TechnicalSignalEvent(
+        event_type=event_type,
+        event_date="2024-01-09",
+        confirmed_as_of_date=confirmed_as_of_date,
+        event_id=event_id or event_type.lower(),
+        structure_epoch_id=structure_epoch_id,
+        bars_since_confirmation=bars_since_confirmation,
     )
 
 
@@ -246,10 +283,10 @@ def test_events_and_pivots_enforce_no_lookahead_by_confirmed_as_of_date():
         config=TechnicalSignalRelevanceConfig(),
     )
 
-    assert record.latest_bos_direction == "UP"
+    assert record.latest_bos_direction == BOS_UP
     assert "eligible_event_ids=usable" in record.rule_trace
     assert "eligible_pivot_ids=usable-pivot" in record.rule_trace
-    assert record.near_latest_pivot == 1
+    assert record.near_latest_pivot == 0
 
 
 def test_events_and_pivots_are_sorted_deterministically_independent_of_input_order():
@@ -327,7 +364,13 @@ def test_neutral_after_reset_strong_reversal_is_relevant_per_locked_spec():
         _observation(signal_name="Bullish Engulfing"),
         TechnicalSignalDowSnapshot(trend_state="NEUTRAL"),
         events=[
-            TechnicalSignalEvent("RESET", "2024-01-09", "2024-01-10", event_id="reset-1"),
+            TechnicalSignalEvent(
+                "RESET",
+                "2024-01-09",
+                "2024-01-10",
+                event_id="reset-1",
+                bars_since_confirmation=2,
+            ),
         ],
         pivots=[],
         config=TechnicalSignalRelevanceConfig(),
@@ -344,7 +387,12 @@ def test_neutral_after_reset_divergence_is_relevant_per_locked_spec():
         _observation(signal_name="Bullish Divergence"),
         TechnicalSignalDowSnapshot(trend_state="NEUTRAL"),
         events=[
-            TechnicalSignalEvent("RESET", "2024-01-09", "2024-01-10"),
+            TechnicalSignalEvent(
+                "RESET",
+                "2024-01-09",
+                "2024-01-10",
+                bars_since_confirmation=2,
+            ),
         ],
         pivots=[],
         config=TechnicalSignalRelevanceConfig(),
@@ -353,3 +401,195 @@ def test_neutral_after_reset_divergence_is_relevant_per_locked_spec():
     assert record.dow_context_state == "AFTER_RESET"
     assert record.relevance_class == "RELEVANT"
     assert record.relevance_reason == "NEUTRAL_AFTER_RESET_DIVERGENCE"
+
+
+@pytest.mark.parametrize(
+    ("signal_name", "expected_class", "expected_reason", "expected_trend_aligned", "expected_counter_trend", "pivots", "events"),
+    [
+        ("Bullish Flag", RELEVANT, "UP_TREND_BULLISH_CONTINUATION", 1, 0, [], []),
+        ("Hammer", RELEVANT, "UP_TREND_BULLISH_DIP_REVERSAL_NEAR_PIVOT_LOW", 1, 0, [_pivot_low(bars_since_confirmation=2)], []),
+        ("Morning Star", WEAK_CONTEXT, "UP_TREND_BULLISH_REVERSAL_WITHOUT_PIVOT_CONTEXT", 1, 0, [], []),
+        ("Hidden Bullish Divergence", RELEVANT, "UP_TREND_HIDDEN_BULLISH_DIVERGENCE", 1, 0, [], []),
+        ("Bullish Divergence", WEAK_CONTEXT, "UP_TREND_REGULAR_BULLISH_DIVERGENCE_WEAK", 1, 0, [], []),
+        ("Bearish Engulfing", WEAK_CONTEXT, "UP_TREND_COUNTER_BEARISH_REVERSAL_STRONG_WITHOUT_BOS", 0, 1, [], []),
+        ("Shooting Star", NOISE, "UP_TREND_COUNTER_BEARISH_REVERSAL_MEDIUM_WITHOUT_BOS", 0, 1, [], []),
+        ("Evening Star", RELEVANT, "UP_TREND_BEARISH_REVERSAL_AFTER_BOS_DOWN", 0, 1, [], [_event(BOS_DOWN, bars_since_confirmation=3, event_id="bos-down")]),
+        ("Bearish Divergence", RELEVANT, "UP_TREND_BEARISH_DIVERGENCE_AFTER_BOS_DOWN", 0, 1, [], [_event(BOS_DOWN, bars_since_confirmation=2, event_id="bos-down")]),
+        ("Bearish Flag", NOISE, "UP_TREND_BEARISH_CONTINUATION_WITHOUT_BEARISH_STRUCTURE", 0, 1, [], []),
+    ],
+)
+def test_up_trend_rule_matrix(signal_name, expected_class, expected_reason, expected_trend_aligned, expected_counter_trend, pivots, events):
+    record = classify_relevance(
+        _observation(signal_name=signal_name),
+        TechnicalSignalDowSnapshot(trend_state="UP", structure_epoch_id=1),
+        events=events,
+        pivots=pivots,
+        config=TechnicalSignalRelevanceConfig(),
+    )
+
+    assert record.relevance_class == expected_class
+    assert record.relevance_reason == expected_reason
+    assert record.dow_context_state in {"NORMAL", "AFTER_BOS"}
+    assert record.is_trend_aligned == expected_trend_aligned
+    assert record.is_counter_trend == expected_counter_trend
+    if signal_name in {"Hammer", "Morning Star"}:
+        assert record.near_latest_pivot == (1 if expected_reason.endswith("NEAR_PIVOT_LOW") else 0)
+    if signal_name in {"Evening Star", "Bearish Divergence"}:
+        assert record.latest_bos_direction == BOS_DOWN
+
+
+@pytest.mark.parametrize(
+    ("signal_name", "expected_class", "expected_reason", "expected_trend_aligned", "expected_counter_trend", "pivots", "events"),
+    [
+        ("Bearish Flag", RELEVANT, "DOWN_TREND_BEARISH_CONTINUATION", 1, 0, [], []),
+        ("Bearish Engulfing", RELEVANT, "DOWN_TREND_BEARISH_PULLBACK_REVERSAL_NEAR_PIVOT_HIGH", 1, 0, [_pivot_high(bars_since_confirmation=1)], []),
+        ("Evening Star", WEAK_CONTEXT, "DOWN_TREND_BEARISH_REVERSAL_WITHOUT_PIVOT_CONTEXT", 1, 0, [], []),
+        ("Hidden Bearish Divergence", RELEVANT, "DOWN_TREND_HIDDEN_BEARISH_DIVERGENCE", 1, 0, [], []),
+        ("Bearish Divergence", WEAK_CONTEXT, "DOWN_TREND_REGULAR_BEARISH_DIVERGENCE_WEAK", 1, 0, [], []),
+        ("Bullish Engulfing", WEAK_CONTEXT, "DOWN_TREND_COUNTER_BULLISH_REVERSAL_STRONG_WITHOUT_BOS", 0, 1, [], []),
+        ("Hammer", NOISE, "DOWN_TREND_COUNTER_BULLISH_REVERSAL_MEDIUM_WITHOUT_BOS", 0, 1, [], []),
+        ("Morning Star", RELEVANT, "DOWN_TREND_BULLISH_REVERSAL_AFTER_BOS_UP", 0, 1, [], [_event(BOS_UP, bars_since_confirmation=4, event_id="bos-up")]),
+        ("Bullish Divergence", RELEVANT, "DOWN_TREND_BULLISH_DIVERGENCE_AFTER_BOS_UP", 0, 1, [], [_event(BOS_UP, bars_since_confirmation=2, event_id="bos-up")]),
+        ("Bullish Flag", NOISE, "DOWN_TREND_BULLISH_CONTINUATION_WITHOUT_BULLISH_STRUCTURE", 0, 1, [], []),
+    ],
+)
+def test_down_trend_rule_matrix(signal_name, expected_class, expected_reason, expected_trend_aligned, expected_counter_trend, pivots, events):
+    record = classify_relevance(
+        _observation(signal_name=signal_name),
+        TechnicalSignalDowSnapshot(trend_state="DOWN", structure_epoch_id=1),
+        events=events,
+        pivots=pivots,
+        config=TechnicalSignalRelevanceConfig(),
+    )
+
+    assert record.relevance_class == expected_class
+    assert record.relevance_reason == expected_reason
+    assert record.is_trend_aligned == expected_trend_aligned
+    assert record.is_counter_trend == expected_counter_trend
+    if signal_name in {"Bearish Engulfing", "Evening Star"}:
+        assert record.near_latest_pivot == (1 if expected_reason.endswith("NEAR_PIVOT_HIGH") else 0)
+    if signal_name in {"Morning Star", "Bullish Divergence"}:
+        assert record.latest_bos_direction == BOS_UP
+
+
+@pytest.mark.parametrize(
+    ("signal_name", "expected_class", "expected_reason"),
+    [
+        ("Bullish Flag", NOISE, "NEUTRAL_CONTINUATION_NO_TREND"),
+        ("Bullish Engulfing", WEAK_CONTEXT, "NEUTRAL_REVERSAL_STRONG_WEAK_CONTEXT"),
+        ("Hammer", NOISE, "NEUTRAL_REVERSAL_MEDIUM_NOISE"),
+        ("Bullish Divergence", WEAK_CONTEXT, "NEUTRAL_DIVERGENCE_WEAK_CONTEXT"),
+        ("Ascending Triangle", WEAK_CONTEXT, "NEUTRAL_STRUCTURAL_PATTERN_WEAK_CONTEXT"),
+    ],
+)
+def test_neutral_rule_matrix(signal_name, expected_class, expected_reason):
+    record = classify_relevance(
+        _observation(signal_name=signal_name),
+        TechnicalSignalDowSnapshot(trend_state="NEUTRAL", structure_epoch_id=1),
+        events=[],
+        pivots=[],
+        config=TechnicalSignalRelevanceConfig(),
+    )
+
+    assert record.relevance_class == expected_class
+    assert record.relevance_reason == expected_reason
+    assert record.dow_context_state == "NORMAL"
+
+
+@pytest.mark.parametrize(
+    ("signal_name", "expected_class", "expected_reason"),
+    [
+        ("Bullish Engulfing", RELEVANT, "NEUTRAL_AFTER_RESET_STRONG_REVERSAL"),
+        ("Bullish Divergence", RELEVANT, "NEUTRAL_AFTER_RESET_DIVERGENCE"),
+        ("Hidden Bullish Divergence", WEAK_CONTEXT, "NEUTRAL_AFTER_RESET_HIDDEN_DIVERGENCE_WEAK"),
+        ("Bullish Flag", NOISE, "NEUTRAL_AFTER_RESET_CONTINUATION_WITHOUT_TREND"),
+        ("Hammer", WEAK_CONTEXT, "NEUTRAL_AFTER_RESET_MEDIUM_REVERSAL_WEAK"),
+    ],
+)
+def test_neutral_after_reset_rule_matrix(signal_name, expected_class, expected_reason):
+    record = classify_relevance(
+        _observation(signal_name=signal_name),
+        TechnicalSignalDowSnapshot(trend_state="NEUTRAL", structure_epoch_id=1),
+        events=[_event("RESET", bars_since_confirmation=2, event_id="reset-1")],
+        pivots=[],
+        config=TechnicalSignalRelevanceConfig(),
+    )
+
+    assert record.dow_context_state == "AFTER_RESET"
+    assert record.latest_reset_reason == "RESET"
+    assert record.relevance_class == expected_class
+    assert record.relevance_reason == expected_reason
+
+
+def test_old_bos_does_not_trigger_recent_bos_upgrade():
+    record = classify_relevance(
+        _observation(signal_name="Bearish Engulfing"),
+        TechnicalSignalDowSnapshot(trend_state="UP", structure_epoch_id=1),
+        events=[_event(BOS_DOWN, bars_since_confirmation=99, event_id="old-bos")],
+        pivots=[],
+        config=TechnicalSignalRelevanceConfig(),
+    )
+
+    assert record.latest_bos_direction == BOS_DOWN
+    assert record.relevance_class == WEAK_CONTEXT
+    assert record.relevance_reason == "UP_TREND_COUNTER_BEARISH_REVERSAL_STRONG_WITHOUT_BOS"
+    assert "recent_bos=false" in record.rule_trace
+
+
+def test_missing_pivot_context_is_visible_and_does_not_upgrade_signal():
+    record = classify_relevance(
+        _observation(signal_name="Hammer"),
+        TechnicalSignalDowSnapshot(trend_state="UP", structure_epoch_id=1),
+        events=[],
+        pivots=[_pivot_low(event_id="pivot-without-bars")],
+        config=TechnicalSignalRelevanceConfig(),
+    )
+
+    assert record.near_latest_pivot == 0
+    assert record.relevance_class == WEAK_CONTEXT
+    assert record.relevance_reason == "UP_TREND_BULLISH_REVERSAL_WITHOUT_PIVOT_CONTEXT"
+    assert "missing_pivot_context=true" in record.rule_trace
+
+
+def test_missing_event_context_is_visible_in_rule_trace():
+    record = classify_relevance(
+        _observation(signal_name="Bearish Flag"),
+        TechnicalSignalDowSnapshot(trend_state="UP", structure_epoch_id=1),
+        events=[],
+        pivots=[],
+        config=TechnicalSignalRelevanceConfig(),
+    )
+
+    assert "missing_event_context=true" in record.rule_trace
+    assert "used_recent_bos=false" in record.rule_trace
+
+
+def test_rule_trace_contains_required_context_fields():
+    record = classify_relevance(
+        _observation(signal_name="Bearish Divergence"),
+        TechnicalSignalDowSnapshot(trend_state="UP", structure_epoch_id=4),
+        events=[_event(BOS_DOWN, bars_since_confirmation=3, event_id="bos_123")],
+        pivots=[_pivot_high(bars_since_confirmation=2, event_id="pivot_456", structure_epoch_id=4)],
+        config=TechnicalSignalRelevanceConfig(),
+    )
+
+    expected_entries = {
+        "mapping_version=TECH_SIGNAL_MAPPING_V1",
+        "reason_version=TECH_SIGNAL_RELEVANCE_REASON_V1",
+        "relevance_rule_version=TECH_SIGNAL_RELEVANCE_V1",
+        "dow_trend_state=UP",
+        "dow_context_state=AFTER_BOS",
+        "latest_bos_event_id=bos_123",
+        "latest_reset_event_id=null",
+        "latest_pivot_event_id=pivot_456",
+        "recent_bos=true",
+        "used_recent_bos=true",
+        "used_near_pivot=true",
+        "selected_relevance_reason=UP_TREND_BEARISH_DIVERGENCE_AFTER_BOS_DOWN",
+        "missing_bar_index=true",
+        "missing_dow_context=false",
+        "missing_event_context=false",
+        "missing_signal_close_price=false",
+        "unknown_signal_name=false",
+    }
+    assert expected_entries.issubset(set(record.rule_trace))
