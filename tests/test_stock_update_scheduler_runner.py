@@ -30,9 +30,10 @@ def _touch(path):
 
 
 class _FakeCompletedProcess:
-    def __init__(self, returncode=0, stdout=""):
+    def __init__(self, returncode=0, stdout="", stderr=""):
         self.returncode = returncode
         self.stdout = stdout
+        self.stderr = stderr
 
 
 def _write_config(
@@ -618,6 +619,13 @@ def test_scheduler_runner_runs_datacenter_post_step_once_for_usa_success(
     assert result.datacenter_pipeline_status == "OK"
     assert result.datacenter_pipeline_market == "usa"
     assert result.datacenter_pipeline_audit_validation_status == "OK"
+    assert result.datacenter_pipeline_log_path.endswith(".txt")
+    log_path = Path(result.datacenter_pipeline_log_path)
+    assert log_path.exists()
+    log_text = log_path.read_text(encoding="utf-8")
+    assert "SUMMARY audit_validation_status=OK" in log_text
+    assert "=== STDOUT ===" in log_text
+    assert "=== STDERR ===" in log_text
     assert result.overall_status == STATUS_OK
 
 
@@ -653,6 +661,7 @@ def test_scheduler_runner_runs_datacenter_post_step_for_ok_with_warnings(
     assert result.datacenter_pipeline_status == "OK"
     assert result.datacenter_pipeline_market == "usa"
     assert result.datacenter_pipeline_audit_validation_status == "WARN"
+    assert result.datacenter_pipeline_log_path.endswith(".txt")
     assert result.overall_status == STATUS_OK_WITH_WARNINGS
 
 
@@ -686,6 +695,7 @@ def test_scheduler_runner_skips_datacenter_post_step_when_market_phase_failed(
     assert result.datacenter_pipeline_status == "SKIPPED"
     assert result.datacenter_pipeline_market == "usa"
     assert result.datacenter_pipeline_audit_validation_status == "SKIPPED"
+    assert result.datacenter_pipeline_log_path == ""
     assert result.overall_status == STATUS_FAILED
 
 
@@ -719,6 +729,7 @@ def test_scheduler_runner_skips_datacenter_post_step_when_usa_not_enabled(
     assert result.datacenter_pipeline_status == "SKIPPED"
     assert result.datacenter_pipeline_market == "usa"
     assert result.datacenter_pipeline_audit_validation_status == "SKIPPED"
+    assert result.datacenter_pipeline_log_path == ""
     assert result.overall_status == STATUS_OK
 
 
@@ -791,6 +802,7 @@ def test_scheduler_runner_datacenter_post_step_failure_fails_scheduler(
     assert result.datacenter_pipeline_status == "FAILED"
     assert result.datacenter_pipeline_market == "usa"
     assert result.datacenter_pipeline_audit_validation_status == "FAIL"
+    assert result.datacenter_pipeline_log_path.endswith(".txt")
     assert result.overall_status == STATUS_FAILED
 
 
@@ -822,6 +834,7 @@ def test_scheduler_runner_skip_next_run_marks_datacenter_post_step_skipped(
     assert result.datacenter_pipeline_status == "SKIPPED"
     assert result.datacenter_pipeline_market == "usa"
     assert result.datacenter_pipeline_audit_validation_status == "SKIPPED"
+    assert result.datacenter_pipeline_log_path == ""
 
     assert log_dir.exists()
     assert Path(scheduler_status_path(str(log_dir))).exists()

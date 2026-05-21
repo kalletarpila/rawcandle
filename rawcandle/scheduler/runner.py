@@ -52,6 +52,7 @@ class ScheduledStockUpdateRunResult:
     datacenter_pipeline_status: str = "SKIPPED"
     datacenter_pipeline_market: str = "usa"
     datacenter_pipeline_audit_validation_status: str = "SKIPPED"
+    datacenter_pipeline_log_path: str = ""
 
 
 class SchedulerAlreadyRunningError(RuntimeError):
@@ -77,6 +78,7 @@ class DatacenterPostStepResult:
     status: str
     market: str
     audit_validation_status: str = "SKIPPED"
+    log_path: str = ""
     signal_date: Optional[str] = None
     error: Optional[str] = None
 
@@ -223,6 +225,21 @@ def _parse_summary_value(stdout: str, key: str) -> Optional[str]:
     return None
 
 
+def _build_datacenter_log_path(log_dir: Path, market: str, started_at: datetime.datetime) -> Path:
+    minute_timestamp = _format_utc_filename_minute_timestamp(started_at)
+    base_name = f"datacenter_pipeline_{market}_{minute_timestamp}"
+    candidate = log_dir / f"{base_name}.txt"
+    if not candidate.exists():
+        return candidate
+
+    suffix = 2
+    while True:
+        candidate = log_dir / f"{base_name}_{suffix}.txt"
+        if not candidate.exists():
+            return candidate
+        suffix += 1
+
+
 def _run_datacenter_post_step(
     *,
     config: StockUpdateSchedulerConfig,
@@ -237,7 +254,11 @@ def _run_datacenter_post_step(
             market=target_market,
         )
 
+    started_at = _utc_now()
     signal_date = _previous_calendar_date(effective_today)
+    log_dir = Path(config.log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = _build_datacenter_log_path(log_dir, resolved.market, started_at)
     command = [
         "python3",
         "run_datacenter_swing_pipeline.py",
@@ -273,6 +294,22 @@ def _run_datacenter_post_step(
         capture_output=True,
         text=True,
     )
+    finished_at = _utc_now()
+    log_lines = [
+        f"run_started_at_local={_format_local_timestamp(started_at, config.timezone)}",
+        f"run_finished_at_local={_format_local_timestamp(finished_at, config.timezone)}",
+        f"market={resolved.market}",
+        f"signal_date={signal_date}",
+        f"osakedata_db_path={config.osakedata_db_path}",
+        f"analysis_db_path={config.analysis_db_path}",
+        f"command={' '.join(command)}",
+        f"returncode={completed.returncode}",
+        "=== STDOUT ===",
+        completed.stdout.rstrip(),
+        "=== STDERR ===",
+        completed.stderr.rstrip(),
+    ]
+    log_path.write_text("\n".join(log_lines).rstrip() + "\n", encoding="utf-8")
     audit_validation_status = _parse_summary_value(
         completed.stdout or "", "audit_validation_status"
     )
@@ -282,6 +319,7 @@ def _run_datacenter_post_step(
             status="FAILED",
             market=resolved.market,
             audit_validation_status=audit_validation_status or "UNKNOWN",
+            log_path=str(log_path),
             signal_date=signal_date,
             error=f"datacenter pipeline exited with code {completed.returncode}",
         )
@@ -290,6 +328,7 @@ def _run_datacenter_post_step(
         status="OK",
         market=resolved.market,
         audit_validation_status=audit_validation_status or "UNKNOWN",
+        log_path=str(log_path),
         signal_date=signal_date,
     )
 
@@ -503,6 +542,7 @@ def run_scheduler_config(
                     datacenter_pipeline_status="SKIPPED",
                     datacenter_pipeline_market="usa",
                     datacenter_pipeline_audit_validation_status="SKIPPED",
+                    datacenter_pipeline_log_path="",
                 )
                 _write_summary_json(config=config, run_started_at=run_started_at, result=result)
                 write_scheduler_status(
@@ -584,6 +624,7 @@ def run_scheduler_config(
                 datacenter_pipeline_status=datacenter_result.status,
                 datacenter_pipeline_market=datacenter_result.market,
                 datacenter_pipeline_audit_validation_status=datacenter_result.audit_validation_status,
+                datacenter_pipeline_log_path=datacenter_result.log_path,
             )
             _write_summary_json(config=config, run_started_at=run_started_at, result=result)
             write_scheduler_status(
