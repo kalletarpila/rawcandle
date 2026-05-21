@@ -4,6 +4,7 @@ from rawcandle.technical_signal_relevance import CANDLE, RSI
 from rawcandle.technical_signal_relevance_sources import (
     normalize_candlestick_observation_row,
     normalize_signal_name,
+    read_candlestick_observations,
     read_divergence_observations,
     read_dow_events,
     read_dow_pivots,
@@ -172,6 +173,167 @@ def test_candlestick_row_normalization_helper_emits_observation():
     assert observation.signal_name == "Hammer"
     assert observation.signal_confirmed_as_of_date == "2024-01-10"
     assert observation.signal_source_id == CANDLE
+
+
+def test_read_candlestick_observations_emits_hammer_from_analysis_findings():
+    conn = _connect()
+    conn.execute(
+        """
+        CREATE TABLE analysis_findings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            date TEXT NOT NULL,
+            pattern TEXT,
+            signal_strength REAL,
+            rsi14 REAL
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO analysis_findings (ticker, date, pattern, signal_strength, rsi14) VALUES (?, ?, ?, ?, ?)",
+        ("AAA", "2024-01-10", "Hammer", 0.8, 55.0),
+    )
+
+    observations = read_candlestick_observations(conn, "AAA", "1d", "2024-01-01", "2024-01-31")
+
+    assert len(observations) == 1
+    assert observations[0].signal_name == "Hammer"
+    assert observations[0].signal_date == "2024-01-10"
+    assert observations[0].signal_confirmed_as_of_date == "2024-01-10"
+    assert observations[0].signal_source_id == CANDLE
+
+
+def test_read_candlestick_observations_emits_bearish_candle_from_analysis_findings():
+    conn = _connect()
+    conn.execute(
+        """
+        CREATE TABLE analysis_findings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            date TEXT NOT NULL,
+            pattern TEXT,
+            signal_strength REAL,
+            rsi14 REAL
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO analysis_findings (ticker, date, pattern, signal_strength, rsi14) VALUES (?, ?, ?, ?, ?)",
+        ("AAA", "2024-01-10", "Bearish Engulfing", 0.8, 45.0),
+    )
+
+    observations = read_candlestick_observations(conn, "AAA", "1d", "2024-01-01", "2024-01-31")
+
+    assert len(observations) == 1
+    assert observations[0].signal_name == "Bearish Engulfing"
+
+
+def test_read_candlestick_observations_maps_snake_case_names_explicitly():
+    conn = _connect()
+    conn.execute(
+        """
+        CREATE TABLE analysis_findings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            date TEXT NOT NULL,
+            pattern TEXT,
+            signal_strength REAL,
+            rsi14 REAL
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO analysis_findings (ticker, date, pattern, signal_strength, rsi14) VALUES (?, ?, ?, ?, ?)",
+        ("AAA", "2024-01-10", "bullish_engulfing", 0.8, 55.0),
+    )
+
+    observations = read_candlestick_observations(conn, "AAA", "1d", "2024-01-01", "2024-01-31")
+
+    assert len(observations) == 1
+    assert observations[0].signal_name == "Bullish Engulfing"
+
+
+def test_read_candlestick_observations_ignores_non_candlestick_rows():
+    conn = _connect()
+    conn.execute(
+        """
+        CREATE TABLE analysis_findings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            date TEXT NOT NULL,
+            pattern TEXT,
+            signal_strength REAL,
+            rsi14 REAL
+        )
+        """
+    )
+    conn.executemany(
+        "INSERT INTO analysis_findings (ticker, date, pattern, signal_strength, rsi14) VALUES (?, ?, ?, ?, ?)",
+        [
+            ("AAA", "2024-01-10", "Bullish Divergence", 1.0, 30.0),
+            ("AAA", "2024-01-10", "Hammer", 0.7, 45.0),
+        ],
+    )
+
+    observations = read_candlestick_observations(conn, "AAA", "1d", "2024-01-01", "2024-01-31")
+
+    assert [item.signal_name for item in observations] == ["Hammer"]
+
+
+def test_read_candlestick_observations_ignores_unknown_names_without_fuzzy_matching():
+    conn = _connect()
+    conn.execute(
+        """
+        CREATE TABLE analysis_findings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            date TEXT NOT NULL,
+            pattern TEXT,
+            signal_strength REAL,
+            rsi14 REAL
+        )
+        """
+    )
+    conn.executemany(
+        "INSERT INTO analysis_findings (ticker, date, pattern, signal_strength, rsi14) VALUES (?, ?, ?, ?, ?)",
+        [
+            ("AAA", "2024-01-10", "Doji", 0.6, 50.0),
+            ("AAA", "2024-01-10", "Hammer", 0.7, 50.0),
+        ],
+    )
+
+    observations = read_candlestick_observations(conn, "AAA", "1d", "2024-01-01", "2024-01-31")
+
+    assert [item.signal_name for item in observations] == ["Hammer"]
+
+
+def test_read_candlestick_observations_date_range_filtering_works():
+    conn = _connect()
+    conn.execute(
+        """
+        CREATE TABLE analysis_findings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            date TEXT NOT NULL,
+            pattern TEXT,
+            signal_strength REAL,
+            rsi14 REAL
+        )
+        """
+    )
+    conn.executemany(
+        "INSERT INTO analysis_findings (ticker, date, pattern, signal_strength, rsi14) VALUES (?, ?, ?, ?, ?)",
+        [
+            ("AAA", "2024-01-01", "Hammer", 0.7, 50.0),
+            ("AAA", "2024-01-15", "Hammer", 0.8, 50.0),
+            ("AAA", "2024-02-01", "Hammer", 0.9, 50.0),
+        ],
+    )
+
+    observations = read_candlestick_observations(conn, "AAA", "1d", "2024-01-10", "2024-01-31")
+
+    assert len(observations) == 1
+    assert observations[0].signal_date == "2024-01-15"
 
 
 def test_dow_events_adapter_filters_by_confirmed_as_of_date():

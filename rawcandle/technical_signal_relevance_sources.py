@@ -124,6 +124,29 @@ def normalize_signal_name(raw_name: str | None) -> str | None:
     return normalized if normalized in TECH_SIGNAL_MAPPING_V1 else None
 
 
+def _resolve_optional_candlestick_close(
+    row: sqlite3.Row | dict[str, Any],
+    available_fields: set[str] | None = None,
+) -> float | None:
+    candidate_fields = ("signal_close_price", "close_price", "close", "price")
+    if available_fields is None:
+        for field_name in candidate_fields:
+            try:
+                value = _row_value(row, field_name)
+            except (KeyError, IndexError):
+                continue
+            if value is not None:
+                return float(value)
+        return None
+
+    for field_name in candidate_fields:
+        if field_name in available_fields:
+            value = _row_value(row, field_name)
+            if value is not None:
+                return float(value)
+    return None
+
+
 def read_divergence_observations(
     conn: sqlite3.Connection,
     ticker: str,
@@ -259,7 +282,7 @@ def normalize_candlestick_observation_row(
             str(signal_confirmed_as_of_date),
             "signal_confirmed_as_of_date",
         )
-    signal_close_price = _row_value(row, "signal_close_price")
+    signal_close_price = _resolve_optional_candlestick_close(row)
     return TechnicalSignalObservation(
         ticker=str(ticker),
         timeframe=timeframe,
@@ -269,6 +292,69 @@ def normalize_candlestick_observation_row(
         signal_close_price=None if signal_close_price is None else float(signal_close_price),
         signal_source_id=CANDLE,
     )
+
+
+def read_candlestick_observations(
+    conn: sqlite3.Connection,
+    ticker: str,
+    timeframe: str,
+    start_date: str,
+    end_date: str,
+) -> list[TechnicalSignalObservation]:
+    normalized_start_date = _parse_iso_date(start_date, "start_date")
+    normalized_end_date = _parse_iso_date(end_date, "end_date")
+    if normalized_start_date > normalized_end_date:
+        raise ValueError(
+            f"Invalid date range: start_date {normalized_start_date} is after end_date {normalized_end_date}"
+        )
+    if not _table_exists(conn, "analysis_findings"):
+        return []
+
+    columns = _table_columns(conn, "analysis_findings")
+    if not {"ticker", "date", "pattern"}.issubset(columns):
+        return []
+
+    close_expr = None
+    for candidate in ("signal_close_price", "close_price", "close", "price"):
+        if candidate in columns:
+            close_expr = candidate
+            break
+    close_select = (
+        f", {close_expr} AS signal_close_price"
+        if close_expr is not None
+        else ", NULL AS signal_close_price"
+    )
+
+    rows = conn.execute(
+        f"""
+        SELECT
+            ticker,
+            date,
+            pattern AS signal_name,
+            date AS signal_date,
+            date AS signal_confirmed_as_of_date
+            {close_select}
+        FROM analysis_findings
+        WHERE ticker = ?
+          AND date >= ?
+          AND date <= ?
+        ORDER BY date ASC, pattern ASC, id ASC
+        """,
+        (ticker, normalized_start_date, normalized_end_date),
+    ).fetchall()
+
+    observations: list[TechnicalSignalObservation] = []
+    for row in rows:
+        normalized_name = normalize_signal_name(
+            None if row["signal_name"] is None else str(row["signal_name"])
+        )
+        if normalized_name is None:
+            continue
+        mapping_entry = TECH_SIGNAL_MAPPING_V1[normalized_name]
+        if mapping_entry.signal_source_type != CANDLE:
+            continue
+        observations.append(normalize_candlestick_observation_row(row, timeframe))
+    return observations
 
 
 def read_dow_snapshot(
@@ -435,6 +521,7 @@ def read_dow_pivots(
 __all__ = [
     "normalize_candlestick_observation_row",
     "normalize_signal_name",
+    "read_candlestick_observations",
     "read_divergence_observations",
     "read_dow_events",
     "read_dow_pivots",
