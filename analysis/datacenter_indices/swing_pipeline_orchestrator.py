@@ -34,6 +34,7 @@ FINAL_PIPELINE_SUMMARY_ORDER = (
     "pipeline_taxonomy_version",
     "pipeline_signal_version",
     "pipeline_ohlc_calc_version",
+    "technical_relevance_run_id",
     "pipeline_output_dir",
     "pipeline_stage_count",
     "pipeline_completed_stage_count",
@@ -142,6 +143,7 @@ def _run_daily_report_stage(
     output_md: Path,
     output_csv: Path,
     include_taxonomy_listing: bool,
+    technical_relevance_run_id: str | None = None,
 ) -> dict[str, object]:
     result = write_daily_swing_signal_report(
         analysis_db_path=analysis_db,
@@ -153,6 +155,7 @@ def _run_daily_report_stage(
         output_md=output_md,
         output_csv=output_csv,
         include_taxonomy_listing=include_taxonomy_listing,
+        technical_relevance_run_id=technical_relevance_run_id,
     )
     for line in format_daily_swing_report_summary_lines(result["summary"]):
         print(line)
@@ -171,6 +174,7 @@ def _run_weekly_report_stage(
     output_md: Path,
     output_csv: Path,
     include_taxonomy_listing: bool,
+    technical_relevance_run_id: str | None = None,
 ) -> dict[str, object]:
     result = write_weekly_swing_report(
         analysis_db_path=analysis_db,
@@ -183,6 +187,7 @@ def _run_weekly_report_stage(
         output_md=output_md,
         output_csv=output_csv,
         include_taxonomy_listing=include_taxonomy_listing,
+        technical_relevance_run_id=technical_relevance_run_id,
     )
     for line in format_weekly_swing_report_summary_lines(result["summary"]):
         print(line)
@@ -208,6 +213,7 @@ def run_datacenter_swing_pipeline(
     weekly_window_size: int = 20,
     watchlist_file: Path | None = None,
     no_taxonomy_listing: bool = False,
+    technical_relevance_run_id: str | None = None,
     skip_index: bool = False,
     skip_audit: bool = False,
     skip_reports: bool = False,
@@ -215,6 +221,8 @@ def run_datacenter_swing_pipeline(
     dry_run: bool = False,
     generated_at_utc: str | None = None,
 ) -> dict[str, object]:
+    if technical_relevance_run_id is not None and not technical_relevance_run_id.strip():
+        raise ValueError("technical_relevance_run_id must be non-empty when provided")
     selected_watchlist_file = Path(DEFAULT_WATCHLIST_FILE) if watchlist_file is None else Path(watchlist_file)
     output_hhmm = _resolve_output_timestamp_hhmm(generated_at_utc)
     daily_output_md = _timestamp_output_path(
@@ -648,6 +656,9 @@ def run_datacenter_swing_pipeline(
         if no_taxonomy_listing:
             daily_argv.append("--no-taxonomy-listing")
             weekly_argv.append("--no-taxonomy-listing")
+        if technical_relevance_run_id is not None:
+            daily_argv.extend(["--technical-relevance-run-id", technical_relevance_run_id])
+            weekly_argv.extend(["--technical-relevance-run-id", technical_relevance_run_id])
         stages.append(
             PipelineStage(
                 heading="Daily report",
@@ -662,6 +673,7 @@ def run_datacenter_swing_pipeline(
                     output_md=daily_output_md,
                     output_csv=daily_output_csv,
                     include_taxonomy_listing=not no_taxonomy_listing,
+                    technical_relevance_run_id=technical_relevance_run_id,
                 ),
                 watermark_builder=lambda _result: {
                     "component_name": "DAILY_REPORT",
@@ -691,6 +703,7 @@ def run_datacenter_swing_pipeline(
                     output_md=weekly_output_md,
                     output_csv=weekly_output_csv,
                     include_taxonomy_listing=not no_taxonomy_listing,
+                    technical_relevance_run_id=technical_relevance_run_id,
                 ),
                 watermark_builder=lambda result: {
                     "component_name": "WEEKLY_REPORT",
@@ -718,6 +731,7 @@ def run_datacenter_swing_pipeline(
                 "pipeline_taxonomy_version": taxonomy_version,
                 "pipeline_signal_version": signal_version,
                 "pipeline_ohlc_calc_version": ohlc_calc_version,
+                "technical_relevance_run_id": technical_relevance_run_id or "NONE",
                 "pipeline_output_dir": str(output_dir),
                 "pipeline_stage_count": len(stages),
                 "pipeline_completed_stage_count": 0,
@@ -761,6 +775,7 @@ def run_datacenter_swing_pipeline(
                         "pipeline_taxonomy_version": taxonomy_version,
                         "pipeline_signal_version": signal_version,
                         "pipeline_ohlc_calc_version": ohlc_calc_version,
+                        "technical_relevance_run_id": technical_relevance_run_id or "NONE",
                         "pipeline_output_dir": str(output_dir),
                         "pipeline_stage_count": len(stages),
                         "pipeline_completed_stage_count": completed_stage_count,
@@ -789,6 +804,7 @@ def run_datacenter_swing_pipeline(
             "pipeline_taxonomy_version": taxonomy_version,
             "pipeline_signal_version": signal_version,
             "pipeline_ohlc_calc_version": ohlc_calc_version,
+            "technical_relevance_run_id": technical_relevance_run_id or "NONE",
             "pipeline_output_dir": str(output_dir),
             "pipeline_stage_count": len(stages),
             "pipeline_completed_stage_count": completed_stage_count,

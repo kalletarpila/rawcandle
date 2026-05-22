@@ -68,6 +68,21 @@ def test_pipeline_default_weekly_window_size_is_20_and_used_in_dry_run(tmp_path,
     )
     assert not any("--no-taxonomy-listing" in line for line in lines if line.startswith("PLAN "))
     assert lines[-1] == "SUMMARY pipeline_status=DRY_RUN"
+    assert "SUMMARY technical_relevance_run_id=NONE" in lines
+
+
+def test_pipeline_accepts_technical_relevance_run_id_and_threads_it_to_dry_run_plans(tmp_path, capsys):
+    exit_code = run_datacenter_swing_pipeline_main(
+        _base_args(tmp_path) + ["--dry-run", "--technical-relevance-run-id", "REL_PIPE_A"]
+    )
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert any(
+        line.startswith("PLAN ") and "--technical-relevance-run-id REL_PIPE_A" in line
+        for line in lines
+    )
+    assert "SUMMARY technical_relevance_run_id=REL_PIPE_A" in lines
 
 
 def test_pipeline_calls_stages_in_correct_order_and_uses_index_base_date(tmp_path, monkeypatch, capsys):
@@ -154,11 +169,59 @@ def test_pipeline_calls_stages_in_correct_order_and_uses_index_base_date(tmp_pat
     daily_kwargs = calls[10][1]
     weekly_kwargs = calls[11][1]
     assert str(daily_kwargs["watchlist_file"]) == orchestrator.DEFAULT_WATCHLIST_FILE
+    assert daily_kwargs["technical_relevance_run_id"] is None
     assert weekly_kwargs["window_size"] == 3
     assert str(weekly_kwargs["watchlist_file"]) == orchestrator.DEFAULT_WATCHLIST_FILE
+    assert weekly_kwargs["technical_relevance_run_id"] is None
     lines = capsys.readouterr().out.strip().splitlines()
+    assert "SUMMARY technical_relevance_run_id=NONE" in lines
     assert lines[-4] == "SUMMARY audit_validation_status=OK"
     assert lines[-1] == "SUMMARY pipeline_status=OK"
+
+
+def test_pipeline_threads_technical_relevance_run_id_to_daily_and_weekly_report_stages(tmp_path, monkeypatch):
+    calls: list[tuple[str, dict[str, object]]] = []
+    DatabaseManager(str(tmp_path / "analysis.db")).close()
+
+    def _runner(argv: list[str]) -> int:
+        return 0
+
+    def _audit(**kwargs):
+        return {"summary": {"validation_status": "OK"}}
+
+    def _daily(**kwargs):
+        calls.append(("daily", dict(kwargs)))
+        kwargs["output_md"].parent.mkdir(parents=True, exist_ok=True)
+        kwargs["output_md"].write_text("daily", encoding="utf-8")
+        kwargs["output_csv"].write_text("daily", encoding="utf-8")
+        return {"summary": {"output_markdown": str(kwargs["output_md"]), "output_csv": str(kwargs["output_csv"]), "validation_status": "OK"}}
+
+    def _weekly(**kwargs):
+        calls.append(("weekly", dict(kwargs)))
+        kwargs["output_md"].write_text("weekly", encoding="utf-8")
+        kwargs["output_csv"].write_text("weekly", encoding="utf-8")
+        return {"summary": {"output_markdown": str(kwargs["output_md"]), "output_csv": str(kwargs["output_csv"]), "validation_status": "OK"}}
+
+    monkeypatch.setattr(orchestrator, "run_datacenter_indices_main", _runner)
+    monkeypatch.setattr(orchestrator, "run_datacenter_ticker_swing_signals_main", _runner)
+    monkeypatch.setattr(orchestrator, "run_datacenter_group_swing_signals_main", _runner)
+    monkeypatch.setattr(orchestrator, "run_datacenter_group_synthetic_ohlc_main", _runner)
+    monkeypatch.setattr(orchestrator, "load_swing_pipeline_audit", _audit)
+    monkeypatch.setattr(orchestrator, "write_daily_swing_signal_report", _daily)
+    monkeypatch.setattr(orchestrator, "write_weekly_swing_report", _weekly)
+    monkeypatch.setattr(orchestrator, "format_swing_pipeline_audit_summary_lines", lambda summary: [])
+    monkeypatch.setattr(orchestrator, "format_daily_swing_report_summary_lines", lambda summary: [])
+    monkeypatch.setattr(orchestrator, "format_weekly_swing_report_summary_lines", lambda summary: [])
+
+    exit_code = run_datacenter_swing_pipeline_main(
+        _base_args(tmp_path) + ["--technical-relevance-run-id", "REL_PIPE_B"]
+    )
+
+    assert exit_code == 0
+    assert calls[0][0] == "daily"
+    assert calls[0][1]["technical_relevance_run_id"] == "REL_PIPE_B"
+    assert calls[1][0] == "weekly"
+    assert calls[1][1]["technical_relevance_run_id"] == "REL_PIPE_B"
 
 
 def test_pipeline_watchlist_override_is_passed_to_daily_and_weekly_report_stages(tmp_path, monkeypatch):
@@ -204,6 +267,8 @@ def test_pipeline_watchlist_override_is_passed_to_daily_and_weekly_report_stages
     assert exit_code == 0
     assert str(calls[0][1]["watchlist_file"]) == str(watchlist_file)
     assert str(calls[1][1]["watchlist_file"]) == str(watchlist_file)
+    assert calls[0][1]["technical_relevance_run_id"] is None
+    assert calls[1][1]["technical_relevance_run_id"] is None
 
 
 def test_pipeline_no_taxonomy_listing_flag_is_passed_to_daily_and_weekly_report_stages(tmp_path, monkeypatch, capsys):
@@ -257,6 +322,15 @@ def test_pipeline_no_taxonomy_listing_flag_is_passed_to_daily_and_weekly_report_
         line.startswith("PLAN ") and "--no-taxonomy-listing" in line
         for line in lines
     )
+
+
+def test_pipeline_blank_technical_relevance_run_id_fails_validation(tmp_path, capsys):
+    exit_code = run_datacenter_swing_pipeline_main(
+        _base_args(tmp_path) + ["--technical-relevance-run-id", "   "]
+    )
+
+    assert exit_code == 1
+    assert "ERROR technical-relevance-run-id must be non-empty when provided" in capsys.readouterr().err
 
 
 def test_pipeline_generates_reports_on_audit_warn(tmp_path, monkeypatch, capsys):
