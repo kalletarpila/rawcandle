@@ -17,7 +17,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--analysis-db", required=True)
     parser.add_argument("--run-id")
-    parser.add_argument("--ticker")
+    parser.add_argument("--ticker", nargs="+")
     parser.add_argument("--timeframe", default="1d")
     parser.add_argument("--start-date")
     parser.add_argument("--end-date")
@@ -27,14 +27,11 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _parse_tickers(raw_ticker_value: str | None) -> list[str] | None:
-    if raw_ticker_value is None:
+def _parse_tickers(raw_ticker_values: list[str] | None) -> list[str] | None:
+    if raw_ticker_values is None:
         return None
-    comma_split = []
-    for part in raw_ticker_value.split(","):
-        comma_split.extend(part.split())
-    tickers = [ticker for ticker in comma_split if ticker]
-    return tickers
+    joined_value = " ".join(str(value) for value in raw_ticker_values)
+    return [segment.strip() for segment in joined_value.split(",") if segment.strip()]
 
 
 def _validate_iso_date(value: str, field_name: str) -> str:

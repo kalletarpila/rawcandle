@@ -190,6 +190,42 @@ def test_export_cli_filtering_by_ticker_works_with_comma_separated_tickers(tmp_p
     assert "BBB" not in output
 
 
+def test_export_cli_filtering_by_ticker_works_with_spaces_in_one_argument(tmp_path, capsys):
+    db_path = _db_path(tmp_path)
+    conn = _connect(db_path)
+    _insert_run(conn, "RUN_A")
+    _insert_record(conn, run_id="RUN_A", ticker="AAA", signal_date="2026-05-01", signal_name="Hammer", relevance_class="RELEVANT", relevance_reason="A")
+    _insert_record(conn, run_id="RUN_A", ticker="BBB", signal_date="2026-05-02", signal_name="Hammer", relevance_class="RELEVANT", relevance_reason="B")
+    _insert_record(conn, run_id="RUN_A", ticker="CCC", signal_date="2026-05-03", signal_name="Hammer", relevance_class="RELEVANT", relevance_reason="C")
+    conn.commit()
+    conn.close()
+
+    main(["--analysis-db", str(db_path), "--ticker", "AAA, CCC"])
+
+    summary = _summary(capsys.readouterr().out)
+    assert summary["technical_signal_relevance_export.ticker_count_filter"] == "2"
+
+
+def test_export_cli_filtering_by_shell_split_ticker_tokens_works(tmp_path, capsys):
+    db_path = _db_path(tmp_path)
+    conn = _connect(db_path)
+    _insert_run(conn, "RUN_A")
+    _insert_record(conn, run_id="RUN_A", ticker="AAA", signal_date="2026-05-01", signal_name="Hammer", relevance_class="RELEVANT", relevance_reason="A")
+    _insert_record(conn, run_id="RUN_A", ticker="BBB", signal_date="2026-05-02", signal_name="Hammer", relevance_class="RELEVANT", relevance_reason="B")
+    _insert_record(conn, run_id="RUN_A", ticker="CCC", signal_date="2026-05-03", signal_name="Hammer", relevance_class="RELEVANT", relevance_reason="C")
+    conn.commit()
+    conn.close()
+
+    main(["--analysis-db", str(db_path), "--ticker", "AAA,", "CCC", "--timeframe", "1d"])
+
+    output = capsys.readouterr().out
+    assert "AAA" in output
+    assert "CCC" in output
+    assert "BBB" not in output
+    summary = _summary(output)
+    assert summary["technical_signal_relevance_export.ticker_count_filter"] == "2"
+
+
 def test_export_cli_filtering_by_relevance_class_works(tmp_path, capsys):
     db_path = _db_path(tmp_path)
     conn = _connect(db_path)

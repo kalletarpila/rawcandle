@@ -302,6 +302,110 @@ def test_cli_supports_comma_separated_tickers(tmp_path, capsys):
     conn.close()
 
 
+def test_cli_supports_comma_separated_tickers_with_spaces_in_one_argument(tmp_path, capsys):
+    db_path = _db_path(tmp_path)
+    conn = _connect(db_path)
+    _create_analysis_findings(conn)
+    _create_dow_events(conn)
+    conn.executemany(
+        "INSERT INTO analysis_findings (ticker, date, pattern, signal_strength, rsi14) VALUES (?, ?, ?, ?, ?)",
+        [
+            ("AAA", "2024-01-10", "Hammer", 0.8, 50.0),
+            ("BBB", "2024-01-11", "Hammer", 0.7, 45.0),
+            ("CCC", "2024-01-12", "Hammer", 0.7, 45.0),
+        ],
+    )
+    conn.executemany(
+        """
+        INSERT INTO stock_dow_structure_events (
+            ticker, event_date, confirmed_as_of_date, event_type, trend_state, structure_epoch_id
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        [
+            ("AAA", "2024-01-09", "2024-01-10", "PIVOT_LOW", "UP", 1),
+            ("BBB", "2024-01-10", "2024-01-11", "PIVOT_LOW", "UP", 1),
+            ("CCC", "2024-01-11", "2024-01-12", "PIVOT_LOW", "UP", 1),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    result = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--ticker",
+            "CCC, AAA, BBB",
+            "--start-date",
+            "2024-01-01",
+            "--end-date",
+            "2024-01-31",
+            "--run-id",
+            "RUN_CLI_004B",
+            "--created-at-utc",
+            "2026-05-22T10:00:00Z",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert "SUMMARY technical_signal_relevance.ticker_count=3" in output
+
+
+def test_cli_supports_shell_split_ticker_tokens(tmp_path, capsys):
+    db_path = _db_path(tmp_path)
+    conn = _connect(db_path)
+    _create_analysis_findings(conn)
+    _create_dow_events(conn)
+    conn.executemany(
+        "INSERT INTO analysis_findings (ticker, date, pattern, signal_strength, rsi14) VALUES (?, ?, ?, ?, ?)",
+        [
+            ("AAA", "2024-01-10", "Hammer", 0.8, 50.0),
+            ("BBB", "2024-01-11", "Hammer", 0.7, 45.0),
+            ("CCC", "2024-01-12", "Hammer", 0.7, 45.0),
+        ],
+    )
+    conn.executemany(
+        """
+        INSERT INTO stock_dow_structure_events (
+            ticker, event_date, confirmed_as_of_date, event_type, trend_state, structure_epoch_id
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        [
+            ("AAA", "2024-01-09", "2024-01-10", "PIVOT_LOW", "UP", 1),
+            ("BBB", "2024-01-10", "2024-01-11", "PIVOT_LOW", "UP", 1),
+            ("CCC", "2024-01-11", "2024-01-12", "PIVOT_LOW", "UP", 1),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    result = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--ticker",
+            "CCC,",
+            "AAA,",
+            "BBB",
+            "--timeframe",
+            "1d",
+            "--start-date",
+            "2024-01-01",
+            "--end-date",
+            "2024-01-31",
+            "--run-id",
+            "RUN_CLI_004C",
+            "--created-at-utc",
+            "2026-05-22T10:00:01Z",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert "SUMMARY technical_signal_relevance.ticker_count=3" in output
+
+
 def test_cli_succeeds_with_no_observations_and_writes_one_run_row_plus_zero_relevance_rows(
     tmp_path,
 ):

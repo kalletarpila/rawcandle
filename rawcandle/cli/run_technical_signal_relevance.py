@@ -18,7 +18,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Run technical signal relevance classification from analysis sources."
     )
     parser.add_argument("--analysis-db", required=True)
-    parser.add_argument("--ticker", required=True)
+    parser.add_argument("--ticker", nargs="+", required=True)
     parser.add_argument("--start-date", required=True)
     parser.add_argument("--end-date", required=True)
     parser.add_argument("--run-id", required=True)
@@ -27,11 +27,9 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _parse_tickers(raw_ticker_value: str) -> list[str]:
-    comma_split = []
-    for part in raw_ticker_value.split(","):
-        comma_split.extend(part.split())
-    return [ticker for ticker in comma_split if ticker]
+def _parse_tickers(raw_ticker_values: list[str]) -> list[str]:
+    joined_value = " ".join(str(value) for value in raw_ticker_values)
+    return [segment.strip() for segment in joined_value.split(",") if segment.strip()]
 
 
 def _validate_args(args: argparse.Namespace, tickers: list[str]) -> None:
