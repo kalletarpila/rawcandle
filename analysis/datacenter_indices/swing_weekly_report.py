@@ -32,6 +32,7 @@ from .swing_daily_report import (
     _normalize_path,
     _parse_iso_date,
     _resolve_watchlist_context,
+    _strip_markdown_technical_relevance_section,
     _technical_relevance_companion_headers,
     _technical_relevance_context_headers,
     _row_to_dict,
@@ -1709,7 +1710,11 @@ def build_csv_weekly_swing_report(
         top_n=top_n,
         include_taxonomy_listing=include_taxonomy_listing,
     )
-    rows = _build_csv_rows_from_markdown(markdown)
+    technical_relevance_run_id = report_data.get("technical_relevance_run_id")
+    markdown_for_csv = markdown
+    if technical_relevance_run_id is not None:
+        markdown_for_csv = _strip_markdown_technical_relevance_section(markdown_for_csv)
+    rows = _build_csv_rows_from_markdown(markdown_for_csv)
     output = io.StringIO()
     writer = csv.writer(output, delimiter=";", lineterminator="\n")
     max_columns = max((len(row) for row in rows), default=1)
@@ -1717,10 +1722,12 @@ def build_csv_weekly_swing_report(
     for row in rows:
         writer.writerow([*row, *([""] * (max_columns - len(row)))])
     csv_text = output.getvalue()
-    technical_relevance_run_id = report_data.get("technical_relevance_run_id")
     technical_relevance_context_rows = list(report_data.get("technical_relevance_context_rows") or [])
     if technical_relevance_run_id is not None:
-        csv_text += _build_technical_relevance_csv_section(technical_relevance_context_rows)
+        csv_text += _build_technical_relevance_csv_section(
+            str(technical_relevance_run_id),
+            technical_relevance_context_rows,
+        )
     return csv_text
 
 

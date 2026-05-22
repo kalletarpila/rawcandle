@@ -859,6 +859,7 @@ def test_daily_report_with_technical_relevance_run_id_adds_context_section_witho
     assert "latest_bullish_relevance_class" in enriched["markdown"]
     assert "latest_bearish_relevance_class" in enriched["markdown"]
     assert "section;technical_relevance_context" in enriched["csv"]
+    assert "section;technical_relevance_run_id;REL_RUN_A" in enriched["csv"]
     assert (
         "section;ticker;timeframe;signal_date;signal_confirmed_as_of_date;signal_name;"
         "signal_source_id;relevance_class;relevance_reason;dow_trend_state;"
@@ -866,9 +867,12 @@ def test_daily_report_with_technical_relevance_run_id_adds_context_section_witho
         "bars_since_latest_reset;near_latest_pivot;near_active_bos_level;"
         "is_trend_aligned;is_counter_trend"
     ) in enriched["csv"]
-    assert ";AAA;1d;2024-01-10;2024-01-10;Hammer;CANDLE;RELEVANT;" in enriched["csv"]
-    assert ";BBB;1d;2024-01-10;2024-01-10;Bullish Divergence;CANDLE;WEAK_CONTEXT;" in enriched["csv"]
-    assert ";CCC;1d;2024-01-10;2024-01-10;Bearish Engulfing;CANDLE;RELEVANT;" in enriched["csv"]
+    assert "technical_relevance_context;AAA;1d;2024-01-10;2024-01-10;Hammer;CANDLE;RELEVANT;" in enriched["csv"]
+    assert "technical_relevance_context;BBB;1d;2024-01-10;2024-01-10;Bullish Divergence;CANDLE;WEAK_CONTEXT;" in enriched["csv"]
+    assert "technical_relevance_context;CCC;1d;2024-01-10;2024-01-10;Bearish Engulfing;CANDLE;RELEVANT;" in enriched["csv"]
+    assert "17. Technical Relevance Context" not in enriched["csv"]
+    assert "section;technical_relevance_context\nsection;technical_relevance_run_id;REL_RUN_A\nsection;ticker;timeframe;signal_date;signal_confirmed_as_of_date;" in enriched["csv"]
+    assert "\n17. Technical Relevance Context;" not in enriched["csv"]
     assert "| AAA | Infrastructure | AI Chips |" in enriched["markdown"]
     assert "| 2024-01-10 | Hammer | RELEVANT | UP_TREND_BULLISH_DIP_REVERSAL_NEAR_PIVOT_LOW | 2024-01-10 | Bearish Divergence | WEAK_CONTEXT | NEUTRAL_DIVERGENCE_WEAK_CONTEXT |" in enriched["markdown"]
     assert "| BBB | Infrastructure | Cloud |" in enriched["markdown"]

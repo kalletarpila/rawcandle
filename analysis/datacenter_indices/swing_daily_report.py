@@ -203,10 +203,12 @@ def _enrich_rows_with_technical_relevance_companions(
 
 
 def _build_technical_relevance_csv_section(
+    technical_relevance_run_id: str,
     rows: Sequence[dict[str, object]],
 ) -> str:
     lines = [
         "section;technical_relevance_context",
+        f"section;technical_relevance_run_id;{technical_relevance_run_id}",
         (
             "section;ticker;timeframe;signal_date;signal_confirmed_as_of_date;"
             "signal_name;signal_source_id;relevance_class;relevance_reason;"
@@ -222,6 +224,22 @@ def _build_technical_relevance_csv_section(
         ]
         lines.append(";".join(values))
     return "\n".join(lines) + "\n"
+
+
+def _strip_markdown_technical_relevance_section(markdown: str) -> str:
+    heading = "\n## 17. Technical Relevance Context\n"
+    start = markdown.find(heading)
+    if start == -1:
+        weekly_heading = "\n## 15. Technical Relevance Context\n"
+        start = markdown.find(weekly_heading)
+        if start == -1:
+            return markdown
+    next_section = markdown.find("\n## ", start + 1)
+    if next_section == -1:
+        stripped = markdown[:start]
+    else:
+        stripped = markdown[:start] + markdown[next_section:]
+    return stripped.rstrip() + "\n"
 
 
 def _format_table(headers: Sequence[str], rows: Sequence[dict[str, object]]) -> str:
@@ -1536,7 +1554,11 @@ def build_csv_daily_swing_report(
         top_n=top_n,
         include_taxonomy_listing=include_taxonomy_listing,
     )
-    rows = _build_csv_rows_from_markdown(markdown)
+    technical_relevance_run_id = report_data.get("technical_relevance_run_id")
+    markdown_for_csv = markdown
+    if technical_relevance_run_id is not None:
+        markdown_for_csv = _strip_markdown_technical_relevance_section(markdown_for_csv)
+    rows = _build_csv_rows_from_markdown(markdown_for_csv)
     output = io.StringIO()
     writer = csv.writer(output, delimiter=";", lineterminator="\n")
     max_columns = max((len(row) for row in rows), default=1)
@@ -1544,10 +1566,12 @@ def build_csv_daily_swing_report(
     for row in rows:
         writer.writerow([*row, *([""] * (max_columns - len(row)))])
     csv_text = output.getvalue()
-    technical_relevance_run_id = report_data.get("technical_relevance_run_id")
     technical_relevance_context_rows = list(report_data.get("technical_relevance_context_rows") or [])
     if technical_relevance_run_id is not None:
-        csv_text += _build_technical_relevance_csv_section(technical_relevance_context_rows)
+        csv_text += _build_technical_relevance_csv_section(
+            str(technical_relevance_run_id),
+            technical_relevance_context_rows,
+        )
     return csv_text
 
 
