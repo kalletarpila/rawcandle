@@ -12,6 +12,11 @@ from analysis.datacenter_indices.swing_daily_report import (
     load_daily_swing_report_data,
     write_daily_swing_signal_report,
 )
+from tests.test_datacenter_technical_relevance_context import (
+    _connect as _connect_relevance_db,
+    _insert_record as _insert_relevance_record,
+    _insert_run as _insert_relevance_run,
+)
 
 
 def _create_analysis_db(path):
@@ -741,3 +746,84 @@ def test_daily_report_infers_taxonomy_version_when_only_one_exists(tmp_path):
 
     assert report_data["taxonomy_version"] == "DC_TAXONOMY_V1"
     assert report_data["taxonomy_version_inferred"] == 1
+
+
+def test_daily_report_without_technical_relevance_run_id_remains_unchanged(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_report_db(analysis_db)
+
+    result = write_daily_swing_signal_report(
+        analysis_db_path=analysis_db,
+        signal_date="2024-01-10",
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+
+    assert "## 17. Technical Relevance Context" not in result["markdown"]
+    assert "section;technical_relevance_context" not in result["csv"]
+
+
+def test_daily_report_with_technical_relevance_run_id_adds_context_section_without_changing_scanner_counts(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_report_db(analysis_db)
+    conn = _connect_relevance_db(analysis_db)
+    _insert_relevance_run(conn, "REL_RUN_A")
+    _insert_relevance_record(
+        conn,
+        run_id="REL_RUN_A",
+        ticker="AAA",
+        signal_date="2024-01-10",
+        signal_name="Hammer",
+        relevance_class="RELEVANT",
+        relevance_reason="UP_TREND_BULLISH_DIP_REVERSAL_NEAR_PIVOT_LOW",
+    )
+    _insert_relevance_record(
+        conn,
+        run_id="REL_RUN_A",
+        ticker="BBB",
+        signal_date="2024-01-10",
+        signal_name="Bullish Divergence",
+        relevance_class="WEAK_CONTEXT",
+        relevance_reason="UP_TREND_REGULAR_BULLISH_DIVERGENCE_WEAK",
+    )
+    _insert_relevance_record(
+        conn,
+        run_id="REL_RUN_A",
+        ticker="CCC",
+        signal_date="2024-01-10",
+        signal_name="Bearish Engulfing",
+        relevance_class="NOISE",
+        relevance_reason="UP_TREND_COUNTER_BEARISH_REVERSAL_MEDIUM_WITHOUT_BOS",
+    )
+    conn.commit()
+    conn.close()
+
+    baseline = write_daily_swing_signal_report(
+        analysis_db_path=analysis_db,
+        signal_date="2024-01-10",
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+    enriched = write_daily_swing_signal_report(
+        analysis_db_path=analysis_db,
+        signal_date="2024-01-10",
+        generated_at_utc="2026-05-17T12:00:00Z",
+        technical_relevance_run_id="REL_RUN_A",
+    )
+
+    assert baseline["summary"]["breakout_count"] == enriched["summary"]["breakout_count"]
+    assert baseline["summary"]["pullback_count"] == enriched["summary"]["pullback_count"]
+    assert baseline["summary"]["exit_risk_count"] == enriched["summary"]["exit_risk_count"]
+    assert "## 17. Technical Relevance Context" in enriched["markdown"]
+    assert "technical_relevance_run_id: REL_RUN_A" in enriched["markdown"]
+    assert "bullish_candle_signal" in enriched["markdown"]
+    assert "bearish_divergence_signal" in enriched["markdown"]
+    assert "section;technical_relevance_context" in enriched["csv"]
+    assert (
+        "section;ticker;timeframe;signal_date;signal_confirmed_as_of_date;signal_name;"
+        "signal_source_id;relevance_class;relevance_reason;dow_trend_state;"
+        "dow_context_state;latest_bos_direction;bars_since_latest_bos;"
+        "bars_since_latest_reset;near_latest_pivot;near_active_bos_level;"
+        "is_trend_aligned;is_counter_trend"
+    ) in enriched["csv"]
+    assert ";AAA;1d;2024-01-10;2024-01-10;Hammer;CANDLE;RELEVANT;" in enriched["csv"]
+    assert ";BBB;1d;2024-01-10;2024-01-10;Bullish Divergence;CANDLE;WEAK_CONTEXT;" in enriched["csv"]
+    assert ";CCC;1d;2024-01-10;2024-01-10;Bearish Engulfing;CANDLE;NOISE;" in enriched["csv"]

@@ -77,6 +77,10 @@ from .swing_weekly_report import (
     load_weekly_swing_report_data,
     write_weekly_swing_report,
 )
+from .technical_relevance_context import (
+    TechnicalRelevanceContextRow,
+    load_technical_relevance_context,
+)
 
 __all__ = [
     "CALC_VERSION",
@@ -101,6 +105,7 @@ __all__ = [
     "DowStructureEnrichmentSnapshot",
     "TickerOhlcvRow",
     "TickerAnalysisEnrichmentSnapshot",
+    "TechnicalRelevanceContextRow",
     "TickerSwingMetrics",
     "build_group_synthetic_ohlc_run_id",
     "format_group_relative_ohlc_summary_lines",
@@ -117,6 +122,7 @@ __all__ = [
     "format_ticker_swing_summary_lines",
     "load_bounded_ticker_ohlcv_history",
     "load_daily_swing_report_data",
+    "load_technical_relevance_context",
     "load_weekly_swing_report_data",
     "persist_datacenter_group_structure",
     "persist_datacenter_group_relative_ohlc",

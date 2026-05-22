@@ -40,6 +40,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output-csv", type=Path, default=None, help="Optional output CSV path")
     parser.add_argument("--top-n", type=int, default=20, help="Maximum row count for scanner and ranking sections")
     parser.add_argument("--no-taxonomy-listing", action="store_true", help="Omit the full datacenter taxonomy listing section")
+    parser.add_argument("--technical-relevance-run-id", type=str, default=None, help="Optional explicit technical relevance run_id for read-only report context")
     parser.add_argument("--generated-at-utc", type=str, default=None, help="Optional explicit generated_at_utc timestamp (YYYY-MM-DDTHH:MM:SSZ)")
     return parser.parse_args(argv)
 
@@ -86,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
             top_n=args.top_n,
             generated_at_utc=args.generated_at_utc,
             include_taxonomy_listing=not args.no_taxonomy_listing,
+            technical_relevance_run_id=args.technical_relevance_run_id,
         )
     except Exception as exc:
         print(f"ERROR {exc}", file=sys.stderr)

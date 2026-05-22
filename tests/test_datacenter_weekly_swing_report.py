@@ -12,6 +12,11 @@ from analysis.datacenter_indices.swing_weekly_report import (
     load_weekly_swing_report_data,
     write_weekly_swing_report,
 )
+from tests.test_datacenter_technical_relevance_context import (
+    _connect as _connect_relevance_db,
+    _insert_record as _insert_relevance_record,
+    _insert_run as _insert_relevance_run,
+)
 
 
 WINDOW_DATES = [
@@ -948,3 +953,59 @@ def test_weekly_report_infers_taxonomy_version_when_only_one_exists(tmp_path):
 
     assert report_data["taxonomy_version"] == "DC_TAXONOMY_V1"
     assert report_data["taxonomy_version_inferred"] == 1
+
+
+def test_weekly_report_without_technical_relevance_run_id_remains_unchanged(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+
+    result = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+
+    assert "## 15. Technical Relevance Context" not in result["markdown"]
+    assert "section;technical_relevance_context" not in result["csv"]
+
+
+def test_weekly_report_with_technical_relevance_run_id_includes_context_section(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+    conn = _connect_relevance_db(analysis_db)
+    _insert_relevance_run(conn, "REL_WEEKLY")
+    _insert_relevance_record(
+        conn,
+        run_id="REL_WEEKLY",
+        ticker="AAA",
+        signal_date="2024-01-05",
+        signal_name="Hammer",
+        relevance_class="RELEVANT",
+        relevance_reason="UP_TREND_BULLISH_DIP_REVERSAL_NEAR_PIVOT_LOW",
+    )
+    _insert_relevance_record(
+        conn,
+        run_id="REL_WEEKLY",
+        ticker="BBB",
+        signal_date="2024-01-10",
+        signal_name="Bullish Divergence",
+        relevance_class="WEAK_CONTEXT",
+        relevance_reason="UP_TREND_REGULAR_BULLISH_DIVERGENCE_WEAK",
+    )
+    conn.commit()
+    conn.close()
+
+    result = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        generated_at_utc="2026-05-17T12:00:00Z",
+        technical_relevance_run_id="REL_WEEKLY",
+    )
+
+    assert "## 15. Technical Relevance Context" in result["markdown"]
+    assert "technical_relevance_run_id: REL_WEEKLY" in result["markdown"]
+    assert "section;technical_relevance_context" in result["csv"]
+    assert ";AAA;1d;2024-01-05;2024-01-05;Hammer;CANDLE;RELEVANT;" in result["csv"]
+    assert ";BBB;1d;2024-01-10;2024-01-10;Bullish Divergence;CANDLE;WEAK_CONTEXT;" in result["csv"]

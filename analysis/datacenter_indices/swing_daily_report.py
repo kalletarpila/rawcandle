@@ -4,9 +4,12 @@ import csv
 import io
 import re
 import sqlite3
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Sequence
+
+from .technical_relevance_context import load_technical_relevance_context
 
 
 DEFAULT_SIGNAL_VERSION = "DC_SWING_SIGNAL_V1"
@@ -130,6 +133,50 @@ def _format_value(value: object | None) -> str:
     if isinstance(value, float):
         return f"{value:.6f}".rstrip("0").rstrip(".")
     return str(value)
+
+
+def _technical_relevance_context_headers() -> list[str]:
+    return [
+        "ticker",
+        "timeframe",
+        "signal_date",
+        "signal_confirmed_as_of_date",
+        "signal_name",
+        "signal_source_id",
+        "relevance_class",
+        "relevance_reason",
+        "dow_trend_state",
+        "dow_context_state",
+        "latest_bos_direction",
+        "bars_since_latest_bos",
+        "bars_since_latest_reset",
+        "near_latest_pivot",
+        "near_active_bos_level",
+        "is_trend_aligned",
+        "is_counter_trend",
+    ]
+
+
+def _build_technical_relevance_csv_section(
+    rows: Sequence[dict[str, object]],
+) -> str:
+    lines = [
+        "section;technical_relevance_context",
+        (
+            "section;ticker;timeframe;signal_date;signal_confirmed_as_of_date;"
+            "signal_name;signal_source_id;relevance_class;relevance_reason;"
+            "dow_trend_state;dow_context_state;latest_bos_direction;"
+            "bars_since_latest_bos;bars_since_latest_reset;near_latest_pivot;"
+            "near_active_bos_level;is_trend_aligned;is_counter_trend"
+        ),
+    ]
+    for row in rows:
+        values = [
+            "technical_relevance_context",
+            *(_format_value(row.get(header)) for header in _technical_relevance_context_headers()),
+        ]
+        lines.append(";".join(values))
+    return "\n".join(lines) + "\n"
 
 
 def _format_table(headers: Sequence[str], rows: Sequence[dict[str, object]]) -> str:
@@ -689,6 +736,7 @@ def load_daily_swing_report_data(
     ohlc_calc_version: str = DEFAULT_OHLC_CALC_VERSION,
     taxonomy_version: str | None = None,
     watchlist_file: str | Path | None = None,
+    technical_relevance_run_id: str | None = None,
 ) -> dict[str, object]:
     normalized_signal_date = _parse_iso_date(signal_date)
     with sqlite3.connect(analysis_db_path) as conn:
@@ -725,6 +773,26 @@ def load_daily_swing_report_data(
             calc_version=ohlc_calc_version,
             taxonomy_version=resolved_taxonomy_version,
         )
+        technical_relevance_context_rows = []
+        if technical_relevance_run_id is not None:
+            report_tickers = sorted(
+                {
+                    str(row.get("ticker") or "")
+                    for row in ticker_rows
+                    if str(row.get("ticker") or "")
+                }
+            )
+            technical_relevance_context_rows = [
+                asdict(row)
+                for row in load_technical_relevance_context(
+                    conn,
+                    technical_relevance_run_id=technical_relevance_run_id,
+                    tickers=report_tickers,
+                    timeframe="1d",
+                    start_date=normalized_signal_date,
+                    end_date=normalized_signal_date,
+                )
+            ]
     result = {
         "signal_date": normalized_signal_date,
         "signal_version": signal_version,
@@ -734,6 +802,8 @@ def load_daily_swing_report_data(
         "group_rows": group_rows,
         "ticker_rows": ticker_rows,
         "synthetic_rows": synthetic_rows,
+        "technical_relevance_run_id": technical_relevance_run_id,
+        "technical_relevance_context_rows": technical_relevance_context_rows,
     }
     result.update(_resolve_watchlist_context(watchlist_file))
     return result
@@ -789,6 +859,12 @@ def build_markdown_daily_swing_report(
     group_rows = list(report_data["group_rows"])  # type: ignore[arg-type]
     ticker_rows = list(report_data["ticker_rows"])  # type: ignore[arg-type]
     synthetic_rows = list(report_data["synthetic_rows"])  # type: ignore[arg-type]
+    technical_relevance_run_id = (
+        None
+        if report_data.get("technical_relevance_run_id") is None
+        else str(report_data["technical_relevance_run_id"])
+    )
+    technical_relevance_context_rows = list(report_data.get("technical_relevance_context_rows") or [])
     watchlist_tickers = list(report_data.get("watchlist_tickers") or [])
     watchlist_file_path = str(report_data.get("watchlist_file_path") or DEFAULT_WATCHLIST_FILE)
     watchlist_file_missing = bool(report_data.get("watchlist_file_missing"))
@@ -1324,6 +1400,19 @@ def build_markdown_daily_swing_report(
     ]
     lines.append(_format_table(["metric", "count"], missing_rows).rstrip())
 
+    if technical_relevance_run_id is not None:
+        lines.extend(["", "## 17. Technical Relevance Context"])
+        lines.append(f"technical_relevance_run_id: {technical_relevance_run_id}")
+        if technical_relevance_context_rows:
+            lines.append(
+                _format_table(
+                    _technical_relevance_context_headers(),
+                    technical_relevance_context_rows,
+                ).rstrip()
+            )
+        else:
+            lines.append("No rows.")
+
     if include_taxonomy_listing:
         lines.extend(["", "## Datacenter Taxonomy Listing"])
         if not taxonomy_listing_rows:
@@ -1393,7 +1482,12 @@ def build_csv_daily_swing_report(
     writer.writerow(["section", *(f"value_{index}" for index in range(1, max_columns))])
     for row in rows:
         writer.writerow([*row, *([""] * (max_columns - len(row)))])
-    return output.getvalue()
+    csv_text = output.getvalue()
+    technical_relevance_run_id = report_data.get("technical_relevance_run_id")
+    technical_relevance_context_rows = list(report_data.get("technical_relevance_context_rows") or [])
+    if technical_relevance_run_id is not None:
+        csv_text += _build_technical_relevance_csv_section(technical_relevance_context_rows)
+    return csv_text
 
 
 def format_daily_swing_report_summary_lines(summary: dict[str, int | str]) -> list[str]:
@@ -1417,6 +1511,7 @@ def write_daily_swing_signal_report(
     top_n: int = 20,
     generated_at_utc: str | None = None,
     include_taxonomy_listing: bool = True,
+    technical_relevance_run_id: str | None = None,
 ) -> dict[str, object]:
     report_data = load_daily_swing_report_data(
         analysis_db_path=analysis_db_path,
@@ -1425,6 +1520,7 @@ def write_daily_swing_signal_report(
         ohlc_calc_version=ohlc_calc_version,
         taxonomy_version=taxonomy_version,
         watchlist_file=watchlist_file,
+        technical_relevance_run_id=technical_relevance_run_id,
     )
     markdown = build_markdown_daily_swing_report(
         report_data,

@@ -1,5 +1,15 @@
 from __future__ import annotations
 
+import sqlite3
+
+from rawcandle.technical_signal_relevance import TechnicalSignalRelevanceConfig
+from rawcandle.technical_signal_relevance_persistence import (
+    TechnicalSignalRelevanceStoredRow,
+    apply_technical_signal_relevance_migration,
+    build_relevance_run_row,
+    insert_relevance_records,
+    insert_relevance_run,
+)
 from run_datacenter_weekly_swing_report import main as run_datacenter_weekly_swing_report_main
 
 from tests.test_datacenter_weekly_swing_report import _seed_weekly_report_db
@@ -193,3 +203,84 @@ def test_cli_accepts_watchlist_file_and_renders_watchlist_summary(tmp_path, caps
     assert "last_layer_trend_classification" in markdown
     assert "last_layer_latest_structure_label" in markdown
     assert "NOT_PART_OF_DATACENTER_ECOSYSTEM" in markdown
+
+
+def test_cli_can_include_technical_relevance_context_section(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    output_md = tmp_path / "weekly_report.md"
+    output_csv = tmp_path / "weekly_report.csv"
+    expected_output_csv = tmp_path / "weekly_report_1200.csv"
+    _seed_weekly_report_db(analysis_db)
+
+    conn = sqlite3.connect(analysis_db)
+    conn.row_factory = sqlite3.Row
+    apply_technical_signal_relevance_migration(conn)
+    insert_relevance_run(
+        conn,
+        build_relevance_run_row(
+            run_id="REL_WEEKLY_CLI",
+            config=TechnicalSignalRelevanceConfig(),
+            created_at_utc="2026-05-17T12:00:00Z",
+        ),
+    )
+    insert_relevance_records(
+        conn,
+        [
+            TechnicalSignalRelevanceStoredRow(
+                ticker="AAA",
+                timeframe="1d",
+                signal_date="2024-01-05",
+                signal_confirmed_as_of_date="2024-01-05",
+                signal_name="Hammer",
+                signal_close_price=100.0,
+                signal_direction="BULLISH",
+                signal_family="REVERSAL_MEDIUM",
+                signal_source_type="CANDLE",
+                signal_source_id="CANDLE",
+                dow_trend_state="UP",
+                dow_context_state="NORMAL",
+                latest_bos_direction="BOS_UP",
+                bars_since_latest_bos=2,
+                latest_reset_reason="RESET",
+                bars_since_latest_reset=5,
+                near_latest_pivot=1,
+                near_active_bos_level=0,
+                is_trend_aligned=1,
+                is_counter_trend=0,
+                relevance_class="RELEVANT",
+                relevance_reason="UP_TREND_BULLISH_DIP_REVERSAL_NEAR_PIVOT_LOW",
+                relevance_rule_version="TECH_SIGNAL_RELEVANCE_V1",
+                mapping_version="TECH_SIGNAL_MAPPING_V1",
+                reason_version="TECH_SIGNAL_RELEVANCE_REASON_V1",
+                rule_trace='["missing_bar_index=false"]',
+                created_at_utc="2026-05-17T12:00:00Z",
+                run_id="REL_WEEKLY_CLI",
+            )
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    exit_code = run_datacenter_weekly_swing_report_main(
+        [
+            "--analysis-db",
+            str(analysis_db),
+            "--end-date",
+            "2024-01-10",
+            "--taxonomy-version",
+            "DC_TAXONOMY_V1",
+            "--technical-relevance-run-id",
+            "REL_WEEKLY_CLI",
+            "--output-md",
+            str(output_md),
+            "--output-csv",
+            str(output_csv),
+            "--generated-at-utc",
+            "2026-05-17T12:00:00Z",
+        ]
+    )
+
+    assert exit_code == 0
+    csv_text = expected_output_csv.read_text(encoding="utf-8")
+    assert "section;technical_relevance_context" in csv_text
+    assert ";AAA;1d;2024-01-05;2024-01-05;Hammer;CANDLE;RELEVANT;" in csv_text
