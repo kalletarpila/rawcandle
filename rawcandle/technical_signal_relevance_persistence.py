@@ -488,6 +488,96 @@ def read_relevance_records_for_run(
     return _rows_to_dicts(cursor, cursor.fetchall())
 
 
+def query_relevance_records(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str | None = None,
+    tickers: Sequence[str] | None = None,
+    timeframe: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    relevance_class: str | None = None,
+    limit: int = 200,
+) -> list[dict[str, object]]:
+    if limit <= 0:
+        raise ValueError("limit must be positive")
+
+    where_clauses: list[str] = []
+    params: list[object] = []
+
+    if run_id is not None:
+        where_clauses.append("run_id = ?")
+        params.append(run_id)
+
+    if tickers is not None:
+        normalized_tickers = [str(ticker) for ticker in tickers]
+        if not normalized_tickers:
+            raise ValueError("tickers must be non-empty when provided")
+        where_clauses.append(
+            f"ticker IN ({','.join('?' for _ in normalized_tickers)})"
+        )
+        params.extend(normalized_tickers)
+
+    if timeframe is not None:
+        where_clauses.append("timeframe = ?")
+        params.append(timeframe)
+
+    if start_date is not None:
+        where_clauses.append("signal_date >= ?")
+        params.append(start_date)
+
+    if end_date is not None:
+        where_clauses.append("signal_date <= ?")
+        params.append(end_date)
+
+    if relevance_class is not None:
+        where_clauses.append("relevance_class = ?")
+        params.append(relevance_class)
+
+    where_sql = ""
+    if where_clauses:
+        where_sql = "WHERE " + " AND ".join(where_clauses)
+
+    cursor = conn.execute(
+        f"""
+        SELECT
+            run_id,
+            ticker,
+            timeframe,
+            signal_date,
+            signal_confirmed_as_of_date,
+            signal_name,
+            signal_source_id,
+            relevance_class,
+            relevance_reason,
+            dow_trend_state,
+            dow_context_state,
+            latest_bos_direction,
+            bars_since_latest_bos,
+            bars_since_latest_reset,
+            near_latest_pivot,
+            near_active_bos_level,
+            is_trend_aligned,
+            is_counter_trend,
+            rule_trace
+        FROM technical_signal_relevance
+        {where_sql}
+        ORDER BY
+            run_id ASC,
+            ticker ASC,
+            timeframe ASC,
+            signal_date ASC,
+            signal_name ASC,
+            signal_source_id ASC,
+            relevance_class ASC,
+            relevance_reason ASC
+        LIMIT ?
+        """,
+        tuple([*params, int(limit)]),
+    )
+    return _rows_to_dicts(cursor, cursor.fetchall())
+
+
 __all__ = [
     "MIGRATION_SQL_PATH",
     "PERSISTED_UNKNOWN_SOURCE_ID",
@@ -499,6 +589,7 @@ __all__ = [
     "build_relevance_stored_row",
     "insert_relevance_records",
     "insert_relevance_run",
+    "query_relevance_records",
     "read_relevance_records_for_run",
     "read_relevance_run",
     "resolve_created_at_utc",
