@@ -46,18 +46,32 @@ TICKER_SWING_SUMMARY_ORDER = [
 ]
 
 TICKER_SWING_PROFILE_SUMMARY_ORDER = [
-    "profile_enabled",
-    "profile_taxonomy_load_seconds",
-    "profile_price_load_seconds",
-    "profile_metric_calc_seconds",
-    "profile_dow_reader_seconds",
-    "profile_divergence_reader_seconds",
-    "profile_candle_reader_seconds",
-    "profile_db_write_seconds",
-    "profile_total_seconds",
-    "profile_tickers_processed",
-    "profile_price_rows_loaded",
-    "profile_rows_prepared",
+    "ticker_swing_snapshot_profile.ticker_count",
+    "ticker_swing_snapshot_profile.signal_date_count",
+    "ticker_swing_snapshot_profile.rows_built",
+    "ticker_swing_snapshot_profile.rows_inserted",
+    "ticker_swing_snapshot_profile.rows_deleted",
+    "ticker_swing_snapshot_profile.ok_price_count",
+    "ticker_swing_snapshot_profile.missing_price_count",
+    "ticker_swing_snapshot_profile.missing_as_of_date_count",
+    "ticker_swing_snapshot_profile.insufficient_history_count",
+    "ticker_swing_snapshot_profile.price_history_read_calls",
+    "ticker_swing_snapshot_profile.dow_context_read_calls",
+    "ticker_swing_snapshot_profile.candlestick_enrichment_read_calls",
+    "ticker_swing_snapshot_profile.divergence_enrichment_read_calls",
+    "ticker_swing_snapshot_profile.total_seconds",
+    "ticker_swing_snapshot_profile.taxonomy_load_seconds",
+    "ticker_swing_snapshot_profile.price_history_seconds",
+    "ticker_swing_snapshot_profile.indicator_compute_seconds",
+    "ticker_swing_snapshot_profile.dow_context_seconds",
+    "ticker_swing_snapshot_profile.candlestick_enrichment_seconds",
+    "ticker_swing_snapshot_profile.divergence_enrichment_seconds",
+    "ticker_swing_snapshot_profile.row_build_seconds",
+    "ticker_swing_snapshot_profile.delete_seconds",
+    "ticker_swing_snapshot_profile.insert_seconds",
+    "ticker_swing_snapshot_profile.tickers_with_rows",
+    "ticker_swing_snapshot_profile.max_rows_per_ticker",
+    "ticker_swing_snapshot_profile.avg_rows_per_ticker",
 ]
 
 TICKER_SCANNER_SUMMARY_ORDER = [
@@ -425,15 +439,129 @@ def build_ticker_swing_run_id(
     return f"DC_TICKER_SWING_{compact_date}_{signal_version}".replace(" ", "_")
 
 
-def format_ticker_swing_summary_lines(summary: dict[str, int | str]) -> list[str]:
+def format_ticker_swing_summary_lines(
+    summary: dict[str, int | str],
+    *,
+    include_profile: bool = True,
+) -> list[str]:
     lines = [f"SUMMARY {key}={summary[key]}" for key in TICKER_SWING_SUMMARY_ORDER]
-    if str(summary.get("profile_enabled", "0")) == "1":
-        lines.extend(
-            f"SUMMARY {key}={summary[key]}"
-            for key in TICKER_SWING_PROFILE_SUMMARY_ORDER
-            if key in summary
-        )
+    if include_profile and str(summary.get("profile_enabled", "0")) == "1":
+        lines.extend(format_ticker_swing_profile_summary_lines(summary))
     return lines
+
+
+def format_ticker_swing_profile_summary_lines(summary: dict[str, int | str]) -> list[str]:
+    return [
+        f"SUMMARY {key}={summary[key]}"
+        for key in TICKER_SWING_PROFILE_SUMMARY_ORDER
+        if key in summary
+    ]
+
+
+def _empty_ticker_swing_profile_aggregate() -> dict[str, object]:
+    return {
+        "ticker_swing_snapshot_profile.ticker_count": 0,
+        "ticker_swing_snapshot_profile.signal_date_count": 0,
+        "ticker_swing_snapshot_profile.rows_built": 0,
+        "ticker_swing_snapshot_profile.rows_inserted": 0,
+        "ticker_swing_snapshot_profile.rows_deleted": 0,
+        "ticker_swing_snapshot_profile.ok_price_count": 0,
+        "ticker_swing_snapshot_profile.missing_price_count": 0,
+        "ticker_swing_snapshot_profile.missing_as_of_date_count": 0,
+        "ticker_swing_snapshot_profile.insufficient_history_count": 0,
+        "ticker_swing_snapshot_profile.price_history_read_calls": 0,
+        "ticker_swing_snapshot_profile.dow_context_read_calls": 0,
+        "ticker_swing_snapshot_profile.candlestick_enrichment_read_calls": 0,
+        "ticker_swing_snapshot_profile.divergence_enrichment_read_calls": 0,
+        "ticker_swing_snapshot_profile.total_seconds": 0.0,
+        "ticker_swing_snapshot_profile.taxonomy_load_seconds": 0.0,
+        "ticker_swing_snapshot_profile.price_history_seconds": 0.0,
+        "ticker_swing_snapshot_profile.indicator_compute_seconds": 0.0,
+        "ticker_swing_snapshot_profile.dow_context_seconds": 0.0,
+        "ticker_swing_snapshot_profile.candlestick_enrichment_seconds": 0.0,
+        "ticker_swing_snapshot_profile.divergence_enrichment_seconds": 0.0,
+        "ticker_swing_snapshot_profile.row_build_seconds": 0.0,
+        "ticker_swing_snapshot_profile.delete_seconds": 0.0,
+        "ticker_swing_snapshot_profile.insert_seconds": 0.0,
+        "_ticker_rows": {},
+        "_tickers_seen": set(),
+    }
+
+
+def merge_ticker_swing_profile_summary(
+    aggregate: dict[str, object],
+    summary: dict[str, int | str | object],
+) -> None:
+    if str(summary.get("profile_enabled", "0")) != "1":
+        return
+    int_keys = (
+        "ticker_swing_snapshot_profile.signal_date_count",
+        "ticker_swing_snapshot_profile.rows_built",
+        "ticker_swing_snapshot_profile.rows_inserted",
+        "ticker_swing_snapshot_profile.rows_deleted",
+        "ticker_swing_snapshot_profile.ok_price_count",
+        "ticker_swing_snapshot_profile.missing_price_count",
+        "ticker_swing_snapshot_profile.missing_as_of_date_count",
+        "ticker_swing_snapshot_profile.insufficient_history_count",
+        "ticker_swing_snapshot_profile.price_history_read_calls",
+        "ticker_swing_snapshot_profile.dow_context_read_calls",
+        "ticker_swing_snapshot_profile.candlestick_enrichment_read_calls",
+        "ticker_swing_snapshot_profile.divergence_enrichment_read_calls",
+    )
+    float_keys = (
+        "ticker_swing_snapshot_profile.total_seconds",
+        "ticker_swing_snapshot_profile.taxonomy_load_seconds",
+        "ticker_swing_snapshot_profile.price_history_seconds",
+        "ticker_swing_snapshot_profile.indicator_compute_seconds",
+        "ticker_swing_snapshot_profile.dow_context_seconds",
+        "ticker_swing_snapshot_profile.candlestick_enrichment_seconds",
+        "ticker_swing_snapshot_profile.divergence_enrichment_seconds",
+        "ticker_swing_snapshot_profile.row_build_seconds",
+        "ticker_swing_snapshot_profile.delete_seconds",
+        "ticker_swing_snapshot_profile.insert_seconds",
+    )
+    for key in int_keys:
+        aggregate[key] = int(aggregate.get(key, 0)) + int(summary.get(key, 0))
+    for key in float_keys:
+        aggregate[key] = float(aggregate.get(key, 0.0)) + float(summary.get(key, 0.0))
+    aggregate_ticker_rows = dict(aggregate.get("_ticker_rows", {}))
+    summary_ticker_rows = dict(summary.get("_ticker_rows", {}))
+    tickers_seen = set(aggregate.get("_tickers_seen", set()))
+    for ticker, row_count in summary_ticker_rows.items():
+        aggregate_ticker_rows[str(ticker)] = int(aggregate_ticker_rows.get(str(ticker), 0)) + int(row_count)
+        tickers_seen.add(str(ticker))
+    aggregate["_ticker_rows"] = aggregate_ticker_rows
+    aggregate["_tickers_seen"] = tickers_seen
+
+
+def finalize_ticker_swing_profile_summary(aggregate: dict[str, object]) -> dict[str, int | str]:
+    ticker_rows = {
+        str(ticker): int(row_count)
+        for ticker, row_count in dict(aggregate.get("_ticker_rows", {})).items()
+    }
+    tickers_with_rows = sum(1 for row_count in ticker_rows.values() if row_count > 0)
+    max_rows_per_ticker = max(ticker_rows.values(), default=0)
+    avg_rows_per_ticker = (
+        sum(ticker_rows.values()) / tickers_with_rows
+        if tickers_with_rows > 0
+        else 0.0
+    )
+    summary: dict[str, int | str] = {"profile_enabled": "1"}
+    summary["ticker_swing_snapshot_profile.ticker_count"] = len(set(aggregate.get("_tickers_seen", set())))
+    for key in TICKER_SWING_PROFILE_SUMMARY_ORDER:
+        if key == "ticker_swing_snapshot_profile.ticker_count":
+            continue
+        value = aggregate.get(key)
+        if value is None:
+            continue
+        if key.endswith("_seconds") or key.endswith("avg_rows_per_ticker"):
+            summary[key] = f"{float(value):.3f}"
+        else:
+            summary[key] = int(value)
+    summary["ticker_swing_snapshot_profile.tickers_with_rows"] = tickers_with_rows
+    summary["ticker_swing_snapshot_profile.max_rows_per_ticker"] = max_rows_per_ticker
+    summary["ticker_swing_snapshot_profile.avg_rows_per_ticker"] = f"{avg_rows_per_ticker:.3f}"
+    return summary
 
 
 def format_ticker_scanner_summary_lines(summary: dict[str, int | str]) -> list[str]:
@@ -873,19 +1001,21 @@ def build_ticker_swing_snapshot_rows(
     price_elapsed = time.perf_counter() - price_started_at
 
     metric_started_at = time.perf_counter()
-    metrics_by_ticker = {
-        ticker: calculate_ticker_swing_metrics(
+    metrics_by_ticker: dict[str, object] = {}
+    ticker_rows: dict[str, int] = {}
+    for ticker in normalized_tickers:
+        metrics_by_ticker[ticker] = calculate_ticker_swing_metrics(
             ohlcv_histories.get(ticker, []),
             normalized_as_of_date,
         )
-        for ticker in normalized_tickers
-    }
+        ticker_rows[ticker] = 0
     metric_elapsed = time.perf_counter() - metric_started_at
 
     rows: list[DatacenterTickerSwingSnapshotRow] = []
     dow_elapsed = 0.0
     divergence_elapsed = 0.0
     candle_elapsed = 0.0
+    row_build_started_at = time.perf_counter()
     with sqlite3.connect(analysis_db_path) as analysis_conn:
         analysis_conn.row_factory = sqlite3.Row
         dow_started_at = time.perf_counter()
@@ -999,6 +1129,8 @@ def build_ticker_swing_snapshot_rows(
                     created_at_utc=created_at_utc,
                 )
             )
+            ticker_rows[ticker] = ticker_rows.get(ticker, 0) + 1
+    row_build_elapsed = time.perf_counter() - row_build_started_at
 
     summary = {
         "taxonomy_rows": len(taxonomy_rows),
@@ -1012,19 +1144,43 @@ def build_ticker_swing_snapshot_rows(
         "ok_price_count": sum(1 for row in rows if row.price_data_status == "OK"),
     }
     if profile:
+        tickers_with_rows = sum(1 for row_count in ticker_rows.values() if row_count > 0)
+        max_rows_per_ticker = max(ticker_rows.values(), default=0)
+        avg_rows_per_ticker = (
+            sum(ticker_rows.values()) / tickers_with_rows
+            if tickers_with_rows > 0
+            else 0.0
+        )
         summary.update(
             {
                 "profile_enabled": "1",
-                "profile_taxonomy_load_seconds": f"{taxonomy_elapsed:.3f}",
-                "profile_price_load_seconds": f"{price_elapsed:.3f}",
-                "profile_metric_calc_seconds": f"{metric_elapsed:.3f}",
-                "profile_dow_reader_seconds": f"{dow_elapsed:.3f}",
-                "profile_divergence_reader_seconds": f"{divergence_elapsed:.3f}",
-                "profile_candle_reader_seconds": f"{candle_elapsed:.3f}",
-                "profile_total_seconds": f"{(time.perf_counter() - total_started_at):.3f}",
-                "profile_tickers_processed": len(primary_rows),
-                "profile_price_rows_loaded": fetched_price_row_count,
-                "profile_rows_prepared": len(rows),
+                "ticker_swing_snapshot_profile.ticker_count": len(primary_rows),
+                "ticker_swing_snapshot_profile.signal_date_count": 1,
+                "ticker_swing_snapshot_profile.rows_built": len(rows),
+                "ticker_swing_snapshot_profile.ok_price_count": summary["ok_price_count"],
+                "ticker_swing_snapshot_profile.missing_price_count": (
+                    summary["missing_as_of_date_count"]
+                    + summary["missing_close_as_of_date_count"]
+                ),
+                "ticker_swing_snapshot_profile.missing_as_of_date_count": summary["missing_as_of_date_count"],
+                "ticker_swing_snapshot_profile.insufficient_history_count": summary["insufficient_history_count"],
+                "ticker_swing_snapshot_profile.price_history_read_calls": 1,
+                "ticker_swing_snapshot_profile.dow_context_read_calls": 1,
+                "ticker_swing_snapshot_profile.candlestick_enrichment_read_calls": 1,
+                "ticker_swing_snapshot_profile.divergence_enrichment_read_calls": 1,
+                "ticker_swing_snapshot_profile.taxonomy_load_seconds": f"{taxonomy_elapsed:.3f}",
+                "ticker_swing_snapshot_profile.price_history_seconds": f"{price_elapsed:.3f}",
+                "ticker_swing_snapshot_profile.indicator_compute_seconds": f"{metric_elapsed:.3f}",
+                "ticker_swing_snapshot_profile.dow_context_seconds": f"{dow_elapsed:.3f}",
+                "ticker_swing_snapshot_profile.divergence_enrichment_seconds": f"{divergence_elapsed:.3f}",
+                "ticker_swing_snapshot_profile.candlestick_enrichment_seconds": f"{candle_elapsed:.3f}",
+                "ticker_swing_snapshot_profile.row_build_seconds": f"{row_build_elapsed:.3f}",
+                "ticker_swing_snapshot_profile.total_seconds": f"{(time.perf_counter() - total_started_at):.3f}",
+                "ticker_swing_snapshot_profile.tickers_with_rows": tickers_with_rows,
+                "ticker_swing_snapshot_profile.max_rows_per_ticker": max_rows_per_ticker,
+                "ticker_swing_snapshot_profile.avg_rows_per_ticker": f"{avg_rows_per_ticker:.3f}",
+                "_ticker_rows": ticker_rows,
+                "_profile_price_rows_loaded": fetched_price_row_count,
             }
         )
     return rows, summary
@@ -1037,6 +1193,7 @@ def write_ticker_swing_snapshot_rows(
     signal_date: str,
     signal_version: str,
     write_mode: str,
+    profile: bool = False,
 ) -> dict[str, int]:
     normalized_signal_date = _parse_iso_date(signal_date, "signal_date")
     if write_mode not in {"insert-missing", "upsert", "replace-date"}:
@@ -1050,11 +1207,14 @@ def write_ticker_swing_snapshot_rows(
     updated_count = 0
     skipped_existing_count = 0
     deleted_count = 0
+    delete_seconds = 0.0
+    insert_seconds = 0.0
     try:
         cursor.execute("BEGIN")
         if write_mode == "replace-date":
             if taxonomy_versions:
                 placeholders = ", ".join("?" for _ in taxonomy_versions)
+                delete_started_at = time.perf_counter()
                 cursor.execute(
                     f"""
                     DELETE FROM dc_ticker_swing_signal_daily
@@ -1064,8 +1224,10 @@ def write_ticker_swing_snapshot_rows(
                     """,
                     [normalized_signal_date, signal_version, *taxonomy_versions],
                 )
+                delete_seconds += time.perf_counter() - delete_started_at
                 deleted_count = cursor.rowcount
             for row in rows:
+                insert_started_at = time.perf_counter()
                 cursor.execute(
                     """
                     INSERT INTO dc_ticker_swing_signal_daily (
@@ -1092,6 +1254,7 @@ def write_ticker_swing_snapshot_rows(
                     """,
                     _serialize_row(row),
                 )
+                insert_seconds += time.perf_counter() - insert_started_at
                 inserted_count += 1
         else:
             existing_keys = {
@@ -1114,6 +1277,7 @@ def write_ticker_swing_snapshot_rows(
             for row in rows:
                 key = _row_key(row)
                 if write_mode == "insert-missing":
+                    insert_started_at = time.perf_counter()
                     cursor.execute(
                         """
                         INSERT OR IGNORE INTO dc_ticker_swing_signal_daily (
@@ -1140,11 +1304,13 @@ def write_ticker_swing_snapshot_rows(
                         """,
                         _serialize_row(row),
                     )
+                    insert_seconds += time.perf_counter() - insert_started_at
                     if cursor.rowcount == 1:
                         inserted_count += 1
                     else:
                         skipped_existing_count += 1
                 else:
+                    insert_started_at = time.perf_counter()
                     cursor.execute(
                         """
                         INSERT INTO dc_ticker_swing_signal_daily (
@@ -1229,18 +1395,29 @@ def write_ticker_swing_snapshot_rows(
                         """,
                         _serialize_row(row),
                     )
+                    insert_seconds += time.perf_counter() - insert_started_at
                     if key in existing_keys:
                         updated_count += 1
                     else:
                         inserted_count += 1
         conn.commit()
-        return {
+        summary = {
             "inserted_count": inserted_count,
             "updated_count": updated_count,
             "upserted_count": inserted_count + updated_count if write_mode == "upsert" else 0,
             "skipped_existing_count": skipped_existing_count,
             "deleted_count": deleted_count,
         }
+        if profile:
+            summary.update(
+                {
+                    "ticker_swing_snapshot_profile.rows_inserted": inserted_count,
+                    "ticker_swing_snapshot_profile.rows_deleted": deleted_count,
+                    "ticker_swing_snapshot_profile.delete_seconds": f"{delete_seconds:.3f}",
+                    "ticker_swing_snapshot_profile.insert_seconds": f"{insert_seconds:.3f}",
+                }
+            )
+        return summary
     except Exception:
         conn.rollback()
         raise
@@ -1646,6 +1823,7 @@ def persist_datacenter_ticker_swing_snapshots(
         signal_date=normalized_as_of_date,
         signal_version=signal_version,
         write_mode=write_mode,
+        profile=profile,
     )
     summary = {
         "signal_date": normalized_as_of_date,
@@ -1658,8 +1836,17 @@ def persist_datacenter_ticker_swing_snapshots(
         "validation_status": "OK",
     }
     if profile:
-        summary["profile_db_write_seconds"] = f"{(time.perf_counter() - write_started_at):.3f}"
-        summary["profile_total_seconds"] = f"{(time.perf_counter() - total_started_at):.3f}"
+        summary["ticker_swing_snapshot_profile.delete_seconds"] = write_summary.get(
+            "ticker_swing_snapshot_profile.delete_seconds",
+            "0.000",
+        )
+        summary["ticker_swing_snapshot_profile.insert_seconds"] = write_summary.get(
+            "ticker_swing_snapshot_profile.insert_seconds",
+            "0.000",
+        )
+        summary["ticker_swing_snapshot_profile.rows_inserted"] = write_summary["inserted_count"]
+        summary["ticker_swing_snapshot_profile.rows_deleted"] = write_summary["deleted_count"]
+        summary["ticker_swing_snapshot_profile.total_seconds"] = f"{(time.perf_counter() - total_started_at):.3f}"
     return summary
 
 

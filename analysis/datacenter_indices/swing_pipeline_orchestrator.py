@@ -417,6 +417,7 @@ def run_datacenter_swing_pipeline(
     technical_relevance_run_id: str | None = None,
     no_technical_relevance: bool = False,
     profile_technical_relevance: bool = False,
+    profile_ticker_swing_snapshots: bool = False,
     skip_index: bool = False,
     skip_audit: bool = False,
     skip_reports: bool = False,
@@ -475,6 +476,7 @@ def run_datacenter_swing_pipeline(
     selected_watchlist_file = Path(DEFAULT_WATCHLIST_FILE) if watchlist_file is None else Path(watchlist_file)
     stage_duration_summary = _build_stage_duration_summary_defaults()
     technical_relevance_profile_summary: dict[str, object] = {}
+    ticker_swing_snapshot_profile_summary: dict[str, object] = {}
     if profile_technical_relevance and technical_relevance_mode != "auto":
         technical_relevance_profile_summary["technical_relevance_profile.status"] = technical_relevance_status
     output_hhmm = _resolve_output_timestamp_hhmm(generated_at_utc)
@@ -559,6 +561,8 @@ def run_datacenter_swing_pipeline(
         "--write-mode",
         "replace-date",
     ]
+    if profile_ticker_swing_snapshots:
+        ticker_base_argv.append("--profile")
     stages.append(
         PipelineStage(
             stage_key="ticker_swing_base_snapshots",
@@ -1018,6 +1022,8 @@ def run_datacenter_swing_pipeline(
             technical_relevance_profile_summary["technical_relevance_profile.status"] = (
                 "DRY_RUN" if technical_relevance_mode == "auto" else technical_relevance_status
             )
+        if profile_ticker_swing_snapshots:
+            ticker_swing_snapshot_profile_summary["ticker_swing_snapshot_profile.status"] = "DRY_RUN"
         for index, stage in enumerate(stages, start=1):
             stage_duration_summary[f"pipeline_stage.{stage.stage_key}.status"] = "DRY_RUN"
             print(f"=== Stage {index}/{len(stages)}: {stage.heading} ===")
@@ -1048,6 +1054,7 @@ def run_datacenter_swing_pipeline(
                 "weekly_report_path": "",
                 "pipeline_status": "DRY_RUN",
                 **stage_duration_summary,
+                **ticker_swing_snapshot_profile_summary,
                 **technical_relevance_profile_summary,
             }
         }
@@ -1115,6 +1122,7 @@ def run_datacenter_swing_pipeline(
                         "weekly_report_path": "",
                         "pipeline_status": "FAIL",
                         **stage_duration_summary,
+                        **ticker_swing_snapshot_profile_summary,
                         **technical_relevance_profile_summary,
                     }
                 }
@@ -1165,8 +1173,9 @@ def run_datacenter_swing_pipeline(
             "audit_validation_status": audit_validation_status,
             "daily_report_path": daily_report_path,
             "weekly_report_path": weekly_report_path,
-            "pipeline_status": pipeline_status,
-            **stage_duration_summary,
-            **technical_relevance_profile_summary,
+                "pipeline_status": pipeline_status,
+                **stage_duration_summary,
+                **ticker_swing_snapshot_profile_summary,
+                **technical_relevance_profile_summary,
+            }
         }
-    }

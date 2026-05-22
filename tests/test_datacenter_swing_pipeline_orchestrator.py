@@ -315,6 +315,20 @@ def test_dry_run_stage_summaries_use_stable_keys_and_zero_durations(tmp_path, mo
     assert summary["pipeline_stage.automatic_technical_relevance.duration_seconds"] == "0.000"
 
 
+def test_dry_run_stage_2_profile_reports_dry_run_status(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+
+    result = orchestrator.run_datacenter_swing_pipeline(
+        **_base_kwargs(tmp_path),
+        dry_run=True,
+        profile_ticker_swing_snapshots=True,
+        no_technical_relevance=True,
+    )
+
+    assert result["summary"]["ticker_swing_snapshot_profile.status"] == "DRY_RUN"
+
+
 def test_dry_run_auto_mode_reports_not_available_when_snapshot_rows_do_not_exist(tmp_path):
     analysis_db = tmp_path / "analysis.db"
     _create_analysis_db(analysis_db)

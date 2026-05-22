@@ -231,6 +231,54 @@ DC_TAXONOMY_V1,AAA,Power,UPS,CORE,1,1.0,
     assert rows[0]["latest_structure_freshness"] is None
 
 
+def test_persistence_profile_does_not_change_inserted_or_deleted_counts(tmp_path):
+    taxonomy_csv = _write_taxonomy_csv(
+        tmp_path,
+        """taxonomy_version,ticker,layer,subindustry,report_group_status,is_primary,role_weight,notes
+DC_TAXONOMY_V1,AAA,Power,UPS,CORE,1,1.0,
+""",
+    )
+    price_db = tmp_path / "osakedata.db"
+    analysis_db_plain = tmp_path / "analysis_plain.db"
+    analysis_db_profiled = tmp_path / "analysis_profiled.db"
+    _create_price_db(price_db)
+    _create_analysis_db(analysis_db_plain)
+    _create_analysis_db(analysis_db_profiled)
+    _insert_price_rows(
+        price_db,
+        [("AAA", "2024-01-10", 100, 101, 99, 100, 1000, "usa")],
+    )
+
+    plain_summary = persist_datacenter_ticker_swing_snapshots(
+        analysis_db_path=analysis_db_plain,
+        price_db_path=price_db,
+        taxonomy_csv_path=taxonomy_csv,
+        as_of_date="2024-01-10",
+        market="usa",
+        run_id="run_plain",
+        created_at_utc="2026-05-17T10:00:00Z",
+        write_mode="replace-date",
+        profile=False,
+    )
+    profiled_summary = persist_datacenter_ticker_swing_snapshots(
+        analysis_db_path=analysis_db_profiled,
+        price_db_path=price_db,
+        taxonomy_csv_path=taxonomy_csv,
+        as_of_date="2024-01-10",
+        market="usa",
+        run_id="run_profiled",
+        created_at_utc="2026-05-17T10:00:00Z",
+        write_mode="replace-date",
+        profile=True,
+    )
+
+    assert plain_summary["inserted_count"] == profiled_summary["inserted_count"] == 1
+    assert plain_summary["deleted_count"] == profiled_summary["deleted_count"] == 0
+    assert profiled_summary["ticker_swing_snapshot_profile.rows_built"] == 1
+    assert profiled_summary["ticker_swing_snapshot_profile.rows_inserted"] == 1
+    assert profiled_summary["ticker_swing_snapshot_profile.rows_deleted"] == 0
+
+
 def test_load_valid_price_dates_for_market_uses_primary_taxonomy_tickers_and_skips_weekend_dates(tmp_path):
     taxonomy_csv = _write_taxonomy_csv(
         tmp_path,

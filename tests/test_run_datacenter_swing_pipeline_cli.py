@@ -194,6 +194,18 @@ def test_pipeline_accepts_profile_technical_relevance_in_dry_run(tmp_path, capsy
     assert "SUMMARY technical_relevance_profile.status=DRY_RUN" in lines
 
 
+def test_pipeline_accepts_profile_ticker_swing_snapshots_in_dry_run(tmp_path, capsys):
+    exit_code = run_datacenter_swing_pipeline_main(
+        _base_args(tmp_path) + ["--dry-run", "--profile-ticker-swing-snapshots"]
+    )
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    profiled_plan_lines = [line for line in lines if line.startswith("PLAN ") and "--profile" in line]
+    assert len(profiled_plan_lines) == 1
+    assert "SUMMARY ticker_swing_snapshot_profile.status=DRY_RUN" in lines
+
+
 def test_pipeline_accepts_no_technical_relevance_and_shows_disabled_mode_in_dry_run(tmp_path, capsys):
     exit_code = run_datacenter_swing_pipeline_main(
         _base_args(tmp_path) + ["--dry-run", "--no-technical-relevance"]
@@ -232,6 +244,10 @@ def test_pipeline_calls_stages_in_correct_order_and_uses_index_base_date(tmp_pat
     def _make_cli(name: str):
         def _runner(argv: list[str]) -> int:
             calls.append((name, list(argv)))
+            if name == "ticker" and "--profile" in argv and "--scanner-only" not in argv:
+                print("SUMMARY ticker_swing_snapshot_profile.ticker_count=236")
+                print("SUMMARY ticker_swing_snapshot_profile.signal_date_count=1")
+                print("SUMMARY ticker_swing_snapshot_profile.total_seconds=12.345")
             return 0
 
         return _runner
@@ -311,6 +327,7 @@ def test_pipeline_calls_stages_in_correct_order_and_uses_index_base_date(tmp_pat
             "--weekly-window-size",
             "3",
             "--profile-technical-relevance",
+            "--profile-ticker-swing-snapshots",
         ]
     )
 
@@ -334,6 +351,8 @@ def test_pipeline_calls_stages_in_correct_order_and_uses_index_base_date(tmp_pat
     assert index_argv[index_argv.index("--start-date") + 1] == "2020-01-01"
     scanner_argv = calls[8][1]
     assert scanner_argv[scanner_argv.index("--taxonomy-version") + 1] == "DC_TAXONOMY_FULL_V1"
+    assert "--profile" in calls[1][1]
+    assert "--profile" not in scanner_argv
     audit_kwargs = calls[9][1]
     assert audit_kwargs["expected_ticker_count"] == 236
     assert audit_kwargs["expected_group_count"] == 54
@@ -365,6 +384,9 @@ def test_pipeline_calls_stages_in_correct_order_and_uses_index_base_date(tmp_pat
     assert "SUMMARY technical_relevance.missing_bar_index_count=0" in lines
     assert "SUMMARY technical_relevance.status=OK" in lines
     assert "SUMMARY technical_relevance_profile.ticker_count=3" in lines
+    assert "SUMMARY ticker_swing_snapshot_profile.ticker_count=236" in lines
+    assert "SUMMARY ticker_swing_snapshot_profile.signal_date_count=1" in lines
+    assert "SUMMARY ticker_swing_snapshot_profile.total_seconds=12.345" in lines
     assert "SUMMARY technical_relevance_profile.read_dow_snapshot_calls=10" in lines
     assert "SUMMARY technical_relevance_profile.classification_seconds=4.400" in lines
     assert "SUMMARY technical_relevance_profile.slowest_ticker.1=AAA|seconds=5.000|observations=5|records=5" in lines
@@ -469,6 +491,7 @@ def test_pipeline_profiling_disabled_by_default_does_not_print_profile_lines_in_
     assert exit_code == 0
     lines = capsys.readouterr().out.strip().splitlines()
     assert not any(line.startswith("SUMMARY technical_relevance_profile.") for line in lines)
+    assert not any(line.startswith("SUMMARY ticker_swing_snapshot_profile.") for line in lines)
 
 
 def test_pipeline_watchlist_override_is_passed_to_daily_and_weekly_report_stages(tmp_path, monkeypatch):

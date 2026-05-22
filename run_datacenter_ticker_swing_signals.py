@@ -14,10 +14,14 @@ if str(CURRENT_DIR) not in sys.path:
 from analysis.datacenter_indices.swing_ticker_persistence import (
     DEFAULT_MAX_VALID_PRICE_ROWS,
     DEFAULT_SIGNAL_VERSION,
+    finalize_ticker_swing_profile_summary,
     format_ticker_scanner_summary_lines,
+    format_ticker_swing_profile_summary_lines,
     format_ticker_swing_summary_lines,
     load_existing_ticker_signal_dates,
     load_valid_price_dates_for_market,
+    merge_ticker_swing_profile_summary,
+    _empty_ticker_swing_profile_aggregate,
     persist_datacenter_ticker_scanner_signals,
     persist_datacenter_ticker_swing_snapshots,
 )
@@ -114,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
                     taxonomy_csv_path=args.taxonomy_csv,
                 )
                 range_lines: list[str] = []
+                profile_aggregate = _empty_ticker_swing_profile_aggregate()
                 for valid_date in valid_dates:
                     summary = persist_datacenter_ticker_swing_snapshots(
                         analysis_db_path=args.analysis_db,
@@ -128,7 +133,11 @@ def main(argv: list[str] | None = None) -> int:
                         max_valid_price_rows=args.max_valid_price_rows,
                         profile=args.profile,
                     )
-                    range_lines.extend(format_ticker_swing_summary_lines(summary))
+                    range_lines.extend(
+                        format_ticker_swing_summary_lines(summary, include_profile=not args.profile)
+                    )
+                    if args.profile:
+                        merge_ticker_swing_profile_summary(profile_aggregate, summary)
                 from datetime import date as _date
                 requested_start_date = args.start_date
                 requested_end_date = args.end_date
@@ -143,6 +152,12 @@ def main(argv: list[str] | None = None) -> int:
                         f"SUMMARY skipped_non_trading_dates={max(calendar_day_count - len(valid_dates), 0)}",
                     ]
                 )
+                if args.profile:
+                    range_lines.extend(
+                        format_ticker_swing_profile_summary_lines(
+                            finalize_ticker_swing_profile_summary(profile_aggregate)
+                        )
+                    )
                 lines = range_lines
     except Exception as exc:
         print(f"ERROR {exc}", file=sys.stderr)

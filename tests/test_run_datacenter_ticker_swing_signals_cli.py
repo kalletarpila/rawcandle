@@ -231,9 +231,9 @@ def test_cli_profile_summary_lines_are_emitted_only_when_enabled(tmp_path, capsy
 
     assert exit_code == 0
     lines = capsys.readouterr().out.strip().splitlines()
-    assert "SUMMARY profile_enabled=1" in lines
-    assert any(line.startswith("SUMMARY profile_total_seconds=") for line in lines)
-    assert any(line.startswith("SUMMARY profile_rows_prepared=") for line in lines)
+    assert any(line.startswith("SUMMARY ticker_swing_snapshot_profile.total_seconds=") for line in lines)
+    assert any(line.startswith("SUMMARY ticker_swing_snapshot_profile.rows_built=") for line in lines)
+    assert any(line.startswith("SUMMARY ticker_swing_snapshot_profile.avg_rows_per_ticker=") for line in lines)
 
 
 def test_cli_base_range_skips_non_trading_dates_and_reports_aggregate_summary(tmp_path, capsys):
@@ -295,6 +295,58 @@ def test_cli_base_range_skips_non_trading_dates_and_reports_aggregate_summary(tm
             ).fetchall()
         ]
     assert dates == ["2024-01-12", "2024-01-15"]
+
+
+def test_cli_base_range_profile_emits_aggregate_snapshot_profile_lines(tmp_path, capsys):
+    price_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    taxonomy_csv = _write_taxonomy_csv(tmp_path)
+    _create_price_db(price_db)
+    _create_analysis_db(analysis_db)
+    with sqlite3.connect(price_db) as conn:
+        conn.executemany(
+            """
+            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ("AAA", "2024-01-12", 100, 101, 99, 100, 1000, "usa"),
+                ("AAA", "2024-01-15", 101, 102, 100, 101, 1000, "usa"),
+            ],
+        )
+        conn.commit()
+
+    exit_code = run_datacenter_ticker_swing_signals_main(
+        [
+            "--price-db",
+            str(price_db),
+            "--analysis-db",
+            str(analysis_db),
+            "--taxonomy-csv",
+            str(taxonomy_csv),
+            "--start-date",
+            "2024-01-12",
+            "--end-date",
+            "2024-01-15",
+            "--market",
+            "usa",
+            "--write-mode",
+            "replace-date",
+            "--created-at-utc",
+            "2026-05-17T12:00:00Z",
+            "--profile",
+        ]
+    )
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert "SUMMARY requested_start_date=2024-01-12" in lines
+    assert "SUMMARY requested_end_date=2024-01-15" in lines
+    assert "SUMMARY valid_trading_dates=2" in lines
+    assert "SUMMARY ticker_swing_snapshot_profile.signal_date_count=2" in lines
+    assert "SUMMARY ticker_swing_snapshot_profile.ticker_count=1" in lines
+    assert "SUMMARY ticker_swing_snapshot_profile.rows_built=2" in lines
+    assert any(line.startswith("SUMMARY ticker_swing_snapshot_profile.total_seconds=") for line in lines)
 
 
 def test_cli_scanner_range_reports_only_existing_base_dates(tmp_path, capsys):
