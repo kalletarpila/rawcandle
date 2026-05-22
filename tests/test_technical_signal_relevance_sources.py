@@ -165,6 +165,219 @@ def test_hidden_divergence_is_emitted_only_when_explicit_hidden_fields_exist_and
     assert [item.signal_name for item in observations] == ["Hidden Bullish Divergence"]
 
 
+def test_divergence_adapter_with_r3_columns_does_not_emit_bullish_when_flag_is_zero():
+    conn = _connect()
+    conn.execute(
+        """
+        CREATE TABLE divergence_data (
+            ticker TEXT,
+            date TEXT,
+            bullish_strength REAL,
+            bearish_strength REAL,
+            rsi REAL,
+            is_bullish_divergence_r3 INTEGER,
+            is_bearish_divergence_r3 INTEGER
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO divergence_data (
+            ticker, date, bullish_strength, bearish_strength, rsi,
+            is_bullish_divergence_r3, is_bearish_divergence_r3
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("AAA", "2024-01-10", 1.2, 0.0, 55.0, 0, 0),
+    )
+
+    observations = read_divergence_observations(conn, "AAA", "1d", "2024-01-01", "2024-01-31")
+    assert observations == []
+
+
+def test_divergence_adapter_with_r3_columns_does_not_emit_bearish_when_flag_is_zero():
+    conn = _connect()
+    conn.execute(
+        """
+        CREATE TABLE divergence_data (
+            ticker TEXT,
+            date TEXT,
+            bullish_strength REAL,
+            bearish_strength REAL,
+            rsi REAL,
+            is_bullish_divergence_r3 INTEGER,
+            is_bearish_divergence_r3 INTEGER
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO divergence_data (
+            ticker, date, bullish_strength, bearish_strength, rsi,
+            is_bullish_divergence_r3, is_bearish_divergence_r3
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("AAA", "2024-01-10", 0.0, 1.1, 40.0, 0, 0),
+    )
+
+    observations = read_divergence_observations(conn, "AAA", "1d", "2024-01-01", "2024-01-31")
+    assert observations == []
+
+
+def test_divergence_adapter_with_r3_columns_emits_bullish_only_when_flag_is_one():
+    conn = _connect()
+    conn.execute(
+        """
+        CREATE TABLE divergence_data (
+            ticker TEXT,
+            date TEXT,
+            bullish_strength REAL,
+            bearish_strength REAL,
+            rsi REAL,
+            is_bullish_divergence_r3 INTEGER,
+            is_bearish_divergence_r3 INTEGER
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO divergence_data (
+            ticker, date, bullish_strength, bearish_strength, rsi,
+            is_bullish_divergence_r3, is_bearish_divergence_r3
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("AAA", "2024-01-10", 0.0, 0.0, 55.0, 1, 0),
+    )
+
+    observations = read_divergence_observations(conn, "AAA", "1d", "2024-01-01", "2024-01-31")
+    assert [item.signal_name for item in observations] == ["Bullish Divergence"]
+
+
+def test_divergence_adapter_with_r3_columns_emits_bearish_only_when_flag_is_one():
+    conn = _connect()
+    conn.execute(
+        """
+        CREATE TABLE divergence_data (
+            ticker TEXT,
+            date TEXT,
+            bullish_strength REAL,
+            bearish_strength REAL,
+            rsi REAL,
+            is_bullish_divergence_r3 INTEGER,
+            is_bearish_divergence_r3 INTEGER
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO divergence_data (
+            ticker, date, bullish_strength, bearish_strength, rsi,
+            is_bullish_divergence_r3, is_bearish_divergence_r3
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("AAA", "2024-01-10", 0.0, 0.0, 40.0, 0, 1),
+    )
+
+    observations = read_divergence_observations(conn, "AAA", "1d", "2024-01-01", "2024-01-31")
+    assert [item.signal_name for item in observations] == ["Bearish Divergence"]
+
+
+def test_divergence_adapter_with_r3_columns_emits_hidden_bullish_only_when_flag_is_one():
+    conn = _connect()
+    conn.execute(
+        """
+        CREATE TABLE divergence_data (
+            ticker TEXT,
+            date TEXT,
+            bullish_strength REAL,
+            bearish_strength REAL,
+            hidden_bullish_strength REAL,
+            hidden_bearish_strength REAL,
+            is_hidden_bullish_divergence_r3 INTEGER,
+            is_hidden_bearish_divergence_r3 INTEGER
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO divergence_data (
+            ticker, date, bullish_strength, bearish_strength,
+            hidden_bullish_strength, hidden_bearish_strength,
+            is_hidden_bullish_divergence_r3, is_hidden_bearish_divergence_r3
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("AAA", "2024-01-10", 0.0, 0.0, 0.0, 0.0, 1, 0),
+    )
+
+    observations = read_divergence_observations(conn, "AAA", "1d", "2024-01-01", "2024-01-31")
+    assert [item.signal_name for item in observations] == ["Hidden Bullish Divergence"]
+
+
+def test_divergence_adapter_with_r3_columns_emits_hidden_bearish_only_when_flag_is_one():
+    conn = _connect()
+    conn.execute(
+        """
+        CREATE TABLE divergence_data (
+            ticker TEXT,
+            date TEXT,
+            bullish_strength REAL,
+            bearish_strength REAL,
+            hidden_bullish_strength REAL,
+            hidden_bearish_strength REAL,
+            is_hidden_bullish_divergence_r3 INTEGER,
+            is_hidden_bearish_divergence_r3 INTEGER
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO divergence_data (
+            ticker, date, bullish_strength, bearish_strength,
+            hidden_bullish_strength, hidden_bearish_strength,
+            is_hidden_bullish_divergence_r3, is_hidden_bearish_divergence_r3
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("AAA", "2024-01-10", 0.0, 0.0, 0.0, 0.0, 0, 1),
+    )
+
+    observations = read_divergence_observations(conn, "AAA", "1d", "2024-01-01", "2024-01-31")
+    assert [item.signal_name for item in observations] == ["Hidden Bearish Divergence"]
+
+
+def test_divergence_adapter_with_r3_columns_does_not_let_strength_override_zero_flags():
+    conn = _connect()
+    conn.execute(
+        """
+        CREATE TABLE divergence_data (
+            ticker TEXT,
+            date TEXT,
+            bullish_strength REAL,
+            bearish_strength REAL,
+            hidden_bullish_strength REAL,
+            hidden_bearish_strength REAL,
+            rsi REAL,
+            is_bullish_divergence_r3 INTEGER,
+            is_bearish_divergence_r3 INTEGER,
+            is_hidden_bullish_divergence_r3 INTEGER,
+            is_hidden_bearish_divergence_r3 INTEGER
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO divergence_data (
+            ticker, date, bullish_strength, bearish_strength,
+            hidden_bullish_strength, hidden_bearish_strength,
+            rsi, is_bullish_divergence_r3, is_bearish_divergence_r3,
+            is_hidden_bullish_divergence_r3, is_hidden_bearish_divergence_r3
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("AAA", "2024-01-10", 0.7, 0.9, 0.4, 0.6, 50.0, 0, 0, 0, 0),
+    )
+
+    observations = read_divergence_observations(conn, "AAA", "1d", "2024-01-01", "2024-01-31")
+    assert observations == []
+
+
 def test_normalize_signal_name_maps_known_names():
     assert normalize_signal_name("Hammer") == "Hammer"
     assert normalize_signal_name("hammer") == "Hammer"

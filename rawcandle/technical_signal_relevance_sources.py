@@ -160,6 +160,20 @@ def _row_value(row: sqlite3.Row | dict[str, Any], field_name: str) -> Any:
     return row.get(field_name)
 
 
+def _should_emit_divergence_signal(
+    row: sqlite3.Row,
+    *,
+    columns: set[str],
+    strength_field: str,
+    flag_field: str,
+) -> bool:
+    if flag_field in columns:
+        return int(row[flag_field] or 0) == 1
+    if strength_field not in columns:
+        return False
+    return float(row[strength_field] or 0) > 0
+
+
 def _build_fallback_event_id(
     ticker: str,
     event_type: str,
@@ -473,6 +487,16 @@ def read_divergence_observations(
         if "is_hidden_bearish_divergence_r3" in columns
         else "NULL AS is_hidden_bearish_divergence_r3"
     )
+    bullish_flag_expr = (
+        "is_bullish_divergence_r3"
+        if "is_bullish_divergence_r3" in columns
+        else "NULL AS is_bullish_divergence_r3"
+    )
+    bearish_flag_expr = (
+        "is_bearish_divergence_r3"
+        if "is_bearish_divergence_r3" in columns
+        else "NULL AS is_bearish_divergence_r3"
+    )
     rows = conn.execute(
         f"""
         SELECT
@@ -482,6 +506,8 @@ def read_divergence_observations(
             bearish_strength,
             {hidden_bullish_strength_expr},
             {hidden_bearish_strength_expr},
+            {bullish_flag_expr},
+            {bearish_flag_expr},
             {hidden_bullish_flag_expr},
             {hidden_bearish_flag_expr}
         FROM divergence_data
@@ -496,7 +522,12 @@ def read_divergence_observations(
     observations: list[TechnicalSignalObservation] = []
     for row in rows:
         signal_date = str(row["date"])
-        if (row["bullish_strength"] or 0) > 0:
+        if _should_emit_divergence_signal(
+            row,
+            columns=columns,
+            strength_field="bullish_strength",
+            flag_field="is_bullish_divergence_r3",
+        ):
             observations.append(
                 TechnicalSignalObservation(
                     ticker=str(row["ticker"]),
@@ -508,7 +539,12 @@ def read_divergence_observations(
                     signal_source_id=RSI,
                 )
             )
-        if (row["bearish_strength"] or 0) > 0:
+        if _should_emit_divergence_signal(
+            row,
+            columns=columns,
+            strength_field="bearish_strength",
+            flag_field="is_bearish_divergence_r3",
+        ):
             observations.append(
                 TechnicalSignalObservation(
                     ticker=str(row["ticker"]),
@@ -520,9 +556,11 @@ def read_divergence_observations(
                     signal_source_id=RSI,
                 )
             )
-        if "hidden_bullish_strength" in columns and (
-            (row["hidden_bullish_strength"] or 0) > 0
-            or int(row["is_hidden_bullish_divergence_r3"] or 0) == 1
+        if _should_emit_divergence_signal(
+            row,
+            columns=columns,
+            strength_field="hidden_bullish_strength",
+            flag_field="is_hidden_bullish_divergence_r3",
         ):
             observations.append(
                 TechnicalSignalObservation(
@@ -535,9 +573,11 @@ def read_divergence_observations(
                     signal_source_id=RSI,
                 )
             )
-        if "hidden_bearish_strength" in columns and (
-            (row["hidden_bearish_strength"] or 0) > 0
-            or int(row["is_hidden_bearish_divergence_r3"] or 0) == 1
+        if _should_emit_divergence_signal(
+            row,
+            columns=columns,
+            strength_field="hidden_bearish_strength",
+            flag_field="is_hidden_bearish_divergence_r3",
         ):
             observations.append(
                 TechnicalSignalObservation(
