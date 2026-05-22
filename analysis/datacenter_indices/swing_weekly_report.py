@@ -26,11 +26,13 @@ from .swing_daily_report import (
     _check_required_tables,
     _float_value,
     _build_csv_rows_from_markdown,
+    _enrich_rows_with_technical_relevance_companions,
     _build_technical_relevance_csv_section,
     _format_table,
     _normalize_path,
     _parse_iso_date,
     _resolve_watchlist_context,
+    _technical_relevance_companion_headers,
     _technical_relevance_context_headers,
     _row_to_dict,
     _utc_now_iso,
@@ -1189,6 +1191,12 @@ def build_markdown_weekly_swing_report(
             str(row.get("ticker") or ""),
         )
     )
+    if technical_relevance_run_id is not None:
+        breakout_rows = _enrich_rows_with_technical_relevance_companions(
+            breakout_rows,
+            technical_relevance_context_rows=technical_relevance_context_rows,
+            row_date_field="last_signal_date",
+        )
     lines.append(
         _format_table(
             [
@@ -1209,7 +1217,7 @@ def build_markdown_weekly_swing_report(
                 "last_latest_reset_reason",
                 "last_latest_reset_freshness",
                 "last_price_data_status",
-            ],
+            ] + ([] if technical_relevance_run_id is None else _technical_relevance_companion_headers()),
             breakout_rows[:top_n],
         ).rstrip()
     )
@@ -1229,6 +1237,12 @@ def build_markdown_weekly_swing_report(
             str(row.get("ticker") or ""),
         )
     )
+    if technical_relevance_run_id is not None:
+        pullback_rows = _enrich_rows_with_technical_relevance_companions(
+            pullback_rows,
+            technical_relevance_context_rows=technical_relevance_context_rows,
+            row_date_field="last_signal_date",
+        )
     lines.append(
         _format_table(
             [
@@ -1254,7 +1268,7 @@ def build_markdown_weekly_swing_report(
                 "last_bullish_divergence_signal",
                 "last_hidden_bullish_divergence_signal",
                 "last_price_data_status",
-            ],
+            ] + ([] if technical_relevance_run_id is None else _technical_relevance_companion_headers()),
             pullback_rows[:top_n],
         ).rstrip()
     )
@@ -1270,6 +1284,12 @@ def build_markdown_weekly_swing_report(
             str(row.get("ticker") or ""),
         )
     )
+    if technical_relevance_run_id is not None:
+        exit_rows = _enrich_rows_with_technical_relevance_companions(
+            exit_rows,
+            technical_relevance_context_rows=technical_relevance_context_rows,
+            row_date_field="last_signal_date",
+        )
     lines.append(
         _format_table(
             [
@@ -1298,7 +1318,7 @@ def build_markdown_weekly_swing_report(
                 "last_bearish_divergence_signal",
                 "last_hidden_bearish_divergence_signal",
                 "last_price_data_status",
-            ],
+            ] + ([] if technical_relevance_run_id is None else _technical_relevance_companion_headers()),
             exit_rows[:top_n],
         ).rstrip()
     )

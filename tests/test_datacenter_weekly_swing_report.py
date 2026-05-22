@@ -968,6 +968,8 @@ def test_weekly_report_without_technical_relevance_run_id_remains_unchanged(tmp_
 
     assert "## 15. Technical Relevance Context" not in result["markdown"]
     assert "section;technical_relevance_context" not in result["csv"]
+    assert "latest_bullish_relevance_signal_name" not in result["markdown"]
+    assert "latest_bearish_relevance_signal_name" not in result["markdown"]
 
 
 def test_weekly_report_with_technical_relevance_run_id_includes_context_section(tmp_path):
@@ -993,9 +995,60 @@ def test_weekly_report_with_technical_relevance_run_id_includes_context_section(
         relevance_class="WEAK_CONTEXT",
         relevance_reason="UP_TREND_REGULAR_BULLISH_DIVERGENCE_WEAK",
     )
+    _insert_relevance_record(
+        conn,
+        run_id="REL_WEEKLY",
+        ticker="BBB",
+        signal_date="2024-01-05",
+        signal_name="Hammer",
+        relevance_class="RELEVANT",
+        relevance_reason="UP_TREND_BULLISH_DIP_REVERSAL_NEAR_PIVOT_LOW",
+    )
+    _insert_relevance_record(
+        conn,
+        run_id="REL_WEEKLY",
+        ticker="BBB",
+        signal_date="2024-01-10",
+        signal_name="Bearish Divergence",
+        relevance_class="RELEVANT",
+        relevance_reason="UP_TREND_BEARISH_DIVERGENCE_AFTER_BOS_DOWN",
+    )
+    _insert_relevance_record(
+        conn,
+        run_id="REL_WEEKLY",
+        ticker="BBB",
+        signal_date="2024-01-10",
+        signal_name="Morning Star",
+        relevance_class="NOISE",
+        relevance_reason="NOISE_REASON",
+    )
+    _insert_relevance_record(
+        conn,
+        run_id="REL_WEEKLY",
+        ticker="CCC",
+        signal_date="2024-01-08",
+        signal_name="Hammer",
+        relevance_class="WEAK_CONTEXT",
+        relevance_reason="UP_TREND_BULLISH_REVERSAL_WITHOUT_PIVOT_CONTEXT",
+    )
+    _insert_relevance_record(
+        conn,
+        run_id="REL_WEEKLY",
+        ticker="CCC",
+        signal_date="2024-01-10",
+        signal_name="Bearish Engulfing",
+        relevance_class="RELEVANT",
+        relevance_reason="UP_TREND_BEARISH_REVERSAL_AFTER_BOS_DOWN",
+    )
     conn.commit()
     conn.close()
 
+    baseline = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
     result = write_weekly_swing_report(
         analysis_db_path=analysis_db,
         end_date="2024-01-10",
@@ -1004,8 +1057,20 @@ def test_weekly_report_with_technical_relevance_run_id_includes_context_section(
         technical_relevance_run_id="REL_WEEKLY",
     )
 
+    assert baseline["summary"]["repeated_pullback_tickers"] == result["summary"]["repeated_pullback_tickers"]
+    assert baseline["summary"]["repeated_exit_risk_tickers"] == result["summary"]["repeated_exit_risk_tickers"]
     assert "## 15. Technical Relevance Context" in result["markdown"]
     assert "technical_relevance_run_id: REL_WEEKLY" in result["markdown"]
+    assert "latest_bullish_relevance_signal_name" in result["markdown"]
+    assert "latest_bearish_relevance_signal_name" in result["markdown"]
     assert "section;technical_relevance_context" in result["csv"]
     assert ";AAA;1d;2024-01-05;2024-01-05;Hammer;CANDLE;RELEVANT;" in result["csv"]
     assert ";BBB;1d;2024-01-10;2024-01-10;Bullish Divergence;CANDLE;WEAK_CONTEXT;" in result["csv"]
+    assert "| BBB | 3 | 2 | 2 | 2024-01-03 | 2024-01-10 | Infrastructure | AI Chips |" in result["markdown"]
+    assert "| 2024-01-05 | Hammer | RELEVANT | UP_TREND_BULLISH_DIP_REVERSAL_NEAR_PIVOT_LOW | 2024-01-10 | Bearish Divergence | RELEVANT | UP_TREND_BEARISH_DIVERGENCE_AFTER_BOS_DOWN |" in result["markdown"]
+    assert "| CCC | 4 | 2024-01-02 | 2024-01-10 | Infrastructure | Storage |" in result["markdown"]
+    assert "| 2024-01-08 | Hammer | WEAK_CONTEXT | UP_TREND_BULLISH_REVERSAL_WITHOUT_PIVOT_CONTEXT | 2024-01-10 | Bearish Engulfing | RELEVANT | UP_TREND_BEARISH_REVERSAL_AFTER_BOS_DOWN |" in result["markdown"]
+    pullback_start = result["markdown"].index("## 9. Repeated pullback tickers")
+    technical_section_start = result["markdown"].index("## 15. Technical Relevance Context")
+    scanner_section_markdown = result["markdown"][pullback_start:technical_section_start]
+    assert "NOISE_REASON" not in scanner_section_markdown

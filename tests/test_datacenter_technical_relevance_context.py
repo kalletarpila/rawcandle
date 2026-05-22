@@ -4,6 +4,7 @@ import sqlite3
 
 from analysis.datacenter_indices.technical_relevance_context import (
     load_technical_relevance_context,
+    select_latest_relevance_companion_rows,
 )
 from rawcandle.technical_signal_relevance import TechnicalSignalRelevanceConfig
 from rawcandle.technical_signal_relevance_persistence import (
@@ -169,3 +170,95 @@ def test_load_technical_relevance_context_can_filter_relevance_classes(tmp_path)
     )
 
     assert [(row.signal_name, row.relevance_class) for row in rows] == [("Hammer", "RELEVANT")]
+
+
+def test_select_latest_relevance_companion_rows_separates_bullish_and_bearish_and_ignores_noise(tmp_path):
+    db_path = tmp_path / "analysis.db"
+    conn = _connect(db_path)
+    _insert_run(conn, "RUN_A")
+    _insert_record(conn, run_id="RUN_A", ticker="AAA", signal_date="2024-01-09", signal_name="Hammer", relevance_class="RELEVANT", relevance_reason="BULL")
+    _insert_record(conn, run_id="RUN_A", ticker="AAA", signal_date="2024-01-10", signal_name="Bearish Divergence", relevance_class="WEAK_CONTEXT", relevance_reason="BEAR")
+    _insert_record(conn, run_id="RUN_A", ticker="AAA", signal_date="2024-01-10", signal_name="Morning Star", relevance_class="NOISE", relevance_reason="NOISE_BULL")
+    conn.commit()
+
+    rows = load_technical_relevance_context(
+        conn,
+        technical_relevance_run_id="RUN_A",
+        tickers=["AAA"],
+        timeframe="1d",
+        start_date="2024-01-09",
+        end_date="2024-01-10",
+    )
+
+    companion = select_latest_relevance_companion_rows(
+        rows,
+        ticker="AAA",
+        timeframe="1d",
+        signal_date="2024-01-10",
+    )
+
+    assert companion.latest_bullish_relevance_signal_name == "Hammer"
+    assert companion.latest_bullish_relevance_class == "RELEVANT"
+    assert companion.latest_bullish_relevance_reason == "BULL"
+    assert companion.latest_bearish_relevance_signal_name == "Bearish Divergence"
+    assert companion.latest_bearish_relevance_class == "WEAK_CONTEXT"
+    assert companion.latest_bearish_relevance_reason == "BEAR"
+
+
+def test_select_latest_relevance_companion_rows_prefers_relevant_over_weaker_newer_signal(tmp_path):
+    db_path = tmp_path / "analysis.db"
+    conn = _connect(db_path)
+    _insert_run(conn, "RUN_A")
+    _insert_record(conn, run_id="RUN_A", ticker="AAA", signal_date="2024-01-09", signal_name="Hammer", relevance_class="RELEVANT", relevance_reason="OLDER_RELEVANT")
+    _insert_record(conn, run_id="RUN_A", ticker="AAA", signal_date="2024-01-10", signal_name="Morning Star", relevance_class="WEAK_CONTEXT", relevance_reason="NEWER_WEAK")
+    conn.commit()
+
+    rows = load_technical_relevance_context(
+        conn,
+        technical_relevance_run_id="RUN_A",
+        tickers=["AAA"],
+        timeframe="1d",
+        start_date="2024-01-09",
+        end_date="2024-01-10",
+    )
+
+    companion = select_latest_relevance_companion_rows(
+        rows,
+        ticker="AAA",
+        timeframe="1d",
+        signal_date="2024-01-10",
+    )
+
+    assert companion.latest_bullish_relevance_signal_name == "Hammer"
+    assert companion.latest_bullish_relevance_class == "RELEVANT"
+    assert companion.latest_bullish_relevance_reason == "OLDER_RELEVANT"
+
+
+def test_select_latest_relevance_companion_rows_uses_latest_date_and_deterministic_ties(tmp_path):
+    db_path = tmp_path / "analysis.db"
+    conn = _connect(db_path)
+    _insert_run(conn, "RUN_A")
+    _insert_record(conn, run_id="RUN_A", ticker="AAA", signal_date="2024-01-09", signal_name="Hammer", relevance_class="RELEVANT", relevance_reason="OLDER")
+    _insert_record(conn, run_id="RUN_A", ticker="AAA", signal_date="2024-01-10", signal_name="Morning Star", relevance_class="RELEVANT", relevance_reason="B_REASON")
+    _insert_record(conn, run_id="RUN_A", ticker="AAA", signal_date="2024-01-10", signal_name="Piercing Pattern", relevance_class="RELEVANT", relevance_reason="A_REASON")
+    conn.commit()
+
+    rows = load_technical_relevance_context(
+        conn,
+        technical_relevance_run_id="RUN_A",
+        tickers=["AAA"],
+        timeframe="1d",
+        start_date="2024-01-09",
+        end_date="2024-01-10",
+    )
+
+    companion = select_latest_relevance_companion_rows(
+        rows,
+        ticker="AAA",
+        timeframe="1d",
+        signal_date="2024-01-10",
+    )
+
+    assert companion.latest_bullish_relevance_signal_date == "2024-01-10"
+    assert companion.latest_bullish_relevance_signal_name == "Morning Star"
+    assert companion.latest_bullish_relevance_reason == "B_REASON"

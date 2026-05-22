@@ -9,7 +9,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Sequence
 
-from .technical_relevance_context import load_technical_relevance_context
+from .technical_relevance_context import (
+    load_technical_relevance_context,
+    select_latest_relevance_companion_rows,
+)
 
 
 DEFAULT_SIGNAL_VERSION = "DC_SWING_SIGNAL_V1"
@@ -155,6 +158,48 @@ def _technical_relevance_context_headers() -> list[str]:
         "is_trend_aligned",
         "is_counter_trend",
     ]
+
+
+def _technical_relevance_companion_headers() -> list[str]:
+    return [
+        "latest_bullish_relevance_signal_date",
+        "latest_bullish_relevance_signal_name",
+        "latest_bullish_relevance_class",
+        "latest_bullish_relevance_reason",
+        "latest_bearish_relevance_signal_date",
+        "latest_bearish_relevance_signal_name",
+        "latest_bearish_relevance_class",
+        "latest_bearish_relevance_reason",
+    ]
+
+
+def _enrich_rows_with_technical_relevance_companions(
+    rows: Sequence[dict[str, object]],
+    *,
+    technical_relevance_context_rows: Sequence[dict[str, object]],
+    row_date_field: str,
+) -> list[dict[str, object]]:
+    if not technical_relevance_context_rows:
+        return [dict(row) for row in rows]
+    enriched_rows: list[dict[str, object]] = []
+    for row in rows:
+        output_row = dict(row)
+        ticker = str(output_row.get("ticker") or "")
+        signal_date = str(output_row.get(row_date_field) or "")
+        if not ticker or not signal_date:
+            for field_name in _technical_relevance_companion_headers():
+                output_row[field_name] = None
+            enriched_rows.append(output_row)
+            continue
+        companion_row = select_latest_relevance_companion_rows(
+            technical_relevance_context_rows,
+            ticker=ticker,
+            timeframe="1d",
+            signal_date=signal_date,
+        )
+        output_row.update(asdict(companion_row))
+        enriched_rows.append(output_row)
+    return enriched_rows
 
 
 def _build_technical_relevance_csv_section(
@@ -1006,6 +1051,22 @@ def build_markdown_daily_swing_report(
         ),
         top_n=top_n,
     )
+    if technical_relevance_run_id is not None:
+        breakout_rows = _enrich_rows_with_technical_relevance_companions(
+            breakout_rows,
+            technical_relevance_context_rows=technical_relevance_context_rows,
+            row_date_field="signal_date",
+        )
+        pullback_rows = _enrich_rows_with_technical_relevance_companions(
+            pullback_rows,
+            technical_relevance_context_rows=technical_relevance_context_rows,
+            row_date_field="signal_date",
+        )
+        exit_risk_rows = _enrich_rows_with_technical_relevance_companions(
+            exit_risk_rows,
+            technical_relevance_context_rows=technical_relevance_context_rows,
+            row_date_field="signal_date",
+        )
 
     lines: list[str] = [
         "# Datacenter Daily Swing Signal Report",
@@ -1261,7 +1322,7 @@ def build_markdown_daily_swing_report(
                 "bullish_divergence_signal",
                 "bearish_divergence_signal",
                 "price_data_status",
-            ],
+            ] + ([] if technical_relevance_run_id is None else _technical_relevance_companion_headers()),
         ),
         (
             "## 13. Pullback Ticker Scanner",
@@ -1290,7 +1351,7 @@ def build_markdown_daily_swing_report(
                 "bullish_divergence_signal",
                 "hidden_bullish_divergence_signal",
                 "price_data_status",
-            ],
+            ] + ([] if technical_relevance_run_id is None else _technical_relevance_companion_headers()),
         ),
         (
             "## 14. Exit-Risk Ticker Scanner",
@@ -1318,7 +1379,7 @@ def build_markdown_daily_swing_report(
                 "bearish_divergence_signal",
                 "hidden_bearish_divergence_signal",
                 "price_data_status",
-            ],
+            ] + ([] if technical_relevance_run_id is None else _technical_relevance_companion_headers()),
         ),
     ]
     for heading, section_rows, headers in ticker_section_specs:

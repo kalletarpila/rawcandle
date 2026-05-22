@@ -760,6 +760,8 @@ def test_daily_report_without_technical_relevance_run_id_remains_unchanged(tmp_p
 
     assert "## 17. Technical Relevance Context" not in result["markdown"]
     assert "section;technical_relevance_context" not in result["csv"]
+    assert "latest_bullish_relevance_signal_name" not in result["markdown"]
+    assert "latest_bearish_relevance_signal_name" not in result["markdown"]
 
 
 def test_daily_report_with_technical_relevance_run_id_adds_context_section_without_changing_scanner_counts(tmp_path):
@@ -779,6 +781,15 @@ def test_daily_report_with_technical_relevance_run_id_adds_context_section_witho
     _insert_relevance_record(
         conn,
         run_id="REL_RUN_A",
+        ticker="AAA",
+        signal_date="2024-01-10",
+        signal_name="Bearish Divergence",
+        relevance_class="WEAK_CONTEXT",
+        relevance_reason="NEUTRAL_DIVERGENCE_WEAK_CONTEXT",
+    )
+    _insert_relevance_record(
+        conn,
+        run_id="REL_RUN_A",
         ticker="BBB",
         signal_date="2024-01-10",
         signal_name="Bullish Divergence",
@@ -788,11 +799,38 @@ def test_daily_report_with_technical_relevance_run_id_adds_context_section_witho
     _insert_relevance_record(
         conn,
         run_id="REL_RUN_A",
+        ticker="BBB",
+        signal_date="2024-01-10",
+        signal_name="Bearish Engulfing",
+        relevance_class="RELEVANT",
+        relevance_reason="UP_TREND_BEARISH_REVERSAL_AFTER_BOS_DOWN",
+    )
+    _insert_relevance_record(
+        conn,
+        run_id="REL_RUN_A",
+        ticker="BBB",
+        signal_date="2024-01-10",
+        signal_name="Morning Star",
+        relevance_class="NOISE",
+        relevance_reason="NOISE_REASON",
+    )
+    _insert_relevance_record(
+        conn,
+        run_id="REL_RUN_A",
         ticker="CCC",
         signal_date="2024-01-10",
         signal_name="Bearish Engulfing",
-        relevance_class="NOISE",
-        relevance_reason="UP_TREND_COUNTER_BEARISH_REVERSAL_MEDIUM_WITHOUT_BOS",
+        relevance_class="RELEVANT",
+        relevance_reason="UP_TREND_BEARISH_REVERSAL_AFTER_BOS_DOWN",
+    )
+    _insert_relevance_record(
+        conn,
+        run_id="REL_RUN_A",
+        ticker="CCC",
+        signal_date="2024-01-10",
+        signal_name="Hammer",
+        relevance_class="WEAK_CONTEXT",
+        relevance_reason="UP_TREND_BULLISH_REVERSAL_WITHOUT_PIVOT_CONTEXT",
     )
     conn.commit()
     conn.close()
@@ -816,6 +854,10 @@ def test_daily_report_with_technical_relevance_run_id_adds_context_section_witho
     assert "technical_relevance_run_id: REL_RUN_A" in enriched["markdown"]
     assert "bullish_candle_signal" in enriched["markdown"]
     assert "bearish_divergence_signal" in enriched["markdown"]
+    assert "latest_bullish_relevance_signal_name" in enriched["markdown"]
+    assert "latest_bearish_relevance_signal_name" in enriched["markdown"]
+    assert "latest_bullish_relevance_class" in enriched["markdown"]
+    assert "latest_bearish_relevance_class" in enriched["markdown"]
     assert "section;technical_relevance_context" in enriched["csv"]
     assert (
         "section;ticker;timeframe;signal_date;signal_confirmed_as_of_date;signal_name;"
@@ -826,4 +868,14 @@ def test_daily_report_with_technical_relevance_run_id_adds_context_section_witho
     ) in enriched["csv"]
     assert ";AAA;1d;2024-01-10;2024-01-10;Hammer;CANDLE;RELEVANT;" in enriched["csv"]
     assert ";BBB;1d;2024-01-10;2024-01-10;Bullish Divergence;CANDLE;WEAK_CONTEXT;" in enriched["csv"]
-    assert ";CCC;1d;2024-01-10;2024-01-10;Bearish Engulfing;CANDLE;NOISE;" in enriched["csv"]
+    assert ";CCC;1d;2024-01-10;2024-01-10;Bearish Engulfing;CANDLE;RELEVANT;" in enriched["csv"]
+    assert "| AAA | Infrastructure | AI Chips |" in enriched["markdown"]
+    assert "| 2024-01-10 | Hammer | RELEVANT | UP_TREND_BULLISH_DIP_REVERSAL_NEAR_PIVOT_LOW | 2024-01-10 | Bearish Divergence | WEAK_CONTEXT | NEUTRAL_DIVERGENCE_WEAK_CONTEXT |" in enriched["markdown"]
+    assert "| BBB | Infrastructure | Cloud |" in enriched["markdown"]
+    assert "| 2024-01-10 | Bullish Divergence | WEAK_CONTEXT | UP_TREND_REGULAR_BULLISH_DIVERGENCE_WEAK | 2024-01-10 | Bearish Engulfing | RELEVANT | UP_TREND_BEARISH_REVERSAL_AFTER_BOS_DOWN |" in enriched["markdown"]
+    assert "| CCC | Infrastructure | Storage |" in enriched["markdown"]
+    assert "| 2024-01-10 | Hammer | WEAK_CONTEXT | UP_TREND_BULLISH_REVERSAL_WITHOUT_PIVOT_CONTEXT | 2024-01-10 | Bearish Engulfing | RELEVANT | UP_TREND_BEARISH_REVERSAL_AFTER_BOS_DOWN |" in enriched["markdown"]
+    breakout_start = enriched["markdown"].index("## 12. Breakout Ticker Scanner")
+    technical_section_start = enriched["markdown"].index("## 17. Technical Relevance Context")
+    scanner_section_markdown = enriched["markdown"][breakout_start:technical_section_start]
+    assert "NOISE_REASON" not in scanner_section_markdown
