@@ -76,6 +76,8 @@ _SIGNAL_NAME_ALIASES = {
     "hidden_bearish_divergence": "Hidden Bearish Divergence",
 }
 
+MAX_BAR_INDEX_LOOKBACK_BARS = 260
+
 
 class TechnicalSignalBarIndex:
     def __init__(self, bar_dates: list[str]) -> None:
@@ -95,6 +97,10 @@ def _parse_iso_date(value: str, field_name: str) -> str:
         return date.fromisoformat(str(value)).isoformat()
     except ValueError as exc:
         raise ValueError(f"Invalid {field_name}: {value}") from exc
+
+
+def _normalize_iso_dates(values: list[str] | tuple[str, ...], field_name: str) -> list[str]:
+    return sorted({_parse_iso_date(value, field_name) for value in values})
 
 
 def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
@@ -251,6 +257,107 @@ def build_bar_index(
     if not bar_dates:
         return None
     return TechnicalSignalBarIndex(bar_dates)
+
+
+def build_context_aware_bar_index(
+    conn: sqlite3.Connection,
+    ticker: str,
+    timeframe: str,
+    observation_confirmed_as_of_dates: list[str] | tuple[str, ...],
+    candidate_confirmed_as_of_dates: list[str] | tuple[str, ...],
+    max_lookback_bars: int = MAX_BAR_INDEX_LOOKBACK_BARS,
+    ohlcv_conn: sqlite3.Connection | None = None,
+) -> TechnicalSignalBarIndex | None:
+    del timeframe
+    normalized_observation_dates = _normalize_iso_dates(
+        list(observation_confirmed_as_of_dates),
+        "observation_confirmed_as_of_dates",
+    )
+    if not normalized_observation_dates:
+        return None
+    normalized_candidate_dates = _normalize_iso_dates(
+        list(candidate_confirmed_as_of_dates) or list(normalized_observation_dates),
+        "candidate_confirmed_as_of_dates",
+    )
+    earliest_observation_date = normalized_observation_dates[0]
+    latest_observation_date = normalized_observation_dates[-1]
+    earliest_required_date = min(normalized_candidate_dates[0], earliest_observation_date)
+
+    resolved_ohlcv_conn = ohlcv_conn
+    should_close = False
+    if resolved_ohlcv_conn is None:
+        resolved_ohlcv_conn, should_close = _resolve_ohlcv_connection(conn)
+    if resolved_ohlcv_conn is None or not _table_exists(resolved_ohlcv_conn, "osakedata"):
+        return None
+
+    try:
+        ticker_column, date_column = _introspect_ohlcv_schema(resolved_ohlcv_conn)
+        in_range_count_row = resolved_ohlcv_conn.execute(
+            f"""
+            SELECT COUNT(*) AS row_count
+            FROM osakedata
+            WHERE UPPER(TRIM({ticker_column})) = UPPER(TRIM(?))
+              AND {date_column} >= ?
+              AND {date_column} <= ?
+            """,
+            (
+                ticker,
+                earliest_observation_date,
+                latest_observation_date,
+            ),
+        ).fetchone()
+        in_range_count = 0 if in_range_count_row is None else int(in_range_count_row["row_count"])
+        if in_range_count == 0:
+            return None
+
+        required_coverage_count_row = resolved_ohlcv_conn.execute(
+            f"""
+            SELECT COUNT(*) AS row_count
+            FROM osakedata
+            WHERE UPPER(TRIM({ticker_column})) = UPPER(TRIM(?))
+              AND {date_column} >= ?
+              AND {date_column} <= ?
+            """,
+            (
+                ticker,
+                earliest_required_date,
+                latest_observation_date,
+            ),
+        ).fetchone()
+        required_coverage_count = (
+            0 if required_coverage_count_row is None else int(required_coverage_count_row["row_count"])
+        )
+        capped_row_limit = in_range_count + int(max_lookback_bars)
+        total_row_limit = min(required_coverage_count, capped_row_limit)
+        if total_row_limit <= 0:
+            return None
+
+        rows = resolved_ohlcv_conn.execute(
+            f"""
+            SELECT {date_column} AS bar_date
+            FROM (
+                SELECT {date_column}
+                FROM osakedata
+                WHERE UPPER(TRIM({ticker_column})) = UPPER(TRIM(?))
+                  AND {date_column} <= ?
+                ORDER BY {date_column} DESC
+                LIMIT ?
+            )
+            ORDER BY bar_date ASC
+            """,
+            (
+                ticker,
+                latest_observation_date,
+                total_row_limit,
+            ),
+        ).fetchall()
+        bar_dates = [str(row["bar_date"]) for row in rows]
+        if not bar_dates:
+            return None
+        return TechnicalSignalBarIndex(bar_dates)
+    finally:
+        if should_close:
+            resolved_ohlcv_conn.close()
 
 
 def assign_event_bar_distances(
@@ -701,10 +808,12 @@ def read_dow_pivots(
 
 
 __all__ = [
+    "MAX_BAR_INDEX_LOOKBACK_BARS",
     "TechnicalSignalBarIndex",
     "assign_event_bar_distances",
     "assign_pivot_bar_distances",
     "build_bar_index",
+    "build_context_aware_bar_index",
     "normalize_candlestick_observation_row",
     "normalize_signal_name",
     "read_bar_dates",

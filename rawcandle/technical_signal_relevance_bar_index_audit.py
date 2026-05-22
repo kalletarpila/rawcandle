@@ -4,12 +4,12 @@ import json
 import sqlite3
 from dataclasses import dataclass
 
-from .technical_signal_relevance import TechnicalSignalRelevanceConfig
 from .technical_signal_relevance_persistence import read_relevance_records_for_run
 from .technical_signal_relevance_sources import (
+    MAX_BAR_INDEX_LOOKBACK_BARS,
     _resolve_ohlcv_connection,
     _table_exists,
-    build_bar_index,
+    build_context_aware_bar_index,
 )
 
 
@@ -64,45 +64,6 @@ class TechnicalSignalBarIndexAuditSummary:
     rows_with_bar_index_available: int
     category_counts: dict[str, int]
     sample_rows_by_category: dict[str, list[TechnicalSignalBarIndexAuditRow]]
-
-
-def _load_run_config(conn: sqlite3.Connection, run_id: str) -> TechnicalSignalRelevanceConfig:
-    row = conn.execute(
-        """
-        SELECT config_snapshot_json
-        FROM technical_signal_relevance_runs
-        WHERE run_id = ?
-        """,
-        (run_id,),
-    ).fetchone()
-    if row is None or row[0] is None:
-        return TechnicalSignalRelevanceConfig()
-    config_snapshot = json.loads(str(row[0]))
-    return TechnicalSignalRelevanceConfig(
-        near_pivot_window_bars=int(
-            config_snapshot.get("near_pivot_window_bars", TechnicalSignalRelevanceConfig().near_pivot_window_bars)
-        ),
-        recent_bos_window_bars=int(
-            config_snapshot.get("recent_bos_window_bars", TechnicalSignalRelevanceConfig().recent_bos_window_bars)
-        ),
-        recent_reset_window_bars=int(
-            config_snapshot.get(
-                "recent_reset_window_bars",
-                TechnicalSignalRelevanceConfig().recent_reset_window_bars,
-            )
-        ),
-        near_bos_level_pct=float(
-            config_snapshot.get("near_bos_level_pct", TechnicalSignalRelevanceConfig().near_bos_level_pct)
-        ),
-        rule_version=str(config_snapshot.get("rule_version", TechnicalSignalRelevanceConfig().rule_version)),
-        mapping_version=str(
-            config_snapshot.get("mapping_version", TechnicalSignalRelevanceConfig().mapping_version)
-        ),
-        reason_version=str(
-            config_snapshot.get("reason_version", TechnicalSignalRelevanceConfig().reason_version)
-        ),
-    )
-
 
 def _parse_rule_trace(rule_trace: str | None) -> tuple[list[str], dict[str, str]]:
     if not rule_trace:
@@ -259,30 +220,36 @@ def audit_missing_bar_index_for_run(
             sample_rows_by_category=sample_rows_by_category,
         )
 
-    config = _load_run_config(conn, run_id)
-    lookback_bars = max(
-        config.near_pivot_window_bars,
-        config.recent_bos_window_bars,
-        config.recent_reset_window_bars,
-    ) + 5
     resolved_ohlcv_conn, should_close_ohlcv_conn = _resolve_audit_ohlcv_connection(conn, osakedata_conn)
     has_ohlcv_source = (
         resolved_ohlcv_conn is not None and _table_exists(resolved_ohlcv_conn, "osakedata")
     )
     bar_dates_by_ticker: dict[str, tuple[str, ...]] = {}
-    date_span_by_ticker: dict[str, tuple[str, str]] = {}
+    observation_dates_by_ticker: dict[str, set[str]] = {}
+    candidate_dates_by_ticker: dict[str, set[str]] = {}
     for row in rows:
         ticker = str(row["ticker"])
-        signal_date = str(row["signal_date"])
         confirmed_as_of_date = str(row["signal_confirmed_as_of_date"])
-        if ticker not in date_span_by_ticker:
-            date_span_by_ticker[ticker] = (signal_date, confirmed_as_of_date)
-            continue
-        current_start_date, current_end_date = date_span_by_ticker[ticker]
-        date_span_by_ticker[ticker] = (
-            min(current_start_date, signal_date, confirmed_as_of_date),
-            max(current_end_date, signal_date, confirmed_as_of_date),
-        )
+        observation_dates_by_ticker.setdefault(ticker, set()).add(confirmed_as_of_date)
+        candidate_dates = candidate_dates_by_ticker.setdefault(ticker, set())
+        candidate_dates.add(confirmed_as_of_date)
+        _, parsed_trace = _parse_rule_trace(None if row["rule_trace"] is None else str(row["rule_trace"]))
+        for event_id_key, expected_event_type in (
+            ("latest_bos_event_id", None),
+            ("latest_reset_event_id", "RESET"),
+            ("latest_pivot_event_id", None),
+        ):
+            event_id = parsed_trace.get(event_id_key)
+            if event_id in {None, "null"}:
+                continue
+            confirmed_date = _fetch_confirmed_date_for_event_id(
+                conn,
+                event_id,
+                ticker,
+                expected_event_type,
+            )
+            if confirmed_date is not None:
+                candidate_dates.add(confirmed_date)
 
     rows_missing_bar_index = 0
     for row in rows:
@@ -298,14 +265,13 @@ def audit_missing_bar_index_for_run(
             category = MISSING_OHLCV_SOURCE
         else:
             if ticker not in bar_dates_by_ticker:
-                span_start_date, span_end_date = date_span_by_ticker[ticker]
-                bar_index = build_bar_index(
+                bar_index = build_context_aware_bar_index(
                     conn,
                     ticker,
                     str(row["timeframe"]),
-                    span_start_date,
-                    span_end_date,
-                    lookback_bars,
+                    sorted(observation_dates_by_ticker[ticker]),
+                    sorted(candidate_dates_by_ticker.get(ticker, set())),
+                    max_lookback_bars=MAX_BAR_INDEX_LOOKBACK_BARS,
                     ohlcv_conn=resolved_ohlcv_conn,
                 )
                 bar_dates_by_ticker[ticker] = tuple() if bar_index is None else bar_index.bar_dates

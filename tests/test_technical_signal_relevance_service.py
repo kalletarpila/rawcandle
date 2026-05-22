@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from datetime import date, timedelta
 
 import pytest
 
@@ -85,6 +86,26 @@ def _create_osakedata(conn: sqlite3.Connection) -> None:
             market TEXT DEFAULT 'usa'
         )
         """
+    )
+
+
+def _insert_osakedata_range(
+    conn: sqlite3.Connection,
+    ticker: str,
+    start_date: str,
+    days: int,
+) -> None:
+    first_day = date.fromisoformat(start_date)
+    rows = []
+    for offset in range(days):
+        bar_date = (first_day + timedelta(days=offset)).isoformat()
+        rows.append((ticker, bar_date, 10.0, 11.0, 9.0, 10.0, 1000.0, "usa"))
+    conn.executemany(
+        """
+        INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        rows,
     )
 
 
@@ -509,3 +530,130 @@ def test_service_does_not_use_calendar_day_fallback_when_ohlcv_rows_are_missing(
 
     assert summary.missing_bar_index_count == 1
     assert record["bars_since_latest_bos"] is None
+
+
+def test_service_builds_bar_index_wide_enough_for_older_reset_within_max_lookback():
+    conn = _connect()
+    _create_analysis_findings(conn)
+    _create_dow_events(conn)
+    _create_osakedata(conn)
+    conn.execute(
+        "INSERT INTO analysis_findings (ticker, date, pattern, signal_strength, rsi14) VALUES (?, ?, ?, ?, ?)",
+        ("AAA", "2024-02-20", "Hammer", 0.8, 50.0),
+    )
+    conn.executemany(
+        """
+        INSERT INTO stock_dow_structure_events (
+            ticker, event_date, confirmed_as_of_date, event_type, trend_state, structure_epoch_id
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        [
+            ("AAA", "2024-01-10", "2024-01-10", "RESET", "UP", 1),
+            ("AAA", "2024-02-20", "2024-02-20", "PIVOT_LOW", "UP", 1),
+        ],
+    )
+    _insert_osakedata_range(conn, "AAA", "2024-01-01", 80)
+
+    summary = run_technical_signal_relevance_for_tickers(
+        conn, ["AAA"], "1d", "2024-02-01", "2024-02-29", "RUN_SERVICE_016", "2026-05-22T09:00:00Z"
+    )
+    record = read_relevance_records_for_run(conn, "RUN_SERVICE_016")[0]
+
+    assert summary.missing_bar_index_count == 0
+    assert record["bars_since_latest_reset"] == 41
+    assert "recent_reset=false" in record["rule_trace"]
+    assert "missing_bar_index=false" in record["rule_trace"]
+
+
+def test_service_builds_bar_index_wide_enough_for_older_bos_within_max_lookback():
+    conn = _connect()
+    _create_analysis_findings(conn)
+    _create_dow_events(conn)
+    _create_osakedata(conn)
+    conn.execute(
+        "INSERT INTO analysis_findings (ticker, date, pattern, signal_strength, rsi14) VALUES (?, ?, ?, ?, ?)",
+        ("AAA", "2024-02-20", "Evening Star", 0.8, 50.0),
+    )
+    conn.execute(
+        """
+        INSERT INTO stock_dow_structure_events (
+            ticker, event_date, confirmed_as_of_date, event_type, trend_state, structure_epoch_id
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        ("AAA", "2024-01-10", "2024-01-10", "BOS_DOWN", "UP", 1),
+    )
+    _insert_osakedata_range(conn, "AAA", "2024-01-01", 80)
+
+    summary = run_technical_signal_relevance_for_tickers(
+        conn, ["AAA"], "1d", "2024-02-01", "2024-02-29", "RUN_SERVICE_017", "2026-05-22T09:00:01Z"
+    )
+    record = read_relevance_records_for_run(conn, "RUN_SERVICE_017")[0]
+
+    assert summary.missing_bar_index_count == 0
+    assert record["latest_bos_direction"] == "BOS_DOWN"
+    assert record["bars_since_latest_bos"] == 41
+    assert record["relevance_class"] == "WEAK_CONTEXT"
+    assert record["relevance_reason"] == "UP_TREND_COUNTER_BEARISH_REVERSAL_STRONG_WITHOUT_BOS"
+    assert "recent_bos=false" in record["rule_trace"]
+    assert "missing_bar_index=false" in record["rule_trace"]
+
+
+def test_service_builds_bar_index_wide_enough_for_older_pivot_within_max_lookback():
+    conn = _connect()
+    _create_analysis_findings(conn)
+    _create_dow_events(conn)
+    _create_osakedata(conn)
+    conn.execute(
+        "INSERT INTO analysis_findings (ticker, date, pattern, signal_strength, rsi14) VALUES (?, ?, ?, ?, ?)",
+        ("AAA", "2024-02-20", "Hammer", 0.8, 50.0),
+    )
+    conn.execute(
+        """
+        INSERT INTO stock_dow_structure_events (
+            ticker, event_date, confirmed_as_of_date, event_type, trend_state, structure_epoch_id
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        ("AAA", "2024-01-10", "2024-01-10", "PIVOT_LOW", "UP", 1),
+    )
+    _insert_osakedata_range(conn, "AAA", "2024-01-01", 80)
+
+    summary = run_technical_signal_relevance_for_tickers(
+        conn, ["AAA"], "1d", "2024-02-01", "2024-02-29", "RUN_SERVICE_018", "2026-05-22T09:00:02Z"
+    )
+    record = read_relevance_records_for_run(conn, "RUN_SERVICE_018")[0]
+
+    assert summary.missing_bar_index_count == 0
+    assert record["near_latest_pivot"] == 0
+    assert record["relevance_class"] == "WEAK_CONTEXT"
+    assert record["relevance_reason"] == "UP_TREND_BULLISH_REVERSAL_WITHOUT_PIVOT_CONTEXT"
+    assert "missing_bar_index=false" in record["rule_trace"]
+
+
+def test_service_leaves_bar_distance_missing_when_event_is_older_than_max_lookback_cap():
+    conn = _connect()
+    _create_analysis_findings(conn)
+    _create_dow_events(conn)
+    _create_osakedata(conn)
+    conn.execute(
+        "INSERT INTO analysis_findings (ticker, date, pattern, signal_strength, rsi14) VALUES (?, ?, ?, ?, ?)",
+        ("AAA", "2025-02-20", "Evening Star", 0.8, 50.0),
+    )
+    conn.execute(
+        """
+        INSERT INTO stock_dow_structure_events (
+            ticker, event_date, confirmed_as_of_date, event_type, trend_state, structure_epoch_id
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        ("AAA", "2024-01-10", "2024-01-10", "BOS_DOWN", "UP", 1),
+    )
+    _insert_osakedata_range(conn, "AAA", "2024-01-01", 500)
+
+    summary = run_technical_signal_relevance_for_tickers(
+        conn, ["AAA"], "1d", "2025-02-01", "2025-02-28", "RUN_SERVICE_019", "2026-05-22T09:00:03Z"
+    )
+    record = read_relevance_records_for_run(conn, "RUN_SERVICE_019")[0]
+
+    assert summary.missing_bar_index_count == 1
+    assert record["bars_since_latest_bos"] is None
+    assert "recent_bos=false" in record["rule_trace"]
+    assert "missing_bar_index=true" in record["rule_trace"]

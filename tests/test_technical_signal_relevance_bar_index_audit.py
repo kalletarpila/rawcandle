@@ -243,6 +243,15 @@ def test_audit_categorizes_observation_date_not_in_bar_index():
     _insert_relevance_row(
         conn,
         run_id="RUN_AUDIT_004",
+        signal_date="2026-05-05",
+        signal_name="Morning Star",
+        rule_trace_entries=[
+            "missing_bar_index=false",
+        ],
+    )
+    _insert_relevance_row(
+        conn,
+        run_id="RUN_AUDIT_004",
         rule_trace_entries=[
             "missing_bar_index=true",
             "latest_bos_event_id=null",

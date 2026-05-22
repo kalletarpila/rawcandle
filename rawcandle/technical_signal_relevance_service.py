@@ -10,9 +10,10 @@ from .technical_signal_relevance_batch import (
     run_technical_signal_relevance_batch,
 )
 from .technical_signal_relevance_sources import (
+    MAX_BAR_INDEX_LOOKBACK_BARS,
     assign_event_bar_distances,
     assign_pivot_bar_distances,
-    build_bar_index,
+    build_context_aware_bar_index,
     read_candlestick_observations,
     read_divergence_observations,
     read_dow_events,
@@ -38,11 +39,6 @@ def run_technical_signal_relevance_for_tickers(
 ) -> TechnicalSignalRelevanceBatchSummary:
     resolved_config = config or TechnicalSignalRelevanceConfig()
     normalized_tickers = _normalize_requested_tickers(tickers)
-    lookback_bars = max(
-        resolved_config.near_pivot_window_bars,
-        resolved_config.recent_bos_window_bars,
-        resolved_config.recent_reset_window_bars,
-    ) + 5
 
     observations = []
     for ticker in normalized_tickers:
@@ -65,21 +61,11 @@ def run_technical_signal_relevance_for_tickers(
             )
         )
 
-    bar_indexes = {
-        ticker: build_bar_index(
-            conn,
-            ticker,
-            timeframe,
-            start_date,
-            end_date,
-            lookback_bars,
-        )
-        for ticker in normalized_tickers
-    }
-
     dow_snapshots_by_key: dict[ObservationContextKey, object] = {}
-    events_by_key: dict[ObservationContextKey, object] = {}
-    pivots_by_key: dict[ObservationContextKey, object] = {}
+    raw_events_by_key: dict[ObservationContextKey, object] = {}
+    raw_pivots_by_key: dict[ObservationContextKey, object] = {}
+    observation_dates_by_ticker: dict[str, set[str]] = {}
+    candidate_context_dates_by_ticker: dict[str, set[str]] = {}
     for observation in observations:
         key: ObservationContextKey = (
             observation.ticker,
@@ -106,15 +92,44 @@ def run_technical_signal_relevance_for_tickers(
             observation.timeframe,
             observation.signal_confirmed_as_of_date,
         )
-        bar_index = bar_indexes.get(observation.ticker)
+        raw_events_by_key[key] = raw_events
+        raw_pivots_by_key[key] = raw_pivots
+        observation_dates_by_ticker.setdefault(observation.ticker, set()).add(
+            observation.signal_confirmed_as_of_date
+        )
+        candidate_dates = candidate_context_dates_by_ticker.setdefault(observation.ticker, set())
+        candidate_dates.add(observation.signal_confirmed_as_of_date)
+        candidate_dates.update(event.confirmed_as_of_date for event in raw_events)
+        candidate_dates.update(pivot.confirmed_as_of_date for pivot in raw_pivots)
+
+    bar_indexes = {
+        ticker: build_context_aware_bar_index(
+            conn,
+            ticker,
+            timeframe,
+            sorted(observation_dates_by_ticker.get(ticker, set())),
+            sorted(candidate_context_dates_by_ticker.get(ticker, set())),
+            max_lookback_bars=MAX_BAR_INDEX_LOOKBACK_BARS,
+        )
+        for ticker in sorted(observation_dates_by_ticker)
+    }
+
+    events_by_key: dict[ObservationContextKey, object] = {}
+    pivots_by_key: dict[ObservationContextKey, object] = {}
+    for key, raw_events in raw_events_by_key.items():
+        ticker, _, observation_confirmed_as_of_date = key
+        bar_index = bar_indexes.get(ticker)
         events_by_key[key] = assign_event_bar_distances(
             raw_events,
-            observation.signal_confirmed_as_of_date,
+            observation_confirmed_as_of_date,
             bar_index,
         )
+    for key, raw_pivots in raw_pivots_by_key.items():
+        ticker, _, observation_confirmed_as_of_date = key
+        bar_index = bar_indexes.get(ticker)
         pivots_by_key[key] = assign_pivot_bar_distances(
             raw_pivots,
-            observation.signal_confirmed_as_of_date,
+            observation_confirmed_as_of_date,
             bar_index,
         )
 

@@ -3,6 +3,7 @@ import sqlite3
 from rawcandle.technical_signal_relevance import CANDLE, RSI
 from rawcandle.technical_signal_relevance_sources import (
     build_bar_index,
+    build_context_aware_bar_index,
     normalize_candlestick_observation_row,
     normalize_signal_name,
     read_bar_dates,
@@ -542,3 +543,67 @@ def test_bar_distance_helper_returns_none_when_confirmed_date_missing_from_index
 
     assert bar_index is not None
     assert bar_index.bars_since("2026-05-05", "2026-05-06") is None
+
+
+def test_context_aware_bar_index_includes_older_required_context_within_cap():
+    conn = _connect()
+    _create_osakedata(conn)
+    rows = [
+        ("AAA", f"2026-01-{day:02d}", 1.0, 1.0, 1.0, 1.0, 1.0, "usa")
+        for day in range(1, 32)
+    ]
+    rows.extend(
+        [
+            ("AAA", f"2026-02-{day:02d}", 1.0, 1.0, 1.0, 1.0, 1.0, "usa")
+            for day in range(1, 29)
+        ]
+    )
+    conn.executemany(
+        """
+        INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        rows,
+    )
+
+    bar_index = build_context_aware_bar_index(
+        conn,
+        "AAA",
+        "1d",
+        ["2026-02-20"],
+        ["2026-01-10", "2026-02-20"],
+        max_lookback_bars=260,
+    )
+
+    assert bar_index is not None
+    assert bar_index.bars_since("2026-01-10", "2026-02-20") == 41
+
+
+def test_context_aware_bar_index_respects_lookback_cap_for_older_context():
+    conn = _connect()
+    _create_osakedata(conn)
+    rows = []
+    for month in range(1, 13):
+        for day in range(1, 29):
+            rows.append(
+                ("AAA", f"2026-{month:02d}-{day:02d}", 1.0, 1.0, 1.0, 1.0, 1.0, "usa")
+            )
+    conn.executemany(
+        """
+        INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        rows,
+    )
+
+    bar_index = build_context_aware_bar_index(
+        conn,
+        "AAA",
+        "1d",
+        ["2026-12-20"],
+        ["2026-01-10", "2026-12-20"],
+        max_lookback_bars=260,
+    )
+
+    assert bar_index is not None
+    assert bar_index.bars_since("2026-01-10", "2026-12-20") is None
