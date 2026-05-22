@@ -157,6 +157,7 @@ def test_pipeline_default_weekly_window_size_is_20_and_used_in_dry_run(tmp_path,
     assert "SUMMARY technical_relevance.ticker_count=2" in lines
     assert "SUMMARY technical_relevance.ticker_count_status=EXISTING_DB_SNAPSHOT" in lines
     assert "SUMMARY technical_relevance_run_id=DATACENTER_TECH_REL_DC_TAXONOMY_FULL_V1_2026_05_15" in lines
+    assert not any(line.startswith("SUMMARY technical_relevance_profile.") for line in lines)
 
 
 def test_pipeline_accepts_technical_relevance_run_id_and_threads_it_to_dry_run_plans(tmp_path, capsys):
@@ -177,6 +178,20 @@ def test_pipeline_accepts_technical_relevance_run_id_and_threads_it_to_dry_run_p
     assert "SUMMARY technical_relevance.ticker_count_status=NOT_APPLICABLE_EXISTING_RUN" in lines
     assert "SUMMARY technical_relevance.status=SKIPPED_EXISTING_RUN" in lines
     assert "SUMMARY technical_relevance_run_id=REL_PIPE_A" in lines
+
+
+def test_pipeline_accepts_profile_technical_relevance_in_dry_run(tmp_path, capsys):
+    exit_code = run_datacenter_swing_pipeline_main(
+        _base_args(tmp_path) + ["--dry-run", "--profile-technical-relevance"]
+    )
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert any(
+        line.startswith("PLAN ") and "--profile-technical-relevance" in line
+        for line in lines
+    )
+    assert "SUMMARY technical_relevance_profile.status=DRY_RUN" in lines
 
 
 def test_pipeline_accepts_no_technical_relevance_and_shows_disabled_mode_in_dry_run(tmp_path, capsys):
@@ -227,7 +242,33 @@ def test_pipeline_calls_stages_in_correct_order_and_uses_index_base_date(tmp_pat
 
     def _technical_relevance(**kwargs):
         calls.append(("techrel", dict(kwargs)))
-        return _fake_technical_relevance_summary()
+        return {
+            **_fake_technical_relevance_summary(),
+            "profile_summary": {
+                "technical_relevance_profile.ticker_count": 3,
+                "technical_relevance_profile.observations_seen": 10,
+                "technical_relevance_profile.records_written": 10,
+                "technical_relevance_profile.candlestick_observation_count": 4,
+                "technical_relevance_profile.divergence_observation_count": 6,
+                "technical_relevance_profile.read_candlestick_observations_calls": 3,
+                "technical_relevance_profile.read_divergence_observations_calls": 3,
+                "technical_relevance_profile.read_dow_snapshot_calls": 10,
+                "technical_relevance_profile.read_dow_events_calls": 10,
+                "technical_relevance_profile.read_dow_pivots_calls": 10,
+                "technical_relevance_profile.read_bar_dates_calls": 3,
+                "technical_relevance_profile.build_bar_index_calls": 3,
+                "technical_relevance_profile.total_seconds": "12.345",
+                "technical_relevance_profile.read_observations_seconds": "1.100",
+                "technical_relevance_profile.read_dow_context_seconds": "2.200",
+                "technical_relevance_profile.bar_index_seconds": "3.300",
+                "technical_relevance_profile.classification_seconds": "4.400",
+                "technical_relevance_profile.persistence_seconds": "1.345",
+                "technical_relevance_profile.tickers_with_observations": 3,
+                "technical_relevance_profile.max_observations_per_ticker": 5,
+                "technical_relevance_profile.avg_observations_per_ticker": "3.333",
+                "technical_relevance_profile.slowest_ticker.1": "AAA|seconds=5.000|observations=5|records=5",
+            },
+        }
 
     def _daily(**kwargs):
         calls.append(("daily", dict(kwargs)))
@@ -269,6 +310,7 @@ def test_pipeline_calls_stages_in_correct_order_and_uses_index_base_date(tmp_pat
             "53",
             "--weekly-window-size",
             "3",
+            "--profile-technical-relevance",
         ]
     )
 
@@ -303,6 +345,7 @@ def test_pipeline_calls_stages_in_correct_order_and_uses_index_base_date(tmp_pat
     assert techrel_kwargs["signal_date"] == "2026-05-15"
     assert techrel_kwargs["taxonomy_version"] == "DC_TAXONOMY_FULL_V1"
     assert techrel_kwargs["signal_version"] == orchestrator.DEFAULT_SIGNAL_VERSION
+    assert techrel_kwargs["profile_technical_relevance"] is True
     assert str(daily_kwargs["watchlist_file"]) == orchestrator.DEFAULT_WATCHLIST_FILE
     assert daily_kwargs["technical_relevance_run_id"] == "AUTO_REL_RUN"
     assert weekly_kwargs["window_size"] == 3
@@ -321,6 +364,10 @@ def test_pipeline_calls_stages_in_correct_order_and_uses_index_base_date(tmp_pat
     assert "SUMMARY technical_relevance.missing_dow_context_count=0" in lines
     assert "SUMMARY technical_relevance.missing_bar_index_count=0" in lines
     assert "SUMMARY technical_relevance.status=OK" in lines
+    assert "SUMMARY technical_relevance_profile.ticker_count=3" in lines
+    assert "SUMMARY technical_relevance_profile.read_dow_snapshot_calls=10" in lines
+    assert "SUMMARY technical_relevance_profile.classification_seconds=4.400" in lines
+    assert "SUMMARY technical_relevance_profile.slowest_ticker.1=AAA|seconds=5.000|observations=5|records=5" in lines
     assert "SUMMARY audit_validation_status=OK" in lines
     total_duration_line = next(
         line for line in lines if line.startswith("SUMMARY pipeline.total_duration_seconds=")
@@ -380,6 +427,48 @@ def test_pipeline_threads_technical_relevance_run_id_to_daily_and_weekly_report_
     assert calls[0][1]["technical_relevance_run_id"] == "REL_PIPE_B"
     assert calls[1][0] == "weekly"
     assert calls[1][1]["technical_relevance_run_id"] == "REL_PIPE_B"
+
+
+def test_pipeline_profiling_disabled_by_default_does_not_print_profile_lines_in_auto_mode(tmp_path, monkeypatch, capsys):
+    DatabaseManager(str(tmp_path / "analysis.db")).close()
+
+    def _runner(argv: list[str]) -> int:
+        return 0
+
+    def _audit(**kwargs):
+        return {"summary": {"validation_status": "OK"}}
+
+    def _technical_relevance(**kwargs):
+        return _fake_technical_relevance_summary()
+
+    def _daily(**kwargs):
+        kwargs["output_md"].parent.mkdir(parents=True, exist_ok=True)
+        kwargs["output_md"].write_text("daily", encoding="utf-8")
+        kwargs["output_csv"].write_text("daily", encoding="utf-8")
+        return {"summary": {"output_markdown": str(kwargs["output_md"]), "output_csv": str(kwargs["output_csv"]), "validation_status": "OK"}}
+
+    def _weekly(**kwargs):
+        kwargs["output_md"].write_text("weekly", encoding="utf-8")
+        kwargs["output_csv"].write_text("weekly", encoding="utf-8")
+        return {"summary": {"output_markdown": str(kwargs["output_md"]), "output_csv": str(kwargs["output_csv"]), "validation_status": "OK"}}
+
+    monkeypatch.setattr(orchestrator, "run_datacenter_indices_main", _runner)
+    monkeypatch.setattr(orchestrator, "run_datacenter_ticker_swing_signals_main", _runner)
+    monkeypatch.setattr(orchestrator, "run_datacenter_group_swing_signals_main", _runner)
+    monkeypatch.setattr(orchestrator, "run_datacenter_group_synthetic_ohlc_main", _runner)
+    monkeypatch.setattr(orchestrator, "load_swing_pipeline_audit", _audit)
+    monkeypatch.setattr(orchestrator, "_run_automatic_technical_relevance_stage", _technical_relevance)
+    monkeypatch.setattr(orchestrator, "write_daily_swing_signal_report", _daily)
+    monkeypatch.setattr(orchestrator, "write_weekly_swing_report", _weekly)
+    monkeypatch.setattr(orchestrator, "format_swing_pipeline_audit_summary_lines", lambda summary: [])
+    monkeypatch.setattr(orchestrator, "format_daily_swing_report_summary_lines", lambda summary: [])
+    monkeypatch.setattr(orchestrator, "format_weekly_swing_report_summary_lines", lambda summary: [])
+
+    exit_code = run_datacenter_swing_pipeline_main(_base_args(tmp_path))
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert not any(line.startswith("SUMMARY technical_relevance_profile.") for line in lines)
 
 
 def test_pipeline_watchlist_override_is_passed_to_daily_and_weekly_report_stages(tmp_path, monkeypatch):

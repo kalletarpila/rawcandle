@@ -10,6 +10,7 @@ from rawcandle.technical_signal_relevance_persistence import (
     read_relevance_run,
 )
 from rawcandle.technical_signal_relevance_service import (
+    TechnicalSignalRelevanceProfile,
     run_technical_signal_relevance_for_tickers,
 )
 
@@ -189,6 +190,65 @@ def test_service_combines_candlestick_and_divergence_observations_for_one_ticker
 
     assert summary.observations_seen == 2
     assert summary.records_written == 2
+
+
+def test_service_profiling_counts_reader_calls_and_observations_without_changing_summary():
+    conn = _connect()
+    _create_analysis_findings(conn)
+    _create_divergence_data(conn)
+    _create_dow_events(conn)
+    _create_osakedata(conn)
+    conn.execute(
+        "INSERT INTO analysis_findings (ticker, date, pattern, signal_strength, rsi14) VALUES (?, ?, ?, ?, ?)",
+        ("AAA", "2024-01-10", "Hammer", 0.8, 50.0),
+    )
+    conn.execute(
+        "INSERT INTO divergence_data (ticker, date, bullish_strength, bearish_strength, rsi) VALUES (?, ?, ?, ?, ?)",
+        ("AAA", "2024-01-10", 1.0, 0.0, 30.0),
+    )
+    conn.execute(
+        """
+        INSERT INTO stock_dow_structure_events (
+            ticker, event_date, confirmed_as_of_date, event_type, trend_state, structure_epoch_id
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        ("AAA", "2024-01-09", "2024-01-10", "PIVOT_LOW", "UP", 1),
+    )
+    _insert_osakedata_range(conn, "AAA", "2024-01-01", 20)
+
+    profile = TechnicalSignalRelevanceProfile()
+    summary = run_technical_signal_relevance_for_tickers(
+        conn,
+        ["AAA"],
+        "1d",
+        "2024-01-01",
+        "2024-01-31",
+        "RUN_SERVICE_PROFILE_001",
+        "2026-05-21T13:00:02Z",
+        profile=profile,
+    )
+
+    assert summary.observations_seen == 2
+    assert summary.records_written == 2
+    assert profile.ticker_count == 1
+    assert profile.observations_seen == 2
+    assert profile.records_written == 2
+    assert profile.candlestick_observation_count == 1
+    assert profile.divergence_observation_count == 1
+    assert profile.read_candlestick_observations_calls == 1
+    assert profile.read_divergence_observations_calls == 1
+    assert profile.read_dow_snapshot_calls == 1
+    assert profile.read_dow_events_calls == 1
+    assert profile.read_dow_pivots_calls == 1
+    assert profile.read_bar_dates_calls == 1
+    assert profile.build_bar_index_calls == 1
+    assert profile.tickers_with_observations == 1
+    assert profile.max_observations_per_ticker == 2
+    assert profile.avg_observations_per_ticker == 2.0
+    assert len(profile.slowest_tickers) == 1
+    assert profile.slowest_tickers[0].ticker == "AAA"
+    assert profile.slowest_tickers[0].observations == 2
+    assert profile.slowest_tickers[0].records == 2
 
 
 def test_service_handles_multiple_tickers_deterministically():

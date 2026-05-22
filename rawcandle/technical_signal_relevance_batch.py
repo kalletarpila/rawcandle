@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from time import perf_counter
 from typing import Iterable, Mapping, TypeVar
 
 from .technical_signal_relevance import (
@@ -88,6 +89,7 @@ def run_technical_signal_relevance_batch(
     pivots_by_key: Mapping[ObservationContextKey, list[TechnicalSignalPivot]],
     config: TechnicalSignalRelevanceConfig,
     created_at_utc: str,
+    profile: object | None = None,
 ) -> TechnicalSignalRelevanceBatchSummary:
     sorted_observations = sorted(list(observations), key=_observation_sort_key)
     run_row = build_relevance_run_row(
@@ -95,7 +97,10 @@ def run_technical_signal_relevance_batch(
         config=config,
         created_at_utc=created_at_utc,
     )
+    insert_run_start = perf_counter()
     insert_relevance_run(conn, run_row)
+    if profile is not None:
+        profile.persistence_seconds += perf_counter() - insert_run_start
 
     stored_rows = []
     relevant_count = 0
@@ -106,6 +111,7 @@ def run_technical_signal_relevance_batch(
     missing_bar_index_count = 0
 
     for observation in sorted_observations:
+        classification_start = perf_counter()
         record = classify_relevance(
             observation,
             _resolve_context_value(dow_snapshots_by_key, observation, None),
@@ -113,6 +119,8 @@ def run_technical_signal_relevance_batch(
             _resolve_context_value(pivots_by_key, observation, []),
             config=config,
         )
+        if profile is not None:
+            profile.classification_seconds += perf_counter() - classification_start
         stored_rows.append(
             build_relevance_stored_row(
                 record,
@@ -133,7 +141,10 @@ def run_technical_signal_relevance_batch(
         if "missing_bar_index=true" in record.rule_trace:
             missing_bar_index_count += 1
 
+    insert_records_start = perf_counter()
     insert_relevance_records(conn, stored_rows)
+    if profile is not None:
+        profile.persistence_seconds += perf_counter() - insert_records_start
     return TechnicalSignalRelevanceBatchSummary(
         run_id=run_id,
         observations_seen=len(sorted_observations),

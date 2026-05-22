@@ -33,6 +33,8 @@ from run_datacenter_group_synthetic_ohlc import main as run_datacenter_group_syn
 from run_datacenter_indices import main as run_datacenter_indices_main
 from run_datacenter_ticker_swing_signals import main as run_datacenter_ticker_swing_signals_main
 from rawcandle.technical_signal_relevance_service import (
+    TechnicalSignalRelevanceProfile,
+    format_technical_relevance_profile_summary_lines,
     run_technical_signal_relevance_for_tickers,
 )
 
@@ -251,12 +253,14 @@ def _run_automatic_technical_relevance_stage(
     taxonomy_version: str,
     signal_version: str,
     generated_at_utc: str | None,
+    profile_technical_relevance: bool = False,
 ) -> dict[str, object]:
     start_date, end_date = compute_datacenter_technical_relevance_date_range(signal_date)
     run_id = build_datacenter_technical_relevance_run_id(
         taxonomy_version=taxonomy_version,
         signal_date=signal_date,
     )
+    profile = TechnicalSignalRelevanceProfile() if profile_technical_relevance else None
     with sqlite3.connect(analysis_db) as conn:
         conn.row_factory = sqlite3.Row
         tickers = load_datacenter_pipeline_technical_relevance_tickers(
@@ -278,8 +282,9 @@ def _run_automatic_technical_relevance_stage(
             end_date,
             run_id,
             resolve_created_at_utc(generated_at_utc),
+            profile=profile,
         )
-    return {
+    result = {
         "summary": {
             "run_id": run_id,
             "ticker_count": len(tickers),
@@ -295,6 +300,9 @@ def _run_automatic_technical_relevance_stage(
             "missing_bar_index_count": batch_summary.missing_bar_index_count,
         }
     }
+    if profile is not None:
+        result["profile_summary"] = profile.to_summary_dict()
+    return result
 
 
 def _load_dry_run_technical_relevance_ticker_snapshot_count(
@@ -408,6 +416,7 @@ def run_datacenter_swing_pipeline(
     no_taxonomy_listing: bool = False,
     technical_relevance_run_id: str | None = None,
     no_technical_relevance: bool = False,
+    profile_technical_relevance: bool = False,
     skip_index: bool = False,
     skip_audit: bool = False,
     skip_reports: bool = False,
@@ -465,6 +474,9 @@ def run_datacenter_swing_pipeline(
                 technical_relevance_ticker_count_status = "EXISTING_DB_SNAPSHOT"
     selected_watchlist_file = Path(DEFAULT_WATCHLIST_FILE) if watchlist_file is None else Path(watchlist_file)
     stage_duration_summary = _build_stage_duration_summary_defaults()
+    technical_relevance_profile_summary: dict[str, object] = {}
+    if profile_technical_relevance and technical_relevance_mode != "auto":
+        technical_relevance_profile_summary["technical_relevance_profile.status"] = technical_relevance_status
     output_hhmm = _resolve_output_timestamp_hhmm(generated_at_utc)
     daily_output_md = _timestamp_output_path(
         output_dir / f"datacenter_daily_{signal_date}_full.md",
@@ -876,6 +888,8 @@ def run_datacenter_swing_pipeline(
             "--signal-version",
             signal_version,
         ]
+        if profile_technical_relevance:
+            technical_relevance_argv.append("--profile-technical-relevance")
         stages.append(
             PipelineStage(
                 stage_key="automatic_technical_relevance",
@@ -887,6 +901,7 @@ def run_datacenter_swing_pipeline(
                     taxonomy_version=taxonomy_version,
                     signal_version=signal_version,
                     generated_at_utc=generated_at_utc,
+                    profile_technical_relevance=profile_technical_relevance,
                 ),
             )
         )
@@ -999,6 +1014,10 @@ def run_datacenter_swing_pipeline(
         )
 
     if dry_run:
+        if profile_technical_relevance:
+            technical_relevance_profile_summary["technical_relevance_profile.status"] = (
+                "DRY_RUN" if technical_relevance_mode == "auto" else technical_relevance_status
+            )
         for index, stage in enumerate(stages, start=1):
             stage_duration_summary[f"pipeline_stage.{stage.stage_key}.status"] = "DRY_RUN"
             print(f"=== Stage {index}/{len(stages)}: {stage.heading} ===")
@@ -1029,6 +1048,7 @@ def run_datacenter_swing_pipeline(
                 "weekly_report_path": "",
                 "pipeline_status": "DRY_RUN",
                 **stage_duration_summary,
+                **technical_relevance_profile_summary,
             }
         }
 
@@ -1095,11 +1115,15 @@ def run_datacenter_swing_pipeline(
                         "weekly_report_path": "",
                         "pipeline_status": "FAIL",
                         **stage_duration_summary,
+                        **technical_relevance_profile_summary,
                     }
                 }
         elif stage.heading == "Automatic technical relevance":
             for line in _format_technical_relevance_stage_summary_lines(result["summary"], status="OK"):
                 print(line)
+            if profile_technical_relevance and "profile_summary" in result:
+                for line in format_technical_relevance_profile_summary_lines(result["profile_summary"]):
+                    print(line)
             resolved_technical_relevance_run_id = str(result["summary"]["run_id"])
             technical_relevance_ticker_count = int(result["summary"]["ticker_count"])
             technical_relevance_ticker_count_status = "ACTUAL_RUN"
@@ -1143,5 +1167,6 @@ def run_datacenter_swing_pipeline(
             "weekly_report_path": weekly_report_path,
             "pipeline_status": pipeline_status,
             **stage_duration_summary,
+            **technical_relevance_profile_summary,
         }
     }

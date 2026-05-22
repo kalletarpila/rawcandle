@@ -42,6 +42,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--no-taxonomy-listing", action="store_true", help="Omit the taxonomy listing section from daily and rolling reports")
     parser.add_argument("--technical-relevance-run-id", type=str, default=None, help="Optional explicit technical relevance run_id for daily and weekly report threading")
     parser.add_argument("--no-technical-relevance", action="store_true", help="Disable automatic or explicit technical relevance usage in daily and weekly reports")
+    parser.add_argument("--profile-technical-relevance", action="store_true", help="Print optional profiling SUMMARY lines for automatic technical relevance when it executes")
     parser.add_argument("--skip-index", action="store_true", help="Skip the datacenter base index stage")
     parser.add_argument("--skip-audit", action="store_true", help="Skip the read-only pipeline audit stage")
     parser.add_argument("--skip-reports", action="store_true", help="Skip daily and weekly report generation")
@@ -85,6 +86,7 @@ def main(argv: list[str] | None = None) -> int:
             no_taxonomy_listing=args.no_taxonomy_listing,
             technical_relevance_run_id=args.technical_relevance_run_id,
             no_technical_relevance=args.no_technical_relevance,
+            profile_technical_relevance=args.profile_technical_relevance,
             skip_index=args.skip_index,
             skip_audit=args.skip_audit,
             skip_reports=args.skip_reports,
