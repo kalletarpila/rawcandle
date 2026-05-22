@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from time import perf_counter
 from typing import Callable
 import re
 import sqlite3
@@ -54,15 +55,33 @@ FINAL_PIPELINE_SUMMARY_ORDER = (
     "pipeline_output_dir",
     "pipeline_stage_count",
     "pipeline_completed_stage_count",
+    "pipeline.total_duration_seconds",
     "audit_validation_status",
     "daily_report_path",
     "weekly_report_path",
     "pipeline_status",
 )
 
+PIPELINE_STAGE_KEYS = (
+    "datacenter_base_index",
+    "ticker_swing_base_snapshots",
+    "group_swing_base_metrics",
+    "synthetic_ohlc_base",
+    "relative_ohlc20",
+    "group_structure_bos_reset",
+    "group_timing_states",
+    "group_overheat_risk",
+    "ticker_scanners",
+    "pipeline_audit",
+    "automatic_technical_relevance",
+    "daily_report",
+    "weekly_swing_report",
+)
+
 
 @dataclass(frozen=True)
 class PipelineStage:
+    stage_key: str
     heading: str
     argv: list[str]
     runner: Callable[[], dict[str, object] | None]
@@ -112,12 +131,35 @@ def _timestamp_output_path(path: Path, *, date_value: str, hhmm: str) -> Path:
 def format_pipeline_final_summary_lines(summary: dict[str, object]) -> list[str]:
     lines: list[str] = []
     for key in FINAL_PIPELINE_SUMMARY_ORDER:
+        if key == "pipeline_status":
+            continue
         if key in summary:
             lines.append(f"SUMMARY {key}={summary[key]}")
+    for stage_key in PIPELINE_STAGE_KEYS:
+        status_key = f"pipeline_stage.{stage_key}.status"
+        duration_key = f"pipeline_stage.{stage_key}.duration_seconds"
+        if status_key in summary:
+            lines.append(f"SUMMARY {status_key}={summary[status_key]}")
+        if duration_key in summary:
+            lines.append(f"SUMMARY {duration_key}={summary[duration_key]}")
     for key, value in summary.items():
-        if key not in FINAL_PIPELINE_SUMMARY_ORDER:
+        if key not in FINAL_PIPELINE_SUMMARY_ORDER and not key.startswith("pipeline_stage."):
             lines.append(f"SUMMARY {key}={value}")
+    if "pipeline_status" in summary:
+        lines.append(f"SUMMARY pipeline_status={summary['pipeline_status']}")
     return lines
+
+
+def _format_duration_seconds(value: float) -> str:
+    return f"{value:.3f}"
+
+
+def _build_stage_duration_summary_defaults() -> dict[str, str]:
+    summary: dict[str, str] = {}
+    for stage_key in PIPELINE_STAGE_KEYS:
+        summary[f"pipeline_stage.{stage_key}.status"] = "SKIPPED"
+        summary[f"pipeline_stage.{stage_key}.duration_seconds"] = "0.000"
+    return summary
 
 
 def _run_cli_stage(main_func: Callable[[list[str]], int], argv: list[str]) -> dict[str, object] | None:
@@ -345,6 +387,7 @@ def run_datacenter_swing_pipeline(
     dry_run: bool = False,
     generated_at_utc: str | None = None,
 ) -> dict[str, object]:
+    total_start = perf_counter()
     if technical_relevance_run_id is not None and not technical_relevance_run_id.strip():
         raise ValueError("technical_relevance_run_id must be non-empty when provided")
     if no_technical_relevance and technical_relevance_run_id is not None:
@@ -388,6 +431,7 @@ def run_datacenter_swing_pipeline(
             if technical_relevance_ticker_count > 0:
                 technical_relevance_ticker_count_status = "EXISTING_DB_SNAPSHOT"
     selected_watchlist_file = Path(DEFAULT_WATCHLIST_FILE) if watchlist_file is None else Path(watchlist_file)
+    stage_duration_summary = _build_stage_duration_summary_defaults()
     output_hhmm = _resolve_output_timestamp_hhmm(generated_at_utc)
     daily_output_md = _timestamp_output_path(
         output_dir / f"datacenter_daily_{signal_date}_full.md",
@@ -434,6 +478,7 @@ def run_datacenter_swing_pipeline(
         ]
         stages.append(
             PipelineStage(
+                stage_key="datacenter_base_index",
                 heading="Datacenter base index",
                 argv=index_argv,
                 runner=lambda argv=index_argv: _run_cli_stage(run_datacenter_indices_main, argv),
@@ -471,6 +516,7 @@ def run_datacenter_swing_pipeline(
     ]
     stages.append(
         PipelineStage(
+            stage_key="ticker_swing_base_snapshots",
             heading="Ticker swing base snapshots",
             argv=ticker_base_argv,
             runner=lambda argv=ticker_base_argv: _run_cli_stage(run_datacenter_ticker_swing_signals_main, argv),
@@ -504,6 +550,7 @@ def run_datacenter_swing_pipeline(
     ]
     stages.append(
         PipelineStage(
+            stage_key="group_swing_base_metrics",
             heading="Group swing base metrics",
             argv=group_base_argv,
             runner=lambda argv=group_base_argv: _run_cli_stage(run_datacenter_group_swing_signals_main, argv),
@@ -541,6 +588,7 @@ def run_datacenter_swing_pipeline(
     ]
     stages.append(
         PipelineStage(
+            stage_key="synthetic_ohlc_base",
             heading="Synthetic OHLC base",
             argv=synthetic_base_argv,
             runner=lambda argv=synthetic_base_argv: _run_cli_stage(run_datacenter_group_synthetic_ohlc_main, argv),
@@ -579,6 +627,7 @@ def run_datacenter_swing_pipeline(
     ]
     stages.append(
         PipelineStage(
+            stage_key="relative_ohlc20",
             heading="Relative OHLC20",
             argv=relative_argv,
             runner=lambda argv=relative_argv: _run_cli_stage(run_datacenter_group_synthetic_ohlc_main, argv),
@@ -611,6 +660,7 @@ def run_datacenter_swing_pipeline(
     ]
     stages.append(
         PipelineStage(
+            stage_key="group_structure_bos_reset",
             heading="Group structure / BOS / RESET",
             argv=structure_argv,
             runner=lambda argv=structure_argv: _run_cli_stage(run_datacenter_group_synthetic_ohlc_main, argv),
@@ -643,6 +693,7 @@ def run_datacenter_swing_pipeline(
     ]
     stages.append(
         PipelineStage(
+            stage_key="group_timing_states",
             heading="Group timing states",
             argv=timing_argv,
             runner=lambda argv=timing_argv: _run_cli_stage(run_datacenter_group_swing_signals_main, argv),
@@ -675,6 +726,7 @@ def run_datacenter_swing_pipeline(
     ]
     stages.append(
         PipelineStage(
+            stage_key="group_overheat_risk",
             heading="Group overheat risk",
             argv=overheat_argv,
             runner=lambda argv=overheat_argv: _run_cli_stage(run_datacenter_group_swing_signals_main, argv),
@@ -709,6 +761,7 @@ def run_datacenter_swing_pipeline(
     ]
     stages.append(
         PipelineStage(
+            stage_key="ticker_scanners",
             heading="Ticker scanners",
             argv=scanner_argv,
             runner=lambda argv=scanner_argv: _run_cli_stage(run_datacenter_ticker_swing_signals_main, argv),
@@ -750,6 +803,7 @@ def run_datacenter_swing_pipeline(
             audit_argv.append("--strict")
         stages.append(
             PipelineStage(
+                stage_key="pipeline_audit",
                 heading="Pipeline audit",
                 argv=audit_argv,
                 runner=lambda: _run_audit_stage(
@@ -791,6 +845,7 @@ def run_datacenter_swing_pipeline(
         ]
         stages.append(
             PipelineStage(
+                stage_key="automatic_technical_relevance",
                 heading="Automatic technical relevance",
                 argv=technical_relevance_argv,
                 runner=lambda: _run_automatic_technical_relevance_stage(
@@ -850,6 +905,7 @@ def run_datacenter_swing_pipeline(
             weekly_argv.extend(["--technical-relevance-run-id", resolved_technical_relevance_run_id])
         stages.append(
             PipelineStage(
+                stage_key="daily_report",
                 heading="Daily report",
                 argv=daily_argv,
                 runner=lambda: _run_daily_report_stage(
@@ -879,6 +935,7 @@ def run_datacenter_swing_pipeline(
         )
         stages.append(
             PipelineStage(
+                stage_key="weekly_swing_report",
                 heading="Weekly swing report",
                 argv=weekly_argv,
                 runner=lambda: _run_weekly_report_stage(
@@ -910,6 +967,7 @@ def run_datacenter_swing_pipeline(
 
     if dry_run:
         for index, stage in enumerate(stages, start=1):
+            stage_duration_summary[f"pipeline_stage.{stage.stage_key}.status"] = "DRY_RUN"
             print(f"=== Stage {index}/{len(stages)}: {stage.heading} ===")
             print("PLAN " + " ".join(stage.argv))
         return {
@@ -931,10 +989,12 @@ def run_datacenter_swing_pipeline(
                 "pipeline_output_dir": str(output_dir),
                 "pipeline_stage_count": len(stages),
                 "pipeline_completed_stage_count": 0,
+                "pipeline.total_duration_seconds": _format_duration_seconds(perf_counter() - total_start),
                 "audit_validation_status": "SKIPPED" if skip_audit else "DRY_RUN",
                 "daily_report_path": "",
                 "weekly_report_path": "",
                 "pipeline_status": "DRY_RUN",
+                **stage_duration_summary,
             }
         }
 
@@ -952,7 +1012,19 @@ def run_datacenter_swing_pipeline(
         if stage.heading == "Weekly swing report" and audit_validation_status == "FAIL":
             break
         print(f"=== Stage {index}/{len(stages)}: {stage.heading} ===")
-        result = stage.runner()
+        stage_start = perf_counter()
+        try:
+            result = stage.runner()
+        except Exception:
+            stage_duration_summary[f"pipeline_stage.{stage.stage_key}.status"] = "FAILED"
+            stage_duration_summary[f"pipeline_stage.{stage.stage_key}.duration_seconds"] = _format_duration_seconds(
+                perf_counter() - stage_start
+            )
+            raise
+        stage_duration_summary[f"pipeline_stage.{stage.stage_key}.status"] = "OK"
+        stage_duration_summary[f"pipeline_stage.{stage.stage_key}.duration_seconds"] = _format_duration_seconds(
+            perf_counter() - stage_start
+        )
         _write_stage_watermark(
             analysis_db=analysis_db,
             builder=stage.watermark_builder,
@@ -982,10 +1054,12 @@ def run_datacenter_swing_pipeline(
                         "pipeline_output_dir": str(output_dir),
                         "pipeline_stage_count": len(stages),
                         "pipeline_completed_stage_count": completed_stage_count,
+                        "pipeline.total_duration_seconds": _format_duration_seconds(perf_counter() - total_start),
                         "audit_validation_status": audit_validation_status,
                         "daily_report_path": "",
                         "weekly_report_path": "",
                         "pipeline_status": "FAIL",
+                        **stage_duration_summary,
                     }
                 }
         elif stage.heading == "Automatic technical relevance":
@@ -1024,9 +1098,11 @@ def run_datacenter_swing_pipeline(
             "pipeline_output_dir": str(output_dir),
             "pipeline_stage_count": len(stages),
             "pipeline_completed_stage_count": completed_stage_count,
+            "pipeline.total_duration_seconds": _format_duration_seconds(perf_counter() - total_start),
             "audit_validation_status": audit_validation_status,
             "daily_report_path": daily_report_path,
             "weekly_report_path": weekly_report_path,
             "pipeline_status": pipeline_status,
+            **stage_duration_summary,
         }
     }

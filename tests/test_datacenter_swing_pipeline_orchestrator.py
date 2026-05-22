@@ -106,6 +106,15 @@ def _fake_technical_relevance_summary(run_id: str = "AUTO_REL_RUN") -> dict[str,
     }
 
 
+def _make_perf_counter(values: list[float]):
+    iterator = iter(values)
+
+    def _fake_perf_counter() -> float:
+        return next(iterator)
+
+    return _fake_perf_counter
+
+
 def test_load_datacenter_pipeline_technical_relevance_tickers_filters_and_orders(tmp_path):
     analysis_db = tmp_path / "analysis.db"
     _create_analysis_db(analysis_db)
@@ -222,6 +231,25 @@ def test_build_datacenter_technical_relevance_run_id_is_deterministic():
     )
 
 
+def test_pipeline_stage_keys_are_stable_and_contain_no_spaces():
+    assert orchestrator.PIPELINE_STAGE_KEYS == (
+        "datacenter_base_index",
+        "ticker_swing_base_snapshots",
+        "group_swing_base_metrics",
+        "synthetic_ohlc_base",
+        "relative_ohlc20",
+        "group_structure_bos_reset",
+        "group_timing_states",
+        "group_overheat_risk",
+        "ticker_scanners",
+        "pipeline_audit",
+        "automatic_technical_relevance",
+        "daily_report",
+        "weekly_swing_report",
+    )
+    assert all(" " not in key for key in orchestrator.PIPELINE_STAGE_KEYS)
+
+
 def test_automatic_technical_relevance_stage_fails_on_empty_universe(tmp_path):
     analysis_db = tmp_path / "analysis.db"
     _create_analysis_db(analysis_db)
@@ -267,6 +295,25 @@ def test_dry_run_auto_mode_uses_existing_db_snapshot_count_when_available(tmp_pa
     assert result["summary"]["technical_relevance.ticker_count_status"] == "EXISTING_DB_SNAPSHOT"
 
 
+def test_dry_run_stage_summaries_use_stable_keys_and_zero_durations(tmp_path, monkeypatch):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    monkeypatch.setattr(orchestrator, "perf_counter", _make_perf_counter([10.0, 10.456]))
+
+    result = orchestrator.run_datacenter_swing_pipeline(
+        **_base_kwargs(tmp_path),
+        dry_run=True,
+        no_technical_relevance=True,
+    )
+
+    summary = result["summary"]
+    assert summary["pipeline.total_duration_seconds"] == "0.456"
+    assert summary["pipeline_stage.datacenter_base_index.status"] == "DRY_RUN"
+    assert summary["pipeline_stage.datacenter_base_index.duration_seconds"] == "0.000"
+    assert summary["pipeline_stage.automatic_technical_relevance.status"] == "SKIPPED"
+    assert summary["pipeline_stage.automatic_technical_relevance.duration_seconds"] == "0.000"
+
+
 def test_dry_run_auto_mode_reports_not_available_when_snapshot_rows_do_not_exist(tmp_path):
     analysis_db = tmp_path / "analysis.db"
     _create_analysis_db(analysis_db)
@@ -308,6 +355,13 @@ def test_default_mode_runs_automatic_technical_relevance_and_threads_generated_r
         kwargs["output_csv"].write_text("weekly", encoding="utf-8")
         return {"summary": {"output_markdown": str(kwargs["output_md"]), "output_csv": str(kwargs["output_csv"]), "validation_status": "OK"}}
 
+    perf_values = [0.0]
+    stage_start = 1.0
+    for _ in range(13):
+        perf_values.extend([stage_start, stage_start + 0.25])
+        stage_start += 1.0
+    perf_values.append(13.25)
+
     monkeypatch.setattr(orchestrator, "run_datacenter_indices_main", _runner)
     monkeypatch.setattr(orchestrator, "run_datacenter_ticker_swing_signals_main", _runner)
     monkeypatch.setattr(orchestrator, "run_datacenter_group_swing_signals_main", _runner)
@@ -319,12 +373,23 @@ def test_default_mode_runs_automatic_technical_relevance_and_threads_generated_r
     monkeypatch.setattr(orchestrator, "format_swing_pipeline_audit_summary_lines", lambda summary: [])
     monkeypatch.setattr(orchestrator, "format_daily_swing_report_summary_lines", lambda summary: [])
     monkeypatch.setattr(orchestrator, "format_weekly_swing_report_summary_lines", lambda summary: [])
+    monkeypatch.setattr(
+        orchestrator,
+        "perf_counter",
+        _make_perf_counter(perf_values),
+    )
 
     result = orchestrator.run_datacenter_swing_pipeline(**_base_kwargs(tmp_path))
 
-    assert result["summary"]["technical_relevance.mode"] == "auto"
-    assert result["summary"]["technical_relevance.run_id"] == "AUTO_GENERATED_RUN"
-    assert result["summary"]["technical_relevance.ticker_count_status"] == "ACTUAL_RUN"
+    summary = result["summary"]
+    assert summary["technical_relevance.mode"] == "auto"
+    assert summary["technical_relevance.run_id"] == "AUTO_GENERATED_RUN"
+    assert summary["technical_relevance.ticker_count_status"] == "ACTUAL_RUN"
+    assert summary["pipeline.total_duration_seconds"] == "13.250"
+    assert summary["pipeline_stage.automatic_technical_relevance.status"] == "OK"
+    assert summary["pipeline_stage.automatic_technical_relevance.duration_seconds"] == "0.250"
+    assert summary["pipeline_stage.daily_report.duration_seconds"] == "0.250"
+    assert summary["pipeline_stage.weekly_swing_report.duration_seconds"] == "0.250"
     assert calls[0][0] == "techrel"
     assert calls[1][0] == "daily"
     assert calls[1][1]["technical_relevance_run_id"] == "AUTO_GENERATED_RUN"
@@ -426,6 +491,8 @@ def test_disabled_mode_skips_automatic_technical_relevance_and_passes_none(tmp_p
 
     assert result["summary"]["technical_relevance.mode"] == "disabled"
     assert result["summary"]["technical_relevance.ticker_count_status"] == "DISABLED"
+    assert result["summary"]["pipeline_stage.automatic_technical_relevance.status"] == "SKIPPED"
+    assert result["summary"]["pipeline_stage.automatic_technical_relevance.duration_seconds"] == "0.000"
     assert calls[0][1]["technical_relevance_run_id"] is None
     assert calls[1][1]["technical_relevance_run_id"] is None
 

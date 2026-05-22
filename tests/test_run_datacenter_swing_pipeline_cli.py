@@ -96,6 +96,15 @@ def _seed_persisted_ticker_rows(
         conn.commit()
 
 
+def _make_perf_counter(values: list[float]):
+    iterator = iter(values)
+
+    def _fake_perf_counter() -> float:
+        return next(iterator)
+
+    return _fake_perf_counter
+
+
 def test_dry_run_prints_planned_stages_and_does_not_call_stage_runners(tmp_path, monkeypatch, capsys):
     def _fail(*args, **kwargs):
         raise AssertionError("stage runner should not be called in dry-run")
@@ -107,6 +116,7 @@ def test_dry_run_prints_planned_stages_and_does_not_call_stage_runners(tmp_path,
     monkeypatch.setattr(orchestrator, "load_swing_pipeline_audit", _fail)
     monkeypatch.setattr(orchestrator, "write_daily_swing_signal_report", _fail)
     monkeypatch.setattr(orchestrator, "write_weekly_swing_report", _fail)
+    monkeypatch.setattr(orchestrator, "perf_counter", _make_perf_counter([0.0, 0.125]))
 
     exit_code = run_datacenter_swing_pipeline_main(_base_args(tmp_path) + ["--dry-run"])
 
@@ -115,6 +125,9 @@ def test_dry_run_prints_planned_stages_and_does_not_call_stage_runners(tmp_path,
     assert lines[0] == "=== Stage 1/13: Datacenter base index ==="
     assert lines[1].startswith("PLAN --ohlcv-db ")
     assert any("Automatic technical relevance" in line for line in lines)
+    assert "SUMMARY pipeline_stage.automatic_technical_relevance.status=DRY_RUN" in lines
+    assert "SUMMARY pipeline_stage.automatic_technical_relevance.duration_seconds=0.000" in lines
+    assert "SUMMARY pipeline.total_duration_seconds=0.125" in lines
     assert lines[-1] == "SUMMARY pipeline_status=DRY_RUN"
     assert not (tmp_path / "reports").exists()
 
@@ -180,6 +193,8 @@ def test_pipeline_accepts_no_technical_relevance_and_shows_disabled_mode_in_dry_
     assert "SUMMARY technical_relevance.mode=disabled" in lines
     assert "SUMMARY technical_relevance.run_id=NONE" in lines
     assert "SUMMARY technical_relevance.ticker_count_status=DISABLED" in lines
+    assert "SUMMARY pipeline_stage.automatic_technical_relevance.status=SKIPPED" in lines
+    assert "SUMMARY pipeline_stage.automatic_technical_relevance.duration_seconds=0.000" in lines
 
 
 def test_pipeline_dry_run_auto_reports_not_available_when_no_persisted_ticker_snapshot_exists(tmp_path, capsys):
@@ -293,7 +308,15 @@ def test_pipeline_calls_stages_in_correct_order_and_uses_index_base_date(tmp_pat
     assert "SUMMARY technical_relevance.enabled=true" in lines
     assert "SUMMARY technical_relevance.mode=auto" in lines
     assert "SUMMARY technical_relevance.run_id=AUTO_REL_RUN" in lines
-    assert lines[-4] == "SUMMARY audit_validation_status=OK"
+    assert "SUMMARY audit_validation_status=OK" in lines
+    total_duration_line = next(
+        line for line in lines if line.startswith("SUMMARY pipeline.total_duration_seconds=")
+    )
+    total_duration_value = total_duration_line.split("=", 1)[1]
+    assert total_duration_value.count(".") == 1
+    assert len(total_duration_value.rsplit(".", 1)[1]) == 3
+    assert "SUMMARY pipeline_stage.automatic_technical_relevance.status=OK" in lines
+    assert "SUMMARY pipeline_stage.automatic_technical_relevance.duration_seconds=0.000" in lines
     assert lines[-1] == "SUMMARY pipeline_status=OK"
 
 
