@@ -70,6 +70,33 @@ def _normalize_tickers(tickers: Iterable[str]) -> list[str]:
     return sorted({str(ticker).strip() for ticker in tickers if str(ticker).strip()})
 
 
+def load_datacenter_pipeline_technical_relevance_tickers(
+    conn: sqlite3.Connection,
+    *,
+    signal_date: str,
+    taxonomy_version: str,
+    signal_version: str,
+) -> list[str]:
+    if not _table_exists(conn, "dc_ticker_swing_signal_daily"):
+        raise ValueError("Missing required table: dc_ticker_swing_signal_daily")
+    rows = conn.execute(
+        """
+        SELECT ticker
+        FROM dc_ticker_swing_signal_daily
+        WHERE signal_date = ?
+          AND taxonomy_version = ?
+          AND signal_version = ?
+        ORDER BY ticker ASC
+        """,
+        (signal_date, taxonomy_version, signal_version),
+    ).fetchall()
+    return _normalize_tickers(
+        str(row["ticker"])
+        for row in rows
+        if row["ticker"] is not None
+    )
+
+
 def _coerce_context_row(row: TechnicalRelevanceContextRow | dict[str, object]) -> TechnicalRelevanceContextRow:
     if isinstance(row, TechnicalRelevanceContextRow):
         return row

@@ -41,6 +41,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--watchlist-file", type=Path, default=None, help="Optional plain-text watchlist file for daily and rolling reports")
     parser.add_argument("--no-taxonomy-listing", action="store_true", help="Omit the taxonomy listing section from daily and rolling reports")
     parser.add_argument("--technical-relevance-run-id", type=str, default=None, help="Optional explicit technical relevance run_id for daily and weekly report threading")
+    parser.add_argument("--no-technical-relevance", action="store_true", help="Disable automatic or explicit technical relevance usage in daily and weekly reports")
     parser.add_argument("--skip-index", action="store_true", help="Skip the datacenter base index stage")
     parser.add_argument("--skip-audit", action="store_true", help="Skip the read-only pipeline audit stage")
     parser.add_argument("--skip-reports", action="store_true", help="Skip daily and weekly report generation")
@@ -56,6 +57,12 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if args.technical_relevance_run_id is not None and not args.technical_relevance_run_id.strip():
         print("ERROR technical-relevance-run-id must be non-empty when provided", file=sys.stderr)
+        return 1
+    if args.no_technical_relevance and args.technical_relevance_run_id is not None:
+        print(
+            "ERROR --no-technical-relevance and --technical-relevance-run-id cannot be used together",
+            file=sys.stderr,
+        )
         return 1
     try:
         result = run_datacenter_swing_pipeline(
@@ -77,6 +84,7 @@ def main(argv: list[str] | None = None) -> int:
             watchlist_file=args.watchlist_file,
             no_taxonomy_listing=args.no_taxonomy_listing,
             technical_relevance_run_id=args.technical_relevance_run_id,
+            no_technical_relevance=args.no_technical_relevance,
             skip_index=args.skip_index,
             skip_audit=args.skip_audit,
             skip_reports=args.skip_reports,
