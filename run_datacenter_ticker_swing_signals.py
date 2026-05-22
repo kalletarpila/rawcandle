@@ -24,6 +24,7 @@ from analysis.datacenter_indices.swing_ticker_persistence import (
     _empty_ticker_swing_profile_aggregate,
     persist_datacenter_ticker_scanner_signals,
     persist_datacenter_ticker_swing_snapshots,
+    persist_datacenter_ticker_swing_snapshots_for_dates,
 )
 
 
@@ -119,20 +120,20 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 range_lines: list[str] = []
                 profile_aggregate = _empty_ticker_swing_profile_aggregate()
-                for valid_date in valid_dates:
-                    summary = persist_datacenter_ticker_swing_snapshots(
-                        analysis_db_path=args.analysis_db,
-                        price_db_path=args.price_db,
-                        taxonomy_csv_path=args.taxonomy_csv,
-                        as_of_date=valid_date,
-                        market=args.market,
-                        signal_version=args.signal_version,
-                        run_id=args.run_id,
-                        created_at_utc=args.created_at_utc,
-                        write_mode=args.write_mode,
-                        max_valid_price_rows=args.max_valid_price_rows,
-                        profile=args.profile,
-                    )
+                summaries, aggregated_profile_summary = persist_datacenter_ticker_swing_snapshots_for_dates(
+                    analysis_db_path=args.analysis_db,
+                    price_db_path=args.price_db,
+                    taxonomy_csv_path=args.taxonomy_csv,
+                    as_of_dates=valid_dates,
+                    market=args.market,
+                    signal_version=args.signal_version,
+                    run_id=args.run_id,
+                    created_at_utc=args.created_at_utc,
+                    write_mode=args.write_mode,
+                    max_valid_price_rows=args.max_valid_price_rows,
+                    profile=args.profile,
+                )
+                for summary in summaries:
                     range_lines.extend(
                         format_ticker_swing_summary_lines(summary, include_profile=not args.profile)
                     )
@@ -155,7 +156,9 @@ def main(argv: list[str] | None = None) -> int:
                 if args.profile:
                     range_lines.extend(
                         format_ticker_swing_profile_summary_lines(
-                            finalize_ticker_swing_profile_summary(profile_aggregate)
+                            aggregated_profile_summary
+                            if aggregated_profile_summary is not None
+                            else finalize_ticker_swing_profile_summary(profile_aggregate)
                         )
                     )
                 lines = range_lines

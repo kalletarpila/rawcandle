@@ -10,10 +10,12 @@ from analysis.datacenter_indices.swing_ticker_persistence import (
     classify_ticker_structure_freshness,
     classify_exit_risk_severity,
     cleanup_non_trading_ticker_swing_rows,
+    load_bounded_ticker_ohlcv_history_window,
     load_existing_ticker_signal_dates,
     load_bounded_ticker_ohlcv_history,
     load_bounded_ticker_ohlcv_histories,
     load_valid_price_dates_for_market,
+    persist_datacenter_ticker_swing_snapshots_for_dates,
     persist_datacenter_ticker_scanner_signals,
     persist_datacenter_ticker_swing_snapshots,
 )
@@ -845,6 +847,159 @@ def test_batched_price_history_loader_matches_single_ticker_loader(tmp_path):
         )
     ]
     assert fetched_count >= 4
+
+
+def test_multi_date_price_history_window_preserves_sorted_rows_and_missing_days(tmp_path):
+    price_db = tmp_path / "osakedata.db"
+    _create_price_db(price_db)
+    _insert_price_rows(
+        price_db,
+        [
+            ("AAA", "2024-01-08", 10, 11, 9, 10, 100, "usa"),
+            ("AAA", "2024-01-10", 12, 13, 11, 12, 102, "usa"),
+            ("AAA", "2024-01-12", 13, 14, 12, 13, 103, "usa"),
+            ("BBB", "2024-01-09", 20, 21, 19, 20, 200, "usa"),
+            ("BBB", "2024-01-12", 21, 22, 20, 21, 201, "usa"),
+        ],
+    )
+
+    window = load_bounded_ticker_ohlcv_history_window(
+        price_db_path=price_db,
+        tickers=["AAA", "BBB", "CCC"],
+        market="usa",
+        signal_dates=["2024-01-10", "2024-01-12"],
+        max_valid_price_rows=2,
+    )
+
+    aaa_history = window.history_for(ticker="AAA", as_of_date="2024-01-12", max_valid_price_rows=2)
+    bbb_history = window.history_for(ticker="BBB", as_of_date="2024-01-12", max_valid_price_rows=2)
+    ccc_history = window.history_for(ticker="CCC", as_of_date="2024-01-12", max_valid_price_rows=2)
+
+    assert [row.date for row in aaa_history] == ["2024-01-10", "2024-01-12"]
+    assert [row.date for row in bbb_history] == ["2024-01-09", "2024-01-12"]
+    assert ccc_history == []
+    assert "2024-01-11" not in [row.date for row in aaa_history]
+
+
+def test_multi_date_price_history_window_respects_signal_date_range(tmp_path):
+    price_db = tmp_path / "osakedata.db"
+    _create_price_db(price_db)
+    _insert_price_rows(
+        price_db,
+        [
+            ("AAA", "2024-01-05", 9, 10, 8, 9, 90, "usa"),
+            ("AAA", "2024-01-08", 10, 11, 9, 10, 100, "usa"),
+            ("AAA", "2024-01-09", 11, 12, 10, 11, 101, "usa"),
+            ("AAA", "2024-01-10", 12, 13, 11, 12, 102, "usa"),
+            ("AAA", "2024-01-11", 13, 14, 12, 13, 103, "usa"),
+        ],
+    )
+
+    window = load_bounded_ticker_ohlcv_history_window(
+        price_db_path=price_db,
+        tickers=["AAA"],
+        market="usa",
+        signal_dates=["2024-01-10", "2024-01-11"],
+        max_valid_price_rows=2,
+    )
+
+    history = window.history_for(ticker="AAA", as_of_date="2024-01-10", max_valid_price_rows=2)
+    assert [row.date for row in history] == ["2024-01-09", "2024-01-10"]
+    assert "2024-01-11" not in [row.date for row in history]
+
+
+def test_multi_date_snapshot_persistence_reuses_batched_price_history_calls(tmp_path):
+    taxonomy_csv = _write_taxonomy_csv(
+        tmp_path,
+        """taxonomy_version,ticker,layer,subindustry,report_group_status,is_primary,role_weight,notes
+DC_TAXONOMY_V1,AAA,Power,UPS,CORE,1,1.0,
+DC_TAXONOMY_V1,BBB,Cooling,Chillers,CORE,1,1.0,
+""",
+    )
+    price_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _create_price_db(price_db)
+    _create_analysis_db(analysis_db)
+    _insert_price_rows(
+        price_db,
+        [
+            ("AAA", "2024-01-10", 100, 101, 99, 100, 1000, "usa"),
+            ("AAA", "2024-01-11", 101, 102, 100, 101, 1001, "usa"),
+            ("AAA", "2024-01-12", 102, 103, 101, 102, 1002, "usa"),
+            ("AAA", "2024-01-15", 103, 104, 102, 103, 1003, "usa"),
+            ("BBB", "2024-01-10", 200, 201, 199, 200, 2000, "usa"),
+            ("BBB", "2024-01-11", 201, 202, 200, 201, 2001, "usa"),
+            ("BBB", "2024-01-12", 202, 203, 201, 202, 2002, "usa"),
+            ("BBB", "2024-01-15", 203, 204, 202, 203, 2003, "usa"),
+        ],
+    )
+
+    summaries, profile_summary = persist_datacenter_ticker_swing_snapshots_for_dates(
+        analysis_db_path=analysis_db,
+        price_db_path=price_db,
+        taxonomy_csv_path=taxonomy_csv,
+        as_of_dates=["2024-01-10", "2024-01-11", "2024-01-12", "2024-01-15"],
+        market="usa",
+        run_id="range-run",
+        created_at_utc="2026-05-22T00:00:00Z",
+        write_mode="replace-date",
+        profile=True,
+    )
+
+    assert [summary["signal_date"] for summary in summaries] == ["2024-01-10", "2024-01-11", "2024-01-12", "2024-01-15"]
+    assert profile_summary is not None
+    assert int(profile_summary["ticker_swing_snapshot_profile.price_history_read_calls"]) < len(summaries)
+    assert int(profile_summary["ticker_swing_snapshot_profile.rows_built"]) == 8
+
+
+def test_multi_date_snapshot_persistence_preserves_counts_and_representative_values(tmp_path):
+    taxonomy_csv = _write_taxonomy_csv(
+        tmp_path,
+        """taxonomy_version,ticker,layer,subindustry,report_group_status,is_primary,role_weight,notes
+DC_TAXONOMY_V1,AAA,Power,UPS,CORE,1,1.0,
+DC_TAXONOMY_V1,BBB,Cooling,Chillers,CORE,1,1.0,
+""",
+    )
+    price_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _create_price_db(price_db)
+    _create_analysis_db(analysis_db)
+    _insert_price_rows(
+        price_db,
+        [
+            ("AAA", "2024-01-10", 100, 101, 99, 100, 1000, "usa"),
+            ("AAA", "2024-01-11", 101, 102, 100, 101, 1100, "usa"),
+            ("BBB", "2024-01-10", 200, 201, 199, 200, 2000, "usa"),
+            ("BBB", "2024-01-11", 201, 202, 200, None, 2100, "usa"),
+        ],
+    )
+
+    summaries, _ = persist_datacenter_ticker_swing_snapshots_for_dates(
+        analysis_db_path=analysis_db,
+        price_db_path=price_db,
+        taxonomy_csv_path=taxonomy_csv,
+        as_of_dates=["2024-01-10", "2024-01-11"],
+        market="usa",
+        run_id="range-run",
+        created_at_utc="2026-05-22T00:00:00Z",
+        write_mode="replace-date",
+        profile=True,
+    )
+
+    assert [summary["rows_prepared"] for summary in summaries] == [2, 2]
+    assert [summary["inserted_count"] for summary in summaries] == [2, 2]
+    assert [summary["deleted_count"] for summary in summaries] == [0, 0]
+    assert [summary["ok_price_count"] for summary in summaries] == [0, 0]
+    assert [summary["missing_as_of_date_count"] for summary in summaries] == [0, 0]
+    assert [summary["insufficient_history_count"] for summary in summaries] == [2, 1]
+
+    rows = _fetch_ticker_rows(analysis_db)
+    aaa_latest = next(row for row in rows if row["ticker"] == "AAA" and row["signal_date"] == "2024-01-11")
+    bbb_latest = next(row for row in rows if row["ticker"] == "BBB" and row["signal_date"] == "2024-01-11")
+    assert aaa_latest["close"] == 101.0
+    assert aaa_latest["price_data_status"] == "INSUFFICIENT_HISTORY"
+    assert bbb_latest["close"] is None
+    assert bbb_latest["price_data_status"] == "MISSING_CLOSE_AS_OF_DATE"
 
 
 def test_schema_initializers_create_reader_and_price_indexes(tmp_path):

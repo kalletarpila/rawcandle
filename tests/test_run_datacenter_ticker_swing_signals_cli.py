@@ -312,6 +312,8 @@ def test_cli_base_range_profile_emits_aggregate_snapshot_profile_lines(tmp_path,
             [
                 ("AAA", "2024-01-12", 100, 101, 99, 100, 1000, "usa"),
                 ("AAA", "2024-01-15", 101, 102, 100, 101, 1000, "usa"),
+                ("AAA", "2024-01-16", 102, 103, 101, 102, 1000, "usa"),
+                ("AAA", "2024-01-17", 103, 104, 102, 103, 1000, "usa"),
             ],
         )
         conn.commit()
@@ -327,7 +329,7 @@ def test_cli_base_range_profile_emits_aggregate_snapshot_profile_lines(tmp_path,
             "--start-date",
             "2024-01-12",
             "--end-date",
-            "2024-01-15",
+            "2024-01-17",
             "--market",
             "usa",
             "--write-mode",
@@ -341,11 +343,13 @@ def test_cli_base_range_profile_emits_aggregate_snapshot_profile_lines(tmp_path,
     assert exit_code == 0
     lines = capsys.readouterr().out.strip().splitlines()
     assert "SUMMARY requested_start_date=2024-01-12" in lines
-    assert "SUMMARY requested_end_date=2024-01-15" in lines
-    assert "SUMMARY valid_trading_dates=2" in lines
-    assert "SUMMARY ticker_swing_snapshot_profile.signal_date_count=2" in lines
+    assert "SUMMARY requested_end_date=2024-01-17" in lines
+    assert "SUMMARY valid_trading_dates=4" in lines
+    assert "SUMMARY ticker_swing_snapshot_profile.signal_date_count=4" in lines
     assert "SUMMARY ticker_swing_snapshot_profile.ticker_count=1" in lines
-    assert "SUMMARY ticker_swing_snapshot_profile.rows_built=2" in lines
+    assert "SUMMARY ticker_swing_snapshot_profile.rows_built=4" in lines
+    read_call_line = next(line for line in lines if line.startswith("SUMMARY ticker_swing_snapshot_profile.price_history_read_calls="))
+    assert int(read_call_line.split("=", 1)[1]) < 4
     assert any(line.startswith("SUMMARY ticker_swing_snapshot_profile.total_seconds=") for line in lines)
 
 
