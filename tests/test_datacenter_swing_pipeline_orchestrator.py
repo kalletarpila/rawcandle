@@ -236,6 +236,51 @@ def test_automatic_technical_relevance_stage_fails_on_empty_universe(tmp_path):
         )
 
 
+def test_dry_run_auto_mode_uses_existing_db_snapshot_count_when_available(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    conn = sqlite3.connect(analysis_db)
+    conn.row_factory = sqlite3.Row
+    _insert_ticker_row(
+        conn,
+        signal_date="2026-05-15",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        ticker="BBB",
+        signal_version="DC_SWING_SIGNAL_V1",
+    )
+    _insert_ticker_row(
+        conn,
+        signal_date="2026-05-15",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        ticker="AAA",
+        signal_version="DC_SWING_SIGNAL_V1",
+    )
+    conn.commit()
+
+    result = orchestrator.run_datacenter_swing_pipeline(
+        **_base_kwargs(tmp_path),
+        dry_run=True,
+    )
+
+    assert result["summary"]["technical_relevance.mode"] == "auto"
+    assert result["summary"]["technical_relevance.ticker_count"] == 2
+    assert result["summary"]["technical_relevance.ticker_count_status"] == "EXISTING_DB_SNAPSHOT"
+
+
+def test_dry_run_auto_mode_reports_not_available_when_snapshot_rows_do_not_exist(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+
+    result = orchestrator.run_datacenter_swing_pipeline(
+        **_base_kwargs(tmp_path),
+        dry_run=True,
+    )
+
+    assert result["summary"]["technical_relevance.mode"] == "auto"
+    assert result["summary"]["technical_relevance.ticker_count"] == 0
+    assert result["summary"]["technical_relevance.ticker_count_status"] == "NOT_AVAILABLE_DRY_RUN"
+
+
 def test_default_mode_runs_automatic_technical_relevance_and_threads_generated_run_id(tmp_path, monkeypatch):
     _create_analysis_db(tmp_path / "analysis.db")
     calls: list[tuple[str, object]] = []
@@ -279,6 +324,7 @@ def test_default_mode_runs_automatic_technical_relevance_and_threads_generated_r
 
     assert result["summary"]["technical_relevance.mode"] == "auto"
     assert result["summary"]["technical_relevance.run_id"] == "AUTO_GENERATED_RUN"
+    assert result["summary"]["technical_relevance.ticker_count_status"] == "ACTUAL_RUN"
     assert calls[0][0] == "techrel"
     assert calls[1][0] == "daily"
     assert calls[1][1]["technical_relevance_run_id"] == "AUTO_GENERATED_RUN"
@@ -330,6 +376,7 @@ def test_existing_run_mode_skips_automatic_technical_relevance_and_threads_provi
     )
 
     assert result["summary"]["technical_relevance.mode"] == "existing_run"
+    assert result["summary"]["technical_relevance.ticker_count_status"] == "NOT_APPLICABLE_EXISTING_RUN"
     assert calls[0][1]["technical_relevance_run_id"] == "EXISTING_RUN"
     assert calls[1][1]["technical_relevance_run_id"] == "EXISTING_RUN"
 
@@ -378,6 +425,7 @@ def test_disabled_mode_skips_automatic_technical_relevance_and_passes_none(tmp_p
     )
 
     assert result["summary"]["technical_relevance.mode"] == "disabled"
+    assert result["summary"]["technical_relevance.ticker_count_status"] == "DISABLED"
     assert calls[0][1]["technical_relevance_run_id"] is None
     assert calls[1][1]["technical_relevance_run_id"] is None
 

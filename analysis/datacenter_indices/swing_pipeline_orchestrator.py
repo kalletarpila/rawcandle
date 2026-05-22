@@ -47,6 +47,7 @@ FINAL_PIPELINE_SUMMARY_ORDER = (
     "technical_relevance.mode",
     "technical_relevance.run_id",
     "technical_relevance.ticker_count",
+    "technical_relevance.ticker_count_status",
     "technical_relevance.start_date",
     "technical_relevance.end_date",
     "technical_relevance_run_id",
@@ -226,6 +227,34 @@ def _run_automatic_technical_relevance_stage(
     }
 
 
+def _load_dry_run_technical_relevance_ticker_snapshot_count(
+    *,
+    analysis_db: Path,
+    signal_date: str,
+    taxonomy_version: str,
+    signal_version: str,
+) -> int:
+    with sqlite3.connect(analysis_db) as conn:
+        table_exists = conn.execute(
+            """
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name = 'dc_ticker_swing_signal_daily'
+            """
+        ).fetchone()
+        if table_exists is None:
+            return 0
+        conn.row_factory = sqlite3.Row
+        tickers = load_datacenter_pipeline_technical_relevance_tickers(
+            conn,
+            signal_date=signal_date,
+            taxonomy_version=taxonomy_version,
+            signal_version=signal_version,
+        )
+    return len(tickers)
+
+
 def _run_daily_report_stage(
     *,
     analysis_db: Path,
@@ -330,6 +359,15 @@ def run_datacenter_swing_pipeline(
         None if technical_relevance_mode == "disabled" else technical_relevance_run_id
     )
     technical_relevance_ticker_count = 0
+    technical_relevance_ticker_count_status = (
+        "DISABLED"
+        if technical_relevance_mode == "disabled"
+        else (
+            "NOT_APPLICABLE_EXISTING_RUN"
+            if technical_relevance_mode == "existing_run"
+            else "NOT_AVAILABLE_DRY_RUN"
+        )
+    )
     technical_relevance_start_date = "NONE"
     technical_relevance_end_date = "NONE"
     if technical_relevance_mode == "auto":
@@ -340,6 +378,15 @@ def run_datacenter_swing_pipeline(
         technical_relevance_start_date, technical_relevance_end_date = (
             compute_datacenter_technical_relevance_date_range(signal_date)
         )
+        if dry_run:
+            technical_relevance_ticker_count = _load_dry_run_technical_relevance_ticker_snapshot_count(
+                analysis_db=analysis_db,
+                signal_date=signal_date,
+                taxonomy_version=taxonomy_version,
+                signal_version=signal_version,
+            )
+            if technical_relevance_ticker_count > 0:
+                technical_relevance_ticker_count_status = "EXISTING_DB_SNAPSHOT"
     selected_watchlist_file = Path(DEFAULT_WATCHLIST_FILE) if watchlist_file is None else Path(watchlist_file)
     output_hhmm = _resolve_output_timestamp_hhmm(generated_at_utc)
     daily_output_md = _timestamp_output_path(
@@ -877,6 +924,7 @@ def run_datacenter_swing_pipeline(
                 "technical_relevance.mode": technical_relevance_mode,
                 "technical_relevance.run_id": resolved_technical_relevance_run_id or "NONE",
                 "technical_relevance.ticker_count": technical_relevance_ticker_count,
+                "technical_relevance.ticker_count_status": technical_relevance_ticker_count_status,
                 "technical_relevance.start_date": technical_relevance_start_date,
                 "technical_relevance.end_date": technical_relevance_end_date,
                 "technical_relevance_run_id": resolved_technical_relevance_run_id or "NONE",
@@ -927,6 +975,7 @@ def run_datacenter_swing_pipeline(
                         "technical_relevance.mode": technical_relevance_mode,
                         "technical_relevance.run_id": resolved_technical_relevance_run_id or "NONE",
                         "technical_relevance.ticker_count": technical_relevance_ticker_count,
+                        "technical_relevance.ticker_count_status": technical_relevance_ticker_count_status,
                         "technical_relevance.start_date": technical_relevance_start_date,
                         "technical_relevance.end_date": technical_relevance_end_date,
                         "technical_relevance_run_id": resolved_technical_relevance_run_id or "NONE",
@@ -942,6 +991,7 @@ def run_datacenter_swing_pipeline(
         elif stage.heading == "Automatic technical relevance":
             resolved_technical_relevance_run_id = str(result["summary"]["run_id"])
             technical_relevance_ticker_count = int(result["summary"]["ticker_count"])
+            technical_relevance_ticker_count_status = "ACTUAL_RUN"
             technical_relevance_start_date = str(result["summary"]["start_date"])
             technical_relevance_end_date = str(result["summary"]["end_date"])
         elif stage.heading == "Daily report":
@@ -967,6 +1017,7 @@ def run_datacenter_swing_pipeline(
             "technical_relevance.mode": technical_relevance_mode,
             "technical_relevance.run_id": resolved_technical_relevance_run_id or "NONE",
             "technical_relevance.ticker_count": technical_relevance_ticker_count,
+            "technical_relevance.ticker_count_status": technical_relevance_ticker_count_status,
             "technical_relevance.start_date": technical_relevance_start_date,
             "technical_relevance.end_date": technical_relevance_end_date,
             "technical_relevance_run_id": resolved_technical_relevance_run_id or "NONE",

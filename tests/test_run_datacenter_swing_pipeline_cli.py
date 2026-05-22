@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -52,6 +53,49 @@ def _fake_technical_relevance_summary(run_id: str = "AUTO_REL_RUN") -> dict[str,
     }
 
 
+def _seed_persisted_ticker_rows(
+    analysis_db: Path,
+    *,
+    signal_date: str = "2026-05-15",
+    taxonomy_version: str = "DC_TAXONOMY_FULL_V1",
+    signal_version: str = orchestrator.DEFAULT_SIGNAL_VERSION,
+    tickers: list[str],
+) -> None:
+    DatabaseManager(str(analysis_db)).close()
+    with sqlite3.connect(analysis_db) as conn:
+        for ticker in dict.fromkeys(tickers):
+            conn.execute(
+                """
+                INSERT INTO dc_ticker_swing_signal_daily (
+                    signal_date,
+                    taxonomy_version,
+                    ticker,
+                    bullish_divergence_signal,
+                    bearish_divergence_signal,
+                    hidden_bullish_divergence_signal,
+                    hidden_bearish_divergence_signal,
+                    bullish_candle_signal,
+                    bearish_candle_signal,
+                    breakout_signal,
+                    pullback_signal,
+                    exit_risk_signal,
+                    signal_version,
+                    run_id,
+                    created_at_utc
+                ) VALUES (?, ?, ?, 0, 0, 0, 0, 0, 0, 0, 0, 0, ?, ?, ?)
+                """,
+                (
+                    signal_date,
+                    taxonomy_version,
+                    ticker,
+                    signal_version,
+                    "RUN_A",
+                    "2026-05-22T00:00:00Z",
+                ),
+            )
+        conn.commit()
+
+
 def test_dry_run_prints_planned_stages_and_does_not_call_stage_runners(tmp_path, monkeypatch, capsys):
     def _fail(*args, **kwargs):
         raise AssertionError("stage runner should not be called in dry-run")
@@ -76,6 +120,10 @@ def test_dry_run_prints_planned_stages_and_does_not_call_stage_runners(tmp_path,
 
 
 def test_pipeline_default_weekly_window_size_is_20_and_used_in_dry_run(tmp_path, capsys):
+    _seed_persisted_ticker_rows(
+        tmp_path / "analysis.db",
+        tickers=["BBB", "AAA", "AAA"],
+    )
     exit_code = run_datacenter_swing_pipeline_main(_base_args(tmp_path) + ["--dry-run"])
 
     assert exit_code == 0
@@ -92,6 +140,8 @@ def test_pipeline_default_weekly_window_size_is_20_and_used_in_dry_run(tmp_path,
     assert "SUMMARY technical_relevance.enabled=true" in lines
     assert "SUMMARY technical_relevance.mode=auto" in lines
     assert "SUMMARY technical_relevance.run_id=DATACENTER_TECH_REL_DC_TAXONOMY_FULL_V1_2026_05_15" in lines
+    assert "SUMMARY technical_relevance.ticker_count=2" in lines
+    assert "SUMMARY technical_relevance.ticker_count_status=EXISTING_DB_SNAPSHOT" in lines
     assert "SUMMARY technical_relevance_run_id=DATACENTER_TECH_REL_DC_TAXONOMY_FULL_V1_2026_05_15" in lines
 
 
@@ -110,6 +160,7 @@ def test_pipeline_accepts_technical_relevance_run_id_and_threads_it_to_dry_run_p
     assert "SUMMARY technical_relevance.enabled=true" in lines
     assert "SUMMARY technical_relevance.mode=existing_run" in lines
     assert "SUMMARY technical_relevance.run_id=REL_PIPE_A" in lines
+    assert "SUMMARY technical_relevance.ticker_count_status=NOT_APPLICABLE_EXISTING_RUN" in lines
     assert "SUMMARY technical_relevance_run_id=REL_PIPE_A" in lines
 
 
@@ -128,6 +179,16 @@ def test_pipeline_accepts_no_technical_relevance_and_shows_disabled_mode_in_dry_
     assert "SUMMARY technical_relevance.enabled=false" in lines
     assert "SUMMARY technical_relevance.mode=disabled" in lines
     assert "SUMMARY technical_relevance.run_id=NONE" in lines
+    assert "SUMMARY technical_relevance.ticker_count_status=DISABLED" in lines
+
+
+def test_pipeline_dry_run_auto_reports_not_available_when_no_persisted_ticker_snapshot_exists(tmp_path, capsys):
+    exit_code = run_datacenter_swing_pipeline_main(_base_args(tmp_path) + ["--dry-run"])
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert "SUMMARY technical_relevance.ticker_count=0" in lines
+    assert "SUMMARY technical_relevance.ticker_count_status=NOT_AVAILABLE_DRY_RUN" in lines
 
 
 def test_pipeline_calls_stages_in_correct_order_and_uses_index_base_date(tmp_path, monkeypatch, capsys):
