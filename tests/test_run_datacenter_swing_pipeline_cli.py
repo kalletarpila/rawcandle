@@ -127,6 +127,7 @@ def test_dry_run_prints_planned_stages_and_does_not_call_stage_runners(tmp_path,
     assert any("Automatic technical relevance" in line for line in lines)
     assert "SUMMARY pipeline_stage.automatic_technical_relevance.status=DRY_RUN" in lines
     assert "SUMMARY pipeline_stage.automatic_technical_relevance.duration_seconds=0.000" in lines
+    assert "SUMMARY technical_relevance.status=DRY_RUN" in lines
     assert "SUMMARY pipeline.total_duration_seconds=0.125" in lines
     assert lines[-1] == "SUMMARY pipeline_status=DRY_RUN"
     assert not (tmp_path / "reports").exists()
@@ -174,6 +175,7 @@ def test_pipeline_accepts_technical_relevance_run_id_and_threads_it_to_dry_run_p
     assert "SUMMARY technical_relevance.mode=existing_run" in lines
     assert "SUMMARY technical_relevance.run_id=REL_PIPE_A" in lines
     assert "SUMMARY technical_relevance.ticker_count_status=NOT_APPLICABLE_EXISTING_RUN" in lines
+    assert "SUMMARY technical_relevance.status=SKIPPED_EXISTING_RUN" in lines
     assert "SUMMARY technical_relevance_run_id=REL_PIPE_A" in lines
 
 
@@ -193,6 +195,7 @@ def test_pipeline_accepts_no_technical_relevance_and_shows_disabled_mode_in_dry_
     assert "SUMMARY technical_relevance.mode=disabled" in lines
     assert "SUMMARY technical_relevance.run_id=NONE" in lines
     assert "SUMMARY technical_relevance.ticker_count_status=DISABLED" in lines
+    assert "SUMMARY technical_relevance.status=DISABLED" in lines
     assert "SUMMARY pipeline_stage.automatic_technical_relevance.status=SKIPPED" in lines
     assert "SUMMARY pipeline_stage.automatic_technical_relevance.duration_seconds=0.000" in lines
 
@@ -204,6 +207,7 @@ def test_pipeline_dry_run_auto_reports_not_available_when_no_persisted_ticker_sn
     lines = capsys.readouterr().out.strip().splitlines()
     assert "SUMMARY technical_relevance.ticker_count=0" in lines
     assert "SUMMARY technical_relevance.ticker_count_status=NOT_AVAILABLE_DRY_RUN" in lines
+    assert "SUMMARY technical_relevance.status=DRY_RUN" in lines
 
 
 def test_pipeline_calls_stages_in_correct_order_and_uses_index_base_date(tmp_path, monkeypatch, capsys):
@@ -308,6 +312,15 @@ def test_pipeline_calls_stages_in_correct_order_and_uses_index_base_date(tmp_pat
     assert "SUMMARY technical_relevance.enabled=true" in lines
     assert "SUMMARY technical_relevance.mode=auto" in lines
     assert "SUMMARY technical_relevance.run_id=AUTO_REL_RUN" in lines
+    assert "SUMMARY technical_relevance.observations_seen=10" in lines
+    assert "SUMMARY technical_relevance.records_written=10" in lines
+    assert "SUMMARY technical_relevance.relevant_count=4" in lines
+    assert "SUMMARY technical_relevance.weak_context_count=3" in lines
+    assert "SUMMARY technical_relevance.noise_count=3" in lines
+    assert "SUMMARY technical_relevance.unknown_signal_count=0" in lines
+    assert "SUMMARY technical_relevance.missing_dow_context_count=0" in lines
+    assert "SUMMARY technical_relevance.missing_bar_index_count=0" in lines
+    assert "SUMMARY technical_relevance.status=OK" in lines
     assert "SUMMARY audit_validation_status=OK" in lines
     total_duration_line = next(
         line for line in lines if line.startswith("SUMMARY pipeline.total_duration_seconds=")

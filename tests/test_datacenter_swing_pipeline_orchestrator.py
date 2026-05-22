@@ -293,6 +293,7 @@ def test_dry_run_auto_mode_uses_existing_db_snapshot_count_when_available(tmp_pa
     assert result["summary"]["technical_relevance.mode"] == "auto"
     assert result["summary"]["technical_relevance.ticker_count"] == 2
     assert result["summary"]["technical_relevance.ticker_count_status"] == "EXISTING_DB_SNAPSHOT"
+    assert result["summary"]["technical_relevance.status"] == "DRY_RUN"
 
 
 def test_dry_run_stage_summaries_use_stable_keys_and_zero_durations(tmp_path, monkeypatch):
@@ -326,6 +327,7 @@ def test_dry_run_auto_mode_reports_not_available_when_snapshot_rows_do_not_exist
     assert result["summary"]["technical_relevance.mode"] == "auto"
     assert result["summary"]["technical_relevance.ticker_count"] == 0
     assert result["summary"]["technical_relevance.ticker_count_status"] == "NOT_AVAILABLE_DRY_RUN"
+    assert result["summary"]["technical_relevance.status"] == "DRY_RUN"
 
 
 def test_default_mode_runs_automatic_technical_relevance_and_threads_generated_run_id(tmp_path, monkeypatch):
@@ -385,6 +387,7 @@ def test_default_mode_runs_automatic_technical_relevance_and_threads_generated_r
     assert summary["technical_relevance.mode"] == "auto"
     assert summary["technical_relevance.run_id"] == "AUTO_GENERATED_RUN"
     assert summary["technical_relevance.ticker_count_status"] == "ACTUAL_RUN"
+    assert summary["technical_relevance.status"] == "OK"
     assert summary["pipeline.total_duration_seconds"] == "13.250"
     assert summary["pipeline_stage.automatic_technical_relevance.status"] == "OK"
     assert summary["pipeline_stage.automatic_technical_relevance.duration_seconds"] == "0.250"
@@ -442,6 +445,7 @@ def test_existing_run_mode_skips_automatic_technical_relevance_and_threads_provi
 
     assert result["summary"]["technical_relevance.mode"] == "existing_run"
     assert result["summary"]["technical_relevance.ticker_count_status"] == "NOT_APPLICABLE_EXISTING_RUN"
+    assert result["summary"]["technical_relevance.status"] == "SKIPPED_EXISTING_RUN"
     assert calls[0][1]["technical_relevance_run_id"] == "EXISTING_RUN"
     assert calls[1][1]["technical_relevance_run_id"] == "EXISTING_RUN"
 
@@ -491,6 +495,7 @@ def test_disabled_mode_skips_automatic_technical_relevance_and_passes_none(tmp_p
 
     assert result["summary"]["technical_relevance.mode"] == "disabled"
     assert result["summary"]["technical_relevance.ticker_count_status"] == "DISABLED"
+    assert result["summary"]["technical_relevance.status"] == "DISABLED"
     assert result["summary"]["pipeline_stage.automatic_technical_relevance.status"] == "SKIPPED"
     assert result["summary"]["pipeline_stage.automatic_technical_relevance.duration_seconds"] == "0.000"
     assert calls[0][1]["technical_relevance_run_id"] is None

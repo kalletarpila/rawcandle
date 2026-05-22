@@ -51,6 +51,7 @@ FINAL_PIPELINE_SUMMARY_ORDER = (
     "technical_relevance.ticker_count_status",
     "technical_relevance.start_date",
     "technical_relevance.end_date",
+    "technical_relevance.status",
     "technical_relevance_run_id",
     "pipeline_output_dir",
     "pipeline_stage_count",
@@ -160,6 +161,33 @@ def _build_stage_duration_summary_defaults() -> dict[str, str]:
         summary[f"pipeline_stage.{stage_key}.status"] = "SKIPPED"
         summary[f"pipeline_stage.{stage_key}.duration_seconds"] = "0.000"
     return summary
+
+
+def _format_technical_relevance_stage_summary_lines(
+    summary: dict[str, object],
+    *,
+    status: str,
+) -> list[str]:
+    keys = (
+        "run_id",
+        "ticker_count",
+        "start_date",
+        "end_date",
+        "observations_seen",
+        "records_written",
+        "relevant_count",
+        "weak_context_count",
+        "noise_count",
+        "unknown_signal_count",
+        "missing_dow_context_count",
+        "missing_bar_index_count",
+    )
+    lines: list[str] = []
+    for key in keys:
+        if key in summary:
+            lines.append(f"SUMMARY technical_relevance.{key}={summary[key]}")
+    lines.append(f"SUMMARY technical_relevance.status={status}")
+    return lines
 
 
 def _run_cli_stage(main_func: Callable[[list[str]], int], argv: list[str]) -> dict[str, object] | None:
@@ -410,6 +438,11 @@ def run_datacenter_swing_pipeline(
             if technical_relevance_mode == "existing_run"
             else "NOT_AVAILABLE_DRY_RUN"
         )
+    )
+    technical_relevance_status = (
+        "DISABLED"
+        if technical_relevance_mode == "disabled"
+        else ("SKIPPED_EXISTING_RUN" if technical_relevance_mode == "existing_run" else "DRY_RUN")
     )
     technical_relevance_start_date = "NONE"
     technical_relevance_end_date = "NONE"
@@ -985,6 +1018,7 @@ def run_datacenter_swing_pipeline(
                 "technical_relevance.ticker_count_status": technical_relevance_ticker_count_status,
                 "technical_relevance.start_date": technical_relevance_start_date,
                 "technical_relevance.end_date": technical_relevance_end_date,
+                "technical_relevance.status": technical_relevance_status,
                 "technical_relevance_run_id": resolved_technical_relevance_run_id or "NONE",
                 "pipeline_output_dir": str(output_dir),
                 "pipeline_stage_count": len(stages),
@@ -1050,6 +1084,7 @@ def run_datacenter_swing_pipeline(
                         "technical_relevance.ticker_count_status": technical_relevance_ticker_count_status,
                         "technical_relevance.start_date": technical_relevance_start_date,
                         "technical_relevance.end_date": technical_relevance_end_date,
+                        "technical_relevance.status": technical_relevance_status,
                         "technical_relevance_run_id": resolved_technical_relevance_run_id or "NONE",
                         "pipeline_output_dir": str(output_dir),
                         "pipeline_stage_count": len(stages),
@@ -1063,9 +1098,12 @@ def run_datacenter_swing_pipeline(
                     }
                 }
         elif stage.heading == "Automatic technical relevance":
+            for line in _format_technical_relevance_stage_summary_lines(result["summary"], status="OK"):
+                print(line)
             resolved_technical_relevance_run_id = str(result["summary"]["run_id"])
             technical_relevance_ticker_count = int(result["summary"]["ticker_count"])
             technical_relevance_ticker_count_status = "ACTUAL_RUN"
+            technical_relevance_status = "OK"
             technical_relevance_start_date = str(result["summary"]["start_date"])
             technical_relevance_end_date = str(result["summary"]["end_date"])
         elif stage.heading == "Daily report":
@@ -1094,6 +1132,7 @@ def run_datacenter_swing_pipeline(
             "technical_relevance.ticker_count_status": technical_relevance_ticker_count_status,
             "technical_relevance.start_date": technical_relevance_start_date,
             "technical_relevance.end_date": technical_relevance_end_date,
+            "technical_relevance.status": technical_relevance_status,
             "technical_relevance_run_id": resolved_technical_relevance_run_id or "NONE",
             "pipeline_output_dir": str(output_dir),
             "pipeline_stage_count": len(stages),
