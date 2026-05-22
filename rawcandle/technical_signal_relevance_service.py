@@ -15,8 +15,9 @@ from .technical_signal_relevance_sources import (
     MAX_BAR_INDEX_LOOKBACK_BARS,
     assign_event_bar_distances,
     assign_pivot_bar_distances,
-    build_context_aware_bar_index,
+    build_context_aware_bar_index_from_bar_dates,
     read_candlestick_observations,
+    read_bar_dates_for_tickers,
     read_divergence_observations,
     read_dow_events,
     read_dow_pivots,
@@ -272,21 +273,43 @@ def run_technical_signal_relevance_for_tickers(
         candidate_dates.update(pivot.confirmed_as_of_date for pivot in raw_pivots)
 
     bar_indexes = {}
-    for ticker in sorted(observation_dates_by_ticker):
-        bar_index_start = perf_counter()
-        if profile is not None:
-            profile.read_bar_dates_calls += 1
-            profile.build_bar_index_calls += 1
-        bar_indexes[ticker] = build_context_aware_bar_index(
-            conn,
-            ticker,
-            timeframe,
+    normalized_bar_index_tickers = sorted(observation_dates_by_ticker)
+    if normalized_bar_index_tickers:
+        earliest_required_dates: list[str] = []
+        latest_observation_dates: list[str] = []
+        for ticker in normalized_bar_index_tickers:
+            observation_dates = sorted(observation_dates_by_ticker.get(ticker, set()))
+            candidate_dates = sorted(candidate_context_dates_by_ticker.get(ticker, set()))
+            if not observation_dates:
+                continue
+            earliest_required_dates.append(min(candidate_dates[0], observation_dates[0]))
+            latest_observation_dates.append(observation_dates[-1])
+        bar_dates_by_ticker: dict[str, list[str]] = {}
+        if earliest_required_dates and latest_observation_dates:
+            batch_bar_index_start = perf_counter()
+            if profile is not None:
+                profile.read_bar_dates_calls += 1
+                profile.build_bar_index_calls += 1
+            bar_dates_by_ticker = read_bar_dates_for_tickers(
+                conn,
+                normalized_bar_index_tickers,
+                timeframe,
+                min(earliest_required_dates),
+                max(latest_observation_dates),
+            )
+            if profile is not None:
+                profile.bar_index_seconds += perf_counter() - batch_bar_index_start
+
+    for ticker in normalized_bar_index_tickers:
+        ticker_bar_index_start = perf_counter()
+        bar_indexes[ticker] = build_context_aware_bar_index_from_bar_dates(
+            bar_dates_by_ticker.get(ticker, []),
             sorted(observation_dates_by_ticker.get(ticker, set())),
             sorted(candidate_context_dates_by_ticker.get(ticker, set())),
             max_lookback_bars=MAX_BAR_INDEX_LOOKBACK_BARS,
         )
         if profile is not None:
-            bar_index_elapsed = perf_counter() - bar_index_start
+            bar_index_elapsed = perf_counter() - ticker_bar_index_start
             profile.bar_index_seconds += bar_index_elapsed
             profile._ticker_seconds[ticker] = profile._ticker_seconds.get(ticker, 0.0) + bar_index_elapsed
 

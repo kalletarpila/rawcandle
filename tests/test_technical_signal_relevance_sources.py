@@ -3,10 +3,12 @@ import sqlite3
 from rawcandle.technical_signal_relevance import CANDLE, RSI
 from rawcandle.technical_signal_relevance_sources import (
     build_bar_index,
+    build_context_aware_bar_index_from_bar_dates,
     build_context_aware_bar_index,
     normalize_candlestick_observation_row,
     normalize_signal_name,
     read_bar_dates,
+    read_bar_dates_for_tickers,
     read_candlestick_observations,
     read_divergence_observations,
     read_dow_events,
@@ -717,6 +719,80 @@ def test_bar_distance_helper_counts_actual_bars_not_calendar_days():
     bar_index = build_bar_index(conn, "AAA", "1d", "2026-05-05", "2026-05-06", 10)
 
     assert bar_dates == ["2026-05-01", "2026-05-05", "2026-05-06"]
+    assert bar_index is not None
+    assert bar_index.bars_since("2026-05-01", "2026-05-06") == 2
+
+
+def test_batch_bar_date_loader_returns_sorted_dates_per_ticker_and_respects_range():
+    conn = _connect()
+    _create_osakedata(conn)
+    conn.executemany(
+        """
+        INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            ("AAA", "2026-05-01", 1.0, 1.0, 1.0, 1.0, 1.0, "usa"),
+            ("AAA", "2026-05-05", 1.0, 1.0, 1.0, 1.0, 1.0, "usa"),
+            ("AAA", "2026-05-06", 1.0, 1.0, 1.0, 1.0, 1.0, "usa"),
+            ("BBB", "2026-05-02", 1.0, 1.0, 1.0, 1.0, 1.0, "other"),
+            ("BBB", "2026-05-07", 1.0, 1.0, 1.0, 1.0, 1.0, "other"),
+        ],
+    )
+
+    bar_dates = read_bar_dates_for_tickers(
+        conn,
+        ["BBB", "AAA", "CCC"],
+        "1d",
+        "2026-05-02",
+        "2026-05-06",
+    )
+
+    assert bar_dates == {
+        "AAA": ["2026-05-05", "2026-05-06"],
+        "BBB": ["2026-05-02"],
+    }
+
+
+def test_batch_bar_date_loader_handles_chunking_and_missing_tickers():
+    conn = _connect()
+    _create_osakedata(conn)
+    conn.executemany(
+        """
+        INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            ("AAA", "2026-05-01", 1.0, 1.0, 1.0, 1.0, 1.0, "usa"),
+            ("BBB", "2026-05-01", 1.0, 1.0, 1.0, 1.0, 1.0, "usa"),
+            ("CCC", "2026-05-01", 1.0, 1.0, 1.0, 1.0, 1.0, "usa"),
+        ],
+    )
+
+    bar_dates = read_bar_dates_for_tickers(
+        conn,
+        ["CCC", "DDD", "BBB", "AAA"],
+        "1d",
+        "2026-05-01",
+        "2026-05-01",
+        chunk_size=2,
+    )
+
+    assert bar_dates == {
+        "AAA": ["2026-05-01"],
+        "BBB": ["2026-05-01"],
+        "CCC": ["2026-05-01"],
+    }
+
+
+def test_context_aware_bar_index_from_batch_dates_preserves_actual_trading_day_gaps():
+    bar_index = build_context_aware_bar_index_from_bar_dates(
+        ["2026-05-01", "2026-05-05", "2026-05-06"],
+        ["2026-05-06"],
+        ["2026-05-01", "2026-05-06"],
+        max_lookback_bars=260,
+    )
+
     assert bar_index is not None
     assert bar_index.bars_since("2026-05-01", "2026-05-06") == 2
 

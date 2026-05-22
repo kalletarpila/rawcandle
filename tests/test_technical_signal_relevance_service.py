@@ -251,6 +251,54 @@ def test_service_profiling_counts_reader_calls_and_observations_without_changing
     assert profile.slowest_tickers[0].records == 2
 
 
+def test_service_uses_batched_bar_date_loading_for_multiple_tickers():
+    conn = _connect()
+    _create_analysis_findings(conn)
+    _create_dow_events(conn)
+    _create_osakedata(conn)
+    conn.executemany(
+        "INSERT INTO analysis_findings (ticker, date, pattern, signal_strength, rsi14) VALUES (?, ?, ?, ?, ?)",
+        [
+            ("AAA", "2024-01-10", "Hammer", 0.8, 50.0),
+            ("BBB", "2024-01-10", "Hammer", 0.8, 50.0),
+        ],
+    )
+    conn.executemany(
+        """
+        INSERT INTO stock_dow_structure_events (
+            ticker, event_date, confirmed_as_of_date, event_type, trend_state, structure_epoch_id
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        [
+            ("AAA", "2024-01-09", "2024-01-10", "PIVOT_LOW", "UP", 1),
+            ("BBB", "2024-01-09", "2024-01-10", "PIVOT_LOW", "UP", 1),
+        ],
+    )
+    _insert_osakedata_range(conn, "AAA", "2024-01-01", 20)
+    _insert_osakedata_range(conn, "BBB", "2024-01-01", 20)
+
+    profile = TechnicalSignalRelevanceProfile()
+    summary = run_technical_signal_relevance_for_tickers(
+        conn,
+        ["AAA", "BBB"],
+        "1d",
+        "2024-01-01",
+        "2024-01-31",
+        "RUN_SERVICE_PROFILE_002",
+        "2026-05-21T13:00:03Z",
+        profile=profile,
+    )
+
+    assert summary.records_written == 2
+    assert profile.candlestick_observation_count == 2
+    assert profile.divergence_observation_count == 0
+    assert profile.read_candlestick_observations_calls == 2
+    assert profile.read_divergence_observations_calls == 2
+    assert profile.read_bar_dates_calls == 1
+    assert profile.build_bar_index_calls == 1
+    assert profile.bar_index_seconds >= 0.0
+
+
 def test_service_handles_multiple_tickers_deterministically():
     conn = _connect()
     _create_analysis_findings(conn)
