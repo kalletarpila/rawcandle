@@ -38,9 +38,9 @@ _ACTION_PRIORITY = {
     "SELL": 0,
     "REDUCE": 1,
     "TIGHTEN_STOP": 2,
-    "BUY_NOW": 3,
+    "BLOCKED": 3,
     "WAIT_PULLBACK": 4,
-    "BLOCKED": 5,
+    "BUY_NOW": 5,
     "WATCH": 6,
     "NEUTRAL": 7,
 }
@@ -247,6 +247,10 @@ def build_datacenter_ticker_decisions(
             reasons.append(
                 f"high_exit_risk_days_count={high_exit_risk_days_count}"
             )
+        elif has_blocking:
+            action = "BLOCKED"
+            primary_reason = "BLOCKING_REASONS_PRESENT"
+            reasons.extend(blocking_reasons)
         elif (
             rolling_30_positive
             and distance_to_ema20 is not None
@@ -255,10 +259,6 @@ def build_datacenter_ticker_decisions(
             action = "WAIT_PULLBACK"
             primary_reason = "STRETCHED_ABOVE_EMA20"
             reasons.append(f"distance_to_ema20={distance_to_ema20}")
-        elif has_blocking:
-            action = "BLOCKED"
-            primary_reason = "BLOCKING_REASONS_PRESENT"
-            reasons.extend(blocking_reasons)
         elif rolling_30_positive and rolling_5_constructive and daily_positive:
             action = "BUY_NOW"
             primary_reason = "MULTI_HORIZON_ALIGNMENT"

@@ -86,6 +86,22 @@ def test_wait_pullback_when_otherwise_positive_and_stretched():
     assert result.decisions[0].action == "WAIT_PULLBACK"
 
 
+def test_blocked_outranks_wait_pullback_when_blocking_reasons_exist():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="META",
+                horizon="rolling 30d",
+                raw_status="UP",
+                distance_to_ema20=16.5,
+                blocking_reasons="STRUCTURAL_BLOCK",
+            )
+        ]
+    )
+
+    assert result.decisions[0].action == "BLOCKED"
+
+
 def test_buy_now_only_when_multi_horizon_constructive_alignment_exists():
     result = build_datacenter_ticker_decisions(
         [
@@ -120,14 +136,61 @@ def test_output_ordering_is_deterministic():
             _row(ticker="BBB", horizon="daily", reason="close_below_ema20"),
             _row(ticker="AAA", horizon="daily", reason="close_below_ema20"),
             _row(ticker="CCC", horizon="rolling 30d", raw_status="LEADER"),
+            _row(ticker="DDD", horizon="rolling 5d", blocking_reasons="STRUCTURAL_BLOCK"),
         ]
     )
 
     assert [(item.ticker, item.action) for item in result.decisions] == [
         ("AAA", "SELL"),
         ("BBB", "SELL"),
+        ("DDD", "BLOCKED"),
         ("CCC", "WATCH"),
     ]
+
+
+def test_sell_still_outranks_blocked():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="AVGO",
+                horizon="daily",
+                reason="close_below_ema20",
+                blocking_reasons="STRUCTURAL_BLOCK",
+            )
+        ]
+    )
+
+    assert result.decisions[0].action == "SELL"
+
+
+def test_reduce_still_outranks_blocked():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="LRCX",
+                horizon="daily",
+                reason="exit_risk",
+                blocking_reasons="STRUCTURAL_BLOCK",
+            )
+        ]
+    )
+
+    assert result.decisions[0].action == "REDUCE"
+
+
+def test_tighten_stop_still_outranks_blocked():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="SMCI",
+                horizon="rolling 2d",
+                high_exit_risk_days_count=1,
+                blocking_reasons="STRUCTURAL_BLOCK",
+            )
+        ]
+    )
+
+    assert result.decisions[0].action == "TIGHTEN_STOP"
 
 
 def test_action_counts_are_correct():

@@ -649,6 +649,92 @@ def populate_datacenter_dashboard_summary(
         )
 
 
+def populate_datacenter_dashboard_command_center(
+    *,
+    decision_result: DatacenterDecisionBatchResult,
+    command_center_column: ft.Column,
+) -> None:
+    command_center_column.controls.clear()
+    grouped_actions = [
+        ("Critical exits", ("SELL", "REDUCE", "TIGHTEN_STOP")),
+        ("Buy candidates", ("BUY_NOW", "WATCH", "WAIT_PULLBACK")),
+        ("Blocked / neutral", ("BLOCKED", "NEUTRAL")),
+    ]
+
+    decisions_by_action: dict[str, list[Any]] = {}
+    for action_name in ("SELL", "REDUCE", "TIGHTEN_STOP", "BUY_NOW", "WATCH", "WAIT_PULLBACK", "BLOCKED", "NEUTRAL"):
+        decisions_by_action[action_name] = [
+            decision for decision in decision_result.decisions if decision.action == action_name
+        ]
+
+    if not decision_result.decisions:
+        command_center_column.controls.append(ft.Text("No decisions available."))
+        return
+
+    for group_title, actions in grouped_actions:
+        group_rows = [
+            decision
+            for action_name in actions
+            for decision in decisions_by_action[action_name]
+        ]
+        if not group_rows:
+            continue
+        command_center_column.controls.append(
+            ft.Text(group_title, size=18, weight=ft.FontWeight.BOLD)
+        )
+        for decision in group_rows:
+            command_center_column.controls.append(
+                ft.Container(
+                    content=ft.Column(
+                        controls=[
+                            ft.Text(
+                                f"{decision.ticker} | {decision.action} | {decision.severity}",
+                                weight=ft.FontWeight.BOLD,
+                            ),
+                            ft.Text(
+                                f"primary_reason: {decision.primary_reason or 'NONE'}",
+                                size=11,
+                            ),
+                            ft.Text(
+                                "distance_to_ema20="
+                                f"{decision.distance_to_ema20 if decision.distance_to_ema20 is not None else 'NONE'}"
+                                " | high_exit_risk_days_count="
+                                f"{decision.high_exit_risk_days_count if decision.high_exit_risk_days_count is not None else 'NONE'}",
+                                size=11,
+                            ),
+                            ft.Text(
+                                "trend_state="
+                                f"{decision.trend_state or 'NONE'}"
+                                " | latest_structure_label="
+                                f"{decision.latest_structure_label or 'NONE'}"
+                                " | latest_bos_event_type="
+                                f"{decision.latest_bos_event_type or 'NONE'}",
+                                size=11,
+                            ),
+                            ft.Text(
+                                f"latest_reset_reason: {decision.latest_reset_reason or 'NONE'}",
+                                size=11,
+                            ),
+                            ft.Text(
+                                "horizons_present: "
+                                f"{', '.join(decision.horizons_present) if decision.horizons_present else 'NONE'}",
+                                size=11,
+                            ),
+                            ft.Text(
+                                f"source_files: {len(decision.source_files)}",
+                                size=11,
+                                color="gray",
+                            ),
+                        ],
+                        spacing=2,
+                    ),
+                    border=ft.border.all(1, "#DADCE0"),
+                    border_radius=8,
+                    padding=10,
+                )
+            )
+
+
 def _market_row_text(market_result: Dict[str, Any]) -> str:
     return (
         f"{market_result.get('market', '')}: "
@@ -1050,6 +1136,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
         max_lines=9,
         width=240,
     )
+    datacenter_dashboard_command_center_column = ft.Column(spacing=8)
     datacenter_status_field = ft.TextField(
         label="Datacenter status",
         value="",
@@ -1118,6 +1205,10 @@ def run_app(page: ft.Page, config_path: str) -> None:
             parse_summary_field=datacenter_dashboard_parse_summary_field,
             decision_summary_field=datacenter_dashboard_decision_summary_field,
             reports_column=datacenter_dashboard_reports_column,
+        )
+        populate_datacenter_dashboard_command_center(
+            decision_result=decision_result,
+            command_center_column=datacenter_dashboard_command_center_column,
         )
         page.update()
 
@@ -1597,6 +1688,8 @@ def run_app(page: ft.Page, config_path: str) -> None:
                 vertical_alignment=ft.CrossAxisAlignment.END,
             ),
             datacenter_dashboard_reports_column,
+            ft.Text("Command Center", size=18, weight=ft.FontWeight.BOLD),
+            datacenter_dashboard_command_center_column,
         ],
         spacing=12,
         expand=True,
@@ -1625,6 +1718,9 @@ def run_app(page: ft.Page, config_path: str) -> None:
         datacenter_dashboard_decision_summary_field
     )
     page.datacenter_dashboard_reports_column = datacenter_dashboard_reports_column
+    page.datacenter_dashboard_command_center_column = (
+        datacenter_dashboard_command_center_column
+    )
     page.datacenter_status_field = datacenter_status_field
     page.datacenter_reports_column = datacenter_reports_column
     page.datacenter_log_field = datacenter_log_field

@@ -952,6 +952,7 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(tmp_path, mon
     assert "decision_total=0" in page.datacenter_dashboard_decision_summary_field.value
     assert "SELL=0" in page.datacenter_dashboard_decision_summary_field.value
     assert len(page.datacenter_dashboard_reports_column.controls) == 4
+    assert page.datacenter_dashboard_command_center_column.controls[0].value == "No decisions available."
     datacenter_text_labels = [
         control.value
         for control in page.datacenter_content.controls
@@ -1071,6 +1072,116 @@ def test_run_app_datacenter_dashboard_refresh_reads_report_directory(tmp_path, m
     assert "daily: OK" in daily_card.content.controls[0].value
     assert "parsed_rows: 1" in daily_card.content.controls[3].value
     assert "warnings: 0" in daily_card.content.controls[4].value
+
+
+def test_run_app_datacenter_dashboard_command_center_shows_grouped_read_only_rows(
+    tmp_path, monkeypatch
+):
+    config_path = tmp_path / "scheduler.json"
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    (reports_dir / "datacenter_rolling_30_2026-05-22_0000_full.csv").write_text(
+        "\n".join(
+            [
+                "ticker;status;distance_to_ema20;blocking_reasons",
+                "META;UP;16.5;STRUCTURAL_BLOCK",
+                "MRVL;LEADER;;",
+                "TSM;BUY_ZONE;;",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (reports_dir / "datacenter_rolling_5_2026-05-22_0000_full.csv").write_text(
+        "ticker;status\nTSM;PULLBACK\n",
+        encoding="utf-8",
+    )
+    (reports_dir / "datacenter_rolling_2_2026-05-22_0000_full.csv").write_text(
+        "ticker;high_exit_risk_days_count\nLRCX;1\n",
+        encoding="utf-8",
+    )
+    (reports_dir / "datacenter_daily_2026-05-22_0000_full.csv").write_text(
+        "\n".join(
+            [
+                "ticker;status;reason",
+                "NVDA;SELL;close_below_ema20",
+                "AVGO;WATCH;exit_risk",
+                "TSM;BULLISH;",
+                "INTC;SIDEWAYS;",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        json.dumps(
+            {
+                "analysis_db_path": "/tmp/analysis.db",
+                "enabled_markets": ["omxh"],
+                "log_dir": "/tmp/logs",
+                "osakedata_db_path": "/tmp/osakedata.db",
+                "run_time": "05:30",
+                "timezone": "Europe/Helsinki",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.load_latest_scheduler_summary",
+        lambda log_dir: None,
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.list_scheduler_log_files",
+        lambda log_dir: [],
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_scheduler_status",
+        lambda log_dir: None,
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
+        lambda: {
+            "timer_path": "/tmp/timer",
+            "on_calendar": "*-*-* 05:30:00",
+            "installed": True,
+            "status_summary": "ok",
+            "error": None,
+        },
+    )
+
+    page = _FakePage()
+    run_app(page, str(config_path))
+    page.datacenter_dashboard_reports_dir_field.value = str(reports_dir)
+    page.datacenter_dashboard_refresh_button.on_click(None)
+
+    assert "decision_total=7" in page.datacenter_dashboard_decision_summary_field.value
+    assert "SELL=1" in page.datacenter_dashboard_decision_summary_field.value
+    assert "REDUCE=1" in page.datacenter_dashboard_decision_summary_field.value
+    assert "TIGHTEN_STOP=1" in page.datacenter_dashboard_decision_summary_field.value
+    assert "BUY_NOW=1" in page.datacenter_dashboard_decision_summary_field.value
+    assert "BLOCKED=1" in page.datacenter_dashboard_decision_summary_field.value
+    assert "WATCH=1" in page.datacenter_dashboard_decision_summary_field.value
+    assert "NEUTRAL=1" in page.datacenter_dashboard_decision_summary_field.value
+    labels = [
+        control.value
+        for control in page.datacenter_dashboard_command_center_column.controls
+        if hasattr(control, "value")
+    ]
+    assert "Critical exits" in labels
+    assert "Buy candidates" in labels
+    assert "Blocked / neutral" in labels
+    row_titles = [
+        control.content.controls[0].value
+        for control in page.datacenter_dashboard_command_center_column.controls
+        if hasattr(control, "content")
+    ]
+    assert "NVDA | SELL | CRITICAL" in row_titles
+    assert "AVGO | REDUCE | HIGH" in row_titles
+    assert "LRCX | TIGHTEN_STOP | MEDIUM" in row_titles
+    assert "META | BLOCKED | HIGH" in row_titles
+    assert "TSM | BUY_NOW | HIGH" in row_titles
+    assert "MRVL | WATCH | LOW" in row_titles
+    assert "INTC | NEUTRAL | INFO" in row_titles
 
 
 def test_build_skip_next_run_config_sets_true_without_changing_other_fields():
