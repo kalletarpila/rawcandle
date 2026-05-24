@@ -387,6 +387,224 @@ def test_freshness_structure_warning_overrides_bullish_blocks_watch():
     assert result.decisions[0].action != "WATCH"
 
 
+def test_no_pullback_context_is_no_pullback():
+    result = build_datacenter_ticker_decisions(
+        [_row(ticker="INTC", horizon="daily", raw_status="SIDEWAYS")]
+    )
+
+    assert result.decisions[0].pullback_validity == "NO_PULLBACK"
+    assert result.decisions[0].pullback_reason == "NO_PULLBACK_CONTEXT"
+
+
+def test_pullback_context_plus_fresh_rolling_2d_bos_down_is_structure_blocked_pullback():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="NVDA",
+                horizon="rolling 2d",
+                raw_status="PULLBACK_CANDIDATE",
+                latest_bos_event_type="BOS_DOWN",
+                raw_fields={"latest_bos_freshness": "FRESH"},
+            )
+        ]
+    )
+
+    assert result.decisions[0].pullback_validity == "STRUCTURE_BLOCKED_PULLBACK"
+    assert result.decisions[0].pullback_reason == "FRESH_BOS_DOWN_BLOCKS_PULLBACK"
+
+
+def test_pullback_context_plus_fresh_rolling_2d_double_bos_down_is_structure_blocked_pullback():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="NVDA",
+                horizon="rolling 2d",
+                raw_status="PULLBACK_CANDIDATE",
+                latest_reset_reason="DOUBLE_BOS_DOWN",
+                raw_fields={"latest_reset_freshness": "FRESH"},
+            )
+        ]
+    )
+
+    assert result.decisions[0].pullback_validity == "STRUCTURE_BLOCKED_PULLBACK"
+    assert result.decisions[0].pullback_reason == "FRESH_DOUBLE_BOS_DOWN_BLOCKS_PULLBACK"
+
+
+def test_pullback_context_plus_structure_override_flag_is_structure_blocked_pullback():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="TSM",
+                horizon="daily",
+                raw_status="PULLBACK_CANDIDATE",
+                structure_warning_overrides_bullish_signal=1,
+                freshness_status="STRUCTURE_WARNING_OVERRIDES_BULLISH",
+            )
+        ]
+    )
+
+    assert result.decisions[0].pullback_validity == "STRUCTURE_BLOCKED_PULLBACK"
+    assert result.decisions[0].pullback_reason == "STRUCTURE_WARNING_OVERRIDES_BULLISH_SIGNAL"
+
+
+def test_pullback_context_plus_daily_ema20_confirmed_break_is_breakdown_not_pullback():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="AMD",
+                horizon="daily",
+                raw_status="PULLBACK_CANDIDATE",
+                ma_break_status="EMA20_CONFIRMED_BREAK",
+            )
+        ]
+    )
+
+    assert result.decisions[0].pullback_validity == "BREAKDOWN_NOT_PULLBACK"
+    assert result.decisions[0].pullback_reason == "EMA20_CONFIRMED_BREAK"
+
+
+def test_pullback_context_plus_rolling_2d_sma50_confirmed_break_is_breakdown_not_pullback():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="AMD",
+                horizon="rolling 2d",
+                raw_status="PULLBACK_CANDIDATE",
+                ma_break_status="SMA50_CONFIRMED_BREAK",
+            )
+        ]
+    )
+
+    assert result.decisions[0].pullback_validity == "BREAKDOWN_NOT_PULLBACK"
+    assert result.decisions[0].pullback_reason == "SMA50_CONFIRMED_BREAK"
+
+
+def test_pullback_context_plus_fresh_bullish_signal_and_ok_ma_is_valid_pullback():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="TSM",
+                horizon="daily",
+                raw_status="PULLBACK_CANDIDATE",
+                ma_break_status="OK",
+                freshness_status="FRESH_BULLISH_SIGNAL",
+            )
+        ]
+    )
+
+    assert result.decisions[0].pullback_validity == "VALID_PULLBACK"
+    assert result.decisions[0].pullback_reason == "FRESH_BULLISH_PULLBACK_WITH_NO_STRUCTURE_BLOCK"
+
+
+def test_pullback_context_plus_ema20_warning_and_fresh_bullish_signal_is_valid_pullback():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="TSM",
+                horizon="daily",
+                raw_status="PULLBACK_CANDIDATE",
+                ma_break_status="EMA20_WARNING",
+                freshness_status="FRESH_BULLISH_SIGNAL",
+            )
+        ]
+    )
+
+    assert result.decisions[0].pullback_validity == "VALID_PULLBACK"
+
+
+def test_pullback_context_without_block_and_without_bullish_confirmation_is_early_pullback():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="TSM",
+                horizon="daily",
+                raw_status="PULLBACK_CANDIDATE",
+                ma_break_status="OK",
+            )
+        ]
+    )
+
+    assert result.decisions[0].pullback_validity == "EARLY_PULLBACK"
+    assert result.decisions[0].pullback_reason == "WAIT_FOR_BULLISH_CONFIRMATION"
+
+
+def test_structure_blocked_pullback_outranks_breakdown_not_pullback():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="NVDA",
+                horizon="daily",
+                raw_status="PULLBACK_CANDIDATE",
+                ma_break_status="EMA20_CONFIRMED_BREAK",
+                freshness_status="STRUCTURE_WARNING_OVERRIDES_BULLISH",
+                structure_warning_overrides_bullish_signal=1,
+            )
+        ]
+    )
+
+    assert result.decisions[0].pullback_validity == "STRUCTURE_BLOCKED_PULLBACK"
+
+
+def test_breakdown_not_pullback_outranks_early_pullback():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="AMD",
+                horizon="daily",
+                raw_status="PULLBACK_CANDIDATE",
+                ma_break_status="EMA20_CONFIRMED_BREAK",
+            ),
+            _row(
+                ticker="AMD",
+                horizon="rolling 5d",
+                raw_status="EARLY_PULLBACK",
+            ),
+        ]
+    )
+
+    assert result.decisions[0].pullback_validity == "BREAKDOWN_NOT_PULLBACK"
+
+
+def test_final_action_is_unchanged_by_pullback_validity():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="NVDA",
+                horizon="rolling 2d",
+                raw_status="PULLBACK_CANDIDATE DOUBLE_BOS_DOWN",
+                latest_bos_event_type="BOS_DOWN",
+                ma_break_status="OK",
+            )
+        ]
+    )
+
+    assert result.decisions[0].action == "SELL"
+    assert result.decisions[0].pullback_validity in {"STRUCTURE_BLOCKED_PULLBACK", "EARLY_PULLBACK", "VALID_PULLBACK", "BREAKDOWN_NOT_PULLBACK", "NO_PULLBACK", "INSUFFICIENT_DATA"}
+
+
+def test_pullback_validity_respects_deterministic_horizon_priority():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="NVDA",
+                horizon="rolling 2d",
+                raw_status="PULLBACK_CANDIDATE",
+                ma_break_status="EMA20_CONFIRMED_BREAK",
+            ),
+            _row(
+                ticker="NVDA",
+                horizon="daily",
+                raw_status="PULLBACK_CANDIDATE",
+                freshness_status="STRUCTURE_WARNING_OVERRIDES_BULLISH",
+                structure_warning_overrides_bullish_signal=1,
+            ),
+        ]
+    )
+
+    assert result.decisions[0].pullback_validity == "STRUCTURE_BLOCKED_PULLBACK"
+    assert result.decisions[0].pullback_reason == "STRUCTURE_WARNING_OVERRIDES_BULLISH_SIGNAL"
+
+
 def test_neutral_fallback():
     result = build_datacenter_ticker_decisions(
         [_row(ticker="INTC", horizon="daily", raw_status="SIDEWAYS")]

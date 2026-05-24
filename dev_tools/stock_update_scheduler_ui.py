@@ -748,6 +748,8 @@ def populate_datacenter_dashboard_inspector(
     selected_ticker: str | None,
     action_field: ft.TextField,
     conflict_detected_field: ft.TextField,
+    pullback_validity_field: ft.TextField,
+    pullback_reason_field: ft.TextField,
     supporting_signals_field: ft.TextField,
     conflicting_signals_field: ft.TextField,
     override_explanation_field: ft.TextField,
@@ -763,6 +765,8 @@ def populate_datacenter_dashboard_inspector(
     if inspector_view is None:
         action_field.value = "NONE"
         conflict_detected_field.value = "False"
+        pullback_validity_field.value = "NONE"
+        pullback_reason_field.value = "NONE"
         supporting_signals_field.value = "NONE"
         conflicting_signals_field.value = "NONE"
         override_explanation_field.value = "NONE"
@@ -772,6 +776,8 @@ def populate_datacenter_dashboard_inspector(
         f"{inspector_view.ticker} | {inspector_view.action} | {inspector_view.severity}"
     )
     conflict_detected_field.value = str(inspector_view.conflict_detected)
+    pullback_validity_field.value = inspector_view.pullback_validity or "NONE"
+    pullback_reason_field.value = inspector_view.pullback_reason or "NONE"
     supporting_signals_field.value = (
         ", ".join(inspector_view.supporting_signals)
         if inspector_view.supporting_signals
@@ -1206,6 +1212,21 @@ def run_app(page: ft.Page, config_path: str) -> None:
         read_only=True,
         width=180,
     )
+    datacenter_dashboard_pullback_validity_field = ft.TextField(
+        label="pullback_validity",
+        value="NONE",
+        read_only=True,
+        width=240,
+    )
+    datacenter_dashboard_pullback_reason_field = ft.TextField(
+        label="pullback_reason",
+        value="NONE",
+        read_only=True,
+        multiline=True,
+        min_lines=1,
+        max_lines=2,
+        expand=True,
+    )
     datacenter_dashboard_supporting_signals_field = ft.TextField(
         label="supporting_signals",
         value="NONE",
@@ -1334,6 +1355,8 @@ def run_app(page: ft.Page, config_path: str) -> None:
             selected_ticker=selected_ticker,
             action_field=datacenter_dashboard_inspector_action_field,
             conflict_detected_field=datacenter_dashboard_conflict_detected_field,
+            pullback_validity_field=datacenter_dashboard_pullback_validity_field,
+            pullback_reason_field=datacenter_dashboard_pullback_reason_field,
             supporting_signals_field=datacenter_dashboard_supporting_signals_field,
             conflicting_signals_field=datacenter_dashboard_conflicting_signals_field,
             override_explanation_field=datacenter_dashboard_override_explanation_field,
@@ -1387,6 +1410,8 @@ def run_app(page: ft.Page, config_path: str) -> None:
             selected_ticker=selected_ticker,
             action_field=datacenter_dashboard_inspector_action_field,
             conflict_detected_field=datacenter_dashboard_conflict_detected_field,
+            pullback_validity_field=datacenter_dashboard_pullback_validity_field,
+            pullback_reason_field=datacenter_dashboard_pullback_reason_field,
             supporting_signals_field=datacenter_dashboard_supporting_signals_field,
             conflicting_signals_field=datacenter_dashboard_conflicting_signals_field,
             override_explanation_field=datacenter_dashboard_override_explanation_field,
@@ -1880,10 +1905,12 @@ def run_app(page: ft.Page, config_path: str) -> None:
                     datacenter_dashboard_inspector_ticker_dropdown,
                     datacenter_dashboard_inspector_action_field,
                     datacenter_dashboard_conflict_detected_field,
+                    datacenter_dashboard_pullback_validity_field,
                 ],
                 wrap=True,
                 vertical_alignment=ft.CrossAxisAlignment.END,
             ),
+            datacenter_dashboard_pullback_reason_field,
             datacenter_dashboard_supporting_signals_field,
             datacenter_dashboard_conflicting_signals_field,
             datacenter_dashboard_override_explanation_field,
@@ -1926,6 +1953,12 @@ def run_app(page: ft.Page, config_path: str) -> None:
     )
     page.datacenter_dashboard_conflict_detected_field = (
         datacenter_dashboard_conflict_detected_field
+    )
+    page.datacenter_dashboard_pullback_validity_field = (
+        datacenter_dashboard_pullback_validity_field
+    )
+    page.datacenter_dashboard_pullback_reason_field = (
+        datacenter_dashboard_pullback_reason_field
     )
     page.datacenter_dashboard_supporting_signals_field = (
         datacenter_dashboard_supporting_signals_field

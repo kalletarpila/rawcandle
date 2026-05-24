@@ -195,6 +195,15 @@ def _print_inspector_rows(
         "INSPECTOR "
         f"override_explanation={inspector_view.override_explanation or ''}"
     )
+    if show_trace:
+        print(
+            "INSPECTOR "
+            f"pullback_validity={inspector_view.pullback_validity or ''}"
+        )
+        print(
+            "INSPECTOR "
+            f"pullback_reason={inspector_view.pullback_reason or ''}"
+        )
 
     matching_rows = [row for row in rows if row.ticker.upper() == ticker.strip().upper()]
     matching_rows.sort(

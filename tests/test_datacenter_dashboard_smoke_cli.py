@@ -271,24 +271,26 @@ def test_cli_uses_existing_helpers_rather_than_duplicating_logic(monkeypatch, tm
                     distance_to_ema20=None,
                     high_exit_risk_days_count=None,
                     trend_state=None,
-                latest_structure_label=None,
-                latest_bos_event_type=None,
-                latest_reset_reason=None,
-                source_files=[str(tmp_path / "daily.csv")],
-                decision_trace=[
-                    DatacenterDecisionTrace(
-                        ticker="NVDA",
-                        action="SELL",
-                        matched_rule="SELL",
-                        horizon="daily",
-                        field_name="reason",
-                        matched_token="close_below_ema20",
-                        matched_value="close_below_ema20",
-                        source_file=str(tmp_path / "daily.csv"),
-                        section=None,
-                        row_kind=None,
-                    )
-                ],
+                    latest_structure_label=None,
+                    latest_bos_event_type=None,
+                    latest_reset_reason=None,
+                    pullback_validity="NO_PULLBACK",
+                    pullback_reason="NO_PULLBACK_CONTEXT",
+                    source_files=[str(tmp_path / "daily.csv")],
+                    decision_trace=[
+                        DatacenterDecisionTrace(
+                            ticker="NVDA",
+                            action="SELL",
+                            matched_rule="SELL",
+                            horizon="daily",
+                            field_name="reason",
+                            matched_token="close_below_ema20",
+                            matched_value="close_below_ema20",
+                            source_file=str(tmp_path / "daily.csv"),
+                            section=None,
+                            row_kind=None,
+                        )
+                    ],
                 )
             ],
             action_counts={
@@ -312,6 +314,8 @@ def test_cli_uses_existing_helpers_rather_than_duplicating_logic(monkeypatch, tm
             action="SELL",
             severity="CRITICAL",
             primary_reason="SELL_SIGNAL_DETECTED",
+            pullback_validity="NO_PULLBACK",
+            pullback_reason="NO_PULLBACK_CONTEXT",
             supporting_signals=["close_below_ema20"],
             conflicting_signals=[],
             override_explanation=None,
@@ -450,3 +454,41 @@ def test_show_trace_selected_ticker_inspector_can_include_ma_break_and_freshness
     assert "INSPECTOR horizon=daily" in output
     assert "ma_break_status=EMA20_CONFIRMED_BREAK" in output
     assert "freshness_status=FRESH_BEARISH_SIGNAL" in output
+
+
+def test_show_trace_selected_ticker_output_includes_pullback_validity_and_reason(
+    tmp_path, capsys
+):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    _write_report(
+        reports_dir / "datacenter_rolling_2_2026-05-22_0000_full.csv",
+        "ticker;status;latest_bos_event_type;latest_bos_freshness\nNVDA;PULLBACK_CANDIDATE;BOS_DOWN;FRESH\n",
+    )
+
+    exit_code = main(
+        ["--reports-dir", str(reports_dir), "--ticker", "NVDA", "--show-trace"]
+    )
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "INSPECTOR pullback_validity=STRUCTURE_BLOCKED_PULLBACK" in output
+    assert "INSPECTOR pullback_reason=FRESH_BOS_DOWN_BLOCKS_PULLBACK" in output
+
+
+def test_default_output_does_not_include_pullback_validity_lines_when_show_trace_not_used(
+    tmp_path, capsys
+):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    _write_report(
+        reports_dir / "datacenter_rolling_2_2026-05-22_0000_full.csv",
+        "ticker;status;latest_bos_event_type;latest_bos_freshness\nNVDA;PULLBACK_CANDIDATE;BOS_DOWN;FRESH\n",
+    )
+
+    exit_code = main(["--reports-dir", str(reports_dir), "--ticker", "NVDA"])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "INSPECTOR pullback_validity=" not in output
+    assert "INSPECTOR pullback_reason=" not in output

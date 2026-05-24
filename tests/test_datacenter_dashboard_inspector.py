@@ -21,6 +21,9 @@ def _row(
     distance_to_ema20: float | None = None,
     high_exit_risk_days_count: int | None = None,
     blocking_reasons: str | None = None,
+    ma_break_status: str | None = None,
+    structure_warning_overrides_bullish_signal: int | None = None,
+    freshness_status: str | None = None,
     raw_fields: dict[str, str] | None = None,
 ) -> DatacenterDashboardRow:
     return DatacenterDashboardRow(
@@ -39,6 +42,22 @@ def _row(
         distance_to_ema20=distance_to_ema20,
         high_exit_risk_days_count=high_exit_risk_days_count,
         blocking_reasons=blocking_reasons,
+        ma_break_status=ma_break_status,
+        ema20_break_confirmed=None,
+        sma50_break_confirmed=None,
+        close_below_ema20=None,
+        close_below_sma50=None,
+        consecutive_closes_below_ema20=None,
+        consecutive_closes_below_sma50=None,
+        ema20_break_pct=None,
+        sma50_break_pct=None,
+        freshness_status=freshness_status,
+        structure_warning_overrides_bullish_signal=structure_warning_overrides_bullish_signal,
+        latest_bullish_signal_age_td=None,
+        latest_bearish_signal_age_td=None,
+        latest_bos_up_age_td=None,
+        latest_bos_down_age_td=None,
+        latest_reset_age_td=None,
         raw_fields=raw_fields or {},
     )
 
@@ -172,3 +191,31 @@ def test_supporting_and_conflicting_signal_order_is_deterministic():
         "BUY_ZONE",
         "BULLISH",
     ]
+
+
+def test_inspector_exposes_structure_blocked_pullback_fields():
+    inspector = _inspector(
+        [
+            _row(
+                ticker="NVDA",
+                horizon="rolling 2d",
+                raw_status="PULLBACK_CANDIDATE",
+                latest_bos_event_type="BOS_DOWN",
+                raw_fields={"latest_bos_freshness": "FRESH"},
+            ),
+        ],
+        "NVDA",
+    )
+
+    assert inspector.pullback_validity == "STRUCTURE_BLOCKED_PULLBACK"
+    assert inspector.pullback_reason == "FRESH_BOS_DOWN_BLOCKS_PULLBACK"
+
+
+def test_inspector_exposes_no_pullback_fields_when_context_missing():
+    inspector = _inspector(
+        [_row(ticker="INTC", horizon="daily", raw_status="SIDEWAYS")],
+        "INTC",
+    )
+
+    assert inspector.pullback_validity == "NO_PULLBACK"
+    assert inspector.pullback_reason == "NO_PULLBACK_CONTEXT"

@@ -954,6 +954,8 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(tmp_path, mon
     assert len(page.datacenter_dashboard_reports_column.controls) == 4
     assert page.datacenter_dashboard_command_center_column.controls[0].value == "No decisions available."
     assert page.datacenter_dashboard_conflict_detected_field.value == "False"
+    assert page.datacenter_dashboard_pullback_validity_field.value == "NONE"
+    assert page.datacenter_dashboard_pullback_reason_field.value == "NONE"
     assert page.datacenter_dashboard_supporting_signals_field.value == "NONE"
     assert page.datacenter_dashboard_conflicting_signals_field.value == "NONE"
     assert page.datacenter_dashboard_override_explanation_field.value == "NONE"
@@ -1071,6 +1073,8 @@ def test_run_app_datacenter_dashboard_refresh_reads_report_directory(tmp_path, m
     assert "NEUTRAL=1" in page.datacenter_dashboard_decision_summary_field.value
     assert page.datacenter_dashboard_inspector_action_field.value == "NVDA | NEUTRAL | INFO"
     assert page.datacenter_dashboard_conflict_detected_field.value == "False"
+    assert page.datacenter_dashboard_pullback_validity_field.value == "NO_PULLBACK"
+    assert page.datacenter_dashboard_pullback_reason_field.value == "NO_PULLBACK_CONTEXT"
     first_card = page.datacenter_dashboard_reports_column.controls[0]
     assert "rolling 30d: MISSING" in first_card.content.controls[0].value
     assert "parsed_rows: 0" in first_card.content.controls[3].value
@@ -1103,7 +1107,7 @@ def test_run_app_datacenter_dashboard_command_center_shows_grouped_read_only_row
         encoding="utf-8",
     )
     (reports_dir / "datacenter_rolling_2_2026-05-22_0000_full.csv").write_text(
-        "ticker;high_exit_risk_days_count\nLRCX;1\n",
+        "ticker;high_exit_risk_days_count;status;latest_bos_event_type;latest_bos_freshness\nLRCX;1;;;\nNVDA;;PULLBACK_CANDIDATE;BOS_DOWN;FRESH\n",
         encoding="utf-8",
     )
     (reports_dir / "datacenter_daily_2026-05-22_0000_full.csv").write_text(
@@ -1191,8 +1195,17 @@ def test_run_app_datacenter_dashboard_command_center_shows_grouped_read_only_row
     page.datacenter_dashboard_inspector_ticker_dropdown.value = "NVDA"
     page.datacenter_dashboard_inspector_ticker_dropdown.on_change(None)
     assert page.datacenter_dashboard_inspector_action_field.value == "NVDA | SELL | CRITICAL"
-    assert page.datacenter_dashboard_conflict_detected_field.value == "False"
+    assert page.datacenter_dashboard_conflict_detected_field.value == "True"
+    assert (
+        page.datacenter_dashboard_pullback_validity_field.value
+        == "STRUCTURE_BLOCKED_PULLBACK"
+    )
+    assert (
+        page.datacenter_dashboard_pullback_reason_field.value
+        == "FRESH_BOS_DOWN_BLOCKS_PULLBACK"
+    )
     assert "close_below_ema20" in page.datacenter_dashboard_supporting_signals_field.value
+    assert "PULLBACK_CANDIDATE" in page.datacenter_dashboard_conflicting_signals_field.value
     page.datacenter_dashboard_inspector_ticker_dropdown.value = "META"
     page.datacenter_dashboard_inspector_ticker_dropdown.on_change(None)
     assert page.datacenter_dashboard_conflict_detected_field.value == "True"

@@ -37,6 +37,8 @@ class DatacenterTickerDecision:
     latest_structure_label: str | None
     latest_bos_event_type: str | None
     latest_reset_reason: str | None
+    pullback_validity: str | None
+    pullback_reason: str | None
     source_files: list[str]
     decision_trace: list[DatacenterDecisionTrace] = field(default_factory=list)
 
@@ -147,6 +149,18 @@ _TRACE_TEXT_FIELDS = (
     "latest_reset_reason",
     "blocking_reasons",
 )
+
+_PULLBACK_CONTEXT_TERMS = (
+    "pullback_candidate",
+    "early_pullback",
+    "failed_pullback",
+)
+_PULLBACK_HORIZON_PRIORITY = {
+    "daily": 0,
+    "rolling 2d": 1,
+    "rolling 5d": 2,
+    "rolling 30d": 3,
+}
 
 
 def _normalize_horizon(value: str) -> str:
@@ -359,6 +373,155 @@ def _first_positive_trace(
     return None
 
 
+def _raw_field_int(raw_fields: dict[str, str], key: str) -> int | None:
+    value = raw_fields.get(key)
+    if value is None:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    try:
+        return int(stripped)
+    except ValueError:
+        return None
+
+
+def _raw_field_text(raw_fields: dict[str, str], key: str) -> str | None:
+    value = raw_fields.get(key)
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _is_fresh_marker(value: str | None) -> bool:
+    return value is not None and value.strip().upper() == "FRESH"
+
+
+def _row_has_pullback_context(row: DatacenterDashboardRow, text_values: list[str]) -> bool:
+    if _contains_any(text_values, _PULLBACK_CONTEXT_TERMS):
+        return True
+    pullback_days = _raw_field_int(row.raw_fields, "pullback_days")
+    return pullback_days is not None and pullback_days > 0
+
+
+def _classify_pullback_validity(
+    rows_with_horizons: list[tuple[DatacenterDashboardRow, str, list[str]]],
+) -> tuple[str, str]:
+    sorted_rows = sorted(
+        rows_with_horizons,
+        key=lambda item: (
+            _PULLBACK_HORIZON_PRIORITY.get(item[1], 99),
+            item[0].source_file,
+            item[0].section or "",
+            item[0].row_kind or "",
+        ),
+    )
+    has_pullback_context = any(
+        _row_has_pullback_context(row, text_values)
+        for row, _horizon, text_values in sorted_rows
+    )
+    if not has_pullback_context:
+        return ("NO_PULLBACK", "NO_PULLBACK_CONTEXT")
+
+    has_structure_or_freshness_context = any(
+        (
+            bool(row.latest_bos_event_type)
+            or bool(row.latest_reset_reason)
+            or bool(row.freshness_status)
+            or row.structure_warning_overrides_bullish_signal is not None
+            or bool(row.ma_break_status)
+            or _raw_field_text(row.raw_fields, "latest_bos_freshness") is not None
+            or _raw_field_text(row.raw_fields, "latest_reset_freshness") is not None
+        )
+        for row, _horizon, _text_values in sorted_rows
+    )
+    if not has_structure_or_freshness_context:
+        return ("INSUFFICIENT_DATA", "MISSING_STRUCTURE_OR_FRESHNESS_CONTEXT")
+
+    acute_rows = [
+        (row, horizon, text_values)
+        for row, horizon, text_values in sorted_rows
+        if horizon in {"daily", "rolling 2d"}
+    ]
+
+    for row, _horizon, _text_values in acute_rows:
+        if row.freshness_status == "STRUCTURE_WARNING_OVERRIDES_BULLISH":
+            return (
+                "STRUCTURE_BLOCKED_PULLBACK",
+                "STRUCTURE_WARNING_OVERRIDES_BULLISH_SIGNAL",
+            )
+        if row.structure_warning_overrides_bullish_signal == 1:
+            return (
+                "STRUCTURE_BLOCKED_PULLBACK",
+                "STRUCTURE_WARNING_OVERRIDES_BULLISH_SIGNAL",
+            )
+        if row.latest_bos_event_type == "BOS_DOWN" and _is_fresh_marker(
+            _raw_field_text(row.raw_fields, "latest_bos_freshness")
+        ):
+            return (
+                "STRUCTURE_BLOCKED_PULLBACK",
+                "FRESH_BOS_DOWN_BLOCKS_PULLBACK",
+            )
+        if (
+            row.latest_reset_reason
+            and "DOUBLE_BOS_DOWN" in row.latest_reset_reason
+            and _is_fresh_marker(_raw_field_text(row.raw_fields, "latest_reset_freshness"))
+        ):
+            return (
+                "STRUCTURE_BLOCKED_PULLBACK",
+                "FRESH_DOUBLE_BOS_DOWN_BLOCKS_PULLBACK",
+            )
+        if (
+            row.latest_reset_reason
+            and "RESET" in row.latest_reset_reason
+            and _is_fresh_marker(_raw_field_text(row.raw_fields, "latest_reset_freshness"))
+        ):
+            return (
+                "STRUCTURE_BLOCKED_PULLBACK",
+                "FRESH_RESET_BLOCKS_PULLBACK",
+            )
+
+    for row, _horizon, _text_values in acute_rows:
+        if row.ma_break_status == "SMA50_CONFIRMED_BREAK":
+            return ("BREAKDOWN_NOT_PULLBACK", "SMA50_CONFIRMED_BREAK")
+        if row.ma_break_status == "EMA20_CONFIRMED_BREAK":
+            return ("BREAKDOWN_NOT_PULLBACK", "EMA20_CONFIRMED_BREAK")
+
+    has_fresh_bullish_signal = any(
+        row.freshness_status == "FRESH_BULLISH_SIGNAL"
+        for row, _horizon, _text_values in sorted_rows
+    )
+    has_structure_override = any(
+        row.freshness_status == "STRUCTURE_WARNING_OVERRIDES_BULLISH"
+        or row.structure_warning_overrides_bullish_signal == 1
+        for row, _horizon, _text_values in sorted_rows
+    )
+    has_confirmed_ma_break = any(
+        row.ma_break_status in {"SMA50_CONFIRMED_BREAK", "EMA20_CONFIRMED_BREAK"}
+        for row, _horizon, _text_values in acute_rows
+    )
+    has_acceptable_ma_status = any(
+        row.ma_break_status in {"OK", "EMA20_WARNING"}
+        for row, _horizon, _text_values in acute_rows
+    ) or not any(row.ma_break_status for row, _horizon, _text_values in acute_rows)
+
+    if (
+        has_acceptable_ma_status
+        and not has_structure_override
+        and has_fresh_bullish_signal
+    ):
+        return (
+            "VALID_PULLBACK",
+            "FRESH_BULLISH_PULLBACK_WITH_NO_STRUCTURE_BLOCK",
+        )
+
+    if not has_confirmed_ma_break:
+        return ("EARLY_PULLBACK", "WAIT_FOR_BULLISH_CONFIRMATION")
+
+    return ("INSUFFICIENT_DATA", "MISSING_STRUCTURE_OR_FRESHNESS_CONTEXT")
+
+
 def _max_optional_float(values: Iterable[float | None]) -> float | None:
     present = [value for value in values if value is not None]
     return max(present) if present else None
@@ -551,6 +714,7 @@ def build_datacenter_ticker_decisions(
             or hard_sell_match
             or acute_high_exit_risk_days_present
         )
+        pullback_validity, pullback_reason = _classify_pullback_validity(normalized_rows)
 
         if acute_sma50_confirmed_break:
             action = "SELL"
@@ -892,6 +1056,8 @@ def build_datacenter_ticker_decisions(
                 latest_structure_label=latest_structure_label,
                 latest_bos_event_type=latest_bos_event_type,
                 latest_reset_reason=latest_reset_reason,
+                pullback_validity=pullback_validity,
+                pullback_reason=pullback_reason,
                 source_files=source_files,
                 decision_trace=decision_trace,
             )

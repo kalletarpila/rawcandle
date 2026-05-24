@@ -13,6 +13,8 @@ class DatacenterTickerInspectorView:
     action: str
     severity: str
     primary_reason: str | None
+    pullback_validity: str | None = None
+    pullback_reason: str | None = None
     supporting_signals: list[str] = field(default_factory=list)
     conflicting_signals: list[str] = field(default_factory=list)
     override_explanation: str | None = None
@@ -228,6 +230,8 @@ def build_datacenter_ticker_inspector_view(
         action=decision.action,
         severity=decision.severity,
         primary_reason=decision.primary_reason,
+        pullback_validity=decision.pullback_validity,
+        pullback_reason=decision.pullback_reason,
         supporting_signals=supporting_signals,
         conflicting_signals=conflicting_signals,
         override_explanation=override_explanation,
