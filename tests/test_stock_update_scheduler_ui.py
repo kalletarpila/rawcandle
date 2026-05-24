@@ -949,6 +949,8 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(tmp_path, mon
     assert page.datacenter_dashboard_reports_dir_field.value == DEFAULT_DATACENTER_OUTPUT_DIR
     assert page.datacenter_dashboard_overall_status_field.value == "MISSING"
     assert page.datacenter_dashboard_parse_summary_field.value == "total_parsed_rows=0\ntotal_warnings=0"
+    assert "decision_total=0" in page.datacenter_dashboard_decision_summary_field.value
+    assert "SELL=0" in page.datacenter_dashboard_decision_summary_field.value
     assert len(page.datacenter_dashboard_reports_column.controls) == 4
     datacenter_text_labels = [
         control.value
@@ -1060,6 +1062,8 @@ def test_run_app_datacenter_dashboard_refresh_reads_report_directory(tmp_path, m
 
     assert page.datacenter_dashboard_overall_status_field.value == "PARTIAL"
     assert page.datacenter_dashboard_parse_summary_field.value == "total_parsed_rows=1\ntotal_warnings=0"
+    assert "decision_total=1" in page.datacenter_dashboard_decision_summary_field.value
+    assert "NEUTRAL=1" in page.datacenter_dashboard_decision_summary_field.value
     first_card = page.datacenter_dashboard_reports_column.controls[0]
     assert "rolling 30d: MISSING" in first_card.content.controls[0].value
     assert "parsed_rows: 0" in first_card.content.controls[3].value

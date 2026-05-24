@@ -16,8 +16,14 @@ from urllib.parse import quote
 
 import flet as ft
 
+from dev_tools.datacenter_dashboard_decisions import (
+    DatacenterDecisionBatchResult,
+    build_datacenter_ticker_decisions,
+)
 from dev_tools.datacenter_dashboard_parser import (
     DatacenterDashboardBatchParseResult,
+    DatacenterDashboardRow,
+    parse_datacenter_dashboard_file,
     parse_datacenter_dashboard_reports,
 )
 from dev_tools.datacenter_dashboard_support import (
@@ -578,8 +584,10 @@ def populate_datacenter_dashboard_summary(
     *,
     dashboard_status: DatacenterDashboardStatus,
     parse_result: DatacenterDashboardBatchParseResult,
+    decision_result: DatacenterDecisionBatchResult,
     overall_status_field: ft.TextField,
     parse_summary_field: ft.TextField,
+    decision_summary_field: ft.TextField,
     reports_column: ft.Column,
 ) -> None:
     overall_status_field.value = dashboard_status.overall_status
@@ -589,6 +597,19 @@ def populate_datacenter_dashboard_summary(
     parse_summary_field.value = (
         f"total_parsed_rows={parse_result.total_row_count}\n"
         f"total_warnings={parse_result.total_warning_count}"
+    )
+    decision_summary_field.value = "\n".join(
+        [
+            f"decision_total={len(decision_result.decisions)}",
+            f"SELL={decision_result.action_counts.get('SELL', 0)}",
+            f"REDUCE={decision_result.action_counts.get('REDUCE', 0)}",
+            f"TIGHTEN_STOP={decision_result.action_counts.get('TIGHTEN_STOP', 0)}",
+            f"BUY_NOW={decision_result.action_counts.get('BUY_NOW', 0)}",
+            f"WAIT_PULLBACK={decision_result.action_counts.get('WAIT_PULLBACK', 0)}",
+            f"BLOCKED={decision_result.action_counts.get('BLOCKED', 0)}",
+            f"WATCH={decision_result.action_counts.get('WATCH', 0)}",
+            f"NEUTRAL={decision_result.action_counts.get('NEUTRAL', 0)}",
+        ]
     )
     reports_column.controls.clear()
     parse_by_horizon = {
@@ -1010,6 +1031,25 @@ def run_app(page: ft.Page, config_path: str) -> None:
         max_lines=3,
         width=240,
     )
+    datacenter_dashboard_decision_summary_field = ft.TextField(
+        label="dashboard_decision_summary",
+        value=(
+            "decision_total=0\n"
+            "SELL=0\n"
+            "REDUCE=0\n"
+            "TIGHTEN_STOP=0\n"
+            "BUY_NOW=0\n"
+            "WAIT_PULLBACK=0\n"
+            "BLOCKED=0\n"
+            "WATCH=0\n"
+            "NEUTRAL=0"
+        ),
+        read_only=True,
+        multiline=True,
+        min_lines=5,
+        max_lines=9,
+        width=240,
+    )
     datacenter_status_field = ft.TextField(
         label="Datacenter status",
         value="",
@@ -1059,11 +1099,24 @@ def run_app(page: ft.Page, config_path: str) -> None:
             datacenter_dashboard_reports_dir_field.value
         )
         parse_result = parse_datacenter_dashboard_reports(dashboard_status.reports)
+        parsed_rows: list[DatacenterDashboardRow] = []
+        for report in dashboard_status.reports:
+            if not report.path:
+                continue
+            parsed_rows.extend(
+                parse_datacenter_dashboard_file(
+                    path=report.path,
+                    horizon=report.horizon,
+                ).rows
+            )
+        decision_result = build_datacenter_ticker_decisions(parsed_rows)
         populate_datacenter_dashboard_summary(
             dashboard_status=dashboard_status,
             parse_result=parse_result,
+            decision_result=decision_result,
             overall_status_field=datacenter_dashboard_overall_status_field,
             parse_summary_field=datacenter_dashboard_parse_summary_field,
+            decision_summary_field=datacenter_dashboard_decision_summary_field,
             reports_column=datacenter_dashboard_reports_column,
         )
         page.update()
@@ -1537,6 +1590,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
                     datacenter_dashboard_reports_dir_field,
                     datacenter_dashboard_overall_status_field,
                     datacenter_dashboard_parse_summary_field,
+                    datacenter_dashboard_decision_summary_field,
                     datacenter_dashboard_refresh_button,
                 ],
                 wrap=True,
@@ -1566,6 +1620,9 @@ def run_app(page: ft.Page, config_path: str) -> None:
     page.datacenter_dashboard_overall_status_field = datacenter_dashboard_overall_status_field
     page.datacenter_dashboard_parse_summary_field = (
         datacenter_dashboard_parse_summary_field
+    )
+    page.datacenter_dashboard_decision_summary_field = (
+        datacenter_dashboard_decision_summary_field
     )
     page.datacenter_dashboard_reports_column = datacenter_dashboard_reports_column
     page.datacenter_status_field = datacenter_status_field
