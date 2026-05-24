@@ -85,6 +85,16 @@ class ScheduledStockUpdateRunResult:
     datacenter_pipeline_signal_date_source: str = "NONE"
     datacenter_pipeline_signal_date_resolution: str = "NONE"
     datacenter_pipeline_requested_calendar_signal_date: str = "NONE"
+    datacenter_pipeline_daily_report_path: Optional[str] = None
+    datacenter_pipeline_daily_report_csv_path: Optional[str] = None
+    datacenter_pipeline_rolling_30_report_path: Optional[str] = None
+    datacenter_pipeline_rolling_30_report_csv_path: Optional[str] = None
+    datacenter_pipeline_rolling_5_report_path: Optional[str] = None
+    datacenter_pipeline_rolling_5_report_csv_path: Optional[str] = None
+    datacenter_pipeline_rolling_2_report_path: Optional[str] = None
+    datacenter_pipeline_rolling_2_report_csv_path: Optional[str] = None
+    datacenter_pipeline_weekly_report_path: Optional[str] = None
+    datacenter_pipeline_weekly_report_csv_path: Optional[str] = None
     datacenter_pipeline_error: str = ""
 
 
@@ -116,6 +126,16 @@ class DatacenterPostStepResult:
     signal_date_source: str = "NONE"
     signal_date_resolution: str = "NONE"
     requested_calendar_signal_date: Optional[str] = None
+    daily_report_path: Optional[str] = None
+    daily_report_csv_path: Optional[str] = None
+    rolling_30_report_path: Optional[str] = None
+    rolling_30_report_csv_path: Optional[str] = None
+    rolling_5_report_path: Optional[str] = None
+    rolling_5_report_csv_path: Optional[str] = None
+    rolling_2_report_path: Optional[str] = None
+    rolling_2_report_csv_path: Optional[str] = None
+    weekly_report_path: Optional[str] = None
+    weekly_report_csv_path: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -344,6 +364,22 @@ def _parse_summary_value(stdout: str, key: str) -> Optional[str]:
         if line.startswith(prefix):
             return line[len(prefix) :]
     return None
+
+
+def _parse_datacenter_report_paths(stdout: str) -> dict[str, Optional[str]]:
+    keys = (
+        "daily_report_path",
+        "daily_report_csv_path",
+        "rolling_30_report_path",
+        "rolling_30_report_csv_path",
+        "rolling_5_report_path",
+        "rolling_5_report_csv_path",
+        "rolling_2_report_path",
+        "rolling_2_report_csv_path",
+        "weekly_report_path",
+        "weekly_report_csv_path",
+    )
+    return {key: _parse_summary_value(stdout, key) for key in keys}
 
 
 def _build_datacenter_log_path(log_dir: Path, market: str, started_at: datetime.datetime) -> Path:
@@ -630,6 +666,7 @@ def _run_datacenter_post_step(
     audit_validation_status = _parse_summary_value(
         completed.stdout or "", "audit_validation_status"
     )
+    parsed_report_paths = _parse_datacenter_report_paths(completed.stdout or "")
     if completed.returncode != 0:
         return DatacenterPostStepResult(
             attempted=1,
@@ -641,6 +678,16 @@ def _run_datacenter_post_step(
             signal_date_source="LATEST_VALID_OHLCV_DATE",
             signal_date_resolution="LATEST_VALID_OHLCV_DATE",
             requested_calendar_signal_date=requested_calendar_signal_date,
+            daily_report_path=parsed_report_paths["daily_report_path"],
+            daily_report_csv_path=parsed_report_paths["daily_report_csv_path"],
+            rolling_30_report_path=parsed_report_paths["rolling_30_report_path"],
+            rolling_30_report_csv_path=parsed_report_paths["rolling_30_report_csv_path"],
+            rolling_5_report_path=parsed_report_paths["rolling_5_report_path"],
+            rolling_5_report_csv_path=parsed_report_paths["rolling_5_report_csv_path"],
+            rolling_2_report_path=parsed_report_paths["rolling_2_report_path"],
+            rolling_2_report_csv_path=parsed_report_paths["rolling_2_report_csv_path"],
+            weekly_report_path=parsed_report_paths["weekly_report_path"],
+            weekly_report_csv_path=parsed_report_paths["weekly_report_csv_path"],
             error=f"datacenter pipeline exited with code {completed.returncode}",
         )
     return DatacenterPostStepResult(
@@ -653,6 +700,16 @@ def _run_datacenter_post_step(
         signal_date_source="LATEST_VALID_OHLCV_DATE",
         signal_date_resolution="LATEST_VALID_OHLCV_DATE",
         requested_calendar_signal_date=requested_calendar_signal_date,
+        daily_report_path=parsed_report_paths["daily_report_path"],
+        daily_report_csv_path=parsed_report_paths["daily_report_csv_path"],
+        rolling_30_report_path=parsed_report_paths["rolling_30_report_path"],
+        rolling_30_report_csv_path=parsed_report_paths["rolling_30_report_csv_path"],
+        rolling_5_report_path=parsed_report_paths["rolling_5_report_path"],
+        rolling_5_report_csv_path=parsed_report_paths["rolling_5_report_csv_path"],
+        rolling_2_report_path=parsed_report_paths["rolling_2_report_path"],
+        rolling_2_report_csv_path=parsed_report_paths["rolling_2_report_csv_path"],
+        weekly_report_path=parsed_report_paths["weekly_report_path"],
+        weekly_report_csv_path=parsed_report_paths["weekly_report_csv_path"],
     )
 
 
@@ -895,6 +952,16 @@ def run_scheduler_config(
                     datacenter_pipeline_signal_date_source="NONE",
                     datacenter_pipeline_signal_date_resolution="NONE",
                     datacenter_pipeline_requested_calendar_signal_date="NONE",
+                    datacenter_pipeline_daily_report_path=None,
+                    datacenter_pipeline_daily_report_csv_path=None,
+                    datacenter_pipeline_rolling_30_report_path=None,
+                    datacenter_pipeline_rolling_30_report_csv_path=None,
+                    datacenter_pipeline_rolling_5_report_path=None,
+                    datacenter_pipeline_rolling_5_report_csv_path=None,
+                    datacenter_pipeline_rolling_2_report_path=None,
+                    datacenter_pipeline_rolling_2_report_csv_path=None,
+                    datacenter_pipeline_weekly_report_path=None,
+                    datacenter_pipeline_weekly_report_csv_path=None,
                     datacenter_pipeline_error="",
                 )
                 _write_summary_json(config=config, run_started_at=run_started_at, result=result)
@@ -1008,6 +1075,16 @@ def run_scheduler_config(
                 datacenter_pipeline_requested_calendar_signal_date=(
                     datacenter_result.requested_calendar_signal_date or "NONE"
                 ),
+                datacenter_pipeline_daily_report_path=datacenter_result.daily_report_path,
+                datacenter_pipeline_daily_report_csv_path=datacenter_result.daily_report_csv_path,
+                datacenter_pipeline_rolling_30_report_path=datacenter_result.rolling_30_report_path,
+                datacenter_pipeline_rolling_30_report_csv_path=datacenter_result.rolling_30_report_csv_path,
+                datacenter_pipeline_rolling_5_report_path=datacenter_result.rolling_5_report_path,
+                datacenter_pipeline_rolling_5_report_csv_path=datacenter_result.rolling_5_report_csv_path,
+                datacenter_pipeline_rolling_2_report_path=datacenter_result.rolling_2_report_path,
+                datacenter_pipeline_rolling_2_report_csv_path=datacenter_result.rolling_2_report_csv_path,
+                datacenter_pipeline_weekly_report_path=datacenter_result.weekly_report_path,
+                datacenter_pipeline_weekly_report_csv_path=datacenter_result.weekly_report_csv_path,
                 datacenter_pipeline_error=datacenter_result.error or "",
             )
             _write_summary_json(config=config, run_started_at=run_started_at, result=result)

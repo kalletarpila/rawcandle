@@ -687,7 +687,25 @@ def test_scheduler_runner_runs_datacenter_post_step_once_for_usa_success(
 
     def fake_subprocess_run(command, cwd, check, capture_output, text):
         calls.append({"command": command, "cwd": cwd, "check": check})
-        return _FakeCompletedProcess(0, "SUMMARY audit_validation_status=OK\n")
+        return _FakeCompletedProcess(
+            0,
+            "\n".join(
+                [
+                    "SUMMARY audit_validation_status=OK",
+                    "SUMMARY daily_report_path=/tmp/daily.md",
+                    "SUMMARY daily_report_csv_path=/tmp/daily.csv",
+                    "SUMMARY rolling_30_report_path=/tmp/rolling30.md",
+                    "SUMMARY rolling_30_report_csv_path=/tmp/rolling30.csv",
+                    "SUMMARY rolling_5_report_path=/tmp/rolling5.md",
+                    "SUMMARY rolling_5_report_csv_path=/tmp/rolling5.csv",
+                    "SUMMARY rolling_2_report_path=/tmp/rolling2.md",
+                    "SUMMARY rolling_2_report_csv_path=/tmp/rolling2.csv",
+                    "SUMMARY weekly_report_path=/tmp/weekly.md",
+                    "SUMMARY weekly_report_csv_path=/tmp/weekly.csv",
+                    "",
+                ]
+            ),
+        )
 
     monkeypatch.setattr("rawcandle.scheduler.runner.subprocess.run", fake_subprocess_run)
 
@@ -717,6 +735,16 @@ def test_scheduler_runner_runs_datacenter_post_step_once_for_usa_success(
     assert result.datacenter_pipeline_signal_date_source == "LATEST_VALID_OHLCV_DATE"
     assert result.datacenter_pipeline_signal_date_resolution == "LATEST_VALID_OHLCV_DATE"
     assert result.datacenter_pipeline_audit_validation_status == "OK"
+    assert result.datacenter_pipeline_daily_report_path == "/tmp/daily.md"
+    assert result.datacenter_pipeline_daily_report_csv_path == "/tmp/daily.csv"
+    assert result.datacenter_pipeline_rolling_30_report_path == "/tmp/rolling30.md"
+    assert result.datacenter_pipeline_rolling_30_report_csv_path == "/tmp/rolling30.csv"
+    assert result.datacenter_pipeline_rolling_5_report_path == "/tmp/rolling5.md"
+    assert result.datacenter_pipeline_rolling_5_report_csv_path == "/tmp/rolling5.csv"
+    assert result.datacenter_pipeline_rolling_2_report_path == "/tmp/rolling2.md"
+    assert result.datacenter_pipeline_rolling_2_report_csv_path == "/tmp/rolling2.csv"
+    assert result.datacenter_pipeline_weekly_report_path == "/tmp/weekly.md"
+    assert result.datacenter_pipeline_weekly_report_csv_path == "/tmp/weekly.csv"
     assert result.datacenter_pipeline_log_path.endswith(".txt")
     log_path = Path(result.datacenter_pipeline_log_path)
     assert log_path.exists()
@@ -729,6 +757,11 @@ def test_scheduler_runner_runs_datacenter_post_step_once_for_usa_success(
     payload = json.loads(Path(result.summary_json_path).read_text(encoding="utf-8"))
     assert payload["datacenter_pipeline_signal_date"] == "2026-05-16"
     assert payload["datacenter_pipeline_signal_date_source"] == "LATEST_VALID_OHLCV_DATE"
+    assert payload["datacenter_pipeline_daily_report_path"] == "/tmp/daily.md"
+    assert payload["datacenter_pipeline_rolling_30_report_path"] == "/tmp/rolling30.md"
+    assert payload["datacenter_pipeline_rolling_5_report_path"] == "/tmp/rolling5.md"
+    assert payload["datacenter_pipeline_rolling_2_report_path"] == "/tmp/rolling2.md"
+    assert payload["datacenter_pipeline_weekly_report_path"] == "/tmp/weekly.md"
 
 
 def test_scheduler_runner_technical_relevance_disabled_by_default(tmp_path, monkeypatch):
@@ -1114,6 +1147,11 @@ def test_scheduler_runner_skips_datacenter_post_step_when_market_phase_failed(
     assert result.datacenter_pipeline_market == "usa"
     assert result.datacenter_pipeline_audit_validation_status == "SKIPPED"
     assert result.datacenter_pipeline_log_path == ""
+    assert result.datacenter_pipeline_daily_report_path is None
+    assert result.datacenter_pipeline_rolling_30_report_path is None
+    assert result.datacenter_pipeline_rolling_5_report_path is None
+    assert result.datacenter_pipeline_rolling_2_report_path is None
+    assert result.datacenter_pipeline_weekly_report_path is None
     assert result.overall_status == STATUS_FAILED
 
 
@@ -1310,7 +1348,15 @@ def test_scheduler_runner_datacenter_post_step_failure_fails_scheduler(
     monkeypatch.setattr(
         "rawcandle.scheduler.runner.subprocess.run",
         lambda *args, **kwargs: _FakeCompletedProcess(
-            7, "SUMMARY audit_validation_status=FAIL\n"
+            7,
+            "\n".join(
+                [
+                    "SUMMARY audit_validation_status=FAIL",
+                    "SUMMARY daily_report_path=/tmp/daily_failed.md",
+                    "SUMMARY rolling_30_report_path=/tmp/rolling30_failed.md",
+                    "",
+                ]
+            ),
         ),
     )
 
@@ -1320,6 +1366,10 @@ def test_scheduler_runner_datacenter_post_step_failure_fails_scheduler(
     assert result.datacenter_pipeline_status == "FAILED"
     assert result.datacenter_pipeline_market == "usa"
     assert result.datacenter_pipeline_audit_validation_status == "FAIL"
+    assert result.datacenter_pipeline_daily_report_path == "/tmp/daily_failed.md"
+    assert result.datacenter_pipeline_daily_report_csv_path is None
+    assert result.datacenter_pipeline_rolling_30_report_path == "/tmp/rolling30_failed.md"
+    assert result.datacenter_pipeline_rolling_5_report_path is None
     assert result.datacenter_pipeline_log_path.endswith(".txt")
     assert result.overall_status == STATUS_FAILED
 
@@ -1353,6 +1403,11 @@ def test_scheduler_runner_skip_next_run_marks_datacenter_post_step_skipped(
     assert result.datacenter_pipeline_market == "usa"
     assert result.datacenter_pipeline_audit_validation_status == "SKIPPED"
     assert result.datacenter_pipeline_log_path == ""
+    assert result.datacenter_pipeline_daily_report_path is None
+    assert result.datacenter_pipeline_rolling_30_report_path is None
+    assert result.datacenter_pipeline_rolling_5_report_path is None
+    assert result.datacenter_pipeline_rolling_2_report_path is None
+    assert result.datacenter_pipeline_weekly_report_path is None
 
     assert log_dir.exists()
     assert Path(scheduler_status_path(str(log_dir))).exists()

@@ -70,6 +70,16 @@ def _result(overall_status):
         datacenter_pipeline_signal_date_source="NONE",
         datacenter_pipeline_signal_date_resolution="NONE",
         datacenter_pipeline_requested_calendar_signal_date="NONE",
+        datacenter_pipeline_daily_report_path=None,
+        datacenter_pipeline_daily_report_csv_path=None,
+        datacenter_pipeline_rolling_30_report_path=None,
+        datacenter_pipeline_rolling_30_report_csv_path=None,
+        datacenter_pipeline_rolling_5_report_path=None,
+        datacenter_pipeline_rolling_5_report_csv_path=None,
+        datacenter_pipeline_rolling_2_report_path=None,
+        datacenter_pipeline_rolling_2_report_csv_path=None,
+        datacenter_pipeline_weekly_report_path=None,
+        datacenter_pipeline_weekly_report_csv_path=None,
         datacenter_pipeline_error="",
     )
 
@@ -112,6 +122,16 @@ def _skipped_result():
         datacenter_pipeline_signal_date_source="NONE",
         datacenter_pipeline_signal_date_resolution="NONE",
         datacenter_pipeline_requested_calendar_signal_date="NONE",
+        datacenter_pipeline_daily_report_path=None,
+        datacenter_pipeline_daily_report_csv_path=None,
+        datacenter_pipeline_rolling_30_report_path=None,
+        datacenter_pipeline_rolling_30_report_csv_path=None,
+        datacenter_pipeline_rolling_5_report_path=None,
+        datacenter_pipeline_rolling_5_report_csv_path=None,
+        datacenter_pipeline_rolling_2_report_path=None,
+        datacenter_pipeline_rolling_2_report_csv_path=None,
+        datacenter_pipeline_weekly_report_path=None,
+        datacenter_pipeline_weekly_report_csv_path=None,
         datacenter_pipeline_error="",
     )
 
@@ -159,6 +179,16 @@ def test_scheduler_cli_successful_run_prints_top_level_summary_lines(monkeypatch
     assert "SUMMARY datacenter_pipeline.requested_calendar_signal_date=NONE" in captured.out
     assert "SUMMARY datacenter_pipeline.audit_validation_status=SKIPPED" in captured.out
     assert "SUMMARY datacenter_pipeline.log_path=" in captured.out
+    assert "SUMMARY datacenter_pipeline.daily_report_path=NONE" in captured.out
+    assert "SUMMARY datacenter_pipeline.daily_report_csv_path=NONE" in captured.out
+    assert "SUMMARY datacenter_pipeline.rolling_30_report_path=NONE" in captured.out
+    assert "SUMMARY datacenter_pipeline.rolling_30_report_csv_path=NONE" in captured.out
+    assert "SUMMARY datacenter_pipeline.rolling_5_report_path=NONE" in captured.out
+    assert "SUMMARY datacenter_pipeline.rolling_5_report_csv_path=NONE" in captured.out
+    assert "SUMMARY datacenter_pipeline.rolling_2_report_path=NONE" in captured.out
+    assert "SUMMARY datacenter_pipeline.rolling_2_report_csv_path=NONE" in captured.out
+    assert "SUMMARY datacenter_pipeline.weekly_report_path=NONE" in captured.out
+    assert "SUMMARY datacenter_pipeline.weekly_report_csv_path=NONE" in captured.out
     assert "SUMMARY datacenter_pipeline.error=" in captured.out
 
 

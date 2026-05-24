@@ -102,6 +102,46 @@ def main(argv: Optional[List[str]] = None) -> int:
         f"{result.datacenter_pipeline_audit_validation_status}"
     )
     print(f"SUMMARY datacenter_pipeline.log_path={result.datacenter_pipeline_log_path}")
+    print(
+        "SUMMARY datacenter_pipeline.daily_report_path="
+        f"{result.datacenter_pipeline_daily_report_path or 'NONE'}"
+    )
+    print(
+        "SUMMARY datacenter_pipeline.daily_report_csv_path="
+        f"{result.datacenter_pipeline_daily_report_csv_path or 'NONE'}"
+    )
+    print(
+        "SUMMARY datacenter_pipeline.rolling_30_report_path="
+        f"{result.datacenter_pipeline_rolling_30_report_path or 'NONE'}"
+    )
+    print(
+        "SUMMARY datacenter_pipeline.rolling_30_report_csv_path="
+        f"{result.datacenter_pipeline_rolling_30_report_csv_path or 'NONE'}"
+    )
+    print(
+        "SUMMARY datacenter_pipeline.rolling_5_report_path="
+        f"{result.datacenter_pipeline_rolling_5_report_path or 'NONE'}"
+    )
+    print(
+        "SUMMARY datacenter_pipeline.rolling_5_report_csv_path="
+        f"{result.datacenter_pipeline_rolling_5_report_csv_path or 'NONE'}"
+    )
+    print(
+        "SUMMARY datacenter_pipeline.rolling_2_report_path="
+        f"{result.datacenter_pipeline_rolling_2_report_path or 'NONE'}"
+    )
+    print(
+        "SUMMARY datacenter_pipeline.rolling_2_report_csv_path="
+        f"{result.datacenter_pipeline_rolling_2_report_csv_path or 'NONE'}"
+    )
+    print(
+        "SUMMARY datacenter_pipeline.weekly_report_path="
+        f"{result.datacenter_pipeline_weekly_report_path or 'NONE'}"
+    )
+    print(
+        "SUMMARY datacenter_pipeline.weekly_report_csv_path="
+        f"{result.datacenter_pipeline_weekly_report_csv_path or 'NONE'}"
+    )
     print(f"SUMMARY datacenter_pipeline.error={result.datacenter_pipeline_error}")
 
     for market_result in result.market_results:
