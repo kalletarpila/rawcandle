@@ -131,6 +131,14 @@ ROLLING_5_PULLBACK_STATE_PRIORITY = {
     "INSUFFICIENT_DATA": 5,
 }
 
+ROLLING_2_SELL_PRESSURE_STATE_PRIORITY = {
+    "EMERGENCY_SELL_PRESSURE": 0,
+    "SHARP_2D_DROP": 1,
+    "WATCH_PRESSURE": 2,
+    "NO_EMERGENCY": 3,
+    "INSUFFICIENT_DATA": 4,
+}
+
 
 def _count_by_date_and_field(
     rows: Sequence[dict[str, object]],
@@ -300,6 +308,23 @@ def _rolling_30_high_exit_risk_reason(
     if _is_high_exit_risk_status(window_watchlist_status):
         return "HISTORICAL_WINDOW_HIGH_EXIT_RISK"
     return None
+
+
+def _has_exit_reason_token(value: object | None, *tokens: str) -> bool:
+    if value in {None, "", "NULL"}:
+        return False
+    normalized_tokens = {token.strip().lower() for token in tokens}
+    normalized_parts = {
+        part.strip().lower()
+        for part in str(value).replace("|", ";").split(";")
+        if part.strip()
+    }
+    return any(token in normalized_parts for token in normalized_tokens)
+
+
+def _is_negative_ema20_context(value: object | None) -> bool:
+    numeric = _float_value(value)
+    return numeric is not None and numeric < 0.0
 
 
 def _classify_rolling_30_buy_row(row: dict[str, object]) -> tuple[str, str, str]:
@@ -562,6 +587,114 @@ def _classify_rolling_5_pullback_row(row: dict[str, object]) -> tuple[str, str, 
     return "NO_PULLBACK", "NO_MEANINGFUL_PULLBACK_EVIDENCE", "", "NONE"
 
 
+def _classify_rolling_2_sell_pressure_row(row: dict[str, object]) -> tuple[str, str, str, str]:
+    if row.get("last_price_data_status") in WATCHLIST_MISSING_PRICE_STATUSES or row.get("all_price_rows_missing") is True:
+        return "INSUFFICIENT_DATA", "MISSING_PRICE_CONTEXT", "", "WAIT_FOR_DATA"
+
+    ticker = str(row.get("ticker") or "").strip()
+    if not ticker:
+        return "INSUFFICIENT_DATA", "MISSING_TICKER_CONTEXT", "", "WAIT_FOR_DATA"
+
+    current_watchlist_status = row.get("current_watchlist_status")
+    window_watchlist_status = row.get("window_watchlist_status")
+    exit_risk_days = int(row.get("exit_risk_days") or 0)
+    high_exit_risk_days = int(row.get("high_exit_risk_days") or 0)
+    medium_exit_risk_days = int(row.get("medium_exit_risk_days") or 0)
+    latest_exit_severity = row.get("last_exit_risk_severity")
+    latest_exit_reason = row.get("last_exit_reason")
+    trend_state = row.get("last_ticker_trend_state")
+    latest_bearish_relevance_class = row.get("latest_bearish_relevance_class")
+    has_fresh_bos_down = _has_fresh_bos_down(row)
+    has_fresh_reset = _has_fresh_reset(row)
+    current_high_exit_risk = _is_high_exit_risk_status(current_watchlist_status)
+    current_medium_or_group_risk = _is_group_or_medium_risk_status(current_watchlist_status)
+    window_medium_or_group_risk = _is_group_or_medium_risk_status(window_watchlist_status)
+    has_strong_breakdown_reason = _has_exit_reason_token(
+        latest_exit_reason,
+        "close_below_ema20",
+        "return_10d_lt_minus_8pct",
+        "latest_structure_label_ll",
+        "trim_watch_close_below_ma10",
+        "subindustry_exit_zone",
+    )
+    has_relevant_bearish_context = latest_bearish_relevance_class == "RELEVANT"
+    has_weak_bearish_context = latest_bearish_relevance_class == "WEAK_CONTEXT"
+    has_extreme_or_critical_severity = _has_explicit_extreme_exit_severity(latest_exit_severity)
+    has_high_or_extreme_severity = _has_explicit_high_exit_severity(latest_exit_severity)
+
+    if (
+        (current_high_exit_risk and exit_risk_days >= 2 and has_high_or_extreme_severity)
+        or (
+            exit_risk_days >= 2
+            and high_exit_risk_days >= 2
+            and has_strong_breakdown_reason
+        )
+        or (has_fresh_bos_down and has_fresh_reset and exit_risk_days >= 1)
+        or (trend_state == "DOWN" and current_high_exit_risk)
+        or (has_relevant_bearish_context and current_high_exit_risk)
+    ):
+        risk_reason = (
+            "HIGH_EXIT_RISK_TWO_DAYS"
+            if current_high_exit_risk and exit_risk_days >= 2 and has_high_or_extreme_severity
+            else "BREAKDOWN_REASON_TWO_DAYS"
+            if exit_risk_days >= 2 and high_exit_risk_days >= 2 and has_strong_breakdown_reason
+            else "FRESH_BOS_DOWN_AND_RESET"
+            if has_fresh_bos_down and has_fresh_reset and exit_risk_days >= 1
+            else "DOWN_TREND_WITH_CURRENT_HIGH_EXIT_RISK"
+            if trend_state == "DOWN" and current_high_exit_risk
+            else "RELEVANT_BEARISH_CONTEXT_WITH_CURRENT_HIGH_EXIT_RISK"
+        )
+        return "EMERGENCY_SELL_PRESSURE", "CONFIRMED_TWO_DAY_SELL_PRESSURE", risk_reason, "CHECK_STOP_OR_REDUCE"
+
+    if (
+        (exit_risk_days >= 2 and latest_exit_severity in {"MEDIUM", "HIGH"})
+        or (high_exit_risk_days >= 1 and has_strong_breakdown_reason)
+        or (has_relevant_bearish_context and exit_risk_days >= 1)
+        or (has_fresh_bos_down and exit_risk_days >= 1)
+    ):
+        risk_reason = (
+            "EXIT_RISK_PERSISTENT_TWO_DAYS"
+            if exit_risk_days >= 2 and latest_exit_severity in {"MEDIUM", "HIGH"}
+            else "BREAKDOWN_REASON_WITH_HIGH_EXIT_DAY"
+            if high_exit_risk_days >= 1 and has_strong_breakdown_reason
+            else "RELEVANT_BEARISH_CONTEXT"
+            if has_relevant_bearish_context and exit_risk_days >= 1
+            else "FRESH_BOS_DOWN"
+        )
+        return "SHARP_2D_DROP", "SHARP_SHORT_TERM_DROP", risk_reason, "TIGHTEN_STOP_REVIEW_DAILY_TRIGGER"
+
+    if (
+        exit_risk_days >= 1
+        or medium_exit_risk_days >= 1
+        or latest_exit_severity not in {None, "", "NULL"}
+        or has_weak_bearish_context
+        or current_medium_or_group_risk
+        or window_medium_or_group_risk
+        or current_high_exit_risk
+        or _is_negative_ema20_context(row.get("last_distance_to_ema20_pct"))
+    ):
+        risk_reason = (
+            "EXIT_RISK_PRESENT"
+            if exit_risk_days >= 1 and latest_exit_severity in {None, "", "NULL"}
+            else "MEDIUM_EXIT_RISK"
+            if medium_exit_risk_days >= 1 or latest_exit_severity == "MEDIUM"
+            else "GROUP_RISK"
+            if current_watchlist_status == "GROUP_RISK" or window_watchlist_status == "GROUP_RISK"
+            else "CURRENT_HIGH_EXIT_RISK"
+            if current_high_exit_risk
+            else "WEAK_BEARISH_CONTEXT"
+            if has_weak_bearish_context
+            else "NEGATIVE_EMA20_DISTANCE"
+            if _is_negative_ema20_context(row.get("last_distance_to_ema20_pct"))
+            else "WINDOW_MEDIUM_EXIT_RISK"
+            if window_watchlist_status == "MEDIUM_EXIT_RISK"
+            else "MILD_EXIT_RISK_SEVERITY"
+        )
+        return "WATCH_PRESSURE", "MILD_OR_UNCONFIRMED_SELL_PRESSURE", risk_reason, "MONITOR_NEXT_SESSION"
+
+    return "NO_EMERGENCY", "NO_TWO_DAY_SELL_PRESSURE", "", "NONE"
+
+
 def _build_rolling_30_role_rows(
     *,
     ticker_rows: Sequence[dict[str, object]],
@@ -732,6 +865,75 @@ def _build_rolling_5_pullback_rows(
         )
     )
     return pullback_rows
+
+
+def _build_rolling_2_sell_pressure_rows(
+    *,
+    ticker_rows: Sequence[dict[str, object]],
+    group_rows: Sequence[dict[str, object]],
+    synthetic_rows: Sequence[dict[str, object]],
+    technical_relevance_context_rows: Sequence[dict[str, object]],
+) -> list[dict[str, object]]:
+    tickers = sorted(
+        {
+            str(row.get("ticker") or "")
+            for row in ticker_rows
+            if str(row.get("ticker") or "")
+        }
+    )
+    base_rows = _build_rolling_watchlist_rows(
+        watchlist_tickers=tickers,
+        ticker_rows=ticker_rows,
+        group_rows=group_rows,
+        synthetic_rows=synthetic_rows,
+    )
+    if technical_relevance_context_rows:
+        base_rows = _enrich_rows_with_technical_relevance_companions(
+            base_rows,
+            technical_relevance_context_rows=technical_relevance_context_rows,
+            row_date_field="last_signal_date",
+        )
+
+    pressure_rows: list[dict[str, object]] = []
+    for row in base_rows:
+        state, primary_reason, risk_reason, next_action = _classify_rolling_2_sell_pressure_row(row)
+        pressure_rows.append(
+            {
+                "ticker": row.get("ticker"),
+                "rolling_2_sell_pressure_state": state,
+                "primary_layer": row.get("primary_layer"),
+                "primary_subindustry": row.get("primary_subindustry"),
+                "window_watchlist_status": row.get("window_watchlist_status"),
+                "current_watchlist_status": row.get("current_watchlist_status"),
+                "exit_risk_days": row.get("exit_risk_days"),
+                "high_exit_risk_days": row.get("high_exit_risk_days"),
+                "medium_exit_risk_days": row.get("medium_exit_risk_days"),
+                "latest_exit_risk_severity": row.get("last_exit_risk_severity"),
+                "latest_exit_reason": row.get("last_exit_reason"),
+                "latest_ticker_trend_state": row.get("last_ticker_trend_state"),
+                "latest_structure_label": row.get("last_latest_structure_label"),
+                "latest_bos_event_type": row.get("last_latest_bos_event_type"),
+                "latest_bos_freshness": row.get("last_latest_bos_freshness"),
+                "latest_reset_reason": row.get("last_latest_reset_reason"),
+                "latest_reset_freshness": row.get("last_latest_reset_freshness"),
+                "latest_bearish_relevance_class": row.get("latest_bearish_relevance_class"),
+                "latest_bearish_relevance_reason": row.get("latest_bearish_relevance_reason"),
+                "primary_reason": primary_reason,
+                "risk_reason": risk_reason,
+                "next_action": next_action,
+            }
+        )
+
+    pressure_rows.sort(
+        key=lambda row: (
+            ROLLING_2_SELL_PRESSURE_STATE_PRIORITY.get(str(row.get("rolling_2_sell_pressure_state")), 99),
+            -int(row.get("exit_risk_days") or 0),
+            -int(row.get("high_exit_risk_days") or 0),
+            EXIT_RISK_SEVERITY_PRIORITY.get(row.get("latest_exit_risk_severity"), 3),
+            str(row.get("ticker") or ""),
+        )
+    )
+    return pressure_rows
 
 
 def _build_role_csv_section(
@@ -1424,6 +1626,7 @@ def build_markdown_weekly_swing_report(
     rolling_30_buy_rows: list[dict[str, object]] = []
     rolling_30_exit_rows: list[dict[str, object]] = []
     rolling_5_pullback_rows: list[dict[str, object]] = []
+    rolling_2_sell_pressure_rows: list[dict[str, object]] = []
     if window_size == 30:
         rolling_30_buy_rows, rolling_30_exit_rows = _build_rolling_30_role_rows(
             ticker_rows=ticker_rows,
@@ -1433,6 +1636,13 @@ def build_markdown_weekly_swing_report(
         )
     if window_size == 5:
         rolling_5_pullback_rows = _build_rolling_5_pullback_rows(
+            ticker_rows=ticker_rows,
+            group_rows=group_rows,
+            synthetic_rows=synthetic_rows,
+            technical_relevance_context_rows=technical_relevance_context_rows,
+        )
+    if window_size == 2:
+        rolling_2_sell_pressure_rows = _build_rolling_2_sell_pressure_rows(
             ticker_rows=ticker_rows,
             group_rows=group_rows,
             synthetic_rows=synthetic_rows,
@@ -1988,6 +2198,29 @@ def build_markdown_weekly_swing_report(
             ).rstrip()
         )
 
+    if window_size == 2:
+        lines.extend(["", "## Rolling 2 Sell Pressure"])
+        lines.append(
+            _format_table(
+                [
+                    "ticker",
+                    "rolling_2_sell_pressure_state",
+                    "primary_layer",
+                    "primary_subindustry",
+                    "exit_risk_days",
+                    "high_exit_risk_days",
+                    "latest_exit_risk_severity",
+                    "latest_ticker_trend_state",
+                    "latest_bos_event_type",
+                    "latest_reset_reason",
+                    "latest_bearish_relevance_class",
+                    "primary_reason",
+                    "next_action",
+                ],
+                rolling_2_sell_pressure_rows[:top_n],
+            ).rstrip()
+        )
+
     lines.extend(["", "## 11. Synthetic OHLC structure changes"])
     synthetic_change_rows: list[dict[str, object]] = []
     for (_, group_type, group_name), current_rows in _group_rows_by_key(
@@ -2379,6 +2612,7 @@ def build_csv_weekly_swing_report(
     rolling_30_buy_rows: list[dict[str, object]] = []
     rolling_30_exit_rows: list[dict[str, object]] = []
     rolling_5_pullback_rows: list[dict[str, object]] = []
+    rolling_2_sell_pressure_rows: list[dict[str, object]] = []
     if int(report_data.get("window_size") or DEFAULT_WEEKLY_WINDOW_SIZE) == 30:
         rolling_30_buy_rows, rolling_30_exit_rows = _build_rolling_30_role_rows(
             ticker_rows=list(report_data.get("ticker_rows") or []),
@@ -2499,6 +2733,44 @@ def build_csv_weekly_swing_report(
                 rolling_5_pullback_rows,
             ),
         )
+    if int(report_data.get("window_size") or DEFAULT_WEEKLY_WINDOW_SIZE) == 2:
+        rolling_2_sell_pressure_rows = _build_rolling_2_sell_pressure_rows(
+            ticker_rows=list(report_data.get("ticker_rows") or []),
+            group_rows=list(report_data.get("group_rows") or []),
+            synthetic_rows=list(report_data.get("synthetic_rows") or []),
+            technical_relevance_context_rows=list(report_data.get("technical_relevance_context_rows") or []),
+        )
+        csv_text = _insert_csv_section_before_taxonomy_listing(
+            csv_text,
+            _build_role_csv_section(
+                "rolling_2_sell_pressure",
+                [
+                    "ticker",
+                    "rolling_2_sell_pressure_state",
+                    "primary_layer",
+                    "primary_subindustry",
+                    "window_watchlist_status",
+                    "current_watchlist_status",
+                    "exit_risk_days",
+                    "high_exit_risk_days",
+                    "medium_exit_risk_days",
+                    "latest_exit_risk_severity",
+                    "latest_exit_reason",
+                    "latest_ticker_trend_state",
+                    "latest_structure_label",
+                    "latest_bos_event_type",
+                    "latest_bos_freshness",
+                    "latest_reset_reason",
+                    "latest_reset_freshness",
+                    "latest_bearish_relevance_class",
+                    "latest_bearish_relevance_reason",
+                    "primary_reason",
+                    "risk_reason",
+                    "next_action",
+                ],
+                rolling_2_sell_pressure_rows,
+            ),
+        )
     if technical_relevance_run_id is not None:
         csv_text = _insert_csv_section_before_taxonomy_listing(
             csv_text,
@@ -2535,6 +2807,15 @@ def format_weekly_swing_report_summary_lines(summary: dict[str, int | str]) -> l
         "rolling_5_short_term_breakdown_count",
         "rolling_5_no_pullback_count",
         "rolling_5_insufficient_data_count",
+    ):
+        if key in summary:
+            lines.append(f"SUMMARY {key}={summary[key]}")
+    for key in (
+        "rolling_2_emergency_sell_pressure_count",
+        "rolling_2_sharp_2d_drop_count",
+        "rolling_2_watch_pressure_count",
+        "rolling_2_no_emergency_count",
+        "rolling_2_insufficient_data_count",
     ):
         if key in summary:
             lines.append(f"SUMMARY {key}={summary[key]}")
@@ -2664,6 +2945,42 @@ def write_weekly_swing_report(
                 ),
                 "rolling_5_insufficient_data_count": sum(
                     1 for row in rolling_5_pullback_rows if row.get("rolling_5_pullback_state") == "INSUFFICIENT_DATA"
+                ),
+            }
+        )
+    if int(report_data.get("window_size") or DEFAULT_WEEKLY_WINDOW_SIZE) == 2:
+        rolling_2_sell_pressure_rows = _build_rolling_2_sell_pressure_rows(
+            ticker_rows=list(report_data.get("ticker_rows") or []),
+            group_rows=list(report_data.get("group_rows") or []),
+            synthetic_rows=list(report_data.get("synthetic_rows") or []),
+            technical_relevance_context_rows=list(report_data.get("technical_relevance_context_rows") or []),
+        )
+        summary.update(
+            {
+                "rolling_2_emergency_sell_pressure_count": sum(
+                    1
+                    for row in rolling_2_sell_pressure_rows
+                    if row.get("rolling_2_sell_pressure_state") == "EMERGENCY_SELL_PRESSURE"
+                ),
+                "rolling_2_sharp_2d_drop_count": sum(
+                    1
+                    for row in rolling_2_sell_pressure_rows
+                    if row.get("rolling_2_sell_pressure_state") == "SHARP_2D_DROP"
+                ),
+                "rolling_2_watch_pressure_count": sum(
+                    1
+                    for row in rolling_2_sell_pressure_rows
+                    if row.get("rolling_2_sell_pressure_state") == "WATCH_PRESSURE"
+                ),
+                "rolling_2_no_emergency_count": sum(
+                    1
+                    for row in rolling_2_sell_pressure_rows
+                    if row.get("rolling_2_sell_pressure_state") == "NO_EMERGENCY"
+                ),
+                "rolling_2_insufficient_data_count": sum(
+                    1
+                    for row in rolling_2_sell_pressure_rows
+                    if row.get("rolling_2_sell_pressure_state") == "INSUFFICIENT_DATA"
                 ),
             }
         )

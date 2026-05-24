@@ -1525,6 +1525,267 @@ def test_rolling_5_pullback_sections_do_not_render_for_non_5_windows(tmp_path):
         assert "rolling_5_short_term_breakdown_count" not in result["summary"]
 
 
+def test_rolling_2_sell_pressure_section_and_summary_render_for_window_size_2(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+
+    result = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=2,
+        generated_at_utc="2026-05-24T12:00:00Z",
+    )
+
+    markdown = result["markdown"]
+    csv_text = result["csv"]
+    summary = result["summary"]
+
+    assert "## Rolling 2 Sell Pressure" in markdown
+    assert "section;rolling_2_sell_pressure" in csv_text
+    assert "rolling_2_sell_pressure;AAA;NO_EMERGENCY;" in csv_text
+    assert "rolling_2_sell_pressure;BBB;NO_EMERGENCY;" in csv_text
+    assert "rolling_2_sell_pressure;CCC;INSUFFICIENT_DATA;" in csv_text
+    assert "rolling_2_sell_pressure;DDD;INSUFFICIENT_DATA;" in csv_text
+    assert summary["rolling_2_emergency_sell_pressure_count"] == 0
+    assert summary["rolling_2_sharp_2d_drop_count"] == 0
+    assert summary["rolling_2_watch_pressure_count"] == 0
+    assert summary["rolling_2_no_emergency_count"] == 2
+    assert summary["rolling_2_insufficient_data_count"] == 2
+
+
+def test_rolling_2_fixture_can_produce_emergency_sell_pressure(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET exit_risk_signal = 1,
+                exit_risk_severity = 'HIGH',
+                exit_reason = 'close_below_ema20',
+                ticker_trend_state = 'DOWN'
+            WHERE ticker = 'AAA'
+              AND signal_date IN ('2024-01-08', '2024-01-10')
+            """
+        )
+        conn.commit()
+
+    result = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=2,
+        generated_at_utc="2026-05-24T12:00:00Z",
+    )
+
+    assert "rolling_2_sell_pressure;AAA;EMERGENCY_SELL_PRESSURE;" in result["csv"]
+
+
+def test_rolling_2_fixture_can_produce_sharp_2d_drop(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET exit_risk_signal = 1,
+                exit_risk_severity = 'MEDIUM',
+                exit_reason = 'close_below_ema20',
+                ticker_trend_state = 'NEUTRAL'
+            WHERE ticker = 'AAA'
+              AND signal_date IN ('2024-01-08', '2024-01-10')
+            """
+        )
+        conn.commit()
+
+    result = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=2,
+        generated_at_utc="2026-05-24T12:00:00Z",
+    )
+
+    assert "rolling_2_sell_pressure;AAA;SHARP_2D_DROP;" in result["csv"]
+
+
+def test_rolling_2_fixture_can_produce_watch_pressure_and_missing_severity_is_not_emergency(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET exit_risk_signal = 1,
+                exit_risk_severity = NULL,
+                exit_reason = NULL,
+                ticker_trend_state = 'NEUTRAL'
+            WHERE ticker = 'AAA'
+              AND signal_date = '2024-01-10'
+            """
+        )
+        conn.commit()
+
+    result = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=2,
+        generated_at_utc="2026-05-24T12:00:00Z",
+    )
+
+    assert "rolling_2_sell_pressure;AAA;WATCH_PRESSURE;" in result["csv"]
+    assert "rolling_2_sell_pressure;AAA;EMERGENCY_SELL_PRESSURE;" not in result["csv"]
+
+
+def test_rolling_2_bos_up_does_not_create_sell_pressure_and_stale_breakdown_does_not_create_emergency(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET latest_bos_event_type = 'BOS_UP',
+                latest_bos_freshness = 'FRESH',
+                latest_reset_reason = 'DOUBLE_BOS_UP',
+                latest_reset_freshness = 'STALE',
+                exit_risk_signal = 0,
+                exit_risk_severity = NULL,
+                exit_reason = NULL
+            WHERE ticker = 'AAA'
+              AND signal_date = '2024-01-10'
+            """
+        )
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET latest_bos_event_type = 'BOS_DOWN',
+                latest_bos_freshness = 'STALE',
+                latest_reset_reason = 'DOUBLE_BOS_DOWN',
+                latest_reset_freshness = 'STALE',
+                exit_risk_signal = 0,
+                exit_risk_severity = NULL,
+                exit_reason = NULL
+            WHERE ticker = 'BBB'
+              AND signal_date = '2024-01-10'
+            """
+        )
+        conn.commit()
+
+    result = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=2,
+        generated_at_utc="2026-05-24T12:00:00Z",
+    )
+
+    assert "rolling_2_sell_pressure;AAA;NO_EMERGENCY;" in result["csv"]
+    assert "rolling_2_sell_pressure;BBB;NO_EMERGENCY;" in result["csv"]
+
+
+def test_rolling_2_relevant_bearish_context_with_current_high_exit_risk_can_create_emergency(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+    conn = _connect_relevance_db(analysis_db)
+    apply_technical_signal_relevance_migration(conn)
+    insert_relevance_run(
+        conn,
+        build_relevance_run_row(
+            run_id="REL_ROLLING_2_BEARISH",
+            config=TechnicalSignalRelevanceConfig(),
+            created_at_utc="2026-05-24T12:00:00Z",
+        ),
+    )
+    insert_relevance_records(
+        conn,
+        [
+            TechnicalSignalRelevanceStoredRow(
+                ticker="AAA",
+                timeframe="1d",
+                signal_date="2024-01-10",
+                signal_confirmed_as_of_date="2024-01-10",
+                signal_name="Bearish Divergence",
+                signal_close_price=110.0,
+                signal_direction="BEARISH",
+                signal_family="REVERSAL_MEDIUM",
+                signal_source_type="CANDLE",
+                signal_source_id="CANDLE",
+                dow_trend_state="UP",
+                dow_context_state="NORMAL",
+                latest_bos_direction="BOS_DOWN",
+                bars_since_latest_bos=1,
+                latest_reset_reason=None,
+                bars_since_latest_reset=None,
+                near_latest_pivot=0,
+                near_active_bos_level=0,
+                is_trend_aligned=0,
+                is_counter_trend=1,
+                relevance_class="RELEVANT",
+                relevance_reason="BEARISH_CONTEXT",
+                relevance_rule_version="TECH_SIGNAL_RELEVANCE_V1",
+                mapping_version="TECH_SIGNAL_MAPPING_V1",
+                reason_version="TECH_SIGNAL_RELEVANCE_REASON_V1",
+                rule_trace="[]",
+                created_at_utc="2026-05-24T12:00:00Z",
+                run_id="REL_ROLLING_2_BEARISH",
+            )
+        ],
+    )
+    conn.commit()
+    conn.close()
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET exit_risk_signal = 1,
+                exit_risk_severity = 'HIGH',
+                exit_reason = 'close_below_ema20'
+            WHERE ticker = 'AAA'
+              AND signal_date = '2024-01-10'
+            """
+        )
+        conn.commit()
+
+    result = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=2,
+        technical_relevance_run_id="REL_ROLLING_2_BEARISH",
+        generated_at_utc="2026-05-24T12:00:00Z",
+    )
+
+    assert "rolling_2_sell_pressure;AAA;EMERGENCY_SELL_PRESSURE;" in result["csv"]
+
+
+def test_rolling_2_sell_pressure_sections_do_not_render_for_non_2_windows(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+
+    result_5 = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=5,
+        generated_at_utc="2026-05-24T12:00:00Z",
+    )
+    result_30 = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=30,
+        generated_at_utc="2026-05-24T12:00:00Z",
+    )
+
+    for result in (result_5, result_30):
+        assert "Rolling 2 Sell Pressure" not in result["markdown"]
+        assert "section;rolling_2_sell_pressure" not in result["csv"]
+        assert "rolling_2_emergency_sell_pressure_count" not in result["summary"]
+        assert "rolling_2_sharp_2d_drop_count" not in result["summary"]
+
+
 def test_custom_window_size_marks_incomplete_when_fewer_than_requested_dates_exist(tmp_path):
     analysis_db = tmp_path / "analysis.db"
     _seed_weekly_report_db(analysis_db)

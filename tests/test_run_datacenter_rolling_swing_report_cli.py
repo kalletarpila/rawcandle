@@ -251,8 +251,79 @@ def test_rolling_cli_non_5_windows_do_not_emit_rolling_5_sections_or_summaries(t
     assert exit_code == 0
     assert "rolling_5_pullback_candidate_count" not in summary
     assert "rolling_5_failed_pullback_count" not in summary
+    assert "rolling_5_short_term_breakdown_count" not in summary
     assert "Rolling 5 Pullback Alerts" not in expected_md.read_text(encoding="utf-8")
     assert "section;rolling_5_pullback_alerts" not in expected_csv.read_text(encoding="utf-8")
+
+
+def test_rolling_cli_window_2_emits_rolling_2_sections_and_summaries(tmp_path, capsys):
+    analysis_db = tmp_path / "analysis.db"
+    output_md = tmp_path / "rolling_2024-01-10.md"
+    output_csv = tmp_path / "rolling_2024-01-10.csv"
+    expected_md = tmp_path / "rolling_2024-01-10_1200.md"
+    expected_csv = tmp_path / "rolling_2024-01-10_1200.csv"
+    _seed_weekly_report_db(analysis_db)
+
+    exit_code = run_datacenter_rolling_swing_report_main(
+        [
+            "--analysis-db",
+            str(analysis_db),
+            "--end-date",
+            "2024-01-10",
+            "--taxonomy-version",
+            "DC_TAXONOMY_V1",
+            "--window-size",
+            "2",
+            "--output-md",
+            str(output_md),
+            "--output-csv",
+            str(output_csv),
+            "--generated-at-utc",
+            "2026-05-17T12:00:00Z",
+        ]
+    )
+
+    summary = _parse_summary(capsys.readouterr().out)
+    assert exit_code == 0
+    assert "## Rolling 2 Sell Pressure" in expected_md.read_text(encoding="utf-8")
+    assert "section;rolling_2_sell_pressure" in expected_csv.read_text(encoding="utf-8")
+    assert "rolling_2_emergency_sell_pressure_count" in summary
+    assert "rolling_2_no_emergency_count" in summary
+
+
+def test_rolling_cli_non_2_windows_do_not_emit_rolling_2_sections_or_summaries(tmp_path, capsys):
+    analysis_db = tmp_path / "analysis.db"
+    output_md = tmp_path / "rolling_2024-01-10.md"
+    output_csv = tmp_path / "rolling_2024-01-10.csv"
+    expected_md = tmp_path / "rolling_2024-01-10_1200.md"
+    expected_csv = tmp_path / "rolling_2024-01-10_1200.csv"
+    _seed_weekly_report_db(analysis_db)
+
+    exit_code = run_datacenter_rolling_swing_report_main(
+        [
+            "--analysis-db",
+            str(analysis_db),
+            "--end-date",
+            "2024-01-10",
+            "--taxonomy-version",
+            "DC_TAXONOMY_V1",
+            "--window-size",
+            "30",
+            "--output-md",
+            str(output_md),
+            "--output-csv",
+            str(output_csv),
+            "--generated-at-utc",
+            "2026-05-17T12:00:00Z",
+        ]
+    )
+
+    summary = _parse_summary(capsys.readouterr().out)
+    assert exit_code == 0
+    assert "rolling_2_emergency_sell_pressure_count" not in summary
+    assert "rolling_2_sharp_2d_drop_count" not in summary
+    assert "Rolling 2 Sell Pressure" not in expected_md.read_text(encoding="utf-8")
+    assert "section;rolling_2_sell_pressure" not in expected_csv.read_text(encoding="utf-8")
 
 
 def test_rolling_cli_supports_technical_relevance_run_id(tmp_path):
