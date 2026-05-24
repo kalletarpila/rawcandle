@@ -26,6 +26,22 @@ class DatacenterDashboardRow:
     distance_to_ema20: float | None
     high_exit_risk_days_count: int | None
     blocking_reasons: str | None
+    ma_break_status: str | None
+    ema20_break_confirmed: int | None
+    sma50_break_confirmed: int | None
+    close_below_ema20: int | None
+    close_below_sma50: int | None
+    consecutive_closes_below_ema20: int | None
+    consecutive_closes_below_sma50: int | None
+    ema20_break_pct: float | None
+    sma50_break_pct: float | None
+    freshness_status: str | None
+    structure_warning_overrides_bullish_signal: int | None
+    latest_bullish_signal_age_td: int | None
+    latest_bearish_signal_age_td: int | None
+    latest_bos_up_age_td: int | None
+    latest_bos_down_age_td: int | None
+    latest_reset_age_td: int | None
     raw_fields: dict[str, str] = field(default_factory=dict)
 
 
@@ -81,6 +97,22 @@ _COLUMN_SYNONYMS: dict[str, tuple[str, ...]] = {
         "exit_risk_days",
         "risk_days_count",
     ),
+    "ma_break_status": ("ma_break_status",),
+    "ema20_break_confirmed": ("ema20_break_confirmed",),
+    "sma50_break_confirmed": ("sma50_break_confirmed",),
+    "close_below_ema20": ("close_below_ema20",),
+    "close_below_sma50": ("close_below_sma50",),
+    "consecutive_closes_below_ema20": ("consecutive_closes_below_ema20",),
+    "consecutive_closes_below_sma50": ("consecutive_closes_below_sma50",),
+    "ema20_break_pct": ("ema20_break_pct",),
+    "sma50_break_pct": ("sma50_break_pct",),
+    "freshness_status": ("freshness_status",),
+    "structure_warning_overrides_bullish_signal": ("structure_warning_overrides_bullish_signal",),
+    "latest_bullish_signal_age_td": ("latest_bullish_signal_age_td",),
+    "latest_bearish_signal_age_td": ("latest_bearish_signal_age_td",),
+    "latest_bos_up_age_td": ("latest_bos_up_age_td",),
+    "latest_bos_down_age_td": ("latest_bos_down_age_td",),
+    "latest_reset_age_td": ("latest_reset_age_td",),
 }
 
 _HEADER_NORMALIZE_RE = re.compile(r"[^a-z0-9]+")
@@ -100,27 +132,50 @@ def _resolve_column(headers: list[str], canonical_name: str) -> Optional[str]:
     return None
 
 
-def _safe_float(value: str | None) -> float | None:
+def _normalized_optional_string(value: str | None) -> str | None:
     if value is None:
         return None
     text = value.strip()
     if not text:
+        return None
+    return text
+
+
+def _safe_float(
+    value: str | None,
+    *,
+    source_file: str,
+    field_name: str,
+    warnings: list[str],
+) -> float | None:
+    text = _normalized_optional_string(value)
+    if text is None:
         return None
     try:
         return float(text)
     except ValueError:
+        warnings.append(
+            f"{source_file}: invalid float for {field_name}: {text}"
+        )
         return None
 
 
-def _safe_int(value: str | None) -> int | None:
-    if value is None:
-        return None
-    text = value.strip()
-    if not text:
+def _safe_int(
+    value: str | None,
+    *,
+    source_file: str,
+    field_name: str,
+    warnings: list[str],
+) -> int | None:
+    text = _normalized_optional_string(value)
+    if text is None:
         return None
     try:
         return int(float(text))
     except ValueError:
+        warnings.append(
+            f"{source_file}: invalid int for {field_name}: {text}"
+        )
         return None
 
 
@@ -131,6 +186,7 @@ def _build_row(
     horizon: str,
     source_file: str,
     section: str | None,
+    warnings: list[str],
 ) -> DatacenterDashboardRow | None:
     padded_values = values[: len(header)] + [""] * max(0, len(header) - len(values))
     raw_fields = {
@@ -145,34 +201,61 @@ def _build_row(
     if not ticker:
         return None
 
+    def _text_field(canonical_name: str) -> str | None:
+        return _normalized_optional_string(
+            raw_fields.get(_resolve_column(header, canonical_name) or "")
+        )
+
+    def _int_field(canonical_name: str) -> int | None:
+        resolved_column = _resolve_column(header, canonical_name)
+        return _safe_int(
+            raw_fields.get(resolved_column or ""),
+            source_file=source_file,
+            field_name=canonical_name,
+            warnings=warnings,
+        )
+
+    def _float_field(canonical_name: str) -> float | None:
+        resolved_column = _resolve_column(header, canonical_name)
+        return _safe_float(
+            raw_fields.get(resolved_column or ""),
+            source_file=source_file,
+            field_name=canonical_name,
+            warnings=warnings,
+        )
+
     return DatacenterDashboardRow(
         ticker=ticker,
         horizon=horizon,
         source_file=source_file,
-        section=section or raw_fields.get("section") or None,
-        row_kind=raw_fields.get("row_kind"),
-        raw_action=raw_fields.get(_resolve_column(header, "raw_action") or ""),
-        raw_status=raw_fields.get(_resolve_column(header, "raw_status") or ""),
-        reason=raw_fields.get(_resolve_column(header, "reason") or ""),
-        trend_state=raw_fields.get(_resolve_column(header, "trend_state") or ""),
-        latest_structure_label=raw_fields.get(
-            _resolve_column(header, "latest_structure_label") or ""
-        ),
-        latest_bos_event_type=raw_fields.get(
-            _resolve_column(header, "latest_bos_event_type") or ""
-        ),
-        latest_reset_reason=raw_fields.get(
-            _resolve_column(header, "latest_reset_reason") or ""
-        ),
-        distance_to_ema20=_safe_float(
-            raw_fields.get(_resolve_column(header, "distance_to_ema20") or "")
-        ),
-        high_exit_risk_days_count=_safe_int(
-            raw_fields.get(_resolve_column(header, "high_exit_risk_days_count") or "")
-        ),
-        blocking_reasons=raw_fields.get(
-            _resolve_column(header, "blocking_reasons") or ""
-        ),
+        section=_normalized_optional_string(section or raw_fields.get("section") or None),
+        row_kind=_normalized_optional_string(raw_fields.get("row_kind")),
+        raw_action=_text_field("raw_action"),
+        raw_status=_text_field("raw_status"),
+        reason=_text_field("reason"),
+        trend_state=_text_field("trend_state"),
+        latest_structure_label=_text_field("latest_structure_label"),
+        latest_bos_event_type=_text_field("latest_bos_event_type"),
+        latest_reset_reason=_text_field("latest_reset_reason"),
+        distance_to_ema20=_float_field("distance_to_ema20"),
+        high_exit_risk_days_count=_int_field("high_exit_risk_days_count"),
+        blocking_reasons=_text_field("blocking_reasons"),
+        ma_break_status=_text_field("ma_break_status"),
+        ema20_break_confirmed=_int_field("ema20_break_confirmed"),
+        sma50_break_confirmed=_int_field("sma50_break_confirmed"),
+        close_below_ema20=_int_field("close_below_ema20"),
+        close_below_sma50=_int_field("close_below_sma50"),
+        consecutive_closes_below_ema20=_int_field("consecutive_closes_below_ema20"),
+        consecutive_closes_below_sma50=_int_field("consecutive_closes_below_sma50"),
+        ema20_break_pct=_float_field("ema20_break_pct"),
+        sma50_break_pct=_float_field("sma50_break_pct"),
+        freshness_status=_text_field("freshness_status"),
+        structure_warning_overrides_bullish_signal=_int_field("structure_warning_overrides_bullish_signal"),
+        latest_bullish_signal_age_td=_int_field("latest_bullish_signal_age_td"),
+        latest_bearish_signal_age_td=_int_field("latest_bearish_signal_age_td"),
+        latest_bos_up_age_td=_int_field("latest_bos_up_age_td"),
+        latest_bos_down_age_td=_int_field("latest_bos_down_age_td"),
+        latest_reset_age_td=_int_field("latest_reset_age_td"),
         raw_fields=raw_fields,
     )
 
@@ -213,6 +296,7 @@ def _parse_semicolon_rows(
             horizon=horizon,
             source_file=source_file,
             section=current_section,
+            warnings=warnings,
         )
         if row is None:
             warnings.append(f"{source_file}: line {line_number} skipped without ticker")
@@ -259,6 +343,7 @@ def _parse_markdown_rows(
                 horizon=horizon,
                 source_file=source_file,
                 section=None,
+                warnings=warnings,
             )
             if row is None:
                 warnings.append(f"{source_file}: line {line_index + 1} skipped without ticker")

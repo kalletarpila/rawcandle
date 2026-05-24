@@ -61,6 +61,8 @@ def test_parse_datacenter_dashboard_file_tolerates_missing_optional_columns(tmp_
     assert row.raw_status == "SELL_TRIGGER"
     assert row.reason is None
     assert row.distance_to_ema20 is None
+    assert row.ma_break_status is None
+    assert row.freshness_status is None
 
 
 def test_parse_datacenter_dashboard_file_preserves_unknown_columns_in_raw_fields(tmp_path):
@@ -82,6 +84,90 @@ def test_parse_datacenter_dashboard_file_preserves_unknown_columns_in_raw_fields
     )
 
     assert result.rows[0].raw_fields["custom_flag"] == "SPECIAL"
+
+
+def test_parse_datacenter_dashboard_file_parses_ma_break_fields(tmp_path):
+    report_path = tmp_path / "datacenter_daily_2026-05-22_0000_full.csv"
+    report_path.write_text(
+        "\n".join(
+            [
+                "ticker;ma_break_status;ema20_break_confirmed;sma50_break_confirmed;ema20_break_pct;sma50_break_pct",
+                "NVDA;EMA20_CONFIRMED_BREAK;1;0;-0.0215;0.0",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = parse_datacenter_dashboard_file(
+        path=str(report_path),
+        horizon="daily",
+    )
+
+    row = result.rows[0]
+    assert row.ma_break_status == "EMA20_CONFIRMED_BREAK"
+    assert row.ema20_break_confirmed == 1
+    assert row.sma50_break_confirmed == 0
+    assert row.ema20_break_pct == -0.0215
+    assert row.sma50_break_pct == 0.0
+
+
+def test_parse_datacenter_dashboard_file_parses_freshness_fields(tmp_path):
+    report_path = tmp_path / "datacenter_rolling_2_2026-05-22_0000_full.csv"
+    report_path.write_text(
+        "\n".join(
+            [
+                "ticker;freshness_status;structure_warning_overrides_bullish_signal;latest_bullish_signal_age_td;latest_bearish_signal_age_td;latest_bos_up_age_td;latest_bos_down_age_td;latest_reset_age_td",
+                "AVGO;STRUCTURE_WARNING_OVERRIDES_BULLISH;1;4;1;12;1;3",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = parse_datacenter_dashboard_file(
+        path=str(report_path),
+        horizon="rolling 2d",
+    )
+
+    row = result.rows[0]
+    assert row.freshness_status == "STRUCTURE_WARNING_OVERRIDES_BULLISH"
+    assert row.structure_warning_overrides_bullish_signal == 1
+    assert row.latest_bullish_signal_age_td == 4
+    assert row.latest_bearish_signal_age_td == 1
+    assert row.latest_bos_up_age_td == 12
+    assert row.latest_bos_down_age_td == 1
+    assert row.latest_reset_age_td == 3
+
+
+def test_parse_datacenter_dashboard_file_handles_malformed_ma_and_freshness_values(tmp_path):
+    report_path = tmp_path / "datacenter_rolling_30_2026-05-22_0000_full.csv"
+    report_path.write_text(
+        "\n".join(
+            [
+                "ticker;ema20_break_confirmed;ema20_break_pct;structure_warning_overrides_bullish_signal",
+                "TSM;bad_int;bad_float;oops",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = parse_datacenter_dashboard_file(
+        path=str(report_path),
+        horizon="rolling 30d",
+    )
+
+    row = result.rows[0]
+    assert row.ema20_break_confirmed is None
+    assert row.ema20_break_pct is None
+    assert row.structure_warning_overrides_bullish_signal is None
+    assert any("invalid int for ema20_break_confirmed" in warning for warning in result.warnings)
+    assert any("invalid float for ema20_break_pct" in warning for warning in result.warnings)
+    assert any(
+        "invalid int for structure_warning_overrides_bullish_signal" in warning
+        for warning in result.warnings
+    )
 
 
 def test_parse_datacenter_dashboard_file_skips_rows_without_ticker(tmp_path):

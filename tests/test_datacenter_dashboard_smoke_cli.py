@@ -233,6 +233,22 @@ def test_cli_uses_existing_helpers_rather_than_duplicating_logic(monkeypatch, tm
                         distance_to_ema20=None,
                         high_exit_risk_days_count=None,
                         blocking_reasons=None,
+                        ma_break_status=None,
+                        ema20_break_confirmed=None,
+                        sma50_break_confirmed=None,
+                        close_below_ema20=None,
+                        close_below_sma50=None,
+                        consecutive_closes_below_ema20=None,
+                        consecutive_closes_below_sma50=None,
+                        ema20_break_pct=None,
+                        sma50_break_pct=None,
+                        freshness_status=None,
+                        structure_warning_overrides_bullish_signal=None,
+                        latest_bullish_signal_age_td=None,
+                        latest_bearish_signal_age_td=None,
+                        latest_bos_up_age_td=None,
+                        latest_bos_down_age_td=None,
+                        latest_reset_age_td=None,
                         raw_fields={},
                     )
                 ]
@@ -412,3 +428,24 @@ def test_show_trace_output_is_deterministic(tmp_path, capsys):
     assert trace_lines == [
         "TRACE ticker=NVDA action=SELL rule=SELL_HARD_TOKEN horizon=daily field=reason token=close_below_ema20 value=close_below_ema20"
     ]
+
+
+def test_show_trace_selected_ticker_inspector_can_include_ma_break_and_freshness_status(
+    tmp_path, capsys
+):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    _write_report(
+        reports_dir / "datacenter_daily_2026-05-22_0000_full.csv",
+        "ticker;status;reason;ma_break_status;freshness_status\nNVDA;SELL;close_below_ema20;EMA20_CONFIRMED_BREAK;FRESH_BEARISH_SIGNAL\n",
+    )
+
+    exit_code = main(
+        ["--reports-dir", str(reports_dir), "--ticker", "NVDA", "--show-trace"]
+    )
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "INSPECTOR horizon=daily" in output
+    assert "ma_break_status=EMA20_CONFIRMED_BREAK" in output
+    assert "freshness_status=FRESH_BEARISH_SIGNAL" in output

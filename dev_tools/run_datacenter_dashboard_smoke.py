@@ -214,6 +214,16 @@ def _print_inspector_rows(
             f"raw_action={row.raw_action or ''} "
             f"raw_status={row.raw_status or ''} "
             f"reason={row.reason or ''}"
+            + (
+                f" ma_break_status={row.ma_break_status}"
+                if show_trace and row.ma_break_status
+                else ""
+            )
+            + (
+                f" freshness_status={row.freshness_status}"
+                if show_trace and row.freshness_status
+                else ""
+            )
         )
     if show_trace:
         _print_trace_rows(
