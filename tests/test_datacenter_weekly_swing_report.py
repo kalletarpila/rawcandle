@@ -1121,6 +1121,7 @@ def test_rolling_5_pullback_alert_section_and_summary_render_for_window_size_5(t
     assert summary["rolling_5_pullback_candidate_count"] == 1
     assert summary["rolling_5_early_pullback_count"] == 0
     assert summary["rolling_5_failed_pullback_count"] == 0
+    assert summary["rolling_5_short_term_breakdown_count"] == 0
     assert summary["rolling_5_no_pullback_count"] == 1
     assert summary["rolling_5_insufficient_data_count"] == 2
 
@@ -1271,7 +1272,7 @@ def test_rolling_5_no_pullback_with_relevant_bearish_context_alone_stays_no_pull
     assert "rolling_5_pullback_alerts;AAA;NO_PULLBACK;" in result["csv"]
 
 
-def test_rolling_5_no_pullback_with_fresh_bos_down_becomes_failed_pullback_short_term_breakdown(tmp_path):
+def test_rolling_5_no_pullback_with_fresh_bos_down_becomes_short_term_breakdown(tmp_path):
     analysis_db = tmp_path / "analysis.db"
     _seed_weekly_report_db(analysis_db)
     with sqlite3.connect(analysis_db) as conn:
@@ -1297,8 +1298,68 @@ def test_rolling_5_no_pullback_with_fresh_bos_down_becomes_failed_pullback_short
         generated_at_utc="2026-05-17T12:00:00Z",
     )
 
-    assert "rolling_5_pullback_alerts;AAA;FAILED_PULLBACK;" in result["csv"]
+    assert "rolling_5_pullback_alerts;AAA;SHORT_TERM_BREAKDOWN;" in result["csv"]
     assert "SHORT_TERM_BREAKDOWN_WITHOUT_PULLBACK_SETUP" in result["csv"]
+
+
+def test_rolling_5_no_pullback_with_fresh_reset_plus_negative_context_becomes_short_term_breakdown(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET latest_reset_reason = 'DOUBLE_BOS_DOWN',
+                latest_reset_event_date = '2024-01-10',
+                latest_reset_confirmed_as_of_date = '2024-01-10',
+                latest_reset_age_trading_days = 0,
+                latest_reset_freshness = 'FRESH',
+                ticker_trend_state = 'DOWN',
+                exit_risk_signal = 1,
+                exit_risk_severity = 'HIGH',
+                exit_reason = 'trend_break'
+            WHERE ticker = 'AAA'
+              AND signal_date = '2024-01-10'
+            """
+        )
+        conn.commit()
+
+    result = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=5,
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+
+    assert "rolling_5_pullback_alerts;AAA;SHORT_TERM_BREAKDOWN;" in result["csv"]
+
+
+def test_rolling_5_no_pullback_with_critical_severity_becomes_short_term_breakdown(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET exit_risk_signal = 1,
+                exit_risk_severity = 'CRITICAL',
+                exit_reason = 'critical_break'
+            WHERE ticker = 'AAA'
+              AND signal_date = '2024-01-10'
+            """
+        )
+        conn.commit()
+
+    result = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=5,
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+
+    assert "rolling_5_pullback_alerts;AAA;SHORT_TERM_BREAKDOWN;" in result["csv"]
 
 
 def test_rolling_5_pullback_with_relevant_bearish_context_fails_pullback(tmp_path):
@@ -1415,6 +1476,7 @@ def test_rolling_5_pullback_sections_do_not_render_for_non_5_windows(tmp_path):
         assert "section;rolling_5_pullback_alerts" not in result["csv"]
         assert "rolling_5_pullback_candidate_count" not in result["summary"]
         assert "rolling_5_failed_pullback_count" not in result["summary"]
+        assert "rolling_5_short_term_breakdown_count" not in result["summary"]
 
 
 def test_custom_window_size_marks_incomplete_when_fewer_than_requested_dates_exist(tmp_path):

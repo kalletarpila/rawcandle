@@ -126,8 +126,9 @@ ROLLING_5_PULLBACK_STATE_PRIORITY = {
     "PULLBACK_CANDIDATE": 0,
     "EARLY_PULLBACK": 1,
     "FAILED_PULLBACK": 2,
-    "NO_PULLBACK": 3,
-    "INSUFFICIENT_DATA": 4,
+    "SHORT_TERM_BREAKDOWN": 3,
+    "NO_PULLBACK": 4,
+    "INSUFFICIENT_DATA": 5,
 }
 
 
@@ -504,7 +505,7 @@ def _classify_rolling_5_pullback_row(row: dict[str, object]) -> tuple[str, str, 
                 if trend_state == "DOWN" and current_high_exit_risk
                 else "relevant_bearish_context_with_current_high_exit_risk"
             )
-            return "FAILED_PULLBACK", "SHORT_TERM_BREAKDOWN_WITHOUT_PULLBACK_SETUP", blocking_reason, "MONITOR_EXIT_RISK"
+            return "SHORT_TERM_BREAKDOWN", "SHORT_TERM_BREAKDOWN_WITHOUT_PULLBACK_SETUP", blocking_reason, "MONITOR_EXIT_RISK"
         return "NO_PULLBACK", "NO_MEANINGFUL_PULLBACK_EVIDENCE", "", "NONE"
 
     if has_pullback_blocker:
@@ -2520,6 +2521,7 @@ def format_weekly_swing_report_summary_lines(summary: dict[str, int | str]) -> l
         "rolling_5_pullback_candidate_count",
         "rolling_5_early_pullback_count",
         "rolling_5_failed_pullback_count",
+        "rolling_5_short_term_breakdown_count",
         "rolling_5_no_pullback_count",
         "rolling_5_insufficient_data_count",
     ):
@@ -2642,6 +2644,9 @@ def write_weekly_swing_report(
                 ),
                 "rolling_5_failed_pullback_count": sum(
                     1 for row in rolling_5_pullback_rows if row.get("rolling_5_pullback_state") == "FAILED_PULLBACK"
+                ),
+                "rolling_5_short_term_breakdown_count": sum(
+                    1 for row in rolling_5_pullback_rows if row.get("rolling_5_pullback_state") == "SHORT_TERM_BREAKDOWN"
                 ),
                 "rolling_5_no_pullback_count": sum(
                     1 for row in rolling_5_pullback_rows if row.get("rolling_5_pullback_state") == "NO_PULLBACK"
