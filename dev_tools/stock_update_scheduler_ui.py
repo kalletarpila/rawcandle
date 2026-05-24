@@ -2297,19 +2297,23 @@ def run_app(page: ft.Page, config_path: str) -> None:
         padding=ft.padding.only(right=8, bottom=8),
         auto_scroll=False,
     )
-    datacenter_dashboard_content = ft.Container(
-        content=ft.Column(
-            controls=[
-                datacenter_dashboard_header,
-                datacenter_dashboard_scroll_content,
-            ],
-            spacing=12,
-            expand=True,
-            horizontal_alignment=ft.CrossAxisAlignment.START,
-        ),
-        padding=ft.padding.symmetric(horizontal=8, vertical=6),
+    datacenter_dashboard_content = ft.Column(
+        controls=[
+            ft.Container(
+                content=datacenter_dashboard_header,
+                padding=ft.padding.symmetric(horizontal=8, vertical=6),
+                alignment=ft.alignment.top_left,
+            ),
+            ft.Container(
+                content=datacenter_dashboard_scroll_content,
+                padding=ft.padding.only(left=8, right=8, bottom=6),
+                expand=True,
+                alignment=ft.alignment.top_left,
+            ),
+        ],
+        spacing=12,
         expand=True,
-        alignment=ft.alignment.top_left,
+        horizontal_alignment=ft.CrossAxisAlignment.START,
     )
 
     page.datacenter_price_db_field = datacenter_price_db_field
@@ -2448,7 +2452,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
         "DEBUG dashboard_root_control_type="
         f"{type(datacenter_dashboard_content).__name__}"
     )
-    dashboard_root_column = datacenter_dashboard_content.content
+    dashboard_root_column = datacenter_dashboard_content
     dashboard_children_count = (
         len(dashboard_root_column.controls)
         if dashboard_root_column is not None

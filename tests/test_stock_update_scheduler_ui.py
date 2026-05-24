@@ -1059,8 +1059,11 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(
     )
     assert page.datacenter_dashboard_scroll_content.expand is True
     assert page.datacenter_dashboard_scroll_content.auto_scroll is False
-    assert page.datacenter_dashboard_content.padding.left == 8
-    assert page.datacenter_dashboard_content.padding.top == 6
+    assert len(page.datacenter_dashboard_content.controls) == 2
+    assert page.datacenter_dashboard_content.controls[0].content is page.datacenter_dashboard_header
+    assert page.datacenter_dashboard_content.controls[1].content is page.datacenter_dashboard_scroll_content
+    assert page.datacenter_dashboard_content.controls[0].padding.left == 8
+    assert page.datacenter_dashboard_content.controls[0].padding.top == 6
     assert page.datacenter_dashboard_readiness_text.value == "Readiness: NOT_REFRESHED"
     assert page.datacenter_dashboard_reports_status_text.value == "Reports: No reports loaded."
     assert (
@@ -1120,7 +1123,7 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(
     assert "Inspector" in scroll_text_labels
     assert "Reports directory" not in scroll_text_labels
     assert len(page.datacenter_dashboard_scroll_content.controls) == 5
-    assert hasattr(page.datacenter_dashboard_content, "content")
+    assert not hasattr(page.datacenter_dashboard_content, "content")
     assert len(_dashboard_tab_descendants(page)) > 20
     assert "DEBUG dashboard_real_render_v3=1" in captured_stdout
     assert "DEBUG dashboard_page_scroll=" in captured_stdout
