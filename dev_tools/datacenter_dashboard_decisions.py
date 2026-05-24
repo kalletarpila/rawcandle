@@ -493,6 +493,12 @@ def _classify_pullback_validity(
                 "FRESH_RESET_BLOCKS_PULLBACK",
             )
 
+    if _has_acute_confirmed_rolling_2d_bos_down(sorted_rows):
+        return (
+            "STRUCTURE_BLOCKED_PULLBACK",
+            "ACUTE_BOS_DOWN_SELL_CONFIRMATION_BLOCKS_PULLBACK",
+        )
+
     for row, _horizon, _text_values in acute_rows:
         if row.ma_break_status == "SMA50_CONFIRMED_BREAK":
             return ("BREAKDOWN_NOT_PULLBACK", "SMA50_CONFIRMED_BREAK")
@@ -531,6 +537,80 @@ def _classify_pullback_validity(
         return ("EARLY_PULLBACK", "WAIT_FOR_BULLISH_CONFIRMATION")
 
     return ("INSUFFICIENT_DATA", "MISSING_STRUCTURE_OR_FRESHNESS_CONTEXT")
+
+
+def _has_acute_confirmed_rolling_2d_bos_down(
+    normalized_rows: list[tuple[DatacenterDashboardRow, str, list[str]]],
+) -> bool:
+    daily_or_rolling_2 = [
+        (row, horizon, text_values)
+        for row, horizon, text_values in normalized_rows
+        if horizon in {"daily", "rolling 2d"}
+    ]
+    rolling_2d_rows = [
+        (row, horizon, text_values)
+        for row, horizon, text_values in normalized_rows
+        if horizon == "rolling 2d"
+    ]
+    daily_rows = [
+        (row, horizon, text_values)
+        for row, horizon, text_values in normalized_rows
+        if horizon == "daily"
+    ]
+    rolling_2d_bos_down = any(
+        _contains_any(text_values, _ROLLING_2D_BOS_DOWN_TERMS)
+        for _row, _horizon, text_values in rolling_2d_rows
+    )
+    if not rolling_2d_bos_down:
+        return False
+    rolling_2d_reset = any(
+        _contains_any(text_values, _ROLLING_2D_RESET_TERMS)
+        for _row, _horizon, text_values in rolling_2d_rows
+    )
+    acute_high_exit_risk_days_present = any(
+        row.high_exit_risk_days_count is not None
+        and row.high_exit_risk_days_count >= 1
+        for row, _horizon, _text_values in daily_or_rolling_2
+    )
+    acute_ma_status_available = any(
+        row.ma_break_status is not None and row.ma_break_status.strip() != ""
+        for row, _horizon, _text_values in daily_or_rolling_2
+    )
+    explicit_sell_match = any(
+        _contains_any(text_values, ("sell",))
+        for _row, _horizon, text_values in daily_or_rolling_2
+    )
+    return_10d_hard_sell_match = any(
+        _contains_any(text_values, ("return_10d_lt_minus_8pct",))
+        for _row, _horizon, text_values in daily_or_rolling_2
+    )
+    close_below_ema20_fallback_match = (
+        not acute_ma_status_available
+        and any(
+            _contains_any(text_values, ("close_below_ema20",))
+            for _row, _horizon, text_values in daily_or_rolling_2
+        )
+    )
+    hard_sell_match = (
+        explicit_sell_match
+        or return_10d_hard_sell_match
+        or close_below_ema20_fallback_match
+    )
+    daily_bearish_confirmation = any(
+        _contains_any(text_values, _DAILY_BOS_DOWN_CONFIRMATION_TERMS)
+        for _row, _horizon, text_values in daily_rows
+    )
+    acute_rolling_2d_confirmation = any(
+        _contains_any(text_values, _ROLLING_2D_CONFIRMATION_TERMS)
+        for _row, _horizon, text_values in rolling_2d_rows
+    )
+    return (
+        acute_rolling_2d_confirmation
+        or rolling_2d_reset
+        or daily_bearish_confirmation
+        or hard_sell_match
+        or acute_high_exit_risk_days_present
+    )
 
 
 def _max_optional_float(values: Iterable[float | None]) -> float | None:
@@ -718,12 +798,8 @@ def build_datacenter_ticker_decisions(
             and row.high_exit_risk_days_count >= 1
             for row, _horizon, _text_values in long_context_rows
         )
-        confirmed_rolling_2d_bos_down = rolling_2d_bos_down and (
-            acute_rolling_2d_confirmation
-            or rolling_2d_reset
-            or daily_bearish_confirmation
-            or hard_sell_match
-            or acute_high_exit_risk_days_present
+        confirmed_rolling_2d_bos_down = _has_acute_confirmed_rolling_2d_bos_down(
+            normalized_rows
         )
         pullback_validity, pullback_reason = _classify_pullback_validity(normalized_rows)
 

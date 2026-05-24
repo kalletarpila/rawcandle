@@ -512,6 +512,39 @@ def test_pullback_context_plus_ema20_warning_and_fresh_bullish_signal_is_valid_p
     assert result.decisions[0].pullback_validity == "VALID_PULLBACK"
 
 
+def test_acute_bos_down_sell_confirmation_blocks_valid_pullback():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="NVDA",
+                horizon="daily",
+                raw_status="PULLBACK_CANDIDATE",
+                ma_break_status="OK",
+                freshness_status="FRESH_BULLISH_SIGNAL",
+            ),
+            _row(
+                ticker="NVDA",
+                horizon="rolling 2d",
+                latest_bos_event_type="BOS_DOWN",
+                ma_break_status="OK",
+            ),
+            _row(
+                ticker="NVDA",
+                horizon="rolling 2d",
+                raw_status="DOUBLE_BOS_DOWN",
+                ma_break_status="OK",
+            ),
+        ]
+    )
+
+    assert result.decisions[0].pullback_validity == "STRUCTURE_BLOCKED_PULLBACK"
+    assert (
+        result.decisions[0].pullback_reason
+        == "ACUTE_BOS_DOWN_SELL_CONFIRMATION_BLOCKS_PULLBACK"
+    )
+    assert result.decisions[0].action == "SELL"
+
+
 def test_pullback_context_without_block_and_without_bullish_confirmation_is_early_pullback():
     result = build_datacenter_ticker_decisions(
         [
@@ -543,6 +576,39 @@ def test_structure_blocked_pullback_outranks_breakdown_not_pullback():
     )
 
     assert result.decisions[0].pullback_validity == "STRUCTURE_BLOCKED_PULLBACK"
+
+
+def test_acute_bos_down_block_outranks_breakdown_not_pullback():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="NVDA",
+                horizon="daily",
+                raw_status="PULLBACK_CANDIDATE",
+                ma_break_status="EMA20_CONFIRMED_BREAK",
+                freshness_status="FRESH_BULLISH_SIGNAL",
+            ),
+            _row(
+                ticker="NVDA",
+                horizon="rolling 2d",
+                latest_bos_event_type="BOS_DOWN",
+                ma_break_status="OK",
+            ),
+            _row(
+                ticker="NVDA",
+                horizon="rolling 2d",
+                raw_status="DOUBLE_BOS_DOWN",
+                ma_break_status="OK",
+            ),
+        ]
+    )
+
+    assert result.decisions[0].pullback_validity == "STRUCTURE_BLOCKED_PULLBACK"
+    assert (
+        result.decisions[0].pullback_reason
+        == "ACUTE_BOS_DOWN_SELL_CONFIRMATION_BLOCKS_PULLBACK"
+    )
+    assert result.decisions[0].action == "SELL"
 
 
 def test_breakdown_not_pullback_outranks_early_pullback():
@@ -843,6 +909,46 @@ def test_pullback_counts_are_correct_for_mixed_fixtures():
     assert result.pullback_action_counts["BREAKDOWN_NOT_PULLBACK"]["SELL"] == 1
     assert result.pullback_action_counts["NO_PULLBACK"]["NEUTRAL"] == 1
     assert result.pullback_action_counts["INSUFFICIENT_DATA"]["NEUTRAL"] == 1
+
+
+def test_pullback_counts_update_for_acute_bos_down_sell_block_without_action_count_change():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="AAA",
+                horizon="daily",
+                raw_status="PULLBACK_CANDIDATE",
+                ma_break_status="OK",
+                freshness_status="FRESH_BULLISH_SIGNAL",
+            ),
+            _row(
+                ticker="AAA",
+                horizon="rolling 2d",
+                latest_bos_event_type="BOS_DOWN",
+                ma_break_status="OK",
+            ),
+            _row(
+                ticker="AAA",
+                horizon="rolling 2d",
+                raw_status="DOUBLE_BOS_DOWN",
+                ma_break_status="OK",
+            ),
+            _row(
+                ticker="BBB",
+                horizon="daily",
+                raw_status="PULLBACK_CANDIDATE",
+                ma_break_status="OK",
+                freshness_status="FRESH_BULLISH_SIGNAL",
+            ),
+        ]
+    )
+
+    assert result.action_counts["SELL"] == 1
+    assert result.action_counts["NEUTRAL"] == 1
+    assert result.pullback_counts["STRUCTURE_BLOCKED_PULLBACK"] == 1
+    assert result.pullback_counts["VALID_PULLBACK"] == 1
+    assert result.pullback_action_counts["STRUCTURE_BLOCKED_PULLBACK"]["SELL"] == 1
+    assert result.pullback_action_counts["VALID_PULLBACK"]["NEUTRAL"] == 1
 
 
 def test_final_actions_remain_unchanged_when_pullback_counts_are_present():
