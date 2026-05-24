@@ -948,6 +948,7 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(tmp_path, mon
     assert page.datacenter_watchlist_file_field.value == DEFAULT_DATACENTER_WATCHLIST_FILE
     assert page.datacenter_dashboard_reports_dir_field.value == DEFAULT_DATACENTER_OUTPUT_DIR
     assert page.datacenter_dashboard_overall_status_field.value == "MISSING"
+    assert page.datacenter_dashboard_parse_summary_field.value == "total_parsed_rows=0\ntotal_warnings=0"
     assert len(page.datacenter_dashboard_reports_column.controls) == 4
     datacenter_text_labels = [
         control.value
@@ -1014,7 +1015,7 @@ def test_run_app_datacenter_dashboard_refresh_reads_report_directory(tmp_path, m
     reports_dir = tmp_path / "reports"
     reports_dir.mkdir()
     (reports_dir / "datacenter_daily_2026-05-22_0000_full.md").write_text(
-        "report", encoding="utf-8"
+        "ticker;status\nNVDA;BUY_WATCH\n", encoding="utf-8"
     )
     config_path.write_text(
         json.dumps(
@@ -1058,10 +1059,14 @@ def test_run_app_datacenter_dashboard_refresh_reads_report_directory(tmp_path, m
     page.datacenter_dashboard_refresh_button.on_click(None)
 
     assert page.datacenter_dashboard_overall_status_field.value == "PARTIAL"
+    assert page.datacenter_dashboard_parse_summary_field.value == "total_parsed_rows=1\ntotal_warnings=0"
     first_card = page.datacenter_dashboard_reports_column.controls[0]
     assert "rolling 30d: MISSING" in first_card.content.controls[0].value
+    assert "parsed_rows: 0" in first_card.content.controls[3].value
     daily_card = page.datacenter_dashboard_reports_column.controls[3]
     assert "daily: OK" in daily_card.content.controls[0].value
+    assert "parsed_rows: 1" in daily_card.content.controls[3].value
+    assert "warnings: 0" in daily_card.content.controls[4].value
 
 
 def test_build_skip_next_run_config_sets_true_without_changing_other_fields():

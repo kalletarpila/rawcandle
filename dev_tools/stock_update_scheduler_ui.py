@@ -16,6 +16,10 @@ from urllib.parse import quote
 
 import flet as ft
 
+from dev_tools.datacenter_dashboard_parser import (
+    DatacenterDashboardBatchParseResult,
+    parse_datacenter_dashboard_reports,
+)
 from dev_tools.datacenter_dashboard_support import (
     DatacenterDashboardStatus,
     discover_datacenter_dashboard_status,
@@ -573,15 +577,25 @@ def _dashboard_status_color(status: str) -> str:
 def populate_datacenter_dashboard_summary(
     *,
     dashboard_status: DatacenterDashboardStatus,
+    parse_result: DatacenterDashboardBatchParseResult,
     overall_status_field: ft.TextField,
+    parse_summary_field: ft.TextField,
     reports_column: ft.Column,
 ) -> None:
     overall_status_field.value = dashboard_status.overall_status
     overall_status_field.border_color = _dashboard_status_color(
         dashboard_status.overall_status
     )
+    parse_summary_field.value = (
+        f"total_parsed_rows={parse_result.total_row_count}\n"
+        f"total_warnings={parse_result.total_warning_count}"
+    )
     reports_column.controls.clear()
+    parse_by_horizon = {
+        report.horizon: report for report in parse_result.reports
+    }
     for report in dashboard_status.reports:
+        parse_summary = parse_by_horizon.get(report.horizon)
         reports_column.controls.append(
             ft.Container(
                 content=ft.Column(
@@ -595,6 +609,14 @@ def populate_datacenter_dashboard_summary(
                             f"modified_at: {report.modified_at or 'NONE'}",
                             size=11,
                             color="gray",
+                        ),
+                        ft.Text(
+                            f"parsed_rows: {parse_summary.row_count if parse_summary else 0}",
+                            size=11,
+                        ),
+                        ft.Text(
+                            f"warnings: {parse_summary.warning_count if parse_summary else 0}",
+                            size=11,
                         ),
                     ],
                     spacing=2,
@@ -979,6 +1001,15 @@ def run_app(page: ft.Page, config_path: str) -> None:
         width=220,
         border_color=_STATUS_ERROR_COLOR,
     )
+    datacenter_dashboard_parse_summary_field = ft.TextField(
+        label="dashboard_parse_summary",
+        value="total_parsed_rows=0\ntotal_warnings=0",
+        read_only=True,
+        multiline=True,
+        min_lines=2,
+        max_lines=3,
+        width=240,
+    )
     datacenter_status_field = ft.TextField(
         label="Datacenter status",
         value="",
@@ -1027,9 +1058,12 @@ def run_app(page: ft.Page, config_path: str) -> None:
         dashboard_status = discover_datacenter_dashboard_status(
             datacenter_dashboard_reports_dir_field.value
         )
+        parse_result = parse_datacenter_dashboard_reports(dashboard_status.reports)
         populate_datacenter_dashboard_summary(
             dashboard_status=dashboard_status,
+            parse_result=parse_result,
             overall_status_field=datacenter_dashboard_overall_status_field,
+            parse_summary_field=datacenter_dashboard_parse_summary_field,
             reports_column=datacenter_dashboard_reports_column,
         )
         page.update()
@@ -1502,6 +1536,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
                 [
                     datacenter_dashboard_reports_dir_field,
                     datacenter_dashboard_overall_status_field,
+                    datacenter_dashboard_parse_summary_field,
                     datacenter_dashboard_refresh_button,
                 ],
                 wrap=True,
@@ -1529,6 +1564,9 @@ def run_app(page: ft.Page, config_path: str) -> None:
     page.datacenter_watchlist_file_field = datacenter_watchlist_file_field
     page.datacenter_dashboard_reports_dir_field = datacenter_dashboard_reports_dir_field
     page.datacenter_dashboard_overall_status_field = datacenter_dashboard_overall_status_field
+    page.datacenter_dashboard_parse_summary_field = (
+        datacenter_dashboard_parse_summary_field
+    )
     page.datacenter_dashboard_reports_column = datacenter_dashboard_reports_column
     page.datacenter_status_field = datacenter_status_field
     page.datacenter_reports_column = datacenter_reports_column
