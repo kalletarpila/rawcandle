@@ -122,6 +122,14 @@ ROLLING_30_EXIT_STATE_PRIORITY = {
     "INSUFFICIENT_DATA": 4,
 }
 
+ROLLING_5_PULLBACK_STATE_PRIORITY = {
+    "PULLBACK_CANDIDATE": 0,
+    "EARLY_PULLBACK": 1,
+    "FAILED_PULLBACK": 2,
+    "NO_PULLBACK": 3,
+    "INSUFFICIENT_DATA": 4,
+}
+
 
 def _count_by_date_and_field(
     rows: Sequence[dict[str, object]],
@@ -272,6 +280,10 @@ def _has_explicit_high_exit_severity(value: object | None) -> bool:
 
 def _has_negative_group_context(row: dict[str, object]) -> bool:
     return row.get("window_watchlist_status") in {"HIGH_EXIT_RISK", "GROUP_RISK"}
+
+
+def _is_pullback_or_buy_context(value: object | None) -> bool:
+    return value in {"PULLBACK_CANDIDATE", "BUY_ZONE", "ADD_ON_PULLBACK"}
 
 
 def _classify_rolling_30_buy_row(row: dict[str, object]) -> tuple[str, str, str]:
@@ -429,6 +441,83 @@ def _classify_rolling_30_exit_row(row: dict[str, object]) -> tuple[str, str, str
     return "NORMAL", "NO_MEANINGFUL_EXIT_RISK", ""
 
 
+def _classify_rolling_5_pullback_row(row: dict[str, object]) -> tuple[str, str, str, str]:
+    if row.get("last_price_data_status") in WATCHLIST_MISSING_PRICE_STATUSES or row.get("all_price_rows_missing") is True:
+        return "INSUFFICIENT_DATA", "MISSING_PRICE_CONTEXT", "price_data_missing", "WAIT_FOR_DATA"
+
+    ticker = str(row.get("ticker") or "").strip()
+    if not ticker:
+        return "INSUFFICIENT_DATA", "MISSING_TICKER_CONTEXT", "missing_ticker", "WAIT_FOR_DATA"
+
+    trend_state = row.get("last_ticker_trend_state")
+    current_watchlist_status = row.get("current_watchlist_status")
+    window_watchlist_status = row.get("window_watchlist_status")
+    pullback_days = int(row.get("pullback_days") or 0)
+    fast_ema10_pullback_days = int(row.get("fast_ema10_pullback_days") or 0)
+    conservative_ema20_pullback_days = int(row.get("conservative_ema20_pullback_days") or 0)
+    breakout_days = int(row.get("breakout_days") or 0)
+    exit_risk_days = int(row.get("exit_risk_days") or 0)
+    latest_exit_severity = row.get("last_exit_risk_severity")
+    has_pullback_evidence = (
+        pullback_days > 0
+        or fast_ema10_pullback_days > 0
+        or conservative_ema20_pullback_days > 0
+        or _is_pullback_or_buy_context(current_watchlist_status)
+        or _is_pullback_or_buy_context(window_watchlist_status)
+    )
+    has_clear_blocker = (
+        trend_state == "DOWN"
+        or _has_fresh_bos_down(row)
+        or _has_fresh_reset(row)
+        or row.get("latest_bearish_relevance_class") == "RELEVANT"
+        or _is_high_exit_risk_status(current_watchlist_status)
+        or _is_high_exit_risk_status(window_watchlist_status)
+        or _has_explicit_high_exit_severity(latest_exit_severity)
+    )
+
+    if has_clear_blocker:
+        blocking_reason = (
+            "recent_bos_down"
+            if _has_fresh_bos_down(row)
+            else "recent_reset"
+            if _has_fresh_reset(row)
+            else "high_exit_risk_status"
+            if _is_high_exit_risk_status(current_watchlist_status) or _is_high_exit_risk_status(window_watchlist_status)
+            else "high_exit_risk_severity"
+            if _has_explicit_high_exit_severity(latest_exit_severity)
+            else "relevant_bearish_context"
+            if row.get("latest_bearish_relevance_class") == "RELEVANT"
+            else "down_trend"
+        )
+        return "FAILED_PULLBACK", "PULLBACK_SETUP_BLOCKED", blocking_reason, "REMOVE_FROM_PULLBACK_LIST"
+
+    if (
+        has_pullback_evidence
+        and (trend_state == "UP" or _is_pullback_or_buy_context(current_watchlist_status) or _is_pullback_or_buy_context(window_watchlist_status))
+        and exit_risk_days == 0
+        and row.get("latest_bearish_relevance_class") != "RELEVANT"
+        and not _is_high_exit_risk_status(window_watchlist_status)
+    ):
+        primary_reason = (
+            "CONFIRMED_EMA20_PULLBACK_CONTEXT"
+            if conservative_ema20_pullback_days > 0
+            else "CONFIRMED_EMA10_PULLBACK_CONTEXT"
+            if fast_ema10_pullback_days > 0
+            else "PULLBACK_STATUS_WITHOUT_BLOCKERS"
+        )
+        return "PULLBACK_CANDIDATE", primary_reason, "", "REVIEW_FOR_DAILY_TRIGGER"
+
+    if has_pullback_evidence:
+        blocking_reason = (
+            "EXIT_RISK_DAYS_WITHOUT_HIGH_SEVERITY"
+            if exit_risk_days > 0
+            else "MIXED_TREND_OR_STATUS"
+        )
+        return "EARLY_PULLBACK", "EARLY_OR_UNCONFIRMED_PULLBACK", blocking_reason, "MONITOR_FOR_CONFIRMATION"
+
+    return "NO_PULLBACK", "NO_MEANINGFUL_PULLBACK_EVIDENCE", "", "NONE"
+
+
 def _build_rolling_30_role_rows(
     *,
     ticker_rows: Sequence[dict[str, object]],
@@ -527,6 +616,78 @@ def _build_rolling_30_role_rows(
         )
     )
     return buy_rows, exit_rows
+
+
+def _build_rolling_5_pullback_rows(
+    *,
+    ticker_rows: Sequence[dict[str, object]],
+    group_rows: Sequence[dict[str, object]],
+    synthetic_rows: Sequence[dict[str, object]],
+    technical_relevance_context_rows: Sequence[dict[str, object]],
+) -> list[dict[str, object]]:
+    tickers = sorted(
+        {
+            str(row.get("ticker") or "")
+            for row in ticker_rows
+            if str(row.get("ticker") or "")
+        }
+    )
+    base_rows = _build_rolling_watchlist_rows(
+        watchlist_tickers=tickers,
+        ticker_rows=ticker_rows,
+        group_rows=group_rows,
+        synthetic_rows=synthetic_rows,
+    )
+    if technical_relevance_context_rows:
+        base_rows = _enrich_rows_with_technical_relevance_companions(
+            base_rows,
+            technical_relevance_context_rows=technical_relevance_context_rows,
+            row_date_field="last_signal_date",
+        )
+
+    pullback_rows: list[dict[str, object]] = []
+    for row in base_rows:
+        state, primary_reason, blocking_reason, next_action = _classify_rolling_5_pullback_row(row)
+        pullback_rows.append(
+            {
+                "ticker": row.get("ticker"),
+                "rolling_5_pullback_state": state,
+                "primary_layer": row.get("primary_layer"),
+                "primary_subindustry": row.get("primary_subindustry"),
+                "window_watchlist_status": row.get("window_watchlist_status"),
+                "current_watchlist_status": row.get("current_watchlist_status"),
+                "pullback_days": row.get("pullback_days"),
+                "fast_ema10_pullback_days": row.get("fast_ema10_pullback_days"),
+                "conservative_ema20_pullback_days": row.get("conservative_ema20_pullback_days"),
+                "breakout_days": row.get("breakout_days"),
+                "exit_risk_days": row.get("exit_risk_days"),
+                "latest_ticker_trend_state": row.get("last_ticker_trend_state"),
+                "latest_structure_label": row.get("last_latest_structure_label"),
+                "latest_bos_event_type": row.get("last_latest_bos_event_type"),
+                "latest_bos_freshness": row.get("last_latest_bos_freshness"),
+                "latest_reset_reason": row.get("last_latest_reset_reason"),
+                "latest_reset_freshness": row.get("last_latest_reset_freshness"),
+                "latest_bullish_relevance_class": row.get("latest_bullish_relevance_class"),
+                "latest_bullish_relevance_reason": row.get("latest_bullish_relevance_reason"),
+                "latest_bearish_relevance_class": row.get("latest_bearish_relevance_class"),
+                "latest_bearish_relevance_reason": row.get("latest_bearish_relevance_reason"),
+                "primary_reason": primary_reason,
+                "blocking_reason": blocking_reason,
+                "next_action": next_action,
+            }
+        )
+
+    pullback_rows.sort(
+        key=lambda row: (
+            ROLLING_5_PULLBACK_STATE_PRIORITY.get(str(row.get("rolling_5_pullback_state")), 99),
+            -int(row.get("pullback_days") or 0),
+            -int(row.get("conservative_ema20_pullback_days") or 0),
+            -int(row.get("fast_ema10_pullback_days") or 0),
+            int(row.get("exit_risk_days") or 0),
+            str(row.get("ticker") or ""),
+        )
+    )
+    return pullback_rows
 
 
 def _build_role_csv_section(
@@ -896,8 +1057,17 @@ def _build_rolling_watchlist_rows(
             "last_close": last_row.get("close"),
             "last_breakout_signal": last_row.get("breakout_signal"),
             "last_pullback_signal": last_row.get("pullback_signal"),
+            "last_return_5d": last_row.get("return_5d"),
+            "last_return_20d": last_row.get("return_20d"),
+            "last_return_60d": last_row.get("return_60d"),
+            "last_distance_to_ema10_pct": last_row.get("distance_to_ema10_pct"),
+            "last_distance_to_ema20_pct": last_row.get("distance_to_ema20_pct"),
             "breakout_days": sum(1 for row in current_rows if row.get("breakout_signal") == 1),
             "pullback_days": sum(1 for row in current_rows if row.get("pullback_signal") == 1),
+            "fast_ema10_pullback_days": sum(1 for row in current_rows if row.get("fast_ema10_pullback_signal") == 1),
+            "conservative_ema20_pullback_days": sum(
+                1 for row in current_rows if row.get("conservative_ema20_pullback_signal") == 1
+            ),
             "exit_risk_days": sum(1 for row in current_rows if row.get("exit_risk_signal") == 1),
             "high_exit_risk_days": sum(1 for row in current_rows if row.get("exit_risk_severity") == "HIGH"),
             "medium_exit_risk_days": sum(1 for row in current_rows if row.get("exit_risk_severity") == "MEDIUM"),
@@ -1209,8 +1379,16 @@ def build_markdown_weekly_swing_report(
     technical_relevance_context_rows = list(report_data.get("technical_relevance_context_rows") or [])
     rolling_30_buy_rows: list[dict[str, object]] = []
     rolling_30_exit_rows: list[dict[str, object]] = []
+    rolling_5_pullback_rows: list[dict[str, object]] = []
     if window_size == 30:
         rolling_30_buy_rows, rolling_30_exit_rows = _build_rolling_30_role_rows(
+            ticker_rows=ticker_rows,
+            group_rows=group_rows,
+            synthetic_rows=synthetic_rows,
+            technical_relevance_context_rows=technical_relevance_context_rows,
+        )
+    if window_size == 5:
+        rolling_5_pullback_rows = _build_rolling_5_pullback_rows(
             ticker_rows=ticker_rows,
             group_rows=group_rows,
             synthetic_rows=synthetic_rows,
@@ -1742,6 +1920,30 @@ def build_markdown_weekly_swing_report(
             ).rstrip()
         )
 
+    if window_size == 5:
+        lines.extend(["", "## Rolling 5 Pullback Alerts"])
+        lines.append(
+            _format_table(
+                [
+                    "ticker",
+                    "rolling_5_pullback_state",
+                    "primary_layer",
+                    "primary_subindustry",
+                    "pullback_days",
+                    "fast_ema10_pullback_days",
+                    "conservative_ema20_pullback_days",
+                    "breakout_days",
+                    "exit_risk_days",
+                    "latest_ticker_trend_state",
+                    "latest_bullish_relevance_class",
+                    "latest_bearish_relevance_class",
+                    "primary_reason",
+                    "next_action",
+                ],
+                rolling_5_pullback_rows[:top_n],
+            ).rstrip()
+        )
+
     lines.extend(["", "## 11. Synthetic OHLC structure changes"])
     synthetic_change_rows: list[dict[str, object]] = []
     for (_, group_type, group_name), current_rows in _group_rows_by_key(
@@ -2132,6 +2334,7 @@ def build_csv_weekly_swing_report(
     markdown_for_csv = markdown
     rolling_30_buy_rows: list[dict[str, object]] = []
     rolling_30_exit_rows: list[dict[str, object]] = []
+    rolling_5_pullback_rows: list[dict[str, object]] = []
     if int(report_data.get("window_size") or DEFAULT_WEEKLY_WINDOW_SIZE) == 30:
         rolling_30_buy_rows, rolling_30_exit_rows = _build_rolling_30_role_rows(
             ticker_rows=list(report_data.get("ticker_rows") or []),
@@ -2141,6 +2344,14 @@ def build_csv_weekly_swing_report(
         )
         markdown_for_csv = _strip_markdown_section(markdown_for_csv, "Rolling 30 Buy Filter")
         markdown_for_csv = _strip_markdown_section(markdown_for_csv, "Rolling 30 Exit Prefilter")
+    if int(report_data.get("window_size") or DEFAULT_WEEKLY_WINDOW_SIZE) == 5:
+        rolling_5_pullback_rows = _build_rolling_5_pullback_rows(
+            ticker_rows=list(report_data.get("ticker_rows") or []),
+            group_rows=list(report_data.get("group_rows") or []),
+            synthetic_rows=list(report_data.get("synthetic_rows") or []),
+            technical_relevance_context_rows=list(report_data.get("technical_relevance_context_rows") or []),
+        )
+        markdown_for_csv = _strip_markdown_section(markdown_for_csv, "Rolling 5 Pullback Alerts")
     if technical_relevance_run_id is not None:
         markdown_for_csv = _strip_markdown_technical_relevance_section(markdown_for_csv)
     rows = _build_csv_rows_from_markdown(markdown_for_csv)
@@ -2210,6 +2421,40 @@ def build_csv_weekly_swing_report(
                 rolling_30_exit_rows,
             ),
         )
+    if int(report_data.get("window_size") or DEFAULT_WEEKLY_WINDOW_SIZE) == 5:
+        csv_text = _insert_csv_section_before_taxonomy_listing(
+            csv_text,
+            _build_role_csv_section(
+                "rolling_5_pullback_alerts",
+                [
+                    "ticker",
+                    "rolling_5_pullback_state",
+                    "primary_layer",
+                    "primary_subindustry",
+                    "window_watchlist_status",
+                    "current_watchlist_status",
+                    "pullback_days",
+                    "fast_ema10_pullback_days",
+                    "conservative_ema20_pullback_days",
+                    "breakout_days",
+                    "exit_risk_days",
+                    "latest_ticker_trend_state",
+                    "latest_structure_label",
+                    "latest_bos_event_type",
+                    "latest_bos_freshness",
+                    "latest_reset_reason",
+                    "latest_reset_freshness",
+                    "latest_bullish_relevance_class",
+                    "latest_bullish_relevance_reason",
+                    "latest_bearish_relevance_class",
+                    "latest_bearish_relevance_reason",
+                    "primary_reason",
+                    "blocking_reason",
+                    "next_action",
+                ],
+                rolling_5_pullback_rows,
+            ),
+        )
     if technical_relevance_run_id is not None:
         csv_text = _insert_csv_section_before_taxonomy_listing(
             csv_text,
@@ -2222,7 +2467,11 @@ def build_csv_weekly_swing_report(
 
 
 def format_weekly_swing_report_summary_lines(summary: dict[str, int | str]) -> list[str]:
-    lines = [f"SUMMARY {key}={summary[key]}" for key in WEEKLY_REPORT_SUMMARY_ORDER if key in summary]
+    lines = [
+        f"SUMMARY {key}={summary[key]}"
+        for key in WEEKLY_REPORT_SUMMARY_ORDER
+        if key in summary and key != "validation_status"
+    ]
     for key in (
         "rolling_30_buy_zone_count",
         "rolling_30_watch_zone_count",
@@ -2235,6 +2484,17 @@ def format_weekly_swing_report_summary_lines(summary: dict[str, int | str]) -> l
     ):
         if key in summary:
             lines.append(f"SUMMARY {key}={summary[key]}")
+    for key in (
+        "rolling_5_pullback_candidate_count",
+        "rolling_5_early_pullback_count",
+        "rolling_5_failed_pullback_count",
+        "rolling_5_no_pullback_count",
+        "rolling_5_insufficient_data_count",
+    ):
+        if key in summary:
+            lines.append(f"SUMMARY {key}={summary[key]}")
+    if "validation_status" in summary:
+        lines.append(f"SUMMARY validation_status={summary['validation_status']}")
     return lines
 
 
@@ -2331,6 +2591,32 @@ def write_weekly_swing_report(
                 "rolling_30_extreme_count": sum(1 for row in rolling_30_exit_rows if row.get("rolling_30_exit_state") == "EXTREME"),
                 "rolling_30_exit_watch_count": sum(1 for row in rolling_30_exit_rows if row.get("rolling_30_exit_state") == "WATCH"),
                 "rolling_30_exit_prefilter_insufficient_data_count": sum(1 for row in rolling_30_exit_rows if row.get("rolling_30_exit_state") == "INSUFFICIENT_DATA"),
+            }
+        )
+    if int(report_data.get("window_size") or DEFAULT_WEEKLY_WINDOW_SIZE) == 5:
+        rolling_5_pullback_rows = _build_rolling_5_pullback_rows(
+            ticker_rows=list(report_data.get("ticker_rows") or []),
+            group_rows=list(report_data.get("group_rows") or []),
+            synthetic_rows=list(report_data.get("synthetic_rows") or []),
+            technical_relevance_context_rows=list(report_data.get("technical_relevance_context_rows") or []),
+        )
+        summary.update(
+            {
+                "rolling_5_pullback_candidate_count": sum(
+                    1 for row in rolling_5_pullback_rows if row.get("rolling_5_pullback_state") == "PULLBACK_CANDIDATE"
+                ),
+                "rolling_5_early_pullback_count": sum(
+                    1 for row in rolling_5_pullback_rows if row.get("rolling_5_pullback_state") == "EARLY_PULLBACK"
+                ),
+                "rolling_5_failed_pullback_count": sum(
+                    1 for row in rolling_5_pullback_rows if row.get("rolling_5_pullback_state") == "FAILED_PULLBACK"
+                ),
+                "rolling_5_no_pullback_count": sum(
+                    1 for row in rolling_5_pullback_rows if row.get("rolling_5_pullback_state") == "NO_PULLBACK"
+                ),
+                "rolling_5_insufficient_data_count": sum(
+                    1 for row in rolling_5_pullback_rows if row.get("rolling_5_pullback_state") == "INSUFFICIENT_DATA"
+                ),
             }
         )
     return {

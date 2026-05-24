@@ -195,6 +195,8 @@ def test_weekly_cli_window_20_remains_without_rolling_30_sections(tmp_path):
     assert exit_code == 0
     assert "Rolling 30 Buy Filter" not in expected_output_md.read_text(encoding="utf-8")
     assert "section;rolling_30_buy_filter" not in expected_output_csv.read_text(encoding="utf-8")
+    assert "Rolling 5 Pullback Alerts" not in expected_output_md.read_text(encoding="utf-8")
+    assert "section;rolling_5_pullback_alerts" not in expected_output_csv.read_text(encoding="utf-8")
 
 
 def test_weekly_cli_window_30_can_render_rolling_30_sections(tmp_path):
@@ -227,6 +229,40 @@ def test_weekly_cli_window_30_can_render_rolling_30_sections(tmp_path):
     assert exit_code == 0
     assert "Rolling 30 Buy Filter" in expected_output_md.read_text(encoding="utf-8")
     assert "section;rolling_30_buy_filter" in expected_output_csv.read_text(encoding="utf-8")
+    assert "Rolling 5 Pullback Alerts" not in expected_output_md.read_text(encoding="utf-8")
+    assert "section;rolling_5_pullback_alerts" not in expected_output_csv.read_text(encoding="utf-8")
+
+
+def test_weekly_cli_window_5_can_render_rolling_5_sections(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    output_md = tmp_path / "weekly_report.md"
+    output_csv = tmp_path / "weekly_report.csv"
+    expected_output_md = tmp_path / "weekly_report_1200.md"
+    expected_output_csv = tmp_path / "weekly_report_1200.csv"
+    _seed_weekly_report_db(analysis_db)
+
+    exit_code = run_datacenter_weekly_swing_report_main(
+        [
+            "--analysis-db",
+            str(analysis_db),
+            "--end-date",
+            "2024-01-10",
+            "--taxonomy-version",
+            "DC_TAXONOMY_V1",
+            "--window-size",
+            "5",
+            "--output-md",
+            str(output_md),
+            "--output-csv",
+            str(output_csv),
+            "--generated-at-utc",
+            "2026-05-17T12:00:00Z",
+        ]
+    )
+
+    assert exit_code == 0
+    assert "Rolling 5 Pullback Alerts" in expected_output_md.read_text(encoding="utf-8")
+    assert "section;rolling_5_pullback_alerts" in expected_output_csv.read_text(encoding="utf-8")
 
 
 def test_cli_accepts_watchlist_file_and_renders_watchlist_summary(tmp_path, capsys):

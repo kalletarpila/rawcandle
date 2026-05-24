@@ -1086,6 +1086,119 @@ def test_rolling_30_role_sections_do_not_render_for_non_30_windows(tmp_path):
         assert "rolling_30_exit_zone_count" not in result["summary"]
 
 
+def test_rolling_5_pullback_alert_section_and_summary_render_for_window_size_5(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+
+    result = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=5,
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+
+    markdown = result["markdown"]
+    csv_text = result["csv"]
+    summary = result["summary"]
+
+    assert "## Rolling 5 Pullback Alerts" in markdown
+    assert "section;rolling_5_pullback_alerts" in csv_text
+    assert "rolling_5_pullback_alerts;BBB;PULLBACK_CANDIDATE;" in csv_text
+    assert "rolling_5_pullback_alerts;AAA;NO_PULLBACK;" in csv_text
+    assert "rolling_5_pullback_alerts;CCC;INSUFFICIENT_DATA;" in csv_text
+    assert "rolling_5_pullback_alerts;DDD;INSUFFICIENT_DATA;" in csv_text
+    assert "| BBB | PULLBACK_CANDIDATE |" in markdown
+    assert "| AAA | NO_PULLBACK |" in markdown
+    assert summary["rolling_5_pullback_candidate_count"] == 1
+    assert summary["rolling_5_early_pullback_count"] == 0
+    assert summary["rolling_5_failed_pullback_count"] == 0
+    assert summary["rolling_5_no_pullback_count"] == 1
+    assert summary["rolling_5_insufficient_data_count"] == 2
+
+
+def test_rolling_5_pullback_fixture_can_produce_early_pullback(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET exit_risk_signal = 1,
+                exit_risk_severity = NULL,
+                exit_reason = NULL
+            WHERE ticker = 'BBB'
+              AND signal_date = '2024-01-10'
+            """
+        )
+        conn.commit()
+
+    result = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=5,
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+
+    assert "rolling_5_pullback_alerts;BBB;EARLY_PULLBACK;" in result["csv"]
+
+
+def test_rolling_5_pullback_fixture_can_produce_failed_pullback(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET latest_bos_event_type = 'BOS_DOWN',
+                latest_bos_event_date = '2024-01-10',
+                latest_bos_confirmed_as_of_date = '2024-01-10',
+                latest_bos_age_trading_days = 0,
+                latest_bos_freshness = 'FRESH'
+            WHERE ticker = 'BBB'
+              AND signal_date = '2024-01-10'
+            """
+        )
+        conn.commit()
+
+    result = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=5,
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+
+    assert "rolling_5_pullback_alerts;BBB;FAILED_PULLBACK;" in result["csv"]
+
+
+def test_rolling_5_pullback_sections_do_not_render_for_non_5_windows(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+
+    result_30 = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=30,
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+    result_2 = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=2,
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+
+    for result in (result_30, result_2):
+        assert "Rolling 5 Pullback Alerts" not in result["markdown"]
+        assert "section;rolling_5_pullback_alerts" not in result["csv"]
+        assert "rolling_5_pullback_candidate_count" not in result["summary"]
+        assert "rolling_5_failed_pullback_count" not in result["summary"]
+
+
 def test_custom_window_size_marks_incomplete_when_fewer_than_requested_dates_exist(tmp_path):
     analysis_db = tmp_path / "analysis.db"
     _seed_weekly_report_db(analysis_db)

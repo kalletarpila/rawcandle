@@ -62,6 +62,41 @@ def test_rolling_cli_uses_default_rolling_output_names(tmp_path, monkeypatch, ca
     assert "rolling_30_extreme_count" in summary
 
 
+def test_rolling_cli_window_5_emits_rolling_5_sections_and_summaries(tmp_path, capsys):
+    analysis_db = tmp_path / "analysis.db"
+    output_md = tmp_path / "rolling_2024-01-10.md"
+    output_csv = tmp_path / "rolling_2024-01-10.csv"
+    expected_md = tmp_path / "rolling_2024-01-10_1200.md"
+    expected_csv = tmp_path / "rolling_2024-01-10_1200.csv"
+    _seed_weekly_report_db(analysis_db)
+
+    exit_code = run_datacenter_rolling_swing_report_main(
+        [
+            "--analysis-db",
+            str(analysis_db),
+            "--end-date",
+            "2024-01-10",
+            "--taxonomy-version",
+            "DC_TAXONOMY_V1",
+            "--window-size",
+            "5",
+            "--output-md",
+            str(output_md),
+            "--output-csv",
+            str(output_csv),
+            "--generated-at-utc",
+            "2026-05-17T12:00:00Z",
+        ]
+    )
+
+    summary = _parse_summary(capsys.readouterr().out)
+    assert exit_code == 0
+    assert "## Rolling 5 Pullback Alerts" in expected_md.read_text(encoding="utf-8")
+    assert "section;rolling_5_pullback_alerts" in expected_csv.read_text(encoding="utf-8")
+    assert "rolling_5_pullback_candidate_count" in summary
+    assert "rolling_5_no_pullback_count" in summary
+
+
 def test_rolling_cli_respects_explicit_output_paths_using_weekly_timestamp_behavior(tmp_path, capsys):
     analysis_db = tmp_path / "analysis.db"
     output_md = tmp_path / "custom_2024-01-10.md"
@@ -183,6 +218,41 @@ def test_rolling_cli_non_30_windows_do_not_emit_rolling_30_sections_or_summaries
     assert "rolling_30_extreme_count" not in summary
     assert "Rolling 30 Buy Filter" not in expected_md.read_text(encoding="utf-8")
     assert "section;rolling_30_buy_filter" not in expected_csv.read_text(encoding="utf-8")
+
+
+def test_rolling_cli_non_5_windows_do_not_emit_rolling_5_sections_or_summaries(tmp_path, capsys):
+    analysis_db = tmp_path / "analysis.db"
+    output_md = tmp_path / "rolling_2024-01-10.md"
+    output_csv = tmp_path / "rolling_2024-01-10.csv"
+    expected_md = tmp_path / "rolling_2024-01-10_1200.md"
+    expected_csv = tmp_path / "rolling_2024-01-10_1200.csv"
+    _seed_weekly_report_db(analysis_db)
+
+    exit_code = run_datacenter_rolling_swing_report_main(
+        [
+            "--analysis-db",
+            str(analysis_db),
+            "--end-date",
+            "2024-01-10",
+            "--taxonomy-version",
+            "DC_TAXONOMY_V1",
+            "--window-size",
+            "30",
+            "--output-md",
+            str(output_md),
+            "--output-csv",
+            str(output_csv),
+            "--generated-at-utc",
+            "2026-05-17T12:00:00Z",
+        ]
+    )
+
+    summary = _parse_summary(capsys.readouterr().out)
+    assert exit_code == 0
+    assert "rolling_5_pullback_candidate_count" not in summary
+    assert "rolling_5_failed_pullback_count" not in summary
+    assert "Rolling 5 Pullback Alerts" not in expected_md.read_text(encoding="utf-8")
+    assert "section;rolling_5_pullback_alerts" not in expected_csv.read_text(encoding="utf-8")
 
 
 def test_rolling_cli_supports_technical_relevance_run_id(tmp_path):
