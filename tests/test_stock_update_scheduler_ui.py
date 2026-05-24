@@ -120,6 +120,21 @@ def _descendant_text_values(page):
     return values
 
 
+def _descendant_text_values_for_control(control):
+    values = []
+    for descendant in _iter_flet_descendants(control):
+        value = getattr(descendant, "value", None)
+        if isinstance(value, str):
+            values.append(value)
+        text = getattr(descendant, "text", None)
+        if isinstance(text, str):
+            values.append(text)
+        label = getattr(descendant, "label", None)
+        if isinstance(label, str):
+            values.append(label)
+    return values
+
+
 def test_load_latest_scheduler_summary_picks_newest_by_filename_timestamp(tmp_path):
     older = tmp_path / "stock_update_scheduler_summary_20260516T010000Z.json"
     newer = tmp_path / "stock_update_scheduler_summary_20260516T020000Z.json"
@@ -1002,6 +1017,10 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(
     assert page.datacenter_dashboard_build_marker_text.value == (
         "Dashboard UI build: dashboard_ui_visible_v1"
     )
+    assert page.datacenter_dashboard_scroll_content.expand is True
+    assert page.datacenter_dashboard_scroll_content.auto_scroll is False
+    assert page.datacenter_dashboard_content.padding.left == 8
+    assert page.datacenter_dashboard_content.padding.top == 6
     assert page.datacenter_dashboard_readiness_text.value == "Readiness: NOT_REFRESHED"
     assert page.datacenter_dashboard_reports_status_text.value == "Reports: No reports loaded."
     assert (
@@ -1027,6 +1046,12 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(
     ]
     assert "Datacenter Dashboard" not in datacenter_text_labels
     dashboard_text_labels = _descendant_text_values(page)
+    header_text_labels = _descendant_text_values_for_control(
+        page.datacenter_dashboard_header
+    )
+    scroll_text_labels = _descendant_text_values_for_control(
+        page.datacenter_dashboard_scroll_content
+    )
     assert "Datacenter Dashboard" in dashboard_text_labels
     assert "Dashboard UI build: dashboard_ui_visible_v1" in dashboard_text_labels
     assert "Reports directory" in dashboard_text_labels
@@ -1038,7 +1063,19 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(
     assert "Command Center" in dashboard_text_labels
     assert "Candidate Pullbacks" in dashboard_text_labels
     assert "Inspector" in dashboard_text_labels
-    assert len(page.datacenter_tabs.tabs[2].content.controls) > 5
+    assert "Dashboard UI build: dashboard_ui_visible_v1" in header_text_labels
+    assert "Reports directory" in header_text_labels
+    assert "Refresh Dashboard" in header_text_labels
+    assert "Readiness: NOT_REFRESHED" in header_text_labels
+    assert "Dashboard Summary" not in header_text_labels
+    assert "Dashboard Summary" in scroll_text_labels
+    assert "Reports" in scroll_text_labels
+    assert "Command Center" in scroll_text_labels
+    assert "Candidate Pullbacks" in scroll_text_labels
+    assert "Inspector" in scroll_text_labels
+    assert "Reports directory" not in scroll_text_labels
+    assert len(page.datacenter_dashboard_scroll_content.controls) == 5
+    assert hasattr(page.datacenter_dashboard_content, "content")
     assert len(_dashboard_tab_descendants(page)) > 20
     assert "DEBUG dashboard_ui_build=dashboard_ui_visible_v1" in captured_stdout
     assert "DEBUG dashboard_parent=" in captured_stdout
@@ -1136,6 +1173,8 @@ def test_run_app_datacenter_dashboard_refresh_reads_report_directory(tmp_path, m
 
     page = _FakePage()
     run_app(page, str(config_path))
+    header_id_before = id(page.datacenter_dashboard_header)
+    build_marker_id_before = id(page.datacenter_dashboard_build_marker_text)
     page.datacenter_dashboard_reports_dir_field.value = str(reports_dir)
     page.datacenter_dashboard_refresh_button.on_click(None)
 
@@ -1144,6 +1183,8 @@ def test_run_app_datacenter_dashboard_refresh_reads_report_directory(tmp_path, m
     assert page.datacenter_dashboard_reports_status_text.value == "Reports: found=1 missing=3"
     assert page.datacenter_dashboard_decisions_status_text.value == "Decisions: total=1"
     assert page.datacenter_dashboard_candidate_status_text.value == "Candidate Pullbacks: 0"
+    assert id(page.datacenter_dashboard_header) == header_id_before
+    assert id(page.datacenter_dashboard_build_marker_text) == build_marker_id_before
     assert "readiness=PARTIAL" in page.datacenter_dashboard_parse_summary_field.value
     assert "found_reports=1" in page.datacenter_dashboard_parse_summary_field.value
     assert "missing_reports=3" in page.datacenter_dashboard_parse_summary_field.value
@@ -1170,10 +1211,18 @@ def test_run_app_datacenter_dashboard_refresh_reads_report_directory(tmp_path, m
     assert "parsed_rows: 1" in daily_card.content.controls[3].value
     assert "warnings: 0" in daily_card.content.controls[4].value
     dashboard_text_labels = _descendant_text_values(page)
+    scroll_text_labels = _descendant_text_values_for_control(
+        page.datacenter_dashboard_scroll_content
+    )
     assert "Readiness: PARTIAL" in dashboard_text_labels
     assert "Reports: found=1 missing=3" in dashboard_text_labels
     assert "Decisions: total=1" in dashboard_text_labels
     assert "Candidate Pullbacks: 0" in dashboard_text_labels
+    assert "Dashboard Summary" in scroll_text_labels
+    assert "Reports" in scroll_text_labels
+    assert "Command Center" in scroll_text_labels
+    assert "Candidate Pullbacks" in scroll_text_labels
+    assert "Inspector" in scroll_text_labels
 
 
 def test_run_app_datacenter_dashboard_command_center_shows_grouped_read_only_rows(

@@ -2152,7 +2152,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
         spacing=12,
         expand=True,
     )
-    datacenter_dashboard_content = ft.Column(
+    datacenter_dashboard_header = ft.Column(
         controls=[
             ft.Text("Datacenter Dashboard", size=24, weight=ft.FontWeight.BOLD),
             ft.Text(
@@ -2176,6 +2176,14 @@ def run_app(page: ft.Page, config_path: str) -> None:
                 ],
                 spacing=4,
             ),
+        ],
+        spacing=8,
+        tight=True,
+        horizontal_alignment=ft.CrossAxisAlignment.START,
+    )
+    datacenter_dashboard_summary_section = ft.Column(
+        controls=[
+            ft.Text("Dashboard Summary", size=18, weight=ft.FontWeight.BOLD),
             ft.Row(
                 [
                     datacenter_dashboard_overall_status_field,
@@ -2185,12 +2193,36 @@ def run_app(page: ft.Page, config_path: str) -> None:
                 wrap=True,
                 vertical_alignment=ft.CrossAxisAlignment.START,
             ),
+        ],
+        spacing=8,
+        horizontal_alignment=ft.CrossAxisAlignment.START,
+    )
+    datacenter_dashboard_reports_section = ft.Column(
+        controls=[
             ft.Text("Reports", size=18, weight=ft.FontWeight.BOLD),
             datacenter_dashboard_reports_column,
+        ],
+        spacing=8,
+        horizontal_alignment=ft.CrossAxisAlignment.START,
+    )
+    datacenter_dashboard_command_center_section = ft.Column(
+        controls=[
             ft.Text("Command Center", size=18, weight=ft.FontWeight.BOLD),
             datacenter_dashboard_command_center_column,
+        ],
+        spacing=8,
+        horizontal_alignment=ft.CrossAxisAlignment.START,
+    )
+    datacenter_dashboard_candidate_pullbacks_section = ft.Column(
+        controls=[
             ft.Text("Candidate Pullbacks", size=18, weight=ft.FontWeight.BOLD),
             datacenter_dashboard_candidate_pullbacks_column,
+        ],
+        spacing=8,
+        horizontal_alignment=ft.CrossAxisAlignment.START,
+    )
+    datacenter_dashboard_inspector_section = ft.Column(
+        controls=[
             ft.Text("Inspector", size=18, weight=ft.FontWeight.BOLD),
             ft.Row(
                 [
@@ -2207,9 +2239,35 @@ def run_app(page: ft.Page, config_path: str) -> None:
             datacenter_dashboard_conflicting_signals_field,
             datacenter_dashboard_override_explanation_field,
         ],
-        spacing=12,
+        spacing=8,
+        horizontal_alignment=ft.CrossAxisAlignment.START,
+    )
+    datacenter_dashboard_scroll_content = ft.ListView(
+        controls=[
+            datacenter_dashboard_summary_section,
+            datacenter_dashboard_reports_section,
+            datacenter_dashboard_command_center_section,
+            datacenter_dashboard_candidate_pullbacks_section,
+            datacenter_dashboard_inspector_section,
+        ],
         expand=True,
-        scroll=ft.ScrollMode.AUTO,
+        spacing=12,
+        padding=ft.padding.only(right=8, bottom=8),
+        auto_scroll=False,
+    )
+    datacenter_dashboard_content = ft.Container(
+        content=ft.Column(
+            controls=[
+                datacenter_dashboard_header,
+                datacenter_dashboard_scroll_content,
+            ],
+            spacing=12,
+            expand=True,
+            horizontal_alignment=ft.CrossAxisAlignment.START,
+        ),
+        padding=ft.padding.symmetric(horizontal=8, vertical=6),
+        expand=True,
+        alignment=ft.alignment.top_left,
     )
 
     page.datacenter_price_db_field = datacenter_price_db_field
@@ -2232,6 +2290,17 @@ def run_app(page: ft.Page, config_path: str) -> None:
     page.datacenter_dashboard_reports_status_text = datacenter_dashboard_reports_status_text
     page.datacenter_dashboard_decisions_status_text = datacenter_dashboard_decisions_status_text
     page.datacenter_dashboard_candidate_status_text = datacenter_dashboard_candidate_status_text
+    page.datacenter_dashboard_header = datacenter_dashboard_header
+    page.datacenter_dashboard_scroll_content = datacenter_dashboard_scroll_content
+    page.datacenter_dashboard_summary_section = datacenter_dashboard_summary_section
+    page.datacenter_dashboard_reports_section = datacenter_dashboard_reports_section
+    page.datacenter_dashboard_command_center_section = (
+        datacenter_dashboard_command_center_section
+    )
+    page.datacenter_dashboard_candidate_pullbacks_section = (
+        datacenter_dashboard_candidate_pullbacks_section
+    )
+    page.datacenter_dashboard_inspector_section = datacenter_dashboard_inspector_section
     page.datacenter_dashboard_overall_status_field = datacenter_dashboard_overall_status_field
     page.datacenter_dashboard_parse_summary_field = (
         datacenter_dashboard_parse_summary_field
@@ -2321,7 +2390,14 @@ def run_app(page: ft.Page, config_path: str) -> None:
     )
     print("DEBUG dashboard_ui_build=dashboard_ui_visible_v1")
     print(f"DEBUG dashboard_parent={datacenter_dashboard_content!r}")
-    print(f"DEBUG dashboard_children_count={len(datacenter_dashboard_content.controls)}")
+    dashboard_root_column = datacenter_dashboard_content.content
+    dashboard_children_count = (
+        len(dashboard_root_column.controls)
+        if dashboard_root_column is not None
+        and hasattr(dashboard_root_column, "controls")
+        else 0
+    )
+    print(f"DEBUG dashboard_children_count={dashboard_children_count}")
     page.add(tabs)
     page.update()
 
