@@ -66,6 +66,11 @@ def test_fixture_reports_produce_parsed_rows_and_decisions(tmp_path, capsys):
     assert "SUMMARY pullback.BREAKDOWN_NOT_PULLBACK=0" in lines
     assert "SUMMARY pullback.NO_PULLBACK=2" in lines
     assert "SUMMARY pullback.INSUFFICIENT_DATA=0" in lines
+    assert "SUMMARY pullback_action.VALID_PULLBACK.SELL=0" in lines
+    assert "SUMMARY pullback_action.VALID_PULLBACK.WATCH=0" in lines
+    assert "SUMMARY pullback_action.EARLY_PULLBACK.WATCH=0" in lines
+    assert "SUMMARY pullback_action.STRUCTURE_BLOCKED_PULLBACK.SELL=0" in lines
+    assert "SUMMARY pullback_action.BREAKDOWN_NOT_PULLBACK.NEUTRAL=0" in lines
 
 
 def test_ticker_found_prints_selected_ticker_summary(tmp_path, capsys):
@@ -317,6 +322,68 @@ def test_cli_uses_existing_helpers_rather_than_duplicating_logic(monkeypatch, tm
                 "NO_PULLBACK": 1,
                 "INSUFFICIENT_DATA": 0,
             },
+            pullback_action_counts={
+                "VALID_PULLBACK": {
+                    "SELL": 0,
+                    "REDUCE": 0,
+                    "TIGHTEN_STOP": 0,
+                    "BLOCKED": 0,
+                    "WAIT_PULLBACK": 0,
+                    "BUY_NOW": 0,
+                    "WATCH": 0,
+                    "NEUTRAL": 0,
+                },
+                "EARLY_PULLBACK": {
+                    "SELL": 0,
+                    "REDUCE": 0,
+                    "TIGHTEN_STOP": 0,
+                    "BLOCKED": 0,
+                    "WAIT_PULLBACK": 0,
+                    "BUY_NOW": 0,
+                    "WATCH": 0,
+                    "NEUTRAL": 0,
+                },
+                "STRUCTURE_BLOCKED_PULLBACK": {
+                    "SELL": 0,
+                    "REDUCE": 0,
+                    "TIGHTEN_STOP": 0,
+                    "BLOCKED": 0,
+                    "WAIT_PULLBACK": 0,
+                    "BUY_NOW": 0,
+                    "WATCH": 0,
+                    "NEUTRAL": 0,
+                },
+                "BREAKDOWN_NOT_PULLBACK": {
+                    "SELL": 0,
+                    "REDUCE": 0,
+                    "TIGHTEN_STOP": 0,
+                    "BLOCKED": 0,
+                    "WAIT_PULLBACK": 0,
+                    "BUY_NOW": 0,
+                    "WATCH": 0,
+                    "NEUTRAL": 0,
+                },
+                "NO_PULLBACK": {
+                    "SELL": 1,
+                    "REDUCE": 0,
+                    "TIGHTEN_STOP": 0,
+                    "BLOCKED": 0,
+                    "WAIT_PULLBACK": 0,
+                    "BUY_NOW": 0,
+                    "WATCH": 0,
+                    "NEUTRAL": 0,
+                },
+                "INSUFFICIENT_DATA": {
+                    "SELL": 0,
+                    "REDUCE": 0,
+                    "TIGHTEN_STOP": 0,
+                    "BLOCKED": 0,
+                    "WAIT_PULLBACK": 0,
+                    "BUY_NOW": 0,
+                    "WATCH": 0,
+                    "NEUTRAL": 0,
+                },
+            },
             warning_count=0,
             warnings=[],
         )
@@ -383,6 +450,10 @@ def test_default_output_does_not_include_trace_summary_lines(tmp_path, capsys):
     assert exit_code == 0
     output = capsys.readouterr().out
     assert "SUMMARY pullback.NO_PULLBACK=1" in output
+    assert "SUMMARY pullback_action.VALID_PULLBACK.SELL=0" in output
+    assert "SUMMARY pullback_action.EARLY_PULLBACK.WATCH=0" in output
+    assert "SUMMARY pullback_action.STRUCTURE_BLOCKED_PULLBACK.NEUTRAL=0" in output
+    assert "SUMMARY pullback_action.BREAKDOWN_NOT_PULLBACK.NEUTRAL=0" in output
     assert "SUMMARY trace.SELL.horizon.daily=" not in output
     assert "TRACE ticker=NVDA" not in output
 
@@ -430,6 +501,10 @@ def test_show_trace_includes_sell_horizon_and_token_summary_counts(tmp_path, cap
     assert "SUMMARY trace.SELL.token.RESET=1" in lines
     assert "SUMMARY pullback.NO_PULLBACK=2" in lines
     assert "SUMMARY pullback.STRUCTURE_BLOCKED_PULLBACK=0" in lines
+    assert "SUMMARY pullback_action.VALID_PULLBACK.SELL=0" in lines
+    assert "SUMMARY pullback_action.EARLY_PULLBACK.WATCH=0" in lines
+    assert "SUMMARY pullback_action.STRUCTURE_BLOCKED_PULLBACK.SELL=0" in lines
+    assert "SUMMARY pullback_action.BREAKDOWN_NOT_PULLBACK.NEUTRAL=0" in lines
 
 
 def test_show_trace_output_is_deterministic(tmp_path, capsys):
@@ -480,6 +555,54 @@ def test_pullback_summary_counts_are_printed_deterministically(tmp_path, capsys)
         "SUMMARY pullback.BREAKDOWN_NOT_PULLBACK=0",
         "SUMMARY pullback.NO_PULLBACK=1",
         "SUMMARY pullback.INSUFFICIENT_DATA=0",
+    ]
+
+
+def test_pullback_action_summary_counts_are_printed_deterministically(tmp_path, capsys):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    _write_report(
+        reports_dir / "datacenter_daily_2026-05-22_0000_full.csv",
+        "\n".join(
+            [
+                "ticker;status;ma_break_status;freshness_status",
+                "AAA;PULLBACK_CANDIDATE;OK;FRESH_BULLISH_SIGNAL",
+                "BBB;PULLBACK_CANDIDATE;OK;",
+                "CCC;PULLBACK_CANDIDATE;EMA20_CONFIRMED_BREAK;",
+                "DDD;PULLBACK_CANDIDATE;;STRUCTURE_WARNING_OVERRIDES_BULLISH",
+            ]
+        )
+        + "\n",
+    )
+
+    exit_code = main(["--reports-dir", str(reports_dir)])
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    pullback_action_lines = [
+        line for line in lines if line.startswith("SUMMARY pullback_action.")
+    ]
+    assert pullback_action_lines == [
+        "SUMMARY pullback_action.VALID_PULLBACK.SELL=0",
+        "SUMMARY pullback_action.VALID_PULLBACK.REDUCE=0",
+        "SUMMARY pullback_action.VALID_PULLBACK.TIGHTEN_STOP=0",
+        "SUMMARY pullback_action.VALID_PULLBACK.WATCH=0",
+        "SUMMARY pullback_action.VALID_PULLBACK.BUY_NOW=0",
+        "SUMMARY pullback_action.VALID_PULLBACK.NEUTRAL=1",
+        "SUMMARY pullback_action.EARLY_PULLBACK.SELL=0",
+        "SUMMARY pullback_action.EARLY_PULLBACK.REDUCE=0",
+        "SUMMARY pullback_action.EARLY_PULLBACK.TIGHTEN_STOP=0",
+        "SUMMARY pullback_action.EARLY_PULLBACK.WATCH=0",
+        "SUMMARY pullback_action.EARLY_PULLBACK.BUY_NOW=0",
+        "SUMMARY pullback_action.EARLY_PULLBACK.NEUTRAL=1",
+        "SUMMARY pullback_action.STRUCTURE_BLOCKED_PULLBACK.SELL=0",
+        "SUMMARY pullback_action.STRUCTURE_BLOCKED_PULLBACK.REDUCE=0",
+        "SUMMARY pullback_action.STRUCTURE_BLOCKED_PULLBACK.TIGHTEN_STOP=0",
+        "SUMMARY pullback_action.STRUCTURE_BLOCKED_PULLBACK.NEUTRAL=1",
+        "SUMMARY pullback_action.BREAKDOWN_NOT_PULLBACK.SELL=1",
+        "SUMMARY pullback_action.BREAKDOWN_NOT_PULLBACK.REDUCE=0",
+        "SUMMARY pullback_action.BREAKDOWN_NOT_PULLBACK.TIGHTEN_STOP=0",
+        "SUMMARY pullback_action.BREAKDOWN_NOT_PULLBACK.NEUTRAL=0",
     ]
 
 

@@ -48,6 +48,7 @@ class DatacenterDecisionBatchResult:
     decisions: list[DatacenterTickerDecision]
     action_counts: dict[str, int]
     pullback_counts: dict[str, int]
+    pullback_action_counts: dict[str, dict[str, int]]
     warning_count: int
     warnings: list[str] = field(default_factory=list)
 
@@ -1082,11 +1083,20 @@ def build_datacenter_ticker_decisions(
     )
     for pullback_name in _PULLBACK_VALIDITY_ORDER:
         pullback_counts.setdefault(pullback_name, 0)
+    pullback_action_counts: dict[str, dict[str, int]] = {}
+    for pullback_name in _PULLBACK_VALIDITY_ORDER:
+        pullback_action_counts[pullback_name] = {
+            action_name: 0 for action_name in _ACTION_PRIORITY
+        }
+    for decision in decisions:
+        pullback_name = decision.pullback_validity or "INSUFFICIENT_DATA"
+        pullback_action_counts[pullback_name][decision.action] += 1
 
     return DatacenterDecisionBatchResult(
         decisions=decisions,
         action_counts=dict(action_counts),
         pullback_counts=dict(pullback_counts),
+        pullback_action_counts=pullback_action_counts,
         warning_count=len(warnings),
         warnings=warnings,
     )

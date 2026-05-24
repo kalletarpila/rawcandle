@@ -726,6 +726,68 @@ def test_pullback_counts_include_all_labels_with_zero_defaults():
         "NO_PULLBACK": 1,
         "INSUFFICIENT_DATA": 0,
     }
+    assert result.pullback_action_counts == {
+        "VALID_PULLBACK": {
+            "SELL": 0,
+            "REDUCE": 0,
+            "TIGHTEN_STOP": 0,
+            "BLOCKED": 0,
+            "WAIT_PULLBACK": 0,
+            "BUY_NOW": 0,
+            "WATCH": 0,
+            "NEUTRAL": 0,
+        },
+        "EARLY_PULLBACK": {
+            "SELL": 0,
+            "REDUCE": 0,
+            "TIGHTEN_STOP": 0,
+            "BLOCKED": 0,
+            "WAIT_PULLBACK": 0,
+            "BUY_NOW": 0,
+            "WATCH": 0,
+            "NEUTRAL": 0,
+        },
+        "STRUCTURE_BLOCKED_PULLBACK": {
+            "SELL": 0,
+            "REDUCE": 0,
+            "TIGHTEN_STOP": 0,
+            "BLOCKED": 0,
+            "WAIT_PULLBACK": 0,
+            "BUY_NOW": 0,
+            "WATCH": 0,
+            "NEUTRAL": 0,
+        },
+        "BREAKDOWN_NOT_PULLBACK": {
+            "SELL": 0,
+            "REDUCE": 0,
+            "TIGHTEN_STOP": 0,
+            "BLOCKED": 0,
+            "WAIT_PULLBACK": 0,
+            "BUY_NOW": 0,
+            "WATCH": 0,
+            "NEUTRAL": 0,
+        },
+        "NO_PULLBACK": {
+            "SELL": 0,
+            "REDUCE": 0,
+            "TIGHTEN_STOP": 0,
+            "BLOCKED": 0,
+            "WAIT_PULLBACK": 0,
+            "BUY_NOW": 0,
+            "WATCH": 0,
+            "NEUTRAL": 1,
+        },
+        "INSUFFICIENT_DATA": {
+            "SELL": 0,
+            "REDUCE": 0,
+            "TIGHTEN_STOP": 0,
+            "BLOCKED": 0,
+            "WAIT_PULLBACK": 0,
+            "BUY_NOW": 0,
+            "WATCH": 0,
+            "NEUTRAL": 0,
+        },
+    }
 
 
 def test_pullback_counts_are_correct_for_mixed_fixtures():
@@ -775,6 +837,12 @@ def test_pullback_counts_are_correct_for_mixed_fixtures():
         "NO_PULLBACK": 1,
         "INSUFFICIENT_DATA": 1,
     }
+    assert result.pullback_action_counts["VALID_PULLBACK"]["NEUTRAL"] == 1
+    assert result.pullback_action_counts["EARLY_PULLBACK"]["NEUTRAL"] == 1
+    assert result.pullback_action_counts["STRUCTURE_BLOCKED_PULLBACK"]["REDUCE"] == 1
+    assert result.pullback_action_counts["BREAKDOWN_NOT_PULLBACK"]["SELL"] == 1
+    assert result.pullback_action_counts["NO_PULLBACK"]["NEUTRAL"] == 1
+    assert result.pullback_action_counts["INSUFFICIENT_DATA"]["NEUTRAL"] == 1
 
 
 def test_final_actions_remain_unchanged_when_pullback_counts_are_present():
@@ -791,6 +859,7 @@ def test_final_actions_remain_unchanged_when_pullback_counts_are_present():
     ]
     assert result.action_counts["SELL"] == 1
     assert result.action_counts["REDUCE"] == 1
+    assert result.pullback_counts["NO_PULLBACK"] == 2
 
 
 def test_sell_trace_captures_horizon_field_token_value_and_source_file():

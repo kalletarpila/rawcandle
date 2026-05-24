@@ -42,6 +42,12 @@ _PULLBACK_ORDER = (
     "NO_PULLBACK",
     "INSUFFICIENT_DATA",
 )
+_PULLBACK_ACTION_SUMMARY_ORDER = {
+    "VALID_PULLBACK": ("SELL", "REDUCE", "TIGHTEN_STOP", "WATCH", "BUY_NOW", "NEUTRAL"),
+    "EARLY_PULLBACK": ("SELL", "REDUCE", "TIGHTEN_STOP", "WATCH", "BUY_NOW", "NEUTRAL"),
+    "STRUCTURE_BLOCKED_PULLBACK": ("SELL", "REDUCE", "TIGHTEN_STOP", "NEUTRAL"),
+    "BREAKDOWN_NOT_PULLBACK": ("SELL", "REDUCE", "TIGHTEN_STOP", "NEUTRAL"),
+}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -159,6 +165,18 @@ def _print_sell_trace_summaries(decision_result: DatacenterDecisionBatchResult) 
         "return_10d_lt_minus_8pct",
     ):
         _print_summary(f"trace.SELL.token.{token_name}", token_counts[token_name])
+
+
+def _print_pullback_action_summaries(
+    decision_result: DatacenterDecisionBatchResult,
+) -> None:
+    for pullback_name, action_names in _PULLBACK_ACTION_SUMMARY_ORDER.items():
+        counts = decision_result.pullback_action_counts.get(pullback_name, {})
+        for action_name in action_names:
+            _print_summary(
+                f"pullback_action.{pullback_name}.{action_name}",
+                counts.get(action_name, 0),
+            )
 
 
 def _print_trace_rows(ticker: str, action: str, decision_trace: list[DatacenterDecisionTrace]) -> None:
@@ -287,6 +305,7 @@ def main(argv: list[str] | None = None) -> int:
             f"pullback.{pullback_name}",
             decision_result.pullback_counts.get(pullback_name, 0),
         )
+    _print_pullback_action_summaries(decision_result)
     if args.show_trace:
         _print_sell_trace_summaries(decision_result)
 
