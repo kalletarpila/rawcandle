@@ -472,6 +472,11 @@ def _classify_daily_trigger_row(row: dict[str, object]) -> tuple[str, str, str, 
         exit_risk_severity
     )
     bullish_evidence = has_pullback_signal or has_bullish_signal or _is_near_pullback_zone(row)
+    has_ll_structure = latest_structure_label == "LL"
+    has_lh_or_ll_structure = latest_structure_label in {"LH", "LL"}
+    has_close_below_ema20 = _has_reason_token(row.get("exit_reason"), "close_below_ema20")
+    has_return_10d_lt_minus_8pct = _has_reason_token(row.get("exit_reason"), "return_10d_lt_minus_8pct")
+    has_structure_label_ll_reason = _has_reason_token(row.get("exit_reason"), "latest_structure_label_ll")
     buy_hard_blocker = (
         trend_state == "DOWN"
         or fresh_bos_down
@@ -481,25 +486,38 @@ def _classify_daily_trigger_row(row: dict[str, object]) -> tuple[str, str, str, 
     )
     stop_reason = ""
     if _is_severe_exit_severity(exit_risk_severity) and has_exit_risk_signal:
-        stop_reason = "EXTREME_OR_CRITICAL_EXIT_RISK"
-    elif exit_risk_severity == "HIGH" and _has_reason_token(row.get("exit_reason"), "close_below_ema20"):
-        stop_reason = "HIGH_EXIT_RISK_CLOSE_BELOW_EMA20"
+        stop_reason = "CRITICAL_OR_EXTREME_EXIT_SEVERITY"
     elif fresh_bos_down and fresh_reset:
         stop_reason = "FRESH_BOS_DOWN_AND_RESET"
-    elif latest_structure_label == "LL" and trend_state == "DOWN":
-        stop_reason = "DOWN_TREND_LL_STRUCTURE_BREAK"
+    elif exit_risk_severity == "HIGH" and (
+        has_ll_structure
+        or (trend_state == "DOWN" and has_lh_or_ll_structure)
+        or fresh_bos_down
+        or fresh_reset
+        or has_structure_label_ll_reason
+        or (has_close_below_ema20 and has_return_10d_lt_minus_8pct)
+    ):
+        stop_reason = "HIGH_RISK_WITH_STRUCTURAL_BREAKDOWN"
     elif relevant_bearish and high_exit_risk:
         stop_reason = "RELEVANT_BEARISH_CONTEXT_WITH_HIGH_EXIT_RISK"
     if stop_reason:
-        return ("STOP_TRIGGER", "CONFIRMED_PROTECTIVE_BREAKDOWN", stop_reason, "CHECK_STOP_OR_REDUCE")
+        return ("STOP_TRIGGER", "CONFIRMED_DAILY_STOP_TRIGGER", stop_reason, "CHECK_STOP_OR_EXIT")
 
     sell_reason = ""
     if has_exit_risk_signal and exit_risk_severity in {"MEDIUM", "HIGH"}:
-        sell_reason = "EXIT_RISK_SIGNAL_MEDIUM_OR_HIGH"
-    elif _has_reason_token(row.get("exit_reason"), "close_below_ema20"):
+        sell_reason = (
+            "HIGH_EXIT_RISK_WITHOUT_FULL_STOP_CONFIRMATION"
+            if exit_risk_severity == "HIGH"
+            else "EXIT_RISK_SIGNAL_MEDIUM_OR_HIGH"
+        )
+    elif has_close_below_ema20:
         sell_reason = "CLOSE_BELOW_EMA20"
-    elif _has_reason_token(row.get("exit_reason"), "return_10d_lt_minus_8pct"):
+    elif has_return_10d_lt_minus_8pct:
         sell_reason = "RETURN_10D_LT_MINUS_8PCT"
+    elif _has_reason_token(row.get("exit_reason"), "trim_watch_close_below_ma10"):
+        sell_reason = "TRIM_WATCH_CLOSE_BELOW_MA10"
+    elif _has_reason_token(row.get("exit_reason"), "subindustry_exit_zone"):
+        sell_reason = "SUBINDUSTRY_EXIT_ZONE"
     elif fresh_bos_down:
         sell_reason = "FRESH_BOS_DOWN"
     elif relevant_bearish:
@@ -509,7 +527,7 @@ def _classify_daily_trigger_row(row: dict[str, object]) -> tuple[str, str, str, 
     elif trend_state == "DOWN" and _has_negative_ema20_context(row.get("distance_to_ema20_pct")):
         sell_reason = "DOWN_TREND_BELOW_EMA20"
     if sell_reason:
-        return ("SELL_TRIGGER", "BEARISH_DAILY_BREAKDOWN_SIGNAL", sell_reason, "REVIEW_EXIT_OR_STOP")
+        return ("SELL_TRIGGER", "DAILY_SELL_TRIGGER", sell_reason, "REVIEW_SELL_OR_TIGHTEN_STOP")
 
     exit_watch_reason = ""
     if has_exit_risk_signal:
@@ -523,7 +541,7 @@ def _classify_daily_trigger_row(row: dict[str, object]) -> tuple[str, str, str, 
     elif current_watchlist_status in {"MEDIUM_EXIT_RISK", "GROUP_RISK"}:
         exit_watch_reason = current_watchlist_status
     if exit_watch_reason:
-        return ("EXIT_WATCH", "MILD_OR_UNCONFIRMED_EXIT_PRESSURE", exit_watch_reason, "MONITOR_NEXT_SESSION")
+        return ("EXIT_WATCH", "DAILY_EXIT_WATCH", "MILD_OR_UNCONFIRMED_EXIT_PRESSURE", "MONITOR_NEXT_SESSION")
 
     if relevant_bullish and bullish_evidence and not buy_hard_blocker and trend_state != "DOWN":
         primary_reason = (

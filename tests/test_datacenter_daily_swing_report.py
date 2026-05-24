@@ -1083,7 +1083,7 @@ def test_daily_triggers_cover_all_states_and_protective_precedence(tmp_path):
     assert rows["BBB"]["daily_trigger_state"] == "STOP_TRIGGER"
     assert rows["CCC"]["daily_trigger_state"] == "SELL_TRIGGER"
     assert rows["DDD"]["daily_trigger_state"] == "EXIT_WATCH"
-    assert rows["BBB"]["next_action"] == "CHECK_STOP_OR_REDUCE"
+    assert rows["BBB"]["next_action"] == "CHECK_STOP_OR_EXIT"
     assert rows["AAA"]["next_action"] == "REVIEW_WITH_ROLLING_CONTEXT"
 
     assert result["summary"]["daily_stop_trigger_count"] == 1
@@ -1258,3 +1258,258 @@ def test_fresh_bos_down_blocks_buy_trigger_but_stale_bos_down_does_not(tmp_path)
 
     assert rows["AAA"]["daily_trigger_state"] != "BUY_TRIGGER"
     assert rows["BBB"]["daily_trigger_state"] == "BUY_TRIGGER"
+
+
+def test_daily_high_severity_close_below_ema20_alone_is_sell_trigger_not_stop(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_report_db(analysis_db)
+    _update_ticker_fields(
+        analysis_db,
+        ticker="AAA",
+        signal_date="2024-01-10",
+        assignments={
+            "exit_risk_signal": 1,
+            "exit_risk_severity": "HIGH",
+            "exit_reason": "close_below_ema20",
+            "ticker_trend_state": "UP",
+            "latest_structure_label": "HL",
+            "latest_bos_event_type": None,
+            "latest_bos_freshness": None,
+            "latest_reset_reason": None,
+            "latest_reset_freshness": None,
+        },
+    )
+
+    result = write_daily_swing_signal_report(
+        analysis_db_path=analysis_db,
+        signal_date="2024-01-10",
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+    section = result["csv"].split("section;daily_triggers\n", 1)[1]
+    assert "daily_triggers;AAA;SELL_TRIGGER;" in section
+    assert "HIGH_EXIT_RISK_WITHOUT_FULL_STOP_CONFIRMATION" in section
+
+
+def test_daily_high_severity_with_close_below_ema20_and_return_10d_lt_minus_8pct_is_stop(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_report_db(analysis_db)
+    _update_ticker_fields(
+        analysis_db,
+        ticker="AAA",
+        signal_date="2024-01-10",
+        assignments={
+            "exit_risk_signal": 1,
+            "exit_risk_severity": "HIGH",
+            "exit_reason": "close_below_ema20;return_10d_lt_minus_8pct",
+            "ticker_trend_state": "UP",
+            "latest_structure_label": "HL",
+            "latest_bos_event_type": None,
+            "latest_bos_freshness": None,
+            "latest_reset_reason": None,
+            "latest_reset_freshness": None,
+        },
+    )
+
+    result = write_daily_swing_signal_report(
+        analysis_db_path=analysis_db,
+        signal_date="2024-01-10",
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+    section = result["csv"].split("section;daily_triggers\n", 1)[1]
+    assert "daily_triggers;AAA;STOP_TRIGGER;" in section
+    assert "HIGH_RISK_WITH_STRUCTURAL_BREAKDOWN" in section
+
+
+def test_daily_high_severity_with_ll_or_down_lh_structure_is_stop(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_report_db(analysis_db)
+    _update_ticker_fields(
+        analysis_db,
+        ticker="AAA",
+        signal_date="2024-01-10",
+        assignments={
+            "exit_risk_signal": 1,
+            "exit_risk_severity": "HIGH",
+            "exit_reason": "close_below_ema20",
+            "ticker_trend_state": "DOWN",
+            "latest_structure_label": "LH",
+        },
+    )
+    _update_ticker_fields(
+        analysis_db,
+        ticker="BBB",
+        signal_date="2024-01-10",
+        assignments={
+            "exit_risk_signal": 1,
+            "exit_risk_severity": "HIGH",
+            "exit_reason": "close_below_ema20",
+            "ticker_trend_state": "UP",
+            "latest_structure_label": "LL",
+        },
+    )
+
+    result = write_daily_swing_signal_report(
+        analysis_db_path=analysis_db,
+        signal_date="2024-01-10",
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+    section = result["csv"].split("section;daily_triggers\n", 1)[1]
+    assert "daily_triggers;AAA;STOP_TRIGGER;" in section
+    assert "daily_triggers;BBB;STOP_TRIGGER;" in section
+
+
+def test_daily_high_severity_with_fresh_bos_down_or_reset_is_stop(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_report_db(analysis_db)
+    _update_ticker_fields(
+        analysis_db,
+        ticker="AAA",
+        signal_date="2024-01-10",
+        assignments={
+            "exit_risk_signal": 1,
+            "exit_risk_severity": "HIGH",
+            "exit_reason": "close_below_ema20",
+            "latest_bos_event_type": "BOS_DOWN",
+            "latest_bos_freshness": "FRESH",
+            "latest_reset_reason": None,
+            "latest_reset_freshness": None,
+        },
+    )
+    _update_ticker_fields(
+        analysis_db,
+        ticker="BBB",
+        signal_date="2024-01-10",
+        assignments={
+            "exit_risk_signal": 1,
+            "exit_risk_severity": "HIGH",
+            "exit_reason": "close_below_ema20",
+            "latest_bos_event_type": None,
+            "latest_bos_freshness": None,
+            "latest_reset_reason": "RESET",
+            "latest_reset_freshness": "FRESH",
+        },
+    )
+
+    result = write_daily_swing_signal_report(
+        analysis_db_path=analysis_db,
+        signal_date="2024-01-10",
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+    section = result["csv"].split("section;daily_triggers\n", 1)[1]
+    assert "daily_triggers;AAA;STOP_TRIGGER;" in section
+    assert "daily_triggers;BBB;STOP_TRIGGER;" in section
+
+
+def test_daily_extreme_or_critical_exit_severity_is_stop(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_report_db(analysis_db)
+    _update_ticker_fields(
+        analysis_db,
+        ticker="AAA",
+        signal_date="2024-01-10",
+        assignments={"exit_risk_signal": 1, "exit_risk_severity": "EXTREME"},
+    )
+    _update_ticker_fields(
+        analysis_db,
+        ticker="BBB",
+        signal_date="2024-01-10",
+        assignments={"exit_risk_signal": 1, "exit_risk_severity": "CRITICAL"},
+    )
+
+    result = write_daily_swing_signal_report(
+        analysis_db_path=analysis_db,
+        signal_date="2024-01-10",
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+    section = result["csv"].split("section;daily_triggers\n", 1)[1]
+    assert "daily_triggers;AAA;STOP_TRIGGER;" in section
+    assert "daily_triggers;BBB;STOP_TRIGGER;" in section
+
+
+def test_daily_fresh_bos_down_without_reset_is_sell_but_with_reset_is_stop(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_report_db(analysis_db)
+    _update_ticker_fields(
+        analysis_db,
+        ticker="AAA",
+        signal_date="2024-01-10",
+        assignments={
+            "exit_risk_signal": 1,
+            "exit_risk_severity": "MEDIUM",
+            "latest_bos_event_type": "BOS_DOWN",
+            "latest_bos_freshness": "FRESH",
+            "latest_reset_reason": None,
+            "latest_reset_freshness": None,
+        },
+    )
+    _update_ticker_fields(
+        analysis_db,
+        ticker="BBB",
+        signal_date="2024-01-10",
+        assignments={
+            "exit_risk_signal": 1,
+            "exit_risk_severity": "MEDIUM",
+            "latest_bos_event_type": "BOS_DOWN",
+            "latest_bos_freshness": "FRESH",
+            "latest_reset_reason": "RESET",
+            "latest_reset_freshness": "FRESH",
+        },
+    )
+
+    result = write_daily_swing_signal_report(
+        analysis_db_path=analysis_db,
+        signal_date="2024-01-10",
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+    section = result["csv"].split("section;daily_triggers\n", 1)[1]
+    assert "daily_triggers;AAA;SELL_TRIGGER;" in section
+    assert "daily_triggers;BBB;STOP_TRIGGER;" in section
+
+
+def test_daily_relevant_bearish_context_with_and_without_current_high_risk_maps_to_stop_or_sell(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_report_db(analysis_db)
+    _update_ticker_fields(
+        analysis_db,
+        ticker="AAA",
+        signal_date="2024-01-10",
+        assignments={"exit_risk_signal": 1, "exit_risk_severity": "HIGH"},
+    )
+    _update_ticker_fields(
+        analysis_db,
+        ticker="BBB",
+        signal_date="2024-01-10",
+        assignments={"exit_risk_signal": 0, "exit_risk_severity": None},
+    )
+    conn = _connect_relevance_db(analysis_db)
+    _insert_relevance_run(conn, "REL_DAILY_BEARISH")
+    _insert_relevance_record(
+        conn,
+        run_id="REL_DAILY_BEARISH",
+        ticker="AAA",
+        signal_date="2024-01-10",
+        signal_name="Bearish Engulfing",
+        relevance_class="RELEVANT",
+        relevance_reason="DOWN_TREND_BEARISH_REVERSAL_AFTER_BREAK",
+    )
+    _insert_relevance_record(
+        conn,
+        run_id="REL_DAILY_BEARISH",
+        ticker="BBB",
+        signal_date="2024-01-10",
+        signal_name="Bearish Engulfing",
+        relevance_class="RELEVANT",
+        relevance_reason="DOWN_TREND_BEARISH_REVERSAL_AFTER_BREAK",
+    )
+    conn.commit()
+    conn.close()
+
+    result = write_daily_swing_signal_report(
+        analysis_db_path=analysis_db,
+        signal_date="2024-01-10",
+        generated_at_utc="2026-05-17T12:00:00Z",
+        technical_relevance_run_id="REL_DAILY_BEARISH",
+    )
+    section = result["csv"].split("section;daily_triggers\n", 1)[1]
+    assert "daily_triggers;AAA;STOP_TRIGGER;" in section
+    assert "daily_triggers;BBB;SELL_TRIGGER;" in section
