@@ -1064,6 +1064,52 @@ def test_rolling_30_explicit_high_exit_risk_status_forces_avoid_and_exit_zone(tm
 
     assert "rolling_30_buy_filter;AAA;AVOID;" in result["csv"]
     assert "rolling_30_exit_prefilter;AAA;EXIT_ZONE;" in result["csv"]
+    assert "CURRENT_HIGH_EXIT_RISK" in result["csv"]
+
+
+def test_rolling_30_historical_window_high_exit_risk_reason_is_precise(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET breakout_signal = 1,
+                exit_risk_signal = 1,
+                exit_risk_severity = 'HIGH',
+                exit_reason = 'distribution_pressure',
+                ticker_trend_state = 'UP'
+            WHERE ticker = 'AAA'
+              AND signal_date = '2024-01-08'
+            """
+        )
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET breakout_signal = 1,
+                pullback_signal = 0,
+                exit_risk_signal = 0,
+                exit_risk_severity = NULL,
+                exit_reason = NULL,
+                ticker_trend_state = 'UP'
+            WHERE ticker = 'AAA'
+              AND signal_date = '2024-01-10'
+            """
+        )
+        conn.commit()
+
+    result = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=30,
+        generated_at_utc="2026-05-24T12:00:00Z",
+    )
+
+    assert "rolling_30_buy_filter;AAA;WATCH_ZONE;" in result["csv"]
+    assert "rolling_30_exit_prefilter;AAA;WATCH;" in result["csv"]
+    assert "HISTORICAL_WINDOW_HIGH_EXIT_RISK" in result["csv"]
+    assert ";WINDOW_HIGH_EXIT_RISK;" not in result["csv"]
 
 
 def test_rolling_30_role_sections_do_not_render_for_non_30_windows(tmp_path):

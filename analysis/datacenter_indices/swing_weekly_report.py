@@ -291,6 +291,17 @@ def _is_pullback_oriented_status(value: object | None) -> bool:
     return value in {"PULLBACK_CANDIDATE", "ADD_ON_PULLBACK"}
 
 
+def _rolling_30_high_exit_risk_reason(
+    current_watchlist_status: object | None,
+    window_watchlist_status: object | None,
+) -> str | None:
+    if _is_high_exit_risk_status(current_watchlist_status):
+        return "CURRENT_HIGH_EXIT_RISK"
+    if _is_high_exit_risk_status(window_watchlist_status):
+        return "HISTORICAL_WINDOW_HIGH_EXIT_RISK"
+    return None
+
+
 def _classify_rolling_30_buy_row(row: dict[str, object]) -> tuple[str, str, str]:
     if row.get("last_price_data_status") in WATCHLIST_MISSING_PRICE_STATUSES or row.get("all_price_rows_missing") is True:
         return "INSUFFICIENT_DATA", "missing_price_context", "price_data_missing"
@@ -333,7 +344,7 @@ def _classify_rolling_30_buy_row(row: dict[str, object]) -> tuple[str, str, str]
             if has_fresh_bos_down
             else "recent_reset"
             if has_fresh_reset
-            else "high_exit_risk_status"
+            else "CURRENT_HIGH_EXIT_RISK"
             if has_explicit_current_high_risk
             else "high_exit_risk_severity"
             if has_explicit_high_severity
@@ -356,7 +367,7 @@ def _classify_rolling_30_buy_row(row: dict[str, object]) -> tuple[str, str, str]
 
     if has_buy_activity or has_mixed_context:
         blocking_reason = (
-            "WINDOW_HIGH_EXIT_RISK"
+            _rolling_30_high_exit_risk_reason(current_watchlist_status, window_watchlist_status)
             if has_window_high_risk
             else "GROUP_RISK"
             if window_watchlist_status == "GROUP_RISK"
@@ -405,7 +416,7 @@ def _classify_rolling_30_exit_row(row: dict[str, object]) -> tuple[str, str, str
         or (exit_risk_days >= 5 and latest_exit_severity not in {None, "", "NULL"})
     ):
         risk_reason = (
-            "HIGH_EXIT_RISK_STATUS"
+            "CURRENT_HIGH_EXIT_RISK"
             if _is_high_exit_risk_status(current_watchlist_status)
             else "HIGH_EXIT_RISK_SEVERITY"
             if latest_exit_severity == "HIGH"
@@ -433,7 +444,7 @@ def _classify_rolling_30_exit_row(row: dict[str, object]) -> tuple[str, str, str
             if exit_risk_days > 0 and latest_exit_severity in {None, "", "NULL"}
             else "GROUP_RISK"
             if window_watchlist_status == "GROUP_RISK"
-            else "WINDOW_HIGH_EXIT_RISK"
+            else "HISTORICAL_WINDOW_HIGH_EXIT_RISK"
             if _is_high_exit_risk_status(window_watchlist_status)
             else "WINDOW_MEDIUM_EXIT_RISK"
             if window_watchlist_status == "MEDIUM_EXIT_RISK"
