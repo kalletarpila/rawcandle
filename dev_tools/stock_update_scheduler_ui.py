@@ -799,6 +799,7 @@ def populate_datacenter_dashboard_candidate_pullbacks(
     ]
     candidate_decisions.sort(
         key=lambda decision: (
+            decision.candidate_priority or 9,
             0 if decision.pullback_validity == "VALID_PULLBACK" else 1,
             (
                 "READY_TO_WATCH",
@@ -809,6 +810,9 @@ def populate_datacenter_dashboard_candidate_pullbacks(
                 "INSUFFICIENT_DATA",
             ).index(decision.entry_readiness or "INSUFFICIENT_DATA"),
             ("WATCH", "NEUTRAL", "TIGHTEN_STOP", "REDUCE", "SELL", "BLOCKED", "WAIT_PULLBACK", "BUY_NOW").index(decision.action),
+            decision.latest_bullish_signal_age_td
+            if decision.latest_bullish_signal_age_td is not None
+            else 999999,
             decision.ticker,
         )
     )
@@ -822,7 +826,7 @@ def populate_datacenter_dashboard_candidate_pullbacks(
                 content=ft.Column(
                     controls=[
                         ft.Text(
-                            f"{decision.ticker} | {decision.pullback_validity} | {decision.entry_readiness or 'NONE'} | {decision.action}",
+                            f"{decision.ticker} | {decision.candidate_priority_label or 'P9_NOT_CANDIDATE'} | {decision.entry_readiness or 'NONE'} | {decision.action}",
                             weight=ft.FontWeight.BOLD,
                         ),
                         ft.Text(

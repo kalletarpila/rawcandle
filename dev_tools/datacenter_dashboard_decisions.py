@@ -37,10 +37,15 @@ class DatacenterTickerDecision:
     latest_structure_label: str | None
     latest_bos_event_type: str | None
     latest_reset_reason: str | None
+    latest_bullish_signal_age_td: int | None
+    latest_bearish_signal_age_td: int | None
     pullback_validity: str | None
     pullback_reason: str | None
     entry_readiness: str | None
     entry_readiness_reason: str | None
+    candidate_priority: int | None
+    candidate_priority_label: str | None
+    candidate_priority_reason: str | None
     source_files: list[str]
     decision_trace: list[DatacenterDecisionTrace] = field(default_factory=list)
 
@@ -52,6 +57,7 @@ class DatacenterDecisionBatchResult:
     pullback_counts: dict[str, int]
     pullback_action_counts: dict[str, dict[str, int]]
     entry_readiness_counts: dict[str, int]
+    candidate_priority_counts: dict[str, int]
     warning_count: int
     warnings: list[str] = field(default_factory=list)
 
@@ -94,6 +100,15 @@ _ENTRY_READINESS_ORDER = (
     "EARLY_MONITOR",
     "NOT_READY",
     "INSUFFICIENT_DATA",
+)
+
+_CANDIDATE_PRIORITY_LABEL_ORDER = (
+    "P1_READY_TO_WATCH",
+    "P2_STOP_STABILIZATION",
+    "P3_RISK_CLEARANCE",
+    "P4_EARLY_MONITOR",
+    "P5_NOT_READY",
+    "P9_NOT_CANDIDATE",
 )
 
 _HARD_SELL_TERMS = (
@@ -589,6 +604,38 @@ def _classify_entry_readiness(
     return ("INSUFFICIENT_DATA", "MISSING_PULLBACK_VALIDITY_OR_ACTION")
 
 
+def _classify_candidate_priority(
+    entry_readiness: str | None,
+) -> tuple[int, str, str]:
+    if entry_readiness == "READY_TO_WATCH":
+        return (1, "P1_READY_TO_WATCH", "READY_TO_WATCH")
+    if entry_readiness == "NEEDS_STOP_STABILIZATION":
+        return (
+            2,
+            "P2_STOP_STABILIZATION",
+            "VALID_PULLBACK_BUT_STOP_RISK_REMAINS",
+        )
+    if entry_readiness == "NEEDS_RISK_CLEARANCE":
+        return (
+            3,
+            "P3_RISK_CLEARANCE",
+            "VALID_PULLBACK_BUT_RISK_SIGNAL_REMAINS",
+        )
+    if entry_readiness == "EARLY_MONITOR":
+        return (
+            4,
+            "P4_EARLY_MONITOR",
+            "EARLY_PULLBACK_WAIT_FOR_CONFIRMATION",
+        )
+    if entry_readiness == "NOT_READY":
+        return (5, "P5_NOT_READY", "NOT_READY")
+    return (
+        9,
+        "P9_NOT_CANDIDATE",
+        "NOT_CANDIDATE_OR_INSUFFICIENT_DATA",
+    )
+
+
 def _has_acute_confirmed_rolling_2d_bos_down(
     normalized_rows: list[tuple[DatacenterDashboardRow, str, list[str]]],
 ) -> bool:
@@ -673,6 +720,11 @@ def _max_optional_int(values: Iterable[int | None]) -> int | None:
     return max(present) if present else None
 
 
+def _min_optional_int(values: Iterable[int | None]) -> int | None:
+    present = [value for value in values if value is not None]
+    return min(present) if present else None
+
+
 def build_datacenter_ticker_decisions(
     rows: Iterable[DatacenterDashboardRow],
 ) -> DatacenterDecisionBatchResult:
@@ -722,6 +774,12 @@ def build_datacenter_ticker_decisions(
         latest_reset_reason = next(
             (row.latest_reset_reason for row in ticker_rows if row.latest_reset_reason),
             None,
+        )
+        latest_bullish_signal_age_td = _min_optional_int(
+            row.latest_bullish_signal_age_td for row in ticker_rows
+        )
+        latest_bearish_signal_age_td = _min_optional_int(
+            row.latest_bearish_signal_age_td for row in ticker_rows
         )
 
         reasons: list[str] = []
@@ -1182,6 +1240,12 @@ def build_datacenter_ticker_decisions(
             action,
         )
 
+        (
+            candidate_priority,
+            candidate_priority_label,
+            candidate_priority_reason,
+        ) = _classify_candidate_priority(entry_readiness)
+
         decisions.append(
             DatacenterTickerDecision(
                 ticker=ticker,
@@ -1198,10 +1262,15 @@ def build_datacenter_ticker_decisions(
                 latest_structure_label=latest_structure_label,
                 latest_bos_event_type=latest_bos_event_type,
                 latest_reset_reason=latest_reset_reason,
+                latest_bullish_signal_age_td=latest_bullish_signal_age_td,
+                latest_bearish_signal_age_td=latest_bearish_signal_age_td,
                 pullback_validity=pullback_validity,
                 pullback_reason=pullback_reason,
                 entry_readiness=entry_readiness,
                 entry_readiness_reason=entry_readiness_reason,
+                candidate_priority=candidate_priority,
+                candidate_priority_label=candidate_priority_label,
+                candidate_priority_reason=candidate_priority_reason,
                 source_files=source_files,
                 decision_trace=decision_trace,
             )
@@ -1229,6 +1298,12 @@ def build_datacenter_ticker_decisions(
     )
     for readiness_name in _ENTRY_READINESS_ORDER:
         entry_readiness_counts.setdefault(readiness_name, 0)
+    candidate_priority_counts = Counter(
+        decision.candidate_priority_label or "P9_NOT_CANDIDATE"
+        for decision in decisions
+    )
+    for priority_label in _CANDIDATE_PRIORITY_LABEL_ORDER:
+        candidate_priority_counts.setdefault(priority_label, 0)
 
     return DatacenterDecisionBatchResult(
         decisions=decisions,
@@ -1236,6 +1311,7 @@ def build_datacenter_ticker_decisions(
         pullback_counts=dict(pullback_counts),
         pullback_action_counts=pullback_action_counts,
         entry_readiness_counts=dict(entry_readiness_counts),
+        candidate_priority_counts=dict(candidate_priority_counts),
         warning_count=len(warnings),
         warnings=warnings,
     )

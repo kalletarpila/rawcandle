@@ -66,6 +66,15 @@ _ENTRY_READINESS_ORDER = (
     "NOT_READY",
     "INSUFFICIENT_DATA",
 )
+_CANDIDATE_PRIORITY_CHOICES = (1, 2, 3, 4, 5, 9)
+_CANDIDATE_PRIORITY_LABEL_ORDER = (
+    "P1_READY_TO_WATCH",
+    "P2_STOP_STABILIZATION",
+    "P3_RISK_CLEARANCE",
+    "P4_EARLY_MONITOR",
+    "P5_NOT_READY",
+    "P9_NOT_CANDIDATE",
+)
 _CANDIDATE_ACTION_ORDER = (
     "WATCH",
     "NEUTRAL",
@@ -97,6 +106,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--candidate-pullbacks-readiness",
         choices=_ENTRY_READINESS_ORDER,
+    )
+    parser.add_argument(
+        "--candidate-pullbacks-priority",
+        type=int,
+        choices=_CANDIDATE_PRIORITY_CHOICES,
     )
     parser.add_argument("--max-candidate-pullbacks", type=int, default=50)
     parser.add_argument("--pullback-debug", action="store_true")
@@ -268,6 +282,7 @@ def _filtered_candidate_pullback_decisions(
     *,
     pullback_validity: str | None,
     readiness: str | None,
+    priority: int | None,
     action: str | None,
 ) -> list[DatacenterTickerDecision]:
     decisions = [
@@ -287,14 +302,24 @@ def _filtered_candidate_pullback_decisions(
             for decision in decisions
             if (decision.entry_readiness or "INSUFFICIENT_DATA") == readiness
         ]
+    if priority is not None:
+        decisions = [
+            decision
+            for decision in decisions
+            if (decision.candidate_priority or 9) == priority
+        ]
     if action:
         decisions = [decision for decision in decisions if decision.action == action]
     return sorted(
         decisions,
         key=lambda decision: (
+            decision.candidate_priority or 9,
             _CANDIDATE_PULLBACK_ORDER.index(decision.pullback_validity or "INSUFFICIENT_DATA"),
             _ENTRY_READINESS_ORDER.index(decision.entry_readiness or "INSUFFICIENT_DATA"),
             _CANDIDATE_ACTION_ORDER.index(decision.action),
+            decision.latest_bullish_signal_age_td
+            if decision.latest_bullish_signal_age_td is not None
+            else 999999,
             decision.ticker,
         ),
     )
@@ -306,6 +331,7 @@ def _print_candidate_pullback_rows(
     *,
     pullback_validity: str | None,
     readiness: str | None,
+    priority: int | None,
     action: str | None,
     max_rows: int,
 ) -> None:
@@ -313,6 +339,7 @@ def _print_candidate_pullback_rows(
         decision_result,
         pullback_validity=pullback_validity,
         readiness=readiness,
+        priority=priority,
         action=action,
     )[:max_rows]:
         first_trace = decision.decision_trace[0] if decision.decision_trace else None
@@ -322,6 +349,9 @@ def _print_candidate_pullback_rows(
             f"ticker={_safe_debug_value(decision.ticker)} "
             f"validity={_safe_debug_value(decision.pullback_validity)} "
             f"entry_readiness={_safe_debug_value(decision.entry_readiness)} "
+            f"candidate_priority={_safe_debug_value(decision.candidate_priority)} "
+            f"candidate_priority_label={_safe_debug_value(decision.candidate_priority_label)} "
+            f"candidate_priority_reason={_safe_debug_value(decision.candidate_priority_reason)} "
             f"entry_readiness_reason={_safe_debug_value(decision.entry_readiness_reason)} "
             f"action={_safe_debug_value(decision.action)} "
             f"severity={_safe_debug_value(decision.severity)} "
@@ -418,6 +448,16 @@ def _print_entry_readiness_summaries(
         _print_summary(
             f"entry_readiness.{readiness_name}",
             decision_result.entry_readiness_counts.get(readiness_name, 0),
+        )
+
+
+def _print_candidate_priority_summaries(
+    decision_result: DatacenterDecisionBatchResult,
+) -> None:
+    for priority_label in _CANDIDATE_PRIORITY_LABEL_ORDER:
+        _print_summary(
+            f"candidate_priority.{priority_label}",
+            decision_result.candidate_priority_counts.get(priority_label, 0),
         )
 
 
@@ -549,6 +589,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     _print_pullback_action_summaries(decision_result)
     _print_entry_readiness_summaries(decision_result)
+    _print_candidate_priority_summaries(decision_result)
     if args.show_trace:
         _print_sell_trace_summaries(decision_result)
     if args.candidate_pullbacks:
@@ -557,6 +598,7 @@ def main(argv: list[str] | None = None) -> int:
             parsed_rows,
             pullback_validity=args.candidate_pullbacks_validity,
             readiness=args.candidate_pullbacks_readiness,
+            priority=args.candidate_pullbacks_priority,
             action=args.candidate_pullbacks_action,
             max_rows=args.max_candidate_pullbacks,
         )

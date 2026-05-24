@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from dev_tools.datacenter_dashboard_decisions import build_datacenter_ticker_decisions
+from dev_tools.datacenter_dashboard_decisions import (
+    _classify_candidate_priority,
+    build_datacenter_ticker_decisions,
+)
 from dev_tools.datacenter_dashboard_parser import DatacenterDashboardRow
 
 
@@ -21,6 +24,8 @@ def _row(
     ma_break_status: str | None = None,
     structure_warning_overrides_bullish_signal: int | None = None,
     freshness_status: str | None = None,
+    latest_bullish_signal_age_td: int | None = None,
+    latest_bearish_signal_age_td: int | None = None,
     raw_fields: dict[str, str] | None = None,
 ) -> DatacenterDashboardRow:
     return DatacenterDashboardRow(
@@ -50,8 +55,8 @@ def _row(
         sma50_break_pct=None,
         freshness_status=freshness_status,
         structure_warning_overrides_bullish_signal=structure_warning_overrides_bullish_signal,
-        latest_bullish_signal_age_td=None,
-        latest_bearish_signal_age_td=None,
+        latest_bullish_signal_age_td=latest_bullish_signal_age_td,
+        latest_bearish_signal_age_td=latest_bearish_signal_age_td,
         latest_bos_up_age_td=None,
         latest_bos_down_age_td=None,
         latest_reset_age_td=None,
@@ -632,6 +637,134 @@ def test_entry_readiness_counts_include_zero_defaults():
     assert result.entry_readiness_counts["EARLY_MONITOR"] == 0
     assert result.entry_readiness_counts["NOT_READY"] == 0
     assert result.entry_readiness_counts["INSUFFICIENT_DATA"] == 0
+
+
+def test_ready_to_watch_maps_to_candidate_priority_p1():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(ticker="TSM", horizon="rolling 30d", raw_status="LEADER"),
+            _row(
+                ticker="TSM",
+                horizon="daily",
+                raw_status="PULLBACK_CANDIDATE",
+                ma_break_status="OK",
+                freshness_status="FRESH_BULLISH_SIGNAL",
+            ),
+        ]
+    )
+
+    assert result.decisions[0].candidate_priority == 1
+    assert result.decisions[0].candidate_priority_label == "P1_READY_TO_WATCH"
+
+
+def test_needs_stop_stabilization_maps_to_candidate_priority_p2():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="CRUS",
+                horizon="daily",
+                raw_status="PULLBACK_CANDIDATE",
+                ma_break_status="OK",
+                freshness_status="FRESH_BULLISH_SIGNAL",
+            ),
+            _row(ticker="CRUS", horizon="rolling 2d", high_exit_risk_days_count=1),
+        ]
+    )
+
+    assert result.decisions[0].candidate_priority == 2
+    assert result.decisions[0].candidate_priority_label == "P2_STOP_STABILIZATION"
+
+
+def test_needs_risk_clearance_maps_to_candidate_priority_p3():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="CSW",
+                horizon="daily",
+                raw_status="PULLBACK_CANDIDATE",
+                ma_break_status="OK",
+                freshness_status="FRESH_BULLISH_SIGNAL",
+                reason="subindustry_context_risk",
+            )
+        ]
+    )
+
+    assert result.decisions[0].candidate_priority == 3
+    assert result.decisions[0].candidate_priority_label == "P3_RISK_CLEARANCE"
+
+
+def test_early_monitor_maps_to_candidate_priority_p4():
+    result = build_datacenter_ticker_decisions(
+        [_row(ticker="AMD", horizon="daily", raw_status="PULLBACK_CANDIDATE", ma_break_status="OK")]
+    )
+
+    assert result.decisions[0].candidate_priority == 4
+    assert result.decisions[0].candidate_priority_label == "P4_EARLY_MONITOR"
+
+
+def test_not_ready_maps_to_candidate_priority_p5():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="NVDA",
+                horizon="rolling 2d",
+                raw_status="PULLBACK_CANDIDATE",
+                latest_bos_event_type="BOS_DOWN",
+                raw_fields={"latest_bos_freshness": "FRESH"},
+            )
+        ]
+    )
+
+    assert result.decisions[0].candidate_priority == 5
+    assert result.decisions[0].candidate_priority_label == "P5_NOT_READY"
+
+
+def test_insufficient_data_or_missing_entry_readiness_maps_to_candidate_priority_p9():
+    priority, label, reason = _classify_candidate_priority("INSUFFICIENT_DATA")
+
+    assert priority == 9
+    assert label == "P9_NOT_CANDIDATE"
+    assert reason == "NOT_CANDIDATE_OR_INSUFFICIENT_DATA"
+
+
+def test_candidate_priority_counts_include_zero_defaults():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(ticker="TSM", horizon="rolling 30d", raw_status="LEADER"),
+            _row(
+                ticker="TSM",
+                horizon="daily",
+                raw_status="PULLBACK_CANDIDATE",
+                ma_break_status="OK",
+                freshness_status="FRESH_BULLISH_SIGNAL",
+            ),
+        ]
+    )
+
+    assert result.candidate_priority_counts["P1_READY_TO_WATCH"] == 1
+    assert result.candidate_priority_counts["P2_STOP_STABILIZATION"] == 0
+    assert result.candidate_priority_counts["P3_RISK_CLEARANCE"] == 0
+    assert result.candidate_priority_counts["P4_EARLY_MONITOR"] == 0
+    assert result.candidate_priority_counts["P5_NOT_READY"] == 0
+    assert result.candidate_priority_counts["P9_NOT_CANDIDATE"] == 0
+
+
+def test_final_action_is_unchanged_by_candidate_priority():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="CRUS",
+                horizon="daily",
+                raw_status="PULLBACK_CANDIDATE",
+                ma_break_status="OK",
+                freshness_status="FRESH_BULLISH_SIGNAL",
+            ),
+            _row(ticker="CRUS", horizon="rolling 2d", high_exit_risk_days_count=1),
+        ]
+    )
+
+    assert result.decisions[0].action == "TIGHTEN_STOP"
+    assert result.decisions[0].candidate_priority == 2
 
 
 def test_acute_bos_down_sell_confirmation_blocks_valid_pullback():
