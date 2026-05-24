@@ -48,6 +48,7 @@ def test_cli_writes_markdown_and_prints_deterministic_summary(tmp_path, capsys):
     markdown = expected_output_md.read_text(encoding="utf-8")
     assert "# Datacenter Daily Swing Signal Report" in markdown
     assert "## Watchlist Summary" in markdown
+    assert "## 15. Daily Triggers" in markdown
     assert "## Datacenter Taxonomy Listing" in markdown
     assert "row_type" in markdown
     assert "| LAYER |" in markdown
@@ -66,6 +67,7 @@ def test_cli_writes_markdown_and_prints_deterministic_summary(tmp_path, capsys):
     assert csv_text.startswith("section;value_1;")
     assert "0,0476" in csv_text
     assert "Dashboard;metric;value" in csv_text
+    assert "section;daily_triggers" in csv_text
     assert "Data Quality;scope;group_type;status;count" in csv_text
     assert "| metric | value |" not in csv_text
 
@@ -81,8 +83,16 @@ def test_cli_writes_markdown_and_prints_deterministic_summary(tmp_path, capsys):
     assert lines[8] == "SUMMARY breakout_count=1"
     assert lines[9] == "SUMMARY pullback_count=1"
     assert lines[10] == "SUMMARY exit_risk_count=1"
-    assert lines[11] == f"SUMMARY output_markdown={expected_output_md}"
-    assert lines[12] == f"SUMMARY output_csv={expected_output_csv}"
+    assert "SUMMARY daily_trigger_section_enabled=1" in lines
+    assert any(line.startswith("SUMMARY daily_stop_trigger_count=") for line in lines)
+    assert any(line.startswith("SUMMARY daily_sell_trigger_count=") for line in lines)
+    assert any(line.startswith("SUMMARY daily_exit_watch_count=") for line in lines)
+    assert any(line.startswith("SUMMARY daily_buy_trigger_count=") for line in lines)
+    assert any(line.startswith("SUMMARY daily_buy_watch_count=") for line in lines)
+    assert any(line.startswith("SUMMARY daily_no_trigger_count=") for line in lines)
+    assert any(line.startswith("SUMMARY daily_trigger_insufficient_data_count=") for line in lines)
+    assert f"SUMMARY output_markdown={expected_output_md}" in lines
+    assert f"SUMMARY output_csv={expected_output_csv}" in lines
     assert lines[-1] == "SUMMARY validation_status=OK"
 
 

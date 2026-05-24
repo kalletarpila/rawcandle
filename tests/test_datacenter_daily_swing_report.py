@@ -113,6 +113,22 @@ def _update_ticker_exit_risk_severity(path, *, ticker: str, signal_date: str, se
         conn.commit()
 
 
+def _update_ticker_fields(path, *, ticker: str, signal_date: str, assignments: dict[str, object]):
+    columns = ", ".join(f"{column} = ?" for column in assignments)
+    values = [*assignments.values(), ticker, signal_date]
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            f"""
+            UPDATE dc_ticker_swing_signal_daily
+            SET {columns}
+            WHERE ticker = ?
+              AND signal_date = ?
+            """,
+            values,
+        )
+        conn.commit()
+
+
 def _seed_report_db(path, *, with_ecosystem: bool = True):
     _create_analysis_db(path)
     group_rows = [
@@ -313,8 +329,9 @@ def test_generates_markdown_report_with_required_sections_and_filters(tmp_path):
         "## 12. Breakout Ticker Scanner",
         "## 13. Pullback Ticker Scanner",
         "## 14. Exit-Risk Ticker Scanner",
-        "## 15. Data Quality",
-        "## 16. Missing / Incomplete Inputs Summary",
+        "## 15. Daily Triggers",
+        "## 16. Data Quality",
+        "## 17. Missing / Incomplete Inputs Summary",
         "## Datacenter Taxonomy Listing",
     ]:
         assert heading in markdown
@@ -758,7 +775,7 @@ def test_daily_report_without_technical_relevance_run_id_remains_unchanged(tmp_p
         generated_at_utc="2026-05-17T12:00:00Z",
     )
 
-    assert "## 17. Technical Relevance Context" not in result["markdown"]
+    assert "## 18. Technical Relevance Context" not in result["markdown"]
     assert "section;technical_relevance_context" not in result["csv"]
     assert "latest_bullish_relevance_signal_name" not in result["markdown"]
     assert "latest_bearish_relevance_signal_name" not in result["markdown"]
@@ -850,7 +867,7 @@ def test_daily_report_with_technical_relevance_run_id_adds_context_section_witho
     assert baseline["summary"]["breakout_count"] == enriched["summary"]["breakout_count"]
     assert baseline["summary"]["pullback_count"] == enriched["summary"]["pullback_count"]
     assert baseline["summary"]["exit_risk_count"] == enriched["summary"]["exit_risk_count"]
-    assert "## 17. Technical Relevance Context" in enriched["markdown"]
+    assert "## 18. Technical Relevance Context" in enriched["markdown"]
     assert "technical_relevance_run_id: REL_RUN_A" in enriched["markdown"]
     assert "bullish_candle_signal" in enriched["markdown"]
     assert "bearish_divergence_signal" in enriched["markdown"]
@@ -870,9 +887,12 @@ def test_daily_report_with_technical_relevance_run_id_adds_context_section_witho
     assert "technical_relevance_context;AAA;1d;2024-01-10;2024-01-10;Hammer;CANDLE;RELEVANT;" in enriched["csv"]
     assert "technical_relevance_context;BBB;1d;2024-01-10;2024-01-10;Bullish Divergence;CANDLE;WEAK_CONTEXT;" in enriched["csv"]
     assert "technical_relevance_context;CCC;1d;2024-01-10;2024-01-10;Bearish Engulfing;CANDLE;RELEVANT;" in enriched["csv"]
-    assert "17. Technical Relevance Context" not in enriched["csv"]
+    assert "18. Technical Relevance Context" not in enriched["csv"]
     assert "section;technical_relevance_context\nsection;technical_relevance_run_id;REL_RUN_A\nsection;ticker;timeframe;signal_date;signal_confirmed_as_of_date;" in enriched["csv"]
-    assert "\n17. Technical Relevance Context;" not in enriched["csv"]
+    assert "\n18. Technical Relevance Context;" not in enriched["csv"]
+    assert "Datacenter Taxonomy Listing" in enriched["csv"]
+    assert enriched["csv"].index("section;technical_relevance_context") < enriched["csv"].index("Datacenter Taxonomy Listing")
+    assert enriched["csv"].count("section;technical_relevance_context") == 1
     assert "| AAA | Infrastructure | AI Chips |" in enriched["markdown"]
     assert "| 2024-01-10 | Hammer | RELEVANT | UP_TREND_BULLISH_DIP_REVERSAL_NEAR_PIVOT_LOW | 2024-01-10 | Bearish Divergence | WEAK_CONTEXT | NEUTRAL_DIVERGENCE_WEAK_CONTEXT |" in enriched["markdown"]
     assert "| BBB | Infrastructure | Cloud |" in enriched["markdown"]
@@ -880,6 +900,361 @@ def test_daily_report_with_technical_relevance_run_id_adds_context_section_witho
     assert "| CCC | Infrastructure | Storage |" in enriched["markdown"]
     assert "| 2024-01-10 | Hammer | WEAK_CONTEXT | UP_TREND_BULLISH_REVERSAL_WITHOUT_PIVOT_CONTEXT | 2024-01-10 | Bearish Engulfing | RELEVANT | UP_TREND_BEARISH_REVERSAL_AFTER_BOS_DOWN |" in enriched["markdown"]
     breakout_start = enriched["markdown"].index("## 12. Breakout Ticker Scanner")
-    technical_section_start = enriched["markdown"].index("## 17. Technical Relevance Context")
+    technical_section_start = enriched["markdown"].index("## 18. Technical Relevance Context")
     scanner_section_markdown = enriched["markdown"][breakout_start:technical_section_start]
     assert "NOISE_REASON" not in scanner_section_markdown
+
+
+def test_daily_trigger_section_renders_markdown_csv_and_summary(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_report_db(analysis_db)
+    _update_ticker_fields(
+        analysis_db,
+        ticker="AAA",
+        signal_date="2024-01-10",
+        assignments={
+            "pullback_signal": 1,
+            "ticker_trend_state": "UP",
+            "latest_bos_event_type": "BOS_UP",
+            "latest_bos_freshness": "FRESH",
+            "latest_reset_reason": None,
+            "latest_reset_freshness": None,
+        },
+    )
+
+    conn = _connect_relevance_db(analysis_db)
+    _insert_relevance_run(conn, "REL_DAILY_TRIGGER")
+    _insert_relevance_record(
+        conn,
+        run_id="REL_DAILY_TRIGGER",
+        ticker="AAA",
+        signal_date="2024-01-10",
+        signal_name="Hammer",
+        relevance_class="RELEVANT",
+        relevance_reason="UP_TREND_BULLISH_DIP_REVERSAL_NEAR_PIVOT_LOW",
+    )
+    conn.commit()
+    conn.close()
+
+    result = write_daily_swing_signal_report(
+        analysis_db_path=analysis_db,
+        signal_date="2024-01-10",
+        generated_at_utc="2026-05-17T12:00:00Z",
+        technical_relevance_run_id="REL_DAILY_TRIGGER",
+    )
+
+    assert "## 15. Daily Triggers" in result["markdown"]
+    assert "section;daily_triggers" in result["csv"]
+    assert result["summary"]["daily_trigger_section_enabled"] == 1
+    assert "daily_buy_trigger_count" in result["summary"]
+
+
+def test_daily_triggers_cover_all_states_and_protective_precedence(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_report_db(analysis_db)
+    _update_ticker_fields(
+        analysis_db,
+        ticker="AAA",
+        signal_date="2024-01-10",
+        assignments={
+            "pullback_signal": 1,
+            "ticker_trend_state": "UP",
+            "latest_bos_event_type": "BOS_UP",
+            "latest_bos_freshness": "FRESH",
+            "latest_reset_reason": None,
+            "latest_reset_freshness": None,
+        },
+    )
+    _update_ticker_fields(
+        analysis_db,
+        ticker="BBB",
+        signal_date="2024-01-10",
+        assignments={
+            "pullback_signal": 1,
+            "ticker_trend_state": "UP",
+            "bearish_candle_signal": 1,
+            "exit_risk_signal": 1,
+            "exit_risk_severity": "HIGH",
+            "exit_reason": "close_below_ema20",
+            "latest_bos_event_type": "BOS_DOWN",
+            "latest_bos_freshness": "FRESH",
+            "latest_reset_reason": "RESET",
+            "latest_reset_freshness": "FRESH",
+        },
+    )
+    _update_ticker_fields(
+        analysis_db,
+        ticker="CCC",
+        signal_date="2024-01-10",
+        assignments={
+            "price_data_status": "OK",
+            "close": 90.0,
+            "exit_risk_signal": 1,
+            "exit_risk_severity": "MEDIUM",
+            "exit_reason": "close_below_ema20",
+            "ticker_trend_state": "NEUTRAL",
+            "latest_bos_event_type": None,
+            "latest_bos_freshness": None,
+            "latest_reset_reason": None,
+            "latest_reset_freshness": None,
+        },
+    )
+    _update_ticker_fields(
+        analysis_db,
+        ticker="DDD",
+        signal_date="2024-01-10",
+        assignments={
+            "close": 100.0,
+            "price_data_status": "OK",
+            "pullback_signal": 0,
+            "breakout_signal": 0,
+            "exit_risk_signal": 0,
+            "exit_risk_severity": None,
+            "exit_reason": None,
+            "ticker_trend_state": "NEUTRAL",
+            "distance_to_ema20_pct": -0.01,
+            "latest_bos_event_type": "BOS_DOWN",
+            "latest_bos_freshness": "STALE",
+            "latest_reset_reason": None,
+            "latest_reset_freshness": None,
+        },
+    )
+
+    conn = _connect_relevance_db(analysis_db)
+    _insert_relevance_run(conn, "REL_DAILY_STATES")
+    _insert_relevance_record(
+        conn,
+        run_id="REL_DAILY_STATES",
+        ticker="AAA",
+        signal_date="2024-01-10",
+        signal_name="Hammer",
+        relevance_class="RELEVANT",
+        relevance_reason="UP_TREND_BULLISH_DIP_REVERSAL_NEAR_PIVOT_LOW",
+    )
+    _insert_relevance_record(
+        conn,
+        run_id="REL_DAILY_STATES",
+        ticker="BBB",
+        signal_date="2024-01-10",
+        signal_name="Bearish Engulfing",
+        relevance_class="RELEVANT",
+        relevance_reason="DOWN_TREND_BEARISH_REVERSAL_AFTER_BREAK",
+    )
+    _insert_relevance_record(
+        conn,
+        run_id="REL_DAILY_STATES",
+        ticker="CCC",
+        signal_date="2024-01-10",
+        signal_name="Bearish Divergence",
+        relevance_class="RELEVANT",
+        relevance_reason="NEAR_LOWER_HIGH_WITH_BEARISH_CONTEXT",
+    )
+    _insert_relevance_record(
+        conn,
+        run_id="REL_DAILY_STATES",
+        ticker="DDD",
+        signal_date="2024-01-10",
+        signal_name="Hammer",
+        relevance_class="WEAK_CONTEXT",
+        relevance_reason="WEAK_BULLISH_CONTEXT",
+    )
+    conn.commit()
+    conn.close()
+
+    result = write_daily_swing_signal_report(
+        analysis_db_path=analysis_db,
+        signal_date="2024-01-10",
+        generated_at_utc="2026-05-17T12:00:00Z",
+        technical_relevance_run_id="REL_DAILY_STATES",
+    )
+
+    csv_lines = result["csv"].splitlines()
+    section_index = csv_lines.index("section;daily_triggers")
+    header = csv_lines[section_index + 1].split(";")[1:]
+    rows = {}
+    for line in csv_lines[section_index + 2 :]:
+        if not line or line.startswith("section;") or line.startswith("Datacenter Taxonomy Listing;"):
+            break
+        parts = line.split(";")
+        row = dict(zip(header, parts[1:]))
+        rows[row["ticker"]] = row
+
+    assert rows["AAA"]["daily_trigger_state"] == "BUY_TRIGGER"
+    assert rows["BBB"]["daily_trigger_state"] == "STOP_TRIGGER"
+    assert rows["CCC"]["daily_trigger_state"] == "SELL_TRIGGER"
+    assert rows["DDD"]["daily_trigger_state"] == "EXIT_WATCH"
+    assert rows["BBB"]["next_action"] == "CHECK_STOP_OR_REDUCE"
+    assert rows["AAA"]["next_action"] == "REVIEW_WITH_ROLLING_CONTEXT"
+
+    assert result["summary"]["daily_stop_trigger_count"] == 1
+    assert result["summary"]["daily_sell_trigger_count"] == 1
+    assert result["summary"]["daily_exit_watch_count"] == 1
+    assert result["summary"]["daily_buy_trigger_count"] == 1
+    assert result["summary"]["daily_buy_watch_count"] == 0
+    assert result["summary"]["daily_no_trigger_count"] == 0
+    assert result["summary"]["daily_trigger_insufficient_data_count"] == 0
+
+
+def test_daily_trigger_handles_buy_watch_no_trigger_and_insufficient_data(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_report_db(analysis_db)
+    _update_ticker_fields(
+        analysis_db,
+        ticker="AAA",
+        signal_date="2024-01-10",
+        assignments={
+            "pullback_signal": 1,
+            "ticker_trend_state": "NEUTRAL",
+            "latest_bos_event_type": None,
+            "latest_bos_freshness": None,
+            "latest_reset_reason": None,
+            "latest_reset_freshness": None,
+            "exit_risk_signal": 0,
+            "exit_risk_severity": None,
+            "exit_reason": None,
+        },
+    )
+    _update_ticker_fields(
+        analysis_db,
+        ticker="BBB",
+        signal_date="2024-01-10",
+        assignments={
+            "pullback_signal": 0,
+            "breakout_signal": 0,
+            "fast_ema10_pullback_signal": 0,
+            "conservative_ema20_pullback_signal": 0,
+            "bullish_candle_signal": 0,
+            "bullish_divergence_signal": 0,
+            "hidden_bullish_divergence_signal": 0,
+            "exit_risk_signal": 0,
+            "exit_risk_severity": None,
+            "exit_reason": None,
+            "distance_to_ema10_pct": 0.08,
+            "distance_to_ema20_pct": 0.08,
+            "latest_bos_event_type": "BOS_UP",
+            "latest_bos_freshness": "FRESH",
+            "latest_reset_reason": None,
+            "latest_reset_freshness": None,
+            "ticker_trend_state": "UP",
+        },
+    )
+    _update_ticker_fields(
+        analysis_db,
+        ticker="CCC",
+        signal_date="2024-01-10",
+        assignments={
+            "price_data_status": "OK",
+            "close": 90.0,
+            "pullback_signal": 1,
+            "ticker_trend_state": "UP",
+            "bearish_candle_signal": 0,
+            "bearish_divergence_signal": 0,
+            "hidden_bearish_divergence_signal": 0,
+            "latest_bos_event_type": "BOS_DOWN",
+            "latest_bos_freshness": "STALE",
+            "latest_reset_reason": None,
+            "latest_reset_freshness": None,
+            "exit_risk_signal": 0,
+            "exit_risk_severity": None,
+            "exit_reason": None,
+        },
+    )
+
+    result = write_daily_swing_signal_report(
+        analysis_db_path=analysis_db,
+        signal_date="2024-01-10",
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+
+    csv_lines = result["csv"].splitlines()
+    section_index = csv_lines.index("section;daily_triggers")
+    header = csv_lines[section_index + 1].split(";")[1:]
+    rows = {}
+    for line in csv_lines[section_index + 2 :]:
+        if not line or line.startswith("section;") or line.startswith("Datacenter Taxonomy Listing;"):
+            break
+        parts = line.split(";")
+        row = dict(zip(header, parts[1:]))
+        rows[row["ticker"]] = row
+
+    assert rows["AAA"]["daily_trigger_state"] == "BUY_WATCH"
+    assert rows["BBB"]["daily_trigger_state"] == "NO_TRIGGER"
+    assert rows["CCC"]["daily_trigger_state"] == "EXIT_WATCH"
+    assert rows["DDD"]["daily_trigger_state"] == "INSUFFICIENT_DATA"
+
+
+def test_fresh_bos_down_blocks_buy_trigger_but_stale_bos_down_does_not(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_report_db(analysis_db)
+    _update_ticker_fields(
+        analysis_db,
+        ticker="AAA",
+        signal_date="2024-01-10",
+        assignments={
+            "pullback_signal": 1,
+            "ticker_trend_state": "UP",
+            "latest_bos_event_type": "BOS_DOWN",
+            "latest_bos_freshness": "FRESH",
+            "exit_risk_signal": 0,
+            "exit_risk_severity": None,
+            "exit_reason": None,
+        },
+    )
+    _update_ticker_fields(
+        analysis_db,
+        ticker="BBB",
+        signal_date="2024-01-10",
+        assignments={
+            "pullback_signal": 1,
+            "ticker_trend_state": "UP",
+            "latest_bos_event_type": "BOS_DOWN",
+            "latest_bos_freshness": "STALE",
+            "exit_risk_signal": 0,
+            "exit_risk_severity": None,
+            "exit_reason": None,
+        },
+    )
+
+    conn = _connect_relevance_db(analysis_db)
+    _insert_relevance_run(conn, "REL_FRESHNESS")
+    _insert_relevance_record(
+        conn,
+        run_id="REL_FRESHNESS",
+        ticker="AAA",
+        signal_date="2024-01-10",
+        signal_name="Hammer",
+        relevance_class="RELEVANT",
+        relevance_reason="UP_TREND_BULLISH_DIP_REVERSAL_NEAR_PIVOT_LOW",
+    )
+    _insert_relevance_record(
+        conn,
+        run_id="REL_FRESHNESS",
+        ticker="BBB",
+        signal_date="2024-01-10",
+        signal_name="Hammer",
+        relevance_class="RELEVANT",
+        relevance_reason="UP_TREND_BULLISH_DIP_REVERSAL_NEAR_PIVOT_LOW",
+    )
+    conn.commit()
+    conn.close()
+
+    result = write_daily_swing_signal_report(
+        analysis_db_path=analysis_db,
+        signal_date="2024-01-10",
+        generated_at_utc="2026-05-17T12:00:00Z",
+        technical_relevance_run_id="REL_FRESHNESS",
+    )
+
+    csv_lines = result["csv"].splitlines()
+    section_index = csv_lines.index("section;daily_triggers")
+    header = csv_lines[section_index + 1].split(";")[1:]
+    rows = {}
+    for line in csv_lines[section_index + 2 :]:
+        if not line or line.startswith("section;") or line.startswith("Datacenter Taxonomy Listing;"):
+            break
+        parts = line.split(";")
+        row = dict(zip(header, parts[1:]))
+        rows[row["ticker"]] = row
+
+    assert rows["AAA"]["daily_trigger_state"] != "BUY_TRIGGER"
+    assert rows["BBB"]["daily_trigger_state"] == "BUY_TRIGGER"

@@ -31,6 +31,14 @@ DAILY_REPORT_SUMMARY_ORDER = [
     "breakout_count",
     "pullback_count",
     "exit_risk_count",
+    "daily_trigger_section_enabled",
+    "daily_stop_trigger_count",
+    "daily_sell_trigger_count",
+    "daily_exit_watch_count",
+    "daily_buy_trigger_count",
+    "daily_buy_watch_count",
+    "daily_no_trigger_count",
+    "daily_trigger_insufficient_data_count",
     "output_markdown",
     "output_csv",
     "validation_status",
@@ -60,11 +68,27 @@ TREND_PRIORITY = {
     None: 3,
 }
 
+DAILY_TRIGGER_STATE_PRIORITY = {
+    "STOP_TRIGGER": 0,
+    "SELL_TRIGGER": 1,
+    "EXIT_WATCH": 2,
+    "BUY_TRIGGER": 3,
+    "BUY_WATCH": 4,
+    "NO_TRIGGER": 5,
+    "INSUFFICIENT_DATA": 6,
+}
+
+FRESH_SIGNAL_STATES = {"FRESH", "RECENT", "CURRENT"}
+SEVERE_EXIT_SEVERITIES = {"EXTREME", "CRITICAL"}
+HIGH_EXIT_SEVERITIES = {"HIGH", *SEVERE_EXIT_SEVERITIES}
+
 EXIT_RISK_SEVERITY_PRIORITY = {
-    "HIGH": 0,
-    "MEDIUM": 1,
-    "LOW": 2,
-    None: 3,
+    "CRITICAL": 0,
+    "EXTREME": 1,
+    "HIGH": 2,
+    "MEDIUM": 3,
+    "LOW": 4,
+    None: 5,
 }
 
 FRESHNESS_PRIORITY = {
@@ -227,19 +251,46 @@ def _build_technical_relevance_csv_section(
 
 
 def _strip_markdown_technical_relevance_section(markdown: str) -> str:
-    heading = "\n## 17. Technical Relevance Context\n"
-    start = markdown.find(heading)
-    if start == -1:
-        weekly_heading = "\n## 15. Technical Relevance Context\n"
-        start = markdown.find(weekly_heading)
-        if start == -1:
-            return markdown
+    for heading in (
+        "\n## 18. Technical Relevance Context\n",
+        "\n## 17. Technical Relevance Context\n",
+        "\n## 15. Technical Relevance Context\n",
+    ):
+        start = markdown.find(heading)
+        if start != -1:
+            break
+    else:
+        return markdown
     next_section = markdown.find("\n## ", start + 1)
     if next_section == -1:
         stripped = markdown[:start]
     else:
         stripped = markdown[:start] + markdown[next_section:]
     return stripped.rstrip() + "\n"
+
+
+def _insert_csv_section_before_taxonomy_listing(csv_text: str, section_text: str) -> str:
+    taxonomy_marker = "\nDatacenter Taxonomy Listing;"
+    marker_index = csv_text.find(taxonomy_marker)
+    if marker_index == -1:
+        return csv_text + section_text
+    insertion_index = marker_index + 1
+    return csv_text[:insertion_index] + section_text + csv_text[insertion_index:]
+
+
+def _build_role_csv_section(
+    section_name: str,
+    headers: Sequence[str],
+    rows: Sequence[dict[str, object]],
+) -> str:
+    lines = [
+        f"section;{section_name}",
+        "section;" + ";".join(headers),
+    ]
+    for row in rows:
+        values = [section_name, *(_format_value(row.get(header)) for header in headers)]
+        lines.append(";".join(values))
+    return "\n".join(lines) + "\n"
 
 
 def _format_table(headers: Sequence[str], rows: Sequence[dict[str, object]]) -> str:
@@ -303,6 +354,268 @@ def _count_by_field(rows: Sequence[dict[str, object]], field_name: str) -> list[
         key = "NULL" if row.get(field_name) is None else str(row.get(field_name))
         counts[key] = counts.get(key, 0) + 1
     return [{"value": key, "count": counts[key]} for key in sorted(counts)]
+
+
+def _normalize_text(value: object | None) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _is_fresh_or_recent(value: object | None) -> bool:
+    return _normalize_text(value).upper() in FRESH_SIGNAL_STATES
+
+
+def _has_reason_token(value: object | None, token: str) -> bool:
+    reason_text = _normalize_text(value).lower()
+    return token.lower() in reason_text
+
+
+def _is_severe_exit_severity(value: object | None) -> bool:
+    return _normalize_text(value).upper() in SEVERE_EXIT_SEVERITIES
+
+
+def _is_high_or_worse_exit_severity(value: object | None) -> bool:
+    return _normalize_text(value).upper() in HIGH_EXIT_SEVERITIES
+
+
+def _has_negative_ema20_context(value: object | None) -> bool:
+    distance = _float_value(value)
+    return distance is not None and distance < 0
+
+
+def _has_slightly_negative_ema20_context(value: object | None) -> bool:
+    distance = _float_value(value)
+    return distance is not None and distance < 0 and distance >= -0.03
+
+
+def _is_near_pullback_zone(row: dict[str, object]) -> bool:
+    for field_name in ("distance_to_ema10_pct", "distance_to_ema20_pct"):
+        distance = _float_value(row.get(field_name))
+        if distance is not None and abs(distance) <= 0.03:
+            return True
+    return False
+
+
+def _build_daily_report_ticker_rows(
+    *,
+    ticker_rows: Sequence[dict[str, object]],
+    group_rows: Sequence[dict[str, object]],
+    synthetic_rows: Sequence[dict[str, object]],
+) -> list[dict[str, object]]:
+    group_context_by_key = {
+        (row.get("group_type"), row.get("group_name")): row
+        for row in group_rows
+    }
+    synthetic_context_by_key = _build_group_synthetic_context_by_key(
+        synthetic_rows,
+        include_date=False,
+    )
+    return [
+        _build_daily_report_ticker_row(
+            ticker_row=row,
+            group_context_by_key=group_context_by_key,
+            synthetic_context_by_key=synthetic_context_by_key,
+        )
+        for row in ticker_rows
+    ]
+
+
+def _classify_daily_trigger_row(row: dict[str, object]) -> tuple[str, str, str, str]:
+    ticker = _normalize_text(row.get("ticker"))
+    if not ticker:
+        return ("INSUFFICIENT_DATA", "MISSING_TICKER_CONTEXT", "", "WAIT_FOR_DATA")
+    if row.get("price_data_status") in WATCHLIST_MISSING_PRICE_STATUSES or row.get("close") is None:
+        return ("INSUFFICIENT_DATA", "MISSING_PRICE_CONTEXT", "", "WAIT_FOR_DATA")
+
+    trend_state = _normalize_text(row.get("ticker_trend_state")).upper()
+    current_watchlist_status = _normalize_text(row.get("current_watchlist_status")).upper()
+    exit_risk_severity = _normalize_text(row.get("exit_risk_severity")).upper()
+    latest_structure_label = _normalize_text(row.get("latest_structure_label")).upper()
+    latest_bullish_relevance_class = _normalize_text(row.get("latest_bullish_relevance_class")).upper()
+    latest_bearish_relevance_class = _normalize_text(row.get("latest_bearish_relevance_class")).upper()
+    fresh_bos_down = (
+        _normalize_text(row.get("latest_bos_event_type")).upper() == "BOS_DOWN"
+        and _is_fresh_or_recent(row.get("latest_bos_freshness"))
+    )
+    stale_bos_down = (
+        _normalize_text(row.get("latest_bos_event_type")).upper() == "BOS_DOWN"
+        and not _is_fresh_or_recent(row.get("latest_bos_freshness"))
+    )
+    fresh_reset = bool(_normalize_text(row.get("latest_reset_reason"))) and _is_fresh_or_recent(
+        row.get("latest_reset_freshness")
+    )
+    relevant_bullish = latest_bullish_relevance_class == "RELEVANT"
+    weak_bullish = latest_bullish_relevance_class == "WEAK_CONTEXT"
+    relevant_bearish = latest_bearish_relevance_class == "RELEVANT"
+    weak_bearish = latest_bearish_relevance_class == "WEAK_CONTEXT"
+    has_pullback_signal = int(row.get("pullback_signal") or 0) == 1
+    has_breakout_signal = int(row.get("breakout_signal") or 0) == 1
+    has_exit_risk_signal = int(row.get("exit_risk_signal") or 0) == 1
+    has_bullish_signal = any(
+        int(row.get(field_name) or 0) == 1
+        for field_name in (
+            "bullish_candle_signal",
+            "bullish_divergence_signal",
+            "hidden_bullish_divergence_signal",
+        )
+    )
+    has_bearish_signal = any(
+        int(row.get(field_name) or 0) == 1
+        for field_name in (
+            "bearish_candle_signal",
+            "bearish_divergence_signal",
+            "hidden_bearish_divergence_signal",
+        )
+    )
+    high_exit_risk = current_watchlist_status == "HIGH_EXIT_RISK" or _is_high_or_worse_exit_severity(
+        exit_risk_severity
+    )
+    bullish_evidence = has_pullback_signal or has_bullish_signal or _is_near_pullback_zone(row)
+    buy_hard_blocker = (
+        trend_state == "DOWN"
+        or fresh_bos_down
+        or fresh_reset
+        or high_exit_risk
+        or relevant_bearish
+    )
+    stop_reason = ""
+    if _is_severe_exit_severity(exit_risk_severity) and has_exit_risk_signal:
+        stop_reason = "EXTREME_OR_CRITICAL_EXIT_RISK"
+    elif exit_risk_severity == "HIGH" and _has_reason_token(row.get("exit_reason"), "close_below_ema20"):
+        stop_reason = "HIGH_EXIT_RISK_CLOSE_BELOW_EMA20"
+    elif fresh_bos_down and fresh_reset:
+        stop_reason = "FRESH_BOS_DOWN_AND_RESET"
+    elif latest_structure_label == "LL" and trend_state == "DOWN":
+        stop_reason = "DOWN_TREND_LL_STRUCTURE_BREAK"
+    elif relevant_bearish and high_exit_risk:
+        stop_reason = "RELEVANT_BEARISH_CONTEXT_WITH_HIGH_EXIT_RISK"
+    if stop_reason:
+        return ("STOP_TRIGGER", "CONFIRMED_PROTECTIVE_BREAKDOWN", stop_reason, "CHECK_STOP_OR_REDUCE")
+
+    sell_reason = ""
+    if has_exit_risk_signal and exit_risk_severity in {"MEDIUM", "HIGH"}:
+        sell_reason = "EXIT_RISK_SIGNAL_MEDIUM_OR_HIGH"
+    elif _has_reason_token(row.get("exit_reason"), "close_below_ema20"):
+        sell_reason = "CLOSE_BELOW_EMA20"
+    elif _has_reason_token(row.get("exit_reason"), "return_10d_lt_minus_8pct"):
+        sell_reason = "RETURN_10D_LT_MINUS_8PCT"
+    elif fresh_bos_down:
+        sell_reason = "FRESH_BOS_DOWN"
+    elif relevant_bearish:
+        sell_reason = "RELEVANT_BEARISH_CONTEXT"
+    elif has_bearish_signal and trend_state != "UP":
+        sell_reason = "BEARISH_DAILY_SIGNAL"
+    elif trend_state == "DOWN" and _has_negative_ema20_context(row.get("distance_to_ema20_pct")):
+        sell_reason = "DOWN_TREND_BELOW_EMA20"
+    if sell_reason:
+        return ("SELL_TRIGGER", "BEARISH_DAILY_BREAKDOWN_SIGNAL", sell_reason, "REVIEW_EXIT_OR_STOP")
+
+    exit_watch_reason = ""
+    if has_exit_risk_signal:
+        exit_watch_reason = "MILD_EXIT_RISK_SIGNAL"
+    elif weak_bearish:
+        exit_watch_reason = "WEAK_BEARISH_CONTEXT"
+    elif stale_bos_down and not (relevant_bullish and bullish_evidence and trend_state != "DOWN"):
+        exit_watch_reason = "STALE_BOS_DOWN"
+    elif _has_slightly_negative_ema20_context(row.get("distance_to_ema20_pct")):
+        exit_watch_reason = "SLIGHTLY_BELOW_EMA20"
+    elif current_watchlist_status in {"MEDIUM_EXIT_RISK", "GROUP_RISK"}:
+        exit_watch_reason = current_watchlist_status
+    if exit_watch_reason:
+        return ("EXIT_WATCH", "MILD_OR_UNCONFIRMED_EXIT_PRESSURE", exit_watch_reason, "MONITOR_NEXT_SESSION")
+
+    if relevant_bullish and bullish_evidence and not buy_hard_blocker and trend_state != "DOWN":
+        primary_reason = (
+            "PULLBACK_TRIGGER_WITH_RELEVANT_BULLISH_CONTEXT"
+            if has_pullback_signal or _is_near_pullback_zone(row)
+            else "BULLISH_DAILY_TRIGGER_WITH_CONTEXT"
+        )
+        return ("BUY_TRIGGER", primary_reason, "", "REVIEW_WITH_ROLLING_CONTEXT")
+
+    if (
+        (has_pullback_signal or has_breakout_signal or has_bullish_signal or weak_bullish or _is_near_pullback_zone(row))
+        and not buy_hard_blocker
+    ):
+        return ("BUY_WATCH", "BULLISH_SETUP_NEEDS_CONFIRMATION", "", "MONITOR_FOR_DAILY_CONFIRMATION")
+
+    return ("NO_TRIGGER", "NO_MEANINGFUL_DAILY_TRIGGER", "", "NONE")
+
+
+def _build_daily_trigger_rows(
+    *,
+    ticker_rows: Sequence[dict[str, object]],
+    group_rows: Sequence[dict[str, object]],
+    synthetic_rows: Sequence[dict[str, object]],
+    technical_relevance_context_rows: Sequence[dict[str, object]],
+    technical_relevance_run_id: str | None,
+) -> list[dict[str, object]]:
+    contextual_rows = _build_daily_report_ticker_rows(
+        ticker_rows=ticker_rows,
+        group_rows=group_rows,
+        synthetic_rows=synthetic_rows,
+    )
+    contextual_by_ticker = {
+        _normalize_text(row.get("ticker")): row
+        for row in contextual_rows
+        if _normalize_text(row.get("ticker"))
+    }
+    enriched_rows = (
+        _enrich_rows_with_technical_relevance_companions(
+            ticker_rows,
+            technical_relevance_context_rows=technical_relevance_context_rows,
+            row_date_field="signal_date",
+        )
+        if technical_relevance_run_id is not None
+        else [dict(row) for row in ticker_rows]
+    )
+    output_rows: list[dict[str, object]] = []
+    for row in enriched_rows:
+        ticker = _normalize_text(row.get("ticker"))
+        contextual_row = contextual_by_ticker.get(ticker, {})
+        combined_row = {
+            **row,
+            "current_watchlist_status": contextual_row.get("watchlist_status"),
+            "subindustry_context_risk": contextual_row.get("subindustry_context_risk"),
+            "layer_context_risk": contextual_row.get("layer_context_risk"),
+        }
+        state, primary_reason, blocking_reason, next_action = _classify_daily_trigger_row(combined_row)
+        output_rows.append(
+            {
+                "ticker": row.get("ticker"),
+                "daily_trigger_state": state,
+                "primary_layer": row.get("primary_layer"),
+                "primary_subindustry": row.get("primary_subindustry"),
+                "close": row.get("close"),
+                "current_watchlist_status": contextual_row.get("watchlist_status"),
+                "pullback_signal": row.get("pullback_signal"),
+                "breakout_signal": row.get("breakout_signal"),
+                "exit_risk_signal": row.get("exit_risk_signal"),
+                "exit_risk_severity": row.get("exit_risk_severity"),
+                "exit_reason": row.get("exit_reason"),
+                "ticker_trend_state": row.get("ticker_trend_state"),
+                "latest_structure_label": row.get("latest_structure_label"),
+                "latest_bos_event_type": row.get("latest_bos_event_type"),
+                "latest_bos_freshness": row.get("latest_bos_freshness"),
+                "latest_reset_reason": row.get("latest_reset_reason"),
+                "latest_reset_freshness": row.get("latest_reset_freshness"),
+                "latest_bullish_relevance_class": row.get("latest_bullish_relevance_class"),
+                "latest_bullish_relevance_reason": row.get("latest_bullish_relevance_reason"),
+                "latest_bearish_relevance_class": row.get("latest_bearish_relevance_class"),
+                "latest_bearish_relevance_reason": row.get("latest_bearish_relevance_reason"),
+                "primary_reason": primary_reason,
+                "blocking_reason": blocking_reason,
+                "next_action": next_action,
+            }
+        )
+    output_rows.sort(
+        key=lambda output_row: (
+            DAILY_TRIGGER_STATE_PRIORITY.get(str(output_row.get("daily_trigger_state")), 99),
+            EXIT_RISK_SEVERITY_PRIORITY.get(output_row.get("exit_risk_severity"), 5),
+            str(output_row.get("ticker") or ""),
+        )
+    )
+    return output_rows
 
 
 def _load_watchlist_tickers(path: str | Path | None) -> list[str]:
@@ -1085,6 +1398,13 @@ def build_markdown_daily_swing_report(
             technical_relevance_context_rows=technical_relevance_context_rows,
             row_date_field="signal_date",
         )
+    daily_trigger_rows = _build_daily_trigger_rows(
+        ticker_rows=ticker_rows,
+        group_rows=group_rows,
+        synthetic_rows=synthetic_rows,
+        technical_relevance_context_rows=technical_relevance_context_rows,
+        technical_relevance_run_id=technical_relevance_run_id,
+    )
 
     lines: list[str] = [
         "# Datacenter Daily Swing Signal Report",
@@ -1404,7 +1724,29 @@ def build_markdown_daily_swing_report(
         lines.extend(["", heading])
         lines.append(_format_table(headers, section_rows).rstrip())
 
-    lines.extend(["", "## 15. Data Quality"])
+    lines.extend(["", "## 15. Daily Triggers"])
+    lines.append(
+        _format_table(
+            [
+                "ticker",
+                "daily_trigger_state",
+                "primary_layer",
+                "primary_subindustry",
+                "close",
+                "ticker_trend_state",
+                "exit_risk_severity",
+                "latest_bos_event_type",
+                "latest_reset_reason",
+                "latest_bullish_relevance_class",
+                "latest_bearish_relevance_class",
+                "primary_reason",
+                "next_action",
+            ],
+            daily_trigger_rows[:top_n],
+        ).rstrip()
+    )
+
+    lines.extend(["", "## 16. Data Quality"])
     group_quality_rows: list[dict[str, object]] = []
     for group_type in sorted({str(row.get("group_type") or "") for row in group_rows}):
         subset = [row for row in group_rows if row.get("group_type") == group_type]
@@ -1433,7 +1775,7 @@ def build_markdown_daily_swing_report(
         ).rstrip()
     )
 
-    lines.extend(["", "## 16. Missing / Incomplete Inputs Summary"])
+    lines.extend(["", "## 17. Missing / Incomplete Inputs Summary"])
     missing_rows = [
         {
             "metric": "group_rows_missing_timing_state",
@@ -1480,7 +1822,7 @@ def build_markdown_daily_swing_report(
     lines.append(_format_table(["metric", "count"], missing_rows).rstrip())
 
     if technical_relevance_run_id is not None:
-        lines.extend(["", "## 17. Technical Relevance Context"])
+        lines.extend(["", "## 18. Technical Relevance Context"])
         lines.append(f"technical_relevance_run_id: {technical_relevance_run_id}")
         if technical_relevance_context_rows:
             lines.append(
@@ -1566,11 +1908,58 @@ def build_csv_daily_swing_report(
     for row in rows:
         writer.writerow([*row, *([""] * (max_columns - len(row)))])
     csv_text = output.getvalue()
+    daily_trigger_rows = _build_daily_trigger_rows(
+        ticker_rows=list(report_data["ticker_rows"]),  # type: ignore[arg-type]
+        group_rows=list(report_data["group_rows"]),  # type: ignore[arg-type]
+        synthetic_rows=list(report_data["synthetic_rows"]),  # type: ignore[arg-type]
+        technical_relevance_context_rows=list(report_data.get("technical_relevance_context_rows") or []),
+        technical_relevance_run_id=(
+            None
+            if report_data.get("technical_relevance_run_id") is None
+            else str(report_data["technical_relevance_run_id"])
+        ),
+    )
+    csv_text = _insert_csv_section_before_taxonomy_listing(
+        csv_text,
+        _build_role_csv_section(
+            "daily_triggers",
+            [
+                "ticker",
+                "daily_trigger_state",
+                "primary_layer",
+                "primary_subindustry",
+                "close",
+                "current_watchlist_status",
+                "pullback_signal",
+                "breakout_signal",
+                "exit_risk_signal",
+                "exit_risk_severity",
+                "exit_reason",
+                "ticker_trend_state",
+                "latest_structure_label",
+                "latest_bos_event_type",
+                "latest_bos_freshness",
+                "latest_reset_reason",
+                "latest_reset_freshness",
+                "latest_bullish_relevance_class",
+                "latest_bullish_relevance_reason",
+                "latest_bearish_relevance_class",
+                "latest_bearish_relevance_reason",
+                "primary_reason",
+                "blocking_reason",
+                "next_action",
+            ],
+            daily_trigger_rows,
+        ),
+    )
     technical_relevance_context_rows = list(report_data.get("technical_relevance_context_rows") or [])
     if technical_relevance_run_id is not None:
-        csv_text += _build_technical_relevance_csv_section(
-            str(technical_relevance_run_id),
-            technical_relevance_context_rows,
+        csv_text = _insert_csv_section_before_taxonomy_listing(
+            csv_text,
+            _build_technical_relevance_csv_section(
+                str(technical_relevance_run_id),
+                technical_relevance_context_rows,
+            ),
         )
     return csv_text
 
@@ -1619,6 +2008,13 @@ def write_daily_swing_signal_report(
         top_n=top_n,
         include_taxonomy_listing=include_taxonomy_listing,
     )
+    daily_trigger_rows = _build_daily_trigger_rows(
+        ticker_rows=list(report_data["ticker_rows"]),  # type: ignore[arg-type]
+        group_rows=list(report_data["group_rows"]),  # type: ignore[arg-type]
+        synthetic_rows=list(report_data["synthetic_rows"]),  # type: ignore[arg-type]
+        technical_relevance_context_rows=list(report_data.get("technical_relevance_context_rows") or []),
+        technical_relevance_run_id=technical_relevance_run_id,
+    )
     output_md_value = ""
     output_csv_value = ""
     if output_md is not None:
@@ -1643,6 +2039,14 @@ def write_daily_swing_signal_report(
         "breakout_count": sum(1 for row in report_data["ticker_rows"] if row.get("breakout_signal") == 1),  # type: ignore[index]
         "pullback_count": sum(1 for row in report_data["ticker_rows"] if row.get("pullback_signal") == 1),  # type: ignore[index]
         "exit_risk_count": sum(1 for row in report_data["ticker_rows"] if row.get("exit_risk_signal") == 1),  # type: ignore[index]
+        "daily_trigger_section_enabled": 1,
+        "daily_stop_trigger_count": sum(1 for row in daily_trigger_rows if row.get("daily_trigger_state") == "STOP_TRIGGER"),
+        "daily_sell_trigger_count": sum(1 for row in daily_trigger_rows if row.get("daily_trigger_state") == "SELL_TRIGGER"),
+        "daily_exit_watch_count": sum(1 for row in daily_trigger_rows if row.get("daily_trigger_state") == "EXIT_WATCH"),
+        "daily_buy_trigger_count": sum(1 for row in daily_trigger_rows if row.get("daily_trigger_state") == "BUY_TRIGGER"),
+        "daily_buy_watch_count": sum(1 for row in daily_trigger_rows if row.get("daily_trigger_state") == "BUY_WATCH"),
+        "daily_no_trigger_count": sum(1 for row in daily_trigger_rows if row.get("daily_trigger_state") == "NO_TRIGGER"),
+        "daily_trigger_insufficient_data_count": sum(1 for row in daily_trigger_rows if row.get("daily_trigger_state") == "INSUFFICIENT_DATA"),
         "output_markdown": output_md_value,
         "output_csv": output_csv_value,
         "validation_status": "OK",
