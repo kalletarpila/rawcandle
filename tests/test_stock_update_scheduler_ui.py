@@ -770,6 +770,39 @@ def test_scheduler_ui_startup_passes_fixed_port_to_ft_app(tmp_path, monkeypatch)
     assert captured["assets_dir"] == "/tmp/logs"
 
 
+def test_scheduler_ui_startup_accepts_port_override(tmp_path, monkeypatch):
+    config_path = tmp_path / "scheduler.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "analysis_db_path": "/tmp/analysis.db",
+                "enabled_markets": ["omxh", "omxs"],
+                "log_dir": "/tmp/logs",
+                "osakedata_db_path": "/tmp/osakedata.db",
+                "run_time": "05:30",
+                "timezone": "Europe/Helsinki",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    captured = {}
+
+    def fake_app(*, target, view, port, assets_dir):
+        captured["target"] = target
+        captured["view"] = view
+        captured["port"] = port
+        captured["assets_dir"] = assets_dir
+
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.ft.app", fake_app)
+
+    code = main(["--config", str(config_path), "--port", "8566"])
+
+    assert code == 0
+    assert captured["port"] == 8566
+    assert captured["assets_dir"] == "/tmp/logs"
+
+
 def test_datacenter_command_builders_use_expected_defaults_and_shapes():
     pipeline_command = build_datacenter_pipeline_command(
         price_db=DEFAULT_DATACENTER_PRICE_DB,

@@ -84,6 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Standalone stock update scheduler control panel."
     )
     parser.add_argument("--config", default="scheduler_config.json")
+    parser.add_argument("--port", type=int, default=SCHEDULER_UI_PORT)
     return parser
 
 
@@ -2463,6 +2464,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     config_path = args.config
+    port = args.port
     if not Path(config_path).exists():
         raise FileNotFoundError(f"Missing scheduler config: {config_path}")
     initial_config = read_scheduler_config(config_path)
@@ -2471,7 +2473,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ft.app(
         target=lambda page: run_app(page, config_path),
         view=app_view,
-        port=SCHEDULER_UI_PORT,
+        port=port,
         assets_dir=initial_config.log_dir,
     )
     return 0
