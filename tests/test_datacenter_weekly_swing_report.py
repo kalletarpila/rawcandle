@@ -357,10 +357,11 @@ def test_finds_last_five_valid_signal_dates_and_generates_report(tmp_path):
         "## 9. Repeated pullback tickers",
         "## 10. Repeated exit-risk tickers",
         "## 11. Swing MA Break Status",
-        "## 12. Synthetic OHLC structure changes",
-        "## 13. Group Structure Break / Reset History",
-        "## 14. Data quality over the window",
-        "## 15. Missing / incomplete inputs summary",
+        "## 12. Swing Signal Freshness",
+        "## 13. Synthetic OHLC structure changes",
+        "## 14. Group Structure Break / Reset History",
+        "## 15. Data quality over the window",
+        "## 16. Missing / incomplete inputs summary",
         "## Datacenter Taxonomy Listing",
     ]:
         assert heading in markdown
@@ -698,8 +699,8 @@ def test_weekly_group_structure_break_reset_section_renders_no_rows_when_absent(
         generated_at_utc="2026-05-17T12:00:00Z",
         top_n=20,
     )
-    heading = markdown.index("## 13. Group Structure Break / Reset History")
-    next_heading = markdown.index("## 14. Data quality over the window")
+    heading = markdown.index("## 14. Group Structure Break / Reset History")
+    next_heading = markdown.index("## 15. Data quality over the window")
     section = markdown[heading:next_heading]
     assert section.count("No rows.") == 2
 
@@ -1545,6 +1546,7 @@ def test_rolling_2_sell_pressure_section_and_summary_render_for_window_size_2(tm
     assert "## Rolling 2 Sell Pressure" in markdown
     assert "section;rolling_2_sell_pressure" in csv_text
     assert "section;swing_ma_break_status" in csv_text
+    assert "section;swing_signal_freshness" in csv_text
     assert "rolling_2_sell_pressure;AAA;NO_EMERGENCY;" in csv_text
     assert "rolling_2_sell_pressure;BBB;NO_EMERGENCY;" in csv_text
     assert "rolling_2_sell_pressure;CCC;INSUFFICIENT_DATA;" in csv_text
@@ -2164,7 +2166,7 @@ def test_weekly_report_without_technical_relevance_run_id_remains_unchanged(tmp_
         generated_at_utc="2026-05-17T12:00:00Z",
     )
 
-    assert "## 16. Technical Relevance Context" not in result["markdown"]
+    assert "## 17. Technical Relevance Context" not in result["markdown"]
     assert "section;technical_relevance_context" not in result["csv"]
     assert "latest_bullish_relevance_signal_name" not in result["markdown"]
     assert "latest_bearish_relevance_signal_name" not in result["markdown"]
@@ -2257,7 +2259,7 @@ def test_weekly_report_with_technical_relevance_run_id_includes_context_section(
 
     assert baseline["summary"]["repeated_pullback_tickers"] == result["summary"]["repeated_pullback_tickers"]
     assert baseline["summary"]["repeated_exit_risk_tickers"] == result["summary"]["repeated_exit_risk_tickers"]
-    assert "## 16. Technical Relevance Context" in result["markdown"]
+    assert "## 17. Technical Relevance Context" in result["markdown"]
     assert "technical_relevance_run_id: REL_WEEKLY" in result["markdown"]
     assert "latest_bullish_relevance_signal_name" in result["markdown"]
     assert "latest_bearish_relevance_signal_name" in result["markdown"]
@@ -2275,6 +2277,6 @@ def test_weekly_report_with_technical_relevance_run_id_includes_context_section(
     assert "| CCC | 4 | 2024-01-02 | 2024-01-10 | Infrastructure | Storage |" in result["markdown"]
     assert "| 2024-01-08 | Hammer | WEAK_CONTEXT | UP_TREND_BULLISH_REVERSAL_WITHOUT_PIVOT_CONTEXT | 2024-01-10 | Bearish Engulfing | RELEVANT | UP_TREND_BEARISH_REVERSAL_AFTER_BOS_DOWN |" in result["markdown"]
     pullback_start = result["markdown"].index("## 9. Repeated pullback tickers")
-    technical_section_start = result["markdown"].index("## 16. Technical Relevance Context")
+    technical_section_start = result["markdown"].index("## 17. Technical Relevance Context")
     scanner_section_markdown = result["markdown"][pullback_start:technical_section_start]
     assert "NOISE_REASON" not in scanner_section_markdown

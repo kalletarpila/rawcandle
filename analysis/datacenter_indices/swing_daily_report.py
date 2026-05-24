@@ -13,6 +13,10 @@ from .swing_ma_break_status import (
     build_swing_ma_break_status_rows,
     load_ticker_ma_history_rows,
 )
+from .swing_signal_freshness import (
+    build_swing_signal_freshness_rows,
+    load_ticker_signal_freshness_history_rows,
+)
 from .technical_relevance_context import (
     load_technical_relevance_context,
     select_latest_relevance_companion_rows,
@@ -256,6 +260,7 @@ def _build_technical_relevance_csv_section(
 
 def _strip_markdown_technical_relevance_section(markdown: str) -> str:
     for heading in (
+        "\n## 20. Technical Relevance Context\n",
         "\n## 19. Technical Relevance Context\n",
         "\n## 18. Technical Relevance Context\n",
         "\n## 17. Technical Relevance Context\n",
@@ -1193,6 +1198,19 @@ def load_daily_swing_report_data(
             signal_version=signal_version,
             taxonomy_version=resolved_taxonomy_version,
         )
+        freshness_history_rows = load_ticker_signal_freshness_history_rows(
+            conn,
+            tickers=sorted(
+                {
+                    str(row.get("ticker") or "")
+                    for row in ticker_rows
+                    if str(row.get("ticker") or "")
+                }
+            ),
+            as_of_date=normalized_signal_date,
+            signal_version=signal_version,
+            taxonomy_version=resolved_taxonomy_version,
+        )
         synthetic_rows = _load_synthetic_rows(
             conn,
             signal_date=normalized_signal_date,
@@ -1231,6 +1249,11 @@ def load_daily_swing_report_data(
         "swing_ma_break_status_rows": build_swing_ma_break_status_rows(
             latest_rows=ticker_rows,
             history_rows=ma_history_rows,
+            as_of_date=normalized_signal_date,
+        ),
+        "swing_signal_freshness_rows": build_swing_signal_freshness_rows(
+            latest_rows=ticker_rows,
+            history_rows=freshness_history_rows,
             as_of_date=normalized_signal_date,
         ),
         "technical_relevance_run_id": technical_relevance_run_id,
@@ -1826,7 +1849,37 @@ def build_markdown_daily_swing_report(
         ).rstrip()
     )
 
-    lines.extend(["", "## 17. Data Quality"])
+    lines.extend(["", "## 17. Swing Signal Freshness"])
+    lines.append(
+        _format_table(
+            [
+                "ticker",
+                "as_of_date",
+                "latest_bullish_candle",
+                "bullish_candle_age_td",
+                "latest_bearish_candle",
+                "bearish_candle_age_td",
+                "latest_bullish_divergence",
+                "bullish_divergence_age_td",
+                "latest_bearish_divergence",
+                "bearish_divergence_age_td",
+                "latest_hidden_bullish_divergence",
+                "hidden_bullish_divergence_age_td",
+                "latest_hidden_bearish_divergence",
+                "hidden_bearish_divergence_age_td",
+                "latest_bos_up_age_td",
+                "latest_bos_down_age_td",
+                "latest_reset_age_td",
+                "latest_bullish_signal_age_td",
+                "latest_bearish_signal_age_td",
+                "structure_warning_overrides_bullish_signal",
+                "freshness_status",
+            ],
+            list(report_data.get("swing_signal_freshness_rows") or []),
+        ).rstrip()
+    )
+
+    lines.extend(["", "## 18. Data Quality"])
     group_quality_rows: list[dict[str, object]] = []
     for group_type in sorted({str(row.get("group_type") or "") for row in group_rows}):
         subset = [row for row in group_rows if row.get("group_type") == group_type]
@@ -1855,7 +1908,7 @@ def build_markdown_daily_swing_report(
         ).rstrip()
     )
 
-    lines.extend(["", "## 18. Missing / Incomplete Inputs Summary"])
+    lines.extend(["", "## 19. Missing / Incomplete Inputs Summary"])
     missing_rows = [
         {
             "metric": "group_rows_missing_timing_state",
@@ -1902,7 +1955,7 @@ def build_markdown_daily_swing_report(
     lines.append(_format_table(["metric", "count"], missing_rows).rstrip())
 
     if technical_relevance_run_id is not None:
-        lines.extend(["", "## 19. Technical Relevance Context"])
+        lines.extend(["", "## 20. Technical Relevance Context"])
         lines.append(f"technical_relevance_run_id: {technical_relevance_run_id}")
         if technical_relevance_context_rows:
             lines.append(
@@ -2055,6 +2108,36 @@ def build_csv_daily_swing_report(
                 "ma_break_status",
             ],
             list(report_data.get("swing_ma_break_status_rows") or []),
+        ),
+    )
+    csv_text = _insert_csv_section_before_taxonomy_listing(
+        csv_text,
+        _build_role_csv_section(
+            "swing_signal_freshness",
+            [
+                "ticker",
+                "as_of_date",
+                "latest_bullish_candle",
+                "bullish_candle_age_td",
+                "latest_bearish_candle",
+                "bearish_candle_age_td",
+                "latest_bullish_divergence",
+                "bullish_divergence_age_td",
+                "latest_bearish_divergence",
+                "bearish_divergence_age_td",
+                "latest_hidden_bullish_divergence",
+                "hidden_bullish_divergence_age_td",
+                "latest_hidden_bearish_divergence",
+                "hidden_bearish_divergence_age_td",
+                "latest_bos_up_age_td",
+                "latest_bos_down_age_td",
+                "latest_reset_age_td",
+                "latest_bullish_signal_age_td",
+                "latest_bearish_signal_age_td",
+                "structure_warning_overrides_bullish_signal",
+                "freshness_status",
+            ],
+            list(report_data.get("swing_signal_freshness_rows") or []),
         ),
     )
     technical_relevance_context_rows = list(report_data.get("technical_relevance_context_rows") or [])
