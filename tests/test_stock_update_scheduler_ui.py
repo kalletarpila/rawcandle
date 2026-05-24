@@ -8,10 +8,6 @@ from unittest.mock import Mock
 
 import pytest
 
-from dev_tools.datacenter_dashboard_support import (
-    DatacenterDashboardStatus,
-    DatacenterReportStatus,
-)
 from dev_tools.stock_update_scheduler_ui import (
     DEFAULT_DATACENTER_ANALYSIS_DB,
     DEFAULT_DATACENTER_EXPECTED_GROUP_COUNT,
@@ -100,14 +96,14 @@ def _iter_flet_descendants(control):
             yield from _iter_flet_descendants(tab)
 
 
-def _dashboard_tab_descendants(page):
-    dashboard_tab = page.datacenter_tabs.tabs[2]
-    return list(_iter_flet_descendants(dashboard_tab.content))
+def _tab_descendants(page, tab_index: int):
+    tab = page.datacenter_tabs.tabs[tab_index]
+    return list(_iter_flet_descendants(tab.content))
 
 
-def _descendant_text_values(page):
+def _descendant_text_values(page, *, tab_index: int):
     values = []
-    for control in _dashboard_tab_descendants(page):
+    for control in _tab_descendants(page, tab_index):
         value = getattr(control, "value", None)
         if isinstance(value, str):
             values.append(value)
@@ -989,21 +985,6 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(
     monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.list_scheduler_log_files", lambda log_dir: [])
     monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.read_scheduler_status", lambda log_dir: None)
     monkeypatch.setattr(
-        "dev_tools.stock_update_scheduler_ui.discover_datacenter_dashboard_status",
-        lambda reports_dir: DatacenterDashboardStatus(
-            overall_status="MISSING",
-            reports=[
-                DatacenterReportStatus(
-                    horizon=horizon,
-                    status="MISSING",
-                    path=None,
-                    modified_at=None,
-                )
-                for horizon in ("rolling 30d", "rolling 5d", "rolling 2d", "daily")
-            ],
-        ),
-    )
-    monkeypatch.setattr(
         "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
         lambda: {"timer_path": "/tmp/timer", "on_calendar": "*-*-* 05:30:00", "installed": True, "status_summary": "ok", "error": None},
     )
@@ -1014,10 +995,9 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(
 
     page = _FakePage()
     run_app(page, str(config_path))
-    captured_stdout = capsys.readouterr().out
+    _ = capsys.readouterr().out
 
-    assert page.datacenter_tabs.tabs[1].text == "Datacenter"
-    assert page.datacenter_tabs.tabs[2].text == "Datacenter Dashboard"
+    assert [tab.text for tab in page.datacenter_tabs.tabs] == ["Scheduler", "Datacenter"]
     assert page.datacenter_price_db_field.value == DEFAULT_DATACENTER_PRICE_DB
     assert page.datacenter_analysis_db_field.value == DEFAULT_DATACENTER_ANALYSIS_DB
     assert page.datacenter_taxonomy_csv_field.value == DEFAULT_DATACENTER_TAXONOMY_CSV
@@ -1032,104 +1012,12 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(
     assert page.datacenter_expected_synthetic_ohlc_count_field.value == DEFAULT_DATACENTER_EXPECTED_SYNTHETIC_OHLC_COUNT
     assert page.datacenter_rolling_window_size_field.value == DEFAULT_DATACENTER_ROLLING_WINDOW_SIZE
     assert page.datacenter_watchlist_file_field.value == DEFAULT_DATACENTER_WATCHLIST_FILE
-    assert page.datacenter_dashboard_reports_dir_field.value == DEFAULT_DATACENTER_OUTPUT_DIR
-    assert page.datacenter_dashboard_overall_status_field.value == "NOT_REFRESHED"
-    assert "readiness=NOT_REFRESHED" in page.datacenter_dashboard_parse_summary_field.value
-    assert "found_reports=0" in page.datacenter_dashboard_parse_summary_field.value
-    assert "missing_reports=0" in page.datacenter_dashboard_parse_summary_field.value
-    assert "total_parsed_rows=0" in page.datacenter_dashboard_parse_summary_field.value
-    assert "total_parse_warnings=0" in page.datacenter_dashboard_parse_summary_field.value
-    assert "decision_total=0" in page.datacenter_dashboard_decision_summary_field.value
-    assert "SELL=0" in page.datacenter_dashboard_decision_summary_field.value
-    assert "VALID_PULLBACK=0" in page.datacenter_dashboard_decision_summary_field.value
-    assert "NO_PULLBACK=0" in page.datacenter_dashboard_decision_summary_field.value
-    assert "entry_readiness.READY_TO_WATCH=0" in page.datacenter_dashboard_decision_summary_field.value
-    assert "candidate_priority.P1_READY_TO_WATCH=0" in page.datacenter_dashboard_decision_summary_field.value
-    assert page.datacenter_dashboard_refresh_button.text == "Refresh Dashboard"
-    assert page.datacenter_dashboard_reports_dir_field.label == "dashboard_reports_dir"
-    assert (
-        page.datacenter_dashboard_real_render_marker_text.value
-        == "REAL RENDER CHECK: DATACENTER DASHBOARD V3"
-    )
-    assert page.datacenter_dashboard_real_render_diag_text.value == "dashboard_real_render_v3=1"
-    assert page.datacenter_dashboard_tab_constructed_text.value == "dashboard_tab_constructed=1"
-    assert page.datacenter_dashboard_backend_available_text.value == "dashboard_backend_available=1"
-    assert page.datacenter_dashboard_build_marker_text.value == (
-        "Dashboard UI build: dashboard_ui_visible_v1"
-    )
-    assert page.datacenter_dashboard_scroll_content.expand is True
-    assert page.datacenter_dashboard_scroll_content.auto_scroll is False
-    assert len(page.datacenter_dashboard_content.controls) == 2
-    assert page.datacenter_dashboard_content.controls[0].content is page.datacenter_dashboard_header
-    assert page.datacenter_dashboard_content.controls[1].content is page.datacenter_dashboard_scroll_content
-    assert page.datacenter_dashboard_content.controls[0].padding.left == 8
-    assert page.datacenter_dashboard_content.controls[0].padding.top == 6
-    assert page.datacenter_dashboard_readiness_text.value == "Readiness: NOT_REFRESHED"
-    assert page.datacenter_dashboard_reports_status_text.value == "Reports: No reports loaded."
-    assert (
-        page.datacenter_dashboard_decisions_status_text.value
-        == "Decisions: No decisions available."
-    )
-    assert (
-        page.datacenter_dashboard_candidate_status_text.value
-        == "Candidate Pullbacks: No candidate pullbacks available."
-    )
-    assert page.datacenter_dashboard_reports_column.controls[0].value == "No reports loaded."
-    assert page.datacenter_dashboard_command_center_column.controls[0].value == "No decisions available."
-    assert page.datacenter_dashboard_conflict_detected_field.value == "False"
-    assert page.datacenter_dashboard_pullback_validity_field.value == "NONE"
-    assert page.datacenter_dashboard_pullback_reason_field.value == "NONE"
-    assert page.datacenter_dashboard_supporting_signals_field.value == "NONE"
-    assert page.datacenter_dashboard_conflicting_signals_field.value == "NONE"
-    assert page.datacenter_dashboard_override_explanation_field.value == "NONE"
-    datacenter_text_labels = [
-        control.value
-        for control in page.datacenter_content.controls
-        if hasattr(control, "value")
-    ]
+    datacenter_text_labels = _descendant_text_values(page, tab_index=1)
     assert "Datacenter Dashboard" not in datacenter_text_labels
-    dashboard_text_labels = _descendant_text_values(page)
-    header_text_labels = _descendant_text_values_for_control(
-        page.datacenter_dashboard_header
-    )
-    scroll_text_labels = _descendant_text_values_for_control(
-        page.datacenter_dashboard_scroll_content
-    )
-    assert "REAL RENDER CHECK: DATACENTER DASHBOARD V3" in dashboard_text_labels
-    assert "dashboard_real_render_v3=1" in dashboard_text_labels
-    assert "dashboard_tab_constructed=1" in dashboard_text_labels
-    assert "dashboard_backend_available=1" in dashboard_text_labels
-    assert "Datacenter Dashboard" in dashboard_text_labels
-    assert "Dashboard UI build: dashboard_ui_visible_v1" in dashboard_text_labels
-    assert "Reports directory" in dashboard_text_labels
-    assert "Refresh Dashboard" in dashboard_text_labels
-    assert "Readiness: NOT_REFRESHED" in dashboard_text_labels
-    assert "Reports: No reports loaded." in dashboard_text_labels
-    assert "Decisions: No decisions available." in dashboard_text_labels
-    assert "Candidate Pullbacks: No candidate pullbacks available." in dashboard_text_labels
-    assert "Command Center" in dashboard_text_labels
-    assert "Candidate Pullbacks" in dashboard_text_labels
-    assert "Inspector" in dashboard_text_labels
-    assert header_text_labels[0] == "REAL RENDER CHECK: DATACENTER DASHBOARD V3"
-    assert "Dashboard UI build: dashboard_ui_visible_v1" in header_text_labels
-    assert "Reports directory" in header_text_labels
-    assert "Refresh Dashboard" in header_text_labels
-    assert "Readiness: NOT_REFRESHED" in header_text_labels
-    assert "Dashboard Summary" not in header_text_labels
-    assert "Dashboard Summary" in scroll_text_labels
-    assert "Reports" in scroll_text_labels
-    assert "Command Center" in scroll_text_labels
-    assert "Candidate Pullbacks" in scroll_text_labels
-    assert "Inspector" in scroll_text_labels
-    assert "Reports directory" not in scroll_text_labels
-    assert len(page.datacenter_dashboard_scroll_content.controls) == 5
-    assert not hasattr(page.datacenter_dashboard_content, "content")
-    assert len(_dashboard_tab_descendants(page)) > 20
-    assert "DEBUG dashboard_real_render_v3=1" in captured_stdout
-    assert "DEBUG dashboard_page_scroll=" in captured_stdout
-    assert "DEBUG dashboard_root_control_type=" in captured_stdout
-    assert "DEBUG dashboard_root_controls_count=" in captured_stdout
-    assert "DEBUG dashboard_tab_index_or_label=Datacenter Dashboard" in captured_stdout
+    assert "REAL RENDER CHECK: DATACENTER DASHBOARD V3" not in datacenter_text_labels
+    assert "dashboard_real_render_v3=1" not in datacenter_text_labels
+    assert "Dashboard UI build: dashboard_ui_visible_v1" not in datacenter_text_labels
+    assert "Refresh Dashboard" not in datacenter_text_labels
 
     page.datacenter_signal_date_field.value = "2026-05-15"
     page.datacenter_start_date_field.value = "2026-01-01"
@@ -1178,7 +1066,7 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(
     assert daily_override["command"][daily_override["command"].index("--watchlist-file") + 1] == "/tmp/custom_watchlist.txt"
 
 
-def test_dashboard_real_render_marker_is_in_actual_tab_control_tree(
+def test_run_app_removes_datacenter_dashboard_tab_and_debug_markers(
     tmp_path, monkeypatch
 ):
     config_path = tmp_path / "scheduler.json"
@@ -1221,157 +1109,18 @@ def test_dashboard_real_render_marker_is_in_actual_tab_control_tree(
     page = _FakePage()
     run_app(page, str(config_path))
 
-    dashboard_text_labels = _descendant_text_values(page)
-    assert "REAL RENDER CHECK: DATACENTER DASHBOARD V3" in dashboard_text_labels
-    assert "Reports directory" in dashboard_text_labels
-    assert "Refresh Dashboard" in dashboard_text_labels
+    assert [tab.text for tab in page.datacenter_tabs.tabs] == ["Scheduler", "Datacenter"]
+    all_text = _descendant_text_values_for_control(page.datacenter_tabs)
+    assert "Datacenter Dashboard" not in all_text
+    assert "REAL RENDER CHECK: DATACENTER DASHBOARD V3" not in all_text
+    assert "dashboard_ui_visible_v1" not in all_text
+    assert "dashboard_real_render_v3=1" not in all_text
 
 
-def test_run_app_datacenter_dashboard_refresh_reads_report_directory(
-    tmp_path, monkeypatch, capsys
-):
-    config_path = tmp_path / "scheduler.json"
-    reports_dir = tmp_path / "reports"
-    reports_dir.mkdir()
-    (reports_dir / "datacenter_daily_2026-05-22_0000_full.md").write_text(
-        "ticker;status\nNVDA;BUY_WATCH\n", encoding="utf-8"
-    )
-    config_path.write_text(
-        json.dumps(
-            {
-                "analysis_db_path": "/tmp/analysis.db",
-                "enabled_markets": ["omxh"],
-                "log_dir": "/tmp/logs",
-                "osakedata_db_path": "/tmp/osakedata.db",
-                "run_time": "05:30",
-                "timezone": "Europe/Helsinki",
-            }
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(
-        "dev_tools.stock_update_scheduler_ui.load_latest_scheduler_summary",
-        lambda log_dir: None,
-    )
-    monkeypatch.setattr(
-        "dev_tools.stock_update_scheduler_ui.list_scheduler_log_files",
-        lambda log_dir: [],
-    )
-    monkeypatch.setattr(
-        "dev_tools.stock_update_scheduler_ui.read_scheduler_status",
-        lambda log_dir: None,
-    )
-    monkeypatch.setattr(
-        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
-        lambda: {
-            "timer_path": "/tmp/timer",
-            "on_calendar": "*-*-* 05:30:00",
-            "installed": True,
-            "status_summary": "ok",
-            "error": None,
-        },
-    )
-
-    page = _FakePage()
-    run_app(page, str(config_path))
-    _ = capsys.readouterr()
-    header_id_before = id(page.datacenter_dashboard_header)
-    build_marker_id_before = id(page.datacenter_dashboard_build_marker_text)
-    page.datacenter_dashboard_reports_dir_field.value = str(reports_dir)
-    page.datacenter_dashboard_refresh_button.on_click(None)
-    refresh_stdout = capsys.readouterr().out
-
-    assert page.datacenter_dashboard_overall_status_field.value == "PARTIAL"
-    assert page.datacenter_dashboard_readiness_text.value == "Readiness: PARTIAL"
-    assert page.datacenter_dashboard_reports_status_text.value == "Reports: found=1 missing=3"
-    assert page.datacenter_dashboard_decisions_status_text.value == "Decisions: total=1"
-    assert page.datacenter_dashboard_candidate_status_text.value == "Candidate Pullbacks: 0"
-    assert id(page.datacenter_dashboard_header) == header_id_before
-    assert id(page.datacenter_dashboard_build_marker_text) == build_marker_id_before
-    assert "DEBUG dashboard_refresh_clicked=1" in refresh_stdout
-    assert f"DEBUG dashboard_reports_dir={reports_dir}" in refresh_stdout
-    assert "DEBUG dashboard_refresh_completed=1" in refresh_stdout
-    assert "DEBUG dashboard_found_reports=1" in refresh_stdout
-    assert "DEBUG dashboard_decision_total=1" in refresh_stdout
-    assert "readiness=PARTIAL" in page.datacenter_dashboard_parse_summary_field.value
-    assert "found_reports=1" in page.datacenter_dashboard_parse_summary_field.value
-    assert "missing_reports=3" in page.datacenter_dashboard_parse_summary_field.value
-    assert "total_parsed_rows=1" in page.datacenter_dashboard_parse_summary_field.value
-    assert "total_parse_warnings=0" in page.datacenter_dashboard_parse_summary_field.value
-    assert "decision_total=1" in page.datacenter_dashboard_decision_summary_field.value
-    assert "NEUTRAL=1" in page.datacenter_dashboard_decision_summary_field.value
-    assert "NO_PULLBACK=1" in page.datacenter_dashboard_decision_summary_field.value
-    assert "entry_readiness.NOT_READY=1" in page.datacenter_dashboard_decision_summary_field.value
-    assert "candidate_priority.P5_NOT_READY=1" in page.datacenter_dashboard_decision_summary_field.value
-    assert (
-        page.datacenter_dashboard_candidate_pullbacks_column.controls[0].value
-        == "No candidate pullbacks available."
-    )
-    assert page.datacenter_dashboard_inspector_action_field.value == "NVDA | NEUTRAL | INFO"
-    assert page.datacenter_dashboard_conflict_detected_field.value == "False"
-    assert page.datacenter_dashboard_pullback_validity_field.value == "NO_PULLBACK"
-    assert page.datacenter_dashboard_pullback_reason_field.value == "NO_PULLBACK_CONTEXT"
-    first_card = page.datacenter_dashboard_reports_column.controls[0]
-    assert "rolling 30d: MISSING" in first_card.content.controls[0].value
-    assert "parsed_rows: 0" in first_card.content.controls[3].value
-    daily_card = page.datacenter_dashboard_reports_column.controls[3]
-    assert "daily: OK" in daily_card.content.controls[0].value
-    assert "parsed_rows: 1" in daily_card.content.controls[3].value
-    assert "warnings: 0" in daily_card.content.controls[4].value
-    dashboard_text_labels = _descendant_text_values(page)
-    scroll_text_labels = _descendant_text_values_for_control(
-        page.datacenter_dashboard_scroll_content
-    )
-    assert "Readiness: PARTIAL" in dashboard_text_labels
-    assert "Reports: found=1 missing=3" in dashboard_text_labels
-    assert "Decisions: total=1" in dashboard_text_labels
-    assert "Candidate Pullbacks: 0" in dashboard_text_labels
-    assert "Dashboard Summary" in scroll_text_labels
-    assert "Reports" in scroll_text_labels
-    assert "Command Center" in scroll_text_labels
-    assert "Candidate Pullbacks" in scroll_text_labels
-    assert "Inspector" in scroll_text_labels
-
-
-def test_run_app_datacenter_dashboard_command_center_shows_grouped_read_only_rows(
+def test_run_app_does_not_add_broker_or_order_buttons(
     tmp_path, monkeypatch
 ):
     config_path = tmp_path / "scheduler.json"
-    reports_dir = tmp_path / "reports"
-    reports_dir.mkdir()
-    (reports_dir / "datacenter_rolling_30_2026-05-22_0000_full.csv").write_text(
-        "\n".join(
-            [
-                "ticker;status;distance_to_ema20;blocking_reasons",
-                "META;BUY_ZONE;16.5;STRUCTURAL_BLOCK",
-                "MRVL;LEADER;;",
-                "TSM;BUY_ZONE;;",
-            ]
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    (reports_dir / "datacenter_rolling_5_2026-05-22_0000_full.csv").write_text(
-        "ticker;status\nTSM;PULLBACK_CANDIDATE\n",
-        encoding="utf-8",
-    )
-    (reports_dir / "datacenter_rolling_2_2026-05-22_0000_full.csv").write_text(
-        "ticker;high_exit_risk_days_count;status;latest_bos_event_type;latest_bos_freshness\nLRCX;1;;;\nNVDA;;PULLBACK_CANDIDATE;BOS_DOWN;FRESH\n",
-        encoding="utf-8",
-    )
-    (reports_dir / "datacenter_daily_2026-05-22_0000_full.csv").write_text(
-        "\n".join(
-            [
-                "ticker;status;reason;ma_break_status;freshness_status",
-                "NVDA;SELL;close_below_ema20;;",
-                "AVGO;WATCH;exit_risk;;",
-                "TSM;BULLISH;;OK;FRESH_BULLISH_SIGNAL",
-                "INTC;SIDEWAYS;;;",
-            ]
-        )
-        + "\n",
-        encoding="utf-8",
-    )
     config_path.write_text(
         json.dumps(
             {
@@ -1410,79 +1159,11 @@ def test_run_app_datacenter_dashboard_command_center_shows_grouped_read_only_row
 
     page = _FakePage()
     run_app(page, str(config_path))
-    page.datacenter_dashboard_reports_dir_field.value = str(reports_dir)
-    page.datacenter_dashboard_refresh_button.on_click(None)
 
-    assert "decision_total=7" in page.datacenter_dashboard_decision_summary_field.value
-    assert page.datacenter_dashboard_readiness_text.value == "Readiness: READY"
-    assert page.datacenter_dashboard_reports_status_text.value == "Reports: found=4 missing=0"
-    assert page.datacenter_dashboard_decisions_status_text.value == "Decisions: total=7"
-    assert page.datacenter_dashboard_candidate_status_text.value == "Candidate Pullbacks: 1"
-    assert "SELL=1" in page.datacenter_dashboard_decision_summary_field.value
-    assert "REDUCE=1" in page.datacenter_dashboard_decision_summary_field.value
-    assert "TIGHTEN_STOP=1" in page.datacenter_dashboard_decision_summary_field.value
-    assert "BUY_NOW=1" in page.datacenter_dashboard_decision_summary_field.value
-    assert "BLOCKED=1" in page.datacenter_dashboard_decision_summary_field.value
-    assert "WATCH=1" in page.datacenter_dashboard_decision_summary_field.value
-    assert "NEUTRAL=1" in page.datacenter_dashboard_decision_summary_field.value
-    assert "STRUCTURE_BLOCKED_PULLBACK=1" in page.datacenter_dashboard_decision_summary_field.value
-    assert "entry_readiness.NOT_READY=6" in page.datacenter_dashboard_decision_summary_field.value
-    assert "candidate_priority.P9_READY_TO_WATCH=0" not in page.datacenter_dashboard_decision_summary_field.value
-    candidate_titles = [
-        control.content.controls[0].value
-        for control in page.datacenter_dashboard_candidate_pullbacks_column.controls
-        if hasattr(control, "content")
-    ]
-    assert "TSM | P9_NOT_CANDIDATE | INSUFFICIENT_DATA | BUY_NOW" in candidate_titles
-    candidate_readiness_lines = [
-        control.content.controls[2].value
-        for control in page.datacenter_dashboard_candidate_pullbacks_column.controls
-        if hasattr(control, "content")
-    ]
-    assert "entry_readiness_reason: MISSING_PULLBACK_VALIDITY_OR_ACTION" in candidate_readiness_lines
-    labels = [
-        control.value
-        for control in page.datacenter_dashboard_command_center_column.controls
-        if hasattr(control, "value")
-    ]
-    assert "Critical exits" in labels
-    assert "Buy candidates" in labels
-    assert "Blocked / neutral" in labels
-    row_titles = [
-        control.content.controls[0].value
-        for control in page.datacenter_dashboard_command_center_column.controls
-        if hasattr(control, "content")
-    ]
-    assert "NVDA | SELL | CRITICAL" in row_titles
-    assert "AVGO | REDUCE | HIGH" in row_titles
-    assert "LRCX | TIGHTEN_STOP | MEDIUM" in row_titles
-    assert "META | BLOCKED | HIGH" in row_titles
-    assert "TSM | BUY_NOW | HIGH" in row_titles
-    assert "MRVL | WATCH | LOW" in row_titles
-    assert "INTC | NEUTRAL | INFO" in row_titles
-    page.datacenter_dashboard_inspector_ticker_dropdown.value = "NVDA"
-    page.datacenter_dashboard_inspector_ticker_dropdown.on_change(None)
-    assert page.datacenter_dashboard_inspector_action_field.value == "NVDA | SELL | CRITICAL"
-    assert page.datacenter_dashboard_conflict_detected_field.value == "True"
-    assert (
-        page.datacenter_dashboard_pullback_validity_field.value
-        == "STRUCTURE_BLOCKED_PULLBACK"
-    )
-    assert (
-        page.datacenter_dashboard_pullback_reason_field.value
-        == "FRESH_BOS_DOWN_BLOCKS_PULLBACK"
-    )
-    assert "close_below_ema20" in page.datacenter_dashboard_supporting_signals_field.value
-    assert "PULLBACK_CANDIDATE" in page.datacenter_dashboard_conflicting_signals_field.value
-    page.datacenter_dashboard_inspector_ticker_dropdown.value = "META"
-    page.datacenter_dashboard_inspector_ticker_dropdown.on_change(None)
-    assert page.datacenter_dashboard_conflict_detected_field.value == "True"
-    assert "STRUCTURAL_BLOCK" in page.datacenter_dashboard_supporting_signals_field.value
-    assert "BUY_ZONE" in page.datacenter_dashboard_conflicting_signals_field.value
-    assert (
-        page.datacenter_dashboard_override_explanation_field.value
-        == "Blocking reasons override constructive setup labels."
-    )
+    all_text = _descendant_text_values_for_control(page.datacenter_tabs)
+    assert "Send Order" not in all_text
+    assert "Buy" not in [value.strip() for value in all_text]
+    assert "Sell" not in [value.strip() for value in all_text]
 
 
 def test_build_skip_next_run_config_sets_true_without_changing_other_fields():

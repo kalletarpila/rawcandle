@@ -2136,13 +2136,6 @@ def run_app(page: ft.Page, config_path: str) -> None:
     datacenter_rolling_report_button = ft.ElevatedButton("Generate Rolling Report", on_click=on_datacenter_rolling_report)
     datacenter_plan_button = ft.ElevatedButton("Show Pipeline Plan", on_click=on_datacenter_plan)
     datacenter_watermarks_button = ft.ElevatedButton("Show Watermarks", on_click=on_datacenter_watermarks)
-    datacenter_dashboard_refresh_button = ft.ElevatedButton(
-        "Refresh Dashboard",
-        on_click=on_datacenter_dashboard_refresh,
-    )
-    datacenter_dashboard_inspector_ticker_dropdown.on_change = (
-        lambda _e: refresh_datacenter_dashboard_inspector_for_selected_ticker()
-    )
     datacenter_buttons = ft.Row(
         [
             datacenter_dry_run_button,
@@ -2185,136 +2178,6 @@ def run_app(page: ft.Page, config_path: str) -> None:
         spacing=12,
         expand=True,
     )
-    # Manual verification:
-    # 1. Run: PYTHONPATH=. python3 dev_tools/stock_update_scheduler_ui.py
-    # 2. Open Datacenter Dashboard tab.
-    # 3. Confirm text: REAL RENDER CHECK: DATACENTER DASHBOARD V3
-    # 4. Confirm stdout: DEBUG dashboard_real_render_v3=1
-    datacenter_dashboard_header = ft.Column(
-        controls=[
-            datacenter_dashboard_real_render_marker_text,
-            datacenter_dashboard_real_render_diag_text,
-            datacenter_dashboard_tab_constructed_text,
-            datacenter_dashboard_backend_available_text,
-            ft.Row(
-                [
-                    ft.Text("Reports directory", width=140),
-                    datacenter_dashboard_reports_dir_field,
-                    datacenter_dashboard_refresh_button,
-                ],
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            ),
-            ft.Column(
-                controls=[
-                    datacenter_dashboard_readiness_text,
-                    datacenter_dashboard_reports_status_text,
-                    datacenter_dashboard_decisions_status_text,
-                    datacenter_dashboard_candidate_status_text,
-                ],
-                spacing=4,
-            ),
-            ft.Text("Datacenter Dashboard", size=24, weight=ft.FontWeight.BOLD),
-            ft.Text(
-                "Read-only dashboard for the newest daily and rolling reports."
-            ),
-            datacenter_dashboard_build_marker_text,
-        ],
-        spacing=8,
-        tight=True,
-        horizontal_alignment=ft.CrossAxisAlignment.START,
-    )
-    datacenter_dashboard_summary_section = ft.Column(
-        controls=[
-            ft.Text("Dashboard Summary", size=18, weight=ft.FontWeight.BOLD),
-            ft.Row(
-                [
-                    datacenter_dashboard_overall_status_field,
-                    datacenter_dashboard_parse_summary_field,
-                    datacenter_dashboard_decision_summary_field,
-                ],
-                wrap=True,
-                vertical_alignment=ft.CrossAxisAlignment.START,
-            ),
-        ],
-        spacing=8,
-        horizontal_alignment=ft.CrossAxisAlignment.START,
-    )
-    datacenter_dashboard_reports_section = ft.Column(
-        controls=[
-            ft.Text("Reports", size=18, weight=ft.FontWeight.BOLD),
-            datacenter_dashboard_reports_column,
-        ],
-        spacing=8,
-        horizontal_alignment=ft.CrossAxisAlignment.START,
-    )
-    datacenter_dashboard_command_center_section = ft.Column(
-        controls=[
-            ft.Text("Command Center", size=18, weight=ft.FontWeight.BOLD),
-            datacenter_dashboard_command_center_column,
-        ],
-        spacing=8,
-        horizontal_alignment=ft.CrossAxisAlignment.START,
-    )
-    datacenter_dashboard_candidate_pullbacks_section = ft.Column(
-        controls=[
-            ft.Text("Candidate Pullbacks", size=18, weight=ft.FontWeight.BOLD),
-            datacenter_dashboard_candidate_pullbacks_column,
-        ],
-        spacing=8,
-        horizontal_alignment=ft.CrossAxisAlignment.START,
-    )
-    datacenter_dashboard_inspector_section = ft.Column(
-        controls=[
-            ft.Text("Inspector", size=18, weight=ft.FontWeight.BOLD),
-            ft.Row(
-                [
-                    datacenter_dashboard_inspector_ticker_dropdown,
-                    datacenter_dashboard_inspector_action_field,
-                    datacenter_dashboard_conflict_detected_field,
-                    datacenter_dashboard_pullback_validity_field,
-                ],
-                wrap=True,
-                vertical_alignment=ft.CrossAxisAlignment.END,
-            ),
-            datacenter_dashboard_pullback_reason_field,
-            datacenter_dashboard_supporting_signals_field,
-            datacenter_dashboard_conflicting_signals_field,
-            datacenter_dashboard_override_explanation_field,
-        ],
-        spacing=8,
-        horizontal_alignment=ft.CrossAxisAlignment.START,
-    )
-    datacenter_dashboard_scroll_content = ft.ListView(
-        controls=[
-            datacenter_dashboard_summary_section,
-            datacenter_dashboard_reports_section,
-            datacenter_dashboard_command_center_section,
-            datacenter_dashboard_candidate_pullbacks_section,
-            datacenter_dashboard_inspector_section,
-        ],
-        expand=True,
-        spacing=12,
-        padding=ft.padding.only(right=8, bottom=8),
-        auto_scroll=False,
-    )
-    datacenter_dashboard_content = ft.Column(
-        controls=[
-            ft.Container(
-                content=datacenter_dashboard_header,
-                padding=ft.padding.symmetric(horizontal=8, vertical=6),
-                alignment=ft.alignment.top_left,
-            ),
-            ft.Container(
-                content=datacenter_dashboard_scroll_content,
-                padding=ft.padding.only(left=8, right=8, bottom=6),
-                expand=True,
-                alignment=ft.alignment.top_left,
-            ),
-        ],
-        spacing=12,
-        expand=True,
-        horizontal_alignment=ft.CrossAxisAlignment.START,
-    )
 
     page.datacenter_price_db_field = datacenter_price_db_field
     page.datacenter_analysis_db_field = datacenter_analysis_db_field
@@ -2330,73 +2193,6 @@ def run_app(page: ft.Page, config_path: str) -> None:
     page.datacenter_expected_synthetic_ohlc_count_field = datacenter_expected_synthetic_ohlc_count_field
     page.datacenter_rolling_window_size_field = datacenter_rolling_window_size_field
     page.datacenter_watchlist_file_field = datacenter_watchlist_file_field
-    page.datacenter_dashboard_reports_dir_field = datacenter_dashboard_reports_dir_field
-    page.datacenter_dashboard_real_render_marker_text = (
-        datacenter_dashboard_real_render_marker_text
-    )
-    page.datacenter_dashboard_real_render_diag_text = (
-        datacenter_dashboard_real_render_diag_text
-    )
-    page.datacenter_dashboard_tab_constructed_text = (
-        datacenter_dashboard_tab_constructed_text
-    )
-    page.datacenter_dashboard_backend_available_text = (
-        datacenter_dashboard_backend_available_text
-    )
-    page.datacenter_dashboard_build_marker_text = datacenter_dashboard_build_marker_text
-    page.datacenter_dashboard_readiness_text = datacenter_dashboard_readiness_text
-    page.datacenter_dashboard_reports_status_text = datacenter_dashboard_reports_status_text
-    page.datacenter_dashboard_decisions_status_text = datacenter_dashboard_decisions_status_text
-    page.datacenter_dashboard_candidate_status_text = datacenter_dashboard_candidate_status_text
-    page.datacenter_dashboard_header = datacenter_dashboard_header
-    page.datacenter_dashboard_scroll_content = datacenter_dashboard_scroll_content
-    page.datacenter_dashboard_summary_section = datacenter_dashboard_summary_section
-    page.datacenter_dashboard_reports_section = datacenter_dashboard_reports_section
-    page.datacenter_dashboard_command_center_section = (
-        datacenter_dashboard_command_center_section
-    )
-    page.datacenter_dashboard_candidate_pullbacks_section = (
-        datacenter_dashboard_candidate_pullbacks_section
-    )
-    page.datacenter_dashboard_inspector_section = datacenter_dashboard_inspector_section
-    page.datacenter_dashboard_overall_status_field = datacenter_dashboard_overall_status_field
-    page.datacenter_dashboard_parse_summary_field = (
-        datacenter_dashboard_parse_summary_field
-    )
-    page.datacenter_dashboard_decision_summary_field = (
-        datacenter_dashboard_decision_summary_field
-    )
-    page.datacenter_dashboard_reports_column = datacenter_dashboard_reports_column
-    page.datacenter_dashboard_command_center_column = (
-        datacenter_dashboard_command_center_column
-    )
-    page.datacenter_dashboard_candidate_pullbacks_column = (
-        datacenter_dashboard_candidate_pullbacks_column
-    )
-    page.datacenter_dashboard_inspector_ticker_dropdown = (
-        datacenter_dashboard_inspector_ticker_dropdown
-    )
-    page.datacenter_dashboard_inspector_action_field = (
-        datacenter_dashboard_inspector_action_field
-    )
-    page.datacenter_dashboard_conflict_detected_field = (
-        datacenter_dashboard_conflict_detected_field
-    )
-    page.datacenter_dashboard_pullback_validity_field = (
-        datacenter_dashboard_pullback_validity_field
-    )
-    page.datacenter_dashboard_pullback_reason_field = (
-        datacenter_dashboard_pullback_reason_field
-    )
-    page.datacenter_dashboard_supporting_signals_field = (
-        datacenter_dashboard_supporting_signals_field
-    )
-    page.datacenter_dashboard_conflicting_signals_field = (
-        datacenter_dashboard_conflicting_signals_field
-    )
-    page.datacenter_dashboard_override_explanation_field = (
-        datacenter_dashboard_override_explanation_field
-    )
     page.datacenter_status_field = datacenter_status_field
     page.datacenter_reports_column = datacenter_reports_column
     page.datacenter_log_field = datacenter_log_field
@@ -2407,60 +2203,22 @@ def run_app(page: ft.Page, config_path: str) -> None:
     page.datacenter_rolling_report_button = datacenter_rolling_report_button
     page.datacenter_plan_button = datacenter_plan_button
     page.datacenter_watermarks_button = datacenter_watermarks_button
-    page.datacenter_dashboard_refresh_button = datacenter_dashboard_refresh_button
     page.summary_field = summary_field
     page.logs_column = logs_column
     page.technical_relevance_checkbox = technical_relevance_checkbox
     page.save_config_button = save_config_button
     page.reload_config_button = reload_config_button
     page.datacenter_content = datacenter_content
-    page.datacenter_dashboard_content = datacenter_dashboard_content
 
     tabs = ft.Tabs(
         selected_index=0,
         tabs=[
             ft.Tab(text="Scheduler", content=scheduler_content),
             ft.Tab(text="Datacenter", content=datacenter_content),
-            ft.Tab(text="Datacenter Dashboard", content=datacenter_dashboard_content),
         ],
         expand=1,
     )
     page.datacenter_tabs = tabs
-    populate_datacenter_dashboard_not_refreshed(
-        overall_status_field=datacenter_dashboard_overall_status_field,
-        parse_summary_field=datacenter_dashboard_parse_summary_field,
-        decision_summary_field=datacenter_dashboard_decision_summary_field,
-        readiness_text=datacenter_dashboard_readiness_text,
-        reports_status_text=datacenter_dashboard_reports_status_text,
-        decisions_status_text=datacenter_dashboard_decisions_status_text,
-        candidate_status_text=datacenter_dashboard_candidate_status_text,
-        reports_column=datacenter_dashboard_reports_column,
-        command_center_column=datacenter_dashboard_command_center_column,
-        candidate_pullbacks_column=datacenter_dashboard_candidate_pullbacks_column,
-        inspector_ticker_dropdown=datacenter_dashboard_inspector_ticker_dropdown,
-        action_field=datacenter_dashboard_inspector_action_field,
-        conflict_detected_field=datacenter_dashboard_conflict_detected_field,
-        pullback_validity_field=datacenter_dashboard_pullback_validity_field,
-        pullback_reason_field=datacenter_dashboard_pullback_reason_field,
-        supporting_signals_field=datacenter_dashboard_supporting_signals_field,
-        conflicting_signals_field=datacenter_dashboard_conflicting_signals_field,
-        override_explanation_field=datacenter_dashboard_override_explanation_field,
-    )
-    print("DEBUG dashboard_real_render_v3=1")
-    print(f"DEBUG dashboard_page_scroll={page.scroll}")
-    print(
-        "DEBUG dashboard_root_control_type="
-        f"{type(datacenter_dashboard_content).__name__}"
-    )
-    dashboard_root_column = datacenter_dashboard_content
-    dashboard_children_count = (
-        len(dashboard_root_column.controls)
-        if dashboard_root_column is not None
-        and hasattr(dashboard_root_column, "controls")
-        else 0
-    )
-    print(f"DEBUG dashboard_root_controls_count={dashboard_children_count}")
-    print("DEBUG dashboard_tab_index_or_label=Datacenter Dashboard")
     page.add(tabs)
     page.update()
 
