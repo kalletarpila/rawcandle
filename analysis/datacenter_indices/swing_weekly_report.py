@@ -40,6 +40,10 @@ from .swing_daily_report import (
     _row_to_dict,
     _utc_now_iso,
 )
+from .swing_ma_break_status import (
+    build_swing_ma_break_status_rows,
+    load_ticker_ma_history_rows,
+)
 from .technical_relevance_context import load_technical_relevance_context
 
 
@@ -1110,6 +1114,19 @@ def load_weekly_swing_report_data(
             version_value=signal_version,
             taxonomy_version=resolved_taxonomy_version,
         )
+        ma_history_rows = load_ticker_ma_history_rows(
+            conn,
+            tickers=sorted(
+                {
+                    str(row.get("ticker") or "")
+                    for row in ticker_rows
+                    if str(row.get("ticker") or "")
+                }
+            ),
+            as_of_date=normalized_end_date,
+            signal_version=signal_version,
+            taxonomy_version=resolved_taxonomy_version,
+        )
         synthetic_rows = _load_rows_for_dates(
             conn,
             table_name="dc_group_synthetic_ohlc_daily",
@@ -1150,6 +1167,11 @@ def load_weekly_swing_report_data(
         "group_rows": group_rows,
         "ticker_rows": ticker_rows,
         "synthetic_rows": synthetic_rows,
+        "swing_ma_break_status_rows": build_swing_ma_break_status_rows(
+            latest_rows=[row for row in ticker_rows if row.get("signal_date") == (valid_signal_dates[-1] if valid_signal_dates else None)],
+            history_rows=ma_history_rows,
+            as_of_date=valid_signal_dates[-1] if valid_signal_dates else normalized_end_date,
+        ),
         "technical_relevance_run_id": technical_relevance_run_id,
         "technical_relevance_context_rows": technical_relevance_context_rows,
     }
@@ -2243,7 +2265,32 @@ def build_markdown_weekly_swing_report(
             ).rstrip()
         )
 
-    lines.extend(["", "## 11. Synthetic OHLC structure changes"])
+    lines.extend(["", "## 11. Swing MA Break Status"])
+    lines.append(
+        _format_table(
+            [
+                "ticker",
+                "as_of_date",
+                "close",
+                "ema20",
+                "sma50",
+                "dist_ema20_pct",
+                "dist_sma50_pct",
+                "close_below_ema20",
+                "ema20_break_pct",
+                "ema20_break_confirmed",
+                "consecutive_closes_below_ema20",
+                "close_below_sma50",
+                "sma50_break_pct",
+                "sma50_break_confirmed",
+                "consecutive_closes_below_sma50",
+                "ma_break_status",
+            ],
+            list(report_data.get("swing_ma_break_status_rows") or []),
+        ).rstrip()
+    )
+
+    lines.extend(["", "## 12. Synthetic OHLC structure changes"])
     synthetic_change_rows: list[dict[str, object]] = []
     for (_, group_type, group_name), current_rows in _group_rows_by_key(
         [row for row in synthetic_rows if row.get("group_type") in {"subindustry", "layer"}],
@@ -2402,7 +2449,7 @@ def build_markdown_weekly_swing_report(
         )
     )
 
-    lines.extend(["", "## 12. Group Structure Break / Reset History"])
+    lines.extend(["", "## 13. Group Structure Break / Reset History"])
     lines.extend(["", "### A. BOS / RESET events during window"])
     lines.append(
         _format_table(
@@ -2447,7 +2494,7 @@ def build_markdown_weekly_swing_report(
         ).rstrip()
     )
 
-    lines.extend(["", "## 13. Data quality over the window"])
+    lines.extend(["", "## 14. Data quality over the window"])
     group_quality_rows = _count_by_date_and_field(
         group_rows,
         date_field="signal_date",
@@ -2493,7 +2540,7 @@ def build_markdown_weekly_swing_report(
         ]
     )
 
-    lines.extend(["", "## 14. Missing / incomplete inputs summary"])
+    lines.extend(["", "## 15. Missing / incomplete inputs summary"])
     lines.append("Window-total counts")
     lines.append(
         _format_table(
@@ -2558,7 +2605,7 @@ def build_markdown_weekly_swing_report(
     )
 
     if technical_relevance_run_id is not None:
-        lines.extend(["", "## 15. Technical Relevance Context"])
+        lines.extend(["", "## 16. Technical Relevance Context"])
         lines.append(f"technical_relevance_run_id: {technical_relevance_run_id}")
         if technical_relevance_context_rows:
             lines.append(
@@ -2793,6 +2840,31 @@ def build_csv_weekly_swing_report(
                 rolling_2_sell_pressure_rows,
             ),
         )
+    csv_text = _insert_csv_section_before_taxonomy_listing(
+        csv_text,
+        _build_role_csv_section(
+            "swing_ma_break_status",
+            [
+                "ticker",
+                "as_of_date",
+                "close",
+                "ema20",
+                "sma50",
+                "dist_ema20_pct",
+                "dist_sma50_pct",
+                "close_below_ema20",
+                "ema20_break_pct",
+                "ema20_break_confirmed",
+                "consecutive_closes_below_ema20",
+                "close_below_sma50",
+                "sma50_break_pct",
+                "sma50_break_confirmed",
+                "consecutive_closes_below_sma50",
+                "ma_break_status",
+            ],
+            list(report_data.get("swing_ma_break_status_rows") or []),
+        ),
+    )
     if technical_relevance_run_id is not None:
         csv_text = _insert_csv_section_before_taxonomy_listing(
             csv_text,

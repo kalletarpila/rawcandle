@@ -9,6 +9,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Sequence
 
+from .swing_ma_break_status import (
+    build_swing_ma_break_status_rows,
+    load_ticker_ma_history_rows,
+)
 from .technical_relevance_context import (
     load_technical_relevance_context,
     select_latest_relevance_companion_rows,
@@ -252,8 +256,10 @@ def _build_technical_relevance_csv_section(
 
 def _strip_markdown_technical_relevance_section(markdown: str) -> str:
     for heading in (
+        "\n## 19. Technical Relevance Context\n",
         "\n## 18. Technical Relevance Context\n",
         "\n## 17. Technical Relevance Context\n",
+        "\n## 16. Technical Relevance Context\n",
         "\n## 15. Technical Relevance Context\n",
     ):
         start = markdown.find(heading)
@@ -1174,6 +1180,19 @@ def load_daily_swing_report_data(
             signal_version=signal_version,
             taxonomy_version=resolved_taxonomy_version,
         )
+        ma_history_rows = load_ticker_ma_history_rows(
+            conn,
+            tickers=sorted(
+                {
+                    str(row.get("ticker") or "")
+                    for row in ticker_rows
+                    if str(row.get("ticker") or "")
+                }
+            ),
+            as_of_date=normalized_signal_date,
+            signal_version=signal_version,
+            taxonomy_version=resolved_taxonomy_version,
+        )
         synthetic_rows = _load_synthetic_rows(
             conn,
             signal_date=normalized_signal_date,
@@ -1209,6 +1228,11 @@ def load_daily_swing_report_data(
         "group_rows": group_rows,
         "ticker_rows": ticker_rows,
         "synthetic_rows": synthetic_rows,
+        "swing_ma_break_status_rows": build_swing_ma_break_status_rows(
+            latest_rows=ticker_rows,
+            history_rows=ma_history_rows,
+            as_of_date=normalized_signal_date,
+        ),
         "technical_relevance_run_id": technical_relevance_run_id,
         "technical_relevance_context_rows": technical_relevance_context_rows,
     }
@@ -1777,7 +1801,32 @@ def build_markdown_daily_swing_report(
         ).rstrip()
     )
 
-    lines.extend(["", "## 16. Data Quality"])
+    lines.extend(["", "## 16. Swing MA Break Status"])
+    lines.append(
+        _format_table(
+            [
+                "ticker",
+                "as_of_date",
+                "close",
+                "ema20",
+                "sma50",
+                "dist_ema20_pct",
+                "dist_sma50_pct",
+                "close_below_ema20",
+                "ema20_break_pct",
+                "ema20_break_confirmed",
+                "consecutive_closes_below_ema20",
+                "close_below_sma50",
+                "sma50_break_pct",
+                "sma50_break_confirmed",
+                "consecutive_closes_below_sma50",
+                "ma_break_status",
+            ],
+            list(report_data.get("swing_ma_break_status_rows") or []),
+        ).rstrip()
+    )
+
+    lines.extend(["", "## 17. Data Quality"])
     group_quality_rows: list[dict[str, object]] = []
     for group_type in sorted({str(row.get("group_type") or "") for row in group_rows}):
         subset = [row for row in group_rows if row.get("group_type") == group_type]
@@ -1806,7 +1855,7 @@ def build_markdown_daily_swing_report(
         ).rstrip()
     )
 
-    lines.extend(["", "## 17. Missing / Incomplete Inputs Summary"])
+    lines.extend(["", "## 18. Missing / Incomplete Inputs Summary"])
     missing_rows = [
         {
             "metric": "group_rows_missing_timing_state",
@@ -1853,7 +1902,7 @@ def build_markdown_daily_swing_report(
     lines.append(_format_table(["metric", "count"], missing_rows).rstrip())
 
     if technical_relevance_run_id is not None:
-        lines.extend(["", "## 18. Technical Relevance Context"])
+        lines.extend(["", "## 19. Technical Relevance Context"])
         lines.append(f"technical_relevance_run_id: {technical_relevance_run_id}")
         if technical_relevance_context_rows:
             lines.append(
@@ -1981,6 +2030,31 @@ def build_csv_daily_swing_report(
                 "next_action",
             ],
             daily_trigger_rows,
+        ),
+    )
+    csv_text = _insert_csv_section_before_taxonomy_listing(
+        csv_text,
+        _build_role_csv_section(
+            "swing_ma_break_status",
+            [
+                "ticker",
+                "as_of_date",
+                "close",
+                "ema20",
+                "sma50",
+                "dist_ema20_pct",
+                "dist_sma50_pct",
+                "close_below_ema20",
+                "ema20_break_pct",
+                "ema20_break_confirmed",
+                "consecutive_closes_below_ema20",
+                "close_below_sma50",
+                "sma50_break_pct",
+                "sma50_break_confirmed",
+                "consecutive_closes_below_sma50",
+                "ma_break_status",
+            ],
+            list(report_data.get("swing_ma_break_status_rows") or []),
         ),
     )
     technical_relevance_context_rows = list(report_data.get("technical_relevance_context_rows") or [])

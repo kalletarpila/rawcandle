@@ -330,8 +330,9 @@ def test_generates_markdown_report_with_required_sections_and_filters(tmp_path):
         "## 13. Pullback Ticker Scanner",
         "## 14. Exit-Risk Ticker Scanner",
         "## 15. Daily Triggers",
-        "## 16. Data Quality",
-        "## 17. Missing / Incomplete Inputs Summary",
+        "## 16. Swing MA Break Status",
+        "## 17. Data Quality",
+        "## 18. Missing / Incomplete Inputs Summary",
         "## Datacenter Taxonomy Listing",
     ]:
         assert heading in markdown
@@ -357,6 +358,7 @@ def test_generates_markdown_report_with_required_sections_and_filters(tmp_path):
     assert "latest_bos_freshness" in markdown
     assert "latest_reset_reason" in markdown
     assert "latest_reset_freshness" in markdown
+    assert "ma_break_status" in markdown
     assert "| subindustry | AI Chips | BOS_UP | 2024-01-10 | FRESH | DOUBLE_BOS_UP | 2024-01-10 | FRESH | HH | FRESH | UP | BUY_ZONE | LOW |" in markdown
     assert "| layer | Infrastructure | BOS_DOWN | 2024-01-10 | FRESH |  |  |  | LH | FRESH | NEUTRAL | NEUTRAL | LOW |" in markdown
     assert "HIGH" in markdown
@@ -775,7 +777,7 @@ def test_daily_report_without_technical_relevance_run_id_remains_unchanged(tmp_p
         generated_at_utc="2026-05-17T12:00:00Z",
     )
 
-    assert "## 18. Technical Relevance Context" not in result["markdown"]
+    assert "## 19. Technical Relevance Context" not in result["markdown"]
     assert "section;technical_relevance_context" not in result["csv"]
     assert "latest_bullish_relevance_signal_name" not in result["markdown"]
     assert "latest_bearish_relevance_signal_name" not in result["markdown"]
@@ -867,7 +869,7 @@ def test_daily_report_with_technical_relevance_run_id_adds_context_section_witho
     assert baseline["summary"]["breakout_count"] == enriched["summary"]["breakout_count"]
     assert baseline["summary"]["pullback_count"] == enriched["summary"]["pullback_count"]
     assert baseline["summary"]["exit_risk_count"] == enriched["summary"]["exit_risk_count"]
-    assert "## 18. Technical Relevance Context" in enriched["markdown"]
+    assert "## 19. Technical Relevance Context" in enriched["markdown"]
     assert "technical_relevance_run_id: REL_RUN_A" in enriched["markdown"]
     assert "bullish_candle_signal" in enriched["markdown"]
     assert "bearish_divergence_signal" in enriched["markdown"]
@@ -900,7 +902,7 @@ def test_daily_report_with_technical_relevance_run_id_adds_context_section_witho
     assert "| CCC | Infrastructure | Storage |" in enriched["markdown"]
     assert "| 2024-01-10 | Hammer | WEAK_CONTEXT | UP_TREND_BULLISH_REVERSAL_WITHOUT_PIVOT_CONTEXT | 2024-01-10 | Bearish Engulfing | RELEVANT | UP_TREND_BEARISH_REVERSAL_AFTER_BOS_DOWN |" in enriched["markdown"]
     breakout_start = enriched["markdown"].index("## 12. Breakout Ticker Scanner")
-    technical_section_start = enriched["markdown"].index("## 18. Technical Relevance Context")
+    technical_section_start = enriched["markdown"].index("## 19. Technical Relevance Context")
     scanner_section_markdown = enriched["markdown"][breakout_start:technical_section_start]
     assert "NOISE_REASON" not in scanner_section_markdown
 
@@ -945,6 +947,7 @@ def test_daily_trigger_section_renders_markdown_csv_and_summary(tmp_path):
 
     assert "## 15. Daily Triggers" in result["markdown"]
     assert "section;daily_triggers" in result["csv"]
+    assert "section;swing_ma_break_status" in result["csv"]
     assert result["summary"]["daily_trigger_section_enabled"] == 1
     assert "daily_buy_trigger_count" in result["summary"]
 
