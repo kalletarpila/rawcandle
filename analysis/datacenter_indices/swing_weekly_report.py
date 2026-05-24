@@ -327,6 +327,10 @@ def _is_negative_ema20_context(value: object | None) -> bool:
     return numeric is not None and numeric < 0.0
 
 
+def _has_structural_breakdown_label(value: object | None) -> bool:
+    return value in {"LL", "LH"}
+
+
 def _classify_rolling_30_buy_row(row: dict[str, object]) -> tuple[str, str, str]:
     if row.get("last_price_data_status") in WATCHLIST_MISSING_PRICE_STATUSES or row.get("all_price_rows_missing") is True:
         return "INSUFFICIENT_DATA", "missing_price_context", "price_data_missing"
@@ -620,43 +624,61 @@ def _classify_rolling_2_sell_pressure_row(row: dict[str, object]) -> tuple[str, 
     has_relevant_bearish_context = latest_bearish_relevance_class == "RELEVANT"
     has_weak_bearish_context = latest_bearish_relevance_class == "WEAK_CONTEXT"
     has_extreme_or_critical_severity = _has_explicit_extreme_exit_severity(latest_exit_severity)
-    has_high_or_extreme_severity = _has_explicit_high_exit_severity(latest_exit_severity)
+    has_structural_breakdown_label = _has_structural_breakdown_label(row.get("last_latest_structure_label"))
+    has_structure_label_breakdown_reason = _has_exit_reason_token(latest_exit_reason, "latest_structure_label_ll")
+    has_close_below_ema20_reason = _has_exit_reason_token(latest_exit_reason, "close_below_ema20")
+    has_return_10d_pressure_reason = _has_exit_reason_token(latest_exit_reason, "return_10d_lt_minus_8pct")
+    has_double_breakdown_reason = has_close_below_ema20_reason and has_return_10d_pressure_reason
+    has_emergency_structure_confirmation = (
+        trend_state == "DOWN"
+        or has_structural_breakdown_label
+        or has_fresh_bos_down
+        or has_fresh_reset
+        or has_structure_label_breakdown_reason
+        or has_double_breakdown_reason
+    )
 
     if (
-        (current_high_exit_risk and exit_risk_days >= 2 and has_high_or_extreme_severity)
+        (has_extreme_or_critical_severity and exit_risk_days >= 1)
         or (
             exit_risk_days >= 2
-            and high_exit_risk_days >= 2
-            and has_strong_breakdown_reason
+            and (high_exit_risk_days >= 2 or current_high_exit_risk)
+            and latest_exit_severity == "HIGH"
+            and has_emergency_structure_confirmation
         )
         or (has_fresh_bos_down and has_fresh_reset and exit_risk_days >= 1)
-        or (trend_state == "DOWN" and current_high_exit_risk)
         or (has_relevant_bearish_context and current_high_exit_risk)
     ):
         risk_reason = (
-            "HIGH_EXIT_RISK_TWO_DAYS"
-            if current_high_exit_risk and exit_risk_days >= 2 and has_high_or_extreme_severity
-            else "BREAKDOWN_REASON_TWO_DAYS"
-            if exit_risk_days >= 2 and high_exit_risk_days >= 2 and has_strong_breakdown_reason
+            "CRITICAL_OR_EXTREME_EXIT_SEVERITY"
+            if has_extreme_or_critical_severity and exit_risk_days >= 1
+            else "HIGH_PRESSURE_WITH_STRUCTURAL_BREAKDOWN"
+            if (
+                exit_risk_days >= 2
+                and (high_exit_risk_days >= 2 or current_high_exit_risk)
+                and latest_exit_severity == "HIGH"
+                and has_emergency_structure_confirmation
+            )
             else "FRESH_BOS_DOWN_AND_RESET"
             if has_fresh_bos_down and has_fresh_reset and exit_risk_days >= 1
-            else "DOWN_TREND_WITH_CURRENT_HIGH_EXIT_RISK"
-            if trend_state == "DOWN" and current_high_exit_risk
             else "RELEVANT_BEARISH_CONTEXT_WITH_CURRENT_HIGH_EXIT_RISK"
         )
         return "EMERGENCY_SELL_PRESSURE", "CONFIRMED_TWO_DAY_SELL_PRESSURE", risk_reason, "CHECK_STOP_OR_REDUCE"
 
     if (
-        (exit_risk_days >= 2 and latest_exit_severity in {"MEDIUM", "HIGH"})
-        or (high_exit_risk_days >= 1 and has_strong_breakdown_reason)
+        (exit_risk_days >= 2 and high_exit_risk_days >= 2 and latest_exit_severity == "HIGH")
+        or (exit_risk_days >= 2 and latest_exit_severity in {"MEDIUM", "HIGH"})
+        or (high_exit_risk_days >= 1 and (has_close_below_ema20_reason or has_return_10d_pressure_reason))
         or (has_relevant_bearish_context and exit_risk_days >= 1)
         or (has_fresh_bos_down and exit_risk_days >= 1)
     ):
         risk_reason = (
-            "EXIT_RISK_PERSISTENT_TWO_DAYS"
+            "TWO_DAY_HIGH_PRESSURE_WITHOUT_FULL_BREAKDOWN"
+            if exit_risk_days >= 2 and high_exit_risk_days >= 2 and latest_exit_severity == "HIGH"
+            else "EXIT_RISK_PERSISTENT_TWO_DAYS"
             if exit_risk_days >= 2 and latest_exit_severity in {"MEDIUM", "HIGH"}
             else "BREAKDOWN_REASON_WITH_HIGH_EXIT_DAY"
-            if high_exit_risk_days >= 1 and has_strong_breakdown_reason
+            if high_exit_risk_days >= 1 and (has_close_below_ema20_reason or has_return_10d_pressure_reason)
             else "RELEVANT_BEARISH_CONTEXT"
             if has_relevant_bearish_context and exit_risk_days >= 1
             else "FRESH_BOS_DOWN"
