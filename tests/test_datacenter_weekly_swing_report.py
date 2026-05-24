@@ -6,6 +6,14 @@ import pytest
 from analysis.database_manager import DatabaseManager
 from analysis.datacenter_indices import swing_daily_report as daily_report_module
 from analysis.datacenter_indices import swing_weekly_report as weekly_report_module
+from rawcandle.technical_signal_relevance import TechnicalSignalRelevanceConfig
+from rawcandle.technical_signal_relevance_persistence import (
+    TechnicalSignalRelevanceStoredRow,
+    apply_technical_signal_relevance_migration,
+    build_relevance_run_row,
+    insert_relevance_records,
+    insert_relevance_run,
+)
 from analysis.datacenter_indices.swing_weekly_report import (
     DEFAULT_WATCHLIST_FILE,
     build_markdown_weekly_swing_report,
@@ -1171,6 +1179,216 @@ def test_rolling_5_pullback_fixture_can_produce_failed_pullback(tmp_path):
     )
 
     assert "rolling_5_pullback_alerts;BBB;FAILED_PULLBACK;" in result["csv"]
+
+
+def test_rolling_5_no_pullback_with_window_high_exit_risk_stays_no_pullback(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET exit_risk_signal = 1,
+                exit_risk_severity = 'HIGH',
+                exit_reason = 'window_high_exit_risk'
+            WHERE ticker = 'AAA'
+              AND signal_date = '2024-01-08'
+            """
+        )
+        conn.commit()
+
+    result = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=5,
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+
+    assert "rolling_5_pullback_alerts;AAA;NO_PULLBACK;" in result["csv"]
+
+
+def test_rolling_5_no_pullback_with_relevant_bearish_context_alone_stays_no_pullback(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+    conn = _connect_relevance_db(analysis_db)
+    apply_technical_signal_relevance_migration(conn)
+    insert_relevance_run(
+        conn,
+        build_relevance_run_row(
+            run_id="REL_ROLLING_5_BEARISH",
+            config=TechnicalSignalRelevanceConfig(),
+            created_at_utc="2026-05-17T12:00:00Z",
+        ),
+    )
+    insert_relevance_records(
+        conn,
+        [
+            TechnicalSignalRelevanceStoredRow(
+                ticker="AAA",
+                timeframe="1d",
+                signal_date="2024-01-10",
+                signal_confirmed_as_of_date="2024-01-10",
+                signal_name="Bearish",
+                signal_close_price=110.0,
+                signal_direction="BEARISH",
+                signal_family="REVERSAL_MEDIUM",
+                signal_source_type="CANDLE",
+                signal_source_id="CANDLE",
+                dow_trend_state="UP",
+                dow_context_state="NORMAL",
+                latest_bos_direction="BOS_UP",
+                bars_since_latest_bos=2,
+                latest_reset_reason=None,
+                bars_since_latest_reset=None,
+                near_latest_pivot=0,
+                near_active_bos_level=0,
+                is_trend_aligned=0,
+                is_counter_trend=1,
+                relevance_class="RELEVANT",
+                relevance_reason="BEARISH_CONTEXT",
+                relevance_rule_version="TECH_SIGNAL_RELEVANCE_V1",
+                mapping_version="TECH_SIGNAL_MAPPING_V1",
+                reason_version="TECH_SIGNAL_RELEVANCE_REASON_V1",
+                rule_trace='[]',
+                created_at_utc="2026-05-17T12:00:00Z",
+                run_id="REL_ROLLING_5_BEARISH",
+            )
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    result = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=5,
+        generated_at_utc="2026-05-17T12:00:00Z",
+        technical_relevance_run_id="REL_ROLLING_5_BEARISH",
+    )
+
+    assert "rolling_5_pullback_alerts;AAA;NO_PULLBACK;" in result["csv"]
+
+
+def test_rolling_5_no_pullback_with_fresh_bos_down_becomes_failed_pullback_short_term_breakdown(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET latest_bos_event_type = 'BOS_DOWN',
+                latest_bos_event_date = '2024-01-10',
+                latest_bos_confirmed_as_of_date = '2024-01-10',
+                latest_bos_age_trading_days = 0,
+                latest_bos_freshness = 'FRESH'
+            WHERE ticker = 'AAA'
+              AND signal_date = '2024-01-10'
+            """
+        )
+        conn.commit()
+
+    result = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=5,
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+
+    assert "rolling_5_pullback_alerts;AAA;FAILED_PULLBACK;" in result["csv"]
+    assert "SHORT_TERM_BREAKDOWN_WITHOUT_PULLBACK_SETUP" in result["csv"]
+
+
+def test_rolling_5_pullback_with_relevant_bearish_context_fails_pullback(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+    conn = _connect_relevance_db(analysis_db)
+    apply_technical_signal_relevance_migration(conn)
+    insert_relevance_run(
+        conn,
+        build_relevance_run_row(
+            run_id="REL_ROLLING_5_PULLBACK_BEARISH",
+            config=TechnicalSignalRelevanceConfig(),
+            created_at_utc="2026-05-17T12:00:00Z",
+        ),
+    )
+    insert_relevance_records(
+        conn,
+        [
+            TechnicalSignalRelevanceStoredRow(
+                ticker="BBB",
+                timeframe="1d",
+                signal_date="2024-01-10",
+                signal_confirmed_as_of_date="2024-01-10",
+                signal_name="Bearish Engulfing",
+                signal_close_price=100.0,
+                signal_direction="BEARISH",
+                signal_family="REVERSAL_MEDIUM",
+                signal_source_type="CANDLE",
+                signal_source_id="CANDLE",
+                dow_trend_state="UP",
+                dow_context_state="NORMAL",
+                latest_bos_direction="BOS_UP",
+                bars_since_latest_bos=2,
+                latest_reset_reason=None,
+                bars_since_latest_reset=None,
+                near_latest_pivot=0,
+                near_active_bos_level=0,
+                is_trend_aligned=0,
+                is_counter_trend=1,
+                relevance_class="RELEVANT",
+                relevance_reason="BEARISH_CONTEXT",
+                relevance_rule_version="TECH_SIGNAL_RELEVANCE_V1",
+                mapping_version="TECH_SIGNAL_MAPPING_V1",
+                reason_version="TECH_SIGNAL_RELEVANCE_REASON_V1",
+                rule_trace='[]',
+                created_at_utc="2026-05-17T12:00:00Z",
+                run_id="REL_ROLLING_5_PULLBACK_BEARISH",
+            )
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    result = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=5,
+        generated_at_utc="2026-05-17T12:00:00Z",
+        technical_relevance_run_id="REL_ROLLING_5_PULLBACK_BEARISH",
+    )
+
+    assert "rolling_5_pullback_alerts;BBB;FAILED_PULLBACK;" in result["csv"]
+
+
+def test_rolling_5_pullback_with_mild_exit_risk_stays_early_pullback(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET exit_risk_signal = 1,
+                exit_risk_severity = NULL,
+                exit_reason = NULL
+            WHERE ticker = 'BBB'
+              AND signal_date = '2024-01-10'
+            """
+        )
+        conn.commit()
+
+    result = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=5,
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+
+    assert "rolling_5_pullback_alerts;BBB;EARLY_PULLBACK;" in result["csv"]
 
 
 def test_rolling_5_pullback_sections_do_not_render_for_non_5_windows(tmp_path):

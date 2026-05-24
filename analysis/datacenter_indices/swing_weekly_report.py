@@ -286,6 +286,10 @@ def _is_pullback_or_buy_context(value: object | None) -> bool:
     return value in {"PULLBACK_CANDIDATE", "BUY_ZONE", "ADD_ON_PULLBACK"}
 
 
+def _is_pullback_oriented_status(value: object | None) -> bool:
+    return value in {"PULLBACK_CANDIDATE", "ADD_ON_PULLBACK"}
+
+
 def _classify_rolling_30_buy_row(row: dict[str, object]) -> tuple[str, str, str]:
     if row.get("last_price_data_status") in WATCHLIST_MISSING_PRICE_STATUSES or row.get("all_price_rows_missing") is True:
         return "INSUFFICIENT_DATA", "missing_price_context", "price_data_missing"
@@ -455,55 +459,84 @@ def _classify_rolling_5_pullback_row(row: dict[str, object]) -> tuple[str, str, 
     pullback_days = int(row.get("pullback_days") or 0)
     fast_ema10_pullback_days = int(row.get("fast_ema10_pullback_days") or 0)
     conservative_ema20_pullback_days = int(row.get("conservative_ema20_pullback_days") or 0)
-    breakout_days = int(row.get("breakout_days") or 0)
     exit_risk_days = int(row.get("exit_risk_days") or 0)
     latest_exit_severity = row.get("last_exit_risk_severity")
+    has_fresh_bos_down = _has_fresh_bos_down(row)
+    has_fresh_reset = _has_fresh_reset(row)
+    has_relevant_bearish_context = row.get("latest_bearish_relevance_class") == "RELEVANT"
+    current_high_exit_risk = _is_high_exit_risk_status(current_watchlist_status)
+    window_high_exit_risk = _is_high_exit_risk_status(window_watchlist_status)
+    has_explicit_high_severity = _has_explicit_high_exit_severity(latest_exit_severity)
+    has_explicit_extreme_severity = _has_explicit_extreme_exit_severity(latest_exit_severity)
     has_pullback_evidence = (
         pullback_days > 0
         or fast_ema10_pullback_days > 0
         or conservative_ema20_pullback_days > 0
-        or _is_pullback_or_buy_context(current_watchlist_status)
-        or _is_pullback_or_buy_context(window_watchlist_status)
+        or _is_pullback_oriented_status(current_watchlist_status)
+        or _is_pullback_oriented_status(window_watchlist_status)
     )
-    has_clear_blocker = (
+    has_pullback_blocker = (
         trend_state == "DOWN"
-        or _has_fresh_bos_down(row)
-        or _has_fresh_reset(row)
-        or row.get("latest_bearish_relevance_class") == "RELEVANT"
-        or _is_high_exit_risk_status(current_watchlist_status)
-        or _is_high_exit_risk_status(window_watchlist_status)
-        or _has_explicit_high_exit_severity(latest_exit_severity)
+        or has_fresh_bos_down
+        or has_fresh_reset
+        or has_relevant_bearish_context
+        or current_high_exit_risk
+        or has_explicit_high_severity
+    )
+    has_severe_short_term_breakdown = (
+        has_fresh_bos_down
+        or (has_fresh_reset and (trend_state == "DOWN" or current_high_exit_risk or has_explicit_high_severity))
+        or (trend_state == "DOWN" and current_high_exit_risk)
+        or has_explicit_extreme_severity
+        or (has_relevant_bearish_context and current_high_exit_risk)
     )
 
-    if has_clear_blocker:
+    if not has_pullback_evidence:
+        if has_severe_short_term_breakdown:
+            blocking_reason = (
+                "recent_bos_down"
+                if has_fresh_bos_down
+                else "recent_reset"
+                if has_fresh_reset and (trend_state == "DOWN" or current_high_exit_risk or has_explicit_high_severity)
+                else "extreme_exit_risk_severity"
+                if has_explicit_extreme_severity
+                else "down_trend_with_current_high_exit_risk"
+                if trend_state == "DOWN" and current_high_exit_risk
+                else "relevant_bearish_context_with_current_high_exit_risk"
+            )
+            return "FAILED_PULLBACK", "SHORT_TERM_BREAKDOWN_WITHOUT_PULLBACK_SETUP", blocking_reason, "MONITOR_EXIT_RISK"
+        return "NO_PULLBACK", "NO_MEANINGFUL_PULLBACK_EVIDENCE", "", "NONE"
+
+    if has_pullback_blocker:
         blocking_reason = (
             "recent_bos_down"
-            if _has_fresh_bos_down(row)
+            if has_fresh_bos_down
             else "recent_reset"
-            if _has_fresh_reset(row)
+            if has_fresh_reset
             else "high_exit_risk_status"
-            if _is_high_exit_risk_status(current_watchlist_status) or _is_high_exit_risk_status(window_watchlist_status)
+            if current_high_exit_risk
             else "high_exit_risk_severity"
-            if _has_explicit_high_exit_severity(latest_exit_severity)
+            if has_explicit_high_severity
             else "relevant_bearish_context"
-            if row.get("latest_bearish_relevance_class") == "RELEVANT"
+            if has_relevant_bearish_context
             else "down_trend"
         )
         return "FAILED_PULLBACK", "PULLBACK_SETUP_BLOCKED", blocking_reason, "REMOVE_FROM_PULLBACK_LIST"
 
     if (
         has_pullback_evidence
-        and (trend_state == "UP" or _is_pullback_or_buy_context(current_watchlist_status) or _is_pullback_or_buy_context(window_watchlist_status))
+        and (trend_state == "UP" or _is_pullback_oriented_status(current_watchlist_status) or _is_pullback_oriented_status(window_watchlist_status))
         and exit_risk_days == 0
-        and row.get("latest_bearish_relevance_class") != "RELEVANT"
-        and not _is_high_exit_risk_status(window_watchlist_status)
+        and not has_relevant_bearish_context
+        and not current_high_exit_risk
+        and not window_high_exit_risk
     ):
         primary_reason = (
             "CONFIRMED_EMA20_PULLBACK_CONTEXT"
             if conservative_ema20_pullback_days > 0
             else "CONFIRMED_EMA10_PULLBACK_CONTEXT"
             if fast_ema10_pullback_days > 0
-            else "PULLBACK_STATUS_WITHOUT_BLOCKERS"
+            else "PULLBACK_EVIDENCE_WITH_ACCEPTABLE_STRUCTURE"
         )
         return "PULLBACK_CANDIDATE", primary_reason, "", "REVIEW_FOR_DAILY_TRIGGER"
 
@@ -514,7 +547,6 @@ def _classify_rolling_5_pullback_row(row: dict[str, object]) -> tuple[str, str, 
             else "MIXED_TREND_OR_STATUS"
         )
         return "EARLY_PULLBACK", "EARLY_OR_UNCONFIRMED_PULLBACK", blocking_reason, "MONITOR_FOR_CONFIRMATION"
-
     return "NO_PULLBACK", "NO_MEANINGFUL_PULLBACK_EVIDENCE", "", "NONE"
 
 
