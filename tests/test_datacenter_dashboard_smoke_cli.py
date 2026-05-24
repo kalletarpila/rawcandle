@@ -366,7 +366,7 @@ def test_show_trace_includes_selected_ticker_trace_lines(tmp_path, capsys):
 
     assert exit_code == 0
     output = capsys.readouterr().out
-    assert "TRACE ticker=NVDA action=SELL rule=SELL horizon=daily field=reason token=close_below_ema20 value=close_below_ema20" in output
+    assert "TRACE ticker=NVDA action=SELL rule=SELL_HARD_TOKEN horizon=daily field=reason token=close_below_ema20 value=close_below_ema20" in output
 
 
 def test_show_trace_includes_sell_horizon_and_token_summary_counts(tmp_path, capsys):
@@ -374,7 +374,7 @@ def test_show_trace_includes_sell_horizon_and_token_summary_counts(tmp_path, cap
     reports_dir.mkdir()
     _write_report(
         reports_dir / "datacenter_rolling_2_2026-05-22_0000_full.csv",
-        "ticker;status;latest_bos_event_type\nNVDA;WATCH;BOS_DOWN\n",
+        "ticker;status;latest_bos_event_type;latest_reset_reason\nNVDA;WATCH;BOS_DOWN;RESET\n",
     )
     _write_report(
         reports_dir / "datacenter_daily_2026-05-22_0000_full.csv",
@@ -386,12 +386,12 @@ def test_show_trace_includes_sell_horizon_and_token_summary_counts(tmp_path, cap
     assert exit_code == 0
     lines = capsys.readouterr().out.strip().splitlines()
     assert "SUMMARY trace.SELL.horizon.daily=1" in lines
-    assert "SUMMARY trace.SELL.horizon.rolling_2d=1" in lines
+    assert "SUMMARY trace.SELL.horizon.rolling_2d=2" in lines
     assert "SUMMARY trace.SELL.horizon.rolling_5d=0" in lines
     assert "SUMMARY trace.SELL.horizon.rolling_30d=0" in lines
     assert "SUMMARY trace.SELL.token.close_below_ema20=1" in lines
     assert "SUMMARY trace.SELL.token.BOS_DOWN=1" in lines
-    assert "SUMMARY trace.SELL.token.RESET=0" in lines
+    assert "SUMMARY trace.SELL.token.RESET=1" in lines
 
 
 def test_show_trace_output_is_deterministic(tmp_path, capsys):
@@ -410,5 +410,5 @@ def test_show_trace_output_is_deterministic(tmp_path, capsys):
     lines = capsys.readouterr().out.strip().splitlines()
     trace_lines = [line for line in lines if line.startswith("TRACE ")]
     assert trace_lines == [
-        "TRACE ticker=NVDA action=SELL rule=SELL horizon=daily field=reason token=close_below_ema20 value=close_below_ema20"
+        "TRACE ticker=NVDA action=SELL rule=SELL_HARD_TOKEN horizon=daily field=reason token=close_below_ema20 value=close_below_ema20"
     ]

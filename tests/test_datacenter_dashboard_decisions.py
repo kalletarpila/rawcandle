@@ -53,6 +53,58 @@ def test_sell_overrides_positive_signals():
     assert result.decisions[0].action == "SELL"
 
 
+def test_rolling_2d_bos_down_alone_is_reduce_not_sell():
+    result = build_datacenter_ticker_decisions(
+        [_row(ticker="NVDA", horizon="rolling 2d", latest_bos_event_type="BOS_DOWN")]
+    )
+
+    assert result.decisions[0].action == "REDUCE"
+
+
+def test_rolling_2d_bos_down_plus_reset_is_sell():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(ticker="NVDA", horizon="rolling 2d", latest_bos_event_type="BOS_DOWN"),
+            _row(ticker="NVDA", horizon="rolling 2d", latest_reset_reason="RESET"),
+        ]
+    )
+
+    assert result.decisions[0].action == "SELL"
+
+
+def test_rolling_2d_bos_down_plus_high_exit_risk_days_count_is_sell():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(ticker="NVDA", horizon="rolling 2d", latest_bos_event_type="BOS_DOWN"),
+            _row(ticker="NVDA", horizon="rolling 2d", high_exit_risk_days_count=1),
+        ]
+    )
+
+    assert result.decisions[0].action == "SELL"
+
+
+def test_rolling_2d_bos_down_plus_failed_pullback_is_sell():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(ticker="NVDA", horizon="rolling 2d", latest_bos_event_type="BOS_DOWN"),
+            _row(ticker="NVDA", horizon="rolling 2d", raw_status="FAILED_PULLBACK"),
+        ]
+    )
+
+    assert result.decisions[0].action == "SELL"
+
+
+def test_rolling_2d_bos_down_plus_daily_bos_down_is_sell():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(ticker="NVDA", horizon="rolling 2d", latest_bos_event_type="BOS_DOWN"),
+            _row(ticker="NVDA", horizon="daily", latest_bos_event_type="BOS_DOWN"),
+        ]
+    )
+
+    assert result.decisions[0].action == "SELL"
+
+
 def test_blocked_from_blocking_reasons_when_no_sell_exists():
     result = build_datacenter_ticker_decisions(
         [_row(ticker="AMD", horizon="rolling 5d", blocking_reasons="HIGH_EXIT_RISK")]
@@ -65,6 +117,14 @@ def test_blocked_from_blocking_reasons_when_no_sell_exists():
 def test_reduce_from_daily_or_rolling_2d_risk_language():
     result = build_datacenter_ticker_decisions(
         [_row(ticker="AVGO", horizon="daily", reason="subindustry_context_risk")]
+    )
+
+    assert result.decisions[0].action == "REDUCE"
+
+
+def test_reset_alone_without_hard_confirmation_is_reduce():
+    result = build_datacenter_ticker_decisions(
+        [_row(ticker="AVGO", horizon="rolling 2d", latest_reset_reason="RESET")]
     )
 
     assert result.decisions[0].action == "REDUCE"
@@ -211,6 +271,19 @@ def test_action_counts_are_correct():
     assert result.action_counts["NEUTRAL"] == 1
 
 
+def test_action_counts_reflect_refined_bos_down_rules():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(ticker="AAA", horizon="rolling 2d", latest_bos_event_type="BOS_DOWN"),
+            _row(ticker="BBB", horizon="rolling 2d", latest_bos_event_type="BOS_DOWN"),
+            _row(ticker="BBB", horizon="rolling 2d", latest_reset_reason="RESET"),
+        ]
+    )
+
+    assert result.action_counts["SELL"] == 1
+    assert result.action_counts["REDUCE"] == 1
+
+
 def test_sell_trace_captures_horizon_field_token_value_and_source_file():
     result = build_datacenter_ticker_decisions(
         [_row(ticker="NVDA", horizon="daily", reason="close_below_ema20")]
@@ -223,6 +296,7 @@ def test_sell_trace_captures_horizon_field_token_value_and_source_file():
     assert trace.matched_token == "close_below_ema20"
     assert trace.matched_value == "close_below_ema20"
     assert trace.source_file == "/tmp/NVDA_daily.csv"
+    assert trace.matched_rule == "SELL_HARD_TOKEN"
 
 
 def test_reduce_trace_captures_risk_token():
@@ -232,7 +306,7 @@ def test_reduce_trace_captures_risk_token():
 
     trace = result.decisions[0].decision_trace[0]
     assert result.decisions[0].action == "REDUCE"
-    assert trace.matched_rule == "REDUCE"
+    assert trace.matched_rule == "REDUCE_RISK_TOKEN"
     assert trace.matched_token == "risk"
     assert trace.field_name == "reason"
 
@@ -284,7 +358,28 @@ def test_final_action_is_unchanged_when_traces_are_added():
     )
 
     assert result.decisions[0].action == "SELL"
-    assert result.decisions[0].decision_trace[0].matched_rule == "SELL"
+    assert result.decisions[0].decision_trace[0].matched_rule == "SELL_HARD_TOKEN"
+
+
+def test_confirmed_bos_down_trace_uses_sell_bos_down_confirmed():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(ticker="NVDA", horizon="rolling 2d", latest_bos_event_type="BOS_DOWN"),
+            _row(ticker="NVDA", horizon="rolling 2d", latest_reset_reason="RESET"),
+        ]
+    )
+
+    assert result.decisions[0].action == "SELL"
+    assert result.decisions[0].decision_trace[0].matched_rule == "SELL_BOS_DOWN_CONFIRMED"
+
+
+def test_unconfirmed_bos_down_trace_uses_reduce_bos_down_unconfirmed():
+    result = build_datacenter_ticker_decisions(
+        [_row(ticker="NVDA", horizon="rolling 2d", latest_bos_event_type="BOS_DOWN")]
+    )
+
+    assert result.decisions[0].action == "REDUCE"
+    assert result.decisions[0].decision_trace[0].matched_rule == "REDUCE_BOS_DOWN_UNCONFIRMED"
 
 
 def test_decision_ordering_is_unchanged_when_traces_are_added():
