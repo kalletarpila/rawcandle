@@ -83,7 +83,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Standalone stock update scheduler control panel."
     )
-    parser.add_argument("--config", required=True)
+    parser.add_argument("--config", default="scheduler_config.json")
     return parser
 
 
@@ -1389,6 +1389,21 @@ def run_app(page: ft.Page, config_path: str) -> None:
         value=DEFAULT_DATACENTER_OUTPUT_DIR,
         expand=True,
     )
+    datacenter_dashboard_real_render_marker_text = ft.Text(
+        "REAL RENDER CHECK: DATACENTER DASHBOARD V3",
+        size=28,
+        weight=ft.FontWeight.BOLD,
+        color="#0B57D0",
+    )
+    datacenter_dashboard_real_render_diag_text = ft.Text(
+        "dashboard_real_render_v3=1"
+    )
+    datacenter_dashboard_tab_constructed_text = ft.Text(
+        "dashboard_tab_constructed=1"
+    )
+    datacenter_dashboard_backend_available_text = ft.Text(
+        "dashboard_backend_available=1"
+    )
     datacenter_dashboard_build_marker_text = ft.Text(
         "Dashboard UI build: dashboard_ui_visible_v1",
         size=12,
@@ -1563,7 +1578,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
         usa_checkbox.value = "usa" in enabled_markets
         technical_relevance_checkbox.value = config.technical_relevance_enabled
 
-    def refresh_datacenter_dashboard_view() -> None:
+    def refresh_datacenter_dashboard_view() -> dict[str, int]:
         dashboard_status = discover_datacenter_dashboard_status(
             datacenter_dashboard_reports_dir_field.value
         )
@@ -1635,6 +1650,13 @@ def run_app(page: ft.Page, config_path: str) -> None:
             override_explanation_field=datacenter_dashboard_override_explanation_field,
         )
         page.update()
+        found_reports = sum(
+            1 for report in dashboard_status.reports if report.status == "OK"
+        )
+        return {
+            "found_reports": found_reports,
+            "decision_total": len(decision_result.decisions),
+        }
 
     def refresh_datacenter_dashboard_inspector_for_selected_ticker() -> None:
         dashboard_status = discover_datacenter_dashboard_status(
@@ -1690,6 +1712,16 @@ def run_app(page: ft.Page, config_path: str) -> None:
             override_explanation_field=datacenter_dashboard_override_explanation_field,
         )
         page.update()
+
+    def on_datacenter_dashboard_refresh(_e) -> None:
+        print("DEBUG dashboard_refresh_clicked=1")
+        print(
+            f"DEBUG dashboard_reports_dir={datacenter_dashboard_reports_dir_field.value}"
+        )
+        refresh_result = refresh_datacenter_dashboard_view()
+        print("DEBUG dashboard_refresh_completed=1")
+        print(f"DEBUG dashboard_found_reports={refresh_result['found_reports']}")
+        print(f"DEBUG dashboard_decision_total={refresh_result['decision_total']}")
 
     def refresh_timer_status(config: StockUpdateSchedulerConfig) -> None:
         timer_status = read_systemd_user_timer_status()
@@ -2105,7 +2137,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
     datacenter_watermarks_button = ft.ElevatedButton("Show Watermarks", on_click=on_datacenter_watermarks)
     datacenter_dashboard_refresh_button = ft.ElevatedButton(
         "Refresh Dashboard",
-        on_click=lambda _e: refresh_datacenter_dashboard_view(),
+        on_click=on_datacenter_dashboard_refresh,
     )
     datacenter_dashboard_inspector_ticker_dropdown.on_change = (
         lambda _e: refresh_datacenter_dashboard_inspector_for_selected_ticker()
@@ -2152,13 +2184,17 @@ def run_app(page: ft.Page, config_path: str) -> None:
         spacing=12,
         expand=True,
     )
+    # Manual verification:
+    # 1. Run: PYTHONPATH=. python3 dev_tools/stock_update_scheduler_ui.py
+    # 2. Open Datacenter Dashboard tab.
+    # 3. Confirm text: REAL RENDER CHECK: DATACENTER DASHBOARD V3
+    # 4. Confirm stdout: DEBUG dashboard_real_render_v3=1
     datacenter_dashboard_header = ft.Column(
         controls=[
-            ft.Text("Datacenter Dashboard", size=24, weight=ft.FontWeight.BOLD),
-            ft.Text(
-                "Read-only dashboard for the newest daily and rolling reports."
-            ),
-            datacenter_dashboard_build_marker_text,
+            datacenter_dashboard_real_render_marker_text,
+            datacenter_dashboard_real_render_diag_text,
+            datacenter_dashboard_tab_constructed_text,
+            datacenter_dashboard_backend_available_text,
             ft.Row(
                 [
                     ft.Text("Reports directory", width=140),
@@ -2176,6 +2212,11 @@ def run_app(page: ft.Page, config_path: str) -> None:
                 ],
                 spacing=4,
             ),
+            ft.Text("Datacenter Dashboard", size=24, weight=ft.FontWeight.BOLD),
+            ft.Text(
+                "Read-only dashboard for the newest daily and rolling reports."
+            ),
+            datacenter_dashboard_build_marker_text,
         ],
         spacing=8,
         tight=True,
@@ -2285,6 +2326,18 @@ def run_app(page: ft.Page, config_path: str) -> None:
     page.datacenter_rolling_window_size_field = datacenter_rolling_window_size_field
     page.datacenter_watchlist_file_field = datacenter_watchlist_file_field
     page.datacenter_dashboard_reports_dir_field = datacenter_dashboard_reports_dir_field
+    page.datacenter_dashboard_real_render_marker_text = (
+        datacenter_dashboard_real_render_marker_text
+    )
+    page.datacenter_dashboard_real_render_diag_text = (
+        datacenter_dashboard_real_render_diag_text
+    )
+    page.datacenter_dashboard_tab_constructed_text = (
+        datacenter_dashboard_tab_constructed_text
+    )
+    page.datacenter_dashboard_backend_available_text = (
+        datacenter_dashboard_backend_available_text
+    )
     page.datacenter_dashboard_build_marker_text = datacenter_dashboard_build_marker_text
     page.datacenter_dashboard_readiness_text = datacenter_dashboard_readiness_text
     page.datacenter_dashboard_reports_status_text = datacenter_dashboard_reports_status_text
@@ -2388,8 +2441,12 @@ def run_app(page: ft.Page, config_path: str) -> None:
         conflicting_signals_field=datacenter_dashboard_conflicting_signals_field,
         override_explanation_field=datacenter_dashboard_override_explanation_field,
     )
-    print("DEBUG dashboard_ui_build=dashboard_ui_visible_v1")
-    print(f"DEBUG dashboard_parent={datacenter_dashboard_content!r}")
+    print("DEBUG dashboard_real_render_v3=1")
+    print(f"DEBUG dashboard_page_scroll={page.scroll}")
+    print(
+        "DEBUG dashboard_root_control_type="
+        f"{type(datacenter_dashboard_content).__name__}"
+    )
     dashboard_root_column = datacenter_dashboard_content.content
     dashboard_children_count = (
         len(dashboard_root_column.controls)
@@ -2397,7 +2454,8 @@ def run_app(page: ft.Page, config_path: str) -> None:
         and hasattr(dashboard_root_column, "controls")
         else 0
     )
-    print(f"DEBUG dashboard_children_count={dashboard_children_count}")
+    print(f"DEBUG dashboard_root_controls_count={dashboard_children_count}")
+    print("DEBUG dashboard_tab_index_or_label=Datacenter Dashboard")
     page.add(tabs)
     page.update()
 

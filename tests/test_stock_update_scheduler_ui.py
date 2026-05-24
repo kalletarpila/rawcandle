@@ -1014,6 +1014,13 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(
     assert "candidate_priority.P1_READY_TO_WATCH=0" in page.datacenter_dashboard_decision_summary_field.value
     assert page.datacenter_dashboard_refresh_button.text == "Refresh Dashboard"
     assert page.datacenter_dashboard_reports_dir_field.label == "dashboard_reports_dir"
+    assert (
+        page.datacenter_dashboard_real_render_marker_text.value
+        == "REAL RENDER CHECK: DATACENTER DASHBOARD V3"
+    )
+    assert page.datacenter_dashboard_real_render_diag_text.value == "dashboard_real_render_v3=1"
+    assert page.datacenter_dashboard_tab_constructed_text.value == "dashboard_tab_constructed=1"
+    assert page.datacenter_dashboard_backend_available_text.value == "dashboard_backend_available=1"
     assert page.datacenter_dashboard_build_marker_text.value == (
         "Dashboard UI build: dashboard_ui_visible_v1"
     )
@@ -1052,6 +1059,10 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(
     scroll_text_labels = _descendant_text_values_for_control(
         page.datacenter_dashboard_scroll_content
     )
+    assert "REAL RENDER CHECK: DATACENTER DASHBOARD V3" in dashboard_text_labels
+    assert "dashboard_real_render_v3=1" in dashboard_text_labels
+    assert "dashboard_tab_constructed=1" in dashboard_text_labels
+    assert "dashboard_backend_available=1" in dashboard_text_labels
     assert "Datacenter Dashboard" in dashboard_text_labels
     assert "Dashboard UI build: dashboard_ui_visible_v1" in dashboard_text_labels
     assert "Reports directory" in dashboard_text_labels
@@ -1063,6 +1074,7 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(
     assert "Command Center" in dashboard_text_labels
     assert "Candidate Pullbacks" in dashboard_text_labels
     assert "Inspector" in dashboard_text_labels
+    assert header_text_labels[0] == "REAL RENDER CHECK: DATACENTER DASHBOARD V3"
     assert "Dashboard UI build: dashboard_ui_visible_v1" in header_text_labels
     assert "Reports directory" in header_text_labels
     assert "Refresh Dashboard" in header_text_labels
@@ -1077,9 +1089,11 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(
     assert len(page.datacenter_dashboard_scroll_content.controls) == 5
     assert hasattr(page.datacenter_dashboard_content, "content")
     assert len(_dashboard_tab_descendants(page)) > 20
-    assert "DEBUG dashboard_ui_build=dashboard_ui_visible_v1" in captured_stdout
-    assert "DEBUG dashboard_parent=" in captured_stdout
-    assert "DEBUG dashboard_children_count=" in captured_stdout
+    assert "DEBUG dashboard_real_render_v3=1" in captured_stdout
+    assert "DEBUG dashboard_page_scroll=" in captured_stdout
+    assert "DEBUG dashboard_root_control_type=" in captured_stdout
+    assert "DEBUG dashboard_root_controls_count=" in captured_stdout
+    assert "DEBUG dashboard_tab_index_or_label=Datacenter Dashboard" in captured_stdout
 
     page.datacenter_signal_date_field.value = "2026-05-15"
     page.datacenter_start_date_field.value = "2026-01-01"
@@ -1128,7 +1142,58 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(
     assert daily_override["command"][daily_override["command"].index("--watchlist-file") + 1] == "/tmp/custom_watchlist.txt"
 
 
-def test_run_app_datacenter_dashboard_refresh_reads_report_directory(tmp_path, monkeypatch):
+def test_dashboard_real_render_marker_is_in_actual_tab_control_tree(
+    tmp_path, monkeypatch
+):
+    config_path = tmp_path / "scheduler.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "analysis_db_path": "/tmp/analysis.db",
+                "enabled_markets": ["omxh"],
+                "log_dir": "/tmp/logs",
+                "osakedata_db_path": "/tmp/osakedata.db",
+                "run_time": "05:30",
+                "timezone": "Europe/Helsinki",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.load_latest_scheduler_summary",
+        lambda log_dir: None,
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.list_scheduler_log_files",
+        lambda log_dir: [],
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_scheduler_status",
+        lambda log_dir: None,
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
+        lambda: {
+            "timer_path": "/tmp/timer",
+            "on_calendar": "*-*-* 05:30:00",
+            "installed": True,
+            "status_summary": "ok",
+            "error": None,
+        },
+    )
+
+    page = _FakePage()
+    run_app(page, str(config_path))
+
+    dashboard_text_labels = _descendant_text_values(page)
+    assert "REAL RENDER CHECK: DATACENTER DASHBOARD V3" in dashboard_text_labels
+    assert "Reports directory" in dashboard_text_labels
+    assert "Refresh Dashboard" in dashboard_text_labels
+
+
+def test_run_app_datacenter_dashboard_refresh_reads_report_directory(
+    tmp_path, monkeypatch, capsys
+):
     config_path = tmp_path / "scheduler.json"
     reports_dir = tmp_path / "reports"
     reports_dir.mkdir()
@@ -1173,10 +1238,12 @@ def test_run_app_datacenter_dashboard_refresh_reads_report_directory(tmp_path, m
 
     page = _FakePage()
     run_app(page, str(config_path))
+    _ = capsys.readouterr()
     header_id_before = id(page.datacenter_dashboard_header)
     build_marker_id_before = id(page.datacenter_dashboard_build_marker_text)
     page.datacenter_dashboard_reports_dir_field.value = str(reports_dir)
     page.datacenter_dashboard_refresh_button.on_click(None)
+    refresh_stdout = capsys.readouterr().out
 
     assert page.datacenter_dashboard_overall_status_field.value == "PARTIAL"
     assert page.datacenter_dashboard_readiness_text.value == "Readiness: PARTIAL"
@@ -1185,6 +1252,11 @@ def test_run_app_datacenter_dashboard_refresh_reads_report_directory(tmp_path, m
     assert page.datacenter_dashboard_candidate_status_text.value == "Candidate Pullbacks: 0"
     assert id(page.datacenter_dashboard_header) == header_id_before
     assert id(page.datacenter_dashboard_build_marker_text) == build_marker_id_before
+    assert "DEBUG dashboard_refresh_clicked=1" in refresh_stdout
+    assert f"DEBUG dashboard_reports_dir={reports_dir}" in refresh_stdout
+    assert "DEBUG dashboard_refresh_completed=1" in refresh_stdout
+    assert "DEBUG dashboard_found_reports=1" in refresh_stdout
+    assert "DEBUG dashboard_decision_total=1" in refresh_stdout
     assert "readiness=PARTIAL" in page.datacenter_dashboard_parse_summary_field.value
     assert "found_reports=1" in page.datacenter_dashboard_parse_summary_field.value
     assert "missing_reports=3" in page.datacenter_dashboard_parse_summary_field.value
