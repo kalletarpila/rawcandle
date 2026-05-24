@@ -76,6 +76,7 @@ def build_config_from_ui_values(
     timezone: str,
     run_time: str,
     selected_markets: List[str],
+    technical_relevance_enabled: bool,
 ) -> StockUpdateSchedulerConfig:
     config = StockUpdateSchedulerConfig(
         enabled_markets=selected_markets,
@@ -84,6 +85,7 @@ def build_config_from_ui_values(
         analysis_db_path=analysis_db_path,
         log_dir=log_dir,
         timezone=timezone,
+        technical_relevance_enabled=technical_relevance_enabled,
     )
     return validate_scheduler_config(config)
 
@@ -99,6 +101,7 @@ def build_skip_next_run_config(
         log_dir=config.log_dir,
         timezone=config.timezone,
         skip_next_run=True,
+        technical_relevance_enabled=config.technical_relevance_enabled,
     )
     return validate_scheduler_config(updated_config)
 
@@ -114,6 +117,7 @@ def build_cancel_skip_next_run_config(
         log_dir=config.log_dir,
         timezone=config.timezone,
         skip_next_run=False,
+        technical_relevance_enabled=config.technical_relevance_enabled,
     )
     return validate_scheduler_config(updated_config)
 
@@ -852,6 +856,14 @@ def run_app(page: ft.Page, config_path: str) -> None:
     omxh_checkbox = ft.Checkbox(label="OMXH")
     omxs_checkbox = ft.Checkbox(label="OMXS")
     usa_checkbox = ft.Checkbox(label="USA")
+    technical_relevance_checkbox = ft.Checkbox(
+        label="Run technical relevance after stock updates",
+        value=False,
+        tooltip=(
+            "Runs technical_signal_relevance after daily "
+            "OHLCV/candle/divergence/Dow updates. Default off."
+        ),
+    )
     skip_next_run_text = ft.Text("")
     running_status_text = ft.Text("")
     skip_next_run_button = ft.ElevatedButton("Ohita seuraava ajastettu ajo")
@@ -948,6 +960,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
         omxh_checkbox.value = "omxh" in enabled_markets
         omxs_checkbox.value = "omxs" in enabled_markets
         usa_checkbox.value = "usa" in enabled_markets
+        technical_relevance_checkbox.value = config.technical_relevance_enabled
 
     def refresh_timer_status(config: StockUpdateSchedulerConfig) -> None:
         timer_status = read_systemd_user_timer_status()
@@ -1074,6 +1087,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
                 timezone=timezone_field.value,
                 run_time=run_time_field.value,
                 selected_markets=selected_markets_from_ui(),
+                technical_relevance_enabled=bool(technical_relevance_checkbox.value),
             )
             save_result = save_config_and_sync_systemd_timer(
                 config_path=config_path,
@@ -1315,6 +1329,11 @@ def run_app(page: ft.Page, config_path: str) -> None:
     skip_next_run_button.on_click = on_skip_next_run
     cancel_skip_next_run_button.on_click = on_cancel_skip_next_run
 
+    save_config_button = ft.ElevatedButton("Save config", on_click=on_save_config)
+    reload_config_button = ft.ElevatedButton("Reload config", on_click=on_reload_config)
+    run_now_button = ft.ElevatedButton("Run now", on_click=on_run_now)
+    refresh_logs_button = ft.ElevatedButton("Refresh logs", on_click=on_refresh_logs)
+
     scheduler_content = ft.Column(
         controls=[
             ft.Text("Stock Update Scheduler Control Panel", size=24, weight=ft.FontWeight.BOLD),
@@ -1325,16 +1344,17 @@ def run_app(page: ft.Page, config_path: str) -> None:
             timezone_field,
             run_time_field,
             ft.Row([omxh_checkbox, omxs_checkbox, usa_checkbox]),
+            technical_relevance_checkbox,
             skip_next_run_text,
             running_status_text,
             ft.Row(
                 [
-                    ft.ElevatedButton("Save config", on_click=on_save_config),
-                    ft.ElevatedButton("Reload config", on_click=on_reload_config),
-                    ft.ElevatedButton("Run now", on_click=on_run_now),
+                    save_config_button,
+                    reload_config_button,
+                    run_now_button,
                     skip_next_run_button,
                     cancel_skip_next_run_button,
-                    ft.ElevatedButton("Refresh logs", on_click=on_refresh_logs),
+                    refresh_logs_button,
                 ]
             ),
             status_field,
@@ -1423,6 +1443,9 @@ def run_app(page: ft.Page, config_path: str) -> None:
     page.datacenter_watermarks_button = datacenter_watermarks_button
     page.summary_field = summary_field
     page.logs_column = logs_column
+    page.technical_relevance_checkbox = technical_relevance_checkbox
+    page.save_config_button = save_config_button
+    page.reload_config_button = reload_config_button
 
     tabs = ft.Tabs(
         selected_index=0,

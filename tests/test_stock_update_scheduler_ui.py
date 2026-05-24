@@ -360,6 +360,7 @@ def test_save_config_and_sync_systemd_timer_reports_success(tmp_path, monkeypatc
         analysis_db_path="/tmp/analysis.db",
         log_dir="/tmp/logs",
         timezone="Europe/Helsinki",
+        technical_relevance_enabled=True,
     )
     monkeypatch.setattr(
         "dev_tools.stock_update_scheduler_ui.get_systemd_user_timer_path",
@@ -377,6 +378,7 @@ def test_save_config_and_sync_systemd_timer_reports_success(tmp_path, monkeypatc
 
     saved = read_scheduler_config(str(config_path))
     assert saved.run_time == "06:30"
+    assert saved.technical_relevance_enabled is True
     assert read_systemd_timer_on_calendar(timer_path) == "*-*-* 06:30:00"
     assert result == {
         "config_saved": True,
@@ -400,6 +402,7 @@ def test_save_config_and_sync_systemd_timer_reports_missing_timer_warning(
         analysis_db_path="/tmp/analysis.db",
         log_dir="/tmp/logs",
         timezone="Europe/Helsinki",
+        technical_relevance_enabled=True,
     )
     monkeypatch.setattr(
         "dev_tools.stock_update_scheduler_ui.get_systemd_user_timer_path",
@@ -418,6 +421,7 @@ def test_save_config_and_sync_systemd_timer_reports_missing_timer_warning(
 
     saved = read_scheduler_config(str(config_path))
     assert saved.run_time == "06:30"
+    assert saved.technical_relevance_enabled is True
     assert reloaded_called["value"] is False
     assert result["status"] == "WARNING"
     assert result["timer_file_found"] is False
@@ -434,6 +438,7 @@ def test_save_config_and_sync_systemd_timer_reports_reload_warning(tmp_path, mon
         analysis_db_path="/tmp/analysis.db",
         log_dir="/tmp/logs",
         timezone="Europe/Helsinki",
+        technical_relevance_enabled=True,
     )
     monkeypatch.setattr(
         "dev_tools.stock_update_scheduler_ui.get_systemd_user_timer_path",
@@ -451,6 +456,7 @@ def test_save_config_and_sync_systemd_timer_reports_reload_warning(tmp_path, mon
 
     saved = read_scheduler_config(str(config_path))
     assert saved.run_time == "06:30"
+    assert saved.technical_relevance_enabled is True
     assert read_systemd_timer_on_calendar(timer_path) == "*-*-* 06:30:00"
     assert result["status"] == "WARNING"
     assert "reload failed" in result["message"]
@@ -492,9 +498,11 @@ def test_build_config_from_ui_values_normalizes_markets():
         timezone="Europe/Helsinki",
         run_time="05:30",
         selected_markets=["OMXH", " omxs "],
+        technical_relevance_enabled=True,
     )
 
     assert config.enabled_markets == ["omxh", "omxs"]
+    assert config.technical_relevance_enabled is True
 
 
 def test_build_config_from_ui_values_does_not_include_usa_unless_selected():
@@ -505,10 +513,12 @@ def test_build_config_from_ui_values_does_not_include_usa_unless_selected():
         timezone="Europe/Helsinki",
         run_time="05:30",
         selected_markets=["OMXH", " omxs "],
+        technical_relevance_enabled=False,
     )
 
     assert config.enabled_markets == ["omxh", "omxs"]
     assert "usa" not in config.enabled_markets
+    assert config.technical_relevance_enabled is False
 
 
 def test_build_config_from_ui_values_invalid_run_time_raises_value_error():
@@ -520,6 +530,7 @@ def test_build_config_from_ui_values_invalid_run_time_raises_value_error():
             timezone="Europe/Helsinki",
             run_time="5:30",
             selected_markets=["OMXH"],
+            technical_relevance_enabled=False,
         )
 
 
@@ -531,6 +542,7 @@ def test_config_write_read_roundtrip_through_existing_config_module(tmp_path):
         timezone="Europe/Helsinki",
         run_time="05:30",
         selected_markets=["OMXH", "OMXS"],
+        technical_relevance_enabled=True,
     )
     path = tmp_path / "scheduler.json"
 
@@ -538,6 +550,133 @@ def test_config_write_read_roundtrip_through_existing_config_module(tmp_path):
     loaded = read_scheduler_config(str(path))
 
     assert loaded == config
+
+
+def test_run_app_loads_technical_relevance_enabled_true_into_checkbox(
+    tmp_path, monkeypatch
+):
+    config_path = tmp_path / "scheduler_true.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "analysis_db_path": "/tmp/analysis.db",
+                "enabled_markets": ["omxh"],
+                "log_dir": "/tmp/logs",
+                "osakedata_db_path": "/tmp/osakedata.db",
+                "run_time": "05:30",
+                "technical_relevance_enabled": True,
+                "timezone": "Europe/Helsinki",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.load_latest_scheduler_summary", lambda log_dir: None)
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.list_scheduler_log_files", lambda log_dir: [])
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.read_scheduler_status", lambda log_dir: None)
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
+        lambda: {"timer_path": "/tmp/timer", "on_calendar": "*-*-* 05:30:00", "installed": True, "status_summary": "ok", "error": None},
+    )
+
+    page = _FakePage()
+    run_app(page, str(config_path))
+
+    assert page.technical_relevance_checkbox.value is True
+
+
+def test_run_app_loads_technical_relevance_enabled_false_when_false_or_missing(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.load_latest_scheduler_summary", lambda log_dir: None)
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.list_scheduler_log_files", lambda log_dir: [])
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.read_scheduler_status", lambda log_dir: None)
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
+        lambda: {"timer_path": "/tmp/timer", "on_calendar": "*-*-* 05:30:00", "installed": True, "status_summary": "ok", "error": None},
+    )
+
+    false_path = tmp_path / "scheduler_false.json"
+    false_path.write_text(
+        json.dumps(
+            {
+                "analysis_db_path": "/tmp/analysis.db",
+                "enabled_markets": ["omxh"],
+                "log_dir": "/tmp/logs",
+                "osakedata_db_path": "/tmp/osakedata.db",
+                "run_time": "05:30",
+                "technical_relevance_enabled": False,
+                "timezone": "Europe/Helsinki",
+            }
+        ),
+        encoding="utf-8",
+    )
+    missing_path = tmp_path / "scheduler_missing.json"
+    missing_path.write_text(
+        json.dumps(
+            {
+                "analysis_db_path": "/tmp/analysis.db",
+                "enabled_markets": ["omxh"],
+                "log_dir": "/tmp/logs",
+                "osakedata_db_path": "/tmp/osakedata.db",
+                "run_time": "05:30",
+                "timezone": "Europe/Helsinki",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    false_page = _FakePage()
+    run_app(false_page, str(false_path))
+    assert false_page.technical_relevance_checkbox.value is False
+
+    missing_page = _FakePage()
+    run_app(missing_page, str(missing_path))
+    assert missing_page.technical_relevance_checkbox.value is False
+
+
+def test_run_app_save_config_persists_technical_relevance_checkbox_state(
+    tmp_path, monkeypatch
+):
+    config_path = tmp_path / "scheduler_save.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "analysis_db_path": "/tmp/analysis.db",
+                "enabled_markets": ["omxh"],
+                "log_dir": str(tmp_path / "logs"),
+                "osakedata_db_path": "/tmp/osakedata.db",
+                "run_time": "05:30",
+                "technical_relevance_enabled": False,
+                "timezone": "Europe/Helsinki",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.load_latest_scheduler_summary", lambda log_dir: None)
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.list_scheduler_log_files", lambda log_dir: [])
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.read_scheduler_status", lambda log_dir: None)
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
+        lambda: {"timer_path": "/tmp/timer", "on_calendar": "*-*-* 05:30:00", "installed": False, "status_summary": "missing", "error": None},
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.get_systemd_user_timer_path",
+        lambda: tmp_path / "missing.timer",
+    )
+
+    checked_page = _FakePage()
+    run_app(checked_page, str(config_path))
+    checked_page.technical_relevance_checkbox.value = True
+    checked_page.save_config_button.on_click(None)
+    saved_checked = read_scheduler_config(str(config_path))
+    assert saved_checked.technical_relevance_enabled is True
+
+    unchecked_page = _FakePage()
+    run_app(unchecked_page, str(config_path))
+    unchecked_page.technical_relevance_checkbox.value = False
+    unchecked_page.save_config_button.on_click(None)
+    saved_unchecked = read_scheduler_config(str(config_path))
+    assert saved_unchecked.technical_relevance_enabled is False
 
 
 def test_scheduler_ui_port_constant_is_fixed():
@@ -844,6 +983,7 @@ def test_build_skip_next_run_config_sets_true_without_changing_other_fields():
         log_dir="/tmp/logs",
         timezone="Europe/Helsinki",
         skip_next_run=False,
+        technical_relevance_enabled=True,
     )
 
     updated = build_skip_next_run_config(config)
@@ -855,6 +995,7 @@ def test_build_skip_next_run_config_sets_true_without_changing_other_fields():
     assert updated.analysis_db_path == config.analysis_db_path
     assert updated.log_dir == config.log_dir
     assert updated.timezone == config.timezone
+    assert updated.technical_relevance_enabled is True
 
 
 def test_build_cancel_skip_next_run_config_sets_false_without_changing_other_fields():
@@ -866,6 +1007,7 @@ def test_build_cancel_skip_next_run_config_sets_false_without_changing_other_fie
         log_dir="/tmp/logs",
         timezone="Europe/Helsinki",
         skip_next_run=True,
+        technical_relevance_enabled=True,
     )
 
     updated = build_cancel_skip_next_run_config(config)
@@ -877,6 +1019,7 @@ def test_build_cancel_skip_next_run_config_sets_false_without_changing_other_fie
     assert updated.analysis_db_path == config.analysis_db_path
     assert updated.log_dir == config.log_dir
     assert updated.timezone == config.timezone
+    assert updated.technical_relevance_enabled is True
 
 
 def test_scheduler_running_state_disables_skip_button_when_running():
