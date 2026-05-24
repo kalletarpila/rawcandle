@@ -43,6 +43,44 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"SUMMARY summary_json_path={result.summary_json_path}")
     print(f"SUMMARY scheduler_skipped={1 if result.skipped else 0}")
     print(f"SUMMARY scheduler_skip_reason={result.skip_reason or ''}")
+    print(f"SUMMARY technical_relevance.attempted={result.technical_relevance_attempted}")
+    print(f"SUMMARY technical_relevance.enabled={str(result.technical_relevance_enabled).lower()}")
+    print(f"SUMMARY technical_relevance.status={result.technical_relevance_status}")
+    print(f"SUMMARY technical_relevance.market={result.technical_relevance_market}")
+    print(f"SUMMARY technical_relevance.run_id={result.technical_relevance_run_id}")
+    print(f"SUMMARY technical_relevance.ticker_count={result.technical_relevance_ticker_count}")
+    print(f"SUMMARY technical_relevance.start_date={result.technical_relevance_start_date}")
+    print(f"SUMMARY technical_relevance.end_date={result.technical_relevance_end_date}")
+    print(
+        "SUMMARY technical_relevance.records_written="
+        f"{result.technical_relevance_records_written}"
+    )
+    print(
+        "SUMMARY technical_relevance.relevant_count="
+        f"{result.technical_relevance_relevant_count}"
+    )
+    print(
+        "SUMMARY technical_relevance.weak_context_count="
+        f"{result.technical_relevance_weak_context_count}"
+    )
+    print(f"SUMMARY technical_relevance.noise_count={result.technical_relevance_noise_count}")
+    print(
+        "SUMMARY technical_relevance.unknown_signal_count="
+        f"{result.technical_relevance_unknown_signal_count}"
+    )
+    print(
+        "SUMMARY technical_relevance.missing_dow_context_count="
+        f"{result.technical_relevance_missing_dow_context_count}"
+    )
+    print(
+        "SUMMARY technical_relevance.missing_bar_index_count="
+        f"{result.technical_relevance_missing_bar_index_count}"
+    )
+    print(
+        "SUMMARY technical_relevance.duration_seconds="
+        f"{result.technical_relevance_duration_seconds}"
+    )
+    print(f"SUMMARY technical_relevance.skip_reason={result.technical_relevance_skip_reason}")
     print(f"SUMMARY datacenter_pipeline.attempted={result.datacenter_pipeline_attempted}")
     print(f"SUMMARY datacenter_pipeline.status={result.datacenter_pipeline_status}")
     print(f"SUMMARY datacenter_pipeline.market={result.datacenter_pipeline_market}")

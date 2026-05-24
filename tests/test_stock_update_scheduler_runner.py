@@ -15,6 +15,7 @@ from rawcandle.scheduler.runner import (
     STATUS_FAILED,
     STATUS_OK,
     STATUS_OK_WITH_WARNINGS,
+    _resolve_market_technical_relevance_tickers,
     _resolve_latest_valid_ohlcv_date_for_market,
     acquire_scheduler_lock,
     read_scheduler_status,
@@ -73,6 +74,7 @@ def _write_config(
     analysis_db=None,
     log_dir=None,
     skip_next_run=False,
+    technical_relevance_enabled=False,
 ):
     osakedata_db = osakedata_db or (tmp_path / "osakedata.db")
     analysis_db = analysis_db or (tmp_path / "analysis.db")
@@ -85,6 +87,7 @@ def _write_config(
     if enabled_markets is not None:
         config.enabled_markets = enabled_markets
     config.skip_next_run = skip_next_run
+    config.technical_relevance_enabled = technical_relevance_enabled
     path = tmp_path / "scheduler_config.json"
     write_scheduler_config(str(path), config)
     return path
@@ -639,6 +642,22 @@ def test_resolve_latest_valid_ohlcv_date_for_market_respects_market_filter(tmp_p
     assert _resolve_latest_valid_ohlcv_date_for_market(str(db_path), "usa") == "2026-05-15"
 
 
+def test_resolve_market_technical_relevance_tickers_returns_sorted_market_tickers(tmp_path):
+    db_path = tmp_path / "osakedata.db"
+    _create_osakedata_with_rows(
+        db_path,
+        [
+            ("BBB", "2026-05-15", 1.0, 1.0, 1.0, 1.0, 100, "usa"),
+            ("AAA", "2026-05-14", 1.0, 1.0, 1.0, 1.0, 100, "usa"),
+            ("", "2026-05-16", 1.0, 1.0, 1.0, 1.0, 100, "usa"),
+            ("CCC", "2026-05-16", 1.0, 1.0, 1.0, None, 100, "usa"),
+            ("OMX", "2026-05-16", 1.0, 1.0, 1.0, 1.0, 100, "omxh"),
+        ],
+    )
+
+    assert _resolve_market_technical_relevance_tickers(str(db_path), "usa") == ["AAA", "BBB"]
+
+
 def test_scheduler_runner_runs_datacenter_post_step_once_for_usa_success(
     tmp_path, monkeypatch
 ):
@@ -710,6 +729,317 @@ def test_scheduler_runner_runs_datacenter_post_step_once_for_usa_success(
     payload = json.loads(Path(result.summary_json_path).read_text(encoding="utf-8"))
     assert payload["datacenter_pipeline_signal_date"] == "2026-05-16"
     assert payload["datacenter_pipeline_signal_date_source"] == "LATEST_VALID_OHLCV_DATE"
+
+
+def test_scheduler_runner_technical_relevance_disabled_by_default(tmp_path, monkeypatch):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(tmp_path, enabled_markets=["usa"])
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.run_technical_signal_relevance_for_tickers",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("technical relevance should be disabled")
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda *args, **kwargs: _FakeCompletedProcess(0, "SUMMARY audit_validation_status=OK\n"),
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.technical_relevance_enabled is False
+    assert result.technical_relevance_status == "DISABLED"
+    payload = json.loads(Path(result.summary_json_path).read_text(encoding="utf-8"))
+    assert payload["technical_relevance_status"] == "DISABLED"
+
+
+def test_scheduler_runner_runs_technical_relevance_before_datacenter(tmp_path, monkeypatch):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _create_osakedata_with_rows(
+        osakedata_db,
+        [
+            ("BBB", "2026-05-15", 1.0, 1.0, 1.0, 1.0, 100, "usa"),
+            ("AAA", "2026-05-16", 1.0, 1.0, 1.0, 2.0, 100, "usa"),
+            ("TAXONOMY_ONLY", "2026-05-16", 1.0, 1.0, 1.0, 3.0, 100, "usa"),
+        ],
+    )
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        technical_relevance_enabled=True,
+    )
+
+    calls = []
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: calls.append(("market_update", kwargs["market"]))
+        or StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+
+    def fake_technical_relevance(**kwargs):
+        calls.append(("technical_relevance", kwargs["tickers"], kwargs["start_date"], kwargs["end_date"], kwargs["run_id"]))
+        class _Summary:
+            records_written = 7
+            relevant_count = 4
+            weak_context_count = 2
+            noise_count = 1
+            unknown_signal_count = 0
+            missing_dow_context_count = 0
+            missing_bar_index_count = 0
+        return _Summary()
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.run_technical_signal_relevance_for_tickers",
+        fake_technical_relevance,
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda *args, **kwargs: calls.append(("datacenter",))
+        or _FakeCompletedProcess(0, "SUMMARY audit_validation_status=OK\n"),
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert calls[0] == ("market_update", "usa")
+    assert calls[1][0] == "technical_relevance"
+    assert calls[2] == ("datacenter",)
+    assert calls[1][1] == ["AAA", "BBB", "TAXONOMY_ONLY"]
+    assert calls[1][2] == "2026-04-01"
+    assert calls[1][3] == "2026-05-16"
+    assert calls[1][4] == "TECH_SIGNAL_REL_DAILY_USA_2026_05_16"
+    assert result.technical_relevance_status == "OK"
+    assert result.technical_relevance_records_written == 7
+    assert result.technical_relevance_relevant_count == 4
+    assert result.datacenter_pipeline_status == "OK"
+    payload = json.loads(Path(result.summary_json_path).read_text(encoding="utf-8"))
+    assert payload["technical_relevance_status"] == "OK"
+    assert payload["technical_relevance_run_id"] == "TECH_SIGNAL_REL_DAILY_USA_2026_05_16"
+    assert payload["technical_relevance_start_date"] == "2026-04-01"
+    assert payload["technical_relevance_end_date"] == "2026-05-16"
+
+
+def test_scheduler_runner_technical_relevance_skips_existing_run_id(tmp_path, monkeypatch):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _create_osakedata_with_rows(
+        osakedata_db,
+        [("AAA", "2026-05-16", 1.0, 1.0, 1.0, 2.0, 100, "usa")],
+    )
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        technical_relevance_enabled=True,
+        analysis_db=analysis_db,
+    )
+    _touch(analysis_db)
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.run_technical_signal_relevance_for_tickers",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("technical relevance service should not run for duplicate run_id")
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.read_relevance_run",
+        lambda conn, run_id: {"run_id": run_id},
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda *args, **kwargs: _FakeCompletedProcess(0, "SUMMARY audit_validation_status=OK\n"),
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.technical_relevance_attempted == 1
+    assert result.technical_relevance_status == "SKIPPED_EXISTING_RUN"
+    assert result.technical_relevance_skip_reason == "RUN_ID_ALREADY_EXISTS"
+    assert result.technical_relevance_records_written == 0
+
+
+def test_scheduler_runner_technical_relevance_skips_when_market_phase_failed(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        technical_relevance_enabled=True,
+    )
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_FAILED),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.technical_relevance_status == "SKIPPED"
+    assert result.technical_relevance_skip_reason == "MARKET_UPDATE_FAILED"
+    assert result.datacenter_pipeline_status == "SKIPPED"
+
+
+def test_scheduler_runner_technical_relevance_skips_when_usa_not_enabled(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["omxh"],
+        technical_relevance_enabled=True,
+    )
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.technical_relevance_status == "SKIPPED"
+    assert result.technical_relevance_skip_reason == "USA_NOT_ENABLED"
+
+
+def test_scheduler_runner_technical_relevance_skips_when_no_valid_ohlcv_date(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _create_osakedata_with_rows(
+        osakedata_db,
+        [("AAA", "2026-05-16", 1.0, 1.0, 1.0, None, 100, "usa")],
+    )
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        technical_relevance_enabled=True,
+    )
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.technical_relevance_status == "SKIPPED"
+    assert result.technical_relevance_skip_reason == "NO_VALID_OHLCV_DATE_FOR_MARKET"
+
+
+def test_scheduler_runner_technical_relevance_skips_when_no_tickers_for_market(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _create_osakedata_with_rows(
+        osakedata_db,
+        [("", "2026-05-16", 1.0, 1.0, 1.0, 1.0, 100, "usa")],
+    )
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        technical_relevance_enabled=True,
+    )
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.technical_relevance_status == "SKIPPED"
+    assert result.technical_relevance_skip_reason == "NO_TICKERS_FOR_MARKET"
+
+
+def test_scheduler_runner_technical_relevance_failure_fails_scheduler(tmp_path, monkeypatch):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _create_osakedata_with_rows(
+        osakedata_db,
+        [("AAA", "2026-05-16", 1.0, 1.0, 1.0, 2.0, 100, "usa")],
+    )
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        technical_relevance_enabled=True,
+    )
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.run_technical_signal_relevance_for_tickers",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("tech rel boom")),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("datacenter ordering is irrelevant after failed technical relevance")
+        ),
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.technical_relevance_status == "FAILED"
+    assert result.technical_relevance_error == "tech rel boom"
+    assert result.overall_status == STATUS_FAILED
 
 
 def test_scheduler_runner_runs_datacenter_post_step_for_ok_with_warnings(

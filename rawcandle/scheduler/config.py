@@ -18,7 +18,7 @@ _REQUIRED_CONFIG_KEYS = {
     "analysis_db_path",
     "log_dir",
 }
-_OPTIONAL_CONFIG_KEYS = {"timezone", "skip_next_run"}
+_OPTIONAL_CONFIG_KEYS = {"timezone", "skip_next_run", "technical_relevance_enabled"}
 
 
 @dataclass(eq=True)
@@ -30,6 +30,7 @@ class StockUpdateSchedulerConfig:
     log_dir: str = ""
     timezone: str = DEFAULT_TIMEZONE
     skip_next_run: bool = False
+    technical_relevance_enabled: bool = False
 
 
 def validate_market_list(markets: List[str]) -> List[str]:
@@ -76,6 +77,8 @@ def validate_scheduler_config(
         raise ValueError("log_dir must be non-empty")
     if type(config.skip_next_run) is not bool:
         raise ValueError("skip_next_run must be a bool")
+    if type(config.technical_relevance_enabled) is not bool:
+        raise ValueError("technical_relevance_enabled must be a bool")
 
     return StockUpdateSchedulerConfig(
         enabled_markets=enabled_markets,
@@ -85,6 +88,7 @@ def validate_scheduler_config(
         log_dir=config.log_dir,
         timezone=config.timezone,
         skip_next_run=config.skip_next_run,
+        technical_relevance_enabled=config.technical_relevance_enabled,
     )
 
 
@@ -112,6 +116,7 @@ def scheduler_config_from_dict(data: Dict[str, Any]) -> StockUpdateSchedulerConf
         log_dir=data["log_dir"],
         timezone=data.get("timezone", DEFAULT_TIMEZONE),
         skip_next_run=data.get("skip_next_run", False),
+        technical_relevance_enabled=data.get("technical_relevance_enabled", False),
     )
     return validate_scheduler_config(config)
 
@@ -142,5 +147,6 @@ def create_default_scheduler_config(
         log_dir=log_dir,
         timezone=DEFAULT_TIMEZONE,
         skip_next_run=False,
+        technical_relevance_enabled=False,
     )
     return validate_scheduler_config(config)

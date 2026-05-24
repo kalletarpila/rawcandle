@@ -25,6 +25,7 @@ def test_default_scheduler_config_uses_omxh_and_omxs_not_usa():
 
     assert config.enabled_markets == ["omxh", "omxs"]
     assert config.skip_next_run is False
+    assert config.technical_relevance_enabled is False
 
 
 def test_market_validation_normalizes_case_whitespace_and_deduplicates():
@@ -56,6 +57,7 @@ def test_scheduler_config_serialization_roundtrip():
         log_dir="/tmp/logs",
         timezone=DEFAULT_TIMEZONE,
         skip_next_run=False,
+        technical_relevance_enabled=True,
     )
 
     serialized = scheduler_config_to_dict(config)
@@ -69,6 +71,7 @@ def test_scheduler_config_serialization_roundtrip():
         log_dir="/tmp/logs",
         timezone=DEFAULT_TIMEZONE,
         skip_next_run=False,
+        technical_relevance_enabled=True,
     )
 
 
@@ -81,6 +84,7 @@ def test_scheduler_config_json_write_read_roundtrip(tmp_path):
         analysis_db_path="/tmp/analysis.db",
         log_dir="/tmp/logs",
         skip_next_run=True,
+        technical_relevance_enabled=True,
     )
 
     write_scheduler_config(str(path), config)
@@ -138,6 +142,7 @@ def test_validate_scheduler_config_returns_new_instance():
         analysis_db_path="/tmp/analysis.db",
         log_dir="/tmp/logs",
         skip_next_run=True,
+        technical_relevance_enabled=True,
     )
 
     validated = validate_scheduler_config(config)
@@ -157,11 +162,27 @@ def test_scheduler_config_to_dict_includes_skip_next_run():
         analysis_db_path="/tmp/analysis.db",
         log_dir="/tmp/logs",
         skip_next_run=True,
+        technical_relevance_enabled=True,
     )
 
     data = scheduler_config_to_dict(config)
 
     assert data["skip_next_run"] is True
+
+
+def test_scheduler_config_to_dict_includes_technical_relevance_enabled():
+    config = StockUpdateSchedulerConfig(
+        enabled_markets=["omxh", "omxs"],
+        run_time="05:30",
+        osakedata_db_path="/tmp/osakedata.db",
+        analysis_db_path="/tmp/analysis.db",
+        log_dir="/tmp/logs",
+        technical_relevance_enabled=True,
+    )
+
+    data = scheduler_config_to_dict(config)
+
+    assert data["technical_relevance_enabled"] is True
 
 
 def test_scheduler_config_from_dict_defaults_missing_skip_next_run_to_false():
@@ -176,6 +197,7 @@ def test_scheduler_config_from_dict_defaults_missing_skip_next_run_to_false():
     )
 
     assert config.skip_next_run is False
+    assert config.technical_relevance_enabled is False
 
 
 def test_scheduler_config_from_dict_accepts_skip_next_run_true():
@@ -191,6 +213,36 @@ def test_scheduler_config_from_dict_accepts_skip_next_run_true():
     )
 
     assert config.skip_next_run is True
+    assert config.technical_relevance_enabled is False
+
+
+def test_scheduler_config_from_dict_accepts_technical_relevance_enabled_true():
+    config = scheduler_config_from_dict(
+        {
+            "enabled_markets": ["omxh", "omxs"],
+            "run_time": "05:30",
+            "osakedata_db_path": "/tmp/osakedata.db",
+            "analysis_db_path": "/tmp/analysis.db",
+            "log_dir": "/tmp/logs",
+            "technical_relevance_enabled": True,
+        }
+    )
+
+    assert config.technical_relevance_enabled is True
+
+
+def test_scheduler_config_from_dict_defaults_missing_technical_relevance_enabled_to_false():
+    config = scheduler_config_from_dict(
+        {
+            "enabled_markets": ["omxh", "omxs"],
+            "run_time": "05:30",
+            "osakedata_db_path": "/tmp/osakedata.db",
+            "analysis_db_path": "/tmp/analysis.db",
+            "log_dir": "/tmp/logs",
+        }
+    )
+
+    assert config.technical_relevance_enabled is False
 
 
 @pytest.mark.parametrize("skip_next_run", ["true", 1, None])
@@ -204,5 +256,22 @@ def test_scheduler_config_from_dict_rejects_non_bool_skip_next_run(skip_next_run
                 "analysis_db_path": "/tmp/analysis.db",
                 "log_dir": "/tmp/logs",
                 "skip_next_run": skip_next_run,
+            }
+        )
+
+
+@pytest.mark.parametrize("technical_relevance_enabled", ["true", 1, None])
+def test_scheduler_config_from_dict_rejects_non_bool_technical_relevance_enabled(
+    technical_relevance_enabled,
+):
+    with pytest.raises(ValueError):
+        scheduler_config_from_dict(
+            {
+                "enabled_markets": ["omxh", "omxs"],
+                "run_time": "05:30",
+                "osakedata_db_path": "/tmp/osakedata.db",
+                "analysis_db_path": "/tmp/analysis.db",
+                "log_dir": "/tmp/logs",
+                "technical_relevance_enabled": technical_relevance_enabled,
             }
         )

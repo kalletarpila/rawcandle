@@ -6,6 +6,7 @@ import fcntl
 import json
 import sqlite3
 import subprocess
+import time
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -17,6 +18,14 @@ from rawcandle.scheduler.config import (
     StockUpdateSchedulerConfig,
     read_scheduler_config,
     write_scheduler_config,
+)
+from rawcandle.technical_signal_relevance_persistence import (
+    apply_technical_signal_relevance_migration,
+    read_relevance_run,
+    resolve_created_at_utc,
+)
+from rawcandle.technical_signal_relevance_service import (
+    run_technical_signal_relevance_for_tickers,
 )
 from services.stock_update_service import (
     STATUS_FAILED,
@@ -49,6 +58,24 @@ class ScheduledStockUpdateRunResult:
     summary_json_path: str = ""
     skipped: bool = False
     skip_reason: Optional[str] = None
+    technical_relevance_attempted: int = 0
+    technical_relevance_enabled: bool = False
+    technical_relevance_status: str = "DISABLED"
+    technical_relevance_market: str = "NONE"
+    technical_relevance_run_id: str = "NONE"
+    technical_relevance_ticker_count: int = 0
+    technical_relevance_start_date: str = "NONE"
+    technical_relevance_end_date: str = "NONE"
+    technical_relevance_records_written: int = 0
+    technical_relevance_relevant_count: int = 0
+    technical_relevance_weak_context_count: int = 0
+    technical_relevance_noise_count: int = 0
+    technical_relevance_unknown_signal_count: int = 0
+    technical_relevance_missing_dow_context_count: int = 0
+    technical_relevance_missing_bar_index_count: int = 0
+    technical_relevance_duration_seconds: str = "0.000"
+    technical_relevance_skip_reason: str = ""
+    technical_relevance_error: str = ""
     datacenter_pipeline_attempted: int = 0
     datacenter_pipeline_status: str = "SKIPPED"
     datacenter_pipeline_market: str = "usa"
@@ -89,6 +116,28 @@ class DatacenterPostStepResult:
     signal_date_source: str = "NONE"
     signal_date_resolution: str = "NONE"
     requested_calendar_signal_date: Optional[str] = None
+    error: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class TechnicalRelevancePostStepResult:
+    attempted: int
+    enabled: bool
+    status: str
+    market: str
+    run_id: Optional[str] = None
+    ticker_count: int = 0
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    records_written: int = 0
+    relevant_count: int = 0
+    weak_context_count: int = 0
+    noise_count: int = 0
+    unknown_signal_count: int = 0
+    missing_dow_context_count: int = 0
+    missing_bar_index_count: int = 0
+    duration_seconds: str = "0.000"
+    skip_reason: str = ""
     error: Optional[str] = None
 
 
@@ -249,6 +298,46 @@ def _resolve_latest_valid_ohlcv_date_for_market(
     return str(row[0])
 
 
+def _resolve_market_technical_relevance_tickers(
+    price_db_path: str,
+    market: str,
+) -> List[str]:
+    normalized_market = market.strip().lower()
+    try:
+        with sqlite3.connect(price_db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT osake
+                FROM osakedata
+                WHERE market = ?
+                  AND close IS NOT NULL
+                ORDER BY osake ASC
+                """,
+                (normalized_market,),
+            ).fetchall()
+    except sqlite3.Error:
+        return []
+
+    tickers = []
+    for row in rows:
+        raw_ticker = row[0]
+        if raw_ticker is None:
+            continue
+        ticker = str(raw_ticker).strip()
+        if not ticker:
+            continue
+        tickers.append(ticker)
+    return tickers
+
+
+def _build_technical_relevance_run_id(market: str, effective_signal_date: str) -> str:
+    return f"TECH_SIGNAL_REL_DAILY_{market.upper()}_{effective_signal_date.replace('-', '_')}"
+
+
+def _format_duration_seconds(duration_seconds: float) -> str:
+    return f"{duration_seconds:.3f}"
+
+
 def _parse_summary_value(stdout: str, key: str) -> Optional[str]:
     prefix = f"SUMMARY {key}="
     for line in stdout.splitlines():
@@ -270,6 +359,168 @@ def _build_datacenter_log_path(log_dir: Path, market: str, started_at: datetime.
         if not candidate.exists():
             return candidate
         suffix += 1
+
+
+def _run_technical_relevance_post_step(
+    *,
+    config: StockUpdateSchedulerConfig,
+    target_market: str,
+    market_update_phase_status: str,
+) -> TechnicalRelevancePostStepResult:
+    if not config.technical_relevance_enabled:
+        return TechnicalRelevancePostStepResult(
+            attempted=0,
+            enabled=False,
+            status="DISABLED",
+            market="NONE",
+            skip_reason="",
+        )
+
+    if target_market not in config.enabled_markets:
+        return TechnicalRelevancePostStepResult(
+            attempted=0,
+            enabled=True,
+            status="SKIPPED",
+            market=target_market,
+            skip_reason="USA_NOT_ENABLED",
+        )
+
+    if market_update_phase_status not in (STATUS_OK, STATUS_OK_WITH_WARNINGS):
+        return TechnicalRelevancePostStepResult(
+            attempted=0,
+            enabled=True,
+            status="SKIPPED",
+            market=target_market,
+            skip_reason="MARKET_UPDATE_FAILED",
+        )
+
+    end_date = _resolve_latest_valid_ohlcv_date_for_market(
+        config.osakedata_db_path,
+        target_market,
+    )
+    if end_date is None:
+        return TechnicalRelevancePostStepResult(
+            attempted=0,
+            enabled=True,
+            status="SKIPPED",
+            market=target_market,
+            skip_reason="NO_VALID_OHLCV_DATE_FOR_MARKET",
+        )
+
+    tickers = _resolve_market_technical_relevance_tickers(
+        config.osakedata_db_path,
+        target_market,
+    )
+    if not tickers:
+        return TechnicalRelevancePostStepResult(
+            attempted=0,
+            enabled=True,
+            status="SKIPPED",
+            market=target_market,
+            end_date=end_date,
+            skip_reason="NO_TICKERS_FOR_MARKET",
+        )
+
+    start_date = (
+        datetime.date.fromisoformat(end_date) - datetime.timedelta(days=45)
+    ).isoformat()
+    run_id = _build_technical_relevance_run_id(target_market, end_date)
+    started_at = time.perf_counter()
+
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = sqlite3.connect(config.analysis_db_path)
+        conn.row_factory = sqlite3.Row
+        apply_technical_signal_relevance_migration(conn)
+        if read_relevance_run(conn, run_id) is not None:
+            return TechnicalRelevancePostStepResult(
+                attempted=1,
+                enabled=True,
+                status="SKIPPED_EXISTING_RUN",
+                market=target_market,
+                run_id=run_id,
+                ticker_count=len(tickers),
+                start_date=start_date,
+                end_date=end_date,
+                duration_seconds=_format_duration_seconds(time.perf_counter() - started_at),
+                skip_reason="RUN_ID_ALREADY_EXISTS",
+            )
+
+        summary = run_technical_signal_relevance_for_tickers(
+            conn=conn,
+            tickers=tickers,
+            timeframe="1d",
+            start_date=start_date,
+            end_date=end_date,
+            run_id=run_id,
+            created_at_utc=resolve_created_at_utc(None),
+        )
+        conn.commit()
+        return TechnicalRelevancePostStepResult(
+            attempted=1,
+            enabled=True,
+            status="OK",
+            market=target_market,
+            run_id=run_id,
+            ticker_count=len(tickers),
+            start_date=start_date,
+            end_date=end_date,
+            records_written=summary.records_written,
+            relevant_count=summary.relevant_count,
+            weak_context_count=summary.weak_context_count,
+            noise_count=summary.noise_count,
+            unknown_signal_count=summary.unknown_signal_count,
+            missing_dow_context_count=summary.missing_dow_context_count,
+            missing_bar_index_count=summary.missing_bar_index_count,
+            duration_seconds=_format_duration_seconds(time.perf_counter() - started_at),
+        )
+    except sqlite3.IntegrityError as exc:
+        if conn is not None:
+            conn.rollback()
+        error_text = str(exc)
+        if "technical_signal_relevance_runs.run_id" in error_text or "UNIQUE constraint failed" in error_text:
+            return TechnicalRelevancePostStepResult(
+                attempted=1,
+                enabled=True,
+                status="SKIPPED_EXISTING_RUN",
+                market=target_market,
+                run_id=run_id,
+                ticker_count=len(tickers),
+                start_date=start_date,
+                end_date=end_date,
+                duration_seconds=_format_duration_seconds(time.perf_counter() - started_at),
+                skip_reason="RUN_ID_ALREADY_EXISTS",
+            )
+        return TechnicalRelevancePostStepResult(
+            attempted=1,
+            enabled=True,
+            status="FAILED",
+            market=target_market,
+            run_id=run_id,
+            ticker_count=len(tickers),
+            start_date=start_date,
+            end_date=end_date,
+            duration_seconds=_format_duration_seconds(time.perf_counter() - started_at),
+            error=error_text,
+        )
+    except Exception as exc:
+        if conn is not None:
+            conn.rollback()
+        return TechnicalRelevancePostStepResult(
+            attempted=1,
+            enabled=True,
+            status="FAILED",
+            market=target_market,
+            run_id=run_id,
+            ticker_count=len(tickers),
+            start_date=start_date,
+            end_date=end_date,
+            duration_seconds=_format_duration_seconds(time.perf_counter() - started_at),
+            error=str(exc),
+        )
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def _run_datacenter_post_step(
@@ -598,6 +849,7 @@ def run_scheduler_config(
                     log_dir=config.log_dir,
                     timezone=config.timezone,
                     skip_next_run=False,
+                    technical_relevance_enabled=config.technical_relevance_enabled,
                 )
                 write_scheduler_config(config_path, reset_config)
 
@@ -610,6 +862,30 @@ def run_scheduler_config(
                     overall_status=STATUS_OK,
                     skipped=True,
                     skip_reason="skip_next_run",
+                    technical_relevance_attempted=0,
+                    technical_relevance_enabled=config.technical_relevance_enabled,
+                    technical_relevance_status="DISABLED"
+                    if not config.technical_relevance_enabled
+                    else "SKIPPED",
+                    technical_relevance_market="NONE"
+                    if not config.technical_relevance_enabled
+                    else "usa",
+                    technical_relevance_run_id="NONE",
+                    technical_relevance_ticker_count=0,
+                    technical_relevance_start_date="NONE",
+                    technical_relevance_end_date="NONE",
+                    technical_relevance_records_written=0,
+                    technical_relevance_relevant_count=0,
+                    technical_relevance_weak_context_count=0,
+                    technical_relevance_noise_count=0,
+                    technical_relevance_unknown_signal_count=0,
+                    technical_relevance_missing_dow_context_count=0,
+                    technical_relevance_missing_bar_index_count=0,
+                    technical_relevance_duration_seconds="0.000",
+                    technical_relevance_skip_reason="skip_next_run"
+                    if config.technical_relevance_enabled
+                    else "",
+                    technical_relevance_error="",
                     datacenter_pipeline_attempted=0,
                     datacenter_pipeline_status="SKIPPED",
                     datacenter_pipeline_market="usa",
@@ -661,12 +937,19 @@ def run_scheduler_config(
 
             finished_at_utc = _format_utc_timestamp(_utc_now())
             market_update_phase_status = _derive_overall_status(market_results)
+            technical_relevance_result = _run_technical_relevance_post_step(
+                config=config,
+                target_market="usa",
+                market_update_phase_status=market_update_phase_status,
+            )
             datacenter_result = DatacenterPostStepResult(
                 attempted=0,
                 status="SKIPPED",
                 market="usa",
             )
             if (
+                technical_relevance_result.status != "FAILED"
+                and
                 market_update_phase_status in (STATUS_OK, STATUS_OK_WITH_WARNINGS)
                 and datacenter_result.market in config.enabled_markets
             ):
@@ -677,7 +960,8 @@ def run_scheduler_config(
                 )
             overall_status = (
                 STATUS_FAILED
-                if datacenter_result.status == "FAILED"
+                if technical_relevance_result.status == "FAILED"
+                or datacenter_result.status == "FAILED"
                 else market_update_phase_status
             )
 
@@ -697,6 +981,24 @@ def run_scheduler_config(
                 overall_status=overall_status,
                 skipped=False,
                 skip_reason=None,
+                technical_relevance_attempted=technical_relevance_result.attempted,
+                technical_relevance_enabled=technical_relevance_result.enabled,
+                technical_relevance_status=technical_relevance_result.status,
+                technical_relevance_market=technical_relevance_result.market,
+                technical_relevance_run_id=technical_relevance_result.run_id or "NONE",
+                technical_relevance_ticker_count=technical_relevance_result.ticker_count,
+                technical_relevance_start_date=technical_relevance_result.start_date or "NONE",
+                technical_relevance_end_date=technical_relevance_result.end_date or "NONE",
+                technical_relevance_records_written=technical_relevance_result.records_written,
+                technical_relevance_relevant_count=technical_relevance_result.relevant_count,
+                technical_relevance_weak_context_count=technical_relevance_result.weak_context_count,
+                technical_relevance_noise_count=technical_relevance_result.noise_count,
+                technical_relevance_unknown_signal_count=technical_relevance_result.unknown_signal_count,
+                technical_relevance_missing_dow_context_count=technical_relevance_result.missing_dow_context_count,
+                technical_relevance_missing_bar_index_count=technical_relevance_result.missing_bar_index_count,
+                technical_relevance_duration_seconds=technical_relevance_result.duration_seconds,
+                technical_relevance_skip_reason=technical_relevance_result.skip_reason,
+                technical_relevance_error=technical_relevance_result.error or "",
                 datacenter_pipeline_attempted=datacenter_result.attempted,
                 datacenter_pipeline_status=datacenter_result.status,
                 datacenter_pipeline_market=datacenter_result.market,
