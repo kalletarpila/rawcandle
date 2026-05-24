@@ -209,3 +209,97 @@ def test_action_counts_are_correct():
     assert result.action_counts["TIGHTEN_STOP"] == 1
     assert result.action_counts["WATCH"] == 1
     assert result.action_counts["NEUTRAL"] == 1
+
+
+def test_sell_trace_captures_horizon_field_token_value_and_source_file():
+    result = build_datacenter_ticker_decisions(
+        [_row(ticker="NVDA", horizon="daily", reason="close_below_ema20")]
+    )
+
+    trace = result.decisions[0].decision_trace[0]
+    assert result.decisions[0].action == "SELL"
+    assert trace.horizon == "daily"
+    assert trace.field_name == "reason"
+    assert trace.matched_token == "close_below_ema20"
+    assert trace.matched_value == "close_below_ema20"
+    assert trace.source_file == "/tmp/NVDA_daily.csv"
+
+
+def test_reduce_trace_captures_risk_token():
+    result = build_datacenter_ticker_decisions(
+        [_row(ticker="AVGO", horizon="daily", reason="subindustry_context_risk")]
+    )
+
+    trace = result.decisions[0].decision_trace[0]
+    assert result.decisions[0].action == "REDUCE"
+    assert trace.matched_rule == "REDUCE"
+    assert trace.matched_token == "risk"
+    assert trace.field_name == "reason"
+
+
+def test_tighten_stop_trace_captures_high_exit_risk_days_count():
+    result = build_datacenter_ticker_decisions(
+        [_row(ticker="LRCX", horizon="rolling 2d", high_exit_risk_days_count=1)]
+    )
+
+    trace = result.decisions[0].decision_trace[0]
+    assert result.decisions[0].action == "TIGHTEN_STOP"
+    assert trace.field_name == "high_exit_risk_days_count"
+    assert trace.matched_token == "high_exit_risk_days_count>=1"
+    assert trace.matched_value == "1"
+
+
+def test_wait_pullback_trace_captures_distance_to_ema20():
+    result = build_datacenter_ticker_decisions(
+        [_row(ticker="META", horizon="rolling 30d", raw_status="UP", distance_to_ema20=16.5)]
+    )
+
+    trace = result.decisions[0].decision_trace[0]
+    assert result.decisions[0].action == "WAIT_PULLBACK"
+    assert trace.field_name == "distance_to_ema20"
+    assert trace.matched_token == "distance_to_ema20>15.0"
+    assert trace.matched_value == "16.5"
+
+
+def test_blocked_trace_captures_blocking_reasons():
+    result = build_datacenter_ticker_decisions(
+        [_row(ticker="AMD", horizon="rolling 5d", blocking_reasons="HIGH_EXIT_RISK")]
+    )
+
+    trace = result.decisions[0].decision_trace[0]
+    assert result.decisions[0].action == "BLOCKED"
+    assert trace.field_name == "blocking_reasons"
+    assert trace.matched_token == "blocking_reasons"
+    assert trace.matched_value == "HIGH_EXIT_RISK"
+
+
+def test_final_action_is_unchanged_when_traces_are_added():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(ticker="NVDA", horizon="rolling 30d", raw_status="BUY_ZONE"),
+            _row(ticker="NVDA", horizon="rolling 5d", raw_status="PULLBACK"),
+            _row(ticker="NVDA", horizon="daily", raw_status="BUY_NOW"),
+            _row(ticker="NVDA", horizon="daily", reason="close_below_ema20"),
+        ]
+    )
+
+    assert result.decisions[0].action == "SELL"
+    assert result.decisions[0].decision_trace[0].matched_rule == "SELL"
+
+
+def test_decision_ordering_is_unchanged_when_traces_are_added():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(ticker="BBB", horizon="daily", reason="close_below_ema20"),
+            _row(ticker="AAA", horizon="daily", reason="close_below_ema20"),
+            _row(ticker="CCC", horizon="rolling 30d", raw_status="LEADER"),
+            _row(ticker="DDD", horizon="rolling 5d", blocking_reasons="STRUCTURAL_BLOCK"),
+        ]
+    )
+
+    assert [(item.ticker, item.action) for item in result.decisions] == [
+        ("AAA", "SELL"),
+        ("BBB", "SELL"),
+        ("DDD", "BLOCKED"),
+        ("CCC", "WATCH"),
+    ]

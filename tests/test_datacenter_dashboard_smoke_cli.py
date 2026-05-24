@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dev_tools.datacenter_dashboard_decisions import (
+    DatacenterDecisionTrace,
     DatacenterDecisionBatchResult,
     DatacenterTickerDecision,
 )
@@ -254,10 +255,24 @@ def test_cli_uses_existing_helpers_rather_than_duplicating_logic(monkeypatch, tm
                     distance_to_ema20=None,
                     high_exit_risk_days_count=None,
                     trend_state=None,
-                    latest_structure_label=None,
-                    latest_bos_event_type=None,
-                    latest_reset_reason=None,
-                    source_files=[str(tmp_path / "daily.csv")],
+                latest_structure_label=None,
+                latest_bos_event_type=None,
+                latest_reset_reason=None,
+                source_files=[str(tmp_path / "daily.csv")],
+                decision_trace=[
+                    DatacenterDecisionTrace(
+                        ticker="NVDA",
+                        action="SELL",
+                        matched_rule="SELL",
+                        horizon="daily",
+                        field_name="reason",
+                        matched_token="close_below_ema20",
+                        matched_value="close_below_ema20",
+                        source_file=str(tmp_path / "daily.csv"),
+                        section=None,
+                        row_kind=None,
+                    )
+                ],
                 )
             ],
             action_counts={
@@ -319,3 +334,81 @@ def test_cli_uses_existing_helpers_rather_than_duplicating_logic(monkeypatch, tm
         "inspector": 1,
     }
     assert "SUMMARY selected_ticker_found=1" in capsys.readouterr().out
+
+
+def test_default_output_does_not_include_trace_summary_lines(tmp_path, capsys):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    _write_report(
+        reports_dir / "datacenter_daily_2026-05-22_0000_full.csv",
+        "ticker;status;reason\nNVDA;SELL;close_below_ema20\n",
+    )
+
+    exit_code = main(["--reports-dir", str(reports_dir)])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "SUMMARY trace.SELL.horizon.daily=" not in output
+    assert "TRACE ticker=NVDA" not in output
+
+
+def test_show_trace_includes_selected_ticker_trace_lines(tmp_path, capsys):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    _write_report(
+        reports_dir / "datacenter_daily_2026-05-22_0000_full.csv",
+        "ticker;status;reason\nNVDA;SELL;close_below_ema20\n",
+    )
+
+    exit_code = main(
+        ["--reports-dir", str(reports_dir), "--ticker", "NVDA", "--show-trace"]
+    )
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "TRACE ticker=NVDA action=SELL rule=SELL horizon=daily field=reason token=close_below_ema20 value=close_below_ema20" in output
+
+
+def test_show_trace_includes_sell_horizon_and_token_summary_counts(tmp_path, capsys):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    _write_report(
+        reports_dir / "datacenter_rolling_2_2026-05-22_0000_full.csv",
+        "ticker;status;latest_bos_event_type\nNVDA;WATCH;BOS_DOWN\n",
+    )
+    _write_report(
+        reports_dir / "datacenter_daily_2026-05-22_0000_full.csv",
+        "ticker;status;reason\nAVGO;SELL;close_below_ema20\n",
+    )
+
+    exit_code = main(["--reports-dir", str(reports_dir), "--show-trace"])
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert "SUMMARY trace.SELL.horizon.daily=1" in lines
+    assert "SUMMARY trace.SELL.horizon.rolling_2d=1" in lines
+    assert "SUMMARY trace.SELL.horizon.rolling_5d=0" in lines
+    assert "SUMMARY trace.SELL.horizon.rolling_30d=0" in lines
+    assert "SUMMARY trace.SELL.token.close_below_ema20=1" in lines
+    assert "SUMMARY trace.SELL.token.BOS_DOWN=1" in lines
+    assert "SUMMARY trace.SELL.token.RESET=0" in lines
+
+
+def test_show_trace_output_is_deterministic(tmp_path, capsys):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    _write_report(
+        reports_dir / "datacenter_daily_2026-05-22_0000_full.csv",
+        "ticker;status;reason\nNVDA;SELL;close_below_ema20\n",
+    )
+
+    exit_code = main(
+        ["--reports-dir", str(reports_dir), "--ticker", "NVDA", "--show-trace"]
+    )
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    trace_lines = [line for line in lines if line.startswith("TRACE ")]
+    assert trace_lines == [
+        "TRACE ticker=NVDA action=SELL rule=SELL horizon=daily field=reason token=close_below_ema20 value=close_below_ema20"
+    ]

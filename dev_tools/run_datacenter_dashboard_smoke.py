@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from dev_tools.datacenter_dashboard_decisions import (
+    DatacenterDecisionTrace,
     DatacenterDecisionBatchResult,
     DatacenterTickerDecision,
     build_datacenter_ticker_decisions,
@@ -42,6 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reports-dir", required=True)
     parser.add_argument("--ticker")
     parser.add_argument("--max-rows", type=int)
+    parser.add_argument("--show-trace", action="store_true")
     return parser
 
 
@@ -88,11 +90,90 @@ def _print_decision_rows(
         )
 
 
+def _normalize_trace_horizon_for_summary(value: str | None) -> str:
+    if value == "rolling 30d":
+        return "rolling_30d"
+    if value == "rolling 5d":
+        return "rolling_5d"
+    if value == "rolling 2d":
+        return "rolling_2d"
+    if value == "daily":
+        return "daily"
+    return ""
+
+
+def _print_sell_trace_summaries(decision_result: DatacenterDecisionBatchResult) -> None:
+    horizon_counts = {
+        "daily": 0,
+        "rolling_2d": 0,
+        "rolling_5d": 0,
+        "rolling_30d": 0,
+    }
+    token_counts = {
+        "SELL": 0,
+        "BOS_DOWN": 0,
+        "RESET": 0,
+        "DOUBLE_BOS_DOWN": 0,
+        "close_below_ema20": 0,
+        "return_10d_lt_minus_8pct": 0,
+    }
+    for decision in decision_result.decisions:
+        if decision.action != "SELL":
+            continue
+        for trace in decision.decision_trace:
+            normalized_horizon = _normalize_trace_horizon_for_summary(trace.horizon)
+            if normalized_horizon in horizon_counts:
+                horizon_counts[normalized_horizon] += 1
+            token = trace.matched_token
+            if token is None:
+                continue
+            if token.lower() == "sell":
+                token_counts["SELL"] += 1
+            elif token.lower() == "bos_down":
+                token_counts["BOS_DOWN"] += 1
+            elif token.lower() == "reset":
+                token_counts["RESET"] += 1
+            elif token.lower() == "double_bos_down":
+                token_counts["DOUBLE_BOS_DOWN"] += 1
+            elif token == "close_below_ema20":
+                token_counts["close_below_ema20"] += 1
+            elif token == "return_10d_lt_minus_8pct":
+                token_counts["return_10d_lt_minus_8pct"] += 1
+
+    for horizon_name in ("daily", "rolling_2d", "rolling_5d", "rolling_30d"):
+        _print_summary(f"trace.SELL.horizon.{horizon_name}", horizon_counts[horizon_name])
+    for token_name in (
+        "SELL",
+        "BOS_DOWN",
+        "RESET",
+        "DOUBLE_BOS_DOWN",
+        "close_below_ema20",
+        "return_10d_lt_minus_8pct",
+    ):
+        _print_summary(f"trace.SELL.token.{token_name}", token_counts[token_name])
+
+
+def _print_trace_rows(ticker: str, action: str, decision_trace: list[DatacenterDecisionTrace]) -> None:
+    for trace in decision_trace:
+        print(
+            "TRACE "
+            f"ticker={ticker} "
+            f"action={action} "
+            f"rule={trace.matched_rule} "
+            f"horizon={trace.horizon or ''} "
+            f"field={trace.field_name or ''} "
+            f"token={trace.matched_token or ''} "
+            f"value={trace.matched_value or ''}"
+        )
+
+
 def _print_inspector_rows(
     *,
     ticker: str,
     inspector_view: DatacenterTickerInspectorView,
     rows: list[DatacenterDashboardRow],
+    decision_trace: list[DatacenterDecisionTrace],
+    show_trace: bool,
 ) -> None:
     print(
         "INSPECTOR "
@@ -129,9 +210,16 @@ def _print_inspector_rows(
         print(
             "INSPECTOR "
             f"horizon={row.horizon} "
+            f"source_file={row.source_file} "
             f"raw_action={row.raw_action or ''} "
             f"raw_status={row.raw_status or ''} "
             f"reason={row.reason or ''}"
+        )
+    if show_trace:
+        _print_trace_rows(
+            ticker=inspector_view.ticker,
+            action=inspector_view.action,
+            decision_trace=decision_trace,
         )
 
 
@@ -167,6 +255,8 @@ def main(argv: list[str] | None = None) -> int:
             f"action.{action_name}",
             decision_result.action_counts.get(action_name, 0),
         )
+    if args.show_trace:
+        _print_sell_trace_summaries(decision_result)
 
     if args.ticker:
         selected_ticker = args.ticker.strip().upper()
@@ -192,6 +282,8 @@ def main(argv: list[str] | None = None) -> int:
                 ticker=selected_ticker,
                 inspector_view=inspector_view,
                 rows=parsed_rows,
+                decision_trace=decision.decision_trace,
+                show_trace=args.show_trace,
             )
 
     if args.max_rows is not None and args.max_rows > 0:

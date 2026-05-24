@@ -8,6 +8,20 @@ from dev_tools.datacenter_dashboard_parser import DatacenterDashboardRow
 
 
 @dataclass(frozen=True)
+class DatacenterDecisionTrace:
+    ticker: str
+    action: str
+    matched_rule: str
+    horizon: str | None
+    field_name: str | None
+    matched_token: str | None
+    matched_value: str | None
+    source_file: str | None
+    section: str | None
+    row_kind: str | None
+
+
+@dataclass(frozen=True)
 class DatacenterTickerDecision:
     ticker: str
     action: str
@@ -24,6 +38,7 @@ class DatacenterTickerDecision:
     latest_bos_event_type: str | None
     latest_reset_reason: str | None
     source_files: list[str]
+    decision_trace: list[DatacenterDecisionTrace] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -57,11 +72,11 @@ _SEVERITY_BY_ACTION = {
 }
 
 _SELL_TERMS = (
-    "sell",
     "close_below_ema20",
     "return_10d_lt_minus_8pct",
     "bos_down",
     "reset",
+    "sell",
 )
 _REDUCE_TERMS = (
     "reduce",
@@ -93,6 +108,16 @@ _DAILY_POSITIVE_TERMS = (
     "reversal",
     "bos_up",
     "support",
+)
+_TRACE_TEXT_FIELDS = (
+    "raw_action",
+    "raw_status",
+    "reason",
+    "trend_state",
+    "latest_structure_label",
+    "latest_bos_event_type",
+    "latest_reset_reason",
+    "blocking_reasons",
 )
 
 
@@ -126,6 +151,158 @@ def _collect_text_values(row: DatacenterDashboardRow) -> list[str]:
 
 def _contains_any(text_values: list[str], terms: Iterable[str]) -> bool:
     return any(term.lower() in value for value in text_values for term in terms)
+
+
+def _build_trace(
+    *,
+    ticker: str,
+    action: str,
+    matched_rule: str,
+    row: DatacenterDashboardRow | None,
+    horizon: str | None,
+    field_name: str | None,
+    matched_token: str | None,
+    matched_value: str | None,
+) -> DatacenterDecisionTrace:
+    return DatacenterDecisionTrace(
+        ticker=ticker,
+        action=action,
+        matched_rule=matched_rule,
+        horizon=horizon,
+        field_name=field_name,
+        matched_token=matched_token,
+        matched_value=matched_value,
+        source_file=row.source_file if row is not None else None,
+        section=row.section if row is not None else None,
+        row_kind=row.row_kind if row is not None else None,
+    )
+
+
+def _match_row_text_trace(
+    *,
+    ticker: str,
+    action: str,
+    matched_rule: str,
+    rows_with_horizons: list[tuple[DatacenterDashboardRow, str, list[str]]],
+    terms: Iterable[str],
+) -> DatacenterDecisionTrace | None:
+    for term in terms:
+        for row, horizon, _text_values in rows_with_horizons:
+            for field_name in _TRACE_TEXT_FIELDS:
+                value = getattr(row, field_name)
+                if not value:
+                    continue
+                lowered_value = value.lower()
+                if term.lower() in lowered_value:
+                    return _build_trace(
+                        ticker=ticker,
+                        action=action,
+                        matched_rule=matched_rule,
+                        row=row,
+                        horizon=horizon,
+                        field_name=field_name,
+                        matched_token=term,
+                        matched_value=value,
+                    )
+            for raw_field_name in sorted(row.raw_fields):
+                raw_value = row.raw_fields[raw_field_name]
+                if not raw_value:
+                    continue
+                lowered_value = raw_value.lower()
+                if term.lower() in lowered_value:
+                    return _build_trace(
+                        ticker=ticker,
+                        action=action,
+                        matched_rule=matched_rule,
+                        row=row,
+                        horizon=horizon,
+                        field_name=f"raw_fields.{raw_field_name}",
+                        matched_token=term,
+                        matched_value=raw_value,
+                    )
+    return None
+
+
+def _match_first_row_with_value(
+    *,
+    ticker: str,
+    action: str,
+    matched_rule: str,
+    rows_with_horizons: list[tuple[DatacenterDashboardRow, str, list[str]]],
+    predicate,
+    field_name: str,
+    token: str,
+) -> DatacenterDecisionTrace | None:
+    for row, horizon, _text_values in rows_with_horizons:
+        value = getattr(row, field_name)
+        if predicate(value):
+            return _build_trace(
+                ticker=ticker,
+                action=action,
+                matched_rule=matched_rule,
+                row=row,
+                horizon=horizon,
+                field_name=field_name,
+                matched_token=token,
+                matched_value=str(value),
+            )
+    return None
+
+
+def _first_positive_trace(
+    *,
+    ticker: str,
+    action: str,
+    matched_rule: str,
+    rows_with_horizons: list[tuple[DatacenterDashboardRow, str, list[str]]],
+    horizon_name: str,
+    terms: Iterable[str],
+    label: str,
+) -> DatacenterDecisionTrace | None:
+    for row, horizon, text_values in rows_with_horizons:
+        if horizon != horizon_name:
+            continue
+        for term in terms:
+            if _contains_any(text_values, (term,)):
+                for field_name in _TRACE_TEXT_FIELDS:
+                    value = getattr(row, field_name)
+                    if value and term.lower() in value.lower():
+                        return _build_trace(
+                            ticker=ticker,
+                            action=action,
+                            matched_rule=matched_rule,
+                            row=row,
+                            horizon=horizon,
+                            field_name=field_name,
+                            matched_token=term,
+                            matched_value=value,
+                        )
+                for raw_field_name in sorted(row.raw_fields):
+                    raw_value = row.raw_fields[raw_field_name]
+                    if raw_value and term.lower() in raw_value.lower():
+                        return _build_trace(
+                            ticker=ticker,
+                            action=action,
+                            matched_rule=matched_rule,
+                            row=row,
+                            horizon=horizon,
+                            field_name=f"raw_fields.{raw_field_name}",
+                            matched_token=term,
+                            matched_value=raw_value,
+                        )
+    for row, horizon, _text_values in rows_with_horizons:
+        if horizon == horizon_name:
+            return _build_trace(
+                ticker=ticker,
+                action=action,
+                matched_rule=matched_rule,
+                row=row,
+                horizon=horizon,
+                field_name=None,
+                matched_token=label,
+                matched_value=label,
+            )
+    return None
 
 
 def _max_optional_float(values: Iterable[float | None]) -> float | None:
@@ -190,6 +367,7 @@ def build_datacenter_ticker_decisions(
         )
 
         reasons: list[str] = []
+        decision_trace: list[DatacenterDecisionTrace] = []
         action = "NEUTRAL"
         primary_reason: Optional[str] = None
 
@@ -237,20 +415,60 @@ def build_datacenter_ticker_decisions(
             action = "SELL"
             primary_reason = "SELL_SIGNAL_DETECTED"
             reasons.append("Matched sell-language in daily or rolling 2d context")
+            trace = _match_row_text_trace(
+                ticker=ticker,
+                action=action,
+                matched_rule="SELL",
+                rows_with_horizons=daily_or_rolling_2,
+                terms=_SELL_TERMS,
+            )
+            if trace is not None:
+                decision_trace.append(trace)
         elif direct_reduce_match:
             action = "REDUCE"
             primary_reason = "RISK_SIGNAL_DETECTED"
             reasons.append("Matched risk-language in daily or rolling 2d context")
+            trace = _match_row_text_trace(
+                ticker=ticker,
+                action=action,
+                matched_rule="REDUCE",
+                rows_with_horizons=daily_or_rolling_2,
+                terms=_REDUCE_TERMS,
+            )
+            if trace is not None:
+                decision_trace.append(trace)
         elif has_tighten_stop:
             action = "TIGHTEN_STOP"
             primary_reason = "HIGH_EXIT_RISK_DAYS_PRESENT"
             reasons.append(
                 f"high_exit_risk_days_count={high_exit_risk_days_count}"
             )
+            trace = _match_first_row_with_value(
+                ticker=ticker,
+                action=action,
+                matched_rule="TIGHTEN_STOP",
+                rows_with_horizons=normalized_rows,
+                predicate=lambda value: value is not None and value >= 1,
+                field_name="high_exit_risk_days_count",
+                token="high_exit_risk_days_count>=1",
+            )
+            if trace is not None:
+                decision_trace.append(trace)
         elif has_blocking:
             action = "BLOCKED"
             primary_reason = "BLOCKING_REASONS_PRESENT"
             reasons.extend(blocking_reasons)
+            trace = _match_first_row_with_value(
+                ticker=ticker,
+                action=action,
+                matched_rule="BLOCKED",
+                rows_with_horizons=normalized_rows,
+                predicate=lambda value: bool(value and str(value).strip()),
+                field_name="blocking_reasons",
+                token="blocking_reasons",
+            )
+            if trace is not None:
+                decision_trace.append(trace)
         elif (
             rolling_30_positive
             and distance_to_ema20 is not None
@@ -259,22 +477,82 @@ def build_datacenter_ticker_decisions(
             action = "WAIT_PULLBACK"
             primary_reason = "STRETCHED_ABOVE_EMA20"
             reasons.append(f"distance_to_ema20={distance_to_ema20}")
+            trace = _match_first_row_with_value(
+                ticker=ticker,
+                action=action,
+                matched_rule="WAIT_PULLBACK",
+                rows_with_horizons=normalized_rows,
+                predicate=lambda value: value is not None and value > 15.0,
+                field_name="distance_to_ema20",
+                token="distance_to_ema20>15.0",
+            )
+            if trace is not None:
+                decision_trace.append(trace)
         elif rolling_30_positive and rolling_5_constructive and daily_positive:
             action = "BUY_NOW"
             primary_reason = "MULTI_HORIZON_ALIGNMENT"
             reasons.append("rolling 30d + rolling 5d + daily constructive alignment")
+            for horizon_name, terms, label in (
+                ("rolling 30d", _ROLLING_30_POSITIVE_TERMS, "rolling 30d positive context"),
+                ("rolling 5d", _ROLLING_5_POSITIVE_TERMS, "rolling 5d constructive context"),
+                ("daily", _DAILY_POSITIVE_TERMS, "daily positive trigger"),
+            ):
+                trace = _first_positive_trace(
+                    ticker=ticker,
+                    action=action,
+                    matched_rule="BUY_NOW",
+                    rows_with_horizons=normalized_rows,
+                    horizon_name=horizon_name,
+                    terms=terms,
+                    label=label,
+                )
+                if trace is not None:
+                    decision_trace.append(trace)
         elif rolling_30_positive:
             action = "WATCH"
             primary_reason = "ROLLING_30_POSITIVE_ONLY"
             reasons.append("Positive rolling 30d context without full alignment")
+            trace = _first_positive_trace(
+                ticker=ticker,
+                action=action,
+                matched_rule="WATCH",
+                rows_with_horizons=normalized_rows,
+                horizon_name="rolling 30d",
+                terms=_ROLLING_30_POSITIVE_TERMS,
+                label="rolling 30d positive context",
+            )
+            if trace is not None:
+                decision_trace.append(trace)
         else:
             action = "NEUTRAL"
             primary_reason = "NO_DECISIVE_SIGNAL"
+            decision_trace.append(
+                _build_trace(
+                    ticker=ticker,
+                    action=action,
+                    matched_rule="NEUTRAL_FALLBACK",
+                    row=None,
+                    horizon=None,
+                    field_name=None,
+                    matched_token=None,
+                    matched_value=None,
+                )
+            )
 
         if action == "BLOCKED" and direct_reduce_match:
             action = "REDUCE"
             primary_reason = "RISK_SIGNAL_DETECTED"
             reasons = ["Matched risk-language in daily or rolling 2d context"]
+            decision_trace = []
+            trace = _match_row_text_trace(
+                ticker=ticker,
+                action=action,
+                matched_rule="REDUCE",
+                rows_with_horizons=daily_or_rolling_2,
+                terms=_REDUCE_TERMS,
+            )
+            if trace is not None:
+                decision_trace.append(trace)
 
         if not horizons_present:
             warnings.append(f"{ticker}: no normalized horizons present")
@@ -296,6 +574,7 @@ def build_datacenter_ticker_decisions(
                 latest_bos_event_type=latest_bos_event_type,
                 latest_reset_reason=latest_reset_reason,
                 source_files=source_files,
+                decision_trace=decision_trace,
             )
         )
 
