@@ -225,19 +225,49 @@ def _numeric_change(first_row: dict[str, object], last_row: dict[str, object], f
 def _has_fresh_bos_down(row: dict[str, object]) -> bool:
     return (
         row.get("last_latest_bos_event_type") == "BOS_DOWN"
-        and row.get("last_latest_bos_freshness") == "FRESH"
+        and _is_fresh_or_recent(row.get("last_latest_bos_freshness"))
     )
 
 
 def _has_fresh_reset(row: dict[str, object]) -> bool:
     return (
         row.get("last_latest_reset_reason") not in {None, "", "NULL"}
-        and row.get("last_latest_reset_freshness") == "FRESH"
+        and _is_fresh_or_recent(row.get("last_latest_reset_freshness"))
     )
+
+
+def _is_fresh_or_recent(value: object | None) -> bool:
+    if value is None:
+        return False
+    normalized = str(value).strip().upper()
+    return normalized in {"FRESH", "RECENT", "CURRENT"}
+
+
+def _is_stale_or_aging(value: object | None) -> bool:
+    if value is None:
+        return False
+    normalized = str(value).strip().upper()
+    return normalized in {"AGING", "STALE", "OLD"}
 
 
 def _is_buy_oriented_status(value: object | None) -> bool:
     return value in {"BREAKOUT_CANDIDATE", "PULLBACK_CANDIDATE"}
+
+
+def _is_high_exit_risk_status(value: object | None) -> bool:
+    return value == "HIGH_EXIT_RISK"
+
+
+def _is_group_or_medium_risk_status(value: object | None) -> bool:
+    return value in {"GROUP_RISK", "MEDIUM_EXIT_RISK"}
+
+
+def _has_explicit_extreme_exit_severity(value: object | None) -> bool:
+    return value in {"EXTREME", "CRITICAL"}
+
+
+def _has_explicit_high_exit_severity(value: object | None) -> bool:
+    return value in {"HIGH", "EXTREME", "CRITICAL"}
 
 
 def _has_negative_group_context(row: dict[str, object]) -> bool:
@@ -259,39 +289,67 @@ def _classify_rolling_30_buy_row(row: dict[str, object]) -> tuple[str, str, str]
     )
     has_buy_activity = breakout_days > 0 or pullback_days > 0 or has_buy_oriented_status
 
+    has_clear_bearish_relevance = row.get("latest_bearish_relevance_class") == "RELEVANT"
+    current_watchlist_status = row.get("current_watchlist_status")
+    window_watchlist_status = row.get("window_watchlist_status")
+    has_explicit_current_high_risk = _is_high_exit_risk_status(current_watchlist_status)
+    has_explicit_high_severity = _has_explicit_high_exit_severity(row.get("last_exit_risk_severity"))
+    has_window_high_risk = _is_high_exit_risk_status(window_watchlist_status)
+    has_mixed_context = (
+        current_watchlist_status == "NEUTRAL_MONITOR"
+        or _is_group_or_medium_risk_status(current_watchlist_status)
+        or _is_group_or_medium_risk_status(window_watchlist_status)
+        or has_window_high_risk
+        or exit_risk_days > 0
+    )
+
     if (
-        exit_risk_days > 0
-        or row.get("last_exit_risk_severity") in {"HIGH", "MEDIUM"}
-        or trend_state == "DOWN"
+        trend_state == "DOWN"
         or has_fresh_bos_down
         or has_fresh_reset
-        or row.get("window_watchlist_status") == "HIGH_EXIT_RISK"
+        or has_explicit_current_high_risk
+        or has_explicit_high_severity
+        or has_clear_bearish_relevance
     ):
         blocking_reason = (
             "recent_bos_down"
             if has_fresh_bos_down
             else "recent_reset"
             if has_fresh_reset
-            else "exit_risk_present"
-            if exit_risk_days > 0 or row.get("last_exit_risk_severity") in {"HIGH", "MEDIUM"}
+            else "high_exit_risk_status"
+            if has_explicit_current_high_risk
+            else "high_exit_risk_severity"
+            if has_explicit_high_severity
+            else "relevant_bearish_context"
+            if has_clear_bearish_relevance
             else "down_trend"
         )
-        return "AVOID", "structural_buy_block", blocking_reason
+        return "AVOID", "clear_structural_or_exit_block", blocking_reason
 
-    if breakout_days > 0 and not _has_negative_group_context(row):
-        return "BUY_ZONE", "breakout_supported_structure", ""
+    if (
+        has_buy_activity
+        and (trend_state == "UP" or has_buy_oriented_status)
+        and not _has_negative_group_context(row)
+        and exit_risk_days == 0
+        and not has_clear_bearish_relevance
+        and not has_window_high_risk
+    ):
+        reason = "UP_STRUCTURE_WITH_REPEATED_BUY_SIGNAL" if breakout_days > 0 else "UP_STRUCTURE_WITH_PULLBACK_CONTEXT"
+        return "BUY_ZONE", reason, ""
 
-    if trend_state == "UP" and pullback_days > 0 and not _has_negative_group_context(row):
-        return "BUY_ZONE", "trend_up_pullback_context", ""
+    if has_buy_activity or has_mixed_context:
+        blocking_reason = (
+            "WINDOW_HIGH_EXIT_RISK"
+            if has_window_high_risk
+            else "GROUP_RISK"
+            if window_watchlist_status == "GROUP_RISK"
+            else "EXIT_RISK_DAYS_WITHOUT_HIGH_SEVERITY"
+            if exit_risk_days > 0
+            else ""
+        )
+        return "WATCH_ZONE", "MIXED_OR_UNCONFIRMED_STRUCTURE", blocking_reason
 
-    if has_buy_activity or row.get("current_watchlist_status") == "NEUTRAL_MONITOR" or row.get("window_watchlist_status") in {
-        "NEUTRAL_MONITOR",
-        "GROUP_RISK",
-    }:
-        blocking_reason = "group_risk_needs_confirmation" if _has_negative_group_context(row) else ""
-        return "WATCH_ZONE", "needs_confirmation", blocking_reason
-
-    return "AVOID", "no_buy_evidence", "no_buy_activity"
+    return "WATCH_ZONE", "MIXED_OR_UNCONFIRMED_STRUCTURE", ""
 
 
 def _classify_rolling_30_exit_row(row: dict[str, object]) -> tuple[str, str, str]:
@@ -300,64 +358,75 @@ def _classify_rolling_30_exit_row(row: dict[str, object]) -> tuple[str, str, str
 
     exit_risk_days = int(row.get("exit_risk_days") or 0)
     high_exit_risk_days = int(row.get("high_exit_risk_days") or 0)
+    medium_exit_risk_days = int(row.get("medium_exit_risk_days") or 0)
     latest_bearish_relevance_class = row.get("latest_bearish_relevance_class")
     has_fresh_bos_down = _has_fresh_bos_down(row)
     has_fresh_reset = _has_fresh_reset(row)
     has_extreme_group_context = row.get("last_subindustry_overheat_risk_level") == "EXTREME"
+    current_watchlist_status = row.get("current_watchlist_status")
+    window_watchlist_status = row.get("window_watchlist_status")
+    latest_exit_severity = row.get("last_exit_risk_severity")
+    trend_state = row.get("last_ticker_trend_state")
+
+    if _has_explicit_extreme_exit_severity(latest_exit_severity):
+        return "EXTREME", "EXTREME_EXIT_RISK", "CRITICAL_EXIT_RISK_SEVERITY"
 
     if (
-        high_exit_risk_days >= 2
-        or exit_risk_days >= 3
-        or (has_extreme_group_context and exit_risk_days > 0)
-        or (row.get("window_watchlist_status") == "HIGH_EXIT_RISK" and has_fresh_bos_down)
+        latest_exit_severity == "HIGH"
+        and exit_risk_days >= 15
+        and trend_state == "DOWN"
+        and (has_fresh_bos_down or has_fresh_reset)
     ):
-        risk_reason = (
-            "repeated_high_exit_risk"
-            if high_exit_risk_days >= 2
-            else "persistent_exit_risk"
-            if exit_risk_days >= 3
-            else "extreme_group_context"
-            if has_extreme_group_context
-            else "high_exit_risk_with_bos_down"
-        )
-        return "EXTREME", "urgent_exit_attention", risk_reason
+        return "EXTREME", "EXTREME_EXIT_RISK", "HIGH_SEVERITY_WITH_FRESH_BREAKDOWN"
 
     if (
-        exit_risk_days > 0
-        or row.get("window_watchlist_status") == "HIGH_EXIT_RISK"
+        latest_exit_severity == "HIGH"
+        or _is_high_exit_risk_status(current_watchlist_status)
         or has_fresh_bos_down
         or has_fresh_reset
         or latest_bearish_relevance_class == "RELEVANT"
+        or (exit_risk_days >= 5 and latest_exit_severity not in {None, "", "NULL"})
     ):
         risk_reason = (
-            "repeated_exit_risk"
-            if exit_risk_days > 0
-            else "recent_bos_down"
+            "HIGH_EXIT_RISK_STATUS"
+            if _is_high_exit_risk_status(current_watchlist_status)
+            else "HIGH_EXIT_RISK_SEVERITY"
+            if latest_exit_severity == "HIGH"
+            else "RECENT_BOS_DOWN"
             if has_fresh_bos_down
-            else "recent_reset"
+            else "RECENT_RESET"
             if has_fresh_reset
-            else "bearish_relevance"
+            else "RELEVANT_BEARISH_CONTEXT"
             if latest_bearish_relevance_class == "RELEVANT"
-            else "high_exit_risk_status"
+            else "REPEATED_EXIT_RISK_WITH_SEVERITY"
         )
-        return "EXIT_ZONE", "exit_risk_detected", risk_reason
+        return "EXIT_ZONE", "ELEVATED_EXIT_RISK", risk_reason
 
     if (
-        int(row.get("medium_exit_risk_days") or 0) > 0
-        or row.get("window_watchlist_status") == "GROUP_RISK"
-        or row.get("last_subindustry_overheat_risk_level") == "HIGH"
+        exit_risk_days > 0
+        or medium_exit_risk_days > 0
+        or _is_high_exit_risk_status(window_watchlist_status)
+        or _is_group_or_medium_risk_status(window_watchlist_status)
+        or row.get("last_subindustry_overheat_risk_level") in {"HIGH", "ELEVATED", "EXTREME"}
         or latest_bearish_relevance_class == "WEAK_CONTEXT"
+        or has_extreme_group_context
     ):
         risk_reason = (
-            "group_risk"
-            if row.get("window_watchlist_status") == "GROUP_RISK"
-            else "weak_bearish_relevance"
+            "EXIT_RISK_DAYS_WITHOUT_HIGH_SEVERITY"
+            if exit_risk_days > 0 and latest_exit_severity in {None, "", "NULL"}
+            else "GROUP_RISK"
+            if window_watchlist_status == "GROUP_RISK"
+            else "WINDOW_HIGH_EXIT_RISK"
+            if _is_high_exit_risk_status(window_watchlist_status)
+            else "WINDOW_MEDIUM_EXIT_RISK"
+            if window_watchlist_status == "MEDIUM_EXIT_RISK"
+            else "WEAK_BEARISH_RELEVANCE"
             if latest_bearish_relevance_class == "WEAK_CONTEXT"
-            else "mild_exit_risk"
+            else "MILD_OR_GROUP_EXIT_RISK"
         )
-        return "WATCH", "monitor_exit_risk", risk_reason
+        return "WATCH", "MILD_OR_UNCONFIRMED_EXIT_RISK", risk_reason
 
-    return "NORMAL", "no_exit_risk_detected", ""
+    return "NORMAL", "NO_MEANINGFUL_EXIT_RISK", ""
 
 
 def _build_rolling_30_role_rows(

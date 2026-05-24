@@ -886,16 +886,16 @@ def test_rolling_30_role_sections_and_summary_render_for_window_size_30(tmp_path
     assert "section;rolling_30_buy_filter" in csv_text
     assert "section;rolling_30_exit_prefilter" in csv_text
     assert "rolling_30_buy_filter;AAA;BUY_ZONE;" in csv_text
-    assert "rolling_30_buy_filter;BBB;WATCH_ZONE;" in csv_text
+    assert "rolling_30_buy_filter;BBB;BUY_ZONE;" in csv_text
     assert "rolling_30_buy_filter;CCC;INSUFFICIENT_DATA;" in csv_text
     assert "rolling_30_buy_filter;DDD;INSUFFICIENT_DATA;" in csv_text
     assert "rolling_30_exit_prefilter;CCC;INSUFFICIENT_DATA;" in csv_text
     assert "rolling_30_exit_prefilter;DDD;INSUFFICIENT_DATA;" in csv_text
     assert "| AAA | BUY_ZONE |" in markdown
-    assert "| BBB | WATCH_ZONE |" in markdown
+    assert "| BBB | BUY_ZONE |" in markdown
     assert "| CCC | INSUFFICIENT_DATA |" in markdown
-    assert summary["rolling_30_buy_zone_count"] == 1
-    assert summary["rolling_30_watch_zone_count"] == 1
+    assert summary["rolling_30_buy_zone_count"] == 2
+    assert summary["rolling_30_watch_zone_count"] == 0
     assert summary["rolling_30_avoid_count"] == 0
     assert summary["rolling_30_buy_filter_insufficient_data_count"] == 2
     assert summary["rolling_30_extreme_count"] == 0
@@ -911,7 +911,7 @@ def test_rolling_30_role_fixture_can_produce_avoid_and_extreme(tmp_path):
             UPDATE dc_ticker_swing_signal_daily
             SET breakout_signal = 0,
                 exit_risk_signal = 1,
-                exit_risk_severity = 'HIGH',
+                exit_risk_severity = 'CRITICAL',
                 exit_reason = 'distribution_pressure'
             WHERE ticker = 'AAA'
               AND signal_date IN ('2024-01-05', '2024-01-08', '2024-01-10')
@@ -929,6 +929,133 @@ def test_rolling_30_role_fixture_can_produce_avoid_and_extreme(tmp_path):
 
     assert "rolling_30_buy_filter;AAA;AVOID;" in result["csv"]
     assert "rolling_30_exit_prefilter;AAA;EXTREME;" in result["csv"]
+
+
+def test_rolling_30_exit_risk_days_without_severity_maps_to_watch_not_extreme_or_buy_avoid(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET ticker_trend_state = 'NEUTRAL',
+                exit_risk_signal = 1,
+                exit_risk_severity = NULL,
+                exit_reason = NULL
+            WHERE ticker = 'AAA'
+              AND signal_date IN ('2024-01-08', '2024-01-10')
+            """
+        )
+        conn.commit()
+
+    result = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=30,
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+
+    assert "rolling_30_buy_filter;AAA;WATCH_ZONE;" in result["csv"]
+    assert "rolling_30_exit_prefilter;AAA;WATCH;" in result["csv"]
+
+
+def test_rolling_30_stale_reset_and_bos_up_do_not_force_avoid_or_extreme(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET latest_bos_event_type = 'BOS_UP',
+                latest_bos_event_date = '2024-01-10',
+                latest_bos_confirmed_as_of_date = '2024-01-10',
+                latest_bos_age_trading_days = 3,
+                latest_bos_freshness = 'AGING',
+                latest_reset_reason = 'DOUBLE_BOS_UP',
+                latest_reset_event_date = '2024-01-10',
+                latest_reset_confirmed_as_of_date = '2024-01-10',
+                latest_reset_age_trading_days = 5,
+                latest_reset_freshness = 'STALE'
+            WHERE ticker = 'AAA'
+              AND signal_date = '2024-01-10'
+            """
+        )
+        conn.commit()
+
+    result = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=30,
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+
+    assert "rolling_30_buy_filter;AAA;BUY_ZONE;" in result["csv"]
+    assert "rolling_30_exit_prefilter;AAA;WATCH;" in result["csv"]
+
+
+def test_rolling_30_fresh_bos_down_forces_avoid_and_exit_zone(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET latest_bos_event_type = 'BOS_DOWN',
+                latest_bos_event_date = '2024-01-10',
+                latest_bos_confirmed_as_of_date = '2024-01-10',
+                latest_bos_age_trading_days = 0,
+                latest_bos_freshness = 'FRESH',
+                latest_reset_reason = NULL,
+                latest_reset_event_date = NULL,
+                latest_reset_confirmed_as_of_date = NULL,
+                latest_reset_age_trading_days = NULL,
+                latest_reset_freshness = NULL
+            WHERE ticker = 'AAA'
+              AND signal_date = '2024-01-10'
+            """
+        )
+        conn.commit()
+
+    result = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=30,
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+
+    assert "rolling_30_buy_filter;AAA;AVOID;" in result["csv"]
+    assert "rolling_30_exit_prefilter;AAA;EXIT_ZONE;" in result["csv"]
+
+
+def test_rolling_30_explicit_high_exit_risk_status_forces_avoid_and_exit_zone(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET exit_risk_signal = 1,
+                exit_risk_severity = 'HIGH',
+                exit_reason = 'distribution_pressure'
+            WHERE ticker = 'AAA'
+              AND signal_date = '2024-01-10'
+            """
+        )
+        conn.commit()
+
+    result = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=30,
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+
+    assert "rolling_30_buy_filter;AAA;AVOID;" in result["csv"]
+    assert "rolling_30_exit_prefilter;AAA;EXIT_ZONE;" in result["csv"]
 
 
 def test_rolling_30_role_sections_do_not_render_for_non_30_windows(tmp_path):
