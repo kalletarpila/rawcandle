@@ -476,7 +476,21 @@ def _classify_daily_trigger_row(row: dict[str, object]) -> tuple[str, str, str, 
     has_lh_or_ll_structure = latest_structure_label in {"LH", "LL"}
     has_close_below_ema20 = _has_reason_token(row.get("exit_reason"), "close_below_ema20")
     has_return_10d_lt_minus_8pct = _has_reason_token(row.get("exit_reason"), "return_10d_lt_minus_8pct")
+    has_trim_watch_close_below_ma10 = _has_reason_token(row.get("exit_reason"), "trim_watch_close_below_ma10")
     has_structure_label_ll_reason = _has_reason_token(row.get("exit_reason"), "latest_structure_label_ll")
+    has_price_break_evidence = (
+        has_close_below_ema20
+        or has_return_10d_lt_minus_8pct
+        or has_trim_watch_close_below_ma10
+        or _has_negative_ema20_context(row.get("distance_to_ema20_pct"))
+    )
+    has_structural_break_evidence = (
+        has_ll_structure
+        or trend_state == "DOWN"
+        or fresh_bos_down
+        or fresh_reset
+        or has_structure_label_ll_reason
+    )
     buy_hard_blocker = (
         trend_state == "DOWN"
         or fresh_bos_down
@@ -487,19 +501,16 @@ def _classify_daily_trigger_row(row: dict[str, object]) -> tuple[str, str, str, 
     stop_reason = ""
     if _is_severe_exit_severity(exit_risk_severity) and has_exit_risk_signal:
         stop_reason = "CRITICAL_OR_EXTREME_EXIT_SEVERITY"
-    elif fresh_bos_down and fresh_reset:
-        stop_reason = "FRESH_BOS_DOWN_AND_RESET"
-    elif exit_risk_severity == "HIGH" and (
-        has_ll_structure
-        or (trend_state == "DOWN" and has_lh_or_ll_structure)
-        or fresh_bos_down
-        or fresh_reset
-        or has_structure_label_ll_reason
-        or (has_close_below_ema20 and has_return_10d_lt_minus_8pct)
+    elif (
+        exit_risk_severity == "HIGH"
+        and has_price_break_evidence
+        and has_structural_break_evidence
     ):
-        stop_reason = "HIGH_RISK_WITH_STRUCTURAL_BREAKDOWN"
-    elif relevant_bearish and high_exit_risk:
-        stop_reason = "RELEVANT_BEARISH_CONTEXT_WITH_HIGH_EXIT_RISK"
+        stop_reason = "PRICE_BREAK_WITH_STRUCTURAL_BREAKDOWN"
+    elif fresh_bos_down and fresh_reset and has_price_break_evidence:
+        stop_reason = "FRESH_BOS_DOWN_AND_RESET_WITH_PRICE_BREAK"
+    elif relevant_bearish and high_exit_risk and has_price_break_evidence:
+        stop_reason = "RELEVANT_BEARISH_CONTEXT_WITH_HIGH_EXIT_RISK_AND_PRICE_BREAK"
     if stop_reason:
         return ("STOP_TRIGGER", "CONFIRMED_DAILY_STOP_TRIGGER", stop_reason, "CHECK_STOP_OR_EXIT")
 
@@ -514,10 +525,12 @@ def _classify_daily_trigger_row(row: dict[str, object]) -> tuple[str, str, str, 
         sell_reason = "CLOSE_BELOW_EMA20"
     elif has_return_10d_lt_minus_8pct:
         sell_reason = "RETURN_10D_LT_MINUS_8PCT"
-    elif _has_reason_token(row.get("exit_reason"), "trim_watch_close_below_ma10"):
+    elif has_trim_watch_close_below_ma10:
         sell_reason = "TRIM_WATCH_CLOSE_BELOW_MA10"
     elif _has_reason_token(row.get("exit_reason"), "subindustry_exit_zone"):
         sell_reason = "SUBINDUSTRY_EXIT_ZONE"
+    elif has_structure_label_ll_reason or has_ll_structure or fresh_reset:
+        sell_reason = "STRUCTURAL_WARNING_WITHOUT_PRICE_BREAK"
     elif fresh_bos_down:
         sell_reason = "FRESH_BOS_DOWN"
     elif relevant_bearish:
