@@ -18,7 +18,12 @@ import flet as ft
 
 from dev_tools.datacenter_dashboard_decisions import (
     DatacenterDecisionBatchResult,
+    DatacenterTickerDecision,
     build_datacenter_ticker_decisions,
+)
+from dev_tools.datacenter_dashboard_inspector import (
+    DatacenterTickerInspectorView,
+    build_datacenter_ticker_inspector_view,
 )
 from dev_tools.datacenter_dashboard_parser import (
     DatacenterDashboardBatchParseResult,
@@ -735,6 +740,51 @@ def populate_datacenter_dashboard_command_center(
             )
 
 
+def populate_datacenter_dashboard_inspector(
+    *,
+    inspector_view: DatacenterTickerInspectorView | None,
+    inspector_ticker_dropdown: ft.Dropdown,
+    decision_result: DatacenterDecisionBatchResult,
+    selected_ticker: str | None,
+    action_field: ft.TextField,
+    conflict_detected_field: ft.TextField,
+    supporting_signals_field: ft.TextField,
+    conflicting_signals_field: ft.TextField,
+    override_explanation_field: ft.TextField,
+) -> None:
+    inspector_ticker_dropdown.options = [
+        ft.dropdown.Option(decision.ticker) for decision in decision_result.decisions
+    ]
+    if decision_result.decisions:
+        inspector_ticker_dropdown.value = selected_ticker or decision_result.decisions[0].ticker
+    else:
+        inspector_ticker_dropdown.value = None
+
+    if inspector_view is None:
+        action_field.value = "NONE"
+        conflict_detected_field.value = "False"
+        supporting_signals_field.value = "NONE"
+        conflicting_signals_field.value = "NONE"
+        override_explanation_field.value = "NONE"
+        return
+
+    action_field.value = (
+        f"{inspector_view.ticker} | {inspector_view.action} | {inspector_view.severity}"
+    )
+    conflict_detected_field.value = str(inspector_view.conflict_detected)
+    supporting_signals_field.value = (
+        ", ".join(inspector_view.supporting_signals)
+        if inspector_view.supporting_signals
+        else "NONE"
+    )
+    conflicting_signals_field.value = (
+        ", ".join(inspector_view.conflicting_signals)
+        if inspector_view.conflicting_signals
+        else "NONE"
+    )
+    override_explanation_field.value = inspector_view.override_explanation or "NONE"
+
+
 def _market_row_text(market_result: Dict[str, Any]) -> str:
     return (
         f"{market_result.get('market', '')}: "
@@ -1136,6 +1186,53 @@ def run_app(page: ft.Page, config_path: str) -> None:
         max_lines=9,
         width=240,
     )
+    datacenter_dashboard_inspector_ticker_dropdown = ft.Dropdown(
+        label="inspector_ticker",
+        options=[],
+        width=220,
+    )
+    datacenter_dashboard_inspector_action_field = ft.TextField(
+        label="inspector_action",
+        value="NONE",
+        read_only=True,
+        multiline=True,
+        min_lines=1,
+        max_lines=2,
+        expand=True,
+    )
+    datacenter_dashboard_conflict_detected_field = ft.TextField(
+        label="conflict_detected",
+        value="False",
+        read_only=True,
+        width=180,
+    )
+    datacenter_dashboard_supporting_signals_field = ft.TextField(
+        label="supporting_signals",
+        value="NONE",
+        read_only=True,
+        multiline=True,
+        min_lines=2,
+        max_lines=4,
+        expand=True,
+    )
+    datacenter_dashboard_conflicting_signals_field = ft.TextField(
+        label="conflicting_signals",
+        value="NONE",
+        read_only=True,
+        multiline=True,
+        min_lines=2,
+        max_lines=4,
+        expand=True,
+    )
+    datacenter_dashboard_override_explanation_field = ft.TextField(
+        label="override_explanation",
+        value="NONE",
+        read_only=True,
+        multiline=True,
+        min_lines=2,
+        max_lines=3,
+        expand=True,
+    )
     datacenter_dashboard_command_center_column = ft.Column(spacing=8)
     datacenter_status_field = ft.TextField(
         label="Datacenter status",
@@ -1209,6 +1306,90 @@ def run_app(page: ft.Page, config_path: str) -> None:
         populate_datacenter_dashboard_command_center(
             decision_result=decision_result,
             command_center_column=datacenter_dashboard_command_center_column,
+        )
+        decisions_by_ticker = {
+            decision.ticker: decision for decision in decision_result.decisions
+        }
+        selected_ticker = datacenter_dashboard_inspector_ticker_dropdown.value
+        if (
+            decision_result.decisions
+            and (not selected_ticker or selected_ticker not in decisions_by_ticker)
+        ):
+            selected_ticker = decision_result.decisions[0].ticker
+        selected_decision = (
+            decisions_by_ticker.get(selected_ticker) if selected_ticker else None
+        )
+        inspector_view = (
+            build_datacenter_ticker_inspector_view(
+                decision=selected_decision,
+                rows=parsed_rows,
+            )
+            if selected_decision is not None
+            else None
+        )
+        populate_datacenter_dashboard_inspector(
+            inspector_view=inspector_view,
+            inspector_ticker_dropdown=datacenter_dashboard_inspector_ticker_dropdown,
+            decision_result=decision_result,
+            selected_ticker=selected_ticker,
+            action_field=datacenter_dashboard_inspector_action_field,
+            conflict_detected_field=datacenter_dashboard_conflict_detected_field,
+            supporting_signals_field=datacenter_dashboard_supporting_signals_field,
+            conflicting_signals_field=datacenter_dashboard_conflicting_signals_field,
+            override_explanation_field=datacenter_dashboard_override_explanation_field,
+        )
+        page.update()
+
+    def refresh_datacenter_dashboard_inspector_for_selected_ticker() -> None:
+        dashboard_status = discover_datacenter_dashboard_status(
+            datacenter_dashboard_reports_dir_field.value
+        )
+        parsed_rows: list[DatacenterDashboardRow] = []
+        for report in dashboard_status.reports:
+            if not report.path:
+                continue
+            parsed_rows.extend(
+                parse_datacenter_dashboard_file(
+                    path=report.path,
+                    horizon=report.horizon,
+                ).rows
+            )
+        decision_result = build_datacenter_ticker_decisions(parsed_rows)
+        selected_ticker = datacenter_dashboard_inspector_ticker_dropdown.value
+        decisions_by_ticker = {
+            decision.ticker: decision for decision in decision_result.decisions
+        }
+        if (
+            decision_result.decisions
+            and (not selected_ticker or selected_ticker not in decisions_by_ticker)
+        ):
+            selected_ticker = decision_result.decisions[0].ticker
+        selected_decision = next(
+            (
+                decision
+                for decision in decision_result.decisions
+                if decision.ticker == selected_ticker
+            ),
+            None,
+        )
+        inspector_view = (
+            build_datacenter_ticker_inspector_view(
+                decision=selected_decision,
+                rows=parsed_rows,
+            )
+            if selected_decision is not None
+            else None
+        )
+        populate_datacenter_dashboard_inspector(
+            inspector_view=inspector_view,
+            inspector_ticker_dropdown=datacenter_dashboard_inspector_ticker_dropdown,
+            decision_result=decision_result,
+            selected_ticker=selected_ticker,
+            action_field=datacenter_dashboard_inspector_action_field,
+            conflict_detected_field=datacenter_dashboard_conflict_detected_field,
+            supporting_signals_field=datacenter_dashboard_supporting_signals_field,
+            conflicting_signals_field=datacenter_dashboard_conflicting_signals_field,
+            override_explanation_field=datacenter_dashboard_override_explanation_field,
         )
         page.update()
 
@@ -1628,6 +1809,9 @@ def run_app(page: ft.Page, config_path: str) -> None:
         "Refresh Dashboard",
         on_click=lambda _e: refresh_datacenter_dashboard_view(),
     )
+    datacenter_dashboard_inspector_ticker_dropdown.on_change = (
+        lambda _e: refresh_datacenter_dashboard_inspector_for_selected_ticker()
+    )
     datacenter_buttons = ft.Row(
         [
             datacenter_dry_run_button,
@@ -1690,6 +1874,19 @@ def run_app(page: ft.Page, config_path: str) -> None:
             datacenter_dashboard_reports_column,
             ft.Text("Command Center", size=18, weight=ft.FontWeight.BOLD),
             datacenter_dashboard_command_center_column,
+            ft.Text("Inspector", size=18, weight=ft.FontWeight.BOLD),
+            ft.Row(
+                [
+                    datacenter_dashboard_inspector_ticker_dropdown,
+                    datacenter_dashboard_inspector_action_field,
+                    datacenter_dashboard_conflict_detected_field,
+                ],
+                wrap=True,
+                vertical_alignment=ft.CrossAxisAlignment.END,
+            ),
+            datacenter_dashboard_supporting_signals_field,
+            datacenter_dashboard_conflicting_signals_field,
+            datacenter_dashboard_override_explanation_field,
         ],
         spacing=12,
         expand=True,
@@ -1720,6 +1917,24 @@ def run_app(page: ft.Page, config_path: str) -> None:
     page.datacenter_dashboard_reports_column = datacenter_dashboard_reports_column
     page.datacenter_dashboard_command_center_column = (
         datacenter_dashboard_command_center_column
+    )
+    page.datacenter_dashboard_inspector_ticker_dropdown = (
+        datacenter_dashboard_inspector_ticker_dropdown
+    )
+    page.datacenter_dashboard_inspector_action_field = (
+        datacenter_dashboard_inspector_action_field
+    )
+    page.datacenter_dashboard_conflict_detected_field = (
+        datacenter_dashboard_conflict_detected_field
+    )
+    page.datacenter_dashboard_supporting_signals_field = (
+        datacenter_dashboard_supporting_signals_field
+    )
+    page.datacenter_dashboard_conflicting_signals_field = (
+        datacenter_dashboard_conflicting_signals_field
+    )
+    page.datacenter_dashboard_override_explanation_field = (
+        datacenter_dashboard_override_explanation_field
     )
     page.datacenter_status_field = datacenter_status_field
     page.datacenter_reports_column = datacenter_reports_column

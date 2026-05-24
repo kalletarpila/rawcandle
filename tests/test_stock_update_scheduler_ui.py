@@ -953,6 +953,10 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(tmp_path, mon
     assert "SELL=0" in page.datacenter_dashboard_decision_summary_field.value
     assert len(page.datacenter_dashboard_reports_column.controls) == 4
     assert page.datacenter_dashboard_command_center_column.controls[0].value == "No decisions available."
+    assert page.datacenter_dashboard_conflict_detected_field.value == "False"
+    assert page.datacenter_dashboard_supporting_signals_field.value == "NONE"
+    assert page.datacenter_dashboard_conflicting_signals_field.value == "NONE"
+    assert page.datacenter_dashboard_override_explanation_field.value == "NONE"
     datacenter_text_labels = [
         control.value
         for control in page.datacenter_content.controls
@@ -1065,6 +1069,8 @@ def test_run_app_datacenter_dashboard_refresh_reads_report_directory(tmp_path, m
     assert page.datacenter_dashboard_parse_summary_field.value == "total_parsed_rows=1\ntotal_warnings=0"
     assert "decision_total=1" in page.datacenter_dashboard_decision_summary_field.value
     assert "NEUTRAL=1" in page.datacenter_dashboard_decision_summary_field.value
+    assert page.datacenter_dashboard_inspector_action_field.value == "NVDA | NEUTRAL | INFO"
+    assert page.datacenter_dashboard_conflict_detected_field.value == "False"
     first_card = page.datacenter_dashboard_reports_column.controls[0]
     assert "rolling 30d: MISSING" in first_card.content.controls[0].value
     assert "parsed_rows: 0" in first_card.content.controls[3].value
@@ -1084,7 +1090,7 @@ def test_run_app_datacenter_dashboard_command_center_shows_grouped_read_only_row
         "\n".join(
             [
                 "ticker;status;distance_to_ema20;blocking_reasons",
-                "META;UP;16.5;STRUCTURAL_BLOCK",
+                "META;BUY_ZONE;16.5;STRUCTURAL_BLOCK",
                 "MRVL;LEADER;;",
                 "TSM;BUY_ZONE;;",
             ]
@@ -1182,6 +1188,20 @@ def test_run_app_datacenter_dashboard_command_center_shows_grouped_read_only_row
     assert "TSM | BUY_NOW | HIGH" in row_titles
     assert "MRVL | WATCH | LOW" in row_titles
     assert "INTC | NEUTRAL | INFO" in row_titles
+    page.datacenter_dashboard_inspector_ticker_dropdown.value = "NVDA"
+    page.datacenter_dashboard_inspector_ticker_dropdown.on_change(None)
+    assert page.datacenter_dashboard_inspector_action_field.value == "NVDA | SELL | CRITICAL"
+    assert page.datacenter_dashboard_conflict_detected_field.value == "False"
+    assert "close_below_ema20" in page.datacenter_dashboard_supporting_signals_field.value
+    page.datacenter_dashboard_inspector_ticker_dropdown.value = "META"
+    page.datacenter_dashboard_inspector_ticker_dropdown.on_change(None)
+    assert page.datacenter_dashboard_conflict_detected_field.value == "True"
+    assert "STRUCTURAL_BLOCK" in page.datacenter_dashboard_supporting_signals_field.value
+    assert "BUY_ZONE" in page.datacenter_dashboard_conflicting_signals_field.value
+    assert (
+        page.datacenter_dashboard_override_explanation_field.value
+        == "Blocking reasons override constructive setup labels."
+    )
 
 
 def test_build_skip_next_run_config_sets_true_without_changing_other_fields():
