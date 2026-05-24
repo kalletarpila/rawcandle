@@ -1030,15 +1030,14 @@ def test_scheduler_runner_technical_relevance_failure_fails_scheduler(tmp_path, 
     )
     monkeypatch.setattr(
         "rawcandle.scheduler.runner.subprocess.run",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("datacenter ordering is irrelevant after failed technical relevance")
-        ),
+        lambda *args, **kwargs: _FakeCompletedProcess(0, "SUMMARY audit_validation_status=OK\n"),
     )
 
     result = run_scheduler_config(config_path=str(config_path))
 
     assert result.technical_relevance_status == "FAILED"
     assert result.technical_relevance_error == "tech rel boom"
+    assert result.datacenter_pipeline_status == "OK"
     assert result.overall_status == STATUS_FAILED
 
 

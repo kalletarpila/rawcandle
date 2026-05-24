@@ -948,8 +948,6 @@ def run_scheduler_config(
                 market="usa",
             )
             if (
-                technical_relevance_result.status != "FAILED"
-                and
                 market_update_phase_status in (STATUS_OK, STATUS_OK_WITH_WARNINGS)
                 and datacenter_result.market in config.enabled_markets
             ):
