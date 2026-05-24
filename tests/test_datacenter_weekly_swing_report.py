@@ -848,6 +848,117 @@ def test_supports_custom_window_size_and_selected_dates(tmp_path):
     assert "| CCC | 2 | 2024-01-08 | 2024-01-10 |" in markdown
 
 
+def test_rolling_30_role_sections_and_summary_render_for_window_size_30(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET ticker_trend_state = 'NEUTRAL'
+            WHERE ticker = 'BBB'
+            """
+        )
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET exit_risk_severity = 'HIGH'
+            WHERE ticker = 'CCC'
+              AND exit_risk_signal = 1
+            """
+        )
+        conn.commit()
+
+    result = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=30,
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+
+    markdown = result["markdown"]
+    csv_text = result["csv"]
+    summary = result["summary"]
+
+    assert "## Rolling 30 Buy Filter" in markdown
+    assert "## Rolling 30 Exit Prefilter" in markdown
+    assert "section;rolling_30_buy_filter" in csv_text
+    assert "section;rolling_30_exit_prefilter" in csv_text
+    assert "rolling_30_buy_filter;AAA;BUY_ZONE;" in csv_text
+    assert "rolling_30_buy_filter;BBB;WATCH_ZONE;" in csv_text
+    assert "rolling_30_buy_filter;CCC;INSUFFICIENT_DATA;" in csv_text
+    assert "rolling_30_buy_filter;DDD;INSUFFICIENT_DATA;" in csv_text
+    assert "rolling_30_exit_prefilter;CCC;INSUFFICIENT_DATA;" in csv_text
+    assert "rolling_30_exit_prefilter;DDD;INSUFFICIENT_DATA;" in csv_text
+    assert "| AAA | BUY_ZONE |" in markdown
+    assert "| BBB | WATCH_ZONE |" in markdown
+    assert "| CCC | INSUFFICIENT_DATA |" in markdown
+    assert summary["rolling_30_buy_zone_count"] == 1
+    assert summary["rolling_30_watch_zone_count"] == 1
+    assert summary["rolling_30_avoid_count"] == 0
+    assert summary["rolling_30_buy_filter_insufficient_data_count"] == 2
+    assert summary["rolling_30_extreme_count"] == 0
+    assert summary["rolling_30_exit_prefilter_insufficient_data_count"] == 2
+
+
+def test_rolling_30_role_fixture_can_produce_avoid_and_extreme(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_ticker_swing_signal_daily
+            SET breakout_signal = 0,
+                exit_risk_signal = 1,
+                exit_risk_severity = 'HIGH',
+                exit_reason = 'distribution_pressure'
+            WHERE ticker = 'AAA'
+              AND signal_date IN ('2024-01-05', '2024-01-08', '2024-01-10')
+            """
+        )
+        conn.commit()
+
+    result = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=30,
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+
+    assert "rolling_30_buy_filter;AAA;AVOID;" in result["csv"]
+    assert "rolling_30_exit_prefilter;AAA;EXTREME;" in result["csv"]
+
+
+def test_rolling_30_role_sections_do_not_render_for_non_30_windows(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _seed_weekly_report_db(analysis_db)
+
+    result_5 = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=5,
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+    result_2 = write_weekly_swing_report(
+        analysis_db_path=analysis_db,
+        end_date="2024-01-10",
+        taxonomy_version="DC_TAXONOMY_V1",
+        window_size=2,
+        generated_at_utc="2026-05-17T12:00:00Z",
+    )
+
+    for result in (result_5, result_2):
+        assert "Rolling 30 Buy Filter" not in result["markdown"]
+        assert "Rolling 30 Exit Prefilter" not in result["markdown"]
+        assert "section;rolling_30_buy_filter" not in result["csv"]
+        assert "section;rolling_30_exit_prefilter" not in result["csv"]
+        assert "rolling_30_buy_zone_count" not in result["summary"]
+        assert "rolling_30_exit_zone_count" not in result["summary"]
+
+
 def test_custom_window_size_marks_incomplete_when_fewer_than_requested_dates_exist(tmp_path):
     analysis_db = tmp_path / "analysis.db"
     _seed_weekly_report_db(analysis_db)
@@ -1069,6 +1180,9 @@ def test_weekly_report_with_technical_relevance_run_id_includes_context_section(
     assert "technical_relevance_context;BBB;1d;2024-01-10;2024-01-10;Bullish Divergence;CANDLE;WEAK_CONTEXT;" in result["csv"]
     assert "15. Technical Relevance Context" not in result["csv"]
     assert "\n15. Technical Relevance Context;" not in result["csv"]
+    assert "Datacenter Taxonomy Listing" in result["csv"]
+    assert result["csv"].index("section;technical_relevance_context") < result["csv"].index("Datacenter Taxonomy Listing")
+    assert result["csv"].count("section;technical_relevance_context") == 1
     assert "| BBB | 3 | 2 | 2 | 2024-01-03 | 2024-01-10 | Infrastructure | AI Chips |" in result["markdown"]
     assert "| 2024-01-05 | Hammer | RELEVANT | UP_TREND_BULLISH_DIP_REVERSAL_NEAR_PIVOT_LOW | 2024-01-10 | Bearish Divergence | RELEVANT | UP_TREND_BEARISH_DIVERGENCE_AFTER_BOS_DOWN |" in result["markdown"]
     assert "| CCC | 4 | 2024-01-02 | 2024-01-10 | Infrastructure | Storage |" in result["markdown"]

@@ -24,11 +24,13 @@ from .swing_daily_report import (
     _has_subindustry_context_risk,
     _is_group_risk_state,
     _check_required_tables,
+    _format_value,
     _float_value,
     _build_csv_rows_from_markdown,
     _enrich_rows_with_technical_relevance_companions,
     _build_technical_relevance_csv_section,
     _format_table,
+    _insert_csv_section_before_taxonomy_listing,
     _normalize_path,
     _parse_iso_date,
     _resolve_watchlist_context,
@@ -103,6 +105,21 @@ ROLLING_GROUP_STATUS_PRIORITY = {
     "BUY_ZONE": 3,
     "NEUTRAL": 4,
     None: 5,
+}
+
+ROLLING_30_BUY_STATE_PRIORITY = {
+    "BUY_ZONE": 0,
+    "WATCH_ZONE": 1,
+    "AVOID": 2,
+    "INSUFFICIENT_DATA": 3,
+}
+
+ROLLING_30_EXIT_STATE_PRIORITY = {
+    "EXTREME": 0,
+    "EXIT_ZONE": 1,
+    "WATCH": 2,
+    "NORMAL": 3,
+    "INSUFFICIENT_DATA": 4,
 }
 
 
@@ -184,12 +201,278 @@ def _group_rows_by_key(
     return grouped
 
 
+def _strip_markdown_section(markdown: str, heading: str) -> str:
+    normalized_heading = f"\n## {heading}\n"
+    start = markdown.find(normalized_heading)
+    if start == -1:
+        return markdown
+    next_section = markdown.find("\n## ", start + 1)
+    if next_section == -1:
+        stripped = markdown[:start]
+    else:
+        stripped = markdown[:start] + markdown[next_section:]
+    return stripped.rstrip() + "\n"
+
+
 def _numeric_change(first_row: dict[str, object], last_row: dict[str, object], field_name: str) -> float | None:
     first_value = _float_value(first_row.get(field_name))
     last_value = _float_value(last_row.get(field_name))
     if first_value is None or last_value is None:
         return None
     return last_value - first_value
+
+
+def _has_fresh_bos_down(row: dict[str, object]) -> bool:
+    return (
+        row.get("last_latest_bos_event_type") == "BOS_DOWN"
+        and row.get("last_latest_bos_freshness") == "FRESH"
+    )
+
+
+def _has_fresh_reset(row: dict[str, object]) -> bool:
+    return (
+        row.get("last_latest_reset_reason") not in {None, "", "NULL"}
+        and row.get("last_latest_reset_freshness") == "FRESH"
+    )
+
+
+def _is_buy_oriented_status(value: object | None) -> bool:
+    return value in {"BREAKOUT_CANDIDATE", "PULLBACK_CANDIDATE"}
+
+
+def _has_negative_group_context(row: dict[str, object]) -> bool:
+    return row.get("window_watchlist_status") in {"HIGH_EXIT_RISK", "GROUP_RISK"}
+
+
+def _classify_rolling_30_buy_row(row: dict[str, object]) -> tuple[str, str, str]:
+    if row.get("last_price_data_status") in WATCHLIST_MISSING_PRICE_STATUSES or row.get("all_price_rows_missing") is True:
+        return "INSUFFICIENT_DATA", "missing_price_context", "price_data_missing"
+
+    trend_state = row.get("last_ticker_trend_state")
+    breakout_days = int(row.get("breakout_days") or 0)
+    pullback_days = int(row.get("pullback_days") or 0)
+    exit_risk_days = int(row.get("exit_risk_days") or 0)
+    has_fresh_bos_down = _has_fresh_bos_down(row)
+    has_fresh_reset = _has_fresh_reset(row)
+    has_buy_oriented_status = _is_buy_oriented_status(row.get("current_watchlist_status")) or _is_buy_oriented_status(
+        row.get("window_watchlist_status")
+    )
+    has_buy_activity = breakout_days > 0 or pullback_days > 0 or has_buy_oriented_status
+
+    if (
+        exit_risk_days > 0
+        or row.get("last_exit_risk_severity") in {"HIGH", "MEDIUM"}
+        or trend_state == "DOWN"
+        or has_fresh_bos_down
+        or has_fresh_reset
+        or row.get("window_watchlist_status") == "HIGH_EXIT_RISK"
+    ):
+        blocking_reason = (
+            "recent_bos_down"
+            if has_fresh_bos_down
+            else "recent_reset"
+            if has_fresh_reset
+            else "exit_risk_present"
+            if exit_risk_days > 0 or row.get("last_exit_risk_severity") in {"HIGH", "MEDIUM"}
+            else "down_trend"
+        )
+        return "AVOID", "structural_buy_block", blocking_reason
+
+    if breakout_days > 0 and not _has_negative_group_context(row):
+        return "BUY_ZONE", "breakout_supported_structure", ""
+
+    if trend_state == "UP" and pullback_days > 0 and not _has_negative_group_context(row):
+        return "BUY_ZONE", "trend_up_pullback_context", ""
+
+    if has_buy_activity or row.get("current_watchlist_status") == "NEUTRAL_MONITOR" or row.get("window_watchlist_status") in {
+        "NEUTRAL_MONITOR",
+        "GROUP_RISK",
+    }:
+        blocking_reason = "group_risk_needs_confirmation" if _has_negative_group_context(row) else ""
+        return "WATCH_ZONE", "needs_confirmation", blocking_reason
+
+    return "AVOID", "no_buy_evidence", "no_buy_activity"
+
+
+def _classify_rolling_30_exit_row(row: dict[str, object]) -> tuple[str, str, str]:
+    if row.get("last_price_data_status") in WATCHLIST_MISSING_PRICE_STATUSES or row.get("all_price_rows_missing") is True:
+        return "INSUFFICIENT_DATA", "missing_price_context", "price_data_missing"
+
+    exit_risk_days = int(row.get("exit_risk_days") or 0)
+    high_exit_risk_days = int(row.get("high_exit_risk_days") or 0)
+    latest_bearish_relevance_class = row.get("latest_bearish_relevance_class")
+    has_fresh_bos_down = _has_fresh_bos_down(row)
+    has_fresh_reset = _has_fresh_reset(row)
+    has_extreme_group_context = row.get("last_subindustry_overheat_risk_level") == "EXTREME"
+
+    if (
+        high_exit_risk_days >= 2
+        or exit_risk_days >= 3
+        or (has_extreme_group_context and exit_risk_days > 0)
+        or (row.get("window_watchlist_status") == "HIGH_EXIT_RISK" and has_fresh_bos_down)
+    ):
+        risk_reason = (
+            "repeated_high_exit_risk"
+            if high_exit_risk_days >= 2
+            else "persistent_exit_risk"
+            if exit_risk_days >= 3
+            else "extreme_group_context"
+            if has_extreme_group_context
+            else "high_exit_risk_with_bos_down"
+        )
+        return "EXTREME", "urgent_exit_attention", risk_reason
+
+    if (
+        exit_risk_days > 0
+        or row.get("window_watchlist_status") == "HIGH_EXIT_RISK"
+        or has_fresh_bos_down
+        or has_fresh_reset
+        or latest_bearish_relevance_class == "RELEVANT"
+    ):
+        risk_reason = (
+            "repeated_exit_risk"
+            if exit_risk_days > 0
+            else "recent_bos_down"
+            if has_fresh_bos_down
+            else "recent_reset"
+            if has_fresh_reset
+            else "bearish_relevance"
+            if latest_bearish_relevance_class == "RELEVANT"
+            else "high_exit_risk_status"
+        )
+        return "EXIT_ZONE", "exit_risk_detected", risk_reason
+
+    if (
+        int(row.get("medium_exit_risk_days") or 0) > 0
+        or row.get("window_watchlist_status") == "GROUP_RISK"
+        or row.get("last_subindustry_overheat_risk_level") == "HIGH"
+        or latest_bearish_relevance_class == "WEAK_CONTEXT"
+    ):
+        risk_reason = (
+            "group_risk"
+            if row.get("window_watchlist_status") == "GROUP_RISK"
+            else "weak_bearish_relevance"
+            if latest_bearish_relevance_class == "WEAK_CONTEXT"
+            else "mild_exit_risk"
+        )
+        return "WATCH", "monitor_exit_risk", risk_reason
+
+    return "NORMAL", "no_exit_risk_detected", ""
+
+
+def _build_rolling_30_role_rows(
+    *,
+    ticker_rows: Sequence[dict[str, object]],
+    group_rows: Sequence[dict[str, object]],
+    synthetic_rows: Sequence[dict[str, object]],
+    technical_relevance_context_rows: Sequence[dict[str, object]],
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    tickers = sorted(
+        {
+            str(row.get("ticker") or "")
+            for row in ticker_rows
+            if str(row.get("ticker") or "")
+        }
+    )
+    base_rows = _build_rolling_watchlist_rows(
+        watchlist_tickers=tickers,
+        ticker_rows=ticker_rows,
+        group_rows=group_rows,
+        synthetic_rows=synthetic_rows,
+    )
+    if technical_relevance_context_rows:
+        base_rows = _enrich_rows_with_technical_relevance_companions(
+            base_rows,
+            technical_relevance_context_rows=technical_relevance_context_rows,
+            row_date_field="last_signal_date",
+        )
+
+    buy_rows: list[dict[str, object]] = []
+    exit_rows: list[dict[str, object]] = []
+    for row in base_rows:
+        buy_state, primary_reason, blocking_reason = _classify_rolling_30_buy_row(row)
+        buy_rows.append(
+            {
+                "ticker": row.get("ticker"),
+                "rolling_30_buy_state": buy_state,
+                "primary_layer": row.get("primary_layer"),
+                "primary_subindustry": row.get("primary_subindustry"),
+                "window_watchlist_status": row.get("window_watchlist_status"),
+                "current_watchlist_status": row.get("current_watchlist_status"),
+                "breakout_days": row.get("breakout_days"),
+                "pullback_days": row.get("pullback_days"),
+                "exit_risk_days": row.get("exit_risk_days"),
+                "latest_ticker_trend_state": row.get("last_ticker_trend_state"),
+                "latest_structure_label": row.get("last_latest_structure_label"),
+                "latest_bos_event_type": row.get("last_latest_bos_event_type"),
+                "latest_bos_freshness": row.get("last_latest_bos_freshness"),
+                "latest_reset_reason": row.get("last_latest_reset_reason"),
+                "latest_reset_freshness": row.get("last_latest_reset_freshness"),
+                "latest_bullish_relevance_class": row.get("latest_bullish_relevance_class"),
+                "latest_bullish_relevance_reason": row.get("latest_bullish_relevance_reason"),
+                "latest_bearish_relevance_class": row.get("latest_bearish_relevance_class"),
+                "latest_bearish_relevance_reason": row.get("latest_bearish_relevance_reason"),
+                "primary_reason": primary_reason,
+                "blocking_reason": blocking_reason,
+            }
+        )
+        exit_state, exit_primary_reason, risk_reason = _classify_rolling_30_exit_row(row)
+        exit_rows.append(
+            {
+                "ticker": row.get("ticker"),
+                "rolling_30_exit_state": exit_state,
+                "primary_layer": row.get("primary_layer"),
+                "primary_subindustry": row.get("primary_subindustry"),
+                "window_watchlist_status": row.get("window_watchlist_status"),
+                "current_watchlist_status": row.get("current_watchlist_status"),
+                "exit_risk_days": row.get("exit_risk_days"),
+                "latest_exit_risk_severity": row.get("last_exit_risk_severity"),
+                "latest_exit_reason": row.get("last_exit_reason"),
+                "latest_ticker_trend_state": row.get("last_ticker_trend_state"),
+                "latest_bos_event_type": row.get("last_latest_bos_event_type"),
+                "latest_bos_freshness": row.get("last_latest_bos_freshness"),
+                "latest_reset_reason": row.get("last_latest_reset_reason"),
+                "latest_reset_freshness": row.get("last_latest_reset_freshness"),
+                "latest_bearish_relevance_class": row.get("latest_bearish_relevance_class"),
+                "latest_bearish_relevance_reason": row.get("latest_bearish_relevance_reason"),
+                "primary_reason": exit_primary_reason,
+                "risk_reason": risk_reason,
+            }
+        )
+
+    buy_rows.sort(
+        key=lambda row: (
+            ROLLING_30_BUY_STATE_PRIORITY.get(str(row.get("rolling_30_buy_state")), 99),
+            -int(row.get("breakout_days") or 0),
+            -int(row.get("pullback_days") or 0),
+            int(row.get("exit_risk_days") or 0),
+            str(row.get("ticker") or ""),
+        )
+    )
+    exit_rows.sort(
+        key=lambda row: (
+            ROLLING_30_EXIT_STATE_PRIORITY.get(str(row.get("rolling_30_exit_state")), 99),
+            -int(row.get("exit_risk_days") or 0),
+            EXIT_RISK_SEVERITY_PRIORITY.get(row.get("latest_exit_risk_severity"), 3),
+            str(row.get("ticker") or ""),
+        )
+    )
+    return buy_rows, exit_rows
+
+
+def _build_role_csv_section(
+    section_name: str,
+    headers: Sequence[str],
+    rows: Sequence[dict[str, object]],
+) -> str:
+    lines = [
+        f"section;{section_name}",
+        "section;" + ";".join(headers),
+    ]
+    for row in rows:
+        values = [section_name, *(_format_value(row.get(header)) for header in headers)]
+        lines.append(";".join(values))
+    return "\n".join(lines) + "\n"
 
 
 def _load_valid_signal_dates(
@@ -855,6 +1138,15 @@ def build_markdown_weekly_swing_report(
         else str(report_data["technical_relevance_run_id"])
     )
     technical_relevance_context_rows = list(report_data.get("technical_relevance_context_rows") or [])
+    rolling_30_buy_rows: list[dict[str, object]] = []
+    rolling_30_exit_rows: list[dict[str, object]] = []
+    if window_size == 30:
+        rolling_30_buy_rows, rolling_30_exit_rows = _build_rolling_30_role_rows(
+            ticker_rows=ticker_rows,
+            group_rows=group_rows,
+            synthetic_rows=synthetic_rows,
+            technical_relevance_context_rows=technical_relevance_context_rows,
+        )
     watchlist_tickers = list(report_data.get("watchlist_tickers") or [])
     watchlist_file_path = str(report_data.get("watchlist_file_path") or DEFAULT_WATCHLIST_FILE)
     watchlist_file_missing = bool(report_data.get("watchlist_file_missing"))
@@ -1324,6 +1616,63 @@ def build_markdown_weekly_swing_report(
         ).rstrip()
     )
 
+    if window_size == 30:
+        lines.extend(["", "## Rolling 30 Buy Filter"])
+        lines.append(
+            _format_table(
+                [
+                    "ticker",
+                    "rolling_30_buy_state",
+                    "primary_layer",
+                    "primary_subindustry",
+                    "window_watchlist_status",
+                    "current_watchlist_status",
+                    "breakout_days",
+                    "pullback_days",
+                    "exit_risk_days",
+                    "latest_ticker_trend_state",
+                    "latest_structure_label",
+                    "latest_bos_event_type",
+                    "latest_bos_freshness",
+                    "latest_reset_reason",
+                    "latest_reset_freshness",
+                    "latest_bullish_relevance_class",
+                    "latest_bullish_relevance_reason",
+                    "latest_bearish_relevance_class",
+                    "latest_bearish_relevance_reason",
+                    "primary_reason",
+                    "blocking_reason",
+                ],
+                rolling_30_buy_rows[:top_n],
+            ).rstrip()
+        )
+        lines.extend(["", "## Rolling 30 Exit Prefilter"])
+        lines.append(
+            _format_table(
+                [
+                    "ticker",
+                    "rolling_30_exit_state",
+                    "primary_layer",
+                    "primary_subindustry",
+                    "window_watchlist_status",
+                    "current_watchlist_status",
+                    "exit_risk_days",
+                    "latest_exit_risk_severity",
+                    "latest_exit_reason",
+                    "latest_ticker_trend_state",
+                    "latest_bos_event_type",
+                    "latest_bos_freshness",
+                    "latest_reset_reason",
+                    "latest_reset_freshness",
+                    "latest_bearish_relevance_class",
+                    "latest_bearish_relevance_reason",
+                    "primary_reason",
+                    "risk_reason",
+                ],
+                rolling_30_exit_rows[:top_n],
+            ).rstrip()
+        )
+
     lines.extend(["", "## 11. Synthetic OHLC structure changes"])
     synthetic_change_rows: list[dict[str, object]] = []
     for (_, group_type, group_name), current_rows in _group_rows_by_key(
@@ -1712,6 +2061,17 @@ def build_csv_weekly_swing_report(
     )
     technical_relevance_run_id = report_data.get("technical_relevance_run_id")
     markdown_for_csv = markdown
+    rolling_30_buy_rows: list[dict[str, object]] = []
+    rolling_30_exit_rows: list[dict[str, object]] = []
+    if int(report_data.get("window_size") or DEFAULT_WEEKLY_WINDOW_SIZE) == 30:
+        rolling_30_buy_rows, rolling_30_exit_rows = _build_rolling_30_role_rows(
+            ticker_rows=list(report_data.get("ticker_rows") or []),
+            group_rows=list(report_data.get("group_rows") or []),
+            synthetic_rows=list(report_data.get("synthetic_rows") or []),
+            technical_relevance_context_rows=list(report_data.get("technical_relevance_context_rows") or []),
+        )
+        markdown_for_csv = _strip_markdown_section(markdown_for_csv, "Rolling 30 Buy Filter")
+        markdown_for_csv = _strip_markdown_section(markdown_for_csv, "Rolling 30 Exit Prefilter")
     if technical_relevance_run_id is not None:
         markdown_for_csv = _strip_markdown_technical_relevance_section(markdown_for_csv)
     rows = _build_csv_rows_from_markdown(markdown_for_csv)
@@ -1723,16 +2083,90 @@ def build_csv_weekly_swing_report(
         writer.writerow([*row, *([""] * (max_columns - len(row)))])
     csv_text = output.getvalue()
     technical_relevance_context_rows = list(report_data.get("technical_relevance_context_rows") or [])
+    if int(report_data.get("window_size") or DEFAULT_WEEKLY_WINDOW_SIZE) == 30:
+        csv_text = _insert_csv_section_before_taxonomy_listing(
+            csv_text,
+            _build_role_csv_section(
+                "rolling_30_buy_filter",
+                [
+                    "ticker",
+                    "rolling_30_buy_state",
+                    "primary_layer",
+                    "primary_subindustry",
+                    "window_watchlist_status",
+                    "current_watchlist_status",
+                    "breakout_days",
+                    "pullback_days",
+                    "exit_risk_days",
+                    "latest_ticker_trend_state",
+                    "latest_structure_label",
+                    "latest_bos_event_type",
+                    "latest_bos_freshness",
+                    "latest_reset_reason",
+                    "latest_reset_freshness",
+                    "latest_bullish_relevance_class",
+                    "latest_bullish_relevance_reason",
+                    "latest_bearish_relevance_class",
+                    "latest_bearish_relevance_reason",
+                    "primary_reason",
+                    "blocking_reason",
+                ],
+                rolling_30_buy_rows,
+            ),
+        )
+        csv_text = _insert_csv_section_before_taxonomy_listing(
+            csv_text,
+            _build_role_csv_section(
+                "rolling_30_exit_prefilter",
+                [
+                    "ticker",
+                    "rolling_30_exit_state",
+                    "primary_layer",
+                    "primary_subindustry",
+                    "window_watchlist_status",
+                    "current_watchlist_status",
+                    "exit_risk_days",
+                    "latest_exit_risk_severity",
+                    "latest_exit_reason",
+                    "latest_ticker_trend_state",
+                    "latest_bos_event_type",
+                    "latest_bos_freshness",
+                    "latest_reset_reason",
+                    "latest_reset_freshness",
+                    "latest_bearish_relevance_class",
+                    "latest_bearish_relevance_reason",
+                    "primary_reason",
+                    "risk_reason",
+                ],
+                rolling_30_exit_rows,
+            ),
+        )
     if technical_relevance_run_id is not None:
-        csv_text += _build_technical_relevance_csv_section(
-            str(technical_relevance_run_id),
-            technical_relevance_context_rows,
+        csv_text = _insert_csv_section_before_taxonomy_listing(
+            csv_text,
+            _build_technical_relevance_csv_section(
+                str(technical_relevance_run_id),
+                technical_relevance_context_rows,
+            ),
         )
     return csv_text
 
 
 def format_weekly_swing_report_summary_lines(summary: dict[str, int | str]) -> list[str]:
-    return [f"SUMMARY {key}={summary[key]}" for key in WEEKLY_REPORT_SUMMARY_ORDER if key in summary]
+    lines = [f"SUMMARY {key}={summary[key]}" for key in WEEKLY_REPORT_SUMMARY_ORDER if key in summary]
+    for key in (
+        "rolling_30_buy_zone_count",
+        "rolling_30_watch_zone_count",
+        "rolling_30_avoid_count",
+        "rolling_30_buy_filter_insufficient_data_count",
+        "rolling_30_exit_zone_count",
+        "rolling_30_extreme_count",
+        "rolling_30_exit_watch_count",
+        "rolling_30_exit_prefilter_insufficient_data_count",
+    ):
+        if key in summary:
+            lines.append(f"SUMMARY {key}={summary[key]}")
+    return lines
 
 
 def write_weekly_swing_report(
@@ -1811,6 +2245,25 @@ def write_weekly_swing_report(
         "output_csv": output_csv_value,
         "validation_status": "OK",
     }
+    if int(report_data.get("window_size") or DEFAULT_WEEKLY_WINDOW_SIZE) == 30:
+        rolling_30_buy_rows, rolling_30_exit_rows = _build_rolling_30_role_rows(
+            ticker_rows=list(report_data.get("ticker_rows") or []),
+            group_rows=list(report_data.get("group_rows") or []),
+            synthetic_rows=list(report_data.get("synthetic_rows") or []),
+            technical_relevance_context_rows=list(report_data.get("technical_relevance_context_rows") or []),
+        )
+        summary.update(
+            {
+                "rolling_30_buy_zone_count": sum(1 for row in rolling_30_buy_rows if row.get("rolling_30_buy_state") == "BUY_ZONE"),
+                "rolling_30_watch_zone_count": sum(1 for row in rolling_30_buy_rows if row.get("rolling_30_buy_state") == "WATCH_ZONE"),
+                "rolling_30_avoid_count": sum(1 for row in rolling_30_buy_rows if row.get("rolling_30_buy_state") == "AVOID"),
+                "rolling_30_buy_filter_insufficient_data_count": sum(1 for row in rolling_30_buy_rows if row.get("rolling_30_buy_state") == "INSUFFICIENT_DATA"),
+                "rolling_30_exit_zone_count": sum(1 for row in rolling_30_exit_rows if row.get("rolling_30_exit_state") == "EXIT_ZONE"),
+                "rolling_30_extreme_count": sum(1 for row in rolling_30_exit_rows if row.get("rolling_30_exit_state") == "EXTREME"),
+                "rolling_30_exit_watch_count": sum(1 for row in rolling_30_exit_rows if row.get("rolling_30_exit_state") == "WATCH"),
+                "rolling_30_exit_prefilter_insufficient_data_count": sum(1 for row in rolling_30_exit_rows if row.get("rolling_30_exit_state") == "INSUFFICIENT_DATA"),
+            }
+        )
     return {
         "markdown": markdown,
         "csv": csv_text,
