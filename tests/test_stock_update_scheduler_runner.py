@@ -15,6 +15,7 @@ from rawcandle.scheduler.runner import (
     STATUS_FAILED,
     STATUS_OK,
     STATUS_OK_WITH_WARNINGS,
+    _resolve_latest_valid_ohlcv_date_for_market,
     acquire_scheduler_lock,
     read_scheduler_status,
     release_scheduler_lock,
@@ -27,6 +28,34 @@ from services.stock_update_service import StockUpdateResult
 
 def _touch(path):
     path.write_text("", encoding="utf-8")
+
+
+def _create_osakedata_with_rows(path, rows):
+    import sqlite3
+
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE osakedata (
+                osake TEXT,
+                pvm TEXT,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                volume INTEGER,
+                market TEXT
+            )
+            """
+        )
+        conn.executemany(
+            """
+            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+        conn.commit()
 
 
 class _FakeCompletedProcess:
@@ -571,12 +600,58 @@ def test_scheduler_status_write_creates_log_dir_if_missing(tmp_path, monkeypatch
     run_scheduler_config(config_path=str(config_path))
 
 
+def test_resolve_latest_valid_ohlcv_date_for_market_returns_latest_non_null_close(tmp_path):
+    db_path = tmp_path / "osakedata.db"
+    _create_osakedata_with_rows(
+        db_path,
+        [
+            ("AAA", "2026-05-14", 1.0, 1.0, 1.0, 1.0, 100, "usa"),
+            ("AAA", "2026-05-15", 1.0, 1.0, 1.0, 2.0, 100, "usa"),
+        ],
+    )
+
+    assert _resolve_latest_valid_ohlcv_date_for_market(str(db_path), "usa") == "2026-05-15"
+
+
+def test_resolve_latest_valid_ohlcv_date_for_market_ignores_null_close_rows(tmp_path):
+    db_path = tmp_path / "osakedata.db"
+    _create_osakedata_with_rows(
+        db_path,
+        [
+            ("AAA", "2026-05-14", 1.0, 1.0, 1.0, 1.0, 100, "usa"),
+            ("AAA", "2026-05-15", 1.0, 1.0, 1.0, None, 100, "usa"),
+        ],
+    )
+
+    assert _resolve_latest_valid_ohlcv_date_for_market(str(db_path), "usa") == "2026-05-14"
+
+
+def test_resolve_latest_valid_ohlcv_date_for_market_respects_market_filter(tmp_path):
+    db_path = tmp_path / "osakedata.db"
+    _create_osakedata_with_rows(
+        db_path,
+        [
+            ("AAA", "2026-05-15", 1.0, 1.0, 1.0, 1.0, 100, "usa"),
+            ("BBB", "2026-05-22", 1.0, 1.0, 1.0, 1.0, 100, "omxh"),
+        ],
+    )
+
+    assert _resolve_latest_valid_ohlcv_date_for_market(str(db_path), "usa") == "2026-05-15"
+
+
 def test_scheduler_runner_runs_datacenter_post_step_once_for_usa_success(
     tmp_path, monkeypatch
 ):
     osakedata_db = tmp_path / "osakedata.db"
     analysis_db = tmp_path / "analysis.db"
-    _touch(osakedata_db)
+    _create_osakedata_with_rows(
+        osakedata_db,
+        [
+            ("USA_A", "2026-05-15", 1.0, 1.0, 1.0, 1.0, 100, "usa"),
+            ("USA_A", "2026-05-16", 1.0, 1.0, 1.0, 2.0, 100, "usa"),
+            ("OMX_A", "2026-05-20", 1.0, 1.0, 1.0, 3.0, 100, "omxh"),
+        ],
+    )
     _touch(analysis_db)
     config_path = _write_config(tmp_path, enabled_markets=["usa"])
 
@@ -615,18 +690,26 @@ def test_scheduler_runner_runs_datacenter_post_step_once_for_usa_success(
     assert "--expected-ticker-count" in command and command[command.index("--expected-ticker-count") + 1] == "236"
     assert "--expected-group-count" in command and command[command.index("--expected-group-count") + 1] == "54"
     assert "--expected-synthetic-ohlc-count" in command and command[command.index("--expected-synthetic-ohlc-count") + 1] == "53"
+    assert "--signal-date" in command and command[command.index("--signal-date") + 1] == "2026-05-16"
     assert result.datacenter_pipeline_attempted == 1
     assert result.datacenter_pipeline_status == "OK"
     assert result.datacenter_pipeline_market == "usa"
+    assert result.datacenter_pipeline_signal_date == "2026-05-16"
+    assert result.datacenter_pipeline_signal_date_source == "LATEST_VALID_OHLCV_DATE"
+    assert result.datacenter_pipeline_signal_date_resolution == "LATEST_VALID_OHLCV_DATE"
     assert result.datacenter_pipeline_audit_validation_status == "OK"
     assert result.datacenter_pipeline_log_path.endswith(".txt")
     log_path = Path(result.datacenter_pipeline_log_path)
     assert log_path.exists()
     log_text = log_path.read_text(encoding="utf-8")
+    assert "signal_date_source=LATEST_VALID_OHLCV_DATE" in log_text
     assert "SUMMARY audit_validation_status=OK" in log_text
     assert "=== STDOUT ===" in log_text
     assert "=== STDERR ===" in log_text
     assert result.overall_status == STATUS_OK
+    payload = json.loads(Path(result.summary_json_path).read_text(encoding="utf-8"))
+    assert payload["datacenter_pipeline_signal_date"] == "2026-05-16"
+    assert payload["datacenter_pipeline_signal_date_source"] == "LATEST_VALID_OHLCV_DATE"
 
 
 def test_scheduler_runner_runs_datacenter_post_step_for_ok_with_warnings(
@@ -634,7 +717,12 @@ def test_scheduler_runner_runs_datacenter_post_step_for_ok_with_warnings(
 ):
     osakedata_db = tmp_path / "osakedata.db"
     analysis_db = tmp_path / "analysis.db"
-    _touch(osakedata_db)
+    _create_osakedata_with_rows(
+        osakedata_db,
+        [
+            ("USA_A", "2026-05-15", 1.0, 1.0, 1.0, 1.0, 100, "usa"),
+        ],
+    )
     _touch(analysis_db)
     config_path = _write_config(tmp_path, enabled_markets=["usa"])
 
@@ -660,6 +748,7 @@ def test_scheduler_runner_runs_datacenter_post_step_for_ok_with_warnings(
     assert result.datacenter_pipeline_attempted == 1
     assert result.datacenter_pipeline_status == "OK"
     assert result.datacenter_pipeline_market == "usa"
+    assert result.datacenter_pipeline_signal_date == "2026-05-15"
     assert result.datacenter_pipeline_audit_validation_status == "WARN"
     assert result.datacenter_pipeline_log_path.endswith(".txt")
     assert result.overall_status == STATUS_OK_WITH_WARNINGS
@@ -740,7 +829,13 @@ def test_scheduler_runner_derives_previous_signal_date_for_datacenter_post_step(
 
     osakedata_db = tmp_path / "osakedata.db"
     analysis_db = tmp_path / "analysis.db"
-    _touch(osakedata_db)
+    _create_osakedata_with_rows(
+        osakedata_db,
+        [
+            ("USA_A", "2026-05-15", 1.0, 1.0, 1.0, 1.0, 100, "usa"),
+            ("OMX_A", "2026-05-17", 1.0, 1.0, 1.0, 1.0, 100, "omxh"),
+        ],
+    )
     _touch(analysis_db)
     config_path = _write_config(tmp_path, enabled_markets=["usa"])
 
@@ -772,12 +867,106 @@ def test_scheduler_runner_derives_previous_signal_date_for_datacenter_post_step(
     assert command[command.index("--signal-date") + 1] == "2026-05-15"
 
 
+def test_scheduler_runner_uses_latest_valid_ohlcv_date_not_today_minus_one_for_weekend_like_case(
+    tmp_path, monkeypatch
+):
+    import datetime as real_datetime
+
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _create_osakedata_with_rows(
+        osakedata_db,
+        [
+            ("USA_A", "2026-05-15", 1.0, 1.0, 1.0, 1.0, 100, "usa"),
+            ("USA_A", "2026-05-17", 1.0, 1.0, 1.0, None, 100, "usa"),
+            ("OMXS_A", "2026-05-18", 1.0, 1.0, 1.0, 1.0, 100, "omxs"),
+        ],
+    )
+    _touch(analysis_db)
+    config_path = _write_config(tmp_path, enabled_markets=["usa"])
+
+    class FixedDateTime(real_datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 5, 18, 8, 30, 0, tzinfo=tz)
+
+    calls = []
+
+    monkeypatch.setattr("rawcandle.scheduler.runner.datetime.datetime", FixedDateTime)
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda command, **kwargs: calls.append(command)
+        or _FakeCompletedProcess(0, "SUMMARY audit_validation_status=OK\n"),
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    command = calls[0]
+    assert command[command.index("--signal-date") + 1] == "2026-05-15"
+    assert result.datacenter_pipeline_requested_calendar_signal_date == "2026-05-17"
+
+
+def test_scheduler_runner_skips_datacenter_post_step_when_no_valid_ohlcv_date_for_usa(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _create_osakedata_with_rows(
+        osakedata_db,
+        [
+            ("USA_A", "2026-05-15", 1.0, 1.0, 1.0, None, 100, "usa"),
+            ("OMX_A", "2026-05-20", 1.0, 1.0, 1.0, 1.0, 100, "omxh"),
+        ],
+    )
+    _touch(analysis_db)
+    config_path = _write_config(tmp_path, enabled_markets=["usa"])
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("datacenter subprocess should not run without a valid USA signal date")
+        ),
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.datacenter_pipeline_attempted == 0
+    assert result.datacenter_pipeline_status == "SKIPPED"
+    assert result.datacenter_pipeline_signal_date == "NONE"
+    assert result.datacenter_pipeline_signal_date_source == "LATEST_VALID_OHLCV_DATE"
+    assert result.datacenter_pipeline_error == "NO_VALID_OHLCV_DATE_FOR_MARKET"
+    payload = json.loads(Path(result.summary_json_path).read_text(encoding="utf-8"))
+    assert payload["datacenter_pipeline_signal_date"] == "NONE"
+    assert payload["datacenter_pipeline_error"] == "NO_VALID_OHLCV_DATE_FOR_MARKET"
+
+
 def test_scheduler_runner_datacenter_post_step_failure_fails_scheduler(
     tmp_path, monkeypatch
 ):
     osakedata_db = tmp_path / "osakedata.db"
     analysis_db = tmp_path / "analysis.db"
-    _touch(osakedata_db)
+    _create_osakedata_with_rows(
+        osakedata_db,
+        [
+            ("USA_A", "2026-05-15", 1.0, 1.0, 1.0, 1.0, 100, "usa"),
+        ],
+    )
     _touch(analysis_db)
     config_path = _write_config(tmp_path, enabled_markets=["usa"])
 

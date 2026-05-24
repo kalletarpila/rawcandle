@@ -48,6 +48,11 @@ def _result(overall_status):
         datacenter_pipeline_market="usa",
         datacenter_pipeline_audit_validation_status="SKIPPED",
         datacenter_pipeline_log_path="",
+        datacenter_pipeline_signal_date="NONE",
+        datacenter_pipeline_signal_date_source="NONE",
+        datacenter_pipeline_signal_date_resolution="NONE",
+        datacenter_pipeline_requested_calendar_signal_date="NONE",
+        datacenter_pipeline_error="",
     )
 
 
@@ -67,6 +72,11 @@ def _skipped_result():
         datacenter_pipeline_market="usa",
         datacenter_pipeline_audit_validation_status="SKIPPED",
         datacenter_pipeline_log_path="",
+        datacenter_pipeline_signal_date="NONE",
+        datacenter_pipeline_signal_date_source="NONE",
+        datacenter_pipeline_signal_date_resolution="NONE",
+        datacenter_pipeline_requested_calendar_signal_date="NONE",
+        datacenter_pipeline_error="",
     )
 
 
@@ -90,8 +100,13 @@ def test_scheduler_cli_successful_run_prints_top_level_summary_lines(monkeypatch
     assert "SUMMARY datacenter_pipeline.attempted=0" in captured.out
     assert "SUMMARY datacenter_pipeline.status=SKIPPED" in captured.out
     assert "SUMMARY datacenter_pipeline.market=usa" in captured.out
+    assert "SUMMARY datacenter_pipeline.signal_date=NONE" in captured.out
+    assert "SUMMARY datacenter_pipeline.signal_date_source=NONE" in captured.out
+    assert "SUMMARY datacenter_pipeline.signal_date_resolution=NONE" in captured.out
+    assert "SUMMARY datacenter_pipeline.requested_calendar_signal_date=NONE" in captured.out
     assert "SUMMARY datacenter_pipeline.audit_validation_status=SKIPPED" in captured.out
     assert "SUMMARY datacenter_pipeline.log_path=" in captured.out
+    assert "SUMMARY datacenter_pipeline.error=" in captured.out
 
 
 def test_scheduler_cli_ok_overall_status_exits_zero(monkeypatch):

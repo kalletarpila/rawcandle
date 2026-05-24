@@ -46,11 +46,25 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"SUMMARY datacenter_pipeline.attempted={result.datacenter_pipeline_attempted}")
     print(f"SUMMARY datacenter_pipeline.status={result.datacenter_pipeline_status}")
     print(f"SUMMARY datacenter_pipeline.market={result.datacenter_pipeline_market}")
+    print(f"SUMMARY datacenter_pipeline.signal_date={result.datacenter_pipeline_signal_date}")
+    print(
+        "SUMMARY datacenter_pipeline.signal_date_source="
+        f"{result.datacenter_pipeline_signal_date_source}"
+    )
+    print(
+        "SUMMARY datacenter_pipeline.signal_date_resolution="
+        f"{result.datacenter_pipeline_signal_date_resolution}"
+    )
+    print(
+        "SUMMARY datacenter_pipeline.requested_calendar_signal_date="
+        f"{result.datacenter_pipeline_requested_calendar_signal_date}"
+    )
     print(
         "SUMMARY datacenter_pipeline.audit_validation_status="
         f"{result.datacenter_pipeline_audit_validation_status}"
     )
     print(f"SUMMARY datacenter_pipeline.log_path={result.datacenter_pipeline_log_path}")
+    print(f"SUMMARY datacenter_pipeline.error={result.datacenter_pipeline_error}")
 
     for market_result in result.market_results:
         print(f"SUMMARY market.{market_result.market}.status={market_result.summary_status}")

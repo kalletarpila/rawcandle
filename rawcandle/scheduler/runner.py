@@ -4,6 +4,7 @@ import datetime
 import errno
 import fcntl
 import json
+import sqlite3
 import subprocess
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
@@ -53,6 +54,11 @@ class ScheduledStockUpdateRunResult:
     datacenter_pipeline_market: str = "usa"
     datacenter_pipeline_audit_validation_status: str = "SKIPPED"
     datacenter_pipeline_log_path: str = ""
+    datacenter_pipeline_signal_date: str = "NONE"
+    datacenter_pipeline_signal_date_source: str = "NONE"
+    datacenter_pipeline_signal_date_resolution: str = "NONE"
+    datacenter_pipeline_requested_calendar_signal_date: str = "NONE"
+    datacenter_pipeline_error: str = ""
 
 
 class SchedulerAlreadyRunningError(RuntimeError):
@@ -80,6 +86,9 @@ class DatacenterPostStepResult:
     audit_validation_status: str = "SKIPPED"
     log_path: str = ""
     signal_date: Optional[str] = None
+    signal_date_source: str = "NONE"
+    signal_date_resolution: str = "NONE"
+    requested_calendar_signal_date: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -217,6 +226,29 @@ def _previous_calendar_date(value: str) -> str:
     return (datetime.date.fromisoformat(value) - datetime.timedelta(days=1)).isoformat()
 
 
+def _resolve_latest_valid_ohlcv_date_for_market(
+    price_db_path: str,
+    market: str,
+) -> str | None:
+    normalized_market = market.strip().lower()
+    try:
+        with sqlite3.connect(price_db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT MAX(pvm)
+                FROM osakedata
+                WHERE market = ?
+                  AND close IS NOT NULL
+                """,
+                (normalized_market,),
+            ).fetchone()
+    except sqlite3.Error:
+        return None
+    if row is None or row[0] is None:
+        return None
+    return str(row[0])
+
+
 def _parse_summary_value(stdout: str, key: str) -> Optional[str]:
     prefix = f"SUMMARY {key}="
     for line in stdout.splitlines():
@@ -255,10 +287,41 @@ def _run_datacenter_post_step(
         )
 
     started_at = _utc_now()
-    signal_date = _previous_calendar_date(effective_today)
+    requested_calendar_signal_date = _previous_calendar_date(effective_today)
+    signal_date = _resolve_latest_valid_ohlcv_date_for_market(
+        config.osakedata_db_path,
+        resolved.market,
+    )
     log_dir = Path(config.log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = _build_datacenter_log_path(log_dir, resolved.market, started_at)
+    if signal_date is None:
+        finished_at = _utc_now()
+        log_lines = [
+            f"run_started_at_local={_format_local_timestamp(started_at, config.timezone)}",
+            f"run_finished_at_local={_format_local_timestamp(finished_at, config.timezone)}",
+            f"market={resolved.market}",
+            f"requested_calendar_signal_date={requested_calendar_signal_date}",
+            "signal_date=NONE",
+            "signal_date_source=LATEST_VALID_OHLCV_DATE",
+            "signal_date_resolution=LATEST_VALID_OHLCV_DATE",
+            f"osakedata_db_path={config.osakedata_db_path}",
+            f"analysis_db_path={config.analysis_db_path}",
+            "skip_reason=NO_VALID_OHLCV_DATE_FOR_MARKET",
+        ]
+        log_path.write_text("\n".join(log_lines) + "\n", encoding="utf-8")
+        return DatacenterPostStepResult(
+            attempted=0,
+            status="SKIPPED",
+            market=resolved.market,
+            audit_validation_status="SKIPPED",
+            log_path=str(log_path),
+            signal_date=None,
+            signal_date_source="LATEST_VALID_OHLCV_DATE",
+            signal_date_resolution="LATEST_VALID_OHLCV_DATE",
+            requested_calendar_signal_date=requested_calendar_signal_date,
+            error="NO_VALID_OHLCV_DATE_FOR_MARKET",
+        )
     command = [
         "python3",
         "run_datacenter_swing_pipeline.py",
@@ -299,7 +362,10 @@ def _run_datacenter_post_step(
         f"run_started_at_local={_format_local_timestamp(started_at, config.timezone)}",
         f"run_finished_at_local={_format_local_timestamp(finished_at, config.timezone)}",
         f"market={resolved.market}",
+        f"requested_calendar_signal_date={requested_calendar_signal_date}",
         f"signal_date={signal_date}",
+        "signal_date_source=LATEST_VALID_OHLCV_DATE",
+        "signal_date_resolution=LATEST_VALID_OHLCV_DATE",
         f"osakedata_db_path={config.osakedata_db_path}",
         f"analysis_db_path={config.analysis_db_path}",
         f"command={' '.join(command)}",
@@ -321,6 +387,9 @@ def _run_datacenter_post_step(
             audit_validation_status=audit_validation_status or "UNKNOWN",
             log_path=str(log_path),
             signal_date=signal_date,
+            signal_date_source="LATEST_VALID_OHLCV_DATE",
+            signal_date_resolution="LATEST_VALID_OHLCV_DATE",
+            requested_calendar_signal_date=requested_calendar_signal_date,
             error=f"datacenter pipeline exited with code {completed.returncode}",
         )
     return DatacenterPostStepResult(
@@ -330,6 +399,9 @@ def _run_datacenter_post_step(
         audit_validation_status=audit_validation_status or "UNKNOWN",
         log_path=str(log_path),
         signal_date=signal_date,
+        signal_date_source="LATEST_VALID_OHLCV_DATE",
+        signal_date_resolution="LATEST_VALID_OHLCV_DATE",
+        requested_calendar_signal_date=requested_calendar_signal_date,
     )
 
 
@@ -543,6 +615,11 @@ def run_scheduler_config(
                     datacenter_pipeline_market="usa",
                     datacenter_pipeline_audit_validation_status="SKIPPED",
                     datacenter_pipeline_log_path="",
+                    datacenter_pipeline_signal_date="NONE",
+                    datacenter_pipeline_signal_date_source="NONE",
+                    datacenter_pipeline_signal_date_resolution="NONE",
+                    datacenter_pipeline_requested_calendar_signal_date="NONE",
+                    datacenter_pipeline_error="",
                 )
                 _write_summary_json(config=config, run_started_at=run_started_at, result=result)
                 write_scheduler_status(
@@ -625,6 +702,13 @@ def run_scheduler_config(
                 datacenter_pipeline_market=datacenter_result.market,
                 datacenter_pipeline_audit_validation_status=datacenter_result.audit_validation_status,
                 datacenter_pipeline_log_path=datacenter_result.log_path,
+                datacenter_pipeline_signal_date=datacenter_result.signal_date or "NONE",
+                datacenter_pipeline_signal_date_source=datacenter_result.signal_date_source,
+                datacenter_pipeline_signal_date_resolution=datacenter_result.signal_date_resolution,
+                datacenter_pipeline_requested_calendar_signal_date=(
+                    datacenter_result.requested_calendar_signal_date or "NONE"
+                ),
+                datacenter_pipeline_error=datacenter_result.error or "",
             )
             _write_summary_json(config=config, run_started_at=run_started_at, result=result)
             write_scheduler_status(
