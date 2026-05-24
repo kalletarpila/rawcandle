@@ -1484,7 +1484,17 @@ def run_app(page: ft.Page, config_path: str) -> None:
                 wrap=True,
             ),
             datacenter_watchlist_file_field,
-            ft.Text("Datacenter Dashboard", size=18, weight=ft.FontWeight.BOLD),
+            datacenter_buttons,
+            datacenter_status_field,
+            datacenter_reports_column,
+            datacenter_log_field,
+        ],
+        spacing=12,
+        expand=True,
+    )
+    datacenter_dashboard_content = ft.Column(
+        controls=[
+            ft.Text("Datacenter Dashboard", size=24, weight=ft.FontWeight.BOLD),
             ft.Text(
                 "Read-only dashboard shell. It scans the reports directory for the newest daily and rolling reports."
             ),
@@ -1498,10 +1508,6 @@ def run_app(page: ft.Page, config_path: str) -> None:
                 vertical_alignment=ft.CrossAxisAlignment.END,
             ),
             datacenter_dashboard_reports_column,
-            datacenter_buttons,
-            datacenter_status_field,
-            datacenter_reports_column,
-            datacenter_log_field,
         ],
         spacing=12,
         expand=True,
@@ -1540,12 +1546,15 @@ def run_app(page: ft.Page, config_path: str) -> None:
     page.technical_relevance_checkbox = technical_relevance_checkbox
     page.save_config_button = save_config_button
     page.reload_config_button = reload_config_button
+    page.datacenter_content = datacenter_content
+    page.datacenter_dashboard_content = datacenter_dashboard_content
 
     tabs = ft.Tabs(
         selected_index=0,
         tabs=[
             ft.Tab(text="Scheduler", content=scheduler_content),
             ft.Tab(text="Datacenter", content=datacenter_content),
+            ft.Tab(text="Datacenter Dashboard", content=datacenter_dashboard_content),
         ],
         expand=1,
     )

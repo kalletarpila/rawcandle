@@ -931,6 +931,7 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(tmp_path, mon
     run_app(page, str(config_path))
 
     assert page.datacenter_tabs.tabs[1].text == "Datacenter"
+    assert page.datacenter_tabs.tabs[2].text == "Datacenter Dashboard"
     assert page.datacenter_price_db_field.value == DEFAULT_DATACENTER_PRICE_DB
     assert page.datacenter_analysis_db_field.value == DEFAULT_DATACENTER_ANALYSIS_DB
     assert page.datacenter_taxonomy_csv_field.value == DEFAULT_DATACENTER_TAXONOMY_CSV
@@ -948,6 +949,18 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(tmp_path, mon
     assert page.datacenter_dashboard_reports_dir_field.value == DEFAULT_DATACENTER_OUTPUT_DIR
     assert page.datacenter_dashboard_overall_status_field.value == "MISSING"
     assert len(page.datacenter_dashboard_reports_column.controls) == 4
+    datacenter_text_labels = [
+        control.value
+        for control in page.datacenter_content.controls
+        if hasattr(control, "value")
+    ]
+    assert "Datacenter Dashboard" not in datacenter_text_labels
+    dashboard_text_labels = [
+        control.value
+        for control in page.datacenter_dashboard_content.controls
+        if hasattr(control, "value")
+    ]
+    assert "Datacenter Dashboard" in dashboard_text_labels
 
     page.datacenter_signal_date_field.value = "2026-05-15"
     page.datacenter_start_date_field.value = "2026-01-01"
