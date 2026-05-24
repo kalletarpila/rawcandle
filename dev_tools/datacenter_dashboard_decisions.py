@@ -39,6 +39,8 @@ class DatacenterTickerDecision:
     latest_reset_reason: str | None
     pullback_validity: str | None
     pullback_reason: str | None
+    entry_readiness: str | None
+    entry_readiness_reason: str | None
     source_files: list[str]
     decision_trace: list[DatacenterDecisionTrace] = field(default_factory=list)
 
@@ -49,6 +51,7 @@ class DatacenterDecisionBatchResult:
     action_counts: dict[str, int]
     pullback_counts: dict[str, int]
     pullback_action_counts: dict[str, dict[str, int]]
+    entry_readiness_counts: dict[str, int]
     warning_count: int
     warnings: list[str] = field(default_factory=list)
 
@@ -81,6 +84,15 @@ _PULLBACK_VALIDITY_ORDER = (
     "STRUCTURE_BLOCKED_PULLBACK",
     "BREAKDOWN_NOT_PULLBACK",
     "NO_PULLBACK",
+    "INSUFFICIENT_DATA",
+)
+
+_ENTRY_READINESS_ORDER = (
+    "READY_TO_WATCH",
+    "NEEDS_STOP_STABILIZATION",
+    "NEEDS_RISK_CLEARANCE",
+    "EARLY_MONITOR",
+    "NOT_READY",
     "INSUFFICIENT_DATA",
 )
 
@@ -537,6 +549,44 @@ def _classify_pullback_validity(
         return ("EARLY_PULLBACK", "WAIT_FOR_BULLISH_CONFIRMATION")
 
     return ("INSUFFICIENT_DATA", "MISSING_STRUCTURE_OR_FRESHNESS_CONTEXT")
+
+
+def _classify_entry_readiness(
+    pullback_validity: str | None,
+    action: str | None,
+) -> tuple[str, str]:
+    if not pullback_validity or not action:
+        return ("INSUFFICIENT_DATA", "MISSING_PULLBACK_VALIDITY_OR_ACTION")
+
+    if pullback_validity == "VALID_PULLBACK":
+        if action in {"WATCH", "NEUTRAL"}:
+            return ("READY_TO_WATCH", "VALID_PULLBACK_NO_STRONG_RISK_ACTION")
+        if action == "TIGHTEN_STOP":
+            return (
+                "NEEDS_STOP_STABILIZATION",
+                "VALID_PULLBACK_BUT_HIGH_EXIT_RISK_DAYS",
+            )
+        if action == "REDUCE":
+            return (
+                "NEEDS_RISK_CLEARANCE",
+                "VALID_PULLBACK_BUT_RISK_SIGNAL_PRESENT",
+            )
+        if action == "SELL":
+            return ("NOT_READY", "VALID_PULLBACK_BUT_SELL_ACTION_PRESENT")
+        return ("INSUFFICIENT_DATA", "MISSING_PULLBACK_VALIDITY_OR_ACTION")
+
+    if pullback_validity == "EARLY_PULLBACK":
+        return ("EARLY_MONITOR", "WAIT_FOR_BULLISH_CONFIRMATION")
+
+    if pullback_validity in {
+        "STRUCTURE_BLOCKED_PULLBACK",
+        "BREAKDOWN_NOT_PULLBACK",
+        "NO_PULLBACK",
+        "INSUFFICIENT_DATA",
+    }:
+        return ("NOT_READY", pullback_validity)
+
+    return ("INSUFFICIENT_DATA", "MISSING_PULLBACK_VALIDITY_OR_ACTION")
 
 
 def _has_acute_confirmed_rolling_2d_bos_down(
@@ -1127,6 +1177,11 @@ def build_datacenter_ticker_decisions(
         if not horizons_present:
             warnings.append(f"{ticker}: no normalized horizons present")
 
+        entry_readiness, entry_readiness_reason = _classify_entry_readiness(
+            pullback_validity,
+            action,
+        )
+
         decisions.append(
             DatacenterTickerDecision(
                 ticker=ticker,
@@ -1145,6 +1200,8 @@ def build_datacenter_ticker_decisions(
                 latest_reset_reason=latest_reset_reason,
                 pullback_validity=pullback_validity,
                 pullback_reason=pullback_reason,
+                entry_readiness=entry_readiness,
+                entry_readiness_reason=entry_readiness_reason,
                 source_files=source_files,
                 decision_trace=decision_trace,
             )
@@ -1167,12 +1224,18 @@ def build_datacenter_ticker_decisions(
     for decision in decisions:
         pullback_name = decision.pullback_validity or "INSUFFICIENT_DATA"
         pullback_action_counts[pullback_name][decision.action] += 1
+    entry_readiness_counts = Counter(
+        decision.entry_readiness or "INSUFFICIENT_DATA" for decision in decisions
+    )
+    for readiness_name in _ENTRY_READINESS_ORDER:
+        entry_readiness_counts.setdefault(readiness_name, 0)
 
     return DatacenterDecisionBatchResult(
         decisions=decisions,
         action_counts=dict(action_counts),
         pullback_counts=dict(pullback_counts),
         pullback_action_counts=pullback_action_counts,
+        entry_readiness_counts=dict(entry_readiness_counts),
         warning_count=len(warnings),
         warnings=warnings,
     )

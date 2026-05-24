@@ -73,6 +73,8 @@ def test_fixture_reports_produce_parsed_rows_and_decisions(tmp_path, capsys):
     assert "SUMMARY pullback_action.EARLY_PULLBACK.WATCH=0" in lines
     assert "SUMMARY pullback_action.STRUCTURE_BLOCKED_PULLBACK.SELL=0" in lines
     assert "SUMMARY pullback_action.BREAKDOWN_NOT_PULLBACK.NEUTRAL=0" in lines
+    assert "SUMMARY entry_readiness.READY_TO_WATCH=0" in lines
+    assert "SUMMARY entry_readiness.NOT_READY=2" in lines
 
 
 def test_ticker_found_prints_selected_ticker_summary(tmp_path, capsys):
@@ -289,6 +291,8 @@ def test_cli_uses_existing_helpers_rather_than_duplicating_logic(monkeypatch, tm
                     latest_reset_reason=None,
                     pullback_validity="NO_PULLBACK",
                     pullback_reason="NO_PULLBACK_CONTEXT",
+                    entry_readiness="NOT_READY",
+                    entry_readiness_reason="NO_PULLBACK",
                     source_files=[str(tmp_path / "daily.csv")],
                     decision_trace=[
                         DatacenterDecisionTrace(
@@ -385,6 +389,14 @@ def test_cli_uses_existing_helpers_rather_than_duplicating_logic(monkeypatch, tm
                     "WATCH": 0,
                     "NEUTRAL": 0,
                 },
+            },
+            entry_readiness_counts={
+                "READY_TO_WATCH": 0,
+                "NEEDS_STOP_STABILIZATION": 0,
+                "NEEDS_RISK_CLEARANCE": 0,
+                "EARLY_MONITOR": 0,
+                "NOT_READY": 1,
+                "INSUFFICIENT_DATA": 0,
             },
             warning_count=0,
             warnings=[],
@@ -605,6 +617,44 @@ def test_pullback_action_summary_counts_are_printed_deterministically(tmp_path, 
         "SUMMARY pullback_action.BREAKDOWN_NOT_PULLBACK.REDUCE=0",
         "SUMMARY pullback_action.BREAKDOWN_NOT_PULLBACK.TIGHTEN_STOP=0",
         "SUMMARY pullback_action.BREAKDOWN_NOT_PULLBACK.NEUTRAL=0",
+    ]
+
+
+def test_entry_readiness_summary_counts_are_printed_deterministically(tmp_path, capsys):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    _write_report(
+        reports_dir / "datacenter_rolling_2_2026-05-22_0000_full.csv",
+        "ticker;high_exit_risk_days_count\nAAA;1\n",
+    )
+    _write_report(
+        reports_dir / "datacenter_daily_2026-05-22_0000_full.csv",
+        "\n".join(
+            [
+                "ticker;status;ma_break_status;freshness_status;reason",
+                "AAA;PULLBACK_CANDIDATE;OK;FRESH_BULLISH_SIGNAL;",
+                "BBB;PULLBACK_CANDIDATE;OK;FRESH_BULLISH_SIGNAL;subindustry_context_risk",
+                "CCC;PULLBACK_CANDIDATE;OK;;",
+                "DDD;SIDEWAYS;;;",
+            ]
+        )
+        + "\n",
+    )
+
+    exit_code = main(["--reports-dir", str(reports_dir)])
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    readiness_lines = [
+        line for line in lines if line.startswith("SUMMARY entry_readiness.")
+    ]
+    assert readiness_lines == [
+        "SUMMARY entry_readiness.READY_TO_WATCH=0",
+        "SUMMARY entry_readiness.NEEDS_STOP_STABILIZATION=1",
+        "SUMMARY entry_readiness.NEEDS_RISK_CLEARANCE=1",
+        "SUMMARY entry_readiness.EARLY_MONITOR=1",
+        "SUMMARY entry_readiness.NOT_READY=1",
+        "SUMMARY entry_readiness.INSUFFICIENT_DATA=0",
     ]
 
 
@@ -971,8 +1021,12 @@ def test_candidate_pullbacks_prints_candidate_rows(tmp_path, capsys):
     lines = capsys.readouterr().out.strip().splitlines()
     candidate_lines = [line for line in lines if line.startswith("CANDIDATE_PULLBACK ")]
     assert len(candidate_lines) == 2
-    assert candidate_lines[0].startswith("CANDIDATE_PULLBACK ticker=AAA validity=VALID_PULLBACK")
-    assert candidate_lines[1].startswith("CANDIDATE_PULLBACK ticker=BBB validity=EARLY_PULLBACK")
+    assert candidate_lines[0].startswith(
+        "CANDIDATE_PULLBACK ticker=AAA validity=VALID_PULLBACK entry_readiness=READY_TO_WATCH"
+    )
+    assert candidate_lines[1].startswith(
+        "CANDIDATE_PULLBACK ticker=BBB validity=EARLY_PULLBACK entry_readiness=EARLY_MONITOR"
+    )
 
 
 def test_default_output_without_candidate_pullbacks_does_not_print_candidate_rows(
@@ -1092,6 +1146,43 @@ def test_candidate_pullbacks_action_filters_by_action(tmp_path, capsys):
     assert "action=TIGHTEN_STOP" in candidate_lines[0]
 
 
+def test_candidate_pullbacks_readiness_filters_by_readiness(tmp_path, capsys):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    _write_report(
+        reports_dir / "datacenter_rolling_2_2026-05-22_0000_full.csv",
+        "ticker;high_exit_risk_days_count\nAAA;1\n",
+    )
+    _write_report(
+        reports_dir / "datacenter_daily_2026-05-22_0000_full.csv",
+        "\n".join(
+            [
+                "ticker;status;ma_break_status;freshness_status",
+                "AAA;PULLBACK_CANDIDATE;OK;FRESH_BULLISH_SIGNAL",
+                "BBB;PULLBACK_CANDIDATE;OK;",
+            ]
+        )
+        + "\n",
+    )
+
+    exit_code = main(
+        [
+            "--reports-dir",
+            str(reports_dir),
+            "--candidate-pullbacks",
+            "--candidate-pullbacks-readiness",
+            "NEEDS_STOP_STABILIZATION",
+        ]
+    )
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    candidate_lines = [line for line in lines if line.startswith("CANDIDATE_PULLBACK ")]
+    assert len(candidate_lines) == 1
+    assert "ticker=AAA" in candidate_lines[0]
+    assert "entry_readiness=NEEDS_STOP_STABILIZATION" in candidate_lines[0]
+
+
 def test_max_candidate_pullbacks_limits_output(tmp_path, capsys):
     reports_dir = tmp_path / "reports"
     reports_dir.mkdir()
@@ -1160,6 +1251,24 @@ def test_invalid_candidate_pullbacks_action_filter_exits_non_zero(tmp_path):
     assert exc_info.value.code != 0
 
 
+def test_invalid_candidate_pullbacks_readiness_filter_exits_non_zero(tmp_path):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(
+            [
+                "--reports-dir",
+                str(reports_dir),
+                "--candidate-pullbacks",
+                "--candidate-pullbacks-readiness",
+                "BAD_READINESS",
+            ]
+        )
+
+    assert exc_info.value.code != 0
+
+
 def test_candidate_pullbacks_output_order_is_deterministic(tmp_path, capsys):
     reports_dir = tmp_path / "reports"
     reports_dir.mkdir()
@@ -1186,9 +1295,9 @@ def test_candidate_pullbacks_output_order_is_deterministic(tmp_path, capsys):
     lines = capsys.readouterr().out.strip().splitlines()
     candidate_lines = [line for line in lines if line.startswith("CANDIDATE_PULLBACK ")]
     assert candidate_lines == [
-        "CANDIDATE_PULLBACK ticker=AAA validity=VALID_PULLBACK action=TIGHTEN_STOP severity=MEDIUM primary_reason=HIGH_EXIT_RISK_DAYS_PRESENT pullback_reason=FRESH_BULLISH_PULLBACK_WITH_NO_STRUCTURE_BLOCK first_trace_rule=TIGHTEN_STOP first_trace_token=high_exit_risk_days_count>=1 ma_break_status=OK freshness_status=FRESH_BULLISH_SIGNAL latest_bullish_signal_age_td=2 latest_bearish_signal_age_td=9",
-        "CANDIDATE_PULLBACK ticker=BBB validity=EARLY_PULLBACK action=NEUTRAL severity=INFO primary_reason=NO_DECISIVE_SIGNAL pullback_reason=WAIT_FOR_BULLISH_CONFIRMATION first_trace_rule=NEUTRAL_FALLBACK first_trace_token= ma_break_status=OK freshness_status= latest_bullish_signal_age_td= latest_bearish_signal_age_td=",
-        "CANDIDATE_PULLBACK ticker=CCC validity=EARLY_PULLBACK action=NEUTRAL severity=INFO primary_reason=NO_DECISIVE_SIGNAL pullback_reason=WAIT_FOR_BULLISH_CONFIRMATION first_trace_rule=NEUTRAL_FALLBACK first_trace_token= ma_break_status=OK freshness_status= latest_bullish_signal_age_td= latest_bearish_signal_age_td=",
+        "CANDIDATE_PULLBACK ticker=AAA validity=VALID_PULLBACK entry_readiness=NEEDS_STOP_STABILIZATION entry_readiness_reason=VALID_PULLBACK_BUT_HIGH_EXIT_RISK_DAYS action=TIGHTEN_STOP severity=MEDIUM primary_reason=HIGH_EXIT_RISK_DAYS_PRESENT pullback_reason=FRESH_BULLISH_PULLBACK_WITH_NO_STRUCTURE_BLOCK first_trace_rule=TIGHTEN_STOP first_trace_token=high_exit_risk_days_count>=1 ma_break_status=OK freshness_status=FRESH_BULLISH_SIGNAL latest_bullish_signal_age_td=2 latest_bearish_signal_age_td=9",
+        "CANDIDATE_PULLBACK ticker=BBB validity=EARLY_PULLBACK entry_readiness=EARLY_MONITOR entry_readiness_reason=WAIT_FOR_BULLISH_CONFIRMATION action=NEUTRAL severity=INFO primary_reason=NO_DECISIVE_SIGNAL pullback_reason=WAIT_FOR_BULLISH_CONFIRMATION first_trace_rule=NEUTRAL_FALLBACK first_trace_token= ma_break_status=OK freshness_status= latest_bullish_signal_age_td= latest_bearish_signal_age_td=",
+        "CANDIDATE_PULLBACK ticker=CCC validity=EARLY_PULLBACK entry_readiness=EARLY_MONITOR entry_readiness_reason=WAIT_FOR_BULLISH_CONFIRMATION action=NEUTRAL severity=INFO primary_reason=NO_DECISIVE_SIGNAL pullback_reason=WAIT_FOR_BULLISH_CONFIRMATION first_trace_rule=NEUTRAL_FALLBACK first_trace_token= ma_break_status=OK freshness_status= latest_bullish_signal_age_td= latest_bearish_signal_age_td=",
     ]
 
 
@@ -1221,3 +1330,5 @@ def test_candidate_pullbacks_does_not_change_final_action_counts_or_pullback_cou
     assert "SUMMARY action.NEUTRAL=1" in output
     assert "SUMMARY pullback.VALID_PULLBACK=1" in output
     assert "SUMMARY pullback.EARLY_PULLBACK=1" in output
+    assert "SUMMARY entry_readiness.NEEDS_STOP_STABILIZATION=1" in output
+    assert "SUMMARY entry_readiness.EARLY_MONITOR=1" in output

@@ -512,6 +512,128 @@ def test_pullback_context_plus_ema20_warning_and_fresh_bullish_signal_is_valid_p
     assert result.decisions[0].pullback_validity == "VALID_PULLBACK"
 
 
+def test_valid_pullback_with_watch_is_ready_to_watch():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(ticker="TSM", horizon="rolling 30d", raw_status="LEADER"),
+            _row(
+                ticker="TSM",
+                horizon="daily",
+                raw_status="PULLBACK_CANDIDATE",
+                ma_break_status="OK",
+                freshness_status="FRESH_BULLISH_SIGNAL",
+            ),
+        ]
+    )
+
+    assert result.decisions[0].action == "WATCH"
+    assert result.decisions[0].entry_readiness == "READY_TO_WATCH"
+    assert (
+        result.decisions[0].entry_readiness_reason
+        == "VALID_PULLBACK_NO_STRONG_RISK_ACTION"
+    )
+
+
+def test_valid_pullback_with_tighten_stop_needs_stop_stabilization():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="CRUS",
+                horizon="daily",
+                raw_status="PULLBACK_CANDIDATE",
+                ma_break_status="OK",
+                freshness_status="FRESH_BULLISH_SIGNAL",
+            ),
+            _row(ticker="CRUS", horizon="rolling 2d", high_exit_risk_days_count=1),
+        ]
+    )
+
+    assert result.decisions[0].action == "TIGHTEN_STOP"
+    assert result.decisions[0].entry_readiness == "NEEDS_STOP_STABILIZATION"
+    assert (
+        result.decisions[0].entry_readiness_reason
+        == "VALID_PULLBACK_BUT_HIGH_EXIT_RISK_DAYS"
+    )
+
+
+def test_valid_pullback_with_reduce_needs_risk_clearance():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="CSW",
+                horizon="daily",
+                raw_status="PULLBACK_CANDIDATE",
+                ma_break_status="OK",
+                freshness_status="FRESH_BULLISH_SIGNAL",
+                reason="subindustry_context_risk",
+            )
+        ]
+    )
+
+    assert result.decisions[0].action == "REDUCE"
+    assert result.decisions[0].entry_readiness == "NEEDS_RISK_CLEARANCE"
+    assert (
+        result.decisions[0].entry_readiness_reason
+        == "VALID_PULLBACK_BUT_RISK_SIGNAL_PRESENT"
+    )
+
+
+def test_early_pullback_is_early_monitor():
+    result = build_datacenter_ticker_decisions(
+        [_row(ticker="AMD", horizon="daily", raw_status="PULLBACK_CANDIDATE", ma_break_status="OK")]
+    )
+
+    assert result.decisions[0].pullback_validity == "EARLY_PULLBACK"
+    assert result.decisions[0].entry_readiness == "EARLY_MONITOR"
+    assert result.decisions[0].entry_readiness_reason == "WAIT_FOR_BULLISH_CONFIRMATION"
+
+
+def test_structure_blocked_pullback_is_not_ready():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="NVDA",
+                horizon="rolling 2d",
+                raw_status="PULLBACK_CANDIDATE",
+                latest_bos_event_type="BOS_DOWN",
+                raw_fields={"latest_bos_freshness": "FRESH"},
+            )
+        ]
+    )
+
+    assert result.decisions[0].entry_readiness == "NOT_READY"
+    assert (
+        result.decisions[0].entry_readiness_reason
+        == "STRUCTURE_BLOCKED_PULLBACK"
+    )
+
+
+def test_entry_readiness_counts_include_zero_defaults():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="TSM",
+                horizon="rolling 30d",
+                raw_status="LEADER",
+            ),
+            _row(
+                ticker="TSM",
+                horizon="daily",
+                raw_status="PULLBACK_CANDIDATE",
+                ma_break_status="OK",
+                freshness_status="FRESH_BULLISH_SIGNAL",
+            ),
+        ]
+    )
+
+    assert result.entry_readiness_counts["READY_TO_WATCH"] == 1
+    assert result.entry_readiness_counts["NEEDS_STOP_STABILIZATION"] == 0
+    assert result.entry_readiness_counts["NEEDS_RISK_CLEARANCE"] == 0
+    assert result.entry_readiness_counts["EARLY_MONITOR"] == 0
+    assert result.entry_readiness_counts["NOT_READY"] == 0
+    assert result.entry_readiness_counts["INSUFFICIENT_DATA"] == 0
+
+
 def test_acute_bos_down_sell_confirmation_blocks_valid_pullback():
     result = build_datacenter_ticker_decisions(
         [

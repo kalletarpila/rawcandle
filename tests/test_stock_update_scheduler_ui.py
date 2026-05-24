@@ -1185,7 +1185,13 @@ def test_run_app_datacenter_dashboard_command_center_shows_grouped_read_only_row
         for control in page.datacenter_dashboard_candidate_pullbacks_column.controls
         if hasattr(control, "content")
     ]
-    assert "TSM | VALID_PULLBACK | BUY_NOW" in candidate_titles
+    assert "TSM | VALID_PULLBACK | INSUFFICIENT_DATA | BUY_NOW" in candidate_titles
+    candidate_readiness_lines = [
+        control.content.controls[2].value
+        for control in page.datacenter_dashboard_candidate_pullbacks_column.controls
+        if hasattr(control, "content")
+    ]
+    assert "entry_readiness_reason: MISSING_PULLBACK_VALIDITY_OR_ACTION" in candidate_readiness_lines
     labels = [
         control.value
         for control in page.datacenter_dashboard_command_center_column.controls

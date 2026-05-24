@@ -800,7 +800,15 @@ def populate_datacenter_dashboard_candidate_pullbacks(
     candidate_decisions.sort(
         key=lambda decision: (
             0 if decision.pullback_validity == "VALID_PULLBACK" else 1,
-            ("SELL", "REDUCE", "TIGHTEN_STOP", "BLOCKED", "WAIT_PULLBACK", "BUY_NOW", "WATCH", "NEUTRAL").index(decision.action),
+            (
+                "READY_TO_WATCH",
+                "NEEDS_STOP_STABILIZATION",
+                "NEEDS_RISK_CLEARANCE",
+                "EARLY_MONITOR",
+                "NOT_READY",
+                "INSUFFICIENT_DATA",
+            ).index(decision.entry_readiness or "INSUFFICIENT_DATA"),
+            ("WATCH", "NEUTRAL", "TIGHTEN_STOP", "REDUCE", "SELL", "BLOCKED", "WAIT_PULLBACK", "BUY_NOW").index(decision.action),
             decision.ticker,
         )
     )
@@ -814,11 +822,15 @@ def populate_datacenter_dashboard_candidate_pullbacks(
                 content=ft.Column(
                     controls=[
                         ft.Text(
-                            f"{decision.ticker} | {decision.pullback_validity} | {decision.action}",
+                            f"{decision.ticker} | {decision.pullback_validity} | {decision.entry_readiness or 'NONE'} | {decision.action}",
                             weight=ft.FontWeight.BOLD,
                         ),
                         ft.Text(
                             f"primary_reason: {decision.primary_reason or 'NONE'}",
+                            size=11,
+                        ),
+                        ft.Text(
+                            f"entry_readiness_reason: {decision.entry_readiness_reason or 'NONE'}",
                             size=11,
                         ),
                         ft.Text(
