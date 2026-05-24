@@ -1074,6 +1074,10 @@ def test_run_app_datacenter_dashboard_refresh_reads_report_directory(tmp_path, m
     assert "decision_total=1" in page.datacenter_dashboard_decision_summary_field.value
     assert "NEUTRAL=1" in page.datacenter_dashboard_decision_summary_field.value
     assert "NO_PULLBACK=1" in page.datacenter_dashboard_decision_summary_field.value
+    assert (
+        page.datacenter_dashboard_candidate_pullbacks_column.controls[0].value
+        == "No candidate pullbacks available."
+    )
     assert page.datacenter_dashboard_inspector_action_field.value == "NVDA | NEUTRAL | INFO"
     assert page.datacenter_dashboard_conflict_detected_field.value == "False"
     assert page.datacenter_dashboard_pullback_validity_field.value == "NO_PULLBACK"
@@ -1106,7 +1110,7 @@ def test_run_app_datacenter_dashboard_command_center_shows_grouped_read_only_row
         encoding="utf-8",
     )
     (reports_dir / "datacenter_rolling_5_2026-05-22_0000_full.csv").write_text(
-        "ticker;status\nTSM;PULLBACK\n",
+        "ticker;status\nTSM;PULLBACK_CANDIDATE\n",
         encoding="utf-8",
     )
     (reports_dir / "datacenter_rolling_2_2026-05-22_0000_full.csv").write_text(
@@ -1116,11 +1120,11 @@ def test_run_app_datacenter_dashboard_command_center_shows_grouped_read_only_row
     (reports_dir / "datacenter_daily_2026-05-22_0000_full.csv").write_text(
         "\n".join(
             [
-                "ticker;status;reason",
-                "NVDA;SELL;close_below_ema20",
-                "AVGO;WATCH;exit_risk",
-                "TSM;BULLISH;",
-                "INTC;SIDEWAYS;",
+                "ticker;status;reason;ma_break_status;freshness_status",
+                "NVDA;SELL;close_below_ema20;;",
+                "AVGO;WATCH;exit_risk;;",
+                "TSM;BULLISH;;OK;FRESH_BULLISH_SIGNAL",
+                "INTC;SIDEWAYS;;;",
             ]
         )
         + "\n",
@@ -1176,6 +1180,12 @@ def test_run_app_datacenter_dashboard_command_center_shows_grouped_read_only_row
     assert "WATCH=1" in page.datacenter_dashboard_decision_summary_field.value
     assert "NEUTRAL=1" in page.datacenter_dashboard_decision_summary_field.value
     assert "STRUCTURE_BLOCKED_PULLBACK=1" in page.datacenter_dashboard_decision_summary_field.value
+    candidate_titles = [
+        control.content.controls[0].value
+        for control in page.datacenter_dashboard_candidate_pullbacks_column.controls
+        if hasattr(control, "content")
+    ]
+    assert "TSM | VALID_PULLBACK | BUY_NOW" in candidate_titles
     labels = [
         control.value
         for control in page.datacenter_dashboard_command_center_column.controls

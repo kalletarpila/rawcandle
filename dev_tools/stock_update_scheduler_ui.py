@@ -749,6 +749,95 @@ def populate_datacenter_dashboard_command_center(
             )
 
 
+def _dashboard_context_rows_for_ticker(
+    rows: list[DatacenterDashboardRow],
+    ticker: str,
+) -> list[DatacenterDashboardRow]:
+    horizon_order = {
+        "daily": 0,
+        "rolling 2d": 1,
+        "rolling 5d": 2,
+        "rolling 30d": 3,
+    }
+    return sorted(
+        [row for row in rows if row.ticker == ticker],
+        key=lambda row: (
+            horizon_order.get(row.horizon, 99),
+            row.source_file,
+            row.section or "",
+            row.raw_status or "",
+            row.raw_action or "",
+        ),
+    )
+
+
+def _dashboard_first_non_empty_context_value(
+    rows: list[DatacenterDashboardRow],
+    field_name: str,
+) -> str | int | float | None:
+    for row in rows:
+        value = getattr(row, field_name, None)
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        return value
+    return None
+
+
+def populate_datacenter_dashboard_candidate_pullbacks(
+    *,
+    decision_result: DatacenterDecisionBatchResult,
+    parsed_rows: list[DatacenterDashboardRow],
+    candidate_pullbacks_column: ft.Column,
+) -> None:
+    candidate_pullbacks_column.controls.clear()
+    candidate_decisions = [
+        decision
+        for decision in decision_result.decisions
+        if decision.pullback_validity in {"VALID_PULLBACK", "EARLY_PULLBACK"}
+    ]
+    candidate_decisions.sort(
+        key=lambda decision: (
+            0 if decision.pullback_validity == "VALID_PULLBACK" else 1,
+            ("SELL", "REDUCE", "TIGHTEN_STOP", "BLOCKED", "WAIT_PULLBACK", "BUY_NOW", "WATCH", "NEUTRAL").index(decision.action),
+            decision.ticker,
+        )
+    )
+    if not candidate_decisions:
+        candidate_pullbacks_column.controls.append(ft.Text("No candidate pullbacks available."))
+        return
+    for decision in candidate_decisions:
+        context_rows = _dashboard_context_rows_for_ticker(parsed_rows, decision.ticker)
+        candidate_pullbacks_column.controls.append(
+            ft.Container(
+                content=ft.Column(
+                    controls=[
+                        ft.Text(
+                            f"{decision.ticker} | {decision.pullback_validity} | {decision.action}",
+                            weight=ft.FontWeight.BOLD,
+                        ),
+                        ft.Text(
+                            f"primary_reason: {decision.primary_reason or 'NONE'}",
+                            size=11,
+                        ),
+                        ft.Text(
+                            "ma_break_status="
+                            f"{_dashboard_first_non_empty_context_value(context_rows, 'ma_break_status') or 'NONE'}"
+                            " | freshness_status="
+                            f"{_dashboard_first_non_empty_context_value(context_rows, 'freshness_status') or 'NONE'}",
+                            size=11,
+                        ),
+                    ],
+                    spacing=2,
+                ),
+                border=ft.border.all(1, "#DADCE0"),
+                border_radius=8,
+                padding=10,
+            )
+        )
+
+
 def populate_datacenter_dashboard_inspector(
     *,
     inspector_view: DatacenterTickerInspectorView | None,
@@ -1201,6 +1290,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
         max_lines=9,
         width=240,
     )
+    datacenter_dashboard_candidate_pullbacks_column = ft.Column(spacing=8)
     datacenter_dashboard_inspector_ticker_dropdown = ft.Dropdown(
         label="inspector_ticker",
         options=[],
@@ -1336,6 +1426,11 @@ def run_app(page: ft.Page, config_path: str) -> None:
         populate_datacenter_dashboard_command_center(
             decision_result=decision_result,
             command_center_column=datacenter_dashboard_command_center_column,
+        )
+        populate_datacenter_dashboard_candidate_pullbacks(
+            decision_result=decision_result,
+            parsed_rows=parsed_rows,
+            candidate_pullbacks_column=datacenter_dashboard_candidate_pullbacks_column,
         )
         decisions_by_ticker = {
             decision.ticker: decision for decision in decision_result.decisions
@@ -1908,6 +2003,8 @@ def run_app(page: ft.Page, config_path: str) -> None:
             datacenter_dashboard_reports_column,
             ft.Text("Command Center", size=18, weight=ft.FontWeight.BOLD),
             datacenter_dashboard_command_center_column,
+            ft.Text("Candidate Pullbacks", size=18, weight=ft.FontWeight.BOLD),
+            datacenter_dashboard_candidate_pullbacks_column,
             ft.Text("Inspector", size=18, weight=ft.FontWeight.BOLD),
             ft.Row(
                 [
@@ -1953,6 +2050,9 @@ def run_app(page: ft.Page, config_path: str) -> None:
     page.datacenter_dashboard_reports_column = datacenter_dashboard_reports_column
     page.datacenter_dashboard_command_center_column = (
         datacenter_dashboard_command_center_column
+    )
+    page.datacenter_dashboard_candidate_pullbacks_column = (
+        datacenter_dashboard_candidate_pullbacks_column
     )
     page.datacenter_dashboard_inspector_ticker_dropdown = (
         datacenter_dashboard_inspector_ticker_dropdown

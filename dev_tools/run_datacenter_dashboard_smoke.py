@@ -54,6 +54,10 @@ _PULLBACK_DEBUG_ORDER = (
     "STRUCTURE_BLOCKED_PULLBACK",
     "BREAKDOWN_NOT_PULLBACK",
 )
+_CANDIDATE_PULLBACK_ORDER = (
+    "VALID_PULLBACK",
+    "EARLY_PULLBACK",
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -63,6 +67,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reports-dir", required=True)
     parser.add_argument("--ticker")
     parser.add_argument("--max-rows", type=int)
+    parser.add_argument("--candidate-pullbacks", action="store_true")
+    parser.add_argument(
+        "--candidate-pullbacks-validity",
+        choices=_CANDIDATE_PULLBACK_ORDER,
+    )
+    parser.add_argument(
+        "--candidate-pullbacks-action",
+        choices=_ACTION_ORDER,
+    )
+    parser.add_argument("--max-candidate-pullbacks", type=int, default=50)
     parser.add_argument("--pullback-debug", action="store_true")
     parser.add_argument(
         "--pullback-debug-validity",
@@ -222,6 +236,67 @@ def _print_pullback_debug_rows(
             f"freshness_status={_safe_debug_value(_first_non_empty_context_value(context_rows, 'freshness_status'))} "
             f"latest_bos_down_age_td={_safe_debug_value(_first_non_empty_context_value(context_rows, 'latest_bos_down_age_td'))} "
             f"latest_reset_age_td={_safe_debug_value(_first_non_empty_context_value(context_rows, 'latest_reset_age_td'))} "
+            f"latest_bullish_signal_age_td={_safe_debug_value(_first_non_empty_context_value(context_rows, 'latest_bullish_signal_age_td'))} "
+            f"latest_bearish_signal_age_td={_safe_debug_value(_first_non_empty_context_value(context_rows, 'latest_bearish_signal_age_td'))}"
+        )
+
+
+def _filtered_candidate_pullback_decisions(
+    decision_result: DatacenterDecisionBatchResult,
+    *,
+    pullback_validity: str | None,
+    action: str | None,
+) -> list[DatacenterTickerDecision]:
+    decisions = [
+        decision
+        for decision in decision_result.decisions
+        if (decision.pullback_validity or "INSUFFICIENT_DATA") in _CANDIDATE_PULLBACK_ORDER
+    ]
+    if pullback_validity:
+        decisions = [
+            decision
+            for decision in decisions
+            if (decision.pullback_validity or "INSUFFICIENT_DATA") == pullback_validity
+        ]
+    if action:
+        decisions = [decision for decision in decisions if decision.action == action]
+    return sorted(
+        decisions,
+        key=lambda decision: (
+            _CANDIDATE_PULLBACK_ORDER.index(decision.pullback_validity or "INSUFFICIENT_DATA"),
+            _ACTION_ORDER.index(decision.action),
+            decision.ticker,
+        ),
+    )
+
+
+def _print_candidate_pullback_rows(
+    decision_result: DatacenterDecisionBatchResult,
+    rows: list[DatacenterDashboardRow],
+    *,
+    pullback_validity: str | None,
+    action: str | None,
+    max_rows: int,
+) -> None:
+    for decision in _filtered_candidate_pullback_decisions(
+        decision_result,
+        pullback_validity=pullback_validity,
+        action=action,
+    )[:max_rows]:
+        first_trace = decision.decision_trace[0] if decision.decision_trace else None
+        context_rows = _pullback_debug_context_rows(rows, decision.ticker)
+        print(
+            "CANDIDATE_PULLBACK "
+            f"ticker={_safe_debug_value(decision.ticker)} "
+            f"validity={_safe_debug_value(decision.pullback_validity)} "
+            f"action={_safe_debug_value(decision.action)} "
+            f"severity={_safe_debug_value(decision.severity)} "
+            f"primary_reason={_safe_debug_value(decision.primary_reason)} "
+            f"pullback_reason={_safe_debug_value(decision.pullback_reason)} "
+            f"first_trace_rule={_safe_debug_value(first_trace.matched_rule if first_trace else None)} "
+            f"first_trace_token={_safe_debug_value(first_trace.matched_token if first_trace else None)} "
+            f"ma_break_status={_safe_debug_value(_first_non_empty_context_value(context_rows, 'ma_break_status'))} "
+            f"freshness_status={_safe_debug_value(_first_non_empty_context_value(context_rows, 'freshness_status'))} "
             f"latest_bullish_signal_age_td={_safe_debug_value(_first_non_empty_context_value(context_rows, 'latest_bullish_signal_age_td'))} "
             f"latest_bearish_signal_age_td={_safe_debug_value(_first_non_empty_context_value(context_rows, 'latest_bearish_signal_age_td'))}"
         )
@@ -431,6 +506,14 @@ def main(argv: list[str] | None = None) -> int:
     _print_pullback_action_summaries(decision_result)
     if args.show_trace:
         _print_sell_trace_summaries(decision_result)
+    if args.candidate_pullbacks:
+        _print_candidate_pullback_rows(
+            decision_result,
+            parsed_rows,
+            pullback_validity=args.candidate_pullbacks_validity,
+            action=args.candidate_pullbacks_action,
+            max_rows=args.max_candidate_pullbacks,
+        )
     if args.pullback_debug:
         _print_pullback_debug_rows(
             decision_result,
