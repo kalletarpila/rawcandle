@@ -478,6 +478,75 @@ def test_pipeline_threads_technical_relevance_run_id_to_daily_and_weekly_report_
     assert calls[4][1]["technical_relevance_run_id"] == "REL_PIPE_B"
 
 
+def test_pipeline_auto_technical_relevance_existing_run_reuse_is_reported_and_threaded(tmp_path, monkeypatch, capsys):
+    calls: list[tuple[str, dict[str, object]]] = []
+    DatabaseManager(str(tmp_path / "analysis.db")).close()
+
+    def _runner(argv: list[str]) -> int:
+        return 0
+
+    def _audit(**kwargs):
+        return {"summary": {"validation_status": "OK"}}
+
+    def _auto(**kwargs):
+        return {
+            "summary": {
+                "run_id": "DATACENTER_TECH_REL_DC_TAXONOMY_FULL_V1_2026_05_15",
+                "ticker_count": 3,
+                "start_date": "2026-03-31",
+                "end_date": "2026-05-15",
+                "observations_seen": 0,
+                "records_written": 0,
+                "relevant_count": 0,
+                "weak_context_count": 0,
+                "noise_count": 0,
+                "unknown_signal_count": 0,
+                "missing_dow_context_count": 0,
+                "missing_bar_index_count": 0,
+                "existing_run_reused": 1,
+                "skip_reason": "RUN_ID_ALREADY_EXISTS",
+            }
+        }
+
+    def _daily(**kwargs):
+        calls.append(("daily", dict(kwargs)))
+        kwargs["output_md"].parent.mkdir(parents=True, exist_ok=True)
+        kwargs["output_md"].write_text("daily", encoding="utf-8")
+        kwargs["output_csv"].write_text("daily", encoding="utf-8")
+        return {"summary": {"output_markdown": str(kwargs["output_md"]), "output_csv": str(kwargs["output_csv"]), "validation_status": "OK"}}
+
+    def _weekly(**kwargs):
+        calls.append((f"weekly_{kwargs['window_size']}", dict(kwargs)))
+        kwargs["output_md"].write_text("weekly", encoding="utf-8")
+        kwargs["output_csv"].write_text("weekly", encoding="utf-8")
+        return {"summary": {"output_markdown": str(kwargs["output_md"]), "output_csv": str(kwargs["output_csv"]), "validation_status": "OK"}}
+
+    monkeypatch.setattr(orchestrator, "run_datacenter_indices_main", _runner)
+    monkeypatch.setattr(orchestrator, "run_datacenter_ticker_swing_signals_main", _runner)
+    monkeypatch.setattr(orchestrator, "run_datacenter_group_swing_signals_main", _runner)
+    monkeypatch.setattr(orchestrator, "run_datacenter_group_synthetic_ohlc_main", _runner)
+    monkeypatch.setattr(orchestrator, "load_swing_pipeline_audit", _audit)
+    monkeypatch.setattr(orchestrator, "_run_automatic_technical_relevance_stage", _auto)
+    monkeypatch.setattr(orchestrator, "write_daily_swing_signal_report", _daily)
+    monkeypatch.setattr(orchestrator, "write_weekly_swing_report", _weekly)
+    monkeypatch.setattr(orchestrator, "format_swing_pipeline_audit_summary_lines", lambda summary: [])
+    monkeypatch.setattr(orchestrator, "format_daily_swing_report_summary_lines", lambda summary: [])
+    monkeypatch.setattr(orchestrator, "format_weekly_swing_report_summary_lines", lambda summary: [])
+
+    exit_code = run_datacenter_swing_pipeline_main(_base_args(tmp_path))
+
+    assert exit_code == 0
+    assert all(
+        call[1]["technical_relevance_run_id"] == "DATACENTER_TECH_REL_DC_TAXONOMY_FULL_V1_2026_05_15"
+        for call in calls
+    )
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert "SUMMARY technical_relevance.status=SKIPPED_EXISTING_RUN" in lines
+    assert "SUMMARY technical_relevance.run_id=DATACENTER_TECH_REL_DC_TAXONOMY_FULL_V1_2026_05_15" in lines
+    assert "SUMMARY technical_relevance.existing_run_reused=1" in lines
+    assert lines[-1] == "SUMMARY pipeline_status=OK"
+
+
 def test_pipeline_profiling_disabled_by_default_does_not_print_profile_lines_in_auto_mode(tmp_path, monkeypatch, capsys):
     DatabaseManager(str(tmp_path / "analysis.db")).close()
 

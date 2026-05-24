@@ -37,6 +37,10 @@ from rawcandle.technical_signal_relevance_service import (
     format_technical_relevance_profile_summary_lines,
     run_technical_signal_relevance_for_tickers,
 )
+from rawcandle.technical_signal_relevance_persistence import (
+    apply_technical_signal_relevance_migration,
+    read_relevance_run,
+)
 
 
 FINAL_PIPELINE_SUMMARY_ORDER = (
@@ -199,6 +203,10 @@ def _format_technical_relevance_stage_summary_lines(
     for key in keys:
         if key in summary:
             lines.append(f"SUMMARY technical_relevance.{key}={summary[key]}")
+    if "existing_run_reused" in summary:
+        lines.append(f"SUMMARY technical_relevance.existing_run_reused={summary['existing_run_reused']}")
+    if "skip_reason" in summary:
+        lines.append(f"SUMMARY technical_relevance.skip_reason={summary['skip_reason']}")
     lines.append(f"SUMMARY technical_relevance.status={status}")
     return lines
 
@@ -274,6 +282,7 @@ def _run_automatic_technical_relevance_stage(
     profile = TechnicalSignalRelevanceProfile() if profile_technical_relevance else None
     with sqlite3.connect(analysis_db) as conn:
         conn.row_factory = sqlite3.Row
+        apply_technical_signal_relevance_migration(conn)
         tickers = load_datacenter_pipeline_technical_relevance_tickers(
             conn,
             signal_date=signal_date,
@@ -285,16 +294,60 @@ def _run_automatic_technical_relevance_stage(
                 "Automatic technical relevance ticker universe is empty for "
                 f"signal_date={signal_date}, taxonomy_version={taxonomy_version}, signal_version={signal_version}"
             )
-        batch_summary = run_technical_signal_relevance_for_tickers(
-            conn,
-            tickers,
-            "1d",
-            start_date,
-            end_date,
-            run_id,
-            resolve_created_at_utc(generated_at_utc),
-            profile=profile,
-        )
+        if read_relevance_run(conn, run_id) is not None:
+            result = {
+                "summary": {
+                    "run_id": run_id,
+                    "ticker_count": len(tickers),
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "observations_seen": 0,
+                    "records_written": 0,
+                    "relevant_count": 0,
+                    "weak_context_count": 0,
+                    "noise_count": 0,
+                    "unknown_signal_count": 0,
+                    "missing_dow_context_count": 0,
+                    "missing_bar_index_count": 0,
+                    "existing_run_reused": 1,
+                    "skip_reason": "RUN_ID_ALREADY_EXISTS",
+                }
+            }
+            return result
+        try:
+            batch_summary = run_technical_signal_relevance_for_tickers(
+                conn,
+                tickers,
+                "1d",
+                start_date,
+                end_date,
+                run_id,
+                resolve_created_at_utc(generated_at_utc),
+                profile=profile,
+            )
+        except sqlite3.IntegrityError as exc:
+            conn.rollback()
+            error_text = str(exc)
+            if "technical_signal_relevance_runs.run_id" not in error_text and "UNIQUE constraint failed" not in error_text:
+                raise
+            return {
+                "summary": {
+                    "run_id": run_id,
+                    "ticker_count": len(tickers),
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "observations_seen": 0,
+                    "records_written": 0,
+                    "relevant_count": 0,
+                    "weak_context_count": 0,
+                    "noise_count": 0,
+                    "unknown_signal_count": 0,
+                    "missing_dow_context_count": 0,
+                    "missing_bar_index_count": 0,
+                    "existing_run_reused": 1,
+                    "skip_reason": "RUN_ID_ALREADY_EXISTS",
+                }
+            }
     result = {
         "summary": {
             "run_id": run_id,
@@ -485,6 +538,7 @@ def run_datacenter_swing_pipeline(
         if technical_relevance_mode == "disabled"
         else ("SKIPPED_EXISTING_RUN" if technical_relevance_mode == "existing_run" else "DRY_RUN")
     )
+    technical_relevance_existing_run_reused = 0
     technical_relevance_start_date = "NONE"
     technical_relevance_end_date = "NONE"
     if technical_relevance_mode == "auto":
@@ -1351,15 +1405,23 @@ def run_datacenter_swing_pipeline(
                     }
                 }
         elif stage.heading == "Automatic technical relevance":
-            for line in _format_technical_relevance_stage_summary_lines(result["summary"], status="OK"):
+            automatic_status = (
+                "SKIPPED_EXISTING_RUN"
+                if int(result["summary"].get("existing_run_reused", 0)) == 1
+                else "OK"
+            )
+            for line in _format_technical_relevance_stage_summary_lines(result["summary"], status=automatic_status):
                 print(line)
             if profile_technical_relevance and "profile_summary" in result:
                 for line in format_technical_relevance_profile_summary_lines(result["profile_summary"]):
                     print(line)
             resolved_technical_relevance_run_id = str(result["summary"]["run_id"])
             technical_relevance_ticker_count = int(result["summary"]["ticker_count"])
-            technical_relevance_ticker_count_status = "ACTUAL_RUN"
-            technical_relevance_status = "OK"
+            technical_relevance_existing_run_reused = int(result["summary"].get("existing_run_reused", 0))
+            technical_relevance_ticker_count_status = (
+                "EXISTING_RUN_REUSED" if technical_relevance_existing_run_reused == 1 else "ACTUAL_RUN"
+            )
+            technical_relevance_status = automatic_status
             technical_relevance_start_date = str(result["summary"]["start_date"])
             technical_relevance_end_date = str(result["summary"]["end_date"])
         elif stage.heading == "Daily report":
@@ -1401,6 +1463,11 @@ def run_datacenter_swing_pipeline(
             "technical_relevance.end_date": technical_relevance_end_date,
             "technical_relevance.status": technical_relevance_status,
             "technical_relevance_run_id": resolved_technical_relevance_run_id or "NONE",
+            **(
+                {"technical_relevance.existing_run_reused": technical_relevance_existing_run_reused}
+                if technical_relevance_existing_run_reused == 1
+                else {}
+            ),
             "pipeline_output_dir": str(output_dir),
             "pipeline_stage_count": len(stages),
             "pipeline_completed_stage_count": completed_stage_count,
