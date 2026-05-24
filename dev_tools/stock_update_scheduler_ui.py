@@ -614,6 +614,15 @@ def populate_datacenter_dashboard_summary(
             f"BLOCKED={decision_result.action_counts.get('BLOCKED', 0)}",
             f"WATCH={decision_result.action_counts.get('WATCH', 0)}",
             f"NEUTRAL={decision_result.action_counts.get('NEUTRAL', 0)}",
+            f"VALID_PULLBACK={decision_result.pullback_counts.get('VALID_PULLBACK', 0)}",
+            f"EARLY_PULLBACK={decision_result.pullback_counts.get('EARLY_PULLBACK', 0)}",
+            "STRUCTURE_BLOCKED_PULLBACK="
+            f"{decision_result.pullback_counts.get('STRUCTURE_BLOCKED_PULLBACK', 0)}",
+            "BREAKDOWN_NOT_PULLBACK="
+            f"{decision_result.pullback_counts.get('BREAKDOWN_NOT_PULLBACK', 0)}",
+            f"NO_PULLBACK={decision_result.pullback_counts.get('NO_PULLBACK', 0)}",
+            "INSUFFICIENT_DATA="
+            f"{decision_result.pullback_counts.get('INSUFFICIENT_DATA', 0)}",
         ]
     )
     reports_column.controls.clear()

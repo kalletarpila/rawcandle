@@ -692,6 +692,12 @@ def test_action_counts_are_correct():
     assert result.action_counts["TIGHTEN_STOP"] == 1
     assert result.action_counts["WATCH"] == 1
     assert result.action_counts["NEUTRAL"] == 1
+    assert result.pullback_counts["VALID_PULLBACK"] == 0
+    assert result.pullback_counts["EARLY_PULLBACK"] == 0
+    assert result.pullback_counts["STRUCTURE_BLOCKED_PULLBACK"] == 0
+    assert result.pullback_counts["BREAKDOWN_NOT_PULLBACK"] == 0
+    assert result.pullback_counts["NO_PULLBACK"] == 5
+    assert result.pullback_counts["INSUFFICIENT_DATA"] == 0
 
 
 def test_action_counts_reflect_refined_bos_down_rules():
@@ -703,6 +709,86 @@ def test_action_counts_reflect_refined_bos_down_rules():
         ]
     )
 
+    assert result.action_counts["SELL"] == 1
+    assert result.action_counts["REDUCE"] == 1
+
+
+def test_pullback_counts_include_all_labels_with_zero_defaults():
+    result = build_datacenter_ticker_decisions(
+        [_row(ticker="INTC", horizon="daily", raw_status="SIDEWAYS")]
+    )
+
+    assert result.pullback_counts == {
+        "VALID_PULLBACK": 0,
+        "EARLY_PULLBACK": 0,
+        "STRUCTURE_BLOCKED_PULLBACK": 0,
+        "BREAKDOWN_NOT_PULLBACK": 0,
+        "NO_PULLBACK": 1,
+        "INSUFFICIENT_DATA": 0,
+    }
+
+
+def test_pullback_counts_are_correct_for_mixed_fixtures():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="AAA",
+                horizon="daily",
+                raw_status="PULLBACK_CANDIDATE",
+                ma_break_status="OK",
+                freshness_status="FRESH_BULLISH_SIGNAL",
+            ),
+            _row(
+                ticker="BBB",
+                horizon="daily",
+                raw_status="PULLBACK_CANDIDATE",
+                ma_break_status="OK",
+            ),
+            _row(
+                ticker="CCC",
+                horizon="rolling 2d",
+                raw_status="PULLBACK_CANDIDATE",
+                latest_bos_event_type="BOS_DOWN",
+                raw_fields={"latest_bos_freshness": "FRESH"},
+            ),
+            _row(
+                ticker="DDD",
+                horizon="daily",
+                raw_status="PULLBACK_CANDIDATE",
+                ma_break_status="EMA20_CONFIRMED_BREAK",
+            ),
+            _row(ticker="EEE", horizon="daily", raw_status="SIDEWAYS"),
+            _row(
+                ticker="FFF",
+                horizon="daily",
+                raw_status="PULLBACK_CANDIDATE",
+                raw_fields={"pullback_days": "2"},
+            ),
+        ]
+    )
+
+    assert result.pullback_counts == {
+        "VALID_PULLBACK": 1,
+        "EARLY_PULLBACK": 1,
+        "STRUCTURE_BLOCKED_PULLBACK": 1,
+        "BREAKDOWN_NOT_PULLBACK": 1,
+        "NO_PULLBACK": 1,
+        "INSUFFICIENT_DATA": 1,
+    }
+
+
+def test_final_actions_remain_unchanged_when_pullback_counts_are_present():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(ticker="AAA", horizon="daily", reason="close_below_ema20"),
+            _row(ticker="BBB", horizon="daily", reason="exit_risk"),
+        ]
+    )
+
+    assert [(item.ticker, item.action) for item in result.decisions] == [
+        ("AAA", "SELL"),
+        ("BBB", "REDUCE"),
+    ]
     assert result.action_counts["SELL"] == 1
     assert result.action_counts["REDUCE"] == 1
 

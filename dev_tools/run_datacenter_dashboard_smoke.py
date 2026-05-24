@@ -34,6 +34,14 @@ _ACTION_ORDER = (
     "WATCH",
     "NEUTRAL",
 )
+_PULLBACK_ORDER = (
+    "VALID_PULLBACK",
+    "EARLY_PULLBACK",
+    "STRUCTURE_BLOCKED_PULLBACK",
+    "BREAKDOWN_NOT_PULLBACK",
+    "NO_PULLBACK",
+    "INSUFFICIENT_DATA",
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -273,6 +281,11 @@ def main(argv: list[str] | None = None) -> int:
         _print_summary(
             f"action.{action_name}",
             decision_result.action_counts.get(action_name, 0),
+        )
+    for pullback_name in _PULLBACK_ORDER:
+        _print_summary(
+            f"pullback.{pullback_name}",
+            decision_result.pullback_counts.get(pullback_name, 0),
         )
     if args.show_trace:
         _print_sell_trace_summaries(decision_result)

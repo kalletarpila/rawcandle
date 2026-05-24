@@ -951,6 +951,8 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(tmp_path, mon
     assert page.datacenter_dashboard_parse_summary_field.value == "total_parsed_rows=0\ntotal_warnings=0"
     assert "decision_total=0" in page.datacenter_dashboard_decision_summary_field.value
     assert "SELL=0" in page.datacenter_dashboard_decision_summary_field.value
+    assert "VALID_PULLBACK=0" in page.datacenter_dashboard_decision_summary_field.value
+    assert "NO_PULLBACK=0" in page.datacenter_dashboard_decision_summary_field.value
     assert len(page.datacenter_dashboard_reports_column.controls) == 4
     assert page.datacenter_dashboard_command_center_column.controls[0].value == "No decisions available."
     assert page.datacenter_dashboard_conflict_detected_field.value == "False"
@@ -1071,6 +1073,7 @@ def test_run_app_datacenter_dashboard_refresh_reads_report_directory(tmp_path, m
     assert page.datacenter_dashboard_parse_summary_field.value == "total_parsed_rows=1\ntotal_warnings=0"
     assert "decision_total=1" in page.datacenter_dashboard_decision_summary_field.value
     assert "NEUTRAL=1" in page.datacenter_dashboard_decision_summary_field.value
+    assert "NO_PULLBACK=1" in page.datacenter_dashboard_decision_summary_field.value
     assert page.datacenter_dashboard_inspector_action_field.value == "NVDA | NEUTRAL | INFO"
     assert page.datacenter_dashboard_conflict_detected_field.value == "False"
     assert page.datacenter_dashboard_pullback_validity_field.value == "NO_PULLBACK"
@@ -1172,6 +1175,7 @@ def test_run_app_datacenter_dashboard_command_center_shows_grouped_read_only_row
     assert "BLOCKED=1" in page.datacenter_dashboard_decision_summary_field.value
     assert "WATCH=1" in page.datacenter_dashboard_decision_summary_field.value
     assert "NEUTRAL=1" in page.datacenter_dashboard_decision_summary_field.value
+    assert "STRUCTURE_BLOCKED_PULLBACK=1" in page.datacenter_dashboard_decision_summary_field.value
     labels = [
         control.value
         for control in page.datacenter_dashboard_command_center_column.controls

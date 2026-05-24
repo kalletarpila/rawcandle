@@ -60,6 +60,12 @@ def test_fixture_reports_produce_parsed_rows_and_decisions(tmp_path, capsys):
     assert "SUMMARY decision_total=2" in lines
     assert "SUMMARY action.SELL=1" in lines
     assert "SUMMARY action.WATCH=1" in lines
+    assert "SUMMARY pullback.VALID_PULLBACK=0" in lines
+    assert "SUMMARY pullback.EARLY_PULLBACK=0" in lines
+    assert "SUMMARY pullback.STRUCTURE_BLOCKED_PULLBACK=0" in lines
+    assert "SUMMARY pullback.BREAKDOWN_NOT_PULLBACK=0" in lines
+    assert "SUMMARY pullback.NO_PULLBACK=2" in lines
+    assert "SUMMARY pullback.INSUFFICIENT_DATA=0" in lines
 
 
 def test_ticker_found_prints_selected_ticker_summary(tmp_path, capsys):
@@ -303,6 +309,14 @@ def test_cli_uses_existing_helpers_rather_than_duplicating_logic(monkeypatch, tm
                 "WATCH": 0,
                 "NEUTRAL": 0,
             },
+            pullback_counts={
+                "VALID_PULLBACK": 0,
+                "EARLY_PULLBACK": 0,
+                "STRUCTURE_BLOCKED_PULLBACK": 0,
+                "BREAKDOWN_NOT_PULLBACK": 0,
+                "NO_PULLBACK": 1,
+                "INSUFFICIENT_DATA": 0,
+            },
             warning_count=0,
             warnings=[],
         )
@@ -368,6 +382,7 @@ def test_default_output_does_not_include_trace_summary_lines(tmp_path, capsys):
 
     assert exit_code == 0
     output = capsys.readouterr().out
+    assert "SUMMARY pullback.NO_PULLBACK=1" in output
     assert "SUMMARY trace.SELL.horizon.daily=" not in output
     assert "TRACE ticker=NVDA" not in output
 
@@ -413,6 +428,8 @@ def test_show_trace_includes_sell_horizon_and_token_summary_counts(tmp_path, cap
     assert "SUMMARY trace.SELL.token.close_below_ema20=0" in lines
     assert "SUMMARY trace.SELL.token.BOS_DOWN=1" in lines
     assert "SUMMARY trace.SELL.token.RESET=1" in lines
+    assert "SUMMARY pullback.NO_PULLBACK=2" in lines
+    assert "SUMMARY pullback.STRUCTURE_BLOCKED_PULLBACK=0" in lines
 
 
 def test_show_trace_output_is_deterministic(tmp_path, capsys):
@@ -432,6 +449,37 @@ def test_show_trace_output_is_deterministic(tmp_path, capsys):
     trace_lines = [line for line in lines if line.startswith("TRACE ")]
     assert trace_lines == [
         "TRACE ticker=NVDA action=SELL rule=SELL_HARD_TOKEN horizon=daily field=raw_status token=sell value=SELL"
+    ]
+
+
+def test_pullback_summary_counts_are_printed_deterministically(tmp_path, capsys):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    _write_report(
+        reports_dir / "datacenter_daily_2026-05-22_0000_full.csv",
+        "\n".join(
+            [
+                "ticker;status;ma_break_status;freshness_status",
+                "AAA;PULLBACK_CANDIDATE;OK;FRESH_BULLISH_SIGNAL",
+                "BBB;PULLBACK_CANDIDATE;OK;",
+                "CCC;SIDEWAYS;;",
+            ]
+        )
+        + "\n",
+    )
+
+    exit_code = main(["--reports-dir", str(reports_dir)])
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    pullback_lines = [line for line in lines if line.startswith("SUMMARY pullback.")]
+    assert pullback_lines == [
+        "SUMMARY pullback.VALID_PULLBACK=1",
+        "SUMMARY pullback.EARLY_PULLBACK=1",
+        "SUMMARY pullback.STRUCTURE_BLOCKED_PULLBACK=0",
+        "SUMMARY pullback.BREAKDOWN_NOT_PULLBACK=0",
+        "SUMMARY pullback.NO_PULLBACK=1",
+        "SUMMARY pullback.INSUFFICIENT_DATA=0",
     ]
 
 
