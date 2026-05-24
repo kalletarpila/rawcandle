@@ -8,6 +8,10 @@ from unittest.mock import Mock
 
 import pytest
 
+from dev_tools.datacenter_dashboard_support import (
+    DatacenterDashboardStatus,
+    DatacenterReportStatus,
+)
 from dev_tools.stock_update_scheduler_ui import (
     DEFAULT_DATACENTER_ANALYSIS_DB,
     DEFAULT_DATACENTER_EXPECTED_GROUP_COUNT,
@@ -900,6 +904,21 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(tmp_path, mon
     monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.list_scheduler_log_files", lambda log_dir: [])
     monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.read_scheduler_status", lambda log_dir: None)
     monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.discover_datacenter_dashboard_status",
+        lambda reports_dir: DatacenterDashboardStatus(
+            overall_status="MISSING",
+            reports=[
+                DatacenterReportStatus(
+                    horizon=horizon,
+                    status="MISSING",
+                    path=None,
+                    modified_at=None,
+                )
+                for horizon in ("rolling 30d", "rolling 5d", "rolling 2d", "daily")
+            ],
+        ),
+    )
+    monkeypatch.setattr(
         "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
         lambda: {"timer_path": "/tmp/timer", "on_calendar": "*-*-* 05:30:00", "installed": True, "status_summary": "ok", "error": None},
     )
@@ -926,6 +945,9 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(tmp_path, mon
     assert page.datacenter_expected_synthetic_ohlc_count_field.value == DEFAULT_DATACENTER_EXPECTED_SYNTHETIC_OHLC_COUNT
     assert page.datacenter_rolling_window_size_field.value == DEFAULT_DATACENTER_ROLLING_WINDOW_SIZE
     assert page.datacenter_watchlist_file_field.value == DEFAULT_DATACENTER_WATCHLIST_FILE
+    assert page.datacenter_dashboard_reports_dir_field.value == DEFAULT_DATACENTER_OUTPUT_DIR
+    assert page.datacenter_dashboard_overall_status_field.value == "MISSING"
+    assert len(page.datacenter_dashboard_reports_column.controls) == 4
 
     page.datacenter_signal_date_field.value = "2026-05-15"
     page.datacenter_start_date_field.value = "2026-01-01"
@@ -972,6 +994,61 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(tmp_path, mon
     page.datacenter_daily_report_button.on_click(None)
     daily_override = captured[-1]
     assert daily_override["command"][daily_override["command"].index("--watchlist-file") + 1] == "/tmp/custom_watchlist.txt"
+
+
+def test_run_app_datacenter_dashboard_refresh_reads_report_directory(tmp_path, monkeypatch):
+    config_path = tmp_path / "scheduler.json"
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    (reports_dir / "datacenter_daily_2026-05-22_0000_full.md").write_text(
+        "report", encoding="utf-8"
+    )
+    config_path.write_text(
+        json.dumps(
+            {
+                "analysis_db_path": "/tmp/analysis.db",
+                "enabled_markets": ["omxh"],
+                "log_dir": "/tmp/logs",
+                "osakedata_db_path": "/tmp/osakedata.db",
+                "run_time": "05:30",
+                "timezone": "Europe/Helsinki",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.load_latest_scheduler_summary",
+        lambda log_dir: None,
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.list_scheduler_log_files",
+        lambda log_dir: [],
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_scheduler_status",
+        lambda log_dir: None,
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
+        lambda: {
+            "timer_path": "/tmp/timer",
+            "on_calendar": "*-*-* 05:30:00",
+            "installed": True,
+            "status_summary": "ok",
+            "error": None,
+        },
+    )
+
+    page = _FakePage()
+    run_app(page, str(config_path))
+    page.datacenter_dashboard_reports_dir_field.value = str(reports_dir)
+    page.datacenter_dashboard_refresh_button.on_click(None)
+
+    assert page.datacenter_dashboard_overall_status_field.value == "PARTIAL"
+    first_card = page.datacenter_dashboard_reports_column.controls[0]
+    assert "rolling 30d: MISSING" in first_card.content.controls[0].value
+    daily_card = page.datacenter_dashboard_reports_column.controls[3]
+    assert "daily: OK" in daily_card.content.controls[0].value
 
 
 def test_build_skip_next_run_config_sets_true_without_changing_other_fields():

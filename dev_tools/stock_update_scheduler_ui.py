@@ -16,6 +16,10 @@ from urllib.parse import quote
 
 import flet as ft
 
+from dev_tools.datacenter_dashboard_support import (
+    DatacenterDashboardStatus,
+    discover_datacenter_dashboard_status,
+)
 from rawcandle.scheduler.config import (
     StockUpdateSchedulerConfig,
     read_scheduler_config,
@@ -558,6 +562,50 @@ def _set_status(status_field: ft.TextField, message: str, color: str | None = No
         status_field.border_color = color
 
 
+def _dashboard_status_color(status: str) -> str:
+    if status == "READY" or status == "OK":
+        return _STATUS_OK_COLOR
+    if status == "PARTIAL":
+        return _STATUS_WARNING_COLOR
+    return _STATUS_ERROR_COLOR
+
+
+def populate_datacenter_dashboard_summary(
+    *,
+    dashboard_status: DatacenterDashboardStatus,
+    overall_status_field: ft.TextField,
+    reports_column: ft.Column,
+) -> None:
+    overall_status_field.value = dashboard_status.overall_status
+    overall_status_field.border_color = _dashboard_status_color(
+        dashboard_status.overall_status
+    )
+    reports_column.controls.clear()
+    for report in dashboard_status.reports:
+        reports_column.controls.append(
+            ft.Container(
+                content=ft.Column(
+                    controls=[
+                        ft.Text(
+                            f"{report.horizon}: {report.status}",
+                            weight=ft.FontWeight.BOLD,
+                        ),
+                        ft.Text(f"path: {report.path or 'NONE'}", size=11),
+                        ft.Text(
+                            f"modified_at: {report.modified_at or 'NONE'}",
+                            size=11,
+                            color="gray",
+                        ),
+                    ],
+                    spacing=2,
+                ),
+                border=ft.border.all(1, "#DADCE0"),
+                border_radius=8,
+                padding=10,
+            )
+        )
+
+
 def _market_row_text(market_result: Dict[str, Any]) -> str:
     return (
         f"{market_result.get('market', '')}: "
@@ -919,6 +967,18 @@ def run_app(page: ft.Page, config_path: str) -> None:
     datacenter_expected_synthetic_ohlc_count_field = ft.TextField(label="expected_synthetic_ohlc_count", value=DEFAULT_DATACENTER_EXPECTED_SYNTHETIC_OHLC_COUNT, width=220)
     datacenter_rolling_window_size_field = ft.TextField(label="rolling_window_size", value=DEFAULT_DATACENTER_ROLLING_WINDOW_SIZE, width=180)
     datacenter_watchlist_file_field = ft.TextField(label="watchlist_file", value=DEFAULT_DATACENTER_WATCHLIST_FILE, expand=True)
+    datacenter_dashboard_reports_dir_field = ft.TextField(
+        label="dashboard_reports_dir",
+        value=DEFAULT_DATACENTER_OUTPUT_DIR,
+        expand=True,
+    )
+    datacenter_dashboard_overall_status_field = ft.TextField(
+        label="dashboard_overall_status",
+        value="MISSING",
+        read_only=True,
+        width=220,
+        border_color=_STATUS_ERROR_COLOR,
+    )
     datacenter_status_field = ft.TextField(
         label="Datacenter status",
         value="",
@@ -937,6 +997,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
         read_only=True,
         expand=True,
     )
+    datacenter_dashboard_reports_column = ft.Column(spacing=8)
     datacenter_reports_column = ft.Column(spacing=8)
 
     def selected_markets_from_ui() -> List[str]:
@@ -961,6 +1022,17 @@ def run_app(page: ft.Page, config_path: str) -> None:
         omxs_checkbox.value = "omxs" in enabled_markets
         usa_checkbox.value = "usa" in enabled_markets
         technical_relevance_checkbox.value = config.technical_relevance_enabled
+
+    def refresh_datacenter_dashboard_view() -> None:
+        dashboard_status = discover_datacenter_dashboard_status(
+            datacenter_dashboard_reports_dir_field.value
+        )
+        populate_datacenter_dashboard_summary(
+            dashboard_status=dashboard_status,
+            overall_status_field=datacenter_dashboard_overall_status_field,
+            reports_column=datacenter_dashboard_reports_column,
+        )
+        page.update()
 
     def refresh_timer_status(config: StockUpdateSchedulerConfig) -> None:
         timer_status = read_systemd_user_timer_status()
@@ -1374,6 +1446,10 @@ def run_app(page: ft.Page, config_path: str) -> None:
     datacenter_rolling_report_button = ft.ElevatedButton("Generate Rolling Report", on_click=on_datacenter_rolling_report)
     datacenter_plan_button = ft.ElevatedButton("Show Pipeline Plan", on_click=on_datacenter_plan)
     datacenter_watermarks_button = ft.ElevatedButton("Show Watermarks", on_click=on_datacenter_watermarks)
+    datacenter_dashboard_refresh_button = ft.ElevatedButton(
+        "Refresh Dashboard",
+        on_click=lambda _e: refresh_datacenter_dashboard_view(),
+    )
     datacenter_buttons = ft.Row(
         [
             datacenter_dry_run_button,
@@ -1408,6 +1484,20 @@ def run_app(page: ft.Page, config_path: str) -> None:
                 wrap=True,
             ),
             datacenter_watchlist_file_field,
+            ft.Text("Datacenter Dashboard", size=18, weight=ft.FontWeight.BOLD),
+            ft.Text(
+                "Read-only dashboard shell. It scans the reports directory for the newest daily and rolling reports."
+            ),
+            ft.Row(
+                [
+                    datacenter_dashboard_reports_dir_field,
+                    datacenter_dashboard_overall_status_field,
+                    datacenter_dashboard_refresh_button,
+                ],
+                wrap=True,
+                vertical_alignment=ft.CrossAxisAlignment.END,
+            ),
+            datacenter_dashboard_reports_column,
             datacenter_buttons,
             datacenter_status_field,
             datacenter_reports_column,
@@ -1431,6 +1521,9 @@ def run_app(page: ft.Page, config_path: str) -> None:
     page.datacenter_expected_synthetic_ohlc_count_field = datacenter_expected_synthetic_ohlc_count_field
     page.datacenter_rolling_window_size_field = datacenter_rolling_window_size_field
     page.datacenter_watchlist_file_field = datacenter_watchlist_file_field
+    page.datacenter_dashboard_reports_dir_field = datacenter_dashboard_reports_dir_field
+    page.datacenter_dashboard_overall_status_field = datacenter_dashboard_overall_status_field
+    page.datacenter_dashboard_reports_column = datacenter_dashboard_reports_column
     page.datacenter_status_field = datacenter_status_field
     page.datacenter_reports_column = datacenter_reports_column
     page.datacenter_log_field = datacenter_log_field
@@ -1441,6 +1534,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
     page.datacenter_rolling_report_button = datacenter_rolling_report_button
     page.datacenter_plan_button = datacenter_plan_button
     page.datacenter_watermarks_button = datacenter_watermarks_button
+    page.datacenter_dashboard_refresh_button = datacenter_dashboard_refresh_button
     page.summary_field = summary_field
     page.logs_column = logs_column
     page.technical_relevance_checkbox = technical_relevance_checkbox
@@ -1456,6 +1550,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
         expand=1,
     )
     page.datacenter_tabs = tabs
+    refresh_datacenter_dashboard_view()
     page.add(tabs)
     page.update()
 
