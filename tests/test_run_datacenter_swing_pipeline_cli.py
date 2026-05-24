@@ -122,7 +122,7 @@ def test_dry_run_prints_planned_stages_and_does_not_call_stage_runners(tmp_path,
 
     assert exit_code == 0
     lines = capsys.readouterr().out.strip().splitlines()
-    assert lines[0] == "=== Stage 1/13: Datacenter base index ==="
+    assert lines[0] == "=== Stage 1/16: Datacenter base index ==="
     assert lines[1].startswith("PLAN --ohlcv-db ")
     assert any("Automatic technical relevance" in line for line in lines)
     assert "SUMMARY pipeline_stage.automatic_technical_relevance.status=DRY_RUN" in lines
@@ -296,7 +296,7 @@ def test_pipeline_calls_stages_in_correct_order_and_uses_index_base_date(tmp_pat
         return {"summary": {"output_markdown": str(output_md), "output_csv": str(output_csv), "validation_status": "OK"}}
 
     def _weekly(**kwargs):
-        calls.append(("weekly", dict(kwargs)))
+        calls.append((f"weekly_{kwargs['window_size']}", dict(kwargs)))
         output_md = kwargs["output_md"]
         output_csv = kwargs["output_csv"]
         output_md.write_text("weekly", encoding="utf-8")
@@ -345,7 +345,10 @@ def test_pipeline_calls_stages_in_correct_order_and_uses_index_base_date(tmp_pat
         "audit",
         "techrel",
         "daily",
-        "weekly",
+        "weekly_30",
+        "weekly_5",
+        "weekly_2",
+        "weekly_3",
     ]
     index_argv = calls[0][1]
     assert index_argv[index_argv.index("--start-date") + 1] == "2020-01-01"
@@ -360,7 +363,10 @@ def test_pipeline_calls_stages_in_correct_order_and_uses_index_base_date(tmp_pat
     assert audit_kwargs["weekly_window_size"] == 3
     techrel_kwargs = calls[10][1]
     daily_kwargs = calls[11][1]
-    weekly_kwargs = calls[12][1]
+    rolling_30_kwargs = calls[12][1]
+    rolling_5_kwargs = calls[13][1]
+    rolling_2_kwargs = calls[14][1]
+    weekly_kwargs = calls[15][1]
     assert techrel_kwargs["signal_date"] == "2026-05-15"
     assert techrel_kwargs["taxonomy_version"] == "DC_TAXONOMY_FULL_V1"
     assert techrel_kwargs["signal_version"] == orchestrator.DEFAULT_SIGNAL_VERSION
@@ -370,6 +376,12 @@ def test_pipeline_calls_stages_in_correct_order_and_uses_index_base_date(tmp_pat
     assert weekly_kwargs["window_size"] == 3
     assert str(weekly_kwargs["watchlist_file"]) == orchestrator.DEFAULT_WATCHLIST_FILE
     assert weekly_kwargs["technical_relevance_run_id"] == "AUTO_REL_RUN"
+    assert rolling_30_kwargs["window_size"] == 30
+    assert rolling_30_kwargs["technical_relevance_run_id"] == "AUTO_REL_RUN"
+    assert rolling_5_kwargs["window_size"] == 5
+    assert rolling_5_kwargs["technical_relevance_run_id"] == "AUTO_REL_RUN"
+    assert rolling_2_kwargs["window_size"] == 2
+    assert rolling_2_kwargs["technical_relevance_run_id"] == "AUTO_REL_RUN"
     lines = capsys.readouterr().out.strip().splitlines()
     assert "SUMMARY technical_relevance.enabled=true" in lines
     assert "SUMMARY technical_relevance.mode=auto" in lines
@@ -399,6 +411,15 @@ def test_pipeline_calls_stages_in_correct_order_and_uses_index_base_date(tmp_pat
     assert len(total_duration_value.rsplit(".", 1)[1]) == 3
     assert "SUMMARY pipeline_stage.automatic_technical_relevance.status=OK" in lines
     assert "SUMMARY pipeline_stage.automatic_technical_relevance.duration_seconds=0.000" in lines
+    assert any(line.startswith("SUMMARY rolling_30_report_path=") for line in lines)
+    assert any(line.startswith("SUMMARY rolling_5_report_path=") for line in lines)
+    assert any(line.startswith("SUMMARY rolling_2_report_path=") for line in lines)
+    assert any("datacenter_rolling_30_" in line for line in lines)
+    assert any("datacenter_rolling_5_" in line for line in lines)
+    assert any("datacenter_rolling_2_" in line for line in lines)
+    assert "SUMMARY pipeline_stage.rolling_30_report.status=OK" in lines
+    assert "SUMMARY pipeline_stage.rolling_5_report.status=OK" in lines
+    assert "SUMMARY pipeline_stage.rolling_2_report.status=OK" in lines
     assert lines[-1] == "SUMMARY pipeline_status=OK"
 
 
@@ -423,7 +444,7 @@ def test_pipeline_threads_technical_relevance_run_id_to_daily_and_weekly_report_
         return {"summary": {"output_markdown": str(kwargs["output_md"]), "output_csv": str(kwargs["output_csv"]), "validation_status": "OK"}}
 
     def _weekly(**kwargs):
-        calls.append(("weekly", dict(kwargs)))
+        calls.append((f"weekly_{kwargs['window_size']}", dict(kwargs)))
         kwargs["output_md"].write_text("weekly", encoding="utf-8")
         kwargs["output_csv"].write_text("weekly", encoding="utf-8")
         return {"summary": {"output_markdown": str(kwargs["output_md"]), "output_csv": str(kwargs["output_csv"]), "validation_status": "OK"}}
@@ -447,8 +468,14 @@ def test_pipeline_threads_technical_relevance_run_id_to_daily_and_weekly_report_
     assert exit_code == 0
     assert calls[0][0] == "daily"
     assert calls[0][1]["technical_relevance_run_id"] == "REL_PIPE_B"
-    assert calls[1][0] == "weekly"
+    assert calls[1][0] == "weekly_30"
     assert calls[1][1]["technical_relevance_run_id"] == "REL_PIPE_B"
+    assert calls[2][0] == "weekly_5"
+    assert calls[2][1]["technical_relevance_run_id"] == "REL_PIPE_B"
+    assert calls[3][0] == "weekly_2"
+    assert calls[3][1]["technical_relevance_run_id"] == "REL_PIPE_B"
+    assert calls[4][0] == "weekly_20"
+    assert calls[4][1]["technical_relevance_run_id"] == "REL_PIPE_B"
 
 
 def test_pipeline_profiling_disabled_by_default_does_not_print_profile_lines_in_auto_mode(tmp_path, monkeypatch, capsys):
@@ -517,7 +544,7 @@ def test_pipeline_watchlist_override_is_passed_to_daily_and_weekly_report_stages
         return {"summary": {"output_markdown": str(kwargs["output_md"]), "output_csv": str(kwargs["output_csv"]), "validation_status": "OK"}}
 
     def _weekly(**kwargs):
-        calls.append(("weekly", dict(kwargs)))
+        calls.append((f"weekly_{kwargs['window_size']}", dict(kwargs)))
         kwargs["output_md"].write_text("weekly", encoding="utf-8")
         kwargs["output_csv"].write_text("weekly", encoding="utf-8")
         return {"summary": {"output_markdown": str(kwargs["output_md"]), "output_csv": str(kwargs["output_csv"]), "validation_status": "OK"}}
@@ -540,9 +567,8 @@ def test_pipeline_watchlist_override_is_passed_to_daily_and_weekly_report_stages
 
     assert exit_code == 0
     assert str(calls[0][1]["watchlist_file"]) == str(watchlist_file)
-    assert str(calls[1][1]["watchlist_file"]) == str(watchlist_file)
-    assert calls[0][1]["technical_relevance_run_id"] == "AUTO_REL_RUN"
-    assert calls[1][1]["technical_relevance_run_id"] == "AUTO_REL_RUN"
+    assert all(str(call[1]["watchlist_file"]) == str(watchlist_file) for call in calls)
+    assert all(call[1]["technical_relevance_run_id"] == "AUTO_REL_RUN" for call in calls)
 
 
 def test_pipeline_no_taxonomy_listing_flag_is_passed_to_daily_and_weekly_report_stages(tmp_path, monkeypatch, capsys):
@@ -566,7 +592,7 @@ def test_pipeline_no_taxonomy_listing_flag_is_passed_to_daily_and_weekly_report_
         return {"summary": {"output_markdown": str(kwargs["output_md"]), "output_csv": str(kwargs["output_csv"]), "validation_status": "OK"}}
 
     def _weekly(**kwargs):
-        calls.append(("weekly", dict(kwargs)))
+        calls.append((f"weekly_{kwargs['window_size']}", dict(kwargs)))
         kwargs["output_md"].write_text("weekly", encoding="utf-8")
         kwargs["output_csv"].write_text("weekly", encoding="utf-8")
         return {"summary": {"output_markdown": str(kwargs["output_md"]), "output_csv": str(kwargs["output_csv"]), "validation_status": "OK"}}
@@ -589,7 +615,7 @@ def test_pipeline_no_taxonomy_listing_flag_is_passed_to_daily_and_weekly_report_
 
     assert exit_code == 0
     assert calls[0][1]["include_taxonomy_listing"] is False
-    assert calls[1][1]["include_taxonomy_listing"] is False
+    assert all(call[1]["include_taxonomy_listing"] is False for call in calls)
 
     dry_run_exit_code = run_datacenter_swing_pipeline_main(
         _base_args(tmp_path) + ["--dry-run", "--no-taxonomy-listing"]
@@ -664,6 +690,9 @@ def test_pipeline_generates_reports_on_audit_warn(tmp_path, monkeypatch, capsys)
     assert exit_code == 0
     lines = capsys.readouterr().out.strip().splitlines()
     assert "SUMMARY audit_validation_status=WARN" in lines
+    assert any(line.startswith("SUMMARY rolling_30_report_path=") for line in lines)
+    assert any(line.startswith("SUMMARY rolling_5_report_path=") for line in lines)
+    assert any(line.startswith("SUMMARY rolling_2_report_path=") for line in lines)
     assert lines[-1] == "SUMMARY pipeline_status=WARN"
 
 
@@ -810,6 +839,9 @@ def test_successful_orchestrator_writes_watermarks(tmp_path, monkeypatch):
     assert "PIPELINE_AUDIT" in component_names
     assert "DAILY_REPORT" in component_names
     assert "WEEKLY_REPORT" in component_names
+    assert "ROLLING_REPORT_30" in component_names
+    assert "ROLLING_REPORT_5" in component_names
+    assert "ROLLING_REPORT_2" in component_names
 
 
 def test_existing_watermark_does_not_skip_any_stage(tmp_path, monkeypatch, capsys):
@@ -842,7 +874,7 @@ def test_existing_watermark_does_not_skip_any_stage(tmp_path, monkeypatch, capsy
         return {"summary": {"output_markdown": str(output_md), "output_csv": str(output_csv), "validation_status": "OK"}}
 
     def _weekly(**kwargs):
-        calls.append("weekly")
+        calls.append(f"weekly_{kwargs['window_size']}")
         output_md = kwargs["output_md"]
         output_csv = kwargs["output_csv"]
         output_md.write_text("weekly", encoding="utf-8")
@@ -909,5 +941,8 @@ def test_existing_watermark_does_not_skip_any_stage(tmp_path, monkeypatch, capsy
         "audit",
         "techrel",
         "daily",
-        "weekly",
+        "weekly_30",
+        "weekly_5",
+        "weekly_2",
+        "weekly_20",
     ]

@@ -61,7 +61,15 @@ FINAL_PIPELINE_SUMMARY_ORDER = (
     "pipeline.total_duration_seconds",
     "audit_validation_status",
     "daily_report_path",
+    "daily_report_csv_path",
     "weekly_report_path",
+    "weekly_report_csv_path",
+    "rolling_30_report_path",
+    "rolling_30_report_csv_path",
+    "rolling_5_report_path",
+    "rolling_5_report_csv_path",
+    "rolling_2_report_path",
+    "rolling_2_report_csv_path",
     "pipeline_status",
 )
 
@@ -79,6 +87,9 @@ PIPELINE_STAGE_KEYS = (
     "automatic_technical_relevance",
     "daily_report",
     "weekly_swing_report",
+    "rolling_30_report",
+    "rolling_5_report",
+    "rolling_2_report",
 )
 
 
@@ -395,6 +406,26 @@ def _run_weekly_report_stage(
     return result
 
 
+def _build_timestamped_report_output_paths(
+    *,
+    output_dir: Path,
+    prefix: str,
+    signal_date: str,
+    output_hhmm: str,
+) -> tuple[Path, Path]:
+    output_md = _timestamp_output_path(
+        output_dir / f"{prefix}_{signal_date}_full.md",
+        date_value=signal_date,
+        hhmm=output_hhmm,
+    )
+    output_csv = _timestamp_output_path(
+        output_dir / f"{prefix}_{signal_date}_full.csv",
+        date_value=signal_date,
+        hhmm=output_hhmm,
+    )
+    return output_md, output_csv
+
+
 def run_datacenter_swing_pipeline(
     *,
     price_db: Path,
@@ -480,25 +511,35 @@ def run_datacenter_swing_pipeline(
     if profile_technical_relevance and technical_relevance_mode != "auto":
         technical_relevance_profile_summary["technical_relevance_profile.status"] = technical_relevance_status
     output_hhmm = _resolve_output_timestamp_hhmm(generated_at_utc)
-    daily_output_md = _timestamp_output_path(
-        output_dir / f"datacenter_daily_{signal_date}_full.md",
-        date_value=signal_date,
-        hhmm=output_hhmm,
+    daily_output_md, daily_output_csv = _build_timestamped_report_output_paths(
+        output_dir=output_dir,
+        prefix="datacenter_daily",
+        signal_date=signal_date,
+        output_hhmm=output_hhmm,
     )
-    daily_output_csv = _timestamp_output_path(
-        output_dir / f"datacenter_daily_{signal_date}_full.csv",
-        date_value=signal_date,
-        hhmm=output_hhmm,
+    weekly_output_md, weekly_output_csv = _build_timestamped_report_output_paths(
+        output_dir=output_dir,
+        prefix="datacenter_weekly",
+        signal_date=signal_date,
+        output_hhmm=output_hhmm,
     )
-    weekly_output_md = _timestamp_output_path(
-        output_dir / f"datacenter_weekly_{signal_date}_full.md",
-        date_value=signal_date,
-        hhmm=output_hhmm,
+    rolling_30_output_md, rolling_30_output_csv = _build_timestamped_report_output_paths(
+        output_dir=output_dir,
+        prefix="datacenter_rolling_30",
+        signal_date=signal_date,
+        output_hhmm=output_hhmm,
     )
-    weekly_output_csv = _timestamp_output_path(
-        output_dir / f"datacenter_weekly_{signal_date}_full.csv",
-        date_value=signal_date,
-        hhmm=output_hhmm,
+    rolling_5_output_md, rolling_5_output_csv = _build_timestamped_report_output_paths(
+        output_dir=output_dir,
+        prefix="datacenter_rolling_5",
+        signal_date=signal_date,
+        output_hhmm=output_hhmm,
+    )
+    rolling_2_output_md, rolling_2_output_csv = _build_timestamped_report_output_paths(
+        output_dir=output_dir,
+        prefix="datacenter_rolling_2",
+        signal_date=signal_date,
+        output_hhmm=output_hhmm,
     )
 
     stages: list[PipelineStage] = []
@@ -949,12 +990,78 @@ def run_datacenter_swing_pipeline(
             "--output-csv",
             str(output_dir / f"datacenter_weekly_{signal_date}_full.csv"),
         ]
+        rolling_30_argv = [
+            "--analysis-db",
+            str(analysis_db),
+            "--end-date",
+            signal_date,
+            "--signal-version",
+            signal_version,
+            "--ohlc-calc-version",
+            ohlc_calc_version,
+            "--taxonomy-version",
+            taxonomy_version,
+            "--window-size",
+            "30",
+            "--watchlist-file",
+            str(selected_watchlist_file),
+            "--output-md",
+            str(output_dir / f"datacenter_rolling_30_{signal_date}_full.md"),
+            "--output-csv",
+            str(output_dir / f"datacenter_rolling_30_{signal_date}_full.csv"),
+        ]
+        rolling_5_argv = [
+            "--analysis-db",
+            str(analysis_db),
+            "--end-date",
+            signal_date,
+            "--signal-version",
+            signal_version,
+            "--ohlc-calc-version",
+            ohlc_calc_version,
+            "--taxonomy-version",
+            taxonomy_version,
+            "--window-size",
+            "5",
+            "--watchlist-file",
+            str(selected_watchlist_file),
+            "--output-md",
+            str(output_dir / f"datacenter_rolling_5_{signal_date}_full.md"),
+            "--output-csv",
+            str(output_dir / f"datacenter_rolling_5_{signal_date}_full.csv"),
+        ]
+        rolling_2_argv = [
+            "--analysis-db",
+            str(analysis_db),
+            "--end-date",
+            signal_date,
+            "--signal-version",
+            signal_version,
+            "--ohlc-calc-version",
+            ohlc_calc_version,
+            "--taxonomy-version",
+            taxonomy_version,
+            "--window-size",
+            "2",
+            "--watchlist-file",
+            str(selected_watchlist_file),
+            "--output-md",
+            str(output_dir / f"datacenter_rolling_2_{signal_date}_full.md"),
+            "--output-csv",
+            str(output_dir / f"datacenter_rolling_2_{signal_date}_full.csv"),
+        ]
         if no_taxonomy_listing:
             daily_argv.append("--no-taxonomy-listing")
             weekly_argv.append("--no-taxonomy-listing")
+            rolling_30_argv.append("--no-taxonomy-listing")
+            rolling_5_argv.append("--no-taxonomy-listing")
+            rolling_2_argv.append("--no-taxonomy-listing")
         if resolved_technical_relevance_run_id is not None:
             daily_argv.extend(["--technical-relevance-run-id", resolved_technical_relevance_run_id])
             weekly_argv.extend(["--technical-relevance-run-id", resolved_technical_relevance_run_id])
+            rolling_30_argv.extend(["--technical-relevance-run-id", resolved_technical_relevance_run_id])
+            rolling_5_argv.extend(["--technical-relevance-run-id", resolved_technical_relevance_run_id])
+            rolling_2_argv.extend(["--technical-relevance-run-id", resolved_technical_relevance_run_id])
         stages.append(
             PipelineStage(
                 stage_key="daily_report",
@@ -979,6 +1086,99 @@ def run_datacenter_swing_pipeline(
                     "signal_version": signal_version,
                     "calc_version": ohlc_calc_version,
                     "start_date": signal_date,
+                    "end_date": signal_date,
+                    "row_count": None,
+                    "status": "OK",
+                },
+            )
+        )
+        stages.append(
+            PipelineStage(
+                stage_key="rolling_30_report",
+                heading="Rolling 30 report",
+                argv=rolling_30_argv,
+                runner=lambda: _run_weekly_report_stage(
+                    analysis_db=analysis_db,
+                    end_date=signal_date,
+                    signal_version=signal_version,
+                    ohlc_calc_version=ohlc_calc_version,
+                    taxonomy_version=taxonomy_version,
+                    window_size=30,
+                    watchlist_file=selected_watchlist_file,
+                    output_md=rolling_30_output_md,
+                    output_csv=rolling_30_output_csv,
+                    include_taxonomy_listing=not no_taxonomy_listing,
+                    technical_relevance_run_id=resolved_technical_relevance_run_id,
+                ),
+                watermark_builder=lambda result: {
+                    "component_name": "ROLLING_REPORT_30",
+                    "taxonomy_version": taxonomy_version,
+                    "market": "",
+                    "signal_version": signal_version,
+                    "calc_version": ohlc_calc_version,
+                    "start_date": str(result["summary"].get("window_start_date", signal_date)),
+                    "end_date": signal_date,
+                    "row_count": None,
+                    "status": "OK",
+                },
+            )
+        )
+        stages.append(
+            PipelineStage(
+                stage_key="rolling_5_report",
+                heading="Rolling 5 report",
+                argv=rolling_5_argv,
+                runner=lambda: _run_weekly_report_stage(
+                    analysis_db=analysis_db,
+                    end_date=signal_date,
+                    signal_version=signal_version,
+                    ohlc_calc_version=ohlc_calc_version,
+                    taxonomy_version=taxonomy_version,
+                    window_size=5,
+                    watchlist_file=selected_watchlist_file,
+                    output_md=rolling_5_output_md,
+                    output_csv=rolling_5_output_csv,
+                    include_taxonomy_listing=not no_taxonomy_listing,
+                    technical_relevance_run_id=resolved_technical_relevance_run_id,
+                ),
+                watermark_builder=lambda result: {
+                    "component_name": "ROLLING_REPORT_5",
+                    "taxonomy_version": taxonomy_version,
+                    "market": "",
+                    "signal_version": signal_version,
+                    "calc_version": ohlc_calc_version,
+                    "start_date": str(result["summary"].get("window_start_date", signal_date)),
+                    "end_date": signal_date,
+                    "row_count": None,
+                    "status": "OK",
+                },
+            )
+        )
+        stages.append(
+            PipelineStage(
+                stage_key="rolling_2_report",
+                heading="Rolling 2 report",
+                argv=rolling_2_argv,
+                runner=lambda: _run_weekly_report_stage(
+                    analysis_db=analysis_db,
+                    end_date=signal_date,
+                    signal_version=signal_version,
+                    ohlc_calc_version=ohlc_calc_version,
+                    taxonomy_version=taxonomy_version,
+                    window_size=2,
+                    watchlist_file=selected_watchlist_file,
+                    output_md=rolling_2_output_md,
+                    output_csv=rolling_2_output_csv,
+                    include_taxonomy_listing=not no_taxonomy_listing,
+                    technical_relevance_run_id=resolved_technical_relevance_run_id,
+                ),
+                watermark_builder=lambda result: {
+                    "component_name": "ROLLING_REPORT_2",
+                    "taxonomy_version": taxonomy_version,
+                    "market": "",
+                    "signal_version": signal_version,
+                    "calc_version": ohlc_calc_version,
+                    "start_date": str(result["summary"].get("window_start_date", signal_date)),
                     "end_date": signal_date,
                     "row_count": None,
                     "status": "OK",
@@ -1051,7 +1251,15 @@ def run_datacenter_swing_pipeline(
                 "pipeline.total_duration_seconds": _format_duration_seconds(perf_counter() - total_start),
                 "audit_validation_status": "SKIPPED" if skip_audit else "DRY_RUN",
                 "daily_report_path": "",
+                "daily_report_csv_path": "",
                 "weekly_report_path": "",
+                "weekly_report_csv_path": "",
+                "rolling_30_report_path": "",
+                "rolling_30_report_csv_path": "",
+                "rolling_5_report_path": "",
+                "rolling_5_report_csv_path": "",
+                "rolling_2_report_path": "",
+                "rolling_2_report_csv_path": "",
                 "pipeline_status": "DRY_RUN",
                 **stage_duration_summary,
                 **ticker_swing_snapshot_profile_summary,
@@ -1062,7 +1270,15 @@ def run_datacenter_swing_pipeline(
     completed_stage_count = 0
     audit_validation_status = "SKIPPED" if skip_audit else "UNKNOWN"
     daily_report_path = ""
+    daily_report_csv_path = ""
     weekly_report_path = ""
+    weekly_report_csv_path = ""
+    rolling_30_report_path = ""
+    rolling_30_report_csv_path = ""
+    rolling_5_report_path = ""
+    rolling_5_report_csv_path = ""
+    rolling_2_report_path = ""
+    rolling_2_report_csv_path = ""
 
     if not skip_reports:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -1119,7 +1335,15 @@ def run_datacenter_swing_pipeline(
                         "pipeline.total_duration_seconds": _format_duration_seconds(perf_counter() - total_start),
                         "audit_validation_status": audit_validation_status,
                         "daily_report_path": "",
+                        "daily_report_csv_path": "",
                         "weekly_report_path": "",
+                        "weekly_report_csv_path": "",
+                        "rolling_30_report_path": "",
+                        "rolling_30_report_csv_path": "",
+                        "rolling_5_report_path": "",
+                        "rolling_5_report_csv_path": "",
+                        "rolling_2_report_path": "",
+                        "rolling_2_report_csv_path": "",
                         "pipeline_status": "FAIL",
                         **stage_duration_summary,
                         **ticker_swing_snapshot_profile_summary,
@@ -1140,8 +1364,19 @@ def run_datacenter_swing_pipeline(
             technical_relevance_end_date = str(result["summary"]["end_date"])
         elif stage.heading == "Daily report":
             daily_report_path = str(result["summary"]["output_markdown"])
+            daily_report_csv_path = str(result["summary"]["output_csv"])
         elif stage.heading == "Weekly swing report":
             weekly_report_path = str(result["summary"]["output_markdown"])
+            weekly_report_csv_path = str(result["summary"]["output_csv"])
+        elif stage.heading == "Rolling 30 report":
+            rolling_30_report_path = str(result["summary"]["output_markdown"])
+            rolling_30_report_csv_path = str(result["summary"]["output_csv"])
+        elif stage.heading == "Rolling 5 report":
+            rolling_5_report_path = str(result["summary"]["output_markdown"])
+            rolling_5_report_csv_path = str(result["summary"]["output_csv"])
+        elif stage.heading == "Rolling 2 report":
+            rolling_2_report_path = str(result["summary"]["output_markdown"])
+            rolling_2_report_csv_path = str(result["summary"]["output_csv"])
 
     pipeline_status = "OK"
     if audit_validation_status == "WARN":
@@ -1172,10 +1407,18 @@ def run_datacenter_swing_pipeline(
             "pipeline.total_duration_seconds": _format_duration_seconds(perf_counter() - total_start),
             "audit_validation_status": audit_validation_status,
             "daily_report_path": daily_report_path,
+            "daily_report_csv_path": daily_report_csv_path,
             "weekly_report_path": weekly_report_path,
-                "pipeline_status": pipeline_status,
-                **stage_duration_summary,
-                **ticker_swing_snapshot_profile_summary,
-                **technical_relevance_profile_summary,
-            }
+            "weekly_report_csv_path": weekly_report_csv_path,
+            "rolling_30_report_path": rolling_30_report_path,
+            "rolling_30_report_csv_path": rolling_30_report_csv_path,
+            "rolling_5_report_path": rolling_5_report_path,
+            "rolling_5_report_csv_path": rolling_5_report_csv_path,
+            "rolling_2_report_path": rolling_2_report_path,
+            "rolling_2_report_csv_path": rolling_2_report_csv_path,
+            "pipeline_status": pipeline_status,
+            **stage_duration_summary,
+            **ticker_swing_snapshot_profile_summary,
+            **technical_relevance_profile_summary,
         }
+    }

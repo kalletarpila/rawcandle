@@ -246,6 +246,9 @@ def test_pipeline_stage_keys_are_stable_and_contain_no_spaces():
         "automatic_technical_relevance",
         "daily_report",
         "weekly_swing_report",
+        "rolling_30_report",
+        "rolling_5_report",
+        "rolling_2_report",
     )
     assert all(" " not in key for key in orchestrator.PIPELINE_STAGE_KEYS)
 
@@ -373,10 +376,10 @@ def test_default_mode_runs_automatic_technical_relevance_and_threads_generated_r
 
     perf_values = [0.0]
     stage_start = 1.0
-    for _ in range(13):
+    for _ in range(16):
         perf_values.extend([stage_start, stage_start + 0.25])
         stage_start += 1.0
-    perf_values.append(13.25)
+    perf_values.append(16.25)
 
     monkeypatch.setattr(orchestrator, "run_datacenter_indices_main", _runner)
     monkeypatch.setattr(orchestrator, "run_datacenter_ticker_swing_signals_main", _runner)
@@ -402,16 +405,29 @@ def test_default_mode_runs_automatic_technical_relevance_and_threads_generated_r
     assert summary["technical_relevance.run_id"] == "AUTO_GENERATED_RUN"
     assert summary["technical_relevance.ticker_count_status"] == "ACTUAL_RUN"
     assert summary["technical_relevance.status"] == "OK"
-    assert summary["pipeline.total_duration_seconds"] == "13.250"
+    assert summary["pipeline.total_duration_seconds"] == "16.250"
     assert summary["pipeline_stage.automatic_technical_relevance.status"] == "OK"
     assert summary["pipeline_stage.automatic_technical_relevance.duration_seconds"] == "0.250"
     assert summary["pipeline_stage.daily_report.duration_seconds"] == "0.250"
     assert summary["pipeline_stage.weekly_swing_report.duration_seconds"] == "0.250"
+    assert summary["pipeline_stage.rolling_30_report.duration_seconds"] == "0.250"
+    assert summary["pipeline_stage.rolling_5_report.duration_seconds"] == "0.250"
+    assert summary["pipeline_stage.rolling_2_report.duration_seconds"] == "0.250"
     assert calls[0][0] == "techrel"
     assert calls[1][0] == "daily"
     assert calls[1][1]["technical_relevance_run_id"] == "AUTO_GENERATED_RUN"
     assert calls[2][0] == "weekly"
     assert calls[2][1]["technical_relevance_run_id"] == "AUTO_GENERATED_RUN"
+    assert calls[2][1]["window_size"] == 30
+    assert calls[3][0] == "weekly"
+    assert calls[3][1]["technical_relevance_run_id"] == "AUTO_GENERATED_RUN"
+    assert calls[3][1]["window_size"] == 5
+    assert calls[4][0] == "weekly"
+    assert calls[4][1]["technical_relevance_run_id"] == "AUTO_GENERATED_RUN"
+    assert calls[4][1]["window_size"] == 2
+    assert calls[5][0] == "weekly"
+    assert calls[5][1]["technical_relevance_run_id"] == "AUTO_GENERATED_RUN"
+    assert calls[5][1]["window_size"] == 20
 
 
 def test_existing_run_mode_skips_automatic_technical_relevance_and_threads_provided_run_id(tmp_path, monkeypatch):
@@ -462,6 +478,9 @@ def test_existing_run_mode_skips_automatic_technical_relevance_and_threads_provi
     assert result["summary"]["technical_relevance.status"] == "SKIPPED_EXISTING_RUN"
     assert calls[0][1]["technical_relevance_run_id"] == "EXISTING_RUN"
     assert calls[1][1]["technical_relevance_run_id"] == "EXISTING_RUN"
+    assert calls[2][1]["technical_relevance_run_id"] == "EXISTING_RUN"
+    assert calls[3][1]["technical_relevance_run_id"] == "EXISTING_RUN"
+    assert calls[4][1]["technical_relevance_run_id"] == "EXISTING_RUN"
 
 
 def test_disabled_mode_skips_automatic_technical_relevance_and_passes_none(tmp_path, monkeypatch):
@@ -514,6 +533,9 @@ def test_disabled_mode_skips_automatic_technical_relevance_and_passes_none(tmp_p
     assert result["summary"]["pipeline_stage.automatic_technical_relevance.duration_seconds"] == "0.000"
     assert calls[0][1]["technical_relevance_run_id"] is None
     assert calls[1][1]["technical_relevance_run_id"] is None
+    assert calls[2][1]["technical_relevance_run_id"] is None
+    assert calls[3][1]["technical_relevance_run_id"] is None
+    assert calls[4][1]["technical_relevance_run_id"] is None
 
 
 def test_automatic_duplicate_run_failure_propagates_clearly(tmp_path, monkeypatch):
