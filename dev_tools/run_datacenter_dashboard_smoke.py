@@ -48,6 +48,12 @@ _PULLBACK_ACTION_SUMMARY_ORDER = {
     "STRUCTURE_BLOCKED_PULLBACK": ("SELL", "REDUCE", "TIGHTEN_STOP", "NEUTRAL"),
     "BREAKDOWN_NOT_PULLBACK": ("SELL", "REDUCE", "TIGHTEN_STOP", "NEUTRAL"),
 }
+_PULLBACK_DEBUG_ORDER = (
+    "VALID_PULLBACK",
+    "EARLY_PULLBACK",
+    "STRUCTURE_BLOCKED_PULLBACK",
+    "BREAKDOWN_NOT_PULLBACK",
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -57,6 +63,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reports-dir", required=True)
     parser.add_argument("--ticker")
     parser.add_argument("--max-rows", type=int)
+    parser.add_argument("--pullback-debug", action="store_true")
+    parser.add_argument(
+        "--pullback-debug-validity",
+        choices=_PULLBACK_DEBUG_ORDER,
+    )
+    parser.add_argument(
+        "--pullback-debug-action",
+        choices=_ACTION_ORDER,
+    )
+    parser.add_argument("--max-pullback-debug-rows", type=int, default=50)
     parser.add_argument("--show-trace", action="store_true")
     return parser
 
@@ -101,6 +117,68 @@ def _print_decision_rows(
             f"action={decision.action} "
             f"severity={decision.severity} "
             f"reason={decision.primary_reason or ''}"
+        )
+
+
+def _safe_debug_value(value: object | None) -> str:
+    if value is None:
+        return ""
+    return str(value).replace("\n", " ").replace("\r", " ").strip()
+
+
+def _filtered_pullback_debug_decisions(
+    decision_result: DatacenterDecisionBatchResult,
+    *,
+    pullback_validity: str | None,
+    action: str | None,
+) -> list[DatacenterTickerDecision]:
+    decisions = [
+        decision
+        for decision in decision_result.decisions
+        if (decision.pullback_validity or "INSUFFICIENT_DATA") in _PULLBACK_DEBUG_ORDER
+    ]
+    if pullback_validity:
+        decisions = [
+            decision
+            for decision in decisions
+            if (decision.pullback_validity or "INSUFFICIENT_DATA") == pullback_validity
+        ]
+    if action:
+        decisions = [decision for decision in decisions if decision.action == action]
+    return sorted(
+        decisions,
+        key=lambda decision: (
+            _PULLBACK_DEBUG_ORDER.index(decision.pullback_validity or "INSUFFICIENT_DATA"),
+            _ACTION_ORDER.index(decision.action),
+            decision.ticker,
+        ),
+    )
+
+
+def _print_pullback_debug_rows(
+    decision_result: DatacenterDecisionBatchResult,
+    *,
+    pullback_validity: str | None,
+    action: str | None,
+    max_rows: int,
+) -> None:
+    for decision in _filtered_pullback_debug_decisions(
+        decision_result,
+        pullback_validity=pullback_validity,
+        action=action,
+    )[:max_rows]:
+        first_trace = decision.decision_trace[0] if decision.decision_trace else None
+        print(
+            "PULLBACK_DEBUG "
+            f"ticker={_safe_debug_value(decision.ticker)} "
+            f"validity={_safe_debug_value(decision.pullback_validity)} "
+            f"reason={_safe_debug_value(decision.pullback_reason)} "
+            f"action={_safe_debug_value(decision.action)} "
+            f"severity={_safe_debug_value(decision.severity)} "
+            f"primary_reason={_safe_debug_value(decision.primary_reason)} "
+            f"first_trace_rule={_safe_debug_value(first_trace.matched_rule if first_trace else None)} "
+            f"first_trace_token={_safe_debug_value(first_trace.matched_token if first_trace else None)} "
+            f"first_trace_horizon={_safe_debug_value(first_trace.horizon if first_trace else None)}"
         )
 
 
@@ -308,6 +386,13 @@ def main(argv: list[str] | None = None) -> int:
     _print_pullback_action_summaries(decision_result)
     if args.show_trace:
         _print_sell_trace_summaries(decision_result)
+    if args.pullback_debug:
+        _print_pullback_debug_rows(
+            decision_result,
+            pullback_validity=args.pullback_debug_validity,
+            action=args.pullback_debug_action,
+            max_rows=args.max_pullback_debug_rows,
+        )
 
     if args.ticker:
         selected_ticker = args.ticker.strip().upper()

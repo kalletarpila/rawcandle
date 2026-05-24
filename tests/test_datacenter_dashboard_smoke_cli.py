@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from dev_tools.datacenter_dashboard_decisions import (
     DatacenterDecisionTrace,
     DatacenterDecisionBatchResult,
@@ -663,3 +665,250 @@ def test_default_output_does_not_include_pullback_validity_lines_when_show_trace
     output = capsys.readouterr().out
     assert "INSPECTOR pullback_validity=" not in output
     assert "INSPECTOR pullback_reason=" not in output
+
+
+def test_pullback_debug_prints_rows(tmp_path, capsys):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    _write_report(
+        reports_dir / "datacenter_daily_2026-05-22_0000_full.csv",
+        "\n".join(
+            [
+                "ticker;status;ma_break_status;freshness_status;reason",
+                "AAA;PULLBACK_CANDIDATE;OK;FRESH_BULLISH_SIGNAL;",
+                "BBB;PULLBACK_CANDIDATE;OK;;",
+                "CCC;PULLBACK_CANDIDATE;EMA20_CONFIRMED_BREAK;;",
+                "DDD;PULLBACK_CANDIDATE;;STRUCTURE_WARNING_OVERRIDES_BULLISH;",
+            ]
+        )
+        + "\n",
+    )
+
+    exit_code = main(["--reports-dir", str(reports_dir), "--pullback-debug"])
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    debug_lines = [line for line in lines if line.startswith("PULLBACK_DEBUG ")]
+    assert len(debug_lines) == 4
+    assert debug_lines[0].startswith("PULLBACK_DEBUG ticker=AAA validity=VALID_PULLBACK")
+    assert debug_lines[1].startswith("PULLBACK_DEBUG ticker=BBB validity=EARLY_PULLBACK")
+    assert debug_lines[2].startswith(
+        "PULLBACK_DEBUG ticker=DDD validity=STRUCTURE_BLOCKED_PULLBACK"
+    )
+    assert debug_lines[3].startswith(
+        "PULLBACK_DEBUG ticker=CCC validity=BREAKDOWN_NOT_PULLBACK"
+    )
+
+
+def test_default_output_without_pullback_debug_does_not_print_pullback_debug_rows(
+    tmp_path, capsys
+):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    _write_report(
+        reports_dir / "datacenter_daily_2026-05-22_0000_full.csv",
+        "ticker;status;ma_break_status;freshness_status\nAAA;PULLBACK_CANDIDATE;OK;FRESH_BULLISH_SIGNAL\n",
+    )
+
+    exit_code = main(["--reports-dir", str(reports_dir)])
+
+    assert exit_code == 0
+    assert "PULLBACK_DEBUG " not in capsys.readouterr().out
+
+
+def test_pullback_debug_validity_filters_rows(tmp_path, capsys):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    _write_report(
+        reports_dir / "datacenter_daily_2026-05-22_0000_full.csv",
+        "\n".join(
+            [
+                "ticker;status;ma_break_status;freshness_status",
+                "AAA;PULLBACK_CANDIDATE;OK;FRESH_BULLISH_SIGNAL",
+                "BBB;PULLBACK_CANDIDATE;OK;",
+            ]
+        )
+        + "\n",
+    )
+
+    exit_code = main(
+        [
+            "--reports-dir",
+            str(reports_dir),
+            "--pullback-debug",
+            "--pullback-debug-validity",
+            "VALID_PULLBACK",
+        ]
+    )
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    debug_lines = [line for line in lines if line.startswith("PULLBACK_DEBUG ")]
+    assert len(debug_lines) == 1
+    assert "ticker=AAA" in debug_lines[0]
+    assert "validity=VALID_PULLBACK" in debug_lines[0]
+
+
+def test_pullback_debug_action_filters_rows(tmp_path, capsys):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    _write_report(
+        reports_dir / "datacenter_daily_2026-05-22_0000_full.csv",
+        "\n".join(
+            [
+                "ticker;status;ma_break_status;freshness_status",
+                "AAA;PULLBACK_CANDIDATE;OK;FRESH_BULLISH_SIGNAL",
+                "BBB;PULLBACK_CANDIDATE;EMA20_CONFIRMED_BREAK;",
+            ]
+        )
+        + "\n",
+    )
+
+    exit_code = main(
+        [
+            "--reports-dir",
+            str(reports_dir),
+            "--pullback-debug",
+            "--pullback-debug-action",
+            "SELL",
+        ]
+    )
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    debug_lines = [line for line in lines if line.startswith("PULLBACK_DEBUG ")]
+    assert len(debug_lines) == 1
+    assert "ticker=BBB" in debug_lines[0]
+    assert "action=SELL" in debug_lines[0]
+
+
+def test_max_pullback_debug_rows_limits_pullback_debug_rows(tmp_path, capsys):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    _write_report(
+        reports_dir / "datacenter_daily_2026-05-22_0000_full.csv",
+        "\n".join(
+            [
+                "ticker;status;ma_break_status;freshness_status",
+                "AAA;PULLBACK_CANDIDATE;OK;FRESH_BULLISH_SIGNAL",
+                "BBB;PULLBACK_CANDIDATE;OK;",
+                "CCC;PULLBACK_CANDIDATE;EMA20_CONFIRMED_BREAK;",
+                "DDD;PULLBACK_CANDIDATE;;STRUCTURE_WARNING_OVERRIDES_BULLISH",
+            ]
+        )
+        + "\n",
+    )
+
+    exit_code = main(
+        [
+            "--reports-dir",
+            str(reports_dir),
+            "--pullback-debug",
+            "--max-pullback-debug-rows",
+            "2",
+        ]
+    )
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    debug_lines = [line for line in lines if line.startswith("PULLBACK_DEBUG ")]
+    assert len(debug_lines) == 2
+
+
+def test_invalid_pullback_debug_validity_filter_exits_non_zero(tmp_path):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(
+            [
+                "--reports-dir",
+                str(reports_dir),
+                "--pullback-debug",
+                "--pullback-debug-validity",
+                "BAD_VALUE",
+            ]
+        )
+
+    assert exc_info.value.code != 0
+
+
+def test_invalid_pullback_debug_action_filter_exits_non_zero(tmp_path):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(
+            [
+                "--reports-dir",
+                str(reports_dir),
+                "--pullback-debug",
+                "--pullback-debug-action",
+                "BAD_ACTION",
+            ]
+        )
+
+    assert exc_info.value.code != 0
+
+
+def test_pullback_debug_output_order_is_deterministic(tmp_path, capsys):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    _write_report(
+        reports_dir / "datacenter_daily_2026-05-22_0000_full.csv",
+        "\n".join(
+            [
+                "ticker;status;ma_break_status;freshness_status;reason",
+                "CCC;PULLBACK_CANDIDATE;EMA20_CONFIRMED_BREAK;;",
+                "AAA;PULLBACK_CANDIDATE;OK;FRESH_BULLISH_SIGNAL;",
+                "DDD;PULLBACK_CANDIDATE;;STRUCTURE_WARNING_OVERRIDES_BULLISH;",
+                "BBB;PULLBACK_CANDIDATE;OK;;",
+            ]
+        )
+        + "\n",
+    )
+
+    exit_code = main(["--reports-dir", str(reports_dir), "--pullback-debug"])
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    debug_lines = [line for line in lines if line.startswith("PULLBACK_DEBUG ")]
+    assert debug_lines == [
+        "PULLBACK_DEBUG ticker=AAA validity=VALID_PULLBACK reason=FRESH_BULLISH_PULLBACK_WITH_NO_STRUCTURE_BLOCK action=NEUTRAL severity=INFO primary_reason=NO_DECISIVE_SIGNAL first_trace_rule=NEUTRAL_FALLBACK first_trace_token= first_trace_horizon=",
+        "PULLBACK_DEBUG ticker=BBB validity=EARLY_PULLBACK reason=WAIT_FOR_BULLISH_CONFIRMATION action=NEUTRAL severity=INFO primary_reason=NO_DECISIVE_SIGNAL first_trace_rule=NEUTRAL_FALLBACK first_trace_token= first_trace_horizon=",
+        "PULLBACK_DEBUG ticker=DDD validity=STRUCTURE_BLOCKED_PULLBACK reason=STRUCTURE_WARNING_OVERRIDES_BULLISH_SIGNAL action=NEUTRAL severity=INFO primary_reason=NO_DECISIVE_SIGNAL first_trace_rule=NEUTRAL_FALLBACK first_trace_token= first_trace_horizon=",
+        "PULLBACK_DEBUG ticker=CCC validity=BREAKDOWN_NOT_PULLBACK reason=EMA20_CONFIRMED_BREAK action=SELL severity=CRITICAL primary_reason=SELL_SIGNAL_DETECTED first_trace_rule=SELL_EMA20_CONFIRMED_BREAK first_trace_token=EMA20_CONFIRMED_BREAK first_trace_horizon=daily",
+    ]
+
+
+def test_pullback_debug_does_not_change_decision_output_counts(tmp_path, capsys):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    _write_report(
+        reports_dir / "datacenter_daily_2026-05-22_0000_full.csv",
+        "\n".join(
+            [
+                "ticker;status;ma_break_status;freshness_status;reason",
+                "AAA;PULLBACK_CANDIDATE;OK;FRESH_BULLISH_SIGNAL;",
+                "CCC;PULLBACK_CANDIDATE;EMA20_CONFIRMED_BREAK;;",
+            ]
+        )
+        + "\n",
+    )
+
+    exit_code = main(
+        [
+            "--reports-dir",
+            str(reports_dir),
+            "--pullback-debug",
+            "--max-rows",
+            "2",
+        ]
+    )
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "SUMMARY action.SELL=1" in output
+    assert "SUMMARY action.NEUTRAL=1" in output
+    assert "DECISION ticker=CCC action=SELL severity=CRITICAL reason=SELL_SIGNAL_DETECTED" in output
+    assert "DECISION ticker=AAA action=NEUTRAL severity=INFO reason=NO_DECISIVE_SIGNAL" in output
