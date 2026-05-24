@@ -155,8 +155,46 @@ def _filtered_pullback_debug_decisions(
     )
 
 
+def _pullback_debug_context_rows(
+    rows: list[DatacenterDashboardRow],
+    ticker: str,
+) -> list[DatacenterDashboardRow]:
+    matching_rows = [row for row in rows if row.ticker.upper() == ticker.upper()]
+    horizon_order = {
+        "daily": 0,
+        "rolling 2d": 1,
+        "rolling 5d": 2,
+        "rolling 30d": 3,
+    }
+    return sorted(
+        matching_rows,
+        key=lambda row: (
+            horizon_order.get(row.horizon, 99),
+            row.source_file,
+            row.section or "",
+            row.raw_status or "",
+            row.raw_action or "",
+        ),
+    )
+
+
+def _first_non_empty_context_value(
+    rows: list[DatacenterDashboardRow],
+    field_name: str,
+) -> object | None:
+    for row in rows:
+        value = getattr(row, field_name, None)
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        return value
+    return None
+
+
 def _print_pullback_debug_rows(
     decision_result: DatacenterDecisionBatchResult,
+    rows: list[DatacenterDashboardRow],
     *,
     pullback_validity: str | None,
     action: str | None,
@@ -168,6 +206,7 @@ def _print_pullback_debug_rows(
         action=action,
     )[:max_rows]:
         first_trace = decision.decision_trace[0] if decision.decision_trace else None
+        context_rows = _pullback_debug_context_rows(rows, decision.ticker)
         print(
             "PULLBACK_DEBUG "
             f"ticker={_safe_debug_value(decision.ticker)} "
@@ -178,7 +217,13 @@ def _print_pullback_debug_rows(
             f"primary_reason={_safe_debug_value(decision.primary_reason)} "
             f"first_trace_rule={_safe_debug_value(first_trace.matched_rule if first_trace else None)} "
             f"first_trace_token={_safe_debug_value(first_trace.matched_token if first_trace else None)} "
-            f"first_trace_horizon={_safe_debug_value(first_trace.horizon if first_trace else None)}"
+            f"first_trace_horizon={_safe_debug_value(first_trace.horizon if first_trace else None)} "
+            f"ma_break_status={_safe_debug_value(_first_non_empty_context_value(context_rows, 'ma_break_status'))} "
+            f"freshness_status={_safe_debug_value(_first_non_empty_context_value(context_rows, 'freshness_status'))} "
+            f"latest_bos_down_age_td={_safe_debug_value(_first_non_empty_context_value(context_rows, 'latest_bos_down_age_td'))} "
+            f"latest_reset_age_td={_safe_debug_value(_first_non_empty_context_value(context_rows, 'latest_reset_age_td'))} "
+            f"latest_bullish_signal_age_td={_safe_debug_value(_first_non_empty_context_value(context_rows, 'latest_bullish_signal_age_td'))} "
+            f"latest_bearish_signal_age_td={_safe_debug_value(_first_non_empty_context_value(context_rows, 'latest_bearish_signal_age_td'))}"
         )
 
 
@@ -389,6 +434,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.pullback_debug:
         _print_pullback_debug_rows(
             decision_result,
+            parsed_rows,
             pullback_validity=args.pullback_debug_validity,
             action=args.pullback_debug_action,
             max_rows=args.max_pullback_debug_rows,

@@ -674,11 +674,11 @@ def test_pullback_debug_prints_rows(tmp_path, capsys):
         reports_dir / "datacenter_daily_2026-05-22_0000_full.csv",
         "\n".join(
             [
-                "ticker;status;ma_break_status;freshness_status;reason",
-                "AAA;PULLBACK_CANDIDATE;OK;FRESH_BULLISH_SIGNAL;",
-                "BBB;PULLBACK_CANDIDATE;OK;;",
-                "CCC;PULLBACK_CANDIDATE;EMA20_CONFIRMED_BREAK;;",
-                "DDD;PULLBACK_CANDIDATE;;STRUCTURE_WARNING_OVERRIDES_BULLISH;",
+                "ticker;status;ma_break_status;freshness_status;latest_bos_down_age_td;latest_reset_age_td;latest_bullish_signal_age_td;latest_bearish_signal_age_td;reason",
+                "AAA;PULLBACK_CANDIDATE;OK;FRESH_BULLISH_SIGNAL;7;;2;9;",
+                "BBB;PULLBACK_CANDIDATE;OK;;;4;;",
+                "CCC;PULLBACK_CANDIDATE;EMA20_CONFIRMED_BREAK;;;5;;1;",
+                "DDD;PULLBACK_CANDIDATE;;STRUCTURE_WARNING_OVERRIDES_BULLISH;1;2;6;1;",
             ]
         )
         + "\n",
@@ -691,6 +691,12 @@ def test_pullback_debug_prints_rows(tmp_path, capsys):
     debug_lines = [line for line in lines if line.startswith("PULLBACK_DEBUG ")]
     assert len(debug_lines) == 4
     assert debug_lines[0].startswith("PULLBACK_DEBUG ticker=AAA validity=VALID_PULLBACK")
+    assert "ma_break_status=OK" in debug_lines[0]
+    assert "freshness_status=FRESH_BULLISH_SIGNAL" in debug_lines[0]
+    assert "latest_bos_down_age_td=7" in debug_lines[0]
+    assert "latest_reset_age_td=" in debug_lines[0]
+    assert "latest_bullish_signal_age_td=2" in debug_lines[0]
+    assert "latest_bearish_signal_age_td=9" in debug_lines[0]
     assert debug_lines[1].startswith("PULLBACK_DEBUG ticker=BBB validity=EARLY_PULLBACK")
     assert debug_lines[2].startswith(
         "PULLBACK_DEBUG ticker=DDD validity=STRUCTURE_BLOCKED_PULLBACK"
@@ -858,11 +864,11 @@ def test_pullback_debug_output_order_is_deterministic(tmp_path, capsys):
         reports_dir / "datacenter_daily_2026-05-22_0000_full.csv",
         "\n".join(
             [
-                "ticker;status;ma_break_status;freshness_status;reason",
-                "CCC;PULLBACK_CANDIDATE;EMA20_CONFIRMED_BREAK;;",
-                "AAA;PULLBACK_CANDIDATE;OK;FRESH_BULLISH_SIGNAL;",
-                "DDD;PULLBACK_CANDIDATE;;STRUCTURE_WARNING_OVERRIDES_BULLISH;",
-                "BBB;PULLBACK_CANDIDATE;OK;;",
+                "ticker;status;ma_break_status;freshness_status;latest_bos_down_age_td;latest_reset_age_td;latest_bullish_signal_age_td;latest_bearish_signal_age_td;reason",
+                "CCC;PULLBACK_CANDIDATE;EMA20_CONFIRMED_BREAK;;;5;;1;",
+                "AAA;PULLBACK_CANDIDATE;OK;FRESH_BULLISH_SIGNAL;7;;2;9;",
+                "DDD;PULLBACK_CANDIDATE;;STRUCTURE_WARNING_OVERRIDES_BULLISH;1;2;6;1;",
+                "BBB;PULLBACK_CANDIDATE;OK;;;4;;",
             ]
         )
         + "\n",
@@ -874,11 +880,40 @@ def test_pullback_debug_output_order_is_deterministic(tmp_path, capsys):
     lines = capsys.readouterr().out.strip().splitlines()
     debug_lines = [line for line in lines if line.startswith("PULLBACK_DEBUG ")]
     assert debug_lines == [
-        "PULLBACK_DEBUG ticker=AAA validity=VALID_PULLBACK reason=FRESH_BULLISH_PULLBACK_WITH_NO_STRUCTURE_BLOCK action=NEUTRAL severity=INFO primary_reason=NO_DECISIVE_SIGNAL first_trace_rule=NEUTRAL_FALLBACK first_trace_token= first_trace_horizon=",
-        "PULLBACK_DEBUG ticker=BBB validity=EARLY_PULLBACK reason=WAIT_FOR_BULLISH_CONFIRMATION action=NEUTRAL severity=INFO primary_reason=NO_DECISIVE_SIGNAL first_trace_rule=NEUTRAL_FALLBACK first_trace_token= first_trace_horizon=",
-        "PULLBACK_DEBUG ticker=DDD validity=STRUCTURE_BLOCKED_PULLBACK reason=STRUCTURE_WARNING_OVERRIDES_BULLISH_SIGNAL action=NEUTRAL severity=INFO primary_reason=NO_DECISIVE_SIGNAL first_trace_rule=NEUTRAL_FALLBACK first_trace_token= first_trace_horizon=",
-        "PULLBACK_DEBUG ticker=CCC validity=BREAKDOWN_NOT_PULLBACK reason=EMA20_CONFIRMED_BREAK action=SELL severity=CRITICAL primary_reason=SELL_SIGNAL_DETECTED first_trace_rule=SELL_EMA20_CONFIRMED_BREAK first_trace_token=EMA20_CONFIRMED_BREAK first_trace_horizon=daily",
+        "PULLBACK_DEBUG ticker=AAA validity=VALID_PULLBACK reason=FRESH_BULLISH_PULLBACK_WITH_NO_STRUCTURE_BLOCK action=NEUTRAL severity=INFO primary_reason=NO_DECISIVE_SIGNAL first_trace_rule=NEUTRAL_FALLBACK first_trace_token= first_trace_horizon= ma_break_status=OK freshness_status=FRESH_BULLISH_SIGNAL latest_bos_down_age_td=7 latest_reset_age_td= latest_bullish_signal_age_td=2 latest_bearish_signal_age_td=9",
+        "PULLBACK_DEBUG ticker=BBB validity=EARLY_PULLBACK reason=WAIT_FOR_BULLISH_CONFIRMATION action=NEUTRAL severity=INFO primary_reason=NO_DECISIVE_SIGNAL first_trace_rule=NEUTRAL_FALLBACK first_trace_token= first_trace_horizon= ma_break_status=OK freshness_status= latest_bos_down_age_td= latest_reset_age_td=4 latest_bullish_signal_age_td= latest_bearish_signal_age_td=",
+        "PULLBACK_DEBUG ticker=DDD validity=STRUCTURE_BLOCKED_PULLBACK reason=STRUCTURE_WARNING_OVERRIDES_BULLISH_SIGNAL action=NEUTRAL severity=INFO primary_reason=NO_DECISIVE_SIGNAL first_trace_rule=NEUTRAL_FALLBACK first_trace_token= first_trace_horizon= ma_break_status= freshness_status=STRUCTURE_WARNING_OVERRIDES_BULLISH latest_bos_down_age_td=1 latest_reset_age_td=2 latest_bullish_signal_age_td=6 latest_bearish_signal_age_td=1",
+        "PULLBACK_DEBUG ticker=CCC validity=BREAKDOWN_NOT_PULLBACK reason=EMA20_CONFIRMED_BREAK action=SELL severity=CRITICAL primary_reason=SELL_SIGNAL_DETECTED first_trace_rule=SELL_EMA20_CONFIRMED_BREAK first_trace_token=EMA20_CONFIRMED_BREAK first_trace_horizon=daily ma_break_status=EMA20_CONFIRMED_BREAK freshness_status= latest_bos_down_age_td= latest_reset_age_td=5 latest_bullish_signal_age_td= latest_bearish_signal_age_td=1",
     ]
+
+
+def test_pullback_debug_context_uses_deterministic_horizon_priority(tmp_path, capsys):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    _write_report(
+        reports_dir / "datacenter_rolling_30_2026-05-22_0000_full.csv",
+        "ticker;status;ma_break_status;freshness_status;latest_bos_down_age_td;latest_reset_age_td;latest_bullish_signal_age_td;latest_bearish_signal_age_td\nAAA;PULLBACK_CANDIDATE;SMA50_CONFIRMED_BREAK;FRESH_BEARISH_SIGNAL;30;40;20;21\n",
+    )
+    _write_report(
+        reports_dir / "datacenter_rolling_2_2026-05-22_0000_full.csv",
+        "ticker;status;ma_break_status;freshness_status;latest_bos_down_age_td;latest_reset_age_td;latest_bullish_signal_age_td;latest_bearish_signal_age_td\nAAA;PULLBACK_CANDIDATE;EMA20_WARNING;FRESH_BULLISH_SIGNAL;2;3;4;5\n",
+    )
+    _write_report(
+        reports_dir / "datacenter_daily_2026-05-22_0000_full.csv",
+        "ticker;status;ma_break_status;freshness_status;latest_bos_down_age_td;latest_reset_age_td;latest_bullish_signal_age_td;latest_bearish_signal_age_td\nAAA;PULLBACK_CANDIDATE;OK;STRUCTURE_WARNING_OVERRIDES_BULLISH;0;1;2;3\n",
+    )
+
+    exit_code = main(["--reports-dir", str(reports_dir), "--pullback-debug"])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "PULLBACK_DEBUG ticker=AAA" in output
+    assert "ma_break_status=OK" in output
+    assert "freshness_status=STRUCTURE_WARNING_OVERRIDES_BULLISH" in output
+    assert "latest_bos_down_age_td=0" in output
+    assert "latest_reset_age_td=1" in output
+    assert "latest_bullish_signal_age_td=2" in output
+    assert "latest_bearish_signal_age_td=3" in output
 
 
 def test_pullback_debug_does_not_change_decision_output_counts(tmp_path, capsys):
