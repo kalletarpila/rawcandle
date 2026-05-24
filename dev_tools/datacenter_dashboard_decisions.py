@@ -104,6 +104,16 @@ _DAILY_BOS_DOWN_CONFIRMATION_TERMS = (
     "close_below_ema20",
     "sell",
 )
+_LONG_CONTEXT_CONFIRMATION_TERMS = (
+    "reset",
+    "double_bos_down",
+    "high_exit_risk",
+    "failed_pullback",
+    "close_below_ema20",
+    "return_10d_lt_minus_8pct",
+    "sell",
+    "bos_down",
+)
 _ROLLING_30_POSITIVE_TERMS = (
     "buy_zone",
     "leader",
@@ -405,6 +415,11 @@ def build_datacenter_ticker_decisions(
             for row, horizon, text_values in normalized_rows
             if horizon == "daily"
         ]
+        long_context_rows = [
+            (row, horizon, text_values)
+            for row, horizon, text_values in normalized_rows
+            if horizon in {"rolling 30d", "rolling 5d"}
+        ]
 
         hard_sell_match = any(
             _contains_any(text_values, _HARD_SELL_TERMS)
@@ -426,6 +441,11 @@ def build_datacenter_ticker_decisions(
         has_tighten_stop = (
             high_exit_risk_days_count is not None and high_exit_risk_days_count >= 1
         )
+        acute_high_exit_risk_days_present = any(
+            row.high_exit_risk_days_count is not None
+            and row.high_exit_risk_days_count >= 1
+            for row, _horizon, _text_values in daily_or_rolling_2
+        )
 
         rolling_30_positive = any(
             horizon == "rolling 30d"
@@ -446,15 +466,24 @@ def build_datacenter_ticker_decisions(
             _contains_any(text_values, _DAILY_BOS_DOWN_CONFIRMATION_TERMS)
             for _row, _horizon, text_values in daily_rows
         )
+        acute_rolling_2d_confirmation = any(
+            _contains_any(text_values, _ROLLING_2D_CONFIRMATION_TERMS)
+            for _row, _horizon, text_values in rolling_2d_rows
+        )
+        long_context_confirmation = any(
+            _contains_any(text_values, _LONG_CONTEXT_CONFIRMATION_TERMS)
+            for _row, _horizon, text_values in long_context_rows
+        ) or any(
+            row.high_exit_risk_days_count is not None
+            and row.high_exit_risk_days_count >= 1
+            for row, _horizon, _text_values in long_context_rows
+        )
         confirmed_rolling_2d_bos_down = rolling_2d_bos_down and (
-            any(
-                _contains_any(text_values, ("double_bos_down", "high_exit_risk", "failed_pullback"))
-                for _row, _horizon, text_values in rolling_2d_rows
-            )
+            acute_rolling_2d_confirmation
             or rolling_2d_reset
             or daily_bearish_confirmation
             or hard_sell_match
-            or has_tighten_stop
+            or acute_high_exit_risk_days_present
         )
 
         if hard_sell_match:
@@ -477,18 +506,18 @@ def build_datacenter_ticker_decisions(
             trace = _match_row_text_trace(
                 ticker=ticker,
                 action=action,
-                matched_rule="SELL_BOS_DOWN_CONFIRMED",
+                matched_rule="SELL_BOS_DOWN_CONFIRMED_ACUTE",
                 rows_with_horizons=rolling_2d_rows,
                 terms=("bos_down",),
             )
             if trace is not None:
                 decision_trace.append(trace)
-            if has_tighten_stop:
+            if acute_high_exit_risk_days_present:
                 confirm_trace = _match_first_row_with_value(
                     ticker=ticker,
                     action=action,
-                    matched_rule="SELL_BOS_DOWN_CONFIRMED",
-                    rows_with_horizons=normalized_rows,
+                    matched_rule="SELL_BOS_DOWN_CONFIRMED_ACUTE",
+                    rows_with_horizons=daily_or_rolling_2,
                     predicate=lambda value: value is not None and value >= 1,
                     field_name="high_exit_risk_days_count",
                     token="high_exit_risk_days_count>=1",
@@ -497,8 +526,8 @@ def build_datacenter_ticker_decisions(
                 confirm_trace = _match_row_text_trace(
                     ticker=ticker,
                     action=action,
-                    matched_rule="SELL_BOS_DOWN_CONFIRMED",
-                    rows_with_horizons=normalized_rows,
+                    matched_rule="SELL_BOS_DOWN_CONFIRMED_ACUTE",
+                    rows_with_horizons=daily_or_rolling_2,
                     terms=(
                         "double_bos_down",
                         "high_exit_risk",
@@ -511,6 +540,38 @@ def build_datacenter_ticker_decisions(
                 )
             if confirm_trace is not None:
                 decision_trace.append(confirm_trace)
+        elif rolling_2d_bos_down and long_context_confirmation:
+            action = "REDUCE"
+            primary_reason = "RISK_SIGNAL_DETECTED"
+            reasons.append("Rolling 2d BOS_DOWN has only longer-horizon context and is downgraded to REDUCE")
+            trace = _match_row_text_trace(
+                ticker=ticker,
+                action=action,
+                matched_rule="REDUCE_BOS_DOWN_LONG_CONTEXT_ONLY",
+                rows_with_horizons=rolling_2d_rows,
+                terms=("bos_down",),
+            )
+            if trace is not None:
+                decision_trace.append(trace)
+            context_trace = _match_first_row_with_value(
+                ticker=ticker,
+                action=action,
+                matched_rule="REDUCE_BOS_DOWN_LONG_CONTEXT_ONLY",
+                rows_with_horizons=long_context_rows,
+                predicate=lambda value: value is not None and value >= 1,
+                field_name="high_exit_risk_days_count",
+                token="high_exit_risk_days_count>=1",
+            )
+            if context_trace is None:
+                context_trace = _match_row_text_trace(
+                    ticker=ticker,
+                    action=action,
+                    matched_rule="REDUCE_BOS_DOWN_LONG_CONTEXT_ONLY",
+                    rows_with_horizons=long_context_rows,
+                    terms=_LONG_CONTEXT_CONFIRMATION_TERMS,
+                )
+            if context_trace is not None:
+                decision_trace.append(context_trace)
         elif direct_reduce_match:
             action = "REDUCE"
             primary_reason = "RISK_SIGNAL_DETECTED"
