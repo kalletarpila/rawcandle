@@ -595,13 +595,18 @@ def populate_datacenter_dashboard_summary(
     decision_summary_field: ft.TextField,
     reports_column: ft.Column,
 ) -> None:
+    found_reports = sum(1 for report in dashboard_status.reports if report.status == "OK")
+    missing_reports = sum(1 for report in dashboard_status.reports if report.status != "OK")
     overall_status_field.value = dashboard_status.overall_status
     overall_status_field.border_color = _dashboard_status_color(
         dashboard_status.overall_status
     )
     parse_summary_field.value = (
+        f"readiness={dashboard_status.overall_status}\n"
+        f"found_reports={found_reports}\n"
+        f"missing_reports={missing_reports}\n"
         f"total_parsed_rows={parse_result.total_row_count}\n"
-        f"total_warnings={parse_result.total_warning_count}"
+        f"total_parse_warnings={parse_result.total_warning_count}"
     )
     decision_summary_field.value = "\n".join(
         [
@@ -623,6 +628,26 @@ def populate_datacenter_dashboard_summary(
             f"NO_PULLBACK={decision_result.pullback_counts.get('NO_PULLBACK', 0)}",
             "INSUFFICIENT_DATA="
             f"{decision_result.pullback_counts.get('INSUFFICIENT_DATA', 0)}",
+            "entry_readiness.READY_TO_WATCH="
+            f"{decision_result.entry_readiness_counts.get('READY_TO_WATCH', 0)}",
+            "entry_readiness.NEEDS_STOP_STABILIZATION="
+            f"{decision_result.entry_readiness_counts.get('NEEDS_STOP_STABILIZATION', 0)}",
+            "entry_readiness.NEEDS_RISK_CLEARANCE="
+            f"{decision_result.entry_readiness_counts.get('NEEDS_RISK_CLEARANCE', 0)}",
+            "entry_readiness.EARLY_MONITOR="
+            f"{decision_result.entry_readiness_counts.get('EARLY_MONITOR', 0)}",
+            "entry_readiness.NOT_READY="
+            f"{decision_result.entry_readiness_counts.get('NOT_READY', 0)}",
+            "candidate_priority.P1_READY_TO_WATCH="
+            f"{decision_result.candidate_priority_counts.get('P1_READY_TO_WATCH', 0)}",
+            "candidate_priority.P2_STOP_STABILIZATION="
+            f"{decision_result.candidate_priority_counts.get('P2_STOP_STABILIZATION', 0)}",
+            "candidate_priority.P3_RISK_CLEARANCE="
+            f"{decision_result.candidate_priority_counts.get('P3_RISK_CLEARANCE', 0)}",
+            "candidate_priority.P4_EARLY_MONITOR="
+            f"{decision_result.candidate_priority_counts.get('P4_EARLY_MONITOR', 0)}",
+            "candidate_priority.P5_NOT_READY="
+            f"{decision_result.candidate_priority_counts.get('P5_NOT_READY', 0)}",
         ]
     )
     reports_column.controls.clear()
@@ -903,6 +928,78 @@ def populate_datacenter_dashboard_inspector(
         else "NONE"
     )
     override_explanation_field.value = inspector_view.override_explanation or "NONE"
+
+
+def populate_datacenter_dashboard_not_refreshed(
+    *,
+    overall_status_field: ft.TextField,
+    parse_summary_field: ft.TextField,
+    decision_summary_field: ft.TextField,
+    reports_column: ft.Column,
+    command_center_column: ft.Column,
+    candidate_pullbacks_column: ft.Column,
+    inspector_ticker_dropdown: ft.Dropdown,
+    action_field: ft.TextField,
+    conflict_detected_field: ft.TextField,
+    pullback_validity_field: ft.TextField,
+    pullback_reason_field: ft.TextField,
+    supporting_signals_field: ft.TextField,
+    conflicting_signals_field: ft.TextField,
+    override_explanation_field: ft.TextField,
+) -> None:
+    overall_status_field.value = "NOT_REFRESHED"
+    overall_status_field.border_color = _STATUS_WARNING_COLOR
+    parse_summary_field.value = (
+        "readiness=NOT_REFRESHED\n"
+        "found_reports=0\n"
+        "missing_reports=0\n"
+        "total_parsed_rows=0\n"
+        "total_parse_warnings=0"
+    )
+    decision_summary_field.value = "\n".join(
+        [
+            "decision_total=0",
+            "SELL=0",
+            "REDUCE=0",
+            "TIGHTEN_STOP=0",
+            "BUY_NOW=0",
+            "WAIT_PULLBACK=0",
+            "BLOCKED=0",
+            "WATCH=0",
+            "NEUTRAL=0",
+            "VALID_PULLBACK=0",
+            "EARLY_PULLBACK=0",
+            "STRUCTURE_BLOCKED_PULLBACK=0",
+            "BREAKDOWN_NOT_PULLBACK=0",
+            "NO_PULLBACK=0",
+            "INSUFFICIENT_DATA=0",
+            "entry_readiness.READY_TO_WATCH=0",
+            "entry_readiness.NEEDS_STOP_STABILIZATION=0",
+            "entry_readiness.NEEDS_RISK_CLEARANCE=0",
+            "entry_readiness.EARLY_MONITOR=0",
+            "entry_readiness.NOT_READY=0",
+            "candidate_priority.P1_READY_TO_WATCH=0",
+            "candidate_priority.P2_STOP_STABILIZATION=0",
+            "candidate_priority.P3_RISK_CLEARANCE=0",
+            "candidate_priority.P4_EARLY_MONITOR=0",
+            "candidate_priority.P5_NOT_READY=0",
+        ]
+    )
+    reports_column.controls.clear()
+    reports_column.controls.append(ft.Text("No reports loaded."))
+    command_center_column.controls.clear()
+    command_center_column.controls.append(ft.Text("No decisions available."))
+    candidate_pullbacks_column.controls.clear()
+    candidate_pullbacks_column.controls.append(ft.Text("No candidate pullbacks available."))
+    inspector_ticker_dropdown.options = []
+    inspector_ticker_dropdown.value = None
+    action_field.value = "NONE"
+    conflict_detected_field.value = "False"
+    pullback_validity_field.value = "NONE"
+    pullback_reason_field.value = "NONE"
+    supporting_signals_field.value = "NONE"
+    conflicting_signals_field.value = "NONE"
+    override_explanation_field.value = "NONE"
 
 
 def _market_row_text(market_result: Dict[str, Any]) -> str:
@@ -1273,19 +1370,25 @@ def run_app(page: ft.Page, config_path: str) -> None:
     )
     datacenter_dashboard_overall_status_field = ft.TextField(
         label="dashboard_overall_status",
-        value="MISSING",
+        value="NOT_REFRESHED",
         read_only=True,
         width=220,
-        border_color=_STATUS_ERROR_COLOR,
+        border_color=_STATUS_WARNING_COLOR,
     )
     datacenter_dashboard_parse_summary_field = ft.TextField(
-        label="dashboard_parse_summary",
-        value="total_parsed_rows=0\ntotal_warnings=0",
+        label="dashboard_readiness_summary",
+        value=(
+            "readiness=NOT_REFRESHED\n"
+            "found_reports=0\n"
+            "missing_reports=0\n"
+            "total_parsed_rows=0\n"
+            "total_parse_warnings=0"
+        ),
         read_only=True,
         multiline=True,
-        min_lines=2,
-        max_lines=3,
-        width=240,
+        min_lines=5,
+        max_lines=5,
+        width=260,
     )
     datacenter_dashboard_decision_summary_field = ft.TextField(
         label="dashboard_decision_summary",
@@ -1298,13 +1401,27 @@ def run_app(page: ft.Page, config_path: str) -> None:
             "WAIT_PULLBACK=0\n"
             "BLOCKED=0\n"
             "WATCH=0\n"
-            "NEUTRAL=0"
+            "NEUTRAL=0\n"
+            "VALID_PULLBACK=0\n"
+            "EARLY_PULLBACK=0\n"
+            "STRUCTURE_BLOCKED_PULLBACK=0\n"
+            "BREAKDOWN_NOT_PULLBACK=0\n"
+            "NO_PULLBACK=0\n"
+            "INSUFFICIENT_DATA=0\n"
+            "entry_readiness.READY_TO_WATCH=0\n"
+            "entry_readiness.NEEDS_STOP_STABILIZATION=0\n"
+            "entry_readiness.NEEDS_RISK_CLEARANCE=0\n"
+            "entry_readiness.EARLY_MONITOR=0\n"
+            "candidate_priority.P1_READY_TO_WATCH=0\n"
+            "candidate_priority.P2_STOP_STABILIZATION=0\n"
+            "candidate_priority.P3_RISK_CLEARANCE=0\n"
+            "candidate_priority.P4_EARLY_MONITOR=0"
         ),
         read_only=True,
         multiline=True,
-        min_lines=5,
-        max_lines=9,
-        width=240,
+        min_lines=8,
+        max_lines=16,
+        width=300,
     )
     datacenter_dashboard_candidate_pullbacks_column = ft.Column(spacing=8)
     datacenter_dashboard_inspector_ticker_dropdown = ft.Dropdown(
@@ -2003,19 +2120,27 @@ def run_app(page: ft.Page, config_path: str) -> None:
         controls=[
             ft.Text("Datacenter Dashboard", size=24, weight=ft.FontWeight.BOLD),
             ft.Text(
-                "Read-only dashboard shell. It scans the reports directory for the newest daily and rolling reports."
+                "Read-only dashboard for the newest daily and rolling reports."
             ),
+            ft.Text("Reports directory", size=18, weight=ft.FontWeight.BOLD),
             ft.Row(
                 [
                     datacenter_dashboard_reports_dir_field,
-                    datacenter_dashboard_overall_status_field,
-                    datacenter_dashboard_parse_summary_field,
-                    datacenter_dashboard_decision_summary_field,
                     datacenter_dashboard_refresh_button,
                 ],
                 wrap=True,
                 vertical_alignment=ft.CrossAxisAlignment.END,
             ),
+            ft.Row(
+                [
+                    datacenter_dashboard_overall_status_field,
+                    datacenter_dashboard_parse_summary_field,
+                    datacenter_dashboard_decision_summary_field,
+                ],
+                wrap=True,
+                vertical_alignment=ft.CrossAxisAlignment.START,
+            ),
+            ft.Text("Reports", size=18, weight=ft.FontWeight.BOLD),
             datacenter_dashboard_reports_column,
             ft.Text("Command Center", size=18, weight=ft.FontWeight.BOLD),
             datacenter_dashboard_command_center_column,
@@ -2039,6 +2164,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
         ],
         spacing=12,
         expand=True,
+        scroll=ft.ScrollMode.AUTO,
     )
 
     page.datacenter_price_db_field = datacenter_price_db_field
@@ -2123,7 +2249,22 @@ def run_app(page: ft.Page, config_path: str) -> None:
         expand=1,
     )
     page.datacenter_tabs = tabs
-    refresh_datacenter_dashboard_view()
+    populate_datacenter_dashboard_not_refreshed(
+        overall_status_field=datacenter_dashboard_overall_status_field,
+        parse_summary_field=datacenter_dashboard_parse_summary_field,
+        decision_summary_field=datacenter_dashboard_decision_summary_field,
+        reports_column=datacenter_dashboard_reports_column,
+        command_center_column=datacenter_dashboard_command_center_column,
+        candidate_pullbacks_column=datacenter_dashboard_candidate_pullbacks_column,
+        inspector_ticker_dropdown=datacenter_dashboard_inspector_ticker_dropdown,
+        action_field=datacenter_dashboard_inspector_action_field,
+        conflict_detected_field=datacenter_dashboard_conflict_detected_field,
+        pullback_validity_field=datacenter_dashboard_pullback_validity_field,
+        pullback_reason_field=datacenter_dashboard_pullback_reason_field,
+        supporting_signals_field=datacenter_dashboard_supporting_signals_field,
+        conflicting_signals_field=datacenter_dashboard_conflicting_signals_field,
+        override_explanation_field=datacenter_dashboard_override_explanation_field,
+    )
     page.add(tabs)
     page.update()
 

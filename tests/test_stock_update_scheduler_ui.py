@@ -947,13 +947,21 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(tmp_path, mon
     assert page.datacenter_rolling_window_size_field.value == DEFAULT_DATACENTER_ROLLING_WINDOW_SIZE
     assert page.datacenter_watchlist_file_field.value == DEFAULT_DATACENTER_WATCHLIST_FILE
     assert page.datacenter_dashboard_reports_dir_field.value == DEFAULT_DATACENTER_OUTPUT_DIR
-    assert page.datacenter_dashboard_overall_status_field.value == "MISSING"
-    assert page.datacenter_dashboard_parse_summary_field.value == "total_parsed_rows=0\ntotal_warnings=0"
+    assert page.datacenter_dashboard_overall_status_field.value == "NOT_REFRESHED"
+    assert "readiness=NOT_REFRESHED" in page.datacenter_dashboard_parse_summary_field.value
+    assert "found_reports=0" in page.datacenter_dashboard_parse_summary_field.value
+    assert "missing_reports=0" in page.datacenter_dashboard_parse_summary_field.value
+    assert "total_parsed_rows=0" in page.datacenter_dashboard_parse_summary_field.value
+    assert "total_parse_warnings=0" in page.datacenter_dashboard_parse_summary_field.value
     assert "decision_total=0" in page.datacenter_dashboard_decision_summary_field.value
     assert "SELL=0" in page.datacenter_dashboard_decision_summary_field.value
     assert "VALID_PULLBACK=0" in page.datacenter_dashboard_decision_summary_field.value
     assert "NO_PULLBACK=0" in page.datacenter_dashboard_decision_summary_field.value
-    assert len(page.datacenter_dashboard_reports_column.controls) == 4
+    assert "entry_readiness.READY_TO_WATCH=0" in page.datacenter_dashboard_decision_summary_field.value
+    assert "candidate_priority.P1_READY_TO_WATCH=0" in page.datacenter_dashboard_decision_summary_field.value
+    assert page.datacenter_dashboard_refresh_button.text == "Refresh Dashboard"
+    assert page.datacenter_dashboard_reports_dir_field.label == "dashboard_reports_dir"
+    assert page.datacenter_dashboard_reports_column.controls[0].value == "No reports loaded."
     assert page.datacenter_dashboard_command_center_column.controls[0].value == "No decisions available."
     assert page.datacenter_dashboard_conflict_detected_field.value == "False"
     assert page.datacenter_dashboard_pullback_validity_field.value == "NONE"
@@ -973,6 +981,10 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(tmp_path, mon
         if hasattr(control, "value")
     ]
     assert "Datacenter Dashboard" in dashboard_text_labels
+    assert "Reports directory" in dashboard_text_labels
+    assert "Command Center" in dashboard_text_labels
+    assert "Candidate Pullbacks" in dashboard_text_labels
+    assert "Inspector" in dashboard_text_labels
 
     page.datacenter_signal_date_field.value = "2026-05-15"
     page.datacenter_start_date_field.value = "2026-01-01"
@@ -1070,10 +1082,16 @@ def test_run_app_datacenter_dashboard_refresh_reads_report_directory(tmp_path, m
     page.datacenter_dashboard_refresh_button.on_click(None)
 
     assert page.datacenter_dashboard_overall_status_field.value == "PARTIAL"
-    assert page.datacenter_dashboard_parse_summary_field.value == "total_parsed_rows=1\ntotal_warnings=0"
+    assert "readiness=PARTIAL" in page.datacenter_dashboard_parse_summary_field.value
+    assert "found_reports=1" in page.datacenter_dashboard_parse_summary_field.value
+    assert "missing_reports=3" in page.datacenter_dashboard_parse_summary_field.value
+    assert "total_parsed_rows=1" in page.datacenter_dashboard_parse_summary_field.value
+    assert "total_parse_warnings=0" in page.datacenter_dashboard_parse_summary_field.value
     assert "decision_total=1" in page.datacenter_dashboard_decision_summary_field.value
     assert "NEUTRAL=1" in page.datacenter_dashboard_decision_summary_field.value
     assert "NO_PULLBACK=1" in page.datacenter_dashboard_decision_summary_field.value
+    assert "entry_readiness.NOT_READY=1" in page.datacenter_dashboard_decision_summary_field.value
+    assert "candidate_priority.P5_NOT_READY=1" in page.datacenter_dashboard_decision_summary_field.value
     assert (
         page.datacenter_dashboard_candidate_pullbacks_column.controls[0].value
         == "No candidate pullbacks available."
@@ -1180,6 +1198,8 @@ def test_run_app_datacenter_dashboard_command_center_shows_grouped_read_only_row
     assert "WATCH=1" in page.datacenter_dashboard_decision_summary_field.value
     assert "NEUTRAL=1" in page.datacenter_dashboard_decision_summary_field.value
     assert "STRUCTURE_BLOCKED_PULLBACK=1" in page.datacenter_dashboard_decision_summary_field.value
+    assert "entry_readiness.NOT_READY=6" in page.datacenter_dashboard_decision_summary_field.value
+    assert "candidate_priority.P9_READY_TO_WATCH=0" not in page.datacenter_dashboard_decision_summary_field.value
     candidate_titles = [
         control.content.controls[0].value
         for control in page.datacenter_dashboard_candidate_pullbacks_column.controls
