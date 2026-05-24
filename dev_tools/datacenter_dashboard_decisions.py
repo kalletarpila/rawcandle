@@ -72,7 +72,6 @@ _SEVERITY_BY_ACTION = {
 }
 
 _HARD_SELL_TERMS = (
-    "close_below_ema20",
     "return_10d_lt_minus_8pct",
     "sell",
 )
@@ -278,6 +277,32 @@ def _match_first_row_with_value(
     return None
 
 
+def _match_row_field_equals(
+    *,
+    ticker: str,
+    action: str,
+    matched_rule: str,
+    rows_with_horizons: list[tuple[DatacenterDashboardRow, str, list[str]]],
+    field_name: str,
+    expected_value: str,
+    matched_token: str | None = None,
+) -> DatacenterDecisionTrace | None:
+    for row, horizon, _text_values in rows_with_horizons:
+        value = getattr(row, field_name)
+        if value == expected_value:
+            return _build_trace(
+                ticker=ticker,
+                action=action,
+                matched_rule=matched_rule,
+                row=row,
+                horizon=horizon,
+                field_name=field_name,
+                matched_token=matched_token or expected_value,
+                matched_value=str(value),
+            )
+    return None
+
+
 def _first_positive_trace(
     *,
     ticker: str,
@@ -421,10 +446,6 @@ def build_datacenter_ticker_decisions(
             if horizon in {"rolling 30d", "rolling 5d"}
         ]
 
-        hard_sell_match = any(
-            _contains_any(text_values, _HARD_SELL_TERMS)
-            for _row, _horizon, text_values in daily_or_rolling_2
-        )
         rolling_2d_bos_down = any(
             _contains_any(text_values, _ROLLING_2D_BOS_DOWN_TERMS)
             for _row, _horizon, text_values in rolling_2d_rows
@@ -445,6 +466,51 @@ def build_datacenter_ticker_decisions(
             row.high_exit_risk_days_count is not None
             and row.high_exit_risk_days_count >= 1
             for row, _horizon, _text_values in daily_or_rolling_2
+        )
+        acute_ma_status_available = any(
+            row.ma_break_status is not None and row.ma_break_status.strip() != ""
+            for row, _horizon, _text_values in daily_or_rolling_2
+        )
+        acute_sma50_confirmed_break = any(
+            row.ma_break_status == "SMA50_CONFIRMED_BREAK"
+            for row, _horizon, _text_values in daily_or_rolling_2
+        )
+        acute_ema20_confirmed_break = any(
+            row.ma_break_status == "EMA20_CONFIRMED_BREAK"
+            for row, _horizon, _text_values in daily_or_rolling_2
+        )
+        acute_sma50_warning = any(
+            row.ma_break_status == "SMA50_WARNING"
+            for row, _horizon, _text_values in daily_or_rolling_2
+        )
+        acute_ema20_warning = any(
+            row.ma_break_status == "EMA20_WARNING"
+            for row, _horizon, _text_values in daily_or_rolling_2
+        )
+        explicit_sell_match = any(
+            _contains_any(text_values, ("sell",))
+            for _row, _horizon, text_values in daily_or_rolling_2
+        )
+        return_10d_hard_sell_match = any(
+            _contains_any(text_values, ("return_10d_lt_minus_8pct",))
+            for _row, _horizon, text_values in daily_or_rolling_2
+        )
+        close_below_ema20_fallback_match = (
+            not acute_ma_status_available
+            and any(
+                _contains_any(text_values, ("close_below_ema20",))
+                for _row, _horizon, text_values in daily_or_rolling_2
+            )
+        )
+        hard_sell_match = (
+            explicit_sell_match
+            or return_10d_hard_sell_match
+            or close_below_ema20_fallback_match
+        )
+        freshness_structure_override = any(
+            row.freshness_status == "STRUCTURE_WARNING_OVERRIDES_BULLISH"
+            or row.structure_warning_overrides_bullish_signal == 1
+            for row in ticker_rows
         )
 
         rolling_30_positive = any(
@@ -486,17 +552,63 @@ def build_datacenter_ticker_decisions(
             or acute_high_exit_risk_days_present
         )
 
-        if hard_sell_match:
+        if acute_sma50_confirmed_break:
+            action = "SELL"
+            primary_reason = "SELL_SIGNAL_DETECTED"
+            reasons.append("Confirmed SMA50 break in daily or rolling 2d context")
+            trace = _match_row_field_equals(
+                ticker=ticker,
+                action=action,
+                matched_rule="SELL_SMA50_CONFIRMED_BREAK",
+                rows_with_horizons=daily_or_rolling_2,
+                field_name="ma_break_status",
+                expected_value="SMA50_CONFIRMED_BREAK",
+            )
+            if trace is not None:
+                decision_trace.append(trace)
+        elif acute_ema20_confirmed_break:
+            action = "SELL"
+            primary_reason = "SELL_SIGNAL_DETECTED"
+            reasons.append("Confirmed EMA20 break in daily or rolling 2d context")
+            trace = _match_row_field_equals(
+                ticker=ticker,
+                action=action,
+                matched_rule="SELL_EMA20_CONFIRMED_BREAK",
+                rows_with_horizons=daily_or_rolling_2,
+                field_name="ma_break_status",
+                expected_value="EMA20_CONFIRMED_BREAK",
+            )
+            if trace is not None:
+                decision_trace.append(trace)
+        elif hard_sell_match:
             action = "SELL"
             primary_reason = "SELL_SIGNAL_DETECTED"
             reasons.append("Matched hard sell-language in daily or rolling 2d context")
-            trace = _match_row_text_trace(
-                ticker=ticker,
-                action=action,
-                matched_rule="SELL_HARD_TOKEN",
-                rows_with_horizons=daily_or_rolling_2,
-                terms=_HARD_SELL_TERMS,
-            )
+            trace = None
+            if explicit_sell_match:
+                trace = _match_row_text_trace(
+                    ticker=ticker,
+                    action=action,
+                    matched_rule="SELL_HARD_TOKEN",
+                    rows_with_horizons=daily_or_rolling_2,
+                    terms=("sell",),
+                )
+            if trace is None and return_10d_hard_sell_match:
+                trace = _match_row_text_trace(
+                    ticker=ticker,
+                    action=action,
+                    matched_rule="SELL_HARD_TOKEN",
+                    rows_with_horizons=daily_or_rolling_2,
+                    terms=("return_10d_lt_minus_8pct",),
+                )
+            if trace is None and close_below_ema20_fallback_match:
+                trace = _match_row_text_trace(
+                    ticker=ticker,
+                    action=action,
+                    matched_rule="SELL_HARD_TOKEN",
+                    rows_with_horizons=daily_or_rolling_2,
+                    terms=("close_below_ema20",),
+                )
             if trace is not None:
                 decision_trace.append(trace)
         elif confirmed_rolling_2d_bos_down:
@@ -572,6 +684,34 @@ def build_datacenter_ticker_decisions(
                 )
             if context_trace is not None:
                 decision_trace.append(context_trace)
+        elif acute_sma50_warning:
+            action = "REDUCE"
+            primary_reason = "RISK_SIGNAL_DETECTED"
+            reasons.append("SMA50 warning in daily or rolling 2d context")
+            trace = _match_row_field_equals(
+                ticker=ticker,
+                action=action,
+                matched_rule="REDUCE_SMA50_WARNING",
+                rows_with_horizons=daily_or_rolling_2,
+                field_name="ma_break_status",
+                expected_value="SMA50_WARNING",
+            )
+            if trace is not None:
+                decision_trace.append(trace)
+        elif acute_ema20_warning:
+            action = "REDUCE"
+            primary_reason = "RISK_SIGNAL_DETECTED"
+            reasons.append("EMA20 warning in daily or rolling 2d context")
+            trace = _match_row_field_equals(
+                ticker=ticker,
+                action=action,
+                matched_rule="REDUCE_EMA20_WARNING",
+                rows_with_horizons=daily_or_rolling_2,
+                field_name="ma_break_status",
+                expected_value="EMA20_WARNING",
+            )
+            if trace is not None:
+                decision_trace.append(trace)
         elif direct_reduce_match:
             action = "REDUCE"
             primary_reason = "RISK_SIGNAL_DETECTED"
@@ -662,7 +802,12 @@ def build_datacenter_ticker_decisions(
             )
             if trace is not None:
                 decision_trace.append(trace)
-        elif rolling_30_positive and rolling_5_constructive and daily_positive:
+        elif (
+            not freshness_structure_override
+            and rolling_30_positive
+            and rolling_5_constructive
+            and daily_positive
+        ):
             action = "BUY_NOW"
             primary_reason = "MULTI_HORIZON_ALIGNMENT"
             reasons.append("rolling 30d + rolling 5d + daily constructive alignment")
@@ -682,7 +827,7 @@ def build_datacenter_ticker_decisions(
                 )
                 if trace is not None:
                     decision_trace.append(trace)
-        elif rolling_30_positive:
+        elif not freshness_structure_override and rolling_30_positive:
             action = "WATCH"
             primary_reason = "ROLLING_30_POSITIVE_ONLY"
             reasons.append("Positive rolling 30d context without full alignment")

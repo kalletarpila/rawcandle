@@ -18,6 +18,9 @@ def _row(
     distance_to_ema20: float | None = None,
     high_exit_risk_days_count: int | None = None,
     blocking_reasons: str | None = None,
+    ma_break_status: str | None = None,
+    structure_warning_overrides_bullish_signal: int | None = None,
+    freshness_status: str | None = None,
     raw_fields: dict[str, str] | None = None,
 ) -> DatacenterDashboardRow:
     return DatacenterDashboardRow(
@@ -36,7 +39,7 @@ def _row(
         distance_to_ema20=distance_to_ema20,
         high_exit_risk_days_count=high_exit_risk_days_count,
         blocking_reasons=blocking_reasons,
-        ma_break_status=None,
+        ma_break_status=ma_break_status,
         ema20_break_confirmed=None,
         sma50_break_confirmed=None,
         close_below_ema20=None,
@@ -45,8 +48,8 @@ def _row(
         consecutive_closes_below_sma50=None,
         ema20_break_pct=None,
         sma50_break_pct=None,
-        freshness_status=None,
-        structure_warning_overrides_bullish_signal=None,
+        freshness_status=freshness_status,
+        structure_warning_overrides_bullish_signal=structure_warning_overrides_bullish_signal,
         latest_bullish_signal_age_td=None,
         latest_bearish_signal_age_td=None,
         latest_bos_up_age_td=None,
@@ -67,6 +70,95 @@ def test_sell_overrides_positive_signals():
     )
 
     assert result.decisions[0].action == "SELL"
+
+
+def test_daily_sma50_confirmed_break_is_sell():
+    result = build_datacenter_ticker_decisions(
+        [_row(ticker="NVDA", horizon="daily", ma_break_status="SMA50_CONFIRMED_BREAK")]
+    )
+
+    assert result.decisions[0].action == "SELL"
+    assert result.decisions[0].decision_trace[0].matched_rule == "SELL_SMA50_CONFIRMED_BREAK"
+
+
+def test_rolling_2d_sma50_confirmed_break_is_sell():
+    result = build_datacenter_ticker_decisions(
+        [_row(ticker="NVDA", horizon="rolling 2d", ma_break_status="SMA50_CONFIRMED_BREAK")]
+    )
+
+    assert result.decisions[0].action == "SELL"
+    assert result.decisions[0].decision_trace[0].matched_rule == "SELL_SMA50_CONFIRMED_BREAK"
+
+
+def test_daily_ema20_confirmed_break_is_sell():
+    result = build_datacenter_ticker_decisions(
+        [_row(ticker="NVDA", horizon="daily", ma_break_status="EMA20_CONFIRMED_BREAK")]
+    )
+
+    assert result.decisions[0].action == "SELL"
+    assert result.decisions[0].decision_trace[0].matched_rule == "SELL_EMA20_CONFIRMED_BREAK"
+
+
+def test_rolling_2d_ema20_confirmed_break_is_sell():
+    result = build_datacenter_ticker_decisions(
+        [_row(ticker="NVDA", horizon="rolling 2d", ma_break_status="EMA20_CONFIRMED_BREAK")]
+    )
+
+    assert result.decisions[0].action == "SELL"
+    assert result.decisions[0].decision_trace[0].matched_rule == "SELL_EMA20_CONFIRMED_BREAK"
+
+
+def test_daily_ema20_warning_is_reduce():
+    result = build_datacenter_ticker_decisions(
+        [_row(ticker="NVDA", horizon="daily", ma_break_status="EMA20_WARNING")]
+    )
+
+    assert result.decisions[0].action == "REDUCE"
+    assert result.decisions[0].decision_trace[0].matched_rule == "REDUCE_EMA20_WARNING"
+
+
+def test_rolling_2d_ema20_warning_is_reduce():
+    result = build_datacenter_ticker_decisions(
+        [_row(ticker="NVDA", horizon="rolling 2d", ma_break_status="EMA20_WARNING")]
+    )
+
+    assert result.decisions[0].action == "REDUCE"
+    assert result.decisions[0].decision_trace[0].matched_rule == "REDUCE_EMA20_WARNING"
+
+
+def test_ma_break_status_ok_with_raw_close_below_ema20_does_not_create_sell_by_itself():
+    result = build_datacenter_ticker_decisions(
+        [_row(ticker="NVDA", horizon="daily", ma_break_status="OK", reason="close_below_ema20")]
+    )
+
+    assert result.decisions[0].action != "SELL"
+
+
+def test_no_ma_break_status_with_raw_close_below_ema20_still_creates_sell_fallback():
+    result = build_datacenter_ticker_decisions(
+        [_row(ticker="NVDA", horizon="daily", reason="close_below_ema20")]
+    )
+
+    assert result.decisions[0].action == "SELL"
+    assert result.decisions[0].decision_trace[0].matched_rule == "SELL_HARD_TOKEN"
+
+
+def test_explicit_sell_still_creates_sell_even_when_ma_break_status_ok():
+    result = build_datacenter_ticker_decisions(
+        [_row(ticker="NVDA", horizon="daily", ma_break_status="OK", raw_status="SELL")]
+    )
+
+    assert result.decisions[0].action == "SELL"
+    assert result.decisions[0].decision_trace[0].matched_rule == "SELL_HARD_TOKEN"
+
+
+def test_return_10d_lt_minus_8pct_still_creates_sell_even_when_ma_break_status_ok():
+    result = build_datacenter_ticker_decisions(
+        [_row(ticker="NVDA", horizon="daily", ma_break_status="OK", reason="return_10d_lt_minus_8pct")]
+    )
+
+    assert result.decisions[0].action == "SELL"
+    assert result.decisions[0].decision_trace[0].matched_rule == "SELL_HARD_TOKEN"
 
 
 def test_rolling_2d_bos_down_alone_is_reduce_not_sell():
@@ -154,6 +246,28 @@ def test_rolling_2d_bos_down_plus_daily_reset_is_sell():
     assert result.decisions[0].action == "SELL"
 
 
+def test_rolling_2d_bos_down_plus_double_bos_down_is_sell_even_when_ma_break_status_ok():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(
+                ticker="NVDA",
+                horizon="rolling 2d",
+                ma_break_status="OK",
+                latest_bos_event_type="BOS_DOWN",
+            ),
+            _row(
+                ticker="NVDA",
+                horizon="rolling 2d",
+                ma_break_status="OK",
+                raw_status="DOUBLE_BOS_DOWN",
+            ),
+        ]
+    )
+
+    assert result.decisions[0].action == "SELL"
+    assert result.decisions[0].decision_trace[0].matched_rule == "SELL_BOS_DOWN_CONFIRMED_ACUTE"
+
+
 def test_blocked_from_blocking_reasons_when_no_sell_exists():
     result = build_datacenter_ticker_decisions(
         [_row(ticker="AMD", horizon="rolling 5d", blocking_reasons="HIGH_EXIT_RISK")]
@@ -237,6 +351,40 @@ def test_watch_when_rolling_30_positive_but_no_daily_trigger_exists():
     )
 
     assert result.decisions[0].action == "WATCH"
+
+
+def test_freshness_structure_warning_overrides_bullish_blocks_buy_now():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(ticker="TSM", horizon="rolling 30d", raw_status="BUY_ZONE"),
+            _row(ticker="TSM", horizon="rolling 5d", raw_status="PULLBACK"),
+            _row(ticker="TSM", horizon="daily", raw_status="BULLISH"),
+            _row(
+                ticker="TSM",
+                horizon="daily",
+                freshness_status="STRUCTURE_WARNING_OVERRIDES_BULLISH",
+                structure_warning_overrides_bullish_signal=1,
+            ),
+        ]
+    )
+
+    assert result.decisions[0].action != "BUY_NOW"
+
+
+def test_freshness_structure_warning_overrides_bullish_blocks_watch():
+    result = build_datacenter_ticker_decisions(
+        [
+            _row(ticker="MRVL", horizon="rolling 30d", raw_status="LEADER"),
+            _row(
+                ticker="MRVL",
+                horizon="daily",
+                freshness_status="STRUCTURE_WARNING_OVERRIDES_BULLISH",
+                structure_warning_overrides_bullish_signal=1,
+            ),
+        ]
+    )
+
+    assert result.decisions[0].action != "WATCH"
 
 
 def test_neutral_fallback():
