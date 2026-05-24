@@ -85,6 +85,41 @@ class _FakePage:
         self.tasks.append(task)
 
 
+def _iter_flet_descendants(control):
+    yield control
+    content = getattr(control, "content", None)
+    if content is not None:
+        yield from _iter_flet_descendants(content)
+    controls = getattr(control, "controls", None)
+    if controls:
+        for child in controls:
+            yield from _iter_flet_descendants(child)
+    tabs = getattr(control, "tabs", None)
+    if tabs:
+        for tab in tabs:
+            yield from _iter_flet_descendants(tab)
+
+
+def _dashboard_tab_descendants(page):
+    dashboard_tab = page.datacenter_tabs.tabs[2]
+    return list(_iter_flet_descendants(dashboard_tab.content))
+
+
+def _descendant_text_values(page):
+    values = []
+    for control in _dashboard_tab_descendants(page):
+        value = getattr(control, "value", None)
+        if isinstance(value, str):
+            values.append(value)
+        text = getattr(control, "text", None)
+        if isinstance(text, str):
+            values.append(text)
+        label = getattr(control, "label", None)
+        if isinstance(label, str):
+            values.append(label)
+    return values
+
+
 def test_load_latest_scheduler_summary_picks_newest_by_filename_timestamp(tmp_path):
     older = tmp_path / "stock_update_scheduler_summary_20260516T010000Z.json"
     newer = tmp_path / "stock_update_scheduler_summary_20260516T020000Z.json"
@@ -884,7 +919,9 @@ def test_datacenter_command_log_prepends_newest_entries(monkeypatch, tmp_path):
     assert log_field.value.splitlines() == expected_lines
 
 
-def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(tmp_path, monkeypatch):
+def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(
+    tmp_path, monkeypatch, capsys
+):
     config_path = tmp_path / "scheduler.json"
     config_path.write_text(
         json.dumps(
@@ -929,6 +966,7 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(tmp_path, mon
 
     page = _FakePage()
     run_app(page, str(config_path))
+    captured_stdout = capsys.readouterr().out
 
     assert page.datacenter_tabs.tabs[1].text == "Datacenter"
     assert page.datacenter_tabs.tabs[2].text == "Datacenter Dashboard"
@@ -961,6 +999,19 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(tmp_path, mon
     assert "candidate_priority.P1_READY_TO_WATCH=0" in page.datacenter_dashboard_decision_summary_field.value
     assert page.datacenter_dashboard_refresh_button.text == "Refresh Dashboard"
     assert page.datacenter_dashboard_reports_dir_field.label == "dashboard_reports_dir"
+    assert page.datacenter_dashboard_build_marker_text.value == (
+        "Dashboard UI build: dashboard_ui_visible_v1"
+    )
+    assert page.datacenter_dashboard_readiness_text.value == "Readiness: NOT_REFRESHED"
+    assert page.datacenter_dashboard_reports_status_text.value == "Reports: No reports loaded."
+    assert (
+        page.datacenter_dashboard_decisions_status_text.value
+        == "Decisions: No decisions available."
+    )
+    assert (
+        page.datacenter_dashboard_candidate_status_text.value
+        == "Candidate Pullbacks: No candidate pullbacks available."
+    )
     assert page.datacenter_dashboard_reports_column.controls[0].value == "No reports loaded."
     assert page.datacenter_dashboard_command_center_column.controls[0].value == "No decisions available."
     assert page.datacenter_dashboard_conflict_detected_field.value == "False"
@@ -975,16 +1026,23 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(tmp_path, mon
         if hasattr(control, "value")
     ]
     assert "Datacenter Dashboard" not in datacenter_text_labels
-    dashboard_text_labels = [
-        control.value
-        for control in page.datacenter_dashboard_content.controls
-        if hasattr(control, "value")
-    ]
+    dashboard_text_labels = _descendant_text_values(page)
     assert "Datacenter Dashboard" in dashboard_text_labels
+    assert "Dashboard UI build: dashboard_ui_visible_v1" in dashboard_text_labels
     assert "Reports directory" in dashboard_text_labels
+    assert "Refresh Dashboard" in dashboard_text_labels
+    assert "Readiness: NOT_REFRESHED" in dashboard_text_labels
+    assert "Reports: No reports loaded." in dashboard_text_labels
+    assert "Decisions: No decisions available." in dashboard_text_labels
+    assert "Candidate Pullbacks: No candidate pullbacks available." in dashboard_text_labels
     assert "Command Center" in dashboard_text_labels
     assert "Candidate Pullbacks" in dashboard_text_labels
     assert "Inspector" in dashboard_text_labels
+    assert len(page.datacenter_tabs.tabs[2].content.controls) > 5
+    assert len(_dashboard_tab_descendants(page)) > 20
+    assert "DEBUG dashboard_ui_build=dashboard_ui_visible_v1" in captured_stdout
+    assert "DEBUG dashboard_parent=" in captured_stdout
+    assert "DEBUG dashboard_children_count=" in captured_stdout
 
     page.datacenter_signal_date_field.value = "2026-05-15"
     page.datacenter_start_date_field.value = "2026-01-01"
@@ -1082,6 +1140,10 @@ def test_run_app_datacenter_dashboard_refresh_reads_report_directory(tmp_path, m
     page.datacenter_dashboard_refresh_button.on_click(None)
 
     assert page.datacenter_dashboard_overall_status_field.value == "PARTIAL"
+    assert page.datacenter_dashboard_readiness_text.value == "Readiness: PARTIAL"
+    assert page.datacenter_dashboard_reports_status_text.value == "Reports: found=1 missing=3"
+    assert page.datacenter_dashboard_decisions_status_text.value == "Decisions: total=1"
+    assert page.datacenter_dashboard_candidate_status_text.value == "Candidate Pullbacks: 0"
     assert "readiness=PARTIAL" in page.datacenter_dashboard_parse_summary_field.value
     assert "found_reports=1" in page.datacenter_dashboard_parse_summary_field.value
     assert "missing_reports=3" in page.datacenter_dashboard_parse_summary_field.value
@@ -1107,6 +1169,11 @@ def test_run_app_datacenter_dashboard_refresh_reads_report_directory(tmp_path, m
     assert "daily: OK" in daily_card.content.controls[0].value
     assert "parsed_rows: 1" in daily_card.content.controls[3].value
     assert "warnings: 0" in daily_card.content.controls[4].value
+    dashboard_text_labels = _descendant_text_values(page)
+    assert "Readiness: PARTIAL" in dashboard_text_labels
+    assert "Reports: found=1 missing=3" in dashboard_text_labels
+    assert "Decisions: total=1" in dashboard_text_labels
+    assert "Candidate Pullbacks: 0" in dashboard_text_labels
 
 
 def test_run_app_datacenter_dashboard_command_center_shows_grouped_read_only_rows(
@@ -1190,6 +1257,10 @@ def test_run_app_datacenter_dashboard_command_center_shows_grouped_read_only_row
     page.datacenter_dashboard_refresh_button.on_click(None)
 
     assert "decision_total=7" in page.datacenter_dashboard_decision_summary_field.value
+    assert page.datacenter_dashboard_readiness_text.value == "Readiness: READY"
+    assert page.datacenter_dashboard_reports_status_text.value == "Reports: found=4 missing=0"
+    assert page.datacenter_dashboard_decisions_status_text.value == "Decisions: total=7"
+    assert page.datacenter_dashboard_candidate_status_text.value == "Candidate Pullbacks: 1"
     assert "SELL=1" in page.datacenter_dashboard_decision_summary_field.value
     assert "REDUCE=1" in page.datacenter_dashboard_decision_summary_field.value
     assert "TIGHTEN_STOP=1" in page.datacenter_dashboard_decision_summary_field.value

@@ -593,6 +593,10 @@ def populate_datacenter_dashboard_summary(
     overall_status_field: ft.TextField,
     parse_summary_field: ft.TextField,
     decision_summary_field: ft.TextField,
+    readiness_text: ft.Text,
+    reports_status_text: ft.Text,
+    decisions_status_text: ft.Text,
+    candidate_status_text: ft.Text,
     reports_column: ft.Column,
 ) -> None:
     found_reports = sum(1 for report in dashboard_status.reports if report.status == "OK")
@@ -601,6 +605,15 @@ def populate_datacenter_dashboard_summary(
     overall_status_field.border_color = _dashboard_status_color(
         dashboard_status.overall_status
     )
+    readiness_text.value = f"Readiness: {dashboard_status.overall_status}"
+    reports_status_text.value = (
+        f"Reports: found={found_reports} missing={missing_reports}"
+    )
+    decisions_status_text.value = (
+        f"Decisions: total={len(decision_result.decisions)}"
+    )
+    candidate_count = decision_result.pullback_counts.get("VALID_PULLBACK", 0) + decision_result.pullback_counts.get("EARLY_PULLBACK", 0)
+    candidate_status_text.value = f"Candidate Pullbacks: {candidate_count}"
     parse_summary_field.value = (
         f"readiness={dashboard_status.overall_status}\n"
         f"found_reports={found_reports}\n"
@@ -935,6 +948,10 @@ def populate_datacenter_dashboard_not_refreshed(
     overall_status_field: ft.TextField,
     parse_summary_field: ft.TextField,
     decision_summary_field: ft.TextField,
+    readiness_text: ft.Text,
+    reports_status_text: ft.Text,
+    decisions_status_text: ft.Text,
+    candidate_status_text: ft.Text,
     reports_column: ft.Column,
     command_center_column: ft.Column,
     candidate_pullbacks_column: ft.Column,
@@ -949,6 +966,10 @@ def populate_datacenter_dashboard_not_refreshed(
 ) -> None:
     overall_status_field.value = "NOT_REFRESHED"
     overall_status_field.border_color = _STATUS_WARNING_COLOR
+    readiness_text.value = "Readiness: NOT_REFRESHED"
+    reports_status_text.value = "Reports: No reports loaded."
+    decisions_status_text.value = "Decisions: No decisions available."
+    candidate_status_text.value = "Candidate Pullbacks: No candidate pullbacks available."
     parse_summary_field.value = (
         "readiness=NOT_REFRESHED\n"
         "found_reports=0\n"
@@ -1368,6 +1389,17 @@ def run_app(page: ft.Page, config_path: str) -> None:
         value=DEFAULT_DATACENTER_OUTPUT_DIR,
         expand=True,
     )
+    datacenter_dashboard_build_marker_text = ft.Text(
+        "Dashboard UI build: dashboard_ui_visible_v1",
+        size=12,
+        color="gray",
+    )
+    datacenter_dashboard_readiness_text = ft.Text("Readiness: NOT_REFRESHED")
+    datacenter_dashboard_reports_status_text = ft.Text("Reports: No reports loaded.")
+    datacenter_dashboard_decisions_status_text = ft.Text("Decisions: No decisions available.")
+    datacenter_dashboard_candidate_status_text = ft.Text(
+        "Candidate Pullbacks: No candidate pullbacks available."
+    )
     datacenter_dashboard_overall_status_field = ft.TextField(
         label="dashboard_overall_status",
         value="NOT_REFRESHED",
@@ -1554,6 +1586,10 @@ def run_app(page: ft.Page, config_path: str) -> None:
             overall_status_field=datacenter_dashboard_overall_status_field,
             parse_summary_field=datacenter_dashboard_parse_summary_field,
             decision_summary_field=datacenter_dashboard_decision_summary_field,
+            readiness_text=datacenter_dashboard_readiness_text,
+            reports_status_text=datacenter_dashboard_reports_status_text,
+            decisions_status_text=datacenter_dashboard_decisions_status_text,
+            candidate_status_text=datacenter_dashboard_candidate_status_text,
             reports_column=datacenter_dashboard_reports_column,
         )
         populate_datacenter_dashboard_command_center(
@@ -2122,14 +2158,23 @@ def run_app(page: ft.Page, config_path: str) -> None:
             ft.Text(
                 "Read-only dashboard for the newest daily and rolling reports."
             ),
-            ft.Text("Reports directory", size=18, weight=ft.FontWeight.BOLD),
+            datacenter_dashboard_build_marker_text,
             ft.Row(
                 [
+                    ft.Text("Reports directory", width=140),
                     datacenter_dashboard_reports_dir_field,
                     datacenter_dashboard_refresh_button,
                 ],
-                wrap=True,
-                vertical_alignment=ft.CrossAxisAlignment.END,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            ft.Column(
+                controls=[
+                    datacenter_dashboard_readiness_text,
+                    datacenter_dashboard_reports_status_text,
+                    datacenter_dashboard_decisions_status_text,
+                    datacenter_dashboard_candidate_status_text,
+                ],
+                spacing=4,
             ),
             ft.Row(
                 [
@@ -2182,6 +2227,11 @@ def run_app(page: ft.Page, config_path: str) -> None:
     page.datacenter_rolling_window_size_field = datacenter_rolling_window_size_field
     page.datacenter_watchlist_file_field = datacenter_watchlist_file_field
     page.datacenter_dashboard_reports_dir_field = datacenter_dashboard_reports_dir_field
+    page.datacenter_dashboard_build_marker_text = datacenter_dashboard_build_marker_text
+    page.datacenter_dashboard_readiness_text = datacenter_dashboard_readiness_text
+    page.datacenter_dashboard_reports_status_text = datacenter_dashboard_reports_status_text
+    page.datacenter_dashboard_decisions_status_text = datacenter_dashboard_decisions_status_text
+    page.datacenter_dashboard_candidate_status_text = datacenter_dashboard_candidate_status_text
     page.datacenter_dashboard_overall_status_field = datacenter_dashboard_overall_status_field
     page.datacenter_dashboard_parse_summary_field = (
         datacenter_dashboard_parse_summary_field
@@ -2253,6 +2303,10 @@ def run_app(page: ft.Page, config_path: str) -> None:
         overall_status_field=datacenter_dashboard_overall_status_field,
         parse_summary_field=datacenter_dashboard_parse_summary_field,
         decision_summary_field=datacenter_dashboard_decision_summary_field,
+        readiness_text=datacenter_dashboard_readiness_text,
+        reports_status_text=datacenter_dashboard_reports_status_text,
+        decisions_status_text=datacenter_dashboard_decisions_status_text,
+        candidate_status_text=datacenter_dashboard_candidate_status_text,
         reports_column=datacenter_dashboard_reports_column,
         command_center_column=datacenter_dashboard_command_center_column,
         candidate_pullbacks_column=datacenter_dashboard_candidate_pullbacks_column,
@@ -2265,6 +2319,9 @@ def run_app(page: ft.Page, config_path: str) -> None:
         conflicting_signals_field=datacenter_dashboard_conflicting_signals_field,
         override_explanation_field=datacenter_dashboard_override_explanation_field,
     )
+    print("DEBUG dashboard_ui_build=dashboard_ui_visible_v1")
+    print(f"DEBUG dashboard_parent={datacenter_dashboard_content!r}")
+    print(f"DEBUG dashboard_children_count={len(datacenter_dashboard_content.controls)}")
     page.add(tabs)
     page.update()
 
