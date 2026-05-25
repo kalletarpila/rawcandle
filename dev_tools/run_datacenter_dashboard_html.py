@@ -2203,6 +2203,183 @@ def _watchlist_value_with_age(
     return _format_value_with_age(value, age_text)
 
 
+def _watchlist_row_text(row: DatacenterDashboardRow, *field_names: str) -> str:
+    for field_name in field_names:
+        if hasattr(row, field_name):
+            value = getattr(row, field_name, None)
+        else:
+            value = row.raw_fields.get(field_name, "")
+        text = str(value).strip() if value is not None else ""
+        if text:
+            return text
+    return ""
+
+
+def _watchlist_age_rank(age_text: str) -> int | None:
+    if not age_text:
+        return None
+    try:
+        return int(age_text)
+    except ValueError:
+        return None
+
+
+def _watchlist_is_signal_name(value: str) -> bool:
+    text = value.strip()
+    return bool(text and text not in {"0", "1", "-"})
+
+
+def _watchlist_pick_candidate(
+    rows: Sequence[DatacenterDashboardRow],
+    candidate_specs: Sequence[tuple[Sequence[str], Sequence[str], int]],
+) -> tuple[str, str]:
+    ranked_with_age: list[tuple[int, int, int, str, str]] = []
+    ranked_without_age: list[tuple[int, int, str, str]] = []
+    for row_index, row in enumerate(rows):
+        for value_names, age_names, priority in candidate_specs:
+            value = _watchlist_row_text(row, *value_names)
+            if not _watchlist_is_signal_name(value):
+                continue
+            age_text = _watchlist_row_text(row, *age_names)
+            age_rank = _watchlist_age_rank(age_text)
+            if age_rank is None:
+                ranked_without_age.append((priority, row_index, value, age_text))
+            else:
+                ranked_with_age.append((age_rank, priority, row_index, value, age_text))
+    if ranked_with_age:
+        ranked_with_age.sort(key=lambda item: (item[0], item[1], item[2], item[3]))
+        _age_rank, _priority, _row_index, value, age_text = ranked_with_age[0]
+        return value, age_text
+    if ranked_without_age:
+        ranked_without_age.sort(key=lambda item: (item[0], item[1], item[2]))
+        _priority, _row_index, value, age_text = ranked_without_age[0]
+        return value, age_text
+    return "", ""
+
+
+def _watchlist_latest_candle(rows: Sequence[DatacenterDashboardRow]) -> tuple[str, str]:
+    direct_candidate = _watchlist_pick_candidate(
+        rows,
+        (
+            (("latest_bearish_candle",), ("bearish_candle_age_td",), 0),
+            (("latest_bullish_candle",), ("bullish_candle_age_td",), 1),
+        ),
+    )
+    if direct_candidate[0]:
+        return direct_candidate
+
+    value, age_text = _watchlist_pick_candidate(
+        rows,
+        (
+            (
+                ("latest_bearish_relevance_signal_name",),
+                (),
+                0,
+            ),
+            (
+                ("latest_bullish_relevance_signal_name",),
+                (),
+                1,
+            ),
+        ),
+    )
+    if value and "divergence" not in value.lower():
+        return value, age_text
+    return "", ""
+
+
+def _watchlist_latest_divergence(
+    rows: Sequence[DatacenterDashboardRow],
+) -> tuple[str, str]:
+    direct_candidate = _watchlist_pick_candidate(
+        rows,
+        (
+            (("latest_bearish_divergence",), ("bearish_divergence_age_td",), 0),
+            (("latest_bullish_divergence",), ("bullish_divergence_age_td",), 1),
+            (
+                ("latest_hidden_bearish_divergence",),
+                ("hidden_bearish_divergence_age_td",),
+                2,
+            ),
+            (
+                ("latest_hidden_bullish_divergence",),
+                ("hidden_bullish_divergence_age_td",),
+                3,
+            ),
+        ),
+    )
+    if direct_candidate[0]:
+        return direct_candidate
+
+    value, age_text = _watchlist_pick_candidate(
+        rows,
+        (
+            (
+                ("latest_bearish_relevance_signal_name",),
+                (),
+                0,
+            ),
+            (
+                ("latest_bullish_relevance_signal_name",),
+                (),
+                1,
+            ),
+        ),
+    )
+    if value and "divergence" in value.lower():
+        return value, age_text
+    return "", ""
+
+
+def _watchlist_latest_chart_pattern(
+    rows: Sequence[DatacenterDashboardRow],
+) -> tuple[str, str]:
+    return _watchlist_pick_candidate(
+        rows,
+        (
+            (
+                ("latest_chart_pattern",),
+                ("latest_chart_pattern_age_td", "chart_pattern_age_td"),
+                0,
+            ),
+            (("chart_pattern",), ("chart_pattern_age_td",), 1),
+        ),
+    )
+
+
+def _watchlist_formatted_signal(value: str, age_text: str) -> str:
+    return _format_value_with_age(value, age_text)
+
+
+def _watchlist_summary_pattern_token(
+    latest_candle: tuple[str, str],
+    latest_divergence: tuple[str, str],
+    latest_chart_pattern: tuple[str, str],
+) -> str:
+    ranked_with_age: list[tuple[int, int, str, str]] = []
+    ranked_without_age: list[tuple[int, str, str]] = []
+    for priority, candidate in enumerate(
+        (latest_candle, latest_divergence, latest_chart_pattern)
+    ):
+        value, age_text = candidate
+        if not value:
+            continue
+        age_rank = _watchlist_age_rank(age_text)
+        if age_rank is None:
+            ranked_without_age.append((priority, value, age_text))
+        else:
+            ranked_with_age.append((age_rank, priority, value, age_text))
+    if ranked_with_age:
+        ranked_with_age.sort(key=lambda item: (item[0], item[1], item[2]))
+        _age_rank, _priority, value, age_text = ranked_with_age[0]
+        return _watchlist_formatted_signal(value, age_text)
+    if ranked_without_age:
+        ranked_without_age.sort(key=lambda item: (item[0], item[1]))
+        _priority, value, age_text = ranked_without_age[0]
+        return _watchlist_formatted_signal(value, age_text)
+    return ""
+
+
 def _watchlist_status_change_text(
     rows: Sequence[DatacenterDashboardRow], *field_names: str
 ) -> str:
@@ -2229,8 +2406,11 @@ def _watchlist_window_status(
 
 def _watchlist_detail_filter_text(
     decision: DatacenterTickerDecision,
-    watchlist_rows: Sequence[DatacenterDashboardRow],
+    ticker_rows: Sequence[DatacenterDashboardRow],
     horizon_status_by_name: dict[str, str],
+    latest_candle_text: str,
+    latest_divergence_text: str,
+    latest_chart_pattern_text: str,
 ) -> str:
     parts = [
         decision.ticker,
@@ -2240,10 +2420,10 @@ def _watchlist_detail_filter_text(
         decision.pullback_validity or "",
         decision.entry_readiness or "",
         decision.candidate_priority_label or "",
-        _watchlist_context_text(watchlist_rows, "ma_break_status", "ma_break_status"),
-        _watchlist_context_text(watchlist_rows, "freshness_status", "freshness_status"),
+        _watchlist_context_text(ticker_rows, "ma_break_status", "ma_break_status"),
+        _watchlist_context_text(ticker_rows, "freshness_status", "freshness_status"),
         _watchlist_context_text(
-            watchlist_rows,
+            ticker_rows,
             "trend_state",
             "trend_state",
             "dow_trend_state",
@@ -2251,23 +2431,26 @@ def _watchlist_detail_filter_text(
             "last_trend_state",
         ),
         _watchlist_context_text(
-            watchlist_rows,
+            ticker_rows,
             "latest_structure_label",
             "latest_structure_label",
             "last_latest_structure_label",
         ),
         _watchlist_context_text(
-            watchlist_rows,
+            ticker_rows,
             "latest_bos_event_type",
             "latest_bos_event_type",
             "last_latest_bos_event_type",
         ),
         _watchlist_context_text(
-            watchlist_rows,
+            ticker_rows,
             "latest_reset_reason",
             "latest_reset_reason",
             "last_latest_reset_reason",
         ),
+        latest_candle_text,
+        latest_divergence_text,
+        latest_chart_pattern_text,
         horizon_status_by_name.get("daily", ""),
         horizon_status_by_name.get("rolling 2d", ""),
         horizon_status_by_name.get("rolling 5d", ""),
@@ -2578,26 +2761,23 @@ def generate_dashboard_html(
     )
     watchlist_rows_html_parts: list[str] = []
     for decision in watchlist_decisions:
-        watchlist_rows = [
-            row
-            for row in _rows_for_ticker(parsed_rows, decision.ticker)
-            if _is_watchlist_row(row)
-        ]
+        ticker_rows = _rows_for_ticker(parsed_rows, decision.ticker)
+        watchlist_rows = [row for row in ticker_rows if _is_watchlist_row(row)]
         horizon_status_by_name = {
             row.horizon: _watchlist_horizon_status(row) for row in watchlist_rows
         }
         ma_break_text = _watchlist_context_text(
-            watchlist_rows,
+            ticker_rows,
             "ma_break_status",
             "ma_break_status",
         )
         freshness_text = _watchlist_context_text(
-            watchlist_rows,
+            ticker_rows,
             "freshness_status",
             "freshness_status",
         )
         trend_text = _watchlist_value_with_age(
-            watchlist_rows,
+            ticker_rows,
             "trend_state",
             "trend_state_age_td",
             "dow_trend_state_age_td",
@@ -2612,7 +2792,7 @@ def generate_dashboard_html(
             ),
         )
         latest_structure_text = _watchlist_value_with_age(
-            watchlist_rows,
+            ticker_rows,
             "latest_structure_label",
             "latest_structure_age_td",
             "latest_structure_age_trading_days",
@@ -2621,7 +2801,7 @@ def generate_dashboard_html(
             raw_value_names=("latest_structure_label", "last_latest_structure_label"),
         )
         latest_bos_text = _watchlist_value_with_age(
-            watchlist_rows,
+            ticker_rows,
             "latest_bos_event_type",
             "latest_bos_age_td",
             "latest_bos_age_trading_days",
@@ -2631,12 +2811,25 @@ def generate_dashboard_html(
             raw_value_names=("latest_bos_event_type", "last_latest_bos_event_type"),
         )
         latest_reset_text = _watchlist_value_with_age(
-            watchlist_rows,
+            ticker_rows,
             "latest_reset_reason",
             "latest_reset_age_td",
             "latest_reset_age_trading_days",
             "last_latest_reset_age_trading_days",
             raw_value_names=("latest_reset_reason", "last_latest_reset_reason"),
+        )
+        latest_candle = _watchlist_latest_candle(ticker_rows)
+        latest_divergence = _watchlist_latest_divergence(ticker_rows)
+        latest_chart_pattern = _watchlist_latest_chart_pattern(ticker_rows)
+        latest_candle_text = _watchlist_formatted_signal(*latest_candle) or "-"
+        latest_divergence_text = _watchlist_formatted_signal(*latest_divergence) or "-"
+        latest_chart_pattern_text = (
+            _watchlist_formatted_signal(*latest_chart_pattern) or "-"
+        )
+        pattern_summary_text = _watchlist_summary_pattern_token(
+            latest_candle,
+            latest_divergence,
+            latest_chart_pattern,
         )
         current_status_text = _watchlist_current_status(horizon_status_by_name)
         start_status_30d_text = _watchlist_status_change_text(
@@ -2672,8 +2865,11 @@ def generate_dashboard_html(
         summary_action_class = _watchlist_summary_action_class(decision.action)
         detail_filter_text = _watchlist_detail_filter_text(
             decision,
-            watchlist_rows,
+            ticker_rows,
             horizon_status_by_name,
+            latest_candle_text,
+            latest_divergence_text,
+            latest_chart_pattern_text,
         )
         detail_table_html = (
             '<table class="sticky-table watchlist-detail-table"><thead><tr>'
@@ -2681,7 +2877,8 @@ def generate_dashboard_html(
             "<th>Current status</th><th>Start status 30d</th><th>Status change 30d</th><th>Status change 5d</th>"
             "<th>Window status 30d</th><th>Window status 5d</th><th>Window status 2d</th>"
             "<th>MA break</th><th>Freshness</th><th>Trend state</th><th>Latest structure</th>"
-            "<th>Latest BOS</th><th>Latest reset</th><th>Pullback validity</th><th>Entry readiness</th>"
+            "<th>Latest BOS</th><th>Latest reset</th><th>Latest candle</th><th>Latest divergence</th>"
+            "<th>Latest chart pattern</th><th>Pullback validity</th><th>Entry readiness</th>"
             "<th>Candidate priority</th><th>Daily status</th><th>Rolling 2d status</th>"
             "<th>Rolling 5d status</th><th>Rolling 30d status</th><th>Horizons</th>"
             "</tr></thead><tbody><tr>"
@@ -2702,6 +2899,9 @@ def generate_dashboard_html(
             + f"<td>{_html_text(latest_structure_text)}</td>"
             + f"<td>{_html_text(latest_bos_text)}</td>"
             + f"<td>{_html_text(latest_reset_text)}</td>"
+            + f"<td>{_html_text(latest_candle_text)}</td>"
+            + f"<td>{_html_text(latest_divergence_text)}</td>"
+            + f"<td>{_html_text(latest_chart_pattern_text)}</td>"
             + f"<td>{_html_text(_safe_text(decision.pullback_validity))}</td>"
             + f"<td>{_html_text(_safe_text(decision.entry_readiness))}</td>"
             + f"<td>{_html_text(_safe_text(decision.candidate_priority_label))}</td>"
@@ -2734,7 +2934,12 @@ def generate_dashboard_html(
             f"<span>Structure {_html_text(latest_structure_text)}</span>"
             f"<span>BOS {_html_text(latest_bos_text)}</span>"
             f"<span>Reset {_html_text(latest_reset_text)}</span>"
-            "</summary>"
+            + (
+                f"<span>Pattern {_html_text(pattern_summary_text)}</span>"
+                if pattern_summary_text
+                else ""
+            )
+            + "</summary>"
             '<div class="watchlist-detail-body"><div class="table-scroll">'
             + detail_table_html
             + "</div></div></details>"

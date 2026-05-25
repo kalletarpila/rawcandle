@@ -200,7 +200,16 @@ def _fake_rows(path: str, horizon: str) -> list[DatacenterDashboardRow]:
                 latest_bos_up_age_td=1,
                 latest_bos_down_age_td=None,
                 latest_reset_age_td=None,
-                raw_fields={},
+                raw_fields={
+                    "latest_bullish_candle": "Hammer",
+                    "bullish_candle_age_td": "4",
+                    "latest_bearish_divergence": "Bearish Divergence",
+                    "bearish_divergence_age_td": "2",
+                    "latest_bullish_relevance_signal_name": "Hammer",
+                    "latest_bearish_relevance_signal_name": "Bearish Divergence",
+                    "latest_chart_pattern": "BASE_BREAKOUT",
+                    "latest_chart_pattern_age_td": "5",
+                },
             ),
             DatacenterDashboardRow(
                 ticker="NV<DA>",
@@ -344,7 +353,18 @@ def _fake_rows(path: str, horizon: str) -> list[DatacenterDashboardRow]:
                 latest_bos_up_age_td=2,
                 latest_bos_down_age_td=None,
                 latest_reset_age_td=None,
-                raw_fields={},
+                raw_fields={
+                    "latest_bearish_candle": "SHOOTING_STAR",
+                    "bearish_candle_age_td": "2",
+                    "latest_bullish_candle": "HAMMER",
+                    "bullish_candle_age_td": "2",
+                    "latest_hidden_bullish_divergence": "HIDDEN_BULLISH_DIVERGENCE",
+                    "hidden_bullish_divergence_age_td": "1",
+                    "latest_bearish_divergence": "BEARISH_DIVERGENCE",
+                    "bearish_divergence_age_td": "1",
+                    "chart_pattern": "ASCENDING_TRIANGLE",
+                    "chart_pattern_age_td": "6",
+                },
             ),
         ]
     if horizon == "rolling 30d":
@@ -949,14 +969,22 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(
     assert "Structure HH (3)" in msft_summary_html
     assert "BOS BOS_UP (1)" in msft_summary_html
     assert "Reset -" in msft_summary_html
+    assert "Pattern Bearish Divergence (2)" in msft_summary_html
 
     assert "HH (3)" in watchlist_section
     assert "BOS_DOWN (1)" in watchlist_section
     assert "DOUBLE_BOS_DOWN (1)" in watchlist_section
     assert "FAILED_BREAKOUT" in watchlist_section
+    assert "Hammer (4)" in watchlist_section
+    assert "Bearish Divergence (2)" in watchlist_section
+    assert "BASE_BREAKOUT (5)" in watchlist_section
+    assert "SHOOTING_STAR (2)" in watchlist_section
+    assert "BEARISH_DIVERGENCE (1)" in watchlist_section
+    assert "ASCENDING_TRIANGLE (6)" in watchlist_section
     assert "FAILED_BREAKOUT (-)" not in watchlist_section
     assert "HH (-)" not in watchlist_section
     assert "BOS_UP (-)" not in watchlist_section
+    assert "Pattern -" not in watchlist_section
 
     for snippet in (
         "<th>Ticker</th>",
@@ -976,6 +1004,9 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(
         "<th>Latest structure</th>",
         "<th>Latest BOS</th>",
         "<th>Latest reset</th>",
+        "<th>Latest candle</th>",
+        "<th>Latest divergence</th>",
+        "<th>Latest chart pattern</th>",
         "<th>Pullback validity</th>",
         "<th>Entry readiness</th>",
         "<th>Candidate priority</th>",
@@ -992,6 +1023,23 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(
     assert "PULLBACK_WINDOW -&gt; BREAKOUT_READY" in watchlist_section
     assert "PULLBACK_MONITOR" in watchlist_section
     assert "PULLBACK_WINDOW" in watchlist_section
+
+    amd_details_match = re.search(
+        r'<details class="watchlist-detail [^"]+"[^>]*data-filter-text="([^"]+)"[^>]*>\s*<summary class="watchlist-summary [^"]+">\s*<span class="watchlist-ticker">AMD</span>(.*?)</summary>.*?<table class="sticky-table watchlist-detail-table">(.*?)</table>',
+        watchlist_section,
+        re.DOTALL,
+    )
+    assert amd_details_match is not None
+    amd_filter_text = amd_details_match.group(1).lower()
+    amd_detail_html = amd_details_match.group(3)
+    assert "SHOOTING_STAR (2)" in amd_detail_html
+    assert "BEARISH_DIVERGENCE (1)" in amd_detail_html
+    assert "ascending_triangle (6)" in amd_detail_html.lower()
+    assert "hammer (2)" not in amd_detail_html.lower()
+    assert "hidden_bullish_divergence (1)" not in amd_detail_html.lower()
+    assert "shooting_star (2)" in amd_filter_text
+    assert "bearish_divergence (1)" in amd_filter_text
+    assert "ascending_triangle (6)" in amd_filter_text
 
 
 @pytest.mark.parametrize(
