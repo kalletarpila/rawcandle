@@ -1595,6 +1595,9 @@ def generate_dashboard_html(
       <a href="#inspector">Inspector</a>
       <a href="#source-files">Source Files</a>
     </nav>
+  </section>
+
+  <section>
     <table class="meta-table">
       <tbody>
         {header_summary_rows}
