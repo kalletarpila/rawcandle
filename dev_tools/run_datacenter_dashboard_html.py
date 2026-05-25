@@ -153,6 +153,9 @@ class _CombinedEcosystemRow:
     current_status: str
     start_status_30d: str
     status_change_30d: str
+    start_status_5d: str
+    status_change_5d: str
+    window_status: str
     overheat_risk_level: str
     pct_above_ema20: str
     pct_above_ma10: str
@@ -535,9 +538,19 @@ def _combine_ecosystem_context_rows(
         if row.horizon == "rolling 30d" and row.start_status_30d.strip():
             start_status_30d = row.start_status_30d.strip()
             break
+    start_status_5d = ""
+    for row in rows:
+        if row.horizon == "rolling 5d" and row.start_status_30d.strip():
+            start_status_5d = row.start_status_30d.strip()
+            break
     status_change_30d = (
         f"{start_status_30d} -> {current_status}"
         if start_status_30d and current_status
+        else ""
+    )
+    status_change_5d = (
+        f"{start_status_5d} -> {current_status}"
+        if start_status_5d and current_status
         else ""
     )
 
@@ -584,6 +597,9 @@ def _combine_ecosystem_context_rows(
         current_status=current_status,
         start_status_30d=start_status_30d,
         status_change_30d=status_change_30d,
+        start_status_5d=start_status_5d,
+        status_change_5d=status_change_5d,
+        window_status="",
         overheat_risk_level=_preferred("overheat_risk_level"),
         pct_above_ema20=_preferred("pct_above_ema20"),
         pct_above_ma10=_preferred("pct_above_ma10"),
@@ -608,9 +624,9 @@ def _ecosystem_filter_text(row: _CombinedEcosystemRow) -> str:
         part
         for part in (
             row.name,
-            row.current_status,
-            row.start_status_30d,
             row.status_change_30d,
+            row.status_change_5d,
+            row.window_status,
             row.overheat_risk_level,
             row.dow_trend_state,
             row.latest_relevant_pattern,
@@ -621,6 +637,8 @@ def _ecosystem_filter_text(row: _CombinedEcosystemRow) -> str:
 
 
 def _render_combined_ecosystem_row(row: _CombinedEcosystemRow) -> str:
+    status_class = _group_status_class(row.current_status)
+    status_class_attr = f' class="{status_class}"' if status_class else ""
     return (
         "<tr"
         f' data-filter-row="1"'
@@ -632,9 +650,9 @@ def _render_combined_ecosystem_row(row: _CombinedEcosystemRow) -> str:
         f' data-filter-text="{_html_attr(_ecosystem_filter_text(row))}"'
         ">"
         f"<td>{_html_text(row.name)}</td>"
-        + _render_market_status_cell(row.current_status)
-        + _render_market_status_cell(row.start_status_30d)
-        + f"<td>{_html_text(row.status_change_30d)}</td>"
+        + f"<td{status_class_attr}>{_html_text(row.status_change_30d)}</td>"
+        + f"<td{status_class_attr}>{_html_text(row.status_change_5d)}</td>"
+        + f"<td{status_class_attr}>{_html_text(row.window_status)}</td>"
         + _render_market_status_cell(row.overheat_risk_level)
         + f"<td>{_html_text(row.pct_above_ema20)}</td>"
         + f"<td>{_html_text(row.pct_above_ma10)}</td>"
@@ -650,7 +668,6 @@ def _render_combined_ecosystem_row(row: _CombinedEcosystemRow) -> str:
         + f"<td>{_html_text(row.latest_relevant_pattern)}</td>"
         + f"<td>{_html_text(row.latest_relevant_pattern_age_td)}</td>"
         + f"<td>{_html_text(row.source_horizons)}</td>"
-        + f"<td>{_html_text(row.source_files)}</td>"
         + "</tr>"
     )
 
@@ -934,7 +951,6 @@ def _render_market_map_rows(
             + f"<td>{_html_text(row.return_10d)}</td>"
             + f"<td>{_html_text(row.return_20d)}</td>"
             + f"<td>{_html_text(row.return_60d)}</td>"
-            + f"<td>{_html_text(Path(row.source_file).name if row.source_file else '')}</td>"
             + "</tr>"
         )
     return "".join(rendered_rows)
@@ -1195,7 +1211,6 @@ def generate_dashboard_html(
                 f"<td>{_html_text(decision.latest_bos_event_type)}</td>"
                 f"<td>{_html_text(decision.latest_reset_reason)}</td>"
                 f"<td>{_html_text(', '.join(decision.horizons_present))}</td>"
-                f"<td>{len(decision.source_files)}</td>"
                 "</tr>"
             )
             command_center_rows_rendered += 1
@@ -1210,7 +1225,7 @@ def generate_dashboard_html(
                 "<th>Pullback validity</th><th>Entry readiness</th><th>Candidate priority</th>"
                 "<th>MA break</th><th>Freshness</th><th>Trend state</th>"
                 "<th>Latest structure</th><th>Latest BOS</th><th>Latest reset</th>"
-                "<th>Horizons</th><th>Source files</th>"
+                "<th>Horizons</th>"
                 "</tr></thead>"
                 f"<tbody>{''.join(rows_html)}</tbody>"
                 "</table>"
@@ -1297,7 +1312,6 @@ def generate_dashboard_html(
             f"<td>{_html_text(decision.latest_bos_event_type)}</td>"
             f"<td>{_html_text(decision.latest_reset_reason)}</td>"
             f"<td>{_html_text(', '.join(decision.horizons_present))}</td>"
-            f"<td>{len(decision.source_files)}</td>"
             f"<td>{_html_text(horizon_status_by_name.get('daily'))}</td>"
             f"<td>{_html_text(horizon_status_by_name.get('rolling 2d'))}</td>"
             f"<td>{_html_text(horizon_status_by_name.get('rolling 5d'))}</td>"
@@ -1616,12 +1630,12 @@ def generate_dashboard_html(
     <h2>Ecosystem Summary</h2>
     {(
       '<div class="table-scroll"><table class="sticky-table"><thead><tr>'
-      '<th>Ecosystem</th><th>Current status</th><th>Start status 30d</th><th>Status change 30d</th>'
+      '<th>Ecosystem</th><th>Status change 30d</th><th>Status change 5d</th><th>Window status</th>'
       '<th>Overheat risk</th><th>% above EMA20</th><th>% above MA10</th>'
       '<th>EMA20 breadth delta 5d</th><th>Return 5d</th><th>Return 10d</th>'
       '<th>Return 20d</th><th>Return 60d</th><th>Dow trend state</th><th>Latest structure</th>'
       '<th>Latest BOS</th><th>Latest reset</th><th>Latest relevant pattern</th>'
-      '<th>Pattern age td</th><th>Source horizons</th><th>Source files</th>'
+      '<th>Pattern age td</th><th>Source horizons</th>'
       '</tr></thead><tbody>'
       + ecosystem_market_rows_html +
       '</tbody></table></div>'
@@ -1635,7 +1649,7 @@ def generate_dashboard_html(
       '<th>Layer</th><th>Horizon</th><th>Current status</th><th>Window status</th>'
       '<th>Overheat risk</th><th>% above EMA20</th><th>% above MA10</th>'
       '<th>EMA20 breadth delta 5d</th><th>Return 5d</th><th>Return 10d</th>'
-      '<th>Return 20d</th><th>Return 60d</th><th>Source file</th>'
+      '<th>Return 20d</th><th>Return 60d</th>'
       '</tr></thead><tbody>'
       + layer_market_rows_html +
       '</tbody></table></div>'
@@ -1649,7 +1663,7 @@ def generate_dashboard_html(
       '<th>Subindustry</th><th>Layer</th><th>Horizon</th><th>Current status</th><th>Window status</th>'
       '<th>Overheat risk</th><th>% above EMA20</th><th>% above MA10</th>'
       '<th>EMA20 breadth delta 5d</th><th>Return 5d</th><th>Return 10d</th>'
-      '<th>Return 20d</th><th>Return 60d</th><th>Source file</th>'
+      '<th>Return 20d</th><th>Return 60d</th>'
       '</tr></thead><tbody>'
       + subindustry_market_rows_html +
       '</tbody></table></div>'
@@ -1665,7 +1679,7 @@ def generate_dashboard_html(
       '<th>Pullback validity</th><th>Entry readiness</th><th>Candidate priority</th>'
       '<th>MA break</th><th>Freshness</th><th>Trend state</th>'
       '<th>Latest structure</th><th>Latest BOS</th><th>Latest reset</th>'
-      '<th>Horizons</th><th>Source files</th>'
+      '<th>Horizons</th>'
       '<th>Daily status</th><th>Rolling 2d status</th><th>Rolling 5d status</th><th>Rolling 30d status</th>'
       '</tr></thead><tbody>'
       + watchlist_rows_html +
