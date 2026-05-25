@@ -95,6 +95,34 @@ _REPORT_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _MARKDOWN_SEPARATOR_RE = re.compile(r"^\s*\|?(?:\s*:?-+:?\s*\|)+\s*:?-+:?\s*\|?\s*$")
 _MARKDOWN_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+(.*?)\s*$")
 _MARKET_MAP_EMPTY = "No market map rows found in the selected reports."
+_MARKET_MAP_COLUMN_LABELS = (
+    "Market level",
+    "Name",
+    "Layer",
+    "Current status",
+    "Start status 30d",
+    "Status change 30d",
+    "Status change 5d",
+    "Window status 30d",
+    "Window status 5d",
+    "Window status 2d",
+    "Overheat risk",
+    "% above EMA20",
+    "% above MA10",
+    "EMA20 breadth delta 5d",
+    "Return 5d",
+    "Return 10d",
+    "Return 20d",
+    "Return 60d",
+    "Dow trend state",
+    "Latest structure",
+    "Latest BOS",
+    "Latest reset",
+    "Latest relevant pattern",
+    "Pattern age td",
+    "Source horizons",
+    "Source files",
+)
 
 
 @dataclass(frozen=True)
@@ -191,13 +219,17 @@ class _EcosystemContextRow:
 
 @dataclass(frozen=True)
 class _CombinedEcosystemRow:
+    market_level: str
     name: str
+    layer: str
     current_status: str
     start_status_30d: str
     status_change_30d: str
     start_status_5d: str
     status_change_5d: str
-    window_status: str
+    window_status_30d: str
+    window_status_5d: str
+    window_status_2d: str
     overheat_risk_level: str
     pct_above_ema20: str
     pct_above_ma10: str
@@ -633,7 +665,18 @@ def _combine_ecosystem_context_rows(
         return ""
 
     current_status = _preferred("current_status")
-    window_status = _preferred("window_status")
+    window_status_30d = next(
+        (row.window_status.strip() for row in rows if row.horizon == "rolling 30d" and row.window_status.strip()),
+        "",
+    )
+    window_status_5d = next(
+        (row.window_status.strip() for row in rows if row.horizon == "rolling 5d" and row.window_status.strip()),
+        "",
+    )
+    window_status_2d = next(
+        (row.window_status.strip() for row in rows if row.horizon == "rolling 2d" and row.window_status.strip()),
+        "",
+    )
     start_status_30d = ""
     for row in rows:
         if row.horizon == "rolling 30d" and row.start_status_30d.strip():
@@ -694,13 +737,17 @@ def _combine_ecosystem_context_rows(
         if row.source_file
     )
     return _CombinedEcosystemRow(
+        market_level="ECOSYSTEM",
         name=rows[0].name,
+        layer="-",
         current_status=current_status,
         start_status_30d=start_status_30d,
         status_change_30d=status_change_30d,
         start_status_5d=start_status_5d,
         status_change_5d=status_change_5d,
-        window_status=window_status,
+        window_status_30d=window_status_30d,
+        window_status_5d=window_status_5d,
+        window_status_2d=window_status_2d,
         overheat_risk_level=_preferred("overheat_risk_level"),
         pct_above_ema20=_preferred("pct_above_ema20"),
         pct_above_ma10=_preferred("pct_above_ma10"),
@@ -724,17 +771,30 @@ def _ecosystem_filter_text(row: _CombinedEcosystemRow) -> str:
     return " ".join(
         part
         for part in (
+            row.market_level,
             row.name,
+            row.layer,
+            row.current_status,
+            row.start_status_30d,
             row.status_change_30d,
             row.status_change_5d,
-            row.window_status,
+            row.window_status_30d,
+            row.window_status_5d,
+            row.window_status_2d,
             row.overheat_risk_level,
             row.dow_trend_state,
+            row.latest_structure_label,
+            row.latest_bos_event_type,
+            row.latest_reset_reason,
             row.latest_relevant_pattern,
             row.source_horizons,
         )
         if part
     ).lower()
+
+
+def _market_map_header_html() -> str:
+    return "".join(f"<th>{escape(label)}</th>" for label in _MARKET_MAP_COLUMN_LABELS)
 
 
 def _render_combined_ecosystem_row(row: _CombinedEcosystemRow) -> str:
@@ -750,10 +810,16 @@ def _render_combined_ecosystem_row(row: _CombinedEcosystemRow) -> str:
         f' data-candidate-priority=""'
         f' data-filter-text="{_html_attr(_ecosystem_filter_text(row))}"'
         ">"
-        f"<td>{_html_text(row.name)}</td>"
+        f"<td>{_html_text(row.market_level)}</td>"
+        + f"<td>{_html_text(row.name)}</td>"
+        + f"<td>{_html_text(row.layer)}</td>"
+        + f"<td>{_html_text(row.current_status)}</td>"
+        + f"<td>{_html_text(row.start_status_30d)}</td>"
         + f"<td{status_class_attr}>{_html_text(row.status_change_30d)}</td>"
         + f"<td{status_class_attr}>{_html_text(row.status_change_5d)}</td>"
-        + f"<td{status_class_attr}>{_html_text(row.window_status)}</td>"
+        + _render_market_status_cell(row.window_status_30d)
+        + _render_market_status_cell(row.window_status_5d)
+        + _render_market_status_cell(row.window_status_2d)
         + _render_market_status_cell(row.overheat_risk_level)
         + f"<td>{_html_percent(row.pct_above_ema20)}</td>"
         + f"<td>{_html_percent(row.pct_above_ma10)}</td>"
@@ -769,6 +835,7 @@ def _render_combined_ecosystem_row(row: _CombinedEcosystemRow) -> str:
         + f"<td>{_html_text(row.latest_relevant_pattern)}</td>"
         + f"<td>{_html_text(row.latest_relevant_pattern_age_td)}</td>"
         + f"<td>{_html_text(row.source_horizons)}</td>"
+        + f"<td>{_html_text(row.source_files)}</td>"
         + "</tr>"
     )
 
@@ -900,9 +967,11 @@ def _combined_market_map_filter_text(row: _CombinedMarketMapGroupRow) -> str:
     return " ".join(
         part
         for part in (
+            row.scope.upper(),
             row.name,
             row.layer,
             row.current_status,
+            row.start_status_30d,
             row.status_change_30d,
             row.status_change_5d,
             row.window_status_30d,
@@ -936,8 +1005,9 @@ def _render_combined_market_group_rows(
             f' data-candidate-priority=""'
             f' data-filter-text="{_html_attr(_combined_market_map_filter_text(row))}"'
             ">"
-            f"<td>{_html_text(row.name)}</td>"
-            + (f"<td>{_html_text(row.layer)}</td>" if include_layer_column else "")
+            f"<td>{_html_text(row.scope.upper())}</td>"
+            + f"<td>{_html_text(row.name)}</td>"
+            + f"<td>{_html_text(row.layer if include_layer_column else row.layer or row.name)}</td>"
             + f"<td>{_html_text(row.current_status)}</td>"
             + f"<td>{_html_text(row.start_status_30d)}</td>"
             + f"<td{status_class_attr}>{_html_text(row.status_change_30d)}</td>"
@@ -1704,6 +1774,7 @@ def generate_dashboard_html(
     subindustry_market_rows = [row for row in market_map_rows if row.scope == "subindustry"]
     combined_layer_rows = _combine_market_group_rows(layer_market_rows)
     combined_subindustry_rows = _combine_market_group_rows(subindustry_market_rows)
+    market_map_header_html = _market_map_header_html()
     ecosystem_market_rows_html = (
         _render_combined_ecosystem_row(combined_ecosystem_row)
         if combined_ecosystem_row is not None
@@ -2014,12 +2085,7 @@ def generate_dashboard_html(
     <h2>Ecosystem Summary</h2>
     {(
       '<div class="table-scroll"><table class="sticky-table"><thead><tr>'
-      '<th>Ecosystem</th><th>Status change 30d</th><th>Status change 5d</th><th>Window status</th>'
-      '<th>Overheat risk</th><th>% above EMA20</th><th>% above MA10</th>'
-      '<th>EMA20 breadth delta 5d</th><th>Return 5d</th><th>Return 10d</th>'
-      '<th>Return 20d</th><th>Return 60d</th><th>Dow trend state</th><th>Latest structure</th>'
-      '<th>Latest BOS</th><th>Latest reset</th><th>Latest relevant pattern</th>'
-      '<th>Pattern age td</th><th>Source horizons</th>'
+      + market_map_header_html +
       '</tr></thead><tbody>'
       + ecosystem_market_rows_html +
       '</tbody></table></div>'
@@ -2030,13 +2096,7 @@ def generate_dashboard_html(
     <h2>Layers Summary</h2>
     {(
       '<div class="table-scroll"><table class="sticky-table"><thead><tr>'
-      '<th>Layer</th><th>Current status</th><th>Start status 30d</th><th>Status change 30d</th><th>Status change 5d</th>'
-      '<th>Window status 30d</th><th>Window status 5d</th><th>Window status 2d</th>'
-      '<th>Overheat risk</th><th>% above EMA20</th><th>% above MA10</th>'
-      '<th>EMA20 breadth delta 5d</th><th>Return 5d</th><th>Return 10d</th>'
-      '<th>Return 20d</th><th>Return 60d</th><th>Dow trend state</th><th>Latest structure</th>'
-      '<th>Latest BOS</th><th>Latest reset</th><th>Latest relevant pattern</th>'
-      '<th>Pattern age td</th><th>Source horizons</th><th>Source files</th>'
+      + market_map_header_html +
       '</tr></thead><tbody>'
       + layer_market_rows_html +
       '</tbody></table></div>'
@@ -2047,13 +2107,7 @@ def generate_dashboard_html(
     <h2>Subindustries Summary</h2>
     {(
       '<div class="table-scroll"><table class="sticky-table"><thead><tr>'
-      '<th>Subindustry</th><th>Layer</th><th>Current status</th><th>Start status 30d</th><th>Status change 30d</th><th>Status change 5d</th>'
-      '<th>Window status 30d</th><th>Window status 5d</th><th>Window status 2d</th>'
-      '<th>Overheat risk</th><th>% above EMA20</th><th>% above MA10</th>'
-      '<th>EMA20 breadth delta 5d</th><th>Return 5d</th><th>Return 10d</th>'
-      '<th>Return 20d</th><th>Return 60d</th><th>Dow trend state</th><th>Latest structure</th>'
-      '<th>Latest BOS</th><th>Latest reset</th><th>Latest relevant pattern</th>'
-      '<th>Pattern age td</th><th>Source horizons</th><th>Source files</th>'
+      + market_map_header_html +
       '</tr></thead><tbody>'
       + subindustry_market_rows_html +
       '</tbody></table></div>'

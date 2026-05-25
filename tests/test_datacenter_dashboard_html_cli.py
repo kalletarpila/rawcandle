@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import re
 
 from dev_tools.datacenter_dashboard_decisions import (
     DatacenterDecisionBatchResult,
@@ -24,6 +25,36 @@ from dev_tools.run_datacenter_dashboard_html import (
     generate_datacenter_dashboard_html_file,
     generate_dashboard_html,
     main,
+)
+
+
+_MARKET_MAP_HEADER_SNIPPETS = (
+    "<th>Market level</th>",
+    "<th>Name</th>",
+    "<th>Layer</th>",
+    "<th>Current status</th>",
+    "<th>Start status 30d</th>",
+    "<th>Status change 30d</th>",
+    "<th>Status change 5d</th>",
+    "<th>Window status 30d</th>",
+    "<th>Window status 5d</th>",
+    "<th>Window status 2d</th>",
+    "<th>Overheat risk</th>",
+    "<th>% above EMA20</th>",
+    "<th>% above MA10</th>",
+    "<th>EMA20 breadth delta 5d</th>",
+    "<th>Return 5d</th>",
+    "<th>Return 10d</th>",
+    "<th>Return 20d</th>",
+    "<th>Return 60d</th>",
+    "<th>Dow trend state</th>",
+    "<th>Latest structure</th>",
+    "<th>Latest BOS</th>",
+    "<th>Latest reset</th>",
+    "<th>Latest relevant pattern</th>",
+    "<th>Pattern age td</th>",
+    "<th>Source horizons</th>",
+    "<th>Source files</th>",
 )
 
 
@@ -701,6 +732,28 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
         generated_at_utc="2026-05-25T00:00:00+00:00",
     )
 
+    ecosystem_header = re.search(
+        r'<section id="market-map-ecosystem".*?<thead><tr>(.*?)</tr></thead>',
+        html_one,
+        re.DOTALL,
+    )
+    layers_header = re.search(
+        r'<section id="market-map-layers".*?<thead><tr>(.*?)</tr></thead>',
+        html_one,
+        re.DOTALL,
+    )
+    subindustries_header = re.search(
+        r'<section id="market-map-subindustries".*?<thead><tr>(.*?)</tr></thead>',
+        html_one,
+        re.DOTALL,
+    )
+    assert ecosystem_header is not None
+    assert layers_header is not None
+    assert subindustries_header is not None
+    assert ecosystem_header.group(1) == layers_header.group(1) == subindustries_header.group(1)
+    for snippet in _MARKET_MAP_HEADER_SNIPPETS:
+        assert snippet in ecosystem_header.group(1)
+
     assert html_one == html_two
     assert "Custom &lt;Dashboard&gt;" in html_one
     assert "MS&amp;FT" in html_one
@@ -753,6 +806,8 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     assert ">1<" in html_one
     assert "daily, rolling 2d, rolling 5d, rolling 30d" in html_one
     assert html_one.count("<td>DC_ECOSYSTEM_TOTAL</td>") == 1
+    assert "<td>ECOSYSTEM</td>" in html_one
+    assert "<td>-</td>" in html_one
     assert 'data-section="market-map"' in html_one
     assert ".risk-high {" in html_one
     assert ".risk-medium {" in html_one
@@ -768,8 +823,12 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     subindustries_section = html_one[
         html_one.index('id="market-map-subindustries"'):html_one.index('id="watchlist-status"')
     ]
-    assert layers_section.count("<td>Compute</td>") == 1
-    assert subindustries_section.count("<td>AI Accelerators</td>") == 1
+    assert "<td>LAYER</td>" in layers_section
+    assert "<td>Compute</td>" in layers_section
+    assert "<td>SUBINDUSTRY</td>" in subindustries_section
+    assert "<td>AI Accelerators</td>" in subindustries_section
+    assert "<td>LAYER</td><td>Compute</td><td>Compute</td>" in layers_section
+    assert "<td>SUBINDUSTRY</td><td>AI Accelerators</td><td>Compute</td>" in subindustries_section
     assert html_one.index('id="watchlist-status"') > html_one.index('id="summary"')
     assert html_one.index('id="watchlist-status"') < html_one.index('id="candidate-pullbacks"')
     assert html_one.index('id="candidate-pullbacks"') < html_one.index('id="command-center"')
@@ -808,6 +867,27 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     output_path = reports_dir / "datacenter_dashboard.html"
     assert output_path.exists()
     html = output_path.read_text(encoding="utf-8")
+    ecosystem_header = re.search(
+        r'<section id="market-map-ecosystem".*?<thead><tr>(.*?)</tr></thead>',
+        html,
+        re.DOTALL,
+    )
+    layers_header = re.search(
+        r'<section id="market-map-layers".*?<thead><tr>(.*?)</tr></thead>',
+        html,
+        re.DOTALL,
+    )
+    subindustries_header = re.search(
+        r'<section id="market-map-subindustries".*?<thead><tr>(.*?)</tr></thead>',
+        html,
+        re.DOTALL,
+    )
+    assert ecosystem_header is not None
+    assert layers_header is not None
+    assert subindustries_header is not None
+    assert ecosystem_header.group(1) == layers_header.group(1) == subindustries_header.group(1)
+    for snippet in _MARKET_MAP_HEADER_SNIPPETS:
+        assert snippet in ecosystem_header.group(1)
     assert "<h1>Datacenter Dashboard</h1>" in html
     assert 'href="#summary"' in html
     assert 'href="#market-map-ecosystem"' in html
