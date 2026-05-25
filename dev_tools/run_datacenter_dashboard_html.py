@@ -129,6 +129,7 @@ class _EcosystemContextRow:
     horizon: str
     name: str
     current_status: str
+    window_status: str
     start_status_30d: str
     overheat_risk_level: str
     pct_above_ema20: str
@@ -452,6 +453,7 @@ def _extract_ecosystem_context_rows(
                     metrics.get("timing_state", ""),
                     metrics.get("current_status", ""),
                 ),
+                window_status=metrics.get("window_status", "").strip(),
                 start_status_30d=first_values.get("timing_state", "").strip(),
                 overheat_risk_level=_non_empty_value(
                     metrics.get("ecosystem_overheat_risk_level", ""),
@@ -529,16 +531,7 @@ def _combine_ecosystem_context_rows(
         return ""
 
     current_status = _preferred("current_status")
-    window_status = ""
-    for horizon in ("rolling 30d", "rolling 5d", "rolling 2d"):
-        for row in rows:
-            if row.horizon != horizon:
-                continue
-            if row.current_status.strip():
-                window_status = row.current_status.strip()
-                break
-        if window_status:
-            break
+    window_status = _preferred("window_status")
     start_status_30d = ""
     for row in rows:
         if row.horizon == "rolling 30d" and row.start_status_30d.strip():
