@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 from typing import List, Optional
 
-from rawcandle.scheduler.runner import SchedulerAlreadyRunningError, run_scheduler_config
+from rawcandle.scheduler.runner import (
+    SchedulerAlreadyRunningError,
+    inspect_scheduler_dashboard_config,
+    run_scheduler_config,
+)
 from services.stock_update_service import STATUS_FAILED, STATUS_OK, STATUS_OK_WITH_WARNINGS
 
 
@@ -12,11 +17,59 @@ def build_parser() -> argparse.ArgumentParser:
         description="Run stock update scheduler config sequentially."
     )
     parser.add_argument("--config", required=True)
+    parser.add_argument("--inspect-dashboard-config", action="store_true")
+    parser.add_argument("--effective-date")
     return parser
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.inspect_dashboard_config:
+        effective_today = args.effective_date
+        if effective_today is None:
+            effective_today = datetime.datetime.now().strftime("%Y-%m-%d")
+        try:
+            inspection = inspect_scheduler_dashboard_config(
+                config_path=args.config,
+                effective_today=effective_today,
+            )
+        except ValueError as exc:
+            print("SUMMARY scheduler_dashboard_config.status=FAILED")
+            print(f"ERROR: {exc}")
+            return 2
+        print(f"SUMMARY scheduler_dashboard_config.enabled={inspection.enabled}")
+        print(
+            "SUMMARY scheduler_dashboard_config.ecosystem_code="
+            f"{inspection.ecosystem_code}"
+        )
+        print(f"SUMMARY scheduler_dashboard_config.dashboard_db={inspection.dashboard_db}")
+        print(f"SUMMARY scheduler_dashboard_config.reports_dir={inspection.reports_dir}")
+        print(
+            "SUMMARY scheduler_dashboard_config.html_output_dir="
+            f"{inspection.html_output_dir}"
+        )
+        print(
+            "SUMMARY scheduler_dashboard_config.expected_report_date="
+            f"{inspection.expected_report_date}"
+        )
+        print(
+            "SUMMARY scheduler_dashboard_config.expected_html_output_path="
+            f"{inspection.expected_html_output_path}"
+        )
+        print(f"SUMMARY scheduler_dashboard_config.mode={inspection.mode}")
+        print(f"SUMMARY scheduler_dashboard_config.render_html={inspection.render_html}")
+        print(f"SUMMARY scheduler_dashboard_config.usa_enabled={inspection.usa_enabled}")
+        print(
+            "SUMMARY scheduler_dashboard_config.datacenter_pipeline_enabled="
+            f"{inspection.datacenter_pipeline_enabled}"
+        )
+        print(
+            "SUMMARY scheduler_dashboard_config.skip_next_run="
+            f"{inspection.skip_next_run}"
+        )
+        print(f"SUMMARY scheduler_dashboard_config.date_status={inspection.date_status}")
+        print(f"SUMMARY scheduler_dashboard_config.status={inspection.status}")
+        return 0
     try:
         result = run_scheduler_config(config_path=args.config)
     except SchedulerAlreadyRunningError as exc:

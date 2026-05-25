@@ -13,6 +13,7 @@ from rawcandle.scheduler.config import (
 )
 from rawcandle.scheduler.runner import (
     DatacenterDashboardPostStepResult,
+    SchedulerDashboardConfigInspection,
     SchedulerAlreadyRunningError,
     STATUS_FAILED,
     STATUS_OK,
@@ -20,6 +21,7 @@ from rawcandle.scheduler.runner import (
     _resolve_market_technical_relevance_tickers,
     _resolve_latest_valid_ohlcv_date_for_market,
     acquire_scheduler_lock,
+    inspect_scheduler_dashboard_config,
     read_scheduler_status,
     release_scheduler_lock,
     run_scheduler_config,
@@ -2010,3 +2012,97 @@ def test_scheduler_runner_dashboard_helper_uses_dashboard_db_build_and_html_args
             "title": None,
         }
     ]
+
+
+def test_inspect_scheduler_dashboard_config_returns_deterministic_plan(tmp_path):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    dashboard_db = tmp_path / "ecosystem_dashboard.db"
+    html_dir = tmp_path / "html"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        datacenter_dashboard_db=dashboard_db,
+        datacenter_dashboard_html_output_dir=html_dir,
+    )
+
+    inspection = inspect_scheduler_dashboard_config(
+        config_path=str(config_path),
+        effective_today="2026-05-23",
+    )
+
+    assert isinstance(inspection, SchedulerDashboardConfigInspection)
+    assert inspection.enabled == 1
+    assert inspection.ecosystem_code == "DATACENTER"
+    assert inspection.dashboard_db == str(dashboard_db)
+    assert inspection.reports_dir == "/home/kalle/projects/rawcandle/swing_reports"
+    assert inspection.html_output_dir == str(html_dir)
+    assert inspection.expected_report_date == "2026-05-22"
+    assert inspection.expected_html_output_path == str(
+        html_dir / "datacenter_dashboard_2026-05-22.html"
+    )
+    assert inspection.mode == "replace-date"
+    assert inspection.render_html == 1
+    assert inspection.usa_enabled == 1
+    assert inspection.datacenter_pipeline_enabled == 1
+    assert inspection.skip_next_run == 0
+    assert inspection.date_status == "OK"
+    assert inspection.status == "OK"
+
+
+def test_inspect_scheduler_dashboard_config_does_not_create_db_or_html_output(tmp_path):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    dashboard_db = tmp_path / "missing_dashboard.db"
+    html_dir = tmp_path / "html"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        datacenter_dashboard_db=dashboard_db,
+        datacenter_dashboard_html_output_dir=html_dir,
+    )
+
+    inspect_scheduler_dashboard_config(
+        config_path=str(config_path),
+        effective_today="2026-05-23",
+    )
+
+    assert not dashboard_db.exists()
+    assert not (html_dir / "datacenter_dashboard_2026-05-22.html").exists()
+
+
+def test_inspect_scheduler_dashboard_config_supports_disabled_dashboard(tmp_path):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    dashboard_db = tmp_path / "ecosystem_dashboard.db"
+    html_dir = tmp_path / "html"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["omxh"],
+        datacenter_dashboard_enabled=False,
+        datacenter_dashboard_db=dashboard_db,
+        datacenter_dashboard_html_output_dir=html_dir,
+        skip_next_run=True,
+    )
+
+    inspection = inspect_scheduler_dashboard_config(
+        config_path=str(config_path),
+        effective_today="2026-05-23",
+    )
+
+    assert inspection.enabled == 0
+    assert inspection.dashboard_db == str(dashboard_db)
+    assert inspection.html_output_dir == str(html_dir)
+    assert inspection.expected_report_date == "2026-05-22"
+    assert inspection.expected_html_output_path == str(
+        html_dir / "datacenter_dashboard_2026-05-22.html"
+    )
+    assert inspection.usa_enabled == 0
+    assert inspection.skip_next_run == 1
+    assert inspection.status == "OK"

@@ -185,6 +185,24 @@ class DatacenterDashboardPostStepResult:
     error: Optional[str] = None
 
 
+@dataclass(frozen=True)
+class SchedulerDashboardConfigInspection:
+    enabled: int
+    ecosystem_code: str
+    dashboard_db: str
+    reports_dir: str
+    html_output_dir: str
+    expected_report_date: str
+    expected_html_output_path: str
+    mode: str
+    render_html: int
+    usa_enabled: int
+    datacenter_pipeline_enabled: int
+    skip_next_run: int
+    date_status: str
+    status: str
+
+
 def scheduler_status_path(log_dir: str) -> str:
     return str(Path(log_dir) / "stock_update_scheduler_status.json")
 
@@ -451,6 +469,43 @@ def _resolve_datacenter_dashboard_html_output_path(
     return str(
         Path(config.datacenter_dashboard_html_output_dir)
         / f"datacenter_dashboard_{report_date}.html"
+    )
+
+
+def inspect_scheduler_dashboard_config(
+    *,
+    config_path: str,
+    effective_today: str | None = None,
+) -> SchedulerDashboardConfigInspection:
+    config = read_scheduler_config(config_path)
+    resolved_post_step = _resolve_datacenter_post_step_config("usa")
+    reports_dir = resolved_post_step.output_dir if resolved_post_step is not None else ""
+    date_status = "UNAVAILABLE"
+    expected_report_date = ""
+    expected_html_output_path = ""
+    if effective_today is not None:
+        expected_report_date = _previous_calendar_date(effective_today)
+        expected_html_output_path = _resolve_datacenter_dashboard_html_output_path(
+            config,
+            expected_report_date,
+        )
+        date_status = "OK"
+
+    return SchedulerDashboardConfigInspection(
+        enabled=1 if config.datacenter_dashboard_enabled else 0,
+        ecosystem_code="DATACENTER",
+        dashboard_db=config.datacenter_dashboard_db,
+        reports_dir=reports_dir,
+        html_output_dir=config.datacenter_dashboard_html_output_dir,
+        expected_report_date=expected_report_date,
+        expected_html_output_path=expected_html_output_path,
+        mode="replace-date",
+        render_html=1,
+        usa_enabled=1 if "usa" in config.enabled_markets else 0,
+        datacenter_pipeline_enabled=1 if resolved_post_step is not None else 0,
+        skip_next_run=1 if config.skip_next_run else 0,
+        date_status=date_status,
+        status="OK",
     )
 
 

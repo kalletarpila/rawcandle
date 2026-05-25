@@ -283,3 +283,93 @@ def test_scheduler_cli_lock_conflict_prints_failed_summary_and_exits_one(
     assert "SUMMARY scheduler_skipped=0" in captured.out
     assert "SUMMARY scheduler_skip_reason=" in captured.out
     assert "SUMMARY error=already running" in captured.out
+
+
+def test_scheduler_cli_inspect_dashboard_config_prints_required_summary_lines(
+    monkeypatch, capsys
+):
+    class _Inspection:
+        enabled = 1
+        ecosystem_code = "DATACENTER"
+        dashboard_db = "/tmp/ecosystem_dashboard.db"
+        reports_dir = "/tmp/swing_reports"
+        html_output_dir = "/tmp/html"
+        expected_report_date = "2026-05-22"
+        expected_html_output_path = "/tmp/html/datacenter_dashboard_2026-05-22.html"
+        mode = "replace-date"
+        render_html = 1
+        usa_enabled = 1
+        datacenter_pipeline_enabled = 1
+        skip_next_run = 0
+        date_status = "OK"
+        status = "OK"
+
+    monkeypatch.setattr(
+        cli,
+        "inspect_scheduler_dashboard_config",
+        lambda config_path, effective_today: _Inspection(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "run_scheduler_config",
+        lambda config_path: (_ for _ in ()).throw(
+            AssertionError("run_scheduler_config should not be called in inspect mode")
+        ),
+    )
+
+    code = cli.main(
+        [
+            "--config",
+            "/tmp/scheduler.json",
+            "--inspect-dashboard-config",
+            "--effective-date",
+            "2026-05-23",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "SUMMARY scheduler_dashboard_config.enabled=1" in captured.out
+    assert "SUMMARY scheduler_dashboard_config.ecosystem_code=DATACENTER" in captured.out
+    assert "SUMMARY scheduler_dashboard_config.dashboard_db=/tmp/ecosystem_dashboard.db" in captured.out
+    assert "SUMMARY scheduler_dashboard_config.reports_dir=/tmp/swing_reports" in captured.out
+    assert "SUMMARY scheduler_dashboard_config.html_output_dir=/tmp/html" in captured.out
+    assert "SUMMARY scheduler_dashboard_config.expected_report_date=2026-05-22" in captured.out
+    assert (
+        "SUMMARY scheduler_dashboard_config.expected_html_output_path="
+        "/tmp/html/datacenter_dashboard_2026-05-22.html"
+    ) in captured.out
+    assert "SUMMARY scheduler_dashboard_config.mode=replace-date" in captured.out
+    assert "SUMMARY scheduler_dashboard_config.render_html=1" in captured.out
+    assert "SUMMARY scheduler_dashboard_config.usa_enabled=1" in captured.out
+    assert "SUMMARY scheduler_dashboard_config.datacenter_pipeline_enabled=1" in captured.out
+    assert "SUMMARY scheduler_dashboard_config.skip_next_run=0" in captured.out
+    assert "SUMMARY scheduler_dashboard_config.date_status=OK" in captured.out
+    assert "SUMMARY scheduler_dashboard_config.status=OK" in captured.out
+
+
+def test_scheduler_cli_inspect_dashboard_config_invalid_effective_date_fails(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        cli,
+        "inspect_scheduler_dashboard_config",
+        lambda config_path, effective_today: (_ for _ in ()).throw(
+            ValueError("Invalid isoformat string: 'bad-date'")
+        ),
+    )
+
+    code = cli.main(
+        [
+            "--config",
+            "/tmp/scheduler.json",
+            "--inspect-dashboard-config",
+            "--effective-date",
+            "bad-date",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "SUMMARY scheduler_dashboard_config.status=FAILED" in captured.out
+    assert "ERROR: Invalid isoformat string: 'bad-date'" in captured.out
