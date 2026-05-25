@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from dev_tools.run_datacenter_dashboard_html import (
     DatacenterDashboardWatchlistRecord,
 )
 from dev_tools.run_ecosystem_dashboard_build import main
+from dev_tools.ecosystem_dashboard_read_model import load_dashboard_snapshot
 
 
 def _write_report(path: Path, text: str) -> None:
@@ -46,6 +48,95 @@ def _make_reports_dir(tmp_path: Path, *, date_text: str = "2026-05-22") -> Path:
         "ticker;status;reason\nNVDA;SELL;close_below_ema20\n",
     )
     return reports_dir
+
+
+def _write_structured_input_json(path: Path, *, report_date: str = "2026-05-22") -> Path:
+    payload = {
+        "ecosystem_code": "DATACENTER",
+        "report_date": report_date,
+        "readiness": "READY",
+        "total_parsed_rows": 1,
+        "total_parse_warnings": 0,
+        "source_reports": [
+            {
+                "source_report_path": "structured://test",
+                "source_report_type": "structured",
+                "source_report_date": report_date,
+                "loaded_row_count": 1,
+                "status": "OK",
+            }
+        ],
+        "action_summary": [
+            {
+                "action_bucket": "WATCH",
+                "action_label": "Watch Candidate",
+                "ticker_count": 1,
+                "weight_sum": 1.5,
+                "notes": None,
+            }
+        ],
+        "market_map": [],
+        "watchlist": [
+            {
+                "ticker": "NVDA",
+                "company_name": "NVIDIA",
+                "layer_name": "Infrastructure",
+                "subindustry_name": "Optical",
+                "action_bucket": "WATCH",
+                "action_label": "Watch Candidate",
+                "watchlist_reason": "momentum",
+                "last_close": 100.5,
+                "return_5d": 1.2,
+                "return_20d": 4.5,
+                "return_60d": 12.0,
+                "trend_state": "UP",
+                "latest_structure_label": "HH",
+                "latest_bos_event_type": "BOS_UP",
+                "latest_reset_reason": None,
+                "bullish_candle_signal": 1,
+                "bullish_divergence_signal": None,
+                "hidden_bullish_divergence_signal": None,
+                "data_status": "READY",
+            }
+        ],
+        "tickers": [
+            {
+                "ticker": "NVDA",
+                "company_name": "NVIDIA",
+                "layer_name": "Infrastructure",
+                "subindustry_name": "Optical",
+                "last_close": 100.5,
+                "return_5d": 1.2,
+                "return_20d": 4.5,
+                "return_60d": 12.0,
+                "trend_state": "UP",
+                "latest_structure_label": "HH",
+                "latest_bos_event_type": "BOS_UP",
+                "latest_bos_freshness": "FRESH",
+                "latest_reset_reason": None,
+                "latest_reset_freshness": None,
+                "bullish_candle_signal": 1,
+                "bullish_divergence_signal": None,
+                "hidden_bullish_divergence_signal": None,
+                "action_bucket": "WATCH",
+                "action_label": "Watch Candidate",
+                "data_status": "READY",
+            }
+        ],
+        "decision_trace": [
+            {
+                "ticker": "NVDA",
+                "trace_order": 0,
+                "rule_group": "daily",
+                "rule_name": "WATCH_MOMENTUM",
+                "input_value": "1.2",
+                "decision": "WATCH",
+                "reason": "momentum",
+            }
+        ],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
 
 
 def _stub_decision_result() -> DatacenterDecisionBatchResult:
@@ -921,11 +1012,219 @@ def test_cli_rejects_unsupported_input_mode(tmp_path, capsys):
             "--report-date",
             "2026-05-22",
             "--input-mode",
-            "structured",
+            "foo",
         ]
     )
 
     assert exit_code == 2
     output = capsys.readouterr().out
     assert "SUMMARY ecosystem_dashboard_build.status=FAILED" in output
-    assert "unsupported input_mode=structured; currently supported: reports" in output
+    assert "unsupported input_mode=foo; currently supported: reports, structured" in output
+
+
+def test_structured_mode_persists_rows_and_round_trips_via_read_model(tmp_path, capsys):
+    dashboard_db = tmp_path / "ecosystem_dashboard.db"
+    structured_json = _write_structured_input_json(tmp_path / "dashboard_input.json")
+
+    exit_code = main(
+        [
+            "--dashboard-db",
+            str(dashboard_db),
+            "--ecosystem-code",
+            "DATACENTER",
+            "--report-date",
+            "2026-05-22",
+            "--mode",
+            "replace-date",
+            "--input-mode",
+            "structured",
+            "--structured-input-json",
+            str(structured_json),
+        ]
+    )
+
+    assert exit_code == 0
+    snapshot = load_dashboard_snapshot(
+        str(dashboard_db),
+        "DATACENTER",
+        report_date="2026-05-22",
+    )
+    assert snapshot.run.ecosystem_code == "DATACENTER"
+    assert snapshot.run.report_date == "2026-05-22"
+    assert snapshot.watchlist[0]["ticker"] == "NVDA"
+    output = capsys.readouterr().out
+    assert "SUMMARY ecosystem_dashboard_build.input_mode=structured" in output
+    assert "SUMMARY ecosystem_dashboard_build.persistence_input=structured" in output
+    assert (
+        f"SUMMARY ecosystem_dashboard_build.structured_input_json={structured_json}" in output
+    )
+
+
+def test_structured_mode_with_render_html_writes_db_backed_html(
+    tmp_path, monkeypatch, capsys
+):
+    dashboard_db = tmp_path / "ecosystem_dashboard.db"
+    structured_json = _write_structured_input_json(tmp_path / "dashboard_input.json")
+    html_output = tmp_path / "dashboard.html"
+
+    def fake_render(**kwargs):
+        Path(kwargs["output"]).write_text(
+            f"run_id={kwargs['run_id']} report_date=2026-05-22 ticker=NVDA",
+            encoding="utf-8",
+        )
+        return object()
+
+    monkeypatch.setattr(
+        "dev_tools.run_ecosystem_dashboard_build.generate_datacenter_dashboard_html_file",
+        fake_render,
+    )
+
+    exit_code = main(
+        [
+            "--dashboard-db",
+            str(dashboard_db),
+            "--ecosystem-code",
+            "DATACENTER",
+            "--report-date",
+            "2026-05-22",
+            "--mode",
+            "replace-date",
+            "--input-mode",
+            "structured",
+            "--structured-input-json",
+            str(structured_json),
+            "--render-html",
+            "--html-output",
+            str(html_output),
+        ]
+    )
+
+    assert exit_code == 0
+    assert html_output.exists()
+    html = html_output.read_text(encoding="utf-8")
+    assert "NVDA" in html
+    output = capsys.readouterr().out
+    assert "SUMMARY ecosystem_dashboard_build.input_mode=structured" in output
+    assert "SUMMARY ecosystem_dashboard_build.html_render_status=OK" in output
+
+
+def test_structured_mode_missing_structured_input_json_fails(tmp_path, capsys):
+    exit_code = main(
+        [
+            "--dashboard-db",
+            str(tmp_path / "ecosystem_dashboard.db"),
+            "--ecosystem-code",
+            "DATACENTER",
+            "--report-date",
+            "2026-05-22",
+            "--input-mode",
+            "structured",
+        ]
+    )
+
+    assert exit_code == 2
+    output = capsys.readouterr().out
+    assert "--structured-input-json is required when --input-mode=structured" in output
+
+
+def test_structured_mode_rejects_reports_dir(tmp_path, capsys):
+    structured_json = _write_structured_input_json(tmp_path / "dashboard_input.json")
+    reports_dir = _make_reports_dir(tmp_path)
+
+    exit_code = main(
+        [
+            "--dashboard-db",
+            str(tmp_path / "ecosystem_dashboard.db"),
+            "--ecosystem-code",
+            "DATACENTER",
+            "--report-date",
+            "2026-05-22",
+            "--input-mode",
+            "structured",
+            "--structured-input-json",
+            str(structured_json),
+            "--reports-dir",
+            str(reports_dir),
+        ]
+    )
+
+    assert exit_code == 2
+    assert "--reports-dir is not allowed when --input-mode=structured" in capsys.readouterr().out
+
+
+def test_reports_mode_rejects_structured_input_json(tmp_path, capsys):
+    reports_dir = _make_reports_dir(tmp_path)
+    structured_json = _write_structured_input_json(tmp_path / "dashboard_input.json")
+
+    exit_code = main(
+        [
+            "--dashboard-db",
+            str(tmp_path / "ecosystem_dashboard.db"),
+            "--ecosystem-code",
+            "DATACENTER",
+            "--reports-dir",
+            str(reports_dir),
+            "--report-date",
+            "2026-05-22",
+            "--input-mode",
+            "reports",
+            "--structured-input-json",
+            str(structured_json),
+        ]
+    )
+
+    assert exit_code == 2
+    assert (
+        "--structured-input-json is not allowed when --input-mode=reports"
+        in capsys.readouterr().out
+    )
+
+
+def test_structured_mode_rejects_mismatched_json_ecosystem_code(tmp_path, capsys):
+    structured_json = tmp_path / "dashboard_input.json"
+    payload = json.loads(_write_structured_input_json(structured_json).read_text(encoding="utf-8"))
+    payload["ecosystem_code"] = "OTHER"
+    structured_json.write_text(json.dumps(payload), encoding="utf-8")
+
+    exit_code = main(
+        [
+            "--dashboard-db",
+            str(tmp_path / "ecosystem_dashboard.db"),
+            "--ecosystem-code",
+            "DATACENTER",
+            "--report-date",
+            "2026-05-22",
+            "--input-mode",
+            "structured",
+            "--structured-input-json",
+            str(structured_json),
+        ]
+    )
+
+    assert exit_code == 2
+    assert "structured input ecosystem_code does not match CLI --ecosystem-code" in capsys.readouterr().out
+
+
+def test_structured_mode_rejects_mismatched_json_report_date(tmp_path, capsys):
+    structured_json = _write_structured_input_json(
+        tmp_path / "dashboard_input.json",
+        report_date="2026-05-21",
+    )
+
+    exit_code = main(
+        [
+            "--dashboard-db",
+            str(tmp_path / "ecosystem_dashboard.db"),
+            "--ecosystem-code",
+            "DATACENTER",
+            "--report-date",
+            "2026-05-22",
+            "--input-mode",
+            "structured",
+            "--structured-input-json",
+            str(structured_json),
+        ]
+    )
+
+    assert exit_code == 2
+    assert "structured input report_date does not match CLI --report-date" in capsys.readouterr().out

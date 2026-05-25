@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -8,6 +9,32 @@ from dev_tools.run_datacenter_dashboard_build import main
 
 def _write_report(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
+
+
+def _write_structured_input_json(path: Path, *, report_date: str = "2026-05-22") -> Path:
+    payload = {
+        "ecosystem_code": "DATACENTER",
+        "report_date": report_date,
+        "readiness": "READY",
+        "total_parsed_rows": 1,
+        "total_parse_warnings": 0,
+        "source_reports": [
+            {
+                "source_report_path": "structured://test",
+                "source_report_type": "structured",
+                "source_report_date": report_date,
+                "loaded_row_count": 1,
+                "status": "OK",
+            }
+        ],
+        "action_summary": [],
+        "market_map": [],
+        "watchlist": [],
+        "tickers": [],
+        "decision_trace": [],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
 
 
 def _table_exists(db_path: Path, table: str) -> bool:
@@ -203,3 +230,44 @@ def test_wrapper_forwards_explicit_input_mode_reports(tmp_path, monkeypatch, cap
 
     assert exit_code == 0
     assert captured["input_mode"] == "reports"
+
+
+def test_wrapper_forwards_structured_mode_and_structured_input_json(
+    tmp_path, monkeypatch
+):
+    structured_json = _write_structured_input_json(tmp_path / "dashboard_input.json")
+    captured: dict[str, object] = {}
+
+    def fake_generate(**kwargs):
+        captured.update(kwargs)
+        return (
+            "RUN_STRUCTURED",
+            (
+                "SUMMARY ecosystem_dashboard_build.status=OK",
+                "SUMMARY ecosystem_dashboard_build.run_id=RUN_STRUCTURED",
+            ),
+        )
+
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_build.generate_ecosystem_dashboard_build",
+        fake_generate,
+    )
+
+    exit_code = main(
+        [
+            "--dashboard-db",
+            str(tmp_path / "ecosystem_dashboard.db"),
+            "--report-date",
+            "2026-05-22",
+            "--input-mode",
+            "structured",
+            "--structured-input-json",
+            str(structured_json),
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["ecosystem_code"] == "DATACENTER"
+    assert captured["input_mode"] == "structured"
+    assert captured["structured_input_json"] == str(structured_json)
+    assert captured["reports_dir"] is None
