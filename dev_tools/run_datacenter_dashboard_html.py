@@ -112,6 +112,8 @@ class _MarketMapRow:
     layer: str
     subindustry: str
     current_status: str
+    status_change_30d: str
+    status_change_5d: str
     window_status: str
     overheat_risk_level: str
     pct_above_ema20: str
@@ -121,6 +123,13 @@ class _MarketMapRow:
     return_10d: str
     return_20d: str
     return_60d: str
+    dow_trend_state: str
+    latest_structure_label: str
+    latest_bos_event_type: str
+    latest_reset_reason: str
+    latest_relevant_pattern: str
+    latest_relevant_pattern_age_td: str
+    source_horizons: str
     source_file: str
 
 
@@ -724,6 +733,8 @@ def _extract_market_map_rows(
                         layer="",
                         subindustry="",
                         current_status=metrics.get("timing_state", ""),
+                        status_change_30d="",
+                        status_change_5d="",
                         window_status="",
                         overheat_risk_level=metrics.get("ecosystem_overheat_risk_level", ""),
                         pct_above_ema20=metrics.get("ecosystem_pct_above_ema20", ""),
@@ -733,6 +744,13 @@ def _extract_market_map_rows(
                         return_10d=metrics.get("ecosystem_return_10d", ""),
                         return_20d=metrics.get("ecosystem_return_20d", ""),
                         return_60d=metrics.get("ecosystem_return_60d", ""),
+                        dow_trend_state="",
+                        latest_structure_label="",
+                        latest_bos_event_type="",
+                        latest_reset_reason="",
+                        latest_relevant_pattern="",
+                        latest_relevant_pattern_age_td="",
+                        source_horizons=horizon,
                         source_file=report.path,
                     )
                 )
@@ -781,6 +799,8 @@ def _extract_market_map_rows(
                                 layer=layer_name,
                                 subindustry="",
                                 current_status=row.get("status", "").strip(),
+                                status_change_30d="",
+                                status_change_5d="",
                                 window_status="",
                                 overheat_risk_level=overheat_row.get("overheat_risk_level", "").strip(),
                                 pct_above_ema20=overheat_row.get("pct_above_ema20", "").strip(),
@@ -790,6 +810,13 @@ def _extract_market_map_rows(
                                 return_10d=overheat_row.get("return_10d", "").strip(),
                                 return_20d=row.get("return_20d", "").strip() or overheat_row.get("return_20d", "").strip(),
                                 return_60d="",
+                                dow_trend_state=row.get("trend_state", "").strip(),
+                                latest_structure_label=row.get("latest_structure_label", "").strip(),
+                                latest_bos_event_type=row.get("latest_bos_event_type", "").strip(),
+                                latest_reset_reason=row.get("latest_reset_reason", "").strip(),
+                                latest_relevant_pattern="",
+                                latest_relevant_pattern_age_td="",
+                                source_horizons=horizon,
                                 source_file=report.path,
                             )
                         )
@@ -805,6 +832,8 @@ def _extract_market_map_rows(
                                 layer=row.get("layer", "").strip(),
                                 subindustry=subindustry_name,
                                 current_status=row.get("status", "").strip() or timing_row.get("timing_state", "").strip(),
+                                status_change_30d="",
+                                status_change_5d="",
                                 window_status="",
                                 overheat_risk_level=overheat_row.get("overheat_risk_level", "").strip(),
                                 pct_above_ema20=timing_row.get("pct_above_ema20", "").strip() or overheat_row.get("pct_above_ema20", "").strip(),
@@ -814,6 +843,13 @@ def _extract_market_map_rows(
                                 return_10d=timing_row.get("return_10d", "").strip() or overheat_row.get("return_10d", "").strip(),
                                 return_20d=row.get("return_20d", "").strip() or timing_row.get("return_20d", "").strip() or overheat_row.get("return_20d", "").strip(),
                                 return_60d=timing_row.get("return_60d", "").strip(),
+                                dow_trend_state=row.get("trend_state", "").strip(),
+                                latest_structure_label=row.get("latest_structure_label", "").strip(),
+                                latest_bos_event_type=row.get("latest_bos_event_type", "").strip(),
+                                latest_reset_reason=row.get("latest_reset_reason", "").strip(),
+                                latest_relevant_pattern="",
+                                latest_relevant_pattern_age_td="",
+                                source_horizons=horizon,
                                 source_file=report.path,
                             )
                         )
@@ -837,6 +873,8 @@ def _extract_market_map_rows(
                         layer="",
                         subindustry="",
                         current_status=metrics.get("timing_state", ""),
+                        status_change_30d="",
+                        status_change_5d="",
                         window_status="",
                         overheat_risk_level=metrics.get("overheat_risk_level", ""),
                         pct_above_ema20=metrics.get("pct_above_ema20", ""),
@@ -846,6 +884,13 @@ def _extract_market_map_rows(
                         return_10d=metrics.get("return_10d", ""),
                         return_20d=metrics.get("return_20d", ""),
                         return_60d="",
+                        dow_trend_state="",
+                        latest_structure_label="",
+                        latest_bos_event_type="",
+                        latest_reset_reason="",
+                        latest_relevant_pattern="",
+                        latest_relevant_pattern_age_td="",
+                        source_horizons=horizon,
                         source_file=report.path,
                     )
                 )
@@ -882,6 +927,8 @@ def _extract_market_map_rows(
                                 layer=layer_name,
                                 subindustry="",
                                 current_status=row.get("current_status", "").strip() or structure_row.get("timing_state", "").strip(),
+                                status_change_30d="",
+                                status_change_5d="",
                                 window_status=row.get("window_status", "").strip(),
                                 overheat_risk_level=structure_row.get("overheat_risk_level", "").strip(),
                                 pct_above_ema20="",
@@ -891,6 +938,13 @@ def _extract_market_map_rows(
                                 return_10d="",
                                 return_20d="",
                                 return_60d="",
+                                dow_trend_state=row.get("last_trend_state", "").strip() or structure_row.get("trend_classification", "").strip(),
+                                latest_structure_label=row.get("last_latest_structure_label", "").strip() or structure_row.get("latest_structure_label", "").strip(),
+                                latest_bos_event_type=row.get("last_latest_bos_event_type", "").strip() or structure_row.get("latest_bos_event_type", "").strip(),
+                                latest_reset_reason=row.get("last_latest_reset_reason", "").strip() or structure_row.get("latest_reset_reason", "").strip(),
+                                latest_relevant_pattern="",
+                                latest_relevant_pattern_age_td="",
+                                source_horizons=horizon,
                                 source_file=report.path,
                             )
                         )
@@ -905,6 +959,8 @@ def _extract_market_map_rows(
                                 layer=row.get("layer", "").strip(),
                                 subindustry=subindustry_name,
                                 current_status=row.get("current_status", "").strip() or structure_row.get("timing_state", "").strip(),
+                                status_change_30d="",
+                                status_change_5d="",
                                 window_status=row.get("window_status", "").strip(),
                                 overheat_risk_level=structure_row.get("overheat_risk_level", "").strip(),
                                 pct_above_ema20="",
@@ -914,6 +970,13 @@ def _extract_market_map_rows(
                                 return_10d="",
                                 return_20d="",
                                 return_60d="",
+                                dow_trend_state=row.get("last_trend_state", "").strip() or structure_row.get("trend_classification", "").strip(),
+                                latest_structure_label=row.get("last_latest_structure_label", "").strip() or structure_row.get("latest_structure_label", "").strip(),
+                                latest_bos_event_type=row.get("last_latest_bos_event_type", "").strip() or structure_row.get("latest_bos_event_type", "").strip(),
+                                latest_reset_reason=row.get("last_latest_reset_reason", "").strip() or structure_row.get("latest_reset_reason", "").strip(),
+                                latest_relevant_pattern="",
+                                latest_relevant_pattern_age_td="",
+                                source_horizons=horizon,
                                 source_file=report.path,
                             )
                         )
@@ -940,8 +1003,16 @@ def _market_map_filter_text(row: _MarketMapRow) -> str:
             row.layer,
             row.subindustry,
             row.current_status,
+            row.status_change_30d,
+            row.status_change_5d,
             row.window_status,
             row.overheat_risk_level,
+            row.dow_trend_state,
+            row.latest_structure_label,
+            row.latest_bos_event_type,
+            row.latest_reset_reason,
+            row.latest_relevant_pattern,
+            row.source_horizons,
         )
         if part
     ).lower()
@@ -954,6 +1025,8 @@ def _render_market_map_rows(
 ) -> str:
     rendered_rows: list[str] = []
     for row in rows:
+        status_class = _group_status_class(row.current_status)
+        status_class_attr = f' class="{status_class}"' if status_class else ""
         rendered_rows.append(
             "<tr"
             f' data-filter-row="1"'
@@ -967,7 +1040,8 @@ def _render_market_map_rows(
             f"<td>{_html_text(row.name)}</td>"
             + (f"<td>{_html_text(row.layer)}</td>" if include_layer_column else "")
             + f"<td>{_html_text(row.horizon)}</td>"
-            + _render_market_status_cell(row.current_status)
+            + f"<td{status_class_attr}>{_html_text(row.status_change_30d)}</td>"
+            + f"<td{status_class_attr}>{_html_text(row.status_change_5d)}</td>"
             + _render_market_status_cell(row.window_status)
             + _render_market_status_cell(row.overheat_risk_level)
             + f"<td>{_html_percent(row.pct_above_ema20)}</td>"
@@ -977,6 +1051,13 @@ def _render_market_map_rows(
             + f"<td>{_html_percent(row.return_10d, scale=100.0)}</td>"
             + f"<td>{_html_percent(row.return_20d, scale=100.0)}</td>"
             + f"<td>{_html_percent(row.return_60d, scale=100.0)}</td>"
+            + f"<td>{_html_text(row.dow_trend_state)}</td>"
+            + f"<td>{_html_text(row.latest_structure_label)}</td>"
+            + f"<td>{_html_text(row.latest_bos_event_type)}</td>"
+            + f"<td>{_html_text(row.latest_reset_reason)}</td>"
+            + f"<td>{_html_text(row.latest_relevant_pattern)}</td>"
+            + f"<td>{_html_text(row.latest_relevant_pattern_age_td)}</td>"
+            + f"<td>{_html_text(row.source_horizons)}</td>"
             + "</tr>"
         )
     return "".join(rendered_rows)
@@ -1675,10 +1756,12 @@ def generate_dashboard_html(
     <h2>Layers</h2>
     {(
       '<div class="table-scroll"><table class="sticky-table"><thead><tr>'
-      '<th>Layer</th><th>Horizon</th><th>Current status</th><th>Window status</th>'
+      '<th>Layer</th><th>Horizon</th><th>Status change 30d</th><th>Status change 5d</th><th>Window status</th>'
       '<th>Overheat risk</th><th>% above EMA20</th><th>% above MA10</th>'
       '<th>EMA20 breadth delta 5d</th><th>Return 5d</th><th>Return 10d</th>'
-      '<th>Return 20d</th><th>Return 60d</th>'
+      '<th>Return 20d</th><th>Return 60d</th><th>Dow trend state</th><th>Latest structure</th>'
+      '<th>Latest BOS</th><th>Latest reset</th><th>Latest relevant pattern</th>'
+      '<th>Pattern age td</th><th>Source horizons</th>'
       '</tr></thead><tbody>'
       + layer_market_rows_html +
       '</tbody></table></div>'
@@ -1689,10 +1772,12 @@ def generate_dashboard_html(
     <h2>Subindustries</h2>
     {(
       '<div class="table-scroll"><table class="sticky-table"><thead><tr>'
-      '<th>Subindustry</th><th>Layer</th><th>Horizon</th><th>Current status</th><th>Window status</th>'
+      '<th>Subindustry</th><th>Layer</th><th>Horizon</th><th>Status change 30d</th><th>Status change 5d</th><th>Window status</th>'
       '<th>Overheat risk</th><th>% above EMA20</th><th>% above MA10</th>'
       '<th>EMA20 breadth delta 5d</th><th>Return 5d</th><th>Return 10d</th>'
-      '<th>Return 20d</th><th>Return 60d</th>'
+      '<th>Return 20d</th><th>Return 60d</th><th>Dow trend state</th><th>Latest structure</th>'
+      '<th>Latest BOS</th><th>Latest reset</th><th>Latest relevant pattern</th>'
+      '<th>Pattern age td</th><th>Source horizons</th>'
       '</tr></thead><tbody>'
       + subindustry_market_rows_html +
       '</tbody></table></div>'

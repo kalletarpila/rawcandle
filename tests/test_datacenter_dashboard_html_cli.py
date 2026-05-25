@@ -717,6 +717,8 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     assert "Ecosystem Summary" in html_one
     assert "Layers" in html_one
     assert "Subindustries" in html_one
+    assert 'id="market-map-layers"' in html_one
+    assert 'id="market-map-subindustries"' in html_one
     assert "Compute" in html_one
     assert "AI Accelerators" in html_one
     assert "ADD_ON_PULLBACK" in html_one
@@ -726,6 +728,11 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     assert "Dow trend state" in html_one
     assert "Latest relevant pattern" in html_one
     assert "Pattern age td" in html_one
+    assert "Latest structure" in html_one
+    assert "Latest BOS" in html_one
+    assert "Latest reset" in html_one
+    assert "Source horizons" in html_one
+    assert 'class="table-scroll"' in html_one
     assert "WATCH -&gt; BUY_ZONE" in html_one
     assert "72.00%" in html_one
     assert "68.00%" in html_one
@@ -809,6 +816,11 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     assert "Dow trend state" in html
     assert "Latest relevant pattern" in html
     assert "Pattern age td" in html
+    assert "Latest structure" in html
+    assert "Latest BOS" in html
+    assert "Latest reset" in html
+    assert "Source horizons" in html
+    assert html.count('class="table-scroll"') >= 4
     assert "WATCH -&gt; BUY_ZONE" in html
     assert "72.00%" in html
     assert "68.00%" in html
