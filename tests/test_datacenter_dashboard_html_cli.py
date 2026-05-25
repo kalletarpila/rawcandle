@@ -21,6 +21,7 @@ from dev_tools.datacenter_dashboard_support import (
     DatacenterReportStatus,
 )
 from dev_tools.run_datacenter_dashboard_html import (
+    _format_value_with_age,
     _status_class_from_text,
     build_parser,
     generate_datacenter_dashboard_html_file,
@@ -53,7 +54,6 @@ _MARKET_MAP_HEADER_SNIPPETS = (
     "<th>Latest BOS</th>",
     "<th>Latest reset</th>",
     "<th>Latest relevant pattern</th>",
-    "<th>Pattern age td</th>",
     "<th>Source horizons</th>",
     "<th>Source files</th>",
 )
@@ -619,9 +619,13 @@ def _install_pipeline_mocks(monkeypatch, tmp_path: Path) -> None:
 | ecosystem_return_20d | 8.4 |
 | ecosystem_return_60d | 21.0 |
 | trend_state | TRENDING_UP |
+| trend_state_age_td | 2 |
 | latest_structure_label | HH |
+| latest_structure_age_td | 3 |
 | latest_bos_event_type | BOS_UP |
+| latest_bos_age_td | 1 |
 | latest_reset_reason | RESET_COMPLETE |
+| latest_reset_age_td | 1 |
 | latest_bullish_divergence | BULL_DIV |
 | bullish_divergence_age_td | 4 |
 | latest_bearish_candle | SHOOTING_STAR |
@@ -661,10 +665,10 @@ def _install_pipeline_mocks(monkeypatch, tmp_path: Path) -> None:
 | chart_pattern_age_td | 7 | 7 | 0 |
 
 ## 6. Group Structure Timing
-| group_type | group_name | latest_bos_event_type | latest_bos_event_date | latest_bos_freshness | latest_reset_reason | latest_reset_event_date | latest_reset_freshness | latest_structure_label | latest_structure_freshness | trend_classification | timing_state | overheat_risk_level |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| layer | Compute | BOS_UP | 2026-05-22 | fresh |  |  |  | HH | fresh | TRENDING_UP | WATCH | WATCH |
-| subindustry | AI Accelerators | BOS_UP | 2026-05-22 | fresh |  |  |  | HH | fresh | TRENDING_UP | BUY_ZONE | HIGH |
+| group_type | group_name | latest_bos_event_type | latest_bos_event_date | latest_bos_age_trading_days | latest_bos_freshness | latest_reset_reason | latest_reset_event_date | latest_reset_age_trading_days | latest_reset_freshness | latest_structure_label | latest_structure_age_trading_days | latest_structure_freshness | trend_classification | timing_state | overheat_risk_level |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| layer | Compute | BOS_UP | 2026-05-22 | 1 | fresh |  |  |  |  | HH | 3 | fresh | TRENDING_UP | WATCH | WATCH |
+| subindustry | AI Accelerators | BOS_UP | 2026-05-22 | 1 | fresh |  |  |  |  | HH | 3 | fresh | TRENDING_UP | BUY_ZONE | HIGH |
 
 ## 7. Group Window Status Change
 | group_type | group_name | first_timing_state | last_timing_state |
@@ -673,10 +677,10 @@ def _install_pipeline_mocks(monkeypatch, tmp_path: Path) -> None:
 | subindustry | AI Accelerators | NEUTRAL | BUY_ZONE |
 
 ## Datacenter Taxonomy Listing
-| row_type | layer | subindustry | ticker | current_status | window_status | subindustry_context_risk | layer_context_risk | last_close | breakout_days | pullback_days | exit_risk_days | high_exit_risk_days | medium_exit_risk_days | last_exit_risk_severity | last_exit_reason | last_trend_state | last_latest_structure_label | last_latest_structure_freshness | last_latest_bos_event_type | last_latest_bos_freshness | last_latest_reset_reason | last_latest_reset_freshness | last_price_data_status |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| LAYER | Compute |  |  | WATCH | ADD_ON_PULLBACK | NORMAL | WATCH |  | 0 | 2 | 0 | 0 | 0 |  |  | UP | HH | fresh | BOS_UP | fresh |  |  | OK |
-| SUBINDUSTRY | Compute | AI Accelerators |  | BUY_ZONE | WATCH | HIGH | WATCH |  | 1 | 1 | 0 | 0 | 0 |  |  | UP | HH | fresh | BOS_UP | fresh |  |  | OK |
+| row_type | layer | subindustry | ticker | current_status | window_status | subindustry_context_risk | layer_context_risk | last_close | breakout_days | pullback_days | exit_risk_days | high_exit_risk_days | medium_exit_risk_days | last_exit_risk_severity | last_exit_reason | last_trend_state | last_trend_state_age_td | last_latest_structure_label | last_latest_structure_age_trading_days | last_latest_structure_freshness | last_latest_bos_event_type | last_latest_bos_age_trading_days | last_latest_bos_freshness | last_latest_reset_reason | last_latest_reset_age_trading_days | last_latest_reset_freshness | last_price_data_status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| LAYER | Compute |  |  | WATCH | ADD_ON_PULLBACK | NORMAL | WATCH |  | 0 | 2 | 0 | 0 | 0 |  |  | UP | 2 | HH | 3 | fresh | BOS_UP | 1 | fresh |  |  |  | OK |
+| SUBINDUSTRY | Compute | AI Accelerators |  | BUY_ZONE | WATCH | HIGH | WATCH |  | 1 | 1 | 0 | 0 | 0 |  |  | UP | 2 | HH | 3 | fresh | BOS_UP | 1 | fresh |  |  |  | OK |
 """
     for name in ("rolling2.csv", "rolling5.csv", "rolling30.csv"):
         (tmp_path / name).write_text(rolling_fixture, encoding="utf-8")
@@ -774,7 +778,7 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     assert "Window status 2d" in html_one
     assert "Dow trend state" in html_one
     assert "Latest relevant pattern" in html_one
-    assert "Pattern age td" in html_one
+    assert "Pattern age td" not in html_one
     assert "Latest structure" in html_one
     assert "Latest BOS" in html_one
     assert "Latest reset" in html_one
@@ -788,8 +792,11 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     assert "4.00%" in html_one
     assert "210.00%" in html_one
     assert "2100.00%" in html_one
-    assert "SHOOTING_STAR" in html_one
-    assert ">1<" in html_one
+    assert "TRENDING_UP (2)" in html_one
+    assert "HH (3)" in html_one
+    assert "BOS_UP (1)" in html_one
+    assert "RESET_COMPLETE (1)" in html_one
+    assert "SHOOTING_STAR (1)" in html_one
     assert "daily, rolling 2d, rolling 5d, rolling 30d" in html_one
     assert html_one.count("<td>DC_ECOSYSTEM_TOTAL</td>") == 1
     assert "<td>ECOSYSTEM</td>" in html_one
@@ -895,7 +902,7 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     assert "Overheat risk" in html
     assert "Dow trend state" in html
     assert "Latest relevant pattern" in html
-    assert "Pattern age td" in html
+    assert "Pattern age td" not in html
     assert "Latest structure" in html
     assert "Latest BOS" in html
     assert "Latest reset" in html
@@ -909,9 +916,11 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     assert "4.00%" in html
     assert "210.00%" in html
     assert "2100.00%" in html
-    assert "SHOOTING_STAR" in html
-    assert "TRENDING_UP" in html
-    assert "RESET_COMPLETE" in html
+    assert "SHOOTING_STAR (1)" in html
+    assert "TRENDING_UP (2)" in html
+    assert "HH (3)" in html
+    assert "BOS_UP (1)" in html
+    assert "RESET_COMPLETE (1)" in html
     assert "daily, rolling 2d, rolling 5d, rolling 30d" in html
     assert "Report Source" in html
     assert "generated_at_utc" in html
@@ -961,6 +970,13 @@ def test_market_map_status_class_mapping_covers_requested_status_groups():
 def test_market_map_status_change_prefers_rhs_status_for_coloring():
     assert _status_class_from_text("EXIT_ZONE -> NEUTRAL") == "status-neutral"
     assert _status_class_from_text("NEUTRAL -> BUY_ZONE") == "status-positive"
+
+
+def test_market_map_value_age_formatting_omits_missing_age_and_missing_value():
+    assert _format_value_with_age("HH", "3") == "HH (3)"
+    assert _format_value_with_age("HH", "") == "HH"
+    assert _format_value_with_age("", "3") == "-"
+    assert _format_value_with_age("HH", "-") == "HH"
 
 
 def test_html_cli_accepts_report_date_and_uses_date_specific_default_output(tmp_path, monkeypatch, capsys):

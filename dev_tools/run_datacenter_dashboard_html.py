@@ -119,7 +119,6 @@ _MARKET_MAP_COLUMN_LABELS = (
     "Latest BOS",
     "Latest reset",
     "Latest relevant pattern",
-    "Pattern age td",
     "Source horizons",
     "Source files",
 )
@@ -154,9 +153,13 @@ class _MarketMapRow:
     return_20d: str
     return_60d: str
     dow_trend_state: str
+    dow_trend_state_age_td: str
     latest_structure_label: str
+    latest_structure_age_td: str
     latest_bos_event_type: str
+    latest_bos_age_td: str
     latest_reset_reason: str
+    latest_reset_age_td: str
     latest_relevant_pattern: str
     latest_relevant_pattern_age_td: str
     source_horizons: str
@@ -184,9 +187,13 @@ class _CombinedMarketMapGroupRow:
     return_20d: str
     return_60d: str
     dow_trend_state: str
+    dow_trend_state_age_td: str
     latest_structure_label: str
+    latest_structure_age_td: str
     latest_bos_event_type: str
+    latest_bos_age_td: str
     latest_reset_reason: str
+    latest_reset_age_td: str
     latest_relevant_pattern: str
     latest_relevant_pattern_age_td: str
     source_horizons: str
@@ -209,9 +216,13 @@ class _EcosystemContextRow:
     return_20d: str
     return_60d: str
     dow_trend_state: str
+    dow_trend_state_age_td: str
     latest_structure_label: str
+    latest_structure_age_td: str
     latest_bos_event_type: str
+    latest_bos_age_td: str
     latest_reset_reason: str
+    latest_reset_age_td: str
     latest_relevant_pattern: str
     latest_relevant_pattern_age_td: str
     source_file: str
@@ -239,9 +250,13 @@ class _CombinedEcosystemRow:
     return_20d: str
     return_60d: str
     dow_trend_state: str
+    dow_trend_state_age_td: str
     latest_structure_label: str
+    latest_structure_age_td: str
     latest_bos_event_type: str
+    latest_bos_age_td: str
     latest_reset_reason: str
+    latest_reset_age_td: str
     latest_relevant_pattern: str
     latest_relevant_pattern_age_td: str
     source_horizons: str
@@ -544,10 +559,35 @@ def _status_class_from_text(value: str) -> str:
     return _group_status_class(text)
 
 
-def _render_market_status_cell(value: str) -> str:
+def _age_text(data: dict[str, str], *keys: str) -> str:
+    for key in keys:
+        value = data.get(key, "")
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
+def _format_value_with_age(value: str, age_text: str) -> str:
+    value_text = _safe_text(value)
+    if value_text == "-":
+        return "-"
+    age = (age_text or "").strip()
+    if not age or age == "-":
+        return value_text
+    return f"{value_text} ({age})"
+
+
+def _render_market_status_cell(value: str, age_text: str = "") -> str:
     css_class = _status_class_from_text(value)
     class_attr = f' class="{css_class}"' if css_class else ""
-    return f"<td{class_attr}>{_html_text(value)}</td>"
+    return f"<td{class_attr}>{_html_text(_format_value_with_age(value, age_text))}</td>"
+
+
+def _render_market_value_cell(value: str, age_text: str = "") -> str:
+    return f"<td>{_html_text(_format_value_with_age(value, age_text))}</td>"
 
 
 def _non_empty_value(*values: str) -> str:
@@ -574,8 +614,8 @@ def _candidate_pattern_value(
         ("bullish_candle_signal", "bullish_candle_age_td", 1),
         ("latest_hidden_bearish_divergence", "hidden_bearish_divergence_age_td", 2),
         ("latest_hidden_bullish_divergence", "hidden_bullish_divergence_age_td", 3),
-        ("latest_chart_pattern", "", 4),
-        ("chart_pattern", "", 4),
+        ("latest_chart_pattern", "chart_pattern_age_td", 4),
+        ("chart_pattern", "chart_pattern_age_td", 4),
     )
     ranked: list[tuple[int, int, str, str]] = []
     for value_key, age_key, priority in pattern_candidates:
@@ -684,17 +724,43 @@ def _extract_ecosystem_context_rows(
                     metrics.get("latest_ticker_trend_state", ""),
                     metrics.get("ecosystem_trend_state", ""),
                 ),
+                dow_trend_state_age_td=_age_text(
+                    metrics,
+                    "trend_state_age_td",
+                    "dow_trend_state_age_td",
+                    "latest_trend_state_age_td",
+                    "trend_age_td",
+                ),
                 latest_structure_label=_non_empty_value(
                     metrics.get("latest_structure_label", ""),
                     metrics.get("structure_label", ""),
+                ),
+                latest_structure_age_td=_age_text(
+                    metrics,
+                    "latest_structure_age_td",
+                    "latest_structure_age_trading_days",
+                    "structure_age_td",
+                    "latest_structure_freshness_age_td",
                 ),
                 latest_bos_event_type=_non_empty_value(
                     metrics.get("latest_bos_event_type", ""),
                     metrics.get("bos_event_type", ""),
                 ),
+                latest_bos_age_td=_age_text(
+                    metrics,
+                    "latest_bos_age_td",
+                    "latest_bos_down_age_td",
+                    "latest_bos_up_age_td",
+                    "latest_bos_age_trading_days",
+                ),
                 latest_reset_reason=_non_empty_value(
                     metrics.get("latest_reset_reason", ""),
                     metrics.get("reset_reason", ""),
+                ),
+                latest_reset_age_td=_age_text(
+                    metrics,
+                    "latest_reset_age_td",
+                    "latest_reset_age_trading_days",
                 ),
                 latest_relevant_pattern=latest_relevant_pattern,
                 latest_relevant_pattern_age_td=latest_relevant_pattern_age_td,
@@ -813,9 +879,13 @@ def _combine_ecosystem_context_rows(
         return_20d=_preferred("return_20d"),
         return_60d=_preferred("return_60d"),
         dow_trend_state=_preferred("dow_trend_state"),
+        dow_trend_state_age_td=_preferred("dow_trend_state_age_td"),
         latest_structure_label=_preferred("latest_structure_label"),
+        latest_structure_age_td=_preferred("latest_structure_age_td"),
         latest_bos_event_type=_preferred("latest_bos_event_type"),
+        latest_bos_age_td=_preferred("latest_bos_age_td"),
         latest_reset_reason=_preferred("latest_reset_reason"),
+        latest_reset_age_td=_preferred("latest_reset_age_td"),
         latest_relevant_pattern=latest_pattern,
         latest_relevant_pattern_age_td=latest_pattern_age,
         source_horizons=source_horizons,
@@ -890,12 +960,11 @@ def _render_combined_ecosystem_row(row: _CombinedEcosystemRow) -> str:
         + f"<td>{_html_percent(row.return_10d, scale=100.0)}</td>"
         + f"<td>{_html_percent(row.return_20d, scale=100.0)}</td>"
         + f"<td>{_html_percent(row.return_60d, scale=100.0)}</td>"
-        + _render_market_status_cell(row.dow_trend_state)
-        + f"<td>{_html_text(row.latest_structure_label)}</td>"
-        + _render_market_status_cell(row.latest_bos_event_type)
-        + _render_market_status_cell(row.latest_reset_reason)
-        + f"<td>{_html_text(row.latest_relevant_pattern)}</td>"
-        + f"<td>{_html_text(row.latest_relevant_pattern_age_td)}</td>"
+        + _render_market_status_cell(row.dow_trend_state, row.dow_trend_state_age_td)
+        + _render_market_value_cell(row.latest_structure_label, row.latest_structure_age_td)
+        + _render_market_status_cell(row.latest_bos_event_type, row.latest_bos_age_td)
+        + _render_market_status_cell(row.latest_reset_reason, row.latest_reset_age_td)
+        + _render_market_value_cell(row.latest_relevant_pattern, row.latest_relevant_pattern_age_td)
         + f"<td>{_html_text(row.source_horizons)}</td>"
         + f"<td>{_html_text(row.source_files)}</td>"
         + "</tr>"
@@ -1013,9 +1082,13 @@ def _combine_market_group_rows(
                 return_20d=_preferred(group_rows, "return_20d"),
                 return_60d=_preferred(group_rows, "return_60d"),
                 dow_trend_state=_preferred(group_rows, "dow_trend_state"),
+                dow_trend_state_age_td=_preferred(group_rows, "dow_trend_state_age_td"),
                 latest_structure_label=_preferred(group_rows, "latest_structure_label"),
+                latest_structure_age_td=_preferred(group_rows, "latest_structure_age_td"),
                 latest_bos_event_type=_preferred(group_rows, "latest_bos_event_type"),
+                latest_bos_age_td=_preferred(group_rows, "latest_bos_age_td"),
                 latest_reset_reason=_preferred(group_rows, "latest_reset_reason"),
+                latest_reset_age_td=_preferred(group_rows, "latest_reset_age_td"),
                 latest_relevant_pattern=latest_pattern,
                 latest_relevant_pattern_age_td=latest_pattern_age,
                 source_horizons=", ".join(horizons_present),
@@ -1091,12 +1164,11 @@ def _render_combined_market_group_rows(
             + f"<td>{_html_percent(row.return_10d, scale=100.0)}</td>"
             + f"<td>{_html_percent(row.return_20d, scale=100.0)}</td>"
             + f"<td>{_html_percent(row.return_60d, scale=100.0)}</td>"
-            + _render_market_status_cell(row.dow_trend_state)
-            + f"<td>{_html_text(row.latest_structure_label)}</td>"
-            + _render_market_status_cell(row.latest_bos_event_type)
-            + _render_market_status_cell(row.latest_reset_reason)
-            + f"<td>{_html_text(row.latest_relevant_pattern)}</td>"
-            + f"<td>{_html_text(row.latest_relevant_pattern_age_td)}</td>"
+            + _render_market_status_cell(row.dow_trend_state, row.dow_trend_state_age_td)
+            + _render_market_value_cell(row.latest_structure_label, row.latest_structure_age_td)
+            + _render_market_status_cell(row.latest_bos_event_type, row.latest_bos_age_td)
+            + _render_market_status_cell(row.latest_reset_reason, row.latest_reset_age_td)
+            + _render_market_value_cell(row.latest_relevant_pattern, row.latest_relevant_pattern_age_td)
             + f"<td>{_html_text(row.source_horizons)}</td>"
             + f"<td>{_html_text(row.source_files)}</td>"
             + "</tr>"
@@ -1240,9 +1312,13 @@ def _extract_market_map_rows(
                         return_20d=metrics.get("ecosystem_return_20d", ""),
                         return_60d=metrics.get("ecosystem_return_60d", ""),
                         dow_trend_state="",
+                        dow_trend_state_age_td="",
                         latest_structure_label="",
+                        latest_structure_age_td="",
                         latest_bos_event_type="",
+                        latest_bos_age_td="",
                         latest_reset_reason="",
+                        latest_reset_age_td="",
                         latest_relevant_pattern="",
                         latest_relevant_pattern_age_td="",
                         source_horizons=horizon,
@@ -1308,9 +1384,35 @@ def _extract_market_map_rows(
                                 return_20d=row.get("return_20d", "").strip() or overheat_row.get("return_20d", "").strip(),
                                 return_60d="",
                                 dow_trend_state=row.get("trend_state", "").strip(),
+                                dow_trend_state_age_td=_age_text(
+                                    row,
+                                    "trend_state_age_td",
+                                    "dow_trend_state_age_td",
+                                    "latest_trend_state_age_td",
+                                    "trend_age_td",
+                                ),
                                 latest_structure_label=row.get("latest_structure_label", "").strip(),
+                                latest_structure_age_td=_age_text(
+                                    row,
+                                    "latest_structure_age_td",
+                                    "latest_structure_age_trading_days",
+                                    "structure_age_td",
+                                    "latest_structure_freshness_age_td",
+                                ),
                                 latest_bos_event_type=row.get("latest_bos_event_type", "").strip(),
+                                latest_bos_age_td=_age_text(
+                                    row,
+                                    "latest_bos_age_td",
+                                    "latest_bos_down_age_td",
+                                    "latest_bos_up_age_td",
+                                    "latest_bos_age_trading_days",
+                                ),
                                 latest_reset_reason=row.get("latest_reset_reason", "").strip(),
+                                latest_reset_age_td=_age_text(
+                                    row,
+                                    "latest_reset_age_td",
+                                    "latest_reset_age_trading_days",
+                                ),
                                 latest_relevant_pattern="",
                                 latest_relevant_pattern_age_td="",
                                 source_horizons=horizon,
@@ -1343,9 +1445,35 @@ def _extract_market_map_rows(
                                 return_20d=row.get("return_20d", "").strip() or timing_row.get("return_20d", "").strip() or overheat_row.get("return_20d", "").strip(),
                                 return_60d=timing_row.get("return_60d", "").strip(),
                                 dow_trend_state=row.get("trend_state", "").strip(),
+                                dow_trend_state_age_td=_age_text(
+                                    row,
+                                    "trend_state_age_td",
+                                    "dow_trend_state_age_td",
+                                    "latest_trend_state_age_td",
+                                    "trend_age_td",
+                                ),
                                 latest_structure_label=row.get("latest_structure_label", "").strip(),
+                                latest_structure_age_td=_age_text(
+                                    row,
+                                    "latest_structure_age_td",
+                                    "latest_structure_age_trading_days",
+                                    "structure_age_td",
+                                    "latest_structure_freshness_age_td",
+                                ),
                                 latest_bos_event_type=row.get("latest_bos_event_type", "").strip(),
+                                latest_bos_age_td=_age_text(
+                                    row,
+                                    "latest_bos_age_td",
+                                    "latest_bos_down_age_td",
+                                    "latest_bos_up_age_td",
+                                    "latest_bos_age_trading_days",
+                                ),
                                 latest_reset_reason=row.get("latest_reset_reason", "").strip(),
+                                latest_reset_age_td=_age_text(
+                                    row,
+                                    "latest_reset_age_td",
+                                    "latest_reset_age_trading_days",
+                                ),
                                 latest_relevant_pattern="",
                                 latest_relevant_pattern_age_td="",
                                 source_horizons=horizon,
@@ -1386,9 +1514,13 @@ def _extract_market_map_rows(
                         return_20d=metrics.get("return_20d", ""),
                         return_60d="",
                         dow_trend_state="",
+                        dow_trend_state_age_td="",
                         latest_structure_label="",
+                        latest_structure_age_td="",
                         latest_bos_event_type="",
+                        latest_bos_age_td="",
                         latest_reset_reason="",
+                        latest_reset_age_td="",
                         latest_relevant_pattern="",
                         latest_relevant_pattern_age_td="",
                         source_horizons=horizon,
@@ -1442,9 +1574,61 @@ def _extract_market_map_rows(
                                 return_20d="",
                                 return_60d="",
                                 dow_trend_state=row.get("last_trend_state", "").strip() or structure_row.get("trend_classification", "").strip(),
+                                dow_trend_state_age_td=_age_text(
+                                    row,
+                                    "last_trend_state_age_td",
+                                    "trend_state_age_td",
+                                    "dow_trend_state_age_td",
+                                    "latest_trend_state_age_td",
+                                    "trend_age_td",
+                                ) or _age_text(
+                                    structure_row,
+                                    "trend_state_age_td",
+                                    "dow_trend_state_age_td",
+                                    "latest_trend_state_age_td",
+                                    "trend_age_td",
+                                ),
                                 latest_structure_label=row.get("last_latest_structure_label", "").strip() or structure_row.get("latest_structure_label", "").strip(),
+                                latest_structure_age_td=_age_text(
+                                    row,
+                                    "last_latest_structure_age_trading_days",
+                                    "latest_structure_age_td",
+                                    "latest_structure_age_trading_days",
+                                    "structure_age_td",
+                                    "latest_structure_freshness_age_td",
+                                ) or _age_text(
+                                    structure_row,
+                                    "latest_structure_age_td",
+                                    "latest_structure_age_trading_days",
+                                    "structure_age_td",
+                                    "latest_structure_freshness_age_td",
+                                ),
                                 latest_bos_event_type=row.get("last_latest_bos_event_type", "").strip() or structure_row.get("latest_bos_event_type", "").strip(),
+                                latest_bos_age_td=_age_text(
+                                    row,
+                                    "last_latest_bos_age_trading_days",
+                                    "latest_bos_age_td",
+                                    "latest_bos_down_age_td",
+                                    "latest_bos_up_age_td",
+                                    "latest_bos_age_trading_days",
+                                ) or _age_text(
+                                    structure_row,
+                                    "latest_bos_age_td",
+                                    "latest_bos_down_age_td",
+                                    "latest_bos_up_age_td",
+                                    "latest_bos_age_trading_days",
+                                ),
                                 latest_reset_reason=row.get("last_latest_reset_reason", "").strip() or structure_row.get("latest_reset_reason", "").strip(),
+                                latest_reset_age_td=_age_text(
+                                    row,
+                                    "last_latest_reset_age_trading_days",
+                                    "latest_reset_age_td",
+                                    "latest_reset_age_trading_days",
+                                ) or _age_text(
+                                    structure_row,
+                                    "latest_reset_age_td",
+                                    "latest_reset_age_trading_days",
+                                ),
                                 latest_relevant_pattern="",
                                 latest_relevant_pattern_age_td="",
                                 source_horizons=horizon,
@@ -1476,9 +1660,61 @@ def _extract_market_map_rows(
                                 return_20d="",
                                 return_60d="",
                                 dow_trend_state=row.get("last_trend_state", "").strip() or structure_row.get("trend_classification", "").strip(),
+                                dow_trend_state_age_td=_age_text(
+                                    row,
+                                    "last_trend_state_age_td",
+                                    "trend_state_age_td",
+                                    "dow_trend_state_age_td",
+                                    "latest_trend_state_age_td",
+                                    "trend_age_td",
+                                ) or _age_text(
+                                    structure_row,
+                                    "trend_state_age_td",
+                                    "dow_trend_state_age_td",
+                                    "latest_trend_state_age_td",
+                                    "trend_age_td",
+                                ),
                                 latest_structure_label=row.get("last_latest_structure_label", "").strip() or structure_row.get("latest_structure_label", "").strip(),
+                                latest_structure_age_td=_age_text(
+                                    row,
+                                    "last_latest_structure_age_trading_days",
+                                    "latest_structure_age_td",
+                                    "latest_structure_age_trading_days",
+                                    "structure_age_td",
+                                    "latest_structure_freshness_age_td",
+                                ) or _age_text(
+                                    structure_row,
+                                    "latest_structure_age_td",
+                                    "latest_structure_age_trading_days",
+                                    "structure_age_td",
+                                    "latest_structure_freshness_age_td",
+                                ),
                                 latest_bos_event_type=row.get("last_latest_bos_event_type", "").strip() or structure_row.get("latest_bos_event_type", "").strip(),
+                                latest_bos_age_td=_age_text(
+                                    row,
+                                    "last_latest_bos_age_trading_days",
+                                    "latest_bos_age_td",
+                                    "latest_bos_down_age_td",
+                                    "latest_bos_up_age_td",
+                                    "latest_bos_age_trading_days",
+                                ) or _age_text(
+                                    structure_row,
+                                    "latest_bos_age_td",
+                                    "latest_bos_down_age_td",
+                                    "latest_bos_up_age_td",
+                                    "latest_bos_age_trading_days",
+                                ),
                                 latest_reset_reason=row.get("last_latest_reset_reason", "").strip() or structure_row.get("latest_reset_reason", "").strip(),
+                                latest_reset_age_td=_age_text(
+                                    row,
+                                    "last_latest_reset_age_trading_days",
+                                    "latest_reset_age_td",
+                                    "latest_reset_age_trading_days",
+                                ) or _age_text(
+                                    structure_row,
+                                    "latest_reset_age_td",
+                                    "latest_reset_age_trading_days",
+                                ),
                                 latest_relevant_pattern="",
                                 latest_relevant_pattern_age_td="",
                                 source_horizons=horizon,
@@ -1556,12 +1792,11 @@ def _render_market_map_rows(
             + f"<td>{_html_percent(row.return_10d, scale=100.0)}</td>"
             + f"<td>{_html_percent(row.return_20d, scale=100.0)}</td>"
             + f"<td>{_html_percent(row.return_60d, scale=100.0)}</td>"
-            + f"<td>{_html_text(row.dow_trend_state)}</td>"
-            + f"<td>{_html_text(row.latest_structure_label)}</td>"
-            + f"<td>{_html_text(row.latest_bos_event_type)}</td>"
-            + f"<td>{_html_text(row.latest_reset_reason)}</td>"
-            + f"<td>{_html_text(row.latest_relevant_pattern)}</td>"
-            + f"<td>{_html_text(row.latest_relevant_pattern_age_td)}</td>"
+            + _render_market_status_cell(row.dow_trend_state, row.dow_trend_state_age_td)
+            + _render_market_value_cell(row.latest_structure_label, row.latest_structure_age_td)
+            + _render_market_status_cell(row.latest_bos_event_type, row.latest_bos_age_td)
+            + _render_market_status_cell(row.latest_reset_reason, row.latest_reset_age_td)
+            + _render_market_value_cell(row.latest_relevant_pattern, row.latest_relevant_pattern_age_td)
             + f"<td>{_html_text(row.source_horizons)}</td>"
             + "</tr>"
         )
