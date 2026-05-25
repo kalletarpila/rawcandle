@@ -25,7 +25,7 @@ from .technical_relevance_context import (
 
 DEFAULT_SIGNAL_VERSION = "DC_SWING_SIGNAL_V1"
 DEFAULT_OHLC_CALC_VERSION = "DC_SWING_OHLC_V1"
-DEFAULT_WATCHLIST_FILE = "/home/kalle/projects/rawcandle/swing_reports/datacenter_watchlist.txt"
+DEFAULT_WATCHLIST_FILE = "/home/kalle/projects/rawcandle/watchlists/datacenter_watchlist.txt"
 
 DAILY_REPORT_SUMMARY_ORDER = [
     "signal_date",

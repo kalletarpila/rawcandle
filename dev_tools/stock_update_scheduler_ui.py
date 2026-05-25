@@ -81,7 +81,7 @@ DEFAULT_DATACENTER_EXPECTED_TICKER_COUNT = "236"
 DEFAULT_DATACENTER_EXPECTED_GROUP_COUNT = "54"
 DEFAULT_DATACENTER_EXPECTED_SYNTHETIC_OHLC_COUNT = "53"
 DEFAULT_DATACENTER_ROLLING_WINDOW_SIZE = "20"
-DEFAULT_DATACENTER_WATCHLIST_FILE = "/home/kalle/projects/rawcandle/swing_reports/datacenter_watchlist.txt"
+DEFAULT_DATACENTER_WATCHLIST_FILE = "/home/kalle/projects/rawcandle/watchlists/datacenter_watchlist.txt"
 DEFAULT_DATACENTER_SIGNAL_DATE = (date.today() - timedelta(days=1)).isoformat()
 DEFAULT_DATACENTER_START_DATE = "2025-08-01"
 DEFAULT_DATACENTER_DASHBOARD_REPORTS_DIR = "/home/kalle/projects/rawcandle/temp"
