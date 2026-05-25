@@ -634,6 +634,12 @@ def _install_pipeline_mocks(monkeypatch, tmp_path: Path) -> None:
 | layer | Compute | BOS_UP | 2026-05-22 | fresh |  |  |  | HH | fresh | TRENDING_UP | WATCH | WATCH |
 | subindustry | AI Accelerators | BOS_UP | 2026-05-22 | fresh |  |  |  | HH | fresh | TRENDING_UP | BUY_ZONE | HIGH |
 
+## 7. Group Window Status Change
+| group_type | group_name | first_timing_state | last_timing_state |
+| --- | --- | --- | --- |
+| layer | Compute | NEUTRAL | WATCH |
+| subindustry | AI Accelerators | NEUTRAL | BUY_ZONE |
+
 ## Datacenter Taxonomy Listing
 | row_type | layer | subindustry | ticker | current_status | window_status | subindustry_context_risk | layer_context_risk | last_close | breakout_days | pullback_days | exit_risk_days | high_exit_risk_days | medium_exit_risk_days | last_exit_risk_severity | last_exit_reason | last_trend_state | last_latest_structure_label | last_latest_structure_freshness | last_latest_bos_event_type | last_latest_bos_freshness | last_latest_reset_reason | last_latest_reset_freshness | last_price_data_status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -715,16 +721,18 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     assert 'id="inspector"' in html_one
     assert 'id="source-files"' in html_one
     assert "Ecosystem Summary" in html_one
-    assert "Layers" in html_one
-    assert "Subindustries" in html_one
-    assert 'id="market-map-layers"' in html_one
-    assert 'id="market-map-subindustries"' in html_one
+    assert "Layers Summary" in html_one
+    assert "Subindustries Summary" in html_one
     assert "Compute" in html_one
     assert "AI Accelerators" in html_one
     assert "ADD_ON_PULLBACK" in html_one
+    assert "Current status" in html_one
+    assert "Start status 30d" in html_one
     assert "Status change 30d" in html_one
     assert "Status change 5d" in html_one
-    assert "Window status" in html_one
+    assert "Window status 30d" in html_one
+    assert "Window status 5d" in html_one
+    assert "Window status 2d" in html_one
     assert "Dow trend state" in html_one
     assert "Latest relevant pattern" in html_one
     assert "Pattern age td" in html_one
@@ -732,8 +740,10 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     assert "Latest BOS" in html_one
     assert "Latest reset" in html_one
     assert "Source horizons" in html_one
+    assert "Source files" in html_one
     assert 'class="table-scroll"' in html_one
     assert "WATCH -&gt; BUY_ZONE" in html_one
+    assert "NEUTRAL -&gt; WATCH" in html_one
     assert "72.00%" in html_one
     assert "68.00%" in html_one
     assert "4.00%" in html_one
@@ -752,6 +762,14 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     assert html_one.index('id="market-map-ecosystem"') < html_one.index('id="watchlist-status"')
     assert html_one.index('id="market-map-layers"') > html_one.index('id="market-map-ecosystem"')
     assert html_one.index('id="market-map-subindustries"') > html_one.index('id="market-map-layers"')
+    layers_section = html_one[
+        html_one.index('id="market-map-layers"'):html_one.index('id="market-map-subindustries"')
+    ]
+    subindustries_section = html_one[
+        html_one.index('id="market-map-subindustries"'):html_one.index('id="watchlist-status"')
+    ]
+    assert layers_section.count("<td>Compute</td>") == 1
+    assert subindustries_section.count("<td>AI Accelerators</td>") == 1
     assert html_one.index('id="watchlist-status"') > html_one.index('id="summary"')
     assert html_one.index('id="watchlist-status"') < html_one.index('id="candidate-pullbacks"')
     assert html_one.index('id="candidate-pullbacks"') < html_one.index('id="command-center"')
@@ -807,11 +825,15 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     assert "Ticker Inspector / Details" in html
     assert "Source Files / Report Status" in html
     assert "Ecosystem Summary" in html
-    assert "Layers" in html
-    assert "Subindustries" in html
+    assert "Layers Summary" in html
+    assert "Subindustries Summary" in html
+    assert "Current status" in html
+    assert "Start status 30d" in html
     assert "Status change 30d" in html
     assert "Status change 5d" in html
-    assert "Window status" in html
+    assert "Window status 30d" in html
+    assert "Window status 5d" in html
+    assert "Window status 2d" in html
     assert "Overheat risk" in html
     assert "Dow trend state" in html
     assert "Latest relevant pattern" in html
@@ -820,8 +842,10 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     assert "Latest BOS" in html
     assert "Latest reset" in html
     assert "Source horizons" in html
+    assert "Source files" in html
     assert html.count('class="table-scroll"') >= 4
     assert "WATCH -&gt; BUY_ZONE" in html
+    assert "NEUTRAL -&gt; WATCH" in html
     assert "72.00%" in html
     assert "68.00%" in html
     assert "4.00%" in html

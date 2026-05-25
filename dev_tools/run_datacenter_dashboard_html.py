@@ -112,6 +112,8 @@ class _MarketMapRow:
     layer: str
     subindustry: str
     current_status: str
+    start_status_30d: str
+    start_status_5d: str
     status_change_30d: str
     status_change_5d: str
     window_status: str
@@ -131,6 +133,36 @@ class _MarketMapRow:
     latest_relevant_pattern_age_td: str
     source_horizons: str
     source_file: str
+
+
+@dataclass(frozen=True)
+class _CombinedMarketMapGroupRow:
+    scope: str
+    name: str
+    layer: str
+    current_status: str
+    start_status_30d: str
+    status_change_30d: str
+    status_change_5d: str
+    window_status_30d: str
+    window_status_5d: str
+    window_status_2d: str
+    overheat_risk_level: str
+    pct_above_ema20: str
+    pct_above_ma10: str
+    ema20_breadth_delta_5d: str
+    return_5d: str
+    return_10d: str
+    return_20d: str
+    return_60d: str
+    dow_trend_state: str
+    latest_structure_label: str
+    latest_bos_event_type: str
+    latest_reset_reason: str
+    latest_relevant_pattern: str
+    latest_relevant_pattern_age_td: str
+    source_horizons: str
+    source_files: str
 
 
 @dataclass(frozen=True)
@@ -378,6 +410,39 @@ def _metric_value_map(table: _MarkdownTable, *, key_field: str, value_field: str
     return output
 
 
+def _group_window_start_map(
+    tables: Sequence[_MarkdownTable],
+) -> dict[tuple[str, str], str]:
+    output: dict[tuple[str, str], str] = {}
+    for table in tables:
+        headers = set(table.headers)
+        if not {"group_type", "group_name"}.issubset(headers):
+            continue
+        start_field = next(
+            (
+                candidate
+                for candidate in (
+                    "first_timing_state",
+                    "first_status",
+                    "start_status",
+                    "first_value",
+                )
+                if candidate in headers
+            ),
+            None,
+        )
+        if start_field is None:
+            continue
+        for row in table.rows:
+            group_type = row.get("group_type", "").strip()
+            group_name = row.get("group_name", "").strip()
+            start_status = row.get(start_field, "").strip()
+            if not group_type or not group_name or not start_status:
+                continue
+            output[(group_type, group_name)] = start_status
+    return output
+
+
 def _group_status_class(value: str) -> str:
     normalized = (value or "").strip().upper()
     if normalized in {"EXIT_ZONE", "HIGH", "EXTREME"}:
@@ -451,6 +516,7 @@ def _extract_ecosystem_context_rows(
             continue
         tables = _parse_markdown_tables(report.path)
         horizon = report.horizon
+        group_start_status_by_group = _group_window_start_map(tables)
         metrics: dict[str, str] = {}
         first_values: dict[str, str] = {}
         if horizon == "daily":
@@ -707,6 +773,199 @@ def _render_combined_ecosystem_row(row: _CombinedEcosystemRow) -> str:
     )
 
 
+def _combine_market_group_rows(
+    rows: Sequence[_MarketMapRow],
+) -> list[_CombinedMarketMapGroupRow]:
+    grouped: dict[tuple[str, str, str], list[_MarketMapRow]] = {}
+    for row in rows:
+        if row.scope not in {"layer", "subindustry"}:
+            continue
+        key = (row.scope, row.name, row.layer)
+        grouped.setdefault(key, []).append(row)
+
+    def _preferred(group_rows: Sequence[_MarketMapRow], field_name: str) -> str:
+        for horizon in ("daily", "rolling 2d", "rolling 5d", "rolling 30d"):
+            for row in group_rows:
+                if row.horizon != horizon:
+                    continue
+                value = getattr(row, field_name)
+                if str(value).strip():
+                    return str(value).strip()
+        return ""
+
+    combined_rows: list[_CombinedMarketMapGroupRow] = []
+    for key in sorted(grouped):
+        scope, name, layer = key
+        group_rows = grouped[key]
+        current_status = _preferred(group_rows, "current_status")
+        start_status_30d = next(
+            (
+                row.start_status_30d.strip()
+                for row in group_rows
+                if row.horizon == "rolling 30d" and row.start_status_30d.strip()
+            ),
+            "",
+        )
+        start_status_5d = next(
+            (
+                row.start_status_5d.strip()
+                for row in group_rows
+                if row.horizon == "rolling 5d" and row.start_status_5d.strip()
+            ),
+            "",
+        )
+        status_change_30d = (
+            f"{start_status_30d} -> {current_status}"
+            if start_status_30d and current_status
+            else ""
+        )
+        status_change_5d = (
+            f"{start_status_5d} -> {current_status}"
+            if start_status_5d and current_status
+            else ""
+        )
+        pattern_ranked: list[tuple[int, int, str, str]] = []
+        for row in group_rows:
+            pattern = row.latest_relevant_pattern.strip()
+            if not pattern:
+                continue
+            age_text = row.latest_relevant_pattern_age_td.strip()
+            try:
+                age_rank = int(age_text)
+            except ValueError:
+                age_rank = 10**9
+            pattern_upper = pattern.upper()
+            if "BEARISH" in pattern_upper and "HIDDEN" not in pattern_upper:
+                priority = 0
+            elif "BULLISH" in pattern_upper and "HIDDEN" not in pattern_upper:
+                priority = 1
+            elif "HIDDEN_BEARISH" in pattern_upper or ("HIDDEN" in pattern_upper and "BEARISH" in pattern_upper):
+                priority = 2
+            elif "HIDDEN_BULLISH" in pattern_upper or ("HIDDEN" in pattern_upper and "BULLISH" in pattern_upper):
+                priority = 3
+            else:
+                priority = 4
+            pattern_ranked.append((age_rank, priority, pattern, age_text))
+        if pattern_ranked:
+            pattern_ranked.sort(key=lambda item: (item[0], item[1], item[2]))
+            _age_rank, _priority, latest_pattern, latest_pattern_age = pattern_ranked[0]
+        else:
+            latest_pattern = ""
+            latest_pattern_age = ""
+        horizons_present = []
+        for horizon in ("daily", "rolling 2d", "rolling 5d", "rolling 30d"):
+            if any(row.horizon == horizon for row in group_rows):
+                horizons_present.append(horizon)
+        source_files = sorted(
+            {
+                Path(row.source_file).name
+                for row in group_rows
+                if row.source_file
+            }
+        )
+        combined_rows.append(
+            _CombinedMarketMapGroupRow(
+                scope=scope,
+                name=name,
+                layer=layer,
+                current_status=current_status,
+                start_status_30d=start_status_30d,
+                status_change_30d=status_change_30d,
+                status_change_5d=status_change_5d,
+                window_status_30d=next((row.window_status.strip() for row in group_rows if row.horizon == "rolling 30d" and row.window_status.strip()), ""),
+                window_status_5d=next((row.window_status.strip() for row in group_rows if row.horizon == "rolling 5d" and row.window_status.strip()), ""),
+                window_status_2d=next((row.window_status.strip() for row in group_rows if row.horizon == "rolling 2d" and row.window_status.strip()), ""),
+                overheat_risk_level=_preferred(group_rows, "overheat_risk_level"),
+                pct_above_ema20=_preferred(group_rows, "pct_above_ema20"),
+                pct_above_ma10=_preferred(group_rows, "pct_above_ma10"),
+                ema20_breadth_delta_5d=_preferred(group_rows, "ema20_breadth_delta_5d"),
+                return_5d=_preferred(group_rows, "return_5d"),
+                return_10d=_preferred(group_rows, "return_10d"),
+                return_20d=_preferred(group_rows, "return_20d"),
+                return_60d=_preferred(group_rows, "return_60d"),
+                dow_trend_state=_preferred(group_rows, "dow_trend_state"),
+                latest_structure_label=_preferred(group_rows, "latest_structure_label"),
+                latest_bos_event_type=_preferred(group_rows, "latest_bos_event_type"),
+                latest_reset_reason=_preferred(group_rows, "latest_reset_reason"),
+                latest_relevant_pattern=latest_pattern,
+                latest_relevant_pattern_age_td=latest_pattern_age,
+                source_horizons=", ".join(horizons_present),
+                source_files=str(len(source_files)),
+            )
+        )
+    return combined_rows
+
+
+def _combined_market_map_filter_text(row: _CombinedMarketMapGroupRow) -> str:
+    return " ".join(
+        part
+        for part in (
+            row.name,
+            row.layer,
+            row.current_status,
+            row.status_change_30d,
+            row.status_change_5d,
+            row.window_status_30d,
+            row.window_status_5d,
+            row.window_status_2d,
+            row.overheat_risk_level,
+            row.dow_trend_state,
+            row.latest_relevant_pattern,
+            row.source_horizons,
+        )
+        if part
+    ).lower()
+
+
+def _render_combined_market_group_rows(
+    rows: Sequence[_CombinedMarketMapGroupRow],
+    *,
+    include_layer_column: bool,
+) -> str:
+    rendered_rows: list[str] = []
+    for row in rows:
+        status_class = _group_status_class(row.current_status)
+        status_class_attr = f' class="{status_class}"' if status_class else ""
+        rendered_rows.append(
+            "<tr"
+            f' data-filter-row="1"'
+            f' data-section="market-map"'
+            f' data-action="{_html_attr(row.current_status)}"'
+            f' data-pullback-validity=""'
+            f' data-entry-readiness=""'
+            f' data-candidate-priority=""'
+            f' data-filter-text="{_html_attr(_combined_market_map_filter_text(row))}"'
+            ">"
+            f"<td>{_html_text(row.name)}</td>"
+            + (f"<td>{_html_text(row.layer)}</td>" if include_layer_column else "")
+            + f"<td>{_html_text(row.current_status)}</td>"
+            + f"<td>{_html_text(row.start_status_30d)}</td>"
+            + f"<td{status_class_attr}>{_html_text(row.status_change_30d)}</td>"
+            + f"<td{status_class_attr}>{_html_text(row.status_change_5d)}</td>"
+            + _render_market_status_cell(row.window_status_30d)
+            + _render_market_status_cell(row.window_status_5d)
+            + _render_market_status_cell(row.window_status_2d)
+            + _render_market_status_cell(row.overheat_risk_level)
+            + f"<td>{_html_percent(row.pct_above_ema20)}</td>"
+            + f"<td>{_html_percent(row.pct_above_ma10)}</td>"
+            + f"<td>{_html_percent(row.ema20_breadth_delta_5d)}</td>"
+            + f"<td>{_html_percent(row.return_5d, scale=100.0)}</td>"
+            + f"<td>{_html_percent(row.return_10d, scale=100.0)}</td>"
+            + f"<td>{_html_percent(row.return_20d, scale=100.0)}</td>"
+            + f"<td>{_html_percent(row.return_60d, scale=100.0)}</td>"
+            + f"<td>{_html_text(row.dow_trend_state)}</td>"
+            + f"<td>{_html_text(row.latest_structure_label)}</td>"
+            + f"<td>{_html_text(row.latest_bos_event_type)}</td>"
+            + f"<td>{_html_text(row.latest_reset_reason)}</td>"
+            + f"<td>{_html_text(row.latest_relevant_pattern)}</td>"
+            + f"<td>{_html_text(row.latest_relevant_pattern_age_td)}</td>"
+            + f"<td>{_html_text(row.source_horizons)}</td>"
+            + f"<td>{_html_text(row.source_files)}</td>"
+            + "</tr>"
+        )
+    return "".join(rendered_rows)
+
+
 def _extract_market_map_rows(
     dashboard_status: DatacenterDashboardStatus,
 ) -> list[_MarketMapRow]:
@@ -716,6 +975,7 @@ def _extract_market_map_rows(
             continue
         tables = _parse_markdown_tables(report.path)
         horizon = report.horizon
+        group_start_status_by_group = _group_window_start_map(tables)
 
         if horizon == "daily":
             dashboard_table = _first_table(
@@ -733,6 +993,8 @@ def _extract_market_map_rows(
                         layer="",
                         subindustry="",
                         current_status=metrics.get("timing_state", ""),
+                        start_status_30d="",
+                        start_status_5d="",
                         status_change_30d="",
                         status_change_5d="",
                         window_status="",
@@ -799,6 +1061,8 @@ def _extract_market_map_rows(
                                 layer=layer_name,
                                 subindustry="",
                                 current_status=row.get("status", "").strip(),
+                                start_status_30d="",
+                                start_status_5d="",
                                 status_change_30d="",
                                 status_change_5d="",
                                 window_status="",
@@ -832,6 +1096,8 @@ def _extract_market_map_rows(
                                 layer=row.get("layer", "").strip(),
                                 subindustry=subindustry_name,
                                 current_status=row.get("status", "").strip() or timing_row.get("timing_state", "").strip(),
+                                start_status_30d="",
+                                start_status_5d="",
                                 status_change_30d="",
                                 status_change_5d="",
                                 window_status="",
@@ -873,6 +1139,8 @@ def _extract_market_map_rows(
                         layer="",
                         subindustry="",
                         current_status=metrics.get("timing_state", ""),
+                        start_status_30d="",
+                        start_status_5d="",
                         status_change_30d="",
                         status_change_5d="",
                         window_status="",
@@ -927,6 +1195,8 @@ def _extract_market_map_rows(
                                 layer=layer_name,
                                 subindustry="",
                                 current_status=row.get("current_status", "").strip() or structure_row.get("timing_state", "").strip(),
+                                start_status_30d=group_start_status_by_group.get(("layer", layer_name), "").strip() if horizon == "rolling 30d" else "",
+                                start_status_5d=group_start_status_by_group.get(("layer", layer_name), "").strip() if horizon == "rolling 5d" else "",
                                 status_change_30d="",
                                 status_change_5d="",
                                 window_status=row.get("window_status", "").strip(),
@@ -959,6 +1229,8 @@ def _extract_market_map_rows(
                                 layer=row.get("layer", "").strip(),
                                 subindustry=subindustry_name,
                                 current_status=row.get("current_status", "").strip() or structure_row.get("timing_state", "").strip(),
+                                start_status_30d=group_start_status_by_group.get(("subindustry", subindustry_name), "").strip() if horizon == "rolling 30d" else "",
+                                start_status_5d=group_start_status_by_group.get(("subindustry", subindustry_name), "").strip() if horizon == "rolling 5d" else "",
                                 status_change_30d="",
                                 status_change_5d="",
                                 window_status=row.get("window_status", "").strip(),
@@ -1430,17 +1702,19 @@ def generate_dashboard_html(
     combined_ecosystem_row = _combine_ecosystem_context_rows(ecosystem_context_rows)
     layer_market_rows = [row for row in market_map_rows if row.scope == "layer"]
     subindustry_market_rows = [row for row in market_map_rows if row.scope == "subindustry"]
+    combined_layer_rows = _combine_market_group_rows(layer_market_rows)
+    combined_subindustry_rows = _combine_market_group_rows(subindustry_market_rows)
     ecosystem_market_rows_html = (
         _render_combined_ecosystem_row(combined_ecosystem_row)
         if combined_ecosystem_row is not None
         else ""
     )
-    layer_market_rows_html = _render_market_map_rows(
-        layer_market_rows,
+    layer_market_rows_html = _render_combined_market_group_rows(
+        combined_layer_rows,
         include_layer_column=False,
     )
-    subindustry_market_rows_html = _render_market_map_rows(
-        subindustry_market_rows,
+    subindustry_market_rows_html = _render_combined_market_group_rows(
+        combined_subindustry_rows,
         include_layer_column=True,
     )
 
@@ -1753,15 +2027,16 @@ def generate_dashboard_html(
   </section>
 
   <section id="market-map-layers" class="major-section">
-    <h2>Layers</h2>
+    <h2>Layers Summary</h2>
     {(
       '<div class="table-scroll"><table class="sticky-table"><thead><tr>'
-      '<th>Layer</th><th>Horizon</th><th>Status change 30d</th><th>Status change 5d</th><th>Window status</th>'
+      '<th>Layer</th><th>Current status</th><th>Start status 30d</th><th>Status change 30d</th><th>Status change 5d</th>'
+      '<th>Window status 30d</th><th>Window status 5d</th><th>Window status 2d</th>'
       '<th>Overheat risk</th><th>% above EMA20</th><th>% above MA10</th>'
       '<th>EMA20 breadth delta 5d</th><th>Return 5d</th><th>Return 10d</th>'
       '<th>Return 20d</th><th>Return 60d</th><th>Dow trend state</th><th>Latest structure</th>'
       '<th>Latest BOS</th><th>Latest reset</th><th>Latest relevant pattern</th>'
-      '<th>Pattern age td</th><th>Source horizons</th>'
+      '<th>Pattern age td</th><th>Source horizons</th><th>Source files</th>'
       '</tr></thead><tbody>'
       + layer_market_rows_html +
       '</tbody></table></div>'
@@ -1769,15 +2044,16 @@ def generate_dashboard_html(
   </section>
 
   <section id="market-map-subindustries" class="major-section">
-    <h2>Subindustries</h2>
+    <h2>Subindustries Summary</h2>
     {(
       '<div class="table-scroll"><table class="sticky-table"><thead><tr>'
-      '<th>Subindustry</th><th>Layer</th><th>Horizon</th><th>Status change 30d</th><th>Status change 5d</th><th>Window status</th>'
+      '<th>Subindustry</th><th>Layer</th><th>Current status</th><th>Start status 30d</th><th>Status change 30d</th><th>Status change 5d</th>'
+      '<th>Window status 30d</th><th>Window status 5d</th><th>Window status 2d</th>'
       '<th>Overheat risk</th><th>% above EMA20</th><th>% above MA10</th>'
       '<th>EMA20 breadth delta 5d</th><th>Return 5d</th><th>Return 10d</th>'
       '<th>Return 20d</th><th>Return 60d</th><th>Dow trend state</th><th>Latest structure</th>'
       '<th>Latest BOS</th><th>Latest reset</th><th>Latest relevant pattern</th>'
-      '<th>Pattern age td</th><th>Source horizons</th>'
+      '<th>Pattern age td</th><th>Source horizons</th><th>Source files</th>'
       '</tr></thead><tbody>'
       + subindustry_market_rows_html +
       '</tbody></table></div>'
