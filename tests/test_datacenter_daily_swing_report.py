@@ -367,6 +367,9 @@ def test_generates_markdown_report_with_required_sections_and_filters(tmp_path):
     assert "ticker_rows_with_scanner_fields_null" in markdown
     assert "### Layer: Infrastructure" in markdown
     assert "| row_type | layer | subindustry | ticker | status |" in markdown
+    assert "latest_structure_age_trading_days" in markdown
+    assert "latest_bos_age_trading_days" in markdown
+    assert "latest_reset_age_trading_days" in markdown
     assert "| LAYER | Infrastructure |  |  |" in markdown
     assert "| SUBINDUSTRY | Infrastructure | AI Chips |  |" in markdown
     assert "| TICKER | Infrastructure | AI Chips | AAA |" in markdown
@@ -581,8 +584,8 @@ def test_daily_taxonomy_listing_includes_all_scoped_ticker_rows_with_compact_col
     assert "exit_risk_severity" in section
     assert "price_data_status" in section
     assert "| trend_state |" in section
-    assert "| LAYER | Infrastructure |  |  | NEUTRAL |  | NO | 101 | 0 | 0.02 | 0.06 | 0.01 | NEUTRAL | LH | FRESH | BOS_DOWN | FRESH |  |  |  |  |  |  |  | OK |" in section
-    assert "| SUBINDUSTRY | Infrastructure | AI Chips |  | BUY_ZONE | NO | NO | 104 | 0.01 | 0.07 | 0.15 | 0.0297 | UP | HH | FRESH | BOS_UP | FRESH | DOUBLE_BOS_UP | FRESH |  |  |  |  |  | OK |" in section
+    assert "| LAYER | Infrastructure |  |  | NEUTRAL |  | NO | 101 | 0 | 0.02 | 0.06 | 0.01 | NEUTRAL | LH | 4 | FRESH | BOS_DOWN | 0 | FRESH |  |  |  |  |  |  |  |  | OK |" in section
+    assert "| SUBINDUSTRY | Infrastructure | AI Chips |  | BUY_ZONE | NO | NO | 104 | 0.01 | 0.07 | 0.15 | 0.0297 | UP | HH | 2 | FRESH | BOS_UP | 0 | FRESH | DOUBLE_BOS_UP | 0 | FRESH |  |  |  |  |  | OK |" in section
     assert "| TICKER | Infrastructure | AI Chips | AAA | BREAKOUT_CANDIDATE | NO | NO | 110 | 0.03 | 0.08 | 0.12 | 0.0476 |" in section
     assert "| TICKER | Infrastructure | Cloud | BBB | PULLBACK_CANDIDATE | NO | NO | 102 | -0.02 | 0.04 | 0.15 | 0.0303 |" in section
     assert "| TICKER | Infrastructure | Storage | CCC | MISSING_PRICE | YES | NO | 90 | -0.04 | -0.1 | -0.15 | -0.0526 |" in section

@@ -1485,6 +1485,7 @@ def _build_rolling_taxonomy_listing_rows(
     for layer_name in layer_names:
         layer_group_window_rows = group_rows_by_group.get(("layer", layer_name), [])
         layer_group_last_row = layer_group_window_rows[-1] if layer_group_window_rows else {}
+        layer_group_first_row = layer_group_window_rows[0] if layer_group_window_rows else {}
         layer_synthetic_window_rows = synthetic_rows_by_group.get(("layer", layer_name), [])
         layer_synthetic_last_row = layer_synthetic_window_rows[-1] if layer_synthetic_window_rows else {}
         output_rows.append(
@@ -1494,6 +1495,12 @@ def _build_rolling_taxonomy_listing_rows(
                 "subindustry": "",
                 "ticker": "",
                 "current_status": layer_group_last_row.get("timing_state"),
+                "start_status": layer_group_first_row.get("timing_state"),
+                "status_change": (
+                    f"{layer_group_first_row.get('timing_state')} -> {layer_group_last_row.get('timing_state')}"
+                    if layer_group_first_row.get("timing_state") and layer_group_last_row.get("timing_state")
+                    else None
+                ),
                 "window_status": _most_severe_group_status(layer_group_window_rows),
                 "subindustry_context_risk": "",
                 "layer_context_risk": _daily_context_risk_value(
@@ -1512,11 +1519,15 @@ def _build_rolling_taxonomy_listing_rows(
                 "last_exit_risk_severity": None,
                 "last_exit_reason": None,
                 "last_trend_state": layer_synthetic_last_row.get("trend_classification"),
+                "last_trend_state_age_td": layer_synthetic_last_row.get("trend_state_age_td"),
                 "last_latest_structure_label": layer_synthetic_last_row.get("latest_structure_label"),
+                "last_latest_structure_age_trading_days": layer_synthetic_last_row.get("latest_structure_age_trading_days"),
                 "last_latest_structure_freshness": layer_synthetic_last_row.get("latest_structure_freshness"),
                 "last_latest_bos_event_type": layer_synthetic_last_row.get("latest_bos_event_type"),
+                "last_latest_bos_age_trading_days": layer_synthetic_last_row.get("latest_bos_age_trading_days"),
                 "last_latest_bos_freshness": layer_synthetic_last_row.get("latest_bos_freshness"),
                 "last_latest_reset_reason": layer_synthetic_last_row.get("latest_reset_reason"),
+                "last_latest_reset_age_trading_days": layer_synthetic_last_row.get("latest_reset_age_trading_days"),
                 "last_latest_reset_freshness": layer_synthetic_last_row.get("latest_reset_freshness"),
                 "last_price_data_status": layer_group_last_row.get("data_quality_status"),
             }
@@ -1524,6 +1535,7 @@ def _build_rolling_taxonomy_listing_rows(
         for subindustry_name in sorted(subindustries_by_layer.get(layer_name, set())):
             subindustry_group_window_rows = group_rows_by_group.get(("subindustry", subindustry_name), [])
             subindustry_group_last_row = subindustry_group_window_rows[-1] if subindustry_group_window_rows else {}
+            subindustry_group_first_row = subindustry_group_window_rows[0] if subindustry_group_window_rows else {}
             subindustry_synthetic_window_rows = synthetic_rows_by_group.get(("subindustry", subindustry_name), [])
             subindustry_synthetic_last_row = subindustry_synthetic_window_rows[-1] if subindustry_synthetic_window_rows else {}
             output_rows.append(
@@ -1533,6 +1545,12 @@ def _build_rolling_taxonomy_listing_rows(
                     "subindustry": subindustry_name,
                     "ticker": "",
                     "current_status": subindustry_group_last_row.get("timing_state"),
+                    "start_status": subindustry_group_first_row.get("timing_state"),
+                    "status_change": (
+                        f"{subindustry_group_first_row.get('timing_state')} -> {subindustry_group_last_row.get('timing_state')}"
+                        if subindustry_group_first_row.get("timing_state") and subindustry_group_last_row.get("timing_state")
+                        else None
+                    ),
                     "window_status": _most_severe_group_status(subindustry_group_window_rows),
                     "subindustry_context_risk": _daily_context_risk_value(
                         in_datacenter_ecosystem="YES",
@@ -1557,11 +1575,15 @@ def _build_rolling_taxonomy_listing_rows(
                     "last_exit_risk_severity": None,
                     "last_exit_reason": None,
                     "last_trend_state": subindustry_synthetic_last_row.get("trend_classification"),
+                    "last_trend_state_age_td": subindustry_synthetic_last_row.get("trend_state_age_td"),
                     "last_latest_structure_label": subindustry_synthetic_last_row.get("latest_structure_label"),
+                    "last_latest_structure_age_trading_days": subindustry_synthetic_last_row.get("latest_structure_age_trading_days"),
                     "last_latest_structure_freshness": subindustry_synthetic_last_row.get("latest_structure_freshness"),
                     "last_latest_bos_event_type": subindustry_synthetic_last_row.get("latest_bos_event_type"),
+                    "last_latest_bos_age_trading_days": subindustry_synthetic_last_row.get("latest_bos_age_trading_days"),
                     "last_latest_bos_freshness": subindustry_synthetic_last_row.get("latest_bos_freshness"),
                     "last_latest_reset_reason": subindustry_synthetic_last_row.get("latest_reset_reason"),
+                    "last_latest_reset_age_trading_days": subindustry_synthetic_last_row.get("latest_reset_age_trading_days"),
                     "last_latest_reset_freshness": subindustry_synthetic_last_row.get("latest_reset_freshness"),
                     "last_price_data_status": subindustry_group_last_row.get("data_quality_status"),
                 }
@@ -1634,11 +1656,11 @@ def _build_rolling_taxonomy_listing_rows(
                 output_row["current_status"] = _classify_rolling_current_watchlist_status(output_row)
                 output_row["window_status"] = _classify_rolling_window_watchlist_status(output_row)
                 output_rows.append(
-                    {
-                        "row_type": "TICKER",
-                        "layer": layer_name,
-                        "subindustry": subindustry_name,
-                        "ticker": ticker,
+                {
+                    "row_type": "TICKER",
+                    "layer": layer_name,
+                    "subindustry": subindustry_name,
+                    "ticker": ticker,
                         "current_status": output_row.get("current_status"),
                         "window_status": output_row.get("window_status"),
                         "subindustry_context_risk": output_row.get("subindustry_context_risk"),
@@ -1649,18 +1671,22 @@ def _build_rolling_taxonomy_listing_rows(
                         "exit_risk_days": output_row.get("exit_risk_days"),
                         "high_exit_risk_days": output_row.get("high_exit_risk_days"),
                         "medium_exit_risk_days": output_row.get("medium_exit_risk_days"),
-                        "last_exit_risk_severity": output_row.get("last_exit_risk_severity"),
-                        "last_exit_reason": output_row.get("last_exit_reason"),
-                        "last_trend_state": output_row.get("last_ticker_trend_state"),
-                        "last_latest_structure_label": output_row.get("last_latest_structure_label"),
-                        "last_latest_structure_freshness": output_row.get("last_latest_structure_freshness"),
-                        "last_latest_bos_event_type": output_row.get("last_latest_bos_event_type"),
-                        "last_latest_bos_freshness": output_row.get("last_latest_bos_freshness"),
-                        "last_latest_reset_reason": output_row.get("last_latest_reset_reason"),
-                        "last_latest_reset_freshness": output_row.get("last_latest_reset_freshness"),
-                        "last_price_data_status": output_row.get("last_price_data_status"),
-                    }
-                )
+                    "last_exit_risk_severity": output_row.get("last_exit_risk_severity"),
+                    "last_exit_reason": output_row.get("last_exit_reason"),
+                    "last_trend_state": output_row.get("last_ticker_trend_state"),
+                    "last_trend_state_age_td": last_row.get("ticker_trend_state_age_td"),
+                    "last_latest_structure_label": output_row.get("last_latest_structure_label"),
+                    "last_latest_structure_age_trading_days": last_row.get("latest_structure_age_trading_days"),
+                    "last_latest_structure_freshness": output_row.get("last_latest_structure_freshness"),
+                    "last_latest_bos_event_type": output_row.get("last_latest_bos_event_type"),
+                    "last_latest_bos_age_trading_days": last_row.get("latest_bos_age_trading_days"),
+                    "last_latest_bos_freshness": output_row.get("last_latest_bos_freshness"),
+                    "last_latest_reset_reason": output_row.get("last_latest_reset_reason"),
+                    "last_latest_reset_age_trading_days": last_row.get("latest_reset_age_trading_days"),
+                    "last_latest_reset_freshness": output_row.get("last_latest_reset_freshness"),
+                    "last_price_data_status": output_row.get("last_price_data_status"),
+                }
+            )
     return output_rows
 
 
@@ -2679,6 +2705,8 @@ def build_markdown_weekly_swing_report(
                 "subindustry",
                 "ticker",
                 "current_status",
+                "start_status",
+                "status_change",
                 "window_status",
                 "subindustry_context_risk",
                 "layer_context_risk",
@@ -2691,11 +2719,15 @@ def build_markdown_weekly_swing_report(
                 "last_exit_risk_severity",
                 "last_exit_reason",
                 "last_trend_state",
+                "last_trend_state_age_td",
                 "last_latest_structure_label",
+                "last_latest_structure_age_trading_days",
                 "last_latest_structure_freshness",
                 "last_latest_bos_event_type",
+                "last_latest_bos_age_trading_days",
                 "last_latest_bos_freshness",
                 "last_latest_reset_reason",
+                "last_latest_reset_age_trading_days",
                 "last_latest_reset_freshness",
                 "last_price_data_status",
             ]

@@ -401,8 +401,12 @@ def test_finds_last_five_valid_signal_dates_and_generates_report(tmp_path):
     assert "| 2024-01-02 | subindustry | HIGH | 1 |" in markdown
     assert "| 2024-01-02 | subindustry | LOW | 1 |" in markdown
     assert "### Layer: Infrastructure" in markdown
-    assert "| row_type | layer | subindustry | ticker | current_status | window_status |" in markdown
+    assert "| row_type | layer | subindustry | ticker | current_status | start_status | status_change | window_status |" in markdown
     assert "last_trend_state" in markdown
+    assert "last_trend_state_age_td" in markdown
+    assert "last_latest_structure_age_trading_days" in markdown
+    assert "last_latest_bos_age_trading_days" in markdown
+    assert "last_latest_reset_age_trading_days" in markdown
     assert "| LAYER | Infrastructure |  |  |" in markdown
     assert "| SUBINDUSTRY | Infrastructure | AI Chips |  |" in markdown
     assert "| TICKER | Infrastructure | AI Chips | AAA |" in markdown

@@ -677,10 +677,10 @@ def _install_pipeline_mocks(monkeypatch, tmp_path: Path) -> None:
 | subindustry | AI Accelerators | NEUTRAL | BUY_ZONE |
 
 ## Datacenter Taxonomy Listing
-| row_type | layer | subindustry | ticker | current_status | window_status | subindustry_context_risk | layer_context_risk | last_close | breakout_days | pullback_days | exit_risk_days | high_exit_risk_days | medium_exit_risk_days | last_exit_risk_severity | last_exit_reason | last_trend_state | last_trend_state_age_td | last_latest_structure_label | last_latest_structure_age_trading_days | last_latest_structure_freshness | last_latest_bos_event_type | last_latest_bos_age_trading_days | last_latest_bos_freshness | last_latest_reset_reason | last_latest_reset_age_trading_days | last_latest_reset_freshness | last_price_data_status |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| LAYER | Compute |  |  | WATCH | ADD_ON_PULLBACK | NORMAL | WATCH |  | 0 | 2 | 0 | 0 | 0 |  |  | UP | 2 | HH | 3 | fresh | BOS_UP | 1 | fresh |  |  |  | OK |
-| SUBINDUSTRY | Compute | AI Accelerators |  | BUY_ZONE | WATCH | HIGH | WATCH |  | 1 | 1 | 0 | 0 | 0 |  |  | UP | 2 | HH | 3 | fresh | BOS_UP | 1 | fresh |  |  |  | OK |
+| row_type | layer | subindustry | ticker | current_status | start_status | status_change | window_status | subindustry_context_risk | layer_context_risk | last_close | breakout_days | pullback_days | exit_risk_days | high_exit_risk_days | medium_exit_risk_days | last_exit_risk_severity | last_exit_reason | last_trend_state | last_trend_state_age_td | last_latest_structure_label | last_latest_structure_age_trading_days | last_latest_structure_freshness | last_latest_bos_event_type | last_latest_bos_age_trading_days | last_latest_bos_freshness | last_latest_reset_reason | last_latest_reset_age_trading_days | last_latest_reset_freshness | last_price_data_status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| LAYER | Compute |  |  | WATCH | NEUTRAL | NEUTRAL -> WATCH | ADD_ON_PULLBACK | NORMAL | WATCH |  | 0 | 2 | 0 | 0 | 0 |  |  | UP | 2 | HH | 3 | fresh | BOS_UP | 1 | fresh |  |  |  | OK |
+| SUBINDUSTRY | Compute | AI Accelerators |  | BUY_ZONE | NEUTRAL | NEUTRAL -> BUY_ZONE | WATCH | HIGH | WATCH |  | 1 | 1 | 0 | 0 | 0 |  |  | UP | 2 | HH | 3 | fresh | BOS_UP | 1 | fresh |  |  |  | OK |
 """
     for name in ("rolling2.csv", "rolling5.csv", "rolling30.csv"):
         (tmp_path / name).write_text(rolling_fixture, encoding="utf-8")
