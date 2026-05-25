@@ -1036,6 +1036,96 @@ def _render_combined_market_group_rows(
     return "".join(rendered_rows)
 
 
+def _render_layer_subindustry_hierarchy(
+    layer_rows: Sequence[_CombinedMarketMapGroupRow],
+    subindustry_rows: Sequence[_CombinedMarketMapGroupRow],
+    *,
+    market_map_header_html: str,
+) -> str:
+    layer_by_name = {row.name: row for row in layer_rows}
+    grouped_subindustries: dict[str, list[_CombinedMarketMapGroupRow]] = {
+        row.name: [] for row in layer_rows
+    }
+    unknown_group_name = "Unmapped / Unknown layer"
+    grouped_subindustries.setdefault(unknown_group_name, [])
+    for row in subindustry_rows:
+        layer_name = row.layer.strip()
+        if layer_name and layer_name in grouped_subindustries:
+            grouped_subindustries[layer_name].append(row)
+        else:
+            grouped_subindustries[unknown_group_name].append(row)
+
+    ordered_layer_names = sorted(layer_by_name)
+    if grouped_subindustries[unknown_group_name]:
+        ordered_layer_names.append(unknown_group_name)
+
+    detail_blocks: list[str] = []
+    for layer_name in ordered_layer_names:
+        layer_row = layer_by_name.get(layer_name)
+        sub_rows = sorted(grouped_subindustries.get(layer_name, []), key=lambda row: row.name)
+        if layer_row is not None:
+            filter_text = " ".join(
+                part
+                for part in (
+                    _combined_market_map_filter_text(layer_row),
+                    " ".join(_combined_market_map_filter_text(row) for row in sub_rows),
+                )
+                if part
+            )
+            current_text = _safe_text(layer_row.current_status)
+            status_change_text = _safe_text(layer_row.status_change_30d)
+            window_text = _safe_text(layer_row.window_status_30d)
+            overheat_text = _safe_text(layer_row.overheat_risk_level)
+            layer_table_html = (
+                '<div class="table-scroll"><table class="sticky-table"><thead><tr>'
+                + market_map_header_html
+                + "</tr></thead><tbody>"
+                + _render_combined_market_group_rows([layer_row], include_layer_column=True)
+                + "</tbody></table></div>"
+            )
+        else:
+            filter_text = " ".join(_combined_market_map_filter_text(row) for row in sub_rows)
+            current_text = "-"
+            status_change_text = "-"
+            window_text = "-"
+            overheat_text = "-"
+            layer_table_html = "<p>No combined layer row available.</p>"
+        subindustry_table_html = (
+            '<div class="table-scroll"><table class="sticky-table"><thead><tr>'
+            + market_map_header_html
+            + "</tr></thead><tbody>"
+            + _render_combined_market_group_rows(sub_rows, include_layer_column=True)
+            + "</tbody></table></div>"
+        ) if sub_rows else "<p>No subindustries found for this layer.</p>"
+        detail_blocks.append(
+            "<details"
+            ' class="market-layer-detail"'
+            ' data-filter-row="1"'
+            ' data-section="market-map"'
+            f' data-action="{_html_attr(layer_row.current_status if layer_row is not None else "")}"'
+            ' data-pullback-validity=""'
+            ' data-entry-readiness=""'
+            ' data-candidate-priority=""'
+            f' data-filter-text="{_html_attr(filter_text.lower())}"'
+            ">"
+            "<summary>"
+            f'<span class="layer-name">{_html_text(layer_name)}</span>'
+            f"<span>Current: {_html_text(current_text)}</span>"
+            f"<span>30d: {_html_text(status_change_text)}</span>"
+            f"<span>Window 30d: {_html_text(window_text)}</span>"
+            f"<span>Overheat: {_html_text(overheat_text)}</span>"
+            "</summary>"
+            '<div class="layer-detail-body">'
+            "<h3>Layer summary</h3>"
+            + layer_table_html
+            + "<h3>Subindustries</h3>"
+            + subindustry_table_html
+            + "</div>"
+            "</details>"
+        )
+    return "".join(detail_blocks)
+
+
 def _extract_market_map_rows(
     dashboard_status: DatacenterDashboardStatus,
 ) -> list[_MarketMapRow]:
@@ -1788,6 +1878,11 @@ def generate_dashboard_html(
         combined_subindustry_rows,
         include_layer_column=True,
     )
+    layer_subindustry_hierarchy_html = _render_layer_subindustry_hierarchy(
+        combined_layer_rows,
+        combined_subindustry_rows,
+        market_map_header_html=market_map_header_html,
+    )
 
     detail_sections: list[str] = []
     for decision in sorted(decision_result.decisions, key=lambda item: item.ticker):
@@ -2012,6 +2107,33 @@ def generate_dashboard_html(
     .group-section {{
       margin-bottom: 18px;
     }}
+    .market-layer-detail {{
+      margin-bottom: 14px;
+      border: 1px solid #d8dee4;
+      background: #fff;
+    }}
+    .market-layer-detail summary {{
+      cursor: pointer;
+      padding: 10px 12px;
+      font-weight: 600;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }}
+    .market-layer-detail[open] summary {{
+      border-bottom: 1px solid #d8dee4;
+      background: #f8fafc;
+    }}
+    .layer-name {{
+      font-weight: 700;
+    }}
+    .layer-detail-body {{
+      padding: 12px;
+    }}
+    .layer-detail-body h3 {{
+      margin-top: 0;
+    }}
     .table-scroll {{
       display: block;
       overflow-x: auto;
@@ -2040,8 +2162,7 @@ def generate_dashboard_html(
     <nav class="nav-links" aria-label="Dashboard sections">
       <a href="#summary">Summary</a>
       <a href="#market-map-ecosystem">Ecosystem</a>
-      <a href="#market-map-layers">Layers</a>
-      <a href="#market-map-subindustries">Subindustries</a>
+      <a href="#market-map-layers-subindustries">Layers and Subindustries</a>
       <a href="#watchlist-status">Watchlist Status</a>
       <a href="#candidate-pullbacks">Candidate Pullbacks</a>
       <a href="#command-center">Command Center</a>
@@ -2092,26 +2213,9 @@ def generate_dashboard_html(
     ) if ecosystem_market_rows_html else '<p>No market map rows found in the selected reports.</p>'}
   </section>
 
-  <section id="market-map-layers" class="major-section">
-    <h2>Layers Summary</h2>
-    {(
-      '<div class="table-scroll"><table class="sticky-table"><thead><tr>'
-      + market_map_header_html +
-      '</tr></thead><tbody>'
-      + layer_market_rows_html +
-      '</tbody></table></div>'
-    ) if layer_market_rows_html else '<p>No market map rows found in the selected reports.</p>'}
-  </section>
-
-  <section id="market-map-subindustries" class="major-section">
-    <h2>Subindustries Summary</h2>
-    {(
-      '<div class="table-scroll"><table class="sticky-table"><thead><tr>'
-      + market_map_header_html +
-      '</tr></thead><tbody>'
-      + subindustry_market_rows_html +
-      '</tbody></table></div>'
-    ) if subindustry_market_rows_html else '<p>No market map rows found in the selected reports.</p>'}
+  <section id="market-map-layers-subindustries" class="major-section">
+    <h2>Layers and Subindustries</h2>
+    {layer_subindustry_hierarchy_html if layer_subindustry_hierarchy_html else '<p>No market map rows found in the selected reports.</p>'}
   </section>
 
   <section id="watchlist-status" class="major-section">

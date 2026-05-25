@@ -737,20 +737,7 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
         html_one,
         re.DOTALL,
     )
-    layers_header = re.search(
-        r'<section id="market-map-layers".*?<thead><tr>(.*?)</tr></thead>',
-        html_one,
-        re.DOTALL,
-    )
-    subindustries_header = re.search(
-        r'<section id="market-map-subindustries".*?<thead><tr>(.*?)</tr></thead>',
-        html_one,
-        re.DOTALL,
-    )
     assert ecosystem_header is not None
-    assert layers_header is not None
-    assert subindustries_header is not None
-    assert ecosystem_header.group(1) == layers_header.group(1) == subindustries_header.group(1)
     for snippet in _MARKET_MAP_HEADER_SNIPPETS:
         assert snippet in ecosystem_header.group(1)
 
@@ -766,16 +753,14 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     assert "newest" in html_one
     assert 'id="summary"' in html_one
     assert 'id="market-map-ecosystem"' in html_one
-    assert 'id="market-map-layers"' in html_one
-    assert 'id="market-map-subindustries"' in html_one
+    assert 'id="market-map-layers-subindustries"' in html_one
     assert 'id="watchlist-status"' in html_one
     assert 'id="candidate-pullbacks"' in html_one
     assert 'id="command-center"' in html_one
     assert 'id="inspector"' in html_one
     assert 'id="source-files"' in html_one
     assert "Ecosystem Summary" in html_one
-    assert "Layers Summary" in html_one
-    assert "Subindustries Summary" in html_one
+    assert "Layers and Subindustries" in html_one
     assert "Compute" in html_one
     assert "AI Accelerators" in html_one
     assert "ADD_ON_PULLBACK" in html_one
@@ -794,7 +779,7 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     assert "Latest reset" in html_one
     assert "Source horizons" in html_one
     assert "Source files" in html_one
-    assert 'class="table-scroll"' in html_one
+    assert 'class="market-layer-detail"' in html_one
     assert "WATCH -&gt; BUY_ZONE" in html_one
     assert "NEUTRAL -&gt; WATCH" in html_one
     assert "72.00%" in html_one
@@ -815,20 +800,20 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     assert ".status-neutral {" in html_one
     assert html_one.index('id="market-map-ecosystem"') > html_one.index('id="summary"')
     assert html_one.index('id="market-map-ecosystem"') < html_one.index('id="watchlist-status"')
-    assert html_one.index('id="market-map-layers"') > html_one.index('id="market-map-ecosystem"')
-    assert html_one.index('id="market-map-subindustries"') > html_one.index('id="market-map-layers"')
-    layers_section = html_one[
-        html_one.index('id="market-map-layers"'):html_one.index('id="market-map-subindustries"')
+    assert html_one.index('id="market-map-layers-subindustries"') > html_one.index('id="market-map-ecosystem"')
+    hierarchy_section = html_one[
+        html_one.index('id="market-map-layers-subindustries"'):html_one.index('id="watchlist-status"')
     ]
-    subindustries_section = html_one[
-        html_one.index('id="market-map-subindustries"'):html_one.index('id="watchlist-status"')
-    ]
-    assert "<td>LAYER</td>" in layers_section
-    assert "<td>Compute</td>" in layers_section
-    assert "<td>SUBINDUSTRY</td>" in subindustries_section
-    assert "<td>AI Accelerators</td>" in subindustries_section
-    assert "<td>LAYER</td><td>Compute</td><td>Compute</td>" in layers_section
-    assert "<td>SUBINDUSTRY</td><td>AI Accelerators</td><td>Compute</td>" in subindustries_section
+    assert "<details" in hierarchy_section
+    assert "<summary>" in hierarchy_section
+    assert "Current: WATCH" in hierarchy_section
+    assert "30d: NEUTRAL -&gt; WATCH" in hierarchy_section
+    assert "Window 30d: ADD_ON_PULLBACK" in hierarchy_section
+    assert "Overheat: WATCH" in hierarchy_section
+    assert "Layer summary" in hierarchy_section
+    assert "Subindustries" in hierarchy_section
+    assert "<td>LAYER</td><td>Compute</td><td>Compute</td>" in hierarchy_section
+    assert "<td>SUBINDUSTRY</td><td>AI Accelerators</td><td>Compute</td>" in hierarchy_section
     assert html_one.index('id="watchlist-status"') > html_one.index('id="summary"')
     assert html_one.index('id="watchlist-status"') < html_one.index('id="candidate-pullbacks"')
     assert html_one.index('id="candidate-pullbacks"') < html_one.index('id="command-center"')
@@ -872,27 +857,13 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
         html,
         re.DOTALL,
     )
-    layers_header = re.search(
-        r'<section id="market-map-layers".*?<thead><tr>(.*?)</tr></thead>',
-        html,
-        re.DOTALL,
-    )
-    subindustries_header = re.search(
-        r'<section id="market-map-subindustries".*?<thead><tr>(.*?)</tr></thead>',
-        html,
-        re.DOTALL,
-    )
     assert ecosystem_header is not None
-    assert layers_header is not None
-    assert subindustries_header is not None
-    assert ecosystem_header.group(1) == layers_header.group(1) == subindustries_header.group(1)
     for snippet in _MARKET_MAP_HEADER_SNIPPETS:
         assert snippet in ecosystem_header.group(1)
     assert "<h1>Datacenter Dashboard</h1>" in html
     assert 'href="#summary"' in html
     assert 'href="#market-map-ecosystem"' in html
-    assert 'href="#market-map-layers"' in html
-    assert 'href="#market-map-subindustries"' in html
+    assert 'href="#market-map-layers-subindustries"' in html
     assert 'href="#watchlist-status"' in html
     assert 'href="#candidate-pullbacks"' in html
     assert 'href="#command-center"' in html
@@ -905,8 +876,7 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     assert "Ticker Inspector / Details" in html
     assert "Source Files / Report Status" in html
     assert "Ecosystem Summary" in html
-    assert "Layers Summary" in html
-    assert "Subindustries Summary" in html
+    assert "Layers and Subindustries" in html
     assert "Current status" in html
     assert "Start status 30d" in html
     assert "Status change 30d" in html
@@ -983,8 +953,7 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     assert html.count("<td>DC_ECOSYSTEM_TOTAL</td>") == 1
     assert html.index('id="market-map-ecosystem"') > html.index('id="summary"')
     assert html.index('id="market-map-ecosystem"') < html.index('id="watchlist-status"')
-    assert html.index('id="market-map-layers"') > html.index('id="market-map-ecosystem"')
-    assert html.index('id="market-map-subindustries"') > html.index('id="market-map-layers"')
+    assert html.index('id="market-map-layers-subindustries"') > html.index('id="market-map-ecosystem"')
     assert html.index('id="watchlist-status"') > html.index('id="summary"')
     assert html.index('id="watchlist-status"') < html.index('id="candidate-pullbacks"')
     assert html.index("<h2>Filters</h2>") < html.index('id="candidate-pullbacks"')
