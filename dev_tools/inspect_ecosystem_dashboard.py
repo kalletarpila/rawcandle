@@ -204,7 +204,7 @@ def _summary_lines(
     ticker_rows: int,
     trace_rows: int,
 ) -> list[str]:
-    return [
+    lines = [
         "SUMMARY ecosystem_dashboard_inspect.status=OK",
         f"SUMMARY ecosystem_dashboard_inspect.dashboard_db={dashboard_db}",
         f"SUMMARY ecosystem_dashboard_inspect.ecosystem_code={ecosystem_code}",
@@ -220,6 +220,16 @@ def _summary_lines(
         f"SUMMARY ecosystem_dashboard_inspect.ticker_rows={ticker_rows}",
         f"SUMMARY ecosystem_dashboard_inspect.trace_rows={trace_rows}",
     ]
+    compatibility_lines = [
+        f"SUMMARY ecosystem_code={ecosystem_code}",
+        f"SUMMARY selected_report_date={_normalize_text(selected_run['report_date']) if selected_run is not None else ''}",
+        f"SUMMARY selected_run_id={_normalize_text(selected_run['run_id']) if selected_run is not None else ''}",
+        "SUMMARY status=OK",
+    ]
+    for line in compatibility_lines:
+        if line not in lines:
+            lines.append(line)
+    return lines
 
 
 def _print_section(header: str, rows: list[list[object]]) -> None:

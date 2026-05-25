@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import sqlite3
 from pathlib import Path
 
@@ -8,6 +7,8 @@ from dev_tools.ecosystem_dashboard_persistence import (
     ensure_dashboard_schema,
 )
 from dev_tools.inspect_ecosystem_dashboard import main
+from dev_tools.run_datacenter_dashboard_inspect import main as datacenter_wrapper_main
+from dev_tools.run_ecosystem_dashboard_inspect import main as ecosystem_wrapper_main
 
 
 def _seed_dashboard_db(db_path: Path) -> None:
@@ -367,7 +368,7 @@ def test_show_runs_prints_sorted_runs_and_summary(tmp_path, capsys):
     )
     assert exit_code == 0
     lines = capsys.readouterr().out.strip().splitlines()
-    assert lines[:14] == [
+    assert lines[:18] == [
         "SUMMARY ecosystem_dashboard_inspect.status=OK",
         f"SUMMARY ecosystem_dashboard_inspect.dashboard_db={db_path}",
         "SUMMARY ecosystem_dashboard_inspect.ecosystem_code=DATACENTER",
@@ -382,8 +383,12 @@ def test_show_runs_prints_sorted_runs_and_summary(tmp_path, capsys):
         "SUMMARY ecosystem_dashboard_inspect.watchlist_rows=0",
         "SUMMARY ecosystem_dashboard_inspect.ticker_rows=0",
         "SUMMARY ecosystem_dashboard_inspect.trace_rows=0",
+        "SUMMARY ecosystem_code=DATACENTER",
+        "SUMMARY selected_report_date=",
+        "SUMMARY selected_run_id=",
+        "SUMMARY status=OK",
     ]
-    assert lines[14:] == [
+    assert lines[18:] == [
         "section;runs",
         "run_id;ecosystem_code;report_date;created_at_utc;readiness;decision_total;market_map_rows;watchlist_rows;ticker_rows;source_reports_count",
         "RUN_A_NEW;DATACENTER;2026-05-22;2026-05-25T11:00:00Z;READY;6;4;3;5;4",
@@ -425,6 +430,10 @@ def test_latest_detail_sections_apply_filters_and_limits(tmp_path, capsys):
     assert "SUMMARY ecosystem_dashboard_inspect.selected_report_date=2026-05-22" in lines
     assert "SUMMARY ecosystem_dashboard_inspect.readiness=READY" in lines
     assert "SUMMARY ecosystem_dashboard_inspect.decision_total=6" in lines
+    assert "SUMMARY ecosystem_code=DATACENTER" in lines
+    assert "SUMMARY selected_report_date=2026-05-22" in lines
+    assert "SUMMARY selected_run_id=RUN_A_NEW" in lines
+    assert "SUMMARY status=OK" in lines
     assert "section;action_summary" in lines
     action_idx = lines.index("section;action_summary")
     assert lines[action_idx + 1 : action_idx + 6] == [
@@ -470,3 +479,121 @@ def test_zero_row_requested_section_still_prints_marker_and_header(tmp_path, cap
         "section;watchlist",
         "ticker;action;severity;primary_reason;current_status;start_status_30d;status_change_30d;status_change_5d;window_status_30d;window_status_5d;window_status_2d;ma_break_status;freshness_status;trend_state;trend_state_age_td;latest_structure_label;latest_structure_age_td;latest_bos_event_type;latest_bos_age_td;latest_reset_reason;latest_reset_age_td;latest_candle;latest_candle_age_td;latest_divergence;latest_divergence_age_td;latest_chart_pattern;latest_chart_pattern_age_td;pullback_validity;entry_readiness;candidate_priority;candidate_priority_label;daily_status;rolling_2d_status;rolling_5d_status;rolling_30d_status;horizons_present;source_files",
     ]
+
+
+def test_generic_wrapper_exists_and_delegates(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_main(argv=None):
+        captured["argv"] = argv
+        return 0
+
+    monkeypatch.setattr(
+        "dev_tools.run_ecosystem_dashboard_inspect.inspect_main",
+        fake_main,
+    )
+
+    exit_code = ecosystem_wrapper_main(["--dashboard-db", "/tmp/x", "--ecosystem-code", "DATACENTER"])
+    assert exit_code == 0
+    assert captured["argv"] == ["--dashboard-db", "/tmp/x", "--ecosystem-code", "DATACENTER"]
+
+
+def test_datacenter_wrapper_injects_ecosystem_code_and_does_not_require_it(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_main(argv=None):
+        captured["argv"] = argv
+        return 0
+
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_inspect.inspect_main",
+        fake_main,
+    )
+    exit_code = datacenter_wrapper_main(
+        ["--dashboard-db", "/tmp/x", "--report-date", "2026-05-22", "--show-runs"]
+    )
+    assert exit_code == 0
+    assert captured["argv"] == [
+        "--dashboard-db",
+        "/tmp/x",
+        "--ecosystem-code",
+        "DATACENTER",
+        "--report-date",
+        "2026-05-22",
+        "--limit",
+        "10",
+        "--show-runs",
+        "--format",
+        "text",
+    ]
+
+
+def test_datacenter_wrapper_uses_sys_argv_when_run_as_script_entrypoint(
+    tmp_path, capsys, monkeypatch
+):
+    db_path = tmp_path / "dashboard.db"
+    _seed_dashboard_db(db_path)
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "run_datacenter_dashboard_inspect.py",
+            "--dashboard-db",
+            str(db_path),
+            "--report-date",
+            "2026-05-22",
+            "--show-runs",
+        ],
+    )
+
+    exit_code = datacenter_wrapper_main()
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert "SUMMARY ecosystem_dashboard_inspect.ecosystem_code=DATACENTER" in lines
+    assert "SUMMARY ecosystem_code=DATACENTER" in lines
+
+
+def test_datacenter_wrapper_rejects_explicit_ecosystem_code(capsys):
+    exit_code = datacenter_wrapper_main(
+        [
+            "--dashboard-db",
+            "/tmp/x",
+            "--ecosystem-code",
+            "DATACENTER",
+        ]
+    )
+    assert exit_code == 2
+    assert (
+        "ERROR: --ecosystem-code is not supported by run_datacenter_dashboard_inspect.py; wrapper is DATACENTER-only"
+        in capsys.readouterr().out
+    )
+
+
+def test_generic_wrapper_preserves_read_only_behavior_and_summary_lines(tmp_path, capsys):
+    db_path = tmp_path / "ecosystem_dashboard.db"
+    _seed_dashboard_db(db_path)
+    before_mtime = db_path.stat().st_mtime_ns
+
+    exit_code = ecosystem_wrapper_main(
+        [
+            "--dashboard-db",
+            str(db_path),
+            "--ecosystem-code",
+            "DATACENTER",
+            "--report-date",
+            "2026-05-22",
+            "--latest",
+            "--show-runs",
+        ]
+    )
+
+    assert exit_code == 0
+    after_mtime = db_path.stat().st_mtime_ns
+    assert after_mtime == before_mtime
+    output = capsys.readouterr().out
+    assert "SUMMARY ecosystem_dashboard_inspect.status=OK" in output
+    assert "SUMMARY ecosystem_code=DATACENTER" in output
+    assert "SUMMARY selected_report_date=2026-05-22" in output
+    assert "SUMMARY selected_run_id=RUN_A_NEW" in output
+    assert "SUMMARY status=OK" in output
