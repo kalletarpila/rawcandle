@@ -237,7 +237,12 @@ def _html_attr(value: object | None) -> str:
     return escape(_safe_attr(value), quote=True)
 
 
-def _format_percent_text(value: object | None, *, fallback: str = "-") -> str:
+def _format_percent_text(
+    value: object | None,
+    *,
+    fallback: str = "-",
+    scale: float = 1.0,
+) -> str:
     text = _safe_text(value, fallback=fallback)
     if text == fallback:
         return fallback
@@ -246,11 +251,17 @@ def _format_percent_text(value: object | None, *, fallback: str = "-") -> str:
         numeric_value = float(normalized)
     except (TypeError, ValueError):
         return text
+    numeric_value *= scale
     return f"{numeric_value:.2f}%"
 
 
-def _html_percent(value: object | None, *, fallback: str = "-") -> str:
-    return escape(_format_percent_text(value, fallback=fallback))
+def _html_percent(
+    value: object | None,
+    *,
+    fallback: str = "-",
+    scale: float = 1.0,
+) -> str:
+    return escape(_format_percent_text(value, fallback=fallback, scale=scale))
 
 
 def _normalize_md_header(value: str) -> str:
@@ -672,10 +683,10 @@ def _render_combined_ecosystem_row(row: _CombinedEcosystemRow) -> str:
         + f"<td>{_html_percent(row.pct_above_ema20)}</td>"
         + f"<td>{_html_percent(row.pct_above_ma10)}</td>"
         + f"<td>{_html_percent(row.ema20_breadth_delta_5d)}</td>"
-        + f"<td>{_html_percent(row.return_5d)}</td>"
-        + f"<td>{_html_percent(row.return_10d)}</td>"
-        + f"<td>{_html_percent(row.return_20d)}</td>"
-        + f"<td>{_html_percent(row.return_60d)}</td>"
+        + f"<td>{_html_percent(row.return_5d, scale=100.0)}</td>"
+        + f"<td>{_html_percent(row.return_10d, scale=100.0)}</td>"
+        + f"<td>{_html_percent(row.return_20d, scale=100.0)}</td>"
+        + f"<td>{_html_percent(row.return_60d, scale=100.0)}</td>"
         + f"<td>{_html_text(row.dow_trend_state)}</td>"
         + f"<td>{_html_text(row.latest_structure_label)}</td>"
         + f"<td>{_html_text(row.latest_bos_event_type)}</td>"
@@ -962,10 +973,10 @@ def _render_market_map_rows(
             + f"<td>{_html_percent(row.pct_above_ema20)}</td>"
             + f"<td>{_html_percent(row.pct_above_ma10)}</td>"
             + f"<td>{_html_percent(row.ema20_breadth_delta_5d)}</td>"
-            + f"<td>{_html_percent(row.return_5d)}</td>"
-            + f"<td>{_html_percent(row.return_10d)}</td>"
-            + f"<td>{_html_percent(row.return_20d)}</td>"
-            + f"<td>{_html_percent(row.return_60d)}</td>"
+            + f"<td>{_html_percent(row.return_5d, scale=100.0)}</td>"
+            + f"<td>{_html_percent(row.return_10d, scale=100.0)}</td>"
+            + f"<td>{_html_percent(row.return_20d, scale=100.0)}</td>"
+            + f"<td>{_html_percent(row.return_60d, scale=100.0)}</td>"
             + "</tr>"
         )
     return "".join(rendered_rows)

@@ -730,8 +730,8 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     assert "72.00%" in html_one
     assert "68.00%" in html_one
     assert "4.00%" in html_one
-    assert "2.10%" in html_one
-    assert "21.00%" in html_one
+    assert "210.00%" in html_one
+    assert "2100.00%" in html_one
     assert "SHOOTING_STAR" in html_one
     assert ">1<" in html_one
     assert "daily, rolling 2d, rolling 5d, rolling 30d" in html_one
@@ -813,8 +813,8 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     assert "72.00%" in html
     assert "68.00%" in html
     assert "4.00%" in html
-    assert "2.10%" in html
-    assert "21.00%" in html
+    assert "210.00%" in html
+    assert "2100.00%" in html
     assert "SHOOTING_STAR" in html
     assert "TRENDING_UP" in html
     assert "RESET_COMPLETE" in html
