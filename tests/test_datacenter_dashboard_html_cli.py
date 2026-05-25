@@ -627,6 +627,8 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     assert "MS&amp;FT" in html_one
     assert "NV&lt;DA&gt;" in html_one
     assert "Bearish &lt;structure&gt; overrides bullish." in html_one
+    assert ".page-header {" in html_one
+    assert 'class="page-header"' in html_one
     assert 'id="summary"' in html_one
     assert 'id="watchlist-status"' in html_one
     assert 'id="candidate-pullbacks"' in html_one

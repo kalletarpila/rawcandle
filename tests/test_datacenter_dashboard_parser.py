@@ -218,6 +218,31 @@ def test_parse_datacenter_dashboard_file_handles_malformed_lines_without_crashin
     assert len(result.warnings) == 1
 
 
+def test_parse_datacenter_dashboard_file_preserves_markdown_section_heading_for_watchlist_rows(tmp_path):
+    report_path = tmp_path / "datacenter_daily_2026-05-22_0000_full.md"
+    report_path.write_text(
+        "\n".join(
+            [
+                "## Watchlist Summary",
+                "| ticker | watchlist_status | latest_structure_label |",
+                "| --- | --- | --- |",
+                "| NVDA | BREAKOUT_READY | HL |",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = parse_datacenter_dashboard_file(
+        path=str(report_path),
+        horizon="daily",
+    )
+
+    assert len(result.rows) == 1
+    assert result.rows[0].section == "Watchlist Summary"
+    assert result.rows[0].raw_fields["watchlist_status"] == "BREAKOUT_READY"
+
+
 def test_parse_datacenter_dashboard_reports_parses_multiple_horizons(tmp_path):
     daily_path = tmp_path / "datacenter_daily_2026-05-22_0000_full.csv"
     daily_path.write_text("ticker;status\nNVDA;BUY_WATCH\n", encoding="utf-8")

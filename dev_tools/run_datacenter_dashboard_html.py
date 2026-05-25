@@ -87,7 +87,7 @@ _COMMAND_CENTER_GROUPS = (
     ("Blocked / neutral", ("BLOCKED", "NEUTRAL")),
 )
 _SOURCE_FILE_HORIZON_ORDER = ("rolling 30d", "rolling 5d", "rolling 2d", "daily")
-_WATCHLIST_SECTION_MARKER = "watchlist"
+_WATCHLIST_SECTION_NAME = "watchlist summary"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -254,15 +254,7 @@ def _action_class(action: str) -> str:
 
 def _is_watchlist_row(row: DatacenterDashboardRow) -> bool:
     section_text = (row.section or "").strip().lower()
-    row_kind_text = (row.row_kind or "").strip().lower()
-    if _WATCHLIST_SECTION_MARKER in section_text or _WATCHLIST_SECTION_MARKER in row_kind_text:
-        return True
-    for key, value in row.raw_fields.items():
-        if _WATCHLIST_SECTION_MARKER in (key or "").lower():
-            return True
-        if _WATCHLIST_SECTION_MARKER in (value or "").strip().lower():
-            return True
-    return False
+    return section_text == _WATCHLIST_SECTION_NAME
 
 
 def _watchlist_horizon_status(row: DatacenterDashboardRow) -> str:
@@ -608,6 +600,15 @@ def generate_dashboard_html(
     }}
     h1, h2, h3 {{ margin: 0 0 12px; }}
     section {{ margin-bottom: 24px; }}
+    .page-header {{
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: #f5f6f8;
+      padding-bottom: 12px;
+      margin-bottom: 24px;
+      box-shadow: 0 2px 0 rgba(216, 222, 228, 0.9);
+    }}
     .major-section {{ margin-top: 28px; }}
     .meta-table, .compact-table, table {{
       width: 100%;
@@ -725,7 +726,7 @@ def generate_dashboard_html(
   </style>
 </head>
 <body>
-  <section>
+  <section class="page-header">
     <h1>{escape(title)}</h1>
     <nav class="nav-links" aria-label="Dashboard sections">
       <a href="#summary">Summary</a>

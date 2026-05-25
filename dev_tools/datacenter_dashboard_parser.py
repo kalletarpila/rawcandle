@@ -117,6 +117,7 @@ _COLUMN_SYNONYMS: dict[str, tuple[str, ...]] = {
 
 _HEADER_NORMALIZE_RE = re.compile(r"[^a-z0-9]+")
 _MARKDOWN_SEPARATOR_RE = re.compile(r"^\s*\|?(?:\s*:?-+:?\s*\|)+\s*:?-+:?\s*\|?\s*$")
+_MARKDOWN_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+(.*?)\s*$")
 
 
 def _normalize_header(value: str) -> str:
@@ -315,8 +316,14 @@ def _parse_markdown_rows(
     warnings: list[str] = []
     lines = text.splitlines()
     line_index = 0
+    current_section: str | None = None
     while line_index < len(lines):
         header_line = lines[line_index].strip()
+        heading_match = _MARKDOWN_HEADING_RE.match(header_line)
+        if heading_match:
+            current_section = heading_match.group(1).strip() or current_section
+            line_index += 1
+            continue
         if "|" not in header_line or line_index + 1 >= len(lines):
             line_index += 1
             continue
@@ -342,7 +349,7 @@ def _parse_markdown_rows(
                 values=values,
                 horizon=horizon,
                 source_file=source_file,
-                section=None,
+                section=current_section,
                 warnings=warnings,
             )
             if row is None:
