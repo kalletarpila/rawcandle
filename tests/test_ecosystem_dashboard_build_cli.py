@@ -394,6 +394,7 @@ def test_cli_creates_tables_and_does_not_require_analysis_db(tmp_path, monkeypat
     output = capsys.readouterr().out
     assert "SUMMARY ecosystem_dashboard_build.status=OK" in output
     assert "SUMMARY ecosystem_dashboard_build.input_mode=reports" in output
+    assert "SUMMARY ecosystem_dashboard_build.persistence_input=structured" in output
 
 
 def test_invalid_report_date_exits_non_zero(tmp_path, capsys):
@@ -554,6 +555,7 @@ def test_cli_writes_run_and_rows_with_ecosystem_code(tmp_path, monkeypatch, caps
         "SUMMARY ecosystem_dashboard_build.ecosystem_code=DATACENTER",
         "SUMMARY ecosystem_dashboard_build.report_date=2026-05-22",
         "SUMMARY ecosystem_dashboard_build.input_mode=reports",
+        "SUMMARY ecosystem_dashboard_build.persistence_input=structured",
         f"SUMMARY ecosystem_dashboard_build.dashboard_db={dashboard_db}",
         f"SUMMARY ecosystem_dashboard_build.reports_dir={reports_dir}",
         "SUMMARY ecosystem_dashboard_build.readiness=PARTIAL",
@@ -792,6 +794,7 @@ def test_build_with_render_html_for_datacenter_builds_and_renders(
     assert "NVDA" in html
     output = capsys.readouterr().out
     assert "SUMMARY ecosystem_dashboard_build.input_mode=reports" in output
+    assert "SUMMARY ecosystem_dashboard_build.persistence_input=structured" in output
     assert "SUMMARY ecosystem_dashboard_build.render_html_requested=1" in output
     assert f"SUMMARY ecosystem_dashboard_build.html_output_path={html_output}" in output
     assert "SUMMARY ecosystem_dashboard_build.html_render_status=OK" in output
@@ -898,7 +901,9 @@ def test_cli_accepts_explicit_input_mode_reports(tmp_path, monkeypatch, capsys):
     )
 
     assert exit_code == 0
-    assert "SUMMARY ecosystem_dashboard_build.input_mode=reports" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "SUMMARY ecosystem_dashboard_build.input_mode=reports" in output
+    assert "SUMMARY ecosystem_dashboard_build.persistence_input=structured" in output
 
 
 def test_cli_rejects_unsupported_input_mode(tmp_path, capsys):

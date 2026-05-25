@@ -6,6 +6,10 @@ from pathlib import Path
 from typing import Iterable
 
 from dev_tools.ecosystem_dashboard_input_model import EcosystemDashboardInput
+from dev_tools.ecosystem_dashboard_reports_adapter import (
+    clear_reports_persistence_context,
+    peek_reports_persistence_context,
+)
 
 SQLITE_BUSY_TIMEOUT_MS = 30_000
 SQLITE_CONNECT_TIMEOUT_SECONDS = 30.0
@@ -447,6 +451,9 @@ def persist_ecosystem_dashboard_input(
     ]
     if source_paths:
         reports_dir = str(Path(source_paths[0]).parent)
+    reports_context = peek_reports_persistence_context(dashboard_input)
+    if reports_context is not None:
+        reports_dir = reports_context.reports_dir
 
     conn = connect_dashboard_db(dashboard_db)
     ensure_dashboard_schema(conn)
@@ -461,447 +468,905 @@ def persist_ecosystem_dashboard_input(
         else:
             assert_run_id_missing(conn, selected_run_id)
 
-        insert_many(
-            conn,
-            """
-            INSERT INTO ecosystem_dashboard_source_reports (
-                run_id,
-                ecosystem_code,
-                report_date,
-                horizon,
-                report_kind,
-                markdown_path,
-                csv_path,
-                modified_at_utc,
-                status,
-                created_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
+        if reports_context is not None:
+            source_report_rows = [
                 (
                     selected_run_id,
                     dashboard_input.ecosystem_code,
                     dashboard_input.report_date,
-                    report.source_report_type or "",
-                    report.source_report_type or "structured_input",
-                    report.source_report_path,
+                    report.horizon,
+                    "dashboard_report",
+                    report.path if report.path and report.path.lower().endswith(".md") else None,
+                    report.path if report.path and report.path.lower().endswith(".csv") else None,
                     None,
-                    None,
-                    report.status or "",
+                    report.status,
                     generated_at_utc,
                 )
-                for report in dashboard_input.source_reports
-            ),
-        )
+                for report in reports_context.dashboard_status.reports
+            ]
+            insert_many(
+                conn,
+                """
+                INSERT INTO ecosystem_dashboard_source_reports (
+                    run_id,
+                    ecosystem_code,
+                    report_date,
+                    horizon,
+                    report_kind,
+                    markdown_path,
+                    csv_path,
+                    modified_at_utc,
+                    status,
+                    created_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                source_report_rows,
+            )
 
-        conn.execute(
-            """
-            INSERT INTO ecosystem_dashboard_runs (
-                run_id,
-                ecosystem_code,
-                report_date,
-                taxonomy_version,
-                generated_at_utc,
-                reports_dir,
-                selection_mode,
-                readiness,
-                found_reports,
-                missing_reports,
-                total_parsed_rows,
-                total_parse_warnings,
-                decision_total,
-                market_map_rows,
-                watchlist_rows,
-                ticker_rows,
-                source_reports_count,
-                created_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                selected_run_id,
-                dashboard_input.ecosystem_code,
-                dashboard_input.report_date,
-                None,
-                generated_at_utc,
-                reports_dir,
-                "structured_input",
-                dashboard_input.readiness or "UNKNOWN",
-                found_reports,
-                missing_reports,
-                dashboard_input.total_parsed_rows or 0,
-                dashboard_input.total_parse_warnings or 0,
-                len(dashboard_input.tickers),
-                len(dashboard_input.market_map),
-                len(dashboard_input.watchlist),
-                len(dashboard_input.tickers),
-                len(dashboard_input.source_reports),
-                generated_at_utc,
-            ),
-        )
-
-        insert_many(
-            conn,
-            """
-            INSERT INTO ecosystem_dashboard_action_summary (
-                run_id,
-                ecosystem_code,
-                action,
-                count,
-                created_at_utc
-            ) VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                (
-                    selected_run_id,
-                    dashboard_input.ecosystem_code,
-                    row.action_bucket or row.action_label or "",
-                    row.ticker_count or 0,
+            conn.execute(
+                """
+                INSERT INTO ecosystem_dashboard_runs (
+                    run_id,
+                    ecosystem_code,
+                    report_date,
+                    taxonomy_version,
                     generated_at_utc,
-                )
-                for row in dashboard_input.action_summary
-            ),
-        )
-
-        insert_many(
-            conn,
-            """
-            INSERT INTO ecosystem_dashboard_market_map (
-                run_id,
-                ecosystem_code,
-                report_date,
-                market_level,
-                name,
-                parent_name,
-                layer,
-                subindustry,
-                taxonomy_path,
-                taxonomy_version,
-                current_status,
-                start_status_30d,
-                status_change_30d,
-                status_change_5d,
-                window_status_30d,
-                window_status_5d,
-                window_status_2d,
-                overheat_risk,
-                pct_above_ema20,
-                pct_above_ma10,
-                ema20_breadth_delta_5d,
-                return_5d,
-                return_10d,
-                return_20d,
-                return_60d,
-                dow_trend_state,
-                dow_trend_state_age_td,
-                latest_structure_label,
-                latest_structure_age_td,
-                latest_bos_event_type,
-                latest_bos_age_td,
-                latest_reset_reason,
-                latest_reset_age_td,
-                latest_candle,
-                latest_candle_age_td,
-                latest_divergence,
-                latest_divergence_age_td,
-                latest_chart_pattern,
-                latest_chart_pattern_age_td,
-                source_horizons,
-                source_files,
-                created_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
+                    reports_dir,
+                    selection_mode,
+                    readiness,
+                    found_reports,
+                    missing_reports,
+                    total_parsed_rows,
+                    total_parse_warnings,
+                    decision_total,
+                    market_map_rows,
+                    watchlist_rows,
+                    ticker_rows,
+                    source_reports_count,
+                    created_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
                 (
                     selected_run_id,
                     dashboard_input.ecosystem_code,
                     dashboard_input.report_date,
+                    None,
+                    generated_at_utc,
+                    reports_dir,
+                    "report_date",
+                    reports_context.dashboard_status.overall_status,
+                    found_reports,
+                    missing_reports,
+                    reports_context.parse_result.total_row_count,
+                    reports_context.parse_result.total_warning_count,
+                    len(reports_context.decision_result.decisions),
+                    len(reports_context.market_map_rows),
+                    len(reports_context.watchlist_rows),
+                    len(reports_context.ticker_rows),
+                    len(source_report_rows),
+                    generated_at_utc,
+                ),
+            )
+
+            insert_many(
+                conn,
+                """
+                INSERT INTO ecosystem_dashboard_action_summary (
+                    run_id,
+                    ecosystem_code,
+                    action,
+                    count,
+                    created_at_utc
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
                     (
-                        "SUBINDUSTRY"
-                        if row.subindustry_name
-                        else ("LAYER" if row.layer_name else "ECOSYSTEM")
-                    ),
-                    row.subindustry_name or row.layer_name or "ECOSYSTEM",
-                    row.layer_name if row.subindustry_name else None,
-                    row.layer_name,
-                    row.subindustry_name,
+                        selected_run_id,
+                        dashboard_input.ecosystem_code,
+                        action,
+                        reports_context.decision_result.action_counts.get(action, 0),
+                        generated_at_utc,
+                    )
+                    for action in (
+                        "SELL",
+                        "REDUCE",
+                        "TIGHTEN_STOP",
+                        "BLOCKED",
+                        "WAIT_PULLBACK",
+                        "BUY_NOW",
+                        "WATCH",
+                        "NEUTRAL",
+                    )
+                ),
+            )
+
+            insert_many(
+                conn,
+                """
+                INSERT INTO ecosystem_dashboard_market_map (
+                    run_id,
+                    ecosystem_code,
+                    report_date,
+                    market_level,
+                    name,
+                    parent_name,
+                    layer,
+                    subindustry,
+                    taxonomy_path,
+                    taxonomy_version,
+                    current_status,
+                    start_status_30d,
+                    status_change_30d,
+                    status_change_5d,
+                    window_status_30d,
+                    window_status_5d,
+                    window_status_2d,
+                    overheat_risk,
+                    pct_above_ema20,
+                    pct_above_ma10,
+                    ema20_breadth_delta_5d,
+                    return_5d,
+                    return_10d,
+                    return_20d,
+                    return_60d,
+                    dow_trend_state,
+                    dow_trend_state_age_td,
+                    latest_structure_label,
+                    latest_structure_age_td,
+                    latest_bos_event_type,
+                    latest_bos_age_td,
+                    latest_reset_reason,
+                    latest_reset_age_td,
+                    latest_candle,
+                    latest_candle_age_td,
+                    latest_divergence,
+                    latest_divergence_age_td,
+                    latest_chart_pattern,
+                    latest_chart_pattern_age_td,
+                    source_horizons,
+                    source_files,
+                    created_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
                     (
-                        f"DC_ECOSYSTEM_TOTAL > {row.layer_name} > {row.subindustry_name}"
-                        if row.layer_name and row.subindustry_name
-                        else (
-                            f"DC_ECOSYSTEM_TOTAL > {row.layer_name}"
-                            if row.layer_name
-                            else None
-                        )
-                    ),
-                    None,
-                    row.dominant_action_bucket,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    row.avg_return_5d,
-                    None,
-                    row.avg_return_20d,
-                    row.avg_return_60d,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    "",
-                    "",
-                    generated_at_utc,
-                )
-                for row in dashboard_input.market_map
-            ),
-        )
+                        selected_run_id,
+                        dashboard_input.ecosystem_code,
+                        dashboard_input.report_date,
+                        row.market_level,
+                        row.name,
+                        (
+                            None
+                            if row.market_level == "ECOSYSTEM"
+                            else (
+                                "DC_ECOSYSTEM_TOTAL"
+                                if row.market_level == "LAYER"
+                                else row.layer
+                            )
+                        ),
+                        row.layer,
+                        row.name if row.market_level == "SUBINDUSTRY" else None,
+                        (
+                            None
+                            if row.market_level == "ECOSYSTEM"
+                            else (
+                                f"DC_ECOSYSTEM_TOTAL > {row.name}"
+                                if row.market_level == "LAYER"
+                                else f"DC_ECOSYSTEM_TOTAL > {row.layer or '-'} > {row.name}"
+                            )
+                        ),
+                        None,
+                        row.current_status,
+                        row.start_status_30d,
+                        row.status_change_30d,
+                        row.status_change_5d,
+                        row.window_status_30d,
+                        row.window_status_5d,
+                        row.window_status_2d,
+                        row.overheat_risk,
+                        row.pct_above_ema20,
+                        row.pct_above_ma10,
+                        row.ema20_breadth_delta_5d,
+                        row.return_5d,
+                        row.return_10d,
+                        row.return_20d,
+                        row.return_60d,
+                        row.dow_trend_state,
+                        row.dow_trend_state_age_td,
+                        row.latest_structure_label,
+                        row.latest_structure_age_td,
+                        row.latest_bos_event_type,
+                        row.latest_bos_age_td,
+                        row.latest_reset_reason,
+                        row.latest_reset_age_td,
+                        row.latest_candle,
+                        row.latest_candle_age_td,
+                        row.latest_divergence,
+                        row.latest_divergence_age_td,
+                        row.latest_chart_pattern,
+                        row.latest_chart_pattern_age_td,
+                        row.source_horizons,
+                        row.source_files,
+                        generated_at_utc,
+                    )
+                    for row in reports_context.market_map_rows
+                ),
+            )
 
-        insert_many(
-            conn,
-            """
-            INSERT INTO ecosystem_dashboard_watchlist_status (
-                run_id,
-                ecosystem_code,
-                report_date,
-                ticker,
-                action,
-                severity,
-                primary_reason,
-                current_status,
-                start_status_30d,
-                status_change_30d,
-                status_change_5d,
-                window_status_30d,
-                window_status_5d,
-                window_status_2d,
-                ma_break_status,
-                freshness_status,
-                trend_state,
-                trend_state_age_td,
-                latest_structure_label,
-                latest_structure_age_td,
-                latest_bos_event_type,
-                latest_bos_age_td,
-                latest_reset_reason,
-                latest_reset_age_td,
-                latest_candle,
-                latest_candle_age_td,
-                latest_divergence,
-                latest_divergence_age_td,
-                latest_chart_pattern,
-                latest_chart_pattern_age_td,
-                pullback_validity,
-                entry_readiness,
-                candidate_priority,
-                candidate_priority_label,
-                daily_status,
-                rolling_2d_status,
-                rolling_5d_status,
-                rolling_30d_status,
-                horizons_present,
-                source_files,
-                created_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
+            insert_many(
+                conn,
+                """
+                INSERT INTO ecosystem_dashboard_watchlist_status (
+                    run_id,
+                    ecosystem_code,
+                    report_date,
+                    ticker,
+                    action,
+                    severity,
+                    primary_reason,
+                    current_status,
+                    start_status_30d,
+                    status_change_30d,
+                    status_change_5d,
+                    window_status_30d,
+                    window_status_5d,
+                    window_status_2d,
+                    ma_break_status,
+                    freshness_status,
+                    trend_state,
+                    trend_state_age_td,
+                    latest_structure_label,
+                    latest_structure_age_td,
+                    latest_bos_event_type,
+                    latest_bos_age_td,
+                    latest_reset_reason,
+                    latest_reset_age_td,
+                    latest_candle,
+                    latest_candle_age_td,
+                    latest_divergence,
+                    latest_divergence_age_td,
+                    latest_chart_pattern,
+                    latest_chart_pattern_age_td,
+                    pullback_validity,
+                    entry_readiness,
+                    candidate_priority,
+                    candidate_priority_label,
+                    daily_status,
+                    rolling_2d_status,
+                    rolling_5d_status,
+                    rolling_30d_status,
+                    horizons_present,
+                    source_files,
+                    created_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    (
+                        selected_run_id,
+                        dashboard_input.ecosystem_code,
+                        dashboard_input.report_date,
+                        row.ticker,
+                        row.action,
+                        row.severity,
+                        row.primary_reason,
+                        row.current_status,
+                        row.start_status_30d,
+                        row.status_change_30d,
+                        row.status_change_5d,
+                        row.window_status_30d,
+                        row.window_status_5d,
+                        row.window_status_2d,
+                        row.ma_break_status,
+                        row.freshness_status,
+                        row.trend_state,
+                        row.trend_state_age_td,
+                        row.latest_structure_label,
+                        row.latest_structure_age_td,
+                        row.latest_bos_event_type,
+                        row.latest_bos_age_td,
+                        row.latest_reset_reason,
+                        row.latest_reset_age_td,
+                        row.latest_candle,
+                        row.latest_candle_age_td,
+                        row.latest_divergence,
+                        row.latest_divergence_age_td,
+                        row.latest_chart_pattern,
+                        row.latest_chart_pattern_age_td,
+                        row.pullback_validity,
+                        row.entry_readiness,
+                        row.candidate_priority,
+                        row.candidate_priority_label,
+                        row.daily_status,
+                        row.rolling_2d_status,
+                        row.rolling_5d_status,
+                        row.rolling_30d_status,
+                        row.horizons_present,
+                        row.source_files,
+                        generated_at_utc,
+                    )
+                    for row in reports_context.watchlist_rows
+                ),
+            )
+
+            insert_many(
+                conn,
+                """
+                INSERT INTO ecosystem_dashboard_ticker_status (
+                    run_id,
+                    ecosystem_code,
+                    report_date,
+                    ticker,
+                    action,
+                    severity,
+                    primary_reason,
+                    current_status,
+                    start_status_30d,
+                    status_change_30d,
+                    status_change_5d,
+                    window_status_30d,
+                    window_status_5d,
+                    window_status_2d,
+                    ma_break_status,
+                    freshness_status,
+                    trend_state,
+                    trend_state_age_td,
+                    latest_structure_label,
+                    latest_structure_age_td,
+                    latest_bos_event_type,
+                    latest_bos_age_td,
+                    latest_reset_reason,
+                    latest_reset_age_td,
+                    latest_candle,
+                    latest_candle_age_td,
+                    latest_divergence,
+                    latest_divergence_age_td,
+                    latest_chart_pattern,
+                    latest_chart_pattern_age_td,
+                    pullback_validity,
+                    entry_readiness,
+                    candidate_priority,
+                    candidate_priority_label,
+                    daily_status,
+                    rolling_2d_status,
+                    rolling_5d_status,
+                    rolling_30d_status,
+                    horizons_present,
+                    source_files,
+                    is_watchlist,
+                    created_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    (
+                        selected_run_id,
+                        dashboard_input.ecosystem_code,
+                        dashboard_input.report_date,
+                        row.ticker,
+                        row.action,
+                        row.severity,
+                        row.primary_reason,
+                        row.current_status,
+                        row.start_status_30d,
+                        row.status_change_30d,
+                        row.status_change_5d,
+                        row.window_status_30d,
+                        row.window_status_5d,
+                        row.window_status_2d,
+                        row.ma_break_status,
+                        row.freshness_status,
+                        row.trend_state,
+                        row.trend_state_age_td,
+                        row.latest_structure_label,
+                        row.latest_structure_age_td,
+                        row.latest_bos_event_type,
+                        row.latest_bos_age_td,
+                        row.latest_reset_reason,
+                        row.latest_reset_age_td,
+                        row.latest_candle,
+                        row.latest_candle_age_td,
+                        row.latest_divergence,
+                        row.latest_divergence_age_td,
+                        row.latest_chart_pattern,
+                        row.latest_chart_pattern_age_td,
+                        row.pullback_validity,
+                        row.entry_readiness,
+                        row.candidate_priority,
+                        row.candidate_priority_label,
+                        row.daily_status,
+                        row.rolling_2d_status,
+                        row.rolling_5d_status,
+                        row.rolling_30d_status,
+                        row.horizons_present,
+                        row.source_files,
+                        row.is_watchlist,
+                        generated_at_utc,
+                    )
+                    for row in reports_context.ticker_rows
+                ),
+            )
+
+            trace_rows = [
+                (decision.ticker, trace_index, trace)
+                for decision in reports_context.decision_result.decisions
+                for trace_index, trace in enumerate(decision.decision_trace)
+            ]
+            insert_many(
+                conn,
+                """
+                INSERT INTO ecosystem_dashboard_decision_trace (
+                    run_id,
+                    ecosystem_code,
+                    ticker,
+                    trace_index,
+                    action,
+                    matched_rule,
+                    matched_token,
+                    matched_value,
+                    horizon,
+                    field,
+                    created_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    (
+                        selected_run_id,
+                        dashboard_input.ecosystem_code,
+                        ticker,
+                        trace_index,
+                        trace.action,
+                        trace.matched_rule,
+                        trace.matched_token,
+                        trace.matched_value,
+                        trace.horizon,
+                        trace.field_name,
+                        generated_at_utc,
+                    )
+                    for ticker, trace_index, trace in trace_rows
+                ),
+            )
+        else:
+            insert_many(
+                conn,
+                """
+                INSERT INTO ecosystem_dashboard_source_reports (
+                    run_id,
+                    ecosystem_code,
+                    report_date,
+                    horizon,
+                    report_kind,
+                    markdown_path,
+                    csv_path,
+                    modified_at_utc,
+                    status,
+                    created_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    (
+                        selected_run_id,
+                        dashboard_input.ecosystem_code,
+                        dashboard_input.report_date,
+                        report.source_report_type or "",
+                        report.source_report_type or "structured_input",
+                        report.source_report_path,
+                        None,
+                        None,
+                        report.status or "",
+                        generated_at_utc,
+                    )
+                    for report in dashboard_input.source_reports
+                ),
+            )
+
+            conn.execute(
+                """
+                INSERT INTO ecosystem_dashboard_runs (
+                    run_id,
+                    ecosystem_code,
+                    report_date,
+                    taxonomy_version,
+                    generated_at_utc,
+                    reports_dir,
+                    selection_mode,
+                    readiness,
+                    found_reports,
+                    missing_reports,
+                    total_parsed_rows,
+                    total_parse_warnings,
+                    decision_total,
+                    market_map_rows,
+                    watchlist_rows,
+                    ticker_rows,
+                    source_reports_count,
+                    created_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
                 (
                     selected_run_id,
                     dashboard_input.ecosystem_code,
                     dashboard_input.report_date,
-                    row.ticker,
-                    row.action_bucket,
-                    row.action_label,
-                    row.watchlist_reason,
-                    row.data_status,
                     None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    row.trend_state,
-                    None,
-                    row.latest_structure_label,
-                    None,
-                    row.latest_bos_event_type,
-                    None,
-                    row.latest_reset_reason,
-                    None,
-                    None,
-                    row.bullish_candle_signal,
-                    None,
-                    row.bullish_divergence_signal,
-                    None,
-                    row.hidden_bullish_divergence_signal,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    "",
-                    0,
                     generated_at_utc,
-                )
-                for row in dashboard_input.watchlist
-            ),
-        )
+                    reports_dir,
+                    "structured_input",
+                    dashboard_input.readiness or "UNKNOWN",
+                    found_reports,
+                    missing_reports,
+                    dashboard_input.total_parsed_rows or 0,
+                    dashboard_input.total_parse_warnings or 0,
+                    len(dashboard_input.tickers),
+                    len(dashboard_input.market_map),
+                    len(dashboard_input.watchlist),
+                    len(dashboard_input.tickers),
+                    len(dashboard_input.source_reports),
+                    generated_at_utc,
+                ),
+            )
 
-        insert_many(
-            conn,
-            """
-            INSERT INTO ecosystem_dashboard_ticker_status (
-                run_id,
-                ecosystem_code,
-                report_date,
-                ticker,
-                action,
-                severity,
-                primary_reason,
-                current_status,
-                start_status_30d,
-                status_change_30d,
-                status_change_5d,
-                window_status_30d,
-                window_status_5d,
-                window_status_2d,
-                ma_break_status,
-                freshness_status,
-                trend_state,
-                trend_state_age_td,
-                latest_structure_label,
-                latest_structure_age_td,
-                latest_bos_event_type,
-                latest_bos_age_td,
-                latest_reset_reason,
-                latest_reset_age_td,
-                latest_candle,
-                latest_candle_age_td,
-                latest_divergence,
-                latest_divergence_age_td,
-                latest_chart_pattern,
-                latest_chart_pattern_age_td,
-                pullback_validity,
-                entry_readiness,
-                candidate_priority,
-                candidate_priority_label,
-                daily_status,
-                rolling_2d_status,
-                rolling_5d_status,
-                rolling_30d_status,
-                horizons_present,
-                source_files,
-                is_watchlist,
-                created_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
+            insert_many(
+                conn,
+                """
+                INSERT INTO ecosystem_dashboard_action_summary (
+                    run_id,
+                    ecosystem_code,
+                    action,
+                    count,
+                    created_at_utc
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
                 (
-                    selected_run_id,
-                    dashboard_input.ecosystem_code,
-                    dashboard_input.report_date,
-                    row.ticker,
-                    row.action_bucket,
-                    row.action_label,
-                    row.data_status,
-                    row.data_status,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    row.latest_bos_freshness or row.latest_reset_freshness,
-                    row.trend_state,
-                    None,
-                    row.latest_structure_label,
-                    None,
-                    row.latest_bos_event_type,
-                    None,
-                    row.latest_reset_reason,
-                    None,
-                    None,
-                    row.bullish_candle_signal,
-                    None,
-                    row.bullish_divergence_signal,
-                    None,
-                    row.hidden_bullish_divergence_signal,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    "",
-                    0,
-                    0,
-                    generated_at_utc,
-                )
-                for row in dashboard_input.tickers
-            ),
-        )
+                    (
+                        selected_run_id,
+                        dashboard_input.ecosystem_code,
+                        row.action_bucket or row.action_label or "",
+                        row.ticker_count or 0,
+                        generated_at_utc,
+                    )
+                    for row in dashboard_input.action_summary
+                ),
+            )
 
-        insert_many(
-            conn,
-            """
-            INSERT INTO ecosystem_dashboard_decision_trace (
-                run_id,
-                ecosystem_code,
-                ticker,
-                trace_index,
-                action,
-                matched_rule,
-                matched_token,
-                matched_value,
-                horizon,
-                field,
-                created_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
+            insert_many(
+                conn,
+                """
+                INSERT INTO ecosystem_dashboard_market_map (
+                    run_id,
+                    ecosystem_code,
+                    report_date,
+                    market_level,
+                    name,
+                    parent_name,
+                    layer,
+                    subindustry,
+                    taxonomy_path,
+                    taxonomy_version,
+                    current_status,
+                    start_status_30d,
+                    status_change_30d,
+                    status_change_5d,
+                    window_status_30d,
+                    window_status_5d,
+                    window_status_2d,
+                    overheat_risk,
+                    pct_above_ema20,
+                    pct_above_ma10,
+                    ema20_breadth_delta_5d,
+                    return_5d,
+                    return_10d,
+                    return_20d,
+                    return_60d,
+                    dow_trend_state,
+                    dow_trend_state_age_td,
+                    latest_structure_label,
+                    latest_structure_age_td,
+                    latest_bos_event_type,
+                    latest_bos_age_td,
+                    latest_reset_reason,
+                    latest_reset_age_td,
+                    latest_candle,
+                    latest_candle_age_td,
+                    latest_divergence,
+                    latest_divergence_age_td,
+                    latest_chart_pattern,
+                    latest_chart_pattern_age_td,
+                    source_horizons,
+                    source_files,
+                    created_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
                 (
-                    selected_run_id,
-                    dashboard_input.ecosystem_code,
-                    row.ticker,
-                    row.trace_order,
-                    row.decision,
-                    row.rule_name,
-                    row.rule_group,
-                    row.input_value,
-                    None,
-                    row.reason,
-                    generated_at_utc,
-                )
-                for row in dashboard_input.decision_trace
-            ),
-        )
+                    (
+                        selected_run_id,
+                        dashboard_input.ecosystem_code,
+                        dashboard_input.report_date,
+                        (
+                            "SUBINDUSTRY"
+                            if row.subindustry_name
+                            else ("LAYER" if row.layer_name else "ECOSYSTEM")
+                        ),
+                        row.subindustry_name or row.layer_name or "ECOSYSTEM",
+                        row.layer_name if row.subindustry_name else None,
+                        row.layer_name,
+                        row.subindustry_name,
+                        (
+                            f"DC_ECOSYSTEM_TOTAL > {row.layer_name} > {row.subindustry_name}"
+                            if row.layer_name and row.subindustry_name
+                            else (
+                                f"DC_ECOSYSTEM_TOTAL > {row.layer_name}"
+                                if row.layer_name
+                                else None
+                            )
+                        ),
+                        None,
+                        row.dominant_action_bucket,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        row.avg_return_5d,
+                        None,
+                        row.avg_return_20d,
+                        row.avg_return_60d,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        "",
+                        "",
+                        generated_at_utc,
+                    )
+                    for row in dashboard_input.market_map
+                ),
+            )
+
+            insert_many(
+                conn,
+                """
+                INSERT INTO ecosystem_dashboard_watchlist_status (
+                    run_id,
+                    ecosystem_code,
+                    report_date,
+                    ticker,
+                    action,
+                    severity,
+                    primary_reason,
+                    current_status,
+                    start_status_30d,
+                    status_change_30d,
+                    status_change_5d,
+                    window_status_30d,
+                    window_status_5d,
+                    window_status_2d,
+                    ma_break_status,
+                    freshness_status,
+                    trend_state,
+                    trend_state_age_td,
+                    latest_structure_label,
+                    latest_structure_age_td,
+                    latest_bos_event_type,
+                    latest_bos_age_td,
+                    latest_reset_reason,
+                    latest_reset_age_td,
+                    latest_candle,
+                    latest_candle_age_td,
+                    latest_divergence,
+                    latest_divergence_age_td,
+                    latest_chart_pattern,
+                    latest_chart_pattern_age_td,
+                    pullback_validity,
+                    entry_readiness,
+                    candidate_priority,
+                    candidate_priority_label,
+                    daily_status,
+                    rolling_2d_status,
+                    rolling_5d_status,
+                    rolling_30d_status,
+                    horizons_present,
+                    source_files,
+                    created_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    (
+                        selected_run_id,
+                        dashboard_input.ecosystem_code,
+                        dashboard_input.report_date,
+                        row.ticker,
+                        row.action_bucket,
+                        row.action_label,
+                        row.watchlist_reason,
+                        row.data_status,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        row.trend_state,
+                        None,
+                        row.latest_structure_label,
+                        None,
+                        row.latest_bos_event_type,
+                        None,
+                        row.latest_reset_reason,
+                        None,
+                        None,
+                        row.bullish_candle_signal,
+                        None,
+                        row.bullish_divergence_signal,
+                        None,
+                        row.hidden_bullish_divergence_signal,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        "",
+                        0,
+                        generated_at_utc,
+                    )
+                    for row in dashboard_input.watchlist
+                ),
+            )
+
+            insert_many(
+                conn,
+                """
+                INSERT INTO ecosystem_dashboard_ticker_status (
+                    run_id,
+                    ecosystem_code,
+                    report_date,
+                    ticker,
+                    action,
+                    severity,
+                    primary_reason,
+                    current_status,
+                    start_status_30d,
+                    status_change_30d,
+                    status_change_5d,
+                    window_status_30d,
+                    window_status_5d,
+                    window_status_2d,
+                    ma_break_status,
+                    freshness_status,
+                    trend_state,
+                    trend_state_age_td,
+                    latest_structure_label,
+                    latest_structure_age_td,
+                    latest_bos_event_type,
+                    latest_bos_age_td,
+                    latest_reset_reason,
+                    latest_reset_age_td,
+                    latest_candle,
+                    latest_candle_age_td,
+                    latest_divergence,
+                    latest_divergence_age_td,
+                    latest_chart_pattern,
+                    latest_chart_pattern_age_td,
+                    pullback_validity,
+                    entry_readiness,
+                    candidate_priority,
+                    candidate_priority_label,
+                    daily_status,
+                    rolling_2d_status,
+                    rolling_5d_status,
+                    rolling_30d_status,
+                    horizons_present,
+                    source_files,
+                    is_watchlist,
+                    created_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    (
+                        selected_run_id,
+                        dashboard_input.ecosystem_code,
+                        dashboard_input.report_date,
+                        row.ticker,
+                        row.action_bucket,
+                        row.action_label,
+                        row.data_status,
+                        row.data_status,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        row.latest_bos_freshness or row.latest_reset_freshness,
+                        row.trend_state,
+                        None,
+                        row.latest_structure_label,
+                        None,
+                        row.latest_bos_event_type,
+                        None,
+                        row.latest_reset_reason,
+                        None,
+                        None,
+                        row.bullish_candle_signal,
+                        None,
+                        row.bullish_divergence_signal,
+                        None,
+                        row.hidden_bullish_divergence_signal,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        "",
+                        0,
+                        0,
+                        generated_at_utc,
+                    )
+                    for row in dashboard_input.tickers
+                ),
+            )
+
+            insert_many(
+                conn,
+                """
+                INSERT INTO ecosystem_dashboard_decision_trace (
+                    run_id,
+                    ecosystem_code,
+                    ticker,
+                    trace_index,
+                    action,
+                    matched_rule,
+                    matched_token,
+                    matched_value,
+                    horizon,
+                    field,
+                    created_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    (
+                        selected_run_id,
+                        dashboard_input.ecosystem_code,
+                        row.ticker,
+                        row.trace_order,
+                        row.decision,
+                        row.rule_name,
+                        row.rule_group,
+                        row.input_value,
+                        None,
+                        row.reason,
+                        generated_at_utc,
+                    )
+                    for row in dashboard_input.decision_trace
+                ),
+            )
         conn.commit()
     except Exception:
         conn.rollback()
         raise
     finally:
         conn.close()
+        clear_reports_persistence_context(dashboard_input)
 
     return selected_run_id
