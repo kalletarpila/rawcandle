@@ -826,11 +826,12 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     assert "Window 2d: ADD_ON_PULLBACK" in summary_html
     assert "Overheat: WATCH" in summary_html
     assert "30d: NEUTRAL -&gt; WATCH" not in summary_html
-    assert "Layer summary" in hierarchy_section
-    assert "Subindustries" in hierarchy_section
+    assert "Layer summary" not in hierarchy_section
+    assert "<h3>Subindustries</h3>" not in hierarchy_section
     assert "<td>LAYER</td><td>Compute</td><td>Compute</td>" in hierarchy_section
     assert "<td>SUBINDUSTRY</td><td>AI Accelerators</td><td>Compute</td>" in hierarchy_section
     assert 'class="status-positive">ADD_ON_PULLBACK</td>' in hierarchy_section
+    assert hierarchy_section.count("<thead><tr>") == 1
     assert html_one.index('id="watchlist-status"') > html_one.index('id="summary"')
     assert html_one.index('id="watchlist-status"') < html_one.index('id="candidate-pullbacks"')
     assert html_one.index('id="candidate-pullbacks"') < html_one.index('id="command-center"')

@@ -1235,9 +1235,7 @@ def _render_layer_subindustry_hierarchy(
             summary_status_class = "status-missing"
             layer_table_html = "<p>No combined layer row available.</p>"
         subindustry_table_html = (
-            '<table class="sticky-table"><thead><tr>'
-            + market_map_header_html
-            + "</tr></thead><tbody>"
+            '<table class="sticky-table"><tbody>'
             + _render_combined_market_group_rows(sub_rows, include_layer_column=True)
             + "</tbody></table>"
         ) if sub_rows else "<p>No subindustries found for this layer.</p>"
@@ -1261,9 +1259,7 @@ def _render_layer_subindustry_hierarchy(
             f"<span>Overheat: {_html_text(overheat_text)}</span>"
             "</summary>"
             '<div class="layer-detail-body">'
-            "<h3>Layer summary</h3>"
             + layer_table_html
-            + "<h3>Subindustries</h3>"
             + subindustry_table_html
             + "</div>"
             "</details>"
