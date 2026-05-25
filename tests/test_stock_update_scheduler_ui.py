@@ -160,6 +160,20 @@ def _dashboard_html_result(
     )
 
 
+def _install_dashboard_launcher_common_mocks(monkeypatch, *, available_dates=None):
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.load_latest_scheduler_summary", lambda log_dir: None)
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.list_scheduler_log_files", lambda log_dir: [])
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.read_scheduler_status", lambda log_dir: None)
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
+        lambda: {"timer_path": "/tmp/timer", "on_calendar": "*-*-* 05:30:00", "installed": True, "status_summary": "ok", "error": None},
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.list_datacenter_report_dates",
+        lambda reports_dir, limit=5: list(available_dates or []),
+    )
+
+
 def test_load_latest_scheduler_summary_picks_newest_by_filename_timestamp(tmp_path):
     older = tmp_path / "stock_update_scheduler_summary_20260516T010000Z.json"
     newer = tmp_path / "stock_update_scheduler_summary_20260516T020000Z.json"
@@ -649,13 +663,7 @@ def test_run_app_loads_technical_relevance_enabled_true_into_checkbox(
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.load_latest_scheduler_summary", lambda log_dir: None)
-    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.list_scheduler_log_files", lambda log_dir: [])
-    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.read_scheduler_status", lambda log_dir: None)
-    monkeypatch.setattr(
-        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
-        lambda: {"timer_path": "/tmp/timer", "on_calendar": "*-*-* 05:30:00", "installed": True, "status_summary": "ok", "error": None},
-    )
+    _install_dashboard_launcher_common_mocks(monkeypatch, available_dates=["2026-05-25"])
 
     page = _FakePage()
     run_app(page, str(config_path))
@@ -1010,12 +1018,9 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(
         encoding="utf-8",
     )
     captured: list[dict[str, object]] = []
-    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.load_latest_scheduler_summary", lambda log_dir: None)
-    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.list_scheduler_log_files", lambda log_dir: [])
-    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.read_scheduler_status", lambda log_dir: None)
-    monkeypatch.setattr(
-        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
-        lambda: {"timer_path": "/tmp/timer", "on_calendar": "*-*-* 05:30:00", "installed": True, "status_summary": "ok", "error": None},
+    _install_dashboard_launcher_common_mocks(
+        monkeypatch,
+        available_dates=["2026-05-25", "2026-05-24", "2026-05-23", "2026-05-22", "2026-05-21"],
     )
     monkeypatch.setattr(
         "dev_tools.stock_update_scheduler_ui.run_datacenter_ui_command",
@@ -1058,6 +1063,11 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(
     assert "Candidate Pullbacks" not in dashboard_text_labels
     assert "Inspector" not in dashboard_text_labels
     assert page.datacenter_dashboard_reports_dir_field.value == DEFAULT_DATACENTER_DASHBOARD_REPORTS_DIR
+    assert page.datacenter_dashboard_report_date_field.value == "2026-05-25"
+    assert (
+        page.datacenter_dashboard_available_dates_text.value
+        == "Available report dates (latest 5): 2026-05-25, 2026-05-24, 2026-05-23, 2026-05-22, 2026-05-21"
+    )
 
     page.datacenter_signal_date_field.value = "2026-05-15"
     page.datacenter_start_date_field.value = "2026-01-01"
@@ -1123,28 +1133,7 @@ def test_run_app_adds_datacenter_dashboard_launcher_tab_without_rendered_dashboa
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(
-        "dev_tools.stock_update_scheduler_ui.load_latest_scheduler_summary",
-        lambda log_dir: None,
-    )
-    monkeypatch.setattr(
-        "dev_tools.stock_update_scheduler_ui.list_scheduler_log_files",
-        lambda log_dir: [],
-    )
-    monkeypatch.setattr(
-        "dev_tools.stock_update_scheduler_ui.read_scheduler_status",
-        lambda log_dir: None,
-    )
-    monkeypatch.setattr(
-        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
-        lambda: {
-            "timer_path": "/tmp/timer",
-            "on_calendar": "*-*-* 05:30:00",
-            "installed": True,
-            "status_summary": "ok",
-            "error": None,
-        },
-    )
+    _install_dashboard_launcher_common_mocks(monkeypatch, available_dates=["2026-05-25"])
 
     page = _FakePage()
     run_app(page, str(config_path))
@@ -1228,13 +1217,7 @@ def test_datacenter_dashboard_launcher_newest_mode_calls_generator_without_repor
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.load_latest_scheduler_summary", lambda log_dir: None)
-    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.list_scheduler_log_files", lambda log_dir: [])
-    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.read_scheduler_status", lambda log_dir: None)
-    monkeypatch.setattr(
-        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
-        lambda: {"timer_path": "/tmp/timer", "on_calendar": "*-*-* 05:30:00", "installed": True, "status_summary": "ok", "error": None},
-    )
+    _install_dashboard_launcher_common_mocks(monkeypatch, available_dates=["2026-05-25"])
     captured: list[dict[str, object]] = []
     monkeypatch.setattr(
         "dev_tools.stock_update_scheduler_ui.generate_datacenter_dashboard_html_file",
@@ -1254,6 +1237,7 @@ def test_datacenter_dashboard_launcher_newest_mode_calls_generator_without_repor
 
     page = _FakePage()
     run_app(page, str(config_path))
+    page.datacenter_dashboard_report_date_field.value = ""
 
     page.datacenter_dashboard_generate_button.on_click(None)
 
@@ -1282,13 +1266,7 @@ def test_datacenter_dashboard_launcher_valid_report_date_passes_report_date_and_
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.load_latest_scheduler_summary", lambda log_dir: None)
-    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.list_scheduler_log_files", lambda log_dir: [])
-    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.read_scheduler_status", lambda log_dir: None)
-    monkeypatch.setattr(
-        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
-        lambda: {"timer_path": "/tmp/timer", "on_calendar": "*-*-* 05:30:00", "installed": True, "status_summary": "ok", "error": None},
-    )
+    _install_dashboard_launcher_common_mocks(monkeypatch, available_dates=["2026-05-25", "2026-05-24"])
     captured: list[dict[str, object]] = []
     monkeypatch.setattr(
         "dev_tools.stock_update_scheduler_ui.generate_datacenter_dashboard_html_file",
@@ -1344,13 +1322,7 @@ def test_datacenter_dashboard_launcher_missing_base_reports_for_selected_date_sh
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.load_latest_scheduler_summary", lambda log_dir: None)
-    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.list_scheduler_log_files", lambda log_dir: [])
-    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.read_scheduler_status", lambda log_dir: None)
-    monkeypatch.setattr(
-        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
-        lambda: {"timer_path": "/tmp/timer", "on_calendar": "*-*-* 05:30:00", "installed": True, "status_summary": "ok", "error": None},
-    )
+    _install_dashboard_launcher_common_mocks(monkeypatch, available_dates=["2026-05-25"])
     monkeypatch.setattr(
         "dev_tools.stock_update_scheduler_ui.generate_datacenter_dashboard_html_file",
         lambda **kwargs: (_ for _ in ()).throw(FileNotFoundError("no reports found")),
@@ -1367,6 +1339,50 @@ def test_datacenter_dashboard_launcher_missing_base_reports_for_selected_date_sh
     assert "Run the reports from the Datacenter tab first." in status
     assert "datacenter_daily_2026-05-22_*.md" in status
     assert "datacenter_rolling_30_2026-05-22_*.md" in status
+
+
+def test_datacenter_dashboard_launcher_reports_dir_change_updates_latest_five_dates_and_default(
+    tmp_path, monkeypatch
+):
+    config_path = tmp_path / "scheduler.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "analysis_db_path": "/tmp/analysis.db",
+                "enabled_markets": ["omxh"],
+                "log_dir": "/tmp/logs",
+                "osakedata_db_path": "/tmp/osakedata.db",
+                "run_time": "05:30",
+                "timezone": "Europe/Helsinki",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.load_latest_scheduler_summary", lambda log_dir: None)
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.list_scheduler_log_files", lambda log_dir: [])
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.read_scheduler_status", lambda log_dir: None)
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
+        lambda: {"timer_path": "/tmp/timer", "on_calendar": "*-*-* 05:30:00", "installed": True, "status_summary": "ok", "error": None},
+    )
+    def _fake_dates(reports_dir, limit=5):
+        if reports_dir == "/tmp/other-reports":
+            return ["2026-05-20", "2026-05-19", "2026-05-18", "2026-05-17", "2026-05-16"]
+        return ["2026-05-25", "2026-05-24", "2026-05-23", "2026-05-22", "2026-05-21"]
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.list_datacenter_report_dates", _fake_dates)
+
+    page = _FakePage()
+    run_app(page, str(config_path))
+    assert page.datacenter_dashboard_report_date_field.value == "2026-05-25"
+
+    page.datacenter_dashboard_reports_dir_field.value = "/tmp/other-reports"
+    page.datacenter_dashboard_reports_dir_field.on_change(None)
+
+    assert page.datacenter_dashboard_report_date_field.value == "2026-05-20"
+    assert (
+        page.datacenter_dashboard_available_dates_text.value
+        == "Available report dates (latest 5): 2026-05-20, 2026-05-19, 2026-05-18, 2026-05-17, 2026-05-16"
+    )
 
 
 def test_run_app_does_not_add_broker_or_order_buttons(

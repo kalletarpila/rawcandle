@@ -34,6 +34,7 @@ from dev_tools.datacenter_dashboard_parser import (
 from dev_tools.datacenter_dashboard_support import (
     DatacenterDashboardStatus,
     discover_datacenter_dashboard_status,
+    list_datacenter_report_dates,
 )
 from dev_tools.run_datacenter_dashboard_html import (
     generate_datacenter_dashboard_html_file,
@@ -2287,6 +2288,11 @@ def run_app(page: ft.Page, config_path: str) -> None:
         label="Report date",
         hint_text="YYYY-MM-DD",
     )
+    datacenter_dashboard_available_dates_text = ft.Text(
+        "",
+        size=13,
+        color="#4b5563",
+    )
     datacenter_dashboard_output_field = ft.TextField(
         label="Output path (optional)",
     )
@@ -2314,6 +2320,48 @@ def run_app(page: ft.Page, config_path: str) -> None:
                 report_date=report_date_value,
             )
         )
+
+    def _refresh_datacenter_dashboard_available_dates(*, preserve_user_value: bool) -> None:
+        reports_dir_value = datacenter_dashboard_reports_dir_field.value.strip() or DEFAULT_DATACENTER_DASHBOARD_REPORTS_DIR
+        available_dates = list_datacenter_report_dates(reports_dir_value, limit=5)
+        current_value = datacenter_dashboard_report_date_field.value.strip()
+        previous_auto_value = getattr(page, "datacenter_dashboard_auto_report_date", "")
+        newest_date = available_dates[0] if available_dates else ""
+        if newest_date and (
+            not current_value
+            or (preserve_user_value and current_value == previous_auto_value)
+            or not preserve_user_value
+        ):
+            datacenter_dashboard_report_date_field.value = newest_date
+            current_value = newest_date
+        elif not available_dates and not preserve_user_value:
+            datacenter_dashboard_report_date_field.value = ""
+            current_value = ""
+        page.datacenter_dashboard_auto_report_date = newest_date
+        if available_dates:
+            datacenter_dashboard_available_dates_text.value = (
+                "Available report dates (latest 5): " + ", ".join(available_dates)
+            )
+        else:
+            datacenter_dashboard_available_dates_text.value = "Available report dates (latest 5): none found"
+
+    def on_datacenter_dashboard_reports_dir_change(e) -> None:
+        _refresh_datacenter_dashboard_available_dates(preserve_user_value=True)
+        datacenter_dashboard_status_field.value = "\n".join(
+            [
+                f"reports_dir={datacenter_dashboard_reports_dir_field.value.strip() or DEFAULT_DATACENTER_DASHBOARD_REPORTS_DIR}",
+                f"report_date={datacenter_dashboard_report_date_field.value.strip() or 'newest'}",
+                f"output={_dashboard_effective_output_path()}",
+                "readiness=MISSING",
+                "found_reports=0",
+                "missing_reports=0",
+                "decision_total=0",
+                "candidate_pullback_rows=0",
+                "generate_status=SKIPPED",
+                "open_status=SKIPPED",
+            ]
+        )
+        page.update()
 
     def _set_datacenter_dashboard_status(lines: list[str]) -> None:
         datacenter_dashboard_status_field.value = "\n".join(lines)
@@ -2449,6 +2497,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
 
     datacenter_dashboard_generate_button.on_click = on_datacenter_dashboard_generate
     datacenter_dashboard_open_button.on_click = on_datacenter_dashboard_open_last
+    datacenter_dashboard_reports_dir_field.on_change = on_datacenter_dashboard_reports_dir_change
     datacenter_dashboard_content = ft.Column(
         controls=[
             ft.Text("Datacenter Dashboard", size=24, weight=ft.FontWeight.BOLD),
@@ -2459,6 +2508,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
                 "If reports for the selected date are missing, run the datacenter reports first from the Datacenter tab."
             ),
             datacenter_dashboard_reports_dir_field,
+            datacenter_dashboard_available_dates_text,
             datacenter_dashboard_report_date_field,
             datacenter_dashboard_output_field,
             ft.Row(
@@ -2483,10 +2533,12 @@ def run_app(page: ft.Page, config_path: str) -> None:
         expand=True,
     )
     page.datacenter_dashboard_last_output_path = None
+    page.datacenter_dashboard_auto_report_date = ""
+    _refresh_datacenter_dashboard_available_dates(preserve_user_value=False)
     datacenter_dashboard_status_field.value = "\n".join(
         [
             f"reports_dir={DEFAULT_DATACENTER_DASHBOARD_REPORTS_DIR}",
-            "report_date=newest",
+            f"report_date={datacenter_dashboard_report_date_field.value.strip() or 'newest'}",
             f"output={_dashboard_effective_output_path()}",
             "readiness=MISSING",
             "found_reports=0",
@@ -2530,6 +2582,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
     page.datacenter_content = datacenter_content
     page.datacenter_dashboard_reports_dir_field = datacenter_dashboard_reports_dir_field
     page.datacenter_dashboard_report_date_field = datacenter_dashboard_report_date_field
+    page.datacenter_dashboard_available_dates_text = datacenter_dashboard_available_dates_text
     page.datacenter_dashboard_output_field = datacenter_dashboard_output_field
     page.datacenter_dashboard_status_field = datacenter_dashboard_status_field
     page.datacenter_dashboard_generate_button = datacenter_dashboard_generate_button

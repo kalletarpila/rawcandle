@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dev_tools.datacenter_dashboard_support import discover_datacenter_dashboard_status
+from dev_tools.datacenter_dashboard_support import (
+    discover_datacenter_dashboard_status,
+    list_datacenter_report_dates,
+)
 
 
 def _touch_report(path: Path, *, mtime: int) -> None:
@@ -139,3 +142,29 @@ def test_discover_datacenter_dashboard_status_report_date_with_no_matching_files
 
     assert status.overall_status == "MISSING"
     assert all(report.status == "MISSING" for report in status.reports)
+
+
+def test_list_datacenter_report_dates_returns_latest_five_unique_dates(tmp_path):
+    for index, report_date in enumerate(
+        [
+            "2026-05-25",
+            "2026-05-24",
+            "2026-05-23",
+            "2026-05-22",
+            "2026-05-21",
+            "2026-05-20",
+        ],
+        start=1,
+    ):
+        _touch_report(tmp_path / f"datacenter_daily_{report_date}_000{index}_full.md", mtime=100 + index)
+    _touch_report(tmp_path / "datacenter_rolling_2_2026-05-25_9999_full.md", mtime=300)
+
+    dates = list_datacenter_report_dates(str(tmp_path), limit=5)
+
+    assert dates == [
+        "2026-05-25",
+        "2026-05-24",
+        "2026-05-23",
+        "2026-05-22",
+        "2026-05-21",
+    ]

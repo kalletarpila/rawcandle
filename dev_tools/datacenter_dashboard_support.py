@@ -42,6 +42,16 @@ _HORIZON_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 _REPORT_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
+def _extract_report_date(filename: str) -> str | None:
+    match = re.search(r"_(\d{4}-\d{2}-\d{2})_", filename)
+    if not match:
+        return None
+    report_date = match.group(1)
+    if not _REPORT_DATE_RE.match(report_date):
+        return None
+    return report_date
+
+
 def _report_sort_key(path: Path) -> tuple[float, int, str]:
     stat_result = path.stat()
     suffix_priority = 1 if path.suffix.lower() == ".md" else 0
@@ -136,3 +146,24 @@ def discover_datacenter_dashboard_status(
         overall_status=overall_status,
         reports=report_statuses,
     )
+
+
+def list_datacenter_report_dates(reports_dir: str, limit: int | None = None) -> list[str]:
+    reports_dir_path = Path(reports_dir.strip())
+    if not reports_dir_path.exists() or not reports_dir_path.is_dir():
+        return []
+
+    report_dates: set[str] = set()
+    for path in reports_dir_path.iterdir():
+        if not path.is_file():
+            continue
+        if not any(pattern.match(path.name) for _horizon, pattern in _HORIZON_PATTERNS):
+            continue
+        report_date = _extract_report_date(path.name)
+        if report_date:
+            report_dates.add(report_date)
+
+    ordered_dates = sorted(report_dates, reverse=True)
+    if limit is not None:
+        return ordered_dates[:limit]
+    return ordered_dates
