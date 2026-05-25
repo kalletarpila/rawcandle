@@ -2282,16 +2282,13 @@ def run_app(page: ft.Page, config_path: str) -> None:
     datacenter_dashboard_reports_dir_field = ft.TextField(
         label="Reports directory",
         value=DEFAULT_DATACENTER_DASHBOARD_REPORTS_DIR,
-        expand=True,
     )
     datacenter_dashboard_report_date_field = ft.TextField(
         label="Report date",
         hint_text="YYYY-MM-DD",
-        expand=True,
     )
     datacenter_dashboard_output_field = ft.TextField(
         label="Output path (optional)",
-        expand=True,
     )
     datacenter_dashboard_status_field = ft.TextField(
         label="Status",
@@ -2300,7 +2297,6 @@ def run_app(page: ft.Page, config_path: str) -> None:
         min_lines=10,
         max_lines=16,
         read_only=True,
-        expand=True,
     )
     datacenter_dashboard_generate_button = ft.ElevatedButton("Generate HTML Dashboard")
     datacenter_dashboard_open_button = ft.ElevatedButton(
@@ -2463,13 +2459,8 @@ def run_app(page: ft.Page, config_path: str) -> None:
                 "If reports for the selected date are missing, run the datacenter reports first from the Datacenter tab."
             ),
             datacenter_dashboard_reports_dir_field,
-            ft.Row(
-                [
-                    datacenter_dashboard_report_date_field,
-                    datacenter_dashboard_output_field,
-                ],
-                wrap=True,
-            ),
+            datacenter_dashboard_report_date_field,
+            datacenter_dashboard_output_field,
             ft.Row(
                 [
                     datacenter_dashboard_generate_button,
@@ -2477,9 +2468,18 @@ def run_app(page: ft.Page, config_path: str) -> None:
                 ],
                 wrap=True,
             ),
-            datacenter_dashboard_status_field,
+            ft.Text("Status", size=16, weight=ft.FontWeight.BOLD),
+            ft.Container(
+                content=datacenter_dashboard_status_field,
+                bgcolor="#f5f5f5",
+                border=ft.border.all(1, "#d0d0d0"),
+                border_radius=4,
+                padding=8,
+                height=260,
+            ),
         ],
         spacing=12,
+        scroll=ft.ScrollMode.AUTO,
         expand=True,
     )
     page.datacenter_dashboard_last_output_path = None
