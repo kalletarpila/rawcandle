@@ -40,6 +40,7 @@ from dev_tools.run_datacenter_dashboard_html import (
     generate_datacenter_dashboard_html_file,
     resolve_dashboard_html_output_path,
 )
+from dev_tools.run_ecosystem_dashboard_build import generate_ecosystem_dashboard_build
 from rawcandle.scheduler.config import (
     StockUpdateSchedulerConfig,
     read_scheduler_config,
@@ -49,6 +50,7 @@ from rawcandle.scheduler.config import (
 )
 from rawcandle.scheduler.runner import (
     SchedulerAlreadyRunningError,
+    inspect_scheduler_dashboard_config,
     read_scheduler_status,
     run_scheduler_config,
 )
@@ -1579,6 +1581,106 @@ def run_datacenter_dashboard_rolling_reports_ui_command(
     threading.Thread(target=_worker, daemon=True).start()
 
 
+def run_datacenter_build_db_html_ui_action(
+    *,
+    page: ft.Page,
+    status_field: ft.TextField,
+    log_field: ft.TextField,
+    report_date: str,
+    dashboard_db: str,
+    reports_dir: str,
+    html_output_path: str,
+) -> None:
+    def _append_log(message: str) -> None:
+        existing = log_field.value or ""
+        log_field.value = f"{message}\n{existing}".strip()
+
+    def _worker() -> None:
+        try:
+            _append_log("=== Datacenter: Build DB + HTML for Date ===")
+            _append_log(
+                "PLAN "
+                + " ".join(
+                    [
+                        f"report_date={report_date}",
+                        "ecosystem_code=DATACENTER",
+                        "mode=replace-date",
+                        f"dashboard_db={dashboard_db}",
+                        f"reports_dir={reports_dir}",
+                        f"html_output={html_output_path}",
+                    ]
+                )
+            )
+            page.update()
+            built_run_id, _summary_lines = generate_ecosystem_dashboard_build(
+                dashboard_db=dashboard_db,
+                ecosystem_code="DATACENTER",
+                reports_dir=reports_dir,
+                report_date=report_date,
+                mode="replace-date",
+                run_id=None,
+            )
+            generate_datacenter_dashboard_html_file(
+                dashboard_db=dashboard_db,
+                ecosystem_code="DATACENTER",
+                run_id=built_run_id,
+                output=html_output_path,
+                report_date=None,
+                title=None,
+            )
+            _append_log("=== Datacenter: Build DB + HTML for Date completed ===")
+            _set_status(
+                status_field,
+                "\n".join(
+                    [
+                        "Build DB + HTML for Date status=OK",
+                        f"report_date={report_date}",
+                        f"dashboard_db={dashboard_db}",
+                        f"html_output_path={html_output_path}",
+                        f"run_id={built_run_id}",
+                    ]
+                ),
+                _STATUS_OK_COLOR,
+            )
+            page.update()
+        except FileNotFoundError as exc:
+            _append_log(f"=== Datacenter: Build DB + HTML for Date failed ({exc}) ===")
+            _set_status(
+                status_field,
+                "\n".join(
+                    [
+                        "Build DB + HTML for Date status=FAILED",
+                        "failure_stage=source_reports",
+                        f"report_date={report_date}",
+                        f"dashboard_db={dashboard_db}",
+                        f"html_output_path={html_output_path}",
+                        f"error={exc}",
+                    ]
+                ),
+                _STATUS_ERROR_COLOR,
+            )
+            page.update()
+        except Exception as exc:
+            _append_log(f"=== Datacenter: Build DB + HTML for Date failed ({exc}) ===")
+            _set_status(
+                status_field,
+                "\n".join(
+                    [
+                        "Build DB + HTML for Date status=FAILED",
+                        "failure_stage=dashboard_build_or_render",
+                        f"report_date={report_date}",
+                        f"dashboard_db={dashboard_db}",
+                        f"html_output_path={html_output_path}",
+                        f"error={exc}",
+                    ]
+                ),
+                _STATUS_ERROR_COLOR,
+            )
+            page.update()
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
 def run_app(page: ft.Page, config_path: str) -> None:
     page.title = "Stock Update Scheduler Control Panel"
     page.scroll = ft.ScrollMode.AUTO
@@ -1831,6 +1933,10 @@ def run_app(page: ft.Page, config_path: str) -> None:
     )
     datacenter_dashboard_reports_column = ft.Column(spacing=8)
     datacenter_reports_column = ft.Column(spacing=8)
+    datacenter_report_date_field = ft.TextField(
+        label="Report date",
+        hint_text="YYYY-MM-DD",
+    )
 
     def selected_markets_from_ui() -> List[str]:
         selected: List[str] = []
@@ -1854,6 +1960,65 @@ def run_app(page: ft.Page, config_path: str) -> None:
         omxs_checkbox.value = "omxs" in enabled_markets
         usa_checkbox.value = "usa" in enabled_markets
         technical_relevance_checkbox.value = config.technical_relevance_enabled
+
+    def _inspect_datacenter_dashboard_plan() -> Any:
+        return inspect_scheduler_dashboard_config(
+            config_path=config_path,
+            effective_today=date.today().isoformat(),
+        )
+
+    def _resolved_datacenter_dashboard_plan_lines(inspection: Any) -> list[str]:
+        return [
+            f"enabled={inspection.enabled}",
+            f"ecosystem_code={inspection.ecosystem_code}",
+            f"dashboard_db={inspection.dashboard_db}",
+            f"reports_dir={inspection.reports_dir}",
+            f"html_output_dir={inspection.html_output_dir}",
+            f"expected_report_date={inspection.expected_report_date}",
+            f"expected_html_output_path={inspection.expected_html_output_path}",
+            f"mode={inspection.mode}",
+            f"render_html={inspection.render_html}",
+            f"usa_enabled={inspection.usa_enabled}",
+            f"datacenter_pipeline_enabled={inspection.datacenter_pipeline_enabled}",
+            f"skip_next_run={inspection.skip_next_run}",
+            f"date_status={inspection.date_status}",
+            f"status={inspection.status}",
+        ]
+
+    def _refresh_datacenter_report_date_from_plan(*, force: bool) -> None:
+        try:
+            inspection = _inspect_datacenter_dashboard_plan()
+        except Exception:
+            return
+        if inspection.expected_report_date and (
+            force or not datacenter_report_date_field.value.strip()
+        ):
+            datacenter_report_date_field.value = inspection.expected_report_date
+
+    def on_datacenter_refresh_status(e) -> None:
+        try:
+            current_config = _load_config_or_raise(config_path)
+            update_ui_from_config(current_config)
+            inspection = _inspect_datacenter_dashboard_plan()
+            if inspection.expected_report_date:
+                datacenter_report_date_field.value = inspection.expected_report_date
+            _set_status(
+                datacenter_status_field,
+                "\n".join(
+                    [
+                        "Refresh Status status=OK",
+                        *_resolved_datacenter_dashboard_plan_lines(inspection),
+                    ]
+                ),
+                _STATUS_OK_COLOR,
+            )
+        except Exception as exc:
+            _set_status(
+                datacenter_status_field,
+                f"Refresh Status failed: {exc}",
+                _STATUS_ERROR_COLOR,
+            )
+        page.update()
 
     def refresh_datacenter_dashboard_view() -> dict[str, int]:
         dashboard_status = discover_datacenter_dashboard_status(
@@ -2347,19 +2512,68 @@ def run_app(page: ft.Page, config_path: str) -> None:
         )
 
     def on_datacenter_plan(e) -> None:
-        run_datacenter_ui_command(
+        try:
+            inspection = _inspect_datacenter_dashboard_plan()
+            if inspection.expected_report_date:
+                datacenter_report_date_field.value = inspection.expected_report_date
+            _set_status(
+                datacenter_status_field,
+                "\n".join(
+                    [
+                        "Show Datacenter Plan status=OK",
+                        *_resolved_datacenter_dashboard_plan_lines(inspection),
+                    ]
+                ),
+                _STATUS_OK_COLOR,
+            )
+        except Exception as exc:
+            _set_status(
+                datacenter_status_field,
+                f"Show Datacenter Plan failed: {exc}",
+                _STATUS_ERROR_COLOR,
+            )
+        page.update()
+
+    def on_datacenter_build_db_html_for_date(e) -> None:
+        report_date_value = datacenter_report_date_field.value.strip()
+        if not report_date_value:
+            _set_status(
+                datacenter_status_field,
+                "Build DB + HTML for Date failed before execution: report_date is required.",
+                _STATUS_ERROR_COLOR,
+            )
+            page.update()
+            return
+        if not _DATACENTER_DASHBOARD_REPORT_DATE_RE.match(report_date_value):
+            _set_status(
+                datacenter_status_field,
+                "Build DB + HTML for Date failed before execution: invalid report_date, expected YYYY-MM-DD.",
+                _STATUS_ERROR_COLOR,
+            )
+            page.update()
+            return
+        try:
+            inspection = _inspect_datacenter_dashboard_plan()
+        except Exception as exc:
+            _set_status(
+                datacenter_status_field,
+                f"Build DB + HTML for Date failed before execution: {exc}",
+                _STATUS_ERROR_COLOR,
+            )
+            page.update()
+            return
+        html_output_path = str(
+            Path(inspection.html_output_dir)
+            / f"datacenter_dashboard_{report_date_value}.html"
+        )
+        run_datacenter_build_db_html_ui_action(
             page=page,
-            title="Show Pipeline Plan",
-            command=build_datacenter_pipeline_plan_command(
-                analysis_db=datacenter_analysis_db_field.value,
-                taxonomy_version=datacenter_taxonomy_version_field.value,
-                market=datacenter_market_field.value,
-                signal_date=datacenter_signal_date_field.value,
-                start_date=datacenter_start_date_field.value,
-                index_base_date=datacenter_index_base_date_field.value,
-            ),
-            log_field=datacenter_log_field,
             status_field=datacenter_status_field,
+            log_field=datacenter_log_field,
+            report_date=report_date_value,
+            dashboard_db=inspection.dashboard_db,
+            reports_dir=inspection.reports_dir,
+            html_output_path=html_output_path,
         )
 
     def on_datacenter_watermarks(e) -> None:
@@ -2377,6 +2591,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
     initial_config = _load_config_or_raise(config_path)
     datacenter_assets_root = Path(initial_config.log_dir)
     update_ui_from_config(initial_config)
+    _refresh_datacenter_report_date_from_plan(force=True)
     refresh_logs_view(initial_config.log_dir)
     skip_next_run_button.on_click = on_skip_next_run
     cancel_skip_next_run_button.on_click = on_cancel_skip_next_run
@@ -2419,33 +2634,48 @@ def run_app(page: ft.Page, config_path: str) -> None:
         expand=True,
     )
 
-    datacenter_dry_run_button = ft.ElevatedButton("Dry Run Pipeline", on_click=on_datacenter_dry_run)
-    datacenter_run_pipeline_button = ft.ElevatedButton("Run Full Pipeline", on_click=on_datacenter_run_pipeline)
+    datacenter_refresh_status_button = ft.ElevatedButton("Refresh Status", on_click=on_datacenter_refresh_status)
+    datacenter_run_full_chain_button = ft.ElevatedButton("Run Full Chain", on_click=on_datacenter_run_pipeline)
     datacenter_audit_button = ft.ElevatedButton("Run Audit", on_click=on_datacenter_run_audit)
+    datacenter_dry_run_button = ft.ElevatedButton("Dry Run Pipeline", on_click=on_datacenter_dry_run)
     datacenter_daily_report_button = ft.ElevatedButton("Generate Daily Report", on_click=on_datacenter_daily_report)
     datacenter_rolling_report_button = ft.ElevatedButton("Generate Rolling Report", on_click=on_datacenter_rolling_report)
     datacenter_dashboard_rolling_reports_button = ft.ElevatedButton(
         "Generate Dashboard Rolling Reports",
         on_click=on_datacenter_dashboard_rolling_reports,
     )
-    datacenter_plan_button = ft.ElevatedButton("Show Pipeline Plan", on_click=on_datacenter_plan)
+    datacenter_plan_button = ft.ElevatedButton("Show Datacenter Plan", on_click=on_datacenter_plan)
+    datacenter_build_db_html_button = ft.ElevatedButton(
+        "Build DB + HTML for Date",
+        on_click=on_datacenter_build_db_html_for_date,
+    )
     datacenter_watermarks_button = ft.ElevatedButton("Show Watermarks", on_click=on_datacenter_watermarks)
-    datacenter_buttons = ft.Row(
+    datacenter_primary_buttons = ft.Row(
+        [
+            datacenter_refresh_status_button,
+            datacenter_plan_button,
+            datacenter_run_full_chain_button,
+            datacenter_build_db_html_button,
+            datacenter_watermarks_button,
+        ],
+        wrap=True,
+    )
+    datacenter_advanced_buttons = ft.Row(
         [
             datacenter_dry_run_button,
-            datacenter_run_pipeline_button,
             datacenter_audit_button,
             datacenter_daily_report_button,
             datacenter_rolling_report_button,
             datacenter_dashboard_rolling_reports_button,
-            datacenter_plan_button,
-            datacenter_watermarks_button,
         ],
         wrap=True,
     )
     datacenter_content = ft.Column(
         controls=[
             ft.Text("Datacenter", size=24, weight=ft.FontWeight.BOLD),
+            ft.Text(
+                "Daily Datacenter flow:\nstock update -> .md reports -> ecosystem_dashboard.db -> DB-backed HTML"
+            ),
             ft.Text(
                 "Run Audit before interpreting reports. WARN may be acceptable; FAIL means do not interpret reports."
             ),
@@ -2465,7 +2695,10 @@ def run_app(page: ft.Page, config_path: str) -> None:
                 wrap=True,
             ),
             datacenter_watchlist_file_field,
-            datacenter_buttons,
+            datacenter_report_date_field,
+            datacenter_primary_buttons,
+            ft.Text("Advanced / Debug", size=16, weight=ft.FontWeight.BOLD),
+            datacenter_advanced_buttons,
             datacenter_status_field,
             datacenter_reports_column,
             datacenter_log_field,
@@ -2761,13 +2994,17 @@ def run_app(page: ft.Page, config_path: str) -> None:
     page.datacenter_status_field = datacenter_status_field
     page.datacenter_reports_column = datacenter_reports_column
     page.datacenter_log_field = datacenter_log_field
+    page.datacenter_report_date_field = datacenter_report_date_field
+    page.datacenter_refresh_status_button = datacenter_refresh_status_button
+    page.datacenter_run_full_chain_button = datacenter_run_full_chain_button
     page.datacenter_dry_run_button = datacenter_dry_run_button
-    page.datacenter_run_pipeline_button = datacenter_run_pipeline_button
+    page.datacenter_run_pipeline_button = datacenter_run_full_chain_button
     page.datacenter_audit_button = datacenter_audit_button
     page.datacenter_daily_report_button = datacenter_daily_report_button
     page.datacenter_rolling_report_button = datacenter_rolling_report_button
     page.datacenter_dashboard_rolling_reports_button = datacenter_dashboard_rolling_reports_button
     page.datacenter_plan_button = datacenter_plan_button
+    page.datacenter_build_db_html_button = datacenter_build_db_html_button
     page.datacenter_watermarks_button = datacenter_watermarks_button
     page.summary_field = summary_field
     page.logs_column = logs_column
