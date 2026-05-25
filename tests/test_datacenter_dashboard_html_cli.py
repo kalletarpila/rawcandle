@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 import re
+import sqlite3
 
 from dev_tools.datacenter_dashboard_decisions import (
     DatacenterDecisionBatchResult,
@@ -20,6 +21,10 @@ from dev_tools.datacenter_dashboard_parser import (
 from dev_tools.datacenter_dashboard_support import (
     DatacenterDashboardStatus,
     DatacenterReportStatus,
+)
+from dev_tools.ecosystem_dashboard_persistence import (
+    connect_dashboard_db,
+    ensure_dashboard_schema,
 )
 from dev_tools.run_datacenter_dashboard_html import (
     _format_value_with_age,
@@ -89,6 +94,192 @@ def _fake_dashboard_status(tmp_path: Path) -> DatacenterDashboardStatus:
             ),
         ],
     )
+
+
+def _seed_dashboard_db(db_path: Path) -> str:
+    conn = connect_dashboard_db(str(db_path))
+    try:
+        ensure_dashboard_schema(conn)
+        run_id = "RUN_DB_HTML"
+        conn.execute(
+            """
+            INSERT INTO ecosystem_dashboard_runs (
+                run_id, ecosystem_code, report_date, taxonomy_version, generated_at_utc,
+                reports_dir, selection_mode, readiness, found_reports, missing_reports,
+                total_parsed_rows, total_parse_warnings, decision_total, market_map_rows,
+                watchlist_rows, ticker_rows, source_reports_count, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                run_id,
+                "DATACENTER",
+                "2026-05-22",
+                None,
+                "2026-05-25T11:00:00Z",
+                "/tmp/reports",
+                "report_date",
+                "READY",
+                4,
+                0,
+                20,
+                0,
+                2,
+                2,
+                1,
+                2,
+                2,
+                "2026-05-25T11:00:00Z",
+            ),
+        )
+        conn.executemany(
+            """
+            INSERT INTO ecosystem_dashboard_source_reports (
+                run_id, ecosystem_code, report_date, horizon, report_kind, markdown_path,
+                csv_path, modified_at_utc, status, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    run_id, "DATACENTER", "2026-05-22", "daily", "full",
+                    "/tmp/daily.md", "/tmp/daily.csv", "2026-05-25T11:00:00Z",
+                    "FOUND", "2026-05-25T11:00:00Z",
+                ),
+                (
+                    run_id, "DATACENTER", "2026-05-22", "rolling_30d", "full",
+                    "/tmp/r30.md", "/tmp/r30.csv", "2026-05-25T11:00:00Z",
+                    "FOUND", "2026-05-25T11:00:00Z",
+                ),
+            ],
+        )
+        conn.executemany(
+            """
+            INSERT INTO ecosystem_dashboard_action_summary (
+                run_id, ecosystem_code, action, count, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                (run_id, "DATACENTER", "SELL", 1, "2026-05-25T11:00:00Z"),
+                (run_id, "DATACENTER", "WATCH", 1, "2026-05-25T11:00:00Z"),
+            ],
+        )
+        conn.executemany(
+            """
+            INSERT INTO ecosystem_dashboard_market_map (
+                run_id, ecosystem_code, report_date, market_level, name, parent_name, layer,
+                subindustry, taxonomy_path, taxonomy_version, current_status, start_status_30d,
+                status_change_30d, status_change_5d, window_status_30d, window_status_5d,
+                window_status_2d, overheat_risk, pct_above_ema20, pct_above_ma10,
+                ema20_breadth_delta_5d, return_5d, return_10d, return_20d, return_60d,
+                dow_trend_state, dow_trend_state_age_td, latest_structure_label,
+                latest_structure_age_td, latest_bos_event_type, latest_bos_age_td,
+                latest_reset_reason, latest_reset_age_td, latest_candle, latest_candle_age_td,
+                latest_divergence, latest_divergence_age_td, latest_chart_pattern,
+                latest_chart_pattern_age_td, source_horizons, source_files, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    run_id, "DATACENTER", "2026-05-22", "ECOSYSTEM", "DC_ECOSYSTEM_TOTAL", None,
+                    None, None, None, None, "BUY_ZONE", "WATCH", "WATCH -> BUY_ZONE", "",
+                    "BUY_ZONE", "", "", "LOW", 62.5, 58.0, 4.0, 0.12, 0.18, 0.25, 0.44,
+                    "UP", 8, "HH", 3, "BOS_UP", 2, None, None, None, None, None, None,
+                    "BASE_BREAKOUT", 5, "daily, rolling 30d", "daily.md, r30.md", "2026-05-25T11:00:00Z",
+                ),
+                (
+                    run_id, "DATACENTER", "2026-05-22", "LAYER", "Compute", "Technology",
+                    "Technology", None, None, None, "WATCH", "NEUTRAL", "NEUTRAL -> WATCH", "",
+                    "WATCH", "", "", "LOW", 50.0, 40.0, 1.0, 0.05, 0.08, 0.10, 0.15,
+                    "UP", 2, "HL", 1, "BOS_UP", 1, None, None, None, None, None, None,
+                    "PULLBACK", 2, "rolling 30d", "r30.md", "2026-05-25T11:00:00Z",
+                ),
+            ],
+        )
+        conn.execute(
+            """
+            INSERT INTO ecosystem_dashboard_watchlist_status (
+                run_id, ecosystem_code, report_date, ticker, action, severity, primary_reason,
+                current_status, start_status_30d, status_change_30d, status_change_5d,
+                window_status_30d, window_status_5d, window_status_2d, ma_break_status,
+                freshness_status, trend_state, trend_state_age_td, latest_structure_label,
+                latest_structure_age_td, latest_bos_event_type, latest_bos_age_td,
+                latest_reset_reason, latest_reset_age_td, latest_candle, latest_candle_age_td,
+                latest_divergence, latest_divergence_age_td, latest_chart_pattern,
+                latest_chart_pattern_age_td, pullback_validity, entry_readiness,
+                candidate_priority, candidate_priority_label, daily_status, rolling_2d_status,
+                rolling_5d_status, rolling_30d_status, horizons_present, source_files,
+                created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                run_id, "DATACENTER", "2026-05-22", "NVDA", "SELL", "CRITICAL",
+                "close_below_ema20", "BREAKOUT_READY", "WATCH", "WATCH -> BREAKOUT_READY",
+                "", "WATCH", "", "", "EMA20_WARNING", "FRESH", "UP", 12, "HH", 3,
+                "BOS_UP", 2, None, None, "Hammer", 4, "Bearish Divergence", 2,
+                "BASE_BREAKOUT", 5, "NO_PULLBACK", "NOT_READY", 5, "P5_NOT_READY",
+                "BREAKOUT_READY", None, None, "WATCH", "daily, rolling 30d", 2,
+                "2026-05-25T11:00:00Z",
+            ),
+        )
+        conn.executemany(
+            """
+            INSERT INTO ecosystem_dashboard_ticker_status (
+                run_id, ecosystem_code, report_date, ticker, action, severity, primary_reason,
+                current_status, start_status_30d, status_change_30d, status_change_5d,
+                window_status_30d, window_status_5d, window_status_2d, ma_break_status,
+                freshness_status, trend_state, trend_state_age_td, latest_structure_label,
+                latest_structure_age_td, latest_bos_event_type, latest_bos_age_td,
+                latest_reset_reason, latest_reset_age_td, latest_candle, latest_candle_age_td,
+                latest_divergence, latest_divergence_age_td, latest_chart_pattern,
+                latest_chart_pattern_age_td, pullback_validity, entry_readiness,
+                candidate_priority, candidate_priority_label, daily_status, rolling_2d_status,
+                rolling_5d_status, rolling_30d_status, horizons_present, source_files,
+                is_watchlist, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    run_id, "DATACENTER", "2026-05-22", "NVDA", "SELL", "CRITICAL",
+                    "close_below_ema20", "BREAKOUT_READY", "WATCH", "WATCH -> BREAKOUT_READY",
+                    "", "WATCH", "", "", "EMA20_WARNING", "FRESH", "UP", 12, "HH", 3,
+                    "BOS_UP", 2, None, None, "Hammer", 4, "Bearish Divergence", 2,
+                    "BASE_BREAKOUT", 5, "NO_PULLBACK", "NOT_READY", 5, "P5_NOT_READY",
+                    "BREAKOUT_READY", None, None, "WATCH", "daily, rolling 30d", 2, 1,
+                    "2026-05-25T11:00:00Z",
+                ),
+                (
+                    run_id, "DATACENTER", "2026-05-22", "AMD", "WATCH", "LOW", "trend_ok",
+                    "BUY_ZONE", "WATCH", "WATCH -> BUY_ZONE", "", "BUY_ZONE", "", "", "OK",
+                    "FRESH", "UP", 7, "HL", 2, "BOS_UP", 1, None, None, None, None, None,
+                    None, "PULLBACK", 2, "VALID_PULLBACK", "READY_TO_WATCH", 1,
+                    "P1_READY_TO_WATCH", None, None, None, "BUY_ZONE", "rolling 30d", 1, 0,
+                    "2026-05-25T11:00:00Z",
+                ),
+            ],
+        )
+        conn.executemany(
+            """
+            INSERT INTO ecosystem_dashboard_decision_trace (
+                run_id, ecosystem_code, ticker, trace_index, action, matched_rule,
+                matched_token, matched_value, horizon, field, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    run_id, "DATACENTER", "NVDA", 0, "SELL", "SELL_HARD_TOKEN",
+                    "close_below_ema20", "close_below_ema20", "daily", "reason",
+                    "2026-05-25T11:00:00Z",
+                ),
+                (
+                    run_id, "DATACENTER", "AMD", 0, "WATCH", "WATCH_RULE",
+                    "trend_ok", "trend_ok", "rolling 30d", "status",
+                    "2026-05-25T11:00:00Z",
+                ),
+            ],
+        )
+        conn.commit()
+        return run_id
+    finally:
+        conn.close()
 
 
 def _fake_parse_batch(tmp_path: Path) -> DatacenterDashboardBatchParseResult:
@@ -783,10 +974,20 @@ def _install_pipeline_mocks(
     )
 
 
-def test_build_parser_requires_reports_dir():
+def test_build_parser_accepts_dashboard_db_mode_args():
     parser = build_parser()
-    with pytest.raises(SystemExit):
-        parser.parse_args([])
+    args = parser.parse_args(
+        [
+            "--dashboard-db",
+            "/tmp/dashboard.db",
+            "--ecosystem-code",
+            "DATACENTER",
+            "--report-date",
+            "2026-05-22",
+        ]
+    )
+    assert args.dashboard_db == "/tmp/dashboard.db"
+    assert args.reports_dir is None
 
 
 def test_generate_dashboard_html_is_deterministic_and_escapes_values(
@@ -1449,3 +1650,77 @@ def test_html_cli_custom_output_path_works(tmp_path, monkeypatch):
     assert output_path.exists()
     html = output_path.read_text(encoding="utf-8")
     assert 'class="ticker-detail selected"' in html
+
+
+def test_html_cli_dashboard_db_mode_renders_html_and_prints_db_summaries(
+    tmp_path, capsys
+):
+    dashboard_db = tmp_path / "ecosystem_dashboard.db"
+    output_path = tmp_path / "dashboard_db_mode.html"
+    run_id = _seed_dashboard_db(dashboard_db)
+
+    exit_code = main(
+        [
+            "--dashboard-db",
+            str(dashboard_db),
+            "--ecosystem-code",
+            "DATACENTER",
+            "--report-date",
+            "2026-05-22",
+            "--output",
+            str(output_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert output_path.exists()
+    html = output_path.read_text(encoding="utf-8")
+    assert "2026-05-22" in html
+    assert run_id in html
+    assert "NVDA" in html
+    assert "SELL" in html
+
+    stdout = capsys.readouterr().out
+    assert "SUMMARY datacenter_dashboard_html.input_mode=dashboard_db" in stdout
+    assert "SUMMARY datacenter_dashboard_html.ecosystem_code=DATACENTER" in stdout
+    assert "SUMMARY datacenter_dashboard_html.report_date=2026-05-22" in stdout
+    assert f"SUMMARY datacenter_dashboard_html.run_id={run_id}" in stdout
+    assert "SUMMARY datacenter_dashboard_html.status=OK" in stdout
+
+
+def test_html_cli_dashboard_db_mode_requires_run_id_or_report_date(
+    tmp_path, capsys
+):
+    dashboard_db = tmp_path / "ecosystem_dashboard.db"
+    _seed_dashboard_db(dashboard_db)
+
+    exit_code = main(
+        [
+            "--dashboard-db",
+            str(dashboard_db),
+        ]
+    )
+
+    assert exit_code == 2
+    assert "dashboard-db mode requires --run-id or --report-date" in capsys.readouterr().out
+
+
+def test_html_cli_dashboard_db_mode_rejects_non_datacenter_ecosystem_code(
+    tmp_path, capsys
+):
+    dashboard_db = tmp_path / "ecosystem_dashboard.db"
+    _seed_dashboard_db(dashboard_db)
+
+    exit_code = main(
+        [
+            "--dashboard-db",
+            str(dashboard_db),
+            "--ecosystem-code",
+            "OTHER",
+            "--report-date",
+            "2026-05-22",
+        ]
+    )
+
+    assert exit_code == 2
+    assert "unsupported ecosystem_code for this CLI: OTHER" in capsys.readouterr().out

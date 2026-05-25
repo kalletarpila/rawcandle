@@ -6,10 +6,11 @@ from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
 import re
-from typing import Sequence
+from typing import TYPE_CHECKING, Sequence
 
 from dev_tools.datacenter_dashboard_decisions import (
     DatacenterDecisionBatchResult,
+    DatacenterDecisionTrace,
     DatacenterTickerDecision,
     build_datacenter_ticker_decisions,
 )
@@ -29,6 +30,8 @@ from dev_tools.datacenter_dashboard_support import (
     DatacenterReportStatus,
     discover_datacenter_dashboard_status,
 )
+if TYPE_CHECKING:
+    from dev_tools.ecosystem_dashboard_read_model import EcosystemDashboardSnapshot
 
 _ACTION_ORDER = (
     "SELL",
@@ -397,11 +400,513 @@ class DatacenterDashboardTickerRecord:
     is_watchlist: int
 
 
+def _action_order_index(action: str | None) -> int:
+    normalized = (action or "").strip().upper()
+    try:
+        return _ACTION_ORDER.index(normalized)
+    except ValueError:
+        return len(_ACTION_ORDER)
+
+
+def _normalize_snapshot_horizon(value: str) -> str:
+    lowered = value.strip().lower().replace("_", " ")
+    if lowered in {"rolling 30d", "rolling30d"}:
+        return "rolling 30d"
+    if lowered in {"rolling 5d", "rolling5d"}:
+        return "rolling 5d"
+    if lowered in {"rolling 2d", "rolling2d"}:
+        return "rolling 2d"
+    if lowered == "daily":
+        return "daily"
+    return value.strip()
+
+
+def _split_snapshot_horizons(value: object | None) -> list[str]:
+    if value is None:
+        return []
+    horizons = [
+        _normalize_snapshot_horizon(part)
+        for part in str(value).split(",")
+        if part.strip()
+    ]
+    ordered = sorted(
+        {horizon for horizon in horizons if horizon},
+        key=lambda item: (_HORIZON_PRIORITY.get(item, 99), item),
+    )
+    return ordered
+
+
+def _snapshot_text(value: object | None) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _snapshot_to_decision_trace_rows(
+    snapshot: EcosystemDashboardSnapshot,
+) -> dict[str, list[DatacenterDecisionTrace]]:
+    trace_rows: dict[str, list[DatacenterDecisionTrace]] = {}
+    for row in snapshot.decision_trace:
+        ticker = _snapshot_text(row.get("ticker"))
+        if not ticker:
+            continue
+        trace_rows.setdefault(ticker, []).append(
+            DatacenterDecisionTrace(
+                ticker=ticker,
+                action=_snapshot_text(row.get("action")),
+                matched_rule=_snapshot_text(row.get("matched_rule")),
+                horizon=_snapshot_text(row.get("horizon")) or None,
+                field_name=_snapshot_text(row.get("field")) or None,
+                matched_token=_snapshot_text(row.get("matched_token")) or None,
+                matched_value=_snapshot_text(row.get("matched_value")) or None,
+                source_file=None,
+                section=None,
+                row_kind=None,
+            )
+        )
+    for ticker in trace_rows:
+        trace_rows[ticker].sort(
+            key=lambda item: (
+                item.horizon or "",
+                item.field_name or "",
+                item.matched_rule,
+                item.matched_token or "",
+            )
+        )
+    return trace_rows
+
+
+def _snapshot_action_counts(
+    snapshot: EcosystemDashboardSnapshot,
+) -> dict[str, int]:
+    counts = {action: 0 for action in _ACTION_ORDER}
+    extras: dict[str, int] = {}
+    for row in snapshot.action_summary:
+        action = _snapshot_text(row.get("action"))
+        count_value = row.get("count")
+        count = int(count_value) if isinstance(count_value, int) else 0
+        if action in counts:
+            counts[action] = count
+        elif action:
+            extras[action] = count
+    counts.update(extras)
+    return counts
+
+
+def _snapshot_count_values(
+    rows: Sequence[dict[str, object]],
+    field_name: str,
+    ordered_keys: Sequence[str],
+) -> dict[str, int]:
+    counts = {key: 0 for key in ordered_keys}
+    extras: dict[str, int] = {}
+    for row in rows:
+        value = _snapshot_text(row.get(field_name))
+        if not value:
+            value = "INSUFFICIENT_DATA"
+        if value in counts:
+            counts[value] += 1
+        else:
+            extras[value] = extras.get(value, 0) + 1
+    counts.update(extras)
+    return counts
+
+
+def _snapshot_to_decision_result(
+    snapshot: EcosystemDashboardSnapshot,
+) -> DatacenterDecisionBatchResult:
+    traces_by_ticker = _snapshot_to_decision_trace_rows(snapshot)
+    decisions: list[DatacenterTickerDecision] = []
+    for row in sorted(snapshot.tickers, key=lambda item: _snapshot_text(item.get("ticker"))):
+        ticker = _snapshot_text(row.get("ticker"))
+        if not ticker:
+            continue
+        decisions.append(
+            DatacenterTickerDecision(
+                ticker=ticker,
+                action=_snapshot_text(row.get("action")) or "NEUTRAL",
+                severity=_snapshot_text(row.get("severity")) or "INFO",
+                primary_reason=_snapshot_text(row.get("primary_reason")) or None,
+                reasons=[_snapshot_text(row.get("primary_reason"))]
+                if _snapshot_text(row.get("primary_reason"))
+                else [],
+                blocking_reasons=[],
+                horizons_present=_split_snapshot_horizons(row.get("horizons_present")),
+                horizon_statuses={
+                    "daily": _snapshot_text(row.get("daily_status")),
+                    "rolling 2d": _snapshot_text(row.get("rolling_2d_status")),
+                    "rolling 5d": _snapshot_text(row.get("rolling_5d_status")),
+                    "rolling 30d": _snapshot_text(row.get("rolling_30d_status")),
+                },
+                distance_to_ema20=None,
+                high_exit_risk_days_count=None,
+                trend_state=_snapshot_text(row.get("trend_state")) or None,
+                latest_structure_label=_snapshot_text(row.get("latest_structure_label")) or None,
+                latest_bos_event_type=_snapshot_text(row.get("latest_bos_event_type")) or None,
+                latest_reset_reason=_snapshot_text(row.get("latest_reset_reason")) or None,
+                latest_bullish_signal_age_td=None,
+                latest_bearish_signal_age_td=None,
+                pullback_validity=_snapshot_text(row.get("pullback_validity")) or None,
+                pullback_reason=None,
+                entry_readiness=_snapshot_text(row.get("entry_readiness")) or None,
+                entry_readiness_reason=None,
+                candidate_priority=(
+                    row.get("candidate_priority")
+                    if isinstance(row.get("candidate_priority"), int)
+                    else None
+                ),
+                candidate_priority_label=_snapshot_text(row.get("candidate_priority_label")) or None,
+                candidate_priority_reason=None,
+                source_files=[],
+                decision_trace=sorted(
+                    traces_by_ticker.get(ticker, []),
+                    key=lambda item: (
+                        item.ticker,
+                        item.horizon or "",
+                        item.field_name or "",
+                        item.matched_rule,
+                    ),
+                ),
+            )
+        )
+    return DatacenterDecisionBatchResult(
+        decisions=decisions,
+        action_counts=_snapshot_action_counts(snapshot),
+        pullback_counts=_snapshot_count_values(
+            snapshot.tickers,
+            "pullback_validity",
+            _PULLBACK_ORDER,
+        ),
+        pullback_action_counts={},
+        entry_readiness_counts=_snapshot_count_values(
+            snapshot.tickers,
+            "entry_readiness",
+            _ENTRY_READINESS_ORDER,
+        ),
+        candidate_priority_counts=_snapshot_count_values(
+            snapshot.tickers,
+            "candidate_priority_label",
+            _CANDIDATE_PRIORITY_LABEL_ORDER,
+        ),
+        warning_count=0,
+        warnings=[],
+    )
+
+
+def _snapshot_row_for_horizon(
+    *,
+    ticker_row: dict[str, object],
+    horizon: str,
+    horizon_status: str | None,
+    source_file: str,
+    is_watchlist: bool,
+) -> DatacenterDashboardRow:
+    raw_fields: dict[str, str] = {}
+    if horizon_status:
+        raw_fields["current_status"] = horizon_status
+        raw_fields["watchlist_status"] = horizon_status
+    for field_name in (
+        "start_status_30d",
+        "status_change_30d",
+        "status_change_5d",
+        "ma_break_status",
+        "freshness_status",
+        "latest_structure_label",
+        "latest_bos_event_type",
+        "latest_reset_reason",
+    ):
+        value = _snapshot_text(ticker_row.get(field_name))
+        if value:
+            raw_fields[field_name] = value
+    latest_candle = _snapshot_text(ticker_row.get("latest_candle"))
+    if latest_candle:
+        raw_fields["latest_bullish_candle"] = latest_candle
+    latest_candle_age = ticker_row.get("latest_candle_age_td")
+    if isinstance(latest_candle_age, int):
+        raw_fields["bullish_candle_age_td"] = str(latest_candle_age)
+    latest_divergence = _snapshot_text(ticker_row.get("latest_divergence"))
+    if latest_divergence:
+        raw_fields["latest_bearish_divergence"] = latest_divergence
+    latest_divergence_age = ticker_row.get("latest_divergence_age_td")
+    if isinstance(latest_divergence_age, int):
+        raw_fields["bearish_divergence_age_td"] = str(latest_divergence_age)
+    latest_chart_pattern = _snapshot_text(ticker_row.get("latest_chart_pattern"))
+    if latest_chart_pattern:
+        raw_fields["latest_chart_pattern"] = latest_chart_pattern
+    latest_chart_pattern_age = ticker_row.get("latest_chart_pattern_age_td")
+    if isinstance(latest_chart_pattern_age, int):
+        raw_fields["latest_chart_pattern_age_td"] = str(latest_chart_pattern_age)
+    return DatacenterDashboardRow(
+        ticker=_snapshot_text(ticker_row.get("ticker")),
+        horizon=horizon,
+        source_file=source_file,
+        section="Watchlist Summary" if is_watchlist else "signals",
+        row_kind="watchlist" if is_watchlist else "row",
+        raw_action=_snapshot_text(ticker_row.get("action")) or None,
+        raw_status=horizon_status or _snapshot_text(ticker_row.get("current_status")) or None,
+        reason=_snapshot_text(ticker_row.get("primary_reason")) or None,
+        trend_state=_snapshot_text(ticker_row.get("trend_state")) or None,
+        latest_structure_label=_snapshot_text(ticker_row.get("latest_structure_label")) or None,
+        latest_bos_event_type=_snapshot_text(ticker_row.get("latest_bos_event_type")) or None,
+        latest_reset_reason=_snapshot_text(ticker_row.get("latest_reset_reason")) or None,
+        distance_to_ema20=None,
+        high_exit_risk_days_count=None,
+        blocking_reasons=None,
+        ma_break_status=_snapshot_text(ticker_row.get("ma_break_status")) or None,
+        ema20_break_confirmed=None,
+        sma50_break_confirmed=None,
+        close_below_ema20=None,
+        close_below_sma50=None,
+        consecutive_closes_below_ema20=None,
+        consecutive_closes_below_sma50=None,
+        ema20_break_pct=None,
+        sma50_break_pct=None,
+        freshness_status=_snapshot_text(ticker_row.get("freshness_status")) or None,
+        structure_warning_overrides_bullish_signal=None,
+        latest_bullish_signal_age_td=None,
+        latest_bearish_signal_age_td=None,
+        latest_bos_up_age_td=None,
+        latest_bos_down_age_td=None,
+        latest_reset_age_td=(
+            ticker_row.get("latest_reset_age_td")
+            if isinstance(ticker_row.get("latest_reset_age_td"), int)
+            else None
+        ),
+        raw_fields=raw_fields,
+    )
+
+
+def _snapshot_to_parsed_rows(
+    snapshot: EcosystemDashboardSnapshot,
+) -> list[DatacenterDashboardRow]:
+    watchlist_tickers = {
+        _snapshot_text(row.get("ticker")).upper() for row in snapshot.watchlist
+    }
+    rows: list[DatacenterDashboardRow] = []
+    for ticker_row in snapshot.tickers:
+        ticker = _snapshot_text(ticker_row.get("ticker"))
+        if not ticker:
+            continue
+        horizons = _split_snapshot_horizons(ticker_row.get("horizons_present"))
+        if not horizons:
+            horizons = ["daily"]
+        source_file = f"snapshot://{ticker}"
+        for horizon in horizons:
+            if horizon == "daily":
+                horizon_status = _snapshot_text(ticker_row.get("daily_status")) or _snapshot_text(ticker_row.get("current_status"))
+            elif horizon == "rolling 2d":
+                horizon_status = _snapshot_text(ticker_row.get("rolling_2d_status"))
+            elif horizon == "rolling 5d":
+                horizon_status = _snapshot_text(ticker_row.get("rolling_5d_status"))
+            else:
+                horizon_status = _snapshot_text(ticker_row.get("rolling_30d_status"))
+            rows.append(
+                _snapshot_row_for_horizon(
+                    ticker_row=ticker_row,
+                    horizon=horizon,
+                    horizon_status=horizon_status or None,
+                    source_file=source_file,
+                    is_watchlist=ticker.upper() in watchlist_tickers,
+                )
+            )
+    return rows
+
+
+def _snapshot_to_dashboard_status(
+    snapshot: EcosystemDashboardSnapshot,
+) -> DatacenterDashboardStatus:
+    reports = [
+        DatacenterReportStatus(
+            horizon=_normalize_snapshot_horizon(_snapshot_text(row.get("horizon"))),
+            status=_snapshot_text(row.get("status")) or "UNKNOWN",
+            path=_snapshot_text(row.get("markdown_path"))
+            or _snapshot_text(row.get("csv_path"))
+            or None,
+            modified_at=_snapshot_text(row.get("modified_at_utc")) or None,
+        )
+        for row in snapshot.source_reports
+    ]
+    return DatacenterDashboardStatus(
+        overall_status=snapshot.run.status or "UNKNOWN",
+        reports=reports,
+    )
+
+
+def _snapshot_to_parse_result(
+    snapshot: EcosystemDashboardSnapshot,
+) -> DatacenterDashboardBatchParseResult:
+    reports = [
+        DatacenterDashboardReportParseSummary(
+            horizon=_normalize_snapshot_horizon(_snapshot_text(row.get("horizon"))),
+            source_file=_snapshot_text(row.get("markdown_path"))
+            or _snapshot_text(row.get("csv_path"))
+            or None,
+            row_count=0,
+            warning_count=0,
+        )
+        for row in snapshot.source_reports
+    ]
+    return DatacenterDashboardBatchParseResult(
+        reports=reports,
+        total_row_count=0,
+        total_warning_count=0,
+    )
+
+
+def _snapshot_market_map_records(
+    snapshot: EcosystemDashboardSnapshot,
+) -> list[DatacenterDashboardMarketMapRecord]:
+    return [
+        DatacenterDashboardMarketMapRecord(
+            market_level=_snapshot_text(row.get("market_level")),
+            name=_snapshot_text(row.get("name")),
+            layer=row.get("layer") if row.get("layer") is not None else None,
+            current_status=row.get("current_status"),
+            start_status_30d=row.get("start_status_30d"),
+            status_change_30d=row.get("status_change_30d"),
+            status_change_5d=row.get("status_change_5d"),
+            window_status_30d=row.get("window_status_30d"),
+            window_status_5d=row.get("window_status_5d"),
+            window_status_2d=row.get("window_status_2d"),
+            overheat_risk=row.get("overheat_risk"),
+            pct_above_ema20=row.get("pct_above_ema20"),
+            pct_above_ma10=row.get("pct_above_ma10"),
+            ema20_breadth_delta_5d=row.get("ema20_breadth_delta_5d"),
+            return_5d=row.get("return_5d"),
+            return_10d=row.get("return_10d"),
+            return_20d=row.get("return_20d"),
+            return_60d=row.get("return_60d"),
+            dow_trend_state=row.get("dow_trend_state"),
+            dow_trend_state_age_td=row.get("dow_trend_state_age_td"),
+            latest_structure_label=row.get("latest_structure_label"),
+            latest_structure_age_td=row.get("latest_structure_age_td"),
+            latest_bos_event_type=row.get("latest_bos_event_type"),
+            latest_bos_age_td=row.get("latest_bos_age_td"),
+            latest_reset_reason=row.get("latest_reset_reason"),
+            latest_reset_age_td=row.get("latest_reset_age_td"),
+            latest_candle=row.get("latest_candle"),
+            latest_candle_age_td=row.get("latest_candle_age_td"),
+            latest_divergence=row.get("latest_divergence"),
+            latest_divergence_age_td=row.get("latest_divergence_age_td"),
+            latest_chart_pattern=row.get("latest_chart_pattern"),
+            latest_chart_pattern_age_td=row.get("latest_chart_pattern_age_td"),
+            source_horizons=_snapshot_text(row.get("source_horizons")),
+            source_files=_snapshot_text(row.get("source_files")),
+        )
+        for row in snapshot.market_map
+    ]
+
+
+def _record_to_combined_ecosystem_row(
+    record: DatacenterDashboardMarketMapRecord,
+) -> _CombinedEcosystemRow:
+    return _CombinedEcosystemRow(
+        market_level=record.market_level,
+        name=record.name,
+        layer=record.layer or "-",
+        current_status=_safe_attr(record.current_status),
+        start_status_30d=_safe_attr(record.start_status_30d),
+        start_status_5d="",
+        status_change_30d=_safe_attr(record.status_change_30d),
+        status_change_5d=_safe_attr(record.status_change_5d),
+        window_status_30d=_safe_attr(record.window_status_30d),
+        window_status_5d=_safe_attr(record.window_status_5d),
+        window_status_2d=_safe_attr(record.window_status_2d),
+        overheat_risk_level=_safe_attr(record.overheat_risk),
+        pct_above_ema20="" if record.pct_above_ema20 is None else str(record.pct_above_ema20),
+        pct_above_ma10="" if record.pct_above_ma10 is None else str(record.pct_above_ma10),
+        ema20_breadth_delta_5d="" if record.ema20_breadth_delta_5d is None else str(record.ema20_breadth_delta_5d),
+        return_5d="" if record.return_5d is None else str(record.return_5d),
+        return_10d="" if record.return_10d is None else str(record.return_10d),
+        return_20d="" if record.return_20d is None else str(record.return_20d),
+        return_60d="" if record.return_60d is None else str(record.return_60d),
+        dow_trend_state=_safe_attr(record.dow_trend_state),
+        dow_trend_state_age_td="" if record.dow_trend_state_age_td is None else str(record.dow_trend_state_age_td),
+        latest_structure_label=_safe_attr(record.latest_structure_label),
+        latest_structure_age_td="" if record.latest_structure_age_td is None else str(record.latest_structure_age_td),
+        latest_bos_event_type=_safe_attr(record.latest_bos_event_type),
+        latest_bos_age_td="" if record.latest_bos_age_td is None else str(record.latest_bos_age_td),
+        latest_reset_reason=_safe_attr(record.latest_reset_reason),
+        latest_reset_age_td="" if record.latest_reset_age_td is None else str(record.latest_reset_age_td),
+        latest_relevant_pattern=_safe_attr(
+            record.latest_candle or record.latest_divergence or record.latest_chart_pattern
+        ),
+        latest_relevant_pattern_age_td="" if (
+            record.latest_candle_age_td is None
+            and record.latest_divergence_age_td is None
+            and record.latest_chart_pattern_age_td is None
+        ) else str(
+            record.latest_candle_age_td
+            if record.latest_candle is not None and record.latest_candle_age_td is not None
+            else record.latest_divergence_age_td
+            if record.latest_divergence is not None and record.latest_divergence_age_td is not None
+            else record.latest_chart_pattern_age_td
+            if record.latest_chart_pattern_age_td is not None
+            else ""
+        ),
+        source_horizons=record.source_horizons,
+        source_files=record.source_files,
+    )
+
+
+def _record_to_combined_market_group_row(
+    record: DatacenterDashboardMarketMapRecord,
+) -> _CombinedMarketMapGroupRow:
+    return _CombinedMarketMapGroupRow(
+        scope=record.market_level.lower(),
+        name=record.name,
+        layer=record.layer or "",
+        current_status=_safe_attr(record.current_status),
+        start_status_30d=_safe_attr(record.start_status_30d),
+        status_change_30d=_safe_attr(record.status_change_30d),
+        status_change_5d=_safe_attr(record.status_change_5d),
+        window_status_30d=_safe_attr(record.window_status_30d),
+        window_status_5d=_safe_attr(record.window_status_5d),
+        window_status_2d=_safe_attr(record.window_status_2d),
+        overheat_risk_level=_safe_attr(record.overheat_risk),
+        pct_above_ema20="" if record.pct_above_ema20 is None else str(record.pct_above_ema20),
+        pct_above_ma10="" if record.pct_above_ma10 is None else str(record.pct_above_ma10),
+        ema20_breadth_delta_5d="" if record.ema20_breadth_delta_5d is None else str(record.ema20_breadth_delta_5d),
+        return_5d="" if record.return_5d is None else str(record.return_5d),
+        return_10d="" if record.return_10d is None else str(record.return_10d),
+        return_20d="" if record.return_20d is None else str(record.return_20d),
+        return_60d="" if record.return_60d is None else str(record.return_60d),
+        dow_trend_state=_safe_attr(record.dow_trend_state),
+        dow_trend_state_age_td="" if record.dow_trend_state_age_td is None else str(record.dow_trend_state_age_td),
+        latest_structure_label=_safe_attr(record.latest_structure_label),
+        latest_structure_age_td="" if record.latest_structure_age_td is None else str(record.latest_structure_age_td),
+        latest_bos_event_type=_safe_attr(record.latest_bos_event_type),
+        latest_bos_age_td="" if record.latest_bos_age_td is None else str(record.latest_bos_age_td),
+        latest_reset_reason=_safe_attr(record.latest_reset_reason),
+        latest_reset_age_td="" if record.latest_reset_age_td is None else str(record.latest_reset_age_td),
+        latest_relevant_pattern=_safe_attr(
+            record.latest_candle or record.latest_divergence or record.latest_chart_pattern
+        ),
+        latest_relevant_pattern_age_td="" if (
+            record.latest_candle_age_td is None
+            and record.latest_divergence_age_td is None
+            and record.latest_chart_pattern_age_td is None
+        ) else str(
+            record.latest_candle_age_td
+            if record.latest_candle is not None and record.latest_candle_age_td is not None
+            else record.latest_divergence_age_td
+            if record.latest_divergence is not None and record.latest_divergence_age_td is not None
+            else record.latest_chart_pattern_age_td
+            if record.latest_chart_pattern_age_td is not None
+            else ""
+        ),
+        source_horizons=record.source_horizons,
+        source_files=record.source_files,
+    )
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Generate a static HTML Datacenter Dashboard from the latest reports."
     )
-    parser.add_argument("--reports-dir", required=True)
+    parser.add_argument("--reports-dir")
+    parser.add_argument("--dashboard-db")
+    parser.add_argument("--ecosystem-code", default="DATACENTER")
+    parser.add_argument("--run-id")
     parser.add_argument("--output")
     parser.add_argument("--report-date")
     parser.add_argument("--ticker")
@@ -3081,47 +3586,40 @@ def generate_dashboard_html(
     max_command_rows: int,
     max_candidate_rows: int,
     generated_at_utc: str | None = None,
+    snapshot: EcosystemDashboardSnapshot | None = None,
+    dashboard_db: str | None = None,
 ) -> tuple[
     str,
     DatacenterDashboardStatus,
     DatacenterDashboardBatchParseResult,
     DatacenterDecisionBatchResult,
 ]:
-    dashboard_status = discover_datacenter_dashboard_status(
-        reports_dir, report_date=report_date
-    )
-    parse_result = parse_datacenter_dashboard_reports(dashboard_status.reports)
-    parsed_rows = _collect_rows(dashboard_status)
-    decision_result = build_datacenter_ticker_decisions(parsed_rows)
-    inspector_views = _build_inspector_views(decision_result.decisions, parsed_rows)
-    generated_at = generated_at_utc or datetime.now(timezone.utc).isoformat(
-        timespec="seconds"
-    )
-    selection_mode = "report_date" if report_date else "newest"
-    selected_report_date = report_date or "newest"
+    if snapshot is None:
+        dashboard_status = discover_datacenter_dashboard_status(
+            reports_dir, report_date=report_date
+        )
+        parse_result = parse_datacenter_dashboard_reports(dashboard_status.reports)
+        parsed_rows = _collect_rows(dashboard_status)
+        decision_result = build_datacenter_ticker_decisions(parsed_rows)
+        generated_at = generated_at_utc or datetime.now(timezone.utc).isoformat(
+            timespec="seconds"
+        )
+        selection_mode = "report_date" if report_date else "newest"
+        selected_report_date = report_date or "newest"
 
-    found_reports = sum(
-        1 for report in dashboard_status.reports if report.status == "OK"
-    )
-    missing_reports = sum(
-        1 for report in dashboard_status.reports if report.status != "OK"
-    )
-    report_summaries = _report_summary_by_horizon(parse_result)
-    newest_report_timestamp = _newest_report_timestamp(dashboard_status)
-    report_paths = {
-        report.horizon: report.path or "" for report in dashboard_status.reports
-    }
-    market_map_rows = _extract_market_map_rows(dashboard_status)
-    ecosystem_context_rows = _extract_ecosystem_context_rows(dashboard_status)
-    watchlist_rows_by_ticker: dict[str, list[DatacenterDashboardRow]] = {}
-    for row in parsed_rows:
-        if not _is_watchlist_row(row):
-            continue
-        watchlist_rows_by_ticker.setdefault(row.ticker, []).append(row)
-
-    header_summary_rows = "".join(
-        "<tr>" f"<th>{escape(label)}</th>" f"<td>{_html_text(value)}</td>" "</tr>"
-        for label, value in (
+        found_reports = sum(
+            1 for report in dashboard_status.reports if report.status == "OK"
+        )
+        missing_reports = sum(
+            1 for report in dashboard_status.reports if report.status != "OK"
+        )
+        report_summaries = _report_summary_by_horizon(parse_result)
+        newest_report_timestamp = _newest_report_timestamp(dashboard_status)
+        report_paths = {
+            report.horizon: report.path or "" for report in dashboard_status.reports
+        }
+        market_map_records = build_dashboard_market_map_model(dashboard_status)
+        header_summary_pairs = (
             ("Generated at UTC", generated_at),
             ("Reports dir", reports_dir),
             ("Selected report date", selected_report_date),
@@ -3132,10 +3630,7 @@ def generate_dashboard_html(
             ("Total parsed rows", parse_result.total_row_count),
             ("Total parse warnings", parse_result.total_warning_count),
         )
-    )
-    report_source_rows = "".join(
-        "<tr>" f"<th>{escape(label)}</th>" f"<td>{_html_text(value)}</td>" "</tr>"
-        for label, value in (
+        report_source_pairs = (
             ("generated_at_utc", generated_at),
             ("reports_dir", reports_dir),
             ("selected_report_date", selected_report_date),
@@ -3146,6 +3641,62 @@ def generate_dashboard_html(
             ("rolling_5d_report_path", report_paths.get("rolling 5d", "")),
             ("rolling_30d_report_path", report_paths.get("rolling 30d", "")),
         )
+    else:
+        dashboard_status = _snapshot_to_dashboard_status(snapshot)
+        parse_result = _snapshot_to_parse_result(snapshot)
+        parsed_rows = _snapshot_to_parsed_rows(snapshot)
+        decision_result = _snapshot_to_decision_result(snapshot)
+        generated_at = generated_at_utc or datetime.now(timezone.utc).isoformat(
+            timespec="seconds"
+        )
+        selection_mode = "dashboard_db"
+        selected_report_date = snapshot.run.report_date
+        found_reports = sum(
+            1 for report in dashboard_status.reports if report.status == "FOUND"
+        )
+        missing_reports = sum(
+            1 for report in dashboard_status.reports if report.status != "FOUND"
+        )
+        report_summaries = _report_summary_by_horizon(parse_result)
+        newest_report_timestamp = _newest_report_timestamp(dashboard_status)
+        market_map_records = _snapshot_market_map_records(snapshot)
+        header_summary_pairs = (
+            ("Generated at UTC", generated_at),
+            ("Dashboard DB", dashboard_db or ""),
+            ("Selected report date", snapshot.run.report_date),
+            ("Selected run id", snapshot.run.run_id),
+            ("Selection mode", selection_mode),
+            ("Readiness", snapshot.run.status or ""),
+            ("Source reports", len(snapshot.source_reports)),
+            ("Action summary rows", len(snapshot.action_summary)),
+            ("Market map rows", len(snapshot.market_map)),
+            ("Watchlist rows", len(snapshot.watchlist)),
+            ("Ticker rows", len(snapshot.tickers)),
+            ("Decision trace rows", len(snapshot.decision_trace)),
+        )
+        report_source_pairs = (
+            ("generated_at_utc", generated_at),
+            ("dashboard_db", dashboard_db or ""),
+            ("ecosystem_code", snapshot.run.ecosystem_code),
+            ("selected_report_date", snapshot.run.report_date),
+            ("selected_run_id", snapshot.run.run_id),
+            ("selection_mode", selection_mode),
+            ("newest_report_timestamp", newest_report_timestamp or "unknown"),
+        )
+    inspector_views = _build_inspector_views(decision_result.decisions, parsed_rows)
+    watchlist_rows_by_ticker: dict[str, list[DatacenterDashboardRow]] = {}
+    for row in parsed_rows:
+        if not _is_watchlist_row(row):
+            continue
+        watchlist_rows_by_ticker.setdefault(row.ticker, []).append(row)
+
+    header_summary_rows = "".join(
+        "<tr>" f"<th>{escape(label)}</th>" f"<td>{_html_text(value)}</td>" "</tr>"
+        for label, value in header_summary_pairs
+    )
+    report_source_rows = "".join(
+        "<tr>" f"<th>{escape(label)}</th>" f"<td>{_html_text(value)}</td>" "</tr>"
+        for label, value in report_source_pairs
     )
 
     command_center_html_parts: list[str] = []
@@ -3445,13 +3996,44 @@ def generate_dashboard_html(
         )
     watchlist_rows_html = "".join(watchlist_rows_html_parts)
 
-    combined_ecosystem_row = _combine_ecosystem_context_rows(ecosystem_context_rows)
-    layer_market_rows = [row for row in market_map_rows if row.scope == "layer"]
-    subindustry_market_rows = [
-        row for row in market_map_rows if row.scope == "subindustry"
-    ]
-    combined_layer_rows = _combine_market_group_rows(layer_market_rows)
-    combined_subindustry_rows = _combine_market_group_rows(subindustry_market_rows)
+    if snapshot is None:
+        market_map_rows = _extract_market_map_rows(dashboard_status)
+        ecosystem_context_rows = _extract_ecosystem_context_rows(dashboard_status)
+        combined_ecosystem_row = _combine_ecosystem_context_rows(ecosystem_context_rows)
+        layer_market_rows = [row for row in market_map_rows if row.scope == "layer"]
+        subindustry_market_rows = [
+            row for row in market_map_rows if row.scope == "subindustry"
+        ]
+        combined_layer_rows = _combine_market_group_rows(layer_market_rows)
+        combined_subindustry_rows = _combine_market_group_rows(subindustry_market_rows)
+    else:
+        ecosystem_records = [
+            record for record in market_map_records if record.market_level == "ECOSYSTEM"
+        ]
+        layer_records = [
+            record for record in market_map_records if record.market_level == "LAYER"
+        ]
+        subindustry_records = [
+            record
+            for record in market_map_records
+            if record.market_level == "SUBINDUSTRY"
+        ]
+        combined_ecosystem_row = (
+            _record_to_combined_ecosystem_row(ecosystem_records[0])
+            if ecosystem_records
+            else None
+        )
+        combined_layer_rows = [
+            _record_to_combined_market_group_row(record)
+            for record in sorted(layer_records, key=lambda item: (item.layer or "", item.name))
+        ]
+        combined_subindustry_rows = [
+            _record_to_combined_market_group_row(record)
+            for record in sorted(
+                subindustry_records,
+                key=lambda item: (item.layer or "", item.name),
+            )
+        ]
     market_map_header_html = _market_map_header_html()
     market_map_colgroup_html = _market_map_colgroup_html()
     ecosystem_market_rows_html = (
@@ -4099,7 +4681,10 @@ def generate_dashboard_html(
 
 def generate_datacenter_dashboard_html_file(
     *,
-    reports_dir: str,
+    reports_dir: str | None = None,
+    dashboard_db: str | None = None,
+    ecosystem_code: str = "DATACENTER",
+    run_id: str | None = None,
     output: str | None = None,
     report_date: str | None = None,
     title: str | None = None,
@@ -4116,34 +4701,67 @@ def generate_datacenter_dashboard_html_file(
     ):
         raise ValueError(f"invalid report_date format: {normalized_report_date}")
 
-    dashboard_status = discover_datacenter_dashboard_status(
-        reports_dir,
-        report_date=normalized_report_date,
+    normalized_dashboard_db = (
+        dashboard_db.strip() if dashboard_db is not None and dashboard_db.strip() else None
     )
-    if normalized_report_date and all(
-        report.status != "OK" for report in dashboard_status.reports
-    ):
-        raise FileNotFoundError(
-            f"no reports found for report_date={normalized_report_date} in {reports_dir}"
+    normalized_reports_dir = (
+        reports_dir.strip() if reports_dir is not None and reports_dir.strip() else None
+    )
+    normalized_run_id = run_id.strip() if run_id is not None and run_id.strip() else None
+    normalized_ecosystem_code = ecosystem_code.strip() if ecosystem_code.strip() else "DATACENTER"
+
+    snapshot: EcosystemDashboardSnapshot | None = None
+    if normalized_dashboard_db is not None:
+        from dev_tools.ecosystem_dashboard_read_model import load_dashboard_snapshot
+
+        if normalized_reports_dir is not None:
+            raise ValueError("do not combine --dashboard-db with --reports-dir")
+        if normalized_run_id is None and normalized_report_date is None:
+            raise ValueError("dashboard-db mode requires --run-id or --report-date")
+        if normalized_ecosystem_code != "DATACENTER":
+            raise ValueError(
+                f"unsupported ecosystem_code for this CLI: {normalized_ecosystem_code}"
+            )
+        snapshot = load_dashboard_snapshot(
+            dashboard_db=normalized_dashboard_db,
+            ecosystem_code=normalized_ecosystem_code,
+            report_date=normalized_report_date,
+            run_id=normalized_run_id,
         )
+        normalized_report_date = snapshot.run.report_date
+    else:
+        if normalized_reports_dir is None:
+            raise ValueError("--reports-dir is required unless --dashboard-db is provided")
+        dashboard_status = discover_datacenter_dashboard_status(
+            normalized_reports_dir,
+            report_date=normalized_report_date,
+        )
+        if normalized_report_date and all(
+            report.status != "OK" for report in dashboard_status.reports
+        ):
+            raise FileNotFoundError(
+                f"no reports found for report_date={normalized_report_date} in {normalized_reports_dir}"
+            )
 
     selected_title = title or "Datacenter Dashboard"
     if normalized_report_date and selected_title == "Datacenter Dashboard":
         selected_title = f"{selected_title} — {normalized_report_date}"
 
     output_path = resolve_dashboard_html_output_path(
-        reports_dir=reports_dir,
+        reports_dir=normalized_reports_dir or str(Path(normalized_dashboard_db).parent),
         output=output,
         report_date=normalized_report_date,
     )
     html, dashboard_status, _parse_result, decision_result = generate_dashboard_html(
-        reports_dir=reports_dir,
+        reports_dir=normalized_reports_dir or "",
         title=selected_title,
         ticker=ticker,
         report_date=normalized_report_date,
         max_command_rows=max_command_rows,
         max_candidate_rows=max_candidate_rows,
         generated_at_utc=generated_at_utc,
+        snapshot=snapshot,
+        dashboard_db=normalized_dashboard_db,
     )
     output_path.write_text(html, encoding="utf-8")
 
@@ -4158,18 +4776,34 @@ def generate_datacenter_dashboard_html_file(
     missing_reports = sum(
         1 for report in dashboard_status.reports if report.status != "OK"
     )
-    selection_mode = "report_date" if normalized_report_date else "newest"
-    summary_lines = (
-        f"SUMMARY reports_dir={reports_dir}",
-        f"SUMMARY report_date={normalized_report_date or 'newest'}",
-        f"SUMMARY selection_mode={selection_mode}",
-        f"SUMMARY html_output={output_path}",
-        f"SUMMARY readiness={dashboard_status.overall_status}",
-        f"SUMMARY found_reports={found_reports}",
-        f"SUMMARY missing_reports={missing_reports}",
-        f"SUMMARY decision_total={len(decision_result.decisions)}",
-        f"SUMMARY candidate_pullback_rows={candidate_rows}",
-    )
+    selection_mode = "dashboard_db" if snapshot is not None else ("report_date" if normalized_report_date else "newest")
+    if snapshot is not None:
+        summary_lines = (
+            "SUMMARY datacenter_dashboard_html.input_mode=dashboard_db",
+            f"SUMMARY datacenter_dashboard_html.ecosystem_code={snapshot.run.ecosystem_code}",
+            f"SUMMARY datacenter_dashboard_html.report_date={snapshot.run.report_date}",
+            f"SUMMARY datacenter_dashboard_html.run_id={snapshot.run.run_id}",
+            f"SUMMARY datacenter_dashboard_html.source_reports={len(snapshot.source_reports)}",
+            f"SUMMARY datacenter_dashboard_html.action_summary={len(snapshot.action_summary)}",
+            f"SUMMARY datacenter_dashboard_html.market_map={len(snapshot.market_map)}",
+            f"SUMMARY datacenter_dashboard_html.watchlist={len(snapshot.watchlist)}",
+            f"SUMMARY datacenter_dashboard_html.tickers={len(snapshot.tickers)}",
+            f"SUMMARY datacenter_dashboard_html.decision_trace={len(snapshot.decision_trace)}",
+            f"SUMMARY datacenter_dashboard_html.output_path={output_path}",
+            "SUMMARY datacenter_dashboard_html.status=OK",
+        )
+    else:
+        summary_lines = (
+            f"SUMMARY reports_dir={normalized_reports_dir}",
+            f"SUMMARY report_date={normalized_report_date or 'newest'}",
+            f"SUMMARY selection_mode={selection_mode}",
+            f"SUMMARY html_output={output_path}",
+            f"SUMMARY readiness={dashboard_status.overall_status}",
+            f"SUMMARY found_reports={found_reports}",
+            f"SUMMARY missing_reports={missing_reports}",
+            f"SUMMARY decision_total={len(decision_result.decisions)}",
+            f"SUMMARY candidate_pullback_rows={candidate_rows}",
+        )
     return DatacenterDashboardHtmlGenerationResult(
         output_path=str(output_path),
         report_date=normalized_report_date or "newest",
@@ -4188,6 +4822,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = generate_datacenter_dashboard_html_file(
             reports_dir=args.reports_dir,
+            dashboard_db=args.dashboard_db,
+            ecosystem_code=args.ecosystem_code,
+            run_id=args.run_id,
             output=args.output,
             report_date=args.report_date,
             title=args.title,
