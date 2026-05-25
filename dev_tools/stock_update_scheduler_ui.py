@@ -86,6 +86,10 @@ DEFAULT_DATACENTER_DASHBOARD_REPORTS_DIR = "/home/kalle/projects/rawcandle/temp"
 _DATACENTER_DASHBOARD_REPORT_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
+def _datacenter_report_time_tag() -> str:
+    return datetime.now().strftime("%H%M")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Standalone stock update scheduler control panel."
@@ -1276,6 +1280,50 @@ def build_datacenter_rolling_report_command(
     ]
 
 
+def build_datacenter_dashboard_rolling_report_commands(
+    *,
+    analysis_db: str,
+    signal_date: str,
+    taxonomy_version: str,
+    watchlist_file: str,
+    output_dir: str,
+    time_tag: str | None = None,
+) -> list[dict[str, object]]:
+    output_dir_path = Path(output_dir.strip())
+    resolved_time_tag = (time_tag or _datacenter_report_time_tag()).strip()
+    command_specs: list[dict[str, object]] = []
+    for horizon_label, window_size in (("2", "2"), ("5", "5"), ("30", "30")):
+        output_markdown = output_dir_path / f"datacenter_rolling_{horizon_label}_{signal_date.strip()}_{resolved_time_tag}_full.md"
+        output_csv = output_dir_path / f"datacenter_rolling_{horizon_label}_{signal_date.strip()}_{resolved_time_tag}_full.csv"
+        command_specs.append(
+            {
+                "horizon_label": horizon_label,
+                "window_size": window_size,
+                "output_markdown": str(output_markdown),
+                "output_csv": str(output_csv),
+                "command": [
+                    "python3",
+                    "run_datacenter_weekly_swing_report.py",
+                    "--analysis-db",
+                    analysis_db.strip(),
+                    "--end-date",
+                    signal_date.strip(),
+                    "--taxonomy-version",
+                    taxonomy_version.strip(),
+                    "--window-size",
+                    window_size,
+                    "--watchlist-file",
+                    watchlist_file.strip(),
+                    "--output-md",
+                    str(output_markdown),
+                    "--output-csv",
+                    str(output_csv),
+                ],
+            }
+        )
+    return command_specs
+
+
 def build_datacenter_pipeline_plan_command(
     *,
     analysis_db: str,
@@ -1399,6 +1447,133 @@ def run_datacenter_ui_command(
         except Exception as exc:
             _append_log(f"=== Datacenter: {title} failed ({exc}) ===")
             _set_status(status_field, f"{title} failed: {exc}", _STATUS_ERROR_COLOR)
+            page.update()
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
+def run_datacenter_dashboard_rolling_reports_ui_command(
+    *,
+    page: ft.Page,
+    log_field: ft.TextField,
+    status_field: ft.TextField,
+    analysis_db: str,
+    signal_date: str,
+    taxonomy_version: str,
+    watchlist_file: str,
+    output_dir: str,
+    reports_column: ft.Column | None = None,
+    assets_root: Path | None = None,
+) -> None:
+    command_specs = build_datacenter_dashboard_rolling_report_commands(
+        analysis_db=analysis_db,
+        signal_date=signal_date,
+        taxonomy_version=taxonomy_version,
+        watchlist_file=watchlist_file,
+        output_dir=output_dir,
+    )
+
+    def _append_log(message: str) -> None:
+        existing = log_field.value or ""
+        log_field.value = f"{message}\n{existing}".strip()
+
+    def _worker() -> None:
+        try:
+            if output_dir and output_dir.strip():
+                Path(output_dir.strip()).mkdir(parents=True, exist_ok=True)
+            _append_log("=== Datacenter: Generate Dashboard Rolling Reports ===")
+            page.update()
+            env = os.environ.copy()
+            env["PYTHONPATH"] = "."
+            succeeded = 0
+            failed = 0
+            generated_paths: list[Path] = []
+            horizon_status_lines: list[str] = []
+            horizon_name_map = {"2": "dashboard_rolling_2", "5": "dashboard_rolling_5", "30": "dashboard_rolling_30"}
+
+            for spec in command_specs:
+                horizon_label = spec["horizon_label"]
+                command = spec["command"]
+                output_markdown = spec["output_markdown"]
+                output_csv = spec["output_csv"]
+                _append_log(f"=== Datacenter: Generate Rolling {horizon_label}d Report ===")
+                _append_log("COMMAND " + " ".join(command))
+                page.update()
+                completed = subprocess.run(
+                    command,
+                    cwd=str(REPO_ROOT),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    env=env,
+                )
+                stdout = completed.stdout or ""
+                stderr = completed.stderr or ""
+                combined = "\n".join(part for part in [stdout.strip(), stderr.strip()] if part).strip()
+                if combined:
+                    _append_log(combined)
+                summary_prefix = horizon_name_map[str(horizon_label)]
+                if completed.returncode == 0:
+                    succeeded += 1
+                    generated_paths.extend([Path(str(output_markdown)), Path(str(output_csv))])
+                    horizon_status_lines.extend(
+                        [
+                            f"SUMMARY {summary_prefix}.status=OK",
+                            f"SUMMARY {summary_prefix}.output_markdown={output_markdown}",
+                        ]
+                    )
+                else:
+                    failed += 1
+                    horizon_status_lines.extend(
+                        [
+                            f"SUMMARY {summary_prefix}.status=FAILED",
+                            f"SUMMARY {summary_prefix}.output_markdown=",
+                        ]
+                    )
+                    _append_log(
+                        f"=== Datacenter: Generate Rolling {horizon_label}d Report failed (exit {completed.returncode}) ==="
+                    )
+
+            summary_lines = [
+                "SUMMARY dashboard_rolling_reports.attempted=3",
+                f"SUMMARY dashboard_rolling_reports.succeeded={succeeded}",
+                f"SUMMARY dashboard_rolling_reports.failed={failed}",
+                f"SUMMARY dashboard_rolling_reports.output_dir={output_dir}",
+                f"SUMMARY dashboard_rolling_reports.end_date={signal_date}",
+            ] + horizon_status_lines
+            for line in summary_lines:
+                _append_log(line)
+
+            if reports_column is not None and assets_root is not None and generated_paths:
+                populate_datacenter_report_downloads(
+                    page=page,
+                    reports_column=reports_column,
+                    status_field=status_field,
+                    assets_root=assets_root,
+                    report_paths=generated_paths,
+                )
+            if failed == 0:
+                _append_log("=== Datacenter: Generate Dashboard Rolling Reports completed ===")
+                _set_status(
+                    status_field,
+                    "Generate Dashboard Rolling Reports completed.",
+                    _STATUS_OK_COLOR,
+                )
+            else:
+                _append_log("=== Datacenter: Generate Dashboard Rolling Reports completed with failures ===")
+                _set_status(
+                    status_field,
+                    f"Generate Dashboard Rolling Reports completed with {failed} failed horizon(s).",
+                    _STATUS_WARNING_COLOR,
+                )
+            page.update()
+        except Exception as exc:
+            _append_log(f"=== Datacenter: Generate Dashboard Rolling Reports failed ({exc}) ===")
+            _set_status(
+                status_field,
+                f"Generate Dashboard Rolling Reports failed: {exc}",
+                _STATUS_ERROR_COLOR,
+            )
             page.update()
 
     threading.Thread(target=_worker, daemon=True).start()
@@ -2157,6 +2332,20 @@ def run_app(page: ft.Page, config_path: str) -> None:
             include_rolling_reports=True,
         )
 
+    def on_datacenter_dashboard_rolling_reports(e) -> None:
+        run_datacenter_dashboard_rolling_reports_ui_command(
+            page=page,
+            log_field=datacenter_log_field,
+            status_field=datacenter_status_field,
+            analysis_db=datacenter_analysis_db_field.value,
+            signal_date=datacenter_signal_date_field.value,
+            taxonomy_version=datacenter_taxonomy_version_field.value,
+            watchlist_file=datacenter_watchlist_file_field.value,
+            output_dir=datacenter_output_dir_field.value,
+            reports_column=datacenter_reports_column,
+            assets_root=datacenter_assets_root,
+        )
+
     def on_datacenter_plan(e) -> None:
         run_datacenter_ui_command(
             page=page,
@@ -2235,6 +2424,10 @@ def run_app(page: ft.Page, config_path: str) -> None:
     datacenter_audit_button = ft.ElevatedButton("Run Audit", on_click=on_datacenter_run_audit)
     datacenter_daily_report_button = ft.ElevatedButton("Generate Daily Report", on_click=on_datacenter_daily_report)
     datacenter_rolling_report_button = ft.ElevatedButton("Generate Rolling Report", on_click=on_datacenter_rolling_report)
+    datacenter_dashboard_rolling_reports_button = ft.ElevatedButton(
+        "Generate Dashboard Rolling Reports",
+        on_click=on_datacenter_dashboard_rolling_reports,
+    )
     datacenter_plan_button = ft.ElevatedButton("Show Pipeline Plan", on_click=on_datacenter_plan)
     datacenter_watermarks_button = ft.ElevatedButton("Show Watermarks", on_click=on_datacenter_watermarks)
     datacenter_buttons = ft.Row(
@@ -2244,6 +2437,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
             datacenter_audit_button,
             datacenter_daily_report_button,
             datacenter_rolling_report_button,
+            datacenter_dashboard_rolling_reports_button,
             datacenter_plan_button,
             datacenter_watermarks_button,
         ],
@@ -2572,6 +2766,7 @@ def run_app(page: ft.Page, config_path: str) -> None:
     page.datacenter_audit_button = datacenter_audit_button
     page.datacenter_daily_report_button = datacenter_daily_report_button
     page.datacenter_rolling_report_button = datacenter_rolling_report_button
+    page.datacenter_dashboard_rolling_reports_button = datacenter_dashboard_rolling_reports_button
     page.datacenter_plan_button = datacenter_plan_button
     page.datacenter_watermarks_button = datacenter_watermarks_button
     page.summary_field = summary_field

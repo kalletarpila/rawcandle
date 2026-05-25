@@ -31,6 +31,7 @@ from dev_tools.stock_update_scheduler_ui import (
     build_datacenter_audit_command,
     build_text_log_browser_url,
     build_datacenter_daily_report_command,
+    build_datacenter_dashboard_rolling_report_commands,
     build_datacenter_pipeline_command,
     build_datacenter_pipeline_plan_command,
     build_datacenter_rolling_report_command,
@@ -49,6 +50,7 @@ from dev_tools.stock_update_scheduler_ui import (
     read_systemd_timer_on_calendar,
     read_systemd_user_timer_status,
     run_app,
+    run_datacenter_dashboard_rolling_reports_ui_command,
     run_datacenter_ui_command,
     populate_datacenter_report_downloads,
     save_config_and_sync_systemd_timer,
@@ -893,6 +895,29 @@ def test_datacenter_command_builders_use_expected_defaults_and_shapes():
     assert rolling_command[rolling_command.index("--window-size") + 1] == "20"
     assert rolling_command[rolling_command.index("--output-md") + 1].endswith("datacenter_rolling_2026-05-15_20d_full.md")
 
+    dashboard_rolling_commands = build_datacenter_dashboard_rolling_report_commands(
+        analysis_db=DEFAULT_DATACENTER_ANALYSIS_DB,
+        signal_date="2026-05-15",
+        taxonomy_version=DEFAULT_DATACENTER_TAXONOMY_VERSION,
+        watchlist_file=DEFAULT_DATACENTER_WATCHLIST_FILE,
+        output_dir=DEFAULT_DATACENTER_OUTPUT_DIR,
+        time_tag="0925",
+    )
+    assert [spec["window_size"] for spec in dashboard_rolling_commands] == ["2", "5", "30"]
+    assert dashboard_rolling_commands[0]["command"][dashboard_rolling_commands[0]["command"].index("--output-md") + 1].endswith(
+        "datacenter_rolling_2_2026-05-15_0925_full.md"
+    )
+    assert dashboard_rolling_commands[1]["command"][dashboard_rolling_commands[1]["command"].index("--output-md") + 1].endswith(
+        "datacenter_rolling_5_2026-05-15_0925_full.md"
+    )
+    assert dashboard_rolling_commands[2]["command"][dashboard_rolling_commands[2]["command"].index("--output-md") + 1].endswith(
+        "datacenter_rolling_30_2026-05-15_0925_full.md"
+    )
+    assert dashboard_rolling_commands[0]["command"][dashboard_rolling_commands[0]["command"].index("--output-csv") + 1].endswith(
+        "datacenter_rolling_2_2026-05-15_0925_full.csv"
+    )
+    assert "datacenter_rolling_2026-05-15_0925_20d_full.md" not in dashboard_rolling_commands[0]["command"][-2]
+
     plan_command = build_datacenter_pipeline_plan_command(
         analysis_db=DEFAULT_DATACENTER_ANALYSIS_DB,
         taxonomy_version=DEFAULT_DATACENTER_TAXONOMY_VERSION,
@@ -1000,6 +1025,74 @@ def test_datacenter_command_log_prepends_newest_entries(monkeypatch, tmp_path):
     assert log_field.value.splitlines() == expected_lines
 
 
+def test_run_datacenter_dashboard_rolling_reports_ui_command_runs_three_horizons_and_logs_summary(
+    monkeypatch, tmp_path
+):
+    class _ImmediateThread:
+        def __init__(self, *, target, daemon):
+            self._target = target
+
+        def start(self):
+            self._target()
+
+    completed_calls = []
+
+    def _fake_run(command, **kwargs):
+        completed_calls.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.threading.Thread", _ImmediateThread)
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.subprocess.run", _fake_run)
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.populate_datacenter_report_downloads",
+        lambda **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.build_datacenter_dashboard_rolling_report_commands",
+        lambda **kwargs: build_datacenter_dashboard_rolling_report_commands(
+            **kwargs,
+            time_tag="0925",
+        ),
+    )
+
+    page = _FakePage()
+    log_field = Mock()
+    log_field.value = ""
+    status_field = Mock()
+    status_field.value = ""
+    status_field.border_color = None
+    reports_column = Mock()
+    reports_column.controls = []
+
+    run_datacenter_dashboard_rolling_reports_ui_command(
+        page=page,
+        log_field=log_field,
+        status_field=status_field,
+        analysis_db=DEFAULT_DATACENTER_ANALYSIS_DB,
+        signal_date="2026-05-15",
+        taxonomy_version=DEFAULT_DATACENTER_TAXONOMY_VERSION,
+        watchlist_file=DEFAULT_DATACENTER_WATCHLIST_FILE,
+        output_dir=str(tmp_path),
+        reports_column=reports_column,
+        assets_root=tmp_path / "assets",
+    )
+
+    assert len(completed_calls) == 3
+    assert [command[command.index("--window-size") + 1] for command in completed_calls] == ["2", "5", "30"]
+    assert any("=== Datacenter: Generate Dashboard Rolling Reports ===" in line for line in log_field.value.splitlines())
+    assert "=== Datacenter: Generate Rolling 2d Report ===" in log_field.value
+    assert "=== Datacenter: Generate Rolling 5d Report ===" in log_field.value
+    assert "=== Datacenter: Generate Rolling 30d Report ===" in log_field.value
+    assert "SUMMARY dashboard_rolling_reports.attempted=3" in log_field.value
+    assert "SUMMARY dashboard_rolling_reports.succeeded=3" in log_field.value
+    assert "SUMMARY dashboard_rolling_reports.failed=0" in log_field.value
+    assert f"SUMMARY dashboard_rolling_reports.output_dir={tmp_path}" in log_field.value
+    assert "SUMMARY dashboard_rolling_reports.end_date=2026-05-15" in log_field.value
+    assert "SUMMARY dashboard_rolling_2.status=OK" in log_field.value
+    assert "SUMMARY dashboard_rolling_5.status=OK" in log_field.value
+    assert "SUMMARY dashboard_rolling_30.status=OK" in log_field.value
+
+
 def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(
     tmp_path, monkeypatch, capsys
 ):
@@ -1022,9 +1115,14 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(
         monkeypatch,
         available_dates=["2026-05-25", "2026-05-24", "2026-05-23", "2026-05-22", "2026-05-21"],
     )
+    dashboard_rolling_calls: list[dict[str, object]] = []
     monkeypatch.setattr(
         "dev_tools.stock_update_scheduler_ui.run_datacenter_ui_command",
         lambda **kwargs: captured.append(kwargs),
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.run_datacenter_dashboard_rolling_reports_ui_command",
+        lambda **kwargs: dashboard_rolling_calls.append(kwargs),
     )
 
     page = _FakePage()
@@ -1098,6 +1196,12 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(
     assert rolling["title"] == "Generate Rolling Report"
     assert rolling["command"][rolling["command"].index("--window-size") + 1] == "20"
     assert rolling["command"][rolling["command"].index("--output-md") + 1].endswith("datacenter_rolling_2026-05-15_20d_full.md")
+
+    assert "Generate Dashboard Rolling Reports" in _descendant_text_values(page, tab_index=1)
+    page.datacenter_dashboard_rolling_reports_button.on_click(None)
+    assert dashboard_rolling_calls
+    assert dashboard_rolling_calls[-1]["signal_date"] == "2026-05-15"
+    assert dashboard_rolling_calls[-1]["output_dir"] == DEFAULT_DATACENTER_OUTPUT_DIR
 
     page.datacenter_signal_date_field.value = "2026-05-16"
     page.datacenter_watchlist_file_field.value = "/tmp/custom_watchlist.txt"
