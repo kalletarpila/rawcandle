@@ -98,6 +98,40 @@ def _fake_rows(path: str, horizon: str) -> list[DatacenterDashboardRow]:
                 ticker="MS&FT",
                 horizon=horizon,
                 source_file=path,
+                section="Watchlist Summary",
+                row_kind="watchlist",
+                raw_action=None,
+                raw_status=None,
+                reason=None,
+                trend_state="UP",
+                latest_structure_label="HL",
+                latest_bos_event_type="BOS_UP",
+                latest_reset_reason="",
+                distance_to_ema20=None,
+                high_exit_risk_days_count=None,
+                blocking_reasons=None,
+                ma_break_status="OK",
+                ema20_break_confirmed=0,
+                sma50_break_confirmed=0,
+                close_below_ema20=0,
+                close_below_sma50=0,
+                consecutive_closes_below_ema20=0,
+                consecutive_closes_below_sma50=0,
+                ema20_break_pct=0.0,
+                sma50_break_pct=0.0,
+                freshness_status="FRESH_BULLISH_SIGNAL",
+                structure_warning_overrides_bullish_signal=0,
+                latest_bullish_signal_age_td=1,
+                latest_bearish_signal_age_td=None,
+                latest_bos_up_age_td=1,
+                latest_bos_down_age_td=None,
+                latest_reset_age_td=None,
+                raw_fields={"watchlist_status": "BREAKOUT_READY"},
+            ),
+            DatacenterDashboardRow(
+                ticker="MS&FT",
+                horizon=horizon,
+                source_file=path,
                 section="signals",
                 row_kind="row",
                 raw_action=None,
@@ -127,6 +161,40 @@ def _fake_rows(path: str, horizon: str) -> list[DatacenterDashboardRow]:
                 latest_bos_down_age_td=None,
                 latest_reset_age_td=None,
                 raw_fields={},
+            ),
+            DatacenterDashboardRow(
+                ticker="NV<DA>",
+                horizon=horizon,
+                source_file=path,
+                section="Watchlist Summary",
+                row_kind="watchlist",
+                raw_action=None,
+                raw_status=None,
+                reason=None,
+                trend_state="DOWN",
+                latest_structure_label="LL",
+                latest_bos_event_type="BOS_DOWN",
+                latest_reset_reason="RESET",
+                distance_to_ema20=None,
+                high_exit_risk_days_count=2,
+                blocking_reasons=None,
+                ma_break_status="EMA20_CONFIRMED_BREAK",
+                ema20_break_confirmed=1,
+                sma50_break_confirmed=0,
+                close_below_ema20=1,
+                close_below_sma50=0,
+                consecutive_closes_below_ema20=3,
+                consecutive_closes_below_sma50=0,
+                ema20_break_pct=-0.02,
+                sma50_break_pct=0.0,
+                freshness_status="STRUCTURE_WARNING_OVERRIDES_BULLISH",
+                structure_warning_overrides_bullish_signal=1,
+                latest_bullish_signal_age_td=None,
+                latest_bearish_signal_age_td=0,
+                latest_bos_up_age_td=None,
+                latest_bos_down_age_td=0,
+                latest_reset_age_td=0,
+                raw_fields={"watchlist_status": "EXIT_RISK"},
             ),
             DatacenterDashboardRow(
                 ticker="NV<DA>",
@@ -165,6 +233,43 @@ def _fake_rows(path: str, horizon: str) -> list[DatacenterDashboardRow]:
         ]
     if horizon == "rolling 5d":
         return [
+            DatacenterDashboardRow(
+                ticker="AMD",
+                horizon=horizon,
+                source_file=path,
+                section="Watchlist Summary",
+                row_kind="watchlist",
+                raw_action=None,
+                raw_status=None,
+                reason=None,
+                trend_state="UP",
+                latest_structure_label="HL",
+                latest_bos_event_type="BOS_UP",
+                latest_reset_reason="",
+                distance_to_ema20=None,
+                high_exit_risk_days_count=None,
+                blocking_reasons=None,
+                ma_break_status="EMA20_WARNING",
+                ema20_break_confirmed=0,
+                sma50_break_confirmed=0,
+                close_below_ema20=0,
+                close_below_sma50=0,
+                consecutive_closes_below_ema20=0,
+                consecutive_closes_below_sma50=0,
+                ema20_break_pct=0.0,
+                sma50_break_pct=0.0,
+                freshness_status="FRESH_BULLISH_SIGNAL",
+                structure_warning_overrides_bullish_signal=0,
+                latest_bullish_signal_age_td=3,
+                latest_bearish_signal_age_td=None,
+                latest_bos_up_age_td=2,
+                latest_bos_down_age_td=None,
+                latest_reset_age_td=None,
+                raw_fields={
+                    "current_watchlist_status": "PULLBACK_MONITOR",
+                    "window_watchlist_status": "PULLBACK_WINDOW",
+                },
+            ),
             DatacenterDashboardRow(
                 ticker="AMD",
                 horizon=horizon,
@@ -523,10 +628,13 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     assert "NV&lt;DA&gt;" in html_one
     assert "Bearish &lt;structure&gt; overrides bullish." in html_one
     assert 'id="summary"' in html_one
+    assert 'id="watchlist-status"' in html_one
     assert 'id="candidate-pullbacks"' in html_one
     assert 'id="command-center"' in html_one
     assert 'id="inspector"' in html_one
     assert 'id="source-files"' in html_one
+    assert html_one.index('id="watchlist-status"') > html_one.index('id="summary"')
+    assert html_one.index('id="watchlist-status"') < html_one.index('id="candidate-pullbacks"')
     assert html_one.index('id="candidate-pullbacks"') < html_one.index('id="command-center"')
 
 
@@ -543,11 +651,13 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     html = output_path.read_text(encoding="utf-8")
     assert "<h1>Datacenter Dashboard</h1>" in html
     assert 'href="#summary"' in html
+    assert 'href="#watchlist-status"' in html
     assert 'href="#candidate-pullbacks"' in html
     assert 'href="#command-center"' in html
     assert 'href="#inspector"' in html
     assert 'href="#source-files"' in html
     assert "Summary" in html
+    assert "Watchlist Status" in html
     assert "Candidate Pullbacks" in html
     assert "Command Center" in html
     assert "Ticker Inspector / Details" in html
@@ -569,6 +679,7 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     assert "function applyFilters()" in html
     assert ".sticky-table thead th" in html
     assert "Visible filtered rows:" in html
+    assert "Watchlist rows:" in html
     assert "Candidate rows:" in html
     assert "Command Center rows:" in html
     assert "Inspector rows:" in html
@@ -576,6 +687,7 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     assert "P1_READY_TO_WATCH" in html
     assert "WATCH_VALID_PULLBACK" in html
     assert '<tr data-filter-row="1"' in html
+    assert 'data-section="watchlist-status"' in html
     assert 'data-section="candidate-pullbacks"' in html
     assert 'data-section="command-center"' in html
     assert 'data-section="inspector"' in html
@@ -587,16 +699,40 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     assert "</tr>\ndata-filter-row=" not in html
     assert 'document.querySelectorAll("[data-filter-row=\'1\']")' in html
     assert 'id="candidate-filter-status"' in html
+    assert 'id="watchlist-filter-status"' in html
     assert 'id="command-center-filter-status"' in html
     assert 'id="inspector-filter-status"' in html
     assert 'class="table-scroll"' in html
+    assert html.index('id="watchlist-status"') > html.index('id="summary"')
+    assert html.index('id="watchlist-status"') < html.index('id="candidate-pullbacks"')
     assert html.index("<h2>Filters</h2>") < html.index('id="candidate-pullbacks"')
+    assert "<td>MS&amp;FT</td>" in html
 
     stdout = capsys.readouterr().out
     assert f"SUMMARY html_output={output_path}" in stdout
     assert "SUMMARY readiness=READY" in stdout
     assert "SUMMARY decision_total=3" in stdout
     assert "SUMMARY candidate_pullback_rows=2" in stdout
+
+
+def test_html_cli_renders_empty_watchlist_state(tmp_path, monkeypatch):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    _install_pipeline_mocks(monkeypatch, reports_dir)
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_html.parse_datacenter_dashboard_file",
+        lambda path, horizon: type(
+            "ParseResult",
+            (),
+            {"rows": [row for row in _fake_rows(path, horizon) if row.section != "Watchlist Summary"]},
+        )(),
+    )
+
+    exit_code = main(["--reports-dir", str(reports_dir), "--title", "Datacenter Dashboard"])
+
+    assert exit_code == 0
+    html = (reports_dir / "datacenter_dashboard.html").read_text(encoding="utf-8")
+    assert "No watchlist rows found in the selected reports." in html
 
 
 def test_html_cli_custom_output_path_works(tmp_path, monkeypatch):

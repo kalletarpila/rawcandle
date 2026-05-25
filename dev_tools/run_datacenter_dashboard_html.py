@@ -87,6 +87,7 @@ _COMMAND_CENTER_GROUPS = (
     ("Blocked / neutral", ("BLOCKED", "NEUTRAL")),
 )
 _SOURCE_FILE_HORIZON_ORDER = ("rolling 30d", "rolling 5d", "rolling 2d", "daily")
+_WATCHLIST_SECTION_MARKER = "watchlist"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -251,6 +252,33 @@ def _action_class(action: str) -> str:
     return "action-neutral"
 
 
+def _is_watchlist_row(row: DatacenterDashboardRow) -> bool:
+    section_text = (row.section or "").strip().lower()
+    row_kind_text = (row.row_kind or "").strip().lower()
+    if _WATCHLIST_SECTION_MARKER in section_text or _WATCHLIST_SECTION_MARKER in row_kind_text:
+        return True
+    for key, value in row.raw_fields.items():
+        if _WATCHLIST_SECTION_MARKER in (key or "").lower():
+            return True
+        if _WATCHLIST_SECTION_MARKER in (value or "").strip().lower():
+            return True
+    return False
+
+
+def _watchlist_horizon_status(row: DatacenterDashboardRow) -> str:
+    for field_name in (
+        "watchlist_status",
+        "current_watchlist_status",
+        "window_watchlist_status",
+        "current_status",
+        "window_status",
+    ):
+        value = row.raw_fields.get(field_name, "")
+        if value.strip():
+            return value.strip()
+    return ""
+
+
 def _first_trace(decision: DatacenterTickerDecision) -> tuple[str, str]:
     if not decision.decision_trace:
         return "", ""
@@ -293,6 +321,11 @@ def generate_dashboard_html(
         report.horizon: report.path or ""
         for report in dashboard_status.reports
     }
+    watchlist_rows_by_ticker: dict[str, list[DatacenterDashboardRow]] = {}
+    for row in parsed_rows:
+        if not _is_watchlist_row(row):
+            continue
+        watchlist_rows_by_ticker.setdefault(row.ticker, []).append(row)
 
     header_summary_rows = "".join(
         "<tr>"
@@ -416,6 +449,59 @@ def generate_dashboard_html(
         "</tr>"
         for decision in candidate_decisions
     )
+
+    watchlist_decisions = [
+        decision
+        for decision in decision_result.decisions
+        if decision.ticker in watchlist_rows_by_ticker
+    ]
+    watchlist_decisions = sorted(
+        watchlist_decisions,
+        key=lambda decision: (
+            _ACTION_ORDER.index(decision.action),
+            decision.candidate_priority if decision.candidate_priority is not None else 10**9,
+            decision.ticker,
+        ),
+    )
+    watchlist_rows_html_parts: list[str] = []
+    for decision in watchlist_decisions:
+        horizon_status_by_name = {
+            row.horizon: _watchlist_horizon_status(row)
+            for row in _rows_for_ticker(parsed_rows, decision.ticker)
+            if _is_watchlist_row(row)
+        }
+        watchlist_rows_html_parts.append(
+            "<tr"
+            f' data-filter-row="1"'
+            f' data-section="watchlist-status"'
+            f' data-action="{_html_attr(decision.action)}"'
+            f' data-pullback-validity="{_html_attr(decision.pullback_validity)}"'
+            f' data-entry-readiness="{_html_attr(decision.entry_readiness)}"'
+            f' data-candidate-priority="{_html_attr(decision.candidate_priority_label)}"'
+            f' data-filter-text="{_html_attr(" ".join(filter(None, [decision.ticker, decision.action, decision.primary_reason or "", decision.pullback_validity or "", decision.entry_readiness or "", decision.candidate_priority_label or ""])).lower())}"'
+            ">"
+            f'<td class="{_action_class(decision.action)}">{_html_text(decision.ticker)}</td>'
+            f"<td>{_html_text(decision.action)}</td>"
+            f"<td>{_html_text(decision.severity)}</td>"
+            f"<td>{_html_text(decision.primary_reason)}</td>"
+            f"<td>{_html_text(decision.pullback_validity)}</td>"
+            f"<td>{_html_text(decision.entry_readiness)}</td>"
+            f"<td>{_html_text(decision.candidate_priority_label)}</td>"
+            f"<td>{_html_text(_first_non_empty_context_value(parsed_rows, decision.ticker, 'ma_break_status'))}</td>"
+            f"<td>{_html_text(_first_non_empty_context_value(parsed_rows, decision.ticker, 'freshness_status'))}</td>"
+            f"<td>{_html_text(decision.trend_state)}</td>"
+            f"<td>{_html_text(decision.latest_structure_label)}</td>"
+            f"<td>{_html_text(decision.latest_bos_event_type)}</td>"
+            f"<td>{_html_text(decision.latest_reset_reason)}</td>"
+            f"<td>{_html_text(', '.join(decision.horizons_present))}</td>"
+            f"<td>{len(decision.source_files)}</td>"
+            f"<td>{_html_text(horizon_status_by_name.get('daily'))}</td>"
+            f"<td>{_html_text(horizon_status_by_name.get('rolling 2d'))}</td>"
+            f"<td>{_html_text(horizon_status_by_name.get('rolling 5d'))}</td>"
+            f"<td>{_html_text(horizon_status_by_name.get('rolling 30d'))}</td>"
+            "</tr>"
+        )
+    watchlist_rows_html = "".join(watchlist_rows_html_parts)
 
     detail_sections: list[str] = []
     for decision in sorted(decision_result.decisions, key=lambda item: item.ticker):
@@ -643,6 +729,7 @@ def generate_dashboard_html(
     <h1>{escape(title)}</h1>
     <nav class="nav-links" aria-label="Dashboard sections">
       <a href="#summary">Summary</a>
+      <a href="#watchlist-status">Watchlist Status</a>
       <a href="#candidate-pullbacks">Candidate Pullbacks</a>
       <a href="#command-center">Command Center</a>
       <a href="#inspector">Inspector</a>
@@ -676,6 +763,23 @@ def generate_dashboard_html(
       {_count_table("Entry Readiness Counts", "entry_readiness.", _ENTRY_READINESS_ORDER, decision_result.entry_readiness_counts)}
       {_count_table("Candidate Priority Counts", "candidate_priority.", _CANDIDATE_PRIORITY_LABEL_ORDER, decision_result.candidate_priority_counts)}
     </div>
+  </section>
+
+  <section id="watchlist-status" class="major-section">
+    <h2>Watchlist Status</h2>
+    <div id="watchlist-filter-status" class="section-status">Watchlist rows: 0 / 0</div>
+    {(
+      '<div class="table-scroll"><table class="sticky-table"><thead><tr>'
+      '<th>Ticker</th><th>Action</th><th>Severity</th><th>Primary reason</th>'
+      '<th>Pullback validity</th><th>Entry readiness</th><th>Candidate priority</th>'
+      '<th>MA break</th><th>Freshness</th><th>Trend state</th>'
+      '<th>Latest structure</th><th>Latest BOS</th><th>Latest reset</th>'
+      '<th>Horizons</th><th>Source files</th>'
+      '<th>Daily status</th><th>Rolling 2d status</th><th>Rolling 5d status</th><th>Rolling 30d status</th>'
+      '</tr></thead><tbody>'
+      + watchlist_rows_html +
+      '</tbody></table></div>'
+    ) if watchlist_rows_html else '<p>No watchlist rows found in the selected reports.</p>'}
   </section>
 
   <section id="filters" class="major-section">
@@ -801,11 +905,13 @@ def generate_dashboard_html(
         var rows = document.querySelectorAll("[data-filter-row='1']");
         var visibleRows = 0;
         var sectionVisibleCounts = {{
+          "watchlist-status": 0,
           "candidate-pullbacks": 0,
           "command-center": 0,
           "inspector": 0
         }};
         var sectionTotalCounts = {{
+          "watchlist-status": 0,
           "candidate-pullbacks": 0,
           "command-center": 0,
           "inspector": 0
@@ -845,6 +951,14 @@ def generate_dashboard_html(
         }}
 
         var candidateStatus = document.getElementById("candidate-filter-status");
+        var watchlistStatus = document.getElementById("watchlist-filter-status");
+        if (watchlistStatus) {{
+          watchlistStatus.textContent =
+            "Watchlist rows: " +
+            sectionVisibleCounts["watchlist-status"] +
+            " / " +
+            sectionTotalCounts["watchlist-status"];
+        }}
         if (candidateStatus) {{
           candidateStatus.textContent =
             "Candidate rows: " +
