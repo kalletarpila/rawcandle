@@ -2707,21 +2707,80 @@ def run_app(page: ft.Page, config_path: str) -> None:
         expand=True,
     )
 
-    datacenter_dashboard_reports_dir_field = ft.TextField(
-        label="Reports directory",
-        value=DEFAULT_DATACENTER_DASHBOARD_REPORTS_DIR,
-    )
     datacenter_dashboard_report_date_field = ft.TextField(
         label="Report date",
         hint_text="YYYY-MM-DD",
     )
-    datacenter_dashboard_available_dates_text = ft.Text(
-        "",
-        size=13,
-        color="#4b5563",
+    datacenter_dashboard_db_field = ft.TextField(
+        label="Dashboard DB",
+        value="",
+        read_only=True,
     )
-    datacenter_dashboard_output_field = ft.TextField(
-        label="Output path (optional)",
+    datacenter_dashboard_html_output_dir_field = ft.TextField(
+        label="HTML output dir",
+        value="",
+        read_only=True,
+    )
+    datacenter_dashboard_expected_html_output_field = ft.TextField(
+        label="Expected HTML output",
+        value="",
+        read_only=True,
+    )
+    datacenter_dashboard_snapshot_status_field = ft.TextField(
+        label="Snapshot status",
+        value="UNKNOWN",
+        read_only=True,
+    )
+    datacenter_dashboard_html_file_status_field = ft.TextField(
+        label="HTML file status",
+        value="UNKNOWN",
+        read_only=True,
+    )
+    datacenter_dashboard_run_id_field = ft.TextField(
+        label="Selected run_id",
+        value="",
+        read_only=True,
+    )
+    datacenter_dashboard_last_action_status_field = ft.TextField(
+        label="Last action status",
+        value="NOT_RUN",
+        read_only=True,
+    )
+    datacenter_dashboard_source_reports_count_field = ft.TextField(
+        label="Source reports count",
+        value="0",
+        read_only=True,
+        width=180,
+    )
+    datacenter_dashboard_action_summary_count_field = ft.TextField(
+        label="Action summary rows",
+        value="0",
+        read_only=True,
+        width=180,
+    )
+    datacenter_dashboard_market_map_count_field = ft.TextField(
+        label="Market map rows",
+        value="0",
+        read_only=True,
+        width=180,
+    )
+    datacenter_dashboard_watchlist_count_field = ft.TextField(
+        label="Watchlist rows",
+        value="0",
+        read_only=True,
+        width=180,
+    )
+    datacenter_dashboard_ticker_count_field = ft.TextField(
+        label="Ticker rows",
+        value="0",
+        read_only=True,
+        width=180,
+    )
+    datacenter_dashboard_decision_trace_count_field = ft.TextField(
+        label="Decision trace rows",
+        value="0",
+        read_only=True,
+        width=180,
     )
     datacenter_dashboard_status_field = ft.TextField(
         label="Status",
@@ -2731,216 +2790,338 @@ def run_app(page: ft.Page, config_path: str) -> None:
         max_lines=16,
         read_only=True,
     )
-    datacenter_dashboard_generate_button = ft.ElevatedButton("Generate HTML Dashboard")
-    datacenter_dashboard_open_button = ft.ElevatedButton(
-        "Open Last Generated Dashboard",
-        disabled=True,
+    datacenter_dashboard_refresh_button = ft.ElevatedButton("Refresh Dashboard Status")
+    datacenter_dashboard_inspect_button = ft.ElevatedButton("Inspect DB Snapshot")
+    datacenter_dashboard_render_button = ft.ElevatedButton(
+        "Render HTML from Existing DB Snapshot"
     )
-
-    def _dashboard_effective_output_path() -> str:
-        report_date_value = datacenter_dashboard_report_date_field.value.strip() or None
-        output_value = datacenter_dashboard_output_field.value.strip() or None
-        return str(
-            resolve_dashboard_html_output_path(
-                reports_dir=datacenter_dashboard_reports_dir_field.value.strip() or DEFAULT_DATACENTER_DASHBOARD_REPORTS_DIR,
-                output=output_value,
-                report_date=report_date_value,
-            )
-        )
-
-    def _refresh_datacenter_dashboard_available_dates(*, preserve_user_value: bool) -> None:
-        reports_dir_value = datacenter_dashboard_reports_dir_field.value.strip() or DEFAULT_DATACENTER_DASHBOARD_REPORTS_DIR
-        available_dates = list_datacenter_report_dates(reports_dir_value, limit=5)
-        current_value = datacenter_dashboard_report_date_field.value.strip()
-        previous_auto_value = getattr(page, "datacenter_dashboard_auto_report_date", "")
-        newest_date = available_dates[0] if available_dates else ""
-        if newest_date and (
-            not current_value
-            or (preserve_user_value and current_value == previous_auto_value)
-            or not preserve_user_value
-        ):
-            datacenter_dashboard_report_date_field.value = newest_date
-            current_value = newest_date
-        elif not available_dates and not preserve_user_value:
-            datacenter_dashboard_report_date_field.value = ""
-            current_value = ""
-        page.datacenter_dashboard_auto_report_date = newest_date
-        if available_dates:
-            datacenter_dashboard_available_dates_text.value = (
-                "Available report dates (latest 5): " + ", ".join(available_dates)
-            )
-        else:
-            datacenter_dashboard_available_dates_text.value = "Available report dates (latest 5): none found"
-
-    def on_datacenter_dashboard_reports_dir_change(e) -> None:
-        _refresh_datacenter_dashboard_available_dates(preserve_user_value=True)
-        datacenter_dashboard_status_field.value = "\n".join(
-            [
-                f"reports_dir={datacenter_dashboard_reports_dir_field.value.strip() or DEFAULT_DATACENTER_DASHBOARD_REPORTS_DIR}",
-                f"report_date={datacenter_dashboard_report_date_field.value.strip() or 'newest'}",
-                f"output={_dashboard_effective_output_path()}",
-                "readiness=MISSING",
-                "found_reports=0",
-                "missing_reports=0",
-                "decision_total=0",
-                "candidate_pullback_rows=0",
-                "generate_status=SKIPPED",
-                "open_status=SKIPPED",
-            ]
-        )
-        page.update()
+    datacenter_dashboard_open_button = ft.ElevatedButton("Open HTML File")
 
     def _set_datacenter_dashboard_status(lines: list[str]) -> None:
         datacenter_dashboard_status_field.value = "\n".join(lines)
         page.update()
 
-    def _show_dashboard_missing_report_error(report_date_value: str, reports_dir_value: str) -> None:
+    def _inspect_datacenter_dashboard_viewer_plan() -> Any:
+        return _inspect_datacenter_dashboard_plan()
+
+    def _apply_datacenter_dashboard_viewer_plan(
+        inspection: Any,
+        *,
+        fill_report_date: bool,
+    ) -> None:
+        datacenter_dashboard_db_field.value = inspection.dashboard_db
+        datacenter_dashboard_html_output_dir_field.value = inspection.html_output_dir
+        if (
+            fill_report_date
+            and inspection.expected_report_date
+            and not datacenter_dashboard_report_date_field.value.strip()
+        ):
+            datacenter_dashboard_report_date_field.value = inspection.expected_report_date
+        current_report_date = datacenter_dashboard_report_date_field.value.strip()
+        if current_report_date and _DATACENTER_DASHBOARD_REPORT_DATE_RE.match(current_report_date):
+            datacenter_dashboard_expected_html_output_field.value = (
+                _dashboard_expected_html_output_path(current_report_date)
+            )
+
+    def _clear_datacenter_dashboard_counts() -> None:
+        datacenter_dashboard_source_reports_count_field.value = "0"
+        datacenter_dashboard_action_summary_count_field.value = "0"
+        datacenter_dashboard_market_map_count_field.value = "0"
+        datacenter_dashboard_watchlist_count_field.value = "0"
+        datacenter_dashboard_ticker_count_field.value = "0"
+        datacenter_dashboard_decision_trace_count_field.value = "0"
+
+    def _dashboard_selected_report_date() -> str:
+        return datacenter_dashboard_report_date_field.value.strip()
+
+    def _dashboard_expected_html_output_path(report_date_value: str) -> str:
+        html_output_dir = (
+            datacenter_dashboard_html_output_dir_field.value.strip()
+            or DEFAULT_DATACENTER_OUTPUT_DIR
+        )
+        return str(Path(html_output_dir) / f"datacenter_dashboard_{report_date_value}.html")
+
+    def _resolve_dashboard_snapshot_for_selected_date() -> tuple[Any, Any, str, str]:
+        from dev_tools.ecosystem_dashboard_read_model import (
+            load_dashboard_snapshot,
+            resolve_dashboard_run,
+        )
+
+        inspection = _inspect_datacenter_dashboard_viewer_plan()
+        _apply_datacenter_dashboard_viewer_plan(inspection, fill_report_date=False)
+        report_date_value = _dashboard_selected_report_date()
+        if not report_date_value:
+            raise ValueError("report_date is required")
+        if not _DATACENTER_DASHBOARD_REPORT_DATE_RE.match(report_date_value):
+            raise ValueError("invalid report date, expected YYYY-MM-DD")
+        html_output_path = _dashboard_expected_html_output_path(report_date_value)
+        run = resolve_dashboard_run(
+            dashboard_db=inspection.dashboard_db,
+            ecosystem_code="DATACENTER",
+            report_date=report_date_value,
+        )
+        snapshot = load_dashboard_snapshot(
+            dashboard_db=inspection.dashboard_db,
+            ecosystem_code="DATACENTER",
+            run_id=run.run_id,
+        )
+        return inspection, snapshot, report_date_value, html_output_path
+
+    def _populate_dashboard_snapshot_fields(snapshot: Any) -> None:
+        datacenter_dashboard_run_id_field.value = snapshot.run.run_id
+        datacenter_dashboard_source_reports_count_field.value = str(len(snapshot.source_reports))
+        datacenter_dashboard_action_summary_count_field.value = str(len(snapshot.action_summary))
+        datacenter_dashboard_market_map_count_field.value = str(len(snapshot.market_map))
+        datacenter_dashboard_watchlist_count_field.value = str(len(snapshot.watchlist))
+        datacenter_dashboard_ticker_count_field.value = str(len(snapshot.tickers))
+        datacenter_dashboard_decision_trace_count_field.value = str(len(snapshot.decision_trace))
+
+    def _set_dashboard_status_failure(action_prefix: str, reason: str, report_date_value: str = "") -> None:
+        datacenter_dashboard_last_action_status_field.value = "FAILED"
         _set_datacenter_dashboard_status(
             [
-                f"ERROR no datacenter reports found for report_date={report_date_value} in {reports_dir_value}. Run the reports from the Datacenter tab first.",
-                f"reports_dir={reports_dir_value}",
+                f"{action_prefix}.status=FAILED",
                 f"report_date={report_date_value}",
-                f"output={_dashboard_effective_output_path()}",
-                "generate_status=FAILED",
-                "open_status=SKIPPED",
-                "Expected filename examples:",
-                f"datacenter_daily_{report_date_value}_*.md",
-                f"datacenter_rolling_2_{report_date_value}_*.md",
-                f"datacenter_rolling_5_{report_date_value}_*.md",
-                f"datacenter_rolling_30_{report_date_value}_*.md",
+                f"reason={reason}",
             ]
         )
 
-    def on_datacenter_dashboard_generate(e) -> None:
-        reports_dir_value = datacenter_dashboard_reports_dir_field.value.strip() or DEFAULT_DATACENTER_DASHBOARD_REPORTS_DIR
-        report_date_value = datacenter_dashboard_report_date_field.value.strip()
-        output_value = datacenter_dashboard_output_field.value.strip() or None
-        if report_date_value and not _DATACENTER_DASHBOARD_REPORT_DATE_RE.match(report_date_value):
-            _set_datacenter_dashboard_status(
-                [
-                    "ERROR invalid report date, expected YYYY-MM-DD",
-                    f"reports_dir={reports_dir_value}",
-                    f"report_date={report_date_value}",
-                    f"output={_dashboard_effective_output_path()}",
-                    "generate_status=FAILED",
-                    "open_status=SKIPPED",
-                ]
-            )
-            return
-
+    def on_datacenter_dashboard_refresh(_e) -> None:
         try:
-            result = generate_datacenter_dashboard_html_file(
-                reports_dir=reports_dir_value,
-                output=output_value,
-                report_date=report_date_value or None,
-            )
-        except FileNotFoundError:
-            if report_date_value:
-                _show_dashboard_missing_report_error(report_date_value, reports_dir_value)
+            inspection = _inspect_datacenter_dashboard_viewer_plan()
+            _apply_datacenter_dashboard_viewer_plan(inspection, fill_report_date=False)
+            report_date_value = _dashboard_selected_report_date()
+            if not report_date_value:
+                datacenter_dashboard_expected_html_output_field.value = ""
+                datacenter_dashboard_snapshot_status_field.value = "DATE_REQUIRED"
+                datacenter_dashboard_html_file_status_field.value = "DATE_REQUIRED"
+                datacenter_dashboard_run_id_field.value = ""
+                _clear_datacenter_dashboard_counts()
+                datacenter_dashboard_last_action_status_field.value = "FAILED"
+                _set_datacenter_dashboard_status(
+                    [
+                        "dashboard_status.status=FAILED",
+                        "dashboard_status.report_date=",
+                        f"dashboard_status.dashboard_db={inspection.dashboard_db}",
+                        "dashboard_status.html_output_path=",
+                        "dashboard_status.snapshot_exists=0",
+                        "dashboard_status.html_exists=0",
+                        "reason=report_date is required",
+                    ]
+                )
                 return
+            if not _DATACENTER_DASHBOARD_REPORT_DATE_RE.match(report_date_value):
+                datacenter_dashboard_expected_html_output_field.value = ""
+                datacenter_dashboard_snapshot_status_field.value = "INVALID_DATE"
+                datacenter_dashboard_html_file_status_field.value = "INVALID_DATE"
+                datacenter_dashboard_run_id_field.value = ""
+                _clear_datacenter_dashboard_counts()
+                datacenter_dashboard_last_action_status_field.value = "FAILED"
+                _set_datacenter_dashboard_status(
+                    [
+                        "dashboard_status.status=FAILED",
+                        f"dashboard_status.report_date={report_date_value}",
+                        f"dashboard_status.dashboard_db={inspection.dashboard_db}",
+                        "dashboard_status.html_output_path=",
+                        "dashboard_status.snapshot_exists=0",
+                        "dashboard_status.html_exists=0",
+                        "reason=invalid report date, expected YYYY-MM-DD",
+                    ]
+                )
+                return
+
+            html_output_path = _dashboard_expected_html_output_path(report_date_value)
+            datacenter_dashboard_expected_html_output_field.value = html_output_path
+            snapshot_exists = 0
+            run_id_value = ""
+            if Path(inspection.dashboard_db).exists():
+                try:
+                    from dev_tools.ecosystem_dashboard_read_model import resolve_dashboard_run
+
+                    run = resolve_dashboard_run(
+                        dashboard_db=inspection.dashboard_db,
+                        ecosystem_code="DATACENTER",
+                        report_date=report_date_value,
+                    )
+                    snapshot_exists = 1
+                    run_id_value = run.run_id
+                except ValueError:
+                    snapshot_exists = 0
+            html_exists = 1 if Path(html_output_path).exists() else 0
+            datacenter_dashboard_snapshot_status_field.value = (
+                "FOUND" if snapshot_exists else "MISSING"
+            )
+            datacenter_dashboard_html_file_status_field.value = (
+                "FOUND" if html_exists else "MISSING"
+            )
+            datacenter_dashboard_run_id_field.value = run_id_value
+            if not snapshot_exists:
+                _clear_datacenter_dashboard_counts()
+            datacenter_dashboard_last_action_status_field.value = "OK"
             _set_datacenter_dashboard_status(
                 [
-                    "ERROR no datacenter reports found for newest mode in the selected reports directory.",
-                    f"reports_dir={reports_dir_value}",
-                    "report_date=newest",
-                    f"output={_dashboard_effective_output_path()}",
-                    "generate_status=FAILED",
-                    "open_status=SKIPPED",
+                    f"dashboard_status.report_date={report_date_value}",
+                    f"dashboard_status.dashboard_db={inspection.dashboard_db}",
+                    f"dashboard_status.html_output_path={html_output_path}",
+                    f"dashboard_status.snapshot_exists={snapshot_exists}",
+                    f"dashboard_status.html_exists={html_exists}",
+                    "dashboard_status.status=OK",
                 ]
             )
-            return
-        except ValueError as exc:
-            _set_datacenter_dashboard_status(
-                [
-                    f"ERROR {exc}",
-                    f"reports_dir={reports_dir_value}",
-                    f"report_date={report_date_value or 'newest'}",
-                    f"output={_dashboard_effective_output_path()}",
-                    "generate_status=FAILED",
-                    "open_status=SKIPPED",
-                ]
-            )
-            return
         except Exception as exc:
+            _set_dashboard_status_failure("dashboard_status", str(exc), _dashboard_selected_report_date())
+
+    def on_datacenter_dashboard_inspect(_e) -> None:
+        try:
+            inspection, snapshot, report_date_value, html_output_path = (
+                _resolve_dashboard_snapshot_for_selected_date()
+            )
+            datacenter_dashboard_expected_html_output_field.value = html_output_path
+            datacenter_dashboard_snapshot_status_field.value = "FOUND"
+            datacenter_dashboard_html_file_status_field.value = (
+                "FOUND" if Path(html_output_path).exists() else "MISSING"
+            )
+            _apply_datacenter_dashboard_viewer_plan(inspection, fill_report_date=False)
+            _populate_dashboard_snapshot_fields(snapshot)
+            datacenter_dashboard_last_action_status_field.value = "OK"
             _set_datacenter_dashboard_status(
                 [
-                    f"ERROR {exc}",
-                    f"reports_dir={reports_dir_value}",
-                    f"report_date={report_date_value or 'newest'}",
-                    f"output={_dashboard_effective_output_path()}",
-                    "generate_status=FAILED",
-                    "open_status=SKIPPED",
+                    "dashboard_inspect.status=OK",
+                    f"report_date={report_date_value}",
+                    f"run_id={snapshot.run.run_id}",
+                    f"source_reports={len(snapshot.source_reports)}",
+                    f"action_summary={len(snapshot.action_summary)}",
+                    f"market_map={len(snapshot.market_map)}",
+                    f"watchlist={len(snapshot.watchlist)}",
+                    f"tickers={len(snapshot.tickers)}",
+                    f"decision_trace={len(snapshot.decision_trace)}",
                 ]
             )
-            return
+        except Exception as exc:
+            _clear_datacenter_dashboard_counts()
+            datacenter_dashboard_snapshot_status_field.value = "MISSING"
+            datacenter_dashboard_run_id_field.value = ""
+            _set_dashboard_status_failure(
+                "dashboard_inspect", str(exc), _dashboard_selected_report_date()
+            )
 
-        open_result = open_datacenter_dashboard_html(result.output_path)
-        page.datacenter_dashboard_last_output_path = result.output_path
-        datacenter_dashboard_output_field.value = result.output_path
-        datacenter_dashboard_open_button.disabled = False
-        status_lines = [
-            f"reports_dir={reports_dir_value}",
-            f"report_date={result.report_date}",
-            f"output={result.output_path}",
-            f"readiness={result.readiness}",
-            f"found_reports={result.found_reports}",
-            f"missing_reports={result.missing_reports}",
-            f"decision_total={result.decision_total}",
-            f"candidate_pullback_rows={result.candidate_pullback_rows}",
-            "generate_status=OK",
-            f"open_status={open_result['open_status']}",
-            f"opener={open_result['opener']}",
-            f"html_output_windows={open_result['html_output_windows']}",
-            f"html_file_url={open_result['html_file_url']}",
-        ]
-        if result.readiness == "PARTIAL" and report_date_value:
-            status_lines.append(f"WARNING partial reports found for report_date={report_date_value}")
-        manual_lines = open_result.get("manual_lines") or []
-        _set_datacenter_dashboard_status(status_lines + list(manual_lines))
-
-    def on_datacenter_dashboard_open_last(e) -> None:
-        last_output_path = getattr(page, "datacenter_dashboard_last_output_path", None)
-        if not last_output_path:
+    def on_datacenter_dashboard_render(_e) -> None:
+        try:
+            inspection, snapshot, report_date_value, html_output_path = (
+                _resolve_dashboard_snapshot_for_selected_date()
+            )
+            datacenter_dashboard_expected_html_output_field.value = html_output_path
+            generate_datacenter_dashboard_html_file(
+                dashboard_db=inspection.dashboard_db,
+                ecosystem_code="DATACENTER",
+                run_id=snapshot.run.run_id,
+                output=html_output_path,
+                report_date=None,
+                title=None,
+            )
+            datacenter_dashboard_snapshot_status_field.value = "FOUND"
+            datacenter_dashboard_html_file_status_field.value = (
+                "FOUND" if Path(html_output_path).exists() else "MISSING"
+            )
+            _populate_dashboard_snapshot_fields(snapshot)
+            datacenter_dashboard_last_action_status_field.value = "OK"
             _set_datacenter_dashboard_status(
                 [
-                    "ERROR no generated dashboard available yet.",
-                    "generate_status=FAILED",
-                    "open_status=SKIPPED",
+                    "dashboard_html.status=OK",
+                    "input_mode=dashboard_db",
+                    f"report_date={report_date_value}",
+                    f"run_id={snapshot.run.run_id}",
+                    f"html_output_path={html_output_path}",
                 ]
             )
-            return
-        open_result = open_datacenter_dashboard_html(last_output_path)
-        status_lines = [
-            f"reports_dir={datacenter_dashboard_reports_dir_field.value.strip() or DEFAULT_DATACENTER_DASHBOARD_REPORTS_DIR}",
-            f"report_date={datacenter_dashboard_report_date_field.value.strip() or 'newest'}",
-            f"output={last_output_path}",
-            "generate_status=OK",
-            f"open_status={open_result['open_status']}",
-            f"opener={open_result['opener']}",
-            f"html_output_windows={open_result['html_output_windows']}",
-            f"html_file_url={open_result['html_file_url']}",
-        ]
-        _set_datacenter_dashboard_status(status_lines + list(open_result.get("manual_lines") or []))
+        except Exception as exc:
+            _set_dashboard_status_failure(
+                "dashboard_html", str(exc), _dashboard_selected_report_date()
+            )
 
-    datacenter_dashboard_generate_button.on_click = on_datacenter_dashboard_generate
-    datacenter_dashboard_open_button.on_click = on_datacenter_dashboard_open_last
-    datacenter_dashboard_reports_dir_field.on_change = on_datacenter_dashboard_reports_dir_change
+    def on_datacenter_dashboard_open(_e) -> None:
+        try:
+            inspection = _inspect_datacenter_dashboard_viewer_plan()
+            _apply_datacenter_dashboard_viewer_plan(inspection, fill_report_date=False)
+            report_date_value = _dashboard_selected_report_date()
+            if not report_date_value:
+                raise ValueError("report_date is required")
+            if not _DATACENTER_DASHBOARD_REPORT_DATE_RE.match(report_date_value):
+                raise ValueError("invalid report date, expected YYYY-MM-DD")
+            html_output_path = _dashboard_expected_html_output_path(report_date_value)
+            datacenter_dashboard_expected_html_output_field.value = html_output_path
+            if not Path(html_output_path).exists():
+                raise FileNotFoundError(f"html file not found: {html_output_path}")
+            open_result = open_datacenter_dashboard_html(html_output_path)
+            datacenter_dashboard_html_file_status_field.value = "FOUND"
+            datacenter_dashboard_last_action_status_field.value = (
+                "OK" if open_result["open_status"] == "OK" else "FAILED"
+            )
+            status_lines = [
+                f"dashboard_open.status={open_result['open_status']}",
+                f"html_output_path={html_output_path}",
+            ]
+            if open_result["open_status"] != "OK":
+                status_lines.append(f"reason=unable to auto-open via {open_result['opener']}")
+            status_lines.extend(list(open_result.get("manual_lines") or []))
+            _set_datacenter_dashboard_status(status_lines)
+        except Exception as exc:
+            _set_dashboard_status_failure(
+                "dashboard_open", str(exc), _dashboard_selected_report_date()
+            )
+
+    datacenter_dashboard_refresh_button.on_click = on_datacenter_dashboard_refresh
+    datacenter_dashboard_inspect_button.on_click = on_datacenter_dashboard_inspect
+    datacenter_dashboard_render_button.on_click = on_datacenter_dashboard_render
+    datacenter_dashboard_open_button.on_click = on_datacenter_dashboard_open
     datacenter_dashboard_content = ft.Column(
         controls=[
             ft.Text("Datacenter Dashboard", size=24, weight=ft.FontWeight.BOLD),
             ft.Text(
-                "Generate and open the static HTML dashboard from existing datacenter reports."
+                "Dashboard flow:\necosystem_dashboard.db -> DB-backed HTML"
             ),
             ft.Text(
-                "If reports for the selected date are missing, run the datacenter reports first from the Datacenter tab."
+                "Use the Datacenter tab to build the snapshot. Use this tab to inspect and render artifacts for an existing report date."
             ),
-            datacenter_dashboard_reports_dir_field,
-            datacenter_dashboard_available_dates_text,
             datacenter_dashboard_report_date_field,
-            datacenter_dashboard_output_field,
+            datacenter_dashboard_db_field,
+            datacenter_dashboard_html_output_dir_field,
+            datacenter_dashboard_expected_html_output_field,
             ft.Row(
                 [
-                    datacenter_dashboard_generate_button,
+                    datacenter_dashboard_snapshot_status_field,
+                    datacenter_dashboard_html_file_status_field,
+                ],
+                wrap=True,
+            ),
+            ft.Row(
+                [
+                    datacenter_dashboard_run_id_field,
+                    datacenter_dashboard_last_action_status_field,
+                ],
+                wrap=True,
+            ),
+            ft.Row(
+                [
+                    datacenter_dashboard_source_reports_count_field,
+                    datacenter_dashboard_action_summary_count_field,
+                    datacenter_dashboard_market_map_count_field,
+                ],
+                wrap=True,
+            ),
+            ft.Row(
+                [
+                    datacenter_dashboard_watchlist_count_field,
+                    datacenter_dashboard_ticker_count_field,
+                    datacenter_dashboard_decision_trace_count_field,
+                ],
+                wrap=True,
+            ),
+            ft.Row(
+                [
+                    datacenter_dashboard_refresh_button,
+                    datacenter_dashboard_inspect_button,
+                    datacenter_dashboard_render_button,
                     datacenter_dashboard_open_button,
                 ],
                 wrap=True,
@@ -2959,21 +3140,22 @@ def run_app(page: ft.Page, config_path: str) -> None:
         scroll=ft.ScrollMode.AUTO,
         expand=True,
     )
-    page.datacenter_dashboard_last_output_path = None
-    page.datacenter_dashboard_auto_report_date = ""
-    _refresh_datacenter_dashboard_available_dates(preserve_user_value=False)
+    try:
+        _apply_datacenter_dashboard_viewer_plan(
+            _inspect_datacenter_dashboard_viewer_plan(),
+            fill_report_date=True,
+        )
+    except Exception:
+        pass
+    _clear_datacenter_dashboard_counts()
     datacenter_dashboard_status_field.value = "\n".join(
         [
-            f"reports_dir={DEFAULT_DATACENTER_DASHBOARD_REPORTS_DIR}",
-            f"report_date={datacenter_dashboard_report_date_field.value.strip() or 'newest'}",
-            f"output={_dashboard_effective_output_path()}",
-            "readiness=MISSING",
-            "found_reports=0",
-            "missing_reports=0",
-            "decision_total=0",
-            "candidate_pullback_rows=0",
-            "generate_status=SKIPPED",
-            "open_status=SKIPPED",
+            f"dashboard_status.report_date={datacenter_dashboard_report_date_field.value.strip()}",
+            f"dashboard_status.dashboard_db={datacenter_dashboard_db_field.value.strip()}",
+            f"dashboard_status.html_output_path={datacenter_dashboard_expected_html_output_field.value.strip()}",
+            "dashboard_status.snapshot_exists=0",
+            "dashboard_status.html_exists=0",
+            "dashboard_status.status=OK",
         ]
     )
 
@@ -3012,12 +3194,24 @@ def run_app(page: ft.Page, config_path: str) -> None:
     page.save_config_button = save_config_button
     page.reload_config_button = reload_config_button
     page.datacenter_content = datacenter_content
-    page.datacenter_dashboard_reports_dir_field = datacenter_dashboard_reports_dir_field
     page.datacenter_dashboard_report_date_field = datacenter_dashboard_report_date_field
-    page.datacenter_dashboard_available_dates_text = datacenter_dashboard_available_dates_text
-    page.datacenter_dashboard_output_field = datacenter_dashboard_output_field
+    page.datacenter_dashboard_db_field = datacenter_dashboard_db_field
+    page.datacenter_dashboard_html_output_dir_field = datacenter_dashboard_html_output_dir_field
+    page.datacenter_dashboard_expected_html_output_field = datacenter_dashboard_expected_html_output_field
+    page.datacenter_dashboard_snapshot_status_field = datacenter_dashboard_snapshot_status_field
+    page.datacenter_dashboard_html_file_status_field = datacenter_dashboard_html_file_status_field
+    page.datacenter_dashboard_run_id_field = datacenter_dashboard_run_id_field
+    page.datacenter_dashboard_last_action_status_field = datacenter_dashboard_last_action_status_field
+    page.datacenter_dashboard_source_reports_count_field = datacenter_dashboard_source_reports_count_field
+    page.datacenter_dashboard_action_summary_count_field = datacenter_dashboard_action_summary_count_field
+    page.datacenter_dashboard_market_map_count_field = datacenter_dashboard_market_map_count_field
+    page.datacenter_dashboard_watchlist_count_field = datacenter_dashboard_watchlist_count_field
+    page.datacenter_dashboard_ticker_count_field = datacenter_dashboard_ticker_count_field
+    page.datacenter_dashboard_decision_trace_count_field = datacenter_dashboard_decision_trace_count_field
     page.datacenter_dashboard_status_field = datacenter_dashboard_status_field
-    page.datacenter_dashboard_generate_button = datacenter_dashboard_generate_button
+    page.datacenter_dashboard_refresh_button = datacenter_dashboard_refresh_button
+    page.datacenter_dashboard_inspect_button = datacenter_dashboard_inspect_button
+    page.datacenter_dashboard_render_button = datacenter_dashboard_render_button
     page.datacenter_dashboard_open_button = datacenter_dashboard_open_button
     page.datacenter_dashboard_content = datacenter_dashboard_content
 
