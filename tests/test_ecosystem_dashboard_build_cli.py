@@ -715,3 +715,159 @@ def test_insert_fails_on_duplicate_run_id(tmp_path, monkeypatch, capsys):
     assert second_exit == 2
     assert _row_count(dashboard_db, "ecosystem_dashboard_runs") == 1
     assert "run_id already exists: RUN_SAME" in capsys.readouterr().out
+
+
+def test_build_without_render_html_does_not_create_html_output(tmp_path, monkeypatch):
+    dashboard_db = tmp_path / "ecosystem_dashboard.db"
+    reports_dir = _make_reports_dir(tmp_path)
+    html_output = tmp_path / "dashboard.html"
+    _patch_models(monkeypatch)
+
+    exit_code = main(
+        [
+            "--dashboard-db",
+            str(dashboard_db),
+            "--ecosystem-code",
+            "DATACENTER",
+            "--reports-dir",
+            str(reports_dir),
+            "--report-date",
+            "2026-05-22",
+            "--run-id",
+            "RUN_NO_RENDER",
+        ]
+    )
+
+    assert exit_code == 0
+    assert not html_output.exists()
+
+
+def test_build_with_render_html_for_datacenter_builds_and_renders(
+    tmp_path, monkeypatch, capsys
+):
+    dashboard_db = tmp_path / "ecosystem_dashboard.db"
+    reports_dir = _make_reports_dir(tmp_path)
+    html_output = tmp_path / "dashboard.html"
+    _patch_models(monkeypatch)
+
+    def fake_render(**kwargs):
+        Path(kwargs["output"]).write_text(
+            f"run_id={kwargs['run_id']} report_date=2026-05-22 ticker=NVDA",
+            encoding="utf-8",
+        )
+        return object()
+
+    monkeypatch.setattr(
+        "dev_tools.run_ecosystem_dashboard_build.generate_datacenter_dashboard_html_file",
+        fake_render,
+    )
+
+    exit_code = main(
+        [
+            "--dashboard-db",
+            str(dashboard_db),
+            "--ecosystem-code",
+            "DATACENTER",
+            "--reports-dir",
+            str(reports_dir),
+            "--report-date",
+            "2026-05-22",
+            "--run-id",
+            "RUN_RENDER",
+            "--render-html",
+            "--html-output",
+            str(html_output),
+        ]
+    )
+
+    assert exit_code == 0
+    assert _row_count(dashboard_db, "ecosystem_dashboard_runs") == 1
+    assert html_output.exists()
+    html = html_output.read_text(encoding="utf-8")
+    assert "2026-05-22" in html
+    assert "RUN_RENDER" in html
+    assert "NVDA" in html
+    output = capsys.readouterr().out
+    assert "SUMMARY ecosystem_dashboard_build.render_html_requested=1" in output
+    assert f"SUMMARY ecosystem_dashboard_build.html_output_path={html_output}" in output
+    assert "SUMMARY ecosystem_dashboard_build.html_render_status=OK" in output
+
+
+def test_render_html_without_html_output_fails_clearly(tmp_path, capsys):
+    dashboard_db = tmp_path / "ecosystem_dashboard.db"
+    reports_dir = _make_reports_dir(tmp_path)
+
+    exit_code = main(
+        [
+            "--dashboard-db",
+            str(dashboard_db),
+            "--ecosystem-code",
+            "DATACENTER",
+            "--reports-dir",
+            str(reports_dir),
+            "--report-date",
+            "2026-05-22",
+            "--render-html",
+        ]
+    )
+
+    assert exit_code == 2
+    output = capsys.readouterr().out
+    assert "SUMMARY ecosystem_dashboard_build.status=FAILED" in output
+    assert "--html-output is required when --render-html is provided" in output
+
+
+def test_html_output_without_render_html_fails_clearly(tmp_path, capsys):
+    dashboard_db = tmp_path / "ecosystem_dashboard.db"
+    reports_dir = _make_reports_dir(tmp_path)
+    html_output = tmp_path / "dashboard.html"
+
+    exit_code = main(
+        [
+            "--dashboard-db",
+            str(dashboard_db),
+            "--ecosystem-code",
+            "DATACENTER",
+            "--reports-dir",
+            str(reports_dir),
+            "--report-date",
+            "2026-05-22",
+            "--html-output",
+            str(html_output),
+        ]
+    )
+
+    assert exit_code == 2
+    output = capsys.readouterr().out
+    assert "SUMMARY ecosystem_dashboard_build.status=FAILED" in output
+    assert "--html-output requires --render-html" in output
+
+
+def test_render_html_with_other_ecosystem_fails_clearly(tmp_path, capsys):
+    dashboard_db = tmp_path / "ecosystem_dashboard.db"
+    reports_dir = _make_reports_dir(tmp_path)
+    html_output = tmp_path / "dashboard.html"
+
+    exit_code = main(
+        [
+            "--dashboard-db",
+            str(dashboard_db),
+            "--ecosystem-code",
+            "OTHER",
+            "--reports-dir",
+            str(reports_dir),
+            "--report-date",
+            "2026-05-22",
+            "--render-html",
+            "--html-output",
+            str(html_output),
+        ]
+    )
+
+    assert exit_code == 2
+    output = capsys.readouterr().out
+    assert "SUMMARY ecosystem_dashboard_build.status=FAILED" in output
+    assert (
+        "--render-html is currently supported only for ecosystem_code=DATACENTER; got OTHER"
+        in output
+    )

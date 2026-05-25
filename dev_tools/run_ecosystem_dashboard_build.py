@@ -21,6 +21,7 @@ from dev_tools.run_datacenter_dashboard_html import (
     build_dashboard_market_map_model,
     build_dashboard_ticker_model,
     build_dashboard_watchlist_model,
+    generate_datacenter_dashboard_html_file,
 )
 
 DEFAULT_DASHBOARD_DB = "/home/kalle/projects/rawcandle/data/ecosystem_dashboard.db"
@@ -48,6 +49,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--report-date", required=True)
     parser.add_argument("--mode", choices=("replace-date", "insert"), default="replace-date")
     parser.add_argument("--run-id")
+    parser.add_argument("--render-html", action="store_true")
+    parser.add_argument("--html-output")
     parser.add_argument("--title")
     return parser
 
@@ -604,10 +607,38 @@ def generate_ecosystem_dashboard_build(
     return selected_run_id, summary_lines
 
 
+def _validate_render_html_args(
+    *,
+    render_html: bool,
+    html_output: str | None,
+    ecosystem_code: str,
+) -> str | None:
+    normalized_output = html_output.strip() if html_output is not None and html_output.strip() else None
+    if render_html and normalized_output is None:
+        raise ValueError("--html-output is required when --render-html is provided")
+    if not render_html and normalized_output is not None:
+        raise ValueError("--html-output requires --render-html")
+    if not render_html:
+        return None
+    if ecosystem_code.strip().upper() != "DATACENTER":
+        raise ValueError(
+            f"--render-html is currently supported only for ecosystem_code=DATACENTER; got {ecosystem_code}"
+        )
+    output_parent = Path(normalized_output).parent
+    if not output_parent.exists():
+        raise ValueError(f"html output parent directory does not exist: {output_parent}")
+    return normalized_output
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        _run_id, summary_lines = generate_ecosystem_dashboard_build(
+        normalized_html_output = _validate_render_html_args(
+            render_html=args.render_html,
+            html_output=args.html_output,
+            ecosystem_code=args.ecosystem_code,
+        )
+        built_run_id, summary_lines = generate_ecosystem_dashboard_build(
             dashboard_db=args.dashboard_db,
             ecosystem_code=args.ecosystem_code,
             reports_dir=args.reports_dir,
@@ -623,8 +654,29 @@ def main(argv: list[str] | None = None) -> int:
         print("SUMMARY ecosystem_dashboard_build.status=FAILED")
         print(f"ERROR: {exc}")
         return 1
+    if args.render_html:
+        try:
+            generate_datacenter_dashboard_html_file(
+                dashboard_db=args.dashboard_db,
+                ecosystem_code="DATACENTER",
+                run_id=built_run_id,
+                output=normalized_html_output,
+                report_date=None,
+                title=args.title,
+            )
+        except (ValueError, FileNotFoundError, sqlite3.DatabaseError, OSError) as exc:
+            for line in summary_lines:
+                print(line)
+            print("SUMMARY ecosystem_dashboard_build.render_html_requested=1")
+            print(f"SUMMARY ecosystem_dashboard_build.html_output_path={normalized_html_output}")
+            print(f"ERROR: HTML render failed after successful build: {exc}")
+            return 1
     for line in summary_lines:
         print(line)
+    if args.render_html:
+        print("SUMMARY ecosystem_dashboard_build.render_html_requested=1")
+        print(f"SUMMARY ecosystem_dashboard_build.html_output_path={normalized_html_output}")
+        print("SUMMARY ecosystem_dashboard_build.html_render_status=OK")
     return 0
 
 

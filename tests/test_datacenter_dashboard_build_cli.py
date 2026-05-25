@@ -97,3 +97,68 @@ def test_wrapper_accepts_deprecated_analysis_db_and_does_not_create_dc_tables(
     )
     assert _table_exists(dashboard_db, "ecosystem_dashboard_runs")
     assert not _table_exists(dashboard_db, "dc_dashboard_runs")
+
+
+def test_wrapper_forwards_render_html_and_html_output(tmp_path, monkeypatch, capsys):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    html_output = tmp_path / "dashboard.html"
+    _write_report(
+        reports_dir / "datacenter_daily_2026-05-22_0000_full.csv",
+        "ticker;status\nNVDA;SELL\n",
+    )
+    captured_build: dict[str, object] = {}
+    captured_render: dict[str, object] = {}
+
+    def fake_generate(**kwargs):
+        captured_build.update(kwargs)
+        return (
+            "RUN_HTML",
+            (
+                "SUMMARY ecosystem_dashboard_build.status=OK",
+                "SUMMARY ecosystem_dashboard_build.run_id=RUN_HTML",
+            ),
+        )
+
+    def fake_render(**kwargs):
+        captured_render.update(kwargs)
+        Path(kwargs["output"]).write_text("RUN_HTML NVDA", encoding="utf-8")
+        return object()
+
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_build.generate_ecosystem_dashboard_build",
+        fake_generate,
+    )
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_build.generate_datacenter_dashboard_html_file",
+        fake_render,
+    )
+
+    exit_code = main(
+        [
+            "--dashboard-db",
+            str(tmp_path / "ecosystem_dashboard.db"),
+            "--reports-dir",
+            str(reports_dir),
+            "--report-date",
+            "2026-05-22",
+            "--render-html",
+            "--html-output",
+            str(html_output),
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured_build["ecosystem_code"] == "DATACENTER"
+    assert captured_render == {
+        "dashboard_db": str(tmp_path / "ecosystem_dashboard.db"),
+        "ecosystem_code": "DATACENTER",
+        "run_id": "RUN_HTML",
+        "output": str(html_output),
+        "report_date": None,
+        "title": None,
+    }
+    output = capsys.readouterr().out
+    assert "SUMMARY ecosystem_dashboard_build.render_html_requested=1" in output
+    assert f"SUMMARY ecosystem_dashboard_build.html_output_path={html_output}" in output
+    assert "SUMMARY ecosystem_dashboard_build.html_render_status=OK" in output
