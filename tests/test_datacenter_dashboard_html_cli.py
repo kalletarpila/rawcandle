@@ -570,6 +570,14 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     assert "VALID_PULLBACK" in html
     assert "P1_READY_TO_WATCH" in html
     assert "WATCH_VALID_PULLBACK" in html
+    assert '<tr data-filter-row="1"' in html
+    assert "<td>MS&amp;FT</td>" in html or "<td>AMD</td>" in html
+    assert "\ndata-filter-row=\"1\"" not in html
+    assert ">data-filter-row=\"1\"" not in html
+    assert "&lt;tr data-filter-row" not in html
+    assert "<tbody>\ndata-filter-row=" not in html
+    assert "</tr>\ndata-filter-row=" not in html
+    assert 'document.querySelectorAll("[data-filter-row=\'1\']")' in html
 
     stdout = capsys.readouterr().out
     assert f"SUMMARY html_output={output_path}" in stdout

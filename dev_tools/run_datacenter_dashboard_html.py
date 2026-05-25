@@ -336,13 +336,14 @@ def generate_dashboard_html(
             if command_center_rows_rendered >= max_command_rows:
                 break
             rows_html.append(
-                "<tr>"
+                "<tr"
                 f' data-filter-row="1"'
                 f' data-action="{_html_attr(decision.action)}"'
                 f' data-pullback-validity="{_html_attr(decision.pullback_validity)}"'
                 f' data-entry-readiness="{_html_attr(decision.entry_readiness)}"'
                 f' data-candidate-priority="{_html_attr(decision.candidate_priority_label)}"'
                 f' data-filter-text="{_html_attr(" ".join(filter(None, [decision.ticker, decision.action, decision.primary_reason or "", decision.pullback_validity or "", decision.entry_readiness or "", decision.candidate_priority_label or ""])).lower())}"'
+                ">"
                 f'<td class="{_action_class(decision.action)}">{_html_text(decision.ticker)}</td>'
                 f"<td>{_html_text(decision.action)}</td>"
                 f"<td>{_html_text(decision.severity)}</td>"
@@ -385,13 +386,14 @@ def generate_dashboard_html(
     ]
     candidate_decisions = sorted(candidate_decisions, key=_candidate_sort_key)[:max_candidate_rows]
     candidate_rows_html = "".join(
-        "<tr>"
+        "<tr"
         f' data-filter-row="1"'
         f' data-action="{_html_attr(decision.action)}"'
         f' data-pullback-validity="{_html_attr(decision.pullback_validity)}"'
         f' data-entry-readiness="{_html_attr(decision.entry_readiness)}"'
         f' data-candidate-priority="{_html_attr(decision.candidate_priority_label)}"'
         f' data-filter-text="{_html_attr(" ".join(filter(None, [decision.ticker, decision.action, decision.primary_reason or "", decision.pullback_reason or "", decision.entry_readiness or "", decision.candidate_priority_label or ""])).lower())}"'
+        ">"
         f'<td class="{_action_class(decision.action)}">{_html_text(decision.ticker)}</td>'
         f"<td>{decision.candidate_priority if decision.candidate_priority is not None else '-'}</td>"
         f"<td>{_html_text(decision.candidate_priority_label)}</td>"
