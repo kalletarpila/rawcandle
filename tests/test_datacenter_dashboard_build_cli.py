@@ -1,0 +1,595 @@
+from __future__ import annotations
+
+import sqlite3
+from pathlib import Path
+
+from dev_tools.datacenter_dashboard_decisions import (
+    DatacenterDecisionBatchResult,
+    DatacenterDecisionTrace,
+    DatacenterTickerDecision,
+)
+from dev_tools.run_datacenter_dashboard_build import main
+from dev_tools.run_datacenter_dashboard_html import (
+    DatacenterDashboardMarketMapRecord,
+    DatacenterDashboardTickerRecord,
+    DatacenterDashboardWatchlistRecord,
+)
+
+
+def _write_report(path: Path, text: str) -> None:
+    path.write_text(text, encoding="utf-8")
+
+
+def _row_count(db_path: Path, table: str) -> int:
+    with sqlite3.connect(db_path) as conn:
+        return int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+
+
+def _table_exists(db_path: Path, table: str) -> bool:
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table' AND name = ?
+            """,
+            (table,),
+        ).fetchone()
+    return row is not None
+
+
+def _make_reports_dir(tmp_path: Path, *, date_text: str = "2026-05-22") -> Path:
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    _write_report(
+        reports_dir / f"datacenter_daily_{date_text}_0000_full.csv",
+        "ticker;status;reason\nNVDA;SELL;close_below_ema20\n",
+    )
+    return reports_dir
+
+
+def _stub_decision_result() -> DatacenterDecisionBatchResult:
+    decisions = [
+        DatacenterTickerDecision(
+            ticker="NVDA",
+            action="SELL",
+            severity="CRITICAL",
+            primary_reason="close_below_ema20",
+            reasons=["close_below_ema20"],
+            blocking_reasons=[],
+            horizons_present=["daily"],
+            horizon_statuses={"daily": "BREAKOUT_READY"},
+            distance_to_ema20=None,
+            high_exit_risk_days_count=None,
+            trend_state="UP",
+            latest_structure_label="HH",
+            latest_bos_event_type="BOS_UP",
+            latest_reset_reason=None,
+            latest_bullish_signal_age_td=3,
+            latest_bearish_signal_age_td=1,
+            pullback_validity="NO_PULLBACK",
+            pullback_reason="not a pullback",
+            entry_readiness="NOT_READY",
+            entry_readiness_reason="risk",
+            candidate_priority=5,
+            candidate_priority_label="P5_NOT_READY",
+            candidate_priority_reason="risk",
+            source_files=["daily.csv"],
+            decision_trace=[
+                DatacenterDecisionTrace(
+                    ticker="NVDA",
+                    action="SELL",
+                    matched_rule="SELL_HARD_TOKEN",
+                    horizon="daily",
+                    field_name="reason",
+                    matched_token="close_below_ema20",
+                    matched_value="close_below_ema20",
+                    source_file="daily.csv",
+                    section="Watchlist Summary",
+                    row_kind="watchlist",
+                )
+            ],
+        ),
+        DatacenterTickerDecision(
+            ticker="AMD",
+            action="WATCH",
+            severity="LOW",
+            primary_reason="trend_ok",
+            reasons=["trend_ok"],
+            blocking_reasons=[],
+            horizons_present=["rolling 30d"],
+            horizon_statuses={"rolling 30d": "BUY_ZONE"},
+            distance_to_ema20=None,
+            high_exit_risk_days_count=None,
+            trend_state="UP",
+            latest_structure_label="HL",
+            latest_bos_event_type="BOS_UP",
+            latest_reset_reason=None,
+            latest_bullish_signal_age_td=2,
+            latest_bearish_signal_age_td=None,
+            pullback_validity="VALID_PULLBACK",
+            pullback_reason="pullback",
+            entry_readiness="READY_TO_WATCH",
+            entry_readiness_reason="ok",
+            candidate_priority=1,
+            candidate_priority_label="P1_READY_TO_WATCH",
+            candidate_priority_reason="ok",
+            source_files=["rolling30.csv"],
+            decision_trace=[],
+        ),
+    ]
+    return DatacenterDecisionBatchResult(
+        decisions=decisions,
+        action_counts={
+            "SELL": 1,
+            "REDUCE": 0,
+            "TIGHTEN_STOP": 0,
+            "BLOCKED": 0,
+            "WAIT_PULLBACK": 0,
+            "BUY_NOW": 0,
+            "WATCH": 1,
+            "NEUTRAL": 0,
+        },
+        pullback_counts={},
+        pullback_action_counts={},
+        entry_readiness_counts={},
+        candidate_priority_counts={},
+        warning_count=0,
+        warnings=[],
+    )
+
+
+def _stub_market_map_rows() -> list[DatacenterDashboardMarketMapRecord]:
+    return [
+        DatacenterDashboardMarketMapRecord(
+            market_level="ECOSYSTEM",
+            name="DC_ECOSYSTEM_TOTAL",
+            layer=None,
+            current_status="BUY_ZONE",
+            start_status_30d="WATCH",
+            status_change_30d="WATCH -> BUY_ZONE",
+            status_change_5d="PULLBACK -> BUY_ZONE",
+            window_status_30d="BUY_ZONE",
+            window_status_5d="PULLBACK",
+            window_status_2d="NEUTRAL",
+            overheat_risk="LOW",
+            pct_above_ema20=62.5,
+            pct_above_ma10=58.0,
+            ema20_breadth_delta_5d=4.0,
+            return_5d=0.12,
+            return_10d=0.18,
+            return_20d=0.25,
+            return_60d=0.44,
+            dow_trend_state="UP",
+            dow_trend_state_age_td=8,
+            latest_structure_label="HH",
+            latest_structure_age_td=3,
+            latest_bos_event_type="BOS_UP",
+            latest_bos_age_td=2,
+            latest_reset_reason=None,
+            latest_reset_age_td=None,
+            latest_candle=None,
+            latest_candle_age_td=None,
+            latest_divergence=None,
+            latest_divergence_age_td=None,
+            latest_chart_pattern="BASE_BREAKOUT",
+            latest_chart_pattern_age_td=5,
+            source_horizons="daily, rolling 30d",
+            source_files="daily.md, rolling30.md",
+        )
+    ]
+
+
+def _stub_watchlist_rows() -> list[DatacenterDashboardWatchlistRecord]:
+    return [
+        DatacenterDashboardWatchlistRecord(
+            ticker="NVDA",
+            action="SELL",
+            severity="CRITICAL",
+            primary_reason="close_below_ema20",
+            current_status="BREAKOUT_READY",
+            start_status_30d="WATCH",
+            status_change_30d="WATCH -> BREAKOUT_READY",
+            status_change_5d="PULLBACK_WINDOW -> BREAKOUT_READY",
+            window_status_30d="WATCH",
+            window_status_5d="PULLBACK_WINDOW",
+            window_status_2d="BREAKOUT_READY",
+            ma_break_status="EMA20_WARNING",
+            freshness_status="FRESH_BULLISH_SIGNAL",
+            trend_state="UP",
+            trend_state_age_td=12,
+            latest_structure_label="HH",
+            latest_structure_age_td=3,
+            latest_bos_event_type="BOS_UP",
+            latest_bos_age_td=2,
+            latest_reset_reason=None,
+            latest_reset_age_td=None,
+            latest_candle="Hammer",
+            latest_candle_age_td=4,
+            latest_divergence="Bearish Divergence",
+            latest_divergence_age_td=2,
+            latest_chart_pattern="BASE_BREAKOUT",
+            latest_chart_pattern_age_td=5,
+            pullback_validity="NO_PULLBACK",
+            entry_readiness="NOT_READY",
+            candidate_priority=5,
+            candidate_priority_label="P5_NOT_READY",
+            daily_status="BREAKOUT_READY",
+            rolling_2d_status=None,
+            rolling_5d_status=None,
+            rolling_30d_status="WATCH",
+            horizons_present="daily, rolling 30d",
+            source_files=2,
+        )
+    ]
+
+
+def _stub_ticker_rows() -> list[DatacenterDashboardTickerRecord]:
+    return [
+        DatacenterDashboardTickerRecord(
+            ticker="AMD",
+            action="WATCH",
+            severity="LOW",
+            primary_reason="trend_ok",
+            current_status="BUY_ZONE",
+            start_status_30d="WATCH",
+            status_change_30d="WATCH -> BUY_ZONE",
+            status_change_5d=None,
+            window_status_30d="BUY_ZONE",
+            window_status_5d=None,
+            window_status_2d=None,
+            ma_break_status="OK",
+            freshness_status="FRESH_BULLISH_SIGNAL",
+            trend_state="UP",
+            trend_state_age_td=7,
+            latest_structure_label="HL",
+            latest_structure_age_td=2,
+            latest_bos_event_type="BOS_UP",
+            latest_bos_age_td=1,
+            latest_reset_reason=None,
+            latest_reset_age_td=None,
+            latest_candle=None,
+            latest_candle_age_td=None,
+            latest_divergence=None,
+            latest_divergence_age_td=None,
+            latest_chart_pattern="PULLBACK",
+            latest_chart_pattern_age_td=2,
+            pullback_validity="VALID_PULLBACK",
+            entry_readiness="READY_TO_WATCH",
+            candidate_priority=1,
+            candidate_priority_label="P1_READY_TO_WATCH",
+            daily_status=None,
+            rolling_2d_status=None,
+            rolling_5d_status=None,
+            rolling_30d_status="BUY_ZONE",
+            horizons_present="rolling 30d",
+            source_files=1,
+            is_watchlist=0,
+        ),
+        DatacenterDashboardTickerRecord(
+            ticker="NVDA",
+            action="SELL",
+            severity="CRITICAL",
+            primary_reason="close_below_ema20",
+            current_status="BREAKOUT_READY",
+            start_status_30d="WATCH",
+            status_change_30d="WATCH -> BREAKOUT_READY",
+            status_change_5d="PULLBACK_WINDOW -> BREAKOUT_READY",
+            window_status_30d="WATCH",
+            window_status_5d="PULLBACK_WINDOW",
+            window_status_2d="BREAKOUT_READY",
+            ma_break_status="EMA20_WARNING",
+            freshness_status="FRESH_BULLISH_SIGNAL",
+            trend_state="UP",
+            trend_state_age_td=12,
+            latest_structure_label="HH",
+            latest_structure_age_td=3,
+            latest_bos_event_type="BOS_UP",
+            latest_bos_age_td=2,
+            latest_reset_reason=None,
+            latest_reset_age_td=None,
+            latest_candle="Hammer",
+            latest_candle_age_td=4,
+            latest_divergence="Bearish Divergence",
+            latest_divergence_age_td=2,
+            latest_chart_pattern="BASE_BREAKOUT",
+            latest_chart_pattern_age_td=5,
+            pullback_validity="NO_PULLBACK",
+            entry_readiness="NOT_READY",
+            candidate_priority=5,
+            candidate_priority_label="P5_NOT_READY",
+            daily_status="BREAKOUT_READY",
+            rolling_2d_status=None,
+            rolling_5d_status=None,
+            rolling_30d_status="WATCH",
+            horizons_present="daily, rolling 30d",
+            source_files=2,
+            is_watchlist=1,
+        ),
+    ]
+
+
+def _patch_models(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_build.build_datacenter_ticker_decisions",
+        lambda rows: _stub_decision_result(),
+    )
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_build.build_dashboard_market_map_model",
+        lambda status: _stub_market_map_rows(),
+    )
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_build.build_dashboard_watchlist_model",
+        lambda rows, decisions: _stub_watchlist_rows(),
+    )
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_build.build_dashboard_ticker_model",
+        lambda rows, decisions: _stub_ticker_rows(),
+    )
+
+
+def test_cli_creates_dashboard_tables_if_missing(tmp_path, monkeypatch, capsys):
+    db_path = tmp_path / "analysis.db"
+    reports_dir = _make_reports_dir(tmp_path)
+    _patch_models(monkeypatch)
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--reports-dir",
+            str(reports_dir),
+            "--report-date",
+            "2026-05-22",
+        ]
+    )
+
+    assert exit_code == 0
+    assert _table_exists(db_path, "dc_dashboard_runs")
+    assert _table_exists(db_path, "dc_dashboard_source_reports")
+    assert _table_exists(db_path, "dc_dashboard_action_summary")
+    assert _table_exists(db_path, "dc_dashboard_market_map")
+    assert _table_exists(db_path, "dc_dashboard_watchlist_status")
+    assert _table_exists(db_path, "dc_dashboard_ticker_status")
+    assert _table_exists(db_path, "dc_dashboard_decision_trace")
+    assert "SUMMARY dashboard_build.status=OK" in capsys.readouterr().out
+
+
+def test_cli_with_invalid_report_date_exits_non_zero(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    reports_dir = _make_reports_dir(tmp_path)
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--reports-dir",
+            str(reports_dir),
+            "--report-date",
+            "20260522",
+        ]
+    )
+
+    assert exit_code == 2
+    output = capsys.readouterr().out
+    assert "SUMMARY dashboard_build.status=FAILED" in output
+    assert "invalid report_date format" in output
+
+
+def test_cli_with_no_matching_reports_exits_non_zero_and_writes_no_run(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--reports-dir",
+            str(reports_dir),
+            "--report-date",
+            "2026-05-22",
+        ]
+    )
+
+    assert exit_code == 1
+    assert "SUMMARY dashboard_build.status=FAILED" in capsys.readouterr().out
+    assert not _table_exists(db_path, "dc_dashboard_runs") or _row_count(
+        db_path, "dc_dashboard_runs"
+    ) == 0
+
+
+def test_cli_writes_run_and_related_rows(tmp_path, monkeypatch, capsys):
+    db_path = tmp_path / "analysis.db"
+    reports_dir = _make_reports_dir(tmp_path)
+    _patch_models(monkeypatch)
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--reports-dir",
+            str(reports_dir),
+            "--report-date",
+            "2026-05-22",
+            "--run-id",
+            "RUN_A",
+        ]
+    )
+
+    assert exit_code == 0
+    assert _row_count(db_path, "dc_dashboard_runs") == 1
+    assert _row_count(db_path, "dc_dashboard_source_reports") == 4
+    assert _row_count(db_path, "dc_dashboard_action_summary") == 8
+    assert _row_count(db_path, "dc_dashboard_market_map") == 1
+    assert _row_count(db_path, "dc_dashboard_watchlist_status") == 1
+    assert _row_count(db_path, "dc_dashboard_ticker_status") == 2
+    assert _row_count(db_path, "dc_dashboard_decision_trace") == 1
+
+    with sqlite3.connect(db_path) as conn:
+        run_row = conn.execute(
+            """
+            SELECT report_date, readiness, decision_total, market_map_rows, watchlist_rows, ticker_rows
+            FROM dc_dashboard_runs
+            WHERE run_id = 'RUN_A'
+            """
+        ).fetchone()
+        watchlist_row = conn.execute(
+            """
+            SELECT latest_structure_label, latest_structure_age_td
+            FROM dc_dashboard_watchlist_status
+            WHERE run_id = 'RUN_A' AND ticker = 'NVDA'
+            """
+        ).fetchone()
+        summary_rows = conn.execute(
+            """
+            SELECT action, count
+            FROM dc_dashboard_action_summary
+            WHERE run_id = 'RUN_A'
+            ORDER BY action
+            """
+        ).fetchall()
+    assert run_row == ("2026-05-22", "PARTIAL", 2, 1, 1, 2)
+    assert watchlist_row == ("HH", 3)
+    assert ("SELL", 1) in summary_rows
+    assert ("WATCH", 1) in summary_rows
+
+    output_lines = capsys.readouterr().out.strip().splitlines()
+    assert output_lines == [
+        "SUMMARY dashboard_build.status=OK",
+        "SUMMARY dashboard_build.run_id=RUN_A",
+        "SUMMARY dashboard_build.report_date=2026-05-22",
+        f"SUMMARY dashboard_build.reports_dir={reports_dir}",
+        "SUMMARY dashboard_build.readiness=PARTIAL",
+        "SUMMARY dashboard_build.source_reports_count=4",
+        "SUMMARY dashboard_build.total_parsed_rows=1",
+        "SUMMARY dashboard_build.total_parse_warnings=0",
+        "SUMMARY dashboard_build.decision_total=2",
+        "SUMMARY dashboard_build.market_map_rows=1",
+        "SUMMARY dashboard_build.watchlist_rows=1",
+        "SUMMARY dashboard_build.ticker_rows=2",
+        "SUMMARY dashboard_build.trace_rows=1",
+        "SUMMARY dashboard_build.mode=replace-date",
+    ]
+
+
+def test_replace_date_deletes_old_rows_before_inserting_new_run(tmp_path, monkeypatch):
+    db_path = tmp_path / "analysis.db"
+    reports_dir = _make_reports_dir(tmp_path)
+    _patch_models(monkeypatch)
+
+    assert main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--reports-dir",
+            str(reports_dir),
+            "--report-date",
+            "2026-05-22",
+            "--run-id",
+            "RUN_OLD",
+        ]
+    ) == 0
+    assert main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--reports-dir",
+            str(reports_dir),
+            "--report-date",
+            "2026-05-22",
+            "--run-id",
+            "RUN_NEW",
+            "--mode",
+            "replace-date",
+        ]
+    ) == 0
+
+    with sqlite3.connect(db_path) as conn:
+        run_ids = conn.execute(
+            "SELECT run_id FROM dc_dashboard_runs ORDER BY run_id"
+        ).fetchall()
+        child_run_ids = conn.execute(
+            "SELECT DISTINCT run_id FROM dc_dashboard_ticker_status ORDER BY run_id"
+        ).fetchall()
+    assert run_ids == [("RUN_NEW",)]
+    assert child_run_ids == [("RUN_NEW",)]
+
+
+def test_insert_does_not_delete_old_rows_and_fails_on_duplicate_run_id(
+    tmp_path, monkeypatch, capsys
+):
+    db_path = tmp_path / "analysis.db"
+    reports_dir = _make_reports_dir(tmp_path)
+    _patch_models(monkeypatch)
+
+    assert main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--reports-dir",
+            str(reports_dir),
+            "--report-date",
+            "2026-05-22",
+            "--run-id",
+            "RUN_SAME",
+            "--mode",
+            "insert",
+        ]
+    ) == 0
+    second_exit = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--reports-dir",
+            str(reports_dir),
+            "--report-date",
+            "2026-05-22",
+            "--run-id",
+            "RUN_SAME",
+            "--mode",
+            "insert",
+        ]
+    )
+
+    assert second_exit == 2
+    assert _row_count(db_path, "dc_dashboard_runs") == 1
+    output = capsys.readouterr().out
+    assert "run_id already exists: RUN_SAME" in output
+
+
+def test_insert_with_different_run_ids_keeps_old_rows(tmp_path, monkeypatch):
+    db_path = tmp_path / "analysis.db"
+    reports_dir = _make_reports_dir(tmp_path)
+    _patch_models(monkeypatch)
+
+    assert main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--reports-dir",
+            str(reports_dir),
+            "--report-date",
+            "2026-05-22",
+            "--run-id",
+            "RUN_1",
+            "--mode",
+            "insert",
+        ]
+    ) == 0
+    assert main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--reports-dir",
+            str(reports_dir),
+            "--report-date",
+            "2026-05-22",
+            "--run-id",
+            "RUN_2",
+            "--mode",
+            "insert",
+        ]
+    ) == 0
+    assert _row_count(db_path, "dc_dashboard_runs") == 2
+    assert _row_count(db_path, "dc_dashboard_ticker_status") == 4
