@@ -923,6 +923,43 @@ def _market_map_header_html() -> str:
     return "".join(f"<th>{escape(label)}</th>" for label in _MARKET_MAP_COLUMN_LABELS)
 
 
+_MARKET_MAP_COLUMN_WIDTHS = (
+    110,
+    220,
+    220,
+    140,
+    140,
+    180,
+    180,
+    140,
+    140,
+    140,
+    130,
+    120,
+    120,
+    170,
+    110,
+    110,
+    110,
+    110,
+    140,
+    140,
+    140,
+    160,
+    180,
+    110,
+    180,
+    120,
+)
+_MARKET_MAP_TABLE_TOTAL_WIDTH = sum(_MARKET_MAP_COLUMN_WIDTHS)
+
+
+def _market_map_colgroup_html() -> str:
+    return "<colgroup>" + "".join(
+        f'<col style="width:{width}px">' for width in _MARKET_MAP_COLUMN_WIDTHS
+    ) + "</colgroup>"
+
+
 def _render_combined_ecosystem_row(row: _CombinedEcosystemRow) -> str:
     status_change_30d_class = _status_class_from_text(row.status_change_30d)
     status_change_30d_attr = (
@@ -1182,6 +1219,7 @@ def _render_layer_subindustry_hierarchy(
     *,
     market_map_header_html: str,
 ) -> str:
+    market_map_colgroup_html = _market_map_colgroup_html()
     layer_by_name = {row.name: row for row in layer_rows}
     grouped_subindustries: dict[str, list[_CombinedMarketMapGroupRow]] = {
         row.name: [] for row in layer_rows
@@ -1219,7 +1257,9 @@ def _render_layer_subindustry_hierarchy(
             overheat_text = _safe_text(layer_row.overheat_risk_level)
             summary_status_class = _status_class_from_text(layer_row.current_status)
             layer_table_html = (
-                '<table class="sticky-table"><thead><tr>'
+                '<table class="sticky-table market-map-table">'
+                + market_map_colgroup_html
+                + "<thead><tr>"
                 + market_map_header_html
                 + "</tr></thead><tbody>"
                 + _render_combined_market_group_rows([layer_row], include_layer_column=True)
@@ -1235,7 +1275,9 @@ def _render_layer_subindustry_hierarchy(
             summary_status_class = "status-missing"
             layer_table_html = "<p>No combined layer row available.</p>"
         subindustry_table_html = (
-            '<table class="sticky-table"><tbody>'
+            '<table class="sticky-table market-map-table">'
+            + market_map_colgroup_html
+            + "<tbody>"
             + _render_combined_market_group_rows(sub_rows, include_layer_column=True)
             + "</tbody></table>"
         ) if sub_rows else "<p>No subindustries found for this layer.</p>"
@@ -2169,6 +2211,7 @@ def generate_dashboard_html(
     combined_layer_rows = _combine_market_group_rows(layer_market_rows)
     combined_subindustry_rows = _combine_market_group_rows(subindustry_market_rows)
     market_map_header_html = _market_map_header_html()
+    market_map_colgroup_html = _market_map_colgroup_html()
     ecosystem_market_rows_html = (
         _render_combined_ecosystem_row(combined_ecosystem_row)
         if combined_ecosystem_row is not None
@@ -2454,13 +2497,17 @@ def generate_dashboard_html(
     .table-scroll td {{
       white-space: nowrap;
     }}
-    .market-map-hierarchy-scroll table {{
-      width: max-content;
-      min-width: 100%;
+    .market-map-table {{
+      table-layout: fixed;
+      width: {_MARKET_MAP_TABLE_TOTAL_WIDTH}px;
     }}
-    .market-map-hierarchy-scroll th,
-    .market-map-hierarchy-scroll td {{
-      white-space: nowrap;
+    .market-map-table th,
+    .market-map-table td {{
+      white-space: normal;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      vertical-align: top;
+      line-height: 1.2;
     }}
     @media (max-width: 960px) {{
       .detail-grid {{
@@ -2518,7 +2565,9 @@ def generate_dashboard_html(
   <section id="market-map-ecosystem" class="major-section">
     <h2>Ecosystem Summary</h2>
     {(
-      '<div class="table-scroll"><table class="sticky-table"><thead><tr>'
+      '<div class="table-scroll"><table class="sticky-table market-map-table">'
+      + market_map_colgroup_html +
+      '<thead><tr>'
       + market_map_header_html +
       '</tr></thead><tbody>'
       + ecosystem_market_rows_html +

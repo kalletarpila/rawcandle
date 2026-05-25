@@ -745,6 +745,9 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     assert ecosystem_header is not None
     for snippet in _MARKET_MAP_HEADER_SNIPPETS:
         assert snippet in ecosystem_header.group(1)
+    assert 'class="sticky-table market-map-table"' in html_one
+    assert "<colgroup>" in html_one
+    assert ".market-map-table {" in html_one
 
     assert html_one == html_two
     assert "Custom &lt;Dashboard&gt;" in html_one
@@ -820,6 +823,7 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     assert "<summary>" in hierarchy_section
     assert 'class="market-layer-detail risk-medium"' in hierarchy_section
     assert 'class="table-scroll"><table class="sticky-table"' not in hierarchy_section
+    assert 'class="sticky-table market-map-table"' in hierarchy_section
     assert "Current: WATCH" in summary_html
     assert "Window 30d: ADD_ON_PULLBACK" in summary_html
     assert "Window 5d: ADD_ON_PULLBACK" in summary_html
