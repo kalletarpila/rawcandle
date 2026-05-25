@@ -8,8 +8,10 @@ from unittest.mock import Mock
 
 import pytest
 
+from dev_tools.run_datacenter_dashboard_html import DatacenterDashboardHtmlGenerationResult
 from dev_tools.stock_update_scheduler_ui import (
     DEFAULT_DATACENTER_ANALYSIS_DB,
+    DEFAULT_DATACENTER_DASHBOARD_REPORTS_DIR,
     DEFAULT_DATACENTER_EXPECTED_GROUP_COUNT,
     DEFAULT_DATACENTER_EXPECTED_SYNTHETIC_OHLC_COUNT,
     DEFAULT_DATACENTER_EXPECTED_TICKER_COUNT,
@@ -129,6 +131,33 @@ def _descendant_text_values_for_control(control):
         if isinstance(label, str):
             values.append(label)
     return values
+
+
+def _dashboard_html_result(
+    *,
+    output_path: str = "/tmp/datacenter_dashboard.html",
+    report_date: str = "newest",
+    selection_mode: str = "newest",
+    readiness: str = "READY",
+    found_reports: int = 4,
+    missing_reports: int = 0,
+    decision_total: int = 237,
+    candidate_pullback_rows: int = 54,
+) -> DatacenterDashboardHtmlGenerationResult:
+    return DatacenterDashboardHtmlGenerationResult(
+        output_path=output_path,
+        report_date=report_date,
+        selection_mode=selection_mode,
+        readiness=readiness,
+        found_reports=found_reports,
+        missing_reports=missing_reports,
+        decision_total=decision_total,
+        candidate_pullback_rows=candidate_pullback_rows,
+        summary_lines=(
+            f"SUMMARY reports_dir={DEFAULT_DATACENTER_DASHBOARD_REPORTS_DIR}",
+            f"SUMMARY report_date={report_date}",
+        ),
+    )
 
 
 def test_load_latest_scheduler_summary_picks_newest_by_filename_timestamp(tmp_path):
@@ -997,7 +1026,11 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(
     run_app(page, str(config_path))
     _ = capsys.readouterr().out
 
-    assert [tab.text for tab in page.datacenter_tabs.tabs] == ["Scheduler", "Datacenter"]
+    assert [tab.text for tab in page.datacenter_tabs.tabs] == [
+        "Scheduler",
+        "Datacenter",
+        "Datacenter Dashboard",
+    ]
     assert page.datacenter_price_db_field.value == DEFAULT_DATACENTER_PRICE_DB
     assert page.datacenter_analysis_db_field.value == DEFAULT_DATACENTER_ANALYSIS_DB
     assert page.datacenter_taxonomy_csv_field.value == DEFAULT_DATACENTER_TAXONOMY_CSV
@@ -1012,12 +1045,19 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(
     assert page.datacenter_expected_synthetic_ohlc_count_field.value == DEFAULT_DATACENTER_EXPECTED_SYNTHETIC_OHLC_COUNT
     assert page.datacenter_rolling_window_size_field.value == DEFAULT_DATACENTER_ROLLING_WINDOW_SIZE
     assert page.datacenter_watchlist_file_field.value == DEFAULT_DATACENTER_WATCHLIST_FILE
-    datacenter_text_labels = _descendant_text_values(page, tab_index=1)
-    assert "Datacenter Dashboard" not in datacenter_text_labels
-    assert "REAL RENDER CHECK: DATACENTER DASHBOARD V3" not in datacenter_text_labels
-    assert "dashboard_real_render_v3=1" not in datacenter_text_labels
-    assert "Dashboard UI build: dashboard_ui_visible_v1" not in datacenter_text_labels
-    assert "Refresh Dashboard" not in datacenter_text_labels
+    dashboard_text_labels = _descendant_text_values(page, tab_index=2)
+    assert "Datacenter Dashboard" in dashboard_text_labels
+    assert "Generate and open the static HTML dashboard from existing datacenter reports." in dashboard_text_labels
+    assert "Reports directory" in dashboard_text_labels
+    assert "Report date" in dashboard_text_labels
+    assert "Output path (optional)" in dashboard_text_labels
+    assert "Generate HTML Dashboard" in dashboard_text_labels
+    assert "Open Last Generated Dashboard" in dashboard_text_labels
+    assert "Refresh Dashboard" not in dashboard_text_labels
+    assert "Command Center" not in dashboard_text_labels
+    assert "Candidate Pullbacks" not in dashboard_text_labels
+    assert "Inspector" not in dashboard_text_labels
+    assert page.datacenter_dashboard_reports_dir_field.value == DEFAULT_DATACENTER_DASHBOARD_REPORTS_DIR
 
     page.datacenter_signal_date_field.value = "2026-05-15"
     page.datacenter_start_date_field.value = "2026-01-01"
@@ -1066,7 +1106,7 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(
     assert daily_override["command"][daily_override["command"].index("--watchlist-file") + 1] == "/tmp/custom_watchlist.txt"
 
 
-def test_run_app_removes_datacenter_dashboard_tab_and_debug_markers(
+def test_run_app_adds_datacenter_dashboard_launcher_tab_without_rendered_dashboard_sections(
     tmp_path, monkeypatch
 ):
     config_path = tmp_path / "scheduler.json"
@@ -1109,12 +1149,224 @@ def test_run_app_removes_datacenter_dashboard_tab_and_debug_markers(
     page = _FakePage()
     run_app(page, str(config_path))
 
-    assert [tab.text for tab in page.datacenter_tabs.tabs] == ["Scheduler", "Datacenter"]
+    assert [tab.text for tab in page.datacenter_tabs.tabs] == [
+        "Scheduler",
+        "Datacenter",
+        "Datacenter Dashboard",
+    ]
+    dashboard_text = _descendant_text_values(page, tab_index=2)
     all_text = _descendant_text_values_for_control(page.datacenter_tabs)
-    assert "Datacenter Dashboard" not in all_text
+    assert "Datacenter Dashboard" in dashboard_text
+    assert "Generate HTML Dashboard" in dashboard_text
+    assert "Reports directory" in dashboard_text
+    assert "Report date" in dashboard_text
+    assert "Output path (optional)" in dashboard_text
+    assert "Command Center" not in dashboard_text
+    assert "Candidate Pullbacks" not in dashboard_text
+    assert "Ticker Inspector / Details" not in dashboard_text
     assert "REAL RENDER CHECK: DATACENTER DASHBOARD V3" not in all_text
     assert "dashboard_ui_visible_v1" not in all_text
     assert "dashboard_real_render_v3=1" not in all_text
+
+
+def test_datacenter_dashboard_launcher_invalid_report_date_shows_error_and_does_not_run_generator(
+    tmp_path, monkeypatch
+):
+    config_path = tmp_path / "scheduler.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "analysis_db_path": "/tmp/analysis.db",
+                "enabled_markets": ["omxh"],
+                "log_dir": "/tmp/logs",
+                "osakedata_db_path": "/tmp/osakedata.db",
+                "run_time": "05:30",
+                "timezone": "Europe/Helsinki",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.load_latest_scheduler_summary", lambda log_dir: None)
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.list_scheduler_log_files", lambda log_dir: [])
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.read_scheduler_status", lambda log_dir: None)
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
+        lambda: {"timer_path": "/tmp/timer", "on_calendar": "*-*-* 05:30:00", "installed": True, "status_summary": "ok", "error": None},
+    )
+    called = []
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.generate_datacenter_dashboard_html_file",
+        lambda **kwargs: called.append(kwargs),
+    )
+
+    page = _FakePage()
+    run_app(page, str(config_path))
+    page.datacenter_dashboard_report_date_field.value = "2026/05/22"
+
+    page.datacenter_dashboard_generate_button.on_click(None)
+
+    assert called == []
+    assert "ERROR invalid report date, expected YYYY-MM-DD" in page.datacenter_dashboard_status_field.value
+    assert "generate_status=FAILED" in page.datacenter_dashboard_status_field.value
+    assert "open_status=SKIPPED" in page.datacenter_dashboard_status_field.value
+
+
+def test_datacenter_dashboard_launcher_newest_mode_calls_generator_without_report_date(
+    tmp_path, monkeypatch
+):
+    config_path = tmp_path / "scheduler.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "analysis_db_path": "/tmp/analysis.db",
+                "enabled_markets": ["omxh"],
+                "log_dir": "/tmp/logs",
+                "osakedata_db_path": "/tmp/osakedata.db",
+                "run_time": "05:30",
+                "timezone": "Europe/Helsinki",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.load_latest_scheduler_summary", lambda log_dir: None)
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.list_scheduler_log_files", lambda log_dir: [])
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.read_scheduler_status", lambda log_dir: None)
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
+        lambda: {"timer_path": "/tmp/timer", "on_calendar": "*-*-* 05:30:00", "installed": True, "status_summary": "ok", "error": None},
+    )
+    captured: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.generate_datacenter_dashboard_html_file",
+        lambda **kwargs: captured.append(kwargs) or _dashboard_html_result(),
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.open_datacenter_dashboard_html",
+        lambda path: {
+            "open_status": "OK",
+            "opener": "cmd.exe",
+            "html_output": path,
+            "html_output_windows": "C:\\temp\\datacenter_dashboard.html",
+            "html_file_url": "file:///C:/temp/datacenter_dashboard.html",
+            "manual_lines": [],
+        },
+    )
+
+    page = _FakePage()
+    run_app(page, str(config_path))
+
+    page.datacenter_dashboard_generate_button.on_click(None)
+
+    assert captured
+    assert captured[-1]["report_date"] is None
+    assert captured[-1]["output"] is None
+    assert "report_date=newest" in page.datacenter_dashboard_status_field.value
+    assert "generate_status=OK" in page.datacenter_dashboard_status_field.value
+    assert "open_status=OK" in page.datacenter_dashboard_status_field.value
+
+
+def test_datacenter_dashboard_launcher_valid_report_date_passes_report_date_and_handles_partial(
+    tmp_path, monkeypatch
+):
+    config_path = tmp_path / "scheduler.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "analysis_db_path": "/tmp/analysis.db",
+                "enabled_markets": ["omxh"],
+                "log_dir": "/tmp/logs",
+                "osakedata_db_path": "/tmp/osakedata.db",
+                "run_time": "05:30",
+                "timezone": "Europe/Helsinki",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.load_latest_scheduler_summary", lambda log_dir: None)
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.list_scheduler_log_files", lambda log_dir: [])
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.read_scheduler_status", lambda log_dir: None)
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
+        lambda: {"timer_path": "/tmp/timer", "on_calendar": "*-*-* 05:30:00", "installed": True, "status_summary": "ok", "error": None},
+    )
+    captured: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.generate_datacenter_dashboard_html_file",
+        lambda **kwargs: captured.append(kwargs) or _dashboard_html_result(
+            output_path="/tmp/datacenter_dashboard_2026-05-22.html",
+            report_date="2026-05-22",
+            selection_mode="report_date",
+            readiness="PARTIAL",
+            found_reports=2,
+            missing_reports=2,
+        ),
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.open_datacenter_dashboard_html",
+        lambda path: {
+            "open_status": "FAILED",
+            "opener": "none",
+            "html_output": path,
+            "html_output_windows": "C:\\temp\\datacenter_dashboard_2026-05-22.html",
+            "html_file_url": "file:///C:/temp/datacenter_dashboard_2026-05-22.html",
+            "manual_lines": ["Open manually in Firefox:"],
+        },
+    )
+
+    page = _FakePage()
+    run_app(page, str(config_path))
+    page.datacenter_dashboard_report_date_field.value = "2026-05-22"
+
+    page.datacenter_dashboard_generate_button.on_click(None)
+
+    assert captured
+    assert captured[-1]["report_date"] == "2026-05-22"
+    assert "WARNING partial reports found for report_date=2026-05-22" in page.datacenter_dashboard_status_field.value
+    assert "found_reports=2" in page.datacenter_dashboard_status_field.value
+    assert "missing_reports=2" in page.datacenter_dashboard_status_field.value
+    assert "open_status=FAILED" in page.datacenter_dashboard_status_field.value
+
+
+def test_datacenter_dashboard_launcher_missing_base_reports_for_selected_date_shows_clear_error(
+    tmp_path, monkeypatch
+):
+    config_path = tmp_path / "scheduler.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "analysis_db_path": "/tmp/analysis.db",
+                "enabled_markets": ["omxh"],
+                "log_dir": "/tmp/logs",
+                "osakedata_db_path": "/tmp/osakedata.db",
+                "run_time": "05:30",
+                "timezone": "Europe/Helsinki",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.load_latest_scheduler_summary", lambda log_dir: None)
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.list_scheduler_log_files", lambda log_dir: [])
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.read_scheduler_status", lambda log_dir: None)
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
+        lambda: {"timer_path": "/tmp/timer", "on_calendar": "*-*-* 05:30:00", "installed": True, "status_summary": "ok", "error": None},
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.generate_datacenter_dashboard_html_file",
+        lambda **kwargs: (_ for _ in ()).throw(FileNotFoundError("no reports found")),
+    )
+
+    page = _FakePage()
+    run_app(page, str(config_path))
+    page.datacenter_dashboard_report_date_field.value = "2026-05-22"
+
+    page.datacenter_dashboard_generate_button.on_click(None)
+
+    status = page.datacenter_dashboard_status_field.value
+    assert "ERROR no datacenter reports found for report_date=2026-05-22" in status
+    assert "Run the reports from the Datacenter tab first." in status
+    assert "datacenter_daily_2026-05-22_*.md" in status
+    assert "datacenter_rolling_30_2026-05-22_*.md" in status
 
 
 def test_run_app_does_not_add_broker_or_order_buttons(

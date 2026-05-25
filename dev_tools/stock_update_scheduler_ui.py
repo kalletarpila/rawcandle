@@ -35,6 +35,10 @@ from dev_tools.datacenter_dashboard_support import (
     DatacenterDashboardStatus,
     discover_datacenter_dashboard_status,
 )
+from dev_tools.run_datacenter_dashboard_html import (
+    generate_datacenter_dashboard_html_file,
+    resolve_dashboard_html_output_path,
+)
 from rawcandle.scheduler.config import (
     StockUpdateSchedulerConfig,
     read_scheduler_config,
@@ -77,6 +81,8 @@ DEFAULT_DATACENTER_ROLLING_WINDOW_SIZE = "20"
 DEFAULT_DATACENTER_WATCHLIST_FILE = "/home/kalle/projects/rawcandle/swing_reports/datacenter_watchlist.txt"
 DEFAULT_DATACENTER_SIGNAL_DATE = (date.today() - timedelta(days=1)).isoformat()
 DEFAULT_DATACENTER_START_DATE = "2025-08-01"
+DEFAULT_DATACENTER_DASHBOARD_REPORTS_DIR = "/home/kalle/projects/rawcandle/temp"
+_DATACENTER_DASHBOARD_REPORT_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -425,6 +431,100 @@ def launch_browser_url(page: ft.Page, url: str) -> None:
             await result
 
         page.run_task(_await_launch)
+
+
+def _is_wsl_environment() -> bool:
+    if os.environ.get("WSL_DISTRO_NAME"):
+        return True
+    try:
+        proc_version = Path("/proc/version").read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return bool(re.search(r"microsoft|wsl", proc_version, flags=re.IGNORECASE))
+
+
+def _build_windows_dashboard_path(output_path: str) -> str | None:
+    if shutil.which("wslpath") is None:
+        return None
+    completed = subprocess.run(
+        ["wslpath", "-w", output_path],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return None
+    windows_path = (completed.stdout or "").strip()
+    return windows_path or None
+
+
+def _build_dashboard_file_url(output_path: str, windows_path: str | None) -> str:
+    if windows_path:
+        return f"file:{windows_path.replace(chr(92), '/')}"
+    return Path(output_path).resolve().as_uri()
+
+
+def open_datacenter_dashboard_html(output_path: str) -> dict[str, str | list[str]]:
+    windows_path = _build_windows_dashboard_path(output_path)
+    file_url = _build_dashboard_file_url(output_path, windows_path)
+    attempts: list[tuple[str, list[str]]] = []
+    if _is_wsl_environment():
+        if windows_path:
+            attempts.extend(
+                [
+                    ("cmd.exe", ["cmd.exe", "/C", "start", "", windows_path]),
+                    (
+                        "powershell.exe",
+                        ["powershell.exe", "-NoProfile", "-Command", f"Start-Process '{windows_path}'"],
+                    ),
+                    ("firefox.exe", ["firefox.exe", windows_path]),
+                    ("explorer.exe", ["explorer.exe", windows_path]),
+                ]
+            )
+        attempts.extend(
+            [
+                ("firefox", ["firefox", output_path]),
+                ("xdg-open", ["xdg-open", output_path]),
+            ]
+        )
+    else:
+        attempts.extend(
+            [
+                ("firefox", ["firefox", output_path]),
+                ("xdg-open", ["xdg-open", output_path]),
+            ]
+        )
+
+    for opener_name, command in attempts:
+        if shutil.which(command[0]) is None:
+            continue
+        completed = subprocess.run(command, capture_output=True, text=True, check=False)
+        if completed.returncode == 0:
+            return {
+                "open_status": "OK",
+                "opener": opener_name,
+                "html_output": output_path,
+                "html_output_windows": windows_path or "unavailable",
+                "html_file_url": file_url,
+                "manual_lines": [],
+            }
+
+    manual_lines = [
+        "Open manually in Firefox:",
+        "1. Copy this path:",
+        windows_path or output_path,
+        "2. Paste it into Firefox address bar.",
+        f"Linux path: {output_path}",
+        f"Windows path: {windows_path or 'unavailable'}",
+    ]
+    return {
+        "open_status": "FAILED",
+        "opener": "none",
+        "html_output": output_path,
+        "html_output_windows": windows_path or "unavailable",
+        "html_file_url": file_url,
+        "manual_lines": manual_lines,
+    }
 
 
 def _datacenter_downloads_dir(assets_root: Path) -> Path:
@@ -2179,6 +2279,225 @@ def run_app(page: ft.Page, config_path: str) -> None:
         expand=True,
     )
 
+    datacenter_dashboard_reports_dir_field = ft.TextField(
+        label="Reports directory",
+        value=DEFAULT_DATACENTER_DASHBOARD_REPORTS_DIR,
+        expand=True,
+    )
+    datacenter_dashboard_report_date_field = ft.TextField(
+        label="Report date",
+        hint_text="YYYY-MM-DD",
+        expand=True,
+    )
+    datacenter_dashboard_output_field = ft.TextField(
+        label="Output path (optional)",
+        expand=True,
+    )
+    datacenter_dashboard_status_field = ft.TextField(
+        label="Status",
+        value="",
+        multiline=True,
+        min_lines=10,
+        max_lines=16,
+        read_only=True,
+        expand=True,
+    )
+    datacenter_dashboard_generate_button = ft.ElevatedButton("Generate HTML Dashboard")
+    datacenter_dashboard_open_button = ft.ElevatedButton(
+        "Open Last Generated Dashboard",
+        disabled=True,
+    )
+
+    def _dashboard_effective_output_path() -> str:
+        report_date_value = datacenter_dashboard_report_date_field.value.strip() or None
+        output_value = datacenter_dashboard_output_field.value.strip() or None
+        return str(
+            resolve_dashboard_html_output_path(
+                reports_dir=datacenter_dashboard_reports_dir_field.value.strip() or DEFAULT_DATACENTER_DASHBOARD_REPORTS_DIR,
+                output=output_value,
+                report_date=report_date_value,
+            )
+        )
+
+    def _set_datacenter_dashboard_status(lines: list[str]) -> None:
+        datacenter_dashboard_status_field.value = "\n".join(lines)
+        page.update()
+
+    def _show_dashboard_missing_report_error(report_date_value: str, reports_dir_value: str) -> None:
+        _set_datacenter_dashboard_status(
+            [
+                f"ERROR no datacenter reports found for report_date={report_date_value} in {reports_dir_value}. Run the reports from the Datacenter tab first.",
+                f"reports_dir={reports_dir_value}",
+                f"report_date={report_date_value}",
+                f"output={_dashboard_effective_output_path()}",
+                "generate_status=FAILED",
+                "open_status=SKIPPED",
+                "Expected filename examples:",
+                f"datacenter_daily_{report_date_value}_*.md",
+                f"datacenter_rolling_2_{report_date_value}_*.md",
+                f"datacenter_rolling_5_{report_date_value}_*.md",
+                f"datacenter_rolling_30_{report_date_value}_*.md",
+            ]
+        )
+
+    def on_datacenter_dashboard_generate(e) -> None:
+        reports_dir_value = datacenter_dashboard_reports_dir_field.value.strip() or DEFAULT_DATACENTER_DASHBOARD_REPORTS_DIR
+        report_date_value = datacenter_dashboard_report_date_field.value.strip()
+        output_value = datacenter_dashboard_output_field.value.strip() or None
+        if report_date_value and not _DATACENTER_DASHBOARD_REPORT_DATE_RE.match(report_date_value):
+            _set_datacenter_dashboard_status(
+                [
+                    "ERROR invalid report date, expected YYYY-MM-DD",
+                    f"reports_dir={reports_dir_value}",
+                    f"report_date={report_date_value}",
+                    f"output={_dashboard_effective_output_path()}",
+                    "generate_status=FAILED",
+                    "open_status=SKIPPED",
+                ]
+            )
+            return
+
+        try:
+            result = generate_datacenter_dashboard_html_file(
+                reports_dir=reports_dir_value,
+                output=output_value,
+                report_date=report_date_value or None,
+            )
+        except FileNotFoundError:
+            if report_date_value:
+                _show_dashboard_missing_report_error(report_date_value, reports_dir_value)
+                return
+            _set_datacenter_dashboard_status(
+                [
+                    "ERROR no datacenter reports found for newest mode in the selected reports directory.",
+                    f"reports_dir={reports_dir_value}",
+                    "report_date=newest",
+                    f"output={_dashboard_effective_output_path()}",
+                    "generate_status=FAILED",
+                    "open_status=SKIPPED",
+                ]
+            )
+            return
+        except ValueError as exc:
+            _set_datacenter_dashboard_status(
+                [
+                    f"ERROR {exc}",
+                    f"reports_dir={reports_dir_value}",
+                    f"report_date={report_date_value or 'newest'}",
+                    f"output={_dashboard_effective_output_path()}",
+                    "generate_status=FAILED",
+                    "open_status=SKIPPED",
+                ]
+            )
+            return
+        except Exception as exc:
+            _set_datacenter_dashboard_status(
+                [
+                    f"ERROR {exc}",
+                    f"reports_dir={reports_dir_value}",
+                    f"report_date={report_date_value or 'newest'}",
+                    f"output={_dashboard_effective_output_path()}",
+                    "generate_status=FAILED",
+                    "open_status=SKIPPED",
+                ]
+            )
+            return
+
+        open_result = open_datacenter_dashboard_html(result.output_path)
+        page.datacenter_dashboard_last_output_path = result.output_path
+        datacenter_dashboard_output_field.value = result.output_path
+        datacenter_dashboard_open_button.disabled = False
+        status_lines = [
+            f"reports_dir={reports_dir_value}",
+            f"report_date={result.report_date}",
+            f"output={result.output_path}",
+            f"readiness={result.readiness}",
+            f"found_reports={result.found_reports}",
+            f"missing_reports={result.missing_reports}",
+            f"decision_total={result.decision_total}",
+            f"candidate_pullback_rows={result.candidate_pullback_rows}",
+            "generate_status=OK",
+            f"open_status={open_result['open_status']}",
+            f"opener={open_result['opener']}",
+            f"html_output_windows={open_result['html_output_windows']}",
+            f"html_file_url={open_result['html_file_url']}",
+        ]
+        if result.readiness == "PARTIAL" and report_date_value:
+            status_lines.append(f"WARNING partial reports found for report_date={report_date_value}")
+        manual_lines = open_result.get("manual_lines") or []
+        _set_datacenter_dashboard_status(status_lines + list(manual_lines))
+
+    def on_datacenter_dashboard_open_last(e) -> None:
+        last_output_path = getattr(page, "datacenter_dashboard_last_output_path", None)
+        if not last_output_path:
+            _set_datacenter_dashboard_status(
+                [
+                    "ERROR no generated dashboard available yet.",
+                    "generate_status=FAILED",
+                    "open_status=SKIPPED",
+                ]
+            )
+            return
+        open_result = open_datacenter_dashboard_html(last_output_path)
+        status_lines = [
+            f"reports_dir={datacenter_dashboard_reports_dir_field.value.strip() or DEFAULT_DATACENTER_DASHBOARD_REPORTS_DIR}",
+            f"report_date={datacenter_dashboard_report_date_field.value.strip() or 'newest'}",
+            f"output={last_output_path}",
+            "generate_status=OK",
+            f"open_status={open_result['open_status']}",
+            f"opener={open_result['opener']}",
+            f"html_output_windows={open_result['html_output_windows']}",
+            f"html_file_url={open_result['html_file_url']}",
+        ]
+        _set_datacenter_dashboard_status(status_lines + list(open_result.get("manual_lines") or []))
+
+    datacenter_dashboard_generate_button.on_click = on_datacenter_dashboard_generate
+    datacenter_dashboard_open_button.on_click = on_datacenter_dashboard_open_last
+    datacenter_dashboard_content = ft.Column(
+        controls=[
+            ft.Text("Datacenter Dashboard", size=24, weight=ft.FontWeight.BOLD),
+            ft.Text(
+                "Generate and open the static HTML dashboard from existing datacenter reports."
+            ),
+            ft.Text(
+                "If reports for the selected date are missing, run the datacenter reports first from the Datacenter tab."
+            ),
+            datacenter_dashboard_reports_dir_field,
+            ft.Row(
+                [
+                    datacenter_dashboard_report_date_field,
+                    datacenter_dashboard_output_field,
+                ],
+                wrap=True,
+            ),
+            ft.Row(
+                [
+                    datacenter_dashboard_generate_button,
+                    datacenter_dashboard_open_button,
+                ],
+                wrap=True,
+            ),
+            datacenter_dashboard_status_field,
+        ],
+        spacing=12,
+        expand=True,
+    )
+    page.datacenter_dashboard_last_output_path = None
+    datacenter_dashboard_status_field.value = "\n".join(
+        [
+            f"reports_dir={DEFAULT_DATACENTER_DASHBOARD_REPORTS_DIR}",
+            "report_date=newest",
+            f"output={_dashboard_effective_output_path()}",
+            "readiness=MISSING",
+            "found_reports=0",
+            "missing_reports=0",
+            "decision_total=0",
+            "candidate_pullback_rows=0",
+            "generate_status=SKIPPED",
+            "open_status=SKIPPED",
+        ]
+    )
+
     page.datacenter_price_db_field = datacenter_price_db_field
     page.datacenter_analysis_db_field = datacenter_analysis_db_field
     page.datacenter_taxonomy_csv_field = datacenter_taxonomy_csv_field
@@ -2209,12 +2528,20 @@ def run_app(page: ft.Page, config_path: str) -> None:
     page.save_config_button = save_config_button
     page.reload_config_button = reload_config_button
     page.datacenter_content = datacenter_content
+    page.datacenter_dashboard_reports_dir_field = datacenter_dashboard_reports_dir_field
+    page.datacenter_dashboard_report_date_field = datacenter_dashboard_report_date_field
+    page.datacenter_dashboard_output_field = datacenter_dashboard_output_field
+    page.datacenter_dashboard_status_field = datacenter_dashboard_status_field
+    page.datacenter_dashboard_generate_button = datacenter_dashboard_generate_button
+    page.datacenter_dashboard_open_button = datacenter_dashboard_open_button
+    page.datacenter_dashboard_content = datacenter_dashboard_content
 
     tabs = ft.Tabs(
         selected_index=0,
         tabs=[
             ft.Tab(text="Scheduler", content=scheduler_content),
             ft.Tab(text="Datacenter", content=datacenter_content),
+            ft.Tab(text="Datacenter Dashboard", content=datacenter_dashboard_content),
         ],
         expand=1,
     )

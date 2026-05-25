@@ -21,6 +21,7 @@ from dev_tools.datacenter_dashboard_support import (
 )
 from dev_tools.run_datacenter_dashboard_html import (
     build_parser,
+    generate_datacenter_dashboard_html_file,
     generate_dashboard_html,
     main,
 )
@@ -643,6 +644,28 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     assert html_one.index('id="watchlist-status"') > html_one.index('id="summary"')
     assert html_one.index('id="watchlist-status"') < html_one.index('id="candidate-pullbacks"')
     assert html_one.index('id="candidate-pullbacks"') < html_one.index('id="command-center"')
+
+
+def test_generate_datacenter_dashboard_html_file_returns_output_path_and_summary_values(
+    tmp_path, monkeypatch
+):
+    _install_pipeline_mocks(monkeypatch, tmp_path)
+
+    result = generate_datacenter_dashboard_html_file(
+        reports_dir=str(tmp_path),
+        report_date="2026-05-22",
+    )
+
+    assert result.output_path.endswith("datacenter_dashboard_2026-05-22.html")
+    assert Path(result.output_path).exists()
+    assert result.report_date == "2026-05-22"
+    assert result.selection_mode == "report_date"
+    assert result.readiness == "READY"
+    assert result.found_reports == 4
+    assert result.missing_reports == 0
+    assert result.decision_total == 3
+    assert result.candidate_pullback_rows == 2
+    assert any(line == "SUMMARY selection_mode=report_date" for line in result.summary_lines)
 
 
 def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkeypatch, capsys):
