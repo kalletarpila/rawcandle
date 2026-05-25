@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import fields
+from dataclasses import asdict, fields
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -143,4 +143,16 @@ def load_ecosystem_dashboard_input_json(path: str) -> EcosystemDashboardInput:
         readiness=payload_dict["readiness"],
         total_parsed_rows=payload_dict["total_parsed_rows"],
         total_parse_warnings=payload_dict["total_parse_warnings"],
+    )
+
+
+def dump_ecosystem_dashboard_input_json(
+    dashboard_input: EcosystemDashboardInput,
+    path: str,
+) -> None:
+    json_path = Path(path)
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    json_path.write_text(
+        json.dumps(asdict(dashboard_input), ensure_ascii=True, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
     )

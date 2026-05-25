@@ -48,6 +48,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--skip-audit", action="store_true", help="Skip the read-only pipeline audit stage")
     parser.add_argument("--skip-reports", action="store_true", help="Skip daily and weekly report generation")
     parser.add_argument("--audit-strict", action="store_true", help="Upgrade audit count/window warnings to FAIL")
+    parser.add_argument("--export-dashboard-input-json", type=Path, default=None, help="Optional path for EcosystemDashboardInput-compatible JSON export written after successful report generation")
     parser.add_argument("--dry-run", action="store_true", help="Print the planned stages without writing any rows or reports")
     return parser.parse_args(argv)
 
@@ -94,6 +95,7 @@ def main(argv: list[str] | None = None) -> int:
             skip_reports=args.skip_reports,
             audit_strict=args.audit_strict,
             dry_run=args.dry_run,
+            export_dashboard_input_json=args.export_dashboard_input_json,
         )
     except Exception as exc:
         print(f"ERROR {exc}", file=sys.stderr)

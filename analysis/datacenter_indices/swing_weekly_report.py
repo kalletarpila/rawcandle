@@ -3195,5 +3195,6 @@ def write_weekly_swing_report(
     return {
         "markdown": markdown,
         "csv": csv_text,
+        "report_data": report_data,
         "summary": summary,
     }

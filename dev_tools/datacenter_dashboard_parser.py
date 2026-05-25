@@ -271,6 +271,7 @@ def _parse_semicolon_rows(
     warnings: list[str] = []
     current_header: list[str] | None = None
     current_section: str | None = None
+    current_header_prefixed = False
 
     for line_number, line in enumerate(text.splitlines(), start=1):
         stripped = line.strip()
@@ -282,18 +283,29 @@ def _parse_semicolon_rows(
             warnings.append(f"{source_file}: line {line_number} csv parse failed: {exc}")
             continue
         normalized = [_normalize_header(cell) for cell in parsed_row]
+        prefixed_section = parsed_row[0].strip() if parsed_row else ""
+        prefixed_values = parsed_row[1:] if len(parsed_row) > 1 else []
+        prefixed_header = normalized[1:] if len(normalized) > 1 else []
+
+        if _resolve_column(prefixed_header, "ticker") is not None:
+            current_header = prefixed_header
+            current_section = prefixed_section or current_section
+            current_header_prefixed = True
+            continue
         if _resolve_column(normalized, "ticker") is not None:
             current_header = normalized
-            if normalized and normalized[0] == "section":
-                current_section = parsed_row[0].strip() or current_section
+            current_header_prefixed = False
             continue
         if current_header is None:
             continue
-        if normalized and normalized[0] == "section":
-            current_section = parsed_row[0].strip() or current_section
+        if current_header_prefixed and prefixed_values:
+            current_section = prefixed_section or current_section
+            row_values = prefixed_values
+        else:
+            row_values = parsed_row
         row = _build_row(
             header=current_header,
-            values=parsed_row,
+            values=row_values,
             horizon=horizon,
             source_file=source_file,
             section=current_section,
@@ -361,6 +373,27 @@ def _parse_markdown_rows(
     return DatacenterDashboardParseResult(rows=rows, warnings=warnings)
 
 
+def parse_datacenter_dashboard_text(
+    *,
+    text: str,
+    horizon: str,
+    source_file: str,
+) -> DatacenterDashboardParseResult:
+    semicolon_result = _parse_semicolon_rows(
+        text=text,
+        horizon=horizon,
+        source_file=source_file,
+    )
+    markdown_result = _parse_markdown_rows(
+        text=text,
+        horizon=horizon,
+        source_file=source_file,
+    )
+    if semicolon_result.rows or semicolon_result.warnings:
+        return semicolon_result
+    return markdown_result
+
+
 def parse_datacenter_dashboard_file(
     *,
     path: str,
@@ -375,19 +408,11 @@ def parse_datacenter_dashboard_file(
             warnings=[f"{source_file}: read failed: {exc}"],
         )
 
-    semicolon_result = _parse_semicolon_rows(
+    return parse_datacenter_dashboard_text(
         text=text,
         horizon=horizon,
         source_file=source_file,
     )
-    markdown_result = _parse_markdown_rows(
-        text=text,
-        horizon=horizon,
-        source_file=source_file,
-    )
-    if semicolon_result.rows or semicolon_result.warnings:
-        return semicolon_result
-    return markdown_result
 
 
 def parse_datacenter_dashboard_reports(

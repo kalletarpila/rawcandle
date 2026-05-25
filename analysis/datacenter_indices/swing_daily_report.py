@@ -2254,5 +2254,6 @@ def write_daily_swing_signal_report(
     return {
         "markdown": markdown,
         "csv": csv_text,
+        "report_data": report_data,
         "summary": summary,
     }
