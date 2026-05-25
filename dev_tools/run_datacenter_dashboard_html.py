@@ -2140,6 +2140,142 @@ def _first_non_empty_context_value(
     return ""
 
 
+def _first_non_empty_context_value_from_rows(
+    rows: Sequence[DatacenterDashboardRow],
+    field_name: str,
+) -> str:
+    for row in rows:
+        value = getattr(row, field_name, None)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
+def _first_non_empty_raw_field(
+    rows: Sequence[DatacenterDashboardRow], *field_names: str
+) -> str:
+    for row in rows:
+        for field_name in field_names:
+            value = row.raw_fields.get(field_name, "")
+            text = str(value).strip()
+            if text:
+                return text
+    return ""
+
+
+def _watchlist_context_text(
+    rows: Sequence[DatacenterDashboardRow], field_name: str, *raw_field_names: str
+) -> str:
+    return _non_empty_value(
+        _first_non_empty_context_value_from_rows(rows, field_name),
+        _first_non_empty_raw_field(rows, *raw_field_names),
+    )
+
+
+def _watchlist_age_text(
+    rows: Sequence[DatacenterDashboardRow], *raw_field_names: str
+) -> str:
+    return _non_empty_value(
+        (
+            _first_non_empty_context_value_from_rows(rows, raw_field_names[0])
+            if raw_field_names
+            else ""
+        ),
+        *[
+            _first_non_empty_context_value_from_rows(rows, field_name)
+            for field_name in raw_field_names[1:]
+        ],
+        _first_non_empty_raw_field(rows, *raw_field_names),
+    )
+
+
+def _watchlist_value_with_age(
+    rows: Sequence[DatacenterDashboardRow],
+    field_name: str,
+    *age_field_names: str,
+    raw_value_names: Sequence[str] = (),
+) -> str:
+    value = _watchlist_context_text(rows, field_name, *raw_value_names)
+    age_text = _watchlist_age_text(rows, *age_field_names)
+    return _format_value_with_age(value, age_text)
+
+
+def _watchlist_status_change_text(
+    rows: Sequence[DatacenterDashboardRow], *field_names: str
+) -> str:
+    return _first_non_empty_raw_field(rows, *field_names) or "-"
+
+
+def _watchlist_current_status(horizon_status_by_name: dict[str, str]) -> str:
+    return (
+        _non_empty_value(
+            horizon_status_by_name.get("daily", ""),
+            horizon_status_by_name.get("rolling 2d", ""),
+            horizon_status_by_name.get("rolling 5d", ""),
+            horizon_status_by_name.get("rolling 30d", ""),
+        )
+        or "-"
+    )
+
+
+def _watchlist_window_status(
+    horizon_status_by_name: dict[str, str], horizon: str
+) -> str:
+    return _safe_text(horizon_status_by_name.get(horizon, ""))
+
+
+def _watchlist_detail_filter_text(
+    decision: DatacenterTickerDecision,
+    watchlist_rows: Sequence[DatacenterDashboardRow],
+    horizon_status_by_name: dict[str, str],
+) -> str:
+    parts = [
+        decision.ticker,
+        decision.action,
+        decision.severity,
+        decision.primary_reason or "",
+        decision.pullback_validity or "",
+        decision.entry_readiness or "",
+        decision.candidate_priority_label or "",
+        _watchlist_context_text(watchlist_rows, "ma_break_status", "ma_break_status"),
+        _watchlist_context_text(watchlist_rows, "freshness_status", "freshness_status"),
+        _watchlist_context_text(
+            watchlist_rows,
+            "trend_state",
+            "trend_state",
+            "dow_trend_state",
+            "latest_trend_state",
+            "last_trend_state",
+        ),
+        _watchlist_context_text(
+            watchlist_rows,
+            "latest_structure_label",
+            "latest_structure_label",
+            "last_latest_structure_label",
+        ),
+        _watchlist_context_text(
+            watchlist_rows,
+            "latest_bos_event_type",
+            "latest_bos_event_type",
+            "last_latest_bos_event_type",
+        ),
+        _watchlist_context_text(
+            watchlist_rows,
+            "latest_reset_reason",
+            "latest_reset_reason",
+            "last_latest_reset_reason",
+        ),
+        horizon_status_by_name.get("daily", ""),
+        horizon_status_by_name.get("rolling 2d", ""),
+        horizon_status_by_name.get("rolling 5d", ""),
+        horizon_status_by_name.get("rolling 30d", ""),
+    ]
+    return " ".join(part for part in parts if part).lower()
+
+
 def _count_dict_lines(
     prefix: str, ordered_keys: tuple[str, ...], counts: dict[str, int]
 ) -> str:
@@ -2211,6 +2347,12 @@ def _action_class(action: str) -> str:
     if action in {"BUY_NOW", "WATCH", "WAIT_PULLBACK"}:
         return "action-watch"
     return "action-neutral"
+
+
+def _watchlist_summary_action_class(action: str) -> str:
+    if action == "BLOCKED":
+        return "action-blocked"
+    return _action_class(action)
 
 
 def _is_watchlist_row(row: DatacenterDashboardRow) -> bool:
@@ -2436,40 +2578,166 @@ def generate_dashboard_html(
     )
     watchlist_rows_html_parts: list[str] = []
     for decision in watchlist_decisions:
-        horizon_status_by_name = {
-            row.horizon: _watchlist_horizon_status(row)
+        watchlist_rows = [
+            row
             for row in _rows_for_ticker(parsed_rows, decision.ticker)
             if _is_watchlist_row(row)
+        ]
+        horizon_status_by_name = {
+            row.horizon: _watchlist_horizon_status(row) for row in watchlist_rows
         }
+        ma_break_text = _watchlist_context_text(
+            watchlist_rows,
+            "ma_break_status",
+            "ma_break_status",
+        )
+        freshness_text = _watchlist_context_text(
+            watchlist_rows,
+            "freshness_status",
+            "freshness_status",
+        )
+        trend_text = _watchlist_value_with_age(
+            watchlist_rows,
+            "trend_state",
+            "trend_state_age_td",
+            "dow_trend_state_age_td",
+            "latest_trend_state_age_td",
+            "last_trend_state_age_td",
+            "trend_age_td",
+            raw_value_names=(
+                "trend_state",
+                "dow_trend_state",
+                "latest_trend_state",
+                "last_trend_state",
+            ),
+        )
+        latest_structure_text = _watchlist_value_with_age(
+            watchlist_rows,
+            "latest_structure_label",
+            "latest_structure_age_td",
+            "latest_structure_age_trading_days",
+            "last_latest_structure_age_trading_days",
+            "structure_age_td",
+            raw_value_names=("latest_structure_label", "last_latest_structure_label"),
+        )
+        latest_bos_text = _watchlist_value_with_age(
+            watchlist_rows,
+            "latest_bos_event_type",
+            "latest_bos_age_td",
+            "latest_bos_age_trading_days",
+            "last_latest_bos_age_trading_days",
+            "latest_bos_down_age_td",
+            "latest_bos_up_age_td",
+            raw_value_names=("latest_bos_event_type", "last_latest_bos_event_type"),
+        )
+        latest_reset_text = _watchlist_value_with_age(
+            watchlist_rows,
+            "latest_reset_reason",
+            "latest_reset_age_td",
+            "latest_reset_age_trading_days",
+            "last_latest_reset_age_trading_days",
+            raw_value_names=("latest_reset_reason", "last_latest_reset_reason"),
+        )
+        current_status_text = _watchlist_current_status(horizon_status_by_name)
+        start_status_30d_text = _watchlist_status_change_text(
+            watchlist_rows,
+            "start_status_30d",
+            "start_status",
+            "first_status",
+            "first_watchlist_status",
+            "first_current_watchlist_status",
+        )
+        status_change_30d_text = _watchlist_status_change_text(
+            watchlist_rows,
+            "status_change_30d",
+            "status_change",
+        )
+        status_change_5d_text = _watchlist_status_change_text(
+            watchlist_rows,
+            "status_change_5d",
+        )
+        window_status_30d_text = _watchlist_window_status(
+            horizon_status_by_name,
+            "rolling 30d",
+        )
+        window_status_5d_text = _watchlist_window_status(
+            horizon_status_by_name,
+            "rolling 5d",
+        )
+        window_status_2d_text = _watchlist_window_status(
+            horizon_status_by_name,
+            "rolling 2d",
+        )
+        horizons_text = _safe_text(", ".join(decision.horizons_present))
+        summary_action_class = _watchlist_summary_action_class(decision.action)
+        detail_filter_text = _watchlist_detail_filter_text(
+            decision,
+            watchlist_rows,
+            horizon_status_by_name,
+        )
+        detail_table_html = (
+            '<table class="sticky-table watchlist-detail-table"><thead><tr>'
+            "<th>Ticker</th><th>Action</th><th>Severity</th><th>Primary reason</th>"
+            "<th>Current status</th><th>Start status 30d</th><th>Status change 30d</th><th>Status change 5d</th>"
+            "<th>Window status 30d</th><th>Window status 5d</th><th>Window status 2d</th>"
+            "<th>MA break</th><th>Freshness</th><th>Trend state</th><th>Latest structure</th>"
+            "<th>Latest BOS</th><th>Latest reset</th><th>Pullback validity</th><th>Entry readiness</th>"
+            "<th>Candidate priority</th><th>Daily status</th><th>Rolling 2d status</th>"
+            "<th>Rolling 5d status</th><th>Rolling 30d status</th><th>Horizons</th>"
+            "</tr></thead><tbody><tr>"
+            f'<td class="{summary_action_class}">{_html_text(decision.ticker)}</td>'
+            f"<td>{_html_text(decision.action)}</td>"
+            f"<td>{_html_text(decision.severity)}</td>"
+            f"<td>{_html_text(_safe_text(decision.primary_reason))}</td>"
+            + _render_market_status_cell(current_status_text)
+            + _render_market_status_cell(start_status_30d_text)
+            + _render_market_status_cell(status_change_30d_text)
+            + _render_market_status_cell(status_change_5d_text)
+            + _render_market_status_cell(window_status_30d_text)
+            + _render_market_status_cell(window_status_5d_text)
+            + _render_market_status_cell(window_status_2d_text)
+            + f"<td>{_html_text(_safe_text(ma_break_text))}</td>"
+            + f"<td>{_html_text(_safe_text(freshness_text))}</td>"
+            + f"<td>{_html_text(trend_text)}</td>"
+            + f"<td>{_html_text(latest_structure_text)}</td>"
+            + f"<td>{_html_text(latest_bos_text)}</td>"
+            + f"<td>{_html_text(latest_reset_text)}</td>"
+            + f"<td>{_html_text(_safe_text(decision.pullback_validity))}</td>"
+            + f"<td>{_html_text(_safe_text(decision.entry_readiness))}</td>"
+            + f"<td>{_html_text(_safe_text(decision.candidate_priority_label))}</td>"
+            + _render_market_status_cell(horizon_status_by_name.get("daily", ""))
+            + _render_market_status_cell(horizon_status_by_name.get("rolling 2d", ""))
+            + _render_market_status_cell(horizon_status_by_name.get("rolling 5d", ""))
+            + _render_market_status_cell(horizon_status_by_name.get("rolling 30d", ""))
+            + f"<td>{_html_text(horizons_text)}</td>"
+            + "</tr></tbody></table>"
+        )
         watchlist_rows_html_parts.append(
-            "<tr"
+            "<details"
+            f' class="watchlist-detail {summary_action_class}"'
             f' data-filter-row="1"'
             f' data-section="watchlist-status"'
             f' data-action="{_html_attr(decision.action)}"'
             f' data-pullback-validity="{_html_attr(decision.pullback_validity)}"'
             f' data-entry-readiness="{_html_attr(decision.entry_readiness)}"'
             f' data-candidate-priority="{_html_attr(decision.candidate_priority_label)}"'
-            f' data-filter-text="{_html_attr(" ".join(filter(None, [decision.ticker, decision.action, decision.primary_reason or "", decision.pullback_validity or "", decision.entry_readiness or "", decision.candidate_priority_label or ""])).lower())}"'
+            f' data-filter-text="{_html_attr(detail_filter_text)}"'
             ">"
-            f'<td class="{_action_class(decision.action)}">{_html_text(decision.ticker)}</td>'
-            f"<td>{_html_text(decision.action)}</td>"
-            f"<td>{_html_text(decision.severity)}</td>"
-            f"<td>{_html_text(decision.primary_reason)}</td>"
-            f"<td>{_html_text(decision.pullback_validity)}</td>"
-            f"<td>{_html_text(decision.entry_readiness)}</td>"
-            f"<td>{_html_text(decision.candidate_priority_label)}</td>"
-            f"<td>{_html_text(_first_non_empty_context_value(parsed_rows, decision.ticker, 'ma_break_status'))}</td>"
-            f"<td>{_html_text(_first_non_empty_context_value(parsed_rows, decision.ticker, 'freshness_status'))}</td>"
-            f"<td>{_html_text(decision.trend_state)}</td>"
-            f"<td>{_html_text(decision.latest_structure_label)}</td>"
-            f"<td>{_html_text(decision.latest_bos_event_type)}</td>"
-            f"<td>{_html_text(decision.latest_reset_reason)}</td>"
-            f"<td>{_html_text(', '.join(decision.horizons_present))}</td>"
-            f"<td>{_html_text(horizon_status_by_name.get('daily'))}</td>"
-            f"<td>{_html_text(horizon_status_by_name.get('rolling 2d'))}</td>"
-            f"<td>{_html_text(horizon_status_by_name.get('rolling 5d'))}</td>"
-            f"<td>{_html_text(horizon_status_by_name.get('rolling 30d'))}</td>"
-            "</tr>"
+            f'<summary class="watchlist-summary {summary_action_class}">'
+            f'<span class="watchlist-ticker">{_html_text(decision.ticker)}</span>'
+            f"<span>{_html_text(_safe_text(decision.action))}</span>"
+            f"<span>{_html_text(_safe_text(decision.severity))}</span>"
+            f"<span>{_html_text(_safe_text(decision.primary_reason))}</span>"
+            f"<span>{_html_text(_safe_text(ma_break_text))}</span>"
+            f"<span>{_html_text(_safe_text(freshness_text))}</span>"
+            f"<span>Trend {_html_text(trend_text)}</span>"
+            f"<span>Structure {_html_text(latest_structure_text)}</span>"
+            f"<span>BOS {_html_text(latest_bos_text)}</span>"
+            f"<span>Reset {_html_text(latest_reset_text)}</span>"
+            "</summary>"
+            '<div class="watchlist-detail-body"><div class="table-scroll">'
+            + detail_table_html
+            + "</div></div></details>"
         )
     watchlist_rows_html = "".join(watchlist_rows_html_parts)
 
@@ -2675,6 +2943,7 @@ def generate_dashboard_html(
     .action-reduce {{ background: #fff2df; }}
     .action-tighten {{ background: #fff8c5; }}
     .action-watch {{ background: #e8f5e9; }}
+    .action-blocked {{ background: #fce8e6; }}
     .action-neutral {{ background: #f1f3f5; }}
     .risk-high {{ background: #fde8e8; }}
     .risk-medium {{ background: #fff2df; }}
@@ -2760,6 +3029,34 @@ def generate_dashboard_html(
     .layer-detail-body h3 {{
       margin-top: 0;
     }}
+        .watchlist-detail {{
+            margin-bottom: 14px;
+            border: 1px solid #d8dee4;
+            background: #fff;
+        }}
+        .watchlist-summary {{
+            cursor: pointer;
+            padding: 10px 12px;
+            font-weight: 600;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: baseline;
+        }}
+        .watchlist-detail[open] summary {{
+            border-bottom: 1px solid #d8dee4;
+        }}
+        .watchlist-ticker {{
+            font-weight: 700;
+            min-width: 72px;
+        }}
+        .watchlist-detail-body {{
+            padding: 12px;
+        }}
+        .watchlist-detail-table {{
+            width: max-content;
+            min-width: 100%;
+        }}
     .table-scroll {{
       display: block;
       overflow-x: auto;
@@ -2865,18 +3162,7 @@ def generate_dashboard_html(
   <section id="watchlist-status" class="major-section">
     <h2>Watchlist Status</h2>
     <div id="watchlist-filter-status" class="section-status">Watchlist rows: 0 / 0</div>
-    {(
-      '<div class="table-scroll"><table class="sticky-table"><thead><tr>'
-      '<th>Ticker</th><th>Action</th><th>Severity</th><th>Primary reason</th>'
-      '<th>Pullback validity</th><th>Entry readiness</th><th>Candidate priority</th>'
-      '<th>MA break</th><th>Freshness</th><th>Trend state</th>'
-      '<th>Latest structure</th><th>Latest BOS</th><th>Latest reset</th>'
-      '<th>Horizons</th>'
-      '<th>Daily status</th><th>Rolling 2d status</th><th>Rolling 5d status</th><th>Rolling 30d status</th>'
-      '</tr></thead><tbody>'
-      + watchlist_rows_html +
-      '</tbody></table></div>'
-    ) if watchlist_rows_html else '<p>No watchlist rows found in the selected reports.</p>'}
+        {watchlist_rows_html if watchlist_rows_html else '<p>No watchlist rows found in the selected reports.</p>'}
   </section>
 
   <section id="filters" class="major-section">

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -136,7 +137,7 @@ def _fake_rows(path: str, horizon: str) -> list[DatacenterDashboardRow]:
                 raw_status=None,
                 reason=None,
                 trend_state="UP",
-                latest_structure_label="HL",
+                latest_structure_label="HH",
                 latest_bos_event_type="BOS_UP",
                 latest_reset_reason="",
                 distance_to_ema20=None,
@@ -158,7 +159,14 @@ def _fake_rows(path: str, horizon: str) -> list[DatacenterDashboardRow]:
                 latest_bos_up_age_td=1,
                 latest_bos_down_age_td=None,
                 latest_reset_age_td=None,
-                raw_fields={"watchlist_status": "BREAKOUT_READY"},
+                raw_fields={
+                    "watchlist_status": "BREAKOUT_READY",
+                    "trend_state_age_td": "12",
+                    "latest_structure_age_td": "3",
+                    "start_status_30d": "WATCH",
+                    "status_change_30d": "WATCH -> BREAKOUT_READY",
+                    "status_change_5d": "PULLBACK_WINDOW -> BREAKOUT_READY",
+                },
             ),
             DatacenterDashboardRow(
                 ticker="MS&FT",
@@ -206,7 +214,7 @@ def _fake_rows(path: str, horizon: str) -> list[DatacenterDashboardRow]:
                 trend_state="DOWN",
                 latest_structure_label="LL",
                 latest_bos_event_type="BOS_DOWN",
-                latest_reset_reason="RESET",
+                latest_reset_reason="DOUBLE_BOS_DOWN",
                 distance_to_ema20=None,
                 high_exit_risk_days_count=2,
                 blocking_reasons=None,
@@ -224,8 +232,8 @@ def _fake_rows(path: str, horizon: str) -> list[DatacenterDashboardRow]:
                 latest_bullish_signal_age_td=None,
                 latest_bearish_signal_age_td=0,
                 latest_bos_up_age_td=None,
-                latest_bos_down_age_td=0,
-                latest_reset_age_td=0,
+                latest_bos_down_age_td=1,
+                latest_reset_age_td=1,
                 raw_fields={"watchlist_status": "EXIT_RISK"},
             ),
             DatacenterDashboardRow(
@@ -277,7 +285,7 @@ def _fake_rows(path: str, horizon: str) -> list[DatacenterDashboardRow]:
                 trend_state="UP",
                 latest_structure_label="HL",
                 latest_bos_event_type="BOS_UP",
-                latest_reset_reason="",
+                latest_reset_reason="FAILED_BREAKOUT",
                 distance_to_ema20=None,
                 high_exit_risk_days_count=None,
                 blocking_reasons=None,
@@ -300,6 +308,8 @@ def _fake_rows(path: str, horizon: str) -> list[DatacenterDashboardRow]:
                 raw_fields={
                     "current_watchlist_status": "PULLBACK_MONITOR",
                     "window_watchlist_status": "PULLBACK_WINDOW",
+                    "first_current_watchlist_status": "NEUTRAL",
+                    "status_change_5d": "NEUTRAL -> PULLBACK_MONITOR",
                 },
             ),
             DatacenterDashboardRow(
@@ -561,6 +571,37 @@ def _fake_decision_result(tmp_path: Path) -> DatacenterDecisionBatchResult:
             "P5_NOT_READY": 1,
             "P9_NOT_CANDIDATE": 0,
         },
+        warning_count=0,
+        warnings=[],
+    )
+
+
+def _fake_decision_result_with_action(
+    tmp_path: Path,
+    *,
+    ticker: str,
+    action: str,
+    severity: str,
+) -> DatacenterDecisionBatchResult:
+    base_result = _fake_decision_result(tmp_path)
+    decision = next(item for item in base_result.decisions if item.ticker == ticker)
+    updated_decision = replace(decision, action=action, severity=severity)
+    return DatacenterDecisionBatchResult(
+        decisions=[updated_decision],
+        action_counts={
+            "SELL": 1 if action == "SELL" else 0,
+            "REDUCE": 1 if action == "REDUCE" else 0,
+            "TIGHTEN_STOP": 1 if action == "TIGHTEN_STOP" else 0,
+            "BLOCKED": 1 if action == "BLOCKED" else 0,
+            "WAIT_PULLBACK": 1 if action == "WAIT_PULLBACK" else 0,
+            "BUY_NOW": 1 if action == "BUY_NOW" else 0,
+            "WATCH": 1 if action == "WATCH" else 0,
+            "NEUTRAL": 1 if action == "NEUTRAL" else 0,
+        },
+        pullback_counts=base_result.pullback_counts,
+        pullback_action_counts=base_result.pullback_action_counts,
+        entry_readiness_counts=base_result.entry_readiness_counts,
+        candidate_priority_counts=base_result.candidate_priority_counts,
         warning_count=0,
         warnings=[],
     )
@@ -873,6 +914,84 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(
     assert html_one.index('id="candidate-pullbacks"') < html_one.index(
         'id="command-center"'
     )
+    watchlist_section = html_one[
+        html_one.index('id="watchlist-status"') : html_one.index(
+            'id="candidate-pullbacks"'
+        )
+    ]
+    assert 'class="watchlist-detail ' in watchlist_section
+    assert 'class="watchlist-summary ' in watchlist_section
+    assert 'data-section="watchlist-status"' in watchlist_section
+    assert 'data-filter-row="1"' in watchlist_section
+    assert 'data-action="' in watchlist_section
+    assert 'data-filter-text="' in watchlist_section
+    assert (
+        'class="table-scroll"><table class="sticky-table"><thead><tr><th>Ticker</th><th>Action</th>'
+        not in watchlist_section
+    )
+    assert watchlist_section.count('class="watchlist-detail ') == 3
+
+    msft_summary_match = re.search(
+        r'<summary class="watchlist-summary ([^"]+)">\s*<span class="watchlist-ticker">MS&amp;FT</span>(.*?)</summary>',
+        watchlist_section,
+        re.DOTALL,
+    )
+    assert msft_summary_match is not None
+    msft_summary_classes = msft_summary_match.group(1).split()
+    msft_summary_html = msft_summary_match.group(2)
+    assert "action-watch" in msft_summary_classes
+    assert "WATCH" in msft_summary_html
+    assert "LOW" in msft_summary_html
+    assert "VALID_PULLBACK_WAIT_FOR_ENTRY_CONFIRMATION" in msft_summary_html
+    assert "OK" in msft_summary_html
+    assert "FRESH_BULLISH_SIGNAL" in msft_summary_html
+    assert "Trend UP (12)" in msft_summary_html
+    assert "Structure HH (3)" in msft_summary_html
+    assert "BOS BOS_UP (1)" in msft_summary_html
+    assert "Reset -" in msft_summary_html
+
+    assert "HH (3)" in watchlist_section
+    assert "BOS_DOWN (1)" in watchlist_section
+    assert "DOUBLE_BOS_DOWN (1)" in watchlist_section
+    assert "FAILED_BREAKOUT" in watchlist_section
+    assert "FAILED_BREAKOUT (-)" not in watchlist_section
+    assert "HH (-)" not in watchlist_section
+    assert "BOS_UP (-)" not in watchlist_section
+
+    for snippet in (
+        "<th>Ticker</th>",
+        "<th>Action</th>",
+        "<th>Severity</th>",
+        "<th>Primary reason</th>",
+        "<th>Current status</th>",
+        "<th>Start status 30d</th>",
+        "<th>Status change 30d</th>",
+        "<th>Status change 5d</th>",
+        "<th>Window status 30d</th>",
+        "<th>Window status 5d</th>",
+        "<th>Window status 2d</th>",
+        "<th>MA break</th>",
+        "<th>Freshness</th>",
+        "<th>Trend state</th>",
+        "<th>Latest structure</th>",
+        "<th>Latest BOS</th>",
+        "<th>Latest reset</th>",
+        "<th>Pullback validity</th>",
+        "<th>Entry readiness</th>",
+        "<th>Candidate priority</th>",
+        "<th>Daily status</th>",
+        "<th>Rolling 2d status</th>",
+        "<th>Rolling 5d status</th>",
+        "<th>Rolling 30d status</th>",
+        "<th>Horizons</th>",
+    ):
+        assert snippet in watchlist_section
+
+    assert "BREAKOUT_READY" in watchlist_section
+    assert "WATCH -&gt; BREAKOUT_READY" in watchlist_section
+    assert "PULLBACK_WINDOW -&gt; BREAKOUT_READY" in watchlist_section
+    assert "PULLBACK_MONITOR" in watchlist_section
+    assert "PULLBACK_WINDOW" in watchlist_section
 
 
 @pytest.mark.parametrize(
@@ -922,6 +1041,56 @@ def test_market_map_layer_summary_uses_current_status_class(
     assert "market-layer-summary" in summary_match.group(0)
     assert expected_summary_class in summary_classes
     assert f'class="market-layer-detail {expected_summary_class}"' in hierarchy_section
+
+
+@pytest.mark.parametrize(
+    ("action", "severity", "expected_summary_class"),
+    [
+        ("SELL", "CRITICAL", "action-sell"),
+        ("REDUCE", "HIGH", "action-reduce"),
+        ("TIGHTEN_STOP", "MEDIUM", "action-tighten"),
+    ],
+)
+def test_watchlist_summary_uses_action_based_color_class(
+    tmp_path,
+    monkeypatch,
+    action,
+    severity,
+    expected_summary_class,
+):
+    _install_pipeline_mocks(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_html.build_datacenter_ticker_decisions",
+        lambda rows: _fake_decision_result_with_action(
+            tmp_path,
+            ticker="MS&FT",
+            action=action,
+            severity=severity,
+        ),
+    )
+
+    html, _status, _parse, _decisions = generate_dashboard_html(
+        reports_dir=str(tmp_path),
+        title="Custom <Dashboard>",
+        ticker="MS&FT",
+        report_date=None,
+        max_command_rows=10,
+        max_candidate_rows=10,
+        generated_at_utc="2026-05-25T00:00:00+00:00",
+    )
+
+    watchlist_section = html[
+        html.index('id="watchlist-status"') : html.index('id="candidate-pullbacks"')
+    ]
+    summary_match = re.search(
+        r'<summary class="watchlist-summary ([^"]+)">\s*<span class="watchlist-ticker">MS&amp;FT</span>',
+        watchlist_section,
+    )
+    assert summary_match is not None
+    summary_classes = summary_match.group(1).split()
+
+    assert expected_summary_class in summary_classes
+    assert f'class="watchlist-detail {expected_summary_class}"' in watchlist_section
 
 
 def test_generate_datacenter_dashboard_html_file_returns_output_path_and_summary_values(
