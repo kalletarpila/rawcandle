@@ -391,7 +391,9 @@ def test_cli_creates_tables_and_does_not_require_analysis_db(tmp_path, monkeypat
     assert _table_exists(dashboard_db, "ecosystem_dashboard_ticker_status")
     assert _table_exists(dashboard_db, "ecosystem_dashboard_decision_trace")
     assert not _table_exists(dashboard_db, "dc_dashboard_runs")
-    assert "SUMMARY ecosystem_dashboard_build.status=OK" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "SUMMARY ecosystem_dashboard_build.status=OK" in output
+    assert "SUMMARY ecosystem_dashboard_build.input_mode=reports" in output
 
 
 def test_invalid_report_date_exits_non_zero(tmp_path, capsys):
@@ -551,6 +553,7 @@ def test_cli_writes_run_and_rows_with_ecosystem_code(tmp_path, monkeypatch, caps
         "SUMMARY ecosystem_dashboard_build.run_id=RUN_A",
         "SUMMARY ecosystem_dashboard_build.ecosystem_code=DATACENTER",
         "SUMMARY ecosystem_dashboard_build.report_date=2026-05-22",
+        "SUMMARY ecosystem_dashboard_build.input_mode=reports",
         f"SUMMARY ecosystem_dashboard_build.dashboard_db={dashboard_db}",
         f"SUMMARY ecosystem_dashboard_build.reports_dir={reports_dir}",
         "SUMMARY ecosystem_dashboard_build.readiness=PARTIAL",
@@ -788,6 +791,7 @@ def test_build_with_render_html_for_datacenter_builds_and_renders(
     assert "RUN_RENDER" in html
     assert "NVDA" in html
     output = capsys.readouterr().out
+    assert "SUMMARY ecosystem_dashboard_build.input_mode=reports" in output
     assert "SUMMARY ecosystem_dashboard_build.render_html_requested=1" in output
     assert f"SUMMARY ecosystem_dashboard_build.html_output_path={html_output}" in output
     assert "SUMMARY ecosystem_dashboard_build.html_render_status=OK" in output
@@ -871,3 +875,52 @@ def test_render_html_with_other_ecosystem_fails_clearly(tmp_path, capsys):
         "--render-html is currently supported only for ecosystem_code=DATACENTER; got OTHER"
         in output
     )
+
+
+def test_cli_accepts_explicit_input_mode_reports(tmp_path, monkeypatch, capsys):
+    dashboard_db = tmp_path / "ecosystem_dashboard.db"
+    reports_dir = _make_reports_dir(tmp_path)
+    _patch_models(monkeypatch)
+
+    exit_code = main(
+        [
+            "--dashboard-db",
+            str(dashboard_db),
+            "--ecosystem-code",
+            "DATACENTER",
+            "--reports-dir",
+            str(reports_dir),
+            "--report-date",
+            "2026-05-22",
+            "--input-mode",
+            "reports",
+        ]
+    )
+
+    assert exit_code == 0
+    assert "SUMMARY ecosystem_dashboard_build.input_mode=reports" in capsys.readouterr().out
+
+
+def test_cli_rejects_unsupported_input_mode(tmp_path, capsys):
+    dashboard_db = tmp_path / "ecosystem_dashboard.db"
+    reports_dir = _make_reports_dir(tmp_path)
+
+    exit_code = main(
+        [
+            "--dashboard-db",
+            str(dashboard_db),
+            "--ecosystem-code",
+            "DATACENTER",
+            "--reports-dir",
+            str(reports_dir),
+            "--report-date",
+            "2026-05-22",
+            "--input-mode",
+            "structured",
+        ]
+    )
+
+    assert exit_code == 2
+    output = capsys.readouterr().out
+    assert "SUMMARY ecosystem_dashboard_build.status=FAILED" in output
+    assert "unsupported input_mode=structured; currently supported: reports" in output

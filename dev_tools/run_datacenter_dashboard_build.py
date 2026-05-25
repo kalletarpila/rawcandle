@@ -18,6 +18,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--analysis-db")
     parser.add_argument("--reports-dir", required=True)
     parser.add_argument("--report-date", required=True)
+    parser.add_argument("--input-mode", default="reports")
     parser.add_argument("--mode", choices=("replace-date", "insert"), default="replace-date")
     parser.add_argument("--run-id")
     parser.add_argument("--render-html", action="store_true")
@@ -41,6 +42,7 @@ def main(argv: list[str] | None = None) -> int:
             ecosystem_code="DATACENTER",
             reports_dir=args.reports_dir,
             report_date=args.report_date,
+            input_mode=args.input_mode,
             mode=args.mode,
             run_id=args.run_id,
         )

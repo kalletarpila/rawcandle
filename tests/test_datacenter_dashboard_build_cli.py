@@ -59,6 +59,7 @@ def test_wrapper_maps_to_datacenter_and_default_dashboard_db(tmp_path, monkeypat
     assert exit_code == 0
     assert captured["ecosystem_code"] == "DATACENTER"
     assert captured["dashboard_db"] == "/home/kalle/projects/rawcandle/data/ecosystem_dashboard.db"
+    assert captured["input_mode"] == "reports"
     assert capsys.readouterr().out.strip().splitlines() == [
         "SUMMARY ecosystem_dashboard_build.status=OK",
         "SUMMARY ecosystem_dashboard_build.run_id=RUN_X",
@@ -150,6 +151,7 @@ def test_wrapper_forwards_render_html_and_html_output(tmp_path, monkeypatch, cap
 
     assert exit_code == 0
     assert captured_build["ecosystem_code"] == "DATACENTER"
+    assert captured_build["input_mode"] == "reports"
     assert captured_render == {
         "dashboard_db": str(tmp_path / "ecosystem_dashboard.db"),
         "ecosystem_code": "DATACENTER",
@@ -162,3 +164,42 @@ def test_wrapper_forwards_render_html_and_html_output(tmp_path, monkeypatch, cap
     assert "SUMMARY ecosystem_dashboard_build.render_html_requested=1" in output
     assert f"SUMMARY ecosystem_dashboard_build.html_output_path={html_output}" in output
     assert "SUMMARY ecosystem_dashboard_build.html_render_status=OK" in output
+
+
+def test_wrapper_forwards_explicit_input_mode_reports(tmp_path, monkeypatch, capsys):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    _write_report(
+        reports_dir / "datacenter_daily_2026-05-22_0000_full.csv",
+        "ticker;status\nNVDA;SELL\n",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_generate(**kwargs):
+        captured.update(kwargs)
+        return (
+            "RUN_MODE",
+            (
+                "SUMMARY ecosystem_dashboard_build.status=OK",
+                "SUMMARY ecosystem_dashboard_build.run_id=RUN_MODE",
+            ),
+        )
+
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_build.generate_ecosystem_dashboard_build",
+        fake_generate,
+    )
+
+    exit_code = main(
+        [
+            "--reports-dir",
+            str(reports_dir),
+            "--report-date",
+            "2026-05-22",
+            "--input-mode",
+            "reports",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["input_mode"] == "reports"
