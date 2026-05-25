@@ -4,6 +4,7 @@ import argparse
 from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
+import re
 
 from dev_tools.datacenter_dashboard_decisions import (
     DatacenterDecisionBatchResult,
@@ -88,6 +89,7 @@ _COMMAND_CENTER_GROUPS = (
 )
 _SOURCE_FILE_HORIZON_ORDER = ("rolling 30d", "rolling 5d", "rolling 2d", "daily")
 _WATCHLIST_SECTION_NAME = "watchlist summary"
+_REPORT_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -96,6 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--reports-dir", required=True)
     parser.add_argument("--output")
+    parser.add_argument("--report-date")
     parser.add_argument("--ticker")
     parser.add_argument("--max-command-rows", type=int, default=200)
     parser.add_argument("--max-candidate-rows", type=int, default=100)
@@ -294,16 +297,19 @@ def generate_dashboard_html(
     reports_dir: str,
     title: str,
     ticker: str | None,
+    report_date: str | None,
     max_command_rows: int,
     max_candidate_rows: int,
     generated_at_utc: str | None = None,
 ) -> tuple[str, DatacenterDashboardStatus, DatacenterDashboardBatchParseResult, DatacenterDecisionBatchResult]:
-    dashboard_status = discover_datacenter_dashboard_status(reports_dir)
+    dashboard_status = discover_datacenter_dashboard_status(reports_dir, report_date=report_date)
     parse_result = parse_datacenter_dashboard_reports(dashboard_status.reports)
     parsed_rows = _collect_rows(dashboard_status)
     decision_result = build_datacenter_ticker_decisions(parsed_rows)
     inspector_views = _build_inspector_views(decision_result.decisions, parsed_rows)
     generated_at = generated_at_utc or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    selection_mode = "report_date" if report_date else "newest"
+    selected_report_date = report_date or "newest"
 
     found_reports = sum(1 for report in dashboard_status.reports if report.status == "OK")
     missing_reports = sum(1 for report in dashboard_status.reports if report.status != "OK")
@@ -327,6 +333,8 @@ def generate_dashboard_html(
         for label, value in (
             ("Generated at UTC", generated_at),
             ("Reports dir", reports_dir),
+            ("Selected report date", selected_report_date),
+            ("Selection mode", selection_mode),
             ("Readiness", dashboard_status.overall_status),
             ("Found reports", found_reports),
             ("Missing reports", missing_reports),
@@ -342,6 +350,8 @@ def generate_dashboard_html(
         for label, value in (
             ("generated_at_utc", generated_at),
             ("reports_dir", reports_dir),
+            ("selected_report_date", selected_report_date),
+            ("selection_mode", selection_mode),
             ("newest_report_timestamp", newest_report_timestamp or "unknown"),
             ("daily_report_path", report_paths.get("daily", "")),
             ("rolling_2d_report_path", report_paths.get("rolling 2d", "")),
@@ -718,6 +728,14 @@ def generate_dashboard_html(
       overflow-x: auto;
       max-width: 100%;
     }}
+    .table-scroll table {{
+      width: max-content;
+      min-width: 100%;
+    }}
+    .table-scroll th,
+    .table-scroll td {{
+      white-space: nowrap;
+    }}
     @media (max-width: 960px) {{
       .detail-grid {{
         grid-template-columns: 1fr;
@@ -1003,11 +1021,31 @@ def generate_dashboard_html(
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    output_path = Path(args.output) if args.output else Path(args.reports_dir) / "datacenter_dashboard.html"
+    if args.report_date is not None and not _REPORT_DATE_RE.match(args.report_date):
+        print(f"ERROR: invalid report_date format: {args.report_date}")
+        return 2
+    try:
+        dashboard_status = discover_datacenter_dashboard_status(
+            args.reports_dir,
+            report_date=args.report_date,
+        )
+    except ValueError as exc:
+        print(f"ERROR: {exc}")
+        return 2
+    selected_title = args.title
+    if args.report_date and args.title == "Datacenter Dashboard":
+        selected_title = f"{args.title} — {args.report_date}"
+    output_path = Path(args.output) if args.output else (
+        Path(args.reports_dir) / (f"datacenter_dashboard_{args.report_date}.html" if args.report_date else "datacenter_dashboard.html")
+    )
+    if args.report_date and all(report.status != "OK" for report in dashboard_status.reports):
+        print(f"ERROR: no reports found for report_date={args.report_date} in {args.reports_dir}")
+        return 1
     html, dashboard_status, parse_result, decision_result = generate_dashboard_html(
         reports_dir=args.reports_dir,
-        title=args.title,
+        title=selected_title,
         ticker=args.ticker,
+        report_date=args.report_date,
         max_command_rows=args.max_command_rows,
         max_candidate_rows=args.max_candidate_rows,
     )
@@ -1018,8 +1056,15 @@ def main(argv: list[str] | None = None) -> int:
         for decision in decision_result.decisions
         if decision.pullback_validity in _CANDIDATE_PULLBACK_ORDER
     )
+    found_reports = sum(1 for report in dashboard_status.reports if report.status == "OK")
+    missing_reports = sum(1 for report in dashboard_status.reports if report.status != "OK")
+    print(f"SUMMARY reports_dir={args.reports_dir}")
+    print(f"SUMMARY report_date={args.report_date or 'newest'}")
+    print(f"SUMMARY selection_mode={'report_date' if args.report_date else 'newest'}")
     print(f"SUMMARY html_output={output_path}")
     print(f"SUMMARY readiness={dashboard_status.overall_status}")
+    print(f"SUMMARY found_reports={found_reports}")
+    print(f"SUMMARY missing_reports={missing_reports}")
     print(f"SUMMARY decision_total={len(decision_result.decisions)}")
     print(f"SUMMARY candidate_pullback_rows={candidate_rows}")
     return 0

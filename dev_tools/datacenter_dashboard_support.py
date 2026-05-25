@@ -39,6 +39,7 @@ _HORIZON_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         re.compile(r"^datacenter_daily(?:_.+)?\.(?:md|csv)$"),
     ),
 )
+_REPORT_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def _report_sort_key(path: Path) -> tuple[float, int, str]:
@@ -52,12 +53,14 @@ def _format_modified_at(path: Path) -> str:
 
 
 def _find_latest_report(
-    reports_dir_path: Path, pattern: re.Pattern[str]
+    reports_dir_path: Path, pattern: re.Pattern[str], *, report_date: str | None = None
 ) -> Optional[DatacenterReportStatus]:
     candidates = [
         path
         for path in reports_dir_path.iterdir()
-        if path.is_file() and pattern.match(path.name)
+        if path.is_file()
+        and pattern.match(path.name)
+        and (report_date is None or f"_{report_date}_" in path.name)
     ]
     if not candidates:
         return None
@@ -72,9 +75,15 @@ def _find_latest_report(
     )
 
 
-def discover_datacenter_dashboard_status(reports_dir: str) -> DatacenterDashboardStatus:
+def discover_datacenter_dashboard_status(
+    reports_dir: str,
+    report_date: str | None = None,
+) -> DatacenterDashboardStatus:
     reports_dir_path = Path(reports_dir.strip())
     report_statuses: list[DatacenterReportStatus] = []
+
+    if report_date is not None and not _REPORT_DATE_RE.match(report_date.strip()):
+        raise ValueError(f"invalid report_date format: {report_date}")
 
     if not reports_dir_path.exists() or not reports_dir_path.is_dir():
         return DatacenterDashboardStatus(
@@ -91,7 +100,11 @@ def discover_datacenter_dashboard_status(reports_dir: str) -> DatacenterDashboar
         )
 
     for horizon, pattern in _HORIZON_PATTERNS:
-        latest_report = _find_latest_report(reports_dir_path, pattern)
+        latest_report = _find_latest_report(
+            reports_dir_path,
+            pattern,
+            report_date=report_date.strip() if report_date is not None else None,
+        )
         if latest_report is None:
             report_statuses.append(
                 DatacenterReportStatus(

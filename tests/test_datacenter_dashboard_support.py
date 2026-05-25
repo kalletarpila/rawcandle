@@ -77,3 +77,65 @@ def test_discover_datacenter_dashboard_status_ignores_unrelated_files(tmp_path):
 
     assert status.overall_status == "MISSING"
     assert all(report.path is None for report in status.reports)
+
+
+def test_discover_datacenter_dashboard_status_report_date_preserves_newest_behavior_when_none(tmp_path):
+    older = tmp_path / "datacenter_daily_2026-05-21_0000_full.csv"
+    newer = tmp_path / "datacenter_daily_2026-05-22_0000_full.md"
+    _touch_report(older, mtime=100)
+    _touch_report(newer, mtime=200)
+
+    status = discover_datacenter_dashboard_status(str(tmp_path), report_date=None)
+
+    daily = next(report for report in status.reports if report.horizon == "daily")
+    assert daily.path == str(newer)
+
+
+def test_discover_datacenter_dashboard_status_report_date_selects_only_matching_date(tmp_path):
+    older = tmp_path / "datacenter_daily_2026-05-21_0000_full.md"
+    wanted = tmp_path / "datacenter_daily_2026-05-22_0000_full.csv"
+    _touch_report(older, mtime=300)
+    _touch_report(wanted, mtime=100)
+
+    status = discover_datacenter_dashboard_status(str(tmp_path), report_date="2026-05-22")
+
+    daily = next(report for report in status.reports if report.horizon == "daily")
+    assert daily.path == str(wanted)
+
+
+def test_discover_datacenter_dashboard_status_report_date_uses_existing_tiebreaker_within_date(tmp_path):
+    older = tmp_path / "datacenter_rolling_30_2026-05-22_0000_full.csv"
+    newer = tmp_path / "datacenter_rolling_30_2026-05-22_0100_full.md"
+    other_date = tmp_path / "datacenter_rolling_30_2026-05-21_9999_full.md"
+    _touch_report(older, mtime=100)
+    _touch_report(newer, mtime=200)
+    _touch_report(other_date, mtime=500)
+
+    status = discover_datacenter_dashboard_status(str(tmp_path), report_date="2026-05-22")
+
+    rolling_30 = next(report for report in status.reports if report.horizon == "rolling 30d")
+    assert rolling_30.path == str(newer)
+
+
+def test_discover_datacenter_dashboard_status_report_date_missing_some_horizons_is_partial(tmp_path):
+    _touch_report(tmp_path / "datacenter_daily_2026-05-22_0000_full.md", mtime=100)
+    _touch_report(tmp_path / "datacenter_rolling_2_2026-05-22_0000_full.md", mtime=110)
+
+    status = discover_datacenter_dashboard_status(str(tmp_path), report_date="2026-05-22")
+
+    assert status.overall_status == "PARTIAL"
+    assert {report.horizon: report.status for report in status.reports} == {
+        "rolling 30d": "MISSING",
+        "rolling 5d": "MISSING",
+        "rolling 2d": "OK",
+        "daily": "OK",
+    }
+
+
+def test_discover_datacenter_dashboard_status_report_date_with_no_matching_files_is_missing(tmp_path):
+    _touch_report(tmp_path / "datacenter_daily_2026-05-21_0000_full.md", mtime=100)
+
+    status = discover_datacenter_dashboard_status(str(tmp_path), report_date="2026-05-22")
+
+    assert status.overall_status == "MISSING"
+    assert all(report.status == "MISSING" for report in status.reports)

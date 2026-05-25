@@ -21,6 +21,9 @@ def test_start_dc_dashboard_ui_script_contains_expected_commands():
     assert "dev_tools/run_datacenter_dashboard_html.py" in text
     assert "--reports-dir" in text
     assert "--output" in text
+    assert "--report-date" in text
+    assert 'REPORT_DATE=""' in text
+    assert 'datacenter_dashboard_${REPORT_DATE}.html' in text
     assert "SUMMARY html_output=" in text
     assert 'WSL_DISTRO_NAME' in text or "/proc/version" in text
     assert "cmd.exe /C start" in text
@@ -36,4 +39,5 @@ def test_start_dc_dashboard_ui_script_contains_expected_commands():
     assert 'SUMMARY html_output_windows=' in text
     assert 'SUMMARY html_file_url=' in text
     assert 'if try_open "xdg-open" xdg-open "$OUTPUT_HTML"; then' in text
+    assert '--report-date "$REPORT_DATE"' in text
     assert "Open manually in Firefox:" in text

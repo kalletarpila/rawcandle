@@ -576,7 +576,7 @@ def _install_pipeline_mocks(monkeypatch, tmp_path: Path) -> None:
     inspector_views = _fake_inspector_views()
     monkeypatch.setattr(
         "dev_tools.run_datacenter_dashboard_html.discover_datacenter_dashboard_status",
-        lambda reports_dir: _fake_dashboard_status(tmp_path),
+        lambda reports_dir, report_date=None: _fake_dashboard_status(tmp_path),
     )
     monkeypatch.setattr(
         "dev_tools.run_datacenter_dashboard_html.parse_datacenter_dashboard_reports",
@@ -609,6 +609,7 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
         reports_dir=str(tmp_path),
         title="Custom <Dashboard>",
         ticker="MS&FT",
+        report_date=None,
         max_command_rows=10,
         max_candidate_rows=10,
         generated_at_utc="2026-05-25T00:00:00+00:00",
@@ -617,6 +618,7 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
         reports_dir=str(tmp_path),
         title="Custom <Dashboard>",
         ticker="MS&FT",
+        report_date=None,
         max_command_rows=10,
         max_candidate_rows=10,
         generated_at_utc="2026-05-25T00:00:00+00:00",
@@ -629,6 +631,9 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     assert "Bearish &lt;structure&gt; overrides bullish." in html_one
     assert ".page-header {" in html_one
     assert 'class="page-header"' in html_one
+    assert "selected_report_date" in html_one
+    assert "selection_mode" in html_one
+    assert "newest" in html_one
     assert 'id="summary"' in html_one
     assert 'id="watchlist-status"' in html_one
     assert 'id="candidate-pullbacks"' in html_one
@@ -667,6 +672,8 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     assert "Report Source" in html
     assert "generated_at_utc" in html
     assert "reports_dir" in html
+    assert "selected_report_date" in html
+    assert "selection_mode" in html
     assert str(reports_dir / "daily.csv") in html
     assert str(reports_dir / "rolling2.csv") in html
     assert str(reports_dir / "rolling5.csv") in html
@@ -711,10 +718,62 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     assert "<td>MS&amp;FT</td>" in html
 
     stdout = capsys.readouterr().out
+    assert f"SUMMARY reports_dir={reports_dir}" in stdout
+    assert "SUMMARY report_date=newest" in stdout
+    assert "SUMMARY selection_mode=newest" in stdout
     assert f"SUMMARY html_output={output_path}" in stdout
     assert "SUMMARY readiness=READY" in stdout
+    assert "SUMMARY found_reports=4" in stdout
+    assert "SUMMARY missing_reports=0" in stdout
     assert "SUMMARY decision_total=3" in stdout
     assert "SUMMARY candidate_pullback_rows=2" in stdout
+
+
+def test_html_cli_accepts_report_date_and_uses_date_specific_default_output(tmp_path, monkeypatch, capsys):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    _install_pipeline_mocks(monkeypatch, reports_dir)
+
+    exit_code = main(["--reports-dir", str(reports_dir), "--report-date", "2026-05-22"])
+
+    assert exit_code == 0
+    output_path = reports_dir / "datacenter_dashboard_2026-05-22.html"
+    assert output_path.exists()
+    html = output_path.read_text(encoding="utf-8")
+    assert "Datacenter Dashboard — 2026-05-22" in html
+    assert "2026-05-22" in html
+    assert "report_date" in capsys.readouterr().out
+
+
+def test_html_cli_invalid_report_date_format_exits_non_zero(tmp_path, monkeypatch, capsys):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    _install_pipeline_mocks(monkeypatch, reports_dir)
+
+    exit_code = main(["--reports-dir", str(reports_dir), "--report-date", "2026/05/22"])
+
+    assert exit_code == 2
+    assert "invalid report_date format" in capsys.readouterr().out
+
+
+def test_html_cli_report_date_no_matching_reports_exits_non_zero(tmp_path, monkeypatch, capsys):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_html.discover_datacenter_dashboard_status",
+        lambda reports_dir, report_date=None: _fake_dashboard_status(tmp_path).__class__(
+            overall_status="MISSING",
+            reports=[
+                report.__class__(horizon=report.horizon, status="MISSING", path=None, modified_at=None)
+                for report in _fake_dashboard_status(tmp_path).reports
+            ],
+        ),
+    )
+
+    exit_code = main(["--reports-dir", str(reports_dir), "--report-date", "2026-05-22"])
+
+    assert exit_code == 1
+    assert "no reports found for report_date=2026-05-22" in capsys.readouterr().out
 
 
 def test_html_cli_renders_empty_watchlist_state(tmp_path, monkeypatch):

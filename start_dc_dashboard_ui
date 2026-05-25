@@ -5,6 +5,8 @@ EXPECTED_REPO_ROOT="/home/kalle/projects/rawcandle"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPORTS_DIR="/home/kalle/projects/rawcandle/temp"
 OUTPUT_HTML="/home/kalle/projects/rawcandle/temp/datacenter_dashboard.html"
+REPORT_DATE=""
+OUTPUT_EXPLICIT=0
 WINDOWS_HTML="unavailable"
 HTML_FILE_URL="unavailable"
 IS_WSL=0
@@ -15,6 +17,7 @@ Usage:
   ./start_dc_dashboard_ui
   ./start_dc_dashboard_ui --reports-dir /path/to/reports
   ./start_dc_dashboard_ui --output /path/to/dashboard.html
+  ./start_dc_dashboard_ui --report-date YYYY-MM-DD
   ./start_dc_dashboard_ui --help
 EOF
 }
@@ -89,6 +92,15 @@ while [[ $# -gt 0 ]]; do
         exit 2
       fi
       OUTPUT_HTML="$2"
+      OUTPUT_EXPLICIT=1
+      shift 2
+      ;;
+    --report-date)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --report-date" >&2
+        exit 2
+      fi
+      REPORT_DATE="$2"
       shift 2
       ;;
     --help)
@@ -113,16 +125,32 @@ if is_wsl_environment; then
   IS_WSL=1
 fi
 
+if [[ -n "$REPORT_DATE" && "$OUTPUT_EXPLICIT" -eq 0 ]]; then
+  OUTPUT_HTML="$REPORTS_DIR/datacenter_dashboard_${REPORT_DATE}.html"
+fi
+
 echo "SUMMARY reports_dir=$REPORTS_DIR"
 echo "SUMMARY html_output=$OUTPUT_HTML"
 
-if ! PYTHONPATH=. python3 dev_tools/run_datacenter_dashboard_html.py \
-  --reports-dir "$REPORTS_DIR" \
-  --output "$OUTPUT_HTML"; then
-  echo "SUMMARY generate_status=FAILED"
-  echo "SUMMARY open_status=SKIPPED"
-  echo "SUMMARY opener=none"
-  exit 1
+if [[ -n "$REPORT_DATE" ]]; then
+  if ! PYTHONPATH=. python3 dev_tools/run_datacenter_dashboard_html.py \
+    --reports-dir "$REPORTS_DIR" \
+    --output "$OUTPUT_HTML" \
+    --report-date "$REPORT_DATE"; then
+    echo "SUMMARY generate_status=FAILED"
+    echo "SUMMARY open_status=SKIPPED"
+    echo "SUMMARY opener=none"
+    exit 1
+  fi
+else
+  if ! PYTHONPATH=. python3 dev_tools/run_datacenter_dashboard_html.py \
+    --reports-dir "$REPORTS_DIR" \
+    --output "$OUTPUT_HTML"; then
+    echo "SUMMARY generate_status=FAILED"
+    echo "SUMMARY open_status=SKIPPED"
+    echo "SUMMARY opener=none"
+    exit 1
+  fi
 fi
 
 echo "SUMMARY generate_status=OK"
