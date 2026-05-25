@@ -573,6 +573,66 @@ def _fake_inspector_views() -> dict[str, DatacenterTickerInspectorView]:
 
 
 def _install_pipeline_mocks(monkeypatch, tmp_path: Path) -> None:
+    (tmp_path / "daily.csv").write_text(
+        """## 3. Dashboard
+| metric | value |
+| --- | --- |
+| timing_state | BUY_ZONE |
+| ecosystem_overheat_risk_level | NORMAL |
+| ecosystem_pct_above_ema20 | 72 |
+| ecosystem_pct_above_ma10 | 68 |
+| ecosystem_ema20_breadth_delta_5d | 4 |
+| ecosystem_return_5d | 2.1 |
+| ecosystem_return_10d | 3.8 |
+| ecosystem_return_20d | 8.4 |
+| ecosystem_return_60d | 21.0 |
+
+## 4. Rotation Risk / Overheat Index
+| group_type | group_name | overheat_risk_level | pct_above_ema20 | ema20_breadth_delta_5d | return_10d | return_20d |
+| --- | --- | --- | --- | --- | --- | --- |
+| layer | Compute | WATCH | 75 | 5 | 4.0 | 9.0 |
+| subindustry | AI Accelerators | HIGH | 81 | 7 | 5.5 | 11.0 |
+
+## 5. Subindustry Timing States
+| group_name | timing_state | pct_above_ema20 | ema20_breadth_delta_5d | return_5d | return_10d | return_20d | return_60d |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| AI Accelerators | BUY_ZONE | 79 | 6 | 2.4 | 4.8 | 10.2 | 25.0 |
+
+## Datacenter Taxonomy Listing
+| row_type | layer | subindustry | ticker | status | subindustry_context_risk | layer_context_risk | close | return_5d | return_10d | return_20d | distance_to_ema20_pct | trend_state | latest_structure_label | latest_structure_freshness | latest_bos_event_type | latest_bos_freshness | latest_reset_reason | latest_reset_freshness | breakout_signal | pullback_signal | exit_risk_signal | exit_risk_severity | exit_reason | price_data_status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| LAYER | Compute |  |  | WATCH | NORMAL | WATCH |  | 2.3 | 4.1 | 9.2 |  | UP | HL | fresh | BOS_UP | fresh |  |  |  |  |  |  |  | OK |
+| SUBINDUSTRY | Compute | AI Accelerators |  | BUY_ZONE | HIGH | WATCH |  | 2.7 | 5.0 | 10.8 |  | UP | HH | fresh | BOS_UP | fresh |  |  |  |  |  |  |  | OK |
+""",
+        encoding="utf-8",
+    )
+    rolling_fixture = """## 4. Ecosystem window change
+| metric | first_value | last_value | change |
+| --- | --- | --- | --- |
+| timing_state | WATCH | BUY_ZONE | BUY_ZONE |
+| overheat_risk_level | NORMAL | WATCH | WATCH |
+| pct_above_ema20 | 66 | 74 | 8 |
+| pct_above_ma10 | 62 | 70 | 8 |
+| ema20_breadth_delta_5d | 1 | 5 | 4 |
+| return_5d | 1.1 | 2.8 | 1.7 |
+| return_10d | 2.0 | 4.2 | 2.2 |
+| return_20d | 4.4 | 9.1 | 4.7 |
+
+## 6. Group Structure Timing
+| group_type | group_name | latest_bos_event_type | latest_bos_event_date | latest_bos_freshness | latest_reset_reason | latest_reset_event_date | latest_reset_freshness | latest_structure_label | latest_structure_freshness | trend_classification | timing_state | overheat_risk_level |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| layer | Compute | BOS_UP | 2026-05-22 | fresh |  |  |  | HH | fresh | TRENDING_UP | WATCH | WATCH |
+| subindustry | AI Accelerators | BOS_UP | 2026-05-22 | fresh |  |  |  | HH | fresh | TRENDING_UP | BUY_ZONE | HIGH |
+
+## Datacenter Taxonomy Listing
+| row_type | layer | subindustry | ticker | current_status | window_status | subindustry_context_risk | layer_context_risk | last_close | breakout_days | pullback_days | exit_risk_days | high_exit_risk_days | medium_exit_risk_days | last_exit_risk_severity | last_exit_reason | last_trend_state | last_latest_structure_label | last_latest_structure_freshness | last_latest_bos_event_type | last_latest_bos_freshness | last_latest_reset_reason | last_latest_reset_freshness | last_price_data_status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| LAYER | Compute |  |  | WATCH | ADD_ON_PULLBACK | NORMAL | WATCH |  | 0 | 2 | 0 | 0 | 0 |  |  | UP | HH | fresh | BOS_UP | fresh |  |  | OK |
+| SUBINDUSTRY | Compute | AI Accelerators |  | BUY_ZONE | WATCH | HIGH | WATCH |  | 1 | 1 | 0 | 0 | 0 |  |  | UP | HH | fresh | BOS_UP | fresh |  |  | OK |
+"""
+    for name in ("rolling2.csv", "rolling5.csv", "rolling30.csv"):
+        (tmp_path / name).write_text(rolling_fixture, encoding="utf-8")
+
     decision_result = _fake_decision_result(tmp_path)
     inspector_views = _fake_inspector_views()
     monkeypatch.setattr(
@@ -636,11 +696,27 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     assert "selection_mode" in html_one
     assert "newest" in html_one
     assert 'id="summary"' in html_one
+    assert 'id="market-map"' in html_one
     assert 'id="watchlist-status"' in html_one
     assert 'id="candidate-pullbacks"' in html_one
     assert 'id="command-center"' in html_one
     assert 'id="inspector"' in html_one
     assert 'id="source-files"' in html_one
+    assert "Market Map" in html_one
+    assert "Ecosystem" in html_one
+    assert "Layers" in html_one
+    assert "Subindustries" in html_one
+    assert "Compute" in html_one
+    assert "AI Accelerators" in html_one
+    assert "ADD_ON_PULLBACK" in html_one
+    assert 'data-section="market-map"' in html_one
+    assert 'id="market-map-filter-status"' in html_one
+    assert ".risk-high {" in html_one
+    assert ".risk-medium {" in html_one
+    assert ".status-positive {" in html_one
+    assert ".status-neutral {" in html_one
+    assert html_one.index('id="market-map"') > html_one.index('id="summary"')
+    assert html_one.index('id="market-map"') < html_one.index('id="watchlist-status"')
     assert html_one.index('id="watchlist-status"') > html_one.index('id="summary"')
     assert html_one.index('id="watchlist-status"') < html_one.index('id="candidate-pullbacks"')
     assert html_one.index('id="candidate-pullbacks"') < html_one.index('id="command-center"')
@@ -681,17 +757,22 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     html = output_path.read_text(encoding="utf-8")
     assert "<h1>Datacenter Dashboard</h1>" in html
     assert 'href="#summary"' in html
+    assert 'href="#market-map"' in html
     assert 'href="#watchlist-status"' in html
     assert 'href="#candidate-pullbacks"' in html
     assert 'href="#command-center"' in html
     assert 'href="#inspector"' in html
     assert 'href="#source-files"' in html
     assert "Summary" in html
+    assert "Market Map" in html
     assert "Watchlist Status" in html
     assert "Candidate Pullbacks" in html
     assert "Command Center" in html
     assert "Ticker Inspector / Details" in html
     assert "Source Files / Report Status" in html
+    assert "Ecosystem" in html
+    assert "Layers" in html
+    assert "Subindustries" in html
     assert "Report Source" in html
     assert "generated_at_utc" in html
     assert "reports_dir" in html
@@ -702,7 +783,7 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     assert str(reports_dir / "rolling5.csv") in html
     assert str(reports_dir / "rolling30.csv") in html
     assert "Filters" in html
-    assert "Filters apply to Candidate Pullbacks, Command Center and Inspector rows." in html
+    assert "Filters apply to Market Map, Watchlist Status, Candidate Pullbacks, Command Center and Inspector rows." in html
     assert 'id="ticker-filter"' in html
     assert 'id="action-filter"' in html
     assert 'id="pullback-filter"' in html
@@ -711,6 +792,7 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     assert "function applyFilters()" in html
     assert ".sticky-table thead th" in html
     assert "Visible filtered rows:" in html
+    assert "Market Map rows:" in html
     assert "Watchlist rows:" in html
     assert "Candidate rows:" in html
     assert "Command Center rows:" in html
@@ -719,6 +801,7 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     assert "P1_READY_TO_WATCH" in html
     assert "WATCH_VALID_PULLBACK" in html
     assert '<tr data-filter-row="1"' in html
+    assert 'data-section="market-map"' in html
     assert 'data-section="watchlist-status"' in html
     assert 'data-section="candidate-pullbacks"' in html
     assert 'data-section="command-center"' in html
@@ -730,11 +813,14 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     assert "<tbody>\ndata-filter-row=" not in html
     assert "</tr>\ndata-filter-row=" not in html
     assert 'document.querySelectorAll("[data-filter-row=\'1\']")' in html
+    assert 'id="market-map-filter-status"' in html
     assert 'id="candidate-filter-status"' in html
     assert 'id="watchlist-filter-status"' in html
     assert 'id="command-center-filter-status"' in html
     assert 'id="inspector-filter-status"' in html
     assert 'class="table-scroll"' in html
+    assert html.index('id="market-map"') > html.index('id="summary"')
+    assert html.index('id="market-map"') < html.index('id="watchlist-status"')
     assert html.index('id="watchlist-status"') > html.index('id="summary"')
     assert html.index('id="watchlist-status"') < html.index('id="candidate-pullbacks"')
     assert html.index("<h2>Filters</h2>") < html.index('id="candidate-pullbacks"')
@@ -817,6 +903,20 @@ def test_html_cli_renders_empty_watchlist_state(tmp_path, monkeypatch):
     assert exit_code == 0
     html = (reports_dir / "datacenter_dashboard.html").read_text(encoding="utf-8")
     assert "No watchlist rows found in the selected reports." in html
+
+
+def test_html_cli_renders_empty_market_map_state(tmp_path, monkeypatch):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    _install_pipeline_mocks(monkeypatch, reports_dir)
+    for name in ("daily.csv", "rolling2.csv", "rolling5.csv", "rolling30.csv"):
+        (reports_dir / name).write_text("", encoding="utf-8")
+
+    exit_code = main(["--reports-dir", str(reports_dir), "--title", "Datacenter Dashboard"])
+
+    assert exit_code == 0
+    html = (reports_dir / "datacenter_dashboard.html").read_text(encoding="utf-8")
+    assert "No market map rows found in the selected reports." in html
 
 
 def test_html_cli_custom_output_path_works(tmp_path, monkeypatch):

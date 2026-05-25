@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
 import re
+from typing import Sequence
 
 from dev_tools.datacenter_dashboard_decisions import (
     DatacenterDecisionBatchResult,
@@ -91,6 +92,36 @@ _COMMAND_CENTER_GROUPS = (
 _SOURCE_FILE_HORIZON_ORDER = ("rolling 30d", "rolling 5d", "rolling 2d", "daily")
 _WATCHLIST_SECTION_NAME = "watchlist summary"
 _REPORT_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_MARKDOWN_SEPARATOR_RE = re.compile(r"^\s*\|?(?:\s*:?-+:?\s*\|)+\s*:?-+:?\s*\|?\s*$")
+_MARKDOWN_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+(.*?)\s*$")
+_MARKET_MAP_EMPTY = "No market map rows found in the selected reports."
+
+
+@dataclass(frozen=True)
+class _MarkdownTable:
+    section: str | None
+    headers: tuple[str, ...]
+    rows: tuple[dict[str, str], ...]
+
+
+@dataclass(frozen=True)
+class _MarketMapRow:
+    scope: str
+    horizon: str
+    name: str
+    layer: str
+    subindustry: str
+    current_status: str
+    window_status: str
+    overheat_risk_level: str
+    pct_above_ema20: str
+    pct_above_ma10: str
+    ema20_breadth_delta_5d: str
+    return_5d: str
+    return_10d: str
+    return_20d: str
+    return_60d: str
+    source_file: str
 
 
 @dataclass(frozen=True)
@@ -155,6 +186,10 @@ def _html_attr(value: object | None) -> str:
     return escape(_safe_attr(value), quote=True)
 
 
+def _normalize_md_header(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", value.strip().lower()).strip("_")
+
+
 def _collect_rows(dashboard_status: DatacenterDashboardStatus) -> list[DatacenterDashboardRow]:
     parsed_rows: list[DatacenterDashboardRow] = []
     for report in dashboard_status.reports:
@@ -167,6 +202,397 @@ def _collect_rows(dashboard_status: DatacenterDashboardStatus) -> list[Datacente
             ).rows
         )
     return parsed_rows
+
+
+def _parse_markdown_tables(path: str) -> list[_MarkdownTable]:
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError:
+        return []
+    lines = text.splitlines()
+    tables: list[_MarkdownTable] = []
+    current_section: str | None = None
+    line_index = 0
+    while line_index < len(lines):
+        current_line = lines[line_index].strip()
+        heading_match = _MARKDOWN_HEADING_RE.match(current_line)
+        if heading_match:
+            current_section = heading_match.group(1).strip() or current_section
+            line_index += 1
+            continue
+        if "|" not in current_line or line_index + 1 >= len(lines):
+            line_index += 1
+            continue
+        separator_line = lines[line_index + 1].strip()
+        if not _MARKDOWN_SEPARATOR_RE.match(separator_line):
+            line_index += 1
+            continue
+        headers = tuple(
+            _normalize_md_header(cell)
+            for cell in current_line.strip("|").split("|")
+        )
+        line_index += 2
+        rows: list[dict[str, str]] = []
+        while line_index < len(lines):
+            row_line = lines[line_index].strip()
+            if not row_line or "|" not in row_line:
+                break
+            values = [cell.strip() for cell in row_line.strip("|").split("|")]
+            padded_values = values[: len(headers)] + [""] * max(0, len(headers) - len(values))
+            rows.append(
+                {
+                    header: value.strip()
+                    for header, value in zip(headers, padded_values)
+                }
+            )
+            line_index += 1
+        tables.append(
+            _MarkdownTable(
+                section=current_section,
+                headers=headers,
+                rows=tuple(rows),
+            )
+        )
+    return tables
+
+
+def _first_table(
+    tables: Sequence[_MarkdownTable],
+    *,
+    section_name: str,
+    required_headers: Sequence[str],
+) -> _MarkdownTable | None:
+    normalized_section = section_name.strip().lower()
+    required = set(required_headers)
+    for table in tables:
+        if (table.section or "").strip().lower() != normalized_section:
+            continue
+        if required.issubset(set(table.headers)):
+            return table
+    return None
+
+
+def _tables_with_headers(
+    tables: Sequence[_MarkdownTable],
+    *,
+    required_headers: Sequence[str],
+) -> list[_MarkdownTable]:
+    required = set(required_headers)
+    return [table for table in tables if required.issubset(set(table.headers))]
+
+
+def _metric_value_map(table: _MarkdownTable, *, key_field: str, value_field: str) -> dict[str, str]:
+    output: dict[str, str] = {}
+    for row in table.rows:
+        key = row.get(key_field, "").strip()
+        if not key:
+            continue
+        output[key] = row.get(value_field, "").strip()
+    return output
+
+
+def _group_status_class(value: str) -> str:
+    normalized = (value or "").strip().upper()
+    if normalized in {"EXIT_ZONE", "HIGH", "EXTREME"}:
+        return "risk-high"
+    if normalized in {"TRIM_WATCH", "WATCH", "ELEVATED", "MEDIUM"}:
+        return "risk-medium"
+    if normalized in {"BUY_ZONE", "ADD_ON_PULLBACK"}:
+        return "status-positive"
+    if normalized in {"NEUTRAL", "NORMAL", "LOW"}:
+        return "status-neutral"
+    return ""
+
+
+def _render_market_status_cell(value: str) -> str:
+    css_class = _group_status_class(value)
+    class_attr = f' class="{css_class}"' if css_class else ""
+    return f"<td{class_attr}>{_html_text(value)}</td>"
+
+
+def _extract_market_map_rows(
+    dashboard_status: DatacenterDashboardStatus,
+) -> list[_MarketMapRow]:
+    rows: list[_MarketMapRow] = []
+    for report in dashboard_status.reports:
+        if not report.path:
+            continue
+        tables = _parse_markdown_tables(report.path)
+        horizon = report.horizon
+
+        if horizon == "daily":
+            dashboard_table = _first_table(
+                tables,
+                section_name="3. Dashboard",
+                required_headers=("metric", "value"),
+            )
+            if dashboard_table is not None:
+                metrics = _metric_value_map(dashboard_table, key_field="metric", value_field="value")
+                rows.append(
+                    _MarketMapRow(
+                        scope="ecosystem",
+                        horizon=horizon,
+                        name="DC_ECOSYSTEM_TOTAL",
+                        layer="",
+                        subindustry="",
+                        current_status=metrics.get("timing_state", ""),
+                        window_status="",
+                        overheat_risk_level=metrics.get("ecosystem_overheat_risk_level", ""),
+                        pct_above_ema20=metrics.get("ecosystem_pct_above_ema20", ""),
+                        pct_above_ma10=metrics.get("ecosystem_pct_above_ma10", ""),
+                        ema20_breadth_delta_5d=metrics.get("ecosystem_ema20_breadth_delta_5d", ""),
+                        return_5d=metrics.get("ecosystem_return_5d", ""),
+                        return_10d=metrics.get("ecosystem_return_10d", ""),
+                        return_20d=metrics.get("ecosystem_return_20d", ""),
+                        return_60d=metrics.get("ecosystem_return_60d", ""),
+                        source_file=report.path,
+                    )
+                )
+
+            overheat_table = _first_table(
+                tables,
+                section_name="4. Rotation Risk / Overheat Index",
+                required_headers=(
+                    "group_type",
+                    "group_name",
+                    "overheat_risk_level",
+                ),
+            )
+            subindustry_timing_table = _first_table(
+                tables,
+                section_name="5. Subindustry Timing States",
+                required_headers=("group_name", "timing_state"),
+            )
+            timing_by_subindustry = {
+                row.get("group_name", "").strip(): row
+                for row in (subindustry_timing_table.rows if subindustry_timing_table else ())
+                if row.get("group_name", "").strip()
+            }
+            overheat_by_group = {
+                (row.get("group_type", "").strip(), row.get("group_name", "").strip()): row
+                for row in (overheat_table.rows if overheat_table else ())
+                if row.get("group_type", "").strip() and row.get("group_name", "").strip()
+            }
+            for table in _tables_with_headers(
+                tables,
+                required_headers=("row_type", "layer", "subindustry", "ticker"),
+            ):
+                for row in table.rows:
+                    row_type = row.get("row_type", "").strip().upper()
+                    ticker_value = row.get("ticker", "").strip()
+                    if ticker_value:
+                        continue
+                    if row_type == "LAYER":
+                        layer_name = row.get("layer", "").strip()
+                        overheat_row = overheat_by_group.get(("layer", layer_name), {})
+                        rows.append(
+                            _MarketMapRow(
+                                scope="layer",
+                                horizon=horizon,
+                                name=layer_name,
+                                layer=layer_name,
+                                subindustry="",
+                                current_status=row.get("status", "").strip(),
+                                window_status="",
+                                overheat_risk_level=overheat_row.get("overheat_risk_level", "").strip(),
+                                pct_above_ema20=overheat_row.get("pct_above_ema20", "").strip(),
+                                pct_above_ma10=overheat_row.get("ma10_breadth_delta_5d", "").strip(),
+                                ema20_breadth_delta_5d=overheat_row.get("ema20_breadth_delta_5d", "").strip(),
+                                return_5d=row.get("return_5d", "").strip(),
+                                return_10d=overheat_row.get("return_10d", "").strip(),
+                                return_20d=row.get("return_20d", "").strip() or overheat_row.get("return_20d", "").strip(),
+                                return_60d="",
+                                source_file=report.path,
+                            )
+                        )
+                    elif row_type == "SUBINDUSTRY":
+                        subindustry_name = row.get("subindustry", "").strip()
+                        overheat_row = overheat_by_group.get(("subindustry", subindustry_name), {})
+                        timing_row = timing_by_subindustry.get(subindustry_name, {})
+                        rows.append(
+                            _MarketMapRow(
+                                scope="subindustry",
+                                horizon=horizon,
+                                name=subindustry_name,
+                                layer=row.get("layer", "").strip(),
+                                subindustry=subindustry_name,
+                                current_status=row.get("status", "").strip() or timing_row.get("timing_state", "").strip(),
+                                window_status="",
+                                overheat_risk_level=overheat_row.get("overheat_risk_level", "").strip(),
+                                pct_above_ema20=timing_row.get("pct_above_ema20", "").strip() or overheat_row.get("pct_above_ema20", "").strip(),
+                                pct_above_ma10=overheat_row.get("ma10_breadth_delta_5d", "").strip(),
+                                ema20_breadth_delta_5d=timing_row.get("ema20_breadth_delta_5d", "").strip() or overheat_row.get("ema20_breadth_delta_5d", "").strip(),
+                                return_5d=row.get("return_5d", "").strip() or timing_row.get("return_5d", "").strip(),
+                                return_10d=timing_row.get("return_10d", "").strip() or overheat_row.get("return_10d", "").strip(),
+                                return_20d=row.get("return_20d", "").strip() or timing_row.get("return_20d", "").strip() or overheat_row.get("return_20d", "").strip(),
+                                return_60d=timing_row.get("return_60d", "").strip(),
+                                source_file=report.path,
+                            )
+                        )
+        else:
+            ecosystem_change_table = _first_table(
+                tables,
+                section_name="4. Ecosystem window change",
+                required_headers=("metric", "last_value"),
+            )
+            if ecosystem_change_table is not None:
+                metrics = _metric_value_map(
+                    ecosystem_change_table,
+                    key_field="metric",
+                    value_field="last_value",
+                )
+                rows.append(
+                    _MarketMapRow(
+                        scope="ecosystem",
+                        horizon=horizon,
+                        name="DC_ECOSYSTEM_TOTAL",
+                        layer="",
+                        subindustry="",
+                        current_status=metrics.get("timing_state", ""),
+                        window_status="",
+                        overheat_risk_level=metrics.get("overheat_risk_level", ""),
+                        pct_above_ema20=metrics.get("pct_above_ema20", ""),
+                        pct_above_ma10=metrics.get("pct_above_ma10", ""),
+                        ema20_breadth_delta_5d=metrics.get("ema20_breadth_delta_5d", ""),
+                        return_5d=metrics.get("return_5d", ""),
+                        return_10d=metrics.get("return_10d", ""),
+                        return_20d=metrics.get("return_20d", ""),
+                        return_60d="",
+                        source_file=report.path,
+                    )
+                )
+
+            structure_tables = _tables_with_headers(
+                tables,
+                required_headers=("group_type", "group_name", "timing_state", "overheat_risk_level"),
+            )
+            structure_by_group: dict[tuple[str, str], dict[str, str]] = {}
+            for table in structure_tables:
+                for row in table.rows:
+                    group_type = row.get("group_type", "").strip()
+                    group_name = row.get("group_name", "").strip()
+                    if not group_type or not group_name:
+                        continue
+                    structure_by_group[(group_type, group_name)] = row
+            for table in _tables_with_headers(
+                tables,
+                required_headers=("row_type", "layer", "subindustry", "ticker", "current_status", "window_status"),
+            ):
+                for row in table.rows:
+                    row_type = row.get("row_type", "").strip().upper()
+                    ticker_value = row.get("ticker", "").strip()
+                    if ticker_value:
+                        continue
+                    if row_type == "LAYER":
+                        layer_name = row.get("layer", "").strip()
+                        structure_row = structure_by_group.get(("layer", layer_name), {})
+                        rows.append(
+                            _MarketMapRow(
+                                scope="layer",
+                                horizon=horizon,
+                                name=layer_name,
+                                layer=layer_name,
+                                subindustry="",
+                                current_status=row.get("current_status", "").strip() or structure_row.get("timing_state", "").strip(),
+                                window_status=row.get("window_status", "").strip(),
+                                overheat_risk_level=structure_row.get("overheat_risk_level", "").strip(),
+                                pct_above_ema20="",
+                                pct_above_ma10="",
+                                ema20_breadth_delta_5d="",
+                                return_5d="",
+                                return_10d="",
+                                return_20d="",
+                                return_60d="",
+                                source_file=report.path,
+                            )
+                        )
+                    elif row_type == "SUBINDUSTRY":
+                        subindustry_name = row.get("subindustry", "").strip()
+                        structure_row = structure_by_group.get(("subindustry", subindustry_name), {})
+                        rows.append(
+                            _MarketMapRow(
+                                scope="subindustry",
+                                horizon=horizon,
+                                name=subindustry_name,
+                                layer=row.get("layer", "").strip(),
+                                subindustry=subindustry_name,
+                                current_status=row.get("current_status", "").strip() or structure_row.get("timing_state", "").strip(),
+                                window_status=row.get("window_status", "").strip(),
+                                overheat_risk_level=structure_row.get("overheat_risk_level", "").strip(),
+                                pct_above_ema20="",
+                                pct_above_ma10="",
+                                ema20_breadth_delta_5d="",
+                                return_5d="",
+                                return_10d="",
+                                return_20d="",
+                                return_60d="",
+                                source_file=report.path,
+                            )
+                        )
+    return sorted(
+        rows,
+        key=lambda row: (
+            {"ecosystem": 0, "layer": 1, "subindustry": 2}.get(row.scope, 99),
+            _HORIZON_PRIORITY.get(row.horizon, 99),
+            row.layer,
+            row.subindustry,
+            row.name,
+            row.source_file,
+        ),
+    )
+
+
+def _market_map_filter_text(row: _MarketMapRow) -> str:
+    return " ".join(
+        part
+        for part in (
+            row.scope,
+            row.horizon,
+            row.name,
+            row.layer,
+            row.subindustry,
+            row.current_status,
+            row.window_status,
+            row.overheat_risk_level,
+        )
+        if part
+    ).lower()
+
+
+def _render_market_map_rows(
+    rows: Sequence[_MarketMapRow],
+    *,
+    include_layer_column: bool,
+) -> str:
+    rendered_rows: list[str] = []
+    for row in rows:
+        rendered_rows.append(
+            "<tr"
+            f' data-filter-row="1"'
+            f' data-section="market-map"'
+            f' data-action="{_html_attr(row.current_status)}"'
+            f' data-pullback-validity=""'
+            f' data-entry-readiness=""'
+            f' data-candidate-priority=""'
+            f' data-filter-text="{_html_attr(_market_map_filter_text(row))}"'
+            ">"
+            f"<td>{_html_text(row.name)}</td>"
+            + (f"<td>{_html_text(row.layer)}</td>" if include_layer_column else "")
+            + f"<td>{_html_text(row.horizon)}</td>"
+            + _render_market_status_cell(row.current_status)
+            + _render_market_status_cell(row.window_status)
+            + _render_market_status_cell(row.overheat_risk_level)
+            + f"<td>{_html_text(row.pct_above_ema20)}</td>"
+            + f"<td>{_html_text(row.pct_above_ma10)}</td>"
+            + f"<td>{_html_text(row.ema20_breadth_delta_5d)}</td>"
+            + f"<td>{_html_text(row.return_5d)}</td>"
+            + f"<td>{_html_text(row.return_10d)}</td>"
+            + f"<td>{_html_text(row.return_20d)}</td>"
+            + f"<td>{_html_text(row.return_60d)}</td>"
+            + f"<td>{_html_text(Path(row.source_file).name if row.source_file else '')}</td>"
+            + "</tr>"
+        )
+    return "".join(rendered_rows)
 
 
 def _build_inspector_views(
@@ -347,6 +773,7 @@ def generate_dashboard_html(
         report.horizon: report.path or ""
         for report in dashboard_status.reports
     }
+    market_map_rows = _extract_market_map_rows(dashboard_status)
     watchlist_rows_by_ticker: dict[str, list[DatacenterDashboardRow]] = {}
     for row in parsed_rows:
         if not _is_watchlist_row(row):
@@ -533,6 +960,22 @@ def generate_dashboard_html(
         )
     watchlist_rows_html = "".join(watchlist_rows_html_parts)
 
+    ecosystem_market_rows = [row for row in market_map_rows if row.scope == "ecosystem"]
+    layer_market_rows = [row for row in market_map_rows if row.scope == "layer"]
+    subindustry_market_rows = [row for row in market_map_rows if row.scope == "subindustry"]
+    ecosystem_market_rows_html = _render_market_map_rows(
+        ecosystem_market_rows,
+        include_layer_column=False,
+    )
+    layer_market_rows_html = _render_market_map_rows(
+        layer_market_rows,
+        include_layer_column=False,
+    )
+    subindustry_market_rows_html = _render_market_map_rows(
+        subindustry_market_rows,
+        include_layer_column=True,
+    )
+
     detail_sections: list[str] = []
     for decision in sorted(decision_result.decisions, key=lambda item: item.ticker):
         inspector = inspector_views.get(decision.ticker)
@@ -699,6 +1142,10 @@ def generate_dashboard_html(
     .action-tighten {{ background: #fff8c5; }}
     .action-watch {{ background: #e8f5e9; }}
     .action-neutral {{ background: #f1f3f5; }}
+    .risk-high {{ background: #fde8e8; }}
+    .risk-medium {{ background: #fff2df; }}
+    .status-positive {{ background: #e8f5e9; }}
+    .status-neutral {{ background: #f1f3f5; }}
     .filter-box {{
       margin: 8px 0 16px;
       padding: 12px;
@@ -776,6 +1223,7 @@ def generate_dashboard_html(
     <h1>{escape(title)}</h1>
     <nav class="nav-links" aria-label="Dashboard sections">
       <a href="#summary">Summary</a>
+      <a href="#market-map">Market Map</a>
       <a href="#watchlist-status">Watchlist Status</a>
       <a href="#candidate-pullbacks">Candidate Pullbacks</a>
       <a href="#command-center">Command Center</a>
@@ -812,6 +1260,51 @@ def generate_dashboard_html(
     </div>
   </section>
 
+  <section id="market-map" class="major-section">
+    <h2>Market Map</h2>
+    <div id="market-map-filter-status" class="section-status">Market Map rows: 0 / 0</div>
+    {(
+      '<section class="group-section">'
+      '<h3>Ecosystem</h3>'
+      '<div class="table-scroll"><table class="sticky-table"><thead><tr>'
+      '<th>Ecosystem</th><th>Horizon</th><th>Current status</th><th>Window status</th>'
+      '<th>Overheat risk</th><th>% above EMA20</th><th>% above MA10</th>'
+      '<th>EMA20 breadth delta 5d</th><th>Return 5d</th><th>Return 10d</th>'
+      '<th>Return 20d</th><th>Return 60d</th><th>Source file</th>'
+      '</tr></thead><tbody>'
+      + ecosystem_market_rows_html +
+      '</tbody></table></div>'
+      '</section>'
+      if ecosystem_market_rows_html else ''
+    )}{(
+      '<section class="group-section">'
+      '<h3>Layers</h3>'
+      '<div class="table-scroll"><table class="sticky-table"><thead><tr>'
+      '<th>Layer</th><th>Horizon</th><th>Current status</th><th>Window status</th>'
+      '<th>Overheat risk</th><th>% above EMA20</th><th>% above MA10</th>'
+      '<th>EMA20 breadth delta 5d</th><th>Return 5d</th><th>Return 10d</th>'
+      '<th>Return 20d</th><th>Return 60d</th><th>Source file</th>'
+      '</tr></thead><tbody>'
+      + layer_market_rows_html +
+      '</tbody></table></div>'
+      '</section>'
+      if layer_market_rows_html else ''
+    )}{(
+      '<section class="group-section">'
+      '<h3>Subindustries</h3>'
+      '<div class="table-scroll"><table class="sticky-table"><thead><tr>'
+      '<th>Subindustry</th><th>Layer</th><th>Horizon</th><th>Current status</th><th>Window status</th>'
+      '<th>Overheat risk</th><th>% above EMA20</th><th>% above MA10</th>'
+      '<th>EMA20 breadth delta 5d</th><th>Return 5d</th><th>Return 10d</th>'
+      '<th>Return 20d</th><th>Return 60d</th><th>Source file</th>'
+      '</tr></thead><tbody>'
+      + subindustry_market_rows_html +
+      '</tbody></table></div>'
+      '</section>'
+      if subindustry_market_rows_html else ''
+    ) if market_map_rows else '<p>No market map rows found in the selected reports.</p>'}
+  </section>
+
   <section id="watchlist-status" class="major-section">
     <h2>Watchlist Status</h2>
     <div id="watchlist-filter-status" class="section-status">Watchlist rows: 0 / 0</div>
@@ -832,7 +1325,7 @@ def generate_dashboard_html(
   <section id="filters" class="major-section">
     <h2>Filters</h2>
     <div class="filter-box">
-      <p class="filter-help">Filters apply to Candidate Pullbacks, Command Center and Inspector rows.</p>
+      <p class="filter-help">Filters apply to Market Map, Watchlist Status, Candidate Pullbacks, Command Center and Inspector rows.</p>
       <div class="filter-grid">
         <label>Text filter
           <input id="ticker-filter" type="text" placeholder="e.g. NVDA, SELL, pullback" />
@@ -952,12 +1445,14 @@ def generate_dashboard_html(
         var rows = document.querySelectorAll("[data-filter-row='1']");
         var visibleRows = 0;
         var sectionVisibleCounts = {{
+          "market-map": 0,
           "watchlist-status": 0,
           "candidate-pullbacks": 0,
           "command-center": 0,
           "inspector": 0
         }};
         var sectionTotalCounts = {{
+          "market-map": 0,
           "watchlist-status": 0,
           "candidate-pullbacks": 0,
           "command-center": 0,
@@ -997,6 +1492,14 @@ def generate_dashboard_html(
           status.textContent = "Visible filtered rows: " + visibleRows + " / " + rows.length;
         }}
 
+        var marketMapStatus = document.getElementById("market-map-filter-status");
+        if (marketMapStatus) {{
+          marketMapStatus.textContent =
+            "Market Map rows: " +
+            sectionVisibleCounts["market-map"] +
+            " / " +
+            sectionTotalCounts["market-map"];
+        }}
         var candidateStatus = document.getElementById("candidate-filter-status");
         var watchlistStatus = document.getElementById("watchlist-filter-status");
         if (watchlistStatus) {{
