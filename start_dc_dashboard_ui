@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+set -u
+
+EXPECTED_REPO_ROOT="/home/kalle/projects/rawcandle"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPORTS_DIR="/home/kalle/projects/rawcandle/temp"
+OUTPUT_HTML="/home/kalle/projects/rawcandle/temp/datacenter_dashboard.html"
+
+print_help() {
+  cat <<'EOF'
+Usage:
+  ./start_dc_dashboard_ui
+  ./start_dc_dashboard_ui --reports-dir /path/to/reports
+  ./start_dc_dashboard_ui --output /path/to/dashboard.html
+  ./start_dc_dashboard_ui --help
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --reports-dir)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --reports-dir" >&2
+        exit 2
+      fi
+      REPORTS_DIR="$2"
+      shift 2
+      ;;
+    --output)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --output" >&2
+        exit 2
+      fi
+      OUTPUT_HTML="$2"
+      shift 2
+      ;;
+    --help)
+      print_help
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      print_help >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [[ "$SCRIPT_DIR" != "$EXPECTED_REPO_ROOT" ]]; then
+  echo "WARNING resolved_repo_root=$SCRIPT_DIR expected_repo_root=$EXPECTED_REPO_ROOT"
+fi
+
+cd "$SCRIPT_DIR" || exit 1
+
+echo "SUMMARY reports_dir=$REPORTS_DIR"
+echo "SUMMARY html_output=$OUTPUT_HTML"
+
+if ! PYTHONPATH=. python3 dev_tools/run_datacenter_dashboard_html.py \
+  --reports-dir "$REPORTS_DIR" \
+  --output "$OUTPUT_HTML"; then
+  echo "SUMMARY generate_status=FAILED"
+  echo "SUMMARY open_status=SKIPPED"
+  echo "SUMMARY opener=none"
+  exit 1
+fi
+
+echo "SUMMARY generate_status=OK"
+
+if command -v firefox >/dev/null 2>&1; then
+  firefox "$OUTPUT_HTML"
+  echo "SUMMARY open_status=OK"
+  echo "SUMMARY opener=firefox"
+  exit 0
+fi
+
+if command -v firefox.exe >/dev/null 2>&1 && command -v wslpath >/dev/null 2>&1; then
+  firefox.exe "$(wslpath -w "$OUTPUT_HTML")"
+  echo "SUMMARY open_status=OK"
+  echo "SUMMARY opener=firefox.exe"
+  exit 0
+fi
+
+if command -v xdg-open >/dev/null 2>&1; then
+  xdg-open "$OUTPUT_HTML"
+  echo "SUMMARY open_status=OK"
+  echo "SUMMARY opener=xdg-open"
+  exit 0
+fi
+
+if command -v explorer.exe >/dev/null 2>&1 && command -v wslpath >/dev/null 2>&1; then
+  explorer.exe "$(wslpath -w "$OUTPUT_HTML")"
+  echo "SUMMARY open_status=OK"
+  echo "SUMMARY opener=explorer.exe"
+  exit 0
+fi
+
+echo "SUMMARY open_status=FAILED"
+echo "SUMMARY opener=none"
+echo "Open the HTML file manually: $OUTPUT_HTML"
+exit 0
