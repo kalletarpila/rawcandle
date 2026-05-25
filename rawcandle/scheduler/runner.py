@@ -96,6 +96,16 @@ class ScheduledStockUpdateRunResult:
     datacenter_pipeline_weekly_report_path: Optional[str] = None
     datacenter_pipeline_weekly_report_csv_path: Optional[str] = None
     datacenter_pipeline_error: str = ""
+    datacenter_dashboard_attempted: int = 0
+    datacenter_dashboard_status: str = "SKIPPED"
+    datacenter_dashboard_dashboard_db: str = ""
+    datacenter_dashboard_report_date: str = ""
+    datacenter_dashboard_md_reports_status: str = "SKIPPED"
+    datacenter_dashboard_source_reports_available: int = 0
+    datacenter_dashboard_html_output_path: str = ""
+    datacenter_dashboard_run_id: str = ""
+    datacenter_dashboard_skip_reason: str = ""
+    datacenter_dashboard_error: str = ""
 
 
 class SchedulerAlreadyRunningError(RuntimeError):
@@ -157,6 +167,20 @@ class TechnicalRelevancePostStepResult:
     missing_dow_context_count: int = 0
     missing_bar_index_count: int = 0
     duration_seconds: str = "0.000"
+    skip_reason: str = ""
+    error: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class DatacenterDashboardPostStepResult:
+    attempted: int
+    status: str
+    dashboard_db: str = ""
+    report_date: str = ""
+    md_reports_status: str = "SKIPPED"
+    source_reports_available: int = 0
+    html_output_path: str = ""
+    run_id: str = ""
     skip_reason: str = ""
     error: Optional[str] = None
 
@@ -395,6 +419,140 @@ def _build_datacenter_log_path(log_dir: Path, market: str, started_at: datetime.
         if not candidate.exists():
             return candidate
         suffix += 1
+
+
+def _default_datacenter_dashboard_result(
+    *,
+    config: StockUpdateSchedulerConfig,
+    status: str = "SKIPPED",
+    report_date: str = "",
+    md_reports_status: str = "SKIPPED",
+    skip_reason: str = "",
+    error: str | None = None,
+) -> DatacenterDashboardPostStepResult:
+    return DatacenterDashboardPostStepResult(
+        attempted=0,
+        status=status,
+        dashboard_db=config.datacenter_dashboard_db,
+        report_date=report_date,
+        md_reports_status=md_reports_status,
+        source_reports_available=0,
+        html_output_path="",
+        run_id="",
+        skip_reason=skip_reason,
+        error=error,
+    )
+
+
+def _resolve_datacenter_dashboard_html_output_path(
+    config: StockUpdateSchedulerConfig,
+    report_date: str,
+) -> str:
+    return str(
+        Path(config.datacenter_dashboard_html_output_dir)
+        / f"datacenter_dashboard_{report_date}.html"
+    )
+
+
+def _run_datacenter_dashboard_post_step(
+    *,
+    config: StockUpdateSchedulerConfig,
+    reports_dir: str,
+    report_date: str,
+    render_html: bool,
+    html_output: str,
+) -> DatacenterDashboardPostStepResult:
+    from dev_tools.datacenter_dashboard_support import discover_datacenter_dashboard_status
+    from dev_tools.run_datacenter_dashboard_html import generate_datacenter_dashboard_html_file
+    from dev_tools.run_ecosystem_dashboard_build import generate_ecosystem_dashboard_build
+
+    if not config.datacenter_dashboard_enabled:
+        return _default_datacenter_dashboard_result(
+            config=config,
+            report_date=report_date,
+            skip_reason="DATACENTER_DASHBOARD_DISABLED",
+        )
+
+    dashboard_status = discover_datacenter_dashboard_status(
+        reports_dir,
+        report_date=report_date,
+    )
+    source_reports_available = sum(
+        1 for report in dashboard_status.reports if report.status == "OK"
+    )
+    if dashboard_status.overall_status != "READY":
+        return DatacenterDashboardPostStepResult(
+            attempted=0,
+            status="FAILED",
+            dashboard_db=config.datacenter_dashboard_db,
+            report_date=report_date,
+            md_reports_status="MISSING",
+            source_reports_available=source_reports_available,
+            html_output_path=html_output,
+            run_id="",
+            skip_reason="DATACENTER_MD_REPORTS_MISSING",
+            error=f"missing dashboard source reports for report_date={report_date}",
+        )
+
+    try:
+        built_run_id, _summary_lines = generate_ecosystem_dashboard_build(
+            dashboard_db=config.datacenter_dashboard_db,
+            ecosystem_code="DATACENTER",
+            reports_dir=reports_dir,
+            report_date=report_date,
+            mode="replace-date",
+            run_id=None,
+        )
+    except Exception as exc:
+        return DatacenterDashboardPostStepResult(
+            attempted=1,
+            status="FAILED",
+            dashboard_db=config.datacenter_dashboard_db,
+            report_date=report_date,
+            md_reports_status="OK",
+            source_reports_available=source_reports_available,
+            html_output_path=html_output,
+            run_id="",
+            skip_reason="DASHBOARD_BUILD_FAILED",
+            error=str(exc),
+        )
+
+    if render_html:
+        try:
+            generate_datacenter_dashboard_html_file(
+                dashboard_db=config.datacenter_dashboard_db,
+                ecosystem_code="DATACENTER",
+                run_id=built_run_id,
+                output=html_output,
+                report_date=None,
+                title=None,
+            )
+        except Exception as exc:
+            return DatacenterDashboardPostStepResult(
+                attempted=1,
+                status="FAILED",
+                dashboard_db=config.datacenter_dashboard_db,
+                report_date=report_date,
+                md_reports_status="OK",
+                source_reports_available=source_reports_available,
+                html_output_path=html_output,
+                run_id=built_run_id,
+                skip_reason="DASHBOARD_HTML_RENDER_FAILED",
+                error=str(exc),
+            )
+
+    return DatacenterDashboardPostStepResult(
+        attempted=1,
+        status="OK",
+        dashboard_db=config.datacenter_dashboard_db,
+        report_date=report_date,
+        md_reports_status="OK",
+        source_reports_available=source_reports_available,
+        html_output_path=html_output,
+        run_id=built_run_id,
+        skip_reason="",
+        error=None,
+    )
 
 
 def _run_technical_relevance_post_step(
@@ -907,6 +1065,9 @@ def run_scheduler_config(
                     timezone=config.timezone,
                     skip_next_run=False,
                     technical_relevance_enabled=config.technical_relevance_enabled,
+                    datacenter_dashboard_enabled=config.datacenter_dashboard_enabled,
+                    datacenter_dashboard_db=config.datacenter_dashboard_db,
+                    datacenter_dashboard_html_output_dir=config.datacenter_dashboard_html_output_dir,
                 )
                 write_scheduler_config(config_path, reset_config)
 
@@ -963,6 +1124,16 @@ def run_scheduler_config(
                     datacenter_pipeline_weekly_report_path=None,
                     datacenter_pipeline_weekly_report_csv_path=None,
                     datacenter_pipeline_error="",
+                    datacenter_dashboard_attempted=0,
+                    datacenter_dashboard_status="SKIPPED",
+                    datacenter_dashboard_dashboard_db=config.datacenter_dashboard_db,
+                    datacenter_dashboard_report_date="",
+                    datacenter_dashboard_md_reports_status="SKIPPED",
+                    datacenter_dashboard_source_reports_available=0,
+                    datacenter_dashboard_html_output_path="",
+                    datacenter_dashboard_run_id="",
+                    datacenter_dashboard_skip_reason="SKIP_NEXT_RUN",
+                    datacenter_dashboard_error="",
                 )
                 _write_summary_json(config=config, run_started_at=run_started_at, result=result)
                 write_scheduler_status(
@@ -1014,6 +1185,14 @@ def run_scheduler_config(
                 status="SKIPPED",
                 market="usa",
             )
+            datacenter_dashboard_result = _default_datacenter_dashboard_result(
+                config=config,
+                skip_reason="USA_NOT_ENABLED"
+                if "usa" not in config.enabled_markets
+                else "MARKET_PHASE_FAILED"
+                if market_update_phase_status not in (STATUS_OK, STATUS_OK_WITH_WARNINGS)
+                else "",
+            )
             if (
                 market_update_phase_status in (STATUS_OK, STATUS_OK_WITH_WARNINGS)
                 and datacenter_result.market in config.enabled_markets
@@ -1023,10 +1202,40 @@ def run_scheduler_config(
                     target_market=datacenter_result.market,
                     effective_today=effective_today,
                 )
+                if datacenter_result.status == "OK" and datacenter_result.signal_date:
+                    datacenter_dashboard_result = _run_datacenter_dashboard_post_step(
+                        config=config,
+                        reports_dir=_resolve_datacenter_post_step_config(
+                            datacenter_result.market
+                        ).output_dir,
+                        report_date=datacenter_result.signal_date,
+                        render_html=True,
+                        html_output=_resolve_datacenter_dashboard_html_output_path(
+                            config,
+                            datacenter_result.signal_date,
+                        ),
+                    )
+                elif datacenter_result.status == "FAILED":
+                    datacenter_dashboard_result = _default_datacenter_dashboard_result(
+                        config=config,
+                        report_date=datacenter_result.signal_date or "",
+                        md_reports_status="FAILED",
+                        skip_reason="DATACENTER_PIPELINE_FAILED",
+                        error=datacenter_result.error,
+                    )
+                else:
+                    datacenter_dashboard_result = _default_datacenter_dashboard_result(
+                        config=config,
+                        report_date=datacenter_result.signal_date or "",
+                        md_reports_status="SKIPPED",
+                        skip_reason="DATACENTER_PIPELINE_SKIPPED",
+                        error=datacenter_result.error,
+                    )
             overall_status = (
                 STATUS_FAILED
                 if technical_relevance_result.status == "FAILED"
                 or datacenter_result.status == "FAILED"
+                or datacenter_dashboard_result.status == "FAILED"
                 else market_update_phase_status
             )
 
@@ -1086,6 +1295,18 @@ def run_scheduler_config(
                 datacenter_pipeline_weekly_report_path=datacenter_result.weekly_report_path,
                 datacenter_pipeline_weekly_report_csv_path=datacenter_result.weekly_report_csv_path,
                 datacenter_pipeline_error=datacenter_result.error or "",
+                datacenter_dashboard_attempted=datacenter_dashboard_result.attempted,
+                datacenter_dashboard_status=datacenter_dashboard_result.status,
+                datacenter_dashboard_dashboard_db=datacenter_dashboard_result.dashboard_db,
+                datacenter_dashboard_report_date=datacenter_dashboard_result.report_date,
+                datacenter_dashboard_md_reports_status=datacenter_dashboard_result.md_reports_status,
+                datacenter_dashboard_source_reports_available=(
+                    datacenter_dashboard_result.source_reports_available
+                ),
+                datacenter_dashboard_html_output_path=datacenter_dashboard_result.html_output_path,
+                datacenter_dashboard_run_id=datacenter_dashboard_result.run_id,
+                datacenter_dashboard_skip_reason=datacenter_dashboard_result.skip_reason,
+                datacenter_dashboard_error=datacenter_dashboard_result.error or "",
             )
             _write_summary_json(config=config, run_started_at=run_started_at, result=result)
             write_scheduler_status(

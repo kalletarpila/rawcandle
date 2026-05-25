@@ -5,12 +5,14 @@ from pathlib import Path
 
 import pytest
 
+from rawcandle.scheduler import runner as scheduler_runner
 from rawcandle.scheduler.config import (
     create_default_scheduler_config,
     read_scheduler_config,
     write_scheduler_config,
 )
 from rawcandle.scheduler.runner import (
+    DatacenterDashboardPostStepResult,
     SchedulerAlreadyRunningError,
     STATUS_FAILED,
     STATUS_OK,
@@ -66,6 +68,37 @@ class _FakeCompletedProcess:
         self.stderr = stderr
 
 
+@pytest.fixture(autouse=True)
+def _stub_datacenter_dashboard_post_step(monkeypatch, request):
+    if "real_datacenter_dashboard" in request.fixturenames:
+        return
+
+    def fake_dashboard_post_step(**kwargs):
+        config = kwargs["config"]
+        return DatacenterDashboardPostStepResult(
+            attempted=1,
+            status="OK",
+            dashboard_db=config.datacenter_dashboard_db,
+            report_date=kwargs["report_date"],
+            md_reports_status="OK",
+            source_reports_available=4,
+            html_output_path=kwargs["html_output"],
+            run_id="ECO_DASHBOARD_DATACENTER_2026-05-22_20260525T000000Z",
+            skip_reason="",
+            error=None,
+        )
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_dashboard_post_step",
+        fake_dashboard_post_step,
+    )
+
+
+@pytest.fixture
+def real_datacenter_dashboard():
+    return None
+
+
 def _write_config(
     tmp_path,
     *,
@@ -75,6 +108,9 @@ def _write_config(
     log_dir=None,
     skip_next_run=False,
     technical_relevance_enabled=False,
+    datacenter_dashboard_enabled=True,
+    datacenter_dashboard_db=None,
+    datacenter_dashboard_html_output_dir=None,
 ):
     osakedata_db = osakedata_db or (tmp_path / "osakedata.db")
     analysis_db = analysis_db or (tmp_path / "analysis.db")
@@ -88,6 +124,11 @@ def _write_config(
         config.enabled_markets = enabled_markets
     config.skip_next_run = skip_next_run
     config.technical_relevance_enabled = technical_relevance_enabled
+    config.datacenter_dashboard_enabled = datacenter_dashboard_enabled
+    if datacenter_dashboard_db is not None:
+        config.datacenter_dashboard_db = str(datacenter_dashboard_db)
+    if datacenter_dashboard_html_output_dir is not None:
+        config.datacenter_dashboard_html_output_dir = str(datacenter_dashboard_html_output_dir)
     path = tmp_path / "scheduler_config.json"
     write_scheduler_config(str(path), config)
     return path
@@ -1624,3 +1665,348 @@ def test_scheduler_runner_unexpected_scheduler_exception_writes_failed_status(
     assert status["is_running"] is False
     assert status["last_status"] == STATUS_FAILED
     assert "summary write failed" in status["error"]
+
+
+def test_scheduler_runner_dashboard_skipped_when_usa_not_enabled(tmp_path, monkeypatch):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(tmp_path, enabled_markets=["omxh"])
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.datacenter_dashboard_attempted == 0
+    assert result.datacenter_dashboard_status == "SKIPPED"
+    assert result.datacenter_dashboard_md_reports_status == "SKIPPED"
+    assert result.datacenter_dashboard_skip_reason == "USA_NOT_ENABLED"
+
+
+def test_scheduler_runner_dashboard_skipped_when_market_phase_failed(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(tmp_path, enabled_markets=["usa"])
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_FAILED),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.datacenter_dashboard_attempted == 0
+    assert result.datacenter_dashboard_status == "SKIPPED"
+    assert result.datacenter_dashboard_md_reports_status == "SKIPPED"
+    assert result.datacenter_dashboard_skip_reason == "MARKET_PHASE_FAILED"
+
+
+def test_scheduler_runner_dashboard_runs_after_datacenter_reports(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    dashboard_db = tmp_path / "ecosystem_dashboard.db"
+    html_dir = tmp_path / "reports"
+    html_dir.mkdir()
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        datacenter_dashboard_db=dashboard_db,
+        datacenter_dashboard_html_output_dir=html_dir,
+    )
+
+    calls = []
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_post_step",
+        lambda **kwargs: scheduler_runner.DatacenterPostStepResult(
+            attempted=1,
+            status="OK",
+            market="usa",
+            signal_date="2026-05-22",
+        ),
+    )
+
+    def fake_dashboard_post_step(**kwargs):
+        calls.append(kwargs)
+        return DatacenterDashboardPostStepResult(
+            attempted=1,
+            status="OK",
+            dashboard_db=kwargs["config"].datacenter_dashboard_db,
+            report_date=kwargs["report_date"],
+            md_reports_status="OK",
+            source_reports_available=4,
+            html_output_path=kwargs["html_output"],
+            run_id="ECO_DASHBOARD_DATACENTER_2026-05-22_20260525T000000Z",
+            skip_reason="",
+            error=None,
+        )
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_dashboard_post_step",
+        fake_dashboard_post_step,
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert len(calls) == 1
+    assert calls[0]["render_html"] is True
+    assert calls[0]["report_date"] == "2026-05-22"
+    assert calls[0]["reports_dir"] == "/home/kalle/projects/rawcandle/swing_reports"
+    assert calls[0]["config"].datacenter_dashboard_db == str(dashboard_db)
+    assert calls[0]["html_output"] == str(html_dir / "datacenter_dashboard_2026-05-22.html")
+    assert result.datacenter_dashboard_attempted == 1
+    assert result.datacenter_dashboard_status == "OK"
+    assert result.datacenter_dashboard_md_reports_status == "OK"
+    assert result.datacenter_dashboard_source_reports_available == 4
+    assert result.datacenter_dashboard_dashboard_db == str(dashboard_db)
+    assert result.datacenter_dashboard_html_output_path == str(
+        html_dir / "datacenter_dashboard_2026-05-22.html"
+    )
+    assert result.datacenter_dashboard_run_id == "ECO_DASHBOARD_DATACENTER_2026-05-22_20260525T000000Z"
+
+
+def test_scheduler_runner_dashboard_not_attempted_when_datacenter_pipeline_failed(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(tmp_path, enabled_markets=["usa"])
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_post_step",
+        lambda **kwargs: scheduler_runner.DatacenterPostStepResult(
+            attempted=1,
+            status="FAILED",
+            market="usa",
+            signal_date="2026-05-22",
+            error="pipeline failed",
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_dashboard_post_step",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("dashboard build/render should not run")
+        ),
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.datacenter_dashboard_attempted == 0
+    assert result.datacenter_dashboard_status == "SKIPPED"
+    assert result.datacenter_dashboard_md_reports_status == "FAILED"
+    assert result.datacenter_dashboard_skip_reason == "DATACENTER_PIPELINE_FAILED"
+    assert result.datacenter_dashboard_error == "pipeline failed"
+
+
+def test_scheduler_runner_dashboard_fails_when_md_reports_missing(
+    tmp_path, monkeypatch, real_datacenter_dashboard
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    dashboard_db = tmp_path / "ecosystem_dashboard.db"
+    html_dir = tmp_path / "reports"
+    html_dir.mkdir()
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        datacenter_dashboard_db=dashboard_db,
+        datacenter_dashboard_html_output_dir=html_dir,
+    )
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_post_step",
+        lambda **kwargs: scheduler_runner.DatacenterPostStepResult(
+            attempted=1,
+            status="OK",
+            market="usa",
+            signal_date="2026-05-22",
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_datacenter_post_step_config",
+        lambda market: scheduler_runner.DatacenterPostStepConfig(
+            market="usa",
+            taxonomy_csv="data/datacenter_ecosystem_taxonomy_full_v1.csv",
+            taxonomy_version="DC_TAXONOMY_FULL_V1",
+            start_date="2025-08-01",
+            index_base_date="2020-01-01",
+            output_dir=str(tmp_path / "empty_reports"),
+            expected_ticker_count=236,
+            expected_group_count=54,
+            expected_synthetic_ohlc_count=53,
+        ),
+    )
+    (tmp_path / "empty_reports").mkdir()
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.datacenter_dashboard_attempted == 0
+    assert result.datacenter_dashboard_status == "FAILED"
+    assert result.datacenter_dashboard_md_reports_status == "MISSING"
+    assert result.datacenter_dashboard_source_reports_available == 0
+    assert result.datacenter_dashboard_skip_reason == "DATACENTER_MD_REPORTS_MISSING"
+
+
+def test_scheduler_runner_dashboard_failure_after_md_reports_is_visible(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(tmp_path, enabled_markets=["usa"])
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_post_step",
+        lambda **kwargs: scheduler_runner.DatacenterPostStepResult(
+            attempted=1,
+            status="OK",
+            market="usa",
+            signal_date="2026-05-22",
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_dashboard_post_step",
+        lambda **kwargs: DatacenterDashboardPostStepResult(
+            attempted=1,
+            status="FAILED",
+            dashboard_db=kwargs["config"].datacenter_dashboard_db,
+            report_date=kwargs["report_date"],
+            md_reports_status="OK",
+            source_reports_available=4,
+            html_output_path=kwargs["html_output"],
+            run_id="ECO_DASHBOARD_DATACENTER_2026-05-22_20260525T000000Z",
+            skip_reason="DASHBOARD_BUILD_FAILED",
+            error="build failed",
+        ),
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.overall_status == STATUS_FAILED
+    assert result.datacenter_dashboard_attempted == 1
+    assert result.datacenter_dashboard_status == "FAILED"
+    assert result.datacenter_dashboard_md_reports_status == "OK"
+    assert result.datacenter_dashboard_skip_reason == "DASHBOARD_BUILD_FAILED"
+    assert result.datacenter_dashboard_error == "build failed"
+
+
+def test_scheduler_runner_dashboard_helper_uses_dashboard_db_build_and_html_args(
+    tmp_path, monkeypatch, real_datacenter_dashboard
+):
+    reports_dir = tmp_path / "swing_reports"
+    reports_dir.mkdir()
+    report_date = "2026-05-22"
+    for prefix in ("daily", "rolling_2", "rolling_5", "rolling_30"):
+        (reports_dir / f"datacenter_{prefix}_{report_date}_0000_full.md").write_text(
+            "report",
+            encoding="utf-8",
+        )
+
+    build_calls = []
+    html_calls = []
+
+    monkeypatch.setattr(
+        "dev_tools.run_ecosystem_dashboard_build.generate_ecosystem_dashboard_build",
+        lambda **kwargs: build_calls.append(kwargs)
+        or ("ECO_DASHBOARD_DATACENTER_2026-05-22_20260525T000000Z", []),
+    )
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_html.generate_datacenter_dashboard_html_file",
+        lambda **kwargs: html_calls.append(kwargs),
+    )
+
+    config = create_default_scheduler_config(
+        osakedata_db_path=str(tmp_path / "osakedata.db"),
+        analysis_db_path=str(tmp_path / "analysis.db"),
+        log_dir=str(tmp_path / "logs"),
+    )
+    config.datacenter_dashboard_db = str(tmp_path / "ecosystem_dashboard.db")
+    config.datacenter_dashboard_html_output_dir = str(tmp_path / "html")
+    (tmp_path / "html").mkdir()
+
+    result = scheduler_runner._run_datacenter_dashboard_post_step(
+        config=config,
+        reports_dir=str(reports_dir),
+        report_date=report_date,
+        render_html=True,
+        html_output=str(tmp_path / "html" / f"datacenter_dashboard_{report_date}.html"),
+    )
+
+    assert result.status == "OK"
+    assert build_calls == [
+        {
+            "dashboard_db": str(tmp_path / "ecosystem_dashboard.db"),
+            "ecosystem_code": "DATACENTER",
+            "reports_dir": str(reports_dir),
+            "report_date": report_date,
+            "mode": "replace-date",
+            "run_id": None,
+        }
+    ]
+    assert html_calls == [
+        {
+            "dashboard_db": str(tmp_path / "ecosystem_dashboard.db"),
+            "ecosystem_code": "DATACENTER",
+            "run_id": "ECO_DASHBOARD_DATACENTER_2026-05-22_20260525T000000Z",
+            "output": str(tmp_path / "html" / f"datacenter_dashboard_{report_date}.html"),
+            "report_date": None,
+            "title": None,
+        }
+    ]

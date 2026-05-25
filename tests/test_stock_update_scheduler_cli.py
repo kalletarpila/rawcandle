@@ -81,6 +81,16 @@ def _result(overall_status):
         datacenter_pipeline_weekly_report_path=None,
         datacenter_pipeline_weekly_report_csv_path=None,
         datacenter_pipeline_error="",
+        datacenter_dashboard_attempted=0,
+        datacenter_dashboard_status="SKIPPED",
+        datacenter_dashboard_dashboard_db="",
+        datacenter_dashboard_report_date="",
+        datacenter_dashboard_md_reports_status="SKIPPED",
+        datacenter_dashboard_source_reports_available=0,
+        datacenter_dashboard_html_output_path="",
+        datacenter_dashboard_run_id="",
+        datacenter_dashboard_skip_reason="",
+        datacenter_dashboard_error="",
     )
 
 
@@ -133,6 +143,16 @@ def _skipped_result():
         datacenter_pipeline_weekly_report_path=None,
         datacenter_pipeline_weekly_report_csv_path=None,
         datacenter_pipeline_error="",
+        datacenter_dashboard_attempted=0,
+        datacenter_dashboard_status="SKIPPED",
+        datacenter_dashboard_dashboard_db="",
+        datacenter_dashboard_report_date="",
+        datacenter_dashboard_md_reports_status="SKIPPED",
+        datacenter_dashboard_source_reports_available=0,
+        datacenter_dashboard_html_output_path="",
+        datacenter_dashboard_run_id="",
+        datacenter_dashboard_skip_reason="SKIP_NEXT_RUN",
+        datacenter_dashboard_error="",
     )
 
 
@@ -190,6 +210,16 @@ def test_scheduler_cli_successful_run_prints_top_level_summary_lines(monkeypatch
     assert "SUMMARY datacenter_pipeline.weekly_report_path=NONE" in captured.out
     assert "SUMMARY datacenter_pipeline.weekly_report_csv_path=NONE" in captured.out
     assert "SUMMARY datacenter_pipeline.error=" in captured.out
+    assert "SUMMARY datacenter_dashboard.attempted=0" in captured.out
+    assert "SUMMARY datacenter_dashboard.status=SKIPPED" in captured.out
+    assert "SUMMARY datacenter_dashboard.dashboard_db=" in captured.out
+    assert "SUMMARY datacenter_dashboard.report_date=" in captured.out
+    assert "SUMMARY datacenter_dashboard.md_reports_status=SKIPPED" in captured.out
+    assert "SUMMARY datacenter_dashboard.source_reports_available=0" in captured.out
+    assert "SUMMARY datacenter_dashboard.html_output_path=" in captured.out
+    assert "SUMMARY datacenter_dashboard.run_id=" in captured.out
+    assert "SUMMARY datacenter_dashboard.skip_reason=" in captured.out
+    assert "SUMMARY datacenter_dashboard.error=" in captured.out
 
 
 def test_scheduler_cli_ok_overall_status_exits_zero(monkeypatch):

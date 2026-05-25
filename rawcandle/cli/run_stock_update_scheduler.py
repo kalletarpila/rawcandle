@@ -143,6 +143,25 @@ def main(argv: Optional[List[str]] = None) -> int:
         f"{result.datacenter_pipeline_weekly_report_csv_path or 'NONE'}"
     )
     print(f"SUMMARY datacenter_pipeline.error={result.datacenter_pipeline_error}")
+    print(f"SUMMARY datacenter_dashboard.attempted={result.datacenter_dashboard_attempted}")
+    print(f"SUMMARY datacenter_dashboard.status={result.datacenter_dashboard_status}")
+    print(f"SUMMARY datacenter_dashboard.dashboard_db={result.datacenter_dashboard_dashboard_db}")
+    print(f"SUMMARY datacenter_dashboard.report_date={result.datacenter_dashboard_report_date}")
+    print(
+        "SUMMARY datacenter_dashboard.md_reports_status="
+        f"{result.datacenter_dashboard_md_reports_status}"
+    )
+    print(
+        "SUMMARY datacenter_dashboard.source_reports_available="
+        f"{result.datacenter_dashboard_source_reports_available}"
+    )
+    print(
+        "SUMMARY datacenter_dashboard.html_output_path="
+        f"{result.datacenter_dashboard_html_output_path}"
+    )
+    print(f"SUMMARY datacenter_dashboard.run_id={result.datacenter_dashboard_run_id}")
+    print(f"SUMMARY datacenter_dashboard.skip_reason={result.datacenter_dashboard_skip_reason}")
+    print(f"SUMMARY datacenter_dashboard.error={result.datacenter_dashboard_error}")
 
     for market_result in result.market_results:
         print(f"SUMMARY market.{market_result.market}.status={market_result.summary_status}")
