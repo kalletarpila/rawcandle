@@ -338,6 +338,7 @@ def generate_dashboard_html(
             rows_html.append(
                 "<tr"
                 f' data-filter-row="1"'
+                f' data-section="command-center"'
                 f' data-action="{_html_attr(decision.action)}"'
                 f' data-pullback-validity="{_html_attr(decision.pullback_validity)}"'
                 f' data-entry-readiness="{_html_attr(decision.entry_readiness)}"'
@@ -366,6 +367,7 @@ def generate_dashboard_html(
             command_center_html_parts.append(
                 "<section class=\"group-section\">"
                 f"<h3>{escape(group_label)}</h3>"
+                "<div class=\"table-scroll\">"
                 "<table class=\"sticky-table\">"
                 "<thead><tr>"
                 "<th>Ticker</th><th>Action</th><th>Severity</th><th>Primary reason</th>"
@@ -376,6 +378,7 @@ def generate_dashboard_html(
                 "</tr></thead>"
                 f"<tbody>{''.join(rows_html)}</tbody>"
                 "</table>"
+                "</div>"
                 "</section>"
             )
 
@@ -388,6 +391,7 @@ def generate_dashboard_html(
     candidate_rows_html = "".join(
         "<tr"
         f' data-filter-row="1"'
+        f' data-section="candidate-pullbacks"'
         f' data-action="{_html_attr(decision.action)}"'
         f' data-pullback-validity="{_html_attr(decision.pullback_validity)}"'
         f' data-entry-readiness="{_html_attr(decision.entry_readiness)}"'
@@ -467,6 +471,8 @@ def generate_dashboard_html(
         is_selected = ticker is not None and decision.ticker.upper() == ticker.strip().upper()
         detail_sections.append(
             f'<details class="ticker-detail{" selected" if is_selected else ""}" '
+            f' data-filter-row="1"'
+            f' data-section="inspector"'
             f'data-filter-text="{_html_attr(filter_text.lower())}"'
             f' data-action="{_html_attr(decision.action)}"'
             f' data-pullback-validity="{_html_attr(decision.pullback_validity)}"'
@@ -475,14 +481,14 @@ def generate_dashboard_html(
             f'{" open" if is_selected else ""}>'
             f"<summary>{_html_text(decision.ticker)} | {_html_text(decision.action)} | {_html_text(decision.severity)} | {_html_text(decision.primary_reason)}</summary>"
             '<div class="detail-grid">'
-            '<table class="detail-table"><tbody>'
+            '<div class="table-scroll"><table class="detail-table"><tbody>'
             f"{detail_rows}"
-            "</tbody></table>"
-            '<table class="trace-table"><thead><tr>'
+            "</tbody></table></div>"
+            '<div class="table-scroll"><table class="trace-table"><thead><tr>'
             "<th>Rule</th><th>Horizon</th><th>Field</th><th>Token</th><th>Value</th><th>Section</th><th>Row kind</th>"
             "</tr></thead><tbody>"
             f"{trace_rows}"
-            "</tbody></table>"
+            "</tbody></table></div>"
             "</div>"
             "</details>"
         )
@@ -516,6 +522,7 @@ def generate_dashboard_html(
     }}
     h1, h2, h3 {{ margin: 0 0 12px; }}
     section {{ margin-bottom: 24px; }}
+    .major-section {{ margin-top: 28px; }}
     .meta-table, .compact-table, table {{
       width: 100%;
       border-collapse: collapse;
@@ -568,10 +575,15 @@ def generate_dashboard_html(
     .action-watch {{ background: #e8f5e9; }}
     .action-neutral {{ background: #f1f3f5; }}
     .filter-box {{
-      margin: 8px 0 12px;
+      margin: 8px 0 16px;
       padding: 12px;
       border: 1px solid #d8dee4;
       background: #fff;
+    }}
+    .filter-help {{
+      margin: 0 0 10px;
+      font-size: 13px;
+      color: #4b5563;
     }}
     .filter-grid {{
       display: grid;
@@ -588,6 +600,11 @@ def generate_dashboard_html(
     }}
     .filter-status {{
       margin-top: 10px;
+      font-size: 13px;
+      color: #4b5563;
+    }}
+    .section-status {{
+      margin: 0 0 10px;
       font-size: 13px;
       color: #4b5563;
     }}
@@ -609,6 +626,10 @@ def generate_dashboard_html(
     }}
     .group-section {{
       margin-bottom: 18px;
+    }}
+    .table-scroll {{
+      overflow-x: auto;
+      max-width: 100%;
     }}
     @media (max-width: 960px) {{
       .detail-grid {{
@@ -657,9 +678,10 @@ def generate_dashboard_html(
     </div>
   </section>
 
-  <section id="candidate-pullbacks">
-    <h2>Candidate Pullbacks</h2>
+  <section id="filters" class="major-section">
+    <h2>Filters</h2>
     <div class="filter-box">
+      <p class="filter-help">Filters apply to Candidate Pullbacks, Command Center and Inspector rows.</p>
       <div class="filter-grid">
         <label>Text filter
           <input id="ticker-filter" type="text" placeholder="e.g. NVDA, SELL, pullback" />
@@ -711,8 +733,14 @@ def generate_dashboard_html(
           </select>
         </label>
       </div>
-      <div id="filter-status" class="filter-status">Visible rows: 0 / 0</div>
+      <div id="filter-status" class="filter-status">Visible filtered rows: 0 / 0</div>
     </div>
+  </section>
+
+  <section id="candidate-pullbacks" class="major-section">
+    <h2>Candidate Pullbacks</h2>
+    <div id="candidate-filter-status" class="section-status">Candidate rows: 0 / 0</div>
+    <div class="table-scroll">
     <table class="sticky-table">
       <thead>
         <tr>
@@ -727,20 +755,24 @@ def generate_dashboard_html(
         {candidate_rows_html or '<tr><td colspan="15">-</td></tr>'}
       </tbody>
     </table>
+    </div>
   </section>
 
-  <section id="command-center">
+  <section id="command-center" class="major-section">
     <h2>Command Center</h2>
+    <div id="command-center-filter-status" class="section-status">Command Center rows: 0 / 0</div>
     {''.join(command_center_html_parts) or '<p>-</p>'}
   </section>
 
-  <section id="inspector">
+  <section id="inspector" class="major-section">
     <h2>Ticker Inspector / Details</h2>
+    <div id="inspector-filter-status" class="section-status">Inspector rows: 0 / 0</div>
     {''.join(detail_sections)}
   </section>
 
-  <section id="source-files">
+  <section id="source-files" class="major-section">
     <h2>Source Files / Report Status</h2>
+    <div class="table-scroll">
     <table class="sticky-table">
       <thead>
         <tr>
@@ -751,6 +783,7 @@ def generate_dashboard_html(
         {source_file_rows}
       </tbody>
     </table>
+    </div>
   </section>
 
   <script>
@@ -767,8 +800,22 @@ def generate_dashboard_html(
         var candidatePriorityValue = document.getElementById("candidate-priority-filter").value;
         var rows = document.querySelectorAll("[data-filter-row='1']");
         var visibleRows = 0;
+        var sectionVisibleCounts = {{
+          "candidate-pullbacks": 0,
+          "command-center": 0,
+          "inspector": 0
+        }};
+        var sectionTotalCounts = {{
+          "candidate-pullbacks": 0,
+          "command-center": 0,
+          "inspector": 0
+        }};
 
         rows.forEach(function (row) {{
+          var section = row.getAttribute("data-section") || "";
+          if (sectionTotalCounts.hasOwnProperty(section)) {{
+            sectionTotalCounts[section] += 1;
+          }}
           var haystack = (row.getAttribute("data-filter-text") || "").toLowerCase();
           var isVisible =
             (!textNeedle || haystack.indexOf(textNeedle) !== -1) &&
@@ -779,24 +826,47 @@ def generate_dashboard_html(
           row.style.display = isVisible ? "" : "none";
           if (isVisible) {{
             visibleRows += 1;
+            if (sectionVisibleCounts.hasOwnProperty(section)) {{
+              sectionVisibleCounts[section] += 1;
+            }}
           }}
         }});
 
         var details = document.querySelectorAll(".ticker-detail");
         details.forEach(function (item) {{
-          var haystack = (item.getAttribute("data-filter-text") || "").toLowerCase();
-          var isVisible =
-            (!textNeedle || haystack.indexOf(textNeedle) !== -1) &&
-            matchesFilter(item.getAttribute("data-action") || "", actionValue) &&
-            matchesFilter(item.getAttribute("data-pullback-validity") || "", pullbackValue) &&
-            matchesFilter(item.getAttribute("data-entry-readiness") || "", entryReadinessValue) &&
-            matchesFilter(item.getAttribute("data-candidate-priority") || "", candidatePriorityValue);
-          item.style.display = isVisible ? "" : "none";
+          if (!item.hasAttribute("data-filter-row")) {{
+            return;
+          }}
         }});
 
         var status = document.getElementById("filter-status");
         if (status) {{
-          status.textContent = "Visible rows: " + visibleRows + " / " + rows.length;
+          status.textContent = "Visible filtered rows: " + visibleRows + " / " + rows.length;
+        }}
+
+        var candidateStatus = document.getElementById("candidate-filter-status");
+        if (candidateStatus) {{
+          candidateStatus.textContent =
+            "Candidate rows: " +
+            sectionVisibleCounts["candidate-pullbacks"] +
+            " / " +
+            sectionTotalCounts["candidate-pullbacks"];
+        }}
+        var commandCenterStatus = document.getElementById("command-center-filter-status");
+        if (commandCenterStatus) {{
+          commandCenterStatus.textContent =
+            "Command Center rows: " +
+            sectionVisibleCounts["command-center"] +
+            " / " +
+            sectionTotalCounts["command-center"];
+        }}
+        var inspectorStatus = document.getElementById("inspector-filter-status");
+        if (inspectorStatus) {{
+          inspectorStatus.textContent =
+            "Inspector rows: " +
+            sectionVisibleCounts["inspector"] +
+            " / " +
+            sectionTotalCounts["inspector"];
         }}
       }}
 
