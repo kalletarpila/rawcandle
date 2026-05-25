@@ -586,6 +586,14 @@ def _install_pipeline_mocks(monkeypatch, tmp_path: Path) -> None:
 | ecosystem_return_10d | 3.8 |
 | ecosystem_return_20d | 8.4 |
 | ecosystem_return_60d | 21.0 |
+| trend_state | TRENDING_UP |
+| latest_structure_label | HH |
+| latest_bos_event_type | BOS_UP |
+| latest_reset_reason | RESET_COMPLETE |
+| latest_bullish_divergence | BULL_DIV |
+| bullish_divergence_age_td | 4 |
+| latest_bearish_candle | SHOOTING_STAR |
+| bearish_candle_age_td | 1 |
 
 ## 4. Rotation Risk / Overheat Index
 | group_type | group_name | overheat_risk_level | pct_above_ema20 | ema20_breadth_delta_5d | return_10d | return_20d |
@@ -617,6 +625,8 @@ def _install_pipeline_mocks(monkeypatch, tmp_path: Path) -> None:
 | return_5d | 1.1 | 2.8 | 1.7 |
 | return_10d | 2.0 | 4.2 | 2.2 |
 | return_20d | 4.4 | 9.1 | 4.7 |
+| latest_chart_pattern | ASCENDING_TRIANGLE | ASCENDING_TRIANGLE |  |
+| chart_pattern_age_td | 7 | 7 | 0 |
 
 ## 6. Group Structure Timing
 | group_type | group_name | latest_bos_event_type | latest_bos_event_date | latest_bos_freshness | latest_reset_reason | latest_reset_event_date | latest_reset_freshness | latest_structure_label | latest_structure_freshness | trend_classification | timing_state | overheat_risk_level |
@@ -703,12 +713,22 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     assert 'id="inspector"' in html_one
     assert 'id="source-files"' in html_one
     assert "Market Map" in html_one
-    assert "Ecosystem" in html_one
+    assert "Ecosystem Summary" in html_one
     assert "Layers" in html_one
     assert "Subindustries" in html_one
     assert "Compute" in html_one
     assert "AI Accelerators" in html_one
     assert "ADD_ON_PULLBACK" in html_one
+    assert "Start status 30d" in html_one
+    assert "Status change 30d" in html_one
+    assert "Dow trend state" in html_one
+    assert "Latest relevant pattern" in html_one
+    assert "Pattern age td" in html_one
+    assert "WATCH -&gt; BUY_ZONE" in html_one
+    assert "SHOOTING_STAR" in html_one
+    assert ">1<" in html_one
+    assert "daily, rolling 2d, rolling 5d, rolling 30d" in html_one
+    assert html_one.count("<td>DC_ECOSYSTEM_TOTAL</td>") == 1
     assert 'data-section="market-map"' in html_one
     assert 'id="market-map-filter-status"' in html_one
     assert ".risk-high {" in html_one
@@ -770,9 +790,21 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     assert "Command Center" in html
     assert "Ticker Inspector / Details" in html
     assert "Source Files / Report Status" in html
-    assert "Ecosystem" in html
+    assert "Ecosystem Summary" in html
     assert "Layers" in html
     assert "Subindustries" in html
+    assert "Current status" in html
+    assert "Start status 30d" in html
+    assert "Status change 30d" in html
+    assert "Overheat risk" in html
+    assert "Dow trend state" in html
+    assert "Latest relevant pattern" in html
+    assert "Pattern age td" in html
+    assert "WATCH -&gt; BUY_ZONE" in html
+    assert "SHOOTING_STAR" in html
+    assert "TRENDING_UP" in html
+    assert "RESET_COMPLETE" in html
+    assert "daily, rolling 2d, rolling 5d, rolling 30d" in html
     assert "Report Source" in html
     assert "generated_at_utc" in html
     assert "reports_dir" in html
@@ -819,6 +851,7 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     assert 'id="command-center-filter-status"' in html
     assert 'id="inspector-filter-status"' in html
     assert 'class="table-scroll"' in html
+    assert html.count("<td>DC_ECOSYSTEM_TOTAL</td>") == 1
     assert html.index('id="market-map"') > html.index('id="summary"')
     assert html.index('id="market-map"') < html.index('id="watchlist-status"')
     assert html.index('id="watchlist-status"') > html.index('id="summary"')
@@ -917,6 +950,30 @@ def test_html_cli_renders_empty_market_map_state(tmp_path, monkeypatch):
     assert exit_code == 0
     html = (reports_dir / "datacenter_dashboard.html").read_text(encoding="utf-8")
     assert "No market map rows found in the selected reports." in html
+
+
+def test_html_cli_market_map_missing_optional_fields_render_as_dash(tmp_path, monkeypatch):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    _install_pipeline_mocks(monkeypatch, reports_dir)
+    (reports_dir / "daily.csv").write_text(
+        """## 3. Dashboard
+| metric | value |
+| --- | --- |
+| timing_state | NEUTRAL |
+""",
+        encoding="utf-8",
+    )
+    for name in ("rolling2.csv", "rolling5.csv", "rolling30.csv"):
+        (reports_dir / name).write_text("", encoding="utf-8")
+
+    exit_code = main(["--reports-dir", str(reports_dir), "--title", "Datacenter Dashboard"])
+
+    assert exit_code == 0
+    html = (reports_dir / "datacenter_dashboard.html").read_text(encoding="utf-8")
+    assert "DC_ECOSYSTEM_TOTAL" in html
+    assert "NEUTRAL" in html
+    assert "<td>-</td>" in html
 
 
 def test_html_cli_custom_output_path_works(tmp_path, monkeypatch):

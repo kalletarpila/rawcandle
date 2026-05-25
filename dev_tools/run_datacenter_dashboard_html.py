@@ -125,6 +125,53 @@ class _MarketMapRow:
 
 
 @dataclass(frozen=True)
+class _EcosystemContextRow:
+    horizon: str
+    name: str
+    current_status: str
+    start_status_30d: str
+    overheat_risk_level: str
+    pct_above_ema20: str
+    pct_above_ma10: str
+    ema20_breadth_delta_5d: str
+    return_5d: str
+    return_10d: str
+    return_20d: str
+    return_60d: str
+    dow_trend_state: str
+    latest_structure_label: str
+    latest_bos_event_type: str
+    latest_reset_reason: str
+    latest_relevant_pattern: str
+    latest_relevant_pattern_age_td: str
+    source_file: str
+
+
+@dataclass(frozen=True)
+class _CombinedEcosystemRow:
+    name: str
+    current_status: str
+    start_status_30d: str
+    status_change_30d: str
+    overheat_risk_level: str
+    pct_above_ema20: str
+    pct_above_ma10: str
+    ema20_breadth_delta_5d: str
+    return_5d: str
+    return_10d: str
+    return_20d: str
+    return_60d: str
+    dow_trend_state: str
+    latest_structure_label: str
+    latest_bos_event_type: str
+    latest_reset_reason: str
+    latest_relevant_pattern: str
+    latest_relevant_pattern_age_td: str
+    source_horizons: str
+    source_files: str
+
+
+@dataclass(frozen=True)
 class DatacenterDashboardHtmlGenerationResult:
     output_path: str
     report_date: str
@@ -308,6 +355,304 @@ def _render_market_status_cell(value: str) -> str:
     css_class = _group_status_class(value)
     class_attr = f' class="{css_class}"' if css_class else ""
     return f"<td{class_attr}>{_html_text(value)}</td>"
+
+
+def _non_empty_value(*values: str) -> str:
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
+def _candidate_pattern_value(
+    data: dict[str, str],
+) -> tuple[str, str]:
+    pattern_candidates = (
+        ("latest_bearish_divergence", "bearish_divergence_age_td", 0),
+        ("bearish_divergence_signal", "bearish_divergence_age_td", 0),
+        ("latest_bearish_candle", "bearish_candle_age_td", 0),
+        ("bearish_candle_signal", "bearish_candle_age_td", 0),
+        ("latest_bullish_divergence", "bullish_divergence_age_td", 1),
+        ("bullish_divergence_signal", "bullish_divergence_age_td", 1),
+        ("latest_bullish_candle", "bullish_candle_age_td", 1),
+        ("bullish_candle_signal", "bullish_candle_age_td", 1),
+        ("latest_hidden_bearish_divergence", "hidden_bearish_divergence_age_td", 2),
+        ("latest_hidden_bullish_divergence", "hidden_bullish_divergence_age_td", 3),
+        ("latest_chart_pattern", "", 4),
+        ("chart_pattern", "", 4),
+    )
+    ranked: list[tuple[int, int, str, str]] = []
+    for value_key, age_key, priority in pattern_candidates:
+        value = data.get(value_key, "").strip()
+        if not value:
+            continue
+        age_text = data.get(age_key, "").strip() if age_key else ""
+        try:
+            age_rank = int(age_text)
+        except ValueError:
+            age_rank = 10**9
+        ranked.append((age_rank, priority, value, age_text))
+    if not ranked:
+        return "", ""
+    ranked.sort(key=lambda item: (item[0], item[1], item[2]))
+    _age_rank, _priority, value, age_text = ranked[0]
+    return value, age_text
+
+
+def _extract_ecosystem_context_rows(
+    dashboard_status: DatacenterDashboardStatus,
+) -> list[_EcosystemContextRow]:
+    rows: list[_EcosystemContextRow] = []
+    for report in dashboard_status.reports:
+        if not report.path:
+            continue
+        tables = _parse_markdown_tables(report.path)
+        horizon = report.horizon
+        metrics: dict[str, str] = {}
+        first_values: dict[str, str] = {}
+        if horizon == "daily":
+            dashboard_table = _first_table(
+                tables,
+                section_name="3. Dashboard",
+                required_headers=("metric", "value"),
+            )
+            if dashboard_table is None:
+                continue
+            metrics = _metric_value_map(dashboard_table, key_field="metric", value_field="value")
+        else:
+            ecosystem_change_table = _first_table(
+                tables,
+                section_name="4. Ecosystem window change",
+                required_headers=("metric", "last_value"),
+            )
+            if ecosystem_change_table is None:
+                continue
+            metrics = _metric_value_map(
+                ecosystem_change_table,
+                key_field="metric",
+                value_field="last_value",
+            )
+            first_values = _metric_value_map(
+                ecosystem_change_table,
+                key_field="metric",
+                value_field="first_value",
+            )
+        latest_relevant_pattern, latest_relevant_pattern_age_td = _candidate_pattern_value(metrics)
+        rows.append(
+            _EcosystemContextRow(
+                horizon=horizon,
+                name=metrics.get("ecosystem_name", "") or "DC_ECOSYSTEM_TOTAL",
+                current_status=_non_empty_value(
+                    metrics.get("timing_state", ""),
+                    metrics.get("current_status", ""),
+                ),
+                start_status_30d=(
+                    first_values.get("timing_state", "").strip()
+                    if horizon == "rolling 30d"
+                    else ""
+                ),
+                overheat_risk_level=_non_empty_value(
+                    metrics.get("ecosystem_overheat_risk_level", ""),
+                    metrics.get("overheat_risk_level", ""),
+                ),
+                pct_above_ema20=_non_empty_value(
+                    metrics.get("ecosystem_pct_above_ema20", ""),
+                    metrics.get("pct_above_ema20", ""),
+                ),
+                pct_above_ma10=_non_empty_value(
+                    metrics.get("ecosystem_pct_above_ma10", ""),
+                    metrics.get("pct_above_ma10", ""),
+                ),
+                ema20_breadth_delta_5d=_non_empty_value(
+                    metrics.get("ecosystem_ema20_breadth_delta_5d", ""),
+                    metrics.get("ema20_breadth_delta_5d", ""),
+                ),
+                return_5d=_non_empty_value(
+                    metrics.get("ecosystem_return_5d", ""),
+                    metrics.get("return_5d", ""),
+                ),
+                return_10d=_non_empty_value(
+                    metrics.get("ecosystem_return_10d", ""),
+                    metrics.get("return_10d", ""),
+                ),
+                return_20d=_non_empty_value(
+                    metrics.get("ecosystem_return_20d", ""),
+                    metrics.get("return_20d", ""),
+                ),
+                return_60d=_non_empty_value(
+                    metrics.get("ecosystem_return_60d", ""),
+                    metrics.get("return_60d", ""),
+                ),
+                dow_trend_state=_non_empty_value(
+                    metrics.get("trend_state", ""),
+                    metrics.get("trend_classification", ""),
+                    metrics.get("ticker_trend_state", ""),
+                    metrics.get("latest_ticker_trend_state", ""),
+                    metrics.get("ecosystem_trend_state", ""),
+                ),
+                latest_structure_label=_non_empty_value(
+                    metrics.get("latest_structure_label", ""),
+                    metrics.get("structure_label", ""),
+                ),
+                latest_bos_event_type=_non_empty_value(
+                    metrics.get("latest_bos_event_type", ""),
+                    metrics.get("bos_event_type", ""),
+                ),
+                latest_reset_reason=_non_empty_value(
+                    metrics.get("latest_reset_reason", ""),
+                    metrics.get("reset_reason", ""),
+                ),
+                latest_relevant_pattern=latest_relevant_pattern,
+                latest_relevant_pattern_age_td=latest_relevant_pattern_age_td,
+                source_file=report.path,
+            )
+        )
+    return sorted(rows, key=lambda row: (_HORIZON_PRIORITY.get(row.horizon, 99), row.source_file))
+
+
+def _combine_ecosystem_context_rows(
+    rows: Sequence[_EcosystemContextRow],
+) -> _CombinedEcosystemRow | None:
+    if not rows:
+        return None
+
+    def _preferred(field_name: str) -> str:
+        for horizon in ("daily", "rolling 2d", "rolling 5d", "rolling 30d"):
+            for row in rows:
+                if row.horizon != horizon:
+                    continue
+                value = getattr(row, field_name)
+                if str(value).strip():
+                    return str(value).strip()
+        return ""
+
+    current_status = _preferred("current_status")
+    start_status_30d = ""
+    for row in rows:
+        if row.horizon == "rolling 30d" and row.start_status_30d.strip():
+            start_status_30d = row.start_status_30d.strip()
+            break
+    status_change_30d = (
+        f"{start_status_30d} -> {current_status}"
+        if start_status_30d and current_status
+        else ""
+    )
+
+    pattern_ranked: list[tuple[int, int, str, str]] = []
+    for row in rows:
+        pattern = row.latest_relevant_pattern.strip()
+        if not pattern:
+            continue
+        age_text = row.latest_relevant_pattern_age_td.strip()
+        try:
+            age_rank = int(age_text)
+        except ValueError:
+            age_rank = 10**9
+        pattern_upper = pattern.upper()
+        if "BEARISH" in pattern_upper and "HIDDEN" not in pattern_upper:
+            priority = 0
+        elif "BULLISH" in pattern_upper and "HIDDEN" not in pattern_upper:
+            priority = 1
+        elif "HIDDEN_BEARISH" in pattern_upper or ("HIDDEN" in pattern_upper and "BEARISH" in pattern_upper):
+            priority = 2
+        elif "HIDDEN_BULLISH" in pattern_upper or ("HIDDEN" in pattern_upper and "BULLISH" in pattern_upper):
+            priority = 3
+        else:
+            priority = 4
+        pattern_ranked.append((age_rank, priority, pattern, age_text))
+    if pattern_ranked:
+        pattern_ranked.sort(key=lambda item: (item[0], item[1], item[2]))
+        _age_rank, _priority, latest_pattern, latest_pattern_age = pattern_ranked[0]
+    else:
+        latest_pattern = ""
+        latest_pattern_age = ""
+
+    source_horizons = ", ".join(
+        row.horizon
+        for row in rows
+    )
+    source_files = ", ".join(
+        Path(row.source_file).name
+        for row in rows
+        if row.source_file
+    )
+    return _CombinedEcosystemRow(
+        name=rows[0].name,
+        current_status=current_status,
+        start_status_30d=start_status_30d,
+        status_change_30d=status_change_30d,
+        overheat_risk_level=_preferred("overheat_risk_level"),
+        pct_above_ema20=_preferred("pct_above_ema20"),
+        pct_above_ma10=_preferred("pct_above_ma10"),
+        ema20_breadth_delta_5d=_preferred("ema20_breadth_delta_5d"),
+        return_5d=_preferred("return_5d"),
+        return_10d=_preferred("return_10d"),
+        return_20d=_preferred("return_20d"),
+        return_60d=_preferred("return_60d"),
+        dow_trend_state=_preferred("dow_trend_state"),
+        latest_structure_label=_preferred("latest_structure_label"),
+        latest_bos_event_type=_preferred("latest_bos_event_type"),
+        latest_reset_reason=_preferred("latest_reset_reason"),
+        latest_relevant_pattern=latest_pattern,
+        latest_relevant_pattern_age_td=latest_pattern_age,
+        source_horizons=source_horizons,
+        source_files=source_files,
+    )
+
+
+def _ecosystem_filter_text(row: _CombinedEcosystemRow) -> str:
+    return " ".join(
+        part
+        for part in (
+            row.name,
+            row.current_status,
+            row.start_status_30d,
+            row.status_change_30d,
+            row.overheat_risk_level,
+            row.dow_trend_state,
+            row.latest_relevant_pattern,
+            row.source_horizons,
+        )
+        if part
+    ).lower()
+
+
+def _render_combined_ecosystem_row(row: _CombinedEcosystemRow) -> str:
+    return (
+        "<tr"
+        f' data-filter-row="1"'
+        f' data-section="market-map"'
+        f' data-action="{_html_attr(row.current_status)}"'
+        f' data-pullback-validity=""'
+        f' data-entry-readiness=""'
+        f' data-candidate-priority=""'
+        f' data-filter-text="{_html_attr(_ecosystem_filter_text(row))}"'
+        ">"
+        f"<td>{_html_text(row.name)}</td>"
+        + _render_market_status_cell(row.current_status)
+        + _render_market_status_cell(row.start_status_30d)
+        + f"<td>{_html_text(row.status_change_30d)}</td>"
+        + _render_market_status_cell(row.overheat_risk_level)
+        + f"<td>{_html_text(row.pct_above_ema20)}</td>"
+        + f"<td>{_html_text(row.pct_above_ma10)}</td>"
+        + f"<td>{_html_text(row.ema20_breadth_delta_5d)}</td>"
+        + f"<td>{_html_text(row.return_5d)}</td>"
+        + f"<td>{_html_text(row.return_10d)}</td>"
+        + f"<td>{_html_text(row.return_20d)}</td>"
+        + f"<td>{_html_text(row.return_60d)}</td>"
+        + f"<td>{_html_text(row.dow_trend_state)}</td>"
+        + f"<td>{_html_text(row.latest_structure_label)}</td>"
+        + f"<td>{_html_text(row.latest_bos_event_type)}</td>"
+        + f"<td>{_html_text(row.latest_reset_reason)}</td>"
+        + f"<td>{_html_text(row.latest_relevant_pattern)}</td>"
+        + f"<td>{_html_text(row.latest_relevant_pattern_age_td)}</td>"
+        + f"<td>{_html_text(row.source_horizons)}</td>"
+        + f"<td>{_html_text(row.source_files)}</td>"
+        + "</tr>"
+    )
 
 
 def _extract_market_map_rows(
@@ -774,6 +1119,7 @@ def generate_dashboard_html(
         for report in dashboard_status.reports
     }
     market_map_rows = _extract_market_map_rows(dashboard_status)
+    ecosystem_context_rows = _extract_ecosystem_context_rows(dashboard_status)
     watchlist_rows_by_ticker: dict[str, list[DatacenterDashboardRow]] = {}
     for row in parsed_rows:
         if not _is_watchlist_row(row):
@@ -960,12 +1306,13 @@ def generate_dashboard_html(
         )
     watchlist_rows_html = "".join(watchlist_rows_html_parts)
 
-    ecosystem_market_rows = [row for row in market_map_rows if row.scope == "ecosystem"]
+    combined_ecosystem_row = _combine_ecosystem_context_rows(ecosystem_context_rows)
     layer_market_rows = [row for row in market_map_rows if row.scope == "layer"]
     subindustry_market_rows = [row for row in market_map_rows if row.scope == "subindustry"]
-    ecosystem_market_rows_html = _render_market_map_rows(
-        ecosystem_market_rows,
-        include_layer_column=False,
+    ecosystem_market_rows_html = (
+        _render_combined_ecosystem_row(combined_ecosystem_row)
+        if combined_ecosystem_row is not None
+        else ""
     )
     layer_market_rows_html = _render_market_map_rows(
         layer_market_rows,
@@ -1265,12 +1612,14 @@ def generate_dashboard_html(
     <div id="market-map-filter-status" class="section-status">Market Map rows: 0 / 0</div>
     {(
       '<section class="group-section">'
-      '<h3>Ecosystem</h3>'
+      '<h3>Ecosystem Summary</h3>'
       '<div class="table-scroll"><table class="sticky-table"><thead><tr>'
-      '<th>Ecosystem</th><th>Horizon</th><th>Current status</th><th>Window status</th>'
+      '<th>Ecosystem</th><th>Current status</th><th>Start status 30d</th><th>Status change 30d</th>'
       '<th>Overheat risk</th><th>% above EMA20</th><th>% above MA10</th>'
       '<th>EMA20 breadth delta 5d</th><th>Return 5d</th><th>Return 10d</th>'
-      '<th>Return 20d</th><th>Return 60d</th><th>Source file</th>'
+      '<th>Return 20d</th><th>Return 60d</th><th>Dow trend state</th><th>Latest structure</th>'
+      '<th>Latest BOS</th><th>Latest reset</th><th>Latest relevant pattern</th>'
+      '<th>Pattern age td</th><th>Source horizons</th><th>Source files</th>'
       '</tr></thead><tbody>'
       + ecosystem_market_rows_html +
       '</tbody></table></div>'
