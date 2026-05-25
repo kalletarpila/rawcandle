@@ -5,6 +5,9 @@ EXPECTED_REPO_ROOT="/home/kalle/projects/rawcandle"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPORTS_DIR="/home/kalle/projects/rawcandle/temp"
 OUTPUT_HTML="/home/kalle/projects/rawcandle/temp/datacenter_dashboard.html"
+WINDOWS_HTML="unavailable"
+HTML_FILE_URL="unavailable"
+IS_WSL=0
 
 print_help() {
   cat <<'EOF'
@@ -14,6 +17,60 @@ Usage:
   ./start_dc_dashboard_ui --output /path/to/dashboard.html
   ./start_dc_dashboard_ui --help
 EOF
+}
+
+is_wsl_environment() {
+  if [[ -n "${WSL_DISTRO_NAME:-}" ]]; then
+    return 0
+  fi
+  if [[ -r /proc/version ]] && grep -qiE 'microsoft|wsl' /proc/version; then
+    return 0
+  fi
+  return 1
+}
+
+build_windows_path() {
+  if command -v wslpath >/dev/null 2>&1; then
+    wslpath -w "$OUTPUT_HTML"
+    return 0
+  fi
+  return 1
+}
+
+build_file_url() {
+  if [[ "$WINDOWS_HTML" != "unavailable" ]]; then
+    local url_path
+    url_path="$(printf '%s' "$WINDOWS_HTML" | sed 's#\\#/#g')"
+    printf 'file:%s\n' "$url_path"
+    return 0
+  fi
+  printf 'file://%s\n' "$OUTPUT_HTML"
+}
+
+print_manual_instructions() {
+  echo "Open manually in Firefox:"
+  echo "1. Copy this path:"
+  if [[ "$WINDOWS_HTML" != "unavailable" ]]; then
+    echo "$WINDOWS_HTML"
+  else
+    echo "$OUTPUT_HTML"
+  fi
+  echo "2. Paste it into Firefox address bar."
+  echo "Linux path:"
+  echo "$OUTPUT_HTML"
+  echo "Windows path:"
+  echo "$WINDOWS_HTML"
+}
+
+try_open() {
+  local opener_name="$1"
+  shift
+  if "$@"; then
+    echo "SUMMARY open_status=OK"
+    echo "SUMMARY opener=$opener_name"
+    return 0
+  fi
+  return 1
 }
 
 while [[ $# -gt 0 ]]; do
@@ -52,6 +109,10 @@ fi
 
 cd "$SCRIPT_DIR" || exit 1
 
+if is_wsl_environment; then
+  IS_WSL=1
+fi
+
 echo "SUMMARY reports_dir=$REPORTS_DIR"
 echo "SUMMARY html_output=$OUTPUT_HTML"
 
@@ -66,35 +127,60 @@ fi
 
 echo "SUMMARY generate_status=OK"
 
-if command -v firefox >/dev/null 2>&1; then
-  firefox "$OUTPUT_HTML"
-  echo "SUMMARY open_status=OK"
-  echo "SUMMARY opener=firefox"
-  exit 0
+if windows_path="$(build_windows_path)"; then
+  WINDOWS_HTML="$windows_path"
 fi
+echo "SUMMARY html_output_windows=$WINDOWS_HTML"
 
-if command -v firefox.exe >/dev/null 2>&1 && command -v wslpath >/dev/null 2>&1; then
-  firefox.exe "$(wslpath -w "$OUTPUT_HTML")"
-  echo "SUMMARY open_status=OK"
-  echo "SUMMARY opener=firefox.exe"
-  exit 0
-fi
+HTML_FILE_URL="$(build_file_url)"
+echo "SUMMARY html_file_url=$HTML_FILE_URL"
 
-if command -v xdg-open >/dev/null 2>&1; then
-  xdg-open "$OUTPUT_HTML"
-  echo "SUMMARY open_status=OK"
-  echo "SUMMARY opener=xdg-open"
-  exit 0
-fi
-
-if command -v explorer.exe >/dev/null 2>&1 && command -v wslpath >/dev/null 2>&1; then
-  explorer.exe "$(wslpath -w "$OUTPUT_HTML")"
-  echo "SUMMARY open_status=OK"
-  echo "SUMMARY opener=explorer.exe"
-  exit 0
+if [[ "$IS_WSL" -eq 1 ]]; then
+  if [[ "$WINDOWS_HTML" != "unavailable" ]] && command -v cmd.exe >/dev/null 2>&1; then
+    if try_open "cmd.exe" cmd.exe /C start "" "$WINDOWS_HTML"; then
+      exit 0
+    fi
+  fi
+  if [[ "$WINDOWS_HTML" != "unavailable" ]] && command -v powershell.exe >/dev/null 2>&1; then
+    if try_open "powershell.exe" powershell.exe -NoProfile -Command "Start-Process '$WINDOWS_HTML'"; then
+      exit 0
+    fi
+  fi
+  if [[ "$WINDOWS_HTML" != "unavailable" ]] && command -v firefox.exe >/dev/null 2>&1; then
+    if try_open "firefox.exe" firefox.exe "$WINDOWS_HTML"; then
+      exit 0
+    fi
+  fi
+  if [[ "$WINDOWS_HTML" != "unavailable" ]] && command -v explorer.exe >/dev/null 2>&1; then
+    if try_open "explorer.exe" explorer.exe "$WINDOWS_HTML"; then
+      exit 0
+    fi
+  fi
+  if command -v firefox >/dev/null 2>&1; then
+    if try_open "firefox" firefox "$OUTPUT_HTML"; then
+      exit 0
+    fi
+  fi
+  if command -v xdg-open >/dev/null 2>&1; then
+    if try_open "xdg-open" xdg-open "$OUTPUT_HTML"; then
+      exit 0
+    fi
+  fi
+else
+  if command -v firefox >/dev/null 2>&1; then
+    if try_open "firefox" firefox "$OUTPUT_HTML"; then
+      exit 0
+    fi
+  fi
+  if command -v xdg-open >/dev/null 2>&1; then
+    if try_open "xdg-open" xdg-open "$OUTPUT_HTML"; then
+      exit 0
+    fi
+  fi
 fi
 
 echo "SUMMARY open_status=FAILED"
 echo "SUMMARY opener=none"
-echo "Open the HTML file manually: $OUTPUT_HTML"
+echo "SUMMARY html_output=$OUTPUT_HTML"
+print_manual_instructions
 exit 0
