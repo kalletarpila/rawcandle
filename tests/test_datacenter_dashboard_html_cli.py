@@ -522,6 +522,12 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     assert "MS&amp;FT" in html_one
     assert "NV&lt;DA&gt;" in html_one
     assert "Bearish &lt;structure&gt; overrides bullish." in html_one
+    assert 'id="summary"' in html_one
+    assert 'id="candidate-pullbacks"' in html_one
+    assert 'id="command-center"' in html_one
+    assert 'id="inspector"' in html_one
+    assert 'id="source-files"' in html_one
+    assert html_one.index('id="candidate-pullbacks"') < html_one.index('id="command-center"')
 
 
 def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkeypatch, capsys):
@@ -536,15 +542,31 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     assert output_path.exists()
     html = output_path.read_text(encoding="utf-8")
     assert "<h1>Datacenter Dashboard</h1>" in html
+    assert 'href="#summary"' in html
+    assert 'href="#candidate-pullbacks"' in html
+    assert 'href="#command-center"' in html
+    assert 'href="#inspector"' in html
+    assert 'href="#source-files"' in html
     assert "Summary" in html
-    assert "Action Counts" in html
-    assert "Pullback Counts" in html
-    assert "Entry Readiness Counts" in html
-    assert "Candidate Priority Counts" in html
-    assert "Command Center" in html
     assert "Candidate Pullbacks" in html
+    assert "Command Center" in html
     assert "Ticker Inspector / Details" in html
     assert "Source Files / Report Status" in html
+    assert "Report Source" in html
+    assert "generated_at_utc" in html
+    assert "reports_dir" in html
+    assert str(reports_dir / "daily.csv") in html
+    assert str(reports_dir / "rolling2.csv") in html
+    assert str(reports_dir / "rolling5.csv") in html
+    assert str(reports_dir / "rolling30.csv") in html
+    assert 'id="ticker-filter"' in html
+    assert 'id="action-filter"' in html
+    assert 'id="pullback-filter"' in html
+    assert 'id="entry-readiness-filter"' in html
+    assert 'id="candidate-priority-filter"' in html
+    assert "function applyFilters()" in html
+    assert ".sticky-table thead th" in html
+    assert "Visible rows:" in html
     assert "VALID_PULLBACK" in html
     assert "P1_READY_TO_WATCH" in html
     assert "WATCH_VALID_PULLBACK" in html

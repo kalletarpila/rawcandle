@@ -16,6 +16,7 @@ from dev_tools.datacenter_dashboard_inspector import (
 )
 from dev_tools.datacenter_dashboard_parser import (
     DatacenterDashboardBatchParseResult,
+    DatacenterDashboardReportParseSummary,
     DatacenterDashboardRow,
     parse_datacenter_dashboard_file,
     parse_datacenter_dashboard_reports,
@@ -257,6 +258,17 @@ def _first_trace(decision: DatacenterTickerDecision) -> tuple[str, str]:
     return first_trace.matched_rule or "", first_trace.matched_token or ""
 
 
+def _newest_report_timestamp(dashboard_status: DatacenterDashboardStatus) -> str:
+    timestamps = [
+        report.modified_at
+        for report in dashboard_status.reports
+        if report.modified_at
+    ]
+    if not timestamps:
+        return ""
+    return max(timestamps)
+
+
 def generate_dashboard_html(
     *,
     reports_dir: str,
@@ -276,6 +288,11 @@ def generate_dashboard_html(
     found_reports = sum(1 for report in dashboard_status.reports if report.status == "OK")
     missing_reports = sum(1 for report in dashboard_status.reports if report.status != "OK")
     report_summaries = _report_summary_by_horizon(parse_result)
+    newest_report_timestamp = _newest_report_timestamp(dashboard_status)
+    report_paths = {
+        report.horizon: report.path or ""
+        for report in dashboard_status.reports
+    }
 
     header_summary_rows = "".join(
         "<tr>"
@@ -292,6 +309,21 @@ def generate_dashboard_html(
             ("Total parse warnings", parse_result.total_warning_count),
         )
     )
+    report_source_rows = "".join(
+        "<tr>"
+        f"<th>{escape(label)}</th>"
+        f"<td>{_html_text(value)}</td>"
+        "</tr>"
+        for label, value in (
+            ("generated_at_utc", generated_at),
+            ("reports_dir", reports_dir),
+            ("newest_report_timestamp", newest_report_timestamp or "unknown"),
+            ("daily_report_path", report_paths.get("daily", "")),
+            ("rolling_2d_report_path", report_paths.get("rolling 2d", "")),
+            ("rolling_5d_report_path", report_paths.get("rolling 5d", "")),
+            ("rolling_30d_report_path", report_paths.get("rolling 30d", "")),
+        )
+    )
 
     command_center_html_parts: list[str] = []
     command_center_rows_rendered = 0
@@ -305,6 +337,12 @@ def generate_dashboard_html(
                 break
             rows_html.append(
                 "<tr>"
+                f' data-filter-row="1"'
+                f' data-action="{_html_attr(decision.action)}"'
+                f' data-pullback-validity="{_html_attr(decision.pullback_validity)}"'
+                f' data-entry-readiness="{_html_attr(decision.entry_readiness)}"'
+                f' data-candidate-priority="{_html_attr(decision.candidate_priority_label)}"'
+                f' data-filter-text="{_html_attr(" ".join(filter(None, [decision.ticker, decision.action, decision.primary_reason or "", decision.pullback_validity or "", decision.entry_readiness or "", decision.candidate_priority_label or ""])).lower())}"'
                 f'<td class="{_action_class(decision.action)}">{_html_text(decision.ticker)}</td>'
                 f"<td>{_html_text(decision.action)}</td>"
                 f"<td>{_html_text(decision.severity)}</td>"
@@ -327,7 +365,7 @@ def generate_dashboard_html(
             command_center_html_parts.append(
                 "<section class=\"group-section\">"
                 f"<h3>{escape(group_label)}</h3>"
-                "<table>"
+                "<table class=\"sticky-table\">"
                 "<thead><tr>"
                 "<th>Ticker</th><th>Action</th><th>Severity</th><th>Primary reason</th>"
                 "<th>Pullback validity</th><th>Entry readiness</th><th>Candidate priority</th>"
@@ -348,6 +386,12 @@ def generate_dashboard_html(
     candidate_decisions = sorted(candidate_decisions, key=_candidate_sort_key)[:max_candidate_rows]
     candidate_rows_html = "".join(
         "<tr>"
+        f' data-filter-row="1"'
+        f' data-action="{_html_attr(decision.action)}"'
+        f' data-pullback-validity="{_html_attr(decision.pullback_validity)}"'
+        f' data-entry-readiness="{_html_attr(decision.entry_readiness)}"'
+        f' data-candidate-priority="{_html_attr(decision.candidate_priority_label)}"'
+        f' data-filter-text="{_html_attr(" ".join(filter(None, [decision.ticker, decision.action, decision.primary_reason or "", decision.pullback_reason or "", decision.entry_readiness or "", decision.candidate_priority_label or ""])).lower())}"'
         f'<td class="{_action_class(decision.action)}">{_html_text(decision.ticker)}</td>'
         f"<td>{decision.candidate_priority if decision.candidate_priority is not None else '-'}</td>"
         f"<td>{_html_text(decision.candidate_priority_label)}</td>"
@@ -422,6 +466,10 @@ def generate_dashboard_html(
         detail_sections.append(
             f'<details class="ticker-detail{" selected" if is_selected else ""}" '
             f'data-filter-text="{_html_attr(filter_text.lower())}"'
+            f' data-action="{_html_attr(decision.action)}"'
+            f' data-pullback-validity="{_html_attr(decision.pullback_validity)}"'
+            f' data-entry-readiness="{_html_attr(decision.entry_readiness)}"'
+            f' data-candidate-priority="{_html_attr(decision.candidate_priority_label)}"'
             f'{" open" if is_selected else ""}>'
             f"<summary>{_html_text(decision.ticker)} | {_html_text(decision.action)} | {_html_text(decision.severity)} | {_html_text(decision.primary_reason)}</summary>"
             '<div class="detail-grid">'
@@ -471,6 +519,12 @@ def generate_dashboard_html(
       border-collapse: collapse;
       background: #fff;
     }}
+    .sticky-table thead th {{
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: #eef2f6;
+    }}
     th, td {{
       border: 1px solid #d8dee4;
       padding: 6px 8px;
@@ -486,6 +540,21 @@ def generate_dashboard_html(
       grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       gap: 12px;
     }}
+    .nav-links {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin: 12px 0 18px;
+      font-size: 14px;
+    }}
+    .nav-links a {{
+      color: #0b57d0;
+      text-decoration: none;
+      font-weight: 600;
+    }}
+    .nav-links a:hover {{
+      text-decoration: underline;
+    }}
     .card {{
       background: #fff;
       border: 1px solid #d8dee4;
@@ -498,12 +567,27 @@ def generate_dashboard_html(
     .action-neutral {{ background: #f1f3f5; }}
     .filter-box {{
       margin: 8px 0 12px;
+      padding: 12px;
+      border: 1px solid #d8dee4;
+      background: #fff;
     }}
-    .filter-box input {{
+    .filter-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 10px;
+      align-items: end;
+    }}
+    .filter-box input,
+    .filter-box select {{
       width: 100%;
-      max-width: 420px;
       padding: 8px;
       font-size: 14px;
+      box-sizing: border-box;
+    }}
+    .filter-status {{
+      margin-top: 10px;
+      font-size: 13px;
+      color: #4b5563;
     }}
     .ticker-detail {{
       margin-bottom: 10px;
@@ -534,6 +618,13 @@ def generate_dashboard_html(
 <body>
   <section>
     <h1>{escape(title)}</h1>
+    <nav class="nav-links" aria-label="Dashboard sections">
+      <a href="#summary">Summary</a>
+      <a href="#candidate-pullbacks">Candidate Pullbacks</a>
+      <a href="#command-center">Command Center</a>
+      <a href="#inspector">Inspector</a>
+      <a href="#source-files">Source Files</a>
+    </nav>
     <table class="meta-table">
       <tbody>
         {header_summary_rows}
@@ -542,6 +633,15 @@ def generate_dashboard_html(
   </section>
 
   <section>
+    <h2>Report Source</h2>
+    <table class="meta-table">
+      <tbody>
+        {report_source_rows}
+      </tbody>
+    </table>
+  </section>
+
+  <section id="summary">
     <h2>Summary</h2>
     <div class="summary-grid">
       <section class="card">
@@ -555,14 +655,63 @@ def generate_dashboard_html(
     </div>
   </section>
 
-  <section>
-    <h2>Command Center</h2>
-    {''.join(command_center_html_parts) or '<p>-</p>'}
-  </section>
-
-  <section>
+  <section id="candidate-pullbacks">
     <h2>Candidate Pullbacks</h2>
-    <table>
+    <div class="filter-box">
+      <div class="filter-grid">
+        <label>Text filter
+          <input id="ticker-filter" type="text" placeholder="e.g. NVDA, SELL, pullback" />
+        </label>
+        <label>Action
+          <select id="action-filter">
+            <option value="ALL">ALL</option>
+            <option value="SELL">SELL</option>
+            <option value="REDUCE">REDUCE</option>
+            <option value="TIGHTEN_STOP">TIGHTEN_STOP</option>
+            <option value="BLOCKED">BLOCKED</option>
+            <option value="WAIT_PULLBACK">WAIT_PULLBACK</option>
+            <option value="BUY_NOW">BUY_NOW</option>
+            <option value="WATCH">WATCH</option>
+            <option value="NEUTRAL">NEUTRAL</option>
+          </select>
+        </label>
+        <label>Pullback validity
+          <select id="pullback-filter">
+            <option value="ALL">ALL</option>
+            <option value="VALID_PULLBACK">VALID_PULLBACK</option>
+            <option value="EARLY_PULLBACK">EARLY_PULLBACK</option>
+            <option value="STRUCTURE_BLOCKED_PULLBACK">STRUCTURE_BLOCKED_PULLBACK</option>
+            <option value="BREAKDOWN_NOT_PULLBACK">BREAKDOWN_NOT_PULLBACK</option>
+            <option value="NO_PULLBACK">NO_PULLBACK</option>
+            <option value="INSUFFICIENT_DATA">INSUFFICIENT_DATA</option>
+          </select>
+        </label>
+        <label>Entry readiness
+          <select id="entry-readiness-filter">
+            <option value="ALL">ALL</option>
+            <option value="READY_TO_WATCH">READY_TO_WATCH</option>
+            <option value="NEEDS_STOP_STABILIZATION">NEEDS_STOP_STABILIZATION</option>
+            <option value="NEEDS_RISK_CLEARANCE">NEEDS_RISK_CLEARANCE</option>
+            <option value="EARLY_MONITOR">EARLY_MONITOR</option>
+            <option value="NOT_READY">NOT_READY</option>
+            <option value="INSUFFICIENT_DATA">INSUFFICIENT_DATA</option>
+          </select>
+        </label>
+        <label>Candidate priority
+          <select id="candidate-priority-filter">
+            <option value="ALL">ALL</option>
+            <option value="P1_READY_TO_WATCH">P1_READY_TO_WATCH</option>
+            <option value="P2_STOP_STABILIZATION">P2_STOP_STABILIZATION</option>
+            <option value="P3_RISK_CLEARANCE">P3_RISK_CLEARANCE</option>
+            <option value="P4_EARLY_MONITOR">P4_EARLY_MONITOR</option>
+            <option value="P5_NOT_READY">P5_NOT_READY</option>
+            <option value="P9_NOT_CANDIDATE">P9_NOT_CANDIDATE</option>
+          </select>
+        </label>
+      </div>
+      <div id="filter-status" class="filter-status">Visible rows: 0 / 0</div>
+    </div>
+    <table class="sticky-table">
       <thead>
         <tr>
           <th>Ticker</th><th>Priority</th><th>Priority label</th><th>Entry readiness</th>
@@ -578,18 +727,19 @@ def generate_dashboard_html(
     </table>
   </section>
 
-  <section>
+  <section id="command-center">
+    <h2>Command Center</h2>
+    {''.join(command_center_html_parts) or '<p>-</p>'}
+  </section>
+
+  <section id="inspector">
     <h2>Ticker Inspector / Details</h2>
-    <div class="filter-box">
-      <label for="ticker-filter">Filter by ticker/action/reason</label><br />
-      <input id="ticker-filter" type="text" placeholder="e.g. NVDA, SELL, pullback" />
-    </div>
     {''.join(detail_sections)}
   </section>
 
-  <section>
+  <section id="source-files">
     <h2>Source Files / Report Status</h2>
-    <table>
+    <table class="sticky-table">
       <thead>
         <tr>
           <th>Horizon</th><th>Status</th><th>Path</th><th>Parsed rows</th><th>Warnings</th>
@@ -603,16 +753,59 @@ def generate_dashboard_html(
 
   <script>
     (function() {{
-      var input = document.getElementById("ticker-filter");
-      if (!input) return;
-      input.addEventListener("input", function () {{
-        var needle = input.value.toLowerCase();
+      function matchesFilter(value, expected) {{
+        return expected === "ALL" || value === expected;
+      }}
+
+      function applyFilters() {{
+        var textNeedle = (document.getElementById("ticker-filter").value || "").toLowerCase();
+        var actionValue = document.getElementById("action-filter").value;
+        var pullbackValue = document.getElementById("pullback-filter").value;
+        var entryReadinessValue = document.getElementById("entry-readiness-filter").value;
+        var candidatePriorityValue = document.getElementById("candidate-priority-filter").value;
+        var rows = document.querySelectorAll("[data-filter-row='1']");
+        var visibleRows = 0;
+
+        rows.forEach(function (row) {{
+          var haystack = (row.getAttribute("data-filter-text") || "").toLowerCase();
+          var isVisible =
+            (!textNeedle || haystack.indexOf(textNeedle) !== -1) &&
+            matchesFilter(row.getAttribute("data-action") || "", actionValue) &&
+            matchesFilter(row.getAttribute("data-pullback-validity") || "", pullbackValue) &&
+            matchesFilter(row.getAttribute("data-entry-readiness") || "", entryReadinessValue) &&
+            matchesFilter(row.getAttribute("data-candidate-priority") || "", candidatePriorityValue);
+          row.style.display = isVisible ? "" : "none";
+          if (isVisible) {{
+            visibleRows += 1;
+          }}
+        }});
+
         var details = document.querySelectorAll(".ticker-detail");
         details.forEach(function (item) {{
-          var haystack = item.getAttribute("data-filter-text") || "";
-          item.style.display = !needle || haystack.indexOf(needle) !== -1 ? "" : "none";
+          var haystack = (item.getAttribute("data-filter-text") || "").toLowerCase();
+          var isVisible =
+            (!textNeedle || haystack.indexOf(textNeedle) !== -1) &&
+            matchesFilter(item.getAttribute("data-action") || "", actionValue) &&
+            matchesFilter(item.getAttribute("data-pullback-validity") || "", pullbackValue) &&
+            matchesFilter(item.getAttribute("data-entry-readiness") || "", entryReadinessValue) &&
+            matchesFilter(item.getAttribute("data-candidate-priority") || "", candidatePriorityValue);
+          item.style.display = isVisible ? "" : "none";
         }});
+
+        var status = document.getElementById("filter-status");
+        if (status) {{
+          status.textContent = "Visible rows: " + visibleRows + " / " + rows.length;
+        }}
+      }}
+
+      ["ticker-filter", "action-filter", "pullback-filter", "entry-readiness-filter", "candidate-priority-filter"].forEach(function (id) {{
+        var control = document.getElementById(id);
+        if (!control) return;
+        control.addEventListener("input", applyFilters);
+        control.addEventListener("change", applyFilters);
       }});
+
+      applyFilters();
     }})();
   </script>
 </body>
