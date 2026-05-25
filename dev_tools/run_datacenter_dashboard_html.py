@@ -237,6 +237,22 @@ def _html_attr(value: object | None) -> str:
     return escape(_safe_attr(value), quote=True)
 
 
+def _format_percent_text(value: object | None, *, fallback: str = "-") -> str:
+    text = _safe_text(value, fallback=fallback)
+    if text == fallback:
+        return fallback
+    normalized = text[:-1].strip() if text.endswith("%") else text
+    try:
+        numeric_value = float(normalized)
+    except (TypeError, ValueError):
+        return text
+    return f"{numeric_value:.2f}%"
+
+
+def _html_percent(value: object | None, *, fallback: str = "-") -> str:
+    return escape(_format_percent_text(value, fallback=fallback))
+
+
 def _normalize_md_header(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", value.strip().lower()).strip("_")
 
@@ -653,13 +669,13 @@ def _render_combined_ecosystem_row(row: _CombinedEcosystemRow) -> str:
         + f"<td{status_class_attr}>{_html_text(row.status_change_5d)}</td>"
         + f"<td{status_class_attr}>{_html_text(row.window_status)}</td>"
         + _render_market_status_cell(row.overheat_risk_level)
-        + f"<td>{_html_text(row.pct_above_ema20)}</td>"
-        + f"<td>{_html_text(row.pct_above_ma10)}</td>"
-        + f"<td>{_html_text(row.ema20_breadth_delta_5d)}</td>"
-        + f"<td>{_html_text(row.return_5d)}</td>"
-        + f"<td>{_html_text(row.return_10d)}</td>"
-        + f"<td>{_html_text(row.return_20d)}</td>"
-        + f"<td>{_html_text(row.return_60d)}</td>"
+        + f"<td>{_html_percent(row.pct_above_ema20)}</td>"
+        + f"<td>{_html_percent(row.pct_above_ma10)}</td>"
+        + f"<td>{_html_percent(row.ema20_breadth_delta_5d)}</td>"
+        + f"<td>{_html_percent(row.return_5d)}</td>"
+        + f"<td>{_html_percent(row.return_10d)}</td>"
+        + f"<td>{_html_percent(row.return_20d)}</td>"
+        + f"<td>{_html_percent(row.return_60d)}</td>"
         + f"<td>{_html_text(row.dow_trend_state)}</td>"
         + f"<td>{_html_text(row.latest_structure_label)}</td>"
         + f"<td>{_html_text(row.latest_bos_event_type)}</td>"
@@ -943,13 +959,13 @@ def _render_market_map_rows(
             + _render_market_status_cell(row.current_status)
             + _render_market_status_cell(row.window_status)
             + _render_market_status_cell(row.overheat_risk_level)
-            + f"<td>{_html_text(row.pct_above_ema20)}</td>"
-            + f"<td>{_html_text(row.pct_above_ma10)}</td>"
-            + f"<td>{_html_text(row.ema20_breadth_delta_5d)}</td>"
-            + f"<td>{_html_text(row.return_5d)}</td>"
-            + f"<td>{_html_text(row.return_10d)}</td>"
-            + f"<td>{_html_text(row.return_20d)}</td>"
-            + f"<td>{_html_text(row.return_60d)}</td>"
+            + f"<td>{_html_percent(row.pct_above_ema20)}</td>"
+            + f"<td>{_html_percent(row.pct_above_ma10)}</td>"
+            + f"<td>{_html_percent(row.ema20_breadth_delta_5d)}</td>"
+            + f"<td>{_html_percent(row.return_5d)}</td>"
+            + f"<td>{_html_percent(row.return_10d)}</td>"
+            + f"<td>{_html_percent(row.return_20d)}</td>"
+            + f"<td>{_html_percent(row.return_60d)}</td>"
             + "</tr>"
         )
     return "".join(rendered_rows)

@@ -720,12 +720,18 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     assert "Compute" in html_one
     assert "AI Accelerators" in html_one
     assert "ADD_ON_PULLBACK" in html_one
-    assert "Start status 30d" in html_one
     assert "Status change 30d" in html_one
+    assert "Status change 5d" in html_one
+    assert "Window status" in html_one
     assert "Dow trend state" in html_one
     assert "Latest relevant pattern" in html_one
     assert "Pattern age td" in html_one
     assert "WATCH -&gt; BUY_ZONE" in html_one
+    assert "72.00%" in html_one
+    assert "68.00%" in html_one
+    assert "4.00%" in html_one
+    assert "2.10%" in html_one
+    assert "21.00%" in html_one
     assert "SHOOTING_STAR" in html_one
     assert ">1<" in html_one
     assert "daily, rolling 2d, rolling 5d, rolling 30d" in html_one
@@ -796,14 +802,19 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     assert "Ecosystem Summary" in html
     assert "Layers" in html
     assert "Subindustries" in html
-    assert "Current status" in html
-    assert "Start status 30d" in html
     assert "Status change 30d" in html
+    assert "Status change 5d" in html
+    assert "Window status" in html
     assert "Overheat risk" in html
     assert "Dow trend state" in html
     assert "Latest relevant pattern" in html
     assert "Pattern age td" in html
     assert "WATCH -&gt; BUY_ZONE" in html
+    assert "72.00%" in html
+    assert "68.00%" in html
+    assert "4.00%" in html
+    assert "2.10%" in html
+    assert "21.00%" in html
     assert "SHOOTING_STAR" in html
     assert "TRENDING_UP" in html
     assert "RESET_COMPLETE" in html
