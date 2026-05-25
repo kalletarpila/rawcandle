@@ -1219,11 +1219,11 @@ def _render_layer_subindustry_hierarchy(
             overheat_text = _safe_text(layer_row.overheat_risk_level)
             summary_status_class = _status_class_from_text(layer_row.current_status)
             layer_table_html = (
-                '<div class="table-scroll"><table class="sticky-table"><thead><tr>'
+                '<table class="sticky-table"><thead><tr>'
                 + market_map_header_html
                 + "</tr></thead><tbody>"
                 + _render_combined_market_group_rows([layer_row], include_layer_column=True)
-                + "</tbody></table></div>"
+                + "</tbody></table>"
             )
         else:
             filter_text = " ".join(_combined_market_map_filter_text(row) for row in sub_rows)
@@ -1235,11 +1235,11 @@ def _render_layer_subindustry_hierarchy(
             summary_status_class = "status-missing"
             layer_table_html = "<p>No combined layer row available.</p>"
         subindustry_table_html = (
-            '<div class="table-scroll"><table class="sticky-table"><thead><tr>'
+            '<table class="sticky-table"><thead><tr>'
             + market_map_header_html
             + "</tr></thead><tbody>"
             + _render_combined_market_group_rows(sub_rows, include_layer_column=True)
-            + "</tbody></table></div>"
+            + "</tbody></table>"
         ) if sub_rows else "<p>No subindustries found for this layer.</p>"
         detail_blocks.append(
             "<details"
@@ -2458,6 +2458,14 @@ def generate_dashboard_html(
     .table-scroll td {{
       white-space: nowrap;
     }}
+    .market-map-hierarchy-scroll table {{
+      width: max-content;
+      min-width: 100%;
+    }}
+    .market-map-hierarchy-scroll th,
+    .market-map-hierarchy-scroll td {{
+      white-space: nowrap;
+    }}
     @media (max-width: 960px) {{
       .detail-grid {{
         grid-template-columns: 1fr;
@@ -2524,7 +2532,11 @@ def generate_dashboard_html(
 
   <section id="market-map-layers-subindustries" class="major-section">
     <h2>Layers and Subindustries</h2>
-    {layer_subindustry_hierarchy_html if layer_subindustry_hierarchy_html else '<p>No market map rows found in the selected reports.</p>'}
+    {(
+      '<div class="table-scroll market-map-hierarchy-scroll">'
+      + layer_subindustry_hierarchy_html
+      + '</div>'
+    ) if layer_subindustry_hierarchy_html else '<p>No market map rows found in the selected reports.</p>'}
   </section>
 
   <section id="watchlist-status" class="major-section">

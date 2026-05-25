@@ -812,12 +812,14 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     hierarchy_section = html_one[
         html_one.index('id="market-map-layers-subindustries"'):html_one.index('id="watchlist-status"')
     ]
+    assert 'class="table-scroll market-map-hierarchy-scroll"' in hierarchy_section
     summary_match = re.search(r"<summary>(.*?)</summary>", hierarchy_section, re.DOTALL)
     assert summary_match is not None
     summary_html = summary_match.group(1)
     assert "<details" in hierarchy_section
     assert "<summary>" in hierarchy_section
     assert 'class="market-layer-detail risk-medium"' in hierarchy_section
+    assert 'class="table-scroll"><table class="sticky-table"' not in hierarchy_section
     assert "Current: WATCH" in summary_html
     assert "Window 30d: ADD_ON_PULLBACK" in summary_html
     assert "Window 5d: ADD_ON_PULLBACK" in summary_html
