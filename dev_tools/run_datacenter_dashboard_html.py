@@ -1573,7 +1573,9 @@ def generate_dashboard_html(
     <h1>{escape(title)}</h1>
     <nav class="nav-links" aria-label="Dashboard sections">
       <a href="#summary">Summary</a>
-      <a href="#market-map">Market Map</a>
+      <a href="#market-map-ecosystem">Ecosystem</a>
+      <a href="#market-map-layers">Layers</a>
+      <a href="#market-map-subindustries">Subindustries</a>
       <a href="#watchlist-status">Watchlist Status</a>
       <a href="#candidate-pullbacks">Candidate Pullbacks</a>
       <a href="#command-center">Command Center</a>
@@ -1610,12 +1612,9 @@ def generate_dashboard_html(
     </div>
   </section>
 
-  <section id="market-map" class="major-section">
-    <h2>Market Map</h2>
-    <div id="market-map-filter-status" class="section-status">Market Map rows: 0 / 0</div>
+  <section id="market-map-ecosystem" class="major-section">
+    <h2>Ecosystem Summary</h2>
     {(
-      '<section class="group-section">'
-      '<h3>Ecosystem Summary</h3>'
       '<div class="table-scroll"><table class="sticky-table"><thead><tr>'
       '<th>Ecosystem</th><th>Current status</th><th>Start status 30d</th><th>Status change 30d</th>'
       '<th>Overheat risk</th><th>% above EMA20</th><th>% above MA10</th>'
@@ -1626,11 +1625,12 @@ def generate_dashboard_html(
       '</tr></thead><tbody>'
       + ecosystem_market_rows_html +
       '</tbody></table></div>'
-      '</section>'
-      if ecosystem_market_rows_html else ''
-    )}{(
-      '<section class="group-section">'
-      '<h3>Layers</h3>'
+    ) if ecosystem_market_rows_html else '<p>No market map rows found in the selected reports.</p>'}
+  </section>
+
+  <section id="market-map-layers" class="major-section">
+    <h2>Layers</h2>
+    {(
       '<div class="table-scroll"><table class="sticky-table"><thead><tr>'
       '<th>Layer</th><th>Horizon</th><th>Current status</th><th>Window status</th>'
       '<th>Overheat risk</th><th>% above EMA20</th><th>% above MA10</th>'
@@ -1639,11 +1639,12 @@ def generate_dashboard_html(
       '</tr></thead><tbody>'
       + layer_market_rows_html +
       '</tbody></table></div>'
-      '</section>'
-      if layer_market_rows_html else ''
-    )}{(
-      '<section class="group-section">'
-      '<h3>Subindustries</h3>'
+    ) if layer_market_rows_html else '<p>No market map rows found in the selected reports.</p>'}
+  </section>
+
+  <section id="market-map-subindustries" class="major-section">
+    <h2>Subindustries</h2>
+    {(
       '<div class="table-scroll"><table class="sticky-table"><thead><tr>'
       '<th>Subindustry</th><th>Layer</th><th>Horizon</th><th>Current status</th><th>Window status</th>'
       '<th>Overheat risk</th><th>% above EMA20</th><th>% above MA10</th>'
@@ -1652,9 +1653,7 @@ def generate_dashboard_html(
       '</tr></thead><tbody>'
       + subindustry_market_rows_html +
       '</tbody></table></div>'
-      '</section>'
-      if subindustry_market_rows_html else ''
-    ) if market_map_rows else '<p>No market map rows found in the selected reports.</p>'}
+    ) if subindustry_market_rows_html else '<p>No market map rows found in the selected reports.</p>'}
   </section>
 
   <section id="watchlist-status" class="major-section">

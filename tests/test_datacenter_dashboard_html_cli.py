@@ -706,13 +706,14 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     assert "selection_mode" in html_one
     assert "newest" in html_one
     assert 'id="summary"' in html_one
-    assert 'id="market-map"' in html_one
+    assert 'id="market-map-ecosystem"' in html_one
+    assert 'id="market-map-layers"' in html_one
+    assert 'id="market-map-subindustries"' in html_one
     assert 'id="watchlist-status"' in html_one
     assert 'id="candidate-pullbacks"' in html_one
     assert 'id="command-center"' in html_one
     assert 'id="inspector"' in html_one
     assert 'id="source-files"' in html_one
-    assert "Market Map" in html_one
     assert "Ecosystem Summary" in html_one
     assert "Layers" in html_one
     assert "Subindustries" in html_one
@@ -730,13 +731,14 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     assert "daily, rolling 2d, rolling 5d, rolling 30d" in html_one
     assert html_one.count("<td>DC_ECOSYSTEM_TOTAL</td>") == 1
     assert 'data-section="market-map"' in html_one
-    assert 'id="market-map-filter-status"' in html_one
     assert ".risk-high {" in html_one
     assert ".risk-medium {" in html_one
     assert ".status-positive {" in html_one
     assert ".status-neutral {" in html_one
-    assert html_one.index('id="market-map"') > html_one.index('id="summary"')
-    assert html_one.index('id="market-map"') < html_one.index('id="watchlist-status"')
+    assert html_one.index('id="market-map-ecosystem"') > html_one.index('id="summary"')
+    assert html_one.index('id="market-map-ecosystem"') < html_one.index('id="watchlist-status"')
+    assert html_one.index('id="market-map-layers"') > html_one.index('id="market-map-ecosystem"')
+    assert html_one.index('id="market-map-subindustries"') > html_one.index('id="market-map-layers"')
     assert html_one.index('id="watchlist-status"') > html_one.index('id="summary"')
     assert html_one.index('id="watchlist-status"') < html_one.index('id="candidate-pullbacks"')
     assert html_one.index('id="candidate-pullbacks"') < html_one.index('id="command-center"')
@@ -777,14 +779,15 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     html = output_path.read_text(encoding="utf-8")
     assert "<h1>Datacenter Dashboard</h1>" in html
     assert 'href="#summary"' in html
-    assert 'href="#market-map"' in html
+    assert 'href="#market-map-ecosystem"' in html
+    assert 'href="#market-map-layers"' in html
+    assert 'href="#market-map-subindustries"' in html
     assert 'href="#watchlist-status"' in html
     assert 'href="#candidate-pullbacks"' in html
     assert 'href="#command-center"' in html
     assert 'href="#inspector"' in html
     assert 'href="#source-files"' in html
     assert "Summary" in html
-    assert "Market Map" in html
     assert "Watchlist Status" in html
     assert "Candidate Pullbacks" in html
     assert "Command Center" in html
@@ -845,15 +848,16 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     assert "<tbody>\ndata-filter-row=" not in html
     assert "</tr>\ndata-filter-row=" not in html
     assert 'document.querySelectorAll("[data-filter-row=\'1\']")' in html
-    assert 'id="market-map-filter-status"' in html
     assert 'id="candidate-filter-status"' in html
     assert 'id="watchlist-filter-status"' in html
     assert 'id="command-center-filter-status"' in html
     assert 'id="inspector-filter-status"' in html
     assert 'class="table-scroll"' in html
     assert html.count("<td>DC_ECOSYSTEM_TOTAL</td>") == 1
-    assert html.index('id="market-map"') > html.index('id="summary"')
-    assert html.index('id="market-map"') < html.index('id="watchlist-status"')
+    assert html.index('id="market-map-ecosystem"') > html.index('id="summary"')
+    assert html.index('id="market-map-ecosystem"') < html.index('id="watchlist-status"')
+    assert html.index('id="market-map-layers"') > html.index('id="market-map-ecosystem"')
+    assert html.index('id="market-map-subindustries"') > html.index('id="market-map-layers"')
     assert html.index('id="watchlist-status"') > html.index('id="summary"')
     assert html.index('id="watchlist-status"') < html.index('id="candidate-pullbacks"')
     assert html.index("<h2>Filters</h2>") < html.index('id="candidate-pullbacks"')
