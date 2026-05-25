@@ -1547,10 +1547,13 @@ def generate_dashboard_html(
       margin-bottom: 18px;
     }}
     .table-scroll {{
+      display: block;
       overflow-x: auto;
+      overflow-y: hidden;
       max-width: 100%;
+      width: 100%;
     }}
-    .table-scroll table {{
+    .table-scroll > table {{
       width: max-content;
       min-width: 100%;
     }}
