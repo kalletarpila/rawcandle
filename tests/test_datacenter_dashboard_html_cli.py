@@ -29,7 +29,6 @@ from dev_tools.run_datacenter_dashboard_html import (
     main,
 )
 
-
 _MARKET_MAP_HEADER_SNIPPETS = (
     "<th>Market level</th>",
     "<th>Name</th>",
@@ -405,7 +404,10 @@ def _fake_decision_result(tmp_path: Path) -> DatacenterDecisionBatchResult:
                 candidate_priority=1,
                 candidate_priority_label="P1_READY_TO_WATCH",
                 candidate_priority_reason="READY_TO_WATCH",
-                source_files=[str(tmp_path / "daily.csv"), str(tmp_path / "rolling30.csv")],
+                source_files=[
+                    str(tmp_path / "daily.csv"),
+                    str(tmp_path / "rolling30.csv"),
+                ],
                 decision_trace=[
                     DatacenterDecisionTrace(
                         ticker="MS&FT",
@@ -522,7 +524,8 @@ def _fake_decision_result(tmp_path: Path) -> DatacenterDecisionBatchResult:
         },
         pullback_action_counts={
             key: {
-                action: 0 for action in (
+                action: 0
+                for action in (
                     "SELL",
                     "REDUCE",
                     "TIGHTEN_STOP",
@@ -604,9 +607,17 @@ def _fake_inspector_views() -> dict[str, DatacenterTickerInspectorView]:
     }
 
 
-def _install_pipeline_mocks(monkeypatch, tmp_path: Path) -> None:
+def _install_pipeline_mocks(
+    monkeypatch,
+    tmp_path: Path,
+    *,
+    layer_current_status: str = "WATCH",
+    layer_start_status: str = "NEUTRAL",
+    layer_window_status: str = "ADD_ON_PULLBACK",
+    layer_overheat_status: str = "WATCH",
+) -> None:
     (tmp_path / "daily.csv").write_text(
-        """## 3. Dashboard
+        f"""## 3. Dashboard
 | metric | value |
 | --- | --- |
 | timing_state | BUY_ZONE |
@@ -645,12 +656,12 @@ def _install_pipeline_mocks(monkeypatch, tmp_path: Path) -> None:
 ## Datacenter Taxonomy Listing
 | row_type | layer | subindustry | ticker | status | subindustry_context_risk | layer_context_risk | close | return_5d | return_10d | return_20d | distance_to_ema20_pct | trend_state | latest_structure_label | latest_structure_freshness | latest_bos_event_type | latest_bos_freshness | latest_reset_reason | latest_reset_freshness | breakout_signal | pullback_signal | exit_risk_signal | exit_risk_severity | exit_reason | price_data_status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| LAYER | Compute |  |  | WATCH | NORMAL | WATCH |  | 2.3 | 4.1 | 9.2 |  | UP | HL | fresh | BOS_UP | fresh |  |  |  |  |  |  |  | OK |
+| LAYER | Compute |  |  | {layer_current_status} | NORMAL | {layer_overheat_status} |  | 2.3 | 4.1 | 9.2 |  | UP | HL | fresh | BOS_UP | fresh |  |  |  |  |  |  |  | OK |
 | SUBINDUSTRY | Compute | AI Accelerators |  | BUY_ZONE | HIGH | WATCH |  | 2.7 | 5.0 | 10.8 |  | UP | HH | fresh | BOS_UP | fresh |  |  |  |  |  |  |  | OK |
 """,
         encoding="utf-8",
     )
-    rolling_fixture = """## 4. Ecosystem window change
+    rolling_fixture = f"""## 4. Ecosystem window change
 | metric | first_value | last_value | change |
 | --- | --- | --- | --- |
 | timing_state | WATCH | BUY_ZONE | BUY_ZONE |
@@ -667,19 +678,19 @@ def _install_pipeline_mocks(monkeypatch, tmp_path: Path) -> None:
 ## 6. Group Structure Timing
 | group_type | group_name | latest_bos_event_type | latest_bos_event_date | latest_bos_age_trading_days | latest_bos_freshness | latest_reset_reason | latest_reset_event_date | latest_reset_age_trading_days | latest_reset_freshness | latest_structure_label | latest_structure_age_trading_days | latest_structure_freshness | trend_classification | timing_state | overheat_risk_level |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| layer | Compute | BOS_UP | 2026-05-22 | 1 | fresh |  |  |  |  | HH | 3 | fresh | TRENDING_UP | WATCH | WATCH |
+| layer | Compute | BOS_UP | 2026-05-22 | 1 | fresh |  |  |  |  | HH | 3 | fresh | TRENDING_UP | {layer_current_status} | {layer_overheat_status} |
 | subindustry | AI Accelerators | BOS_UP | 2026-05-22 | 1 | fresh |  |  |  |  | HH | 3 | fresh | TRENDING_UP | BUY_ZONE | HIGH |
 
 ## 7. Group Window Status Change
 | group_type | group_name | first_timing_state | last_timing_state |
 | --- | --- | --- | --- |
-| layer | Compute | NEUTRAL | WATCH |
+| layer | Compute | {layer_start_status} | {layer_current_status} |
 | subindustry | AI Accelerators | NEUTRAL | BUY_ZONE |
 
 ## Datacenter Taxonomy Listing
 | row_type | layer | subindustry | ticker | current_status | start_status | status_change | window_status | subindustry_context_risk | layer_context_risk | last_close | breakout_days | pullback_days | exit_risk_days | high_exit_risk_days | medium_exit_risk_days | last_exit_risk_severity | last_exit_reason | last_trend_state | last_trend_state_age_td | last_latest_structure_label | last_latest_structure_age_trading_days | last_latest_structure_freshness | last_latest_bos_event_type | last_latest_bos_age_trading_days | last_latest_bos_freshness | last_latest_reset_reason | last_latest_reset_age_trading_days | last_latest_reset_freshness | last_price_data_status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| LAYER | Compute |  |  | WATCH | NEUTRAL | NEUTRAL -> WATCH | ADD_ON_PULLBACK | NORMAL | WATCH |  | 0 | 2 | 0 | 0 | 0 |  |  | UP | 2 | HH | 3 | fresh | BOS_UP | 1 | fresh |  |  |  | OK |
+| LAYER | Compute |  |  | {layer_current_status} | {layer_start_status} | {layer_start_status} -> {layer_current_status} | {layer_window_status} | NORMAL | {layer_overheat_status} |  | 0 | 2 | 0 | 0 | 0 |  |  | UP | 2 | HH | 3 | fresh | BOS_UP | 1 | fresh |  |  |  | OK |
 | SUBINDUSTRY | Compute | AI Accelerators |  | BUY_ZONE | NEUTRAL | NEUTRAL -> BUY_ZONE | WATCH | HIGH | WATCH |  | 1 | 1 | 0 | 0 | 0 |  |  | UP | 2 | HH | 3 | fresh | BOS_UP | 1 | fresh |  |  |  | OK |
 """
     for name in ("rolling2.csv", "rolling5.csv", "rolling30.csv"):
@@ -697,7 +708,9 @@ def _install_pipeline_mocks(monkeypatch, tmp_path: Path) -> None:
     )
     monkeypatch.setattr(
         "dev_tools.run_datacenter_dashboard_html.parse_datacenter_dashboard_file",
-        lambda path, horizon: type("ParseResult", (), {"rows": _fake_rows(path, horizon)})(),
+        lambda path, horizon: type(
+            "ParseResult", (), {"rows": _fake_rows(path, horizon)}
+        )(),
     )
     monkeypatch.setattr(
         "dev_tools.run_datacenter_dashboard_html.build_datacenter_ticker_decisions",
@@ -715,7 +728,9 @@ def test_build_parser_requires_reports_dir():
         parser.parse_args([])
 
 
-def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, monkeypatch):
+def test_generate_dashboard_html_is_deterministic_and_escapes_values(
+    tmp_path, monkeypatch
+):
     _install_pipeline_mocks(monkeypatch, tmp_path)
 
     html_one, _status_one, _parse_one, _decisions_one = generate_dashboard_html(
@@ -810,18 +825,30 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     assert ".status-positive {" in html_one
     assert ".status-neutral {" in html_one
     assert html_one.index('id="market-map-ecosystem"') > html_one.index('id="summary"')
-    assert html_one.index('id="market-map-ecosystem"') < html_one.index('id="watchlist-status"')
-    assert html_one.index('id="market-map-layers-subindustries"') > html_one.index('id="market-map-ecosystem"')
+    assert html_one.index('id="market-map-ecosystem"') < html_one.index(
+        'id="watchlist-status"'
+    )
+    assert html_one.index('id="market-map-layers-subindustries"') > html_one.index(
+        'id="market-map-ecosystem"'
+    )
     hierarchy_section = html_one[
-        html_one.index('id="market-map-layers-subindustries"'):html_one.index('id="watchlist-status"')
+        html_one.index('id="market-map-layers-subindustries"') : html_one.index(
+            'id="watchlist-status"'
+        )
     ]
     assert 'class="table-scroll market-map-hierarchy-scroll"' in hierarchy_section
-    summary_match = re.search(r"<summary>(.*?)</summary>", hierarchy_section, re.DOTALL)
+    summary_match = re.search(
+        r'<summary class="market-layer-summary ([^"]+)">(.*?)</summary>',
+        hierarchy_section,
+        re.DOTALL,
+    )
     assert summary_match is not None
-    summary_html = summary_match.group(1)
+    summary_classes = summary_match.group(1).split()
+    summary_html = summary_match.group(2)
     assert "<details" in hierarchy_section
-    assert "<summary>" in hierarchy_section
+    assert '<summary class="market-layer-summary risk-medium">' in hierarchy_section
     assert 'class="market-layer-detail risk-medium"' in hierarchy_section
+    assert "risk-medium" in summary_classes
     assert 'class="table-scroll"><table class="sticky-table"' not in hierarchy_section
     assert 'class="sticky-table market-map-table"' in hierarchy_section
     assert "Current: WATCH" in summary_html
@@ -833,12 +860,68 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     assert "Layer summary" not in hierarchy_section
     assert "<h3>Subindustries</h3>" not in hierarchy_section
     assert "<td>LAYER</td><td>Compute</td><td>Compute</td>" in hierarchy_section
-    assert "<td>SUBINDUSTRY</td><td>AI Accelerators</td><td>Compute</td>" in hierarchy_section
+    assert (
+        "<td>SUBINDUSTRY</td><td>AI Accelerators</td><td>Compute</td>"
+        in hierarchy_section
+    )
     assert 'class="status-positive">ADD_ON_PULLBACK</td>' in hierarchy_section
     assert hierarchy_section.count("<thead><tr>") == 1
     assert html_one.index('id="watchlist-status"') > html_one.index('id="summary"')
-    assert html_one.index('id="watchlist-status"') < html_one.index('id="candidate-pullbacks"')
-    assert html_one.index('id="candidate-pullbacks"') < html_one.index('id="command-center"')
+    assert html_one.index('id="watchlist-status"') < html_one.index(
+        'id="candidate-pullbacks"'
+    )
+    assert html_one.index('id="candidate-pullbacks"') < html_one.index(
+        'id="command-center"'
+    )
+
+
+@pytest.mark.parametrize(
+    ("layer_current_status", "expected_summary_class"),
+    [
+        ("TRIM_WATCH", "risk-medium"),
+        ("EXIT_ZONE", "risk-high"),
+        ("BUY_ZONE", "status-positive"),
+    ],
+)
+def test_market_map_layer_summary_uses_current_status_class(
+    tmp_path,
+    monkeypatch,
+    layer_current_status,
+    expected_summary_class,
+):
+    _install_pipeline_mocks(
+        monkeypatch,
+        tmp_path,
+        layer_current_status=layer_current_status,
+        layer_window_status=layer_current_status,
+        layer_overheat_status=layer_current_status,
+    )
+
+    html, _status, _parse, _decisions = generate_dashboard_html(
+        reports_dir=str(tmp_path),
+        title="Custom <Dashboard>",
+        ticker="MS&FT",
+        report_date=None,
+        max_command_rows=10,
+        max_candidate_rows=10,
+        generated_at_utc="2026-05-25T00:00:00+00:00",
+    )
+
+    hierarchy_section = html[
+        html.index('id="market-map-layers-subindustries"') : html.index(
+            'id="watchlist-status"'
+        )
+    ]
+    summary_match = re.search(
+        r'<summary class="market-layer-summary ([^"]+)">\s*<span class="layer-name">Compute</span>',
+        hierarchy_section,
+    )
+    assert summary_match is not None
+    summary_classes = summary_match.group(1).split()
+
+    assert "market-layer-summary" in summary_match.group(0)
+    assert expected_summary_class in summary_classes
+    assert f'class="market-layer-detail {expected_summary_class}"' in hierarchy_section
 
 
 def test_generate_datacenter_dashboard_html_file_returns_output_path_and_summary_values(
@@ -860,15 +943,21 @@ def test_generate_datacenter_dashboard_html_file_returns_output_path_and_summary
     assert result.missing_reports == 0
     assert result.decision_total == 3
     assert result.candidate_pullback_rows == 2
-    assert any(line == "SUMMARY selection_mode=report_date" for line in result.summary_lines)
+    assert any(
+        line == "SUMMARY selection_mode=report_date" for line in result.summary_lines
+    )
 
 
-def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkeypatch, capsys):
+def test_html_cli_generates_default_output_and_prints_summaries(
+    tmp_path, monkeypatch, capsys
+):
     reports_dir = tmp_path / "reports"
     reports_dir.mkdir()
     _install_pipeline_mocks(monkeypatch, reports_dir)
 
-    exit_code = main(["--reports-dir", str(reports_dir), "--title", "Datacenter Dashboard"])
+    exit_code = main(
+        ["--reports-dir", str(reports_dir), "--title", "Datacenter Dashboard"]
+    )
 
     assert exit_code == 0
     output_path = reports_dir / "datacenter_dashboard.html"
@@ -939,7 +1028,10 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     assert str(reports_dir / "rolling5.csv") in html
     assert str(reports_dir / "rolling30.csv") in html
     assert "Filters" in html
-    assert "Filters apply to Market Map, Watchlist Status, Candidate Pullbacks, Command Center and Inspector rows." in html
+    assert (
+        "Filters apply to Market Map, Watchlist Status, Candidate Pullbacks, Command Center and Inspector rows."
+        in html
+    )
     assert 'id="ticker-filter"' in html
     assert 'id="action-filter"' in html
     assert 'id="pullback-filter"' in html
@@ -986,7 +1078,9 @@ def test_market_map_value_age_formatting_omits_missing_age_and_missing_value():
     assert _format_value_with_age("HH", "-") == "HH"
 
 
-def test_html_cli_accepts_report_date_and_uses_date_specific_default_output(tmp_path, monkeypatch, capsys):
+def test_html_cli_accepts_report_date_and_uses_date_specific_default_output(
+    tmp_path, monkeypatch, capsys
+):
     reports_dir = tmp_path / "reports"
     reports_dir.mkdir()
     _install_pipeline_mocks(monkeypatch, reports_dir)
@@ -1002,7 +1096,9 @@ def test_html_cli_accepts_report_date_and_uses_date_specific_default_output(tmp_
     assert "report_date" in capsys.readouterr().out
 
 
-def test_html_cli_invalid_report_date_format_exits_non_zero(tmp_path, monkeypatch, capsys):
+def test_html_cli_invalid_report_date_format_exits_non_zero(
+    tmp_path, monkeypatch, capsys
+):
     reports_dir = tmp_path / "reports"
     reports_dir.mkdir()
     _install_pipeline_mocks(monkeypatch, reports_dir)
@@ -1013,15 +1109,24 @@ def test_html_cli_invalid_report_date_format_exits_non_zero(tmp_path, monkeypatc
     assert "invalid report_date format" in capsys.readouterr().out
 
 
-def test_html_cli_report_date_no_matching_reports_exits_non_zero(tmp_path, monkeypatch, capsys):
+def test_html_cli_report_date_no_matching_reports_exits_non_zero(
+    tmp_path, monkeypatch, capsys
+):
     reports_dir = tmp_path / "reports"
     reports_dir.mkdir()
     monkeypatch.setattr(
         "dev_tools.run_datacenter_dashboard_html.discover_datacenter_dashboard_status",
-        lambda reports_dir, report_date=None: _fake_dashboard_status(tmp_path).__class__(
+        lambda reports_dir, report_date=None: _fake_dashboard_status(
+            tmp_path
+        ).__class__(
             overall_status="MISSING",
             reports=[
-                report.__class__(horizon=report.horizon, status="MISSING", path=None, modified_at=None)
+                report.__class__(
+                    horizon=report.horizon,
+                    status="MISSING",
+                    path=None,
+                    modified_at=None,
+                )
                 for report in _fake_dashboard_status(tmp_path).reports
             ],
         ),
@@ -1042,11 +1147,19 @@ def test_html_cli_renders_empty_watchlist_state(tmp_path, monkeypatch):
         lambda path, horizon: type(
             "ParseResult",
             (),
-            {"rows": [row for row in _fake_rows(path, horizon) if row.section != "Watchlist Summary"]},
+            {
+                "rows": [
+                    row
+                    for row in _fake_rows(path, horizon)
+                    if row.section != "Watchlist Summary"
+                ]
+            },
         )(),
     )
 
-    exit_code = main(["--reports-dir", str(reports_dir), "--title", "Datacenter Dashboard"])
+    exit_code = main(
+        ["--reports-dir", str(reports_dir), "--title", "Datacenter Dashboard"]
+    )
 
     assert exit_code == 0
     html = (reports_dir / "datacenter_dashboard.html").read_text(encoding="utf-8")
@@ -1060,14 +1173,18 @@ def test_html_cli_renders_empty_market_map_state(tmp_path, monkeypatch):
     for name in ("daily.csv", "rolling2.csv", "rolling5.csv", "rolling30.csv"):
         (reports_dir / name).write_text("", encoding="utf-8")
 
-    exit_code = main(["--reports-dir", str(reports_dir), "--title", "Datacenter Dashboard"])
+    exit_code = main(
+        ["--reports-dir", str(reports_dir), "--title", "Datacenter Dashboard"]
+    )
 
     assert exit_code == 0
     html = (reports_dir / "datacenter_dashboard.html").read_text(encoding="utf-8")
     assert "No market map rows found in the selected reports." in html
 
 
-def test_html_cli_market_map_missing_optional_fields_render_as_dash(tmp_path, monkeypatch):
+def test_html_cli_market_map_missing_optional_fields_render_as_dash(
+    tmp_path, monkeypatch
+):
     reports_dir = tmp_path / "reports"
     reports_dir.mkdir()
     _install_pipeline_mocks(monkeypatch, reports_dir)
@@ -1082,7 +1199,9 @@ def test_html_cli_market_map_missing_optional_fields_render_as_dash(tmp_path, mo
     for name in ("rolling2.csv", "rolling5.csv", "rolling30.csv"):
         (reports_dir / name).write_text("", encoding="utf-8")
 
-    exit_code = main(["--reports-dir", str(reports_dir), "--title", "Datacenter Dashboard"])
+    exit_code = main(
+        ["--reports-dir", str(reports_dir), "--title", "Datacenter Dashboard"]
+    )
 
     assert exit_code == 0
     html = (reports_dir / "datacenter_dashboard.html").read_text(encoding="utf-8")

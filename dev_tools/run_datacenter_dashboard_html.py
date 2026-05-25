@@ -356,7 +356,9 @@ def _normalize_md_header(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", value.strip().lower()).strip("_")
 
 
-def _collect_rows(dashboard_status: DatacenterDashboardStatus) -> list[DatacenterDashboardRow]:
+def _collect_rows(
+    dashboard_status: DatacenterDashboardStatus,
+) -> list[DatacenterDashboardRow]:
     parsed_rows: list[DatacenterDashboardRow] = []
     for report in dashboard_status.reports:
         if not report.path:
@@ -394,8 +396,7 @@ def _parse_markdown_tables(path: str) -> list[_MarkdownTable]:
             line_index += 1
             continue
         headers = tuple(
-            _normalize_md_header(cell)
-            for cell in current_line.strip("|").split("|")
+            _normalize_md_header(cell) for cell in current_line.strip("|").split("|")
         )
         line_index += 2
         rows: list[dict[str, str]] = []
@@ -404,12 +405,11 @@ def _parse_markdown_tables(path: str) -> list[_MarkdownTable]:
             if not row_line or "|" not in row_line:
                 break
             values = [cell.strip() for cell in row_line.strip("|").split("|")]
-            padded_values = values[: len(headers)] + [""] * max(0, len(headers) - len(values))
+            padded_values = values[: len(headers)] + [""] * max(
+                0, len(headers) - len(values)
+            )
             rows.append(
-                {
-                    header: value.strip()
-                    for header, value in zip(headers, padded_values)
-                }
+                {header: value.strip() for header, value in zip(headers, padded_values)}
             )
             line_index += 1
         tables.append(
@@ -447,7 +447,9 @@ def _tables_with_headers(
     return [table for table in tables if required.issubset(set(table.headers))]
 
 
-def _metric_value_map(table: _MarkdownTable, *, key_field: str, value_field: str) -> dict[str, str]:
+def _metric_value_map(
+    table: _MarkdownTable, *, key_field: str, value_field: str
+) -> dict[str, str]:
     output: dict[str, str] = {}
     for row in table.rows:
         key = row.get(key_field, "").strip()
@@ -551,7 +553,13 @@ def _status_class_from_text(value: str) -> str:
     tokens = re.findall(r"[A-Z_]+", text.upper())
     if not tokens:
         return _group_status_class(text)
-    for css_class in ("risk-high", "risk-medium", "status-positive", "status-neutral", "status-missing"):
+    for css_class in (
+        "risk-high",
+        "risk-medium",
+        "status-positive",
+        "status-neutral",
+        "status-missing",
+    ):
         for token in tokens:
             token_class = _group_status_class(token)
             if token_class == css_class:
@@ -655,7 +663,9 @@ def _extract_ecosystem_context_rows(
             )
             if dashboard_table is None:
                 continue
-            metrics = _metric_value_map(dashboard_table, key_field="metric", value_field="value")
+            metrics = _metric_value_map(
+                dashboard_table, key_field="metric", value_field="value"
+            )
         else:
             ecosystem_change_table = _first_table(
                 tables,
@@ -674,7 +684,9 @@ def _extract_ecosystem_context_rows(
                 key_field="metric",
                 value_field="first_value",
             )
-        latest_relevant_pattern, latest_relevant_pattern_age_td = _candidate_pattern_value(metrics)
+        latest_relevant_pattern, latest_relevant_pattern_age_td = (
+            _candidate_pattern_value(metrics)
+        )
         rows.append(
             _EcosystemContextRow(
                 horizon=horizon,
@@ -767,7 +779,9 @@ def _extract_ecosystem_context_rows(
                 source_file=report.path,
             )
         )
-    return sorted(rows, key=lambda row: (_HORIZON_PRIORITY.get(row.horizon, 99), row.source_file))
+    return sorted(
+        rows, key=lambda row: (_HORIZON_PRIORITY.get(row.horizon, 99), row.source_file)
+    )
 
 
 def _combine_ecosystem_context_rows(
@@ -788,15 +802,27 @@ def _combine_ecosystem_context_rows(
 
     current_status = _preferred("current_status")
     window_status_30d = next(
-        (row.window_status.strip() for row in rows if row.horizon == "rolling 30d" and row.window_status.strip()),
+        (
+            row.window_status.strip()
+            for row in rows
+            if row.horizon == "rolling 30d" and row.window_status.strip()
+        ),
         "",
     )
     window_status_5d = next(
-        (row.window_status.strip() for row in rows if row.horizon == "rolling 5d" and row.window_status.strip()),
+        (
+            row.window_status.strip()
+            for row in rows
+            if row.horizon == "rolling 5d" and row.window_status.strip()
+        ),
         "",
     )
     window_status_2d = next(
-        (row.window_status.strip() for row in rows if row.horizon == "rolling 2d" and row.window_status.strip()),
+        (
+            row.window_status.strip()
+            for row in rows
+            if row.horizon == "rolling 2d" and row.window_status.strip()
+        ),
         "",
     )
     start_status_30d = ""
@@ -835,9 +861,13 @@ def _combine_ecosystem_context_rows(
             priority = 0
         elif "BULLISH" in pattern_upper and "HIDDEN" not in pattern_upper:
             priority = 1
-        elif "HIDDEN_BEARISH" in pattern_upper or ("HIDDEN" in pattern_upper and "BEARISH" in pattern_upper):
+        elif "HIDDEN_BEARISH" in pattern_upper or (
+            "HIDDEN" in pattern_upper and "BEARISH" in pattern_upper
+        ):
             priority = 2
-        elif "HIDDEN_BULLISH" in pattern_upper or ("HIDDEN" in pattern_upper and "BULLISH" in pattern_upper):
+        elif "HIDDEN_BULLISH" in pattern_upper or (
+            "HIDDEN" in pattern_upper and "BULLISH" in pattern_upper
+        ):
             priority = 3
         else:
             priority = 4
@@ -849,14 +879,9 @@ def _combine_ecosystem_context_rows(
         latest_pattern = ""
         latest_pattern_age = ""
 
-    source_horizons = ", ".join(
-        row.horizon
-        for row in rows
-    )
+    source_horizons = ", ".join(row.horizon for row in rows)
     source_files = ", ".join(
-        Path(row.source_file).name
-        for row in rows
-        if row.source_file
+        Path(row.source_file).name for row in rows if row.source_file
     )
     return _CombinedEcosystemRow(
         market_level="ECOSYSTEM",
@@ -955,9 +980,13 @@ _MARKET_MAP_TABLE_TOTAL_WIDTH = sum(_MARKET_MAP_COLUMN_WIDTHS)
 
 
 def _market_map_colgroup_html() -> str:
-    return "<colgroup>" + "".join(
-        f'<col style="width:{width}px">' for width in _MARKET_MAP_COLUMN_WIDTHS
-    ) + "</colgroup>"
+    return (
+        "<colgroup>"
+        + "".join(
+            f'<col style="width:{width}px">' for width in _MARKET_MAP_COLUMN_WIDTHS
+        )
+        + "</colgroup>"
+    )
 
 
 def _render_combined_ecosystem_row(row: _CombinedEcosystemRow) -> str:
@@ -977,9 +1006,9 @@ def _render_combined_ecosystem_row(row: _CombinedEcosystemRow) -> str:
         f' data-pullback-validity=""'
         f' data-entry-readiness=""'
         f' data-candidate-priority=""'
-            f' data-filter-text="{_html_attr(_ecosystem_filter_text(row))}"'
-            ">"
-            f"<td>{_html_text(row.market_level)}</td>"
+        f' data-filter-text="{_html_attr(_ecosystem_filter_text(row))}"'
+        ">"
+        f"<td>{_html_text(row.market_level)}</td>"
         + f"<td>{_html_text(row.name)}</td>"
         + f"<td>{_html_text(row.layer)}</td>"
         + _render_market_status_cell(row.current_status)
@@ -998,10 +1027,14 @@ def _render_combined_ecosystem_row(row: _CombinedEcosystemRow) -> str:
         + f"<td>{_html_percent(row.return_20d, scale=100.0)}</td>"
         + f"<td>{_html_percent(row.return_60d, scale=100.0)}</td>"
         + _render_market_status_cell(row.dow_trend_state, row.dow_trend_state_age_td)
-        + _render_market_value_cell(row.latest_structure_label, row.latest_structure_age_td)
+        + _render_market_value_cell(
+            row.latest_structure_label, row.latest_structure_age_td
+        )
         + _render_market_status_cell(row.latest_bos_event_type, row.latest_bos_age_td)
         + _render_market_status_cell(row.latest_reset_reason, row.latest_reset_age_td)
-        + _render_market_value_cell(row.latest_relevant_pattern, row.latest_relevant_pattern_age_td)
+        + _render_market_value_cell(
+            row.latest_relevant_pattern, row.latest_relevant_pattern_age_td
+        )
         + f"<td>{_html_text(row.source_horizons)}</td>"
         + f"<td>{_html_text(row.source_files)}</td>"
         + "</tr>"
@@ -1074,9 +1107,13 @@ def _combine_market_group_rows(
                 priority = 0
             elif "BULLISH" in pattern_upper and "HIDDEN" not in pattern_upper:
                 priority = 1
-            elif "HIDDEN_BEARISH" in pattern_upper or ("HIDDEN" in pattern_upper and "BEARISH" in pattern_upper):
+            elif "HIDDEN_BEARISH" in pattern_upper or (
+                "HIDDEN" in pattern_upper and "BEARISH" in pattern_upper
+            ):
                 priority = 2
-            elif "HIDDEN_BULLISH" in pattern_upper or ("HIDDEN" in pattern_upper and "BULLISH" in pattern_upper):
+            elif "HIDDEN_BULLISH" in pattern_upper or (
+                "HIDDEN" in pattern_upper and "BULLISH" in pattern_upper
+            ):
                 priority = 3
             else:
                 priority = 4
@@ -1092,11 +1129,7 @@ def _combine_market_group_rows(
             if any(row.horizon == horizon for row in group_rows):
                 horizons_present.append(horizon)
         source_files = sorted(
-            {
-                Path(row.source_file).name
-                for row in group_rows
-                if row.source_file
-            }
+            {Path(row.source_file).name for row in group_rows if row.source_file}
         )
         combined_rows.append(
             _CombinedMarketMapGroupRow(
@@ -1107,9 +1140,30 @@ def _combine_market_group_rows(
                 start_status_30d=start_status_30d,
                 status_change_30d=status_change_30d,
                 status_change_5d=status_change_5d,
-                window_status_30d=next((row.window_status.strip() for row in group_rows if row.horizon == "rolling 30d" and row.window_status.strip()), ""),
-                window_status_5d=next((row.window_status.strip() for row in group_rows if row.horizon == "rolling 5d" and row.window_status.strip()), ""),
-                window_status_2d=next((row.window_status.strip() for row in group_rows if row.horizon == "rolling 2d" and row.window_status.strip()), ""),
+                window_status_30d=next(
+                    (
+                        row.window_status.strip()
+                        for row in group_rows
+                        if row.horizon == "rolling 30d" and row.window_status.strip()
+                    ),
+                    "",
+                ),
+                window_status_5d=next(
+                    (
+                        row.window_status.strip()
+                        for row in group_rows
+                        if row.horizon == "rolling 5d" and row.window_status.strip()
+                    ),
+                    "",
+                ),
+                window_status_2d=next(
+                    (
+                        row.window_status.strip()
+                        for row in group_rows
+                        if row.horizon == "rolling 2d" and row.window_status.strip()
+                    ),
+                    "",
+                ),
                 overheat_risk_level=_preferred(group_rows, "overheat_risk_level"),
                 pct_above_ema20=_preferred(group_rows, "pct_above_ema20"),
                 pct_above_ma10=_preferred(group_rows, "pct_above_ma10"),
@@ -1121,7 +1175,9 @@ def _combine_market_group_rows(
                 dow_trend_state=_preferred(group_rows, "dow_trend_state"),
                 dow_trend_state_age_td=_preferred(group_rows, "dow_trend_state_age_td"),
                 latest_structure_label=_preferred(group_rows, "latest_structure_label"),
-                latest_structure_age_td=_preferred(group_rows, "latest_structure_age_td"),
+                latest_structure_age_td=_preferred(
+                    group_rows, "latest_structure_age_td"
+                ),
                 latest_bos_event_type=_preferred(group_rows, "latest_bos_event_type"),
                 latest_bos_age_td=_preferred(group_rows, "latest_bos_age_td"),
                 latest_reset_reason=_preferred(group_rows, "latest_reset_reason"),
@@ -1201,11 +1257,21 @@ def _render_combined_market_group_rows(
             + f"<td>{_html_percent(row.return_10d, scale=100.0)}</td>"
             + f"<td>{_html_percent(row.return_20d, scale=100.0)}</td>"
             + f"<td>{_html_percent(row.return_60d, scale=100.0)}</td>"
-            + _render_market_status_cell(row.dow_trend_state, row.dow_trend_state_age_td)
-            + _render_market_value_cell(row.latest_structure_label, row.latest_structure_age_td)
-            + _render_market_status_cell(row.latest_bos_event_type, row.latest_bos_age_td)
-            + _render_market_status_cell(row.latest_reset_reason, row.latest_reset_age_td)
-            + _render_market_value_cell(row.latest_relevant_pattern, row.latest_relevant_pattern_age_td)
+            + _render_market_status_cell(
+                row.dow_trend_state, row.dow_trend_state_age_td
+            )
+            + _render_market_value_cell(
+                row.latest_structure_label, row.latest_structure_age_td
+            )
+            + _render_market_status_cell(
+                row.latest_bos_event_type, row.latest_bos_age_td
+            )
+            + _render_market_status_cell(
+                row.latest_reset_reason, row.latest_reset_age_td
+            )
+            + _render_market_value_cell(
+                row.latest_relevant_pattern, row.latest_relevant_pattern_age_td
+            )
             + f"<td>{_html_text(row.source_horizons)}</td>"
             + f"<td>{_html_text(row.source_files)}</td>"
             + "</tr>"
@@ -1240,7 +1306,9 @@ def _render_layer_subindustry_hierarchy(
     detail_blocks: list[str] = []
     for layer_name in ordered_layer_names:
         layer_row = layer_by_name.get(layer_name)
-        sub_rows = sorted(grouped_subindustries.get(layer_name, []), key=lambda row: row.name)
+        sub_rows = sorted(
+            grouped_subindustries.get(layer_name, []), key=lambda row: row.name
+        )
         if layer_row is not None:
             filter_text = " ".join(
                 part
@@ -1262,11 +1330,15 @@ def _render_layer_subindustry_hierarchy(
                 + "<thead><tr>"
                 + market_map_header_html
                 + "</tr></thead><tbody>"
-                + _render_combined_market_group_rows([layer_row], include_layer_column=True)
+                + _render_combined_market_group_rows(
+                    [layer_row], include_layer_column=True
+                )
                 + "</tbody></table>"
             )
         else:
-            filter_text = " ".join(_combined_market_map_filter_text(row) for row in sub_rows)
+            filter_text = " ".join(
+                _combined_market_map_filter_text(row) for row in sub_rows
+            )
             current_text = "-"
             window_text_30d = "-"
             window_text_5d = "-"
@@ -1275,12 +1347,18 @@ def _render_layer_subindustry_hierarchy(
             summary_status_class = "status-missing"
             layer_table_html = "<p>No combined layer row available.</p>"
         subindustry_table_html = (
-            '<table class="sticky-table market-map-table">'
-            + market_map_colgroup_html
-            + "<tbody>"
-            + _render_combined_market_group_rows(sub_rows, include_layer_column=True)
-            + "</tbody></table>"
-        ) if sub_rows else "<p>No subindustries found for this layer.</p>"
+            (
+                '<table class="sticky-table market-map-table">'
+                + market_map_colgroup_html
+                + "<tbody>"
+                + _render_combined_market_group_rows(
+                    sub_rows, include_layer_column=True
+                )
+                + "</tbody></table>"
+            )
+            if sub_rows
+            else "<p>No subindustries found for this layer.</p>"
+        )
         detail_blocks.append(
             "<details"
             f' class="market-layer-detail {summary_status_class}"'
@@ -1292,7 +1370,7 @@ def _render_layer_subindustry_hierarchy(
             ' data-candidate-priority=""'
             f' data-filter-text="{_html_attr(filter_text.lower())}"'
             ">"
-            "<summary>"
+            f'<summary class="market-layer-summary {summary_status_class}">'
             f'<span class="layer-name">{_html_text(layer_name)}</span>'
             f"<span>Current: {_html_text(current_text)}</span>"
             f"<span>Window 30d: {_html_text(window_text_30d)}</span>"
@@ -1327,7 +1405,9 @@ def _extract_market_map_rows(
                 required_headers=("metric", "value"),
             )
             if dashboard_table is not None:
-                metrics = _metric_value_map(dashboard_table, key_field="metric", value_field="value")
+                metrics = _metric_value_map(
+                    dashboard_table, key_field="metric", value_field="value"
+                )
                 rows.append(
                     _MarketMapRow(
                         scope="ecosystem",
@@ -1341,10 +1421,14 @@ def _extract_market_map_rows(
                         status_change_30d="",
                         status_change_5d="",
                         window_status="",
-                        overheat_risk_level=metrics.get("ecosystem_overheat_risk_level", ""),
+                        overheat_risk_level=metrics.get(
+                            "ecosystem_overheat_risk_level", ""
+                        ),
                         pct_above_ema20=metrics.get("ecosystem_pct_above_ema20", ""),
                         pct_above_ma10=metrics.get("ecosystem_pct_above_ma10", ""),
-                        ema20_breadth_delta_5d=metrics.get("ecosystem_ema20_breadth_delta_5d", ""),
+                        ema20_breadth_delta_5d=metrics.get(
+                            "ecosystem_ema20_breadth_delta_5d", ""
+                        ),
                         return_5d=metrics.get("ecosystem_return_5d", ""),
                         return_10d=metrics.get("ecosystem_return_10d", ""),
                         return_20d=metrics.get("ecosystem_return_20d", ""),
@@ -1380,13 +1464,19 @@ def _extract_market_map_rows(
             )
             timing_by_subindustry = {
                 row.get("group_name", "").strip(): row
-                for row in (subindustry_timing_table.rows if subindustry_timing_table else ())
+                for row in (
+                    subindustry_timing_table.rows if subindustry_timing_table else ()
+                )
                 if row.get("group_name", "").strip()
             }
             overheat_by_group = {
-                (row.get("group_type", "").strip(), row.get("group_name", "").strip()): row
+                (
+                    row.get("group_type", "").strip(),
+                    row.get("group_name", "").strip(),
+                ): row
                 for row in (overheat_table.rows if overheat_table else ())
-                if row.get("group_type", "").strip() and row.get("group_name", "").strip()
+                if row.get("group_type", "").strip()
+                and row.get("group_name", "").strip()
             }
             for table in _tables_with_headers(
                 tables,
@@ -1413,13 +1503,22 @@ def _extract_market_map_rows(
                                 status_change_30d="",
                                 status_change_5d="",
                                 window_status="",
-                                overheat_risk_level=overheat_row.get("overheat_risk_level", "").strip(),
-                                pct_above_ema20=overheat_row.get("pct_above_ema20", "").strip(),
-                                pct_above_ma10=overheat_row.get("ma10_breadth_delta_5d", "").strip(),
-                                ema20_breadth_delta_5d=overheat_row.get("ema20_breadth_delta_5d", "").strip(),
+                                overheat_risk_level=overheat_row.get(
+                                    "overheat_risk_level", ""
+                                ).strip(),
+                                pct_above_ema20=overheat_row.get(
+                                    "pct_above_ema20", ""
+                                ).strip(),
+                                pct_above_ma10=overheat_row.get(
+                                    "ma10_breadth_delta_5d", ""
+                                ).strip(),
+                                ema20_breadth_delta_5d=overheat_row.get(
+                                    "ema20_breadth_delta_5d", ""
+                                ).strip(),
                                 return_5d=row.get("return_5d", "").strip(),
                                 return_10d=overheat_row.get("return_10d", "").strip(),
-                                return_20d=row.get("return_20d", "").strip() or overheat_row.get("return_20d", "").strip(),
+                                return_20d=row.get("return_20d", "").strip()
+                                or overheat_row.get("return_20d", "").strip(),
                                 return_60d="",
                                 dow_trend_state=row.get("trend_state", "").strip(),
                                 dow_trend_state_age_td=_age_text(
@@ -1429,7 +1528,9 @@ def _extract_market_map_rows(
                                     "latest_trend_state_age_td",
                                     "trend_age_td",
                                 ),
-                                latest_structure_label=row.get("latest_structure_label", "").strip(),
+                                latest_structure_label=row.get(
+                                    "latest_structure_label", ""
+                                ).strip(),
                                 latest_structure_age_td=_age_text(
                                     row,
                                     "latest_structure_age_td",
@@ -1437,7 +1538,9 @@ def _extract_market_map_rows(
                                     "structure_age_td",
                                     "latest_structure_freshness_age_td",
                                 ),
-                                latest_bos_event_type=row.get("latest_bos_event_type", "").strip(),
+                                latest_bos_event_type=row.get(
+                                    "latest_bos_event_type", ""
+                                ).strip(),
                                 latest_bos_age_td=_age_text(
                                     row,
                                     "latest_bos_age_td",
@@ -1445,7 +1548,9 @@ def _extract_market_map_rows(
                                     "latest_bos_up_age_td",
                                     "latest_bos_age_trading_days",
                                 ),
-                                latest_reset_reason=row.get("latest_reset_reason", "").strip(),
+                                latest_reset_reason=row.get(
+                                    "latest_reset_reason", ""
+                                ).strip(),
                                 latest_reset_age_td=_age_text(
                                     row,
                                     "latest_reset_age_td",
@@ -1459,7 +1564,9 @@ def _extract_market_map_rows(
                         )
                     elif row_type == "SUBINDUSTRY":
                         subindustry_name = row.get("subindustry", "").strip()
-                        overheat_row = overheat_by_group.get(("subindustry", subindustry_name), {})
+                        overheat_row = overheat_by_group.get(
+                            ("subindustry", subindustry_name), {}
+                        )
                         timing_row = timing_by_subindustry.get(subindustry_name, {})
                         rows.append(
                             _MarketMapRow(
@@ -1468,19 +1575,36 @@ def _extract_market_map_rows(
                                 name=subindustry_name,
                                 layer=row.get("layer", "").strip(),
                                 subindustry=subindustry_name,
-                                current_status=row.get("status", "").strip() or timing_row.get("timing_state", "").strip(),
+                                current_status=row.get("status", "").strip()
+                                or timing_row.get("timing_state", "").strip(),
                                 start_status_30d="",
                                 start_status_5d="",
                                 status_change_30d="",
                                 status_change_5d="",
                                 window_status="",
-                                overheat_risk_level=overheat_row.get("overheat_risk_level", "").strip(),
-                                pct_above_ema20=timing_row.get("pct_above_ema20", "").strip() or overheat_row.get("pct_above_ema20", "").strip(),
-                                pct_above_ma10=overheat_row.get("ma10_breadth_delta_5d", "").strip(),
-                                ema20_breadth_delta_5d=timing_row.get("ema20_breadth_delta_5d", "").strip() or overheat_row.get("ema20_breadth_delta_5d", "").strip(),
-                                return_5d=row.get("return_5d", "").strip() or timing_row.get("return_5d", "").strip(),
-                                return_10d=timing_row.get("return_10d", "").strip() or overheat_row.get("return_10d", "").strip(),
-                                return_20d=row.get("return_20d", "").strip() or timing_row.get("return_20d", "").strip() or overheat_row.get("return_20d", "").strip(),
+                                overheat_risk_level=overheat_row.get(
+                                    "overheat_risk_level", ""
+                                ).strip(),
+                                pct_above_ema20=timing_row.get(
+                                    "pct_above_ema20", ""
+                                ).strip()
+                                or overheat_row.get("pct_above_ema20", "").strip(),
+                                pct_above_ma10=overheat_row.get(
+                                    "ma10_breadth_delta_5d", ""
+                                ).strip(),
+                                ema20_breadth_delta_5d=timing_row.get(
+                                    "ema20_breadth_delta_5d", ""
+                                ).strip()
+                                or overheat_row.get(
+                                    "ema20_breadth_delta_5d", ""
+                                ).strip(),
+                                return_5d=row.get("return_5d", "").strip()
+                                or timing_row.get("return_5d", "").strip(),
+                                return_10d=timing_row.get("return_10d", "").strip()
+                                or overheat_row.get("return_10d", "").strip(),
+                                return_20d=row.get("return_20d", "").strip()
+                                or timing_row.get("return_20d", "").strip()
+                                or overheat_row.get("return_20d", "").strip(),
                                 return_60d=timing_row.get("return_60d", "").strip(),
                                 dow_trend_state=row.get("trend_state", "").strip(),
                                 dow_trend_state_age_td=_age_text(
@@ -1490,7 +1614,9 @@ def _extract_market_map_rows(
                                     "latest_trend_state_age_td",
                                     "trend_age_td",
                                 ),
-                                latest_structure_label=row.get("latest_structure_label", "").strip(),
+                                latest_structure_label=row.get(
+                                    "latest_structure_label", ""
+                                ).strip(),
                                 latest_structure_age_td=_age_text(
                                     row,
                                     "latest_structure_age_td",
@@ -1498,7 +1624,9 @@ def _extract_market_map_rows(
                                     "structure_age_td",
                                     "latest_structure_freshness_age_td",
                                 ),
-                                latest_bos_event_type=row.get("latest_bos_event_type", "").strip(),
+                                latest_bos_event_type=row.get(
+                                    "latest_bos_event_type", ""
+                                ).strip(),
                                 latest_bos_age_td=_age_text(
                                     row,
                                     "latest_bos_age_td",
@@ -1506,7 +1634,9 @@ def _extract_market_map_rows(
                                     "latest_bos_up_age_td",
                                     "latest_bos_age_trading_days",
                                 ),
-                                latest_reset_reason=row.get("latest_reset_reason", "").strip(),
+                                latest_reset_reason=row.get(
+                                    "latest_reset_reason", ""
+                                ).strip(),
                                 latest_reset_age_td=_age_text(
                                     row,
                                     "latest_reset_age_td",
@@ -1546,7 +1676,9 @@ def _extract_market_map_rows(
                         overheat_risk_level=metrics.get("overheat_risk_level", ""),
                         pct_above_ema20=metrics.get("pct_above_ema20", ""),
                         pct_above_ma10=metrics.get("pct_above_ma10", ""),
-                        ema20_breadth_delta_5d=metrics.get("ema20_breadth_delta_5d", ""),
+                        ema20_breadth_delta_5d=metrics.get(
+                            "ema20_breadth_delta_5d", ""
+                        ),
                         return_5d=metrics.get("return_5d", ""),
                         return_10d=metrics.get("return_10d", ""),
                         return_20d=metrics.get("return_20d", ""),
@@ -1568,7 +1700,12 @@ def _extract_market_map_rows(
 
             structure_tables = _tables_with_headers(
                 tables,
-                required_headers=("group_type", "group_name", "timing_state", "overheat_risk_level"),
+                required_headers=(
+                    "group_type",
+                    "group_name",
+                    "timing_state",
+                    "overheat_risk_level",
+                ),
             )
             structure_by_group: dict[tuple[str, str], dict[str, str]] = {}
             for table in structure_tables:
@@ -1580,7 +1717,14 @@ def _extract_market_map_rows(
                     structure_by_group[(group_type, group_name)] = row
             for table in _tables_with_headers(
                 tables,
-                required_headers=("row_type", "layer", "subindustry", "ticker", "current_status", "window_status"),
+                required_headers=(
+                    "row_type",
+                    "layer",
+                    "subindustry",
+                    "ticker",
+                    "current_status",
+                    "window_status",
+                ),
             ):
                 for row in table.rows:
                     row_type = row.get("row_type", "").strip().upper()
@@ -1589,7 +1733,9 @@ def _extract_market_map_rows(
                         continue
                     if row_type == "LAYER":
                         layer_name = row.get("layer", "").strip()
-                        structure_row = structure_by_group.get(("layer", layer_name), {})
+                        structure_row = structure_by_group.get(
+                            ("layer", layer_name), {}
+                        )
                         rows.append(
                             _MarketMapRow(
                                 scope="layer",
@@ -1597,13 +1743,42 @@ def _extract_market_map_rows(
                                 name=layer_name,
                                 layer=layer_name,
                                 subindustry="",
-                                current_status=row.get("current_status", "").strip() or structure_row.get("timing_state", "").strip(),
-                                start_status_30d=(row.get("start_status", "").strip() or group_start_status_by_group.get(("layer", layer_name), "").strip()) if horizon == "rolling 30d" else "",
-                                start_status_5d=(row.get("start_status", "").strip() or group_start_status_by_group.get(("layer", layer_name), "").strip()) if horizon == "rolling 5d" else "",
-                                status_change_30d=row.get("status_change", "").strip() if horizon == "rolling 30d" else "",
-                                status_change_5d=row.get("status_change", "").strip() if horizon == "rolling 5d" else "",
+                                current_status=row.get("current_status", "").strip()
+                                or structure_row.get("timing_state", "").strip(),
+                                start_status_30d=(
+                                    (
+                                        row.get("start_status", "").strip()
+                                        or group_start_status_by_group.get(
+                                            ("layer", layer_name), ""
+                                        ).strip()
+                                    )
+                                    if horizon == "rolling 30d"
+                                    else ""
+                                ),
+                                start_status_5d=(
+                                    (
+                                        row.get("start_status", "").strip()
+                                        or group_start_status_by_group.get(
+                                            ("layer", layer_name), ""
+                                        ).strip()
+                                    )
+                                    if horizon == "rolling 5d"
+                                    else ""
+                                ),
+                                status_change_30d=(
+                                    row.get("status_change", "").strip()
+                                    if horizon == "rolling 30d"
+                                    else ""
+                                ),
+                                status_change_5d=(
+                                    row.get("status_change", "").strip()
+                                    if horizon == "rolling 5d"
+                                    else ""
+                                ),
                                 window_status=row.get("window_status", "").strip(),
-                                overheat_risk_level=structure_row.get("overheat_risk_level", "").strip(),
+                                overheat_risk_level=structure_row.get(
+                                    "overheat_risk_level", ""
+                                ).strip(),
                                 pct_above_ema20="",
                                 pct_above_ma10="",
                                 ema20_breadth_delta_5d="",
@@ -1611,7 +1786,10 @@ def _extract_market_map_rows(
                                 return_10d="",
                                 return_20d="",
                                 return_60d="",
-                                dow_trend_state=row.get("last_trend_state", "").strip() or structure_row.get("trend_classification", "").strip(),
+                                dow_trend_state=row.get("last_trend_state", "").strip()
+                                or structure_row.get(
+                                    "trend_classification", ""
+                                ).strip(),
                                 dow_trend_state_age_td=_age_text(
                                     row,
                                     "last_trend_state_age_td",
@@ -1619,14 +1797,20 @@ def _extract_market_map_rows(
                                     "dow_trend_state_age_td",
                                     "latest_trend_state_age_td",
                                     "trend_age_td",
-                                ) or _age_text(
+                                )
+                                or _age_text(
                                     structure_row,
                                     "trend_state_age_td",
                                     "dow_trend_state_age_td",
                                     "latest_trend_state_age_td",
                                     "trend_age_td",
                                 ),
-                                latest_structure_label=row.get("last_latest_structure_label", "").strip() or structure_row.get("latest_structure_label", "").strip(),
+                                latest_structure_label=row.get(
+                                    "last_latest_structure_label", ""
+                                ).strip()
+                                or structure_row.get(
+                                    "latest_structure_label", ""
+                                ).strip(),
                                 latest_structure_age_td=_age_text(
                                     row,
                                     "last_latest_structure_age_trading_days",
@@ -1634,14 +1818,20 @@ def _extract_market_map_rows(
                                     "latest_structure_age_trading_days",
                                     "structure_age_td",
                                     "latest_structure_freshness_age_td",
-                                ) or _age_text(
+                                )
+                                or _age_text(
                                     structure_row,
                                     "latest_structure_age_td",
                                     "latest_structure_age_trading_days",
                                     "structure_age_td",
                                     "latest_structure_freshness_age_td",
                                 ),
-                                latest_bos_event_type=row.get("last_latest_bos_event_type", "").strip() or structure_row.get("latest_bos_event_type", "").strip(),
+                                latest_bos_event_type=row.get(
+                                    "last_latest_bos_event_type", ""
+                                ).strip()
+                                or structure_row.get(
+                                    "latest_bos_event_type", ""
+                                ).strip(),
                                 latest_bos_age_td=_age_text(
                                     row,
                                     "last_latest_bos_age_trading_days",
@@ -1649,20 +1839,25 @@ def _extract_market_map_rows(
                                     "latest_bos_down_age_td",
                                     "latest_bos_up_age_td",
                                     "latest_bos_age_trading_days",
-                                ) or _age_text(
+                                )
+                                or _age_text(
                                     structure_row,
                                     "latest_bos_age_td",
                                     "latest_bos_down_age_td",
                                     "latest_bos_up_age_td",
                                     "latest_bos_age_trading_days",
                                 ),
-                                latest_reset_reason=row.get("last_latest_reset_reason", "").strip() or structure_row.get("latest_reset_reason", "").strip(),
+                                latest_reset_reason=row.get(
+                                    "last_latest_reset_reason", ""
+                                ).strip()
+                                or structure_row.get("latest_reset_reason", "").strip(),
                                 latest_reset_age_td=_age_text(
                                     row,
                                     "last_latest_reset_age_trading_days",
                                     "latest_reset_age_td",
                                     "latest_reset_age_trading_days",
-                                ) or _age_text(
+                                )
+                                or _age_text(
                                     structure_row,
                                     "latest_reset_age_td",
                                     "latest_reset_age_trading_days",
@@ -1675,7 +1870,9 @@ def _extract_market_map_rows(
                         )
                     elif row_type == "SUBINDUSTRY":
                         subindustry_name = row.get("subindustry", "").strip()
-                        structure_row = structure_by_group.get(("subindustry", subindustry_name), {})
+                        structure_row = structure_by_group.get(
+                            ("subindustry", subindustry_name), {}
+                        )
                         rows.append(
                             _MarketMapRow(
                                 scope="subindustry",
@@ -1683,13 +1880,42 @@ def _extract_market_map_rows(
                                 name=subindustry_name,
                                 layer=row.get("layer", "").strip(),
                                 subindustry=subindustry_name,
-                                current_status=row.get("current_status", "").strip() or structure_row.get("timing_state", "").strip(),
-                                start_status_30d=(row.get("start_status", "").strip() or group_start_status_by_group.get(("subindustry", subindustry_name), "").strip()) if horizon == "rolling 30d" else "",
-                                start_status_5d=(row.get("start_status", "").strip() or group_start_status_by_group.get(("subindustry", subindustry_name), "").strip()) if horizon == "rolling 5d" else "",
-                                status_change_30d=row.get("status_change", "").strip() if horizon == "rolling 30d" else "",
-                                status_change_5d=row.get("status_change", "").strip() if horizon == "rolling 5d" else "",
+                                current_status=row.get("current_status", "").strip()
+                                or structure_row.get("timing_state", "").strip(),
+                                start_status_30d=(
+                                    (
+                                        row.get("start_status", "").strip()
+                                        or group_start_status_by_group.get(
+                                            ("subindustry", subindustry_name), ""
+                                        ).strip()
+                                    )
+                                    if horizon == "rolling 30d"
+                                    else ""
+                                ),
+                                start_status_5d=(
+                                    (
+                                        row.get("start_status", "").strip()
+                                        or group_start_status_by_group.get(
+                                            ("subindustry", subindustry_name), ""
+                                        ).strip()
+                                    )
+                                    if horizon == "rolling 5d"
+                                    else ""
+                                ),
+                                status_change_30d=(
+                                    row.get("status_change", "").strip()
+                                    if horizon == "rolling 30d"
+                                    else ""
+                                ),
+                                status_change_5d=(
+                                    row.get("status_change", "").strip()
+                                    if horizon == "rolling 5d"
+                                    else ""
+                                ),
                                 window_status=row.get("window_status", "").strip(),
-                                overheat_risk_level=structure_row.get("overheat_risk_level", "").strip(),
+                                overheat_risk_level=structure_row.get(
+                                    "overheat_risk_level", ""
+                                ).strip(),
                                 pct_above_ema20="",
                                 pct_above_ma10="",
                                 ema20_breadth_delta_5d="",
@@ -1697,7 +1923,10 @@ def _extract_market_map_rows(
                                 return_10d="",
                                 return_20d="",
                                 return_60d="",
-                                dow_trend_state=row.get("last_trend_state", "").strip() or structure_row.get("trend_classification", "").strip(),
+                                dow_trend_state=row.get("last_trend_state", "").strip()
+                                or structure_row.get(
+                                    "trend_classification", ""
+                                ).strip(),
                                 dow_trend_state_age_td=_age_text(
                                     row,
                                     "last_trend_state_age_td",
@@ -1705,14 +1934,20 @@ def _extract_market_map_rows(
                                     "dow_trend_state_age_td",
                                     "latest_trend_state_age_td",
                                     "trend_age_td",
-                                ) or _age_text(
+                                )
+                                or _age_text(
                                     structure_row,
                                     "trend_state_age_td",
                                     "dow_trend_state_age_td",
                                     "latest_trend_state_age_td",
                                     "trend_age_td",
                                 ),
-                                latest_structure_label=row.get("last_latest_structure_label", "").strip() or structure_row.get("latest_structure_label", "").strip(),
+                                latest_structure_label=row.get(
+                                    "last_latest_structure_label", ""
+                                ).strip()
+                                or structure_row.get(
+                                    "latest_structure_label", ""
+                                ).strip(),
                                 latest_structure_age_td=_age_text(
                                     row,
                                     "last_latest_structure_age_trading_days",
@@ -1720,14 +1955,20 @@ def _extract_market_map_rows(
                                     "latest_structure_age_trading_days",
                                     "structure_age_td",
                                     "latest_structure_freshness_age_td",
-                                ) or _age_text(
+                                )
+                                or _age_text(
                                     structure_row,
                                     "latest_structure_age_td",
                                     "latest_structure_age_trading_days",
                                     "structure_age_td",
                                     "latest_structure_freshness_age_td",
                                 ),
-                                latest_bos_event_type=row.get("last_latest_bos_event_type", "").strip() or structure_row.get("latest_bos_event_type", "").strip(),
+                                latest_bos_event_type=row.get(
+                                    "last_latest_bos_event_type", ""
+                                ).strip()
+                                or structure_row.get(
+                                    "latest_bos_event_type", ""
+                                ).strip(),
                                 latest_bos_age_td=_age_text(
                                     row,
                                     "last_latest_bos_age_trading_days",
@@ -1735,20 +1976,25 @@ def _extract_market_map_rows(
                                     "latest_bos_down_age_td",
                                     "latest_bos_up_age_td",
                                     "latest_bos_age_trading_days",
-                                ) or _age_text(
+                                )
+                                or _age_text(
                                     structure_row,
                                     "latest_bos_age_td",
                                     "latest_bos_down_age_td",
                                     "latest_bos_up_age_td",
                                     "latest_bos_age_trading_days",
                                 ),
-                                latest_reset_reason=row.get("last_latest_reset_reason", "").strip() or structure_row.get("latest_reset_reason", "").strip(),
+                                latest_reset_reason=row.get(
+                                    "last_latest_reset_reason", ""
+                                ).strip()
+                                or structure_row.get("latest_reset_reason", "").strip(),
                                 latest_reset_age_td=_age_text(
                                     row,
                                     "last_latest_reset_age_trading_days",
                                     "latest_reset_age_td",
                                     "latest_reset_age_trading_days",
-                                ) or _age_text(
+                                )
+                                or _age_text(
                                     structure_row,
                                     "latest_reset_age_td",
                                     "latest_reset_age_trading_days",
@@ -1830,11 +2076,21 @@ def _render_market_map_rows(
             + f"<td>{_html_percent(row.return_10d, scale=100.0)}</td>"
             + f"<td>{_html_percent(row.return_20d, scale=100.0)}</td>"
             + f"<td>{_html_percent(row.return_60d, scale=100.0)}</td>"
-            + _render_market_status_cell(row.dow_trend_state, row.dow_trend_state_age_td)
-            + _render_market_value_cell(row.latest_structure_label, row.latest_structure_age_td)
-            + _render_market_status_cell(row.latest_bos_event_type, row.latest_bos_age_td)
-            + _render_market_status_cell(row.latest_reset_reason, row.latest_reset_age_td)
-            + _render_market_value_cell(row.latest_relevant_pattern, row.latest_relevant_pattern_age_td)
+            + _render_market_status_cell(
+                row.dow_trend_state, row.dow_trend_state_age_td
+            )
+            + _render_market_value_cell(
+                row.latest_structure_label, row.latest_structure_age_td
+            )
+            + _render_market_status_cell(
+                row.latest_bos_event_type, row.latest_bos_age_td
+            )
+            + _render_market_status_cell(
+                row.latest_reset_reason, row.latest_reset_age_td
+            )
+            + _render_market_value_cell(
+                row.latest_relevant_pattern, row.latest_relevant_pattern_age_td
+            )
             + f"<td>{_html_text(row.source_horizons)}</td>"
             + "</tr>"
         )
@@ -1854,7 +2110,9 @@ def _build_inspector_views(
     }
 
 
-def _rows_for_ticker(rows: list[DatacenterDashboardRow], ticker: str) -> list[DatacenterDashboardRow]:
+def _rows_for_ticker(
+    rows: list[DatacenterDashboardRow], ticker: str
+) -> list[DatacenterDashboardRow]:
     matching_rows = [row for row in rows if row.ticker.upper() == ticker.upper()]
     return sorted(
         matching_rows,
@@ -1882,19 +2140,17 @@ def _first_non_empty_context_value(
     return ""
 
 
-def _count_dict_lines(prefix: str, ordered_keys: tuple[str, ...], counts: dict[str, int]) -> str:
-    return "\n".join(
-        f"{prefix}{key}={counts.get(key, 0)}"
-        for key in ordered_keys
-    )
+def _count_dict_lines(
+    prefix: str, ordered_keys: tuple[str, ...], counts: dict[str, int]
+) -> str:
+    return "\n".join(f"{prefix}{key}={counts.get(key, 0)}" for key in ordered_keys)
 
 
-def _count_table(title: str, prefix: str, ordered_keys: tuple[str, ...], counts: dict[str, int]) -> str:
+def _count_table(
+    title: str, prefix: str, ordered_keys: tuple[str, ...], counts: dict[str, int]
+) -> str:
     rows = "".join(
-        "<tr>"
-        f"<th>{escape(key)}</th>"
-        f"<td>{counts.get(key, 0)}</td>"
-        "</tr>"
+        "<tr>" f"<th>{escape(key)}</th>" f"<td>{counts.get(key, 0)}</td>" "</tr>"
         for key in ordered_keys
     )
     return (
@@ -1913,7 +2169,9 @@ def _command_center_sort_key(decision: DatacenterTickerDecision) -> tuple[int, s
     return (_ACTION_ORDER.index(decision.action), decision.ticker)
 
 
-def _candidate_sort_key(decision: DatacenterTickerDecision) -> tuple[int, int, int, int, int, str]:
+def _candidate_sort_key(
+    decision: DatacenterTickerDecision,
+) -> tuple[int, int, int, int, int, str]:
     bullish_age = (
         decision.latest_bullish_signal_age_td
         if decision.latest_bullish_signal_age_td is not None
@@ -1983,9 +2241,7 @@ def _first_trace(decision: DatacenterTickerDecision) -> tuple[str, str]:
 
 def _newest_report_timestamp(dashboard_status: DatacenterDashboardStatus) -> str:
     timestamps = [
-        report.modified_at
-        for report in dashboard_status.reports
-        if report.modified_at
+        report.modified_at for report in dashboard_status.reports if report.modified_at
     ]
     if not timestamps:
         return ""
@@ -2001,23 +2257,35 @@ def generate_dashboard_html(
     max_command_rows: int,
     max_candidate_rows: int,
     generated_at_utc: str | None = None,
-) -> tuple[str, DatacenterDashboardStatus, DatacenterDashboardBatchParseResult, DatacenterDecisionBatchResult]:
-    dashboard_status = discover_datacenter_dashboard_status(reports_dir, report_date=report_date)
+) -> tuple[
+    str,
+    DatacenterDashboardStatus,
+    DatacenterDashboardBatchParseResult,
+    DatacenterDecisionBatchResult,
+]:
+    dashboard_status = discover_datacenter_dashboard_status(
+        reports_dir, report_date=report_date
+    )
     parse_result = parse_datacenter_dashboard_reports(dashboard_status.reports)
     parsed_rows = _collect_rows(dashboard_status)
     decision_result = build_datacenter_ticker_decisions(parsed_rows)
     inspector_views = _build_inspector_views(decision_result.decisions, parsed_rows)
-    generated_at = generated_at_utc or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    generated_at = generated_at_utc or datetime.now(timezone.utc).isoformat(
+        timespec="seconds"
+    )
     selection_mode = "report_date" if report_date else "newest"
     selected_report_date = report_date or "newest"
 
-    found_reports = sum(1 for report in dashboard_status.reports if report.status == "OK")
-    missing_reports = sum(1 for report in dashboard_status.reports if report.status != "OK")
+    found_reports = sum(
+        1 for report in dashboard_status.reports if report.status == "OK"
+    )
+    missing_reports = sum(
+        1 for report in dashboard_status.reports if report.status != "OK"
+    )
     report_summaries = _report_summary_by_horizon(parse_result)
     newest_report_timestamp = _newest_report_timestamp(dashboard_status)
     report_paths = {
-        report.horizon: report.path or ""
-        for report in dashboard_status.reports
+        report.horizon: report.path or "" for report in dashboard_status.reports
     }
     market_map_rows = _extract_market_map_rows(dashboard_status)
     ecosystem_context_rows = _extract_ecosystem_context_rows(dashboard_status)
@@ -2028,10 +2296,7 @@ def generate_dashboard_html(
         watchlist_rows_by_ticker.setdefault(row.ticker, []).append(row)
 
     header_summary_rows = "".join(
-        "<tr>"
-        f"<th>{escape(label)}</th>"
-        f"<td>{_html_text(value)}</td>"
-        "</tr>"
+        "<tr>" f"<th>{escape(label)}</th>" f"<td>{_html_text(value)}</td>" "</tr>"
         for label, value in (
             ("Generated at UTC", generated_at),
             ("Reports dir", reports_dir),
@@ -2045,10 +2310,7 @@ def generate_dashboard_html(
         )
     )
     report_source_rows = "".join(
-        "<tr>"
-        f"<th>{escape(label)}</th>"
-        f"<td>{_html_text(value)}</td>"
-        "</tr>"
+        "<tr>" f"<th>{escape(label)}</th>" f"<td>{_html_text(value)}</td>" "</tr>"
         for label, value in (
             ("generated_at_utc", generated_at),
             ("reports_dir", reports_dir),
@@ -2101,10 +2363,10 @@ def generate_dashboard_html(
             command_center_rows_rendered += 1
         if rows_html:
             command_center_html_parts.append(
-                "<section class=\"group-section\">"
+                '<section class="group-section">'
                 f"<h3>{escape(group_label)}</h3>"
-                "<div class=\"table-scroll\">"
-                "<table class=\"sticky-table\">"
+                '<div class="table-scroll">'
+                '<table class="sticky-table">'
                 "<thead><tr>"
                 "<th>Ticker</th><th>Action</th><th>Severity</th><th>Primary reason</th>"
                 "<th>Pullback validity</th><th>Entry readiness</th><th>Candidate priority</th>"
@@ -2123,7 +2385,9 @@ def generate_dashboard_html(
         for decision in decision_result.decisions
         if decision.pullback_validity in _CANDIDATE_PULLBACK_ORDER
     ]
-    candidate_decisions = sorted(candidate_decisions, key=_candidate_sort_key)[:max_candidate_rows]
+    candidate_decisions = sorted(candidate_decisions, key=_candidate_sort_key)[
+        :max_candidate_rows
+    ]
     candidate_rows_html = "".join(
         "<tr"
         f' data-filter-row="1"'
@@ -2162,7 +2426,11 @@ def generate_dashboard_html(
         watchlist_decisions,
         key=lambda decision: (
             _ACTION_ORDER.index(decision.action),
-            decision.candidate_priority if decision.candidate_priority is not None else 10**9,
+            (
+                decision.candidate_priority
+                if decision.candidate_priority is not None
+                else 10**9
+            ),
             decision.ticker,
         ),
     )
@@ -2207,7 +2475,9 @@ def generate_dashboard_html(
 
     combined_ecosystem_row = _combine_ecosystem_context_rows(ecosystem_context_rows)
     layer_market_rows = [row for row in market_map_rows if row.scope == "layer"]
-    subindustry_market_rows = [row for row in market_map_rows if row.scope == "subindustry"]
+    subindustry_market_rows = [
+        row for row in market_map_rows if row.scope == "subindustry"
+    ]
     combined_layer_rows = _combine_market_group_rows(layer_market_rows)
     combined_subindustry_rows = _combine_market_group_rows(subindustry_market_rows)
     market_map_header_html = _market_map_header_html()
@@ -2235,19 +2505,28 @@ def generate_dashboard_html(
     for decision in sorted(decision_result.decisions, key=lambda item: item.ticker):
         inspector = inspector_views.get(decision.ticker)
         detail_rows = "".join(
-            "<tr>"
-            f"<th>{escape(label)}</th>"
-            f"<td>{_html_text(value)}</td>"
-            "</tr>"
+            "<tr>" f"<th>{escape(label)}</th>" f"<td>{_html_text(value)}</td>" "</tr>"
             for label, value in (
                 ("Ticker", decision.ticker),
                 ("Final action", decision.action),
                 ("Severity", decision.severity),
                 ("Primary reason", decision.primary_reason),
-                ("Conflict detected", inspector.conflict_detected if inspector else None),
-                ("Supporting signals", ", ".join(inspector.supporting_signals) if inspector else None),
-                ("Conflicting signals", ", ".join(inspector.conflicting_signals) if inspector else None),
-                ("Override explanation", inspector.override_explanation if inspector else None),
+                (
+                    "Conflict detected",
+                    inspector.conflict_detected if inspector else None,
+                ),
+                (
+                    "Supporting signals",
+                    ", ".join(inspector.supporting_signals) if inspector else None,
+                ),
+                (
+                    "Conflicting signals",
+                    ", ".join(inspector.conflicting_signals) if inspector else None,
+                ),
+                (
+                    "Override explanation",
+                    inspector.override_explanation if inspector else None,
+                ),
                 ("Pullback validity", decision.pullback_validity),
                 ("Pullback reason", decision.pullback_reason),
                 ("Entry readiness", decision.entry_readiness),
@@ -2267,9 +2546,7 @@ def generate_dashboard_html(
             f"<td>{_html_text(trace.row_kind)}</td>"
             "</tr>"
             for trace in decision.decision_trace
-        ) or (
-            "<tr><td colspan=\"7\">-</td></tr>"
-        )
+        ) or ('<tr><td colspan="7">-</td></tr>')
         filter_text = " ".join(
             part
             for part in (
@@ -2282,7 +2559,9 @@ def generate_dashboard_html(
             )
             if part
         )
-        is_selected = ticker is not None and decision.ticker.upper() == ticker.strip().upper()
+        is_selected = (
+            ticker is not None and decision.ticker.upper() == ticker.strip().upper()
+        )
         detail_sections.append(
             f'<details class="ticker-detail{" selected" if is_selected else ""}" '
             f' data-filter-row="1"'
@@ -2471,7 +2750,6 @@ def generate_dashboard_html(
     }}
     .market-layer-detail[open] summary {{
       border-bottom: 1px solid #d8dee4;
-      background: #f8fafc;
     }}
     .layer-name {{
       font-weight: 700;
@@ -2840,15 +3118,21 @@ def generate_datacenter_dashboard_html_file(
     max_candidate_rows: int = 100,
     generated_at_utc: str | None = None,
 ) -> DatacenterDashboardHtmlGenerationResult:
-    normalized_report_date = report_date.strip() if report_date is not None and report_date.strip() else None
-    if normalized_report_date is not None and not _REPORT_DATE_RE.match(normalized_report_date):
+    normalized_report_date = (
+        report_date.strip() if report_date is not None and report_date.strip() else None
+    )
+    if normalized_report_date is not None and not _REPORT_DATE_RE.match(
+        normalized_report_date
+    ):
         raise ValueError(f"invalid report_date format: {normalized_report_date}")
 
     dashboard_status = discover_datacenter_dashboard_status(
         reports_dir,
         report_date=normalized_report_date,
     )
-    if normalized_report_date and all(report.status != "OK" for report in dashboard_status.reports):
+    if normalized_report_date and all(
+        report.status != "OK" for report in dashboard_status.reports
+    ):
         raise FileNotFoundError(
             f"no reports found for report_date={normalized_report_date} in {reports_dir}"
         )
@@ -2878,8 +3162,12 @@ def generate_datacenter_dashboard_html_file(
         for decision in decision_result.decisions
         if decision.pullback_validity in _CANDIDATE_PULLBACK_ORDER
     )
-    found_reports = sum(1 for report in dashboard_status.reports if report.status == "OK")
-    missing_reports = sum(1 for report in dashboard_status.reports if report.status != "OK")
+    found_reports = sum(
+        1 for report in dashboard_status.reports if report.status == "OK"
+    )
+    missing_reports = sum(
+        1 for report in dashboard_status.reports if report.status != "OK"
+    )
     selection_mode = "report_date" if normalized_report_date else "newest"
     summary_lines = (
         f"SUMMARY reports_dir={reports_dir}",
