@@ -477,19 +477,75 @@ def _group_window_start_map(
 
 def _group_status_class(value: str) -> str:
     normalized = (value or "").strip().upper()
-    if normalized in {"EXIT_ZONE", "HIGH", "EXTREME"}:
+    if not normalized or normalized == "-":
+        return "status-missing"
+    if normalized == "INSUFFICIENT_DATA":
+        return "status-missing"
+    high_risk = {
+        "EXIT_ZONE",
+        "HIGH_EXIT_RISK",
+        "EMERGENCY_SELL_PRESSURE",
+        "AVOID",
+        "EXTREME",
+        "HIGH",
+    }
+    medium_risk = {
+        "TRIM_WATCH",
+        "WATCH",
+        "WATCH_PRESSURE",
+        "SHARP_2D_DROP",
+        "MEDIUM_EXIT_RISK",
+        "ELEVATED",
+        "MEDIUM",
+    }
+    positive = {
+        "BUY_ZONE",
+        "ADD_ON_PULLBACK",
+        "BREAKOUT_CANDIDATE",
+        "PULLBACK_CANDIDATE",
+        "VALID_PULLBACK",
+        "READY_TO_WATCH",
+    }
+    neutral = {
+        "NEUTRAL",
+        "NORMAL",
+        "NO_EMERGENCY",
+        "NO_PULLBACK",
+        "LOW",
+    }
+    if normalized in high_risk:
         return "risk-high"
-    if normalized in {"TRIM_WATCH", "WATCH", "ELEVATED", "MEDIUM"}:
+    if normalized in medium_risk:
         return "risk-medium"
-    if normalized in {"BUY_ZONE", "ADD_ON_PULLBACK"}:
+    if normalized in positive:
         return "status-positive"
-    if normalized in {"NEUTRAL", "NORMAL", "LOW"}:
+    if normalized in neutral:
         return "status-neutral"
     return ""
 
 
+def _status_class_from_text(value: str) -> str:
+    text = (value or "").strip()
+    if not text:
+        return "status-missing"
+    if "->" in text:
+        right_hand = text.split("->")[-1].strip()
+        css_class = _group_status_class(right_hand)
+        if css_class:
+            return css_class
+    tokens = re.findall(r"[A-Z_]+", text.upper())
+    if not tokens:
+        return _group_status_class(text)
+    for css_class in ("risk-high", "risk-medium", "status-positive", "status-neutral", "status-missing"):
+        for token in tokens:
+            token_class = _group_status_class(token)
+            if token_class == css_class:
+                return css_class
+    return _group_status_class(text)
+
+
 def _render_market_status_cell(value: str) -> str:
-    css_class = _group_status_class(value)
+    css_class = _status_class_from_text(value)
     class_attr = f' class="{css_class}"' if css_class else ""
     return f"<td{class_attr}>{_html_text(value)}</td>"
 
@@ -798,8 +854,14 @@ def _market_map_header_html() -> str:
 
 
 def _render_combined_ecosystem_row(row: _CombinedEcosystemRow) -> str:
-    status_class = _group_status_class(row.current_status)
-    status_class_attr = f' class="{status_class}"' if status_class else ""
+    status_change_30d_class = _status_class_from_text(row.status_change_30d)
+    status_change_30d_attr = (
+        f' class="{status_change_30d_class}"' if status_change_30d_class else ""
+    )
+    status_change_5d_class = _status_class_from_text(row.status_change_5d)
+    status_change_5d_attr = (
+        f' class="{status_change_5d_class}"' if status_change_5d_class else ""
+    )
     return (
         "<tr"
         f' data-filter-row="1"'
@@ -808,15 +870,15 @@ def _render_combined_ecosystem_row(row: _CombinedEcosystemRow) -> str:
         f' data-pullback-validity=""'
         f' data-entry-readiness=""'
         f' data-candidate-priority=""'
-        f' data-filter-text="{_html_attr(_ecosystem_filter_text(row))}"'
-        ">"
-        f"<td>{_html_text(row.market_level)}</td>"
+            f' data-filter-text="{_html_attr(_ecosystem_filter_text(row))}"'
+            ">"
+            f"<td>{_html_text(row.market_level)}</td>"
         + f"<td>{_html_text(row.name)}</td>"
         + f"<td>{_html_text(row.layer)}</td>"
-        + f"<td>{_html_text(row.current_status)}</td>"
-        + f"<td>{_html_text(row.start_status_30d)}</td>"
-        + f"<td{status_class_attr}>{_html_text(row.status_change_30d)}</td>"
-        + f"<td{status_class_attr}>{_html_text(row.status_change_5d)}</td>"
+        + _render_market_status_cell(row.current_status)
+        + _render_market_status_cell(row.start_status_30d)
+        + f"<td{status_change_30d_attr}>{_html_text(row.status_change_30d)}</td>"
+        + f"<td{status_change_5d_attr}>{_html_text(row.status_change_5d)}</td>"
         + _render_market_status_cell(row.window_status_30d)
         + _render_market_status_cell(row.window_status_5d)
         + _render_market_status_cell(row.window_status_2d)
@@ -828,10 +890,10 @@ def _render_combined_ecosystem_row(row: _CombinedEcosystemRow) -> str:
         + f"<td>{_html_percent(row.return_10d, scale=100.0)}</td>"
         + f"<td>{_html_percent(row.return_20d, scale=100.0)}</td>"
         + f"<td>{_html_percent(row.return_60d, scale=100.0)}</td>"
-        + f"<td>{_html_text(row.dow_trend_state)}</td>"
+        + _render_market_status_cell(row.dow_trend_state)
         + f"<td>{_html_text(row.latest_structure_label)}</td>"
-        + f"<td>{_html_text(row.latest_bos_event_type)}</td>"
-        + f"<td>{_html_text(row.latest_reset_reason)}</td>"
+        + _render_market_status_cell(row.latest_bos_event_type)
+        + _render_market_status_cell(row.latest_reset_reason)
         + f"<td>{_html_text(row.latest_relevant_pattern)}</td>"
         + f"<td>{_html_text(row.latest_relevant_pattern_age_td)}</td>"
         + f"<td>{_html_text(row.source_horizons)}</td>"
@@ -993,8 +1055,14 @@ def _render_combined_market_group_rows(
 ) -> str:
     rendered_rows: list[str] = []
     for row in rows:
-        status_class = _group_status_class(row.current_status)
-        status_class_attr = f' class="{status_class}"' if status_class else ""
+        status_change_30d_class = _status_class_from_text(row.status_change_30d)
+        status_change_30d_attr = (
+            f' class="{status_change_30d_class}"' if status_change_30d_class else ""
+        )
+        status_change_5d_class = _status_class_from_text(row.status_change_5d)
+        status_change_5d_attr = (
+            f' class="{status_change_5d_class}"' if status_change_5d_class else ""
+        )
         rendered_rows.append(
             "<tr"
             f' data-filter-row="1"'
@@ -1008,10 +1076,10 @@ def _render_combined_market_group_rows(
             f"<td>{_html_text(row.scope.upper())}</td>"
             + f"<td>{_html_text(row.name)}</td>"
             + f"<td>{_html_text(row.layer if include_layer_column else row.layer or row.name)}</td>"
-            + f"<td>{_html_text(row.current_status)}</td>"
-            + f"<td>{_html_text(row.start_status_30d)}</td>"
-            + f"<td{status_class_attr}>{_html_text(row.status_change_30d)}</td>"
-            + f"<td{status_class_attr}>{_html_text(row.status_change_5d)}</td>"
+            + _render_market_status_cell(row.current_status)
+            + _render_market_status_cell(row.start_status_30d)
+            + f"<td{status_change_30d_attr}>{_html_text(row.status_change_30d)}</td>"
+            + f"<td{status_change_5d_attr}>{_html_text(row.status_change_5d)}</td>"
             + _render_market_status_cell(row.window_status_30d)
             + _render_market_status_cell(row.window_status_5d)
             + _render_market_status_cell(row.window_status_2d)
@@ -1023,10 +1091,10 @@ def _render_combined_market_group_rows(
             + f"<td>{_html_percent(row.return_10d, scale=100.0)}</td>"
             + f"<td>{_html_percent(row.return_20d, scale=100.0)}</td>"
             + f"<td>{_html_percent(row.return_60d, scale=100.0)}</td>"
-            + f"<td>{_html_text(row.dow_trend_state)}</td>"
+            + _render_market_status_cell(row.dow_trend_state)
             + f"<td>{_html_text(row.latest_structure_label)}</td>"
-            + f"<td>{_html_text(row.latest_bos_event_type)}</td>"
-            + f"<td>{_html_text(row.latest_reset_reason)}</td>"
+            + _render_market_status_cell(row.latest_bos_event_type)
+            + _render_market_status_cell(row.latest_reset_reason)
             + f"<td>{_html_text(row.latest_relevant_pattern)}</td>"
             + f"<td>{_html_text(row.latest_relevant_pattern_age_td)}</td>"
             + f"<td>{_html_text(row.source_horizons)}</td>"
@@ -1073,9 +1141,11 @@ def _render_layer_subindustry_hierarchy(
                 if part
             )
             current_text = _safe_text(layer_row.current_status)
-            status_change_text = _safe_text(layer_row.status_change_30d)
-            window_text = _safe_text(layer_row.window_status_30d)
+            window_text_30d = _safe_text(layer_row.window_status_30d)
+            window_text_5d = _safe_text(layer_row.window_status_5d)
+            window_text_2d = _safe_text(layer_row.window_status_2d)
             overheat_text = _safe_text(layer_row.overheat_risk_level)
+            summary_status_class = _status_class_from_text(layer_row.current_status)
             layer_table_html = (
                 '<div class="table-scroll"><table class="sticky-table"><thead><tr>'
                 + market_map_header_html
@@ -1086,9 +1156,11 @@ def _render_layer_subindustry_hierarchy(
         else:
             filter_text = " ".join(_combined_market_map_filter_text(row) for row in sub_rows)
             current_text = "-"
-            status_change_text = "-"
-            window_text = "-"
+            window_text_30d = "-"
+            window_text_5d = "-"
+            window_text_2d = "-"
             overheat_text = "-"
+            summary_status_class = "status-missing"
             layer_table_html = "<p>No combined layer row available.</p>"
         subindustry_table_html = (
             '<div class="table-scroll"><table class="sticky-table"><thead><tr>'
@@ -1099,7 +1171,7 @@ def _render_layer_subindustry_hierarchy(
         ) if sub_rows else "<p>No subindustries found for this layer.</p>"
         detail_blocks.append(
             "<details"
-            ' class="market-layer-detail"'
+            f' class="market-layer-detail {summary_status_class}"'
             ' data-filter-row="1"'
             ' data-section="market-map"'
             f' data-action="{_html_attr(layer_row.current_status if layer_row is not None else "")}"'
@@ -1111,8 +1183,9 @@ def _render_layer_subindustry_hierarchy(
             "<summary>"
             f'<span class="layer-name">{_html_text(layer_name)}</span>'
             f"<span>Current: {_html_text(current_text)}</span>"
-            f"<span>30d: {_html_text(status_change_text)}</span>"
-            f"<span>Window 30d: {_html_text(window_text)}</span>"
+            f"<span>Window 30d: {_html_text(window_text_30d)}</span>"
+            f"<span>Window 5d: {_html_text(window_text_5d)}</span>"
+            f"<span>Window 2d: {_html_text(window_text_2d)}</span>"
             f"<span>Overheat: {_html_text(overheat_text)}</span>"
             "</summary>"
             '<div class="layer-detail-body">'
@@ -2054,6 +2127,7 @@ def generate_dashboard_html(
     .risk-medium {{ background: #fff2df; }}
     .status-positive {{ background: #e8f5e9; }}
     .status-neutral {{ background: #f1f3f5; }}
+    .status-missing {{ background: #eef2f6; }}
     .filter-box {{
       margin: 8px 0 16px;
       padding: 12px;

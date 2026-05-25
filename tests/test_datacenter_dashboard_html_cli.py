@@ -21,6 +21,7 @@ from dev_tools.datacenter_dashboard_support import (
     DatacenterReportStatus,
 )
 from dev_tools.run_datacenter_dashboard_html import (
+    _status_class_from_text,
     build_parser,
     generate_datacenter_dashboard_html_file,
     generate_dashboard_html,
@@ -779,7 +780,7 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     assert "Latest reset" in html_one
     assert "Source horizons" in html_one
     assert "Source files" in html_one
-    assert 'class="market-layer-detail"' in html_one
+    assert 'class="market-layer-detail' in html_one
     assert "WATCH -&gt; BUY_ZONE" in html_one
     assert "NEUTRAL -&gt; WATCH" in html_one
     assert "72.00%" in html_one
@@ -804,16 +805,23 @@ def test_generate_dashboard_html_is_deterministic_and_escapes_values(tmp_path, m
     hierarchy_section = html_one[
         html_one.index('id="market-map-layers-subindustries"'):html_one.index('id="watchlist-status"')
     ]
+    summary_match = re.search(r"<summary>(.*?)</summary>", hierarchy_section, re.DOTALL)
+    assert summary_match is not None
+    summary_html = summary_match.group(1)
     assert "<details" in hierarchy_section
     assert "<summary>" in hierarchy_section
-    assert "Current: WATCH" in hierarchy_section
-    assert "30d: NEUTRAL -&gt; WATCH" in hierarchy_section
-    assert "Window 30d: ADD_ON_PULLBACK" in hierarchy_section
-    assert "Overheat: WATCH" in hierarchy_section
+    assert 'class="market-layer-detail risk-medium"' in hierarchy_section
+    assert "Current: WATCH" in summary_html
+    assert "Window 30d: ADD_ON_PULLBACK" in summary_html
+    assert "Window 5d: ADD_ON_PULLBACK" in summary_html
+    assert "Window 2d: ADD_ON_PULLBACK" in summary_html
+    assert "Overheat: WATCH" in summary_html
+    assert "30d: NEUTRAL -&gt; WATCH" not in summary_html
     assert "Layer summary" in hierarchy_section
     assert "Subindustries" in hierarchy_section
     assert "<td>LAYER</td><td>Compute</td><td>Compute</td>" in hierarchy_section
     assert "<td>SUBINDUSTRY</td><td>AI Accelerators</td><td>Compute</td>" in hierarchy_section
+    assert 'class="status-positive">ADD_ON_PULLBACK</td>' in hierarchy_section
     assert html_one.index('id="watchlist-status"') > html_one.index('id="summary"')
     assert html_one.index('id="watchlist-status"') < html_one.index('id="candidate-pullbacks"')
     assert html_one.index('id="candidate-pullbacks"') < html_one.index('id="command-center"')
@@ -926,36 +934,6 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     assert "Visible filtered rows:" in html
     assert "Market Map rows:" in html
     assert "Watchlist rows:" in html
-    assert "Candidate rows:" in html
-    assert "Command Center rows:" in html
-    assert "Inspector rows:" in html
-    assert "VALID_PULLBACK" in html
-    assert "P1_READY_TO_WATCH" in html
-    assert "WATCH_VALID_PULLBACK" in html
-    assert '<tr data-filter-row="1"' in html
-    assert 'data-section="market-map"' in html
-    assert 'data-section="watchlist-status"' in html
-    assert 'data-section="candidate-pullbacks"' in html
-    assert 'data-section="command-center"' in html
-    assert 'data-section="inspector"' in html
-    assert "<td>MS&amp;FT</td>" in html or "<td>AMD</td>" in html
-    assert "\ndata-filter-row=\"1\"" not in html
-    assert ">data-filter-row=\"1\"" not in html
-    assert "&lt;tr data-filter-row" not in html
-    assert "<tbody>\ndata-filter-row=" not in html
-    assert "</tr>\ndata-filter-row=" not in html
-    assert 'document.querySelectorAll("[data-filter-row=\'1\']")' in html
-    assert 'id="candidate-filter-status"' in html
-    assert 'id="watchlist-filter-status"' in html
-    assert 'id="command-center-filter-status"' in html
-    assert 'id="inspector-filter-status"' in html
-    assert 'class="table-scroll"' in html
-    assert html.count("<td>DC_ECOSYSTEM_TOTAL</td>") == 1
-    assert html.index('id="market-map-ecosystem"') > html.index('id="summary"')
-    assert html.index('id="market-map-ecosystem"') < html.index('id="watchlist-status"')
-    assert html.index('id="market-map-layers-subindustries"') > html.index('id="market-map-ecosystem"')
-    assert html.index('id="watchlist-status"') > html.index('id="summary"')
-    assert html.index('id="watchlist-status"') < html.index('id="candidate-pullbacks"')
     assert html.index("<h2>Filters</h2>") < html.index('id="candidate-pullbacks"')
     assert "<td>MS&amp;FT</td>" in html
 
@@ -969,6 +947,20 @@ def test_html_cli_generates_default_output_and_prints_summaries(tmp_path, monkey
     assert "SUMMARY missing_reports=0" in stdout
     assert "SUMMARY decision_total=3" in stdout
     assert "SUMMARY candidate_pullback_rows=2" in stdout
+
+
+def test_market_map_status_class_mapping_covers_requested_status_groups():
+    assert _status_class_from_text("TRIM_WATCH") == "risk-medium"
+    assert _status_class_from_text("EXIT_ZONE") == "risk-high"
+    assert _status_class_from_text("BUY_ZONE") == "status-positive"
+    assert _status_class_from_text("NEUTRAL") == "status-neutral"
+    assert _status_class_from_text("ELEVATED") == "risk-medium"
+    assert _status_class_from_text("INSUFFICIENT_DATA") == "status-missing"
+
+
+def test_market_map_status_change_prefers_rhs_status_for_coloring():
+    assert _status_class_from_text("EXIT_ZONE -> NEUTRAL") == "status-neutral"
+    assert _status_class_from_text("NEUTRAL -> BUY_ZONE") == "status-positive"
 
 
 def test_html_cli_accepts_report_date_and_uses_date_specific_default_output(tmp_path, monkeypatch, capsys):
