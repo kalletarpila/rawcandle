@@ -110,6 +110,53 @@ def test_missing_reports_dir_fails_clearly(tmp_path, capsys):
     assert not work_dir.exists()
 
 
+def test_missing_watchlist_file_fails_before_copy_and_steps(tmp_path, monkeypatch, capsys):
+    analysis_db = tmp_path / "analysis.db"
+    price_db = tmp_path / "prices.db"
+    reports_dir = tmp_path / "reports"
+    work_dir = tmp_path / "work"
+    missing_watchlist = tmp_path / "missing_watchlist.txt"
+    _create_analysis_db(analysis_db)
+    _create_file(price_db, "prices")
+    _create_reports_dir(reports_dir)
+    calls: list[str] = []
+
+    def fake_run_logged_step(*, step_name, step_main, argv, log_path):
+        calls.append(step_name)
+        raise AssertionError("steps must not run when watchlist file is missing")
+
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_enrichment_e2e_smoke._run_logged_step",
+        fake_run_logged_step,
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(analysis_db),
+            "--price-db",
+            str(price_db),
+            "--reports-dir",
+            str(reports_dir),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--work-dir",
+            str(work_dir),
+            "--watchlist-file",
+            str(missing_watchlist),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "watchlist_file not found:" in captured.err
+    assert "status=OK" not in captured.out
+    assert not (work_dir / "analysis_enrichment_smoke_2026-05-22.db").exists()
+    assert calls == []
+
+
 def test_smoke_copies_analysis_db_and_does_not_mutate_source(tmp_path, monkeypatch, capsys):
     analysis_db = tmp_path / "analysis.db"
     price_db = tmp_path / "prices.db"
@@ -205,6 +252,198 @@ def test_smoke_copies_analysis_db_and_does_not_mutate_source(tmp_path, monkeypat
     )
     assert (
         "SUMMARY datacenter_dashboard_enrichment_e2e_smoke.copy_migration_status=SKIPPED"
+        in output
+    )
+    assert "SUMMARY datacenter_dashboard_enrichment_e2e_smoke.watchlist_file=" in output
+
+
+def test_default_behavior_does_not_pass_watchlist_file_to_enrichment_write(
+    tmp_path, monkeypatch, capsys
+):
+    analysis_db = tmp_path / "analysis.db"
+    price_db = tmp_path / "prices.db"
+    reports_dir = tmp_path / "reports"
+    work_dir = tmp_path / "work"
+    _create_analysis_db(analysis_db)
+    _create_file(price_db, "prices")
+    _create_reports_dir(reports_dir)
+    seen_enrichment_write_argv: list[str] = []
+
+    def fake_run_logged_step(*, step_name, step_main, argv, log_path):
+        log_path.write_text(f"{step_name}\n", encoding="utf-8")
+        if step_name == "enrichment_write":
+            seen_enrichment_write_argv[:] = argv
+            return _summary_lines(
+                "SUMMARY datacenter_dashboard_enrichment_write.status=OK"
+            )
+        if step_name == "enrichment_audit":
+            return _summary_lines(
+                "SUMMARY datacenter_dashboard_enrichment_audit.status=OK",
+                "SUMMARY datacenter_dashboard_enrichment_audit.readiness=PARTIAL",
+            )
+        if step_name == "enrichment_export":
+            Path(argv[argv.index("--output-json") + 1]).write_text("{}", encoding="utf-8")
+            return _summary_lines(
+                "SUMMARY datacenter_dashboard_analysis_db_export.status=OK",
+                "SUMMARY datacenter_dashboard_analysis_db_export.action_summary=0",
+            )
+        if step_name == "enrichment_build":
+            Path(argv[argv.index("--dashboard-db") + 1]).write_text("", encoding="utf-8")
+            return _summary_lines(
+                "SUMMARY ecosystem_dashboard_build.status=OK",
+                "SUMMARY ecosystem_dashboard_build.run_id=ENRICH_RUN",
+                "SUMMARY ecosystem_dashboard_build.source_reports_count=1",
+                "SUMMARY ecosystem_dashboard_build.market_map_rows=1",
+                "SUMMARY ecosystem_dashboard_build.watchlist_rows=0",
+                "SUMMARY ecosystem_dashboard_build.ticker_rows=1",
+                "SUMMARY ecosystem_dashboard_build.trace_rows=0",
+            )
+        if step_name == "reports_build":
+            Path(argv[argv.index("--dashboard-db") + 1]).write_text("", encoding="utf-8")
+            return _summary_lines(
+                "SUMMARY ecosystem_dashboard_build.status=OK",
+                "SUMMARY ecosystem_dashboard_build.run_id=REPORTS_RUN",
+                "SUMMARY ecosystem_dashboard_build.source_reports_count=1",
+                "SUMMARY ecosystem_dashboard_build.market_map_rows=2",
+                "SUMMARY ecosystem_dashboard_build.watchlist_rows=1",
+                "SUMMARY ecosystem_dashboard_build.ticker_rows=2",
+                "SUMMARY ecosystem_dashboard_build.trace_rows=3",
+            )
+        if step_name == "parity_audit":
+            return _summary_lines(
+                "SUMMARY ecosystem_dashboard_parity_audit.status=OK",
+                "SUMMARY ecosystem_dashboard_parity_audit.sections_with_count_diff=1",
+                "SUMMARY ecosystem_dashboard_parity_audit.key_differences=2",
+                "SUMMARY ecosystem_dashboard_parity_audit.field_differences=3",
+            )
+        if step_name == "parity_explain":
+            return _summary_lines("SUMMARY ecosystem_dashboard_parity_explain.status=OK")
+        raise AssertionError(step_name)
+
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_enrichment_e2e_smoke._run_logged_step",
+        fake_run_logged_step,
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(analysis_db),
+            "--price-db",
+            str(price_db),
+            "--reports-dir",
+            str(reports_dir),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--work-dir",
+            str(work_dir),
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "--watchlist-file" not in seen_enrichment_write_argv
+    assert "SUMMARY datacenter_dashboard_enrichment_e2e_smoke.watchlist_file=" in output
+
+
+def test_watchlist_file_is_validated_and_passed_to_enrichment_write(
+    tmp_path, monkeypatch, capsys
+):
+    analysis_db = tmp_path / "analysis.db"
+    price_db = tmp_path / "prices.db"
+    reports_dir = tmp_path / "reports"
+    work_dir = tmp_path / "work"
+    watchlist_file = tmp_path / "watchlist.txt"
+    _create_analysis_db(analysis_db)
+    _create_file(price_db, "prices")
+    _create_reports_dir(reports_dir)
+    _create_file(watchlist_file, "NVDA\n")
+    seen_enrichment_write_argv: list[str] = []
+
+    def fake_run_logged_step(*, step_name, step_main, argv, log_path):
+        log_path.write_text(f"{step_name}\n", encoding="utf-8")
+        if step_name == "enrichment_write":
+            seen_enrichment_write_argv[:] = argv
+            return _summary_lines(
+                "SUMMARY datacenter_dashboard_enrichment_write.status=OK"
+            )
+        if step_name == "enrichment_audit":
+            return _summary_lines(
+                "SUMMARY datacenter_dashboard_enrichment_audit.status=OK",
+                "SUMMARY datacenter_dashboard_enrichment_audit.readiness=PARTIAL",
+            )
+        if step_name == "enrichment_export":
+            Path(argv[argv.index("--output-json") + 1]).write_text("{}", encoding="utf-8")
+            return _summary_lines(
+                "SUMMARY datacenter_dashboard_analysis_db_export.status=OK",
+                "SUMMARY datacenter_dashboard_analysis_db_export.action_summary=0",
+            )
+        if step_name == "enrichment_build":
+            Path(argv[argv.index("--dashboard-db") + 1]).write_text("", encoding="utf-8")
+            return _summary_lines(
+                "SUMMARY ecosystem_dashboard_build.status=OK",
+                "SUMMARY ecosystem_dashboard_build.run_id=ENRICH_RUN",
+                "SUMMARY ecosystem_dashboard_build.source_reports_count=1",
+                "SUMMARY ecosystem_dashboard_build.market_map_rows=1",
+                "SUMMARY ecosystem_dashboard_build.watchlist_rows=1",
+                "SUMMARY ecosystem_dashboard_build.ticker_rows=1",
+                "SUMMARY ecosystem_dashboard_build.trace_rows=0",
+            )
+        if step_name == "reports_build":
+            Path(argv[argv.index("--dashboard-db") + 1]).write_text("", encoding="utf-8")
+            return _summary_lines(
+                "SUMMARY ecosystem_dashboard_build.status=OK",
+                "SUMMARY ecosystem_dashboard_build.run_id=REPORTS_RUN",
+                "SUMMARY ecosystem_dashboard_build.source_reports_count=1",
+                "SUMMARY ecosystem_dashboard_build.market_map_rows=2",
+                "SUMMARY ecosystem_dashboard_build.watchlist_rows=1",
+                "SUMMARY ecosystem_dashboard_build.ticker_rows=2",
+                "SUMMARY ecosystem_dashboard_build.trace_rows=3",
+            )
+        if step_name == "parity_audit":
+            return _summary_lines(
+                "SUMMARY ecosystem_dashboard_parity_audit.status=OK",
+                "SUMMARY ecosystem_dashboard_parity_audit.sections_with_count_diff=1",
+                "SUMMARY ecosystem_dashboard_parity_audit.key_differences=2",
+                "SUMMARY ecosystem_dashboard_parity_audit.field_differences=3",
+            )
+        if step_name == "parity_explain":
+            return _summary_lines("SUMMARY ecosystem_dashboard_parity_explain.status=OK")
+        raise AssertionError(step_name)
+
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_enrichment_e2e_smoke._run_logged_step",
+        fake_run_logged_step,
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(analysis_db),
+            "--price-db",
+            str(price_db),
+            "--reports-dir",
+            str(reports_dir),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--work-dir",
+            str(work_dir),
+            "--watchlist-file",
+            str(watchlist_file),
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "--watchlist-file" in seen_enrichment_write_argv
+    index = seen_enrichment_write_argv.index("--watchlist-file")
+    assert seen_enrichment_write_argv[index + 1] == str(watchlist_file)
+    assert (
+        f"SUMMARY datacenter_dashboard_enrichment_e2e_smoke.watchlist_file={watchlist_file}"
         in output
     )
 

@@ -49,6 +49,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-html", action="store_true")
     parser.add_argument("--skip-parity-explain", action="store_true")
     parser.add_argument("--apply-migrations-to-copy", action="store_true")
+    parser.add_argument("--watchlist-file")
     return parser
 
 
@@ -164,6 +165,11 @@ def main(argv: list[str] | None = None) -> int:
         analysis_db = _validate_existing_file(args.analysis_db, "analysis_db")
         price_db = _validate_existing_file(args.price_db, "price_db")
         reports_dir = _validate_existing_dir(args.reports_dir, "reports_dir")
+        watchlist_file = (
+            _validate_existing_file(args.watchlist_file, "watchlist_file")
+            if args.watchlist_file
+            else None
+        )
         work_dir = _prepare_work_dir(args.work_dir)
         copied_db = work_dir / f"analysis_enrichment_smoke_{args.signal_date}.db"
         enrichment_json = (
@@ -207,7 +213,12 @@ def main(argv: list[str] | None = None) -> int:
                     "replace-date",
                     "--run-id",
                     enrichment_run_id,
-                ],
+                ]
+                + (
+                    ["--watchlist-file", str(watchlist_file)]
+                    if watchlist_file is not None
+                    else []
+                ),
                 log_path=work_dir / "enrichment_write.log",
             ),
         )
@@ -379,6 +390,7 @@ def main(argv: list[str] | None = None) -> int:
         _emit_summary("analysis_db_copy", str(copied_db))
         _emit_summary("price_db", str(price_db))
         _emit_summary("reports_dir", str(reports_dir))
+        _emit_summary("watchlist_file", str(watchlist_file) if watchlist_file else "")
         _emit_summary("signal_date", args.signal_date)
         _emit_summary("taxonomy_version", args.taxonomy_version)
         _emit_summary("work_dir", str(work_dir))
