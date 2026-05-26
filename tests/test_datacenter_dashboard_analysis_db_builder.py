@@ -433,24 +433,18 @@ def test_builder_produces_market_map_and_structured_source_report(tmp_path):
     layer_row = dashboard_input.market_map[1]
     subindustry_row = dashboard_input.market_map[2]
 
-    assert ecosystem_row.current_status == "BUY_ZONE"
-    assert ecosystem_row.overheat_risk == "LOW"
-    assert ecosystem_row.pct_above_ema20 == 60.0
-    assert ecosystem_row.pct_above_ma10 == 55.0
-    assert ecosystem_row.ema20_breadth_delta_5d == 3.0
     assert ecosystem_row.avg_return_5d == 0.10
     assert ecosystem_row.avg_return_20d == 0.20
     assert ecosystem_row.avg_return_60d == 0.40
-    assert ecosystem_row.dow_trend_state == "UP"
-    assert ecosystem_row.latest_structure_label == "HL"
-    assert ecosystem_row.latest_bos_event_type == "BOS_UP"
+    assert ecosystem_row.dominant_action_bucket == "BUY_ZONE"
 
     assert layer_row.layer_name == "Infrastructure"
     assert layer_row.layer_order == 1
+    assert layer_row.dominant_action_bucket == "BUY_ZONE"
     assert subindustry_row.layer_name == "Infrastructure"
     assert subindustry_row.subindustry_name == "AI Accelerators"
     assert subindustry_row.subindustry_order == 1
-    assert subindustry_row.latest_reset_reason == "PULLBACK_RESET"
+    assert subindustry_row.dominant_action_bucket == "BREAKOUT_CANDIDATE"
 
 
 def test_cli_writes_json_and_prints_partial_warnings_read_only(tmp_path, capsys):

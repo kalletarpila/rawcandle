@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import weakref
 
 from dev_tools.datacenter_dashboard_decisions import DatacenterDecisionBatchResult
 from dev_tools.datacenter_dashboard_parser import DatacenterDashboardBatchParseResult
@@ -43,7 +44,9 @@ class ReportsPersistenceContext:
     ticker_rows: list[DatacenterDashboardTickerRecord]
 
 
-_PERSISTENCE_CONTEXT_BY_INPUT_ID: dict[int, ReportsPersistenceContext] = {}
+_PERSISTENCE_CONTEXT_BY_INPUT_ID: dict[
+    int, tuple[weakref.ReferenceType[EcosystemDashboardInput], ReportsPersistenceContext]
+] = {}
 
 
 def build_ecosystem_dashboard_input_from_reports_result(
@@ -164,14 +167,17 @@ def build_ecosystem_dashboard_input_from_reports_result(
         total_parsed_rows=parse_result.total_row_count,
         total_parse_warnings=parse_result.total_warning_count,
     )
-    _PERSISTENCE_CONTEXT_BY_INPUT_ID[id(dashboard_input)] = ReportsPersistenceContext(
-        reports_dir=reports_dir,
-        dashboard_status=dashboard_status,
-        parse_result=parse_result,
-        decision_result=decision_result,
-        market_map_rows=list(market_map_rows),
-        watchlist_rows=list(watchlist_rows),
-        ticker_rows=list(ticker_rows),
+    _PERSISTENCE_CONTEXT_BY_INPUT_ID[id(dashboard_input)] = (
+        weakref.ref(dashboard_input),
+        ReportsPersistenceContext(
+            reports_dir=reports_dir,
+            dashboard_status=dashboard_status,
+            parse_result=parse_result,
+            decision_result=decision_result,
+            market_map_rows=list(market_map_rows),
+            watchlist_rows=list(watchlist_rows),
+            ticker_rows=list(ticker_rows),
+        ),
     )
     return dashboard_input
 
@@ -179,7 +185,14 @@ def build_ecosystem_dashboard_input_from_reports_result(
 def peek_reports_persistence_context(
     dashboard_input: EcosystemDashboardInput,
 ) -> ReportsPersistenceContext | None:
-    return _PERSISTENCE_CONTEXT_BY_INPUT_ID.get(id(dashboard_input))
+    entry = _PERSISTENCE_CONTEXT_BY_INPUT_ID.get(id(dashboard_input))
+    if entry is None:
+        return None
+    dashboard_ref, context = entry
+    if dashboard_ref() is dashboard_input:
+        return context
+    _PERSISTENCE_CONTEXT_BY_INPUT_ID.pop(id(dashboard_input), None)
+    return None
 
 
 def clear_reports_persistence_context(

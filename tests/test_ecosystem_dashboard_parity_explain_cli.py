@@ -348,7 +348,7 @@ def test_parity_explain_extra_right_decision_trace_from_extra_tickers_is_likely(
     )
 
     assert exit_code == 0
-    assert "decision_trace_only_right_summary;BBB;1;WATCH_RULE;daily;momentum;" in output
+    assert "decision_trace_only_right_summary;BBB;1;WATCH_RULE;;momentum;daily" in output
     assert "hypothesis_summary;EXTRA_RIGHT_DECISION_TRACE_FROM_EXTRA_TICKERS;LIKELY;right_only_trace_tickers=1;overlap_with_right_only_tickers=1;overlap_ratio=1.0000" in output
 
 

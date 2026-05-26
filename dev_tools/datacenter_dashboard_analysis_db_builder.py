@@ -217,38 +217,6 @@ def _load_ticker_rows(
                 action_bucket=None,
                 action_label=None,
                 data_status=row["price_data_status"],
-                current_status=None,
-                severity=None,
-                primary_reason=None,
-                start_status_30d=None,
-                status_change_30d=None,
-                status_change_5d=None,
-                window_status_30d=None,
-                window_status_5d=None,
-                window_status_2d=None,
-                ma_break_status=None,
-                freshness_status=row["latest_bos_freshness"] or row["latest_reset_freshness"],
-                trend_state_age_td=None,
-                latest_structure_age_td=row["latest_structure_age_trading_days"],
-                latest_bos_age_td=row["latest_bos_age_trading_days"],
-                latest_reset_age_td=row["latest_reset_age_trading_days"],
-                latest_candle=None,
-                latest_candle_age_td=None,
-                latest_divergence=None,
-                latest_divergence_age_td=None,
-                latest_chart_pattern=None,
-                latest_chart_pattern_age_td=None,
-                pullback_validity=None,
-                entry_readiness=None,
-                candidate_priority=None,
-                candidate_priority_label=None,
-                daily_status=None,
-                rolling_2d_status=None,
-                rolling_5d_status=None,
-                rolling_30d_status=None,
-                horizons_present="daily",
-                source_files=1,
-                is_watchlist=0,
             )
         )
         if max_rows is not None and len(ticker_rows) >= max_rows:
@@ -426,54 +394,6 @@ def _load_market_map_rows(
                 avg_trend_score=None,
                 avg_action_score=None,
                 dominant_action_bucket=row["timing_state"],
-                current_status=row["timing_state"],
-                start_status_30d=None,
-                status_change_30d=None,
-                status_change_5d=None,
-                window_status_30d=None,
-                window_status_5d=None,
-                window_status_2d=None,
-                overheat_risk=row["overheat_risk_level"],
-                pct_above_ema20=row["pct_above_ema20"],
-                pct_above_ma10=row["pct_above_ma10"],
-                ema20_breadth_delta_5d=row["ema20_breadth_delta_5d"],
-                return_10d=row["return_10d"],
-                dow_trend_state=(
-                    synthetic_row["trend_classification"] if synthetic_row is not None else None
-                ),
-                dow_trend_state_age_td=None,
-                latest_structure_label=(
-                    synthetic_row["latest_structure_label"] if synthetic_row is not None else None
-                ),
-                latest_structure_age_td=(
-                    synthetic_row["latest_structure_age_trading_days"]
-                    if synthetic_row is not None
-                    else None
-                ),
-                latest_bos_event_type=(
-                    synthetic_row["latest_bos_event_type"] if synthetic_row is not None else None
-                ),
-                latest_bos_age_td=(
-                    synthetic_row["latest_bos_age_trading_days"]
-                    if synthetic_row is not None
-                    else None
-                ),
-                latest_reset_reason=(
-                    synthetic_row["latest_reset_reason"] if synthetic_row is not None else None
-                ),
-                latest_reset_age_td=(
-                    synthetic_row["latest_reset_age_trading_days"]
-                    if synthetic_row is not None
-                    else None
-                ),
-                latest_candle=None,
-                latest_candle_age_td=None,
-                latest_divergence=None,
-                latest_divergence_age_td=None,
-                latest_chart_pattern=None,
-                latest_chart_pattern_age_td=None,
-                source_horizons="daily",
-                source_files=",".join(source_tables),
             )
         )
         if max_rows is not None and len(market_map_rows) >= max_rows:
