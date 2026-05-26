@@ -10,6 +10,9 @@ from datetime import datetime
 import logging
 
 from .combo_features import BULL_DIV_GENERAL_FEATURES, CANDLE_PATTERN_TO_SLUG
+from rawcandle.datacenter_dashboard_enrichment_migration import (
+    apply_datacenter_dashboard_enrichment_migration,
+)
 from rawcandle.technical_signal_relevance_persistence import (
     apply_technical_signal_relevance_migration,
 )
@@ -1294,6 +1297,7 @@ class DatabaseManager:
             )
 
             apply_technical_signal_relevance_migration(conn)
+            apply_datacenter_dashboard_enrichment_migration(conn)
 
             conn.commit()
             self.logger.info("Analysis database initialized successfully")
