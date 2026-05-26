@@ -4,6 +4,9 @@ import sqlite3
 from pathlib import Path
 
 from dev_tools.run_datacenter_dashboard_enrichment_e2e_smoke import main
+from rawcandle.datacenter_dashboard_enrichment_migration import (
+    apply_datacenter_dashboard_enrichment_migration,
+)
 
 
 def _create_file(path: Path, content: str = "x") -> None:
@@ -20,6 +23,19 @@ def _create_analysis_db(path: Path) -> None:
     with sqlite3.connect(path) as conn:
         conn.execute("CREATE TABLE sample(value TEXT)")
         conn.execute("INSERT INTO sample(value) VALUES ('source-only')")
+
+
+def _table_exists(path: Path, table_name: str) -> bool:
+    with sqlite3.connect(path) as conn:
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'table' AND name = ?
+            """,
+            (table_name,),
+        ).fetchone()
+    return row is not None
 
 
 def _summary_lines(*lines: str) -> tuple[int, dict[str, str], str, str]:
@@ -183,6 +199,14 @@ def test_smoke_copies_analysis_db_and_does_not_mutate_source(tmp_path, monkeypat
     assert copied_db.read_bytes() == original_bytes
     assert analysis_db.read_bytes() == original_bytes
     assert "SUMMARY datacenter_dashboard_enrichment_e2e_smoke.status=OK" in output
+    assert (
+        "SUMMARY datacenter_dashboard_enrichment_e2e_smoke.apply_migrations_to_copy=0"
+        in output
+    )
+    assert (
+        "SUMMARY datacenter_dashboard_enrichment_e2e_smoke.copy_migration_status=SKIPPED"
+        in output
+    )
 
 
 def test_smoke_invokes_steps_in_deterministic_order(tmp_path, monkeypatch):
@@ -272,6 +296,155 @@ def test_smoke_invokes_steps_in_deterministic_order(tmp_path, monkeypatch):
         "parity_audit",
         "parity_explain",
     ]
+
+
+def test_apply_migrations_to_copy_runs_before_enrichment_write_and_updates_only_copy(
+    tmp_path, monkeypatch, capsys
+):
+    analysis_db = tmp_path / "analysis.db"
+    price_db = tmp_path / "prices.db"
+    reports_dir = tmp_path / "reports"
+    work_dir = tmp_path / "work"
+    _create_analysis_db(analysis_db)
+    _create_file(price_db, "prices")
+    _create_reports_dir(reports_dir)
+    calls: list[str] = []
+
+    def fake_run_logged_step(*, step_name, step_main, argv, log_path):
+        calls.append(step_name)
+        log_path.write_text(step_name, encoding="utf-8")
+        outputs = {
+            "enrichment_write": _summary_lines(
+                "SUMMARY datacenter_dashboard_enrichment_write.status=OK"
+            ),
+            "enrichment_audit": _summary_lines(
+                "SUMMARY datacenter_dashboard_enrichment_audit.status=OK",
+                "SUMMARY datacenter_dashboard_enrichment_audit.readiness=PARTIAL",
+            ),
+            "enrichment_export": _summary_lines(
+                "SUMMARY datacenter_dashboard_analysis_db_export.status=OK",
+                "SUMMARY datacenter_dashboard_analysis_db_export.action_summary=0",
+            ),
+            "enrichment_build": _summary_lines(
+                "SUMMARY ecosystem_dashboard_build.status=OK",
+                "SUMMARY ecosystem_dashboard_build.run_id=ERUN",
+                "SUMMARY ecosystem_dashboard_build.source_reports_count=1",
+                "SUMMARY ecosystem_dashboard_build.market_map_rows=0",
+                "SUMMARY ecosystem_dashboard_build.watchlist_rows=0",
+                "SUMMARY ecosystem_dashboard_build.ticker_rows=0",
+                "SUMMARY ecosystem_dashboard_build.trace_rows=0",
+            ),
+            "reports_build": _summary_lines(
+                "SUMMARY ecosystem_dashboard_build.status=OK",
+                "SUMMARY ecosystem_dashboard_build.run_id=RRUN",
+                "SUMMARY ecosystem_dashboard_build.source_reports_count=1",
+                "SUMMARY ecosystem_dashboard_build.market_map_rows=0",
+                "SUMMARY ecosystem_dashboard_build.watchlist_rows=0",
+                "SUMMARY ecosystem_dashboard_build.ticker_rows=0",
+                "SUMMARY ecosystem_dashboard_build.trace_rows=0",
+            ),
+            "parity_audit": _summary_lines(
+                "SUMMARY ecosystem_dashboard_parity_audit.status=OK",
+                "SUMMARY ecosystem_dashboard_parity_audit.sections_with_count_diff=0",
+                "SUMMARY ecosystem_dashboard_parity_audit.key_differences=0",
+                "SUMMARY ecosystem_dashboard_parity_audit.field_differences=0",
+            ),
+            "parity_explain": _summary_lines(
+                "SUMMARY ecosystem_dashboard_parity_explain.status=OK"
+            ),
+        }
+        return outputs[step_name]
+
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_enrichment_e2e_smoke._run_logged_step",
+        fake_run_logged_step,
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(analysis_db),
+            "--price-db",
+            str(price_db),
+            "--reports-dir",
+            str(reports_dir),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--work-dir",
+            str(work_dir),
+            "--apply-migrations-to-copy",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    copied_db = work_dir / "analysis_enrichment_smoke_2026-05-22.db"
+    assert exit_code == 0
+    assert calls[0] == "enrichment_write"
+    assert _table_exists(analysis_db, "dc_dashboard_ticker_enrichment_daily") is False
+    assert _table_exists(copied_db, "dc_dashboard_ticker_enrichment_daily") is True
+    assert (
+        "SUMMARY datacenter_dashboard_enrichment_e2e_smoke.apply_migrations_to_copy=1"
+        in output
+    )
+    assert "SUMMARY datacenter_dashboard_enrichment_e2e_smoke.copy_migration_status=OK" in output
+    log_path = work_dir / "copy_migrations.log"
+    assert log_path.exists()
+    assert str(copied_db) in log_path.read_text(encoding="utf-8")
+
+
+def test_migration_failure_stops_before_enrichment_write(tmp_path, monkeypatch, capsys):
+    analysis_db = tmp_path / "analysis.db"
+    price_db = tmp_path / "prices.db"
+    reports_dir = tmp_path / "reports"
+    work_dir = tmp_path / "work"
+    _create_analysis_db(analysis_db)
+    _create_file(price_db, "prices")
+    _create_reports_dir(reports_dir)
+    calls: list[str] = []
+
+    def fake_apply_migrations_to_copy(copied_db: Path, log_path: Path) -> None:
+        raise RuntimeError("migration exploded")
+
+    def fake_run_logged_step(*, step_name, step_main, argv, log_path):
+        calls.append(step_name)
+        return _summary_lines(
+            "SUMMARY datacenter_dashboard_enrichment_write.status=OK"
+        )
+
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_enrichment_e2e_smoke._apply_migrations_to_copy",
+        fake_apply_migrations_to_copy,
+    )
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_enrichment_e2e_smoke._run_logged_step",
+        fake_run_logged_step,
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(analysis_db),
+            "--price-db",
+            str(price_db),
+            "--reports-dir",
+            str(reports_dir),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--work-dir",
+            str(work_dir),
+            "--apply-migrations-to-copy",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert calls == []
+    assert "migration exploded" in captured.err
+    assert "status=OK" not in captured.out
 
 
 def test_skip_html_omits_render_args_and_summary_paths_are_empty(

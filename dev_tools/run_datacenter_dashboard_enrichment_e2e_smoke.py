@@ -4,6 +4,7 @@ import argparse
 import io
 import re
 import shutil
+import sqlite3
 import sys
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -21,6 +22,9 @@ from dev_tools.run_ecosystem_dashboard_parity_audit import (
 )
 from dev_tools.run_ecosystem_dashboard_parity_explain import (
     main as parity_explain_main,
+)
+from rawcandle.datacenter_dashboard_enrichment_migration import (
+    apply_datacenter_dashboard_enrichment_migration,
 )
 
 
@@ -44,6 +48,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--keep-work-dir", action="store_true")
     parser.add_argument("--skip-html", action="store_true")
     parser.add_argument("--skip-parity-explain", action="store_true")
+    parser.add_argument("--apply-migrations-to-copy", action="store_true")
     return parser
 
 
@@ -136,6 +141,23 @@ def _summary_value(
     return summaries.get(key, default)
 
 
+def _apply_migrations_to_copy(copied_db: Path, log_path: Path) -> None:
+    with sqlite3.connect(copied_db) as conn:
+        apply_datacenter_dashboard_enrichment_migration(conn)
+        conn.commit()
+    log_path.write_text(
+        "\n".join(
+            [
+                "copy_migrations_status=OK",
+                f"copied_db={copied_db}",
+                "migration_helper=apply_datacenter_dashboard_enrichment_migration",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
@@ -161,6 +183,13 @@ def main(argv: list[str] | None = None) -> int:
         enrichment_run_id = f"DC_DASH_ENRICH_SMOKE_{args.signal_date}"
 
         shutil.copy2(analysis_db, copied_db)
+        copy_migration_status = "SKIPPED"
+        if args.apply_migrations_to_copy:
+            _apply_migrations_to_copy(
+                copied_db,
+                work_dir / "copy_migrations.log",
+            )
+            copy_migration_status = "OK"
 
         enrichment_write_summaries = _require_step_ok(
             step_name="enrichment_write",
@@ -341,6 +370,11 @@ def main(argv: list[str] | None = None) -> int:
             )
 
         _emit_summary("status", "OK")
+        _emit_summary(
+            "apply_migrations_to_copy",
+            1 if args.apply_migrations_to_copy else 0,
+        )
+        _emit_summary("copy_migration_status", copy_migration_status)
         _emit_summary("analysis_db_source", str(analysis_db))
         _emit_summary("analysis_db_copy", str(copied_db))
         _emit_summary("price_db", str(price_db))
