@@ -158,6 +158,11 @@ def _count_selection(path: Path, table_name: str) -> int:
     return int(row[0])
 
 
+def _create_watchlist_file(path: Path, content: str) -> Path:
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
 def _run_rows(path: Path) -> list[sqlite3.Row]:
     with sqlite3.connect(path) as conn:
         conn.row_factory = sqlite3.Row
@@ -341,6 +346,48 @@ def test_dry_run_writes_no_metadata_and_leaves_database_unchanged(tmp_path, caps
     assert "SUMMARY datacenter_dashboard_enrichment_write.status=DRY_RUN" in output
     assert "SUMMARY datacenter_dashboard_enrichment_write.ticker_decision_attempted=1" in output
     assert "SUMMARY datacenter_dashboard_enrichment_write.metadata_written=0" in output
+
+
+def test_orchestrator_passes_watchlist_file_to_ticker_stage(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    watchlist_file = _create_watchlist_file(tmp_path / "watchlist.txt", "NVDA\n")
+    _create_source_and_destination_db(db_path)
+    _insert_ticker_source_row(db_path)
+    _insert_group_source_row(db_path)
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+            "--run-id",
+            "RUN_ORCH_WATCHLIST",
+            "--watchlist-file",
+            str(watchlist_file),
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    with sqlite3.connect(db_path) as conn:
+        is_watchlist = conn.execute(
+            """
+            SELECT is_watchlist
+            FROM dc_dashboard_ticker_enrichment_daily
+            WHERE signal_date = ? AND taxonomy_version = ? AND ticker = ?
+            """,
+            ("2026-05-22", "DC_TAXONOMY_FULL_V1", "NVDA"),
+        ).fetchone()[0]
+    assert is_watchlist == 1
+    assert (
+        f"SUMMARY datacenter_dashboard_enrichment_write.watchlist_file={watchlist_file}"
+        in output
+    )
 
 
 def test_skip_ticker_decision_results_in_partial_metadata(tmp_path, capsys):

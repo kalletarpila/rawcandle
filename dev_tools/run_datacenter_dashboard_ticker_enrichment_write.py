@@ -42,6 +42,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--run-id")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--limit", type=int)
+    parser.add_argument("--watchlist-file")
     return parser
 
 
@@ -101,6 +102,28 @@ def _normalize_taxonomy_version(value: str) -> str:
     if not normalized:
         raise ValueError("taxonomy_version must be non-empty")
     return normalized
+
+
+def _load_watchlist_tickers(watchlist_file: str | None) -> tuple[set[str], list[str]]:
+    if watchlist_file is None:
+        return set(), []
+    normalized = watchlist_file.strip()
+    if not normalized:
+        raise ValueError("--watchlist-file must be non-empty when provided")
+    path = Path(normalized)
+    if not path.exists():
+        raise FileNotFoundError(f"watchlist_file not found: {normalized}")
+    tickers: set[str] = set()
+    with path.open("r", encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            tickers.add(line.upper())
+    warnings: list[str] = []
+    if not tickers:
+        warnings.append("WATCHLIST_FILE_EMPTY")
+    return tickers, warnings
 
 
 def _is_pseudo_ticker(row: sqlite3.Row) -> bool:
@@ -171,11 +194,13 @@ def _map_destination_row(
     *,
     run_id: str,
     created_at_utc: str,
+    watchlist_tickers: set[str],
 ) -> tuple[object, ...]:
+    ticker = str(row["ticker"]).strip().upper()
     values = [
         row["signal_date"],
         row["taxonomy_version"],
-        str(row["ticker"]).strip().upper(),
+        ticker,
         row["primary_layer"],
         row["primary_subindustry"],
         row["close"],
@@ -220,7 +245,7 @@ def _map_destination_row(
         None,
         None,
         None,
-        0,
+        1 if ticker in watchlist_tickers else 0,
         row["price_data_status"],
         CALC_VERSION,
         run_id,
@@ -261,6 +286,7 @@ def main(argv: list[str] | None = None) -> int:
         taxonomy_version = _normalize_taxonomy_version(args.taxonomy_version)
         if args.limit is not None and args.limit <= 0:
             raise ValueError("--limit must be greater than 0 when provided")
+        watchlist_tickers, warnings = _load_watchlist_tickers(args.watchlist_file)
 
         connector = _connect_read_only if args.dry_run else _connect_read_write
         with connector(args.analysis_db) as conn:
@@ -278,6 +304,11 @@ def main(argv: list[str] | None = None) -> int:
             excluded_pseudo_rows = len(source_rows) - len(valid_rows_all)
             valid_rows = (
                 valid_rows_all[: args.limit] if args.limit is not None else valid_rows_all
+            )
+            watchlist_matches = sum(
+                1
+                for row in valid_rows
+                if str(row["ticker"]).strip().upper() in watchlist_tickers
             )
 
             run_id = _resolve_run_id(signal_date, args.run_id)
@@ -374,7 +405,12 @@ def main(argv: list[str] | None = None) -> int:
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         [
-                            _map_destination_row(row, run_id=run_id, created_at_utc=created_at_utc)
+                            _map_destination_row(
+                                row,
+                                run_id=run_id,
+                                created_at_utc=created_at_utc,
+                                watchlist_tickers=watchlist_tickers,
+                            )
                             for row in rows_to_write
                         ],
                     )
@@ -490,7 +526,12 @@ def main(argv: list[str] | None = None) -> int:
                             created_at_utc=excluded.created_at_utc
                         """,
                         [
-                            _map_destination_row(row, run_id=run_id, created_at_utc=created_at_utc)
+                            _map_destination_row(
+                                row,
+                                run_id=run_id,
+                                created_at_utc=created_at_utc,
+                                watchlist_tickers=watchlist_tickers,
+                            )
                             for row in valid_rows
                         ],
                     )
@@ -565,7 +606,10 @@ def main(argv: list[str] | None = None) -> int:
                             """,
                             [
                                 _map_destination_row(
-                                    row, run_id=run_id, created_at_utc=created_at_utc
+                                    row,
+                                    run_id=run_id,
+                                    created_at_utc=created_at_utc,
+                                    watchlist_tickers=watchlist_tickers,
                                 )
                                 for row in valid_rows
                             ],
@@ -580,6 +624,9 @@ def main(argv: list[str] | None = None) -> int:
         _emit_summary("taxonomy_version", taxonomy_version)
         _emit_summary("mode", args.mode)
         _emit_summary("dry_run", 1 if args.dry_run else 0)
+        _emit_summary("watchlist_file", args.watchlist_file or "")
+        _emit_summary("watchlist_tickers", len(watchlist_tickers))
+        _emit_summary("watchlist_matches", watchlist_matches)
         _emit_summary("source_rows", len(source_rows))
         _emit_summary("valid_ticker_rows", len(valid_rows))
         _emit_summary("excluded_pseudo_rows", excluded_pseudo_rows)
@@ -588,6 +635,8 @@ def main(argv: list[str] | None = None) -> int:
         _emit_summary("deleted_existing_rows", deleted_existing_rows)
         _emit_summary("skipped_existing_rows", skipped_existing_rows)
         _emit_summary("run_id", run_id)
+        for warning in warnings:
+            _emit_summary("warning", warning)
         return 0
     except (FileNotFoundError, sqlite3.Error, ValueError, OSError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

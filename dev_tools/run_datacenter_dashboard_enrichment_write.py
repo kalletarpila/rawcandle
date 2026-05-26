@@ -61,6 +61,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--run-id")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--limit", type=int)
+    parser.add_argument("--watchlist-file")
     parser.add_argument("--skip-ticker", action="store_true")
     parser.add_argument("--skip-group", action="store_true")
     parser.add_argument("--skip-ticker-decision", action="store_true")
@@ -149,6 +150,8 @@ def _stage_args(
     dry_run: bool,
     limit: int | None,
     supports_limit: bool,
+    watchlist_file: str | None = None,
+    supports_watchlist_file: bool = False,
 ) -> list[str]:
     args = [
         "--analysis-db",
@@ -166,6 +169,8 @@ def _stage_args(
         args.append("--dry-run")
     if supports_limit and limit is not None:
         args.extend(["--limit", str(limit)])
+    if supports_watchlist_file and watchlist_file:
+        args.extend(["--watchlist-file", watchlist_file])
     return args
 
 
@@ -340,6 +345,8 @@ def main(argv: list[str] | None = None) -> int:
                     dry_run=args.dry_run,
                     limit=args.limit,
                     supports_limit=True,
+                    watchlist_file=args.watchlist_file,
+                    supports_watchlist_file=True,
                 ),
                 TICKER_TABLE,
                 bool(args.skip_ticker),
@@ -484,6 +491,7 @@ def main(argv: list[str] | None = None) -> int:
         _emit_summary("taxonomy_version", taxonomy_version)
         _emit_summary("mode", args.mode)
         _emit_summary("dry_run", 1 if args.dry_run else 0)
+        _emit_summary("watchlist_file", args.watchlist_file or "")
         _emit_summary("run_id", run_id)
         _emit_summary("ticker_attempted", attempted["ticker"])
         _emit_summary("group_attempted", attempted["group"])

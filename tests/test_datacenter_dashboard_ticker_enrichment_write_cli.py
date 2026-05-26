@@ -209,6 +209,11 @@ def _destination_count(path: Path) -> int:
     return int(row[0])
 
 
+def _create_watchlist_file(path: Path, content: str) -> Path:
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
 def test_missing_analysis_db_fails_clearly_and_does_not_create_file(tmp_path, capsys):
     db_path = tmp_path / "missing-analysis.db"
 
@@ -357,6 +362,157 @@ def test_field_mapping_persists_expected_values(tmp_path, capsys):
     assert nvda["run_id"] == "RUN_FIELDS"
     assert nvda["created_at_utc"] not in (None, "")
     assert nvda["is_watchlist"] == 0
+
+
+def test_watchlist_file_marks_matching_tickers(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    watchlist_file = _create_watchlist_file(tmp_path / "watchlist.txt", "NVDA\nANET\n")
+    _create_source_and_destination_db(db_path)
+    _insert_source_rows(db_path)
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+            "--run-id",
+            "RUN_WATCHLIST",
+            "--watchlist-file",
+            str(watchlist_file),
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    rows = {row["ticker"]: row for row in _destination_rows(db_path)}
+    assert rows["NVDA"]["is_watchlist"] == 1
+    assert rows["ANET"]["is_watchlist"] == 1
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.watchlist_tickers=2" in output
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.watchlist_matches=2" in output
+
+
+def test_without_watchlist_file_preserves_all_zero_membership(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_source_rows(db_path)
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+            "--run-id",
+            "RUN_NO_WATCHLIST",
+        ]
+    )
+
+    _ = capsys.readouterr()
+    assert exit_code == 0
+    rows = {row["ticker"]: row for row in _destination_rows(db_path)}
+    assert rows["NVDA"]["is_watchlist"] == 0
+    assert rows["ANET"]["is_watchlist"] == 0
+
+
+def test_watchlist_parser_ignores_comments_blanks_uppercases_and_dedupes(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    watchlist_file = _create_watchlist_file(
+        tmp_path / "watchlist.txt",
+        "\n# comment\nnvda\nANET\nnvda\n",
+    )
+    _create_source_and_destination_db(db_path)
+    _insert_source_rows(db_path)
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+            "--run-id",
+            "RUN_WATCHLIST_PARSE",
+            "--watchlist-file",
+            str(watchlist_file),
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    rows = {row["ticker"]: row for row in _destination_rows(db_path)}
+    assert rows["NVDA"]["is_watchlist"] == 1
+    assert rows["ANET"]["is_watchlist"] == 1
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.watchlist_tickers=2" in output
+
+
+def test_missing_watchlist_file_fails_clearly(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    missing = tmp_path / "missing_watchlist.txt"
+    _create_source_and_destination_db(db_path)
+    _insert_source_rows(db_path)
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+            "--watchlist-file",
+            str(missing),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "watchlist_file not found:" in captured.err
+
+
+def test_empty_watchlist_file_succeeds_with_warning(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    watchlist_file = _create_watchlist_file(tmp_path / "watchlist.txt", "# only comments\n\n")
+    _create_source_and_destination_db(db_path)
+    _insert_source_rows(db_path)
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+            "--run-id",
+            "RUN_WATCHLIST_EMPTY",
+            "--watchlist-file",
+            str(watchlist_file),
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    rows = {row["ticker"]: row for row in _destination_rows(db_path)}
+    assert rows["NVDA"]["is_watchlist"] == 0
+    assert rows["ANET"]["is_watchlist"] == 0
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.watchlist_tickers=0" in output
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.warning=WATCHLIST_FILE_EMPTY" in output
 
 
 def test_dry_run_does_not_mutate_destination(tmp_path, capsys):
