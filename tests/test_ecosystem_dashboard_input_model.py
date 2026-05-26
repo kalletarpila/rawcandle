@@ -210,3 +210,62 @@ def test_persist_ecosystem_dashboard_input_replace_date_excludes_old_rows_from_s
             "SELECT COUNT(*) FROM ecosystem_dashboard_runs WHERE run_id = 'RUN_OLD'"
         ).fetchone()[0]
     assert old_rows == 0
+
+
+def test_persist_ecosystem_dashboard_input_uses_action_label_when_action_bucket_missing(tmp_path):
+    dashboard_db = tmp_path / "ecosystem_dashboard.db"
+    dashboard_input = _minimal_dashboard_input()
+    ticker_row = dashboard_input.tickers[0]
+    dashboard_input = EcosystemDashboardInput(
+        ecosystem_code=dashboard_input.ecosystem_code,
+        report_date=dashboard_input.report_date,
+        source_reports=dashboard_input.source_reports,
+        action_summary=dashboard_input.action_summary,
+        market_map=dashboard_input.market_map,
+        watchlist=dashboard_input.watchlist,
+        tickers=[
+            EcosystemDashboardTickerStatusInput(
+                ticker=ticker_row.ticker,
+                company_name=ticker_row.company_name,
+                layer_name=ticker_row.layer_name,
+                subindustry_name=ticker_row.subindustry_name,
+                last_close=ticker_row.last_close,
+                return_5d=ticker_row.return_5d,
+                return_20d=ticker_row.return_20d,
+                return_60d=ticker_row.return_60d,
+                trend_state=ticker_row.trend_state,
+                latest_structure_label=ticker_row.latest_structure_label,
+                latest_bos_event_type=ticker_row.latest_bos_event_type,
+                latest_bos_freshness=ticker_row.latest_bos_freshness,
+                latest_reset_reason=ticker_row.latest_reset_reason,
+                latest_reset_freshness=ticker_row.latest_reset_freshness,
+                bullish_candle_signal=ticker_row.bullish_candle_signal,
+                bullish_divergence_signal=ticker_row.bullish_divergence_signal,
+                hidden_bullish_divergence_signal=ticker_row.hidden_bullish_divergence_signal,
+                action_bucket=None,
+                action_label="SELL",
+                data_status=ticker_row.data_status,
+            )
+        ],
+        decision_trace=dashboard_input.decision_trace,
+        readiness=dashboard_input.readiness,
+        total_parsed_rows=dashboard_input.total_parsed_rows,
+        total_parse_warnings=dashboard_input.total_parse_warnings,
+    )
+
+    run_id = persist_ecosystem_dashboard_input(
+        str(dashboard_db),
+        dashboard_input,
+        mode="insert",
+        run_id="RUN_INPUT_SELL",
+    )
+
+    snapshot = load_dashboard_snapshot(
+        str(dashboard_db),
+        "DATACENTER",
+        run_id=run_id,
+    )
+
+    assert snapshot.tickers[0]["ticker"] == "NVDA"
+    assert snapshot.tickers[0]["action"] == "SELL"
+    assert snapshot.tickers[0]["severity"] == "SELL"

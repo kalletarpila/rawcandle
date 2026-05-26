@@ -1284,7 +1284,7 @@ def persist_ecosystem_dashboard_input(
                         dashboard_input.ecosystem_code,
                         dashboard_input.report_date,
                         row.ticker,
-                        row.action_bucket,
+                        row.action_bucket or row.action_label,
                         row.action_label,
                         row.data_status,
                         row.data_status,

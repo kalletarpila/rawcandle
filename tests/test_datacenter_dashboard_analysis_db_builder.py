@@ -755,6 +755,42 @@ def test_enrichment_mode_reads_all_five_tables_and_emits_ready(tmp_path):
     assert dashboard_input.decision_trace[0].input_value == "BUY_ZONE"
 
 
+def test_enrichment_mode_ticker_action_round_trips_through_persistence(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    price_db = tmp_path / "price.db"
+    dashboard_db = tmp_path / "ecosystem_dashboard.db"
+    _create_enrichment_analysis_db(analysis_db)
+    _create_price_db(price_db)
+    _insert_enrichment_fixture_rows(analysis_db)
+
+    result = build_datacenter_dashboard_input_from_analysis_db(
+        analysis_db=str(analysis_db),
+        price_db=str(price_db),
+        ecosystem_code="DATACENTER",
+        report_date="2026-05-22",
+    )
+
+    dashboard_input = result.dashboard_input
+    assert len(dashboard_input.tickers) == 1
+    assert dashboard_input.tickers[0].action_bucket is None
+    assert dashboard_input.tickers[0].action_label == "WATCH"
+
+    run_id = persist_ecosystem_dashboard_input(
+        dashboard_db=str(dashboard_db),
+        dashboard_input=dashboard_input,
+        mode="replace-date",
+        run_id="RUN_ENRICHMENT_ROUNDTRIP",
+    )
+    snapshot = load_dashboard_snapshot(
+        dashboard_db=str(dashboard_db),
+        ecosystem_code="DATACENTER",
+        run_id=run_id,
+    )
+
+    assert snapshot.tickers[0]["ticker"] == "NVDA"
+    assert snapshot.tickers[0]["action"] == "WATCH"
+
+
 def test_enrichment_mode_partial_when_sections_are_empty(tmp_path, capsys):
     analysis_db = tmp_path / "analysis.db"
     price_db = tmp_path / "price.db"
