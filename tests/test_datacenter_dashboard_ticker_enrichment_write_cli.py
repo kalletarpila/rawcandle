@@ -35,11 +35,20 @@ def _create_source_table_only(path: Path) -> None:
                 latest_structure_freshness TEXT,
                 latest_bos_event_type TEXT,
                 latest_bos_age_trading_days INTEGER,
+                latest_bos_freshness TEXT,
                 latest_reset_reason TEXT,
                 latest_reset_age_trading_days INTEGER,
+                latest_reset_freshness TEXT,
                 bullish_candle_signal INTEGER,
                 bullish_divergence_signal INTEGER,
-                hidden_bullish_divergence_signal INTEGER
+                hidden_bullish_divergence_signal INTEGER,
+                in_datacenter_ecosystem TEXT,
+                exit_risk_signal INTEGER,
+                exit_risk_severity TEXT,
+                exit_reason TEXT,
+                breakout_signal INTEGER,
+                pullback_signal INTEGER,
+                ma_break_status TEXT
             )
             """
         )
@@ -52,140 +61,95 @@ def _create_source_and_destination_db(path: Path) -> None:
 
 
 def _insert_source_rows(path: Path) -> None:
+    _insert_custom_source_row(
+        path,
+        ticker="NVDA",
+        primary_subindustry="AI Accelerators",
+        close=100.5,
+        return_5d=1.2,
+        return_10d=2.4,
+        return_20d=4.5,
+        return_60d=12.0,
+        price_data_status="OK",
+        ticker_trend_state="UP",
+        latest_structure_label="HH",
+        latest_structure_age_trading_days=3,
+        latest_structure_freshness="FRESH",
+        latest_bos_event_type="BOS_UP",
+        latest_bos_age_trading_days=2,
+        latest_bos_freshness="FRESH",
+        latest_reset_reason="EMA20_LOST",
+        latest_reset_age_trading_days=5,
+        bullish_candle_signal=1,
+        bullish_divergence_signal=1,
+        hidden_bullish_divergence_signal=0,
+    )
+    _insert_custom_source_row(
+        path,
+        ticker="ANET",
+        primary_subindustry="Networking",
+        close=95.0,
+        return_5d=0.5,
+        return_10d=1.0,
+        return_20d=2.0,
+        return_60d=6.0,
+        price_data_status="OK",
+        ticker_trend_state="UP",
+        latest_structure_label="HL",
+        latest_structure_age_trading_days=4,
+        latest_structure_freshness="STALE",
+        latest_bos_event_type="BOS_UP",
+        latest_bos_age_trading_days=3,
+        latest_bos_freshness="STALE",
+    )
+    _insert_custom_source_row(path, ticker="")
+    _insert_custom_source_row(path, ticker="2026-05-22")
+    _insert_custom_source_row(path, ticker="Layer Header")
+
+
+def _insert_custom_source_row(path: Path, **overrides: object) -> None:
+    row = {
+        "signal_date": "2026-05-22",
+        "taxonomy_version": "DC_TAXONOMY_FULL_V1",
+        "ticker": "AAA",
+        "primary_layer": "Infrastructure",
+        "primary_subindustry": "AI Accelerators",
+        "close": 100.0,
+        "return_5d": 1.0,
+        "return_10d": 2.0,
+        "return_20d": 3.0,
+        "return_60d": 4.0,
+        "price_data_status": "OK",
+        "ticker_trend_state": "UP",
+        "latest_structure_label": "HH",
+        "latest_structure_age_trading_days": 3,
+        "latest_structure_freshness": "STRUCTURE_FRESH",
+        "latest_bos_event_type": "BOS_UP",
+        "latest_bos_age_trading_days": 2,
+        "latest_bos_freshness": "BOS_FRESH",
+        "latest_reset_reason": None,
+        "latest_reset_age_trading_days": None,
+        "latest_reset_freshness": None,
+        "bullish_candle_signal": 0,
+        "bullish_divergence_signal": 0,
+        "hidden_bullish_divergence_signal": 0,
+        "in_datacenter_ecosystem": None,
+        "exit_risk_signal": 0,
+        "exit_risk_severity": None,
+        "exit_reason": None,
+        "breakout_signal": 0,
+        "pullback_signal": 0,
+        "ma_break_status": None,
+    }
+    row.update(overrides)
+    columns = list(row)
     with sqlite3.connect(path) as conn:
-        conn.executemany(
-            """
-            INSERT INTO dc_ticker_swing_signal_daily (
-                signal_date, taxonomy_version, ticker, primary_layer, primary_subindustry,
-                close, return_5d, return_10d, return_20d, return_60d, price_data_status,
-                ticker_trend_state, latest_structure_label, latest_structure_age_trading_days,
-                latest_structure_freshness, latest_bos_event_type, latest_bos_age_trading_days,
-                latest_reset_reason, latest_reset_age_trading_days, bullish_candle_signal,
-                bullish_divergence_signal, hidden_bullish_divergence_signal
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        conn.execute(
+            f"""
+            INSERT INTO dc_ticker_swing_signal_daily ({", ".join(columns)})
+            VALUES ({", ".join("?" for _ in columns)})
             """,
-            [
-                (
-                    "2026-05-22",
-                    "DC_TAXONOMY_FULL_V1",
-                    "NVDA",
-                    "Infrastructure",
-                    "AI Accelerators",
-                    100.5,
-                    1.2,
-                    2.4,
-                    4.5,
-                    12.0,
-                    "OK",
-                    "UP",
-                    "HH",
-                    3,
-                    "FRESH",
-                    "BOS_UP",
-                    2,
-                    "EMA20_LOST",
-                    5,
-                    1,
-                    1,
-                    0,
-                ),
-                (
-                    "2026-05-22",
-                    "DC_TAXONOMY_FULL_V1",
-                    "ANET",
-                    "Infrastructure",
-                    "Networking",
-                    95.0,
-                    0.5,
-                    1.0,
-                    2.0,
-                    6.0,
-                    "OK",
-                    "UP",
-                    "HL",
-                    4,
-                    "STALE",
-                    "BOS_UP",
-                    3,
-                    None,
-                    None,
-                    0,
-                    0,
-                    0,
-                ),
-                (
-                    "2026-05-22",
-                    "DC_TAXONOMY_FULL_V1",
-                    "",
-                    "Infrastructure",
-                    "AI Accelerators",
-                    10.0,
-                    0.1,
-                    0.2,
-                    0.3,
-                    0.4,
-                    "OK",
-                    "UP",
-                    "HH",
-                    1,
-                    "FRESH",
-                    "BOS_UP",
-                    1,
-                    None,
-                    None,
-                    0,
-                    0,
-                    0,
-                ),
-                (
-                    "2026-05-22",
-                    "DC_TAXONOMY_FULL_V1",
-                    "2026-05-22",
-                    "Infrastructure",
-                    "AI Accelerators",
-                    10.0,
-                    0.1,
-                    0.2,
-                    0.3,
-                    0.4,
-                    "OK",
-                    "UP",
-                    "HH",
-                    1,
-                    "FRESH",
-                    "BOS_UP",
-                    1,
-                    None,
-                    None,
-                    0,
-                    0,
-                    0,
-                ),
-                (
-                    "2026-05-22",
-                    "DC_TAXONOMY_FULL_V1",
-                    "Layer Header",
-                    "Infrastructure",
-                    "AI Accelerators",
-                    10.0,
-                    0.1,
-                    0.2,
-                    0.3,
-                    0.4,
-                    "OK",
-                    "UP",
-                    "HH",
-                    1,
-                    "FRESH",
-                    "BOS_UP",
-                    1,
-                    None,
-                    None,
-                    0,
-                    0,
-                    0,
-                ),
-            ],
+            tuple(row[column] for column in columns),
         )
 
 
@@ -357,11 +321,219 @@ def test_field_mapping_persists_expected_values(tmp_path, capsys):
     assert nvda["latest_structure_label"] == "HH"
     assert nvda["latest_bos_event_type"] == "BOS_UP"
     assert nvda["latest_reset_reason"] == "EMA20_LOST"
+    assert nvda["daily_status"] == "NEUTRAL_MONITOR"
+    assert nvda["current_status"] == "NEUTRAL_MONITOR"
+    assert nvda["freshness_status"] == "FRESH"
+    assert nvda["primary_reason"] is None
+    assert nvda["source_components"] == (
+        "dc_ticker_swing_signal_daily,dc_ticker_swing_signal_daily:daily_status_mapping_v1"
+    )
     assert nvda["data_quality_status"] == "OK"
     assert nvda["calc_version"] == "DATACENTER_DASHBOARD_TICKER_ENRICHMENT_V1"
     assert nvda["run_id"] == "RUN_FIELDS"
     assert nvda["created_at_utc"] not in (None, "")
     assert nvda["is_watchlist"] == 0
+    assert nvda["action"] is None
+
+
+def test_high_exit_risk_maps_to_daily_status_current_status_and_reason(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(
+        db_path,
+        exit_risk_signal=1,
+        exit_risk_severity="HIGH",
+        exit_reason="HIGH_EXIT_TEST",
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    assert row["daily_status"] == "HIGH_EXIT_RISK"
+    assert row["current_status"] == "HIGH_EXIT_RISK"
+    assert row["primary_reason"] == "HIGH_EXIT_TEST"
+    assert row["action"] is None
+
+
+def test_medium_exit_risk_maps_to_medium_exit_risk(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(
+        db_path,
+        exit_risk_signal=1,
+        exit_risk_severity="MEDIUM",
+        exit_reason="MEDIUM_EXIT_TEST",
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    assert row["daily_status"] == "MEDIUM_EXIT_RISK"
+    assert row["current_status"] == "MEDIUM_EXIT_RISK"
+
+
+def test_breakout_signal_maps_to_breakout_candidate(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(db_path, breakout_signal=1)
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    assert row["daily_status"] == "BREAKOUT_CANDIDATE"
+    assert row["primary_reason"] == "BREAKOUT_SIGNAL"
+
+
+def test_pullback_signal_maps_to_pullback_candidate(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(db_path, pullback_signal=1)
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    assert row["daily_status"] == "PULLBACK_CANDIDATE"
+    assert row["primary_reason"] == "PULLBACK_SIGNAL"
+
+
+def test_missing_price_maps_before_other_statuses(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(
+        db_path,
+        price_data_status="MISSING_AS_OF_DATE",
+        exit_risk_signal=1,
+        exit_risk_severity="HIGH",
+        breakout_signal=1,
+        pullback_signal=1,
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    assert row["daily_status"] == "MISSING_PRICE"
+    assert row["current_status"] == "MISSING_PRICE"
+
+
+def test_neutral_source_maps_to_neutral_monitor(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(db_path)
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    assert row["daily_status"] == "NEUTRAL_MONITOR"
+    assert row["current_status"] == "NEUTRAL_MONITOR"
+
+
+def test_freshness_status_prefers_bos_down_then_reset_then_structure(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(
+        db_path,
+        latest_bos_event_type="BOS_DOWN",
+        latest_bos_freshness="BOS_DOWN_FRESH",
+        latest_reset_reason="DOUBLE_BOS_DOWN",
+        latest_reset_freshness="RESET_FRESH",
+        latest_structure_freshness="STRUCTURE_FRESH",
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    assert row["freshness_status"] == "BOS_DOWN_FRESH"
 
 
 def test_watchlist_file_marks_matching_tickers(tmp_path, capsys):

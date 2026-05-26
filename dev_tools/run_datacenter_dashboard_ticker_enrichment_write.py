@@ -11,6 +11,7 @@ from pathlib import Path
 SOURCE_TABLE = "dc_ticker_swing_signal_daily"
 DESTINATION_TABLE = "dc_dashboard_ticker_enrichment_daily"
 CALC_VERSION = "DATACENTER_DASHBOARD_TICKER_ENRICHMENT_V1"
+SOURCE_COMPONENTS = "dc_ticker_swing_signal_daily,dc_ticker_swing_signal_daily:daily_status_mapping_v1"
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 VALID_TICKER_RE = re.compile(r"^[A-Z0-9][A-Z0-9.\-]*$")
 DISALLOWED_TICKER_LABELS = {
@@ -90,6 +91,11 @@ def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
     return row is not None
 
 
+def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {str(row["name"]) for row in rows}
+
+
 def _normalize_signal_date(value: str) -> str:
     normalized = value.strip()
     if not DATE_RE.match(normalized):
@@ -154,32 +160,49 @@ def _load_source_rows(
     signal_date: str,
     taxonomy_version: str,
 ) -> list[sqlite3.Row]:
+    source_columns = _table_columns(conn, SOURCE_TABLE)
+    select_fields: list[tuple[str, str]] = [
+        ("signal_date", "signal_date"),
+        ("taxonomy_version", "taxonomy_version"),
+        ("ticker", "ticker"),
+        ("primary_layer", "primary_layer"),
+        ("primary_subindustry", "primary_subindustry"),
+        ("close", "close"),
+        ("return_5d", "return_5d"),
+        ("return_10d", "return_10d"),
+        ("return_20d", "return_20d"),
+        ("return_60d", "return_60d"),
+        ("price_data_status", "price_data_status"),
+        ("ticker_trend_state", "ticker_trend_state"),
+        ("latest_structure_label", "latest_structure_label"),
+        ("latest_structure_age_trading_days", "latest_structure_age_trading_days"),
+        ("latest_structure_freshness", "latest_structure_freshness"),
+        ("latest_bos_event_type", "latest_bos_event_type"),
+        ("latest_bos_age_trading_days", "latest_bos_age_trading_days"),
+        ("latest_bos_freshness", "latest_bos_freshness"),
+        ("latest_reset_reason", "latest_reset_reason"),
+        ("latest_reset_age_trading_days", "latest_reset_age_trading_days"),
+        ("latest_reset_freshness", "latest_reset_freshness"),
+        ("bullish_candle_signal", "bullish_candle_signal"),
+        ("bullish_divergence_signal", "bullish_divergence_signal"),
+        ("hidden_bullish_divergence_signal", "hidden_bullish_divergence_signal"),
+        ("in_datacenter_ecosystem", "in_datacenter_ecosystem"),
+        ("exit_risk_signal", "exit_risk_signal"),
+        ("exit_risk_severity", "exit_risk_severity"),
+        ("exit_reason", "exit_reason"),
+        ("breakout_signal", "breakout_signal"),
+        ("pullback_signal", "pullback_signal"),
+        ("ma_break_status", "ma_break_status"),
+    ]
+    select_sql = ",\n                ".join(
+        f"{column} AS {alias}" if column in source_columns else f"NULL AS {alias}"
+        for column, alias in select_fields
+    )
     return list(
         conn.execute(
             f"""
             SELECT
-                signal_date,
-                taxonomy_version,
-                ticker,
-                primary_layer,
-                primary_subindustry,
-                close,
-                return_5d,
-                return_10d,
-                return_20d,
-                return_60d,
-                price_data_status,
-                ticker_trend_state,
-                latest_structure_label,
-                latest_structure_age_trading_days,
-                latest_structure_freshness,
-                latest_bos_event_type,
-                latest_bos_age_trading_days,
-                latest_reset_reason,
-                latest_reset_age_trading_days,
-                bullish_candle_signal,
-                bullish_divergence_signal,
-                hidden_bullish_divergence_signal
+                {select_sql}
             FROM {SOURCE_TABLE}
             WHERE signal_date = ? AND taxonomy_version = ?
             ORDER BY ticker ASC
@@ -187,6 +210,67 @@ def _load_source_rows(
             (signal_date, taxonomy_version),
         ).fetchall()
     )
+
+
+def _normalized_text(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _is_truthy_signal(value: object) -> bool:
+    text = _normalized_text(value)
+    if text is None:
+        return False
+    return text not in {"0", "0.0", "FALSE", "false", "NO", "N"}
+
+
+def _derive_daily_status(row: sqlite3.Row) -> str:
+    ecosystem_membership = _normalized_text(row["in_datacenter_ecosystem"])
+    if ecosystem_membership is not None and ecosystem_membership.upper() == "NO":
+        return "NOT_PART_OF_DATACENTER_ECOSYSTEM"
+
+    price_data_status = (_normalized_text(row["price_data_status"]) or "").upper()
+    if price_data_status in {"MISSING_AS_OF_DATE", "MISSING_CLOSE_AS_OF_DATE"}:
+        return "MISSING_PRICE"
+
+    exit_risk_severity = (_normalized_text(row["exit_risk_severity"]) or "").upper()
+    exit_risk_signal = _is_truthy_signal(row["exit_risk_signal"])
+    if exit_risk_severity == "HIGH" or (exit_risk_signal and exit_risk_severity == "HIGH"):
+        return "HIGH_EXIT_RISK"
+    if exit_risk_severity == "MEDIUM" or (exit_risk_signal and exit_risk_severity == "MEDIUM"):
+        return "MEDIUM_EXIT_RISK"
+
+    if _is_truthy_signal(row["breakout_signal"]):
+        return "BREAKOUT_CANDIDATE"
+    if _is_truthy_signal(row["pullback_signal"]):
+        return "PULLBACK_CANDIDATE"
+    return "NEUTRAL_MONITOR"
+
+
+def _derive_primary_reason(row: sqlite3.Row, daily_status: str) -> str | None:
+    exit_reason = _normalized_text(row["exit_reason"])
+    if daily_status in {"HIGH_EXIT_RISK", "MEDIUM_EXIT_RISK"}:
+        return exit_reason
+    if _is_truthy_signal(row["breakout_signal"]):
+        return exit_reason or "BREAKOUT_SIGNAL"
+    if _is_truthy_signal(row["pullback_signal"]):
+        return exit_reason or "PULLBACK_SIGNAL"
+    return exit_reason
+
+
+def _derive_freshness_status(row: sqlite3.Row) -> str | None:
+    latest_bos_event_type = _normalized_text(row["latest_bos_event_type"])
+    latest_bos_freshness = _normalized_text(row["latest_bos_freshness"])
+    latest_reset_reason = _normalized_text(row["latest_reset_reason"])
+    latest_reset_freshness = _normalized_text(row["latest_reset_freshness"])
+    latest_structure_freshness = _normalized_text(row["latest_structure_freshness"])
+    if latest_bos_event_type == "BOS_DOWN" and latest_bos_freshness is not None:
+        return latest_bos_freshness
+    if latest_reset_reason is not None and latest_reset_freshness is not None:
+        return latest_reset_freshness
+    return latest_structure_freshness
 
 
 def _map_destination_row(
@@ -197,59 +281,62 @@ def _map_destination_row(
     watchlist_tickers: set[str],
 ) -> tuple[object, ...]:
     ticker = str(row["ticker"]).strip().upper()
+    daily_status = _derive_daily_status(row)
+    primary_reason = _derive_primary_reason(row, daily_status)
+    freshness_status = _derive_freshness_status(row)
     values = [
-        row["signal_date"],
-        row["taxonomy_version"],
-        ticker,
-        row["primary_layer"],
-        row["primary_subindustry"],
-        row["close"],
-        row["return_5d"],
-        row["return_10d"],
-        row["return_20d"],
-        row["return_60d"],
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        row["latest_structure_freshness"],
-        row["ticker_trend_state"],
-        None,
-        row["latest_structure_label"],
-        row["latest_structure_age_trading_days"],
-        row["latest_bos_event_type"],
-        row["latest_bos_age_trading_days"],
-        row["latest_reset_reason"],
-        row["latest_reset_age_trading_days"],
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        1 if ticker in watchlist_tickers else 0,
-        row["price_data_status"],
-        CALC_VERSION,
-        run_id,
-        created_at_utc,
+        row["signal_date"],  # signal_date
+        row["taxonomy_version"],  # taxonomy_version
+        ticker,  # ticker
+        row["primary_layer"],  # primary_layer
+        row["primary_subindustry"],  # primary_subindustry
+        row["close"],  # close
+        row["return_5d"],  # return_5d
+        row["return_10d"],  # return_10d
+        row["return_20d"],  # return_20d
+        row["return_60d"],  # return_60d
+        None,  # action
+        None,  # severity
+        primary_reason,  # primary_reason
+        daily_status,  # current_status
+        None,  # start_status_30d
+        None,  # status_change_30d
+        None,  # status_change_5d
+        None,  # window_status_30d
+        None,  # window_status_5d
+        None,  # window_status_2d
+        row["ma_break_status"],  # ma_break_status
+        freshness_status,  # freshness_status
+        row["ticker_trend_state"],  # trend_state
+        None,  # trend_state_age_td
+        row["latest_structure_label"],  # latest_structure_label
+        row["latest_structure_age_trading_days"],  # latest_structure_age_td
+        row["latest_bos_event_type"],  # latest_bos_event_type
+        row["latest_bos_age_trading_days"],  # latest_bos_age_td
+        row["latest_reset_reason"],  # latest_reset_reason
+        row["latest_reset_age_trading_days"],  # latest_reset_age_td
+        None,  # latest_candle
+        None,  # latest_candle_age_td
+        None,  # latest_divergence
+        None,  # latest_divergence_age_td
+        None,  # latest_chart_pattern
+        None,  # latest_chart_pattern_age_td
+        None,  # pullback_validity
+        None,  # entry_readiness
+        None,  # candidate_priority
+        None,  # candidate_priority_label
+        daily_status,  # daily_status
+        None,  # rolling_2d_status
+        None,  # rolling_5d_status
+        None,  # rolling_30d_status
+        None,  # horizons_present
+        None,  # source_run_ids
+        SOURCE_COMPONENTS,  # source_components
+        1 if ticker in watchlist_tickers else 0,  # is_watchlist
+        row["price_data_status"],  # data_quality_status
+        CALC_VERSION,  # calc_version
+        run_id,  # run_id
+        created_at_utc,  # created_at_utc
     ]
     assert len(values) == 52
     return tuple(values)

@@ -5,6 +5,9 @@ from types import SimpleNamespace
 from dev_tools.run_datacenter_dashboard_action_summary_write import (
     main as action_summary_main,
 )
+from dev_tools.run_datacenter_dashboard_ticker_enrichment_write import (
+    main as ticker_enrichment_main,
+)
 from dev_tools.run_datacenter_dashboard_ticker_decision_enrichment_write import main
 from rawcandle.datacenter_dashboard_enrichment_migration import (
     apply_datacenter_dashboard_enrichment_migration,
@@ -473,3 +476,128 @@ def test_action_summary_writer_can_use_updated_action_fields(tmp_path):
             ("2026-05-22", "DC_TAXONOMY_FULL_V1"),
         ).fetchone()[0]
     assert count > 0
+
+
+def test_ticker_enrichment_then_decision_writer_produces_non_neutral_action_for_high_exit_risk(
+    tmp_path, capsys
+):
+    db_path = tmp_path / "analysis.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE dc_ticker_swing_signal_daily (
+                signal_date TEXT NOT NULL,
+                taxonomy_version TEXT NOT NULL,
+                ticker TEXT,
+                primary_layer TEXT,
+                primary_subindustry TEXT,
+                close REAL,
+                return_5d REAL,
+                return_10d REAL,
+                return_20d REAL,
+                return_60d REAL,
+                price_data_status TEXT,
+                ticker_trend_state TEXT,
+                latest_structure_label TEXT,
+                latest_structure_age_trading_days INTEGER,
+                latest_structure_freshness TEXT,
+                latest_bos_event_type TEXT,
+                latest_bos_age_trading_days INTEGER,
+                latest_bos_freshness TEXT,
+                latest_reset_reason TEXT,
+                latest_reset_age_trading_days INTEGER,
+                latest_reset_freshness TEXT,
+                bullish_candle_signal INTEGER,
+                bullish_divergence_signal INTEGER,
+                hidden_bullish_divergence_signal INTEGER,
+                in_datacenter_ecosystem TEXT,
+                exit_risk_signal INTEGER,
+                exit_risk_severity TEXT,
+                exit_reason TEXT,
+                breakout_signal INTEGER,
+                pullback_signal INTEGER,
+                ma_break_status TEXT
+            )
+            """
+        )
+        apply_datacenter_dashboard_enrichment_migration(conn)
+        conn.execute(
+            """
+            INSERT INTO dc_ticker_swing_signal_daily (
+                signal_date, taxonomy_version, ticker, primary_layer, primary_subindustry,
+                close, return_5d, return_10d, return_20d, return_60d, price_data_status,
+                ticker_trend_state, latest_structure_label, latest_structure_age_trading_days,
+                latest_structure_freshness, latest_bos_event_type, latest_bos_age_trading_days,
+                latest_bos_freshness, latest_reset_reason, latest_reset_age_trading_days,
+                latest_reset_freshness, bullish_candle_signal, bullish_divergence_signal,
+                hidden_bullish_divergence_signal, in_datacenter_ecosystem, exit_risk_signal,
+                exit_risk_severity, exit_reason, breakout_signal, pullback_signal, ma_break_status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "2026-05-22",
+                "DC_TAXONOMY_FULL_V1",
+                "AAA",
+                "Infrastructure",
+                "AI Accelerators",
+                100.0,
+                1.0,
+                2.0,
+                3.0,
+                4.0,
+                "OK",
+                "DOWN",
+                "LL",
+                3,
+                "FRESH",
+                "BOS_DOWN",
+                2,
+                "FRESH",
+                "DOUBLE_BOS_DOWN",
+                1,
+                "FRESH",
+                0,
+                0,
+                0,
+                None,
+                1,
+                "HIGH",
+                "HIGH_EXIT_TEST",
+                0,
+                0,
+                None,
+            ),
+        )
+
+    ticker_exit_code = ticker_enrichment_main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+    assert ticker_exit_code == 0
+    _ = capsys.readouterr()
+
+    decision_exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "upsert",
+        ]
+    )
+
+    row = _fetch_row(db_path, "AAA")
+    assert decision_exit_code == 0
+    assert row["daily_status"] == "HIGH_EXIT_RISK"
+    assert row["action"] not in (None, "", "NEUTRAL")
