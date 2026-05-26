@@ -12,6 +12,9 @@ from dev_tools.ecosystem_dashboard_structured_json import (
     load_ecosystem_dashboard_input_json,
 )
 from dev_tools.run_datacenter_dashboard_analysis_db_export import main
+from rawcandle.datacenter_dashboard_enrichment_migration import (
+    apply_datacenter_dashboard_enrichment_migration,
+)
 
 
 def _create_price_db(path: Path) -> None:
@@ -379,6 +382,135 @@ def _row_count(db_path: Path, table_name: str) -> int:
         return int(conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0])
 
 
+def _create_enrichment_analysis_db(path: Path) -> None:
+    with sqlite3.connect(path) as conn:
+        apply_datacenter_dashboard_enrichment_migration(conn)
+
+
+def _insert_enrichment_fixture_rows(path: Path) -> None:
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """
+            INSERT INTO dc_dashboard_ticker_enrichment_daily (
+                signal_date, taxonomy_version, ticker, primary_layer, primary_subindustry,
+                close, return_5d, return_20d, return_60d, action, current_status,
+                trend_state, latest_structure_label, latest_bos_event_type, latest_reset_reason,
+                is_watchlist, data_quality_status, calc_version, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "2026-05-22",
+                "DC_TAXONOMY_FULL_V1",
+                "NVDA",
+                "Infrastructure",
+                "AI Accelerators",
+                100.5,
+                1.2,
+                4.5,
+                12.0,
+                "WATCH",
+                "BUY_ZONE",
+                "UP",
+                "HH",
+                "BOS_UP",
+                "EMA20_LOST",
+                1,
+                "OK",
+                "ENRICH_V1",
+                "RUN_ENRICH",
+                "2026-05-26T10:00:00Z",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO dc_dashboard_group_enrichment_daily (
+                signal_date, taxonomy_version, market_level, taxonomy_key, name, layer, subindustry,
+                current_status, return_5d, return_20d, return_60d,
+                data_quality_status, calc_version, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "2026-05-22",
+                "DC_TAXONOMY_FULL_V1",
+                "LAYER",
+                "LAYER:Infrastructure",
+                "Infrastructure",
+                "Infrastructure",
+                None,
+                "BUY_ZONE",
+                0.10,
+                0.20,
+                0.40,
+                "OK",
+                "ENRICH_V1",
+                "RUN_ENRICH",
+                "2026-05-26T10:00:00Z",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO dc_dashboard_action_summary_daily (
+                signal_date, taxonomy_version, action, count, calc_version, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "2026-05-22",
+                "DC_TAXONOMY_FULL_V1",
+                "WATCH",
+                1,
+                "ENRICH_V1",
+                "RUN_ENRICH",
+                "2026-05-26T10:00:00Z",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO dc_dashboard_decision_trace_daily (
+                signal_date, taxonomy_version, ticker, trace_index, action, matched_rule,
+                matched_token, matched_value, horizon, field, calc_version, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "2026-05-22",
+                "DC_TAXONOMY_FULL_V1",
+                "NVDA",
+                1,
+                "WATCH",
+                "ENRICHMENT_FIELD_PRESENT",
+                "daily_status",
+                "BUY_ZONE",
+                "daily",
+                "daily_status",
+                "ENRICH_V1",
+                "RUN_ENRICH",
+                "2026-05-26T10:00:00Z",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO dc_dashboard_enrichment_run_daily (
+                run_id, signal_date, taxonomy_version, status, readiness,
+                ticker_rows, group_rows, action_summary_rows, decision_trace_rows,
+                warnings, calc_version, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "RUN_ENRICH",
+                "2026-05-22",
+                "DC_TAXONOMY_FULL_V1",
+                "OK",
+                "READY",
+                1,
+                1,
+                1,
+                1,
+                None,
+                "ENRICH_V1",
+                "2026-05-26T10:00:00Z",
+            ),
+        )
+
+
 def test_builder_reads_valid_ticker_rows_and_excludes_pseudo_rows(tmp_path):
     analysis_db = tmp_path / "analysis.db"
     price_db = tmp_path / "price.db"
@@ -390,6 +522,7 @@ def test_builder_reads_valid_ticker_rows_and_excludes_pseudo_rows(tmp_path):
         price_db=str(price_db),
         ecosystem_code="DATACENTER",
         report_date="2026-05-22",
+        source_mode="raw-v0",
     )
 
     tickers = result.dashboard_input.tickers
@@ -420,6 +553,7 @@ def test_builder_produces_market_map_and_structured_source_report(tmp_path):
         price_db=str(price_db),
         ecosystem_code="DATACENTER",
         report_date="2026-05-22",
+        source_mode="raw-v0",
     )
 
     dashboard_input = result.dashboard_input
@@ -476,6 +610,8 @@ def test_cli_writes_json_and_prints_partial_warnings_read_only(tmp_path, capsys)
             "DATACENTER",
             "--report-date",
             "2026-05-22",
+            "--source-mode",
+            "raw-v0",
             "--output-json",
             str(output_json),
         ]
@@ -535,6 +671,8 @@ def test_exported_json_loads_and_round_trips_to_dashboard_db(tmp_path):
             "DATACENTER",
             "--report-date",
             "2026-05-22",
+            "--source-mode",
+            "raw-v0",
             "--output-json",
             str(output_json),
         ]
@@ -577,6 +715,8 @@ def test_missing_analysis_db_fails_clearly(tmp_path, capsys):
             "DATACENTER",
             "--report-date",
             "2026-05-22",
+            "--source-mode",
+            "raw-v0",
             "--output-json",
             str(tmp_path / "dashboard_input.json"),
         ]
@@ -586,3 +726,177 @@ def test_missing_analysis_db_fails_clearly(tmp_path, capsys):
     output = capsys.readouterr().out
     assert "SUMMARY datacenter_dashboard_analysis_db_export.status=FAILED" in output
     assert "database not found:" in output
+
+
+def test_enrichment_mode_reads_all_five_tables_and_emits_ready(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    price_db = tmp_path / "price.db"
+    _create_enrichment_analysis_db(analysis_db)
+    _create_price_db(price_db)
+    _insert_enrichment_fixture_rows(analysis_db)
+
+    result = build_datacenter_dashboard_input_from_analysis_db(
+        analysis_db=str(analysis_db),
+        price_db=str(price_db),
+        ecosystem_code="DATACENTER",
+        report_date="2026-05-22",
+    )
+
+    dashboard_input = result.dashboard_input
+    assert dashboard_input.readiness == "READY"
+    assert len(dashboard_input.source_reports) == 1
+    assert dashboard_input.source_reports[0].source_report_type == "analysis_db_enrichment"
+    assert len(dashboard_input.tickers) == 1
+    assert len(dashboard_input.market_map) == 1
+    assert len(dashboard_input.action_summary) == 1
+    assert len(dashboard_input.decision_trace) == 1
+    assert len(dashboard_input.watchlist) == 1
+    assert dashboard_input.decision_trace[0].rule_group == "daily"
+    assert dashboard_input.decision_trace[0].input_value == "BUY_ZONE"
+
+
+def test_enrichment_mode_partial_when_sections_are_empty(tmp_path, capsys):
+    analysis_db = tmp_path / "analysis.db"
+    price_db = tmp_path / "price.db"
+    output_json = tmp_path / "dashboard_input.json"
+    _create_enrichment_analysis_db(analysis_db)
+    _create_price_db(price_db)
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO dc_dashboard_ticker_enrichment_daily (
+                signal_date, taxonomy_version, ticker, data_quality_status, calc_version, run_id, created_at_utc, is_watchlist
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "2026-05-22",
+                "DC_TAXONOMY_FULL_V1",
+                "NVDA",
+                "OK",
+                "ENRICH_V1",
+                "RUN_ENRICH",
+                "2026-05-26T10:00:00Z",
+                0,
+            ),
+        )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(analysis_db),
+            "--price-db",
+            str(price_db),
+            "--ecosystem-code",
+            "DATACENTER",
+            "--report-date",
+            "2026-05-22",
+            "--output-json",
+            str(output_json),
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "SUMMARY datacenter_dashboard_analysis_db_export.source_mode=enrichment" in output
+    assert "SUMMARY datacenter_dashboard_analysis_db_export.readiness=PARTIAL" in output
+    assert (
+        "SUMMARY datacenter_dashboard_analysis_db_export.warning=ENRICHMENT_SECTIONS_EMPTY:"
+        in output
+    )
+    assert (
+        "SUMMARY datacenter_dashboard_analysis_db_export.warning=ENRICHMENT_READINESS_PARTIAL"
+        in output
+    )
+
+
+def test_enrichment_mode_missing_tables_fails_clearly(tmp_path, capsys):
+    analysis_db = tmp_path / "analysis.db"
+    price_db = tmp_path / "price.db"
+    output_json = tmp_path / "dashboard_input.json"
+    with sqlite3.connect(analysis_db):
+        pass
+    _create_price_db(price_db)
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(analysis_db),
+            "--price-db",
+            str(price_db),
+            "--ecosystem-code",
+            "DATACENTER",
+            "--report-date",
+            "2026-05-22",
+            "--output-json",
+            str(output_json),
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 2
+    assert (
+        "SUMMARY datacenter_dashboard_analysis_db_export.warning=ENRICHMENT_TABLES_MISSING"
+        in output
+    )
+    assert "SUMMARY datacenter_dashboard_analysis_db_export.status=FAILED" in output
+
+
+def test_cli_default_source_mode_is_enrichment(tmp_path, capsys):
+    analysis_db = tmp_path / "analysis.db"
+    price_db = tmp_path / "price.db"
+    output_json = tmp_path / "dashboard_input.json"
+    _create_enrichment_analysis_db(analysis_db)
+    _create_price_db(price_db)
+    _insert_enrichment_fixture_rows(analysis_db)
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(analysis_db),
+            "--price-db",
+            str(price_db),
+            "--ecosystem-code",
+            "DATACENTER",
+            "--report-date",
+            "2026-05-22",
+            "--output-json",
+            str(output_json),
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "SUMMARY datacenter_dashboard_analysis_db_export.source_mode=enrichment" in output
+
+
+def test_cli_explicit_raw_v0_mode_works(tmp_path, capsys):
+    analysis_db = tmp_path / "analysis.db"
+    price_db = tmp_path / "price.db"
+    output_json = tmp_path / "dashboard_input.json"
+    _create_analysis_db(analysis_db)
+    _create_price_db(price_db)
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(analysis_db),
+            "--price-db",
+            str(price_db),
+            "--ecosystem-code",
+            "DATACENTER",
+            "--report-date",
+            "2026-05-22",
+            "--source-mode",
+            "raw-v0",
+            "--output-json",
+            str(output_json),
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "SUMMARY datacenter_dashboard_analysis_db_export.source_mode=raw-v0" in output
+    assert (
+        "SUMMARY datacenter_dashboard_analysis_db_export.warning=RAW_V0_SOURCE_MODE_USED"
+        in output
+    )

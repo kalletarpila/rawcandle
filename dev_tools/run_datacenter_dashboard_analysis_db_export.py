@@ -23,6 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--taxonomy-version", default=DEFAULT_TAXONOMY_VERSION)
     parser.add_argument("--market", default="usa")
     parser.add_argument("--max-rows", type=int)
+    parser.add_argument("--source-mode", default="enrichment", choices=("enrichment", "raw-v0"))
     return parser
 
 
@@ -37,6 +38,7 @@ def main(argv: list[str] | None = None) -> int:
             taxonomy_version=args.taxonomy_version,
             market=args.market,
             max_rows=args.max_rows,
+            source_mode=args.source_mode,
         )
         dump_ecosystem_dashboard_input_json(
             build_result.dashboard_input,
@@ -47,6 +49,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {exc}")
         return 1
     except ValueError as exc:
+        if args.source_mode == "enrichment":
+            print(
+                "SUMMARY datacenter_dashboard_analysis_db_export.warning="
+                "ENRICHMENT_TABLES_MISSING"
+            )
         print("SUMMARY datacenter_dashboard_analysis_db_export.status=FAILED")
         print(f"ERROR: {exc}")
         return 2
@@ -63,6 +70,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"SUMMARY datacenter_dashboard_analysis_db_export.analysis_db={args.analysis_db}")
     print(f"SUMMARY datacenter_dashboard_analysis_db_export.price_db={args.price_db}")
     print(f"SUMMARY datacenter_dashboard_analysis_db_export.output_json={args.output_json}")
+    print(f"SUMMARY datacenter_dashboard_analysis_db_export.source_mode={args.source_mode}")
     print(
         "SUMMARY datacenter_dashboard_analysis_db_export.source_reports="
         f"{len(dashboard_input.source_reports)}"
