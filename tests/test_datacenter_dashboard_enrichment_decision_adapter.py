@@ -29,6 +29,7 @@ def test_adapter_builds_dashboard_rows_from_minimal_enrichment_row():
     assert rows[0].raw_status == "NEUTRAL"
     assert rows[0].trend_state == "UP"
     assert rows[0].raw_fields["current_status"] == "NEUTRAL"
+    assert rows[0].raw_fields["horizon_source"] == "current_status"
     assert rows[0].raw_fields["latest_bos_event_type"] == "BOS_UP"
 
 
@@ -45,13 +46,54 @@ def test_adapter_expands_horizon_specific_status_fields():
         ]
     )
 
-    assert any(row.horizon == "daily" and row.raw_status == "NEUTRAL_MONITOR" for row in rows)
-    assert any(row.horizon == "rolling 2d" and row.raw_status == "NO_EMERGENCY" for row in rows)
+    assert len(rows) == 4
     assert any(
-        row.horizon == "rolling 5d" and row.raw_status == "PULLBACK_CANDIDATE"
+        row.horizon == "daily"
+        and row.raw_status == "NEUTRAL_MONITOR"
+        and row.raw_fields["horizon_source"] == "daily_status"
         for row in rows
     )
-    assert any(row.horizon == "rolling 30d" and row.raw_status == "BUY_ZONE" for row in rows)
+    assert any(
+        row.horizon == "rolling 2d"
+        and row.raw_status == "NO_EMERGENCY"
+        and row.raw_fields["horizon_source"] == "rolling_2d_status"
+        for row in rows
+    )
+    assert any(
+        row.horizon == "rolling 5d"
+        and row.raw_status == "PULLBACK_CANDIDATE"
+        and row.raw_fields["horizon_source"] == "rolling_5d_status"
+        for row in rows
+    )
+    assert any(
+        row.horizon == "rolling 30d"
+        and row.raw_status == "BUY_ZONE"
+        and row.raw_fields["horizon_source"] == "rolling_30d_status"
+        for row in rows
+    )
+
+
+def test_adapter_builds_risk_horizon_rows_with_expected_statuses():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "HIGH_EXIT_RISK",
+                "rolling_2d_status": "EMERGENCY_SELL_PRESSURE",
+                "rolling_5d_status": "FAILED_PULLBACK",
+                "rolling_30d_status": "AVOID",
+            }
+        ]
+    )
+
+    assert len(rows) == 4
+    assert any(row.horizon == "daily" and row.raw_status == "HIGH_EXIT_RISK" for row in rows)
+    assert any(
+        row.horizon == "rolling 2d" and row.raw_status == "EMERGENCY_SELL_PRESSURE"
+        for row in rows
+    )
+    assert any(row.horizon == "rolling 5d" and row.raw_status == "FAILED_PULLBACK" for row in rows)
+    assert any(row.horizon == "rolling 30d" and row.raw_status == "AVOID" for row in rows)
 
 
 def test_adapter_excludes_invalid_ticker_rows():
@@ -129,6 +171,62 @@ def test_pullback_readiness_outputs_come_from_existing_decision_logic():
     assert decision.entry_readiness == "READY_TO_WATCH"
     assert decision.candidate_priority is not None
     assert decision.candidate_priority_label == "P1_READY_TO_WATCH"
+
+
+def test_ma_break_fields_are_visible_to_decision_logic_and_produce_sell():
+    result = build_decisions_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "HIGH_EXIT_RISK",
+                "current_status": "RISK",
+                "ma_break_status": "SMA50_CONFIRMED_BREAK",
+                "trend_state": "DOWN",
+            }
+        ]
+    )
+
+    decision = result.decisions[0]
+    assert decision.action == "SELL"
+    assert decision.primary_reason == "SELL_SIGNAL_DETECTED"
+
+
+def test_risk_fields_are_visible_to_decision_logic_trace():
+    result = build_decisions_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "EXIT_ZONE",
+                "rolling_2d_status": "BOS_DOWN",
+                "rolling_30d_status": "BUY_ZONE",
+                "latest_bos_event_type": "BOS_DOWN",
+                "latest_reset_reason": "DOUBLE_BOS_DOWN",
+                "trend_state": "DOWN",
+            }
+        ]
+    )
+
+    decision = result.decisions[0]
+    assert decision.action in {"SELL", "REDUCE"}
+    assert any(
+        "bos_down" in (trace.matched_value or "").lower()
+        or "double_bos_down" in (trace.matched_value or "").lower()
+        for trace in decision.decision_trace
+    )
+
+
+def test_final_action_does_not_self_feed_into_decision_logic():
+    result = build_decisions_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "action": "SELL",
+            }
+        ]
+    )
+
+    decision = result.decisions[0]
+    assert decision.action == "NEUTRAL"
 
 
 def test_loader_reads_rows_read_only_and_missing_db_fails_clearly(tmp_path):

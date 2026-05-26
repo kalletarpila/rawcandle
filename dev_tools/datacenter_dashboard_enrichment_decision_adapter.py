@@ -27,10 +27,53 @@ DISALLOWED_TICKER_LABELS = {
     "TRACE",
 }
 HORIZON_SOURCE_FIELDS: tuple[tuple[str, str], ...] = (
-    ("daily_status", "daily"),
     ("rolling_2d_status", "rolling 2d"),
     ("rolling_5d_status", "rolling 5d"),
     ("rolling_30d_status", "rolling 30d"),
+)
+RAW_FIELD_NAMES: tuple[str, ...] = (
+    "severity",
+    "primary_reason",
+    "current_status",
+    "start_status_30d",
+    "status_change_30d",
+    "status_change_5d",
+    "window_status_30d",
+    "window_status_5d",
+    "window_status_2d",
+    "ma_break_status",
+    "freshness_status",
+    "trend_state",
+    "latest_structure_label",
+    "latest_bos_event_type",
+    "latest_reset_reason",
+    "daily_status",
+    "rolling_2d_status",
+    "rolling_5d_status",
+    "rolling_30d_status",
+    "horizons_present",
+    "pullback_validity",
+    "entry_readiness",
+    "candidate_priority",
+    "candidate_priority_label",
+    "distance_to_ema20",
+    "pullback_days",
+    "high_exit_risk_days_count",
+    "blocking_reasons",
+    "ema20_break_confirmed",
+    "sma50_break_confirmed",
+    "close_below_ema20",
+    "close_below_sma50",
+    "consecutive_closes_below_ema20",
+    "consecutive_closes_below_sma50",
+    "ema20_break_pct",
+    "sma50_break_pct",
+    "structure_warning_overrides_bullish_signal",
+    "latest_bullish_signal_age_td",
+    "latest_bearish_signal_age_td",
+    "latest_bos_up_age_td",
+    "latest_bos_down_age_td",
+    "latest_reset_age_td",
 )
 
 
@@ -77,12 +120,19 @@ def _is_valid_ticker(value: object) -> bool:
     return True
 
 
-def _raw_fields_from_row(row: dict[str, object]) -> dict[str, str]:
+def _raw_fields_from_row(
+    row: dict[str, object],
+    *,
+    horizon_source_field: str | None = None,
+) -> dict[str, str]:
     raw_fields: dict[str, str] = {}
-    for key, value in row.items():
+    for key in RAW_FIELD_NAMES:
+        value = row.get(key)
         text = _normalized_text(value)
         if text is not None:
-            raw_fields[str(key)] = text
+            raw_fields[key] = text
+    if horizon_source_field is not None:
+        raw_fields["horizon_source"] = horizon_source_field
     return raw_fields
 
 
@@ -92,18 +142,16 @@ def _build_row(
     horizon: str,
     row_kind: str,
     raw_status: str | None,
-    extra_raw_fields: dict[str, str] | None = None,
+    horizon_source_field: str | None = None,
 ) -> DatacenterDashboardRow:
-    raw_fields = _raw_fields_from_row(row)
-    if extra_raw_fields:
-        raw_fields.update(extra_raw_fields)
+    raw_fields = _raw_fields_from_row(row, horizon_source_field=horizon_source_field)
     return DatacenterDashboardRow(
         ticker=str(_normalized_text(row.get("ticker"))).upper(),
         horizon=horizon,
         source_file=SOURCE_FILE,
         section=SECTION,
         row_kind=row_kind,
-        raw_action=_normalized_text(row.get("action")),
+        raw_action=None,
         raw_status=raw_status,
         reason=_normalized_text(row.get("primary_reason")),
         trend_state=_normalized_text(row.get("trend_state")),
@@ -142,15 +190,21 @@ def build_dashboard_rows_from_ticker_enrichment_rows(
     for row in rows:
         if not _is_valid_ticker(row.get("ticker")):
             continue
-        base_status = _normalized_text(row.get("current_status")) or _normalized_text(
-            row.get("daily_status")
-        )
+        daily_status = _normalized_text(row.get("daily_status"))
+        current_status = _normalized_text(row.get("current_status"))
+        base_status = daily_status or current_status
+        base_horizon_source = None
+        if daily_status is not None:
+            base_horizon_source = "daily_status"
+        elif current_status is not None:
+            base_horizon_source = "current_status"
         dashboard_rows.append(
             _build_row(
                 row=row,
                 horizon="daily",
                 row_kind="ticker_enrichment_base",
                 raw_status=base_status,
+                horizon_source_field=base_horizon_source,
             )
         )
         for source_field, horizon in HORIZON_SOURCE_FIELDS:
@@ -163,7 +217,7 @@ def build_dashboard_rows_from_ticker_enrichment_rows(
                     horizon=horizon,
                     row_kind="ticker_enrichment_horizon",
                     raw_status=status_value,
-                    extra_raw_fields={"horizon_source_field": source_field},
+                    horizon_source_field=source_field,
                 )
             )
     return dashboard_rows

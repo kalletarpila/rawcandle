@@ -185,6 +185,43 @@ def test_upsert_updates_decision_fields_for_existing_row(tmp_path, capsys):
     assert "SUMMARY datacenter_dashboard_ticker_decision_enrichment_write.updated_rows=1" in output
 
 
+def test_upsert_updates_sell_action_for_ma_break_fixture(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_db_with_table(db_path)
+    _insert_rows(
+        db_path,
+        [
+            _default_row(
+                ticker="AAA",
+                current_status="RISK",
+                daily_status="HIGH_EXIT_RISK",
+                ma_break_status="SMA50_CONFIRMED_BREAK",
+                trend_state="DOWN",
+            )
+        ],
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "upsert",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    row = _fetch_row(db_path, "AAA")
+    assert exit_code == 0
+    assert row["action"] == "SELL"
+    assert row["primary_reason"] == "SELL_SIGNAL_DETECTED"
+    assert "SUMMARY datacenter_dashboard_ticker_decision_enrichment_write.updated_rows=1" in output
+
+
 def test_dry_run_does_not_mutate_row(tmp_path, capsys):
     db_path = tmp_path / "analysis.db"
     _create_db_with_table(db_path)
