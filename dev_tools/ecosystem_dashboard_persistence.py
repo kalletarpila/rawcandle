@@ -1352,9 +1352,9 @@ def persist_ecosystem_dashboard_input(
                         row.trace_order,
                         row.decision,
                         row.rule_name,
-                        row.rule_group,
-                        row.input_value,
                         None,
+                        row.input_value,
+                        row.rule_group,
                         row.reason,
                         generated_at_utc,
                     )

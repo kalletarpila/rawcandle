@@ -177,8 +177,9 @@ def test_persist_ecosystem_dashboard_input_writes_rows_and_round_trips_via_read_
     assert snapshot.market_map[0]["return_60d"] == 12.0
     assert snapshot.tickers[0]["latest_reset_reason"] is None
     assert snapshot.decision_trace[0]["matched_rule"] == "WATCH_MOMENTUM"
-    assert snapshot.decision_trace[0]["matched_token"] == "daily"
+    assert snapshot.decision_trace[0]["matched_token"] is None
     assert snapshot.decision_trace[0]["matched_value"] == "1.2"
+    assert snapshot.decision_trace[0]["horizon"] == "daily"
 
 
 def test_persist_ecosystem_dashboard_input_replace_date_excludes_old_rows_from_selected_run(tmp_path):
