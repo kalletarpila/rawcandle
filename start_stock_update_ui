@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROJECT_DIR="/home/kalle/projects/rawcandle"
+CONFIG_PATH="$PROJECT_DIR/scheduler_config.json"
+UI_URL="http://127.0.0.1:8555"
+
+cd "$PROJECT_DIR"
+
+if [[ ! -f "$CONFIG_PATH" ]]; then
+  echo "ERROR: scheduler config not found: $CONFIG_PATH" >&2
+  exit 1
+fi
+
+echo "Starting RawCandle stock update scheduler UI..."
+echo "Config: $CONFIG_PATH"
+echo "Open in browser: $UI_URL"
+echo "Stop with Ctrl+C"
+echo
+
+PYTHONPATH="$PROJECT_DIR" /usr/bin/python3 dev_tools/stock_update_scheduler_ui.py \
+  --config "$CONFIG_PATH"
