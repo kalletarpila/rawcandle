@@ -16,6 +16,9 @@ from dev_tools.run_datacenter_dashboard_decision_trace_write import (
     main as decision_trace_main,
 )
 from dev_tools.run_datacenter_dashboard_group_enrichment_write import main as group_main
+from dev_tools.run_datacenter_dashboard_ticker_decision_enrichment_write import (
+    main as ticker_decision_main,
+)
 from dev_tools.run_datacenter_dashboard_ticker_enrichment_write import main as ticker_main
 
 
@@ -26,6 +29,7 @@ ACTION_SUMMARY_TABLE = "dc_dashboard_action_summary_daily"
 DECISION_TRACE_TABLE = "dc_dashboard_decision_trace_daily"
 CALC_VERSION = "DATACENTER_DASHBOARD_ENRICHMENT_ORCHESTRATOR_V1"
 WARNING_RE = re.compile(r"^SUMMARY [^.]+\.warning=(.*)$")
+SUMMARY_RE = re.compile(r"^SUMMARY ([^.]+\..+?)=(.*)$")
 
 
 class _Tee(io.StringIO):
@@ -59,6 +63,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit", type=int)
     parser.add_argument("--skip-ticker", action="store_true")
     parser.add_argument("--skip-group", action="store_true")
+    parser.add_argument("--skip-ticker-decision", action="store_true")
     parser.add_argument("--skip-action-summary", action="store_true")
     parser.add_argument("--skip-decision-trace", action="store_true")
     return parser
@@ -164,18 +169,22 @@ def _stage_args(
     return args
 
 
-def _run_stage(stage_main, args: list[str]) -> tuple[int, list[str]]:
+def _run_stage(stage_main, args: list[str]) -> tuple[int, list[str], dict[str, str]]:
     tee = _Tee(sys.stdout)
     with redirect_stdout(tee):
         exit_code = stage_main(args)
     warnings: list[str] = []
+    summaries: dict[str, str] = {}
     for line in tee.getvalue().splitlines():
+        summary_match = SUMMARY_RE.match(line.strip())
+        if summary_match:
+            summaries[summary_match.group(1)] = summary_match.group(2).strip()
         match = WARNING_RE.match(line.strip())
         if match:
             warning = match.group(1).strip()
             if warning:
                 warnings.append(warning)
-    return exit_code, warnings
+    return exit_code, warnings, summaries
 
 
 def _write_metadata_row(
@@ -312,9 +321,11 @@ def main(argv: list[str] | None = None) -> int:
         attempted = {
             "ticker": 0 if args.skip_ticker else 1,
             "group": 0 if args.skip_group else 1,
+            "ticker_decision": 0 if args.skip_ticker_decision else 1,
             "action_summary": 0 if args.skip_action_summary else 1,
             "decision_trace": 0 if args.skip_decision_trace else 1,
         }
+        ticker_decision_updated_rows = ""
 
         stages = [
             (
@@ -348,6 +359,22 @@ def main(argv: list[str] | None = None) -> int:
                 ),
                 GROUP_TABLE,
                 bool(args.skip_group),
+            ),
+            (
+                "ticker_decision",
+                ticker_decision_main,
+                _stage_args(
+                    analysis_db=args.analysis_db,
+                    signal_date=signal_date,
+                    taxonomy_version=taxonomy_version,
+                    mode="upsert" if args.mode == "insert-missing" else args.mode,
+                    run_id=run_id,
+                    dry_run=args.dry_run,
+                    limit=args.limit,
+                    supports_limit=True,
+                ),
+                TICKER_TABLE,
+                bool(args.skip_ticker_decision),
             ),
             (
                 "action_summary",
@@ -386,8 +413,13 @@ def main(argv: list[str] | None = None) -> int:
         for stage_name, stage_main, stage_argv, _, is_skipped in stages:
             if is_skipped:
                 continue
-            exit_code, stage_warnings = _run_stage(stage_main, stage_argv)
+            exit_code, stage_warnings, stage_summaries = _run_stage(stage_main, stage_argv)
             warnings.extend(stage_warnings)
+            if stage_name == "ticker_decision":
+                ticker_decision_updated_rows = stage_summaries.get(
+                    "datacenter_dashboard_ticker_decision_enrichment_write.updated_rows",
+                    "",
+                )
             if exit_code != 0:
                 print(f"ERROR: {stage_name} stage failed", file=sys.stderr)
                 return 1
@@ -455,10 +487,12 @@ def main(argv: list[str] | None = None) -> int:
         _emit_summary("run_id", run_id)
         _emit_summary("ticker_attempted", attempted["ticker"])
         _emit_summary("group_attempted", attempted["group"])
+        _emit_summary("ticker_decision_attempted", attempted["ticker_decision"])
         _emit_summary("action_summary_attempted", attempted["action_summary"])
         _emit_summary("decision_trace_attempted", attempted["decision_trace"])
         _emit_summary("ticker_rows", ticker_rows)
         _emit_summary("group_rows", group_rows)
+        _emit_summary("ticker_decision_updated_rows", ticker_decision_updated_rows)
         _emit_summary("action_summary_rows", action_summary_rows)
         _emit_summary("decision_trace_rows", decision_trace_rows)
         _emit_summary("readiness", readiness)

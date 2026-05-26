@@ -220,19 +220,20 @@ def test_full_replace_date_run_with_real_v0_sources_writes_partial_metadata(tmp_
     assert exit_code == 0
     assert _count_selection(db_path, "dc_dashboard_ticker_enrichment_daily") == 1
     assert _count_selection(db_path, "dc_dashboard_group_enrichment_daily") == 1
-    assert _count_selection(db_path, "dc_dashboard_action_summary_daily") == 0
-    assert _count_selection(db_path, "dc_dashboard_decision_trace_daily") == 0
+    assert _count_selection(db_path, "dc_dashboard_action_summary_daily") == 1
+    assert _count_selection(db_path, "dc_dashboard_decision_trace_daily") > 0
     rows = _run_rows(db_path)
     assert len(rows) == 1
     assert rows[0]["run_id"] == "RUN_ORCH_PARTIAL"
     assert rows[0]["status"] == "OK"
-    assert rows[0]["readiness"] == "PARTIAL"
+    assert rows[0]["readiness"] == "READY"
     assert rows[0]["ticker_rows"] == 1
     assert rows[0]["group_rows"] == 1
-    assert rows[0]["action_summary_rows"] == 0
-    assert rows[0]["decision_trace_rows"] == 0
+    assert rows[0]["action_summary_rows"] == 1
+    assert rows[0]["decision_trace_rows"] > 0
     assert "SUMMARY datacenter_dashboard_enrichment_write.status=OK" in output
-    assert "SUMMARY datacenter_dashboard_enrichment_write.readiness=PARTIAL" in output
+    assert "SUMMARY datacenter_dashboard_enrichment_write.ticker_decision_attempted=1" in output
+    assert "SUMMARY datacenter_dashboard_enrichment_write.readiness=READY" in output
     assert "SUMMARY datacenter_dashboard_enrichment_write.metadata_written=1" in output
 
 
@@ -296,6 +297,7 @@ def test_preseeded_insert_missing_run_can_write_ready_metadata(tmp_path, capsys)
     assert rows[0]["action_summary_rows"] == 1
     assert rows[0]["decision_trace_rows"] > 0
     assert "SUMMARY datacenter_dashboard_enrichment_write.readiness=READY" in output
+    assert "SUMMARY datacenter_dashboard_enrichment_write.ticker_decision_attempted=1" in output
 
 
 def test_dry_run_writes_no_metadata_and_leaves_database_unchanged(tmp_path, capsys):
@@ -337,7 +339,58 @@ def test_dry_run_writes_no_metadata_and_leaves_database_unchanged(tmp_path, caps
     assert before == after
     assert _run_rows(db_path) == []
     assert "SUMMARY datacenter_dashboard_enrichment_write.status=DRY_RUN" in output
+    assert "SUMMARY datacenter_dashboard_enrichment_write.ticker_decision_attempted=1" in output
     assert "SUMMARY datacenter_dashboard_enrichment_write.metadata_written=0" in output
+
+
+def test_skip_ticker_decision_results_in_partial_metadata(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_group_source_row(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO dc_dashboard_ticker_enrichment_daily (
+                signal_date, taxonomy_version, ticker, action, is_watchlist,
+                data_quality_status, calc_version, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "2026-05-22",
+                "DC_TAXONOMY_FULL_V1",
+                "AAA",
+                "WATCH",
+                0,
+                "OK",
+                "SEED",
+                "SEED_RUN",
+                "2026-05-26T10:00:00Z",
+            ),
+        )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "insert-missing",
+            "--run-id",
+            "RUN_ORCH_SKIP",
+            "--skip-ticker-decision",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    rows = _run_rows(db_path)
+    assert len(rows) == 1
+    assert rows[0]["readiness"] == "PARTIAL"
+    assert "SUMMARY datacenter_dashboard_enrichment_write.ticker_decision_attempted=0" in output
+    assert "SUMMARY datacenter_dashboard_enrichment_write.readiness=PARTIAL" in output
 
 
 def test_skip_decision_trace_results_in_partial_metadata(tmp_path, capsys):
@@ -376,7 +429,7 @@ def test_skip_decision_trace_results_in_partial_metadata(tmp_path, capsys):
             "--mode",
             "insert-missing",
             "--run-id",
-            "RUN_ORCH_SKIP",
+            "RUN_ORCH_SKIP_TRACE",
             "--skip-decision-trace",
         ]
     )
@@ -388,6 +441,7 @@ def test_skip_decision_trace_results_in_partial_metadata(tmp_path, capsys):
     assert rows[0]["readiness"] == "PARTIAL"
     assert rows[0]["decision_trace_rows"] == 0
     assert "SUMMARY datacenter_dashboard_enrichment_write.decision_trace_attempted=0" in output
+    assert "SUMMARY datacenter_dashboard_enrichment_write.ticker_decision_attempted=1" in output
     assert "SUMMARY datacenter_dashboard_enrichment_write.readiness=PARTIAL" in output
 
 
@@ -612,6 +666,47 @@ def test_stage_failure_stops_execution_and_writes_no_metadata(tmp_path, capsys):
     assert _run_rows(db_path) == []
 
 
+def test_ticker_decision_stage_failure_stops_before_action_summary_and_trace(
+    tmp_path, monkeypatch, capsys
+):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_ticker_source_row(db_path)
+    _insert_group_source_row(db_path)
+
+    def fail_stage(argv):
+        print("ERROR: forced ticker decision failure", file=__import__("sys").stderr)
+        return 1
+
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_enrichment_write.ticker_decision_main",
+        fail_stage,
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+            "--run-id",
+            "RUN_ORCH_DECISION_FAIL",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "SUMMARY datacenter_dashboard_enrichment_write.status=OK" not in captured.out
+    assert "ticker_decision stage failed" in captured.err
+    assert _count_selection(db_path, "dc_dashboard_action_summary_daily") == 0
+    assert _count_selection(db_path, "dc_dashboard_decision_trace_daily") == 0
+    assert _run_rows(db_path) == []
+
+
 def test_audit_after_orchestrator_matches_written_sections(tmp_path, capsys):
     db_path = tmp_path / "analysis.db"
     _create_source_and_destination_db(db_path)
@@ -650,6 +745,6 @@ def test_audit_after_orchestrator_matches_written_sections(tmp_path, capsys):
     assert audit_exit_code == 0
     assert "section_readiness;ticker_enrichment;READY;1;rows_available" in output
     assert "section_readiness;group_enrichment;READY;1;rows_available" in output
-    assert "section_readiness;action_summary;EMPTY;0;no_rows_for_signal_date_taxonomy_version" in output
-    assert "section_readiness;decision_trace;EMPTY;0;no_rows_for_signal_date_taxonomy_version" in output
-    assert "section_readiness;overall;PARTIAL;3;some_sections_empty" in output
+    assert "section_readiness;action_summary;READY;1;rows_available" in output
+    assert "section_readiness;decision_trace;READY;" in output
+    assert "section_readiness;overall;READY;" in output
