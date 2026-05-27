@@ -7,6 +7,9 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from analysis.datacenter_indices.swing_ma_break_status import (
+    build_swing_ma_break_status_rows,
+)
 
 SOURCE_TABLE = "dc_ticker_swing_signal_daily"
 DESTINATION_TABLE = "dc_dashboard_ticker_enrichment_daily"
@@ -231,6 +234,8 @@ def _load_source_history_by_ticker(
         ("signal_date", "signal_date"),
         ("taxonomy_version", "taxonomy_version"),
         ("ticker", "ticker"),
+        ("close", "close"),
+        ("ema20", "ema20"),
         ("exit_risk_signal", "exit_risk_signal"),
         ("exit_risk_severity", "exit_risk_severity"),
     ]
@@ -405,6 +410,37 @@ def _resolve_high_exit_risk_days_count(
     return _derive_high_exit_risk_days_count_same_day(row), False, True
 
 
+def _resolve_ma_break_status(
+    row: sqlite3.Row,
+    history_rows: list[sqlite3.Row] | None,
+) -> str | None:
+    explicit_value = _normalized_text(row["ma_break_status"])
+    if explicit_value is not None:
+        return explicit_value
+    if not history_rows:
+        return None
+    derived_rows = build_swing_ma_break_status_rows(
+        latest_rows=[
+            {
+                "ticker": row["ticker"],
+                "signal_date": row["signal_date"],
+                "close": row["close"],
+            }
+        ],
+        history_rows=[
+            {key: history_row[key] for key in history_row.keys()}
+            for history_row in history_rows
+        ],
+        as_of_date=str(row["signal_date"]),
+    )
+    if not derived_rows:
+        return None
+    derived_value = _normalized_text(derived_rows[0].get("ma_break_status"))
+    if derived_value == "INSUFFICIENT_DATA":
+        return None
+    return derived_value
+
+
 def _map_destination_row(
     row: sqlite3.Row,
     *,
@@ -412,6 +448,7 @@ def _map_destination_row(
     created_at_utc: str,
     watchlist_tickers: set[str],
     high_exit_risk_days_count: int,
+    ma_break_status: str | None,
 ) -> tuple[object, ...]:
     ticker = str(row["ticker"]).strip().upper()
     daily_status = _derive_daily_status(row)
@@ -440,7 +477,7 @@ def _map_destination_row(
         None,  # window_status_30d
         None,  # window_status_5d
         window_status_2d,  # window_status_2d
-        row["ma_break_status"],  # ma_break_status
+        ma_break_status,  # ma_break_status
         freshness_status,  # freshness_status
         row["ticker_trend_state"],  # trend_state
         None,  # trend_state_age_td
@@ -537,6 +574,13 @@ def main(argv: list[str] | None = None) -> int:
                 tickers=[str(row["ticker"]).strip().upper() for row in valid_rows],
                 window_rows=args.high_exit_window_rows,
             )
+            ma_history_by_ticker = _load_source_history_by_ticker(
+                conn,
+                signal_date=signal_date,
+                taxonomy_version=taxonomy_version,
+                tickers=[str(row["ticker"]).strip().upper() for row in valid_rows],
+                window_rows=60,
+            )
             watchlist_matches = sum(
                 1
                 for row in valid_rows
@@ -553,6 +597,10 @@ def main(argv: list[str] | None = None) -> int:
                 high_exit_risk_days_count, used_window, used_fallback = _resolve_high_exit_risk_days_count(
                     row,
                     history_by_ticker.get(ticker),
+                )
+                ma_break_status = _resolve_ma_break_status(
+                    row,
+                    ma_history_by_ticker.get(ticker),
                 )
                 if used_window:
                     high_exit_window_derived_rows += 1
@@ -571,6 +619,7 @@ def main(argv: list[str] | None = None) -> int:
                             created_at_utc=created_at_utc,
                             watchlist_tickers=watchlist_tickers,
                             high_exit_risk_days_count=high_exit_risk_days_count,
+                            ma_break_status=ma_break_status,
                         ),
                     )
                 )

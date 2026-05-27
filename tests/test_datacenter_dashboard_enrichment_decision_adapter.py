@@ -194,6 +194,24 @@ def test_ma_break_fields_are_visible_to_decision_logic_and_produce_sell():
     assert decision.primary_reason == "SELL_SIGNAL_DETECTED"
 
 
+def test_ema20_confirmed_break_is_visible_to_decision_logic_and_produce_sell():
+    result = build_decisions_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "HIGH_EXIT_RISK",
+                "current_status": "RISK",
+                "ma_break_status": "EMA20_CONFIRMED_BREAK",
+                "trend_state": "DOWN",
+            }
+        ]
+    )
+
+    decision = result.decisions[0]
+    assert decision.action == "SELL"
+    assert decision.primary_reason == "SELL_SIGNAL_DETECTED"
+
+
 def test_risk_fields_are_visible_to_decision_logic_trace():
     result = build_decisions_from_ticker_enrichment_rows(
         [

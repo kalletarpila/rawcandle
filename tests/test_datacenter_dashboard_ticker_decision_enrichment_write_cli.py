@@ -729,6 +729,146 @@ def test_return_10d_hard_sell_token_can_drive_sell_action(tmp_path, capsys):
     assert row["action"] == "SELL"
 
 
+def test_history_derived_sma50_confirmed_break_can_drive_sell_action(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE dc_ticker_swing_signal_daily (
+                signal_date TEXT NOT NULL,
+                taxonomy_version TEXT NOT NULL,
+                ticker TEXT,
+                primary_layer TEXT,
+                primary_subindustry TEXT,
+                close REAL,
+                return_5d REAL,
+                return_10d REAL,
+                return_20d REAL,
+                return_60d REAL,
+                price_data_status TEXT,
+                ticker_trend_state TEXT,
+                latest_structure_label TEXT,
+                latest_structure_age_trading_days INTEGER,
+                latest_structure_freshness TEXT,
+                latest_bos_event_type TEXT,
+                latest_bos_age_trading_days INTEGER,
+                latest_bos_freshness TEXT,
+                latest_reset_reason TEXT,
+                latest_reset_age_trading_days INTEGER,
+                latest_reset_freshness TEXT,
+                bullish_candle_signal INTEGER,
+                bullish_divergence_signal INTEGER,
+                hidden_bullish_divergence_signal INTEGER,
+                in_datacenter_ecosystem TEXT,
+                exit_risk_signal INTEGER,
+                exit_risk_severity TEXT,
+                exit_reason TEXT,
+                breakout_signal INTEGER,
+                pullback_signal INTEGER,
+                ma_break_status TEXT
+            )
+            """
+        )
+        apply_datacenter_dashboard_enrichment_migration(conn)
+        rows: list[tuple[object, ...]] = []
+        for day in range(1, 51):
+            signal_date = f"2026-04-{day:02d}" if day <= 30 else f"2026-05-{day-30:02d}"
+            close = 100.0 if day < 50 else 95.0
+            rows.append(
+                (
+                    signal_date,
+                    "DC_TAXONOMY_FULL_V1",
+                    "AAA",
+                    "Infrastructure",
+                    "AI Accelerators",
+                    close,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    "OK",
+                    "DOWN",
+                    "LL",
+                    3,
+                    "FRESH",
+                    "BOS_UP",
+                    2,
+                    "FRESH",
+                    None,
+                    None,
+                    None,
+                    0,
+                    0,
+                    0,
+                    None,
+                    0,
+                    None,
+                    None,
+                    0,
+                    0,
+                    None,
+                )
+            )
+        conn.executemany(
+            """
+            INSERT INTO dc_ticker_swing_signal_daily (
+                signal_date, taxonomy_version, ticker, primary_layer, primary_subindustry,
+                close, return_5d, return_10d, return_20d, return_60d, price_data_status,
+                ticker_trend_state, latest_structure_label, latest_structure_age_trading_days,
+                latest_structure_freshness, latest_bos_event_type, latest_bos_age_trading_days,
+                latest_bos_freshness, latest_reset_reason, latest_reset_age_trading_days,
+                latest_reset_freshness, bullish_candle_signal, bullish_divergence_signal,
+                hidden_bullish_divergence_signal, in_datacenter_ecosystem, exit_risk_signal,
+                exit_risk_severity, exit_reason, breakout_signal, pullback_signal, ma_break_status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+
+    ticker_exit_code = ticker_enrichment_main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-20",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+    assert ticker_exit_code == 0
+    _ = capsys.readouterr()
+
+    decision_exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-20",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "upsert",
+        ]
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT *
+            FROM dc_dashboard_ticker_enrichment_daily
+            WHERE signal_date = ? AND taxonomy_version = ? AND ticker = ?
+            """,
+            ("2026-05-20", "DC_TAXONOMY_FULL_V1", "AAA"),
+        ).fetchone()
+    assert row is not None
+    assert decision_exit_code == 0
+    assert row["ma_break_status"] == "SMA50_CONFIRMED_BREAK"
+    assert row["action"] == "SELL"
+
+
 def test_windowed_high_exit_history_can_drive_non_neutral_action(tmp_path, capsys):
     db_path = tmp_path / "analysis.db"
     with sqlite3.connect(db_path) as conn:
