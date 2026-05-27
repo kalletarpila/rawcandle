@@ -106,15 +106,32 @@ This step is manual, operator-approved, and modifies production `data/analysis.d
 
 Scheduler must not run migrations automatically.
 
-Use the existing project migration helper path. If the exact standalone migration command has not been separately confirmed from current code, stop and confirm it first.
+Verified migration mechanism:
 
-Conservative operator note:
+- the project does not expose a separate standalone Datacenter enrichment migration CLI in the inspected code path
+- tests and runtime both use `analysis.database_manager.DatabaseManager`
+- `DatabaseManager.__init__(...)` calls `_init_database()`
+- `_init_database()` calls `apply_datacenter_dashboard_enrichment_migration(conn)`
+- `apply_datacenter_dashboard_enrichment_migration(conn)` applies:
+  - `rawcandle/sqlite/migrations/002_create_datacenter_dashboard_enrichment.sql`
+  - `rawcandle/sqlite/migrations/003_add_high_exit_risk_days_count_to_ticker_enrichment.sql` when the column is missing
 
-```text
-TODO before running in production:
-Verify the exact migration command from the current DatabaseManager/migration helper.
-Do not run this step until the command has been confirmed from code.
+Verified manual command:
+
+```bash
+PYTHONPATH=. python3 -c 'from analysis.database_manager import DatabaseManager; DatabaseManager("/home/kalle/projects/rawcandle/data/analysis.db").close()'
 ```
+
+Operator interpretation:
+
+- this uses the existing project migration/init code path
+- this writes to production `data/analysis.db` if run
+- this applies more than only the Datacenter enrichment migration:
+  - it runs the broader `DatabaseManager` initialization/ensure logic for `analysis.db`
+  - it also invokes other existing schema/migration helpers wired there
+- the Datacenter enrichment migration helper itself is idempotent in tests
+- the command must be treated as a write operation
+- no other process should be writing to `analysis.db` while this runs
 
 After migration, verify schema and enrichment table availability with audit:
 
