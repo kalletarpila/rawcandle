@@ -2239,10 +2239,13 @@ def test_scheduler_runner_enrichment_write_failure_falls_back_when_enabled(
             expected_synthetic_ohlc_count=53,
         ),
     )
-    monkeypatch.setattr(
-        "rawcandle.scheduler.runner._run_python_cli_main",
-        lambda cli_main, args: (1, ""),
-    )
+    cli_calls = []
+
+    def fake_cli(cli_main, args):
+        cli_calls.append(list(args))
+        return 1, ""
+
+    monkeypatch.setattr("rawcandle.scheduler.runner._run_python_cli_main", fake_cli)
 
     fallback_calls = []
     monkeypatch.setattr(
@@ -2264,10 +2267,102 @@ def test_scheduler_runner_enrichment_write_failure_falls_back_when_enabled(
 
     result = run_scheduler_config(config_path=str(config_path))
     assert len(fallback_calls) == 1
+    assert len(cli_calls) == 1
     assert result.datacenter_enrichment_attempted == 1
     assert result.datacenter_enrichment_status == "FAILED"
+    assert result.datacenter_dashboard_enrichment_export_status == "SKIPPED"
+    assert result.datacenter_dashboard_structured_build_status == "SKIPPED"
     assert result.datacenter_dashboard_fallback_used == 1
     assert result.datacenter_dashboard_final_source_mode == "reports"
+    assert result.datacenter_dashboard_status == "OK"
+
+
+def test_scheduler_runner_enrichment_audit_failure_falls_back_when_enabled(
+    tmp_path, monkeypatch, real_datacenter_dashboard
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    reports_dir = _prepare_ready_datacenter_reports_dir(tmp_path)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        datacenter_dashboard_source_mode="enrichment",
+        datacenter_enrichment_enabled=True,
+        datacenter_dashboard_fallback_to_reports=True,
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_post_step",
+        lambda **kwargs: scheduler_runner.DatacenterPostStepResult(
+            attempted=1,
+            status="OK",
+            market="usa",
+            signal_date="2026-05-22",
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_datacenter_post_step_config",
+        lambda market: scheduler_runner.DatacenterPostStepConfig(
+            market="usa",
+            taxonomy_csv="data/datacenter_ecosystem_taxonomy_full_v1.csv",
+            taxonomy_version="DC_TAXONOMY_FULL_V1",
+            start_date="2025-08-01",
+            index_base_date="2020-01-01",
+            output_dir=str(reports_dir),
+            expected_ticker_count=236,
+            expected_group_count=54,
+            expected_synthetic_ohlc_count=53,
+        ),
+    )
+    call_index = {"value": 0}
+
+    def fake_cli(cli_main, args):
+        idx = call_index["value"]
+        call_index["value"] += 1
+        if idx == 0:
+            return 0, "\n".join(
+                [
+                    "SUMMARY datacenter_dashboard_enrichment_write.status=OK",
+                    "SUMMARY datacenter_dashboard_enrichment_write.run_id=ENRICH_RUN",
+                    "SUMMARY datacenter_dashboard_enrichment_write.readiness=READY",
+                ]
+            )
+        return 1, ""
+
+    monkeypatch.setattr("rawcandle.scheduler.runner._run_python_cli_main", fake_cli)
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_dashboard_reports_post_step",
+        lambda **kwargs: DatacenterDashboardPostStepResult(
+            attempted=1,
+            status="OK",
+            dashboard_db=kwargs["config"].datacenter_dashboard_db,
+            report_date=kwargs["report_date"],
+            md_reports_status="OK",
+            source_reports_available=4,
+            html_output_path=kwargs["html_output"],
+            run_id="REPORTS_RUN",
+            source_mode="reports",
+            final_source_mode="reports",
+        ),
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+    assert result.datacenter_enrichment_attempted == 1
+    assert result.datacenter_enrichment_status == "FAILED"
+    assert result.datacenter_dashboard_enrichment_export_status == "SKIPPED"
+    assert result.datacenter_dashboard_structured_build_status == "SKIPPED"
+    assert result.datacenter_dashboard_fallback_used == 1
+    assert result.datacenter_dashboard_final_source_mode == "reports"
+    assert result.datacenter_dashboard_status == "OK"
 
 
 def test_scheduler_runner_enrichment_export_failure_falls_back_when_enabled(
@@ -2353,7 +2448,9 @@ def test_scheduler_runner_enrichment_export_failure_falls_back_when_enabled(
 
     result = run_scheduler_config(config_path=str(config_path))
     assert result.datacenter_dashboard_fallback_used == 1
+    assert result.datacenter_dashboard_status == "OK"
     assert result.datacenter_dashboard_enrichment_export_status == "FAILED"
+    assert result.datacenter_dashboard_structured_build_status == "SKIPPED"
     assert result.datacenter_dashboard_final_source_mode == "reports"
 
 
@@ -2442,6 +2539,7 @@ def test_scheduler_runner_structured_build_failure_falls_back_when_enabled(
     result = run_scheduler_config(config_path=str(config_path))
     assert result.datacenter_dashboard_structured_build_status == "FAILED"
     assert result.datacenter_dashboard_fallback_used == 1
+    assert result.datacenter_dashboard_status == "OK"
     assert result.datacenter_dashboard_final_source_mode == "reports"
 
 
@@ -2507,6 +2605,115 @@ def test_scheduler_runner_enrichment_failure_without_fallback_marks_failed(
     assert result.datacenter_dashboard_status == "FAILED"
     assert result.datacenter_dashboard_fallback_used == 0
     assert result.datacenter_dashboard_final_source_mode == "enrichment"
+
+
+def test_scheduler_runner_acceptance_report_failure_falls_back_when_enabled(
+    tmp_path, monkeypatch, real_datacenter_dashboard
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    dashboard_db = tmp_path / "ecosystem_dashboard.db"
+    html_dir = tmp_path / "html"
+    watchlist_file = tmp_path / "watchlist.txt"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    watchlist_file.write_text("AAA\n", encoding="utf-8")
+    reports_dir = _prepare_ready_datacenter_reports_dir(tmp_path)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        datacenter_dashboard_db=dashboard_db,
+        datacenter_dashboard_html_output_dir=html_dir,
+        datacenter_dashboard_source_mode="enrichment",
+        datacenter_enrichment_enabled=True,
+        datacenter_enrichment_watchlist_file=watchlist_file,
+        datacenter_dashboard_fallback_to_reports=True,
+        datacenter_dashboard_run_acceptance_report=True,
+    )
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_post_step",
+        lambda **kwargs: scheduler_runner.DatacenterPostStepResult(
+            attempted=1,
+            status="OK",
+            market="usa",
+            signal_date="2026-05-22",
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_datacenter_post_step_config",
+        lambda market: scheduler_runner.DatacenterPostStepConfig(
+            market="usa",
+            taxonomy_csv="data/datacenter_ecosystem_taxonomy_full_v1.csv",
+            taxonomy_version="DC_TAXONOMY_FULL_V1",
+            start_date="2025-08-01",
+            index_base_date="2020-01-01",
+            output_dir=str(reports_dir),
+            expected_ticker_count=236,
+            expected_group_count=54,
+            expected_synthetic_ohlc_count=53,
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_latest_dashboard_run_id",
+        lambda dashboard_db, ecosystem_code, report_date: "REPORTS_RUN",
+    )
+    call_index = {"value": 0}
+
+    def fake_cli(cli_main, args):
+        idx = call_index["value"]
+        call_index["value"] += 1
+        if idx == 0:
+            return 0, "\n".join(
+                [
+                    "SUMMARY datacenter_dashboard_enrichment_write.status=OK",
+                    "SUMMARY datacenter_dashboard_enrichment_write.run_id=ENRICH_RUN",
+                    "SUMMARY datacenter_dashboard_enrichment_write.readiness=READY",
+                ]
+            )
+        if idx == 1:
+            return 0, "SUMMARY datacenter_dashboard_enrichment_audit.readiness=READY"
+        if idx == 2:
+            return 0, "SUMMARY datacenter_dashboard_analysis_db_export.status=OK"
+        if idx == 3:
+            return 0, "\n".join(
+                [
+                    "SUMMARY ecosystem_dashboard_build.status=OK",
+                    "SUMMARY ecosystem_dashboard_build.run_id=ENRICH_DASH_RUN",
+                ]
+            )
+        return 1, ""
+
+    monkeypatch.setattr("rawcandle.scheduler.runner._run_python_cli_main", fake_cli)
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_dashboard_reports_post_step",
+        lambda **kwargs: DatacenterDashboardPostStepResult(
+            attempted=1,
+            status="OK",
+            dashboard_db=kwargs["config"].datacenter_dashboard_db,
+            report_date=kwargs["report_date"],
+            md_reports_status="OK",
+            source_reports_available=4,
+            html_output_path=kwargs["html_output"],
+            run_id="REPORTS_RUN",
+            source_mode="reports",
+            final_source_mode="reports",
+        ),
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+    assert result.datacenter_dashboard_acceptance_report_status == "FAILED"
+    assert result.datacenter_dashboard_fallback_used == 1
+    assert result.datacenter_dashboard_final_source_mode == "reports"
+    assert result.datacenter_dashboard_status == "OK"
 
 
 def test_scheduler_runner_dashboard_helper_uses_dashboard_db_build_and_html_args(
