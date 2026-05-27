@@ -10,6 +10,7 @@ from pathlib import Path
 SOURCE_TABLE = "dc_group_swing_signal_daily"
 OPTIONAL_SYNTHETIC_TABLE = "dc_group_synthetic_ohlc_daily"
 OPTIONAL_INDEX_TABLE = "dc_group_index_daily"
+OPTIONAL_TICKER_SOURCE_TABLE = "dc_ticker_swing_signal_daily"
 DESTINATION_TABLE = "dc_dashboard_group_enrichment_daily"
 CALC_VERSION = "DATACENTER_DASHBOARD_GROUP_ENRICHMENT_V1"
 
@@ -245,19 +246,121 @@ def _market_level(group_type: object) -> str:
     return normalized.upper()
 
 
-def _group_identity(row: sqlite3.Row) -> tuple[str, str, str, str | None, str | None]:
+def _load_subindustry_to_layer(
+    conn: sqlite3.Connection,
+    *,
+    signal_date: str,
+    taxonomy_version: str,
+) -> dict[str, str]:
+    if not _table_exists(conn, OPTIONAL_TICKER_SOURCE_TABLE):
+        return {}
+    columns = _table_columns(conn, OPTIONAL_TICKER_SOURCE_TABLE)
+    required_columns = {"primary_layer", "primary_subindustry", "signal_date", "taxonomy_version"}
+    if not required_columns.issubset(columns):
+        return {}
+
+    signal_version = _resolve_latest_version(
+        conn,
+        table_name=OPTIONAL_TICKER_SOURCE_TABLE,
+        date_column="signal_date",
+        version_column="signal_version",
+        signal_date=signal_date,
+        taxonomy_version=taxonomy_version,
+    )
+    where_sql = "signal_date = ? AND taxonomy_version = ?"
+    params: list[object] = [signal_date, taxonomy_version]
+    if "signal_version" in columns and signal_version is not None:
+        where_sql += " AND signal_version = ?"
+        params.append(signal_version)
+
+    rows = conn.execute(
+        f"""
+        SELECT primary_layer, primary_subindustry
+        FROM {OPTIONAL_TICKER_SOURCE_TABLE}
+        WHERE {where_sql}
+        ORDER BY primary_subindustry ASC, primary_layer ASC
+        """,
+        tuple(params),
+    ).fetchall()
+
+    candidates: dict[str, set[str]] = {}
+    for row in rows:
+        layer = str(row["primary_layer"] or "").strip()
+        subindustry = str(row["primary_subindustry"] or "").strip()
+        if not layer or not subindustry:
+            continue
+        candidates.setdefault(subindustry, set()).add(layer)
+
+    return {
+        subindustry: next(iter(layers))
+        for subindustry, layers in candidates.items()
+        if len(layers) == 1
+    }
+
+
+def _group_identity(
+    row: sqlite3.Row,
+    *,
+    subindustry_to_layer: dict[str, str],
+) -> tuple[str, str, str, str | None, str | None, str | None, str]:
     market_level = _market_level(row["group_type"])
     name = str(row["group_name"]).strip()
-    layer = name if market_level == "LAYER" else None
-    subindustry = name if market_level == "SUBINDUSTRY" else None
-    taxonomy_path = f"{market_level}|{name}"
-    taxonomy_key = f"{market_level}:{name}"
-    return market_level, name, taxonomy_key, layer, subindustry
+    if market_level == "ECOSYSTEM":
+        return (
+            market_level,
+            "DC_ECOSYSTEM_TOTAL",
+            "ECOSYSTEM|DC_ECOSYSTEM_TOTAL",
+            None,
+            None,
+            None,
+            "DC_ECOSYSTEM_TOTAL",
+        )
+    if market_level == "LAYER":
+        return (
+            market_level,
+            name,
+            f"LAYER|{name}",
+            "DC_ECOSYSTEM_TOTAL",
+            name,
+            None,
+            f"DC_ECOSYSTEM_TOTAL > {name}",
+        )
+    if market_level == "SUBINDUSTRY":
+        layer_name = subindustry_to_layer.get(name)
+        if layer_name:
+            return (
+                market_level,
+                name,
+                f"SUBINDUSTRY|{layer_name}|{name}",
+                layer_name,
+                layer_name,
+                name,
+                f"DC_ECOSYSTEM_TOTAL > {layer_name} > {name}",
+            )
+        return (
+            market_level,
+            name,
+            f"SUBINDUSTRY|{name}",
+            None,
+            None,
+            name,
+            f"SUBINDUSTRY|{name}",
+        )
+    return (
+        market_level,
+        name,
+        f"{market_level}|{name}",
+        None,
+        None,
+        None,
+        f"{market_level}|{name}",
+    )
 
 
 def _map_destination_row(
     row: sqlite3.Row,
     *,
+    subindustry_to_layer: dict[str, str],
     synthetic_row: sqlite3.Row | None,
     index_row: sqlite3.Row | None,
     use_index_daily: bool,
@@ -266,17 +369,20 @@ def _map_destination_row(
     run_id: str,
     created_at_utc: str,
 ) -> tuple[object, ...]:
-    market_level, name, taxonomy_key, layer, subindustry = _group_identity(row)
+    market_level, name, taxonomy_key, parent_name, layer, subindustry, taxonomy_path = _group_identity(
+        row,
+        subindustry_to_layer=subindustry_to_layer,
+    )
     values = [
         row["signal_date"],
         row["taxonomy_version"],
         market_level,
         taxonomy_key,
         name,
-        None,
+        parent_name,
         layer,
         subindustry,
-        f"{market_level}|{name}",
+        taxonomy_path,
         row["timing_state"],
         None,
         None,
@@ -405,6 +511,11 @@ def main(argv: list[str] | None = None) -> int:
                 taxonomy_version=taxonomy_version,
                 selected_fields=("return_20d", "return_60d", "run_id"),
             )
+            subindustry_to_layer = _load_subindustry_to_layer(
+                conn,
+                signal_date=signal_date,
+                taxonomy_version=taxonomy_version,
+            )
 
             run_id = _resolve_run_id(signal_date, args.run_id)
             created_at_utc = _utc_now_text()
@@ -417,6 +528,7 @@ def main(argv: list[str] | None = None) -> int:
             row_specs: list[tuple[tuple[str, str, str, str], tuple[object, ...], bool, bool]] = []
             used_synthetic_ohlc = 0
             used_index_daily = 0
+            unknown_subindustry_layer_count = 0
             for row in valid_rows:
                 group_type = str(row["group_type"]).strip()
                 group_name = str(row["group_name"]).strip()
@@ -443,7 +555,12 @@ def main(argv: list[str] | None = None) -> int:
                 if use_index_for_row:
                     source_components.append("dc_group_index_daily")
                     used_index_daily = 1
-                market_level, name, taxonomy_key, _, _ = _group_identity(row)
+                market_level, name, taxonomy_key, _, _, _, _ = _group_identity(
+                    row,
+                    subindustry_to_layer=subindustry_to_layer,
+                )
+                if market_level == "SUBINDUSTRY" and group_name not in subindustry_to_layer:
+                    unknown_subindustry_layer_count += 1
                 row_specs.append(
                     (
                         (
@@ -454,6 +571,7 @@ def main(argv: list[str] | None = None) -> int:
                         ),
                         _map_destination_row(
                             row,
+                            subindustry_to_layer=subindustry_to_layer,
                             synthetic_row=synthetic_row,
                             index_row=index_row,
                             use_index_daily=use_index_for_row,
@@ -721,8 +839,12 @@ def main(argv: list[str] | None = None) -> int:
         _emit_summary("run_id", run_id)
         _emit_summary("used_synthetic_ohlc", used_synthetic_ohlc)
         _emit_summary("used_index_daily", used_index_daily)
+        _emit_summary("subindustry_layer_mapped_rows", len(subindustry_to_layer))
+        _emit_summary("subindustry_layer_unknown_rows", unknown_subindustry_layer_count)
         for warning in warnings:
             _emit_summary("warning", warning)
+        if unknown_subindustry_layer_count > 0:
+            _emit_summary("warning", "SUBINDUSTRY_LAYER_UNKNOWN")
         return 0
     except (FileNotFoundError, sqlite3.Error, ValueError, OSError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

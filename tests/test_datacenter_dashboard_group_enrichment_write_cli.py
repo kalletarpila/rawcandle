@@ -43,6 +43,19 @@ def _create_source_and_destination_db(path: Path) -> None:
     _create_group_source_table_only(path)
     with sqlite3.connect(path) as conn:
         apply_datacenter_dashboard_enrichment_migration(conn)
+        conn.execute(
+            """
+            CREATE TABLE dc_ticker_swing_signal_daily (
+                signal_date TEXT NOT NULL,
+                taxonomy_version TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                primary_layer TEXT,
+                primary_subindustry TEXT,
+                signal_version TEXT,
+                run_id TEXT
+            )
+            """
+        )
 
 
 def _create_synthetic_table(path: Path) -> None:
@@ -133,6 +146,43 @@ def _insert_group_source_rows(path: Path) -> None:
                     "WARN",
                     "SIG_V1",
                     "RUN_SWING_B",
+                ),
+            ],
+        )
+
+
+def _insert_ticker_taxonomy_rows(path: Path) -> None:
+    with sqlite3.connect(path) as conn:
+        conn.executemany(
+            """
+            INSERT INTO dc_ticker_swing_signal_daily (
+                signal_date,
+                taxonomy_version,
+                ticker,
+                primary_layer,
+                primary_subindustry,
+                signal_version,
+                run_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    "2026-05-22",
+                    "DC_TAXONOMY_FULL_V1",
+                    "NVDA",
+                    "Compute silicon",
+                    "AI Accelerators",
+                    "SIG_V1",
+                    "RUN_TICKER_A",
+                ),
+                (
+                    "2026-05-22",
+                    "DC_TAXONOMY_FULL_V1",
+                    "SMCI",
+                    "Infrastructure",
+                    "Servers / ODM / EMS",
+                    "SIG_V1",
+                    "RUN_TICKER_A",
                 ),
             ],
         )
@@ -295,6 +345,7 @@ def test_replace_date_inserts_valid_group_rows(tmp_path, capsys):
     db_path = tmp_path / "analysis.db"
     _create_source_and_destination_db(db_path)
     _insert_group_source_rows(db_path)
+    _insert_ticker_taxonomy_rows(db_path)
 
     exit_code = main(
         [
@@ -317,9 +368,9 @@ def test_replace_date_inserts_valid_group_rows(tmp_path, capsys):
     assert len(rows) == 3
     assert {row["market_level"] for row in rows} == {"ECOSYSTEM", "LAYER", "SUBINDUSTRY"}
     assert {row["taxonomy_key"] for row in rows} == {
-        "ECOSYSTEM:DC_ECOSYSTEM_TOTAL",
-        "LAYER:Infrastructure",
-        "SUBINDUSTRY:AI Accelerators",
+        "ECOSYSTEM|DC_ECOSYSTEM_TOTAL",
+        "LAYER|Infrastructure",
+        "SUBINDUSTRY|Compute silicon|AI Accelerators",
     }
     assert "SUMMARY datacenter_dashboard_group_enrichment_write.source_rows=3" in output
     assert "SUMMARY datacenter_dashboard_group_enrichment_write.valid_group_rows=3" in output
@@ -330,6 +381,7 @@ def test_field_mapping_persists_expected_values(tmp_path, capsys):
     db_path = tmp_path / "analysis.db"
     _create_source_and_destination_db(db_path)
     _insert_group_source_rows(db_path)
+    _insert_ticker_taxonomy_rows(db_path)
 
     exit_code = main(
         [
@@ -350,6 +402,17 @@ def test_field_mapping_persists_expected_values(tmp_path, capsys):
     _ = capsys.readouterr()
     rows = {row["name"]: row for row in _destination_rows(db_path)}
     ecosystem = rows["DC_ECOSYSTEM_TOTAL"]
+    layer = rows["Infrastructure"]
+    subindustry = rows["AI Accelerators"]
+    assert ecosystem["taxonomy_key"] == "ECOSYSTEM|DC_ECOSYSTEM_TOTAL"
+    assert ecosystem["taxonomy_path"] == "DC_ECOSYSTEM_TOTAL"
+    assert layer["parent_name"] == "DC_ECOSYSTEM_TOTAL"
+    assert layer["taxonomy_key"] == "LAYER|Infrastructure"
+    assert layer["taxonomy_path"] == "DC_ECOSYSTEM_TOTAL > Infrastructure"
+    assert subindustry["parent_name"] == "Compute silicon"
+    assert subindustry["layer"] == "Compute silicon"
+    assert subindustry["taxonomy_key"] == "SUBINDUSTRY|Compute silicon|AI Accelerators"
+    assert subindustry["taxonomy_path"] == "DC_ECOSYSTEM_TOTAL > Compute silicon > AI Accelerators"
     assert ecosystem["current_status"] == "BUY_ZONE"
     assert ecosystem["overheat_risk"] == "LOW"
     assert ecosystem["pct_above_ema20"] == 60.0
@@ -365,11 +428,74 @@ def test_field_mapping_persists_expected_values(tmp_path, capsys):
     assert ecosystem["created_at_utc"] not in (None, "")
 
 
+def test_unknown_subindustry_layer_uses_fallback_identity_and_warning(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO dc_group_swing_signal_daily (
+                signal_date, taxonomy_version, group_type, group_name, timing_state,
+                overheat_risk_level, pct_above_ema20, pct_above_ma10, ema20_breadth_delta_5d,
+                return_5d, return_10d, return_20d, return_60d, data_quality_status,
+                signal_version, run_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "2026-05-22",
+                "DC_TAXONOMY_FULL_V1",
+                "subindustry",
+                "Unknown Group",
+                "NEUTRAL",
+                "LOW",
+                10.0,
+                10.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                "OK",
+                "SIG_V1",
+                "RUN_SWING_X",
+            ),
+        )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+            "--run-id",
+            "RUN_GROUP_UNKNOWN",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    rows = {row["name"]: row for row in _destination_rows(db_path)}
+    unknown = rows["Unknown Group"]
+    assert unknown["parent_name"] in (None, "")
+    assert unknown["layer"] in (None, "")
+    assert unknown["taxonomy_key"] == "SUBINDUSTRY|Unknown Group"
+    assert unknown["taxonomy_path"] == "SUBINDUSTRY|Unknown Group"
+    assert (
+        "SUMMARY datacenter_dashboard_group_enrichment_write.warning=SUBINDUSTRY_LAYER_UNKNOWN"
+        in output
+    )
+
+
 def test_optional_synthetic_join_maps_fields(tmp_path, capsys):
     db_path = tmp_path / "analysis.db"
     _create_source_and_destination_db(db_path)
     _create_synthetic_table(db_path)
     _insert_group_source_rows(db_path)
+    _insert_ticker_taxonomy_rows(db_path)
     _insert_synthetic_rows(db_path)
 
     exit_code = main(
@@ -405,6 +531,7 @@ def test_missing_optional_synthetic_table_warns_and_succeeds(tmp_path, capsys):
     db_path = tmp_path / "analysis.db"
     _create_source_and_destination_db(db_path)
     _insert_group_source_rows(db_path)
+    _insert_ticker_taxonomy_rows(db_path)
 
     exit_code = main(
         [
@@ -434,6 +561,7 @@ def test_dry_run_does_not_mutate_destination(tmp_path, capsys):
     db_path = tmp_path / "analysis.db"
     _create_source_and_destination_db(db_path)
     _insert_group_source_rows(db_path)
+    _insert_ticker_taxonomy_rows(db_path)
 
     exit_code = main(
         [
@@ -462,6 +590,7 @@ def test_insert_missing_keeps_existing_row_unchanged_and_inserts_new_row(tmp_pat
     db_path = tmp_path / "analysis.db"
     _create_source_and_destination_db(db_path)
     _insert_group_source_rows(db_path)
+    _insert_ticker_taxonomy_rows(db_path)
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             """
@@ -474,7 +603,7 @@ def test_insert_missing_keeps_existing_row_unchanged_and_inserts_new_row(tmp_pat
                 "2026-05-22",
                 "DC_TAXONOMY_FULL_V1",
                 "LAYER",
-                "LAYER:Infrastructure",
+                "LAYER|Infrastructure",
                 "Infrastructure",
                 "OLD_STATUS",
                 "OLD_QUALITY",
@@ -519,6 +648,7 @@ def test_upsert_updates_existing_row_and_inserts_new_row(tmp_path, capsys):
     db_path = tmp_path / "analysis.db"
     _create_source_and_destination_db(db_path)
     _insert_group_source_rows(db_path)
+    _insert_ticker_taxonomy_rows(db_path)
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             """
@@ -531,7 +661,7 @@ def test_upsert_updates_existing_row_and_inserts_new_row(tmp_path, capsys):
                 "2026-05-22",
                 "DC_TAXONOMY_FULL_V1",
                 "LAYER",
-                "LAYER:Infrastructure",
+                "LAYER|Infrastructure",
                 "Infrastructure",
                 "OLD_STATUS",
                 "OLD_QUALITY",
@@ -577,6 +707,7 @@ def test_replace_date_deletion_scope_is_exact(tmp_path, capsys):
     db_path = tmp_path / "analysis.db"
     _create_source_and_destination_db(db_path)
     _insert_group_source_rows(db_path)
+    _insert_ticker_taxonomy_rows(db_path)
     with sqlite3.connect(db_path) as conn:
         conn.executemany(
             """
@@ -590,7 +721,7 @@ def test_replace_date_deletion_scope_is_exact(tmp_path, capsys):
                     "2026-05-22",
                     "DC_TAXONOMY_FULL_V1",
                     "LAYER",
-                    "LAYER:OldLayer",
+                    "LAYER|OldLayer",
                     "OldLayer",
                     "OK",
                     "OLD",
@@ -601,7 +732,7 @@ def test_replace_date_deletion_scope_is_exact(tmp_path, capsys):
                     "2026-05-21",
                     "DC_TAXONOMY_FULL_V1",
                     "LAYER",
-                    "LAYER:KeepDate",
+                    "LAYER|KeepDate",
                     "KeepDate",
                     "OK",
                     "OLD",
@@ -612,7 +743,7 @@ def test_replace_date_deletion_scope_is_exact(tmp_path, capsys):
                     "2026-05-22",
                     "OTHER_TAXONOMY",
                     "LAYER",
-                    "LAYER:KeepTax",
+                    "LAYER|KeepTax",
                     "KeepTax",
                     "OK",
                     "OLD",
@@ -673,6 +804,7 @@ def test_limit_works_deterministically(tmp_path, capsys):
     db_path = tmp_path / "analysis.db"
     _create_source_and_destination_db(db_path)
     _insert_group_source_rows(db_path)
+    _insert_ticker_taxonomy_rows(db_path)
 
     exit_code = main(
         [
@@ -704,6 +836,7 @@ def test_audit_after_ticker_and_group_write_reports_partial(tmp_path, capsys):
     db_path = tmp_path / "analysis.db"
     _create_source_and_destination_db(db_path)
     _insert_group_source_rows(db_path)
+    _insert_ticker_taxonomy_rows(db_path)
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             """
