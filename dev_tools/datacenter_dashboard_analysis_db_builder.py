@@ -103,6 +103,12 @@ def _column_names(conn: sqlite3.Connection, table_name: str) -> set[str]:
     return {str(row[1]) for row in rows}
 
 
+def _optional_int(value: object) -> int | None:
+    if value in {None, ""}:
+        return None
+    return int(value)
+
+
 def _resolve_version(
     conn: sqlite3.Connection,
     *,
@@ -226,6 +232,10 @@ def _load_ticker_rows(
                 bullish_candle_signal=row["bullish_candle_signal"],
                 bullish_divergence_signal=row["bullish_divergence_signal"],
                 hidden_bullish_divergence_signal=row["hidden_bullish_divergence_signal"],
+                pullback_validity=None,
+                entry_readiness=None,
+                candidate_priority=None,
+                candidate_priority_label=None,
                 action_bucket=None,
                 action_label=None,
                 data_status=row["price_data_status"],
@@ -479,6 +489,10 @@ def _load_enrichment_ticker_rows(
                 latest_structure_label,
                 latest_bos_event_type,
                 latest_reset_reason,
+                pullback_validity,
+                entry_readiness,
+                candidate_priority,
+                candidate_priority_label,
                 action,
                 is_watchlist,
                 data_quality_status
@@ -512,6 +526,10 @@ def _load_enrichment_ticker_rows(
             bullish_candle_signal=None,
             bullish_divergence_signal=None,
             hidden_bullish_divergence_signal=None,
+            pullback_validity=row["pullback_validity"],
+            entry_readiness=row["entry_readiness"],
+            candidate_priority=_optional_int(row["candidate_priority"]),
+            candidate_priority_label=row["candidate_priority_label"],
             action_bucket=None,
             action_label=action_label,
             data_status=row["data_quality_status"],

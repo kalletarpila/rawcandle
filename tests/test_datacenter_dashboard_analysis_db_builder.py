@@ -395,8 +395,9 @@ def _insert_enrichment_fixture_rows(path: Path) -> None:
                 signal_date, taxonomy_version, ticker, primary_layer, primary_subindustry,
                 close, return_5d, return_20d, return_60d, action, current_status,
                 trend_state, latest_structure_label, latest_bos_event_type, latest_reset_reason,
+                pullback_validity, entry_readiness, candidate_priority, candidate_priority_label,
                 is_watchlist, data_quality_status, calc_version, run_id, created_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "2026-05-22",
@@ -414,6 +415,10 @@ def _insert_enrichment_fixture_rows(path: Path) -> None:
                 "HH",
                 "BOS_UP",
                 "EMA20_LOST",
+                "NO_PULLBACK",
+                "NOT_READY",
+                5,
+                "P5_NOT_READY",
                 1,
                 "OK",
                 "ENRICH_V1",
@@ -788,6 +793,10 @@ def test_enrichment_mode_reads_all_five_tables_and_emits_ready(tmp_path):
     assert dashboard_input.market_map[0].taxonomy_path == "DC_ECOSYSTEM_TOTAL"
     assert dashboard_input.decision_trace[0].rule_group == "daily"
     assert dashboard_input.decision_trace[0].input_value == "BUY_ZONE"
+    assert dashboard_input.tickers[0].pullback_validity == "NO_PULLBACK"
+    assert dashboard_input.tickers[0].entry_readiness == "NOT_READY"
+    assert dashboard_input.tickers[0].candidate_priority == 5
+    assert dashboard_input.tickers[0].candidate_priority_label == "P5_NOT_READY"
 
 
 def test_enrichment_mode_ticker_action_round_trips_through_persistence(tmp_path):
@@ -824,6 +833,10 @@ def test_enrichment_mode_ticker_action_round_trips_through_persistence(tmp_path)
 
     assert snapshot.tickers[0]["ticker"] == "NVDA"
     assert snapshot.tickers[0]["action"] == "WATCH"
+    assert snapshot.tickers[0]["pullback_validity"] == "NO_PULLBACK"
+    assert snapshot.tickers[0]["entry_readiness"] == "NOT_READY"
+    assert snapshot.tickers[0]["candidate_priority"] == 5
+    assert snapshot.tickers[0]["candidate_priority_label"] == "P5_NOT_READY"
 
 
 def test_enrichment_mode_partial_when_sections_are_empty(tmp_path, capsys):

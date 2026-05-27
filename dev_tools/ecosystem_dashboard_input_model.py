@@ -83,9 +83,13 @@ class EcosystemDashboardTickerStatusInput:
     bullish_candle_signal: int | None
     bullish_divergence_signal: int | None
     hidden_bullish_divergence_signal: int | None
-    action_bucket: str | None
-    action_label: str | None
-    data_status: str | None
+    pullback_validity: str | None = None
+    entry_readiness: str | None = None
+    candidate_priority: int | None = None
+    candidate_priority_label: str | None = None
+    action_bucket: str | None = None
+    action_label: str | None = None
+    data_status: str | None = None
 
 
 @dataclass(frozen=True)

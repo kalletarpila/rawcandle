@@ -14,6 +14,10 @@ from dev_tools.ecosystem_dashboard_input_model import (
 )
 from dev_tools.ecosystem_dashboard_persistence import persist_ecosystem_dashboard_input
 from dev_tools.ecosystem_dashboard_read_model import load_dashboard_snapshot
+from dev_tools.ecosystem_dashboard_structured_json import (
+    dump_ecosystem_dashboard_input_json,
+    load_ecosystem_dashboard_input_json,
+)
 
 
 def _table_count(db_path: Path, table: str) -> int:
@@ -105,6 +109,10 @@ def _minimal_dashboard_input(*, report_date: str = "2026-05-22") -> EcosystemDas
                 bullish_candle_signal=1,
                 bullish_divergence_signal=None,
                 hidden_bullish_divergence_signal=None,
+                pullback_validity="NO_PULLBACK",
+                entry_readiness="NOT_READY",
+                candidate_priority=5,
+                candidate_priority_label="P5_NOT_READY",
                 action_bucket="WATCH",
                 action_label="Watch Candidate",
                 data_status="READY",
@@ -177,6 +185,10 @@ def test_persist_ecosystem_dashboard_input_writes_rows_and_round_trips_via_read_
     assert snapshot.tickers[0]["ticker"] == "NVDA"
     assert snapshot.tickers[0]["action"] == "WATCH"
     assert snapshot.tickers[0]["severity"] == "Watch Candidate"
+    assert snapshot.tickers[0]["pullback_validity"] == "NO_PULLBACK"
+    assert snapshot.tickers[0]["entry_readiness"] == "NOT_READY"
+    assert snapshot.tickers[0]["candidate_priority"] == 5
+    assert snapshot.tickers[0]["candidate_priority_label"] == "P5_NOT_READY"
     assert snapshot.market_map[0]["market_level"] == "ECOSYSTEM"
     assert snapshot.market_map[0]["name"] == "DC_ECOSYSTEM_TOTAL"
     assert snapshot.market_map[0]["taxonomy_path"] == "DC_ECOSYSTEM_TOTAL"
@@ -249,6 +261,10 @@ def test_persist_ecosystem_dashboard_input_uses_action_label_when_action_bucket_
                 bullish_candle_signal=ticker_row.bullish_candle_signal,
                 bullish_divergence_signal=ticker_row.bullish_divergence_signal,
                 hidden_bullish_divergence_signal=ticker_row.hidden_bullish_divergence_signal,
+                pullback_validity=ticker_row.pullback_validity,
+                entry_readiness=ticker_row.entry_readiness,
+                candidate_priority=ticker_row.candidate_priority,
+                candidate_priority_label=ticker_row.candidate_priority_label,
                 action_bucket=None,
                 action_label="SELL",
                 data_status=ticker_row.data_status,
@@ -276,3 +292,18 @@ def test_persist_ecosystem_dashboard_input_uses_action_label_when_action_bucket_
     assert snapshot.tickers[0]["ticker"] == "NVDA"
     assert snapshot.tickers[0]["action"] == "SELL"
     assert snapshot.tickers[0]["severity"] == "SELL"
+    assert snapshot.tickers[0]["pullback_validity"] == "NO_PULLBACK"
+    assert snapshot.tickers[0]["candidate_priority_label"] == "P5_NOT_READY"
+
+
+def test_structured_json_round_trip_preserves_ticker_pullback_fields(tmp_path):
+    json_path = tmp_path / "dashboard_input.json"
+    dashboard_input = _minimal_dashboard_input()
+
+    dump_ecosystem_dashboard_input_json(dashboard_input, str(json_path))
+    loaded = load_ecosystem_dashboard_input_json(str(json_path))
+
+    assert loaded.tickers[0].pullback_validity == "NO_PULLBACK"
+    assert loaded.tickers[0].entry_readiness == "NOT_READY"
+    assert loaded.tickers[0].candidate_priority == 5
+    assert loaded.tickers[0].candidate_priority_label == "P5_NOT_READY"
