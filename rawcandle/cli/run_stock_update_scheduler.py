@@ -7,6 +7,7 @@ from typing import List, Optional
 from rawcandle.scheduler.runner import (
     SchedulerAlreadyRunningError,
     inspect_scheduler_dashboard_config,
+    inspect_scheduler_enrichment_plan,
     run_scheduler_config,
 )
 from services.stock_update_service import STATUS_FAILED, STATUS_OK, STATUS_OK_WITH_WARNINGS
@@ -18,6 +19,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--config", required=True)
     parser.add_argument("--inspect-dashboard-config", action="store_true")
+    parser.add_argument("--show-enrichment-plan", action="store_true")
     parser.add_argument("--effective-date")
     return parser
 
@@ -33,6 +35,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                 config_path=args.config,
                 effective_today=effective_today,
             )
+            enrichment_plan = None
+            if args.show_enrichment_plan:
+                enrichment_plan = inspect_scheduler_enrichment_plan(
+                    config_path=args.config,
+                    effective_today=effective_today,
+                )
         except ValueError as exc:
             print("SUMMARY scheduler_dashboard_config.status=FAILED")
             print(f"ERROR: {exc}")
@@ -111,6 +119,114 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"SUMMARY scheduler_dashboard_config.warning={warning}")
         print(f"SUMMARY scheduler_dashboard_config.date_status={inspection.date_status}")
         print(f"SUMMARY scheduler_dashboard_config.status={inspection.status}")
+        if enrichment_plan is not None:
+            print(f"SUMMARY scheduler_enrichment_plan.status={enrichment_plan.status}")
+            print(
+                "SUMMARY scheduler_enrichment_plan.source_mode="
+                f"{enrichment_plan.source_mode}"
+            )
+            print(
+                "SUMMARY scheduler_enrichment_plan.enrichment_enabled="
+                f"{enrichment_plan.enrichment_enabled}"
+            )
+            print(
+                "SUMMARY scheduler_enrichment_plan.effective_status="
+                f"{enrichment_plan.effective_status}"
+            )
+            print(
+                "SUMMARY scheduler_enrichment_plan.expected_signal_date="
+                f"{enrichment_plan.expected_signal_date}"
+            )
+            print(
+                "SUMMARY scheduler_enrichment_plan.analysis_db="
+                f"{enrichment_plan.analysis_db}"
+            )
+            print(
+                "SUMMARY scheduler_enrichment_plan.analysis_db_status="
+                f"{enrichment_plan.analysis_db_status}"
+            )
+            print(
+                "SUMMARY scheduler_enrichment_plan.dashboard_db="
+                f"{enrichment_plan.dashboard_db}"
+            )
+            print(
+                "SUMMARY scheduler_enrichment_plan.reports_dir="
+                f"{enrichment_plan.reports_dir}"
+            )
+            print(
+                "SUMMARY scheduler_enrichment_plan.watchlist_file="
+                f"{enrichment_plan.watchlist_file}"
+            )
+            print(
+                "SUMMARY scheduler_enrichment_plan.watchlist_file_status="
+                f"{enrichment_plan.watchlist_file_status}"
+            )
+            print(
+                "SUMMARY scheduler_enrichment_plan.taxonomy_version="
+                f"{enrichment_plan.taxonomy_version}"
+            )
+            print(
+                "SUMMARY scheduler_enrichment_plan.write_mode="
+                f"{enrichment_plan.write_mode}"
+            )
+            print(
+                "SUMMARY scheduler_enrichment_plan.apply_migrations="
+                f"{enrichment_plan.apply_migrations}"
+            )
+            print(
+                "SUMMARY scheduler_enrichment_plan.fallback_to_reports="
+                f"{enrichment_plan.fallback_to_reports}"
+            )
+            print(
+                "SUMMARY scheduler_enrichment_plan.run_acceptance_report="
+                f"{enrichment_plan.run_acceptance_report}"
+            )
+            print(
+                "SUMMARY scheduler_enrichment_plan.enrichment_json_output_path="
+                f"{enrichment_plan.enrichment_json_output_path}"
+            )
+            print(
+                "SUMMARY scheduler_enrichment_plan.html_output_path="
+                f"{enrichment_plan.html_output_path}"
+            )
+            print(
+                "SUMMARY scheduler_enrichment_plan.acceptance_report_output_path="
+                f"{enrichment_plan.acceptance_report_output_path}"
+            )
+            print(
+                "SUMMARY scheduler_enrichment_plan.stage.md_reports_generation="
+                f"{enrichment_plan.stage_md_reports_generation}"
+            )
+            print(
+                "SUMMARY scheduler_enrichment_plan.stage.enrichment_write="
+                f"{enrichment_plan.stage_enrichment_write}"
+            )
+            print(
+                "SUMMARY scheduler_enrichment_plan.stage.enrichment_audit="
+                f"{enrichment_plan.stage_enrichment_audit}"
+            )
+            print(
+                "SUMMARY scheduler_enrichment_plan.stage.enrichment_export_json="
+                f"{enrichment_plan.stage_enrichment_export_json}"
+            )
+            print(
+                "SUMMARY scheduler_enrichment_plan.stage.structured_dashboard_build="
+                f"{enrichment_plan.stage_structured_dashboard_build}"
+            )
+            print(
+                "SUMMARY scheduler_enrichment_plan.stage.html_render="
+                f"{enrichment_plan.stage_html_render}"
+            )
+            print(
+                "SUMMARY scheduler_enrichment_plan.stage.acceptance_report="
+                f"{enrichment_plan.stage_acceptance_report}"
+            )
+            print(
+                "SUMMARY scheduler_enrichment_plan.stage.fallback_reports_build="
+                f"{enrichment_plan.stage_fallback_reports_build}"
+            )
+            for warning in enrichment_plan.warnings:
+                print(f"SUMMARY scheduler_enrichment_plan.warning={warning}")
         return 0
     try:
         result = run_scheduler_config(config_path=args.config)

@@ -17,10 +17,12 @@ from rawcandle.scheduler.config import (
 from rawcandle.scheduler.runner import (
     DatacenterDashboardPostStepResult,
     SchedulerDashboardConfigInspection,
+    SchedulerEnrichmentPlanInspection,
     SchedulerAlreadyRunningError,
     STATUS_FAILED,
     STATUS_OK,
     STATUS_OK_WITH_WARNINGS,
+    inspect_scheduler_enrichment_plan,
     _resolve_market_technical_relevance_tickers,
     _resolve_latest_valid_ohlcv_date_for_market,
     acquire_scheduler_lock,
@@ -2295,3 +2297,162 @@ def test_inspect_scheduler_dashboard_config_warns_when_apply_migrations_enabled(
 
     assert inspection.enrichment_apply_migrations == 1
     assert "ENRICHMENT_APPLY_MIGRATIONS_NOT_WIRED" in inspection.warnings
+
+
+def test_inspect_scheduler_enrichment_plan_returns_default_plan_visibility(tmp_path):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    dashboard_db = tmp_path / "ecosystem_dashboard.db"
+    html_dir = tmp_path / "html"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        datacenter_dashboard_db=dashboard_db,
+        datacenter_dashboard_html_output_dir=html_dir,
+    )
+
+    plan = inspect_scheduler_enrichment_plan(
+        config_path=str(config_path),
+        effective_today="2026-05-23",
+    )
+
+    assert isinstance(plan, SchedulerEnrichmentPlanInspection)
+    assert plan.status == "OK"
+    assert plan.source_mode == "reports"
+    assert plan.enrichment_enabled == 0
+    assert plan.effective_status == "PLANNING_ONLY"
+    assert plan.expected_signal_date == "2026-05-22"
+    assert plan.analysis_db == str(analysis_db)
+    assert plan.analysis_db_status == "OK"
+    assert plan.dashboard_db == str(dashboard_db)
+    assert plan.stage_md_reports_generation == "1:DATACENTER_PIPELINE_ENABLED"
+    assert plan.stage_enrichment_write == "0:ENRICHMENT_NOT_ENABLED"
+    assert plan.stage_structured_dashboard_build == "0:REPORTS_MODE_REMAINS_ACTIVE"
+    assert plan.stage_fallback_reports_build == "1:FALLBACK_ENABLED"
+    assert plan.warnings == ()
+
+
+def test_inspect_scheduler_enrichment_plan_for_configured_enrichment_mode(tmp_path):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    dashboard_db = tmp_path / "ecosystem_dashboard.db"
+    html_dir = tmp_path / "html"
+    watchlist_file = tmp_path / "watchlist.txt"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    watchlist_file.write_text("AAA\n", encoding="utf-8")
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        datacenter_dashboard_db=dashboard_db,
+        datacenter_dashboard_html_output_dir=html_dir,
+        datacenter_dashboard_source_mode="enrichment",
+        datacenter_enrichment_enabled=True,
+        datacenter_enrichment_apply_migrations=False,
+        datacenter_enrichment_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        datacenter_enrichment_watchlist_file=watchlist_file,
+        datacenter_enrichment_write_mode="replace-date",
+        datacenter_dashboard_fallback_to_reports=True,
+        datacenter_dashboard_run_acceptance_report=True,
+    )
+
+    plan = inspect_scheduler_enrichment_plan(
+        config_path=str(config_path),
+        effective_today="2026-05-23",
+    )
+
+    assert plan.enrichment_enabled == 1
+    assert plan.effective_status == "CONFIGURED_NOT_WIRED"
+    assert plan.watchlist_file_status == "OK"
+    assert plan.stage_enrichment_write == "1:CONFIGURED_NOT_WIRED"
+    assert plan.stage_enrichment_export_json == "1:FOLLOWS_ENRICHMENT_WRITE"
+    assert plan.stage_structured_dashboard_build == "1:ENRICHMENT_SOURCE_CONFIGURED"
+    assert plan.stage_acceptance_report == "1:CONFIG_ENABLED"
+    assert plan.stage_fallback_reports_build == "1:FALLBACK_ENABLED"
+    assert "ENRICHMENT_EXECUTION_NOT_WIRED" in plan.warnings
+
+
+def test_inspect_scheduler_enrichment_plan_warns_when_source_mode_enrichment_but_disabled(
+    tmp_path,
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        datacenter_dashboard_source_mode="enrichment",
+        datacenter_enrichment_enabled=False,
+    )
+
+    plan = inspect_scheduler_enrichment_plan(
+        config_path=str(config_path),
+        effective_today="2026-05-23",
+    )
+
+    assert plan.effective_status == "DISABLED"
+    assert "ENRICHMENT_SOURCE_MODE_CONFIGURED_BUT_DISABLED" in plan.warnings
+    assert "ENRICHMENT_EXECUTION_NOT_WIRED" in plan.warnings
+
+
+def test_inspect_scheduler_enrichment_plan_warns_when_apply_migrations_true(tmp_path):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        datacenter_enrichment_enabled=True,
+        datacenter_enrichment_apply_migrations=True,
+    )
+
+    plan = inspect_scheduler_enrichment_plan(
+        config_path=str(config_path),
+        effective_today="2026-05-23",
+    )
+
+    assert plan.apply_migrations == 1
+    assert "APPLY_MIGRATIONS_NOT_WIRED" in plan.warnings
+
+
+def test_inspect_scheduler_enrichment_plan_warns_when_analysis_db_missing(tmp_path):
+    osakedata_db = tmp_path / "osakedata.db"
+    _touch(osakedata_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        analysis_db=tmp_path / "missing_analysis.db",
+    )
+
+    plan = inspect_scheduler_enrichment_plan(
+        config_path=str(config_path),
+        effective_today="2026-05-23",
+    )
+
+    assert plan.analysis_db_status == "MISSING"
+    assert "ANALYSIS_DB_NOT_READY" in plan.warnings
+
+
+def test_inspect_scheduler_enrichment_plan_warns_when_watchlist_missing(tmp_path):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        datacenter_enrichment_enabled=True,
+        datacenter_enrichment_watchlist_file=tmp_path / "missing_watchlist.txt",
+    )
+
+    plan = inspect_scheduler_enrichment_plan(
+        config_path=str(config_path),
+        effective_today="2026-05-23",
+    )
+
+    assert plan.watchlist_file_status == "MISSING"
+    assert "WATCHLIST_FILE_MISSING" in plan.warnings

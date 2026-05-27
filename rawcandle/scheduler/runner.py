@@ -214,6 +214,38 @@ class SchedulerDashboardConfigInspection:
     status: str
 
 
+@dataclass(frozen=True)
+class SchedulerEnrichmentPlanInspection:
+    status: str
+    source_mode: str
+    enrichment_enabled: int
+    effective_status: str
+    expected_signal_date: str
+    analysis_db: str
+    analysis_db_status: str
+    dashboard_db: str
+    reports_dir: str
+    watchlist_file: str
+    watchlist_file_status: str
+    taxonomy_version: str
+    write_mode: str
+    apply_migrations: int
+    fallback_to_reports: int
+    run_acceptance_report: int
+    enrichment_json_output_path: str
+    html_output_path: str
+    acceptance_report_output_path: str
+    stage_md_reports_generation: str
+    stage_enrichment_write: str
+    stage_enrichment_audit: str
+    stage_enrichment_export_json: str
+    stage_structured_dashboard_build: str
+    stage_html_render: str
+    stage_acceptance_report: str
+    stage_fallback_reports_build: str
+    warnings: tuple[str, ...]
+
+
 def scheduler_status_path(log_dir: str) -> str:
     return str(Path(log_dir) / "stock_update_scheduler_status.json")
 
@@ -552,6 +584,129 @@ def inspect_scheduler_dashboard_config(
         warnings=tuple(warnings),
         date_status=date_status,
         status="OK",
+    )
+
+
+def inspect_scheduler_enrichment_plan(
+    *,
+    config_path: str,
+    effective_today: str | None = None,
+) -> SchedulerEnrichmentPlanInspection:
+    config = read_scheduler_config(config_path)
+    dashboard_inspection = inspect_scheduler_dashboard_config(
+        config_path=config_path,
+        effective_today=effective_today,
+    )
+    expected_signal_date = dashboard_inspection.expected_report_date
+    reports_dir = dashboard_inspection.reports_dir
+    analysis_db = config.analysis_db_path.strip()
+    if not analysis_db:
+        analysis_db_status = "NOT_CONFIGURED"
+    elif Path(analysis_db).exists():
+        analysis_db_status = "OK"
+    else:
+        analysis_db_status = "MISSING"
+    watchlist_file = config.datacenter_enrichment_watchlist_file.strip()
+    watchlist_file_status = dashboard_inspection.enrichment_watchlist_file_status
+    html_output_path = dashboard_inspection.expected_html_output_path
+    enrichment_json_output_path = ""
+    acceptance_report_output_path = ""
+    if reports_dir and expected_signal_date:
+        enrichment_json_output_path = str(
+            Path(reports_dir) / f"datacenter_dashboard_enrichment_{expected_signal_date}.json"
+        )
+        if config.datacenter_dashboard_run_acceptance_report:
+            acceptance_report_output_path = str(
+                Path(reports_dir)
+                / f"datacenter_dashboard_enrichment_acceptance_{expected_signal_date}.txt"
+            )
+    warnings: list[str] = []
+    if config.datacenter_dashboard_source_mode == "enrichment" and not config.datacenter_enrichment_enabled:
+        warnings.append("ENRICHMENT_SOURCE_MODE_CONFIGURED_BUT_DISABLED")
+    if config.datacenter_enrichment_apply_migrations:
+        warnings.append("APPLY_MIGRATIONS_NOT_WIRED")
+    if analysis_db_status != "OK":
+        warnings.append("ANALYSIS_DB_NOT_READY")
+    if watchlist_file_status == "MISSING":
+        warnings.append("WATCHLIST_FILE_MISSING")
+    if config.datacenter_dashboard_source_mode == "enrichment":
+        warnings.append("ENRICHMENT_EXECUTION_NOT_WIRED")
+
+    md_reports_generation_planned = 1 if dashboard_inspection.datacenter_pipeline_enabled else 0
+    enrichment_planned = (
+        1
+        if (
+            config.datacenter_dashboard_source_mode == "enrichment"
+            or config.datacenter_enrichment_enabled
+        )
+        and bool(expected_signal_date)
+        else 0
+    )
+    structured_build_planned = 1 if (
+        config.datacenter_dashboard_source_mode == "enrichment"
+        or config.datacenter_enrichment_enabled
+    ) else 0
+    acceptance_planned = 1 if config.datacenter_dashboard_run_acceptance_report else 0
+    fallback_planned = 1 if config.datacenter_dashboard_fallback_to_reports else 0
+
+    def _stage(planned: int, reason: str) -> str:
+        return f"{planned}:{reason}"
+
+    return SchedulerEnrichmentPlanInspection(
+        status="OK",
+        source_mode=config.datacenter_dashboard_source_mode,
+        enrichment_enabled=1 if config.datacenter_enrichment_enabled else 0,
+        effective_status=dashboard_inspection.enrichment_effective_status,
+        expected_signal_date=expected_signal_date,
+        analysis_db=analysis_db,
+        analysis_db_status=analysis_db_status,
+        dashboard_db=config.datacenter_dashboard_db,
+        reports_dir=reports_dir,
+        watchlist_file=watchlist_file,
+        watchlist_file_status=watchlist_file_status,
+        taxonomy_version=config.datacenter_enrichment_taxonomy_version,
+        write_mode=config.datacenter_enrichment_write_mode,
+        apply_migrations=1 if config.datacenter_enrichment_apply_migrations else 0,
+        fallback_to_reports=1 if config.datacenter_dashboard_fallback_to_reports else 0,
+        run_acceptance_report=1 if config.datacenter_dashboard_run_acceptance_report else 0,
+        enrichment_json_output_path=enrichment_json_output_path,
+        html_output_path=html_output_path,
+        acceptance_report_output_path=acceptance_report_output_path,
+        stage_md_reports_generation=_stage(
+            md_reports_generation_planned,
+            "DATACENTER_PIPELINE_ENABLED" if md_reports_generation_planned else "DATACENTER_PIPELINE_DISABLED",
+        ),
+        stage_enrichment_write=_stage(
+            enrichment_planned,
+            "CONFIGURED_NOT_WIRED" if enrichment_planned else "ENRICHMENT_NOT_ENABLED",
+        ),
+        stage_enrichment_audit=_stage(
+            enrichment_planned,
+            "FOLLOWS_ENRICHMENT_WRITE" if enrichment_planned else "ENRICHMENT_NOT_ENABLED",
+        ),
+        stage_enrichment_export_json=_stage(
+            enrichment_planned,
+            "FOLLOWS_ENRICHMENT_WRITE" if enrichment_planned else "ENRICHMENT_NOT_ENABLED",
+        ),
+        stage_structured_dashboard_build=_stage(
+            structured_build_planned,
+            "ENRICHMENT_SOURCE_CONFIGURED"
+            if structured_build_planned
+            else "REPORTS_MODE_REMAINS_ACTIVE",
+        ),
+        stage_html_render=_stage(
+            dashboard_inspection.render_html,
+            "CURRENT_RENDER_HTML_CONFIG",
+        ),
+        stage_acceptance_report=_stage(
+            acceptance_planned,
+            "CONFIG_ENABLED" if acceptance_planned else "CONFIG_DISABLED",
+        ),
+        stage_fallback_reports_build=_stage(
+            fallback_planned,
+            "FALLBACK_ENABLED" if fallback_planned else "FALLBACK_DISABLED",
+        ),
+        warnings=tuple(warnings),
     )
 
 

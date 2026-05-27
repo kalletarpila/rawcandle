@@ -397,3 +397,149 @@ def test_scheduler_cli_inspect_dashboard_config_invalid_effective_date_fails(
     assert code == 2
     assert "SUMMARY scheduler_dashboard_config.status=FAILED" in captured.out
     assert "ERROR: Invalid isoformat string: 'bad-date'" in captured.out
+
+
+def test_scheduler_cli_inspect_dashboard_config_without_plan_remains_backward_compatible(
+    monkeypatch, capsys
+):
+    class _Inspection:
+        enabled = 1
+        ecosystem_code = "DATACENTER"
+        dashboard_db = "/tmp/ecosystem_dashboard.db"
+        reports_dir = "/tmp/swing_reports"
+        html_output_dir = "/tmp/html"
+        expected_report_date = "2026-05-22"
+        expected_html_output_path = "/tmp/html/datacenter_dashboard_2026-05-22.html"
+        mode = "replace-date"
+        render_html = 1
+        usa_enabled = 1
+        datacenter_pipeline_enabled = 1
+        skip_next_run = 0
+        dashboard_source_mode = "reports"
+        enrichment_enabled = 0
+        enrichment_apply_migrations = 0
+        enrichment_taxonomy_version = "DC_TAXONOMY_FULL_V1"
+        enrichment_watchlist_file = "/tmp/watchlist.txt"
+        enrichment_watchlist_file_status = "OK"
+        enrichment_write_mode = "replace-date"
+        dashboard_fallback_to_reports = 1
+        dashboard_run_acceptance_report = 0
+        enrichment_effective_status = "PLANNING_ONLY"
+        warnings = ()
+        date_status = "OK"
+        status = "OK"
+
+    monkeypatch.setattr(
+        cli,
+        "inspect_scheduler_dashboard_config",
+        lambda config_path, effective_today: _Inspection(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "inspect_scheduler_enrichment_plan",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("inspect_scheduler_enrichment_plan should not be called")
+        ),
+    )
+
+    code = cli.main(["--config", "/tmp/scheduler.json", "--inspect-dashboard-config"])
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "SUMMARY scheduler_dashboard_config.status=OK" in captured.out
+    assert "scheduler_enrichment_plan." not in captured.out
+
+
+def test_scheduler_cli_inspect_dashboard_config_with_plan_prints_plan_lines(
+    monkeypatch, capsys
+):
+    class _Inspection:
+        enabled = 1
+        ecosystem_code = "DATACENTER"
+        dashboard_db = "/tmp/ecosystem_dashboard.db"
+        reports_dir = "/tmp/swing_reports"
+        html_output_dir = "/tmp/html"
+        expected_report_date = "2026-05-22"
+        expected_html_output_path = "/tmp/html/datacenter_dashboard_2026-05-22.html"
+        mode = "replace-date"
+        render_html = 1
+        usa_enabled = 1
+        datacenter_pipeline_enabled = 1
+        skip_next_run = 0
+        dashboard_source_mode = "reports"
+        enrichment_enabled = 0
+        enrichment_apply_migrations = 0
+        enrichment_taxonomy_version = "DC_TAXONOMY_FULL_V1"
+        enrichment_watchlist_file = "/tmp/watchlist.txt"
+        enrichment_watchlist_file_status = "OK"
+        enrichment_write_mode = "replace-date"
+        dashboard_fallback_to_reports = 1
+        dashboard_run_acceptance_report = 0
+        enrichment_effective_status = "PLANNING_ONLY"
+        warnings = ()
+        date_status = "OK"
+        status = "OK"
+
+    class _Plan:
+        status = "OK"
+        source_mode = "reports"
+        enrichment_enabled = 0
+        effective_status = "PLANNING_ONLY"
+        expected_signal_date = "2026-05-22"
+        analysis_db = "/tmp/analysis.db"
+        analysis_db_status = "OK"
+        dashboard_db = "/tmp/ecosystem_dashboard.db"
+        reports_dir = "/tmp/swing_reports"
+        watchlist_file = "/tmp/watchlist.txt"
+        watchlist_file_status = "OK"
+        taxonomy_version = "DC_TAXONOMY_FULL_V1"
+        write_mode = "replace-date"
+        apply_migrations = 0
+        fallback_to_reports = 1
+        run_acceptance_report = 0
+        enrichment_json_output_path = "/tmp/swing_reports/datacenter_dashboard_enrichment_2026-05-22.json"
+        html_output_path = "/tmp/html/datacenter_dashboard_2026-05-22.html"
+        acceptance_report_output_path = ""
+        stage_md_reports_generation = "1:DATACENTER_PIPELINE_ENABLED"
+        stage_enrichment_write = "0:ENRICHMENT_NOT_ENABLED"
+        stage_enrichment_audit = "0:ENRICHMENT_NOT_ENABLED"
+        stage_enrichment_export_json = "0:ENRICHMENT_NOT_ENABLED"
+        stage_structured_dashboard_build = "0:REPORTS_MODE_REMAINS_ACTIVE"
+        stage_html_render = "1:CURRENT_RENDER_HTML_CONFIG"
+        stage_acceptance_report = "0:CONFIG_DISABLED"
+        stage_fallback_reports_build = "1:FALLBACK_ENABLED"
+        warnings = ()
+
+    monkeypatch.setattr(
+        cli,
+        "inspect_scheduler_dashboard_config",
+        lambda config_path, effective_today: _Inspection(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "inspect_scheduler_enrichment_plan",
+        lambda config_path, effective_today: _Plan(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "run_scheduler_config",
+        lambda config_path: (_ for _ in ()).throw(
+            AssertionError("run_scheduler_config should not be called in inspect mode")
+        ),
+    )
+
+    code = cli.main(
+        [
+            "--config",
+            "/tmp/scheduler.json",
+            "--inspect-dashboard-config",
+            "--show-enrichment-plan",
+            "--effective-date",
+            "2026-05-23",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "SUMMARY scheduler_enrichment_plan.status=OK" in captured.out
+    assert "SUMMARY scheduler_enrichment_plan.source_mode=reports" in captured.out
+    assert "SUMMARY scheduler_enrichment_plan.stage.md_reports_generation=1:DATACENTER_PIPELINE_ENABLED" in captured.out
+    assert "SUMMARY scheduler_enrichment_plan.stage.enrichment_write=0:ENRICHMENT_NOT_ENABLED" in captured.out
