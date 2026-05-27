@@ -395,11 +395,13 @@ def test_medium_exit_risk_maps_to_medium_exit_risk(tmp_path, capsys):
     )
 
     assert exit_code == 0
-    _ = capsys.readouterr()
+    output = capsys.readouterr().out
     row = _destination_rows(db_path)[0]
     assert row["daily_status"] == "MEDIUM_EXIT_RISK"
     assert row["current_status"] == "MEDIUM_EXIT_RISK"
-    assert row["high_exit_risk_days_count"] == 0
+    assert row["high_exit_risk_days_count"] == 1
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.high_exit_window_rows=30" in output
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.high_exit_window_derived_rows=1" in output
 
 
 def test_high_exit_risk_days_count_maps_to_one_for_high_severity(tmp_path, capsys):
@@ -476,6 +478,196 @@ def test_explicit_high_exit_risk_days_count_is_preferred_over_derived_value(tmp_
     _ = capsys.readouterr()
     row = _destination_rows(db_path)[0]
     assert row["high_exit_risk_days_count"] == 7
+
+
+def test_window_derived_high_exit_risk_days_count_counts_earlier_high_rows(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(
+        db_path,
+        signal_date="2026-05-20",
+        ticker="AAA",
+        exit_risk_severity="HIGH",
+    )
+    _insert_custom_source_row(
+        db_path,
+        signal_date="2026-05-22",
+        ticker="AAA",
+        exit_risk_severity="LOW",
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    row = _destination_rows(db_path)[0]
+    assert row["high_exit_risk_days_count"] >= 1
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.high_exit_window_rows=30" in output
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.high_exit_window_derived_rows=1" in output
+
+
+def test_exit_risk_signal_contributes_to_windowed_high_exit_count(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(
+        db_path,
+        signal_date="2026-05-20",
+        ticker="AAA",
+        exit_risk_signal=1,
+        exit_risk_severity=None,
+    )
+    _insert_custom_source_row(
+        db_path,
+        signal_date="2026-05-22",
+        ticker="AAA",
+        exit_risk_signal=0,
+        exit_risk_severity="LOW",
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    assert row["high_exit_risk_days_count"] == 1
+
+
+def test_windowed_high_exit_count_respects_taxonomy_version(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(
+        db_path,
+        signal_date="2026-05-20",
+        ticker="AAA",
+        taxonomy_version="OTHER_TAXONOMY",
+        exit_risk_severity="HIGH",
+    )
+    _insert_custom_source_row(
+        db_path,
+        signal_date="2026-05-22",
+        ticker="AAA",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        exit_risk_severity="LOW",
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    assert row["high_exit_risk_days_count"] == 0
+
+
+def test_windowed_high_exit_count_does_not_use_future_rows(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(
+        db_path,
+        signal_date="2026-05-23",
+        ticker="AAA",
+        exit_risk_severity="HIGH",
+    )
+    _insert_custom_source_row(
+        db_path,
+        signal_date="2026-05-22",
+        ticker="AAA",
+        exit_risk_severity="LOW",
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    assert row["high_exit_risk_days_count"] == 0
+
+
+def test_high_exit_window_rows_limit_is_respected(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(
+        db_path,
+        signal_date="2026-05-18",
+        ticker="AAA",
+        exit_risk_severity="HIGH",
+    )
+    _insert_custom_source_row(
+        db_path,
+        signal_date="2026-05-21",
+        ticker="AAA",
+        exit_risk_severity="LOW",
+    )
+    _insert_custom_source_row(
+        db_path,
+        signal_date="2026-05-22",
+        ticker="AAA",
+        exit_risk_severity="LOW",
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+            "--high-exit-window-rows",
+            "2",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    row = _destination_rows(db_path)[0]
+    assert row["high_exit_risk_days_count"] == 0
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.high_exit_window_rows=2" in output
 
 
 def test_breakout_signal_maps_to_breakout_candidate(tmp_path, capsys):

@@ -44,6 +44,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--watchlist-file")
+    parser.add_argument("--high-exit-window-rows", type=int, default=30)
     return parser
 
 
@@ -213,6 +214,53 @@ def _load_source_rows(
     )
 
 
+def _load_source_history_by_ticker(
+    conn: sqlite3.Connection,
+    *,
+    signal_date: str,
+    taxonomy_version: str,
+    tickers: list[str],
+    window_rows: int,
+) -> dict[str, list[sqlite3.Row]]:
+    if not tickers:
+        return {}
+    source_columns = _table_columns(conn, SOURCE_TABLE)
+    placeholders = ", ".join("?" for _ in tickers)
+    select_fields: list[tuple[str, str]] = [
+        ("signal_date", "signal_date"),
+        ("taxonomy_version", "taxonomy_version"),
+        ("ticker", "ticker"),
+        ("exit_risk_signal", "exit_risk_signal"),
+        ("exit_risk_severity", "exit_risk_severity"),
+    ]
+    select_sql = ",\n                ".join(
+        f"{column} AS {alias}" if column in source_columns else f"NULL AS {alias}"
+        for column, alias in select_fields
+    )
+    rows = conn.execute(
+        f"""
+        SELECT
+                {select_sql}
+        FROM {SOURCE_TABLE}
+        WHERE taxonomy_version = ?
+          AND signal_date <= ?
+          AND ticker IN ({placeholders})
+        ORDER BY ticker ASC, signal_date DESC
+        """,
+        (taxonomy_version, signal_date, *tickers),
+    ).fetchall()
+    grouped: dict[str, list[sqlite3.Row]] = {}
+    for row in rows:
+        ticker = str(row["ticker"] or "").strip().upper()
+        if not ticker:
+            continue
+        history = grouped.setdefault(ticker, [])
+        if len(history) >= window_rows:
+            continue
+        history.append(row)
+    return {ticker: list(reversed(history)) for ticker, history in grouped.items()}
+
+
 def _normalized_text(value: object) -> str | None:
     if value is None:
         return None
@@ -289,7 +337,7 @@ def _derive_rolling_2d_status(row: sqlite3.Row) -> str:
     return "NO_EMERGENCY"
 
 
-def _derive_high_exit_risk_days_count(row: sqlite3.Row) -> int:
+def _derive_high_exit_risk_days_count_same_day(row: sqlite3.Row) -> int:
     explicit_value = _normalized_text(row["high_exit_risk_days_count"])
     if explicit_value is not None:
         try:
@@ -300,19 +348,46 @@ def _derive_high_exit_risk_days_count(row: sqlite3.Row) -> int:
     return 1 if exit_risk_severity == "HIGH" else 0
 
 
+def _derive_window_high_exit_risk_days_count(
+    history_rows: list[sqlite3.Row],
+) -> int:
+    count = 0
+    for row in history_rows:
+        exit_risk_signal = _is_truthy_signal(row["exit_risk_signal"])
+        exit_risk_severity = (_normalized_text(row["exit_risk_severity"]) or "").upper()
+        if exit_risk_signal or exit_risk_severity in {"HIGH", "MEDIUM"}:
+            count += 1
+    return count
+
+
+def _resolve_high_exit_risk_days_count(
+    row: sqlite3.Row,
+    history_rows: list[sqlite3.Row] | None,
+) -> tuple[int, bool, bool]:
+    explicit_value = _normalized_text(row["high_exit_risk_days_count"])
+    if explicit_value is not None:
+        try:
+            return int(float(explicit_value)), False, False
+        except ValueError:
+            pass
+    if history_rows:
+        return _derive_window_high_exit_risk_days_count(history_rows), True, False
+    return _derive_high_exit_risk_days_count_same_day(row), False, True
+
+
 def _map_destination_row(
     row: sqlite3.Row,
     *,
     run_id: str,
     created_at_utc: str,
     watchlist_tickers: set[str],
+    high_exit_risk_days_count: int,
 ) -> tuple[object, ...]:
     ticker = str(row["ticker"]).strip().upper()
     daily_status = _derive_daily_status(row)
     primary_reason = _derive_primary_reason(row, daily_status)
     freshness_status = _derive_freshness_status(row)
     rolling_2d_status = _derive_rolling_2d_status(row)
-    high_exit_risk_days_count = _derive_high_exit_risk_days_count(row)
     values = [
         row["signal_date"],  # signal_date
         row["taxonomy_version"],  # taxonomy_version
@@ -403,6 +478,8 @@ def main(argv: list[str] | None = None) -> int:
         taxonomy_version = _normalize_taxonomy_version(args.taxonomy_version)
         if args.limit is not None and args.limit <= 0:
             raise ValueError("--limit must be greater than 0 when provided")
+        if args.high_exit_window_rows <= 0:
+            raise ValueError("--high-exit-window-rows must be greater than 0")
         watchlist_tickers, warnings = _load_watchlist_tickers(args.watchlist_file)
 
         connector = _connect_read_only if args.dry_run else _connect_read_write
@@ -422,6 +499,13 @@ def main(argv: list[str] | None = None) -> int:
             valid_rows = (
                 valid_rows_all[: args.limit] if args.limit is not None else valid_rows_all
             )
+            history_by_ticker = _load_source_history_by_ticker(
+                conn,
+                signal_date=signal_date,
+                taxonomy_version=taxonomy_version,
+                tickers=[str(row["ticker"]).strip().upper() for row in valid_rows],
+                window_rows=args.high_exit_window_rows,
+            )
             watchlist_matches = sum(
                 1
                 for row in valid_rows
@@ -430,6 +514,37 @@ def main(argv: list[str] | None = None) -> int:
 
             run_id = _resolve_run_id(signal_date, args.run_id)
             created_at_utc = _utc_now_text()
+            high_exit_window_derived_rows = 0
+            high_exit_window_unavailable = 0
+            mapped_rows: list[tuple[tuple[str, str, str], tuple[object, ...]]] = []
+            for row in valid_rows:
+                ticker = str(row["ticker"]).strip().upper()
+                high_exit_risk_days_count, used_window, used_fallback = _resolve_high_exit_risk_days_count(
+                    row,
+                    history_by_ticker.get(ticker),
+                )
+                if used_window:
+                    high_exit_window_derived_rows += 1
+                if used_fallback:
+                    high_exit_window_unavailable += 1
+                mapped_rows.append(
+                    (
+                        (
+                            str(row["signal_date"]),
+                            str(row["taxonomy_version"]),
+                            ticker,
+                        ),
+                        _map_destination_row(
+                            row,
+                            run_id=run_id,
+                            created_at_utc=created_at_utc,
+                            watchlist_tickers=watchlist_tickers,
+                            high_exit_risk_days_count=high_exit_risk_days_count,
+                        ),
+                    )
+                )
+            if high_exit_window_unavailable > 0:
+                warnings.append("HIGH_EXIT_WINDOW_ROWS_UNAVAILABLE")
 
             existing_keys = _existing_keys(
                 conn,
@@ -523,13 +638,9 @@ def main(argv: list[str] | None = None) -> int:
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         [
-                            _map_destination_row(
-                                row,
-                                run_id=run_id,
-                                created_at_utc=created_at_utc,
-                                watchlist_tickers=watchlist_tickers,
-                            )
-                            for row in rows_to_write
+                            mapped_tuple
+                            for source_key, mapped_tuple in mapped_rows
+                            if source_key not in existing_keys
                         ],
                     )
             elif args.mode == "upsert":
@@ -645,15 +756,7 @@ def main(argv: list[str] | None = None) -> int:
                             run_id=excluded.run_id,
                             created_at_utc=excluded.created_at_utc
                         """,
-                        [
-                            _map_destination_row(
-                                row,
-                                run_id=run_id,
-                                created_at_utc=created_at_utc,
-                                watchlist_tickers=watchlist_tickers,
-                            )
-                            for row in valid_rows
-                        ],
+                        [mapped_tuple for _source_key, mapped_tuple in mapped_rows],
                     )
             else:
                 deleted_existing_rows = len(existing_keys)
@@ -725,15 +828,7 @@ def main(argv: list[str] | None = None) -> int:
                                 created_at_utc
                             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """,
-                            [
-                                _map_destination_row(
-                                    row,
-                                    run_id=run_id,
-                                    created_at_utc=created_at_utc,
-                                    watchlist_tickers=watchlist_tickers,
-                                )
-                                for row in valid_rows
-                            ],
+                            [mapped_tuple for _source_key, mapped_tuple in mapped_rows],
                         )
 
             if not args.dry_run:
@@ -745,6 +840,8 @@ def main(argv: list[str] | None = None) -> int:
         _emit_summary("taxonomy_version", taxonomy_version)
         _emit_summary("mode", args.mode)
         _emit_summary("dry_run", 1 if args.dry_run else 0)
+        _emit_summary("high_exit_window_rows", args.high_exit_window_rows)
+        _emit_summary("high_exit_window_derived_rows", high_exit_window_derived_rows)
         _emit_summary("watchlist_file", args.watchlist_file or "")
         _emit_summary("watchlist_tickers", len(watchlist_tickers))
         _emit_summary("watchlist_matches", watchlist_matches)
