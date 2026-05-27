@@ -372,6 +372,46 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     print(f"SUMMARY datacenter_dashboard.run_id={result.datacenter_dashboard_run_id}")
     print(f"SUMMARY datacenter_dashboard.skip_reason={result.datacenter_dashboard_skip_reason}")
+    print(
+        "SUMMARY datacenter_dashboard_source_mode="
+        f"{result.datacenter_dashboard_source_mode}"
+    )
+    print(
+        "SUMMARY datacenter_enrichment.attempted="
+        f"{result.datacenter_enrichment_attempted}"
+    )
+    print(
+        "SUMMARY datacenter_enrichment.status="
+        f"{result.datacenter_enrichment_status}"
+    )
+    print(
+        "SUMMARY datacenter_enrichment.readiness="
+        f"{result.datacenter_enrichment_readiness}"
+    )
+    print(
+        "SUMMARY datacenter_enrichment.run_id="
+        f"{result.datacenter_enrichment_run_id}"
+    )
+    print(
+        "SUMMARY datacenter_dashboard.enrichment_export_status="
+        f"{result.datacenter_dashboard_enrichment_export_status}"
+    )
+    print(
+        "SUMMARY datacenter_dashboard.structured_build_status="
+        f"{result.datacenter_dashboard_structured_build_status}"
+    )
+    print(
+        "SUMMARY datacenter_dashboard.acceptance_report_status="
+        f"{result.datacenter_dashboard_acceptance_report_status}"
+    )
+    print(
+        "SUMMARY datacenter_dashboard.fallback_used="
+        f"{result.datacenter_dashboard_fallback_used}"
+    )
+    print(
+        "SUMMARY datacenter_dashboard.final_source_mode="
+        f"{result.datacenter_dashboard_final_source_mode}"
+    )
     print(f"SUMMARY datacenter_dashboard.error={result.datacenter_dashboard_error}")
 
     for market_result in result.market_results:

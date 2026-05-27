@@ -90,6 +90,16 @@ def _result(overall_status):
         datacenter_dashboard_html_output_path="",
         datacenter_dashboard_run_id="",
         datacenter_dashboard_skip_reason="",
+        datacenter_dashboard_source_mode="reports",
+        datacenter_enrichment_attempted=0,
+        datacenter_enrichment_status="SKIPPED",
+        datacenter_enrichment_readiness="SKIPPED",
+        datacenter_enrichment_run_id="",
+        datacenter_dashboard_enrichment_export_status="SKIPPED",
+        datacenter_dashboard_structured_build_status="SKIPPED",
+        datacenter_dashboard_acceptance_report_status="SKIPPED",
+        datacenter_dashboard_fallback_used=0,
+        datacenter_dashboard_final_source_mode="reports",
         datacenter_dashboard_error="",
     )
 
@@ -152,6 +162,16 @@ def _skipped_result():
         datacenter_dashboard_html_output_path="",
         datacenter_dashboard_run_id="",
         datacenter_dashboard_skip_reason="SKIP_NEXT_RUN",
+        datacenter_dashboard_source_mode="reports",
+        datacenter_enrichment_attempted=0,
+        datacenter_enrichment_status="SKIPPED",
+        datacenter_enrichment_readiness="SKIPPED",
+        datacenter_enrichment_run_id="",
+        datacenter_dashboard_enrichment_export_status="SKIPPED",
+        datacenter_dashboard_structured_build_status="SKIPPED",
+        datacenter_dashboard_acceptance_report_status="SKIPPED",
+        datacenter_dashboard_fallback_used=0,
+        datacenter_dashboard_final_source_mode="reports",
         datacenter_dashboard_error="",
     )
 
@@ -219,6 +239,16 @@ def test_scheduler_cli_successful_run_prints_top_level_summary_lines(monkeypatch
     assert "SUMMARY datacenter_dashboard.html_output_path=" in captured.out
     assert "SUMMARY datacenter_dashboard.run_id=" in captured.out
     assert "SUMMARY datacenter_dashboard.skip_reason=" in captured.out
+    assert "SUMMARY datacenter_dashboard_source_mode=reports" in captured.out
+    assert "SUMMARY datacenter_enrichment.attempted=0" in captured.out
+    assert "SUMMARY datacenter_enrichment.status=SKIPPED" in captured.out
+    assert "SUMMARY datacenter_enrichment.readiness=SKIPPED" in captured.out
+    assert "SUMMARY datacenter_enrichment.run_id=" in captured.out
+    assert "SUMMARY datacenter_dashboard.enrichment_export_status=SKIPPED" in captured.out
+    assert "SUMMARY datacenter_dashboard.structured_build_status=SKIPPED" in captured.out
+    assert "SUMMARY datacenter_dashboard.acceptance_report_status=SKIPPED" in captured.out
+    assert "SUMMARY datacenter_dashboard.fallback_used=0" in captured.out
+    assert "SUMMARY datacenter_dashboard.final_source_mode=reports" in captured.out
     assert "SUMMARY datacenter_dashboard.error=" in captured.out
 
 

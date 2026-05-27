@@ -3,11 +3,13 @@ from __future__ import annotations
 import datetime
 import errno
 import fcntl
+import io
 import json
 import sqlite3
 import subprocess
+import sys
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import IO, Iterator, List, Optional
@@ -105,6 +107,16 @@ class ScheduledStockUpdateRunResult:
     datacenter_dashboard_html_output_path: str = ""
     datacenter_dashboard_run_id: str = ""
     datacenter_dashboard_skip_reason: str = ""
+    datacenter_dashboard_source_mode: str = "reports"
+    datacenter_enrichment_attempted: int = 0
+    datacenter_enrichment_status: str = "SKIPPED"
+    datacenter_enrichment_readiness: str = "SKIPPED"
+    datacenter_enrichment_run_id: str = ""
+    datacenter_dashboard_enrichment_export_status: str = "SKIPPED"
+    datacenter_dashboard_structured_build_status: str = "SKIPPED"
+    datacenter_dashboard_acceptance_report_status: str = "SKIPPED"
+    datacenter_dashboard_fallback_used: int = 0
+    datacenter_dashboard_final_source_mode: str = "reports"
     datacenter_dashboard_error: str = ""
 
 
@@ -182,6 +194,16 @@ class DatacenterDashboardPostStepResult:
     html_output_path: str = ""
     run_id: str = ""
     skip_reason: str = ""
+    source_mode: str = "reports"
+    enrichment_attempted: int = 0
+    enrichment_status: str = "SKIPPED"
+    enrichment_readiness: str = "SKIPPED"
+    enrichment_run_id: str = ""
+    enrichment_export_status: str = "SKIPPED"
+    structured_build_status: str = "SKIPPED"
+    acceptance_report_status: str = "SKIPPED"
+    fallback_used: int = 0
+    final_source_mode: str = "reports"
     error: Optional[str] = None
 
 
@@ -501,6 +523,16 @@ def _default_datacenter_dashboard_result(
         html_output_path="",
         run_id="",
         skip_reason=skip_reason,
+        source_mode=config.datacenter_dashboard_source_mode,
+        enrichment_attempted=0,
+        enrichment_status="SKIPPED",
+        enrichment_readiness="SKIPPED",
+        enrichment_run_id="",
+        enrichment_export_status="SKIPPED",
+        structured_build_status="SKIPPED",
+        acceptance_report_status="SKIPPED",
+        fallback_used=0,
+        final_source_mode="reports",
         error=error,
     )
 
@@ -513,6 +545,51 @@ def _resolve_datacenter_dashboard_html_output_path(
         Path(config.datacenter_dashboard_html_output_dir)
         / f"datacenter_dashboard_{report_date}.html"
     )
+
+
+def _resolve_datacenter_enrichment_json_output_path(reports_dir: str, report_date: str) -> str:
+    return str(Path(reports_dir) / f"datacenter_dashboard_enrichment_{report_date}.json")
+
+
+def _resolve_datacenter_enrichment_acceptance_output_path(
+    reports_dir: str,
+    report_date: str,
+) -> str:
+    return str(
+        Path(reports_dir) / f"datacenter_dashboard_enrichment_acceptance_{report_date}.txt"
+    )
+
+
+def _resolve_latest_dashboard_run_id(
+    dashboard_db: str,
+    ecosystem_code: str,
+    report_date: str,
+) -> str:
+    dashboard_path = Path(dashboard_db)
+    if not dashboard_path.exists():
+        return ""
+    with sqlite3.connect(f"file:{dashboard_path}?mode=ro", uri=True) as conn:
+        row = conn.execute(
+            """
+            SELECT run_id
+            FROM ecosystem_dashboard_runs
+            WHERE ecosystem_code = ? AND report_date = ?
+            ORDER BY created_at_utc DESC, run_id DESC
+            LIMIT 1
+            """,
+            (ecosystem_code, report_date),
+        ).fetchone()
+    return "" if row is None else str(row[0] or "")
+
+
+def _run_python_cli_main(cli_main, args: list[str]) -> tuple[int, str]:
+    buffer = io.StringIO()
+    with redirect_stdout(buffer):
+        exit_code = cli_main(args)
+    stdout = buffer.getvalue()
+    if stdout:
+        sys.stdout.write(stdout)
+    return int(exit_code), stdout
 
 
 def inspect_scheduler_dashboard_config(
@@ -718,6 +795,67 @@ def _run_datacenter_dashboard_post_step(
     render_html: bool,
     html_output: str,
 ) -> DatacenterDashboardPostStepResult:
+    if (
+        config.datacenter_dashboard_source_mode == "enrichment"
+        and config.datacenter_enrichment_enabled
+    ):
+        return _run_datacenter_dashboard_enrichment_post_step(
+            config=config,
+            reports_dir=reports_dir,
+            report_date=report_date,
+            render_html=render_html,
+            html_output=html_output,
+        )
+    if (
+        config.datacenter_dashboard_source_mode == "enrichment"
+        and not config.datacenter_enrichment_enabled
+    ):
+        result = _run_datacenter_dashboard_reports_post_step(
+            config=config,
+            reports_dir=reports_dir,
+            report_date=report_date,
+            render_html=render_html,
+            html_output=html_output,
+        )
+        return DatacenterDashboardPostStepResult(
+            attempted=result.attempted,
+            status=result.status,
+            dashboard_db=result.dashboard_db,
+            report_date=result.report_date,
+            md_reports_status=result.md_reports_status,
+            source_reports_available=result.source_reports_available,
+            html_output_path=result.html_output_path,
+            run_id=result.run_id,
+            skip_reason=result.skip_reason,
+            source_mode="enrichment",
+            enrichment_attempted=0,
+            enrichment_status="SKIPPED",
+            enrichment_readiness="SKIPPED",
+            enrichment_run_id="",
+            enrichment_export_status="SKIPPED",
+            structured_build_status="SKIPPED",
+            acceptance_report_status="SKIPPED",
+            fallback_used=0,
+            final_source_mode="reports",
+            error=result.error,
+        )
+    return _run_datacenter_dashboard_reports_post_step(
+        config=config,
+        reports_dir=reports_dir,
+        report_date=report_date,
+        render_html=render_html,
+        html_output=html_output,
+    )
+
+
+def _run_datacenter_dashboard_reports_post_step(
+    *,
+    config: StockUpdateSchedulerConfig,
+    reports_dir: str,
+    report_date: str,
+    render_html: bool,
+    html_output: str,
+) -> DatacenterDashboardPostStepResult:
     from dev_tools.datacenter_dashboard_support import discover_datacenter_dashboard_status
     from dev_tools.run_datacenter_dashboard_html import generate_datacenter_dashboard_html_file
     from dev_tools.run_ecosystem_dashboard_build import generate_ecosystem_dashboard_build
@@ -747,6 +885,8 @@ def _run_datacenter_dashboard_post_step(
             html_output_path=html_output,
             run_id="",
             skip_reason="DATACENTER_MD_REPORTS_MISSING",
+            source_mode="reports",
+            final_source_mode="reports",
             error=f"missing dashboard source reports for report_date={report_date}",
         )
 
@@ -770,6 +910,8 @@ def _run_datacenter_dashboard_post_step(
             html_output_path=html_output,
             run_id="",
             skip_reason="DASHBOARD_BUILD_FAILED",
+            source_mode="reports",
+            final_source_mode="reports",
             error=str(exc),
         )
 
@@ -794,6 +936,8 @@ def _run_datacenter_dashboard_post_step(
                 html_output_path=html_output,
                 run_id=built_run_id,
                 skip_reason="DASHBOARD_HTML_RENDER_FAILED",
+                source_mode="reports",
+                final_source_mode="reports",
                 error=str(exc),
             )
 
@@ -807,7 +951,389 @@ def _run_datacenter_dashboard_post_step(
         html_output_path=html_output,
         run_id=built_run_id,
         skip_reason="",
+        source_mode="reports",
+        final_source_mode="reports",
         error=None,
+    )
+
+
+def _run_datacenter_dashboard_enrichment_post_step(
+    *,
+    config: StockUpdateSchedulerConfig,
+    reports_dir: str,
+    report_date: str,
+    render_html: bool,
+    html_output: str,
+) -> DatacenterDashboardPostStepResult:
+    from dev_tools.datacenter_dashboard_support import discover_datacenter_dashboard_status
+    from dev_tools.run_datacenter_dashboard_analysis_db_export import main as export_main
+    from dev_tools.run_datacenter_dashboard_build import main as build_main
+    from dev_tools.run_datacenter_dashboard_enrichment_acceptance_report import (
+        main as acceptance_main,
+    )
+    from dev_tools.run_datacenter_dashboard_enrichment_audit import main as audit_main
+    from dev_tools.run_datacenter_dashboard_enrichment_write import main as enrichment_main
+
+    dashboard_status = discover_datacenter_dashboard_status(
+        reports_dir,
+        report_date=report_date,
+    )
+    source_reports_available = sum(
+        1 for report in dashboard_status.reports if report.status == "OK"
+    )
+    if dashboard_status.overall_status != "READY":
+        return DatacenterDashboardPostStepResult(
+            attempted=0,
+            status="FAILED",
+            dashboard_db=config.datacenter_dashboard_db,
+            report_date=report_date,
+            md_reports_status="MISSING",
+            source_reports_available=source_reports_available,
+            html_output_path=html_output,
+            run_id="",
+            skip_reason="DATACENTER_MD_REPORTS_MISSING",
+            source_mode="enrichment",
+            enrichment_attempted=1,
+            enrichment_status="FAILED",
+            enrichment_readiness="FAILED",
+            final_source_mode="reports" if config.datacenter_dashboard_fallback_to_reports else "enrichment",
+            error=f"missing dashboard source reports for report_date={report_date}",
+        )
+
+    analysis_db_path = config.analysis_db_path.strip()
+    if not analysis_db_path or not Path(analysis_db_path).exists():
+        return _datacenter_enrichment_failure_with_optional_fallback(
+            config=config,
+            reports_dir=reports_dir,
+            report_date=report_date,
+            render_html=render_html,
+            html_output=html_output,
+            source_reports_available=source_reports_available,
+            failure_status="FAILED",
+            enrichment_status="FAILED",
+            enrichment_readiness="FAILED",
+            enrichment_export_status="SKIPPED",
+            structured_build_status="SKIPPED",
+            acceptance_report_status="SKIPPED",
+            error="analysis_db not found for enrichment dashboard path",
+        )
+
+    enrichment_json_output_path = _resolve_datacenter_enrichment_json_output_path(
+        reports_dir,
+        report_date,
+    )
+    previous_reports_run_id = _resolve_latest_dashboard_run_id(
+        config.datacenter_dashboard_db,
+        "DATACENTER",
+        report_date,
+    )
+
+    write_args = [
+        "--analysis-db",
+        analysis_db_path,
+        "--signal-date",
+        report_date,
+        "--taxonomy-version",
+        config.datacenter_enrichment_taxonomy_version,
+        "--mode",
+        config.datacenter_enrichment_write_mode,
+    ]
+    if config.datacenter_enrichment_watchlist_file.strip():
+        write_args.extend(
+            [
+                "--watchlist-file",
+                config.datacenter_enrichment_watchlist_file.strip(),
+            ]
+        )
+    write_exit_code, write_stdout = _run_python_cli_main(enrichment_main, write_args)
+    enrichment_run_id = (
+        _parse_summary_value(write_stdout, "datacenter_dashboard_enrichment_write.run_id") or ""
+    )
+    enrichment_write_status = (
+        _parse_summary_value(write_stdout, "datacenter_dashboard_enrichment_write.status")
+        or ("OK" if write_exit_code == 0 else "FAILED")
+    )
+    enrichment_readiness = (
+        _parse_summary_value(write_stdout, "datacenter_dashboard_enrichment_write.readiness")
+        or ("UNKNOWN" if write_exit_code == 0 else "FAILED")
+    )
+    if write_exit_code != 0 or enrichment_write_status != "OK":
+        return _datacenter_enrichment_failure_with_optional_fallback(
+            config=config,
+            reports_dir=reports_dir,
+            report_date=report_date,
+            render_html=render_html,
+            html_output=html_output,
+            source_reports_available=source_reports_available,
+            failure_status="FAILED",
+            enrichment_status="FAILED",
+            enrichment_readiness=enrichment_readiness or "FAILED",
+            enrichment_run_id=enrichment_run_id,
+            enrichment_export_status="SKIPPED",
+            structured_build_status="SKIPPED",
+            acceptance_report_status="SKIPPED",
+            error="ENRICHMENT_WRITE_FAILED",
+        )
+
+    audit_args = [
+        "--analysis-db",
+        analysis_db_path,
+        "--signal-date",
+        report_date,
+        "--taxonomy-version",
+        config.datacenter_enrichment_taxonomy_version,
+        "--format",
+        "text",
+    ]
+    audit_exit_code, audit_stdout = _run_python_cli_main(audit_main, audit_args)
+    audit_readiness = (
+        _parse_summary_value(audit_stdout, "datacenter_dashboard_enrichment_audit.readiness")
+        or ""
+    )
+    if audit_exit_code != 0:
+        return _datacenter_enrichment_failure_with_optional_fallback(
+            config=config,
+            reports_dir=reports_dir,
+            report_date=report_date,
+            render_html=render_html,
+            html_output=html_output,
+            source_reports_available=source_reports_available,
+            failure_status="FAILED",
+            enrichment_status="FAILED",
+            enrichment_readiness=audit_readiness or "FAILED",
+            enrichment_run_id=enrichment_run_id,
+            enrichment_export_status="SKIPPED",
+            structured_build_status="SKIPPED",
+            acceptance_report_status="SKIPPED",
+            error="ENRICHMENT_AUDIT_FAILED",
+        )
+
+    export_args = [
+        "--analysis-db",
+        analysis_db_path,
+        "--price-db",
+        config.osakedata_db_path,
+        "--ecosystem-code",
+        "DATACENTER",
+        "--report-date",
+        report_date,
+        "--output-json",
+        enrichment_json_output_path,
+        "--taxonomy-version",
+        config.datacenter_enrichment_taxonomy_version,
+        "--market",
+        "usa",
+        "--source-mode",
+        "enrichment",
+    ]
+    export_exit_code, export_stdout = _run_python_cli_main(export_main, export_args)
+    export_status = (
+        _parse_summary_value(export_stdout, "datacenter_dashboard_analysis_db_export.status")
+        or ("OK" if export_exit_code == 0 else "FAILED")
+    )
+    if export_exit_code != 0 or export_status != "OK":
+        return _datacenter_enrichment_failure_with_optional_fallback(
+            config=config,
+            reports_dir=reports_dir,
+            report_date=report_date,
+            render_html=render_html,
+            html_output=html_output,
+            source_reports_available=source_reports_available,
+            failure_status="FAILED",
+            enrichment_status="FAILED",
+            enrichment_readiness=audit_readiness or enrichment_readiness or "FAILED",
+            enrichment_run_id=enrichment_run_id,
+            enrichment_export_status="FAILED",
+            structured_build_status="SKIPPED",
+            acceptance_report_status="SKIPPED",
+            error="ENRICHMENT_EXPORT_FAILED",
+        )
+
+    build_args = [
+        "--dashboard-db",
+        config.datacenter_dashboard_db,
+        "--report-date",
+        report_date,
+        "--input-mode",
+        "structured",
+        "--structured-input-json",
+        enrichment_json_output_path,
+        "--mode",
+        "replace-date",
+    ]
+    if render_html:
+        build_args.extend(["--render-html", "--html-output", html_output])
+    build_exit_code, build_stdout = _run_python_cli_main(build_main, build_args)
+    built_run_id = _parse_summary_value(build_stdout, "ecosystem_dashboard_build.run_id") or ""
+    structured_build_status = (
+        _parse_summary_value(build_stdout, "ecosystem_dashboard_build.status")
+        or ("OK" if build_exit_code == 0 else "FAILED")
+    )
+    if build_exit_code != 0 or structured_build_status != "OK":
+        return _datacenter_enrichment_failure_with_optional_fallback(
+            config=config,
+            reports_dir=reports_dir,
+            report_date=report_date,
+            render_html=render_html,
+            html_output=html_output,
+            source_reports_available=source_reports_available,
+            failure_status="FAILED",
+            enrichment_status="FAILED",
+            enrichment_readiness=audit_readiness or enrichment_readiness or "FAILED",
+            enrichment_run_id=enrichment_run_id,
+            enrichment_export_status="OK",
+            structured_build_status="FAILED",
+            acceptance_report_status="SKIPPED",
+            error="STRUCTURED_DASHBOARD_BUILD_FAILED",
+        )
+
+    acceptance_report_status = "SKIPPED"
+    if config.datacenter_dashboard_run_acceptance_report:
+        if previous_reports_run_id and built_run_id:
+            acceptance_args = [
+                "--reports-dashboard-db",
+                config.datacenter_dashboard_db,
+                "--reports-run-id",
+                previous_reports_run_id,
+                "--enrichment-dashboard-db",
+                config.datacenter_dashboard_db,
+                "--enrichment-run-id",
+                built_run_id,
+                "--analysis-db-copy",
+                analysis_db_path,
+                "--ecosystem-code",
+                "DATACENTER",
+                "--report-date",
+                report_date,
+                "--format",
+                "text",
+            ]
+            acceptance_exit_code, acceptance_stdout = _run_python_cli_main(
+                acceptance_main,
+                acceptance_args,
+            )
+            acceptance_report_status = (
+                _parse_summary_value(
+                    acceptance_stdout,
+                    "datacenter_dashboard_enrichment_acceptance_report.status",
+                )
+                or ("OK" if acceptance_exit_code == 0 else "FAILED")
+            )
+            if acceptance_exit_code != 0 or acceptance_report_status != "OK":
+                return _datacenter_enrichment_failure_with_optional_fallback(
+                    config=config,
+                    reports_dir=reports_dir,
+                    report_date=report_date,
+                    render_html=render_html,
+                    html_output=html_output,
+                    source_reports_available=source_reports_available,
+                    failure_status="FAILED",
+                    enrichment_status="FAILED",
+                    enrichment_readiness=audit_readiness or enrichment_readiness or "FAILED",
+                    enrichment_run_id=enrichment_run_id,
+                    enrichment_export_status="OK",
+                    structured_build_status="OK",
+                    acceptance_report_status="FAILED",
+                    error="ACCEPTANCE_REPORT_FAILED",
+                )
+        else:
+            acceptance_report_status = "SKIPPED"
+
+    return DatacenterDashboardPostStepResult(
+        attempted=1,
+        status="OK",
+        dashboard_db=config.datacenter_dashboard_db,
+        report_date=report_date,
+        md_reports_status="OK",
+        source_reports_available=source_reports_available,
+        html_output_path=html_output,
+        run_id=built_run_id,
+        skip_reason="",
+        source_mode="enrichment",
+        enrichment_attempted=1,
+        enrichment_status="OK",
+        enrichment_readiness=audit_readiness or enrichment_readiness or "UNKNOWN",
+        enrichment_run_id=enrichment_run_id,
+        enrichment_export_status="OK",
+        structured_build_status="OK",
+        acceptance_report_status=acceptance_report_status,
+        fallback_used=0,
+        final_source_mode="enrichment",
+        error=None,
+    )
+
+
+def _datacenter_enrichment_failure_with_optional_fallback(
+    *,
+    config: StockUpdateSchedulerConfig,
+    reports_dir: str,
+    report_date: str,
+    render_html: bool,
+    html_output: str,
+    source_reports_available: int,
+    failure_status: str,
+    enrichment_status: str,
+    enrichment_readiness: str,
+    enrichment_run_id: str = "",
+    enrichment_export_status: str,
+    structured_build_status: str,
+    acceptance_report_status: str,
+    error: str,
+) -> DatacenterDashboardPostStepResult:
+    if config.datacenter_dashboard_fallback_to_reports:
+        fallback_result = _run_datacenter_dashboard_reports_post_step(
+            config=config,
+            reports_dir=reports_dir,
+            report_date=report_date,
+            render_html=render_html,
+            html_output=html_output,
+        )
+        return DatacenterDashboardPostStepResult(
+            attempted=fallback_result.attempted,
+            status=fallback_result.status,
+            dashboard_db=fallback_result.dashboard_db,
+            report_date=fallback_result.report_date,
+            md_reports_status=fallback_result.md_reports_status,
+            source_reports_available=max(
+                source_reports_available,
+                fallback_result.source_reports_available,
+            ),
+            html_output_path=fallback_result.html_output_path,
+            run_id=fallback_result.run_id,
+            skip_reason=fallback_result.skip_reason or error,
+            source_mode="enrichment",
+            enrichment_attempted=1,
+            enrichment_status=enrichment_status,
+            enrichment_readiness=enrichment_readiness,
+            enrichment_run_id=enrichment_run_id,
+            enrichment_export_status=enrichment_export_status,
+            structured_build_status=structured_build_status,
+            acceptance_report_status=acceptance_report_status,
+            fallback_used=1,
+            final_source_mode="reports",
+            error=error if fallback_result.status == "OK" else fallback_result.error or error,
+        )
+    return DatacenterDashboardPostStepResult(
+        attempted=1,
+        status=failure_status,
+        dashboard_db=config.datacenter_dashboard_db,
+        report_date=report_date,
+        md_reports_status="OK",
+        source_reports_available=source_reports_available,
+        html_output_path=html_output,
+        run_id="",
+        skip_reason=error,
+        source_mode="enrichment",
+        enrichment_attempted=1,
+        enrichment_status=enrichment_status,
+        enrichment_readiness=enrichment_readiness,
+        enrichment_run_id=enrichment_run_id,
+        enrichment_export_status=enrichment_export_status,
+        structured_build_status=structured_build_status,
+        acceptance_report_status=acceptance_report_status,
+        fallback_used=0,
+        final_source_mode="enrichment",
+        error=error,
     )
 
 
@@ -1562,6 +2088,16 @@ def run_scheduler_config(
                 datacenter_dashboard_html_output_path=datacenter_dashboard_result.html_output_path,
                 datacenter_dashboard_run_id=datacenter_dashboard_result.run_id,
                 datacenter_dashboard_skip_reason=datacenter_dashboard_result.skip_reason,
+                datacenter_dashboard_source_mode=datacenter_dashboard_result.source_mode,
+                datacenter_enrichment_attempted=datacenter_dashboard_result.enrichment_attempted,
+                datacenter_enrichment_status=datacenter_dashboard_result.enrichment_status,
+                datacenter_enrichment_readiness=datacenter_dashboard_result.enrichment_readiness,
+                datacenter_enrichment_run_id=datacenter_dashboard_result.enrichment_run_id,
+                datacenter_dashboard_enrichment_export_status=datacenter_dashboard_result.enrichment_export_status,
+                datacenter_dashboard_structured_build_status=datacenter_dashboard_result.structured_build_status,
+                datacenter_dashboard_acceptance_report_status=datacenter_dashboard_result.acceptance_report_status,
+                datacenter_dashboard_fallback_used=datacenter_dashboard_result.fallback_used,
+                datacenter_dashboard_final_source_mode=datacenter_dashboard_result.final_source_mode,
                 datacenter_dashboard_error=datacenter_dashboard_result.error or "",
             )
             _write_summary_json(config=config, run_started_at=run_started_at, result=result)
