@@ -273,6 +273,21 @@ def _derive_freshness_status(row: sqlite3.Row) -> str | None:
     return latest_structure_freshness
 
 
+def _derive_rolling_2d_status(row: sqlite3.Row) -> str:
+    exit_risk_severity = (_normalized_text(row["exit_risk_severity"]) or "").upper()
+    exit_risk_signal = _is_truthy_signal(row["exit_risk_signal"])
+    latest_bos_event_type = (_normalized_text(row["latest_bos_event_type"]) or "").upper()
+    latest_reset_reason = (_normalized_text(row["latest_reset_reason"]) or "").upper()
+
+    if exit_risk_severity == "HIGH" and (
+        latest_bos_event_type == "BOS_DOWN" or "DOUBLE_BOS_DOWN" in latest_reset_reason
+    ):
+        return "EMERGENCY_SELL_PRESSURE"
+    if exit_risk_severity in {"HIGH", "MEDIUM"} or exit_risk_signal:
+        return "WATCH_PRESSURE"
+    return "NO_EMERGENCY"
+
+
 def _map_destination_row(
     row: sqlite3.Row,
     *,
@@ -284,6 +299,7 @@ def _map_destination_row(
     daily_status = _derive_daily_status(row)
     primary_reason = _derive_primary_reason(row, daily_status)
     freshness_status = _derive_freshness_status(row)
+    rolling_2d_status = _derive_rolling_2d_status(row)
     values = [
         row["signal_date"],  # signal_date
         row["taxonomy_version"],  # taxonomy_version
@@ -326,7 +342,7 @@ def _map_destination_row(
         None,  # candidate_priority
         None,  # candidate_priority_label
         daily_status,  # daily_status
-        None,  # rolling_2d_status
+        rolling_2d_status,  # rolling_2d_status
         None,  # rolling_5d_status
         None,  # rolling_30d_status
         None,  # horizons_present

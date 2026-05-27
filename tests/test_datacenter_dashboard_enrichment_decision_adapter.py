@@ -94,6 +94,9 @@ def test_adapter_builds_risk_horizon_rows_with_expected_statuses():
     )
     assert any(row.horizon == "rolling 5d" and row.raw_status == "FAILED_PULLBACK" for row in rows)
     assert any(row.horizon == "rolling 30d" and row.raw_status == "AVOID" for row in rows)
+    rolling_2d_row = next(row for row in rows if row.horizon == "rolling 2d")
+    assert rolling_2d_row.raw_fields["rolling_2d_status"] == "EMERGENCY_SELL_PRESSURE"
+    assert rolling_2d_row.raw_fields["horizon_source"] == "rolling_2d_status"
 
 
 def test_adapter_excludes_invalid_ticker_rows():
@@ -213,6 +216,24 @@ def test_risk_fields_are_visible_to_decision_logic_trace():
         or "double_bos_down" in (trace.matched_value or "").lower()
         for trace in decision.decision_trace
     )
+
+
+def test_rolling_2d_emergency_sell_pressure_produces_non_neutral_decision():
+    result = build_decisions_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "HIGH_EXIT_RISK",
+                "rolling_2d_status": "EMERGENCY_SELL_PRESSURE",
+                "latest_bos_event_type": "BOS_DOWN",
+                "latest_reset_reason": "DOUBLE_BOS_DOWN",
+                "trend_state": "DOWN",
+            }
+        ]
+    )
+
+    decision = result.decisions[0]
+    assert decision.action not in {"", "NEUTRAL"}
 
 
 def test_final_action_does_not_self_feed_into_decision_logic():

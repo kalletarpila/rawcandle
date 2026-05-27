@@ -536,6 +536,94 @@ def test_freshness_status_prefers_bos_down_then_reset_then_structure(tmp_path, c
     assert row["freshness_status"] == "BOS_DOWN_FRESH"
 
 
+def test_rolling_2d_status_maps_to_emergency_sell_pressure_from_high_exit_and_bos_down(
+    tmp_path, capsys
+):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(
+        db_path,
+        exit_risk_signal=1,
+        exit_risk_severity="HIGH",
+        latest_bos_event_type="BOS_DOWN",
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    assert row["daily_status"] == "HIGH_EXIT_RISK"
+    assert row["rolling_2d_status"] == "EMERGENCY_SELL_PRESSURE"
+
+
+def test_rolling_2d_status_maps_to_watch_pressure_from_medium_risk_without_bos_down(
+    tmp_path, capsys
+):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(
+        db_path,
+        exit_risk_signal=1,
+        exit_risk_severity="MEDIUM",
+        latest_bos_event_type="BOS_UP",
+        latest_reset_reason=None,
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    assert row["rolling_2d_status"] == "WATCH_PRESSURE"
+
+
+def test_rolling_2d_status_maps_to_no_emergency_for_neutral_row(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(db_path)
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    assert row["rolling_2d_status"] == "NO_EMERGENCY"
+
+
 def test_watchlist_file_marks_matching_tickers(tmp_path, capsys):
     db_path = tmp_path / "analysis.db"
     watchlist_file = _create_watchlist_file(tmp_path / "watchlist.txt", "NVDA\nANET\n")

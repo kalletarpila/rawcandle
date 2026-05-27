@@ -600,4 +600,5 @@ def test_ticker_enrichment_then_decision_writer_produces_non_neutral_action_for_
     row = _fetch_row(db_path, "AAA")
     assert decision_exit_code == 0
     assert row["daily_status"] == "HIGH_EXIT_RISK"
+    assert row["rolling_2d_status"] == "EMERGENCY_SELL_PRESSURE"
     assert row["action"] not in (None, "", "NEUTRAL")
