@@ -236,6 +236,37 @@ def test_rolling_2d_emergency_sell_pressure_produces_non_neutral_decision():
     assert decision.action not in {"", "NEUTRAL"}
 
 
+def test_return_10d_hard_sell_token_in_window_status_2d_can_produce_sell():
+    result = build_decisions_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "NEUTRAL_MONITOR",
+                "window_status_2d": "return_10d_lt_minus_8pct",
+                "trend_state": "DOWN",
+            }
+        ]
+    )
+
+    decision = result.decisions[0]
+    assert decision.action == "SELL"
+
+
+def test_close_below_ema20_token_is_visible_in_adapter_raw_fields():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "NEUTRAL_MONITOR",
+                "window_status_2d": "close_below_ema20",
+            }
+        ]
+    )
+
+    daily_row = next(row for row in rows if row.horizon == "daily")
+    assert daily_row.raw_fields["window_status_2d"] == "close_below_ema20"
+
+
 def test_high_exit_risk_days_count_is_exposed_in_raw_fields_and_seen_by_decision_logic():
     rows = build_dashboard_rows_from_ticker_enrichment_rows(
         [

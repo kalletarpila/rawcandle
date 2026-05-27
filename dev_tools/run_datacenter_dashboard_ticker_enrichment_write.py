@@ -173,6 +173,7 @@ def _load_source_rows(
         ("return_10d", "return_10d"),
         ("return_20d", "return_20d"),
         ("return_60d", "return_60d"),
+        ("distance_to_ema20_pct", "distance_to_ema20_pct"),
         ("price_data_status", "price_data_status"),
         ("ticker_trend_state", "ticker_trend_state"),
         ("latest_structure_label", "latest_structure_label"),
@@ -337,6 +338,35 @@ def _derive_rolling_2d_status(row: sqlite3.Row) -> str:
     return "NO_EMERGENCY"
 
 
+def _return_10d_is_below_minus_8pct(value: object) -> bool:
+    text = _normalized_text(value)
+    if text is None:
+        return False
+    try:
+        numeric = float(text)
+    except ValueError:
+        return False
+    if abs(numeric) <= 1:
+        return numeric <= -0.08
+    return numeric <= -8
+
+
+def _derive_window_status_2d(row: sqlite3.Row) -> str | None:
+    tokens: list[str] = []
+    if _return_10d_is_below_minus_8pct(row["return_10d"]):
+        tokens.append("return_10d_lt_minus_8pct")
+    distance_to_ema20_pct = row["distance_to_ema20_pct"]
+    try:
+        below_ema20 = distance_to_ema20_pct is not None and float(distance_to_ema20_pct) < 0
+    except (TypeError, ValueError):
+        below_ema20 = False
+    if below_ema20:
+        tokens.append("close_below_ema20")
+    if not tokens:
+        return None
+    return "|".join(tokens)
+
+
 def _derive_high_exit_risk_days_count_same_day(row: sqlite3.Row) -> int:
     explicit_value = _normalized_text(row["high_exit_risk_days_count"])
     if explicit_value is not None:
@@ -388,6 +418,7 @@ def _map_destination_row(
     primary_reason = _derive_primary_reason(row, daily_status)
     freshness_status = _derive_freshness_status(row)
     rolling_2d_status = _derive_rolling_2d_status(row)
+    window_status_2d = _derive_window_status_2d(row)
     values = [
         row["signal_date"],  # signal_date
         row["taxonomy_version"],  # taxonomy_version
@@ -408,7 +439,7 @@ def _map_destination_row(
         None,  # status_change_5d
         None,  # window_status_30d
         None,  # window_status_5d
-        None,  # window_status_2d
+        window_status_2d,  # window_status_2d
         row["ma_break_status"],  # ma_break_status
         freshness_status,  # freshness_status
         row["ticker_trend_state"],  # trend_state

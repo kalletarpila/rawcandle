@@ -28,6 +28,7 @@ def _create_source_table_only(path: Path) -> None:
                 return_10d REAL,
                 return_20d REAL,
                 return_60d REAL,
+                distance_to_ema20_pct REAL,
                 price_data_status TEXT,
                 ticker_trend_state TEXT,
                 latest_structure_label TEXT,
@@ -120,6 +121,7 @@ def _insert_custom_source_row(path: Path, **overrides: object) -> None:
         "return_10d": 2.0,
         "return_20d": 3.0,
         "return_60d": 4.0,
+        "distance_to_ema20_pct": 1.5,
         "price_data_status": "OK",
         "ticker_trend_state": "UP",
         "latest_structure_label": "HH",
@@ -894,6 +896,78 @@ def test_rolling_2d_status_maps_to_no_emergency_for_neutral_row(tmp_path, capsys
     _ = capsys.readouterr()
     row = _destination_rows(db_path)[0]
     assert row["rolling_2d_status"] == "NO_EMERGENCY"
+
+
+def test_return_10d_hard_sell_token_is_written_to_window_status_2d(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(db_path, return_10d=-0.09)
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    assert row["window_status_2d"] == "return_10d_lt_minus_8pct"
+
+
+def test_close_below_ema20_token_is_written_to_window_status_2d(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(db_path, distance_to_ema20_pct=-0.25)
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    assert row["window_status_2d"] == "close_below_ema20"
+
+
+def test_hard_sell_tokens_are_not_written_when_thresholds_are_not_met(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(db_path, return_10d=-0.05, distance_to_ema20_pct=0.5)
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    assert row["window_status_2d"] is None
 
 
 def test_watchlist_file_marks_matching_tickers(tmp_path, capsys):
