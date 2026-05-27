@@ -1080,21 +1080,30 @@ def persist_ecosystem_dashboard_input(
                         dashboard_input.ecosystem_code,
                         dashboard_input.report_date,
                         (
-                            "SUBINDUSTRY"
-                            if row.subindustry_name
-                            else ("LAYER" if row.layer_name else "ECOSYSTEM")
+                            row.market_level
+                            or (
+                                "SUBINDUSTRY"
+                                if row.subindustry_name
+                                else ("LAYER" if row.layer_name else "ECOSYSTEM")
+                            )
                         ),
-                        row.subindustry_name or row.layer_name or "ECOSYSTEM",
-                        row.layer_name if row.subindustry_name else None,
+                        row.name or row.subindustry_name or row.layer_name or "ECOSYSTEM",
+                        row.parent_name if row.parent_name is not None else (
+                            row.layer_name if row.subindustry_name else None
+                        ),
                         row.layer_name,
                         row.subindustry_name,
                         (
-                            f"DC_ECOSYSTEM_TOTAL > {row.layer_name} > {row.subindustry_name}"
-                            if row.layer_name and row.subindustry_name
+                            row.taxonomy_path
+                            if row.taxonomy_path is not None
                             else (
-                                f"DC_ECOSYSTEM_TOTAL > {row.layer_name}"
-                                if row.layer_name
-                                else None
+                                f"DC_ECOSYSTEM_TOTAL > {row.layer_name} > {row.subindustry_name}"
+                                if row.layer_name and row.subindustry_name
+                                else (
+                                    f"DC_ECOSYSTEM_TOTAL > {row.layer_name}"
+                                    if row.layer_name
+                                    else None
+                                )
                             )
                         ),
                         None,

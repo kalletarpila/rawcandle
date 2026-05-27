@@ -35,6 +35,10 @@ class EcosystemDashboardMarketMapInput:
     avg_trend_score: float | None
     avg_action_score: float | None
     dominant_action_bucket: str | None
+    market_level: str | None = None
+    name: str | None = None
+    parent_name: str | None = None
+    taxonomy_path: str | None = None
 
 
 @dataclass(frozen=True)

@@ -432,6 +432,32 @@ def _insert_enrichment_fixture_rows(path: Path) -> None:
             (
                 "2026-05-22",
                 "DC_TAXONOMY_FULL_V1",
+                "ECOSYSTEM",
+                "ECOSYSTEM|DC_ECOSYSTEM_TOTAL",
+                "DC_ECOSYSTEM_TOTAL",
+                None,
+                None,
+                "NEUTRAL",
+                0.09,
+                0.19,
+                0.39,
+                "OK",
+                "ENRICH_V1",
+                "RUN_ENRICH",
+                "2026-05-26T10:00:00Z",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO dc_dashboard_group_enrichment_daily (
+                signal_date, taxonomy_version, market_level, taxonomy_key, name, layer, subindustry,
+                current_status, return_5d, return_20d, return_60d,
+                data_quality_status, calc_version, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "2026-05-22",
+                "DC_TAXONOMY_FULL_V1",
                 "LAYER",
                 "LAYER:Infrastructure",
                 "Infrastructure",
@@ -567,6 +593,9 @@ def test_builder_produces_market_map_and_structured_source_report(tmp_path):
     layer_row = dashboard_input.market_map[1]
     subindustry_row = dashboard_input.market_map[2]
 
+    assert ecosystem_row.market_level == "ECOSYSTEM"
+    assert ecosystem_row.name == "DC_ECOSYSTEM_TOTAL"
+    assert ecosystem_row.taxonomy_path == "DC_ECOSYSTEM_TOTAL"
     assert ecosystem_row.avg_return_5d == 0.10
     assert ecosystem_row.avg_return_20d == 0.20
     assert ecosystem_row.avg_return_60d == 0.40
@@ -682,6 +711,9 @@ def test_exported_json_loads_and_round_trips_to_dashboard_db(tmp_path):
     dashboard_input = load_ecosystem_dashboard_input_json(str(output_json))
     assert dashboard_input.ecosystem_code == "DATACENTER"
     assert dashboard_input.report_date == "2026-05-22"
+    assert dashboard_input.market_map[0].market_level == "ECOSYSTEM"
+    assert dashboard_input.market_map[0].name == "DC_ECOSYSTEM_TOTAL"
+    assert dashboard_input.market_map[0].taxonomy_path == "DC_ECOSYSTEM_TOTAL"
     run_id = persist_ecosystem_dashboard_input(
         dashboard_db=str(dashboard_db),
         dashboard_input=dashboard_input,
@@ -747,10 +779,13 @@ def test_enrichment_mode_reads_all_five_tables_and_emits_ready(tmp_path):
     assert len(dashboard_input.source_reports) == 1
     assert dashboard_input.source_reports[0].source_report_type == "analysis_db_enrichment"
     assert len(dashboard_input.tickers) == 1
-    assert len(dashboard_input.market_map) == 1
+    assert len(dashboard_input.market_map) == 2
     assert len(dashboard_input.action_summary) == 1
     assert len(dashboard_input.decision_trace) == 1
     assert len(dashboard_input.watchlist) == 1
+    assert dashboard_input.market_map[0].market_level == "ECOSYSTEM"
+    assert dashboard_input.market_map[0].name == "DC_ECOSYSTEM_TOTAL"
+    assert dashboard_input.market_map[0].taxonomy_path == "DC_ECOSYSTEM_TOTAL"
     assert dashboard_input.decision_trace[0].rule_group == "daily"
     assert dashboard_input.decision_trace[0].input_value == "BUY_ZONE"
 

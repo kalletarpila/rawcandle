@@ -57,6 +57,10 @@ def _minimal_dashboard_input(*, report_date: str = "2026-05-22") -> EcosystemDas
                 avg_trend_score=0.8,
                 avg_action_score=0.6,
                 dominant_action_bucket="WATCH",
+                market_level="ECOSYSTEM",
+                name="DC_ECOSYSTEM_TOTAL",
+                parent_name=None,
+                taxonomy_path="DC_ECOSYSTEM_TOTAL",
             )
         ],
         watchlist=[
@@ -173,6 +177,9 @@ def test_persist_ecosystem_dashboard_input_writes_rows_and_round_trips_via_read_
     assert snapshot.tickers[0]["ticker"] == "NVDA"
     assert snapshot.tickers[0]["action"] == "WATCH"
     assert snapshot.tickers[0]["severity"] == "Watch Candidate"
+    assert snapshot.market_map[0]["market_level"] == "ECOSYSTEM"
+    assert snapshot.market_map[0]["name"] == "DC_ECOSYSTEM_TOTAL"
+    assert snapshot.market_map[0]["taxonomy_path"] == "DC_ECOSYSTEM_TOTAL"
     assert snapshot.market_map[0]["return_20d"] == 4.5
     assert snapshot.market_map[0]["return_60d"] == 12.0
     assert snapshot.tickers[0]["latest_reset_reason"] is None

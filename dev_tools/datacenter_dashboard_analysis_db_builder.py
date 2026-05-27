@@ -406,6 +406,34 @@ def _load_market_map_rows(
                 avg_trend_score=None,
                 avg_action_score=None,
                 dominant_action_bucket=row["timing_state"],
+                market_level=(
+                    "ECOSYSTEM"
+                    if group_type == "ecosystem"
+                    else ("LAYER" if group_type == "layer" else "SUBINDUSTRY")
+                ),
+                name=(
+                    "DC_ECOSYSTEM_TOTAL"
+                    if group_type == "ecosystem"
+                    else group_name
+                ),
+                parent_name=(
+                    "DC_ECOSYSTEM_TOTAL"
+                    if group_type == "layer"
+                    else (layer_name if group_type == "subindustry" and layer_name else None)
+                ),
+                taxonomy_path=(
+                    "DC_ECOSYSTEM_TOTAL"
+                    if group_type == "ecosystem"
+                    else (
+                        f"DC_ECOSYSTEM_TOTAL > {group_name}"
+                        if group_type == "layer"
+                        else (
+                            f"DC_ECOSYSTEM_TOTAL > {layer_name} > {group_name}"
+                            if group_type == "subindustry" and layer_name
+                            else None
+                        )
+                    )
+                ),
             )
         )
         if max_rows is not None and len(market_map_rows) >= max_rows:
@@ -529,8 +557,10 @@ def _load_enrichment_market_map_rows(
             SELECT
                 market_level,
                 name,
+                parent_name,
                 layer,
                 subindustry,
+                taxonomy_path,
                 current_status,
                 return_5d,
                 return_20d,
@@ -586,6 +616,20 @@ def _load_enrichment_market_map_rows(
             if layer_name:
                 layer_order = layer_order_map.get(layer_name)
                 subindustry_order = subindustry_order_map.get(layer_name, {}).get(name)
+        taxonomy_path = str(row["taxonomy_path"] or "").strip() or None
+        if taxonomy_path is None:
+            if market_level == "ECOSYSTEM":
+                taxonomy_path = "DC_ECOSYSTEM_TOTAL"
+            elif market_level == "LAYER":
+                taxonomy_path = f"DC_ECOSYSTEM_TOTAL > {name}"
+            elif market_level == "SUBINDUSTRY" and layer_name:
+                taxonomy_path = f"DC_ECOSYSTEM_TOTAL > {layer_name} > {name}"
+        parent_name = str(row["parent_name"] or "").strip() or None
+        if parent_name is None:
+            if market_level == "LAYER":
+                parent_name = "DC_ECOSYSTEM_TOTAL"
+            elif market_level == "SUBINDUSTRY" and layer_name:
+                parent_name = layer_name
         market_map.append(
             EcosystemDashboardMarketMapInput(
                 layer_order=layer_order,
@@ -600,6 +644,10 @@ def _load_enrichment_market_map_rows(
                 avg_trend_score=None,
                 avg_action_score=None,
                 dominant_action_bucket=row["current_status"],
+                market_level=market_level,
+                name=name,
+                parent_name=parent_name,
+                taxonomy_path=taxonomy_path,
             )
         )
     return market_map, len(selected_rows)
