@@ -188,9 +188,15 @@ def _load_source_rows(
         ("latest_reset_reason", "latest_reset_reason"),
         ("latest_reset_age_trading_days", "latest_reset_age_trading_days"),
         ("latest_reset_freshness", "latest_reset_freshness"),
+        ("latest_bullish_signal_age_td", "latest_bullish_signal_age_td"),
+        ("latest_bearish_signal_age_td", "latest_bearish_signal_age_td"),
         ("bullish_candle_signal", "bullish_candle_signal"),
         ("bullish_divergence_signal", "bullish_divergence_signal"),
         ("hidden_bullish_divergence_signal", "hidden_bullish_divergence_signal"),
+        (
+            "structure_warning_overrides_bullish_signal",
+            "structure_warning_overrides_bullish_signal",
+        ),
         ("in_datacenter_ecosystem", "in_datacenter_ecosystem"),
         ("exit_risk_signal", "exit_risk_signal"),
         ("exit_risk_severity", "exit_risk_severity"),
@@ -198,6 +204,7 @@ def _load_source_rows(
         ("high_exit_risk_days_count", "high_exit_risk_days_count"),
         ("breakout_signal", "breakout_signal"),
         ("pullback_signal", "pullback_signal"),
+        ("rolling_5d_status", "rolling_5d_status"),
         ("ma_break_status", "ma_break_status"),
     ]
     select_sql = ",\n                ".join(
@@ -274,6 +281,16 @@ def _normalized_text(value: object) -> str | None:
     return text or None
 
 
+def _safe_int(value: object) -> int | None:
+    text = _normalized_text(value)
+    if text is None:
+        return None
+    try:
+        return int(float(text))
+    except ValueError:
+        return None
+
+
 def _is_truthy_signal(value: object) -> bool:
     text = _normalized_text(value)
     if text is None:
@@ -315,12 +332,46 @@ def _derive_primary_reason(row: sqlite3.Row, daily_status: str) -> str | None:
     return exit_reason
 
 
+def _has_same_day_bullish_signal(row: sqlite3.Row) -> bool:
+    return any(
+        _is_truthy_signal(row[field_name])
+        for field_name in (
+            "bullish_candle_signal",
+            "bullish_divergence_signal",
+            "hidden_bullish_divergence_signal",
+        )
+    )
+
+
+def _has_structure_blocker(row: sqlite3.Row) -> bool:
+    latest_bos_event_type = (_normalized_text(row["latest_bos_event_type"]) or "").upper()
+    latest_reset_reason = (_normalized_text(row["latest_reset_reason"]) or "").upper()
+    if latest_bos_event_type == "BOS_DOWN":
+        return True
+    return "DOUBLE_BOS_DOWN" in latest_reset_reason
+
+
+def _is_fresh_marker(value: object) -> bool:
+    text = (_normalized_text(value) or "").upper()
+    return text == "FRESH"
+
+
 def _derive_freshness_status(row: sqlite3.Row) -> str | None:
+    if _safe_int(row["structure_warning_overrides_bullish_signal"]) == 1:
+        return "STRUCTURE_WARNING_OVERRIDES_BULLISH"
     latest_bos_event_type = _normalized_text(row["latest_bos_event_type"])
     latest_bos_freshness = _normalized_text(row["latest_bos_freshness"])
     latest_reset_reason = _normalized_text(row["latest_reset_reason"])
     latest_reset_freshness = _normalized_text(row["latest_reset_freshness"])
     latest_structure_freshness = _normalized_text(row["latest_structure_freshness"])
+    explicit_bullish_age = _safe_int(row["latest_bullish_signal_age_td"])
+    if _has_structure_blocker(row) and (
+        _is_fresh_marker(latest_bos_freshness)
+        or _is_fresh_marker(latest_reset_freshness)
+    ):
+        return "STRUCTURE_WARNING_OVERRIDES_BULLISH"
+    if explicit_bullish_age == 0 or _has_same_day_bullish_signal(row):
+        return "FRESH_BULLISH_SIGNAL"
     if latest_bos_event_type == "BOS_DOWN" and latest_bos_freshness is not None:
         return latest_bos_freshness
     if latest_reset_reason is not None and latest_reset_freshness is not None:
@@ -341,6 +392,17 @@ def _derive_rolling_2d_status(row: sqlite3.Row) -> str:
     if exit_risk_severity in {"HIGH", "MEDIUM"} or exit_risk_signal:
         return "WATCH_PRESSURE"
     return "NO_EMERGENCY"
+
+
+def _derive_rolling_5d_status(row: sqlite3.Row) -> str | None:
+    explicit_value = _normalized_text(row["rolling_5d_status"])
+    if explicit_value is not None:
+        return explicit_value
+    if not _is_truthy_signal(row["pullback_signal"]):
+        return None
+    if _has_structure_blocker(row):
+        return "FAILED_PULLBACK"
+    return "PULLBACK_CANDIDATE"
 
 
 def _return_10d_is_below_minus_8pct(value: object) -> bool:
@@ -455,6 +517,7 @@ def _map_destination_row(
     primary_reason = _derive_primary_reason(row, daily_status)
     freshness_status = _derive_freshness_status(row)
     rolling_2d_status = _derive_rolling_2d_status(row)
+    rolling_5d_status = _derive_rolling_5d_status(row)
     window_status_2d = _derive_window_status_2d(row)
     values = [
         row["signal_date"],  # signal_date
@@ -499,7 +562,7 @@ def _map_destination_row(
         None,  # candidate_priority_label
         daily_status,  # daily_status
         rolling_2d_status,  # rolling_2d_status
-        None,  # rolling_5d_status
+        rolling_5d_status,  # rolling_5d_status
         None,  # rolling_30d_status
         None,  # horizons_present
         high_exit_risk_days_count,  # high_exit_risk_days_count

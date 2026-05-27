@@ -40,9 +40,12 @@ def _create_source_table_only(path: Path) -> None:
                 latest_reset_reason TEXT,
                 latest_reset_age_trading_days INTEGER,
                 latest_reset_freshness TEXT,
+                latest_bullish_signal_age_td INTEGER,
+                latest_bearish_signal_age_td INTEGER,
                 bullish_candle_signal INTEGER,
                 bullish_divergence_signal INTEGER,
                 hidden_bullish_divergence_signal INTEGER,
+                structure_warning_overrides_bullish_signal INTEGER,
                 in_datacenter_ecosystem TEXT,
                 exit_risk_signal INTEGER,
                 exit_risk_severity TEXT,
@@ -50,6 +53,7 @@ def _create_source_table_only(path: Path) -> None:
                 high_exit_risk_days_count INTEGER,
                 breakout_signal INTEGER,
                 pullback_signal INTEGER,
+                rolling_5d_status TEXT,
                 ma_break_status TEXT
             )
             """
@@ -133,9 +137,12 @@ def _insert_custom_source_row(path: Path, **overrides: object) -> None:
         "latest_reset_reason": None,
         "latest_reset_age_trading_days": None,
         "latest_reset_freshness": None,
+        "latest_bullish_signal_age_td": None,
+        "latest_bearish_signal_age_td": None,
         "bullish_candle_signal": 0,
         "bullish_divergence_signal": 0,
         "hidden_bullish_divergence_signal": 0,
+        "structure_warning_overrides_bullish_signal": 0,
         "in_datacenter_ecosystem": None,
         "exit_risk_signal": 0,
         "exit_risk_severity": None,
@@ -143,6 +150,7 @@ def _insert_custom_source_row(path: Path, **overrides: object) -> None:
         "high_exit_risk_days_count": None,
         "breakout_signal": 0,
         "pullback_signal": 0,
+        "rolling_5d_status": None,
         "ma_break_status": None,
     }
     row.update(overrides)
@@ -327,7 +335,7 @@ def test_field_mapping_persists_expected_values(tmp_path, capsys):
     assert nvda["latest_reset_reason"] == "EMA20_LOST"
     assert nvda["daily_status"] == "NEUTRAL_MONITOR"
     assert nvda["current_status"] == "NEUTRAL_MONITOR"
-    assert nvda["freshness_status"] == "FRESH"
+    assert nvda["freshness_status"] == "FRESH_BULLISH_SIGNAL"
     assert nvda["primary_reason"] is None
     assert nvda["source_components"] == (
         "dc_ticker_swing_signal_daily,dc_ticker_swing_signal_daily:daily_status_mapping_v1"
@@ -720,6 +728,86 @@ def test_pullback_signal_maps_to_pullback_candidate(tmp_path, capsys):
     row = _destination_rows(db_path)[0]
     assert row["daily_status"] == "PULLBACK_CANDIDATE"
     assert row["primary_reason"] == "PULLBACK_SIGNAL"
+
+
+def test_pullback_signal_maps_to_conservative_rolling_5d_pullback_candidate(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(db_path, pullback_signal=1, ma_break_status="OK")
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    assert row["rolling_5d_status"] == "PULLBACK_CANDIDATE"
+
+
+def test_pullback_signal_with_structure_blocker_maps_to_failed_pullback(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(
+        db_path,
+        pullback_signal=1,
+        latest_bos_event_type="BOS_DOWN",
+        latest_bos_freshness="FRESH",
+        latest_reset_reason="DOUBLE_BOS_DOWN",
+        latest_reset_freshness="FRESH",
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    assert row["rolling_5d_status"] == "FAILED_PULLBACK"
+    assert row["freshness_status"] == "STRUCTURE_WARNING_OVERRIDES_BULLISH"
+
+
+def test_same_day_bullish_signal_maps_to_fresh_bullish_signal(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(db_path, bullish_candle_signal=1)
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    assert row["freshness_status"] == "FRESH_BULLISH_SIGNAL"
 
 
 def test_missing_price_maps_before_other_statuses(tmp_path, capsys):

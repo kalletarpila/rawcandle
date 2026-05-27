@@ -131,6 +131,18 @@ def _raw_fields_from_row(
         text = _normalized_text(value)
         if text is not None:
             raw_fields[key] = text
+    rolling_5d_status = _normalized_text(row.get("rolling_5d_status"))
+    freshness_status = _normalized_text(row.get("freshness_status"))
+    if "pullback_days" not in raw_fields and rolling_5d_status in {
+        "PULLBACK_CANDIDATE",
+        "FAILED_PULLBACK",
+    }:
+        raw_fields["pullback_days"] = "1"
+    if (
+        "latest_bullish_signal_age_td" not in raw_fields
+        and freshness_status == "FRESH_BULLISH_SIGNAL"
+    ):
+        raw_fields["latest_bullish_signal_age_td"] = "0"
     if horizon_source_field is not None:
         raw_fields["horizon_source"] = horizon_source_field
     return raw_fields

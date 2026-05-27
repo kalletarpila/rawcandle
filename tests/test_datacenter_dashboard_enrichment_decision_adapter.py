@@ -176,6 +176,62 @@ def test_pullback_readiness_outputs_come_from_existing_decision_logic():
     assert decision.candidate_priority_label == "P1_READY_TO_WATCH"
 
 
+def test_adapter_synthesizes_pullback_days_from_rolling_5d_status():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "PULLBACK_CANDIDATE",
+                "rolling_5d_status": "PULLBACK_CANDIDATE",
+                "ma_break_status": "OK",
+                "freshness_status": "FRESH_BULLISH_SIGNAL",
+                "trend_state": "UP",
+                "latest_structure_label": "HH",
+                "latest_bos_event_type": "BOS_UP",
+            }
+        ]
+    )
+
+    rolling_row = next(row for row in rows if row.horizon == "rolling 5d")
+    assert rolling_row.raw_fields["pullback_days"] == "1"
+
+
+def test_adapter_synthesizes_bullish_signal_age_from_freshness_status():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "NEUTRAL_MONITOR",
+                "freshness_status": "FRESH_BULLISH_SIGNAL",
+            }
+        ]
+    )
+
+    daily_row = next(row for row in rows if row.horizon == "daily")
+    assert daily_row.raw_fields["latest_bullish_signal_age_td"] == "0"
+
+
+def test_decision_integration_uses_writer_visible_pullback_context():
+    result = build_decisions_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "PULLBACK_CANDIDATE",
+                "rolling_5d_status": "PULLBACK_CANDIDATE",
+                "ma_break_status": "OK",
+                "freshness_status": "FRESH_BULLISH_SIGNAL",
+                "trend_state": "UP",
+                "latest_structure_label": "HH",
+                "latest_bos_event_type": "BOS_UP",
+            }
+        ]
+    )
+
+    decision = result.decisions[0]
+    assert decision.pullback_validity != "INSUFFICIENT_DATA"
+    assert decision.pullback_validity == "VALID_PULLBACK"
+
+
 def test_ma_break_fields_are_visible_to_decision_logic_and_produce_sell():
     result = build_decisions_from_ticker_enrichment_rows(
         [
