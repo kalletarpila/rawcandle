@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import sqlite3
 import sys
 from datetime import datetime, timezone
@@ -13,6 +14,7 @@ OPTIONAL_INDEX_TABLE = "dc_group_index_daily"
 OPTIONAL_TICKER_SOURCE_TABLE = "dc_ticker_swing_signal_daily"
 DESTINATION_TABLE = "dc_dashboard_group_enrichment_daily"
 CALC_VERSION = "DATACENTER_DASHBOARD_GROUP_ENRICHMENT_V1"
+DEFAULT_TAXONOMY_CSV = "/home/kalle/projects/rawcandle/data/datacenter_ecosystem_taxonomy_full_v1.csv"
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -28,6 +30,7 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=("insert-missing", "upsert", "replace-date"),
     )
     parser.add_argument("--run-id")
+    parser.add_argument("--taxonomy-csv")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--limit", type=int)
     return parser
@@ -298,6 +301,44 @@ def _load_subindustry_to_layer(
     }
 
 
+def _load_subindustry_to_layer_from_csv(
+    csv_path: str,
+) -> tuple[dict[str, str], list[str]]:
+    path = Path(csv_path)
+    if not path.exists():
+        raise FileNotFoundError(f"taxonomy_csv not found: {csv_path}")
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        fieldnames = {str(name).strip() for name in (reader.fieldnames or ())}
+        required_columns = {"layer", "subindustry"}
+        missing_columns = sorted(required_columns - fieldnames)
+        if missing_columns:
+            raise ValueError(
+                "taxonomy_csv missing required columns: "
+                + ",".join(missing_columns)
+            )
+
+        candidates: dict[str, set[str]] = {}
+        for raw_row in reader:
+            layer = str(raw_row.get("layer") or "").strip()
+            subindustry = str(raw_row.get("subindustry") or "").strip()
+            if not layer or not subindustry:
+                continue
+            candidates.setdefault(subindustry, set()).add(layer)
+
+    mapping = {
+        subindustry: next(iter(layers))
+        for subindustry, layers in candidates.items()
+        if len(layers) == 1
+    }
+    ambiguous = sorted(
+        subindustry
+        for subindustry, layers in candidates.items()
+        if len(layers) > 1
+    )
+    return mapping, ambiguous
+
+
 def _group_identity(
     row: sqlite3.Row,
     *,
@@ -465,6 +506,31 @@ def main(argv: list[str] | None = None) -> int:
         taxonomy_version = _normalize_taxonomy_version(args.taxonomy_version)
         if args.limit is not None and args.limit <= 0:
             raise ValueError("--limit must be greater than 0 when provided")
+        taxonomy_csv_path = (
+            args.taxonomy_csv.strip()
+            if args.taxonomy_csv is not None
+            else DEFAULT_TAXONOMY_CSV
+        )
+        taxonomy_csv_explicit = args.taxonomy_csv is not None
+        taxonomy_csv_summary_value = ""
+        taxonomy_csv_status = "EMPTY"
+        csv_subindustry_to_layer: dict[str, str] = {}
+        ambiguous_subindustries: list[str] = []
+
+        if taxonomy_csv_path:
+            if taxonomy_csv_explicit and not Path(taxonomy_csv_path).exists():
+                raise FileNotFoundError(f"taxonomy_csv not found: {taxonomy_csv_path}")
+            if Path(taxonomy_csv_path).exists():
+                csv_subindustry_to_layer, ambiguous_subindustries = _load_subindustry_to_layer_from_csv(
+                    taxonomy_csv_path
+                )
+                taxonomy_csv_summary_value = taxonomy_csv_path
+                taxonomy_csv_status = "USED"
+                if ambiguous_subindustries:
+                    taxonomy_csv_status = "AMBIGUOUS"
+            else:
+                taxonomy_csv_summary_value = ""
+                taxonomy_csv_status = "MISSING_FALLBACK"
 
         connector = _connect_read_only if args.dry_run else _connect_read_write
         with connector(args.analysis_db) as conn:
@@ -511,10 +577,15 @@ def main(argv: list[str] | None = None) -> int:
                 taxonomy_version=taxonomy_version,
                 selected_fields=("return_20d", "return_60d", "run_id"),
             )
-            subindustry_to_layer = _load_subindustry_to_layer(
+            fallback_subindustry_to_layer = _load_subindustry_to_layer(
                 conn,
                 signal_date=signal_date,
                 taxonomy_version=taxonomy_version,
+            )
+            subindustry_to_layer = (
+                csv_subindustry_to_layer
+                if taxonomy_csv_status in {"USED", "AMBIGUOUS"}
+                else fallback_subindustry_to_layer
             )
 
             run_id = _resolve_run_id(signal_date, args.run_id)
@@ -823,6 +894,10 @@ def main(argv: list[str] | None = None) -> int:
             warnings.append("INDEX_DAILY_SOURCE_MISSING")
         if len(source_rows) == 0:
             warnings.append("NO_GROUP_ROWS_FOR_SELECTION")
+        if taxonomy_csv_status == "MISSING_FALLBACK":
+            warnings.append("TAXONOMY_CSV_MISSING_USING_SOURCE_FALLBACK")
+        for subindustry in ambiguous_subindustries:
+            warnings.append(f"TAXONOMY_CSV_AMBIGUOUS_SUBINDUSTRY:{subindustry}")
 
         _emit_summary("status", "OK")
         _emit_summary("analysis_db", args.analysis_db)
@@ -839,6 +914,8 @@ def main(argv: list[str] | None = None) -> int:
         _emit_summary("run_id", run_id)
         _emit_summary("used_synthetic_ohlc", used_synthetic_ohlc)
         _emit_summary("used_index_daily", used_index_daily)
+        _emit_summary("taxonomy_csv", taxonomy_csv_summary_value)
+        _emit_summary("taxonomy_csv_status", taxonomy_csv_status)
         _emit_summary("subindustry_layer_mapped_rows", len(subindustry_to_layer))
         _emit_summary("subindustry_layer_unknown_rows", unknown_subindustry_layer_count)
         for warning in warnings:

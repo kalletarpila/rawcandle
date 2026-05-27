@@ -13,6 +13,18 @@ def _create_empty_db(path: Path) -> None:
         pass
 
 
+def _create_taxonomy_csv(path: Path, rows: list[tuple[str, str]]) -> None:
+    path.write_text(
+        "taxonomy_version,ticker,layer,subindustry,report_group_status,is_primary,role_weight,notes\n"
+        + "\n".join(
+            f"DC_TAXONOMY_FULL_V1,T{index},{layer},{subindustry},CORE,1,1.0,"
+            for index, (layer, subindustry) in enumerate(rows, start=1)
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def _create_group_source_table_only(path: Path) -> None:
     with sqlite3.connect(path) as conn:
         conn.execute(
@@ -343,9 +355,11 @@ def test_missing_destination_table_fails_clearly(tmp_path, capsys):
 
 def test_replace_date_inserts_valid_group_rows(tmp_path, capsys):
     db_path = tmp_path / "analysis.db"
+    taxonomy_csv = tmp_path / "taxonomy.csv"
     _create_source_and_destination_db(db_path)
     _insert_group_source_rows(db_path)
     _insert_ticker_taxonomy_rows(db_path)
+    _create_taxonomy_csv(taxonomy_csv, [("Compute silicon", "AI Accelerators")])
 
     exit_code = main(
         [
@@ -359,6 +373,8 @@ def test_replace_date_inserts_valid_group_rows(tmp_path, capsys):
             "replace-date",
             "--run-id",
             "RUN_GROUP_REPLACE",
+            "--taxonomy-csv",
+            str(taxonomy_csv),
         ]
     )
 
@@ -379,9 +395,11 @@ def test_replace_date_inserts_valid_group_rows(tmp_path, capsys):
 
 def test_field_mapping_persists_expected_values(tmp_path, capsys):
     db_path = tmp_path / "analysis.db"
+    taxonomy_csv = tmp_path / "taxonomy.csv"
     _create_source_and_destination_db(db_path)
     _insert_group_source_rows(db_path)
     _insert_ticker_taxonomy_rows(db_path)
+    _create_taxonomy_csv(taxonomy_csv, [("Compute silicon", "AI Accelerators")])
 
     exit_code = main(
         [
@@ -395,11 +413,13 @@ def test_field_mapping_persists_expected_values(tmp_path, capsys):
             "replace-date",
             "--run-id",
             "RUN_GROUP_FIELDS",
+            "--taxonomy-csv",
+            str(taxonomy_csv),
         ]
     )
 
     assert exit_code == 0
-    _ = capsys.readouterr()
+    output = capsys.readouterr().out
     rows = {row["name"]: row for row in _destination_rows(db_path)}
     ecosystem = rows["DC_ECOSYSTEM_TOTAL"]
     layer = rows["Infrastructure"]
@@ -426,6 +446,159 @@ def test_field_mapping_persists_expected_values(tmp_path, capsys):
     assert ecosystem["calc_version"] == "DATACENTER_DASHBOARD_GROUP_ENRICHMENT_V1"
     assert ecosystem["run_id"] == "RUN_GROUP_FIELDS"
     assert ecosystem["created_at_utc"] not in (None, "")
+    assert "SUMMARY datacenter_dashboard_group_enrichment_write.taxonomy_csv=" in output
+
+
+def test_taxonomy_csv_is_primary_for_subindustry_layer_mapping(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    taxonomy_csv = tmp_path / "taxonomy.csv"
+    _create_source_and_destination_db(db_path)
+    _insert_group_source_rows(db_path)
+    _insert_ticker_taxonomy_rows(db_path)
+    _create_taxonomy_csv(taxonomy_csv, [("Canonical Layer", "AI Accelerators")])
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+            "--run-id",
+            "RUN_GROUP_CANON",
+            "--taxonomy-csv",
+            str(taxonomy_csv),
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    rows = {row["name"]: row for row in _destination_rows(db_path)}
+    subindustry = rows["AI Accelerators"]
+    assert subindustry["parent_name"] == "Canonical Layer"
+    assert subindustry["layer"] == "Canonical Layer"
+    assert subindustry["taxonomy_key"] == "SUBINDUSTRY|Canonical Layer|AI Accelerators"
+    assert (
+        subindustry["taxonomy_path"]
+        == "DC_ECOSYSTEM_TOTAL > Canonical Layer > AI Accelerators"
+    )
+    assert (
+        f"SUMMARY datacenter_dashboard_group_enrichment_write.taxonomy_csv={taxonomy_csv}"
+        in output
+    )
+    assert "SUMMARY datacenter_dashboard_group_enrichment_write.taxonomy_csv_status=USED" in output
+
+
+def test_explicit_missing_taxonomy_csv_fails_clearly(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    missing_csv = tmp_path / "missing.csv"
+    _create_source_and_destination_db(db_path)
+    _insert_group_source_rows(db_path)
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+            "--taxonomy-csv",
+            str(missing_csv),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert f"taxonomy_csv not found: {missing_csv}" in captured.err
+
+
+def test_default_missing_taxonomy_csv_falls_back_to_source_mapping(tmp_path, capsys, monkeypatch):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_group_source_rows(db_path)
+    _insert_ticker_taxonomy_rows(db_path)
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_group_enrichment_write.DEFAULT_TAXONOMY_CSV",
+        str(tmp_path / "missing-default-taxonomy.csv"),
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+            "--run-id",
+            "RUN_GROUP_FALLBACK",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    rows = {row["name"]: row for row in _destination_rows(db_path)}
+    subindustry = rows["AI Accelerators"]
+    assert subindustry["layer"] == "Compute silicon"
+    assert (
+        "SUMMARY datacenter_dashboard_group_enrichment_write.warning="
+        "TAXONOMY_CSV_MISSING_USING_SOURCE_FALLBACK"
+    ) in output
+    assert "SUMMARY datacenter_dashboard_group_enrichment_write.taxonomy_csv_status=MISSING_FALLBACK" in output
+
+
+def test_ambiguous_taxonomy_csv_uses_fallback_identity_and_warning(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    taxonomy_csv = tmp_path / "taxonomy.csv"
+    _create_source_and_destination_db(db_path)
+    _insert_group_source_rows(db_path)
+    _create_taxonomy_csv(
+        taxonomy_csv,
+        [
+            ("Layer A", "AI Accelerators"),
+            ("Layer B", "AI Accelerators"),
+        ],
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+            "--run-id",
+            "RUN_GROUP_AMBIG",
+            "--taxonomy-csv",
+            str(taxonomy_csv),
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    rows = {row["name"]: row for row in _destination_rows(db_path)}
+    subindustry = rows["AI Accelerators"]
+    assert subindustry["parent_name"] in (None, "")
+    assert subindustry["layer"] in (None, "")
+    assert subindustry["taxonomy_key"] == "SUBINDUSTRY|AI Accelerators"
+    assert subindustry["taxonomy_path"] == "SUBINDUSTRY|AI Accelerators"
+    assert "SUMMARY datacenter_dashboard_group_enrichment_write.taxonomy_csv_status=AMBIGUOUS" in output
+    assert (
+        "SUMMARY datacenter_dashboard_group_enrichment_write.warning="
+        "TAXONOMY_CSV_AMBIGUOUS_SUBINDUSTRY:AI Accelerators"
+    ) in output
 
 
 def test_unknown_subindustry_layer_uses_fallback_identity_and_warning(tmp_path, capsys):
