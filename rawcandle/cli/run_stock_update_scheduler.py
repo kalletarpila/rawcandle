@@ -67,6 +67,48 @@ def main(argv: Optional[List[str]] = None) -> int:
             "SUMMARY scheduler_dashboard_config.skip_next_run="
             f"{inspection.skip_next_run}"
         )
+        print(
+            "SUMMARY scheduler_dashboard_config.dashboard_source_mode="
+            f"{inspection.dashboard_source_mode}"
+        )
+        print(
+            "SUMMARY scheduler_dashboard_config.enrichment_enabled="
+            f"{inspection.enrichment_enabled}"
+        )
+        print(
+            "SUMMARY scheduler_dashboard_config.enrichment_apply_migrations="
+            f"{inspection.enrichment_apply_migrations}"
+        )
+        print(
+            "SUMMARY scheduler_dashboard_config.enrichment_taxonomy_version="
+            f"{inspection.enrichment_taxonomy_version}"
+        )
+        print(
+            "SUMMARY scheduler_dashboard_config.enrichment_watchlist_file="
+            f"{inspection.enrichment_watchlist_file}"
+        )
+        print(
+            "SUMMARY scheduler_dashboard_config.enrichment_watchlist_file_status="
+            f"{inspection.enrichment_watchlist_file_status}"
+        )
+        print(
+            "SUMMARY scheduler_dashboard_config.enrichment_write_mode="
+            f"{inspection.enrichment_write_mode}"
+        )
+        print(
+            "SUMMARY scheduler_dashboard_config.dashboard_fallback_to_reports="
+            f"{inspection.dashboard_fallback_to_reports}"
+        )
+        print(
+            "SUMMARY scheduler_dashboard_config.dashboard_run_acceptance_report="
+            f"{inspection.dashboard_run_acceptance_report}"
+        )
+        print(
+            "SUMMARY scheduler_dashboard_config.enrichment_effective_status="
+            f"{inspection.enrichment_effective_status}"
+        )
+        for warning in inspection.warnings:
+            print(f"SUMMARY scheduler_dashboard_config.warning={warning}")
         print(f"SUMMARY scheduler_dashboard_config.date_status={inspection.date_status}")
         print(f"SUMMARY scheduler_dashboard_config.status={inspection.status}")
         return 0

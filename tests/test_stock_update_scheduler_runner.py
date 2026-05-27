@@ -7,8 +7,11 @@ import pytest
 
 from rawcandle.scheduler import runner as scheduler_runner
 from rawcandle.scheduler.config import (
+    DEFAULT_DATACENTER_ENRICHMENT_TAXONOMY_VERSION,
+    DEFAULT_DATACENTER_ENRICHMENT_WATCHLIST_FILE,
     create_default_scheduler_config,
     read_scheduler_config,
+    scheduler_config_from_dict,
     write_scheduler_config,
 )
 from rawcandle.scheduler.runner import (
@@ -113,6 +116,14 @@ def _write_config(
     datacenter_dashboard_enabled=True,
     datacenter_dashboard_db=None,
     datacenter_dashboard_html_output_dir=None,
+    datacenter_dashboard_source_mode=None,
+    datacenter_enrichment_enabled=None,
+    datacenter_enrichment_apply_migrations=None,
+    datacenter_enrichment_taxonomy_version=None,
+    datacenter_enrichment_watchlist_file=None,
+    datacenter_enrichment_write_mode=None,
+    datacenter_dashboard_fallback_to_reports=None,
+    datacenter_dashboard_run_acceptance_report=None,
 ):
     osakedata_db = osakedata_db or (tmp_path / "osakedata.db")
     analysis_db = analysis_db or (tmp_path / "analysis.db")
@@ -131,6 +142,22 @@ def _write_config(
         config.datacenter_dashboard_db = str(datacenter_dashboard_db)
     if datacenter_dashboard_html_output_dir is not None:
         config.datacenter_dashboard_html_output_dir = str(datacenter_dashboard_html_output_dir)
+    if datacenter_dashboard_source_mode is not None:
+        config.datacenter_dashboard_source_mode = datacenter_dashboard_source_mode
+    if datacenter_enrichment_enabled is not None:
+        config.datacenter_enrichment_enabled = datacenter_enrichment_enabled
+    if datacenter_enrichment_apply_migrations is not None:
+        config.datacenter_enrichment_apply_migrations = datacenter_enrichment_apply_migrations
+    if datacenter_enrichment_taxonomy_version is not None:
+        config.datacenter_enrichment_taxonomy_version = datacenter_enrichment_taxonomy_version
+    if datacenter_enrichment_watchlist_file is not None:
+        config.datacenter_enrichment_watchlist_file = str(datacenter_enrichment_watchlist_file)
+    if datacenter_enrichment_write_mode is not None:
+        config.datacenter_enrichment_write_mode = datacenter_enrichment_write_mode
+    if datacenter_dashboard_fallback_to_reports is not None:
+        config.datacenter_dashboard_fallback_to_reports = datacenter_dashboard_fallback_to_reports
+    if datacenter_dashboard_run_acceptance_report is not None:
+        config.datacenter_dashboard_run_acceptance_report = datacenter_dashboard_run_acceptance_report
     path = tmp_path / "scheduler_config.json"
     write_scheduler_config(str(path), config)
     return path
@@ -2048,6 +2075,23 @@ def test_inspect_scheduler_dashboard_config_returns_deterministic_plan(tmp_path)
     assert inspection.usa_enabled == 1
     assert inspection.datacenter_pipeline_enabled == 1
     assert inspection.skip_next_run == 0
+    assert inspection.dashboard_source_mode == "reports"
+    assert inspection.enrichment_enabled == 0
+    assert inspection.enrichment_apply_migrations == 0
+    assert (
+        inspection.enrichment_taxonomy_version
+        == DEFAULT_DATACENTER_ENRICHMENT_TAXONOMY_VERSION
+    )
+    assert (
+        inspection.enrichment_watchlist_file
+        == DEFAULT_DATACENTER_ENRICHMENT_WATCHLIST_FILE
+    )
+    assert inspection.enrichment_watchlist_file_status in {"OK", "MISSING"}
+    assert inspection.enrichment_write_mode == "replace-date"
+    assert inspection.dashboard_fallback_to_reports == 1
+    assert inspection.dashboard_run_acceptance_report == 0
+    assert inspection.enrichment_effective_status == "PLANNING_ONLY"
+    assert inspection.warnings == ()
     assert inspection.date_status == "OK"
     assert inspection.status == "OK"
 
@@ -2106,3 +2150,148 @@ def test_inspect_scheduler_dashboard_config_supports_disabled_dashboard(tmp_path
     assert inspection.usa_enabled == 0
     assert inspection.skip_next_run == 1
     assert inspection.status == "OK"
+
+
+def test_inspect_scheduler_dashboard_config_returns_configured_enrichment_visibility(
+    tmp_path,
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    dashboard_db = tmp_path / "ecosystem_dashboard.db"
+    html_dir = tmp_path / "html"
+    watchlist_file = tmp_path / "watchlist.txt"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    watchlist_file.write_text("AAA\n", encoding="utf-8")
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        datacenter_dashboard_db=dashboard_db,
+        datacenter_dashboard_html_output_dir=html_dir,
+        datacenter_dashboard_source_mode="enrichment",
+        datacenter_enrichment_enabled=True,
+        datacenter_enrichment_apply_migrations=False,
+        datacenter_enrichment_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        datacenter_enrichment_watchlist_file=watchlist_file,
+        datacenter_enrichment_write_mode="replace-date",
+        datacenter_dashboard_fallback_to_reports=True,
+        datacenter_dashboard_run_acceptance_report=True,
+    )
+
+    inspection = inspect_scheduler_dashboard_config(
+        config_path=str(config_path),
+        effective_today="2026-05-23",
+    )
+
+    assert inspection.dashboard_source_mode == "enrichment"
+    assert inspection.enrichment_enabled == 1
+    assert inspection.enrichment_apply_migrations == 0
+    assert inspection.enrichment_taxonomy_version == "DC_TAXONOMY_FULL_V1"
+    assert inspection.enrichment_watchlist_file == str(watchlist_file)
+    assert inspection.enrichment_watchlist_file_status == "OK"
+    assert inspection.enrichment_write_mode == "replace-date"
+    assert inspection.dashboard_fallback_to_reports == 1
+    assert inspection.dashboard_run_acceptance_report == 1
+    assert inspection.enrichment_effective_status == "CONFIGURED_NOT_WIRED"
+    assert inspection.warnings == ()
+
+
+def test_inspect_scheduler_dashboard_config_missing_watchlist_file_is_visible(tmp_path):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    missing_watchlist = tmp_path / "missing_watchlist.txt"
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        datacenter_enrichment_watchlist_file=missing_watchlist,
+    )
+
+    inspection = inspect_scheduler_dashboard_config(
+        config_path=str(config_path),
+        effective_today="2026-05-23",
+    )
+
+    assert inspection.enrichment_watchlist_file == str(missing_watchlist)
+    assert inspection.enrichment_watchlist_file_status == "MISSING"
+    assert inspection.status == "OK"
+
+
+def test_invalid_dashboard_source_mode_fails_clearly():
+    with pytest.raises(
+        ValueError,
+        match="datacenter_dashboard_source_mode must be one of",
+    ):
+        scheduler_config_from_dict(
+            {
+                "enabled_markets": ["omxh"],
+                "run_time": "05:30",
+                "osakedata_db_path": "/tmp/osakedata.db",
+                "analysis_db_path": "/tmp/analysis.db",
+                "log_dir": "/tmp/logs",
+                "datacenter_dashboard_source_mode": "bad-mode",
+            }
+        )
+
+
+def test_invalid_enrichment_write_mode_fails_clearly():
+    with pytest.raises(
+        ValueError,
+        match="datacenter_enrichment_write_mode must be one of",
+    ):
+        scheduler_config_from_dict(
+            {
+                "enabled_markets": ["omxh"],
+                "run_time": "05:30",
+                "osakedata_db_path": "/tmp/osakedata.db",
+                "analysis_db_path": "/tmp/analysis.db",
+                "log_dir": "/tmp/logs",
+                "datacenter_enrichment_write_mode": "bad-write-mode",
+            }
+        )
+
+
+def test_inspect_scheduler_dashboard_config_warns_when_enrichment_source_mode_disabled(
+    tmp_path,
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        datacenter_dashboard_source_mode="enrichment",
+        datacenter_enrichment_enabled=False,
+    )
+
+    inspection = inspect_scheduler_dashboard_config(
+        config_path=str(config_path),
+        effective_today="2026-05-23",
+    )
+
+    assert inspection.enrichment_effective_status == "DISABLED"
+    assert inspection.warnings == ("ENRICHMENT_SOURCE_MODE_CONFIGURED_BUT_DISABLED",)
+
+
+def test_inspect_scheduler_dashboard_config_warns_when_apply_migrations_enabled(
+    tmp_path,
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        datacenter_enrichment_apply_migrations=True,
+    )
+
+    inspection = inspect_scheduler_dashboard_config(
+        config_path=str(config_path),
+        effective_today="2026-05-23",
+    )
+
+    assert inspection.enrichment_apply_migrations == 1
+    assert "ENRICHMENT_APPLY_MIGRATIONS_NOT_WIRED" in inspection.warnings

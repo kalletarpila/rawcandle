@@ -301,6 +301,17 @@ def test_scheduler_cli_inspect_dashboard_config_prints_required_summary_lines(
         usa_enabled = 1
         datacenter_pipeline_enabled = 1
         skip_next_run = 0
+        dashboard_source_mode = "reports"
+        enrichment_enabled = 0
+        enrichment_apply_migrations = 0
+        enrichment_taxonomy_version = "DC_TAXONOMY_FULL_V1"
+        enrichment_watchlist_file = "/tmp/watchlist.txt"
+        enrichment_watchlist_file_status = "OK"
+        enrichment_write_mode = "replace-date"
+        dashboard_fallback_to_reports = 1
+        dashboard_run_acceptance_report = 0
+        enrichment_effective_status = "PLANNING_ONLY"
+        warnings = ()
         date_status = "OK"
         status = "OK"
 
@@ -344,6 +355,19 @@ def test_scheduler_cli_inspect_dashboard_config_prints_required_summary_lines(
     assert "SUMMARY scheduler_dashboard_config.usa_enabled=1" in captured.out
     assert "SUMMARY scheduler_dashboard_config.datacenter_pipeline_enabled=1" in captured.out
     assert "SUMMARY scheduler_dashboard_config.skip_next_run=0" in captured.out
+    assert "SUMMARY scheduler_dashboard_config.dashboard_source_mode=reports" in captured.out
+    assert "SUMMARY scheduler_dashboard_config.enrichment_enabled=0" in captured.out
+    assert "SUMMARY scheduler_dashboard_config.enrichment_apply_migrations=0" in captured.out
+    assert (
+        "SUMMARY scheduler_dashboard_config.enrichment_taxonomy_version=DC_TAXONOMY_FULL_V1"
+        in captured.out
+    )
+    assert "SUMMARY scheduler_dashboard_config.enrichment_watchlist_file=/tmp/watchlist.txt" in captured.out
+    assert "SUMMARY scheduler_dashboard_config.enrichment_watchlist_file_status=OK" in captured.out
+    assert "SUMMARY scheduler_dashboard_config.enrichment_write_mode=replace-date" in captured.out
+    assert "SUMMARY scheduler_dashboard_config.dashboard_fallback_to_reports=1" in captured.out
+    assert "SUMMARY scheduler_dashboard_config.dashboard_run_acceptance_report=0" in captured.out
+    assert "SUMMARY scheduler_dashboard_config.enrichment_effective_status=PLANNING_ONLY" in captured.out
     assert "SUMMARY scheduler_dashboard_config.date_status=OK" in captured.out
     assert "SUMMARY scheduler_dashboard_config.status=OK" in captured.out
 

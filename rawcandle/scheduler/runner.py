@@ -199,6 +199,17 @@ class SchedulerDashboardConfigInspection:
     usa_enabled: int
     datacenter_pipeline_enabled: int
     skip_next_run: int
+    dashboard_source_mode: str
+    enrichment_enabled: int
+    enrichment_apply_migrations: int
+    enrichment_taxonomy_version: str
+    enrichment_watchlist_file: str
+    enrichment_watchlist_file_status: str
+    enrichment_write_mode: str
+    dashboard_fallback_to_reports: int
+    dashboard_run_acceptance_report: int
+    enrichment_effective_status: str
+    warnings: tuple[str, ...]
     date_status: str
     status: str
 
@@ -480,6 +491,30 @@ def inspect_scheduler_dashboard_config(
     config = read_scheduler_config(config_path)
     resolved_post_step = _resolve_datacenter_post_step_config("usa")
     reports_dir = resolved_post_step.output_dir if resolved_post_step is not None else ""
+    watchlist_file = config.datacenter_enrichment_watchlist_file.strip()
+    if not watchlist_file:
+        watchlist_status = "NOT_CONFIGURED"
+    elif Path(watchlist_file).exists():
+        watchlist_status = "OK"
+    else:
+        watchlist_status = "MISSING"
+    if (
+        config.datacenter_dashboard_source_mode == "reports"
+        and not config.datacenter_enrichment_enabled
+    ):
+        enrichment_effective_status = "PLANNING_ONLY"
+    elif not config.datacenter_enrichment_enabled:
+        enrichment_effective_status = "DISABLED"
+    else:
+        enrichment_effective_status = "CONFIGURED_NOT_WIRED"
+    warnings: list[str] = []
+    if (
+        config.datacenter_dashboard_source_mode == "enrichment"
+        and not config.datacenter_enrichment_enabled
+    ):
+        warnings.append("ENRICHMENT_SOURCE_MODE_CONFIGURED_BUT_DISABLED")
+    if config.datacenter_enrichment_apply_migrations:
+        warnings.append("ENRICHMENT_APPLY_MIGRATIONS_NOT_WIRED")
     date_status = "UNAVAILABLE"
     expected_report_date = ""
     expected_html_output_path = ""
@@ -504,6 +539,17 @@ def inspect_scheduler_dashboard_config(
         usa_enabled=1 if "usa" in config.enabled_markets else 0,
         datacenter_pipeline_enabled=1 if resolved_post_step is not None else 0,
         skip_next_run=1 if config.skip_next_run else 0,
+        dashboard_source_mode=config.datacenter_dashboard_source_mode,
+        enrichment_enabled=1 if config.datacenter_enrichment_enabled else 0,
+        enrichment_apply_migrations=1 if config.datacenter_enrichment_apply_migrations else 0,
+        enrichment_taxonomy_version=config.datacenter_enrichment_taxonomy_version,
+        enrichment_watchlist_file=watchlist_file,
+        enrichment_watchlist_file_status=watchlist_status,
+        enrichment_write_mode=config.datacenter_enrichment_write_mode,
+        dashboard_fallback_to_reports=1 if config.datacenter_dashboard_fallback_to_reports else 0,
+        dashboard_run_acceptance_report=1 if config.datacenter_dashboard_run_acceptance_report else 0,
+        enrichment_effective_status=enrichment_effective_status,
+        warnings=tuple(warnings),
         date_status=date_status,
         status="OK",
     )
