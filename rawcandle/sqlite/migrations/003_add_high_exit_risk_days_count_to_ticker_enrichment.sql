@@ -1,0 +1,2 @@
+ALTER TABLE dc_dashboard_ticker_enrichment_daily
+ADD COLUMN high_exit_risk_days_count INTEGER NULL;

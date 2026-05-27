@@ -236,6 +236,35 @@ def test_rolling_2d_emergency_sell_pressure_produces_non_neutral_decision():
     assert decision.action not in {"", "NEUTRAL"}
 
 
+def test_high_exit_risk_days_count_is_exposed_in_raw_fields_and_seen_by_decision_logic():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "rolling_2d_status": "WATCH_PRESSURE",
+                "high_exit_risk_days_count": 1,
+            }
+        ]
+    )
+
+    rolling_row = next(row for row in rows if row.horizon == "rolling 2d")
+    assert rolling_row.high_exit_risk_days_count == 1
+    assert rolling_row.raw_fields["high_exit_risk_days_count"] == "1"
+
+    result = build_decisions_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "rolling_2d_status": "WATCH_PRESSURE",
+                "high_exit_risk_days_count": 1,
+            }
+        ]
+    )
+
+    decision = result.decisions[0]
+    assert decision.action in {"TIGHTEN_STOP", "REDUCE", "SELL"}
+
+
 def test_final_action_does_not_self_feed_into_decision_logic():
     result = build_decisions_from_ticker_enrichment_rows(
         [
@@ -259,7 +288,8 @@ def test_loader_reads_rows_read_only_and_missing_db_fails_clearly(tmp_path):
                 signal_date TEXT NOT NULL,
                 taxonomy_version TEXT NOT NULL,
                 ticker TEXT NOT NULL,
-                current_status TEXT
+                current_status TEXT,
+                high_exit_risk_days_count INTEGER
             )
             """
         )

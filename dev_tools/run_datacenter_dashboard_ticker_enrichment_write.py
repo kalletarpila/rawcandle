@@ -190,6 +190,7 @@ def _load_source_rows(
         ("exit_risk_signal", "exit_risk_signal"),
         ("exit_risk_severity", "exit_risk_severity"),
         ("exit_reason", "exit_reason"),
+        ("high_exit_risk_days_count", "high_exit_risk_days_count"),
         ("breakout_signal", "breakout_signal"),
         ("pullback_signal", "pullback_signal"),
         ("ma_break_status", "ma_break_status"),
@@ -288,6 +289,17 @@ def _derive_rolling_2d_status(row: sqlite3.Row) -> str:
     return "NO_EMERGENCY"
 
 
+def _derive_high_exit_risk_days_count(row: sqlite3.Row) -> int:
+    explicit_value = _normalized_text(row["high_exit_risk_days_count"])
+    if explicit_value is not None:
+        try:
+            return int(float(explicit_value))
+        except ValueError:
+            pass
+    exit_risk_severity = (_normalized_text(row["exit_risk_severity"]) or "").upper()
+    return 1 if exit_risk_severity == "HIGH" else 0
+
+
 def _map_destination_row(
     row: sqlite3.Row,
     *,
@@ -300,6 +312,7 @@ def _map_destination_row(
     primary_reason = _derive_primary_reason(row, daily_status)
     freshness_status = _derive_freshness_status(row)
     rolling_2d_status = _derive_rolling_2d_status(row)
+    high_exit_risk_days_count = _derive_high_exit_risk_days_count(row)
     values = [
         row["signal_date"],  # signal_date
         row["taxonomy_version"],  # taxonomy_version
@@ -346,6 +359,7 @@ def _map_destination_row(
         None,  # rolling_5d_status
         None,  # rolling_30d_status
         None,  # horizons_present
+        high_exit_risk_days_count,  # high_exit_risk_days_count
         None,  # source_run_ids
         SOURCE_COMPONENTS,  # source_components
         1 if ticker in watchlist_tickers else 0,  # is_watchlist
@@ -354,7 +368,7 @@ def _map_destination_row(
         run_id,  # run_id
         created_at_utc,  # created_at_utc
     ]
-    assert len(values) == 52
+    assert len(values) == 53
     return tuple(values)
 
 
@@ -498,6 +512,7 @@ def main(argv: list[str] | None = None) -> int:
                             rolling_5d_status,
                             rolling_30d_status,
                             horizons_present,
+                            high_exit_risk_days_count,
                             source_run_ids,
                             source_components,
                             is_watchlist,
@@ -505,7 +520,7 @@ def main(argv: list[str] | None = None) -> int:
                             calc_version,
                             run_id,
                             created_at_utc
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         [
                             _map_destination_row(
@@ -569,6 +584,7 @@ def main(argv: list[str] | None = None) -> int:
                             rolling_5d_status,
                             rolling_30d_status,
                             horizons_present,
+                            high_exit_risk_days_count,
                             source_run_ids,
                             source_components,
                             is_watchlist,
@@ -576,7 +592,7 @@ def main(argv: list[str] | None = None) -> int:
                             calc_version,
                             run_id,
                             created_at_utc
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(signal_date, taxonomy_version, ticker) DO UPDATE SET
                             primary_layer=excluded.primary_layer,
                             primary_subindustry=excluded.primary_subindustry,
@@ -620,6 +636,7 @@ def main(argv: list[str] | None = None) -> int:
                             rolling_5d_status=excluded.rolling_5d_status,
                             rolling_30d_status=excluded.rolling_30d_status,
                             horizons_present=excluded.horizons_present,
+                            high_exit_risk_days_count=excluded.high_exit_risk_days_count,
                             source_run_ids=excluded.source_run_ids,
                             source_components=excluded.source_components,
                             is_watchlist=excluded.is_watchlist,
@@ -698,6 +715,7 @@ def main(argv: list[str] | None = None) -> int:
                                 rolling_5d_status,
                                 rolling_30d_status,
                                 horizons_present,
+                                high_exit_risk_days_count,
                                 source_run_ids,
                                 source_components,
                                 is_watchlist,
@@ -705,7 +723,7 @@ def main(argv: list[str] | None = None) -> int:
                                 calc_version,
                                 run_id,
                                 created_at_utc
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """,
                             [
                                 _map_destination_row(

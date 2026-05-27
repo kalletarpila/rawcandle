@@ -34,9 +34,9 @@ def _insert_rows(path: Path, rows: list[tuple[object, ...]]) -> None:
                 latest_structure_label, latest_bos_event_type, latest_reset_reason,
                 pullback_validity, entry_readiness, candidate_priority,
                 candidate_priority_label, daily_status, rolling_2d_status,
-                rolling_5d_status, rolling_30d_status, horizons_present,
+                rolling_5d_status, rolling_30d_status, horizons_present, high_exit_risk_days_count,
                 is_watchlist, data_quality_status, calc_version, run_id, created_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )
@@ -66,6 +66,7 @@ def _default_row(
     rolling_5d_status: str | None = None,
     rolling_30d_status: str | None = None,
     horizons_present=None,
+    high_exit_risk_days_count=None,
 ) -> tuple[object, ...]:
     return (
         signal_date,
@@ -90,6 +91,7 @@ def _default_row(
         rolling_5d_status,
         rolling_30d_status,
         horizons_present,
+        high_exit_risk_days_count,
         0,
         "OK",
         "SRC_V1",
@@ -602,3 +604,41 @@ def test_ticker_enrichment_then_decision_writer_produces_non_neutral_action_for_
     assert row["daily_status"] == "HIGH_EXIT_RISK"
     assert row["rolling_2d_status"] == "EMERGENCY_SELL_PRESSURE"
     assert row["action"] not in (None, "", "NEUTRAL")
+
+
+def test_high_exit_risk_days_count_can_drive_tighten_stop(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_db_with_table(db_path)
+    _insert_rows(
+        db_path,
+        [
+            _default_row(
+                ticker="AAA",
+                current_status="NEUTRAL_MONITOR",
+                daily_status="NEUTRAL_MONITOR",
+                rolling_2d_status="WATCH_PRESSURE",
+                high_exit_risk_days_count=1,
+                trend_state="UP",
+                latest_structure_label="HH",
+                latest_bos_event_type="BOS_UP",
+            )
+        ],
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "upsert",
+        ]
+    )
+
+    row = _fetch_row(db_path, "AAA")
+    assert exit_code == 0
+    assert row["action"] in {"TIGHTEN_STOP", "REDUCE", "SELL"}
+    assert row["primary_reason"] is not None

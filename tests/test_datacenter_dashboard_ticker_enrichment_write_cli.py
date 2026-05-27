@@ -46,6 +46,7 @@ def _create_source_table_only(path: Path) -> None:
                 exit_risk_signal INTEGER,
                 exit_risk_severity TEXT,
                 exit_reason TEXT,
+                high_exit_risk_days_count INTEGER,
                 breakout_signal INTEGER,
                 pullback_signal INTEGER,
                 ma_break_status TEXT
@@ -137,6 +138,7 @@ def _insert_custom_source_row(path: Path, **overrides: object) -> None:
         "exit_risk_signal": 0,
         "exit_risk_severity": None,
         "exit_reason": None,
+        "high_exit_risk_days_count": None,
         "breakout_signal": 0,
         "pullback_signal": 0,
         "ma_break_status": None,
@@ -334,6 +336,7 @@ def test_field_mapping_persists_expected_values(tmp_path, capsys):
     assert nvda["created_at_utc"] not in (None, "")
     assert nvda["is_watchlist"] == 0
     assert nvda["action"] is None
+    assert nvda["high_exit_risk_days_count"] == 0
 
 
 def test_high_exit_risk_maps_to_daily_status_current_status_and_reason(tmp_path, capsys):
@@ -396,6 +399,83 @@ def test_medium_exit_risk_maps_to_medium_exit_risk(tmp_path, capsys):
     row = _destination_rows(db_path)[0]
     assert row["daily_status"] == "MEDIUM_EXIT_RISK"
     assert row["current_status"] == "MEDIUM_EXIT_RISK"
+    assert row["high_exit_risk_days_count"] == 0
+
+
+def test_high_exit_risk_days_count_maps_to_one_for_high_severity(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(db_path, exit_risk_severity="HIGH")
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    assert row["high_exit_risk_days_count"] == 1
+
+
+def test_high_exit_risk_days_count_maps_to_zero_for_low_or_empty(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(db_path, exit_risk_severity="LOW")
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    assert row["high_exit_risk_days_count"] == 0
+
+
+def test_explicit_high_exit_risk_days_count_is_preferred_over_derived_value(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(
+        db_path,
+        exit_risk_severity="HIGH",
+        high_exit_risk_days_count=7,
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    assert row["high_exit_risk_days_count"] == 7
 
 
 def test_breakout_signal_maps_to_breakout_candidate(tmp_path, capsys):

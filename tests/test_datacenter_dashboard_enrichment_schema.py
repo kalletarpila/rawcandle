@@ -2,6 +2,7 @@ import sqlite3
 
 from analysis.database_manager import DatabaseManager
 from rawcandle.datacenter_dashboard_enrichment_migration import (
+    HIGH_EXIT_RISK_MIGRATION_SQL_PATH,
     MIGRATION_SQL_PATH,
     apply_datacenter_dashboard_enrichment_migration,
 )
@@ -42,6 +43,7 @@ def _connect() -> sqlite3.Connection:
 
 def test_migration_file_exists():
     assert MIGRATION_SQL_PATH.is_file()
+    assert HIGH_EXIT_RISK_MIGRATION_SQL_PATH.is_file()
 
 
 def test_database_manager_initializes_dashboard_enrichment_tables(tmp_path):
@@ -90,6 +92,7 @@ def test_migration_creates_expected_primary_keys_and_columns():
         "taxonomy_version",
         "ticker",
         "action",
+        "high_exit_risk_days_count",
         "pullback_validity",
         "entry_readiness",
         "candidate_priority",
@@ -168,6 +171,9 @@ def test_migration_is_idempotent():
     assert _table_exists(conn, "dc_dashboard_action_summary_daily")
     assert _table_exists(conn, "dc_dashboard_decision_trace_daily")
     assert _table_exists(conn, "dc_dashboard_enrichment_run_daily")
+    assert "high_exit_risk_days_count" in _table_columns(
+        conn, "dc_dashboard_ticker_enrichment_daily"
+    )
 
 
 def test_old_snapshot_table_names_are_not_created():
