@@ -5,6 +5,10 @@ from services.stock_update_service import (
     STATUS_OK,
     StockUpdateProgressEvent,
     StockUpdateResult,
+    YAHOO_LARGE_BATCH_SLEEP_SECONDS,
+    YAHOO_SHORT_BRANCH_SLEEP_SECONDS,
+    YAHOO_SUCCESS_LARGE_INSERT_SLEEP_SECONDS,
+    YAHOO_SUCCESS_SMALL_INSERT_SLEEP_SECONDS,
     format_stock_update_summary_lines,
     run_stock_data_update,
 )
@@ -78,3 +82,10 @@ def test_format_stock_update_summary_lines_formats_none_dow_as_empty():
     result = StockUpdateResult(market="usa")
     lines = format_stock_update_summary_lines(result)
     assert "SUMMARY dow_structures_updated=" in lines
+
+
+def test_yahoo_throttle_constants_match_reduced_usa_values():
+    assert YAHOO_SHORT_BRANCH_SLEEP_SECONDS == 0.1
+    assert YAHOO_SUCCESS_LARGE_INSERT_SLEEP_SECONDS == 0.25
+    assert YAHOO_SUCCESS_SMALL_INSERT_SLEEP_SECONDS == 0.25
+    assert YAHOO_LARGE_BATCH_SLEEP_SECONDS == 5.0

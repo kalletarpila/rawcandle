@@ -234,10 +234,11 @@ DivergenceUpdateCallable = Callable[[str, bool], tuple]
 CandlestickUpdateCallable = Callable[[str, str, str], tuple]
 QuarterStateUpdateCallable = Callable[[str, str, Any], Any]
 
-YAHOO_SHORT_BRANCH_SLEEP_SECONDS = 0.5
-YAHOO_SUCCESS_LARGE_INSERT_SLEEP_SECONDS = 1.0
-YAHOO_SUCCESS_SMALL_INSERT_SLEEP_SECONDS = 1.5
-YAHOO_LARGE_BATCH_SLEEP_SECONDS = 30.0
+# Still intentionally conservative, but reduced to shorten USA overnight runs.
+YAHOO_SHORT_BRANCH_SLEEP_SECONDS = 0.1
+YAHOO_SUCCESS_LARGE_INSERT_SLEEP_SECONDS = 0.25
+YAHOO_SUCCESS_SMALL_INSERT_SLEEP_SECONDS = 0.25
+YAHOO_LARGE_BATCH_SLEEP_SECONDS = 5.0
 YAHOO_LARGE_BATCH_INTERVAL = 500
 
 
