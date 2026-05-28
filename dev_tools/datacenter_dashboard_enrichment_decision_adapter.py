@@ -351,9 +351,12 @@ def build_dashboard_rows_from_ticker_enrichment_rows(
             rolling2_payload = _rolling2_payload(decoded_payload)
             if horizon == "rolling 2d":
                 high_exit_risk_days_count = row.get("high_exit_risk_days_count")
-                if _normalized_text(high_exit_risk_days_count) is not None:
-                    extra_raw_fields["high_exit_risk_days_count"] = high_exit_risk_days_count
                 if rolling2_payload:
+                    helper_high_exit_risk_days = rolling2_payload.get("high_exit_risk_days")
+                    if _normalized_text(helper_high_exit_risk_days) is not None:
+                        extra_raw_fields["high_exit_risk_days_count"] = helper_high_exit_risk_days
+                    elif _normalized_text(high_exit_risk_days_count) is not None:
+                        extra_raw_fields["high_exit_risk_days_count"] = high_exit_risk_days_count
                     rolling2_status = _normalized_text(
                         rolling2_payload.get("rolling_2_sell_pressure_state")
                     ) or status_value
@@ -421,6 +424,8 @@ def build_dashboard_rows_from_ticker_enrichment_rows(
                         )
                     )
                     continue
+                if _normalized_text(high_exit_risk_days_count) is not None:
+                    extra_raw_fields["high_exit_risk_days_count"] = high_exit_risk_days_count
             if horizon == "rolling 5d" and upstream_payload:
                 rolling5_row = dict(row)
                 rolling5_row.update(upstream_payload)
