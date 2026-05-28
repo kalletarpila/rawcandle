@@ -85,3 +85,7 @@ logs/
 *.html
 __pycache__/
 *.pyc
+
+# Local logs
+*.log
+analysis/*.log
