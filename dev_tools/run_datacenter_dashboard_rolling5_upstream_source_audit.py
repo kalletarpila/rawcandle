@@ -134,6 +134,7 @@ def _extract_upstream_source_rows(
     *,
     analysis_db: str,
     report_date: str,
+    taxonomy_version: str | None,
 ) -> tuple[int, str, str, list[dict[str, object]], list[dict[str, object]]]:
     with _connect_analysis_read_only(analysis_db) as conn:
         _require_tables(
@@ -149,7 +150,7 @@ def _extract_upstream_source_rows(
             conn,
             end_date=normalized_date,
             signal_version=DEFAULT_SIGNAL_VERSION,
-            taxonomy_version=None,
+            taxonomy_version=taxonomy_version,
         )
         valid_signal_dates = _load_valid_signal_dates(
             conn,
@@ -227,6 +228,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reports-run-id", required=True)
     parser.add_argument("--ecosystem-code", required=True)
     parser.add_argument("--report-date", required=True)
+    parser.add_argument("--taxonomy-version")
     parser.add_argument("--tickers")
     parser.add_argument("--max-examples", type=int, default=100)
     return parser
@@ -266,6 +268,7 @@ def main(argv: list[str] | None = None) -> int:
         ) = _extract_upstream_source_rows(
             analysis_db=args.analysis_db,
             report_date=args.report_date,
+            taxonomy_version=args.taxonomy_version,
         )
     except Exception as exc:  # diagnostic path must stay non-fatal
         builder_callable = 0
@@ -380,6 +383,12 @@ def main(argv: list[str] | None = None) -> int:
     _print_row("upstream_builder_status", "metric", "value", "details")
     _print_row("upstream_builder_status", "builder_callable", builder_callable, builder_reason)
     _print_row("upstream_builder_status", "builder_function", builder_function, "")
+    _print_row(
+        "upstream_builder_status",
+        "taxonomy_version",
+        args.taxonomy_version or "",
+        "",
+    )
     _print_row("upstream_builder_status", "rows_extracted", len(upstream_rows), "")
     _print_row("upstream_builder_status", "tickers_extracted", len(upstream_by_ticker), "")
     _print_row("upstream_builder_status", "error_or_reason", builder_reason, builder_reason)
@@ -476,6 +485,9 @@ def main(argv: list[str] | None = None) -> int:
     _print_section("summary")
     _print_row("SUMMARY datacenter_dashboard_rolling5_upstream_source_audit.status=OK")
     _print_row(f"SUMMARY datacenter_dashboard_rolling5_upstream_source_audit.report_date={args.report_date}")
+    _print_row(
+        f"SUMMARY datacenter_dashboard_rolling5_upstream_source_audit.taxonomy_version={args.taxonomy_version or ''}"
+    )
     _print_row(f"SUMMARY datacenter_dashboard_rolling5_upstream_source_audit.builder_callable={builder_callable}")
     _print_row(f"SUMMARY datacenter_dashboard_rolling5_upstream_source_audit.rows_extracted={len(upstream_rows)}")
     _print_row(f"SUMMARY datacenter_dashboard_rolling5_upstream_source_audit.tickers_extracted={len(upstream_by_ticker)}")
