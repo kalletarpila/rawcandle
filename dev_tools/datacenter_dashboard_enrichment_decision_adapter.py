@@ -427,15 +427,8 @@ def build_dashboard_rows_from_ticker_enrichment_rows(
                     if _normalized_text(rolling2_payload.get("latest_bos_event_type")) == "BOS_DOWN":
                         extra_raw_fields["bos_down_token"] = "bos_down"
                     latest_reset_reason = _normalized_text(rolling2_payload.get("latest_reset_reason"))
-                    if latest_reset_reason is not None:
-                        extra_raw_fields["reset_token"] = "reset"
-                        if "DOUBLE_BOS_DOWN" in latest_reset_reason:
-                            extra_raw_fields["double_bos_down_token"] = "double_bos_down"
-                    next_action = _normalized_text(rolling2_payload.get("next_action"))
-                    if next_action is not None and any(
-                        term in next_action.lower() for term in ("sell", "reduce", "stop", "check")
-                    ):
-                        extra_raw_fields["sell_token"] = "sell"
+                    if latest_reset_reason is not None and "DOUBLE_BOS_DOWN" in latest_reset_reason:
+                        extra_raw_fields["double_bos_down_token"] = "double_bos_down"
                     dashboard_rows.append(
                         _build_row(
                             row=row,

@@ -954,7 +954,88 @@ def test_rolling2_payload_is_exposed_on_rolling_2d_row():
     assert rolling_2d_row.raw_fields["bos_down_token"] == "bos_down"
     assert rolling_2d_row.raw_fields["double_bos_down_token"] == "double_bos_down"
     assert rolling_2d_row.raw_fields["high_exit_risk_token"] == "high_exit_risk"
-    assert rolling_2d_row.raw_fields["sell_token"] == "sell"
+    assert "sell_token" not in rolling_2d_row.raw_fields
+
+
+def test_rolling2_double_bos_up_keeps_structured_reset_reason_without_reset_token():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "rolling_2d_status": "NO_EMERGENCY",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "rolling2": {
+                            "rolling_2_sell_pressure_state": "NO_EMERGENCY",
+                            "latest_reset_reason": "DOUBLE_BOS_UP",
+                            "next_action": "NONE",
+                        }
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    rolling_2d_row = next(row for row in rows if row.horizon == "rolling 2d")
+    assert rolling_2d_row.raw_fields["latest_reset_reason"] == "DOUBLE_BOS_UP"
+    assert "reset_token" not in rolling_2d_row.raw_fields
+    assert "double_bos_down_token" not in rolling_2d_row.raw_fields
+
+
+def test_rolling2_double_bos_down_keeps_structured_reset_reason_without_reset_token():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "rolling_2d_status": "WATCH_PRESSURE",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "rolling2": {
+                            "rolling_2_sell_pressure_state": "WATCH_PRESSURE",
+                            "latest_reset_reason": "DOUBLE_BOS_DOWN",
+                            "next_action": "CHECK_STOP_OR_REDUCE",
+                        }
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    rolling_2d_row = next(row for row in rows if row.horizon == "rolling 2d")
+    assert rolling_2d_row.raw_fields["latest_reset_reason"] == "DOUBLE_BOS_DOWN"
+    assert "reset_token" not in rolling_2d_row.raw_fields
+    assert rolling_2d_row.raw_fields["double_bos_down_token"] == "double_bos_down"
+
+
+def test_rolling2_next_action_remains_exposed_without_sell_token():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "rolling_2d_status": "SHARP_2D_DROP",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "rolling2": {
+                            "rolling_2_sell_pressure_state": "SHARP_2D_DROP",
+                            "next_action": "TIGHTEN_STOP_REVIEW_DAILY_TRIGGER",
+                            "risk_reason": "EXIT_RISK_PERSISTENT_TWO_DAYS",
+                        }
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    rolling_2d_row = next(row for row in rows if row.horizon == "rolling 2d")
+    assert rolling_2d_row.raw_action == "TIGHTEN_STOP_REVIEW_DAILY_TRIGGER"
+    assert rolling_2d_row.raw_fields["next_action"] == "TIGHTEN_STOP_REVIEW_DAILY_TRIGGER"
+    assert "sell_token" not in rolling_2d_row.raw_fields
 
 
 def test_decision_integration_can_see_rolling2_payload_context():
@@ -1135,6 +1216,43 @@ def test_top_level_sell_signal_detected_does_not_self_feed_into_sell_action():
     assert decision.action == "REDUCE"
 
 
+def test_rolling2_next_action_stop_guidance_does_not_escalate_reduce_to_sell():
+    result = build_decisions_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "CSW",
+                "current_status": "MEDIUM_EXIT_RISK",
+                "daily_status": "MEDIUM_EXIT_RISK",
+                "rolling_2d_status": "SHARP_2D_DROP",
+                "trend_state": "UP",
+                "latest_structure_label": "HH",
+                "latest_bos_event_type": "BOS_UP",
+                "latest_reset_reason": "DOUBLE_BOS_UP",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "rolling2": {
+                            "rolling_2_sell_pressure_state": "SHARP_2D_DROP",
+                            "high_exit_risk_days": 1,
+                            "medium_exit_risk_days": 1,
+                            "latest_exit_risk_severity": "MEDIUM",
+                            "latest_exit_reason": "subindustry_exit_zone",
+                            "latest_bos_event_type": "BOS_UP",
+                            "latest_reset_reason": "DOUBLE_BOS_UP",
+                            "next_action": "TIGHTEN_STOP_REVIEW_DAILY_TRIGGER",
+                            "risk_reason": "EXIT_RISK_PERSISTENT_TWO_DAYS",
+                        }
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    decision = result.decisions[0]
+    assert decision.action == "REDUCE"
+
+
 def test_top_level_risk_signal_detected_does_not_self_feed_into_reduce_action():
     result = build_decisions_from_ticker_enrichment_rows(
         [
@@ -1173,6 +1291,55 @@ def test_top_level_risk_signal_detected_does_not_self_feed_into_reduce_action():
     decision = result.decisions[0]
     assert decision.action == "TIGHTEN_STOP"
     assert decision.pullback_reason != "NO_PULLBACK_CONTEXT"
+
+
+def test_double_bos_up_does_not_create_reduce_token_ahead_of_tighten_stop():
+    result = build_decisions_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "current_status": "NEUTRAL_MONITOR",
+                "daily_status": "NEUTRAL_MONITOR",
+                "rolling_2d_status": "NO_EMERGENCY",
+                "rolling_30d_status": "WATCH_ZONE",
+                "high_exit_risk_days_count": 7,
+                "trend_state": "UP",
+                "latest_structure_label": "HL",
+                "latest_bos_event_type": "BOS_UP",
+                "freshness_status": "FRESH_BULLISH_SIGNAL",
+                "ma_break_status": "OK",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "rolling2": {
+                            "rolling_2_sell_pressure_state": "NO_EMERGENCY",
+                            "latest_bos_event_type": "BOS_UP",
+                            "latest_reset_reason": "DOUBLE_BOS_UP",
+                            "next_action": "NONE",
+                            "risk_reason": "",
+                        },
+                        "rolling30": {
+                            "rolling_30_buy_state": "WATCH_ZONE",
+                            "pullback_days": 6,
+                            "breakout_days": 1,
+                            "exit_risk_days": 7,
+                            "current_watchlist_status": "NEUTRAL_MONITOR",
+                            "window_watchlist_status": "HIGH_EXIT_RISK",
+                            "primary_reason": "MIXED_OR_UNCONFIRMED_STRUCTURE",
+                            "blocking_reason": "HISTORICAL_WINDOW_HIGH_EXIT_RISK",
+                            "latest_bos_event_type": "BOS_UP",
+                            "latest_reset_reason": "DOUBLE_BOS_UP",
+                            "latest_structure_label": "HL",
+                        },
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    decision = result.decisions[0]
+    assert decision.action == "TIGHTEN_STOP"
 
 
 def test_no_rolling_30d_row_is_emitted_when_status_and_payload_are_missing():
