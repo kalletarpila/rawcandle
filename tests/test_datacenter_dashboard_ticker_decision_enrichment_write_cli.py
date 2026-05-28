@@ -746,6 +746,192 @@ def test_ticker_enrichment_then_decision_writer_uses_mapped_pullback_context(
     assert row["entry_readiness"] == "READY_TO_WATCH"
 
 
+def test_ticker_enrichment_then_decision_writer_uses_lookback_pullback_context(
+    tmp_path, capsys
+):
+    db_path = tmp_path / "analysis.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE dc_ticker_swing_signal_daily (
+                signal_date TEXT NOT NULL,
+                taxonomy_version TEXT NOT NULL,
+                ticker TEXT,
+                primary_layer TEXT,
+                primary_subindustry TEXT,
+                close REAL,
+                return_5d REAL,
+                return_10d REAL,
+                return_20d REAL,
+                return_60d REAL,
+                distance_to_ema20_pct REAL,
+                price_data_status TEXT,
+                ticker_trend_state TEXT,
+                latest_structure_label TEXT,
+                latest_structure_age_trading_days INTEGER,
+                latest_structure_freshness TEXT,
+                latest_bos_event_type TEXT,
+                latest_bos_age_trading_days INTEGER,
+                latest_bos_freshness TEXT,
+                latest_reset_reason TEXT,
+                latest_reset_age_trading_days INTEGER,
+                latest_reset_freshness TEXT,
+                latest_bullish_signal_age_td INTEGER,
+                latest_bearish_signal_age_td INTEGER,
+                bullish_candle_signal INTEGER,
+                bullish_divergence_signal INTEGER,
+                hidden_bullish_divergence_signal INTEGER,
+                structure_warning_overrides_bullish_signal INTEGER,
+                in_datacenter_ecosystem TEXT,
+                exit_risk_signal INTEGER,
+                exit_risk_severity TEXT,
+                exit_reason TEXT,
+                high_exit_risk_days_count INTEGER,
+                breakout_signal INTEGER,
+                pullback_signal INTEGER,
+                conservative_ema20_pullback_signal INTEGER,
+                fast_ema10_pullback_signal INTEGER,
+                rolling_5d_status TEXT,
+                ma_break_status TEXT
+            )
+            """
+        )
+        apply_datacenter_dashboard_enrichment_migration(conn)
+        conn.executemany(
+            """
+            INSERT INTO dc_ticker_swing_signal_daily (
+                signal_date, taxonomy_version, ticker, primary_layer, primary_subindustry,
+                close, return_5d, return_10d, return_20d, return_60d, distance_to_ema20_pct,
+                price_data_status, ticker_trend_state, latest_structure_label, latest_structure_age_trading_days,
+                latest_structure_freshness, latest_bos_event_type, latest_bos_age_trading_days,
+                latest_bos_freshness, latest_reset_reason, latest_reset_age_trading_days,
+                latest_reset_freshness, latest_bullish_signal_age_td, latest_bearish_signal_age_td,
+                bullish_candle_signal, bullish_divergence_signal, hidden_bullish_divergence_signal,
+                structure_warning_overrides_bullish_signal, in_datacenter_ecosystem, exit_risk_signal,
+                exit_risk_severity, exit_reason, high_exit_risk_days_count, breakout_signal, pullback_signal,
+                conservative_ema20_pullback_signal, fast_ema10_pullback_signal, rolling_5d_status, ma_break_status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    "2026-05-21",
+                    "DC_TAXONOMY_FULL_V1",
+                    "AAA",
+                    "Infrastructure",
+                    "AI Accelerators",
+                    98.0,
+                    0.5,
+                    1.0,
+                    1.5,
+                    2.0,
+                    1.5,
+                    "OK",
+                    "UP",
+                    "HH",
+                    4,
+                    "STALE",
+                    "BOS_UP",
+                    3,
+                    "STALE",
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    1,
+                    0,
+                    0,
+                    0,
+                    None,
+                    0,
+                    None,
+                    None,
+                    0,
+                    0,
+                    1,
+                    0,
+                    0,
+                    None,
+                    "OK",
+                ),
+                (
+                    "2026-05-22",
+                    "DC_TAXONOMY_FULL_V1",
+                    "AAA",
+                    "Infrastructure",
+                    "AI Accelerators",
+                    100.0,
+                    1.0,
+                    2.0,
+                    3.0,
+                    4.0,
+                    2.5,
+                    "OK",
+                    "UP",
+                    "HH",
+                    3,
+                    "STALE",
+                    "BOS_UP",
+                    2,
+                    "STALE",
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    0,
+                    0,
+                    0,
+                    0,
+                    None,
+                    0,
+                    None,
+                    None,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    None,
+                    "OK",
+                ),
+            ],
+        )
+
+    ticker_exit_code = ticker_enrichment_main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+    assert ticker_exit_code == 0
+    _ = capsys.readouterr()
+
+    decision_exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "upsert",
+        ]
+    )
+
+    row = _fetch_row(db_path, "AAA")
+    assert decision_exit_code == 0
+    assert row["rolling_5d_status"] == "PULLBACK_CANDIDATE"
+    assert row["pullback_validity"] != "INSUFFICIENT_DATA"
+
+
 def test_return_10d_hard_sell_token_can_drive_sell_action(tmp_path, capsys):
     db_path = tmp_path / "analysis.db"
     with sqlite3.connect(db_path) as conn:

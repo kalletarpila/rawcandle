@@ -53,6 +53,8 @@ def _create_source_table_only(path: Path) -> None:
                 high_exit_risk_days_count INTEGER,
                 breakout_signal INTEGER,
                 pullback_signal INTEGER,
+                conservative_ema20_pullback_signal INTEGER,
+                fast_ema10_pullback_signal INTEGER,
                 rolling_5d_status TEXT,
                 ma_break_status TEXT
             )
@@ -150,6 +152,8 @@ def _insert_custom_source_row(path: Path, **overrides: object) -> None:
         "high_exit_risk_days_count": None,
         "breakout_signal": 0,
         "pullback_signal": 0,
+        "conservative_ema20_pullback_signal": 0,
+        "fast_ema10_pullback_signal": 0,
         "rolling_5d_status": None,
         "ma_break_status": None,
     }
@@ -754,6 +758,45 @@ def test_pullback_signal_maps_to_conservative_rolling_5d_pullback_candidate(tmp_
     assert row["rolling_5d_status"] == "PULLBACK_CANDIDATE"
 
 
+def test_pullback_lookback_signal_maps_to_rolling_5d_status(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(
+        db_path,
+        signal_date="2026-05-21",
+        ticker="AAA",
+        pullback_signal=1,
+    )
+    _insert_custom_source_row(
+        db_path,
+        signal_date="2026-05-22",
+        ticker="AAA",
+        pullback_signal=0,
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    row = _destination_rows(db_path)[0]
+    assert row["rolling_5d_status"] == "PULLBACK_CANDIDATE"
+    assert (
+        "SUMMARY datacenter_dashboard_ticker_enrichment_write.pullback_window_candidate_rows=1"
+        in output
+    )
+
+
 def test_pullback_signal_with_structure_blocker_maps_to_failed_pullback(tmp_path, capsys):
     db_path = tmp_path / "analysis.db"
     _create_source_and_destination_db(db_path)
@@ -786,6 +829,53 @@ def test_pullback_signal_with_structure_blocker_maps_to_failed_pullback(tmp_path
     assert row["freshness_status"] == "STRUCTURE_WARNING_OVERRIDES_BULLISH"
 
 
+def test_pullback_lookback_with_structure_blocker_maps_to_failed_pullback(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(
+        db_path,
+        signal_date="2026-05-20",
+        ticker="AAA",
+        pullback_signal=1,
+    )
+    _insert_custom_source_row(
+        db_path,
+        signal_date="2026-05-21",
+        ticker="AAA",
+        latest_bos_event_type="BOS_DOWN",
+        latest_reset_reason="DOUBLE_BOS_DOWN",
+    )
+    _insert_custom_source_row(
+        db_path,
+        signal_date="2026-05-22",
+        ticker="AAA",
+        pullback_signal=0,
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    row = _destination_rows(db_path)[0]
+    assert row["rolling_5d_status"] == "FAILED_PULLBACK"
+    assert row["freshness_status"] == "STRUCTURE_WARNING_OVERRIDES_BULLISH"
+    assert (
+        "SUMMARY datacenter_dashboard_ticker_enrichment_write.pullback_window_structure_override_rows=1"
+        in output
+    )
+
+
 def test_same_day_bullish_signal_maps_to_fresh_bullish_signal(tmp_path, capsys):
     db_path = tmp_path / "analysis.db"
     _create_source_and_destination_db(db_path)
@@ -808,6 +898,159 @@ def test_same_day_bullish_signal_maps_to_fresh_bullish_signal(tmp_path, capsys):
     _ = capsys.readouterr()
     row = _destination_rows(db_path)[0]
     assert row["freshness_status"] == "FRESH_BULLISH_SIGNAL"
+
+
+def test_bullish_signal_from_lookback_maps_to_fresh_bullish_signal(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(
+        db_path,
+        signal_date="2026-05-21",
+        ticker="AAA",
+        bullish_candle_signal=1,
+    )
+    _insert_custom_source_row(
+        db_path,
+        signal_date="2026-05-22",
+        ticker="AAA",
+        bullish_candle_signal=0,
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    row = _destination_rows(db_path)[0]
+    assert row["freshness_status"] == "FRESH_BULLISH_SIGNAL"
+    assert (
+        "SUMMARY datacenter_dashboard_ticker_enrichment_write.pullback_window_bullish_signal_rows=1"
+        in output
+    )
+
+
+def test_pullback_lookback_respects_taxonomy_version(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(
+        db_path,
+        signal_date="2026-05-21",
+        ticker="AAA",
+        taxonomy_version="OTHER_TAXONOMY",
+        pullback_signal=1,
+    )
+    _insert_custom_source_row(
+        db_path,
+        signal_date="2026-05-22",
+        ticker="AAA",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        pullback_signal=0,
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    row = _destination_rows(db_path)[0]
+    assert row["rolling_5d_status"] is None
+
+
+def test_pullback_lookback_does_not_use_future_rows(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(
+        db_path,
+        signal_date="2026-05-23",
+        ticker="AAA",
+        pullback_signal=1,
+    )
+    _insert_custom_source_row(
+        db_path,
+        signal_date="2026-05-22",
+        ticker="AAA",
+        pullback_signal=0,
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    row = _destination_rows(db_path)[0]
+    assert row["rolling_5d_status"] is None
+
+
+def test_pullback_lookback_rows_limit_is_respected(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(
+        db_path,
+        signal_date="2026-05-18",
+        ticker="AAA",
+        pullback_signal=1,
+    )
+    _insert_custom_source_row(
+        db_path,
+        signal_date="2026-05-21",
+        ticker="AAA",
+        pullback_signal=0,
+    )
+    _insert_custom_source_row(
+        db_path,
+        signal_date="2026-05-22",
+        ticker="AAA",
+        pullback_signal=0,
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+            "--pullback-lookback-rows",
+            "2",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    row = _destination_rows(db_path)[0]
+    assert row["rolling_5d_status"] is None
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.pullback_lookback_rows=2" in output
 
 
 def test_missing_price_maps_before_other_statuses(tmp_path, capsys):

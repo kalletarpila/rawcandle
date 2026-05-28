@@ -48,6 +48,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit", type=int)
     parser.add_argument("--watchlist-file")
     parser.add_argument("--high-exit-window-rows", type=int, default=30)
+    parser.add_argument("--pullback-lookback-rows", type=int, default=5)
     return parser
 
 
@@ -245,6 +246,19 @@ def _load_source_history_by_ticker(
         ("ema20", "ema20"),
         ("exit_risk_signal", "exit_risk_signal"),
         ("exit_risk_severity", "exit_risk_severity"),
+        ("pullback_signal", "pullback_signal"),
+        ("conservative_ema20_pullback_signal", "conservative_ema20_pullback_signal"),
+        ("fast_ema10_pullback_signal", "fast_ema10_pullback_signal"),
+        ("bullish_candle_signal", "bullish_candle_signal"),
+        ("bullish_divergence_signal", "bullish_divergence_signal"),
+        (
+            "hidden_bullish_divergence_signal",
+            "hidden_bullish_divergence_signal",
+        ),
+        ("latest_bos_event_type", "latest_bos_event_type"),
+        ("latest_reset_reason", "latest_reset_reason"),
+        ("rolling_5d_status", "rolling_5d_status"),
+        ("freshness_status", "freshness_status"),
     ]
     select_sql = ",\n                ".join(
         f"{column} AS {alias}" if column in source_columns else f"NULL AS {alias}"
@@ -379,6 +393,68 @@ def _derive_freshness_status(row: sqlite3.Row) -> str | None:
     return latest_structure_freshness
 
 
+def _has_pullback_window_signal(row: sqlite3.Row) -> bool:
+    return any(
+        _is_truthy_signal(row[field_name])
+        for field_name in (
+            "pullback_signal",
+            "conservative_ema20_pullback_signal",
+            "fast_ema10_pullback_signal",
+        )
+        if field_name in row.keys()
+    )
+
+
+def _derive_pullback_window_context(
+    history_rows: list[sqlite3.Row] | None,
+) -> tuple[int, int | None, bool]:
+    if not history_rows:
+        return 0, None, False
+    candidate_pullback_days = sum(1 for row in history_rows if _has_pullback_window_signal(row))
+    candidate_latest_bullish_signal_age_td: int | None = None
+    for offset, row in enumerate(reversed(history_rows)):
+        if _has_same_day_bullish_signal(row):
+            candidate_latest_bullish_signal_age_td = offset
+            break
+    candidate_structure_override = any(_has_structure_blocker(row) for row in history_rows)
+    return (
+        candidate_pullback_days,
+        candidate_latest_bullish_signal_age_td,
+        candidate_structure_override,
+    )
+
+
+def _is_conservative_freshness_status(value: str | None) -> bool:
+    text = (value or "").upper()
+    if not text:
+        return False
+    return (
+        "WARNING" in text
+        or "BOS_DOWN" in text
+        or "RESET" in text
+    )
+
+
+def _resolve_freshness_status(
+    row: sqlite3.Row,
+    history_rows: list[sqlite3.Row] | None,
+) -> tuple[str | None, int | None, int, bool]:
+    base_status = _derive_freshness_status(row)
+    candidate_pullback_days, candidate_bullish_age, candidate_structure_override = (
+        _derive_pullback_window_context(history_rows)
+    )
+    if candidate_structure_override and candidate_pullback_days > 0:
+        return (
+            "STRUCTURE_WARNING_OVERRIDES_BULLISH",
+            candidate_bullish_age,
+            candidate_pullback_days,
+            True,
+        )
+    if candidate_bullish_age is not None and not _is_conservative_freshness_status(base_status):
+        return "FRESH_BULLISH_SIGNAL", candidate_bullish_age, candidate_pullback_days, False
+    return base_status, candidate_bullish_age, candidate_pullback_days, candidate_structure_override
+
+
 def _derive_rolling_2d_status(row: sqlite3.Row) -> str:
     exit_risk_severity = (_normalized_text(row["exit_risk_severity"]) or "").upper()
     exit_risk_signal = _is_truthy_signal(row["exit_risk_signal"])
@@ -394,13 +470,19 @@ def _derive_rolling_2d_status(row: sqlite3.Row) -> str:
     return "NO_EMERGENCY"
 
 
-def _derive_rolling_5d_status(row: sqlite3.Row) -> str | None:
+def _derive_rolling_5d_status(
+    row: sqlite3.Row,
+    history_rows: list[sqlite3.Row] | None,
+) -> str | None:
     explicit_value = _normalized_text(row["rolling_5d_status"])
     if explicit_value is not None:
         return explicit_value
-    if not _is_truthy_signal(row["pullback_signal"]):
+    candidate_pullback_days, _candidate_bullish_age, candidate_structure_override = (
+        _derive_pullback_window_context(history_rows)
+    )
+    if candidate_pullback_days <= 0:
         return None
-    if _has_structure_blocker(row):
+    if candidate_structure_override:
         return "FAILED_PULLBACK"
     return "PULLBACK_CANDIDATE"
 
@@ -511,13 +593,16 @@ def _map_destination_row(
     watchlist_tickers: set[str],
     high_exit_risk_days_count: int,
     ma_break_status: str | None,
+    history_rows: list[sqlite3.Row] | None,
 ) -> tuple[object, ...]:
     ticker = str(row["ticker"]).strip().upper()
     daily_status = _derive_daily_status(row)
     primary_reason = _derive_primary_reason(row, daily_status)
-    freshness_status = _derive_freshness_status(row)
+    freshness_status, _candidate_bullish_age, _candidate_pullback_days, _candidate_structure_override = (
+        _resolve_freshness_status(row, history_rows)
+    )
     rolling_2d_status = _derive_rolling_2d_status(row)
-    rolling_5d_status = _derive_rolling_5d_status(row)
+    rolling_5d_status = _derive_rolling_5d_status(row, history_rows)
     window_status_2d = _derive_window_status_2d(row)
     values = [
         row["signal_date"],  # signal_date
@@ -611,6 +696,8 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("--limit must be greater than 0 when provided")
         if args.high_exit_window_rows <= 0:
             raise ValueError("--high-exit-window-rows must be greater than 0")
+        if args.pullback_lookback_rows <= 0:
+            raise ValueError("--pullback-lookback-rows must be greater than 0")
         watchlist_tickers, warnings = _load_watchlist_tickers(args.watchlist_file)
 
         connector = _connect_read_only if args.dry_run else _connect_read_write
@@ -644,6 +731,13 @@ def main(argv: list[str] | None = None) -> int:
                 tickers=[str(row["ticker"]).strip().upper() for row in valid_rows],
                 window_rows=60,
             )
+            pullback_history_by_ticker = _load_source_history_by_ticker(
+                conn,
+                signal_date=signal_date,
+                taxonomy_version=taxonomy_version,
+                tickers=[str(row["ticker"]).strip().upper() for row in valid_rows],
+                window_rows=args.pullback_lookback_rows,
+            )
             watchlist_matches = sum(
                 1
                 for row in valid_rows
@@ -654,6 +748,10 @@ def main(argv: list[str] | None = None) -> int:
             created_at_utc = _utc_now_text()
             high_exit_window_derived_rows = 0
             high_exit_window_unavailable = 0
+            pullback_window_derived_rows = 0
+            pullback_window_candidate_rows = 0
+            pullback_window_structure_override_rows = 0
+            pullback_window_bullish_signal_rows = 0
             mapped_rows: list[tuple[tuple[str, str, str], tuple[object, ...]]] = []
             for row in valid_rows:
                 ticker = str(row["ticker"]).strip().upper()
@@ -665,10 +763,26 @@ def main(argv: list[str] | None = None) -> int:
                     row,
                     ma_history_by_ticker.get(ticker),
                 )
+                pullback_history_rows = pullback_history_by_ticker.get(ticker)
+                candidate_pullback_days, candidate_bullish_age, candidate_structure_override = (
+                    _derive_pullback_window_context(pullback_history_rows)
+                )
                 if used_window:
                     high_exit_window_derived_rows += 1
                 if used_fallback:
                     high_exit_window_unavailable += 1
+                if (
+                    candidate_pullback_days > 0
+                    or candidate_bullish_age is not None
+                    or candidate_structure_override
+                ):
+                    pullback_window_derived_rows += 1
+                if candidate_pullback_days > 0:
+                    pullback_window_candidate_rows += 1
+                if candidate_structure_override:
+                    pullback_window_structure_override_rows += 1
+                if candidate_bullish_age is not None:
+                    pullback_window_bullish_signal_rows += 1
                 mapped_rows.append(
                     (
                         (
@@ -683,6 +797,7 @@ def main(argv: list[str] | None = None) -> int:
                             watchlist_tickers=watchlist_tickers,
                             high_exit_risk_days_count=high_exit_risk_days_count,
                             ma_break_status=ma_break_status,
+                            history_rows=pullback_history_rows,
                         ),
                     )
                 )
@@ -985,6 +1100,17 @@ def main(argv: list[str] | None = None) -> int:
         _emit_summary("dry_run", 1 if args.dry_run else 0)
         _emit_summary("high_exit_window_rows", args.high_exit_window_rows)
         _emit_summary("high_exit_window_derived_rows", high_exit_window_derived_rows)
+        _emit_summary("pullback_lookback_rows", args.pullback_lookback_rows)
+        _emit_summary("pullback_window_derived_rows", pullback_window_derived_rows)
+        _emit_summary("pullback_window_candidate_rows", pullback_window_candidate_rows)
+        _emit_summary(
+            "pullback_window_structure_override_rows",
+            pullback_window_structure_override_rows,
+        )
+        _emit_summary(
+            "pullback_window_bullish_signal_rows",
+            pullback_window_bullish_signal_rows,
+        )
         _emit_summary("watchlist_file", args.watchlist_file or "")
         _emit_summary("watchlist_tickers", len(watchlist_tickers))
         _emit_summary("watchlist_matches", watchlist_matches)
