@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sqlite3
 import sys
@@ -15,6 +16,8 @@ SOURCE_TABLE = "dc_ticker_swing_signal_daily"
 DESTINATION_TABLE = "dc_dashboard_ticker_enrichment_daily"
 CALC_VERSION = "DATACENTER_DASHBOARD_TICKER_ENRICHMENT_V1"
 SOURCE_COMPONENTS = "dc_ticker_swing_signal_daily,dc_ticker_swing_signal_daily:daily_status_mapping_v1"
+UPSTREAM_ROLLING5_COMPONENT = "swing_weekly_report:rolling5_upstream_v1"
+UPSTREAM_ROLLING5_PAYLOAD_PREFIX = "UPSTREAM_ROLLING5_JSON:"
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 VALID_TICKER_RE = re.compile(r"^[A-Z0-9][A-Z0-9.\-]*$")
 DISALLOWED_TICKER_LABELS = {
@@ -49,6 +52,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--watchlist-file")
     parser.add_argument("--high-exit-window-rows", type=int, default=30)
     parser.add_argument("--pullback-lookback-rows", type=int, default=5)
+    parser.add_argument("--use-upstream-rolling5-pullback", action="store_true")
     return parser
 
 
@@ -295,6 +299,36 @@ def _normalized_text(value: object) -> str | None:
     return text or None
 
 
+def _extract_upstream_rolling5_rows(
+    *,
+    analysis_db: str,
+    report_date: str,
+    taxonomy_version: str,
+) -> dict[str, dict[str, object]]:
+    from dev_tools.run_datacenter_dashboard_rolling5_upstream_source_audit import (
+        _extract_upstream_source_rows,
+    )
+
+    (
+        builder_callable,
+        _builder_function,
+        builder_reason,
+        upstream_rows,
+        _ticker_source_rows,
+    ) = _extract_upstream_source_rows(
+        analysis_db=analysis_db,
+        report_date=report_date,
+        taxonomy_version=taxonomy_version,
+    )
+    if builder_callable != 1:
+        raise ValueError(builder_reason or "upstream rolling5 extraction failed")
+    return {
+        str(row.get("ticker") or "").strip().upper(): row
+        for row in upstream_rows
+        if str(row.get("ticker") or "").strip()
+    }
+
+
 def _safe_int(value: object) -> int | None:
     text = _normalized_text(value)
     if text is None:
@@ -487,6 +521,69 @@ def _derive_rolling_5d_status(
     return "PULLBACK_CANDIDATE"
 
 
+def _map_upstream_rolling_5d_status(value: object) -> str | None:
+    normalized = _normalized_text(value)
+    if normalized is None:
+        return None
+    allowed = {
+        "PULLBACK_CANDIDATE",
+        "EARLY_PULLBACK",
+        "FAILED_PULLBACK",
+        "SHORT_TERM_BREAKDOWN",
+        "NO_PULLBACK",
+        "INSUFFICIENT_DATA",
+    }
+    return normalized if normalized in allowed else None
+
+
+def _build_upstream_rolling5_payload(
+    upstream_row: dict[str, object] | None,
+    *,
+    existing_primary_reason: str | None,
+) -> dict[str, object]:
+    if not upstream_row:
+        return {}
+    payload: dict[str, object] = {}
+    for source_key in (
+        "pullback_days",
+        "fast_ema10_pullback_days",
+        "conservative_ema20_pullback_days",
+        "latest_bos_freshness",
+        "latest_reset_freshness",
+        "latest_bullish_relevance_class",
+        "latest_bearish_relevance_class",
+    ):
+        value = _normalized_text(upstream_row.get(source_key))
+        if value is not None:
+            payload[source_key] = value
+
+    rolling_5_pullback_state = _normalized_text(upstream_row.get("rolling_5_pullback_state"))
+    if rolling_5_pullback_state is not None:
+        payload["rolling_5_pullback_state"] = rolling_5_pullback_state
+
+    primary_reason = _normalized_text(upstream_row.get("primary_reason"))
+    if primary_reason is not None and existing_primary_reason is not None:
+        payload["rolling_5d_primary_reason"] = primary_reason
+    blocking_reason = _normalized_text(upstream_row.get("blocking_reason"))
+    if blocking_reason is not None:
+        payload["rolling_5d_blocking_reason"] = blocking_reason
+    if primary_reason is not None and existing_primary_reason is None:
+        payload["rolling_5d_primary_reason"] = primary_reason
+    return payload
+
+
+def _encode_upstream_rolling5_payload(payload: dict[str, object]) -> str | None:
+    if not payload:
+        return None
+    return UPSTREAM_ROLLING5_PAYLOAD_PREFIX + json.dumps(payload, separators=(",", ":"), sort_keys=True)
+
+
+def _compose_source_components(*, include_upstream_rolling5: bool) -> str:
+    if not include_upstream_rolling5:
+        return SOURCE_COMPONENTS
+    return f"{SOURCE_COMPONENTS},{UPSTREAM_ROLLING5_COMPONENT}"
+
+
 def _return_10d_is_below_minus_8pct(value: object) -> bool:
     text = _normalized_text(value)
     if text is None:
@@ -594,16 +691,34 @@ def _map_destination_row(
     high_exit_risk_days_count: int,
     ma_break_status: str | None,
     history_rows: list[sqlite3.Row] | None,
+    upstream_row: dict[str, object] | None,
 ) -> tuple[object, ...]:
     ticker = str(row["ticker"]).strip().upper()
     daily_status = _derive_daily_status(row)
     primary_reason = _derive_primary_reason(row, daily_status)
+    upstream_primary_reason = _normalized_text(upstream_row.get("primary_reason")) if upstream_row else None
+    if primary_reason is None and upstream_primary_reason is not None:
+        primary_reason = upstream_primary_reason
     freshness_status, _candidate_bullish_age, _candidate_pullback_days, _candidate_structure_override = (
         _resolve_freshness_status(row, history_rows)
     )
     rolling_2d_status = _derive_rolling_2d_status(row)
-    rolling_5d_status = _derive_rolling_5d_status(row, history_rows)
+    rolling_5d_status = _map_upstream_rolling_5d_status(
+        upstream_row.get("rolling_5_pullback_state") if upstream_row else None
+    ) or _derive_rolling_5d_status(row, history_rows)
     window_status_2d = _derive_window_status_2d(row)
+    latest_bos_event_type = _normalized_text(row["latest_bos_event_type"]) or _normalized_text(
+        upstream_row.get("latest_bos_event_type") if upstream_row else None
+    )
+    latest_reset_reason = _normalized_text(row["latest_reset_reason"]) or _normalized_text(
+        upstream_row.get("latest_reset_reason") if upstream_row else None
+    )
+    upstream_payload = _build_upstream_rolling5_payload(
+        upstream_row,
+        existing_primary_reason=_derive_primary_reason(row, daily_status),
+    )
+    encoded_upstream_payload = _encode_upstream_rolling5_payload(upstream_payload)
+    include_upstream_rolling5 = upstream_row is not None
     values = [
         row["signal_date"],  # signal_date
         row["taxonomy_version"],  # taxonomy_version
@@ -631,9 +746,9 @@ def _map_destination_row(
         None,  # trend_state_age_td
         row["latest_structure_label"],  # latest_structure_label
         row["latest_structure_age_trading_days"],  # latest_structure_age_td
-        row["latest_bos_event_type"],  # latest_bos_event_type
+        latest_bos_event_type,  # latest_bos_event_type
         row["latest_bos_age_trading_days"],  # latest_bos_age_td
-        row["latest_reset_reason"],  # latest_reset_reason
+        latest_reset_reason,  # latest_reset_reason
         row["latest_reset_age_trading_days"],  # latest_reset_age_td
         None,  # latest_candle
         None,  # latest_candle_age_td
@@ -651,8 +766,8 @@ def _map_destination_row(
         None,  # rolling_30d_status
         None,  # horizons_present
         high_exit_risk_days_count,  # high_exit_risk_days_count
-        None,  # source_run_ids
-        SOURCE_COMPONENTS,  # source_components
+        encoded_upstream_payload,  # source_run_ids
+        _compose_source_components(include_upstream_rolling5=include_upstream_rolling5),  # source_components
         1 if ticker in watchlist_tickers else 0,  # is_watchlist
         row["price_data_status"],  # data_quality_status
         CALC_VERSION,  # calc_version
@@ -699,6 +814,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.pullback_lookback_rows <= 0:
             raise ValueError("--pullback-lookback-rows must be greater than 0")
         watchlist_tickers, warnings = _load_watchlist_tickers(args.watchlist_file)
+        upstream_rolling5_status = "SKIPPED"
+        upstream_rolling5_rows = 0
+        upstream_rolling5_matched_tickers = 0
 
         connector = _connect_read_only if args.dry_run else _connect_read_write
         with connector(args.analysis_db) as conn:
@@ -717,6 +835,15 @@ def main(argv: list[str] | None = None) -> int:
             valid_rows = (
                 valid_rows_all[: args.limit] if args.limit is not None else valid_rows_all
             )
+            upstream_rows_by_ticker: dict[str, dict[str, object]] = {}
+            if args.use_upstream_rolling5_pullback:
+                upstream_rows_by_ticker = _extract_upstream_rolling5_rows(
+                    analysis_db=args.analysis_db,
+                    report_date=signal_date,
+                    taxonomy_version=taxonomy_version,
+                )
+                upstream_rolling5_status = "OK"
+                upstream_rolling5_rows = len(upstream_rows_by_ticker)
             history_by_ticker = _load_source_history_by_ticker(
                 conn,
                 signal_date=signal_date,
@@ -743,6 +870,12 @@ def main(argv: list[str] | None = None) -> int:
                 for row in valid_rows
                 if str(row["ticker"]).strip().upper() in watchlist_tickers
             )
+            if args.use_upstream_rolling5_pullback:
+                upstream_rolling5_matched_tickers = sum(
+                    1
+                    for row in valid_rows
+                    if str(row["ticker"]).strip().upper() in upstream_rows_by_ticker
+                )
 
             run_id = _resolve_run_id(signal_date, args.run_id)
             created_at_utc = _utc_now_text()
@@ -798,6 +931,7 @@ def main(argv: list[str] | None = None) -> int:
                             high_exit_risk_days_count=high_exit_risk_days_count,
                             ma_break_status=ma_break_status,
                             history_rows=pullback_history_rows,
+                            upstream_row=upstream_rows_by_ticker.get(ticker),
                         ),
                     )
                 )
@@ -1100,6 +1234,13 @@ def main(argv: list[str] | None = None) -> int:
         _emit_summary("dry_run", 1 if args.dry_run else 0)
         _emit_summary("high_exit_window_rows", args.high_exit_window_rows)
         _emit_summary("high_exit_window_derived_rows", high_exit_window_derived_rows)
+        _emit_summary(
+            "use_upstream_rolling5_pullback",
+            1 if args.use_upstream_rolling5_pullback else 0,
+        )
+        _emit_summary("upstream_rolling5_rows", upstream_rolling5_rows)
+        _emit_summary("upstream_rolling5_matched_tickers", upstream_rolling5_matched_tickers)
+        _emit_summary("upstream_rolling5_status", upstream_rolling5_status)
         _emit_summary("pullback_lookback_rows", args.pullback_lookback_rows)
         _emit_summary("pullback_window_derived_rows", pullback_window_derived_rows)
         _emit_summary("pullback_window_candidate_rows", pullback_window_candidate_rows)
@@ -1126,6 +1267,8 @@ def main(argv: list[str] | None = None) -> int:
             _emit_summary("warning", warning)
         return 0
     except (FileNotFoundError, sqlite3.Error, ValueError, OSError) as exc:
+        if args.use_upstream_rolling5_pullback:
+            _emit_summary("upstream_rolling5_status", "FAILED")
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 

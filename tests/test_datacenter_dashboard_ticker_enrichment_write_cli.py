@@ -758,6 +758,145 @@ def test_pullback_signal_maps_to_conservative_rolling_5d_pullback_candidate(tmp_
     assert row["rolling_5d_status"] == "PULLBACK_CANDIDATE"
 
 
+def test_default_behavior_keeps_upstream_rolling5_disabled(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(db_path, pullback_signal=1, ma_break_status="OK")
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    row = _destination_rows(db_path)[0]
+    assert exit_code == 0
+    assert row["rolling_5d_status"] == "PULLBACK_CANDIDATE"
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.use_upstream_rolling5_pullback=0" in output
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.upstream_rolling5_status=SKIPPED" in output
+
+
+def test_upstream_rolling5_state_maps_to_rolling_5d_status_when_enabled(tmp_path, monkeypatch, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(db_path, ticker="AAA", pullback_signal=0)
+
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_ticker_enrichment_write._extract_upstream_rolling5_rows",
+        lambda **kwargs: {
+            "AAA": {
+                "ticker": "AAA",
+                "rolling_5_pullback_state": "EARLY_PULLBACK",
+                "pullback_days": 3,
+                "fast_ema10_pullback_days": 2,
+                "conservative_ema20_pullback_days": 1,
+            }
+        },
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+            "--use-upstream-rolling5-pullback",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    row = _destination_rows(db_path)[0]
+    assert exit_code == 0
+    assert row["rolling_5d_status"] == "EARLY_PULLBACK"
+    assert row["source_run_ids"] is not None
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.use_upstream_rolling5_pullback=1" in output
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.upstream_rolling5_rows=1" in output
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.upstream_rolling5_matched_tickers=1" in output
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.upstream_rolling5_status=OK" in output
+
+
+def test_upstream_primary_reason_does_not_overwrite_existing_reason_unless_empty(tmp_path, monkeypatch, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(db_path, ticker="AAA", pullback_signal=1, exit_reason="SOURCE_REASON")
+
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_ticker_enrichment_write._extract_upstream_rolling5_rows",
+        lambda **kwargs: {
+            "AAA": {
+                "ticker": "AAA",
+                "rolling_5_pullback_state": "EARLY_PULLBACK",
+                "primary_reason": "UPSTREAM_REASON",
+                "blocking_reason": "STRUCTURE_BLOCKED",
+            }
+        },
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+            "--use-upstream-rolling5-pullback",
+        ]
+    )
+
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    assert exit_code == 0
+    assert row["primary_reason"] == "SOURCE_REASON"
+
+
+def test_upstream_extraction_failure_fails_clearly(tmp_path, monkeypatch, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(db_path, ticker="AAA")
+
+    def _boom(**kwargs):
+        raise ValueError("upstream rolling5 unavailable")
+
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_ticker_enrichment_write._extract_upstream_rolling5_rows",
+        _boom,
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+            "--use-upstream-rolling5-pullback",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "ERROR: upstream rolling5 unavailable" in captured.err
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.upstream_rolling5_status=FAILED" in captured.out
+
+
 def test_pullback_lookback_signal_maps_to_rolling_5d_status(tmp_path, capsys):
     db_path = tmp_path / "analysis.db"
     _create_source_and_destination_db(db_path)

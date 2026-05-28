@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from pathlib import Path
@@ -58,6 +59,8 @@ RAW_FIELD_NAMES: tuple[str, ...] = (
     "candidate_priority_label",
     "distance_to_ema20",
     "pullback_days",
+    "fast_ema10_pullback_days",
+    "conservative_ema20_pullback_days",
     "high_exit_risk_days_count",
     "blocking_reasons",
     "ema20_break_confirmed",
@@ -71,10 +74,18 @@ RAW_FIELD_NAMES: tuple[str, ...] = (
     "structure_warning_overrides_bullish_signal",
     "latest_bullish_signal_age_td",
     "latest_bearish_signal_age_td",
+    "latest_bos_freshness",
+    "latest_reset_freshness",
+    "latest_bullish_relevance_class",
+    "latest_bearish_relevance_class",
+    "rolling_5_pullback_state",
+    "rolling_5d_primary_reason",
+    "rolling_5d_blocking_reason",
     "latest_bos_up_age_td",
     "latest_bos_down_age_td",
     "latest_reset_age_td",
 )
+UPSTREAM_ROLLING5_PAYLOAD_PREFIX = "UPSTREAM_ROLLING5_JSON:"
 
 
 def _normalized_text(value: object) -> str | None:
@@ -131,6 +142,17 @@ def _raw_fields_from_row(
         text = _normalized_text(value)
         if text is not None:
             raw_fields[key] = text
+    source_run_ids = _normalized_text(row.get("source_run_ids"))
+    if source_run_ids is not None and source_run_ids.startswith(UPSTREAM_ROLLING5_PAYLOAD_PREFIX):
+        try:
+            payload = json.loads(source_run_ids[len(UPSTREAM_ROLLING5_PAYLOAD_PREFIX):])
+        except json.JSONDecodeError:
+            payload = {}
+        if isinstance(payload, dict):
+            for key, value in payload.items():
+                text = _normalized_text(value)
+                if text is not None:
+                    raw_fields[key] = text
     rolling_5d_status = _normalized_text(row.get("rolling_5d_status"))
     freshness_status = _normalized_text(row.get("freshness_status"))
     if "pullback_days" not in raw_fields and rolling_5d_status in {

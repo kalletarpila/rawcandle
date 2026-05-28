@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -211,6 +212,36 @@ def test_adapter_synthesizes_bullish_signal_age_from_freshness_status():
     assert daily_row.raw_fields["latest_bullish_signal_age_td"] == "0"
 
 
+def test_adapter_exposes_upstream_rolling5_payload_fields_in_raw_fields():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "NEUTRAL_MONITOR",
+                "rolling_5d_status": "EARLY_PULLBACK",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "pullback_days": 3,
+                        "fast_ema10_pullback_days": 2,
+                        "conservative_ema20_pullback_days": 1,
+                        "latest_bos_freshness": "FRESH",
+                        "rolling_5d_blocking_reason": "STRUCTURE_BLOCKED",
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    rolling_row = next(row for row in rows if row.horizon == "rolling 5d")
+    assert rolling_row.raw_fields["pullback_days"] == "3"
+    assert rolling_row.raw_fields["fast_ema10_pullback_days"] == "2"
+    assert rolling_row.raw_fields["conservative_ema20_pullback_days"] == "1"
+    assert rolling_row.raw_fields["latest_bos_freshness"] == "FRESH"
+    assert rolling_row.raw_fields["rolling_5d_blocking_reason"] == "STRUCTURE_BLOCKED"
+
+
 def test_decision_integration_uses_writer_visible_pullback_context():
     result = build_decisions_from_ticker_enrichment_rows(
         [
@@ -230,6 +261,34 @@ def test_decision_integration_uses_writer_visible_pullback_context():
     decision = result.decisions[0]
     assert decision.pullback_validity != "INSUFFICIENT_DATA"
     assert decision.pullback_validity == "VALID_PULLBACK"
+
+
+def test_decision_integration_accepts_upstream_rolling5_context_with_payload():
+    result = build_decisions_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "NEUTRAL_MONITOR",
+                "rolling_5d_status": "EARLY_PULLBACK",
+                "ma_break_status": "OK",
+                "freshness_status": "FRESH_BULLISH_SIGNAL",
+                "trend_state": "UP",
+                "latest_structure_label": "HH",
+                "latest_bos_event_type": "BOS_UP",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "pullback_days": 3,
+                        "rolling_5_pullback_state": "EARLY_PULLBACK",
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    decision = result.decisions[0]
+    assert decision.pullback_validity != "INSUFFICIENT_DATA"
 
 
 def test_ma_break_fields_are_visible_to_decision_logic_and_produce_sell():
