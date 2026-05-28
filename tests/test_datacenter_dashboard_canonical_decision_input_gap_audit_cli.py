@@ -30,6 +30,7 @@ def _row(
     freshness_status: str | None = None,
     latest_bos_event_type: str | None = None,
     latest_reset_reason: str | None = None,
+    high_exit_risk_days_count: int | None = None,
     raw_fields: dict[str, str] | None = None,
 ) -> DatacenterDashboardRow:
     return DatacenterDashboardRow(
@@ -46,7 +47,7 @@ def _row(
         latest_bos_event_type=latest_bos_event_type,
         latest_reset_reason=latest_reset_reason,
         distance_to_ema20=None,
-        high_exit_risk_days_count=None,
+        high_exit_risk_days_count=high_exit_risk_days_count,
         blocking_reasons=blocking_reasons,
         ma_break_status=ma_break_status,
         ema20_break_confirmed=None,
@@ -304,6 +305,114 @@ def test_top_explanatory_gap_ranks_deterministically(tmp_path, monkeypatch, caps
 
     assert exit_code == 0
     assert "top_explanatory_gaps;1;pullback_days;2;DERIVABLE_FROM_SHARED_HELPER;AAA,BBB;SHARED_HELPER_PAYLOAD_FIX" in output
+
+
+def test_high_exit_risk_days_count_rolling_2d_match_is_not_reported_as_horizon_gap(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    reports_snapshot = _snapshot(
+        [{"ticker": "AAA", "pullback_validity": "VALID_PULLBACK", "entry_readiness": "READY_TO_WATCH", "candidate_priority_label": "P1_READY_TO_WATCH"}]
+    )
+    enrichment_snapshot = _snapshot(
+        [{"ticker": "AAA", "pullback_validity": "NO_PULLBACK", "entry_readiness": "NOT_READY", "candidate_priority_label": "P5_NOT_READY"}]
+    )
+    reports_rows = [_row(ticker="AAA", horizon="rolling 2d", high_exit_risk_days_count=2)]
+    enrichment_adapter_rows = [
+        _row(ticker="AAA", horizon="daily", high_exit_risk_days_count=30),
+        _row(ticker="AAA", horizon="rolling 2d", high_exit_risk_days_count=2),
+    ]
+
+    exit_code, output, _ = _run_cli(
+        capsys,
+        monkeypatch,
+        analysis_db=analysis_db,
+        reports_snapshot=reports_snapshot,
+        enrichment_snapshot=enrichment_snapshot,
+        reports_rows=reports_rows,
+        enrichment_table_rows=[{"ticker": "AAA"}],
+        enrichment_adapter_rows=enrichment_adapter_rows,
+        source_rows_by_ticker={"AAA": {}},
+        tickers="AAA",
+    )
+
+    assert exit_code == 0
+    assert (
+        "per_ticker_gap_attribution;AAA;DIFFERENT_HORIZON;high_exit_risk_days_count;"
+        not in output
+    )
+    assert "SUMMARY datacenter_dashboard_canonical_decision_input_gap_audit.top_gap=high_exit_risk_days_count" not in output
+
+
+def test_high_exit_risk_days_count_rolling_2d_real_mismatch_is_still_detected(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    reports_snapshot = _snapshot(
+        [{"ticker": "AAA", "pullback_validity": "VALID_PULLBACK", "entry_readiness": "READY_TO_WATCH", "candidate_priority_label": "P1_READY_TO_WATCH"}]
+    )
+    enrichment_snapshot = _snapshot(
+        [{"ticker": "AAA", "pullback_validity": "NO_PULLBACK", "entry_readiness": "NOT_READY", "candidate_priority_label": "P5_NOT_READY"}]
+    )
+    reports_rows = [_row(ticker="AAA", horizon="rolling 2d", high_exit_risk_days_count=2)]
+    enrichment_adapter_rows = [
+        _row(ticker="AAA", horizon="daily", high_exit_risk_days_count=30),
+        _row(ticker="AAA", horizon="rolling 2d", high_exit_risk_days_count=0),
+    ]
+
+    exit_code, output, _ = _run_cli(
+        capsys,
+        monkeypatch,
+        analysis_db=analysis_db,
+        reports_snapshot=reports_snapshot,
+        enrichment_snapshot=enrichment_snapshot,
+        reports_rows=reports_rows,
+        enrichment_table_rows=[{"ticker": "AAA"}],
+        enrichment_adapter_rows=enrichment_adapter_rows,
+        source_rows_by_ticker={"AAA": {}},
+        tickers="AAA",
+    )
+
+    assert exit_code == 0
+    assert "per_ticker_gap_attribution;AAA;DIFFERENT_VALUE;high_exit_risk_days_count;2;0;NOT_FOUND;present on both sides but different value" in output
+
+
+def test_non_horizon_aware_fields_keep_first_observed_behavior(tmp_path, monkeypatch, capsys):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    reports_snapshot = _snapshot(
+        [{"ticker": "AAA", "pullback_validity": "VALID_PULLBACK", "entry_readiness": "READY_TO_WATCH", "candidate_priority_label": "P1_READY_TO_WATCH"}]
+    )
+    enrichment_snapshot = _snapshot(
+        [{"ticker": "AAA", "pullback_validity": "NO_PULLBACK", "entry_readiness": "NOT_READY", "candidate_priority_label": "P5_NOT_READY"}]
+    )
+    reports_rows = [
+        _row(ticker="AAA", horizon="daily", raw_fields={"pullback_days": "0"}),
+        _row(ticker="AAA", horizon="rolling 5d", raw_fields={"pullback_days": "2"}),
+    ]
+    enrichment_adapter_rows = [_row(ticker="AAA", horizon="rolling 5d")]
+
+    exit_code, output, _ = _run_cli(
+        capsys,
+        monkeypatch,
+        analysis_db=analysis_db,
+        reports_snapshot=reports_snapshot,
+        enrichment_snapshot=enrichment_snapshot,
+        reports_rows=reports_rows,
+        enrichment_table_rows=[{"ticker": "AAA"}],
+        enrichment_adapter_rows=enrichment_adapter_rows,
+        source_rows_by_ticker={"AAA": {}},
+        tickers="AAA",
+    )
+
+    assert exit_code == 0
+    assert "per_ticker_gap_attribution;AAA;MISSING_FIELD;pullback_days;0;;DERIVABLE_FROM_SHARED_HELPER;" in output
 
 
 def test_factual_parity_blocker_confirmed_when_pullback_differences_exist(tmp_path, monkeypatch, capsys):

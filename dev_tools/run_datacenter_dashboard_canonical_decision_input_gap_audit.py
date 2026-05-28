@@ -38,6 +38,14 @@ HORIZON_PRIORITY = {
     "rolling 5d": 2,
     "rolling 30d": 3,
 }
+FIELD_HORIZON_PREFERENCES = {
+    "high_exit_risk_days_count": (
+        "rolling 2d",
+        "daily",
+        "rolling 5d",
+        "rolling 30d",
+    ),
+}
 FIELD_ITEMS = (
     "pullback_days",
     "rolling_5_pullback_state",
@@ -357,6 +365,17 @@ def _field_or_attr_value(row: DatacenterDashboardRow, name: str) -> object:
 
 
 def _field_observation(rows: list[DatacenterDashboardRow], name: str) -> dict[str, object]:
+    preferred_horizons = FIELD_HORIZON_PREFERENCES.get(name)
+    if preferred_horizons:
+        rows = sorted(
+            rows,
+            key=lambda row: (
+                preferred_horizons.index(row.horizon)
+                if row.horizon in preferred_horizons
+                else len(preferred_horizons) + HORIZON_PRIORITY.get(row.horizon, 99),
+                row.row_kind or "",
+            ),
+        )
     for row in rows:
         value = _field_or_attr_value(row, name)
         text = _cell(value)
