@@ -239,6 +239,17 @@ def _upstream_rolling5_payload(row: dict[str, object]) -> dict[str, object]:
     return {}
 
 
+def _resolved_positive_pullback_days(mapping: dict[str, object]) -> object | None:
+    direct_pullback_days = _safe_int(mapping.get("pullback_days"))
+    if direct_pullback_days is not None and direct_pullback_days > 0:
+        return mapping.get("pullback_days")
+    for key in ("fast_ema10_pullback_days", "conservative_ema20_pullback_days"):
+        value = _safe_int(mapping.get(key))
+        if value is not None and value > 0:
+            return mapping.get(key)
+    return None
+
+
 def _build_row(
     *,
     row: dict[str, object],
@@ -250,6 +261,7 @@ def _build_row(
     reason: str | None = None,
     blocking_reasons: str | None = None,
     extra_raw_fields: dict[str, object] | None = None,
+    high_exit_risk_days_count_override: object | None = None,
 ) -> DatacenterDashboardRow:
     raw_fields = _raw_fields_from_row(row, horizon_source_field=horizon_source_field)
     payload = _decoded_payload(row)
@@ -275,7 +287,11 @@ def _build_row(
         latest_bos_event_type=_normalized_text(row.get("latest_bos_event_type")),
         latest_reset_reason=_normalized_text(row.get("latest_reset_reason")),
         distance_to_ema20=_safe_float(row.get("distance_to_ema20")),
-        high_exit_risk_days_count=_safe_int(row.get("high_exit_risk_days_count")),
+        high_exit_risk_days_count=(
+            _safe_int(high_exit_risk_days_count_override)
+            if _safe_int(high_exit_risk_days_count_override) is not None
+            else _safe_int(row.get("high_exit_risk_days_count"))
+        ),
         blocking_reasons=(
             blocking_reasons
             if blocking_reasons is not None
@@ -353,10 +369,13 @@ def build_dashboard_rows_from_ticker_enrichment_rows(
                 high_exit_risk_days_count = row.get("high_exit_risk_days_count")
                 if rolling2_payload:
                     helper_high_exit_risk_days = rolling2_payload.get("high_exit_risk_days")
+                    typed_high_exit_risk_days_count = None
                     if _normalized_text(helper_high_exit_risk_days) is not None:
                         extra_raw_fields["high_exit_risk_days_count"] = helper_high_exit_risk_days
+                        typed_high_exit_risk_days_count = helper_high_exit_risk_days
                     elif _normalized_text(high_exit_risk_days_count) is not None:
                         extra_raw_fields["high_exit_risk_days_count"] = high_exit_risk_days_count
+                        typed_high_exit_risk_days_count = high_exit_risk_days_count
                     rolling2_status = _normalized_text(
                         rolling2_payload.get("rolling_2_sell_pressure_state")
                     ) or status_value
@@ -421,6 +440,7 @@ def build_dashboard_rows_from_ticker_enrichment_rows(
                             raw_action=rolling2_action,
                             reason=rolling2_reason,
                             extra_raw_fields=extra_raw_fields,
+                            high_exit_risk_days_count_override=typed_high_exit_risk_days_count,
                         )
                     )
                     continue
@@ -442,7 +462,10 @@ def build_dashboard_rows_from_ticker_enrichment_rows(
                 )
                 extra_raw_fields["rolling_5_pullback_state"] = mirrored_rolling5_status
                 extra_raw_fields["rolling_5d_status"] = mirrored_rolling5_status
-                if _normalized_text(rolling5_row.get("pullback_days")) is not None:
+                positive_pullback_days = _resolved_positive_pullback_days(rolling5_row)
+                if positive_pullback_days is not None:
+                    extra_raw_fields["pullback_days"] = positive_pullback_days
+                elif _normalized_text(rolling5_row.get("pullback_days")) is not None:
                     extra_raw_fields["pullback_days"] = rolling5_row.get("pullback_days")
                 horizon_source = (
                     "rolling_5_pullback_state"
@@ -467,7 +490,10 @@ def build_dashboard_rows_from_ticker_enrichment_rows(
                 mirrored_rolling5_status = _normalized_text(row.get("rolling_5_pullback_state")) or status_value
                 extra_raw_fields["rolling_5_pullback_state"] = mirrored_rolling5_status
                 extra_raw_fields["rolling_5d_status"] = _normalized_text(row.get("rolling_5d_status")) or mirrored_rolling5_status
-                if _normalized_text(row.get("pullback_days")) is not None:
+                positive_pullback_days = _resolved_positive_pullback_days(row)
+                if positive_pullback_days is not None:
+                    extra_raw_fields["pullback_days"] = positive_pullback_days
+                elif _normalized_text(row.get("pullback_days")) is not None:
                     extra_raw_fields["pullback_days"] = row.get("pullback_days")
             dashboard_rows.append(
                 _build_row(

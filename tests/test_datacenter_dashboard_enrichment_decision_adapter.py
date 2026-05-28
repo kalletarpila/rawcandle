@@ -9,6 +9,7 @@ from dev_tools.datacenter_dashboard_enrichment_decision_adapter import (
     build_decisions_from_ticker_enrichment_rows,
     load_ticker_enrichment_rows,
 )
+from dev_tools.datacenter_dashboard_decisions import _collect_text_values, _row_has_pullback_context
 
 
 def test_adapter_builds_dashboard_rows_from_minimal_enrichment_row():
@@ -868,6 +869,7 @@ def test_rolling2_helper_high_exit_risk_days_overrides_rolling_2d_high_exit_risk
     daily_row = next(row for row in rows if row.horizon == "daily")
     rolling_2d_row = next(row for row in rows if row.horizon == "rolling 2d")
     assert daily_row.raw_fields["high_exit_risk_days_count"] == "30"
+    assert rolling_2d_row.high_exit_risk_days_count == 2
     assert rolling_2d_row.raw_fields["high_exit_risk_days"] == "2"
     assert rolling_2d_row.raw_fields["high_exit_risk_days_count"] == "2"
 
@@ -884,6 +886,7 @@ def test_rolling_2d_high_exit_risk_days_count_falls_back_without_rolling2_payloa
     )
 
     rolling_2d_row = next(row for row in rows if row.horizon == "rolling 2d")
+    assert rolling_2d_row.high_exit_risk_days_count == 30
     assert rolling_2d_row.raw_fields["high_exit_risk_days_count"] == "30"
 
 
@@ -956,6 +959,7 @@ def test_decision_integration_can_see_rolling2_payload_context():
     }
     rows = build_dashboard_rows_from_ticker_enrichment_rows([row])
     rolling_2d_row = next(candidate for candidate in rows if candidate.horizon == "rolling 2d")
+    assert rolling_2d_row.high_exit_risk_days_count == 1
     assert rolling_2d_row.raw_fields["high_exit_risk_days_count"] == "1"
 
     result = build_decisions_from_ticker_enrichment_rows([row])
@@ -985,6 +989,86 @@ def test_pullback_days_is_exposed_on_rolling_5d_companion_row_from_upstream_payl
     rolling_row = next(row for row in rows if row.horizon == "rolling 5d")
     assert rolling_row.raw_status == "PULLBACK_CANDIDATE"
     assert rolling_row.raw_fields["pullback_days"] == "3"
+    assert _row_has_pullback_context(rolling_row, _collect_text_values(rolling_row)) is True
+
+
+def test_positive_pullback_context_can_be_mirrored_from_alternate_upstream_pullback_counts():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "rolling_5d_status": "EARLY_PULLBACK",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "rolling_5_pullback_state": "EARLY_PULLBACK",
+                        "pullback_days": 0,
+                        "fast_ema10_pullback_days": 2,
+                        "conservative_ema20_pullback_days": 1,
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    rolling_row = next(row for row in rows if row.horizon == "rolling 5d")
+    assert rolling_row.raw_status == "EARLY_PULLBACK"
+    assert rolling_row.raw_fields["pullback_days"] == "2"
+    assert _row_has_pullback_context(rolling_row, _collect_text_values(rolling_row)) is True
+
+
+def test_no_pullback_state_does_not_create_pullback_context_without_positive_evidence():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "rolling_5d_status": "NO_PULLBACK",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "rolling_5_pullback_state": "NO_PULLBACK",
+                        "pullback_days": 0,
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    rolling_row = next(row for row in rows if row.horizon == "rolling 5d")
+    assert rolling_row.raw_status == "NO_PULLBACK"
+    assert rolling_row.raw_fields["pullback_days"] == "0"
+    assert _row_has_pullback_context(rolling_row, _collect_text_values(rolling_row)) is False
+
+
+def test_decision_integration_does_not_stop_at_no_pullback_context_when_payload_has_positive_pullback_evidence():
+    result = build_decisions_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "NEUTRAL_MONITOR",
+                "ma_break_status": "OK",
+                "freshness_status": "FRESH_BULLISH_SIGNAL",
+                "trend_state": "UP",
+                "latest_structure_label": "HH",
+                "latest_bos_event_type": "BOS_UP",
+                "rolling_5d_status": "EARLY_PULLBACK",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "rolling_5_pullback_state": "EARLY_PULLBACK",
+                        "pullback_days": 0,
+                        "fast_ema10_pullback_days": 2,
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    decision = result.decisions[0]
+    assert decision.pullback_validity != "NO_PULLBACK"
 
 
 def test_rolling_5d_status_is_mirrored_under_both_names():
