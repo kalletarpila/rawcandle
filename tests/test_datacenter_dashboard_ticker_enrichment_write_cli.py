@@ -1693,6 +1693,104 @@ def test_shared_rolling2_helper_output_is_preserved_in_source_run_ids_payload(tm
     assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.rolling2_payload_rows=1" in output
 
 
+def test_shared_rolling30_helper_output_is_preserved_in_source_run_ids_payload(tmp_path, monkeypatch, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(
+        db_path,
+        ticker="AAA",
+        pullback_signal=1,
+        ticker_trend_state="UP",
+    )
+
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_ticker_enrichment_write.build_rolling_30_role_rows_from_base_rows",
+        lambda rows: (
+            [
+                {
+                    "ticker": "AAA",
+                    "rolling_30_buy_state": "BUY_ZONE",
+                    "current_watchlist_status": "PULLBACK_CANDIDATE",
+                    "window_watchlist_status": "PULLBACK_CANDIDATE",
+                    "breakout_days": 0,
+                    "pullback_days": 3,
+                    "exit_risk_days": 0,
+                    "primary_reason": "UP_STRUCTURE_WITH_PULLBACK_CONTEXT",
+                    "blocking_reason": "",
+                    "latest_ticker_trend_state": "UP",
+                    "latest_structure_label": "HH",
+                    "latest_bos_event_type": "BOS_UP",
+                    "latest_bos_freshness": "FRESH",
+                    "latest_reset_reason": None,
+                    "latest_reset_freshness": None,
+                    "latest_bullish_relevance_class": "RELEVANT",
+                    "latest_bullish_relevance_reason": "ok",
+                    "latest_bearish_relevance_class": None,
+                    "latest_bearish_relevance_reason": None,
+                }
+            ],
+            [],
+        ),
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    row = _destination_rows(db_path)[0]
+    assert row["rolling_30d_status"] == "BUY_ZONE"
+    payload = json.loads(row["source_run_ids"].split(":", 1)[1])
+    assert payload["rolling30"]["rolling_30_buy_state"] == "BUY_ZONE"
+    assert payload["rolling30"]["pullback_days"] == 3
+    assert payload["rolling30"]["current_watchlist_status"] == "PULLBACK_CANDIDATE"
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.rolling30_helper_rows=1" in output
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.rolling30_payload_rows=1" in output
+
+
+def test_rolling30_helper_fallback_keeps_status_empty_when_helper_output_missing(
+    tmp_path, monkeypatch, capsys
+):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(db_path, ticker="AAA")
+
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_ticker_enrichment_write.build_rolling_30_role_rows_from_base_rows",
+        lambda rows: ([], []),
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    row = _destination_rows(db_path)[0]
+    assert row["rolling_30d_status"] is None
+    assert '"rolling30":' not in str(row["source_run_ids"] or "")
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.rolling30_payload_rows=0" in output
+
+
 def test_rolling_2d_status_maps_to_watch_pressure_from_medium_risk_without_bos_down(
     tmp_path, capsys
 ):

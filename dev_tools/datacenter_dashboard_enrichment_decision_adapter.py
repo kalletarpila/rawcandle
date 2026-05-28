@@ -59,8 +59,11 @@ RAW_FIELD_NAMES: tuple[str, ...] = (
     "candidate_priority_label",
     "distance_to_ema20",
     "pullback_days",
+    "breakout_days",
     "fast_ema10_pullback_days",
     "conservative_ema20_pullback_days",
+    "current_watchlist_status",
+    "window_watchlist_status",
     "high_exit_risk_days_count",
     "high_exit_risk_days",
     "medium_exit_risk_days",
@@ -88,6 +91,7 @@ RAW_FIELD_NAMES: tuple[str, ...] = (
     "latest_bearish_relevance_class",
     "latest_bearish_relevance_reason",
     "rolling_5_pullback_state",
+    "rolling_30_buy_state",
     "blocking_reason",
     "next_action",
     "rolling_5d_primary_reason",
@@ -103,6 +107,7 @@ UPSTREAM_ROLLING5_PAYLOAD_PREFIX = "UPSTREAM_ROLLING5_JSON:"
 MA_BREAK_PAYLOAD_KEY = "ma_break"
 FRESHNESS_PAYLOAD_KEY = "freshness"
 ROLLING2_PAYLOAD_KEY = "rolling2"
+ROLLING30_PAYLOAD_KEY = "rolling30"
 
 
 def _normalized_text(value: object) -> str | None:
@@ -171,6 +176,11 @@ def _freshness_payload(payload: dict[str, object]) -> dict[str, object]:
 
 def _rolling2_payload(payload: dict[str, object]) -> dict[str, object]:
     value = payload.get(ROLLING2_PAYLOAD_KEY)
+    return value if isinstance(value, dict) else {}
+
+
+def _rolling30_payload(payload: dict[str, object]) -> dict[str, object]:
+    value = payload.get(ROLLING30_PAYLOAD_KEY)
     return value if isinstance(value, dict) else {}
 
 
@@ -365,6 +375,7 @@ def build_dashboard_rows_from_ticker_enrichment_rows(
                 continue
             extra_raw_fields: dict[str, object] = {}
             rolling2_payload = _rolling2_payload(decoded_payload)
+            rolling30_payload = _rolling30_payload(decoded_payload)
             if horizon == "rolling 2d":
                 high_exit_risk_days_count = row.get("high_exit_risk_days_count")
                 if rolling2_payload:
@@ -446,6 +457,51 @@ def build_dashboard_rows_from_ticker_enrichment_rows(
                     continue
                 if _normalized_text(high_exit_risk_days_count) is not None:
                     extra_raw_fields["high_exit_risk_days_count"] = high_exit_risk_days_count
+            if horizon == "rolling 30d" and rolling30_payload:
+                rolling30_row = dict(row)
+                rolling30_row.update(rolling30_payload)
+                rolling30_status = _normalized_text(
+                    rolling30_payload.get("rolling_30_buy_state")
+                ) or status_value
+                rolling30_reason = _normalized_text(rolling30_payload.get("primary_reason"))
+                rolling30_blocking_reasons = _normalized_text(
+                    rolling30_payload.get("blocking_reason")
+                )
+                for key in (
+                    "rolling_30_buy_state",
+                    "current_watchlist_status",
+                    "window_watchlist_status",
+                    "breakout_days",
+                    "pullback_days",
+                    "exit_risk_days",
+                    "primary_reason",
+                    "blocking_reason",
+                    "latest_ticker_trend_state",
+                    "latest_structure_label",
+                    "latest_bos_event_type",
+                    "latest_bos_freshness",
+                    "latest_reset_reason",
+                    "latest_reset_freshness",
+                    "latest_bullish_relevance_class",
+                    "latest_bullish_relevance_reason",
+                    "latest_bearish_relevance_class",
+                    "latest_bearish_relevance_reason",
+                ):
+                    if _normalized_text(rolling30_payload.get(key)) is not None:
+                        extra_raw_fields[key] = rolling30_payload.get(key)
+                dashboard_rows.append(
+                    _build_row(
+                        row=rolling30_row,
+                        horizon=horizon,
+                        row_kind="ticker_enrichment_horizon",
+                        raw_status=rolling30_status,
+                        horizon_source_field="rolling_30d_status",
+                        reason=rolling30_reason,
+                        blocking_reasons=rolling30_blocking_reasons,
+                        extra_raw_fields=extra_raw_fields,
+                    )
+                )
+                continue
             if horizon == "rolling 5d" and upstream_payload:
                 rolling5_row = dict(row)
                 rolling5_row.update(upstream_payload)

@@ -992,6 +992,91 @@ def test_pullback_days_is_exposed_on_rolling_5d_companion_row_from_upstream_payl
     assert _row_has_pullback_context(rolling_row, _collect_text_values(rolling_row)) is True
 
 
+def test_pullback_days_is_exposed_on_rolling_30d_companion_row_from_payload():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "NEUTRAL_MONITOR",
+                "rolling_30d_status": "BUY_ZONE",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "rolling30": {
+                            "rolling_30_buy_state": "BUY_ZONE",
+                            "pullback_days": 3,
+                            "breakout_days": 0,
+                            "exit_risk_days": 0,
+                            "current_watchlist_status": "PULLBACK_CANDIDATE",
+                            "window_watchlist_status": "PULLBACK_CANDIDATE",
+                            "primary_reason": "UP_STRUCTURE_WITH_PULLBACK_CONTEXT",
+                            "blocking_reason": "",
+                        }
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    rolling_row = next(row for row in rows if row.horizon == "rolling 30d")
+    assert rolling_row.raw_status == "BUY_ZONE"
+    assert rolling_row.reason == "UP_STRUCTURE_WITH_PULLBACK_CONTEXT"
+    assert rolling_row.raw_fields["pullback_days"] == "3"
+    assert rolling_row.raw_fields["current_watchlist_status"] == "PULLBACK_CANDIDATE"
+    assert _row_has_pullback_context(rolling_row, _collect_text_values(rolling_row)) is True
+
+
+def test_decision_integration_can_see_rolling_30d_pullback_context():
+    result = build_decisions_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "NEUTRAL_MONITOR",
+                "rolling_30d_status": "BUY_ZONE",
+                "trend_state": "UP",
+                "latest_structure_label": "HH",
+                "latest_bos_event_type": "BOS_UP",
+                "freshness_status": "FRESH_BULLISH_SIGNAL",
+                "ma_break_status": "OK",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "rolling30": {
+                            "rolling_30_buy_state": "BUY_ZONE",
+                            "pullback_days": 3,
+                            "breakout_days": 0,
+                            "exit_risk_days": 0,
+                            "current_watchlist_status": "PULLBACK_CANDIDATE",
+                            "window_watchlist_status": "PULLBACK_CANDIDATE",
+                            "primary_reason": "UP_STRUCTURE_WITH_PULLBACK_CONTEXT",
+                            "blocking_reason": "",
+                        }
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    decision = result.decisions[0]
+    assert decision.pullback_validity != "NO_PULLBACK"
+    assert decision.pullback_reason != "NO_PULLBACK_CONTEXT"
+
+
+def test_no_rolling_30d_row_is_emitted_when_status_and_payload_are_missing():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "NEUTRAL_MONITOR",
+            }
+        ]
+    )
+
+    assert not any(row.horizon == "rolling 30d" for row in rows)
+
+
 def test_positive_pullback_context_can_be_mirrored_from_alternate_upstream_pullback_counts():
     rows = build_dashboard_rows_from_ticker_enrichment_rows(
         [

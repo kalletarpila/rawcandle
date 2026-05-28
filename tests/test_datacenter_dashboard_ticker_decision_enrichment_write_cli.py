@@ -742,8 +742,10 @@ def test_ticker_enrichment_then_decision_writer_uses_mapped_pullback_context(
     row = _fetch_row(db_path, "AAA")
     assert decision_exit_code == 0
     assert row["rolling_5d_status"] == "PULLBACK_CANDIDATE"
+    assert row["rolling_30d_status"] == "BUY_ZONE"
+    assert row["action"] == "BUY_NOW"
     assert row["pullback_validity"] == "VALID_PULLBACK"
-    assert row["entry_readiness"] == "READY_TO_WATCH"
+    assert row["entry_readiness"] == "INSUFFICIENT_DATA"
 
 
 def test_ticker_enrichment_then_decision_writer_uses_lookback_pullback_context(
