@@ -45,6 +45,7 @@ from .swing_ma_break_status import (
     load_ticker_ma_history_rows,
 )
 from .rolling5_pullback_classifier import classify_rolling_5_pullback_row
+from .rolling2_sell_pressure_classifier import classify_rolling_2_sell_pressure_row
 from .swing_signal_freshness import (
     build_swing_signal_freshness_rows,
     load_ticker_signal_freshness_history_rows,
@@ -495,132 +496,6 @@ def _classify_rolling_30_exit_row(row: dict[str, object]) -> tuple[str, str, str
     return "NORMAL", "NO_MEANINGFUL_EXIT_RISK", ""
 
 
-def _classify_rolling_2_sell_pressure_row(row: dict[str, object]) -> tuple[str, str, str, str]:
-    if row.get("last_price_data_status") in WATCHLIST_MISSING_PRICE_STATUSES or row.get("all_price_rows_missing") is True:
-        return "INSUFFICIENT_DATA", "MISSING_PRICE_CONTEXT", "", "WAIT_FOR_DATA"
-
-    ticker = str(row.get("ticker") or "").strip()
-    if not ticker:
-        return "INSUFFICIENT_DATA", "MISSING_TICKER_CONTEXT", "", "WAIT_FOR_DATA"
-
-    current_watchlist_status = row.get("current_watchlist_status")
-    window_watchlist_status = row.get("window_watchlist_status")
-    exit_risk_days = int(row.get("exit_risk_days") or 0)
-    high_exit_risk_days = int(row.get("high_exit_risk_days") or 0)
-    medium_exit_risk_days = int(row.get("medium_exit_risk_days") or 0)
-    latest_exit_severity = row.get("last_exit_risk_severity")
-    latest_exit_reason = row.get("last_exit_reason")
-    trend_state = row.get("last_ticker_trend_state")
-    latest_bearish_relevance_class = row.get("latest_bearish_relevance_class")
-    has_fresh_bos_down = _has_fresh_bos_down(row)
-    has_fresh_reset = _has_fresh_reset(row)
-    current_high_exit_risk = _is_high_exit_risk_status(current_watchlist_status)
-    current_medium_or_group_risk = _is_group_or_medium_risk_status(current_watchlist_status)
-    window_medium_or_group_risk = _is_group_or_medium_risk_status(window_watchlist_status)
-    has_strong_breakdown_reason = _has_exit_reason_token(
-        latest_exit_reason,
-        "close_below_ema20",
-        "return_10d_lt_minus_8pct",
-        "latest_structure_label_ll",
-        "trim_watch_close_below_ma10",
-        "subindustry_exit_zone",
-    )
-    has_relevant_bearish_context = latest_bearish_relevance_class == "RELEVANT"
-    has_weak_bearish_context = latest_bearish_relevance_class == "WEAK_CONTEXT"
-    has_extreme_or_critical_severity = _has_explicit_extreme_exit_severity(latest_exit_severity)
-    has_structural_breakdown_label = _has_structural_breakdown_label(row.get("last_latest_structure_label"))
-    has_structure_label_breakdown_reason = _has_exit_reason_token(latest_exit_reason, "latest_structure_label_ll")
-    has_close_below_ema20_reason = _has_exit_reason_token(latest_exit_reason, "close_below_ema20")
-    has_return_10d_pressure_reason = _has_exit_reason_token(latest_exit_reason, "return_10d_lt_minus_8pct")
-    has_double_breakdown_reason = has_close_below_ema20_reason and has_return_10d_pressure_reason
-    has_emergency_structure_confirmation = (
-        trend_state == "DOWN"
-        or has_structural_breakdown_label
-        or has_fresh_bos_down
-        or has_fresh_reset
-        or has_structure_label_breakdown_reason
-        or has_double_breakdown_reason
-    )
-
-    if (
-        (has_extreme_or_critical_severity and exit_risk_days >= 1)
-        or (
-            exit_risk_days >= 2
-            and (high_exit_risk_days >= 2 or current_high_exit_risk)
-            and latest_exit_severity == "HIGH"
-            and has_emergency_structure_confirmation
-        )
-        or (has_fresh_bos_down and has_fresh_reset and exit_risk_days >= 1)
-        or (has_relevant_bearish_context and current_high_exit_risk)
-    ):
-        risk_reason = (
-            "CRITICAL_OR_EXTREME_EXIT_SEVERITY"
-            if has_extreme_or_critical_severity and exit_risk_days >= 1
-            else "HIGH_PRESSURE_WITH_STRUCTURAL_BREAKDOWN"
-            if (
-                exit_risk_days >= 2
-                and (high_exit_risk_days >= 2 or current_high_exit_risk)
-                and latest_exit_severity == "HIGH"
-                and has_emergency_structure_confirmation
-            )
-            else "FRESH_BOS_DOWN_AND_RESET"
-            if has_fresh_bos_down and has_fresh_reset and exit_risk_days >= 1
-            else "RELEVANT_BEARISH_CONTEXT_WITH_CURRENT_HIGH_EXIT_RISK"
-        )
-        return "EMERGENCY_SELL_PRESSURE", "CONFIRMED_TWO_DAY_SELL_PRESSURE", risk_reason, "CHECK_STOP_OR_REDUCE"
-
-    if (
-        (exit_risk_days >= 2 and high_exit_risk_days >= 2 and latest_exit_severity == "HIGH")
-        or (exit_risk_days >= 2 and latest_exit_severity in {"MEDIUM", "HIGH"})
-        or (high_exit_risk_days >= 1 and (has_close_below_ema20_reason or has_return_10d_pressure_reason))
-        or (has_relevant_bearish_context and exit_risk_days >= 1)
-        or (has_fresh_bos_down and exit_risk_days >= 1)
-    ):
-        risk_reason = (
-            "TWO_DAY_HIGH_PRESSURE_WITHOUT_FULL_BREAKDOWN"
-            if exit_risk_days >= 2 and high_exit_risk_days >= 2 and latest_exit_severity == "HIGH"
-            else "EXIT_RISK_PERSISTENT_TWO_DAYS"
-            if exit_risk_days >= 2 and latest_exit_severity in {"MEDIUM", "HIGH"}
-            else "BREAKDOWN_REASON_WITH_HIGH_EXIT_DAY"
-            if high_exit_risk_days >= 1 and (has_close_below_ema20_reason or has_return_10d_pressure_reason)
-            else "RELEVANT_BEARISH_CONTEXT"
-            if has_relevant_bearish_context and exit_risk_days >= 1
-            else "FRESH_BOS_DOWN"
-        )
-        return "SHARP_2D_DROP", "SHARP_SHORT_TERM_DROP", risk_reason, "TIGHTEN_STOP_REVIEW_DAILY_TRIGGER"
-
-    if (
-        exit_risk_days >= 1
-        or medium_exit_risk_days >= 1
-        or latest_exit_severity not in {None, "", "NULL"}
-        or has_weak_bearish_context
-        or current_medium_or_group_risk
-        or window_medium_or_group_risk
-        or current_high_exit_risk
-        or _is_negative_ema20_context(row.get("last_distance_to_ema20_pct"))
-    ):
-        risk_reason = (
-            "EXIT_RISK_PRESENT"
-            if exit_risk_days >= 1 and latest_exit_severity in {None, "", "NULL"}
-            else "MEDIUM_EXIT_RISK"
-            if medium_exit_risk_days >= 1 or latest_exit_severity == "MEDIUM"
-            else "GROUP_RISK"
-            if current_watchlist_status == "GROUP_RISK" or window_watchlist_status == "GROUP_RISK"
-            else "CURRENT_HIGH_EXIT_RISK"
-            if current_high_exit_risk
-            else "WEAK_BEARISH_CONTEXT"
-            if has_weak_bearish_context
-            else "NEGATIVE_EMA20_DISTANCE"
-            if _is_negative_ema20_context(row.get("last_distance_to_ema20_pct"))
-            else "WINDOW_MEDIUM_EXIT_RISK"
-            if window_watchlist_status == "MEDIUM_EXIT_RISK"
-            else "MILD_EXIT_RISK_SEVERITY"
-        )
-        return "WATCH_PRESSURE", "MILD_OR_UNCONFIRMED_SELL_PRESSURE", risk_reason, "MONITOR_NEXT_SESSION"
-
-    return "NO_EMERGENCY", "NO_TWO_DAY_SELL_PRESSURE", "", "NONE"
-
-
 def _build_rolling_30_role_rows(
     *,
     ticker_rows: Sequence[dict[str, object]],
@@ -822,11 +697,11 @@ def _build_rolling_2_sell_pressure_rows(
 
     pressure_rows: list[dict[str, object]] = []
     for row in base_rows:
-        state, primary_reason, risk_reason, next_action = _classify_rolling_2_sell_pressure_row(row)
+        classification = classify_rolling_2_sell_pressure_row(row)
         pressure_rows.append(
             {
                 "ticker": row.get("ticker"),
-                "rolling_2_sell_pressure_state": state,
+                "rolling_2_sell_pressure_state": classification.rolling_2_sell_pressure_state,
                 "primary_layer": row.get("primary_layer"),
                 "primary_subindustry": row.get("primary_subindustry"),
                 "window_watchlist_status": row.get("window_watchlist_status"),
@@ -844,9 +719,9 @@ def _build_rolling_2_sell_pressure_rows(
                 "latest_reset_freshness": row.get("last_latest_reset_freshness"),
                 "latest_bearish_relevance_class": row.get("latest_bearish_relevance_class"),
                 "latest_bearish_relevance_reason": row.get("latest_bearish_relevance_reason"),
-                "primary_reason": primary_reason,
-                "risk_reason": risk_reason,
-                "next_action": next_action,
+                "primary_reason": classification.primary_reason,
+                "risk_reason": classification.risk_reason,
+                "next_action": classification.next_action,
             }
         )
 
