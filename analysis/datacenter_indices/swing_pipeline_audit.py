@@ -273,7 +273,22 @@ def _synthetic_summary(
             SUM(CASE WHEN synthetic_close IS NULL THEN 1 ELSE 0 END) AS synthetic_missing_close_count,
             SUM(CASE WHEN ema20 IS NULL THEN 1 ELSE 0 END) AS synthetic_missing_ema20_count,
             SUM(CASE WHEN relative_close_20 IS NULL THEN 1 ELSE 0 END) AS synthetic_missing_relative_close_20_count,
-            SUM(CASE WHEN latest_structure_label IS NULL THEN 1 ELSE 0 END) AS synthetic_missing_latest_structure_label_count,
+            -- Reset intentionally clears latest_structure_label until a new pivot structure is confirmed,
+            -- so valid reset-state NULL labels are excluded from the missing-structure warning count.
+            SUM(
+                CASE
+                    WHEN latest_structure_label IS NULL
+                     AND NOT (
+                        data_quality_status = 'OK'
+                        AND trend_classification = 'NEUTRAL'
+                        AND latest_reset_event_date IS NOT NULL
+                        AND synthetic_close IS NOT NULL
+                        AND ema20 IS NOT NULL
+                        AND relative_close_20 IS NOT NULL
+                     )
+                    THEN 1 ELSE 0
+                END
+            ) AS synthetic_missing_latest_structure_label_count,
             SUM(
                 CASE
                     WHEN latest_structure_label IS NOT NULL

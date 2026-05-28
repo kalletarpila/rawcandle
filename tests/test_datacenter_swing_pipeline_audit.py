@@ -106,6 +106,11 @@ def _insert_synthetic_row(
     data_quality_status: str = "OK",
     latest_structure_label: str | None = "HH",
     latest_structure_freshness: str | None = "FRESH",
+    trend_classification: str | None = "UP",
+    synthetic_close: float | None = 100.0,
+    ema20: float | None = 98.0,
+    relative_close_20: float | None = 1.02,
+    latest_reset_event_date: str | None = None,
 ):
     with sqlite3.connect(path) as conn:
         conn.execute(
@@ -114,14 +119,24 @@ def _insert_synthetic_row(
                 ohlc_date, taxonomy_version, group_type, group_name,
                 synthetic_close, ema20, relative_close_20,
                 latest_structure_label, latest_structure_age_trading_days, latest_structure_freshness,
-                trend_classification, data_quality_status, calc_version, run_id, created_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                latest_reset_event_date, trend_classification, data_quality_status, calc_version, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                signal_date, taxonomy_version, group_type, group_name,
-                100.0, 98.0, 1.02,
+                signal_date,
+                taxonomy_version,
+                group_type,
+                group_name,
+                synthetic_close,
+                ema20,
+                relative_close_20,
                 latest_structure_label, 0 if latest_structure_label is not None else None, latest_structure_freshness,
-                "UP", data_quality_status, calc_version, "seed", "2026-05-18T10:00:00Z",
+                latest_reset_event_date,
+                trend_classification,
+                data_quality_status,
+                calc_version,
+                "seed",
+                "2026-05-18T10:00:00Z",
             ),
         )
         conn.commit()
@@ -291,6 +306,111 @@ def test_audit_reports_synthetic_missing_latest_structure_label_but_does_not_fai
 
     assert result["summary"]["synthetic_missing_latest_structure_label_count"] == 1
     assert result["summary"]["validation_status"] == "WARN"
+
+
+def test_valid_reset_state_null_structure_label_is_excluded_from_missing_count(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    _seed_complete_fixture(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_group_synthetic_ohlc_daily
+            SET latest_structure_label = NULL,
+                latest_structure_freshness = NULL,
+                trend_classification = 'NEUTRAL',
+                latest_reset_event_date = '2026-05-14'
+            WHERE ohlc_date = '2026-05-15' AND group_type = 'subindustry'
+            """
+        )
+        conn.commit()
+
+    result = load_swing_pipeline_audit(
+        analysis_db_path=analysis_db,
+        signal_date="2026-05-15",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        expected_ticker_count=2,
+        expected_group_count=3,
+        expected_synthetic_ohlc_count=2,
+    )
+
+    assert result["summary"]["synthetic_missing_latest_structure_label_count"] == 0
+    assert "synthetic_missing_latest_structure_label_count" not in result["warn_reasons"]
+    assert result["summary"]["validation_status"] == "OK"
+
+
+def test_unexpected_null_structure_label_without_reset_is_still_warned(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    _seed_complete_fixture(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_group_synthetic_ohlc_daily
+            SET latest_structure_label = NULL,
+                latest_structure_freshness = NULL,
+                trend_classification = 'NEUTRAL',
+                latest_reset_event_date = NULL
+            WHERE ohlc_date = '2026-05-15' AND group_type = 'subindustry'
+            """
+        )
+        conn.commit()
+
+    result = load_swing_pipeline_audit(
+        analysis_db_path=analysis_db,
+        signal_date="2026-05-15",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+    )
+
+    assert result["summary"]["synthetic_missing_latest_structure_label_count"] == 1
+    assert "synthetic_missing_latest_structure_label_count" in result["warn_reasons"]
+    assert result["summary"]["validation_status"] == "WARN"
+
+
+def test_incomplete_reset_state_null_structure_label_is_still_warned(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    _seed_complete_fixture(analysis_db)
+    with sqlite3.connect(analysis_db) as conn:
+        conn.execute(
+            """
+            UPDATE dc_group_synthetic_ohlc_daily
+            SET latest_structure_label = NULL,
+                latest_structure_freshness = NULL,
+                trend_classification = 'NEUTRAL',
+                latest_reset_event_date = '2026-05-14',
+                ema20 = NULL
+            WHERE ohlc_date = '2026-05-15' AND group_type = 'subindustry'
+            """
+        )
+        conn.commit()
+
+    result = load_swing_pipeline_audit(
+        analysis_db_path=analysis_db,
+        signal_date="2026-05-15",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+    )
+
+    assert result["summary"]["synthetic_missing_latest_structure_label_count"] == 1
+    assert "synthetic_missing_latest_structure_label_count" in result["warn_reasons"]
+    assert result["summary"]["validation_status"] == "WARN"
+
+
+def test_non_null_structure_label_is_not_counted_missing(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    _seed_complete_fixture(analysis_db)
+
+    result = load_swing_pipeline_audit(
+        analysis_db_path=analysis_db,
+        signal_date="2026-05-15",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        expected_ticker_count=2,
+        expected_group_count=3,
+        expected_synthetic_ohlc_count=2,
+    )
+
+    assert result["summary"]["synthetic_missing_latest_structure_label_count"] == 0
 
 
 def test_weekly_readiness_passes_with_exactly_five_valid_signal_dates(tmp_path):
