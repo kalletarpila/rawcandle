@@ -359,6 +359,35 @@ def test_field_mapping_persists_expected_values(tmp_path, capsys):
     assert nvda["high_exit_risk_days_count"] == 0
 
 
+def test_exit_reason_is_preserved_in_source_run_ids_payload(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(
+        db_path,
+        ticker="AAA",
+        exit_reason="close_below_ema20;return_10d_lt_minus_8pct",
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    assert row["source_run_ids"] is not None
+    assert '"exit_reason":"close_below_ema20;return_10d_lt_minus_8pct"' in row["source_run_ids"]
+
+
 def test_high_exit_risk_maps_to_daily_status_current_status_and_reason(tmp_path, capsys):
     db_path = tmp_path / "analysis.db"
     _create_source_and_destination_db(db_path)

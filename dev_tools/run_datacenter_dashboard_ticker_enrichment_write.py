@@ -593,10 +593,21 @@ def _build_upstream_rolling5_payload(
     *,
     existing_primary_reason: str | None,
     helper_classification: Rolling5PullbackClassification | None,
+    exit_reason: str | None = None,
+    last_exit_reason: str | None = None,
+    latest_exit_reason: str | None = None,
 ) -> dict[str, object]:
-    if not upstream_row:
-        return {}
     payload: dict[str, object] = {}
+    for key, value in (
+        ("exit_reason", exit_reason),
+        ("last_exit_reason", last_exit_reason),
+        ("latest_exit_reason", latest_exit_reason),
+    ):
+        normalized = _normalized_text(value)
+        if normalized is not None:
+            payload[key] = normalized
+    if not upstream_row:
+        return payload
     for source_key in (
         "pullback_days",
         "fast_ema10_pullback_days",
@@ -788,10 +799,12 @@ def _map_destination_row(
     latest_reset_reason = _normalized_text(row["latest_reset_reason"]) or _normalized_text(
         upstream_row.get("latest_reset_reason") if upstream_row else None
     )
+    exit_reason = _normalized_text(row["exit_reason"])
     upstream_payload = _build_upstream_rolling5_payload(
         upstream_row,
         existing_primary_reason=_derive_primary_reason(row, daily_status),
         helper_classification=rolling5_helper_classification,
+        exit_reason=exit_reason,
     )
     encoded_upstream_payload = _encode_upstream_rolling5_payload(upstream_payload)
     include_upstream_rolling5 = upstream_row is not None

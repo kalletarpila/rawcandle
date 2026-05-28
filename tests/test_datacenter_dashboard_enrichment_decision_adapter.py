@@ -538,6 +538,83 @@ def test_close_below_ema20_token_is_visible_in_adapter_raw_fields():
     assert daily_row.raw_fields["window_status_2d"] == "close_below_ema20"
 
 
+def test_exit_reason_is_exposed_on_daily_base_row_raw_fields():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "NEUTRAL_MONITOR",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "exit_reason": "close_below_ema20;return_10d_lt_minus_8pct",
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    daily_row = next(row for row in rows if row.horizon == "daily")
+    assert daily_row.raw_fields["exit_reason"] == "close_below_ema20;return_10d_lt_minus_8pct"
+
+
+def test_exit_reason_is_exposed_on_rolling_2d_row_raw_fields():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "NEUTRAL_MONITOR",
+                "rolling_2d_status": "WATCH_PRESSURE",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "exit_reason": "close_below_ema20",
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    rolling_2d_row = next(row for row in rows if row.horizon == "rolling 2d")
+    assert rolling_2d_row.raw_fields["exit_reason"] == "close_below_ema20"
+
+
+def test_decision_integration_sees_exit_reason_close_below_ema20_token():
+    result = build_decisions_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "NEUTRAL_MONITOR",
+                "rolling_2d_status": "WATCH_PRESSURE",
+                "rolling_5d_status": "PULLBACK_CANDIDATE",
+                "ma_break_status": None,
+                "freshness_status": "FRESH_BULLISH_SIGNAL",
+                "trend_state": "UP",
+                "latest_structure_label": "HH",
+                "latest_bos_event_type": "BOS_UP",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "exit_reason": "close_below_ema20",
+                        "rolling_5_pullback_state": "PULLBACK_CANDIDATE",
+                        "pullback_days": 2,
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    decision = result.decisions[0]
+    assert any(
+        "close_below_ema20" in (trace.matched_value or "").lower()
+        or "close_below_ema20" in (trace.matched_token or "").lower()
+        for trace in decision.decision_trace
+    )
+
+
 def test_high_exit_risk_days_count_is_exposed_in_raw_fields_and_seen_by_decision_logic():
     rows = build_dashboard_rows_from_ticker_enrichment_rows(
         [

@@ -187,6 +187,34 @@ def test_enrichment_lacks_token_hypothesis(tmp_path, monkeypatch, capsys):
     assert "hypothesis_summary;ENRICHMENT_LACKS_CLOSE_BELOW_EMA20_TOKEN;LIKELY;" in output
 
 
+def test_enrichment_close_below_ema20_count_increases_when_exit_reason_is_exposed(tmp_path, monkeypatch, capsys):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    reports_snapshot = _snapshot([{"ticker": "AAA", "pullback_validity": "VALID_PULLBACK"}])
+    enrichment_snapshot = _snapshot([{"ticker": "AAA", "pullback_validity": "NO_PULLBACK"}])
+
+    exit_code, output, _ = _run_cli(
+        capsys,
+        monkeypatch,
+        analysis_db=analysis_db,
+        reports_snapshot=reports_snapshot,
+        enrichment_snapshot=enrichment_snapshot,
+        reports_rows=[_row(ticker="AAA", horizon="daily", raw_fields={"close_below_ema20": "1"})],
+        enrichment_table_rows=[{"ticker": "AAA"}],
+        enrichment_adapter_rows=[
+            _row(
+                ticker="AAA",
+                horizon="daily",
+                raw_fields={"exit_reason": "close_below_ema20"},
+            )
+        ],
+        source_rows_by_ticker={"AAA": {}},
+    )
+
+    assert exit_code == 0
+    assert "SUMMARY datacenter_dashboard_close_below_ema20_source_audit.enrichment_close_below_ema20_tickers=1" in output
+
+
 def test_distance_derivation(tmp_path, monkeypatch, capsys):
     analysis_db = tmp_path / "analysis.db"
     _create_analysis_db(analysis_db)
