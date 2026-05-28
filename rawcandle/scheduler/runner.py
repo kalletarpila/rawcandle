@@ -138,6 +138,19 @@ class DatacenterPostStepConfig:
 
 
 @dataclass(frozen=True)
+class DatacenterSignalDateResolution:
+    signal_date: Optional[str]
+    requested_calendar_signal_date: str
+    signal_date_source: str
+    signal_date_resolution: str
+    min_price_ticker_count: int
+    candidate_count: int
+    ticker_valid_date_count: int
+    group_valid_date_count: int
+    skip_reason: str
+
+
+@dataclass(frozen=True)
 class DatacenterPostStepResult:
     attempted: int
     status: str
@@ -423,6 +436,124 @@ def _resolve_latest_valid_ohlcv_date_for_market(
     if row is None or row[0] is None:
         return None
     return str(row[0])
+
+
+def _count_primary_ticker_prices_for_date(
+    *,
+    price_db_path: str,
+    market: str,
+    signal_date: str,
+    primary_tickers: list[str],
+) -> int:
+    if not primary_tickers:
+        return 0
+    normalized_market = market.strip().lower()
+    placeholders = ", ".join("?" for _ in primary_tickers)
+    params: list[object] = [signal_date, normalized_market, *primary_tickers]
+    with sqlite3.connect(price_db_path) as conn:
+        row = conn.execute(
+            f"""
+            SELECT COUNT(DISTINCT UPPER(TRIM(osake)))
+            FROM osakedata
+            WHERE pvm = ?
+              AND market = ?
+              AND close IS NOT NULL
+              AND UPPER(TRIM(osake)) IN ({placeholders})
+            """,
+            params,
+        ).fetchone()
+    if row is None or row[0] is None:
+        return 0
+    return int(row[0])
+
+
+def _resolve_datacenter_signal_date(
+    *,
+    price_db_path: str,
+    analysis_db_path: str,
+    market: str,
+    taxonomy_csv_path: str,
+    taxonomy_version: str,
+    start_date: str,
+    requested_calendar_signal_date: str,
+    expected_ticker_count: int,
+) -> DatacenterSignalDateResolution:
+    from analysis.datacenter_indices.swing_group_persistence import (
+        _load_valid_group_index_dates,
+    )
+    from analysis.datacenter_indices.swing_ticker_persistence import (
+        _load_primary_tickers_for_taxonomy_version,
+        load_valid_price_dates_for_market,
+    )
+
+    min_price_ticker_count = max(25, expected_ticker_count // 4)
+    signal_date_source = "DOWNSTREAM_VALID_DATE"
+    signal_date_resolution = "TICKER_AND_GROUP_VALID_DATE_WITH_MIN_TICKER_COUNT"
+    normalized_taxonomy_csv_path = str((_repo_root() / taxonomy_csv_path).resolve())
+
+    ticker_valid_dates = load_valid_price_dates_for_market(
+        price_db_path=price_db_path,
+        start_date=start_date,
+        end_date=requested_calendar_signal_date,
+        market=market,
+        taxonomy_csv_path=normalized_taxonomy_csv_path,
+        taxonomy_version=taxonomy_version,
+    )
+    group_valid_dates = _load_valid_group_index_dates(
+        analysis_db_path=analysis_db_path,
+        start_date=start_date,
+        end_date=requested_calendar_signal_date,
+        taxonomy_versions=[taxonomy_version],
+    )
+    primary_tickers = _load_primary_tickers_for_taxonomy_version(
+        normalized_taxonomy_csv_path,
+        taxonomy_version,
+    )
+
+    candidate_dates = sorted(
+        {
+            str(date_value)
+            for date_value in ticker_valid_dates
+            if date_value in set(group_valid_dates)
+        },
+        reverse=True,
+    )
+    for candidate_date in candidate_dates:
+        if candidate_date > requested_calendar_signal_date:
+            continue
+        if (
+            _count_primary_ticker_prices_for_date(
+                price_db_path=price_db_path,
+                market=market,
+                signal_date=candidate_date,
+                primary_tickers=primary_tickers,
+            )
+            < min_price_ticker_count
+        ):
+            continue
+        return DatacenterSignalDateResolution(
+            signal_date=candidate_date,
+            requested_calendar_signal_date=requested_calendar_signal_date,
+            signal_date_source=signal_date_source,
+            signal_date_resolution=signal_date_resolution,
+            min_price_ticker_count=min_price_ticker_count,
+            candidate_count=len(candidate_dates),
+            ticker_valid_date_count=len(ticker_valid_dates),
+            group_valid_date_count=len(group_valid_dates),
+            skip_reason="",
+        )
+
+    return DatacenterSignalDateResolution(
+        signal_date=None,
+        requested_calendar_signal_date=requested_calendar_signal_date,
+        signal_date_source=signal_date_source,
+        signal_date_resolution=signal_date_resolution,
+        min_price_ticker_count=min_price_ticker_count,
+        candidate_count=len(candidate_dates),
+        ticker_valid_date_count=len(ticker_valid_dates),
+        group_valid_date_count=len(group_valid_dates),
+        skip_reason="NO_DOWNSTREAM_VALID_DATACENTER_SIGNAL_DATE",
+    )
 
 
 def _resolve_market_technical_relevance_tickers(
@@ -1515,10 +1646,17 @@ def _run_datacenter_post_step(
 
     started_at = _utc_now()
     requested_calendar_signal_date = _previous_calendar_date(effective_today)
-    signal_date = _resolve_latest_valid_ohlcv_date_for_market(
-        config.osakedata_db_path,
-        resolved.market,
+    signal_date_resolution = _resolve_datacenter_signal_date(
+        price_db_path=config.osakedata_db_path,
+        analysis_db_path=config.analysis_db_path,
+        market=resolved.market,
+        taxonomy_csv_path=resolved.taxonomy_csv,
+        taxonomy_version=resolved.taxonomy_version,
+        start_date=resolved.start_date,
+        requested_calendar_signal_date=requested_calendar_signal_date,
+        expected_ticker_count=resolved.expected_ticker_count,
     )
+    signal_date = signal_date_resolution.signal_date
     log_dir = Path(config.log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = _build_datacenter_log_path(log_dir, resolved.market, started_at)
@@ -1530,11 +1668,15 @@ def _run_datacenter_post_step(
             f"market={resolved.market}",
             f"requested_calendar_signal_date={requested_calendar_signal_date}",
             "signal_date=NONE",
-            "signal_date_source=LATEST_VALID_OHLCV_DATE",
-            "signal_date_resolution=LATEST_VALID_OHLCV_DATE",
+            f"signal_date_source={signal_date_resolution.signal_date_source}",
+            f"signal_date_resolution={signal_date_resolution.signal_date_resolution}",
+            f"signal_date_min_price_ticker_count={signal_date_resolution.min_price_ticker_count}",
+            f"signal_date_candidate_count={signal_date_resolution.candidate_count}",
+            f"ticker_valid_date_count={signal_date_resolution.ticker_valid_date_count}",
+            f"group_valid_date_count={signal_date_resolution.group_valid_date_count}",
             f"osakedata_db_path={config.osakedata_db_path}",
             f"analysis_db_path={config.analysis_db_path}",
-            "skip_reason=NO_VALID_OHLCV_DATE_FOR_MARKET",
+            f"skip_reason={signal_date_resolution.skip_reason}",
         ]
         log_path.write_text("\n".join(log_lines) + "\n", encoding="utf-8")
         return DatacenterPostStepResult(
@@ -1544,10 +1686,10 @@ def _run_datacenter_post_step(
             audit_validation_status="SKIPPED",
             log_path=str(log_path),
             signal_date=None,
-            signal_date_source="LATEST_VALID_OHLCV_DATE",
-            signal_date_resolution="LATEST_VALID_OHLCV_DATE",
+            signal_date_source=signal_date_resolution.signal_date_source,
+            signal_date_resolution=signal_date_resolution.signal_date_resolution,
             requested_calendar_signal_date=requested_calendar_signal_date,
-            error="NO_VALID_OHLCV_DATE_FOR_MARKET",
+            error=signal_date_resolution.skip_reason,
         )
     command = [
         "python3",
@@ -1591,8 +1733,12 @@ def _run_datacenter_post_step(
         f"market={resolved.market}",
         f"requested_calendar_signal_date={requested_calendar_signal_date}",
         f"signal_date={signal_date}",
-        "signal_date_source=LATEST_VALID_OHLCV_DATE",
-        "signal_date_resolution=LATEST_VALID_OHLCV_DATE",
+        f"signal_date_source={signal_date_resolution.signal_date_source}",
+        f"signal_date_resolution={signal_date_resolution.signal_date_resolution}",
+        f"signal_date_min_price_ticker_count={signal_date_resolution.min_price_ticker_count}",
+        f"signal_date_candidate_count={signal_date_resolution.candidate_count}",
+        f"ticker_valid_date_count={signal_date_resolution.ticker_valid_date_count}",
+        f"group_valid_date_count={signal_date_resolution.group_valid_date_count}",
         f"osakedata_db_path={config.osakedata_db_path}",
         f"analysis_db_path={config.analysis_db_path}",
         f"command={' '.join(command)}",
@@ -1615,8 +1761,8 @@ def _run_datacenter_post_step(
             audit_validation_status=audit_validation_status or "UNKNOWN",
             log_path=str(log_path),
             signal_date=signal_date,
-            signal_date_source="LATEST_VALID_OHLCV_DATE",
-            signal_date_resolution="LATEST_VALID_OHLCV_DATE",
+            signal_date_source=signal_date_resolution.signal_date_source,
+            signal_date_resolution=signal_date_resolution.signal_date_resolution,
             requested_calendar_signal_date=requested_calendar_signal_date,
             daily_report_path=parsed_report_paths["daily_report_path"],
             daily_report_csv_path=parsed_report_paths["daily_report_csv_path"],
@@ -1637,8 +1783,8 @@ def _run_datacenter_post_step(
         audit_validation_status=audit_validation_status or "UNKNOWN",
         log_path=str(log_path),
         signal_date=signal_date,
-        signal_date_source="LATEST_VALID_OHLCV_DATE",
-        signal_date_resolution="LATEST_VALID_OHLCV_DATE",
+        signal_date_source=signal_date_resolution.signal_date_source,
+        signal_date_resolution=signal_date_resolution.signal_date_resolution,
         requested_calendar_signal_date=requested_calendar_signal_date,
         daily_report_path=parsed_report_paths["daily_report_path"],
         daily_report_csv_path=parsed_report_paths["daily_report_csv_path"],

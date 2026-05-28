@@ -16,6 +16,8 @@ from rawcandle.scheduler.config import (
 )
 from rawcandle.scheduler.runner import (
     DatacenterDashboardPostStepResult,
+    DatacenterPostStepConfig,
+    DatacenterSignalDateResolution,
     SchedulerDashboardConfigInspection,
     SchedulerEnrichmentPlanInspection,
     SchedulerAlreadyRunningError,
@@ -23,6 +25,7 @@ from rawcandle.scheduler.runner import (
     STATUS_OK,
     STATUS_OK_WITH_WARNINGS,
     inspect_scheduler_enrichment_plan,
+    _resolve_datacenter_signal_date,
     _resolve_market_technical_relevance_tickers,
     _resolve_latest_valid_ohlcv_date_for_market,
     acquire_scheduler_lock,
@@ -66,6 +69,62 @@ def _create_osakedata_with_rows(path, rows):
             rows,
         )
         conn.commit()
+
+
+def _create_group_index_dates_db(path, rows):
+    import sqlite3
+
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE dc_group_index_daily (
+                index_date TEXT,
+                taxonomy_version TEXT,
+                group_type TEXT,
+                group_name TEXT
+            )
+            """
+        )
+        conn.executemany(
+            """
+            INSERT INTO dc_group_index_daily (index_date, taxonomy_version, group_type, group_name)
+            VALUES (?, ?, ?, ?)
+            """,
+            rows,
+        )
+        conn.commit()
+
+
+def _write_taxonomy_csv(path: Path, rows: list[tuple[str, str, str, str, str, int, int, str]]) -> None:
+    lines = [
+        "taxonomy_version,ticker,layer,subindustry,report_group_status,is_primary,role_weight,notes"
+    ]
+    for row in rows:
+        lines.append(",".join(str(value) for value in row))
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _build_datacenter_signal_date_resolution(
+    *,
+    signal_date: str | None,
+    requested_calendar_signal_date: str,
+    candidate_count: int = 1,
+    ticker_valid_date_count: int = 1,
+    group_valid_date_count: int = 1,
+    min_price_ticker_count: int = 59,
+    skip_reason: str = "",
+) -> DatacenterSignalDateResolution:
+    return DatacenterSignalDateResolution(
+        signal_date=signal_date,
+        requested_calendar_signal_date=requested_calendar_signal_date,
+        signal_date_source="DOWNSTREAM_VALID_DATE",
+        signal_date_resolution="TICKER_AND_GROUP_VALID_DATE_WITH_MIN_TICKER_COUNT",
+        min_price_ticker_count=min_price_ticker_count,
+        candidate_count=candidate_count,
+        ticker_valid_date_count=ticker_valid_date_count,
+        group_valid_date_count=group_valid_date_count,
+        skip_reason=skip_reason,
+    )
 
 
 def _prepare_ready_datacenter_reports_dir(tmp_path, report_date: str = "2026-05-22"):
@@ -741,6 +800,219 @@ def test_resolve_market_technical_relevance_tickers_returns_sorted_market_ticker
     assert _resolve_market_technical_relevance_tickers(str(db_path), "usa") == ["AAA", "BBB"]
 
 
+def test_resolve_datacenter_signal_date_uses_latest_downstream_valid_intersection(tmp_path):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    taxonomy_csv = tmp_path / "taxonomy.csv"
+    primary_tickers = [f"TICK{i:02d}" for i in range(1, 26)]
+    _create_osakedata_with_rows(
+        osakedata_db,
+        [
+            *[
+                (ticker, "2026-05-27", 1.0, 1.0, 1.0, 1.0, 100, "usa")
+                for ticker in primary_tickers
+            ],
+            *[
+                (ticker, "2026-05-28", 1.0, 1.0, 1.0, 1.0, 100, "usa")
+                for ticker in primary_tickers
+            ],
+        ],
+    )
+    _create_group_index_dates_db(
+        analysis_db,
+        [
+            ("2026-05-27", "DC_TAXONOMY_FULL_V1", "ecosystem", "DC_ECOSYSTEM_TOTAL"),
+        ],
+    )
+    _write_taxonomy_csv(
+        taxonomy_csv,
+        [
+            ("DC_TAXONOMY_FULL_V1", ticker, "LayerA", "SubA", "CORE", 1, 1, "")
+            for ticker in primary_tickers
+        ],
+    )
+
+    resolution = _resolve_datacenter_signal_date(
+        price_db_path=str(osakedata_db),
+        analysis_db_path=str(analysis_db),
+        market="usa",
+        taxonomy_csv_path=str(taxonomy_csv),
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        start_date="2026-05-01",
+        requested_calendar_signal_date="2026-05-28",
+        expected_ticker_count=8,
+    )
+
+    assert resolution.signal_date == "2026-05-27"
+    assert resolution.signal_date_source == "DOWNSTREAM_VALID_DATE"
+    assert (
+        resolution.signal_date_resolution
+        == "TICKER_AND_GROUP_VALID_DATE_WITH_MIN_TICKER_COUNT"
+    )
+    assert resolution.candidate_count == 1
+    assert resolution.ticker_valid_date_count == 2
+    assert resolution.group_valid_date_count == 1
+    assert resolution.skip_reason == ""
+
+
+def test_resolve_datacenter_signal_date_rejects_outlier_latest_day_below_min_ticker_count(tmp_path):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    taxonomy_csv = tmp_path / "taxonomy.csv"
+    primary_tickers = [f"TICK{i:02d}" for i in range(1, 26)]
+    _create_osakedata_with_rows(
+        osakedata_db,
+        [
+            *[
+                (ticker, "2026-05-27", 1.0, 1.0, 1.0, 1.0, 100, "usa")
+                for ticker in primary_tickers
+            ],
+            (primary_tickers[0], "2026-05-28", 1.0, 1.0, 1.0, 1.0, 100, "usa"),
+            ("BTC-USD", "2026-05-28", 1.0, 1.0, 1.0, 1.0, 100, "usa"),
+        ],
+    )
+    _create_group_index_dates_db(
+        analysis_db,
+        [
+            ("2026-05-27", "DC_TAXONOMY_FULL_V1", "ecosystem", "DC_ECOSYSTEM_TOTAL"),
+            ("2026-05-28", "DC_TAXONOMY_FULL_V1", "ecosystem", "DC_ECOSYSTEM_TOTAL"),
+        ],
+    )
+    _write_taxonomy_csv(
+        taxonomy_csv,
+        [
+            ("DC_TAXONOMY_FULL_V1", ticker, "LayerA", "SubA", "CORE", 1, 1, "")
+            for ticker in primary_tickers
+        ],
+    )
+
+    resolution = _resolve_datacenter_signal_date(
+        price_db_path=str(osakedata_db),
+        analysis_db_path=str(analysis_db),
+        market="usa",
+        taxonomy_csv_path=str(taxonomy_csv),
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        start_date="2026-05-01",
+        requested_calendar_signal_date="2026-05-28",
+        expected_ticker_count=12,
+    )
+
+    assert resolution.min_price_ticker_count == 25
+    assert resolution.signal_date == "2026-05-27"
+    assert resolution.candidate_count == 2
+
+
+def test_resolve_datacenter_signal_date_never_returns_date_after_requested_calendar_signal_date(tmp_path):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    taxonomy_csv = tmp_path / "taxonomy.csv"
+    primary_tickers = [f"TICK{i:02d}" for i in range(1, 26)]
+    _create_osakedata_with_rows(
+        osakedata_db,
+        [
+            *[
+                (ticker, "2026-05-27", 1.0, 1.0, 1.0, 1.0, 100, "usa")
+                for ticker in primary_tickers
+            ],
+            *[
+                (ticker, "2026-05-28", 1.0, 1.0, 1.0, 1.0, 100, "usa")
+                for ticker in primary_tickers
+            ],
+        ],
+    )
+    _create_group_index_dates_db(
+        analysis_db,
+        [
+            ("2026-05-27", "DC_TAXONOMY_FULL_V1", "ecosystem", "DC_ECOSYSTEM_TOTAL"),
+            ("2026-05-28", "DC_TAXONOMY_FULL_V1", "ecosystem", "DC_ECOSYSTEM_TOTAL"),
+        ],
+    )
+    _write_taxonomy_csv(
+        taxonomy_csv,
+        [
+            ("DC_TAXONOMY_FULL_V1", ticker, "LayerA", "SubA", "CORE", 1, 1, "")
+            for ticker in primary_tickers
+        ],
+    )
+
+    resolution = _resolve_datacenter_signal_date(
+        price_db_path=str(osakedata_db),
+        analysis_db_path=str(analysis_db),
+        market="usa",
+        taxonomy_csv_path=str(taxonomy_csv),
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        start_date="2026-05-01",
+        requested_calendar_signal_date="2026-05-27",
+        expected_ticker_count=8,
+    )
+
+    assert resolution.signal_date == "2026-05-27"
+    assert resolution.signal_date <= resolution.requested_calendar_signal_date
+
+
+def test_run_datacenter_post_step_skips_with_exact_reason_when_no_candidate_passes(tmp_path, monkeypatch):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    taxonomy_csv = tmp_path / "taxonomy.csv"
+    log_dir = tmp_path / "logs"
+    _create_osakedata_with_rows(
+        osakedata_db,
+        [
+            ("AAA", "2026-05-28", 1.0, 1.0, 1.0, 1.0, 100, "usa"),
+        ],
+    )
+    _create_group_index_dates_db(analysis_db, [])
+    _write_taxonomy_csv(
+        taxonomy_csv,
+        [
+            ("DC_TAXONOMY_FULL_V1", "AAA", "LayerA", "SubA", "CORE", 1, 1, ""),
+        ],
+    )
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        osakedata_db=osakedata_db,
+        analysis_db=analysis_db,
+        log_dir=log_dir,
+    )
+    config = read_scheduler_config(str(config_path))
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_datacenter_post_step_config",
+        lambda market: DatacenterPostStepConfig(
+            market="usa",
+            taxonomy_csv=str(taxonomy_csv),
+            taxonomy_version="DC_TAXONOMY_FULL_V1",
+            start_date="2026-05-01",
+            index_base_date="2020-01-01",
+            output_dir=str(tmp_path / "reports"),
+            expected_ticker_count=236,
+            expected_group_count=54,
+            expected_synthetic_ohlc_count=53,
+        ),
+    )
+
+    result = scheduler_runner._run_datacenter_post_step(
+        config=config,
+        target_market="usa",
+        effective_today="2026-05-29",
+    )
+
+    assert result.status == "SKIPPED"
+    assert result.signal_date is None
+    assert result.signal_date_source == "DOWNSTREAM_VALID_DATE"
+    assert (
+        result.signal_date_resolution
+        == "TICKER_AND_GROUP_VALID_DATE_WITH_MIN_TICKER_COUNT"
+    )
+    assert result.error == "NO_DOWNSTREAM_VALID_DATACENTER_SIGNAL_DATE"
+    log_text = Path(result.log_path).read_text(encoding="utf-8")
+    assert "skip_reason=NO_DOWNSTREAM_VALID_DATACENTER_SIGNAL_DATE" in log_text
+    assert "signal_date_candidate_count=0" in log_text
+    assert "ticker_valid_date_count=1" in log_text
+    assert "group_valid_date_count=0" in log_text
+
+
 def test_scheduler_runner_runs_datacenter_post_step_once_for_usa_success(
     tmp_path, monkeypatch
 ):
@@ -791,6 +1063,13 @@ def test_scheduler_runner_runs_datacenter_post_step_once_for_usa_success(
         )
 
     monkeypatch.setattr("rawcandle.scheduler.runner.subprocess.run", fake_subprocess_run)
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_datacenter_signal_date",
+        lambda **kwargs: _build_datacenter_signal_date_resolution(
+            signal_date="2026-05-16",
+            requested_calendar_signal_date="2026-05-27",
+        ),
+    )
 
     result = run_scheduler_config(config_path=str(config_path))
 
@@ -815,8 +1094,11 @@ def test_scheduler_runner_runs_datacenter_post_step_once_for_usa_success(
     assert result.datacenter_pipeline_status == "OK"
     assert result.datacenter_pipeline_market == "usa"
     assert result.datacenter_pipeline_signal_date == "2026-05-16"
-    assert result.datacenter_pipeline_signal_date_source == "LATEST_VALID_OHLCV_DATE"
-    assert result.datacenter_pipeline_signal_date_resolution == "LATEST_VALID_OHLCV_DATE"
+    assert result.datacenter_pipeline_signal_date_source == "DOWNSTREAM_VALID_DATE"
+    assert (
+        result.datacenter_pipeline_signal_date_resolution
+        == "TICKER_AND_GROUP_VALID_DATE_WITH_MIN_TICKER_COUNT"
+    )
     assert result.datacenter_pipeline_audit_validation_status == "OK"
     assert result.datacenter_pipeline_daily_report_path == "/tmp/daily.md"
     assert result.datacenter_pipeline_daily_report_csv_path == "/tmp/daily.csv"
@@ -832,14 +1114,14 @@ def test_scheduler_runner_runs_datacenter_post_step_once_for_usa_success(
     log_path = Path(result.datacenter_pipeline_log_path)
     assert log_path.exists()
     log_text = log_path.read_text(encoding="utf-8")
-    assert "signal_date_source=LATEST_VALID_OHLCV_DATE" in log_text
+    assert "signal_date_source=DOWNSTREAM_VALID_DATE" in log_text
     assert "SUMMARY audit_validation_status=OK" in log_text
     assert "=== STDOUT ===" in log_text
     assert "=== STDERR ===" in log_text
     assert result.overall_status == STATUS_OK
     payload = json.loads(Path(result.summary_json_path).read_text(encoding="utf-8"))
     assert payload["datacenter_pipeline_signal_date"] == "2026-05-16"
-    assert payload["datacenter_pipeline_signal_date_source"] == "LATEST_VALID_OHLCV_DATE"
+    assert payload["datacenter_pipeline_signal_date_source"] == "DOWNSTREAM_VALID_DATE"
     assert payload["datacenter_pipeline_daily_report_path"] == "/tmp/daily.md"
     assert payload["datacenter_pipeline_rolling_30_report_path"] == "/tmp/rolling30.md"
     assert payload["datacenter_pipeline_rolling_5_report_path"] == "/tmp/rolling5.md"
@@ -871,6 +1153,13 @@ def test_scheduler_runner_technical_relevance_disabled_by_default(tmp_path, monk
     monkeypatch.setattr(
         "rawcandle.scheduler.runner.subprocess.run",
         lambda *args, **kwargs: _FakeCompletedProcess(0, "SUMMARY audit_validation_status=OK\n"),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_datacenter_signal_date",
+        lambda **kwargs: _build_datacenter_signal_date_resolution(
+            signal_date="2026-05-16",
+            requested_calendar_signal_date="2026-05-27",
+        ),
     )
 
     result = run_scheduler_config(config_path=str(config_path))
@@ -932,6 +1221,13 @@ def test_scheduler_runner_runs_technical_relevance_before_datacenter(tmp_path, m
         lambda *args, **kwargs: calls.append(("datacenter",))
         or _FakeCompletedProcess(0, "SUMMARY audit_validation_status=OK\n"),
     )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_datacenter_signal_date",
+        lambda **kwargs: _build_datacenter_signal_date_resolution(
+            signal_date="2026-05-16",
+            requested_calendar_signal_date="2026-05-27",
+        ),
+    )
 
     result = run_scheduler_config(config_path=str(config_path))
 
@@ -989,6 +1285,13 @@ def test_scheduler_runner_technical_relevance_skips_existing_run_id(tmp_path, mo
     monkeypatch.setattr(
         "rawcandle.scheduler.runner.subprocess.run",
         lambda *args, **kwargs: _FakeCompletedProcess(0, "SUMMARY audit_validation_status=OK\n"),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_datacenter_signal_date",
+        lambda **kwargs: _build_datacenter_signal_date_resolution(
+            signal_date="2026-05-16",
+            requested_calendar_signal_date="2026-05-27",
+        ),
     )
 
     result = run_scheduler_config(config_path=str(config_path))
@@ -1148,6 +1451,13 @@ def test_scheduler_runner_technical_relevance_failure_fails_scheduler(tmp_path, 
         "rawcandle.scheduler.runner.subprocess.run",
         lambda *args, **kwargs: _FakeCompletedProcess(0, "SUMMARY audit_validation_status=OK\n"),
     )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_datacenter_signal_date",
+        lambda **kwargs: _build_datacenter_signal_date_resolution(
+            signal_date="2026-05-16",
+            requested_calendar_signal_date="2026-05-27",
+        ),
+    )
 
     result = run_scheduler_config(config_path=str(config_path))
 
@@ -1185,6 +1495,13 @@ def test_scheduler_runner_runs_datacenter_post_step_for_ok_with_warnings(
         "rawcandle.scheduler.runner.subprocess.run",
         lambda *args, **kwargs: _FakeCompletedProcess(
             0, "SUMMARY audit_validation_status=WARN\n"
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_datacenter_signal_date",
+        lambda **kwargs: _build_datacenter_signal_date_resolution(
+            signal_date="2026-05-15",
+            requested_calendar_signal_date="2026-05-27",
         ),
     )
 
@@ -1310,6 +1627,13 @@ def test_scheduler_runner_derives_previous_signal_date_for_datacenter_post_step(
         lambda command, **kwargs: calls.append(command)
         or _FakeCompletedProcess(0, "SUMMARY audit_validation_status=OK\n"),
     )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_datacenter_signal_date",
+        lambda **kwargs: _build_datacenter_signal_date_resolution(
+            signal_date="2026-05-15",
+            requested_calendar_signal_date="2026-05-15",
+        ),
+    )
 
     run_scheduler_config(config_path=str(config_path))
 
@@ -1356,6 +1680,13 @@ def test_scheduler_runner_uses_latest_valid_ohlcv_date_not_today_minus_one_for_w
         lambda command, **kwargs: calls.append(command)
         or _FakeCompletedProcess(0, "SUMMARY audit_validation_status=OK\n"),
     )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_datacenter_signal_date",
+        lambda **kwargs: _build_datacenter_signal_date_resolution(
+            signal_date="2026-05-15",
+            requested_calendar_signal_date="2026-05-17",
+        ),
+    )
 
     result = run_scheduler_config(config_path=str(config_path))
 
@@ -1393,17 +1724,28 @@ def test_scheduler_runner_skips_datacenter_post_step_when_no_valid_ohlcv_date_fo
             AssertionError("datacenter subprocess should not run without a valid USA signal date")
         ),
     )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_datacenter_signal_date",
+        lambda **kwargs: _build_datacenter_signal_date_resolution(
+            signal_date=None,
+            requested_calendar_signal_date="2026-05-27",
+            candidate_count=0,
+            ticker_valid_date_count=0,
+            group_valid_date_count=0,
+            skip_reason="NO_DOWNSTREAM_VALID_DATACENTER_SIGNAL_DATE",
+        ),
+    )
 
     result = run_scheduler_config(config_path=str(config_path))
 
     assert result.datacenter_pipeline_attempted == 0
     assert result.datacenter_pipeline_status == "SKIPPED"
     assert result.datacenter_pipeline_signal_date == "NONE"
-    assert result.datacenter_pipeline_signal_date_source == "LATEST_VALID_OHLCV_DATE"
-    assert result.datacenter_pipeline_error == "NO_VALID_OHLCV_DATE_FOR_MARKET"
+    assert result.datacenter_pipeline_signal_date_source == "DOWNSTREAM_VALID_DATE"
+    assert result.datacenter_pipeline_error == "NO_DOWNSTREAM_VALID_DATACENTER_SIGNAL_DATE"
     payload = json.loads(Path(result.summary_json_path).read_text(encoding="utf-8"))
     assert payload["datacenter_pipeline_signal_date"] == "NONE"
-    assert payload["datacenter_pipeline_error"] == "NO_VALID_OHLCV_DATE_FOR_MARKET"
+    assert payload["datacenter_pipeline_error"] == "NO_DOWNSTREAM_VALID_DATACENTER_SIGNAL_DATE"
 
 
 def test_scheduler_runner_datacenter_post_step_failure_fails_scheduler(
@@ -1440,6 +1782,13 @@ def test_scheduler_runner_datacenter_post_step_failure_fails_scheduler(
                     "",
                 ]
             ),
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_datacenter_signal_date",
+        lambda **kwargs: _build_datacenter_signal_date_resolution(
+            signal_date="2026-05-15",
+            requested_calendar_signal_date="2026-05-27",
         ),
     )
 
