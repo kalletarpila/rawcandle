@@ -26,6 +26,7 @@ def _create_source_table_only(path: Path) -> None:
             """
             CREATE TABLE dc_ticker_swing_signal_daily (
                 signal_date TEXT NOT NULL,
+                signal_version TEXT,
                 taxonomy_version TEXT NOT NULL,
                 ticker TEXT,
                 primary_layer TEXT,
@@ -50,8 +51,11 @@ def _create_source_table_only(path: Path) -> None:
                 latest_bullish_signal_age_td INTEGER,
                 latest_bearish_signal_age_td INTEGER,
                 bullish_candle_signal INTEGER,
+                bearish_candle_signal INTEGER,
                 bullish_divergence_signal INTEGER,
+                bearish_divergence_signal INTEGER,
                 hidden_bullish_divergence_signal INTEGER,
+                hidden_bearish_divergence_signal INTEGER,
                 structure_warning_overrides_bullish_signal INTEGER,
                 in_datacenter_ecosystem TEXT,
                 exit_risk_signal INTEGER,
@@ -62,6 +66,8 @@ def _create_source_table_only(path: Path) -> None:
                 pullback_signal INTEGER,
                 conservative_ema20_pullback_signal INTEGER,
                 fast_ema10_pullback_signal INTEGER,
+                latest_bos_event_date TEXT,
+                latest_reset_event_date TEXT,
                 rolling_5d_status TEXT,
                 ma_break_status TEXT
             )
@@ -125,6 +131,7 @@ def _insert_source_rows(path: Path) -> None:
 def _insert_custom_source_row(path: Path, **overrides: object) -> None:
     row = {
         "signal_date": "2026-05-22",
+        "signal_version": "DC_SWING_SIGNAL_V1",
         "taxonomy_version": "DC_TAXONOMY_FULL_V1",
         "ticker": "AAA",
         "primary_layer": "Infrastructure",
@@ -149,8 +156,11 @@ def _insert_custom_source_row(path: Path, **overrides: object) -> None:
         "latest_bullish_signal_age_td": None,
         "latest_bearish_signal_age_td": None,
         "bullish_candle_signal": 0,
+        "bearish_candle_signal": 0,
         "bullish_divergence_signal": 0,
+        "bearish_divergence_signal": 0,
         "hidden_bullish_divergence_signal": 0,
+        "hidden_bearish_divergence_signal": 0,
         "structure_warning_overrides_bullish_signal": 0,
         "in_datacenter_ecosystem": None,
         "exit_risk_signal": 0,
@@ -161,6 +171,8 @@ def _insert_custom_source_row(path: Path, **overrides: object) -> None:
         "pullback_signal": 0,
         "conservative_ema20_pullback_signal": 0,
         "fast_ema10_pullback_signal": 0,
+        "latest_bos_event_date": None,
+        "latest_reset_event_date": None,
         "rolling_5d_status": None,
         "ma_break_status": None,
     }
@@ -346,7 +358,7 @@ def test_field_mapping_persists_expected_values(tmp_path, capsys):
     assert nvda["latest_reset_reason"] == "EMA20_LOST"
     assert nvda["daily_status"] == "NEUTRAL_MONITOR"
     assert nvda["current_status"] == "NEUTRAL_MONITOR"
-    assert nvda["freshness_status"] == "FRESH_BULLISH_SIGNAL"
+    assert nvda["freshness_status"] == "MIXED_SIGNALS"
     assert nvda["primary_reason"] is None
     assert nvda["source_components"] == (
         "dc_ticker_swing_signal_daily,dc_ticker_swing_signal_daily:daily_status_mapping_v1"
@@ -444,6 +456,115 @@ def test_full_ma_break_helper_output_is_preserved_in_source_run_ids_payload(tmp_
     assert payload["ma_break"]["ma_break_status"] == "EMA20_WARNING"
     assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.ma_break_helper_rows=1" in output
     assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.ma_break_payload_rows=1" in output
+
+
+def test_freshness_helper_output_is_preserved_in_source_run_ids_payload(tmp_path, monkeypatch, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(
+        db_path,
+        ticker="AAA",
+        bullish_candle_signal=0,
+        bullish_divergence_signal=0,
+        hidden_bullish_divergence_signal=0,
+        latest_bullish_signal_age_td=None,
+        structure_warning_overrides_bullish_signal=0,
+        latest_structure_freshness="NO_RECENT_SIGNAL",
+    )
+
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_ticker_enrichment_write.build_swing_signal_freshness_rows",
+        lambda **kwargs: [
+            {
+                "ticker": "AAA",
+                "as_of_date": "2026-05-22",
+                "freshness_status": "FRESH_BULLISH_SIGNAL",
+                "latest_bullish_signal_age_td": 0,
+                "latest_bearish_signal_age_td": None,
+                "latest_bos_up_age_td": 1,
+                "latest_bos_down_age_td": None,
+                "latest_reset_age_td": None,
+                "bullish_candle_age_td": 0,
+                "bearish_candle_age_td": None,
+                "bullish_divergence_age_td": None,
+                "bearish_divergence_age_td": None,
+                "hidden_bullish_divergence_age_td": None,
+                "hidden_bearish_divergence_age_td": None,
+                "structure_warning_overrides_bullish_signal": 0,
+            }
+        ],
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    row = _destination_rows(db_path)[0]
+    assert row["freshness_status"] == "FRESH_BULLISH_SIGNAL"
+    payload = json.loads(row["source_run_ids"].split(":", 1)[1])
+    assert payload["freshness"]["freshness_status"] == "FRESH_BULLISH_SIGNAL"
+    assert payload["freshness"]["latest_bullish_signal_age_td"] == 0
+    assert payload["freshness"]["structure_warning_overrides_bullish_signal"] == 0
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.freshness_helper_rows=1" in output
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.freshness_payload_rows=1" in output
+
+
+def test_freshness_helper_output_overrides_local_approximation_when_present(tmp_path, monkeypatch, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(
+        db_path,
+        ticker="AAA",
+        bullish_candle_signal=0,
+        bullish_divergence_signal=0,
+        hidden_bullish_divergence_signal=0,
+        latest_bullish_signal_age_td=None,
+        latest_structure_freshness="NO_RECENT_SIGNAL",
+        structure_warning_overrides_bullish_signal=0,
+    )
+
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_ticker_enrichment_write.build_swing_signal_freshness_rows",
+        lambda **kwargs: [
+            {
+                "ticker": "AAA",
+                "as_of_date": "2026-05-22",
+                "freshness_status": "FRESH_BULLISH_SIGNAL",
+                "latest_bullish_signal_age_td": 0,
+                "latest_bearish_signal_age_td": None,
+                "structure_warning_overrides_bullish_signal": 0,
+            }
+        ],
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    assert row["freshness_status"] == "FRESH_BULLISH_SIGNAL"
 
 
 def test_high_exit_risk_maps_to_daily_status_current_status_and_reason(tmp_path, capsys):
@@ -1161,7 +1282,7 @@ def test_pullback_signal_with_structure_blocker_maps_to_failed_pullback(tmp_path
     _ = capsys.readouterr()
     row = _destination_rows(db_path)[0]
     assert row["rolling_5d_status"] == "FAILED_PULLBACK"
-    assert row["freshness_status"] == "STRUCTURE_WARNING_OVERRIDES_BULLISH"
+    assert row["freshness_status"] == "FRESH_BEARISH_SIGNAL"
 
 
 def test_pullback_lookback_with_structure_blocker_maps_to_failed_pullback(tmp_path, capsys):
@@ -1204,7 +1325,7 @@ def test_pullback_lookback_with_structure_blocker_maps_to_failed_pullback(tmp_pa
     assert exit_code == 0
     row = _destination_rows(db_path)[0]
     assert row["rolling_5d_status"] == "FAILED_PULLBACK"
-    assert row["freshness_status"] == "STRUCTURE_WARNING_OVERRIDES_BULLISH"
+    assert row["freshness_status"] == "FRESH_BULLISH_SIGNAL"
     assert (
         "SUMMARY datacenter_dashboard_ticker_enrichment_write.pullback_window_structure_override_rows=1"
         in output
@@ -1473,7 +1594,7 @@ def test_freshness_status_prefers_bos_down_then_reset_then_structure(tmp_path, c
     assert exit_code == 0
     _ = capsys.readouterr()
     row = _destination_rows(db_path)[0]
-    assert row["freshness_status"] == "BOS_DOWN_FRESH"
+    assert row["freshness_status"] == "FRESH_BEARISH_SIGNAL"
 
 
 def test_rolling_2d_status_maps_to_emergency_sell_pressure_from_high_exit_and_bos_down(

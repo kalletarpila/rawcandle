@@ -15,6 +15,10 @@ from analysis.datacenter_indices.rolling5_pullback_classifier import (
 from analysis.datacenter_indices.swing_ma_break_status import (
     build_swing_ma_break_status_rows,
 )
+from analysis.datacenter_indices.swing_signal_freshness import (
+    build_swing_signal_freshness_rows,
+    load_ticker_signal_freshness_history_rows,
+)
 
 SOURCE_TABLE = "dc_ticker_swing_signal_daily"
 DESTINATION_TABLE = "dc_dashboard_ticker_enrichment_daily"
@@ -23,6 +27,7 @@ SOURCE_COMPONENTS = "dc_ticker_swing_signal_daily,dc_ticker_swing_signal_daily:d
 UPSTREAM_ROLLING5_COMPONENT = "swing_weekly_report:rolling5_upstream_v1"
 UPSTREAM_ROLLING5_PAYLOAD_PREFIX = "UPSTREAM_ROLLING5_JSON:"
 MA_BREAK_PAYLOAD_KEY = "ma_break"
+FRESHNESS_PAYLOAD_KEY = "freshness"
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 VALID_TICKER_RE = re.compile(r"^[A-Z0-9][A-Z0-9.\-]*$")
 DISALLOWED_TICKER_LABELS = {
@@ -595,6 +600,7 @@ def _build_upstream_rolling5_payload(
     existing_primary_reason: str | None,
     helper_classification: Rolling5PullbackClassification | None,
     ma_break_row: dict[str, object] | None = None,
+    freshness_row: dict[str, object] | None = None,
     exit_reason: str | None = None,
     last_exit_reason: str | None = None,
     latest_exit_reason: str | None = None,
@@ -628,6 +634,33 @@ def _build_upstream_rolling5_payload(
                 "sma50_break_confirmed",
                 "consecutive_closes_below_sma50",
                 "ma_break_status",
+            }
+        }
+    if freshness_row:
+        payload[FRESHNESS_PAYLOAD_KEY] = {
+            key: value
+            for key, value in freshness_row.items()
+            if key
+            in {
+                "latest_bullish_candle",
+                "bullish_candle_age_td",
+                "latest_bearish_candle",
+                "bearish_candle_age_td",
+                "latest_bullish_divergence",
+                "bullish_divergence_age_td",
+                "latest_bearish_divergence",
+                "bearish_divergence_age_td",
+                "latest_hidden_bullish_divergence",
+                "hidden_bullish_divergence_age_td",
+                "latest_hidden_bearish_divergence",
+                "hidden_bearish_divergence_age_td",
+                "latest_bos_up_age_td",
+                "latest_bos_down_age_td",
+                "latest_reset_age_td",
+                "latest_bullish_signal_age_td",
+                "latest_bearish_signal_age_td",
+                "structure_warning_overrides_bullish_signal",
+                "freshness_status",
             }
         }
     if not upstream_row:
@@ -791,6 +824,34 @@ def _resolve_ma_break_status(
     return derived_value
 
 
+def _resolve_freshness_status_from_helper(
+    row: sqlite3.Row,
+    freshness_helper_row: dict[str, object] | None,
+    history_rows: list[sqlite3.Row] | None,
+) -> tuple[str | None, int | None, int, bool]:
+    if freshness_helper_row is None:
+        return _resolve_freshness_status(row, history_rows)
+    helper_status = _normalized_text(freshness_helper_row.get("freshness_status"))
+    helper_bullish_age = _safe_int(
+        freshness_helper_row.get("latest_bullish_signal_age_td")
+    )
+    candidate_pullback_days, _candidate_bullish_age, candidate_structure_override = (
+        _derive_pullback_window_context(history_rows)
+    )
+    helper_structure_override = (
+        _safe_int(
+            freshness_helper_row.get("structure_warning_overrides_bullish_signal")
+        )
+        == 1
+    )
+    return (
+        helper_status,
+        helper_bullish_age,
+        candidate_pullback_days,
+        helper_structure_override or candidate_structure_override,
+    )
+
+
 def _map_destination_row(
     row: sqlite3.Row,
     *,
@@ -800,6 +861,7 @@ def _map_destination_row(
     high_exit_risk_days_count: int,
     ma_break_status: str | None,
     ma_break_helper_row: dict[str, object] | None,
+    freshness_helper_row: dict[str, object] | None,
     history_rows: list[sqlite3.Row] | None,
     upstream_row: dict[str, object] | None,
     use_shared_rolling5_helper: bool,
@@ -811,7 +873,11 @@ def _map_destination_row(
     if primary_reason is None and upstream_primary_reason is not None:
         primary_reason = upstream_primary_reason
     freshness_status, _candidate_bullish_age, _candidate_pullback_days, _candidate_structure_override = (
-        _resolve_freshness_status(row, history_rows)
+        _resolve_freshness_status_from_helper(
+            row,
+            freshness_helper_row,
+            history_rows,
+        )
     )
     rolling_2d_status = _derive_rolling_2d_status(row)
     rolling5_helper_classification = (
@@ -839,6 +905,7 @@ def _map_destination_row(
         existing_primary_reason=_derive_primary_reason(row, daily_status),
         helper_classification=rolling5_helper_classification,
         ma_break_row=ma_break_helper_row,
+        freshness_row=freshness_helper_row,
         exit_reason=exit_reason,
     )
     encoded_upstream_payload = _encode_upstream_rolling5_payload(upstream_payload)
@@ -945,6 +1012,8 @@ def main(argv: list[str] | None = None) -> int:
         rolling5_classifier_rows = 0
         ma_break_helper_rows = 0
         ma_break_payload_rows = 0
+        freshness_helper_rows = 0
+        freshness_payload_rows = 0
 
         connector = _connect_read_only if args.dry_run else _connect_read_write
         with connector(args.analysis_db) as conn:
@@ -987,6 +1056,35 @@ def main(argv: list[str] | None = None) -> int:
                 tickers=[str(row["ticker"]).strip().upper() for row in valid_rows],
                 window_rows=60,
             )
+            try:
+                freshness_history_rows = load_ticker_signal_freshness_history_rows(
+                    conn,
+                    tickers=[str(row["ticker"]).strip().upper() for row in valid_rows],
+                    as_of_date=signal_date,
+                    signal_version="DC_SWING_SIGNAL_V1",
+                    taxonomy_version=taxonomy_version,
+                )
+            except sqlite3.OperationalError:
+                freshness_history_rows = []
+            freshness_history_tickers = {
+                str(history_row.get("ticker") or "").strip().upper()
+                for history_row in freshness_history_rows
+                if str(history_row.get("ticker") or "").strip()
+            }
+            freshness_rows_by_ticker = {
+                str(helper_row.get("ticker") or "").strip().upper(): helper_row
+                for helper_row in build_swing_signal_freshness_rows(
+                    latest_rows=[
+                        {key: row[key] for key in row.keys()}
+                        for row in valid_rows
+                    ],
+                    history_rows=freshness_history_rows,
+                    as_of_date=signal_date,
+                )
+                if str(helper_row.get("ticker") or "").strip()
+                and str(helper_row.get("ticker") or "").strip().upper()
+                in freshness_history_tickers
+            }
             pullback_history_by_ticker = _load_source_history_by_ticker(
                 conn,
                 signal_date=signal_date,
@@ -1028,6 +1126,9 @@ def main(argv: list[str] | None = None) -> int:
                 ma_break_status = _resolve_ma_break_status(row, ma_break_helper_row)
                 if ma_break_helper_row is not None:
                     ma_break_helper_rows += 1
+                freshness_helper_row = freshness_rows_by_ticker.get(ticker)
+                if freshness_helper_row is not None:
+                    freshness_helper_rows += 1
                 pullback_history_rows = pullback_history_by_ticker.get(ticker)
                 candidate_pullback_days, candidate_bullish_age, candidate_structure_override = (
                     _derive_pullback_window_context(pullback_history_rows)
@@ -1063,6 +1164,7 @@ def main(argv: list[str] | None = None) -> int:
                             high_exit_risk_days_count=high_exit_risk_days_count,
                             ma_break_status=ma_break_status,
                             ma_break_helper_row=ma_break_helper_row,
+                            freshness_helper_row=freshness_helper_row,
                             history_rows=pullback_history_rows,
                             upstream_row=upstream_rows_by_ticker.get(ticker),
                             use_shared_rolling5_helper=args.use_upstream_rolling5_pullback,
@@ -1071,6 +1173,8 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 if ma_break_helper_row is not None:
                     ma_break_payload_rows += 1
+                if freshness_helper_row is not None:
+                    freshness_payload_rows += 1
                 if args.use_upstream_rolling5_pullback and upstream_rows_by_ticker.get(ticker) is not None:
                     rolling5_classifier_rows += 1
             if high_exit_window_unavailable > 0:
@@ -1383,6 +1487,8 @@ def main(argv: list[str] | None = None) -> int:
         _emit_summary("rolling5_classifier_rows", rolling5_classifier_rows)
         _emit_summary("ma_break_helper_rows", ma_break_helper_rows)
         _emit_summary("ma_break_payload_rows", ma_break_payload_rows)
+        _emit_summary("freshness_helper_rows", freshness_helper_rows)
+        _emit_summary("freshness_payload_rows", freshness_payload_rows)
         _emit_summary("pullback_lookback_rows", args.pullback_lookback_rows)
         _emit_summary("pullback_window_derived_rows", pullback_window_derived_rows)
         _emit_summary("pullback_window_candidate_rows", pullback_window_candidate_rows)

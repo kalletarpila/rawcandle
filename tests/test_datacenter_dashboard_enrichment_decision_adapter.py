@@ -212,6 +212,99 @@ def test_adapter_synthesizes_bullish_signal_age_from_freshness_status():
     assert daily_row.raw_fields["latest_bullish_signal_age_td"] == "0"
 
 
+def test_freshness_payload_is_exposed_on_daily_row_raw_fields():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "NEUTRAL_MONITOR",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "freshness": {
+                            "freshness_status": "STRUCTURE_WARNING_OVERRIDES_BULLISH",
+                            "latest_bearish_signal_age_td": 0,
+                            "latest_bos_down_age_td": 1,
+                            "structure_warning_overrides_bullish_signal": 1,
+                        }
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    daily_row = next(row for row in rows if row.horizon == "daily")
+    assert daily_row.freshness_status == "STRUCTURE_WARNING_OVERRIDES_BULLISH"
+    assert daily_row.structure_warning_overrides_bullish_signal == 1
+    assert daily_row.latest_bearish_signal_age_td == 0
+    assert daily_row.latest_bos_down_age_td == 1
+    assert daily_row.raw_fields["freshness_status"] == "STRUCTURE_WARNING_OVERRIDES_BULLISH"
+    assert daily_row.raw_fields["latest_bearish_signal_age_td"] == "0"
+    assert daily_row.raw_fields["latest_bos_down_age_td"] == "1"
+
+
+def test_freshness_payload_is_exposed_on_rolling_2d_row_raw_fields():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "NEUTRAL_MONITOR",
+                "rolling_2d_status": "WATCH_PRESSURE",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "freshness": {
+                            "freshness_status": "FRESH_BULLISH_SIGNAL",
+                            "latest_bullish_signal_age_td": 0,
+                            "bullish_candle_age_td": 0,
+                        }
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    rolling_2d_row = next(row for row in rows if row.horizon == "rolling 2d")
+    assert rolling_2d_row.freshness_status == "FRESH_BULLISH_SIGNAL"
+    assert rolling_2d_row.latest_bullish_signal_age_td == 0
+    assert rolling_2d_row.raw_fields["freshness_status"] == "FRESH_BULLISH_SIGNAL"
+    assert rolling_2d_row.raw_fields["latest_bullish_signal_age_td"] == "0"
+    assert rolling_2d_row.raw_fields["bullish_candle_age_td"] == "0"
+
+
+def test_decision_integration_can_see_freshness_payload_context():
+    result = build_decisions_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "NEUTRAL_MONITOR",
+                "ma_break_status": "OK",
+                "trend_state": "UP",
+                "latest_structure_label": "HH",
+                "latest_bos_event_type": "BOS_UP",
+                "rolling_5d_status": "PULLBACK_CANDIDATE",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "freshness": {
+                            "freshness_status": "FRESH_BULLISH_SIGNAL",
+                            "latest_bullish_signal_age_td": 0,
+                        },
+                        "rolling_5_pullback_state": "PULLBACK_CANDIDATE",
+                        "pullback_days": 3,
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    decision = result.decisions[0]
+    assert decision.pullback_validity == "VALID_PULLBACK"
+
+
 def test_adapter_exposes_upstream_rolling5_payload_fields_in_raw_fields():
     rows = build_dashboard_rows_from_ticker_enrichment_rows(
         [
