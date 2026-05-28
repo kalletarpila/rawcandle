@@ -2,7 +2,13 @@ import sqlite3
 from pathlib import Path
 
 from dev_tools.run_datacenter_dashboard_enrichment_audit import main as audit_main
+from dev_tools.datacenter_dashboard_enrichment_decision_adapter import (
+    build_dashboard_rows_from_ticker_enrichment_rows,
+)
 from dev_tools.run_datacenter_dashboard_ticker_enrichment_write import main
+from analysis.datacenter_indices.rolling5_pullback_classifier import (
+    Rolling5PullbackClassification,
+)
 from rawcandle.datacenter_dashboard_enrichment_migration import (
     apply_datacenter_dashboard_enrichment_migration,
 )
@@ -758,10 +764,20 @@ def test_pullback_signal_maps_to_conservative_rolling_5d_pullback_candidate(tmp_
     assert row["rolling_5d_status"] == "PULLBACK_CANDIDATE"
 
 
-def test_default_behavior_keeps_upstream_rolling5_disabled(tmp_path, capsys):
+def test_default_behavior_keeps_upstream_rolling5_disabled(tmp_path, monkeypatch, capsys):
     db_path = tmp_path / "analysis.db"
     _create_source_and_destination_db(db_path)
     _insert_custom_source_row(db_path, pullback_signal=1, ma_break_status="OK")
+    called = {"value": False}
+
+    def _should_not_run(_row):
+        called["value"] = True
+        raise AssertionError("shared helper should not run without flag")
+
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_ticker_enrichment_write.classify_rolling_5_pullback_row",
+        _should_not_run,
+    )
 
     exit_code = main(
         [
@@ -782,9 +798,12 @@ def test_default_behavior_keeps_upstream_rolling5_disabled(tmp_path, capsys):
     assert row["rolling_5d_status"] == "PULLBACK_CANDIDATE"
     assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.use_upstream_rolling5_pullback=0" in output
     assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.upstream_rolling5_status=SKIPPED" in output
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.rolling5_classifier_source=skipped" in output
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.rolling5_classifier_rows=0" in output
+    assert called["value"] is False
 
 
-def test_upstream_rolling5_state_maps_to_rolling_5d_status_when_enabled(tmp_path, monkeypatch, capsys):
+def test_shared_helper_is_called_and_maps_to_rolling_5d_status_when_enabled(tmp_path, monkeypatch, capsys):
     db_path = tmp_path / "analysis.db"
     _create_source_and_destination_db(db_path)
     _insert_custom_source_row(db_path, ticker="AAA", pullback_signal=0)
@@ -798,8 +817,28 @@ def test_upstream_rolling5_state_maps_to_rolling_5d_status_when_enabled(tmp_path
                 "pullback_days": 3,
                 "fast_ema10_pullback_days": 2,
                 "conservative_ema20_pullback_days": 1,
+                "current_watchlist_status": "PULLBACK_CANDIDATE",
+                "window_watchlist_status": "PULLBACK_CANDIDATE",
+                "latest_ticker_trend_state": "UP",
+                "exit_risk_days": 0,
             }
         },
+    )
+    called = {"count": 0}
+
+    def _fake_classify(row):
+        called["count"] += 1
+        assert row["ticker"] == "AAA"
+        return Rolling5PullbackClassification(
+            "PULLBACK_CANDIDATE",
+            "CONFIRMED_EMA20_PULLBACK_CONTEXT",
+            "",
+            "REVIEW_FOR_DAILY_TRIGGER",
+        )
+
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_ticker_enrichment_write.classify_rolling_5_pullback_row",
+        _fake_classify,
     )
 
     exit_code = main(
@@ -819,12 +858,17 @@ def test_upstream_rolling5_state_maps_to_rolling_5d_status_when_enabled(tmp_path
     output = capsys.readouterr().out
     row = _destination_rows(db_path)[0]
     assert exit_code == 0
-    assert row["rolling_5d_status"] == "EARLY_PULLBACK"
+    assert called["count"] == 1
+    assert row["rolling_5d_status"] == "PULLBACK_CANDIDATE"
     assert row["source_run_ids"] is not None
+    assert '"primary_reason":"CONFIRMED_EMA20_PULLBACK_CONTEXT"' in row["source_run_ids"]
+    assert '"next_action":"REVIEW_FOR_DAILY_TRIGGER"' in row["source_run_ids"]
     assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.use_upstream_rolling5_pullback=1" in output
     assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.upstream_rolling5_rows=1" in output
     assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.upstream_rolling5_matched_tickers=1" in output
     assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.upstream_rolling5_status=OK" in output
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.rolling5_classifier_source=shared_helper" in output
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.rolling5_classifier_rows=1" in output
 
 
 def test_upstream_primary_reason_does_not_overwrite_existing_reason_unless_empty(tmp_path, monkeypatch, capsys):
@@ -840,6 +884,11 @@ def test_upstream_primary_reason_does_not_overwrite_existing_reason_unless_empty
                 "rolling_5_pullback_state": "EARLY_PULLBACK",
                 "primary_reason": "UPSTREAM_REASON",
                 "blocking_reason": "STRUCTURE_BLOCKED",
+                "current_watchlist_status": "PULLBACK_CANDIDATE",
+                "window_watchlist_status": "PULLBACK_CANDIDATE",
+                "latest_ticker_trend_state": "UP",
+                "pullback_days": 2,
+                "exit_risk_days": 0,
             }
         },
     )
@@ -895,6 +944,66 @@ def test_upstream_extraction_failure_fails_clearly(tmp_path, monkeypatch, capsys
     assert exit_code == 1
     assert "ERROR: upstream rolling5 unavailable" in captured.err
     assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.upstream_rolling5_status=FAILED" in captured.out
+
+
+def test_failed_pullback_helper_output_is_exposed_to_adapter_raw_fields(tmp_path, monkeypatch, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(db_path, ticker="AAA", pullback_signal=0)
+
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_ticker_enrichment_write._extract_upstream_rolling5_rows",
+        lambda **kwargs: {
+            "AAA": {
+                "ticker": "AAA",
+                "rolling_5_pullback_state": "EARLY_PULLBACK",
+                "pullback_days": 2,
+                "fast_ema10_pullback_days": 1,
+                "conservative_ema20_pullback_days": 0,
+                "current_watchlist_status": "PULLBACK_CANDIDATE",
+                "window_watchlist_status": "PULLBACK_CANDIDATE",
+                "latest_ticker_trend_state": "UP",
+                "exit_risk_days": 0,
+                "latest_bos_freshness": "FRESH",
+            }
+        },
+    )
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_ticker_enrichment_write.classify_rolling_5_pullback_row",
+        lambda row: Rolling5PullbackClassification(
+            "FAILED_PULLBACK",
+            "PULLBACK_SETUP_BLOCKED",
+            "recent_bos_down",
+            "REMOVE_FROM_PULLBACK_LIST",
+        ),
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+            "--use-upstream-rolling5-pullback",
+        ]
+    )
+
+    _ = capsys.readouterr()
+    assert exit_code == 0
+    stored_row = dict(_destination_rows(db_path)[0])
+    assert stored_row["rolling_5d_status"] == "FAILED_PULLBACK"
+    rolling_row = next(
+        row
+        for row in build_dashboard_rows_from_ticker_enrichment_rows([stored_row])
+        if row.horizon == "rolling 5d"
+    )
+    assert rolling_row.blocking_reasons == "recent_bos_down"
+    assert rolling_row.raw_fields["blocking_reason"] == "recent_bos_down"
+    assert rolling_row.raw_fields["next_action"] == "REMOVE_FROM_PULLBACK_LIST"
 
 
 def test_pullback_lookback_signal_maps_to_rolling_5d_status(tmp_path, capsys):

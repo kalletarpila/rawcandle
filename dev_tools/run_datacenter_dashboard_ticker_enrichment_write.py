@@ -8,6 +8,10 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from analysis.datacenter_indices.rolling5_pullback_classifier import (
+    Rolling5PullbackClassification,
+    classify_rolling_5_pullback_row,
+)
 from analysis.datacenter_indices.swing_ma_break_status import (
     build_swing_ma_break_status_rows,
 )
@@ -536,10 +540,59 @@ def _map_upstream_rolling_5d_status(value: object) -> str | None:
     return normalized if normalized in allowed else None
 
 
+def _build_shared_rolling5_helper_row(
+    row: sqlite3.Row,
+    *,
+    upstream_row: dict[str, object] | None,
+) -> dict[str, object] | None:
+    if upstream_row is None:
+        return None
+    return {
+        "ticker": str(row["ticker"]).strip().upper(),
+        "last_price_data_status": row["price_data_status"],
+        "all_price_rows_missing": None,
+        "last_ticker_trend_state": upstream_row.get("latest_ticker_trend_state")
+        if upstream_row.get("latest_ticker_trend_state") is not None
+        else row["ticker_trend_state"],
+        "current_watchlist_status": upstream_row.get("current_watchlist_status"),
+        "window_watchlist_status": upstream_row.get("window_watchlist_status"),
+        "pullback_days": upstream_row.get("pullback_days"),
+        "fast_ema10_pullback_days": upstream_row.get("fast_ema10_pullback_days"),
+        "conservative_ema20_pullback_days": upstream_row.get("conservative_ema20_pullback_days"),
+        "exit_risk_days": upstream_row.get("exit_risk_days"),
+        "last_exit_risk_severity": row["exit_risk_severity"],
+        "last_latest_bos_event_type": upstream_row.get("latest_bos_event_type")
+        if upstream_row.get("latest_bos_event_type") is not None
+        else row["latest_bos_event_type"],
+        "last_latest_bos_freshness": upstream_row.get("latest_bos_freshness")
+        if upstream_row.get("latest_bos_freshness") is not None
+        else row["latest_bos_freshness"],
+        "last_latest_reset_reason": upstream_row.get("latest_reset_reason")
+        if upstream_row.get("latest_reset_reason") is not None
+        else row["latest_reset_reason"],
+        "last_latest_reset_freshness": upstream_row.get("latest_reset_freshness")
+        if upstream_row.get("latest_reset_freshness") is not None
+        else row["latest_reset_freshness"],
+        "latest_bearish_relevance_class": upstream_row.get("latest_bearish_relevance_class"),
+    }
+
+
+def _classify_shared_rolling5(
+    row: sqlite3.Row,
+    *,
+    upstream_row: dict[str, object] | None,
+) -> Rolling5PullbackClassification | None:
+    helper_row = _build_shared_rolling5_helper_row(row, upstream_row=upstream_row)
+    if helper_row is None:
+        return None
+    return classify_rolling_5_pullback_row(helper_row)
+
+
 def _build_upstream_rolling5_payload(
     upstream_row: dict[str, object] | None,
     *,
     existing_primary_reason: str | None,
+    helper_classification: Rolling5PullbackClassification | None,
 ) -> dict[str, object]:
     if not upstream_row:
         return {}
@@ -558,17 +611,29 @@ def _build_upstream_rolling5_payload(
             payload[source_key] = value
 
     rolling_5_pullback_state = _normalized_text(upstream_row.get("rolling_5_pullback_state"))
-    if rolling_5_pullback_state is not None:
-        payload["rolling_5_pullback_state"] = rolling_5_pullback_state
+    if helper_classification is not None:
+        payload["rolling_5_pullback_state"] = helper_classification.rolling_5_pullback_state
+        payload["primary_reason"] = helper_classification.primary_reason
+        payload["blocking_reason"] = helper_classification.blocking_reason
+        payload["next_action"] = helper_classification.next_action
+        payload["rolling_5d_primary_reason"] = helper_classification.primary_reason
+        if helper_classification.blocking_reason:
+            payload["rolling_5d_blocking_reason"] = helper_classification.blocking_reason
+    else:
+        if rolling_5_pullback_state is not None:
+            payload["rolling_5_pullback_state"] = rolling_5_pullback_state
 
-    primary_reason = _normalized_text(upstream_row.get("primary_reason"))
-    if primary_reason is not None and existing_primary_reason is not None:
-        payload["rolling_5d_primary_reason"] = primary_reason
-    blocking_reason = _normalized_text(upstream_row.get("blocking_reason"))
-    if blocking_reason is not None:
-        payload["rolling_5d_blocking_reason"] = blocking_reason
-    if primary_reason is not None and existing_primary_reason is None:
-        payload["rolling_5d_primary_reason"] = primary_reason
+        primary_reason = _normalized_text(upstream_row.get("primary_reason"))
+        blocking_reason = _normalized_text(upstream_row.get("blocking_reason"))
+        next_action = _normalized_text(upstream_row.get("next_action"))
+        if primary_reason is not None:
+            payload["primary_reason"] = primary_reason
+            payload["rolling_5d_primary_reason"] = primary_reason
+        if blocking_reason is not None:
+            payload["blocking_reason"] = blocking_reason
+            payload["rolling_5d_blocking_reason"] = blocking_reason
+        if next_action is not None:
+            payload["next_action"] = next_action
     return payload
 
 
@@ -692,6 +757,7 @@ def _map_destination_row(
     ma_break_status: str | None,
     history_rows: list[sqlite3.Row] | None,
     upstream_row: dict[str, object] | None,
+    use_shared_rolling5_helper: bool,
 ) -> tuple[object, ...]:
     ticker = str(row["ticker"]).strip().upper()
     daily_status = _derive_daily_status(row)
@@ -703,8 +769,17 @@ def _map_destination_row(
         _resolve_freshness_status(row, history_rows)
     )
     rolling_2d_status = _derive_rolling_2d_status(row)
-    rolling_5d_status = _map_upstream_rolling_5d_status(
-        upstream_row.get("rolling_5_pullback_state") if upstream_row else None
+    rolling5_helper_classification = (
+        _classify_shared_rolling5(row, upstream_row=upstream_row)
+        if use_shared_rolling5_helper
+        else None
+    )
+    rolling_5d_status = (
+        rolling5_helper_classification.rolling_5_pullback_state
+        if rolling5_helper_classification is not None
+        else _map_upstream_rolling_5d_status(
+            upstream_row.get("rolling_5_pullback_state") if upstream_row else None
+        )
     ) or _derive_rolling_5d_status(row, history_rows)
     window_status_2d = _derive_window_status_2d(row)
     latest_bos_event_type = _normalized_text(row["latest_bos_event_type"]) or _normalized_text(
@@ -716,6 +791,7 @@ def _map_destination_row(
     upstream_payload = _build_upstream_rolling5_payload(
         upstream_row,
         existing_primary_reason=_derive_primary_reason(row, daily_status),
+        helper_classification=rolling5_helper_classification,
     )
     encoded_upstream_payload = _encode_upstream_rolling5_payload(upstream_payload)
     include_upstream_rolling5 = upstream_row is not None
@@ -817,6 +893,8 @@ def main(argv: list[str] | None = None) -> int:
         upstream_rolling5_status = "SKIPPED"
         upstream_rolling5_rows = 0
         upstream_rolling5_matched_tickers = 0
+        rolling5_classifier_source = "skipped"
+        rolling5_classifier_rows = 0
 
         connector = _connect_read_only if args.dry_run else _connect_read_write
         with connector(args.analysis_db) as conn:
@@ -844,6 +922,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 upstream_rolling5_status = "OK"
                 upstream_rolling5_rows = len(upstream_rows_by_ticker)
+                rolling5_classifier_source = "shared_helper"
             history_by_ticker = _load_source_history_by_ticker(
                 conn,
                 signal_date=signal_date,
@@ -932,9 +1011,12 @@ def main(argv: list[str] | None = None) -> int:
                             ma_break_status=ma_break_status,
                             history_rows=pullback_history_rows,
                             upstream_row=upstream_rows_by_ticker.get(ticker),
+                            use_shared_rolling5_helper=args.use_upstream_rolling5_pullback,
                         ),
                     )
                 )
+                if args.use_upstream_rolling5_pullback and upstream_rows_by_ticker.get(ticker) is not None:
+                    rolling5_classifier_rows += 1
             if high_exit_window_unavailable > 0:
                 warnings.append("HIGH_EXIT_WINDOW_ROWS_UNAVAILABLE")
 
@@ -1241,6 +1323,8 @@ def main(argv: list[str] | None = None) -> int:
         _emit_summary("upstream_rolling5_rows", upstream_rolling5_rows)
         _emit_summary("upstream_rolling5_matched_tickers", upstream_rolling5_matched_tickers)
         _emit_summary("upstream_rolling5_status", upstream_rolling5_status)
+        _emit_summary("rolling5_classifier_source", rolling5_classifier_source)
+        _emit_summary("rolling5_classifier_rows", rolling5_classifier_rows)
         _emit_summary("pullback_lookback_rows", args.pullback_lookback_rows)
         _emit_summary("pullback_window_derived_rows", pullback_window_derived_rows)
         _emit_summary("pullback_window_candidate_rows", pullback_window_candidate_rows)
