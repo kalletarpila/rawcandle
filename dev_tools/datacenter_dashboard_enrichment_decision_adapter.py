@@ -93,6 +93,7 @@ RAW_FIELD_NAMES: tuple[str, ...] = (
     "latest_reset_age_td",
 )
 UPSTREAM_ROLLING5_PAYLOAD_PREFIX = "UPSTREAM_ROLLING5_JSON:"
+MA_BREAK_PAYLOAD_KEY = "ma_break"
 
 
 def _normalized_text(value: object) -> str | None:
@@ -138,6 +139,22 @@ def _is_valid_ticker(value: object) -> bool:
     return True
 
 
+def _decoded_payload(row: dict[str, object]) -> dict[str, object]:
+    source_run_ids = _normalized_text(row.get("source_run_ids"))
+    if source_run_ids is None or not source_run_ids.startswith(UPSTREAM_ROLLING5_PAYLOAD_PREFIX):
+        return {}
+    try:
+        payload = json.loads(source_run_ids[len(UPSTREAM_ROLLING5_PAYLOAD_PREFIX):])
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _ma_break_payload(payload: dict[str, object]) -> dict[str, object]:
+    value = payload.get(MA_BREAK_PAYLOAD_KEY)
+    return value if isinstance(value, dict) else {}
+
+
 def _raw_fields_from_row(
     row: dict[str, object],
     *,
@@ -149,17 +166,21 @@ def _raw_fields_from_row(
         text = _normalized_text(value)
         if text is not None:
             raw_fields[key] = text
-    source_run_ids = _normalized_text(row.get("source_run_ids"))
-    if source_run_ids is not None and source_run_ids.startswith(UPSTREAM_ROLLING5_PAYLOAD_PREFIX):
-        try:
-            payload = json.loads(source_run_ids[len(UPSTREAM_ROLLING5_PAYLOAD_PREFIX):])
-        except json.JSONDecodeError:
-            payload = {}
-        if isinstance(payload, dict):
-            for key, value in payload.items():
-                text = _normalized_text(value)
-                if text is not None:
-                    raw_fields[key] = text
+    payload = _decoded_payload(row)
+    for key, value in payload.items():
+        if isinstance(value, dict):
+            continue
+        text = _normalized_text(value)
+        if text is not None:
+            raw_fields[key] = text
+    ma_break = _ma_break_payload(payload)
+    for key, value in ma_break.items():
+        text = _normalized_text(value)
+        if text is not None:
+            raw_fields[key] = text
+    for field_name in ("close_below_ema20", "close_below_sma50", "ema20_break_confirmed", "sma50_break_confirmed"):
+        if _safe_int(ma_break.get(field_name)) == 1:
+            raw_fields[f"{field_name}_token"] = field_name
     rolling_5d_status = _normalized_text(row.get("rolling_5d_status"))
     freshness_status = _normalized_text(row.get("freshness_status"))
     if "pullback_days" not in raw_fields and rolling_5d_status in {
@@ -178,13 +199,7 @@ def _raw_fields_from_row(
 
 
 def _upstream_rolling5_payload(row: dict[str, object]) -> dict[str, object]:
-    source_run_ids = _normalized_text(row.get("source_run_ids"))
-    if source_run_ids is None or not source_run_ids.startswith(UPSTREAM_ROLLING5_PAYLOAD_PREFIX):
-        return {}
-    try:
-        payload = json.loads(source_run_ids[len(UPSTREAM_ROLLING5_PAYLOAD_PREFIX):])
-    except json.JSONDecodeError:
-        return {}
+    payload = _decoded_payload(row)
     return payload if isinstance(payload, dict) else {}
 
 
@@ -201,6 +216,8 @@ def _build_row(
     extra_raw_fields: dict[str, object] | None = None,
 ) -> DatacenterDashboardRow:
     raw_fields = _raw_fields_from_row(row, horizon_source_field=horizon_source_field)
+    payload = _decoded_payload(row)
+    ma_break = _ma_break_payload(payload)
     if extra_raw_fields:
         for key, value in extra_raw_fields.items():
             text = _normalized_text(value)
@@ -226,15 +243,15 @@ def _build_row(
             if blocking_reasons is not None
             else _normalized_text(row.get("blocking_reasons"))
         ),
-        ma_break_status=_normalized_text(row.get("ma_break_status")),
-        ema20_break_confirmed=_safe_int(row.get("ema20_break_confirmed")),
-        sma50_break_confirmed=_safe_int(row.get("sma50_break_confirmed")),
-        close_below_ema20=_safe_int(row.get("close_below_ema20")),
-        close_below_sma50=_safe_int(row.get("close_below_sma50")),
-        consecutive_closes_below_ema20=_safe_int(row.get("consecutive_closes_below_ema20")),
-        consecutive_closes_below_sma50=_safe_int(row.get("consecutive_closes_below_sma50")),
-        ema20_break_pct=_safe_float(row.get("ema20_break_pct")),
-        sma50_break_pct=_safe_float(row.get("sma50_break_pct")),
+        ma_break_status=_normalized_text(row.get("ma_break_status")) or _normalized_text(ma_break.get("ma_break_status")),
+        ema20_break_confirmed=_safe_int(row.get("ema20_break_confirmed")) if _safe_int(row.get("ema20_break_confirmed")) is not None else _safe_int(ma_break.get("ema20_break_confirmed")),
+        sma50_break_confirmed=_safe_int(row.get("sma50_break_confirmed")) if _safe_int(row.get("sma50_break_confirmed")) is not None else _safe_int(ma_break.get("sma50_break_confirmed")),
+        close_below_ema20=_safe_int(row.get("close_below_ema20")) if _safe_int(row.get("close_below_ema20")) is not None else _safe_int(ma_break.get("close_below_ema20")),
+        close_below_sma50=_safe_int(row.get("close_below_sma50")) if _safe_int(row.get("close_below_sma50")) is not None else _safe_int(ma_break.get("close_below_sma50")),
+        consecutive_closes_below_ema20=_safe_int(row.get("consecutive_closes_below_ema20")) if _safe_int(row.get("consecutive_closes_below_ema20")) is not None else _safe_int(ma_break.get("consecutive_closes_below_ema20")),
+        consecutive_closes_below_sma50=_safe_int(row.get("consecutive_closes_below_sma50")) if _safe_int(row.get("consecutive_closes_below_sma50")) is not None else _safe_int(ma_break.get("consecutive_closes_below_sma50")),
+        ema20_break_pct=_safe_float(row.get("ema20_break_pct")) if _safe_float(row.get("ema20_break_pct")) is not None else _safe_float(ma_break.get("ema20_break_pct")),
+        sma50_break_pct=_safe_float(row.get("sma50_break_pct")) if _safe_float(row.get("sma50_break_pct")) is not None else _safe_float(ma_break.get("sma50_break_pct")),
         freshness_status=_normalized_text(row.get("freshness_status")),
         structure_warning_overrides_bullish_signal=_safe_int(
             row.get("structure_warning_overrides_bullish_signal")

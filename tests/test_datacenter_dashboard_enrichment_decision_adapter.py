@@ -538,6 +538,64 @@ def test_close_below_ema20_token_is_visible_in_adapter_raw_fields():
     assert daily_row.raw_fields["window_status_2d"] == "close_below_ema20"
 
 
+def test_ma_break_payload_is_exposed_on_daily_base_row_raw_fields():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "NEUTRAL_MONITOR",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "ma_break": {
+                            "close_below_ema20": 1,
+                            "ema20_break_confirmed": 1,
+                            "ma_break_status": "EMA20_CONFIRMED_BREAK",
+                        }
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    daily_row = next(row for row in rows if row.horizon == "daily")
+    assert daily_row.raw_fields["close_below_ema20"] == "1"
+    assert daily_row.raw_fields["ema20_break_confirmed"] == "1"
+    assert daily_row.raw_fields["ma_break_status"] == "EMA20_CONFIRMED_BREAK"
+    assert daily_row.close_below_ema20 == 1
+    assert daily_row.ema20_break_confirmed == 1
+    assert daily_row.ma_break_status == "EMA20_CONFIRMED_BREAK"
+
+
+def test_ma_break_payload_is_exposed_on_rolling_2d_row_raw_fields():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "NEUTRAL_MONITOR",
+                "rolling_2d_status": "WATCH_PRESSURE",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "ma_break": {
+                            "close_below_ema20": 1,
+                            "ma_break_status": "EMA20_WARNING",
+                        }
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    rolling_2d_row = next(row for row in rows if row.horizon == "rolling 2d")
+    assert rolling_2d_row.raw_fields["close_below_ema20"] == "1"
+    assert rolling_2d_row.raw_fields["ma_break_status"] == "EMA20_WARNING"
+    assert rolling_2d_row.close_below_ema20 == 1
+    assert rolling_2d_row.ma_break_status == "EMA20_WARNING"
+
+
 def test_exit_reason_is_exposed_on_daily_base_row_raw_fields():
     rows = build_dashboard_rows_from_ticker_enrichment_rows(
         [
@@ -613,6 +671,34 @@ def test_decision_integration_sees_exit_reason_close_below_ema20_token():
         or "close_below_ema20" in (trace.matched_token or "").lower()
         for trace in decision.decision_trace
     )
+
+
+def test_decision_integration_uses_ma_break_payload_without_changing_rules():
+    result = build_decisions_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "NEUTRAL_MONITOR",
+                "rolling_2d_status": "WATCH_PRESSURE",
+                "ma_break_status": None,
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "ma_break": {
+                            "ma_break_status": "EMA20_CONFIRMED_BREAK",
+                            "close_below_ema20": 1,
+                            "ema20_break_confirmed": 1,
+                        }
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    decision = result.decisions[0]
+    assert decision.action == "SELL"
+    assert any(trace.matched_rule == "SELL_EMA20_CONFIRMED_BREAK" for trace in decision.decision_trace)
 
 
 def test_high_exit_risk_days_count_is_exposed_in_raw_fields_and_seen_by_decision_logic():

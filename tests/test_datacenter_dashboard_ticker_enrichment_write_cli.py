@@ -1,4 +1,5 @@
 import sqlite3
+import json
 from pathlib import Path
 
 from dev_tools.run_datacenter_dashboard_enrichment_audit import main as audit_main
@@ -386,6 +387,63 @@ def test_exit_reason_is_preserved_in_source_run_ids_payload(tmp_path, capsys):
     row = _destination_rows(db_path)[0]
     assert row["source_run_ids"] is not None
     assert '"exit_reason":"close_below_ema20;return_10d_lt_minus_8pct"' in row["source_run_ids"]
+
+
+def test_full_ma_break_helper_output_is_preserved_in_source_run_ids_payload(tmp_path, monkeypatch, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(db_path, ticker="AAA", ma_break_status=None)
+
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_ticker_enrichment_write.build_swing_ma_break_status_rows",
+        lambda **kwargs: [
+            {
+                "ticker": "AAA",
+                "as_of_date": "2026-05-22",
+                "close": 100.0,
+                "ema20": 101.5,
+                "sma50": 110.0,
+                "dist_ema20_pct": -0.015,
+                "dist_sma50_pct": -0.09,
+                "close_below_ema20": 1,
+                "ema20_break_pct": -1.5,
+                "ema20_break_confirmed": 0,
+                "consecutive_closes_below_ema20": 2,
+                "close_below_sma50": 0,
+                "sma50_break_pct": 0.0,
+                "sma50_break_confirmed": 0,
+                "consecutive_closes_below_sma50": 0,
+                "ma_break_status": "EMA20_WARNING",
+            }
+        ],
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    row = _destination_rows(db_path)[0]
+    assert row["ma_break_status"] == "EMA20_WARNING"
+    assert row["source_run_ids"] is not None
+    payload = json.loads(row["source_run_ids"].split(":", 1)[1])
+    assert payload["ma_break"]["close_below_ema20"] == 1
+    assert payload["ma_break"]["ema20_break_confirmed"] == 0
+    assert payload["ma_break"]["consecutive_closes_below_ema20"] == 2
+    assert payload["ma_break"]["ema20_break_pct"] == -1.5
+    assert payload["ma_break"]["ma_break_status"] == "EMA20_WARNING"
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.ma_break_helper_rows=1" in output
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.ma_break_payload_rows=1" in output
 
 
 def test_high_exit_risk_maps_to_daily_status_current_status_and_reason(tmp_path, capsys):

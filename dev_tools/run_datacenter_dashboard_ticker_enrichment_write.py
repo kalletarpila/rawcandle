@@ -22,6 +22,7 @@ CALC_VERSION = "DATACENTER_DASHBOARD_TICKER_ENRICHMENT_V1"
 SOURCE_COMPONENTS = "dc_ticker_swing_signal_daily,dc_ticker_swing_signal_daily:daily_status_mapping_v1"
 UPSTREAM_ROLLING5_COMPONENT = "swing_weekly_report:rolling5_upstream_v1"
 UPSTREAM_ROLLING5_PAYLOAD_PREFIX = "UPSTREAM_ROLLING5_JSON:"
+MA_BREAK_PAYLOAD_KEY = "ma_break"
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 VALID_TICKER_RE = re.compile(r"^[A-Z0-9][A-Z0-9.\-]*$")
 DISALLOWED_TICKER_LABELS = {
@@ -593,6 +594,7 @@ def _build_upstream_rolling5_payload(
     *,
     existing_primary_reason: str | None,
     helper_classification: Rolling5PullbackClassification | None,
+    ma_break_row: dict[str, object] | None = None,
     exit_reason: str | None = None,
     last_exit_reason: str | None = None,
     latest_exit_reason: str | None = None,
@@ -606,6 +608,28 @@ def _build_upstream_rolling5_payload(
         normalized = _normalized_text(value)
         if normalized is not None:
             payload[key] = normalized
+    if ma_break_row:
+        payload[MA_BREAK_PAYLOAD_KEY] = {
+            key: value
+            for key, value in ma_break_row.items()
+            if key
+            in {
+                "close",
+                "ema20",
+                "sma50",
+                "dist_ema20_pct",
+                "dist_sma50_pct",
+                "close_below_ema20",
+                "ema20_break_pct",
+                "ema20_break_confirmed",
+                "consecutive_closes_below_ema20",
+                "close_below_sma50",
+                "sma50_break_pct",
+                "sma50_break_confirmed",
+                "consecutive_closes_below_sma50",
+                "ma_break_status",
+            }
+        }
     if not upstream_row:
         return payload
     for source_key in (
@@ -727,13 +751,10 @@ def _resolve_high_exit_risk_days_count(
     return _derive_high_exit_risk_days_count_same_day(row), False, True
 
 
-def _resolve_ma_break_status(
+def _resolve_ma_break_helper_row(
     row: sqlite3.Row,
     history_rows: list[sqlite3.Row] | None,
-) -> str | None:
-    explicit_value = _normalized_text(row["ma_break_status"])
-    if explicit_value is not None:
-        return explicit_value
+) -> dict[str, object] | None:
     if not history_rows:
         return None
     derived_rows = build_swing_ma_break_status_rows(
@@ -752,7 +773,19 @@ def _resolve_ma_break_status(
     )
     if not derived_rows:
         return None
-    derived_value = _normalized_text(derived_rows[0].get("ma_break_status"))
+    return derived_rows[0]
+
+
+def _resolve_ma_break_status(
+    row: sqlite3.Row,
+    ma_break_helper_row: dict[str, object] | None,
+) -> str | None:
+    explicit_value = _normalized_text(row["ma_break_status"])
+    if explicit_value is not None:
+        return explicit_value
+    if not ma_break_helper_row:
+        return None
+    derived_value = _normalized_text(ma_break_helper_row.get("ma_break_status"))
     if derived_value == "INSUFFICIENT_DATA":
         return None
     return derived_value
@@ -766,6 +799,7 @@ def _map_destination_row(
     watchlist_tickers: set[str],
     high_exit_risk_days_count: int,
     ma_break_status: str | None,
+    ma_break_helper_row: dict[str, object] | None,
     history_rows: list[sqlite3.Row] | None,
     upstream_row: dict[str, object] | None,
     use_shared_rolling5_helper: bool,
@@ -804,6 +838,7 @@ def _map_destination_row(
         upstream_row,
         existing_primary_reason=_derive_primary_reason(row, daily_status),
         helper_classification=rolling5_helper_classification,
+        ma_break_row=ma_break_helper_row,
         exit_reason=exit_reason,
     )
     encoded_upstream_payload = _encode_upstream_rolling5_payload(upstream_payload)
@@ -908,6 +943,8 @@ def main(argv: list[str] | None = None) -> int:
         upstream_rolling5_matched_tickers = 0
         rolling5_classifier_source = "skipped"
         rolling5_classifier_rows = 0
+        ma_break_helper_rows = 0
+        ma_break_payload_rows = 0
 
         connector = _connect_read_only if args.dry_run else _connect_read_write
         with connector(args.analysis_db) as conn:
@@ -984,10 +1021,13 @@ def main(argv: list[str] | None = None) -> int:
                     row,
                     history_by_ticker.get(ticker),
                 )
-                ma_break_status = _resolve_ma_break_status(
+                ma_break_helper_row = _resolve_ma_break_helper_row(
                     row,
                     ma_history_by_ticker.get(ticker),
                 )
+                ma_break_status = _resolve_ma_break_status(row, ma_break_helper_row)
+                if ma_break_helper_row is not None:
+                    ma_break_helper_rows += 1
                 pullback_history_rows = pullback_history_by_ticker.get(ticker)
                 candidate_pullback_days, candidate_bullish_age, candidate_structure_override = (
                     _derive_pullback_window_context(pullback_history_rows)
@@ -1022,12 +1062,15 @@ def main(argv: list[str] | None = None) -> int:
                             watchlist_tickers=watchlist_tickers,
                             high_exit_risk_days_count=high_exit_risk_days_count,
                             ma_break_status=ma_break_status,
+                            ma_break_helper_row=ma_break_helper_row,
                             history_rows=pullback_history_rows,
                             upstream_row=upstream_rows_by_ticker.get(ticker),
                             use_shared_rolling5_helper=args.use_upstream_rolling5_pullback,
                         ),
                     )
                 )
+                if ma_break_helper_row is not None:
+                    ma_break_payload_rows += 1
                 if args.use_upstream_rolling5_pullback and upstream_rows_by_ticker.get(ticker) is not None:
                     rolling5_classifier_rows += 1
             if high_exit_window_unavailable > 0:
@@ -1338,6 +1381,8 @@ def main(argv: list[str] | None = None) -> int:
         _emit_summary("upstream_rolling5_status", upstream_rolling5_status)
         _emit_summary("rolling5_classifier_source", rolling5_classifier_source)
         _emit_summary("rolling5_classifier_rows", rolling5_classifier_rows)
+        _emit_summary("ma_break_helper_rows", ma_break_helper_rows)
+        _emit_summary("ma_break_payload_rows", ma_break_payload_rows)
         _emit_summary("pullback_lookback_rows", args.pullback_lookback_rows)
         _emit_summary("pullback_window_derived_rows", pullback_window_derived_rows)
         _emit_summary("pullback_window_candidate_rows", pullback_window_candidate_rows)
