@@ -35,6 +35,26 @@ def test_adapter_builds_dashboard_rows_from_minimal_enrichment_row():
     assert rows[0].raw_fields["latest_bos_event_type"] == "BOS_UP"
 
 
+def test_top_level_final_primary_reason_is_not_used_as_daily_row_reason_or_raw_field():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "NVDA",
+                "current_status": "NEUTRAL",
+                "daily_status": "NEUTRAL_MONITOR",
+                "primary_reason": "RISK_SIGNAL_DETECTED",
+                "trend_state": "UP",
+                "latest_structure_label": "HH",
+                "latest_bos_event_type": "BOS_UP",
+            }
+        ]
+    )
+
+    daily_row = next(row for row in rows if row.horizon == "daily")
+    assert daily_row.reason is None
+    assert "primary_reason" not in daily_row.raw_fields
+
+
 def test_adapter_expands_horizon_specific_status_fields():
     rows = build_dashboard_rows_from_ticker_enrichment_rows(
         [
@@ -1027,6 +1047,38 @@ def test_pullback_days_is_exposed_on_rolling_30d_companion_row_from_payload():
     assert _row_has_pullback_context(rolling_row, _collect_text_values(rolling_row)) is True
 
 
+def test_rolling30_helper_primary_reason_and_blocking_reason_remain_exposed():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "NEUTRAL_MONITOR",
+                "rolling_30d_status": "WATCH_ZONE",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "rolling30": {
+                            "rolling_30_buy_state": "WATCH_ZONE",
+                            "pullback_days": 2,
+                            "current_watchlist_status": "PULLBACK_CANDIDATE",
+                            "window_watchlist_status": "PULLBACK_CANDIDATE",
+                            "primary_reason": "HISTORICAL_WINDOW_PULLBACK",
+                            "blocking_reason": "HISTORICAL_WINDOW_HIGH_EXIT_RISK",
+                        }
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    rolling_row = next(row for row in rows if row.horizon == "rolling 30d")
+    assert rolling_row.reason == "HISTORICAL_WINDOW_PULLBACK"
+    assert rolling_row.blocking_reasons == "HISTORICAL_WINDOW_HIGH_EXIT_RISK"
+    assert rolling_row.raw_fields["primary_reason"] == "HISTORICAL_WINDOW_PULLBACK"
+    assert rolling_row.raw_fields["blocking_reason"] == "HISTORICAL_WINDOW_HIGH_EXIT_RISK"
+
+
 def test_decision_integration_can_see_rolling_30d_pullback_context():
     result = build_decisions_from_ticker_enrichment_rows(
         [
@@ -1061,6 +1113,65 @@ def test_decision_integration_can_see_rolling_30d_pullback_context():
 
     decision = result.decisions[0]
     assert decision.pullback_validity != "NO_PULLBACK"
+    assert decision.pullback_reason != "NO_PULLBACK_CONTEXT"
+
+
+def test_top_level_sell_signal_detected_does_not_self_feed_into_sell_action():
+    result = build_decisions_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "CSW",
+                "current_status": "MEDIUM_EXIT_RISK",
+                "daily_status": "MEDIUM_EXIT_RISK",
+                "primary_reason": "SELL_SIGNAL_DETECTED",
+                "trend_state": "UP",
+                "latest_structure_label": "HH",
+                "latest_bos_event_type": "BOS_UP",
+            }
+        ]
+    )
+
+    decision = result.decisions[0]
+    assert decision.action == "REDUCE"
+
+
+def test_top_level_risk_signal_detected_does_not_self_feed_into_reduce_action():
+    result = build_decisions_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "CRUS",
+                "current_status": "NEUTRAL_MONITOR",
+                "daily_status": "NEUTRAL_MONITOR",
+                "primary_reason": "RISK_SIGNAL_DETECTED",
+                "rolling_30d_status": "WATCH_ZONE",
+                "high_exit_risk_days_count": 3,
+                "trend_state": "UP",
+                "latest_structure_label": "HH",
+                "latest_bos_event_type": "BOS_UP",
+                "freshness_status": "FRESH_BULLISH_SIGNAL",
+                "ma_break_status": "OK",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "rolling30": {
+                            "rolling_30_buy_state": "WATCH_ZONE",
+                            "pullback_days": 3,
+                            "breakout_days": 0,
+                            "exit_risk_days": 0,
+                            "current_watchlist_status": "PULLBACK_CANDIDATE",
+                            "window_watchlist_status": "PULLBACK_CANDIDATE",
+                            "primary_reason": "UP_STRUCTURE_WITH_PULLBACK_CONTEXT",
+                            "blocking_reason": "",
+                        }
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    decision = result.decisions[0]
+    assert decision.action == "TIGHTEN_STOP"
     assert decision.pullback_reason != "NO_PULLBACK_CONTEXT"
 
 

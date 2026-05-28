@@ -34,7 +34,6 @@ HORIZON_SOURCE_FIELDS: tuple[tuple[str, str], ...] = (
 )
 RAW_FIELD_NAMES: tuple[str, ...] = (
     "severity",
-    "primary_reason",
     "current_status",
     "start_status_30d",
     "status_change_30d",
@@ -53,10 +52,6 @@ RAW_FIELD_NAMES: tuple[str, ...] = (
     "rolling_5d_status",
     "rolling_30d_status",
     "horizons_present",
-    "pullback_validity",
-    "entry_readiness",
-    "candidate_priority",
-    "candidate_priority_label",
     "distance_to_ema20",
     "pullback_days",
     "breakout_days",
@@ -291,7 +286,7 @@ def _build_row(
         row_kind=row_kind,
         raw_action=raw_action,
         raw_status=raw_status,
-        reason=reason if reason is not None else _normalized_text(row.get("primary_reason")),
+        reason=reason,
         trend_state=_normalized_text(row.get("trend_state")),
         latest_structure_label=_normalized_text(row.get("latest_structure_label")),
         latest_bos_event_type=_normalized_text(row.get("latest_bos_event_type")),
