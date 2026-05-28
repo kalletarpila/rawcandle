@@ -293,3 +293,158 @@ or:
 ### DB-18m
 
 - implement a read-only proposed V1 classifier audit against reports mode before adding schema
+
+
+## Reports-mode Pullback Semantic Source Investigation
+
+Inspected files:
+
+- `analysis/datacenter_indices/swing_weekly_report.py`
+- `analysis/datacenter_indices/swing_daily_report.py`
+- `analysis/datacenter_indices/swing_pipeline_orchestrator.py`
+- `dev_tools/datacenter_dashboard_parser.py`
+- `dev_tools/datacenter_dashboard_decisions.py`
+- `dev_tools/run_datacenter_dashboard_rolling5_pullback_v2_classifier_audit.py`
+
+### Source classification
+
+- `STRUCTURED_SOURCE_PARTIAL`
+
+### Where pullback_validity appears to originate
+
+Reports-mode `pullback_validity` does not appear to exist upstream as a single reusable final field before dashboard parsing.
+
+The inspected path is split into two layers:
+
+1. `analysis/datacenter_indices/swing_weekly_report.py`
+   - builds a structured rolling 5d row set in `_build_rolling_5_pullback_rows(...)`
+   - computes upstream rolling 5d semantics in `_classify_rolling_5_pullback_row(...)`
+   - emits structured rolling 5d states before markdown rendering
+
+2. `dev_tools/datacenter_dashboard_decisions.py`
+   - derives final dashboard `pullback_validity` later in `_classify_pullback_validity(...)`
+   - uses parsed report rows plus acute structure / freshness / MA-break context
+
+This means reports-mode pullback semantics are not markdown-only, but final dashboard `pullback_validity` is also not a direct upstream report field in the inspected report-generation code.
+
+### Exact report / parser / decision tokens involved
+
+Upstream rolling 5d structured/report states found in `swing_weekly_report.py`:
+
+- `PULLBACK_CANDIDATE`
+- `EARLY_PULLBACK`
+- `FAILED_PULLBACK`
+- `SHORT_TERM_BREAKDOWN`
+- `NO_PULLBACK`
+- `INSUFFICIENT_DATA`
+
+Structured support fields emitted with rolling 5d rows include at least:
+
+- `rolling_5_pullback_state`
+- `pullback_days`
+- `fast_ema10_pullback_days`
+- `conservative_ema20_pullback_days`
+- `latest_bos_event_type`
+- `latest_bos_freshness`
+- `latest_reset_reason`
+- `latest_reset_freshness`
+- `latest_bullish_relevance_class`
+- `latest_bearish_relevance_class`
+- `primary_reason`
+- `blocking_reason`
+- `next_action`
+
+Final dashboard decision-side classes found in `datacenter_dashboard_decisions.py`:
+
+- `VALID_PULLBACK`
+- `EARLY_PULLBACK`
+- `STRUCTURE_BLOCKED_PULLBACK`
+- `BREAKDOWN_NOT_PULLBACK`
+- `NO_PULLBACK`
+- `INSUFFICIENT_DATA`
+
+Decision-side tokens / fields used in `_classify_pullback_validity(...)` include:
+
+- pullback context:
+  - `pullback_days`
+  - raw-field pullback tokens such as `pullback_candidate`, `early_pullback`, `failed_pullback`
+- structure blocker context:
+  - `freshness_status=STRUCTURE_WARNING_OVERRIDES_BULLISH`
+  - `structure_warning_overrides_bullish_signal=1`
+  - `latest_bos_event_type=BOS_DOWN`
+  - fresh `latest_bos_freshness`
+  - `latest_reset_reason` containing reset / `DOUBLE_BOS_DOWN`
+  - fresh `latest_reset_freshness`
+- breakdown context:
+  - `ma_break_status=SMA50_CONFIRMED_BREAK`
+  - `ma_break_status=EMA20_CONFIRMED_BREAK`
+- bullish confirmation context:
+  - `freshness_status=FRESH_BULLISH_SIGNAL`
+  - acceptable or absent acute `ma_break_status`
+
+### Whether reusable structured source exists before markdown
+
+Reusable structured source does exist before markdown, but only partially.
+
+Available before markdown:
+
+- rolling 5d structured pullback state
+- rolling 5d supporting reason / blocker / day-count fields
+
+Not available as an inspected upstream structured field:
+
+- final dashboard `pullback_validity`
+- final dashboard `entry_readiness`
+- final dashboard `candidate_priority`
+
+`analysis/datacenter_indices/swing_pipeline_orchestrator.py` confirms the rolling 5d report is carried forward as a report artifact and exported as a pipeline report payload, but it does not expose a final upstream `pullback_validity` field on its own.
+
+`dev_tools/datacenter_dashboard_parser.py` parses normalized columns plus generic `raw_fields`, so the reports-mode dashboard can consume the upstream rolling 5d state and supporting fields after report parsing. The parser is therefore a transport step, not the origin of the semantics.
+
+### Should DB-18l add schema now or wait
+
+Recommendation: wait before adding schema for the final dashboard class.
+
+Reason:
+
+- there is a reusable upstream rolling 5d semantic layer
+- but the final dashboard pullback class is still a downstream decision derivation
+- that final derivation also depends on acute daily / rolling 2d freshness and MA-break context, not only on the rolling 5d state itself
+
+Adding schema immediately for the final class would likely store the wrong abstraction level.
+
+### Recommended next step
+
+Recommended next step:
+
+- if parity is required, DB-18p should expose the reusable upstream rolling 5d structured semantic layer into the analysis/enrichment path
+- it should not parse `.md` in production
+- it should also not store only the final dashboard `pullback_validity` first
+
+The narrowest useful upstream payload to expose appears to be:
+
+- `rolling_5_pullback_state`
+- `primary_reason`
+- `blocking_reason`
+- `pullback_days`
+- `fast_ema10_pullback_days`
+- `conservative_ema20_pullback_days`
+- `latest_bos_event_type`
+- `latest_bos_freshness`
+- `latest_reset_reason`
+- `latest_reset_freshness`
+- bullish / bearish relevance companion fields
+
+To preserve current decision semantics, the acute fields already consumed by dashboard decision logic must also remain available:
+
+- `freshness_status`
+- `structure_warning_overrides_bullish_signal`
+- `ma_break_status`
+- `latest_bullish_signal_age_td`
+
+Net recommendation:
+
+- do not treat reports-mode pullback semantics as `PARSER_ONLY_SOURCE`
+- do not treat the current source as fully reusable final semantics either
+- treat it as `STRUCTURED_SOURCE_PARTIAL`
+- expose the upstream rolling 5d semantic layer plus the acute confirmation fields that the current dashboard decision logic already uses
