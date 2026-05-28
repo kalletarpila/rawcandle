@@ -68,6 +68,12 @@ class ScheduledStockUpdateRunResult:
     technical_relevance_ticker_count: int = 0
     technical_relevance_start_date: str = "NONE"
     technical_relevance_end_date: str = "NONE"
+    technical_relevance_requested_calendar_signal_date: str = "NONE"
+    technical_relevance_end_date_source: str = "NONE"
+    technical_relevance_end_date_resolution: str = "NONE"
+    technical_relevance_end_date_min_price_ticker_count: int = 0
+    technical_relevance_end_date_candidate_count: int = 0
+    technical_relevance_ticker_valid_date_count: int = 0
     technical_relevance_records_written: int = 0
     technical_relevance_relevant_count: int = 0
     technical_relevance_weak_context_count: int = 0
@@ -151,6 +157,18 @@ class DatacenterSignalDateResolution:
 
 
 @dataclass(frozen=True)
+class TechnicalRelevanceEndDateResolution:
+    end_date: Optional[str]
+    requested_calendar_signal_date: str
+    end_date_source: str
+    end_date_resolution: str
+    min_price_ticker_count: int
+    candidate_count: int
+    ticker_valid_date_count: int
+    skip_reason: str
+
+
+@dataclass(frozen=True)
 class DatacenterPostStepResult:
     attempted: int
     status: str
@@ -184,6 +202,12 @@ class TechnicalRelevancePostStepResult:
     ticker_count: int = 0
     start_date: Optional[str] = None
     end_date: Optional[str] = None
+    requested_calendar_signal_date: Optional[str] = None
+    end_date_source: str = "NONE"
+    end_date_resolution: str = "NONE"
+    min_price_ticker_count: int = 0
+    candidate_count: int = 0
+    ticker_valid_date_count: int = 0
     records_written: int = 0
     relevant_count: int = 0
     weak_context_count: int = 0
@@ -553,6 +577,78 @@ def _resolve_datacenter_signal_date(
         ticker_valid_date_count=len(ticker_valid_dates),
         group_valid_date_count=len(group_valid_dates),
         skip_reason="NO_DOWNSTREAM_VALID_DATACENTER_SIGNAL_DATE",
+    )
+
+
+def _resolve_technical_relevance_end_date(
+    *,
+    price_db_path: str,
+    market: str,
+    taxonomy_csv_path: str,
+    taxonomy_version: str,
+    requested_calendar_signal_date: str,
+    expected_ticker_count: int,
+) -> TechnicalRelevanceEndDateResolution:
+    from analysis.datacenter_indices.swing_ticker_persistence import (
+        _load_primary_tickers_for_taxonomy_version,
+        load_valid_price_dates_for_market,
+    )
+
+    min_price_ticker_count = max(25, expected_ticker_count // 4)
+    end_date_source = "TECHNICAL_RELEVANCE_TAXONOMY_VALID_DATE"
+    end_date_resolution = "TAXONOMY_VALID_DATE_WITH_MIN_TICKER_COUNT"
+    normalized_taxonomy_csv_path = str((_repo_root() / taxonomy_csv_path).resolve())
+    start_date = (
+        datetime.date.fromisoformat(requested_calendar_signal_date)
+        - datetime.timedelta(days=45)
+    ).isoformat()
+
+    ticker_valid_dates = load_valid_price_dates_for_market(
+        price_db_path=price_db_path,
+        start_date=start_date,
+        end_date=requested_calendar_signal_date,
+        market=market,
+        taxonomy_csv_path=normalized_taxonomy_csv_path,
+        taxonomy_version=taxonomy_version,
+    )
+    primary_tickers = _load_primary_tickers_for_taxonomy_version(
+        normalized_taxonomy_csv_path,
+        taxonomy_version,
+    )
+    candidate_dates = sorted({str(date_value) for date_value in ticker_valid_dates}, reverse=True)
+    for candidate_date in candidate_dates:
+        if candidate_date > requested_calendar_signal_date:
+            continue
+        if (
+            _count_primary_ticker_prices_for_date(
+                price_db_path=price_db_path,
+                market=market,
+                signal_date=candidate_date,
+                primary_tickers=primary_tickers,
+            )
+            < min_price_ticker_count
+        ):
+            continue
+        return TechnicalRelevanceEndDateResolution(
+            end_date=candidate_date,
+            requested_calendar_signal_date=requested_calendar_signal_date,
+            end_date_source=end_date_source,
+            end_date_resolution=end_date_resolution,
+            min_price_ticker_count=min_price_ticker_count,
+            candidate_count=len(candidate_dates),
+            ticker_valid_date_count=len(ticker_valid_dates),
+            skip_reason="",
+        )
+
+    return TechnicalRelevanceEndDateResolution(
+        end_date=None,
+        requested_calendar_signal_date=requested_calendar_signal_date,
+        end_date_source=end_date_source,
+        end_date_resolution=end_date_resolution,
+        min_price_ticker_count=min_price_ticker_count,
+        candidate_count=len(candidate_dates),
+        ticker_valid_date_count=len(ticker_valid_dates),
+        skip_reason="NO_VALID_TECHNICAL_RELEVANCE_END_DATE",
     )
 
 
@@ -1473,6 +1569,7 @@ def _run_technical_relevance_post_step(
     config: StockUpdateSchedulerConfig,
     target_market: str,
     market_update_phase_status: str,
+    effective_today: str,
 ) -> TechnicalRelevancePostStepResult:
     if not config.technical_relevance_enabled:
         return TechnicalRelevancePostStepResult(
@@ -1501,17 +1598,39 @@ def _run_technical_relevance_post_step(
             skip_reason="MARKET_UPDATE_FAILED",
         )
 
-    end_date = _resolve_latest_valid_ohlcv_date_for_market(
-        config.osakedata_db_path,
-        target_market,
+    resolved = _resolve_datacenter_post_step_config(target_market)
+    if resolved is None:
+        return TechnicalRelevancePostStepResult(
+            attempted=0,
+            enabled=True,
+            status="SKIPPED",
+            market=target_market,
+            skip_reason="NO_VALID_TECHNICAL_RELEVANCE_END_DATE",
+        )
+
+    requested_calendar_signal_date = _previous_calendar_date(effective_today)
+    end_date_resolution = _resolve_technical_relevance_end_date(
+        price_db_path=config.osakedata_db_path,
+        market=resolved.market,
+        taxonomy_csv_path=resolved.taxonomy_csv,
+        taxonomy_version=resolved.taxonomy_version,
+        requested_calendar_signal_date=requested_calendar_signal_date,
+        expected_ticker_count=resolved.expected_ticker_count,
     )
+    end_date = end_date_resolution.end_date
     if end_date is None:
         return TechnicalRelevancePostStepResult(
             attempted=0,
             enabled=True,
             status="SKIPPED",
             market=target_market,
-            skip_reason="NO_VALID_OHLCV_DATE_FOR_MARKET",
+            requested_calendar_signal_date=requested_calendar_signal_date,
+            end_date_source=end_date_resolution.end_date_source,
+            end_date_resolution=end_date_resolution.end_date_resolution,
+            min_price_ticker_count=end_date_resolution.min_price_ticker_count,
+            candidate_count=end_date_resolution.candidate_count,
+            ticker_valid_date_count=end_date_resolution.ticker_valid_date_count,
+            skip_reason="NO_VALID_TECHNICAL_RELEVANCE_END_DATE",
         )
 
     tickers = _resolve_market_technical_relevance_tickers(
@@ -1525,6 +1644,12 @@ def _run_technical_relevance_post_step(
             status="SKIPPED",
             market=target_market,
             end_date=end_date,
+            requested_calendar_signal_date=requested_calendar_signal_date,
+            end_date_source=end_date_resolution.end_date_source,
+            end_date_resolution=end_date_resolution.end_date_resolution,
+            min_price_ticker_count=end_date_resolution.min_price_ticker_count,
+            candidate_count=end_date_resolution.candidate_count,
+            ticker_valid_date_count=end_date_resolution.ticker_valid_date_count,
             skip_reason="NO_TICKERS_FOR_MARKET",
         )
 
@@ -1549,6 +1674,12 @@ def _run_technical_relevance_post_step(
                 ticker_count=len(tickers),
                 start_date=start_date,
                 end_date=end_date,
+                requested_calendar_signal_date=requested_calendar_signal_date,
+                end_date_source=end_date_resolution.end_date_source,
+                end_date_resolution=end_date_resolution.end_date_resolution,
+                min_price_ticker_count=end_date_resolution.min_price_ticker_count,
+                candidate_count=end_date_resolution.candidate_count,
+                ticker_valid_date_count=end_date_resolution.ticker_valid_date_count,
                 duration_seconds=_format_duration_seconds(time.perf_counter() - started_at),
                 skip_reason="RUN_ID_ALREADY_EXISTS",
             )
@@ -1572,6 +1703,12 @@ def _run_technical_relevance_post_step(
             ticker_count=len(tickers),
             start_date=start_date,
             end_date=end_date,
+            requested_calendar_signal_date=requested_calendar_signal_date,
+            end_date_source=end_date_resolution.end_date_source,
+            end_date_resolution=end_date_resolution.end_date_resolution,
+            min_price_ticker_count=end_date_resolution.min_price_ticker_count,
+            candidate_count=end_date_resolution.candidate_count,
+            ticker_valid_date_count=end_date_resolution.ticker_valid_date_count,
             records_written=summary.records_written,
             relevant_count=summary.relevant_count,
             weak_context_count=summary.weak_context_count,
@@ -1607,6 +1744,12 @@ def _run_technical_relevance_post_step(
             ticker_count=len(tickers),
             start_date=start_date,
             end_date=end_date,
+            requested_calendar_signal_date=requested_calendar_signal_date,
+            end_date_source=end_date_resolution.end_date_source,
+            end_date_resolution=end_date_resolution.end_date_resolution,
+            min_price_ticker_count=end_date_resolution.min_price_ticker_count,
+            candidate_count=end_date_resolution.candidate_count,
+            ticker_valid_date_count=end_date_resolution.ticker_valid_date_count,
             duration_seconds=_format_duration_seconds(time.perf_counter() - started_at),
             error=error_text,
         )
@@ -1622,6 +1765,12 @@ def _run_technical_relevance_post_step(
             ticker_count=len(tickers),
             start_date=start_date,
             end_date=end_date,
+            requested_calendar_signal_date=requested_calendar_signal_date,
+            end_date_source=end_date_resolution.end_date_source,
+            end_date_resolution=end_date_resolution.end_date_resolution,
+            min_price_ticker_count=end_date_resolution.min_price_ticker_count,
+            candidate_count=end_date_resolution.candidate_count,
+            ticker_valid_date_count=end_date_resolution.ticker_valid_date_count,
             duration_seconds=_format_duration_seconds(time.perf_counter() - started_at),
             error=str(exc),
         )
@@ -2107,6 +2256,7 @@ def run_scheduler_config(
                 config=config,
                 target_market="usa",
                 market_update_phase_status=market_update_phase_status,
+                effective_today=effective_today,
             )
             datacenter_result = DatacenterPostStepResult(
                 attempted=0,
@@ -2191,6 +2341,13 @@ def run_scheduler_config(
                 technical_relevance_ticker_count=technical_relevance_result.ticker_count,
                 technical_relevance_start_date=technical_relevance_result.start_date or "NONE",
                 technical_relevance_end_date=technical_relevance_result.end_date or "NONE",
+                technical_relevance_requested_calendar_signal_date=technical_relevance_result.requested_calendar_signal_date
+                or "NONE",
+                technical_relevance_end_date_source=technical_relevance_result.end_date_source,
+                technical_relevance_end_date_resolution=technical_relevance_result.end_date_resolution,
+                technical_relevance_end_date_min_price_ticker_count=technical_relevance_result.min_price_ticker_count,
+                technical_relevance_end_date_candidate_count=technical_relevance_result.candidate_count,
+                technical_relevance_ticker_valid_date_count=technical_relevance_result.ticker_valid_date_count,
                 technical_relevance_records_written=technical_relevance_result.records_written,
                 technical_relevance_relevant_count=technical_relevance_result.relevant_count,
                 technical_relevance_weak_context_count=technical_relevance_result.weak_context_count,

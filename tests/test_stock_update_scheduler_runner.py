@@ -28,6 +28,7 @@ from rawcandle.scheduler.runner import (
     _resolve_datacenter_signal_date,
     _resolve_market_technical_relevance_tickers,
     _resolve_latest_valid_ohlcv_date_for_market,
+    _resolve_technical_relevance_end_date,
     acquire_scheduler_lock,
     inspect_scheduler_dashboard_config,
     read_scheduler_status,
@@ -123,6 +124,27 @@ def _build_datacenter_signal_date_resolution(
         candidate_count=candidate_count,
         ticker_valid_date_count=ticker_valid_date_count,
         group_valid_date_count=group_valid_date_count,
+        skip_reason=skip_reason,
+    )
+
+
+def _build_technical_relevance_end_date_resolution(
+    *,
+    end_date: str | None,
+    requested_calendar_signal_date: str,
+    candidate_count: int = 1,
+    ticker_valid_date_count: int = 1,
+    min_price_ticker_count: int = 59,
+    skip_reason: str = "",
+):
+    return scheduler_runner.TechnicalRelevanceEndDateResolution(
+        end_date=end_date,
+        requested_calendar_signal_date=requested_calendar_signal_date,
+        end_date_source="TECHNICAL_RELEVANCE_TAXONOMY_VALID_DATE",
+        end_date_resolution="TAXONOMY_VALID_DATE_WITH_MIN_TICKER_COUNT",
+        min_price_ticker_count=min_price_ticker_count,
+        candidate_count=candidate_count,
+        ticker_valid_date_count=ticker_valid_date_count,
         skip_reason=skip_reason,
     )
 
@@ -800,6 +822,85 @@ def test_resolve_market_technical_relevance_tickers_returns_sorted_market_ticker
     assert _resolve_market_technical_relevance_tickers(str(db_path), "usa") == ["AAA", "BBB"]
 
 
+def test_resolve_technical_relevance_end_date_returns_latest_taxonomy_valid_day(tmp_path):
+    osakedata_db = tmp_path / "osakedata.db"
+    taxonomy_csv = tmp_path / "taxonomy.csv"
+    primary_tickers = [f"TICK{i:02d}" for i in range(1, 26)]
+    _create_osakedata_with_rows(
+        osakedata_db,
+        [
+            *[
+                (ticker, "2026-05-27", 1.0, 1.0, 1.0, 1.0, 100, "usa")
+                for ticker in primary_tickers
+            ],
+            *[
+                (ticker, "2026-05-28", 1.0, 1.0, 1.0, 1.0, 100, "usa")
+                for ticker in primary_tickers
+            ],
+        ],
+    )
+    _write_taxonomy_csv(
+        taxonomy_csv,
+        [
+            ("DC_TAXONOMY_FULL_V1", ticker, "LayerA", "SubA", "CORE", 1, 1, "")
+            for ticker in primary_tickers
+        ],
+    )
+
+    resolution = _resolve_technical_relevance_end_date(
+        price_db_path=str(osakedata_db),
+        market="usa",
+        taxonomy_csv_path=str(taxonomy_csv),
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        requested_calendar_signal_date="2026-05-28",
+        expected_ticker_count=25,
+    )
+
+    assert resolution.end_date == "2026-05-28"
+    assert resolution.end_date_source == "TECHNICAL_RELEVANCE_TAXONOMY_VALID_DATE"
+    assert resolution.end_date_resolution == "TAXONOMY_VALID_DATE_WITH_MIN_TICKER_COUNT"
+    assert resolution.candidate_count == 2
+    assert resolution.ticker_valid_date_count == 2
+    assert resolution.skip_reason == ""
+
+
+def test_resolve_technical_relevance_end_date_rejects_outlier_latest_day(tmp_path):
+    osakedata_db = tmp_path / "osakedata.db"
+    taxonomy_csv = tmp_path / "taxonomy.csv"
+    primary_tickers = [f"TICK{i:02d}" for i in range(1, 26)]
+    _create_osakedata_with_rows(
+        osakedata_db,
+        [
+            *[
+                (ticker, "2026-05-27", 1.0, 1.0, 1.0, 1.0, 100, "usa")
+                for ticker in primary_tickers
+            ],
+            (primary_tickers[0], "2026-05-28", 1.0, 1.0, 1.0, 1.0, 100, "usa"),
+            ("BTC-USD", "2026-05-28", 1.0, 1.0, 1.0, 1.0, 100, "usa"),
+        ],
+    )
+    _write_taxonomy_csv(
+        taxonomy_csv,
+        [
+            ("DC_TAXONOMY_FULL_V1", ticker, "LayerA", "SubA", "CORE", 1, 1, "")
+            for ticker in primary_tickers
+        ],
+    )
+
+    resolution = _resolve_technical_relevance_end_date(
+        price_db_path=str(osakedata_db),
+        market="usa",
+        taxonomy_csv_path=str(taxonomy_csv),
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        requested_calendar_signal_date="2026-05-28",
+        expected_ticker_count=25,
+    )
+
+    assert resolution.end_date == "2026-05-27"
+    assert resolution.ticker_valid_date_count == 2
+    assert resolution.candidate_count == 2
+
+
 def test_resolve_datacenter_signal_date_uses_latest_downstream_valid_intersection(tmp_path):
     osakedata_db = tmp_path / "osakedata.db"
     analysis_db = tmp_path / "analysis.db"
@@ -1155,6 +1256,13 @@ def test_scheduler_runner_technical_relevance_disabled_by_default(tmp_path, monk
         lambda *args, **kwargs: _FakeCompletedProcess(0, "SUMMARY audit_validation_status=OK\n"),
     )
     monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_technical_relevance_end_date",
+        lambda **kwargs: _build_technical_relevance_end_date_resolution(
+            end_date="2026-05-16",
+            requested_calendar_signal_date="2026-05-27",
+        ),
+    )
+    monkeypatch.setattr(
         "rawcandle.scheduler.runner._resolve_datacenter_signal_date",
         lambda **kwargs: _build_datacenter_signal_date_resolution(
             signal_date="2026-05-16",
@@ -1222,6 +1330,13 @@ def test_scheduler_runner_runs_technical_relevance_before_datacenter(tmp_path, m
         or _FakeCompletedProcess(0, "SUMMARY audit_validation_status=OK\n"),
     )
     monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_technical_relevance_end_date",
+        lambda **kwargs: _build_technical_relevance_end_date_resolution(
+            end_date="2026-05-16",
+            requested_calendar_signal_date="2026-05-27",
+        ),
+    )
+    monkeypatch.setattr(
         "rawcandle.scheduler.runner._resolve_datacenter_signal_date",
         lambda **kwargs: _build_datacenter_signal_date_resolution(
             signal_date="2026-05-16",
@@ -1247,6 +1362,102 @@ def test_scheduler_runner_runs_technical_relevance_before_datacenter(tmp_path, m
     assert payload["technical_relevance_run_id"] == "TECH_SIGNAL_REL_DAILY_USA_2026_05_16"
     assert payload["technical_relevance_start_date"] == "2026-04-01"
     assert payload["technical_relevance_end_date"] == "2026-05-16"
+
+
+def test_scheduler_runner_technical_relevance_run_id_uses_resolver_approved_date(
+    tmp_path, monkeypatch
+):
+    import datetime as real_datetime
+
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    primary_tickers = [f"TICK{i:02d}" for i in range(1, 26)]
+    _create_osakedata_with_rows(
+        osakedata_db,
+        [
+            *[
+                (ticker, "2026-05-27", 1.0, 1.0, 1.0, 1.0, 100, "usa")
+                for ticker in primary_tickers
+            ],
+            (primary_tickers[0], "2026-05-28", 1.0, 1.0, 1.0, 1.0, 100, "usa"),
+            ("BTC-USD", "2026-05-28", 1.0, 1.0, 1.0, 1.0, 100, "usa"),
+        ],
+    )
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        technical_relevance_enabled=True,
+    )
+
+    class FixedDateTime(real_datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 5, 29, 8, 30, 0, tzinfo=tz)
+
+    calls = []
+
+    monkeypatch.setattr("rawcandle.scheduler.runner.datetime.datetime", FixedDateTime)
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+
+    def fake_technical_relevance(**kwargs):
+        calls.append(kwargs)
+
+        class _Summary:
+            records_written = 1
+            relevant_count = 1
+            weak_context_count = 0
+            noise_count = 0
+            unknown_signal_count = 0
+            missing_dow_context_count = 0
+            missing_bar_index_count = 0
+
+        return _Summary()
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.run_technical_signal_relevance_for_tickers",
+        fake_technical_relevance,
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda *args, **kwargs: _FakeCompletedProcess(0, "SUMMARY audit_validation_status=OK\n"),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_technical_relevance_end_date",
+        lambda **kwargs: _build_technical_relevance_end_date_resolution(
+            end_date="2026-05-27",
+            requested_calendar_signal_date="2026-05-28",
+            candidate_count=2,
+            ticker_valid_date_count=2,
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_datacenter_signal_date",
+        lambda **kwargs: _build_datacenter_signal_date_resolution(
+            signal_date="2026-05-27",
+            requested_calendar_signal_date="2026-05-28",
+        ),
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert calls[0]["end_date"] == "2026-05-27"
+    assert calls[0]["run_id"] == "TECH_SIGNAL_REL_DAILY_USA_2026_05_27"
+    assert result.technical_relevance_end_date == "2026-05-27"
+    assert result.technical_relevance_run_id == "TECH_SIGNAL_REL_DAILY_USA_2026_05_27"
+    assert result.technical_relevance_requested_calendar_signal_date == "2026-05-28"
+    assert result.technical_relevance_end_date_source == "TECHNICAL_RELEVANCE_TAXONOMY_VALID_DATE"
+    assert (
+        result.technical_relevance_end_date_resolution
+        == "TAXONOMY_VALID_DATE_WITH_MIN_TICKER_COUNT"
+    )
 
 
 def test_scheduler_runner_technical_relevance_skips_existing_run_id(tmp_path, monkeypatch):
@@ -1287,6 +1498,13 @@ def test_scheduler_runner_technical_relevance_skips_existing_run_id(tmp_path, mo
         lambda *args, **kwargs: _FakeCompletedProcess(0, "SUMMARY audit_validation_status=OK\n"),
     )
     monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_technical_relevance_end_date",
+        lambda **kwargs: _build_technical_relevance_end_date_resolution(
+            end_date="2026-05-16",
+            requested_calendar_signal_date="2026-05-27",
+        ),
+    )
+    monkeypatch.setattr(
         "rawcandle.scheduler.runner._resolve_datacenter_signal_date",
         lambda **kwargs: _build_datacenter_signal_date_resolution(
             signal_date="2026-05-16",
@@ -1300,6 +1518,85 @@ def test_scheduler_runner_technical_relevance_skips_existing_run_id(tmp_path, mo
     assert result.technical_relevance_status == "SKIPPED_EXISTING_RUN"
     assert result.technical_relevance_skip_reason == "RUN_ID_ALREADY_EXISTS"
     assert result.technical_relevance_records_written == 0
+
+
+def test_scheduler_runner_technical_relevance_existing_run_id_uses_resolver_approved_date(
+    tmp_path, monkeypatch
+):
+    import datetime as real_datetime
+
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    primary_tickers = [f"TICK{i:02d}" for i in range(1, 26)]
+    _create_osakedata_with_rows(
+        osakedata_db,
+        [
+            *[
+                (ticker, "2026-05-27", 1.0, 1.0, 1.0, 1.0, 100, "usa")
+                for ticker in primary_tickers
+            ],
+            (primary_tickers[0], "2026-05-28", 1.0, 1.0, 1.0, 1.0, 100, "usa"),
+            ("BTC-USD", "2026-05-28", 1.0, 1.0, 1.0, 1.0, 100, "usa"),
+        ],
+    )
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        technical_relevance_enabled=True,
+    )
+
+    class FixedDateTime(real_datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 5, 29, 8, 30, 0, tzinfo=tz)
+
+    monkeypatch.setattr("rawcandle.scheduler.runner.datetime.datetime", FixedDateTime)
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.run_technical_signal_relevance_for_tickers",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("technical relevance service should not run for duplicate run_id")
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.read_relevance_run",
+        lambda conn, run_id: {"run_id": run_id},
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda *args, **kwargs: _FakeCompletedProcess(0, "SUMMARY audit_validation_status=OK\n"),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_technical_relevance_end_date",
+        lambda **kwargs: _build_technical_relevance_end_date_resolution(
+            end_date="2026-05-27",
+            requested_calendar_signal_date="2026-05-28",
+            candidate_count=2,
+            ticker_valid_date_count=2,
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_datacenter_signal_date",
+        lambda **kwargs: _build_datacenter_signal_date_resolution(
+            signal_date="2026-05-27",
+            requested_calendar_signal_date="2026-05-28",
+        ),
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.technical_relevance_status == "SKIPPED_EXISTING_RUN"
+    assert result.technical_relevance_run_id == "TECH_SIGNAL_REL_DAILY_USA_2026_05_27"
+    assert result.technical_relevance_end_date == "2026-05-27"
+    assert result.technical_relevance_skip_reason == "RUN_ID_ALREADY_EXISTS"
 
 
 def test_scheduler_runner_technical_relevance_skips_when_market_phase_failed(
@@ -1323,7 +1620,6 @@ def test_scheduler_runner_technical_relevance_skips_when_market_phase_failed(
         "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
         lambda self, result: f"UI {result.market}",
     )
-
     result = run_scheduler_config(config_path=str(config_path))
 
     assert result.technical_relevance_status == "SKIPPED"
@@ -1352,7 +1648,6 @@ def test_scheduler_runner_technical_relevance_skips_when_usa_not_enabled(
         "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
         lambda self, result: f"UI {result.market}",
     )
-
     result = run_scheduler_config(config_path=str(config_path))
 
     assert result.technical_relevance_status == "SKIPPED"
@@ -1383,11 +1678,10 @@ def test_scheduler_runner_technical_relevance_skips_when_no_valid_ohlcv_date(
         "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
         lambda self, result: f"UI {result.market}",
     )
-
     result = run_scheduler_config(config_path=str(config_path))
 
     assert result.technical_relevance_status == "SKIPPED"
-    assert result.technical_relevance_skip_reason == "NO_VALID_OHLCV_DATE_FOR_MARKET"
+    assert result.technical_relevance_skip_reason == "NO_VALID_TECHNICAL_RELEVANCE_END_DATE"
 
 
 def test_scheduler_runner_technical_relevance_skips_when_no_tickers_for_market(
@@ -1413,6 +1707,13 @@ def test_scheduler_runner_technical_relevance_skips_when_no_tickers_for_market(
     monkeypatch.setattr(
         "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
         lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_technical_relevance_end_date",
+        lambda **kwargs: _build_technical_relevance_end_date_resolution(
+            end_date="2026-05-16",
+            requested_calendar_signal_date="2026-05-27",
+        ),
     )
 
     result = run_scheduler_config(config_path=str(config_path))
@@ -1450,6 +1751,13 @@ def test_scheduler_runner_technical_relevance_failure_fails_scheduler(tmp_path, 
     monkeypatch.setattr(
         "rawcandle.scheduler.runner.subprocess.run",
         lambda *args, **kwargs: _FakeCompletedProcess(0, "SUMMARY audit_validation_status=OK\n"),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_technical_relevance_end_date",
+        lambda **kwargs: _build_technical_relevance_end_date_resolution(
+            end_date="2026-05-16",
+            requested_calendar_signal_date="2026-05-27",
+        ),
     )
     monkeypatch.setattr(
         "rawcandle.scheduler.runner._resolve_datacenter_signal_date",
