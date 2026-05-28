@@ -83,3 +83,5 @@ logs/
 *.log
 *.xlsx
 *.html
+__pycache__/
+*.pyc
