@@ -62,7 +62,14 @@ RAW_FIELD_NAMES: tuple[str, ...] = (
     "fast_ema10_pullback_days",
     "conservative_ema20_pullback_days",
     "high_exit_risk_days_count",
+    "high_exit_risk_days",
+    "medium_exit_risk_days",
+    "exit_risk_days",
     "blocking_reasons",
+    "rolling_2_sell_pressure_state",
+    "risk_reason",
+    "latest_exit_risk_severity",
+    "latest_bearish_relevance_reason",
     "ema20_break_confirmed",
     "sma50_break_confirmed",
     "close_below_ema20",
@@ -95,6 +102,7 @@ RAW_FIELD_NAMES: tuple[str, ...] = (
 UPSTREAM_ROLLING5_PAYLOAD_PREFIX = "UPSTREAM_ROLLING5_JSON:"
 MA_BREAK_PAYLOAD_KEY = "ma_break"
 FRESHNESS_PAYLOAD_KEY = "freshness"
+ROLLING2_PAYLOAD_KEY = "rolling2"
 
 
 def _normalized_text(value: object) -> str | None:
@@ -161,6 +169,11 @@ def _freshness_payload(payload: dict[str, object]) -> dict[str, object]:
     return value if isinstance(value, dict) else {}
 
 
+def _rolling2_payload(payload: dict[str, object]) -> dict[str, object]:
+    value = payload.get(ROLLING2_PAYLOAD_KEY)
+    return value if isinstance(value, dict) else {}
+
+
 def _raw_fields_from_row(
     row: dict[str, object],
     *,
@@ -211,7 +224,19 @@ def _raw_fields_from_row(
 
 def _upstream_rolling5_payload(row: dict[str, object]) -> dict[str, object]:
     payload = _decoded_payload(row)
-    return payload if isinstance(payload, dict) else {}
+    if not isinstance(payload, dict):
+        return {}
+    if any(
+        _normalized_text(payload.get(key)) is not None
+        for key in (
+            "rolling_5_pullback_state",
+            "rolling_5d_status",
+            "rolling_5d_primary_reason",
+            "rolling_5d_blocking_reason",
+        )
+    ):
+        return payload
+    return {}
 
 
 def _build_row(
@@ -230,6 +255,7 @@ def _build_row(
     payload = _decoded_payload(row)
     ma_break = _ma_break_payload(payload)
     freshness = _freshness_payload(payload)
+    rolling2 = _rolling2_payload(payload)
     if extra_raw_fields:
         for key, value in extra_raw_fields.items():
             text = _normalized_text(value)
@@ -298,6 +324,7 @@ def build_dashboard_rows_from_ticker_enrichment_rows(
     for row in rows:
         if not _is_valid_ticker(row.get("ticker")):
             continue
+        decoded_payload = _decoded_payload(row)
         upstream_payload = _upstream_rolling5_payload(row)
         daily_status = _normalized_text(row.get("daily_status"))
         current_status = _normalized_text(row.get("current_status"))
@@ -321,10 +348,79 @@ def build_dashboard_rows_from_ticker_enrichment_rows(
             if status_value is None:
                 continue
             extra_raw_fields: dict[str, object] = {}
+            rolling2_payload = _rolling2_payload(decoded_payload)
             if horizon == "rolling 2d":
                 high_exit_risk_days_count = row.get("high_exit_risk_days_count")
                 if _normalized_text(high_exit_risk_days_count) is not None:
                     extra_raw_fields["high_exit_risk_days_count"] = high_exit_risk_days_count
+                if rolling2_payload:
+                    rolling2_status = _normalized_text(
+                        rolling2_payload.get("rolling_2_sell_pressure_state")
+                    ) or status_value
+                    rolling2_action = _normalized_text(rolling2_payload.get("next_action"))
+                    rolling2_reason = _normalized_text(rolling2_payload.get("risk_reason")) or ""
+                    if _normalized_text(rolling2_payload.get("high_exit_risk_days")) is not None:
+                        extra_raw_fields["high_exit_risk_days"] = rolling2_payload.get("high_exit_risk_days")
+                    if _normalized_text(rolling2_payload.get("medium_exit_risk_days")) is not None:
+                        extra_raw_fields["medium_exit_risk_days"] = rolling2_payload.get("medium_exit_risk_days")
+                    if _normalized_text(rolling2_payload.get("exit_risk_days")) is not None:
+                        extra_raw_fields["exit_risk_days"] = rolling2_payload.get("exit_risk_days")
+                    if _normalized_text(rolling2_payload.get("latest_exit_risk_severity")) is not None:
+                        extra_raw_fields["latest_exit_risk_severity"] = rolling2_payload.get("latest_exit_risk_severity")
+                    if _normalized_text(rolling2_payload.get("latest_exit_reason")) is not None:
+                        extra_raw_fields["latest_exit_reason"] = rolling2_payload.get("latest_exit_reason")
+                    if _normalized_text(rolling2_payload.get("risk_reason")) is not None:
+                        extra_raw_fields["risk_reason"] = rolling2_payload.get("risk_reason")
+                    if _normalized_text(rolling2_payload.get("next_action")) is not None:
+                        extra_raw_fields["next_action"] = rolling2_payload.get("next_action")
+                    if _normalized_text(rolling2_payload.get("latest_bos_event_type")) is not None:
+                        extra_raw_fields["latest_bos_event_type"] = rolling2_payload.get("latest_bos_event_type")
+                    if _normalized_text(rolling2_payload.get("latest_bos_freshness")) is not None:
+                        extra_raw_fields["latest_bos_freshness"] = rolling2_payload.get("latest_bos_freshness")
+                    if _normalized_text(rolling2_payload.get("latest_reset_reason")) is not None:
+                        extra_raw_fields["latest_reset_reason"] = rolling2_payload.get("latest_reset_reason")
+                    if _normalized_text(rolling2_payload.get("latest_reset_freshness")) is not None:
+                        extra_raw_fields["latest_reset_freshness"] = rolling2_payload.get("latest_reset_freshness")
+                    if _normalized_text(rolling2_payload.get("latest_bearish_relevance_class")) is not None:
+                        extra_raw_fields["latest_bearish_relevance_class"] = rolling2_payload.get("latest_bearish_relevance_class")
+                    if _normalized_text(rolling2_payload.get("latest_bearish_relevance_reason")) is not None:
+                        extra_raw_fields["latest_bearish_relevance_reason"] = rolling2_payload.get("latest_bearish_relevance_reason")
+                    extra_raw_fields["rolling_2_sell_pressure_state"] = rolling2_status
+                    if (
+                        _safe_int(rolling2_payload.get("high_exit_risk_days")) not in {None, 0}
+                        or (_normalized_text(rolling2_payload.get("latest_exit_risk_severity")) or "").upper() == "HIGH"
+                    ):
+                        extra_raw_fields["high_exit_risk_token"] = "high_exit_risk"
+                    if (
+                        _safe_int(rolling2_payload.get("medium_exit_risk_days")) not in {None, 0}
+                        or (_normalized_text(rolling2_payload.get("latest_exit_risk_severity")) or "").upper() == "MEDIUM"
+                    ):
+                        extra_raw_fields["medium_exit_risk_token"] = "medium_exit_risk"
+                    if _normalized_text(rolling2_payload.get("latest_bos_event_type")) == "BOS_DOWN":
+                        extra_raw_fields["bos_down_token"] = "bos_down"
+                    latest_reset_reason = _normalized_text(rolling2_payload.get("latest_reset_reason"))
+                    if latest_reset_reason is not None:
+                        extra_raw_fields["reset_token"] = "reset"
+                        if "DOUBLE_BOS_DOWN" in latest_reset_reason:
+                            extra_raw_fields["double_bos_down_token"] = "double_bos_down"
+                    next_action = _normalized_text(rolling2_payload.get("next_action"))
+                    if next_action is not None and any(
+                        term in next_action.lower() for term in ("sell", "reduce", "stop", "check")
+                    ):
+                        extra_raw_fields["sell_token"] = "sell"
+                    dashboard_rows.append(
+                        _build_row(
+                            row=row,
+                            horizon=horizon,
+                            row_kind="ticker_enrichment_horizon",
+                            raw_status=rolling2_status,
+                            horizon_source_field="rolling_2d_status",
+                            raw_action=rolling2_action,
+                            reason=rolling2_reason,
+                            extra_raw_fields=extra_raw_fields,
+                        )
+                    )
+                    continue
             if horizon == "rolling 5d" and upstream_payload:
                 rolling5_row = dict(row)
                 rolling5_row.update(upstream_payload)

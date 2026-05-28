@@ -12,6 +12,10 @@ from analysis.datacenter_indices.rolling5_pullback_classifier import (
     Rolling5PullbackClassification,
     classify_rolling_5_pullback_row,
 )
+from analysis.datacenter_indices.rolling2_sell_pressure_classifier import (
+    Rolling2SellPressureClassification,
+    classify_rolling_2_sell_pressure_row,
+)
 from analysis.datacenter_indices.swing_ma_break_status import (
     build_swing_ma_break_status_rows,
 )
@@ -28,6 +32,7 @@ UPSTREAM_ROLLING5_COMPONENT = "swing_weekly_report:rolling5_upstream_v1"
 UPSTREAM_ROLLING5_PAYLOAD_PREFIX = "UPSTREAM_ROLLING5_JSON:"
 MA_BREAK_PAYLOAD_KEY = "ma_break"
 FRESHNESS_PAYLOAD_KEY = "freshness"
+ROLLING2_PAYLOAD_KEY = "rolling2"
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 VALID_TICKER_RE = re.compile(r"^[A-Z0-9][A-Z0-9.\-]*$")
 DISALLOWED_TICKER_LABELS = {
@@ -273,6 +278,11 @@ def _load_source_history_by_ticker(
         ("latest_reset_reason", "latest_reset_reason"),
         ("rolling_5d_status", "rolling_5d_status"),
         ("freshness_status", "freshness_status"),
+        ("exit_reason", "exit_reason"),
+        ("latest_structure_label", "latest_structure_label"),
+        ("latest_bos_freshness", "latest_bos_freshness"),
+        ("latest_reset_freshness", "latest_reset_freshness"),
+        ("distance_to_ema20_pct", "distance_to_ema20_pct"),
     ]
     select_sql = ",\n                ".join(
         f"{column} AS {alias}" if column in source_columns else f"NULL AS {alias}"
@@ -514,6 +524,25 @@ def _derive_rolling_2d_status(row: sqlite3.Row) -> str:
     return "NO_EMERGENCY"
 
 
+def _count_recent_exit_days(
+    history_rows: list[sqlite3.Row] | None,
+    *,
+    severity: str | None = None,
+) -> int:
+    if not history_rows:
+        return 0
+    count = 0
+    for history_row in history_rows[-2:]:
+        exit_risk_signal = _is_truthy_signal(history_row["exit_risk_signal"])
+        exit_risk_severity = (_normalized_text(history_row["exit_risk_severity"]) or "").upper()
+        if severity is None:
+            if exit_risk_signal or exit_risk_severity not in {"", "NULL"}:
+                count += 1
+        elif exit_risk_severity == severity:
+            count += 1
+    return count
+
+
 def _derive_rolling_5d_status(
     row: sqlite3.Row,
     history_rows: list[sqlite3.Row] | None,
@@ -599,6 +628,8 @@ def _build_upstream_rolling5_payload(
     *,
     existing_primary_reason: str | None,
     helper_classification: Rolling5PullbackClassification | None,
+    rolling2_classification: Rolling2SellPressureClassification | None = None,
+    rolling2_helper_row: dict[str, object] | None = None,
     ma_break_row: dict[str, object] | None = None,
     freshness_row: dict[str, object] | None = None,
     exit_reason: str | None = None,
@@ -614,6 +645,32 @@ def _build_upstream_rolling5_payload(
         normalized = _normalized_text(value)
         if normalized is not None:
             payload[key] = normalized
+    if rolling2_classification is not None and rolling2_helper_row is not None:
+        rolling2_payload: dict[str, object] = {
+            "rolling_2_sell_pressure_state": rolling2_classification.rolling_2_sell_pressure_state,
+            "primary_reason": rolling2_classification.primary_reason,
+            "risk_reason": rolling2_classification.risk_reason,
+            "next_action": rolling2_classification.next_action,
+        }
+        for source_key, target_key in (
+            ("exit_risk_days", "exit_risk_days"),
+            ("high_exit_risk_days", "high_exit_risk_days"),
+            ("medium_exit_risk_days", "medium_exit_risk_days"),
+            ("last_exit_risk_severity", "latest_exit_risk_severity"),
+            ("last_exit_reason", "latest_exit_reason"),
+            ("last_ticker_trend_state", "latest_ticker_trend_state"),
+            ("last_latest_structure_label", "latest_structure_label"),
+            ("last_latest_bos_event_type", "latest_bos_event_type"),
+            ("last_latest_bos_freshness", "latest_bos_freshness"),
+            ("last_latest_reset_reason", "latest_reset_reason"),
+            ("last_latest_reset_freshness", "latest_reset_freshness"),
+            ("latest_bearish_relevance_class", "latest_bearish_relevance_class"),
+            ("latest_bearish_relevance_reason", "latest_bearish_relevance_reason"),
+        ):
+            value = rolling2_helper_row.get(source_key)
+            if value is not None:
+                rolling2_payload[target_key] = value
+        payload[ROLLING2_PAYLOAD_KEY] = rolling2_payload
     if ma_break_row:
         payload[MA_BREAK_PAYLOAD_KEY] = {
             key: value
@@ -784,6 +841,55 @@ def _resolve_high_exit_risk_days_count(
     return _derive_high_exit_risk_days_count_same_day(row), False, True
 
 
+def _build_shared_rolling2_helper_row(
+    row: sqlite3.Row,
+    *,
+    daily_status: str,
+    history_rows: list[sqlite3.Row] | None,
+) -> dict[str, object]:
+    return {
+        "ticker": str(row["ticker"]).strip().upper(),
+        "last_price_data_status": row["price_data_status"],
+        "all_price_rows_missing": (_normalized_text(row["price_data_status"]) or "").upper()
+        in {"MISSING_AS_OF_DATE", "MISSING_CLOSE_AS_OF_DATE"},
+        "current_watchlist_status": daily_status,
+        "window_watchlist_status": None,
+        "exit_risk_days": _count_recent_exit_days(history_rows),
+        "high_exit_risk_days": _count_recent_exit_days(history_rows, severity="HIGH"),
+        "medium_exit_risk_days": _count_recent_exit_days(history_rows, severity="MEDIUM"),
+        "last_exit_risk_severity": row["exit_risk_severity"],
+        "last_exit_reason": row["exit_reason"],
+        "last_ticker_trend_state": row["ticker_trend_state"],
+        "latest_bearish_relevance_class": None,
+        "latest_bearish_relevance_reason": None,
+        "last_latest_structure_label": row["latest_structure_label"],
+        "last_latest_bos_event_type": row["latest_bos_event_type"],
+        "last_latest_bos_freshness": row["latest_bos_freshness"],
+        "last_latest_reset_reason": row["latest_reset_reason"],
+        "last_latest_reset_freshness": row["latest_reset_freshness"],
+        "last_distance_to_ema20_pct": row["distance_to_ema20_pct"],
+    }
+
+
+def _classify_shared_rolling2(
+    row: sqlite3.Row,
+    *,
+    daily_status: str,
+    history_rows: list[sqlite3.Row] | None,
+) -> tuple[Rolling2SellPressureClassification | None, dict[str, object] | None]:
+    helper_row = _build_shared_rolling2_helper_row(
+        row,
+        daily_status=daily_status,
+        history_rows=history_rows,
+    )
+    if not helper_row:
+        return None, None
+    classification = classify_rolling_2_sell_pressure_row(helper_row)
+    if classification is None:
+        return None, helper_row
+    return classification, helper_row
+
+
 def _resolve_ma_break_helper_row(
     row: sqlite3.Row,
     history_rows: list[sqlite3.Row] | None,
@@ -862,7 +968,8 @@ def _map_destination_row(
     ma_break_status: str | None,
     ma_break_helper_row: dict[str, object] | None,
     freshness_helper_row: dict[str, object] | None,
-    history_rows: list[sqlite3.Row] | None,
+    pullback_history_rows: list[sqlite3.Row] | None,
+    rolling2_history_rows: list[sqlite3.Row] | None,
     upstream_row: dict[str, object] | None,
     use_shared_rolling5_helper: bool,
 ) -> tuple[object, ...]:
@@ -876,10 +983,19 @@ def _map_destination_row(
         _resolve_freshness_status_from_helper(
             row,
             freshness_helper_row,
-            history_rows,
+            pullback_history_rows,
         )
     )
-    rolling_2d_status = _derive_rolling_2d_status(row)
+    rolling2_helper_classification, rolling2_helper_row = _classify_shared_rolling2(
+        row,
+        daily_status=daily_status,
+        history_rows=rolling2_history_rows,
+    )
+    rolling_2d_status = (
+        rolling2_helper_classification.rolling_2_sell_pressure_state
+        if rolling2_helper_classification is not None
+        else _derive_rolling_2d_status(row)
+    )
     rolling5_helper_classification = (
         _classify_shared_rolling5(row, upstream_row=upstream_row)
         if use_shared_rolling5_helper
@@ -891,7 +1007,8 @@ def _map_destination_row(
         else _map_upstream_rolling_5d_status(
             upstream_row.get("rolling_5_pullback_state") if upstream_row else None
         )
-    ) or _derive_rolling_5d_status(row, history_rows)
+    ) or _derive_rolling_5d_status(row, pullback_history_rows)
+    # keep existing token fallback even when shared rolling2 state is present
     window_status_2d = _derive_window_status_2d(row)
     latest_bos_event_type = _normalized_text(row["latest_bos_event_type"]) or _normalized_text(
         upstream_row.get("latest_bos_event_type") if upstream_row else None
@@ -904,6 +1021,8 @@ def _map_destination_row(
         upstream_row,
         existing_primary_reason=_derive_primary_reason(row, daily_status),
         helper_classification=rolling5_helper_classification,
+        rolling2_classification=rolling2_helper_classification,
+        rolling2_helper_row=rolling2_helper_row,
         ma_break_row=ma_break_helper_row,
         freshness_row=freshness_helper_row,
         exit_reason=exit_reason,
@@ -1014,6 +1133,8 @@ def main(argv: list[str] | None = None) -> int:
         ma_break_payload_rows = 0
         freshness_helper_rows = 0
         freshness_payload_rows = 0
+        rolling2_helper_rows = 0
+        rolling2_payload_rows = 0
 
         connector = _connect_read_only if args.dry_run else _connect_read_write
         with connector(args.analysis_db) as conn:
@@ -1165,16 +1286,20 @@ def main(argv: list[str] | None = None) -> int:
                             ma_break_status=ma_break_status,
                             ma_break_helper_row=ma_break_helper_row,
                             freshness_helper_row=freshness_helper_row,
-                            history_rows=pullback_history_rows,
+                            pullback_history_rows=pullback_history_rows,
+                            rolling2_history_rows=history_by_ticker.get(ticker),
                             upstream_row=upstream_rows_by_ticker.get(ticker),
                             use_shared_rolling5_helper=args.use_upstream_rolling5_pullback,
                         ),
                     )
                 )
+                rolling2_helper_rows += 1
                 if ma_break_helper_row is not None:
                     ma_break_payload_rows += 1
                 if freshness_helper_row is not None:
                     freshness_payload_rows += 1
+                if '"rolling2":' in str(mapped_rows[-1][1][46] or ""):
+                    rolling2_payload_rows += 1
                 if args.use_upstream_rolling5_pullback and upstream_rows_by_ticker.get(ticker) is not None:
                     rolling5_classifier_rows += 1
             if high_exit_window_unavailable > 0:
@@ -1489,6 +1614,8 @@ def main(argv: list[str] | None = None) -> int:
         _emit_summary("ma_break_payload_rows", ma_break_payload_rows)
         _emit_summary("freshness_helper_rows", freshness_helper_rows)
         _emit_summary("freshness_payload_rows", freshness_payload_rows)
+        _emit_summary("rolling2_helper_rows", rolling2_helper_rows)
+        _emit_summary("rolling2_payload_rows", rolling2_payload_rows)
         _emit_summary("pullback_lookback_rows", args.pullback_lookback_rows)
         _emit_summary("pullback_window_derived_rows", pullback_window_derived_rows)
         _emit_summary("pullback_window_candidate_rows", pullback_window_candidate_rows)

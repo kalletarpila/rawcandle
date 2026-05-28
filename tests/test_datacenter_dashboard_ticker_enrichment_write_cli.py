@@ -7,6 +7,9 @@ from dev_tools.datacenter_dashboard_enrichment_decision_adapter import (
     build_dashboard_rows_from_ticker_enrichment_rows,
 )
 from dev_tools.run_datacenter_dashboard_ticker_enrichment_write import main
+from analysis.datacenter_indices.rolling2_sell_pressure_classifier import (
+    Rolling2SellPressureClassification,
+)
 from analysis.datacenter_indices.rolling5_pullback_classifier import (
     Rolling5PullbackClassification,
 )
@@ -1604,9 +1607,21 @@ def test_rolling_2d_status_maps_to_emergency_sell_pressure_from_high_exit_and_bo
     _create_source_and_destination_db(db_path)
     _insert_custom_source_row(
         db_path,
+        signal_date="2026-05-21",
+        ticker="AAA",
         exit_risk_signal=1,
         exit_risk_severity="HIGH",
         latest_bos_event_type="BOS_DOWN",
+        latest_bos_freshness="FRESH",
+        exit_reason="close_below_ema20",
+    )
+    _insert_custom_source_row(
+        db_path,
+        exit_risk_signal=1,
+        exit_risk_severity="HIGH",
+        latest_bos_event_type="BOS_DOWN",
+        latest_bos_freshness="FRESH",
+        exit_reason="close_below_ema20",
     )
 
     exit_code = main(
@@ -1627,6 +1642,55 @@ def test_rolling_2d_status_maps_to_emergency_sell_pressure_from_high_exit_and_bo
     row = _destination_rows(db_path)[0]
     assert row["daily_status"] == "HIGH_EXIT_RISK"
     assert row["rolling_2d_status"] == "EMERGENCY_SELL_PRESSURE"
+
+
+def test_shared_rolling2_helper_output_is_preserved_in_source_run_ids_payload(tmp_path, monkeypatch, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(
+        db_path,
+        ticker="AAA",
+        exit_risk_signal=1,
+        exit_risk_severity="HIGH",
+        exit_reason="close_below_ema20;return_10d_lt_minus_8pct",
+        latest_bos_event_type="BOS_DOWN",
+        latest_bos_freshness="FRESH",
+    )
+
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_ticker_enrichment_write.classify_rolling_2_sell_pressure_row",
+        lambda row: Rolling2SellPressureClassification(
+            rolling_2_sell_pressure_state="EMERGENCY_SELL_PRESSURE",
+            primary_reason="RECENT_BOS_DOWN",
+            risk_reason="high_exit_risk_days",
+            next_action="SELL_OR_REMOVE",
+        ),
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    row = _destination_rows(db_path)[0]
+    assert row["rolling_2d_status"] == "EMERGENCY_SELL_PRESSURE"
+    payload = json.loads(row["source_run_ids"].split(":", 1)[1])
+    assert payload["rolling2"]["rolling_2_sell_pressure_state"] == "EMERGENCY_SELL_PRESSURE"
+    assert payload["rolling2"]["primary_reason"] == "RECENT_BOS_DOWN"
+    assert payload["rolling2"]["risk_reason"] == "high_exit_risk_days"
+    assert payload["rolling2"]["next_action"] == "SELL_OR_REMOVE"
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.rolling2_helper_rows=1" in output
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.rolling2_payload_rows=1" in output
 
 
 def test_rolling_2d_status_maps_to_watch_pressure_from_medium_risk_without_bos_down(
@@ -1659,6 +1723,43 @@ def test_rolling_2d_status_maps_to_watch_pressure_from_medium_risk_without_bos_d
     _ = capsys.readouterr()
     row = _destination_rows(db_path)[0]
     assert row["rolling_2d_status"] == "WATCH_PRESSURE"
+
+
+def test_rolling_2d_shared_helper_fallback_remains_when_helper_output_missing(tmp_path, monkeypatch, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(
+        db_path,
+        exit_risk_signal=1,
+        exit_risk_severity="MEDIUM",
+        latest_bos_event_type="BOS_UP",
+        latest_reset_reason=None,
+    )
+
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_ticker_enrichment_write.classify_rolling_2_sell_pressure_row",
+        lambda row: None,
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    row = _destination_rows(db_path)[0]
+    assert row["rolling_2d_status"] == "WATCH_PRESSURE"
+    assert '"rolling2":' not in str(row["source_run_ids"] or "")
+    assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.rolling2_payload_rows=0" in output
 
 
 def test_rolling_2d_status_maps_to_no_emergency_for_neutral_row(tmp_path, capsys):

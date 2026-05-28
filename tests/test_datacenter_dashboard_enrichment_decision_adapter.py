@@ -839,6 +839,81 @@ def test_high_exit_risk_days_count_is_exposed_to_rolling_2d_companion_row():
     assert rolling_2d_row.raw_fields["high_exit_risk_days_count"] == "2"
 
 
+def test_rolling2_payload_is_exposed_on_rolling_2d_row():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "rolling_2d_status": "NO_EMERGENCY",
+                "high_exit_risk_days_count": 2,
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "rolling2": {
+                            "rolling_2_sell_pressure_state": "WATCH_PRESSURE",
+                            "high_exit_risk_days": 2,
+                            "medium_exit_risk_days": 1,
+                            "exit_risk_days": 2,
+                            "latest_exit_risk_severity": "HIGH",
+                            "latest_exit_reason": "close_below_ema20;return_10d_lt_minus_8pct",
+                            "primary_reason": "MILD_OR_UNCONFIRMED_SELL_PRESSURE",
+                            "risk_reason": "EXIT_RISK_PRESENT",
+                            "next_action": "CHECK_STOP_OR_REDUCE",
+                            "latest_bos_event_type": "BOS_DOWN",
+                            "latest_bos_freshness": "FRESH",
+                            "latest_reset_reason": "DOUBLE_BOS_DOWN",
+                            "latest_reset_freshness": "FRESH",
+                        }
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    rolling_2d_row = next(row for row in rows if row.horizon == "rolling 2d")
+    assert rolling_2d_row.raw_status == "WATCH_PRESSURE"
+    assert rolling_2d_row.raw_action == "CHECK_STOP_OR_REDUCE"
+    assert rolling_2d_row.reason == "EXIT_RISK_PRESENT"
+    assert rolling_2d_row.raw_fields["rolling_2_sell_pressure_state"] == "WATCH_PRESSURE"
+    assert rolling_2d_row.raw_fields["high_exit_risk_days"] == "2"
+    assert rolling_2d_row.raw_fields["medium_exit_risk_days"] == "1"
+    assert rolling_2d_row.raw_fields["latest_exit_reason"] == "close_below_ema20;return_10d_lt_minus_8pct"
+    assert rolling_2d_row.raw_fields["bos_down_token"] == "bos_down"
+    assert rolling_2d_row.raw_fields["double_bos_down_token"] == "double_bos_down"
+    assert rolling_2d_row.raw_fields["high_exit_risk_token"] == "high_exit_risk"
+    assert rolling_2d_row.raw_fields["sell_token"] == "sell"
+
+
+def test_decision_integration_can_see_rolling2_payload_context():
+    result = build_decisions_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "rolling_2d_status": "NO_EMERGENCY",
+                "high_exit_risk_days_count": 1,
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "rolling2": {
+                            "rolling_2_sell_pressure_state": "WATCH_PRESSURE",
+                            "high_exit_risk_days": 1,
+                            "latest_exit_reason": "close_below_ema20;return_10d_lt_minus_8pct",
+                            "latest_bos_event_type": "BOS_DOWN",
+                            "latest_reset_reason": "DOUBLE_BOS_DOWN",
+                            "next_action": "CHECK_STOP_OR_REDUCE",
+                        }
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    decision = result.decisions[0]
+    assert decision.action in {"TIGHTEN_STOP", "REDUCE", "SELL"}
+
+
 def test_pullback_days_is_exposed_on_rolling_5d_companion_row_from_upstream_payload():
     rows = build_dashboard_rows_from_ticker_enrichment_rows(
         [
