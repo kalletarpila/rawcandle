@@ -567,6 +567,82 @@ def test_high_exit_risk_days_count_is_exposed_in_raw_fields_and_seen_by_decision
     assert decision.action in {"TIGHTEN_STOP", "REDUCE", "SELL"}
 
 
+def test_high_exit_risk_days_count_is_exposed_to_rolling_2d_companion_row():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "rolling_2d_status": "BOS_DOWN_WARNING",
+                "high_exit_risk_days_count": 2,
+                "latest_bos_event_type": "BOS_DOWN",
+            }
+        ]
+    )
+
+    rolling_2d_row = next(row for row in rows if row.horizon == "rolling 2d")
+    assert rolling_2d_row.raw_fields["high_exit_risk_days_count"] == "2"
+
+
+def test_pullback_days_is_exposed_on_rolling_5d_companion_row_from_upstream_payload():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "rolling_5d_status": "PULLBACK_CANDIDATE",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "rolling_5_pullback_state": "PULLBACK_CANDIDATE",
+                        "pullback_days": 3,
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    rolling_row = next(row for row in rows if row.horizon == "rolling 5d")
+    assert rolling_row.raw_status == "PULLBACK_CANDIDATE"
+    assert rolling_row.raw_fields["pullback_days"] == "3"
+
+
+def test_rolling_5d_status_is_mirrored_under_both_names():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "rolling_5d_status": "EARLY_PULLBACK",
+            }
+        ]
+    )
+
+    rolling_row = next(row for row in rows if row.horizon == "rolling 5d")
+    assert rolling_row.raw_fields["rolling_5d_status"] == "EARLY_PULLBACK"
+    assert rolling_row.raw_fields["rolling_5_pullback_state"] == "EARLY_PULLBACK"
+
+
+def test_rolling_5_pullback_state_is_mirrored_under_both_names_from_upstream_payload():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "rolling_5d_status": "FAILED_PULLBACK",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "rolling_5_pullback_state": "FAILED_PULLBACK",
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    rolling_row = next(row for row in rows if row.horizon == "rolling 5d")
+    assert rolling_row.raw_fields["rolling_5d_status"] == "FAILED_PULLBACK"
+    assert rolling_row.raw_fields["rolling_5_pullback_state"] == "FAILED_PULLBACK"
+
+
 def test_final_action_does_not_self_feed_into_decision_logic():
     result = build_decisions_from_ticker_enrichment_rows(
         [

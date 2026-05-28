@@ -195,8 +195,14 @@ def _build_row(
     raw_action: str | None = None,
     reason: str | None = None,
     blocking_reasons: str | None = None,
+    extra_raw_fields: dict[str, object] | None = None,
 ) -> DatacenterDashboardRow:
     raw_fields = _raw_fields_from_row(row, horizon_source_field=horizon_source_field)
+    if extra_raw_fields:
+        for key, value in extra_raw_fields.items():
+            text = _normalized_text(value)
+            if text is not None:
+                raw_fields[key] = text
     return DatacenterDashboardRow(
         ticker=str(_normalized_text(row.get("ticker"))).upper(),
         horizon=horizon,
@@ -268,17 +274,29 @@ def build_dashboard_rows_from_ticker_enrichment_rows(
             status_value = _normalized_text(row.get(source_field))
             if status_value is None:
                 continue
+            extra_raw_fields: dict[str, object] = {}
+            if horizon == "rolling 2d":
+                high_exit_risk_days_count = row.get("high_exit_risk_days_count")
+                if _normalized_text(high_exit_risk_days_count) is not None:
+                    extra_raw_fields["high_exit_risk_days_count"] = high_exit_risk_days_count
             if horizon == "rolling 5d" and upstream_payload:
                 rolling5_row = dict(row)
                 rolling5_row.update(upstream_payload)
                 rolling5_status = _normalized_text(
                     upstream_payload.get("rolling_5_pullback_state")
                 ) or status_value
+                mirrored_rolling5_status = _normalized_text(
+                    upstream_payload.get("rolling_5_pullback_state")
+                ) or _normalized_text(upstream_payload.get("rolling_5d_status")) or status_value
                 rolling5_action = _normalized_text(upstream_payload.get("next_action"))
                 rolling5_reason = _normalized_text(upstream_payload.get("primary_reason"))
                 rolling5_blocking_reasons = _normalized_text(
                     upstream_payload.get("blocking_reason")
                 )
+                extra_raw_fields["rolling_5_pullback_state"] = mirrored_rolling5_status
+                extra_raw_fields["rolling_5d_status"] = mirrored_rolling5_status
+                if _normalized_text(rolling5_row.get("pullback_days")) is not None:
+                    extra_raw_fields["pullback_days"] = rolling5_row.get("pullback_days")
                 horizon_source = (
                     "rolling_5_pullback_state"
                     if _normalized_text(upstream_payload.get("rolling_5_pullback_state")) is not None
@@ -294,9 +312,16 @@ def build_dashboard_rows_from_ticker_enrichment_rows(
                         raw_action=rolling5_action,
                         reason=rolling5_reason,
                         blocking_reasons=rolling5_blocking_reasons,
+                        extra_raw_fields=extra_raw_fields,
                     )
                 )
                 continue
+            if horizon == "rolling 5d":
+                mirrored_rolling5_status = _normalized_text(row.get("rolling_5_pullback_state")) or status_value
+                extra_raw_fields["rolling_5_pullback_state"] = mirrored_rolling5_status
+                extra_raw_fields["rolling_5d_status"] = _normalized_text(row.get("rolling_5d_status")) or mirrored_rolling5_status
+                if _normalized_text(row.get("pullback_days")) is not None:
+                    extra_raw_fields["pullback_days"] = row.get("pullback_days")
             dashboard_rows.append(
                 _build_row(
                     row=row,
@@ -304,6 +329,7 @@ def build_dashboard_rows_from_ticker_enrichment_rows(
                     row_kind="ticker_enrichment_horizon",
                     raw_status=status_value,
                     horizon_source_field=source_field,
+                    extra_raw_fields=extra_raw_fields,
                 )
             )
     return dashboard_rows
