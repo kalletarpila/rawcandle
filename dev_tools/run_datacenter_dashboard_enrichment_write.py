@@ -62,6 +62,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--watchlist-file")
+    parser.add_argument("--pullback-lookback-rows", type=int)
+    parser.add_argument("--use-upstream-rolling5-pullback", action="store_true")
     parser.add_argument("--skip-ticker", action="store_true")
     parser.add_argument("--skip-group", action="store_true")
     parser.add_argument("--skip-ticker-decision", action="store_true")
@@ -152,6 +154,10 @@ def _stage_args(
     supports_limit: bool,
     watchlist_file: str | None = None,
     supports_watchlist_file: bool = False,
+    pullback_lookback_rows: int | None = None,
+    supports_pullback_lookback_rows: bool = False,
+    use_upstream_rolling5_pullback: bool = False,
+    supports_upstream_rolling5_pullback: bool = False,
 ) -> list[str]:
     args = [
         "--analysis-db",
@@ -171,6 +177,10 @@ def _stage_args(
         args.extend(["--limit", str(limit)])
     if supports_watchlist_file and watchlist_file:
         args.extend(["--watchlist-file", watchlist_file])
+    if supports_pullback_lookback_rows and pullback_lookback_rows is not None:
+        args.extend(["--pullback-lookback-rows", str(pullback_lookback_rows)])
+    if supports_upstream_rolling5_pullback and use_upstream_rolling5_pullback:
+        args.append("--use-upstream-rolling5-pullback")
     return args
 
 
@@ -319,6 +329,8 @@ def main(argv: list[str] | None = None) -> int:
         taxonomy_version = _normalize_taxonomy_version(args.taxonomy_version)
         if args.limit is not None and args.limit <= 0:
             raise ValueError("--limit must be greater than 0 when provided")
+        if args.pullback_lookback_rows is not None and args.pullback_lookback_rows <= 0:
+            raise ValueError("--pullback-lookback-rows must be greater than 0 when provided")
 
         run_id = _resolve_run_id(signal_date, args.run_id)
         warnings: list[str] = []
@@ -347,6 +359,10 @@ def main(argv: list[str] | None = None) -> int:
                     supports_limit=True,
                     watchlist_file=args.watchlist_file,
                     supports_watchlist_file=True,
+                    pullback_lookback_rows=args.pullback_lookback_rows,
+                    supports_pullback_lookback_rows=True,
+                    use_upstream_rolling5_pullback=args.use_upstream_rolling5_pullback,
+                    supports_upstream_rolling5_pullback=True,
                 ),
                 TICKER_TABLE,
                 bool(args.skip_ticker),
@@ -492,6 +508,11 @@ def main(argv: list[str] | None = None) -> int:
         _emit_summary("mode", args.mode)
         _emit_summary("dry_run", 1 if args.dry_run else 0)
         _emit_summary("watchlist_file", args.watchlist_file or "")
+        _emit_summary(
+            "use_upstream_rolling5_pullback",
+            1 if args.use_upstream_rolling5_pullback else 0,
+        )
+        _emit_summary("pullback_lookback_rows", args.pullback_lookback_rows or "")
         _emit_summary("run_id", run_id)
         _emit_summary("ticker_attempted", attempted["ticker"])
         _emit_summary("group_attempted", attempted["group"])

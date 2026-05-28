@@ -177,6 +177,53 @@ def _run_rows(path: Path) -> list[sqlite3.Row]:
         )
 
 
+def _patch_orchestrator_stages_for_argv_capture(monkeypatch, captured: dict[str, list[str]]):
+    def _ticker(argv):
+        captured["ticker"] = list(argv)
+        return 0
+
+    def _group(argv):
+        captured["group"] = list(argv)
+        return 0
+
+    def _ticker_decision(argv):
+        captured["ticker_decision"] = list(argv)
+        print(
+            "SUMMARY "
+            "datacenter_dashboard_ticker_decision_enrichment_write.updated_rows=0"
+        )
+        return 0
+
+    def _action_summary(argv):
+        captured["action_summary"] = list(argv)
+        return 0
+
+    def _decision_trace(argv):
+        captured["decision_trace"] = list(argv)
+        return 0
+
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_enrichment_write.ticker_main",
+        _ticker,
+    )
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_enrichment_write.group_main",
+        _group,
+    )
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_enrichment_write.ticker_decision_main",
+        _ticker_decision,
+    )
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_enrichment_write.action_summary_main",
+        _action_summary,
+    )
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_enrichment_write.decision_trace_main",
+        _decision_trace,
+    )
+
+
 def test_missing_analysis_db_fails_clearly_and_does_not_create_file(tmp_path, capsys):
     db_path = tmp_path / "missing-analysis.db"
 
@@ -388,6 +435,120 @@ def test_orchestrator_passes_watchlist_file_to_ticker_stage(tmp_path, capsys):
         f"SUMMARY datacenter_dashboard_enrichment_write.watchlist_file={watchlist_file}"
         in output
     )
+
+
+def test_default_orchestrator_does_not_pass_upstream_rolling5_flag(
+    tmp_path, monkeypatch, capsys
+):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    captured: dict[str, list[str]] = {}
+    _patch_orchestrator_stages_for_argv_capture(monkeypatch, captured)
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+            "--run-id",
+            "RUN_ORCH_DEFAULT_FLAGS",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "--use-upstream-rolling5-pullback" not in captured["ticker"]
+    assert "--pullback-lookback-rows" not in captured["ticker"]
+    assert (
+        "SUMMARY datacenter_dashboard_enrichment_write.use_upstream_rolling5_pullback=0"
+        in output
+    )
+    assert "SUMMARY datacenter_dashboard_enrichment_write.pullback_lookback_rows=" in output
+
+
+def test_orchestrator_passes_upstream_rolling5_flag_and_lookback_rows_to_ticker_stage(
+    tmp_path, monkeypatch, capsys
+):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    captured: dict[str, list[str]] = {}
+    _patch_orchestrator_stages_for_argv_capture(monkeypatch, captured)
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+            "--run-id",
+            "RUN_ORCH_UPSTREAM_FLAGS",
+            "--use-upstream-rolling5-pullback",
+            "--pullback-lookback-rows",
+            "5",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "--use-upstream-rolling5-pullback" in captured["ticker"]
+    assert captured["ticker"][
+        captured["ticker"].index("--pullback-lookback-rows") + 1
+    ] == "5"
+    assert "--use-upstream-rolling5-pullback" not in captured["group"]
+    assert "--pullback-lookback-rows" not in captured["group"]
+    assert (
+        "SUMMARY datacenter_dashboard_enrichment_write.use_upstream_rolling5_pullback=1"
+        in output
+    )
+    assert "SUMMARY datacenter_dashboard_enrichment_write.pullback_lookback_rows=5" in output
+
+
+def test_dry_run_passes_upstream_flags_but_writes_no_run_metadata(
+    tmp_path, monkeypatch, capsys
+):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    captured: dict[str, list[str]] = {}
+    _patch_orchestrator_stages_for_argv_capture(monkeypatch, captured)
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+            "--run-id",
+            "RUN_ORCH_DRY_UPSTREAM",
+            "--dry-run",
+            "--use-upstream-rolling5-pullback",
+            "--pullback-lookback-rows",
+            "5",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "--dry-run" in captured["ticker"]
+    assert "--use-upstream-rolling5-pullback" in captured["ticker"]
+    assert captured["ticker"][
+        captured["ticker"].index("--pullback-lookback-rows") + 1
+    ] == "5"
+    assert _run_rows(db_path) == []
+    assert "SUMMARY datacenter_dashboard_enrichment_write.status=DRY_RUN" in output
+    assert "SUMMARY datacenter_dashboard_enrichment_write.metadata_written=0" in output
 
 
 def test_skip_ticker_decision_results_in_partial_metadata(tmp_path, capsys):
