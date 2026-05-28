@@ -86,6 +86,9 @@ TOKEN_ITEMS = (
     "close_below_ema20",
     "high_exit_risk",
 )
+DOWNRANKED_NEGATIVE_TOKENS = {
+    "no_pullback",
+}
 ROW_SCAN_FIELDS = (
     "raw_action",
     "raw_status",
@@ -126,6 +129,10 @@ FIX_TYPE_BY_ATTRIBUTION = {
     "PRESENT_IN_REPORTS_ONLY": "REPORTS_ONLY_SEMANTIC",
     "NOT_FOUND": "SOURCE_SCHEMA_GAP",
 }
+
+
+def _is_top_gap_eligible(field_or_token: str) -> bool:
+    return field_or_token not in DOWNRANKED_NEGATIVE_TOKENS
 
 
 def _cell(value: object) -> str:
@@ -954,11 +961,14 @@ def main(argv: list[str] | None = None) -> int:
         gap_counter.items(),
         key=lambda item: (-item[1], item[0][0], item[0][1], item[0][2]),
     )
+    ranked_gaps_for_summary = [
+        item for item in ranked_gaps if _is_top_gap_eligible(item[0][0])
+    ]
     top_gap = ""
     top_gap_attribution = ""
     recommended_fix_type = "UNKNOWN"
-    if ranked_gaps:
-        top_gap, top_gap_attribution, recommended_fix_type = ranked_gaps[0][0]
+    if ranked_gaps_for_summary:
+        top_gap, top_gap_attribution, recommended_fix_type = ranked_gaps_for_summary[0][0]
 
     _print_section("top_explanatory_gaps")
     _print_row(
@@ -970,7 +980,7 @@ def main(argv: list[str] | None = None) -> int:
         "example_tickers",
         "recommended_fix_type",
     )
-    for rank, (gap_key, mismatch_count) in enumerate(ranked_gaps[:10], start=1):
+    for rank, (gap_key, mismatch_count) in enumerate(ranked_gaps_for_summary[:10], start=1):
         field_or_token, attribution, fix_type = gap_key
         examples = ",".join(gap_examples[gap_key][:5])
         _print_row(
@@ -984,7 +994,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     fix_type_counts: Counter[str] = Counter()
-    for (field_or_token, attribution, fix_type), mismatch_count in ranked_gaps[:10]:
+    for (field_or_token, attribution, fix_type), mismatch_count in ranked_gaps_for_summary[:10]:
         fix_type_counts[fix_type] += mismatch_count
     majority_fix_type = ""
     majority_fix_count = 0

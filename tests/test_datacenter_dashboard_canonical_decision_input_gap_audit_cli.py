@@ -383,6 +383,82 @@ def test_high_exit_risk_days_count_rolling_2d_real_mismatch_is_still_detected(
     assert "per_ticker_gap_attribution;AAA;DIFFERENT_VALUE;high_exit_risk_days_count;2;0;NOT_FOUND;present on both sides but different value" in output
 
 
+def test_no_pullback_does_not_become_top_gap_when_only_negative_enrichment_token(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    reports_snapshot = _snapshot(
+        [{"ticker": "AAA", "pullback_validity": "VALID_PULLBACK", "entry_readiness": "READY_TO_WATCH", "candidate_priority_label": "P1_READY_TO_WATCH"}]
+    )
+    enrichment_snapshot = _snapshot(
+        [{"ticker": "AAA", "pullback_validity": "NO_PULLBACK", "entry_readiness": "NOT_READY", "candidate_priority_label": "P5_NOT_READY"}]
+    )
+    reports_rows = [_row(ticker="AAA", horizon="rolling 5d", raw_fields={"pullback_days": "2"})]
+    enrichment_adapter_rows = [
+        _row(
+            ticker="AAA",
+            horizon="rolling 5d",
+            raw_status="NO_PULLBACK",
+            raw_fields={
+                "pullback_validity": "NO_PULLBACK",
+                "rolling_5d_status": "NO_PULLBACK",
+                "rolling_5_pullback_state": "NO_PULLBACK",
+                "pullback_days": "0",
+            },
+        )
+    ]
+
+    exit_code, output, _ = _run_cli(
+        capsys,
+        monkeypatch,
+        analysis_db=analysis_db,
+        reports_snapshot=reports_snapshot,
+        enrichment_snapshot=enrichment_snapshot,
+        reports_rows=reports_rows,
+        enrichment_table_rows=[{"ticker": "AAA"}],
+        enrichment_adapter_rows=enrichment_adapter_rows,
+        source_rows_by_ticker={"AAA": {}},
+        tickers="AAA",
+    )
+
+    assert exit_code == 0
+    assert "per_ticker_gap_attribution;AAA;MISSING_TOKEN;no_pullback;;no_pullback;PRESENT_WITH_DIFFERENT_NAME;" in output
+    assert "SUMMARY datacenter_dashboard_canonical_decision_input_gap_audit.top_gap=no_pullback" not in output
+    assert "SUMMARY datacenter_dashboard_canonical_decision_input_gap_audit.top_gap=pullback_days" in output
+    assert "top_explanatory_gaps;1;no_pullback;" not in output
+
+
+def test_positive_pullback_candidate_token_can_still_be_top_gap(tmp_path, monkeypatch, capsys):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    reports_snapshot = _snapshot(
+        [{"ticker": "AAA", "pullback_validity": "VALID_PULLBACK", "entry_readiness": "READY_TO_WATCH", "candidate_priority_label": "P1_READY_TO_WATCH"}]
+    )
+    enrichment_snapshot = _snapshot(
+        [{"ticker": "AAA", "pullback_validity": "NO_PULLBACK", "entry_readiness": "NOT_READY", "candidate_priority_label": "P5_NOT_READY"}]
+    )
+    reports_rows = [_row(ticker="AAA", horizon="rolling 5d", raw_status="PULLBACK_CANDIDATE")]
+
+    exit_code, output, _ = _run_cli(
+        capsys,
+        monkeypatch,
+        analysis_db=analysis_db,
+        reports_snapshot=reports_snapshot,
+        enrichment_snapshot=enrichment_snapshot,
+        reports_rows=reports_rows,
+        enrichment_table_rows=[{"ticker": "AAA"}],
+        enrichment_adapter_rows=[_row(ticker="AAA", horizon="rolling 5d")],
+        source_rows_by_ticker={"AAA": {}},
+        tickers="AAA",
+    )
+
+    assert exit_code == 0
+    assert "SUMMARY datacenter_dashboard_canonical_decision_input_gap_audit.top_gap=pullback_candidate" in output
+
+
 def test_non_horizon_aware_fields_keep_first_observed_behavior(tmp_path, monkeypatch, capsys):
     analysis_db = tmp_path / "analysis.db"
     _create_analysis_db(analysis_db)
