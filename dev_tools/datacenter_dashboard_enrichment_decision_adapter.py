@@ -77,8 +77,12 @@ RAW_FIELD_NAMES: tuple[str, ...] = (
     "latest_bos_freshness",
     "latest_reset_freshness",
     "latest_bullish_relevance_class",
+    "latest_bullish_relevance_reason",
     "latest_bearish_relevance_class",
+    "latest_bearish_relevance_reason",
     "rolling_5_pullback_state",
+    "blocking_reason",
+    "next_action",
     "rolling_5d_primary_reason",
     "rolling_5d_blocking_reason",
     "latest_bos_up_age_td",
@@ -170,6 +174,17 @@ def _raw_fields_from_row(
     return raw_fields
 
 
+def _upstream_rolling5_payload(row: dict[str, object]) -> dict[str, object]:
+    source_run_ids = _normalized_text(row.get("source_run_ids"))
+    if source_run_ids is None or not source_run_ids.startswith(UPSTREAM_ROLLING5_PAYLOAD_PREFIX):
+        return {}
+    try:
+        payload = json.loads(source_run_ids[len(UPSTREAM_ROLLING5_PAYLOAD_PREFIX):])
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def _build_row(
     *,
     row: dict[str, object],
@@ -177,6 +192,9 @@ def _build_row(
     row_kind: str,
     raw_status: str | None,
     horizon_source_field: str | None = None,
+    raw_action: str | None = None,
+    reason: str | None = None,
+    blocking_reasons: str | None = None,
 ) -> DatacenterDashboardRow:
     raw_fields = _raw_fields_from_row(row, horizon_source_field=horizon_source_field)
     return DatacenterDashboardRow(
@@ -185,16 +203,20 @@ def _build_row(
         source_file=SOURCE_FILE,
         section=SECTION,
         row_kind=row_kind,
-        raw_action=None,
+        raw_action=raw_action,
         raw_status=raw_status,
-        reason=_normalized_text(row.get("primary_reason")),
+        reason=reason if reason is not None else _normalized_text(row.get("primary_reason")),
         trend_state=_normalized_text(row.get("trend_state")),
         latest_structure_label=_normalized_text(row.get("latest_structure_label")),
         latest_bos_event_type=_normalized_text(row.get("latest_bos_event_type")),
         latest_reset_reason=_normalized_text(row.get("latest_reset_reason")),
         distance_to_ema20=_safe_float(row.get("distance_to_ema20")),
         high_exit_risk_days_count=_safe_int(row.get("high_exit_risk_days_count")),
-        blocking_reasons=_normalized_text(row.get("blocking_reasons")),
+        blocking_reasons=(
+            blocking_reasons
+            if blocking_reasons is not None
+            else _normalized_text(row.get("blocking_reasons"))
+        ),
         ma_break_status=_normalized_text(row.get("ma_break_status")),
         ema20_break_confirmed=_safe_int(row.get("ema20_break_confirmed")),
         sma50_break_confirmed=_safe_int(row.get("sma50_break_confirmed")),
@@ -224,6 +246,7 @@ def build_dashboard_rows_from_ticker_enrichment_rows(
     for row in rows:
         if not _is_valid_ticker(row.get("ticker")):
             continue
+        upstream_payload = _upstream_rolling5_payload(row)
         daily_status = _normalized_text(row.get("daily_status"))
         current_status = _normalized_text(row.get("current_status"))
         base_status = daily_status or current_status
@@ -244,6 +267,35 @@ def build_dashboard_rows_from_ticker_enrichment_rows(
         for source_field, horizon in HORIZON_SOURCE_FIELDS:
             status_value = _normalized_text(row.get(source_field))
             if status_value is None:
+                continue
+            if horizon == "rolling 5d" and upstream_payload:
+                rolling5_row = dict(row)
+                rolling5_row.update(upstream_payload)
+                rolling5_status = _normalized_text(
+                    upstream_payload.get("rolling_5_pullback_state")
+                ) or status_value
+                rolling5_action = _normalized_text(upstream_payload.get("next_action"))
+                rolling5_reason = _normalized_text(upstream_payload.get("primary_reason"))
+                rolling5_blocking_reasons = _normalized_text(
+                    upstream_payload.get("blocking_reason")
+                )
+                horizon_source = (
+                    "rolling_5_pullback_state"
+                    if _normalized_text(upstream_payload.get("rolling_5_pullback_state")) is not None
+                    else source_field
+                )
+                dashboard_rows.append(
+                    _build_row(
+                        row=rolling5_row,
+                        horizon=horizon,
+                        row_kind="ticker_enrichment_horizon",
+                        raw_status=rolling5_status,
+                        horizon_source_field=horizon_source,
+                        raw_action=rolling5_action,
+                        reason=rolling5_reason,
+                        blocking_reasons=rolling5_blocking_reasons,
+                    )
+                )
                 continue
             dashboard_rows.append(
                 _build_row(

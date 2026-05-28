@@ -242,6 +242,61 @@ def test_adapter_exposes_upstream_rolling5_payload_fields_in_raw_fields():
     assert rolling_row.raw_fields["rolling_5d_blocking_reason"] == "STRUCTURE_BLOCKED"
 
 
+def test_adapter_creates_reports_like_rolling5_companion_row_from_upstream_payload():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "NEUTRAL_MONITOR",
+                "rolling_5d_status": "PULLBACK_CANDIDATE",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "rolling_5_pullback_state": "PULLBACK_CANDIDATE",
+                        "pullback_days": 3,
+                        "primary_reason": "CONFIRMED_EMA20_PULLBACK_CONTEXT",
+                        "next_action": "REVIEW_FOR_DAILY_TRIGGER",
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    rolling_row = next(row for row in rows if row.horizon == "rolling 5d")
+    assert rolling_row.raw_status == "PULLBACK_CANDIDATE"
+    assert rolling_row.raw_action == "REVIEW_FOR_DAILY_TRIGGER"
+    assert rolling_row.reason == "CONFIRMED_EMA20_PULLBACK_CONTEXT"
+    assert rolling_row.raw_fields["pullback_days"] == "3"
+    assert rolling_row.raw_fields["horizon_source"] == "rolling_5_pullback_state"
+
+
+def test_adapter_carries_blocking_reason_and_bos_freshness_on_rolling5_row():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "NEUTRAL_MONITOR",
+                "rolling_5d_status": "FAILED_PULLBACK",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "rolling_5_pullback_state": "FAILED_PULLBACK",
+                        "blocking_reason": "recent_bos_down",
+                        "latest_bos_freshness": "FRESH",
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    rolling_row = next(row for row in rows if row.horizon == "rolling 5d")
+    assert rolling_row.blocking_reasons == "recent_bos_down"
+    assert rolling_row.raw_fields["blocking_reason"] == "recent_bos_down"
+    assert rolling_row.raw_fields["latest_bos_freshness"] == "FRESH"
+
+
 def test_decision_integration_uses_writer_visible_pullback_context():
     result = build_decisions_from_ticker_enrichment_rows(
         [
@@ -289,6 +344,89 @@ def test_decision_integration_accepts_upstream_rolling5_context_with_payload():
 
     decision = result.decisions[0]
     assert decision.pullback_validity != "INSUFFICIENT_DATA"
+
+
+def test_decision_integration_uses_reports_like_rolling5_companion_row_context():
+    result = build_decisions_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "NEUTRAL_MONITOR",
+                "ma_break_status": "OK",
+                "freshness_status": "FRESH_BULLISH_SIGNAL",
+                "trend_state": "UP",
+                "latest_structure_label": "HH",
+                "latest_bos_event_type": "BOS_UP",
+                "rolling_5d_status": "PULLBACK_CANDIDATE",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "rolling_5_pullback_state": "PULLBACK_CANDIDATE",
+                        "pullback_days": 3,
+                        "primary_reason": "CONFIRMED_EMA20_PULLBACK_CONTEXT",
+                        "next_action": "REVIEW_FOR_DAILY_TRIGGER",
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    decision = result.decisions[0]
+    assert decision.pullback_validity != "INSUFFICIENT_DATA"
+    assert decision.pullback_validity == "VALID_PULLBACK"
+
+
+def test_decision_integration_returns_structure_blocked_for_failed_pullback_with_acute_override():
+    result = build_decisions_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "NEUTRAL_MONITOR",
+                "freshness_status": "STRUCTURE_WARNING_OVERRIDES_BULLISH",
+                "structure_warning_overrides_bullish_signal": 1,
+                "ma_break_status": "OK",
+                "trend_state": "UP",
+                "latest_structure_label": "HH",
+                "latest_bos_event_type": "BOS_DOWN",
+                "rolling_5d_status": "FAILED_PULLBACK",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "rolling_5_pullback_state": "FAILED_PULLBACK",
+                        "pullback_days": 2,
+                        "blocking_reason": "recent_bos_down",
+                        "latest_bos_freshness": "FRESH",
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    decision = result.decisions[0]
+    assert decision.pullback_validity == "STRUCTURE_BLOCKED_PULLBACK"
+
+
+def test_adapter_backward_compatibility_without_upstream_payload_is_unchanged():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "daily_status": "NEUTRAL_MONITOR",
+                "rolling_2d_status": "NO_EMERGENCY",
+                "rolling_5d_status": "PULLBACK_CANDIDATE",
+                "rolling_30d_status": "BUY_ZONE",
+            }
+        ]
+    )
+
+    assert len(rows) == 4
+    rolling_row = next(row for row in rows if row.horizon == "rolling 5d")
+    assert rolling_row.raw_status == "PULLBACK_CANDIDATE"
+    assert rolling_row.raw_action is None
+    assert rolling_row.reason is None
+    assert rolling_row.raw_fields["horizon_source"] == "rolling_5d_status"
 
 
 def test_ma_break_fields_are_visible_to_decision_logic_and_produce_sell():
