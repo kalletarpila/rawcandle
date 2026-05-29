@@ -41,6 +41,8 @@ Important interpretation:
   - `candidate_priority_label`
 - raw snapshot `action` residuals remain visible
 - those residuals are non-blocking only under the updated factual candidate parity contract
+- the latest accepted manual production-write path is documented in:
+  - [DATACENTER_DASHBOARD_MANUAL_PRODUCTION_ENRICHMENT_RUNBOOK.md](/home/kalle/projects/rawcandle/docs/DATACENTER_DASHBOARD_MANUAL_PRODUCTION_ENRICHMENT_RUNBOOK.md)
 
 
 ## 3. Explicit Non-Goals

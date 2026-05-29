@@ -2,396 +2,410 @@
 
 ## 1. Purpose
 
-This runbook defines the manual, operator-approved procedure for:
+This runbook documents the manual Datacenter dashboard enrichment production-write path using `dev_tools` only.
 
-- backing up production `data/analysis.db`
-- applying Datacenter dashboard enrichment schema/migrations manually
-- running the first manual non-dry enrichment write
-- auditing enrichment readiness
-- exporting enrichment JSON
-- building a dashboard from enrichment into controlled temporary outputs
-- comparing against reports-mode reference outputs
-- deciding whether later scheduler source-mode switch planning can proceed
+It is intentionally not the full scheduler path.
 
-This runbook does not:
+This procedure:
 
-- switch scheduler behavior
-- remove reports mode
-- remove `.md` reports
-- authorize automatic production DB writes by scheduler
+- does not run scheduler
+- does not run `rawcandle/cli/run_stock_update_scheduler.py`
+- does not run Yahoo/OHLCV/stock update work
+- writes production `data/analysis.db`
+- writes production `data/ecosystem_dashboard.db`
+- writes production dashboard HTML under `swing_reports/`
+
+Scheduler switch remains a separate operator decision. See [DATACENTER_DASHBOARD_SCHEDULER_SWITCH_PLAN.md](/home/kalle/projects/rawcandle/docs/DATACENTER_DASHBOARD_SCHEDULER_SWITCH_PLAN.md).
 
 
-## 2. Scope and Non-Goals
+## 2. When To Use This Runbook
 
-This runbook is limited to a manual operator procedure outside scheduler.
+Use this runbook when:
 
-Explicit non-goals:
+- Datacenter reports already exist for the target report date
+- `analysis.db` source tables are already available
+- the operator wants to update dashboard output from enrichment without running stock update
+- scheduler execution would be too slow or would trigger Yahoo/OHLCV work
 
-- no automatic scheduler migration
-- no scheduler source-mode switch
-- no deletion of reports-mode outputs
-- no deletion of existing dashboard snapshots
-- no automatic production HTML replacement unless explicitly approved later
+Do not use this runbook when:
+
+- Datacenter source reports are missing
+- enrichment audit tables are missing
+- the operator wants to update OHLCV data
+- full scheduler behavior is being tested
 
 
-## 3. Required Preconditions
+## 3. Preconditions
 
 Before starting, confirm all of the following:
 
-- git tracked worktree is clean
-- latest relevant tests passed
-- backup location is decided in advance
-- production `analysis.db` path confirmed:
+- tracked git worktree is clean
+- required files and directories exist:
   - `/home/kalle/projects/rawcandle/data/analysis.db`
-- price DB path confirmed:
   - `/home/kalle/projects/rawcandle/data/osakedata.db`
-- dashboard DB path confirmed:
   - `/home/kalle/projects/rawcandle/data/ecosystem_dashboard.db`
-- reports directory confirmed:
   - `/home/kalle/projects/rawcandle/swing_reports`
-- watchlist file confirmed:
   - `/home/kalle/projects/rawcandle/watchlists/datacenter_watchlist.txt`
-- taxonomy version confirmed:
-  - `DC_TAXONOMY_FULL_V1`
-- target signal/report date selected
-- reports-mode dashboard path still works
+- target report date Datacenter reports exist:
+  - daily
+  - rolling `2d`
+  - rolling `5d`
+  - rolling `30d`
+  - weekly if relevant
+- `datacenter_enrichment_apply_migrations=false`
+- scheduler is not part of this procedure
 
 
-## 4. Safety Rule
+## 4. Backup Procedure
 
-Never run scheduler source-mode switch before all of the following are true:
-
-- manual production enrichment write succeeds
-- enrichment audit returns `READY`
-- enrichment dashboard build succeeds
-- acceptance report returns `blockers=0`
-- reports fallback mode is verified
-
-
-## 5. Backup Procedure
-
-Backup must be created before any production migration or enrichment write.
-
-Rules:
-
-- backup directory must be outside `temp/`
-- backup directory must not be committed to git
-- do not rely on WAL/SHM files as the canonical backup
-- if the DB may be open or using WAL mode, ensure no write is running before backup
-- advanced checkpointing should only be used if it is already established project practice
-
-Example:
+Create backups before any production write:
 
 ```bash
 cd /home/kalle/projects/rawcandle
 
-TS="$(date -u +%Y%m%dT%H%M%SZ)"
-BACKUP_DIR="/home/kalle/projects/rawcandle/backups/manual_enrichment_${TS}"
+BACKUP_DIR="/home/kalle/projects/rawcandle/backups/dashboard_prod_write_$(date -u +%Y%m%dT%H%M%SZ)"
+mkdir -p "$BACKUP_DIR"
 
-mkdir -p "${BACKUP_DIR}"
+cp /home/kalle/projects/rawcandle/data/analysis.db "$BACKUP_DIR/analysis.db.before_manual_dashboard_write"
+cp /home/kalle/projects/rawcandle/data/ecosystem_dashboard.db "$BACKUP_DIR/ecosystem_dashboard.db.before_manual_dashboard_write"
 
-cp /home/kalle/projects/rawcandle/data/analysis.db \
-  "${BACKUP_DIR}/analysis.db.before_enrichment"
-
-cp /home/kalle/projects/rawcandle/data/ecosystem_dashboard.db \
-  "${BACKUP_DIR}/ecosystem_dashboard.db.before_enrichment"
-
-ls -lh "${BACKUP_DIR}"
+stat -c '%n|%s|%Y' \
+  /home/kalle/projects/rawcandle/data/analysis.db \
+  /home/kalle/projects/rawcandle/data/ecosystem_dashboard.db
 ```
 
+Operational notes:
 
-## 6. Migration Procedure
+- do not delete backups
+- do not commit backups
+- if backup or `stat` fails, stop before any write
 
-This step is manual, operator-approved, and modifies production `data/analysis.db`.
 
-Scheduler must not run migrations automatically.
+## 5. Manual Dev-Tool Production Write Sequence
 
-Verified migration mechanism:
-
-- the project does not expose a separate standalone Datacenter enrichment migration CLI in the inspected code path
-- tests and runtime both use `analysis.database_manager.DatabaseManager`
-- `DatabaseManager.__init__(...)` calls `_init_database()`
-- `_init_database()` calls `apply_datacenter_dashboard_enrichment_migration(conn)`
-- `apply_datacenter_dashboard_enrichment_migration(conn)` applies:
-  - `rawcandle/sqlite/migrations/002_create_datacenter_dashboard_enrichment.sql`
-  - `rawcandle/sqlite/migrations/003_add_high_exit_risk_days_count_to_ticker_enrichment.sql` when the column is missing
-
-Verified manual command:
+Use these variables:
 
 ```bash
-PYTHONPATH=. python3 -c 'from analysis.database_manager import DatabaseManager; DatabaseManager("/home/kalle/projects/rawcandle/data/analysis.db").close()'
+REPORT_DATE=YYYY-MM-DD
+TAXONOMY_VERSION=DC_TAXONOMY_FULL_V1
 ```
 
-Operator interpretation:
-
-- this uses the existing project migration/init code path
-- this writes to production `data/analysis.db` if run
-- this applies more than only the Datacenter enrichment migration:
-  - it runs the broader `DatabaseManager` initialization/ensure logic for `analysis.db`
-  - it also invokes other existing schema/migration helpers wired there
-- the Datacenter enrichment migration helper itself is idempotent in tests
-- the command must be treated as a write operation
-- no other process should be writing to `analysis.db` while this runs
-
-After migration, verify schema and enrichment table availability with audit:
+### A. Pre-Write Audit
 
 ```bash
 PYTHONPATH=. python3 dev_tools/run_datacenter_dashboard_enrichment_audit.py \
   --analysis-db /home/kalle/projects/rawcandle/data/analysis.db \
-  --signal-date <YYYY-MM-DD> \
-  --taxonomy-version DC_TAXONOMY_FULL_V1
+  --signal-date "${REPORT_DATE}" \
+  --taxonomy-version "${TAXONOMY_VERSION}"
 ```
 
-Expected immediately after migration but before enrichment write:
+Capture:
 
-- expected enrichment tables exist
-- row counts may be `0`
-- readiness is likely `EMPTY`
-- status is `OK`
+- `status`
+- `readiness`
+- `missing_tables`
+- existing row counts if printed
 
-If the audit reports `MISSING_TABLES`, stop.
+Stop if `missing_tables > 0`.
 
-
-## 7. Manual Non-Dry Enrichment Write
-
-Run the enrichment write only after backup and migration verification.
-
-Command:
+### B. Enrichment Write
 
 ```bash
 PYTHONPATH=. python3 dev_tools/run_datacenter_dashboard_enrichment_write.py \
   --analysis-db /home/kalle/projects/rawcandle/data/analysis.db \
-  --signal-date <YYYY-MM-DD> \
-  --taxonomy-version DC_TAXONOMY_FULL_V1 \
+  --signal-date "${REPORT_DATE}" \
+  --taxonomy-version "${TAXONOMY_VERSION}" \
   --mode replace-date \
-  --watchlist-file /home/kalle/projects/rawcandle/watchlists/datacenter_watchlist.txt
+  --watchlist-file /home/kalle/projects/rawcandle/watchlists/datacenter_watchlist.txt \
+  --use-upstream-rolling5-pullback \
+  --pullback-lookback-rows 5
 ```
 
-Important notes:
+Capture:
 
-- this writes enrichment rows into production `data/analysis.db`
-- this does not write `ecosystem_dashboard.db`
-- this does not render HTML
-- this does not run scheduler
-- `replace-date` rebuilds one `signal_date + taxonomy_version` deterministically
+- `status`
+- `readiness`
+- `ticker_rows`
+- `group_rows`
+- `action_summary_rows`
+- `decision_trace_rows`
+- `ticker_decision_updated_rows`
+- `rolling5_classifier_source`
+- `rolling5_classifier_rows`
+- `ma_break_helper_rows`
+- `ma_break_payload_rows`
+- `freshness_helper_rows`
+- `freshness_payload_rows`
+- `rolling2_helper_rows`
+- `rolling2_payload_rows`
+- `rolling30_helper_rows`
+- `rolling30_payload_rows`
+- `run_id`
 
+Stop if write `status` is not `OK`.
 
-## 8. Post-Write Audit
-
-Audit immediately after the enrichment write:
+### C. Post-Write Audit
 
 ```bash
 PYTHONPATH=. python3 dev_tools/run_datacenter_dashboard_enrichment_audit.py \
   --analysis-db /home/kalle/projects/rawcandle/data/analysis.db \
-  --signal-date <YYYY-MM-DD> \
-  --taxonomy-version DC_TAXONOMY_FULL_V1
+  --signal-date "${REPORT_DATE}" \
+  --taxonomy-version "${TAXONOMY_VERSION}"
 ```
 
-Expected after a successful write:
+Expected:
 
-- `ticker_enrichment READY`
-- `group_enrichment READY`
-- `action_summary READY`
-- `decision_trace READY`
-- `enrichment_run READY`
-- `overall READY`
-- `status OK`
+- `status=OK`
+- `readiness=READY`
 
-If readiness is `PARTIAL`, `EMPTY`, or `MISSING_TABLES`, stop and diagnose before export/build.
+Stop if post-write readiness is not `READY`.
 
-
-## 9. Export Enrichment JSON
-
-Export the enrichment dashboard input JSON:
+### D. Export Enrichment JSON To `temp/`
 
 ```bash
 PYTHONPATH=. python3 dev_tools/run_datacenter_dashboard_analysis_db_export.py \
   --analysis-db /home/kalle/projects/rawcandle/data/analysis.db \
   --price-db /home/kalle/projects/rawcandle/data/osakedata.db \
   --ecosystem-code DATACENTER \
-  --report-date <YYYY-MM-DD> \
+  --report-date "${REPORT_DATE}" \
   --source-mode enrichment \
-  --output-json /home/kalle/projects/rawcandle/temp/datacenter_dashboard_enrichment_export_<YYYY-MM-DD>.json
+  --output-json /home/kalle/projects/rawcandle/temp/datacenter_dashboard_enrichment_export_${REPORT_DATE}_production_dashboard_write.json
 ```
 
-Notes:
+Capture:
 
-- this reads production `analysis.db`
-- this writes only JSON to `temp/`
-- this does not write `ecosystem_dashboard.db`
-- this does not render HTML
-- the output file is temporary and must not be committed
+- `status`
+- `source_mode`
+- `readiness`
+- `source_reports`
+- `action_summary`
+- `market_map`
+- `watchlist`
+- `tickers`
+- `decision_trace`
 
+### E. Build Production Enrichment Dashboard DB And HTML
 
-## 10. Build Controlled Enrichment Dashboard DB and HTML
-
-Build to controlled temporary outputs first. Do not overwrite production dashboard DB in this step.
+This is the intentional production dashboard write:
 
 ```bash
 PYTHONPATH=. python3 dev_tools/run_datacenter_dashboard_build.py \
-  --dashboard-db /home/kalle/projects/rawcandle/temp/manual_enrichment_dashboard_<YYYY-MM-DD>.db \
-  --report-date <YYYY-MM-DD> \
+  --dashboard-db /home/kalle/projects/rawcandle/data/ecosystem_dashboard.db \
+  --report-date "${REPORT_DATE}" \
   --input-mode structured \
-  --structured-input-json /home/kalle/projects/rawcandle/temp/datacenter_dashboard_enrichment_export_<YYYY-MM-DD>.json \
+  --structured-input-json /home/kalle/projects/rawcandle/temp/datacenter_dashboard_enrichment_export_${REPORT_DATE}_production_dashboard_write.json \
   --mode replace-date \
   --render-html \
-  --html-output /home/kalle/projects/rawcandle/temp/manual_enrichment_dashboard_<YYYY-MM-DD>.html
+  --html-output /home/kalle/projects/rawcandle/swing_reports/datacenter_dashboard_${REPORT_DATE}.html
 ```
 
-Important:
+Capture:
 
-- this is a controlled temporary build
-- this is not production `ecosystem_dashboard.db`
-- this is not scheduler output
-- production dashboard DB should only be written after explicit approval
+- `run_id`
+- `status`
+- `readiness`
+- counts
+- HTML render status if printed
 
+Stop if build `status` is not `OK`.
 
-## 11. Build Reports Reference Dashboard
+### F. Build Temp Reports Reference Dashboard
 
-Build a reports-mode reference snapshot into separate temporary outputs:
+This build exists only for acceptance comparison:
 
 ```bash
 PYTHONPATH=. python3 dev_tools/run_datacenter_dashboard_build.py \
-  --dashboard-db /home/kalle/projects/rawcandle/temp/manual_reports_dashboard_<YYYY-MM-DD>.db \
-  --report-date <YYYY-MM-DD> \
+  --dashboard-db /home/kalle/projects/rawcandle/temp/manual_reports_dashboard_${REPORT_DATE}_production_dashboard_write_reference.db \
+  --report-date "${REPORT_DATE}" \
   --input-mode reports \
   --reports-dir /home/kalle/projects/rawcandle/swing_reports \
   --mode replace-date \
   --render-html \
-  --html-output /home/kalle/projects/rawcandle/temp/manual_reports_dashboard_<YYYY-MM-DD>.html
+  --html-output /home/kalle/projects/rawcandle/temp/manual_reports_dashboard_${REPORT_DATE}_production_dashboard_write_reference.html
 ```
 
-Notes:
+Capture:
 
-- this uses the reports-mode reference path
-- this writes only temporary DB/HTML
-- this does not modify production `ecosystem_dashboard.db`
+- `run_id`
+- `status`
+- `readiness`
+- counts
+- HTML render status if printed
 
+Stop if reports build fails.
 
-## 12. Acceptance Report
+### G. Run Acceptance Report
 
-Run acceptance using the temporary dashboard DBs:
+Acceptance compares:
+
+- temp reports reference dashboard DB
+- production enrichment dashboard DB
 
 ```bash
 PYTHONPATH=. python3 dev_tools/run_datacenter_dashboard_enrichment_acceptance_report.py \
   --ecosystem-code DATACENTER \
-  --report-date <YYYY-MM-DD> \
-  --reports-dashboard-db /home/kalle/projects/rawcandle/temp/manual_reports_dashboard_<YYYY-MM-DD>.db \
-  --reports-run-id <reports_run_id> \
-  --enrichment-dashboard-db /home/kalle/projects/rawcandle/temp/manual_enrichment_dashboard_<YYYY-MM-DD>.db \
-  --enrichment-run-id <enrichment_run_id> \
+  --report-date "${REPORT_DATE}" \
+  --reports-dashboard-db /home/kalle/projects/rawcandle/temp/manual_reports_dashboard_${REPORT_DATE}_production_dashboard_write_reference.db \
+  --reports-run-id <reports_run_id_from_step_F> \
+  --enrichment-dashboard-db /home/kalle/projects/rawcandle/data/ecosystem_dashboard.db \
+  --enrichment-run-id <enrichment_run_id_from_step_E> \
   --analysis-db-copy /home/kalle/projects/rawcandle/data/analysis.db \
   --max-examples 50
 ```
 
-Clarifications:
+Capture:
 
-- run IDs must come from the build `SUMMARY` lines
-- using production `analysis.db` as `--analysis-db-copy` is acceptable here because the acceptance report is read-only
-- the argument name is historical from temp-copy smoke tooling
-- the acceptance report must not mutate DBs
+- `status`
+- `blockers`
+- `accepted_differences`
+- `review_later`
+- `recommendation`
+- factual parity fields if printed
+- action residuals if printed
 
+### H. Optional Ticker Spot Checks
 
-## 13. Optional Parity Diagnostics
-
-If the acceptance report needs explanation, optional read-only diagnostics can be run:
+If acceptance output does not print the target tickers directly, inspect production dashboard rows read-only:
 
 ```bash
-PYTHONPATH=. python3 dev_tools/run_datacenter_dashboard_enrichment_parity_diagnosis.py \
-  --ecosystem-code DATACENTER \
-  --report-date <YYYY-MM-DD> \
-  --reports-dashboard-db /home/kalle/projects/rawcandle/temp/manual_reports_dashboard_<YYYY-MM-DD>.db \
-  --reports-run-id <reports_run_id> \
-  --enrichment-dashboard-db /home/kalle/projects/rawcandle/temp/manual_enrichment_dashboard_<YYYY-MM-DD>.db \
-  --enrichment-run-id <enrichment_run_id> \
-  --analysis-db-copy /home/kalle/projects/rawcandle/data/analysis.db \
-  --max-examples 100
+sqlite3 -header -column /home/kalle/projects/rawcandle/data/ecosystem_dashboard.db \
+  "SELECT ticker, action, entry_readiness, candidate_priority_label
+   FROM ecosystem_dashboard_ticker_status
+   WHERE report_date='${REPORT_DATE}'
+     AND ecosystem_code='DATACENTER'
+     AND ticker IN ('CRUS','MYRG','HPQ')
+   ORDER BY ticker;"
 ```
 
-These diagnostics are optional and read-only.
+Expected:
 
+- `CRUS = TIGHTEN_STOP / NEEDS_STOP_STABILIZATION / P2_STOP_STABILIZATION`
+- `MYRG = TIGHTEN_STOP / NEEDS_STOP_STABILIZATION / P2_STOP_STABILIZATION`
+- `HPQ = REDUCE / NEEDS_RISK_CLEARANCE / P3_RISK_CLEARANCE`
 
-## 14. Acceptance Criteria
+### I. Final Status Checks
 
-Minimum criteria before later scheduler source-mode decisions:
-
-- backup exists
-- migration/audit confirms enrichment tables exist
-- enrichment write status is `OK`
-- enrichment audit overall status is `READY`
-- enrichment export status is `OK`
-- temporary enrichment dashboard build status is `OK`
-- temporary reports reference dashboard build status is `OK`
-- acceptance report status is `OK`
-- acceptance report `blockers=0`
-- visual HTML review is acceptable
-- reports fallback build still succeeds
-- expected known differences are understood:
-  - `CRGY` outside ecosystem, if still applicable
-  - extra `market_map` groups, if still present
-  - verbose enrichment trace V0
-  - small action residuals, if still present
-
-
-## 15. Rollback Procedure
-
-Normal rollback posture:
-
-- scheduler remains in reports mode, so scheduler rollback should not be required
-- leave enrichment tables and rows in `analysis.db` for audit unless there is a specific reason to remove them
-- do not delete `ecosystem_dashboard.db` snapshots
-- regenerate reports-mode temporary or production HTML through the existing reports-mode path if needed
-
-If production `analysis.db` must be restored:
+Capture production DB metadata:
 
 ```bash
-# Stop any process that may write to analysis.db before doing this.
-
-cp "${BACKUP_DIR}/analysis.db.before_enrichment" \
-  /home/kalle/projects/rawcandle/data/analysis.db
-```
-
-If production `ecosystem_dashboard.db` must be restored:
-
-```bash
-cp "${BACKUP_DIR}/ecosystem_dashboard.db.before_enrichment" \
+stat -c '%n|%s|%Y' \
+  /home/kalle/projects/rawcandle/data/analysis.db \
   /home/kalle/projects/rawcandle/data/ecosystem_dashboard.db
 ```
 
-Cautions:
+Then verify final git state:
 
-- restore only after explicit approval
-- make sure no scheduler/update process is writing
+```bash
+git status --short
+git diff --stat
+```
+
+
+## 6. Success Criteria
+
+Success requires all of the following:
+
+- enrichment write `status=OK`
+- post-write audit `readiness=READY`
+- export `status=OK`
+- production dashboard build `status=OK`
+- production dashboard build `readiness=READY`
+- reports reference build `status=OK`
+- reports reference build `readiness=READY`
+- acceptance:
+  - `status=OK`
+  - `blockers=0`
+  - `recommendation=READY_FOR_SCHEDULER_SWITCH_PLANNING`
+- factual parity:
+  - `pullback_validity_differences=0`
+  - `entry_readiness_differences=0`
+  - `candidate_priority_label_differences=0`
+- production `ecosystem_dashboard.db` intentionally modified
+- scheduler not run
+- Yahoo/OHLCV not run
+
+
+## 7. Stop Conditions
+
+Stop immediately if any of the following occurs:
+
+- dirty tracked worktree
+- missing reports for the target date
+- missing DB input files
+- `missing_tables > 0`
+- enrichment write `status` not `OK`
+- post-write audit not `READY`
+- export failure
+- production dashboard build failure
+- reports reference build failure
+- acceptance `blockers > 0`
+- unexpected scheduler or stock update invocation
+- production DB write error
+
+
+## 8. Rollback
+
+If dashboard output must be rolled back:
+
+- restore `ecosystem_dashboard.db` from backup
+- restore `analysis.db` from backup only if the enrichment write caused bad rows or corruption
+- do not delete backups
+- rerun reports-mode dashboard build if needed
+
+Example restore commands:
+
+```bash
+cp "${BACKUP_DIR}/ecosystem_dashboard.db.before_manual_dashboard_write" \
+  /home/kalle/projects/rawcandle/data/ecosystem_dashboard.db
+```
+
+```bash
+cp "${BACKUP_DIR}/analysis.db.before_manual_dashboard_write" \
+  /home/kalle/projects/rawcandle/data/analysis.db
+```
+
+Operational cautions:
+
+- stop any process that may be writing before restore
+- restore only with explicit operator approval
 - do not restore over a live write
 
 
-## 16. Next Stage After Successful Manual Procedure
+## 9. Known Accepted Residuals
 
-Planned follow-ups after successful manual execution:
+Accepted residuals may remain visible after a successful run:
 
-- `DB-17h`
-  - scheduler config update proposal for enrichment source mode, still disabled by default
-- `DB-17i`
-  - scheduler enrichment source-mode local fake/dry run using temporary DBs
-- `DB-17j`
-  - explicit approval before production source-mode switch
-- `DB-17k`
-  - first production scheduler enrichment run with fallback enabled, if approved
+- raw action residuals may remain visible
+- accepted differences may include known watchlist/outside-ecosystem differences
+- accepted differences may include extra group / market-map / report-shape differences
+- accepted differences may include verbose enrichment trace shape differences
+
+These are non-blocking only when:
+
+- factual candidate parity is clean
+- acceptance `blockers=0`
 
 
-## 17. Explicit Operator Checklist
+## 10. Latest Accepted Example
 
-- git tracked worktree clean
-- backup created
-- migration command verified
-- migration applied to production `analysis.db`
-- enrichment audit after migration checked
-- enrichment write run
-- enrichment audit `READY`
-- enrichment JSON exported
-- temporary enrichment dashboard DB/HTML built
-- temporary reports reference DB/HTML built
-- acceptance report `blockers=0`
-- visual HTML review completed
-- reports fallback path verified
-- decision made whether to proceed to scheduler source-mode planning
+Latest accepted production-write example:
+
+- report date: `2026-05-28`
+- backup dir:
+  - `/home/kalle/projects/rawcandle/backups/dashboard_prod_write_20260529T134917Z`
+- enrichment run id:
+  - `DC_DASH_ENRICH_2026-05-28_2026-05-29T13:49:56Z`
+- dashboard run id:
+  - `ECO_DASHBOARD_DATACENTER_2026-05-28_20260529T135021Z`
+- acceptance:
+  - `status=OK`
+  - `blockers=0`
+  - `recommendation=READY_FOR_SCHEDULER_SWITCH_PLANNING`
+- factual parity:
+  - `pullback_validity_differences=0`
+  - `entry_readiness_differences=0`
+  - `candidate_priority_label_differences=0`
+- ticker spot checks:
+  - `CRUS = TIGHTEN_STOP / NEEDS_STOP_STABILIZATION / P2_STOP_STABILIZATION`
+  - `MYRG = TIGHTEN_STOP / NEEDS_STOP_STABILIZATION / P2_STOP_STABILIZATION`
+  - `HPQ = REDUCE / NEEDS_RISK_CLEARANCE / P3_RISK_CLEARANCE`
