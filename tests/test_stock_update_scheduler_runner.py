@@ -2827,7 +2827,13 @@ def test_scheduler_runner_enrichment_enabled_executes_steps_in_order(
                 ]
             )
         if "--reports-dashboard-db" in joined:
-            return 0, "SUMMARY datacenter_dashboard_enrichment_acceptance_report.status=OK"
+            return 0, "\n".join(
+                [
+                    "SUMMARY datacenter_dashboard_enrichment_acceptance_report.status=OK",
+                    "SUMMARY datacenter_dashboard_enrichment_acceptance_report.blockers=0",
+                    "SUMMARY datacenter_dashboard_enrichment_acceptance_report.recommendation=READY_FOR_SCHEDULER_SWITCH_PLANNING",
+                ]
+            )
         return 1, ""
 
     monkeypatch.setattr(
@@ -2846,6 +2852,11 @@ def test_scheduler_runner_enrichment_enabled_executes_steps_in_order(
     assert result.datacenter_dashboard_enrichment_export_status == "OK"
     assert result.datacenter_dashboard_structured_build_status == "OK"
     assert result.datacenter_dashboard_acceptance_report_status == "OK"
+    assert result.datacenter_dashboard_acceptance_report_blockers == "0"
+    assert (
+        result.datacenter_dashboard_acceptance_report_recommendation
+        == "READY_FOR_SCHEDULER_SWITCH_PLANNING"
+    )
     assert result.datacenter_dashboard_fallback_used == 0
     assert result.datacenter_dashboard_final_source_mode == "enrichment"
 
@@ -3373,6 +3384,330 @@ def test_scheduler_runner_acceptance_report_failure_falls_back_when_enabled(
     assert result.datacenter_dashboard_status == "OK"
 
 
+def test_scheduler_runner_acceptance_blockers_fall_back_when_enabled(
+    tmp_path, monkeypatch, real_datacenter_dashboard
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    dashboard_db = tmp_path / "ecosystem_dashboard.db"
+    html_dir = tmp_path / "html"
+    watchlist_file = tmp_path / "watchlist.txt"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    watchlist_file.write_text("AAA\n", encoding="utf-8")
+    reports_dir = _prepare_ready_datacenter_reports_dir(tmp_path)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        datacenter_dashboard_db=dashboard_db,
+        datacenter_dashboard_html_output_dir=html_dir,
+        datacenter_dashboard_source_mode="enrichment",
+        datacenter_enrichment_enabled=True,
+        datacenter_enrichment_watchlist_file=watchlist_file,
+        datacenter_dashboard_fallback_to_reports=True,
+        datacenter_dashboard_run_acceptance_report=True,
+    )
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_post_step",
+        lambda **kwargs: scheduler_runner.DatacenterPostStepResult(
+            attempted=1,
+            status="OK",
+            market="usa",
+            signal_date="2026-05-22",
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_datacenter_post_step_config",
+        lambda market: scheduler_runner.DatacenterPostStepConfig(
+            market="usa",
+            taxonomy_csv="data/datacenter_ecosystem_taxonomy_full_v1.csv",
+            taxonomy_version="DC_TAXONOMY_FULL_V1",
+            start_date="2025-08-01",
+            index_base_date="2020-01-01",
+            output_dir=str(reports_dir),
+            expected_ticker_count=236,
+            expected_group_count=54,
+            expected_synthetic_ohlc_count=53,
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_latest_dashboard_run_id",
+        lambda dashboard_db, ecosystem_code, report_date: "REPORTS_RUN",
+    )
+    call_index = {"value": 0}
+
+    def fake_cli(cli_main, args):
+        idx = call_index["value"]
+        call_index["value"] += 1
+        if idx == 0:
+            return 0, "\n".join(
+                [
+                    "SUMMARY datacenter_dashboard_enrichment_write.status=OK",
+                    "SUMMARY datacenter_dashboard_enrichment_write.run_id=ENRICH_RUN",
+                    "SUMMARY datacenter_dashboard_enrichment_write.readiness=READY",
+                ]
+            )
+        if idx == 1:
+            return 0, "SUMMARY datacenter_dashboard_enrichment_audit.readiness=READY"
+        if idx == 2:
+            return 0, "SUMMARY datacenter_dashboard_analysis_db_export.status=OK"
+        if idx == 3:
+            return 0, "\n".join(
+                [
+                    "SUMMARY ecosystem_dashboard_build.status=OK",
+                    "SUMMARY ecosystem_dashboard_build.run_id=ENRICH_DASH_RUN",
+                ]
+            )
+        return 0, "\n".join(
+            [
+                "SUMMARY datacenter_dashboard_enrichment_acceptance_report.status=OK",
+                "SUMMARY datacenter_dashboard_enrichment_acceptance_report.blockers=1",
+                "SUMMARY datacenter_dashboard_enrichment_acceptance_report.recommendation=NOT_READY_NEEDS_MORE_FIXES",
+            ]
+        )
+
+    monkeypatch.setattr("rawcandle.scheduler.runner._run_python_cli_main", fake_cli)
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_dashboard_reports_post_step",
+        lambda **kwargs: DatacenterDashboardPostStepResult(
+            attempted=1,
+            status="OK",
+            dashboard_db=kwargs["config"].datacenter_dashboard_db,
+            report_date=kwargs["report_date"],
+            md_reports_status="OK",
+            source_reports_available=4,
+            html_output_path=kwargs["html_output"],
+            run_id="REPORTS_RUN",
+            source_mode="reports",
+            final_source_mode="reports",
+        ),
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+    assert result.datacenter_dashboard_acceptance_report_status == "FAILED"
+    assert result.datacenter_dashboard_acceptance_report_blockers == "1"
+    assert (
+        result.datacenter_dashboard_acceptance_report_recommendation
+        == "NOT_READY_NEEDS_MORE_FIXES"
+    )
+    assert result.datacenter_dashboard_fallback_used == 1
+    assert result.datacenter_dashboard_final_source_mode == "reports"
+    assert result.datacenter_dashboard_error == "ACCEPTANCE_BLOCKERS"
+
+
+def test_scheduler_runner_acceptance_blockers_fail_without_fallback(
+    tmp_path, monkeypatch, real_datacenter_dashboard
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    dashboard_db = tmp_path / "ecosystem_dashboard.db"
+    html_dir = tmp_path / "html"
+    watchlist_file = tmp_path / "watchlist.txt"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    watchlist_file.write_text("AAA\n", encoding="utf-8")
+    reports_dir = _prepare_ready_datacenter_reports_dir(tmp_path)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        datacenter_dashboard_db=dashboard_db,
+        datacenter_dashboard_html_output_dir=html_dir,
+        datacenter_dashboard_source_mode="enrichment",
+        datacenter_enrichment_enabled=True,
+        datacenter_enrichment_watchlist_file=watchlist_file,
+        datacenter_dashboard_fallback_to_reports=False,
+        datacenter_dashboard_run_acceptance_report=True,
+    )
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_post_step",
+        lambda **kwargs: scheduler_runner.DatacenterPostStepResult(
+            attempted=1,
+            status="OK",
+            market="usa",
+            signal_date="2026-05-22",
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_datacenter_post_step_config",
+        lambda market: scheduler_runner.DatacenterPostStepConfig(
+            market="usa",
+            taxonomy_csv="data/datacenter_ecosystem_taxonomy_full_v1.csv",
+            taxonomy_version="DC_TAXONOMY_FULL_V1",
+            start_date="2025-08-01",
+            index_base_date="2020-01-01",
+            output_dir=str(reports_dir),
+            expected_ticker_count=236,
+            expected_group_count=54,
+            expected_synthetic_ohlc_count=53,
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_latest_dashboard_run_id",
+        lambda dashboard_db, ecosystem_code, report_date: "REPORTS_RUN",
+    )
+
+    def fake_cli(cli_main, args):
+        joined = " ".join(args)
+        if "--watchlist-file" in joined and "--mode" in joined:
+            return 0, "\n".join(
+                [
+                    "SUMMARY datacenter_dashboard_enrichment_write.status=OK",
+                    "SUMMARY datacenter_dashboard_enrichment_write.run_id=ENRICH_RUN",
+                    "SUMMARY datacenter_dashboard_enrichment_write.readiness=READY",
+                ]
+            )
+        if "--format text" in joined and "--output-json" not in joined and "--reports-dashboard-db" not in joined:
+            return 0, "SUMMARY datacenter_dashboard_enrichment_audit.readiness=READY"
+        if "--source-mode enrichment" in joined:
+            return 0, "SUMMARY datacenter_dashboard_analysis_db_export.status=OK"
+        if "--input-mode structured" in joined:
+            return 0, "\n".join(
+                [
+                    "SUMMARY ecosystem_dashboard_build.status=OK",
+                    "SUMMARY ecosystem_dashboard_build.run_id=ENRICH_DASH_RUN",
+                ]
+            )
+        return 0, "\n".join(
+            [
+                "SUMMARY datacenter_dashboard_enrichment_acceptance_report.status=OK",
+                "SUMMARY datacenter_dashboard_enrichment_acceptance_report.blockers=1",
+                "SUMMARY datacenter_dashboard_enrichment_acceptance_report.recommendation=NOT_READY_NEEDS_MORE_FIXES",
+            ]
+        )
+
+    monkeypatch.setattr("rawcandle.scheduler.runner._run_python_cli_main", fake_cli)
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_dashboard_reports_post_step",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("fallback should not run")
+        ),
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+    assert result.overall_status == STATUS_FAILED
+    assert result.datacenter_dashboard_status == "FAILED"
+    assert result.datacenter_dashboard_acceptance_report_status == "FAILED"
+    assert result.datacenter_dashboard_acceptance_report_blockers == "1"
+    assert result.datacenter_dashboard_fallback_used == 0
+    assert result.datacenter_dashboard_final_source_mode == "enrichment"
+    assert result.datacenter_dashboard_error == "ACCEPTANCE_BLOCKERS"
+
+
+def test_scheduler_runner_never_runs_migrations_even_when_flag_enabled(
+    tmp_path, monkeypatch, real_datacenter_dashboard
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    dashboard_db = tmp_path / "ecosystem_dashboard.db"
+    html_dir = tmp_path / "html"
+    watchlist_file = tmp_path / "watchlist.txt"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    watchlist_file.write_text("AAA\n", encoding="utf-8")
+    reports_dir = _prepare_ready_datacenter_reports_dir(tmp_path)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        datacenter_dashboard_db=dashboard_db,
+        datacenter_dashboard_html_output_dir=html_dir,
+        datacenter_dashboard_source_mode="enrichment",
+        datacenter_enrichment_enabled=True,
+        datacenter_enrichment_apply_migrations=True,
+        datacenter_enrichment_watchlist_file=watchlist_file,
+        datacenter_dashboard_fallback_to_reports=True,
+        datacenter_dashboard_run_acceptance_report=False,
+    )
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_post_step",
+        lambda **kwargs: scheduler_runner.DatacenterPostStepResult(
+            attempted=1,
+            status="OK",
+            market="usa",
+            signal_date="2026-05-22",
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_datacenter_post_step_config",
+        lambda market: scheduler_runner.DatacenterPostStepConfig(
+            market="usa",
+            taxonomy_csv="data/datacenter_ecosystem_taxonomy_full_v1.csv",
+            taxonomy_version="DC_TAXONOMY_FULL_V1",
+            start_date="2025-08-01",
+            index_base_date="2020-01-01",
+            output_dir=str(reports_dir),
+            expected_ticker_count=236,
+            expected_group_count=54,
+            expected_synthetic_ohlc_count=53,
+        ),
+    )
+
+    calls = []
+
+    def fake_run_python_cli_main(cli_main, args):
+        calls.append(list(args))
+        joined = " ".join(args)
+        if "--watchlist-file" in joined and "--mode" in joined:
+            return 0, "\n".join(
+                [
+                    "SUMMARY datacenter_dashboard_enrichment_write.status=OK",
+                    "SUMMARY datacenter_dashboard_enrichment_write.run_id=ENRICH_RUN",
+                    "SUMMARY datacenter_dashboard_enrichment_write.readiness=READY",
+                ]
+            )
+        if "--format text" in joined and "--output-json" not in joined and "--reports-dashboard-db" not in joined:
+            return 0, "SUMMARY datacenter_dashboard_enrichment_audit.readiness=READY"
+        if "--source-mode enrichment" in joined:
+            return 0, "SUMMARY datacenter_dashboard_analysis_db_export.status=OK"
+        if "--input-mode structured" in joined:
+            return 0, "\n".join(
+                [
+                    "SUMMARY ecosystem_dashboard_build.status=OK",
+                    "SUMMARY ecosystem_dashboard_build.run_id=ENRICH_DASH_RUN",
+                ]
+            )
+        return 1, ""
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_python_cli_main",
+        fake_run_python_cli_main,
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    joined_calls = [" ".join(args) for args in calls]
+    assert all("migration" not in call.lower() for call in joined_calls)
+    assert result.datacenter_enrichment_attempted == 1
+    assert result.datacenter_dashboard_status == "OK"
+    assert result.datacenter_dashboard_final_source_mode == "enrichment"
+
+
 def test_scheduler_runner_dashboard_helper_uses_dashboard_db_build_and_html_args(
     tmp_path, monkeypatch, real_datacenter_dashboard
 ):
@@ -3589,7 +3924,7 @@ def test_inspect_scheduler_dashboard_config_returns_configured_enrichment_visibi
     assert inspection.enrichment_write_mode == "replace-date"
     assert inspection.dashboard_fallback_to_reports == 1
     assert inspection.dashboard_run_acceptance_report == 1
-    assert inspection.enrichment_effective_status == "CONFIGURED_NOT_WIRED"
+    assert inspection.enrichment_effective_status == "READY"
     assert inspection.warnings == ()
 
 
@@ -3602,6 +3937,8 @@ def test_inspect_scheduler_dashboard_config_missing_watchlist_file_is_visible(tm
     config_path = _write_config(
         tmp_path,
         enabled_markets=["usa"],
+        datacenter_dashboard_source_mode="enrichment",
+        datacenter_enrichment_enabled=True,
         datacenter_enrichment_watchlist_file=missing_watchlist,
     )
 
@@ -3612,6 +3949,8 @@ def test_inspect_scheduler_dashboard_config_missing_watchlist_file_is_visible(tm
 
     assert inspection.enrichment_watchlist_file == str(missing_watchlist)
     assert inspection.enrichment_watchlist_file_status == "MISSING"
+    assert inspection.enrichment_effective_status == "NOT_READY"
+    assert "WATCHLIST_FILE_MISSING" in inspection.warnings
     assert inspection.status == "OK"
 
 
@@ -3759,14 +4098,14 @@ def test_inspect_scheduler_enrichment_plan_for_configured_enrichment_mode(tmp_pa
     )
 
     assert plan.enrichment_enabled == 1
-    assert plan.effective_status == "CONFIGURED_NOT_WIRED"
+    assert plan.effective_status == "READY"
     assert plan.watchlist_file_status == "OK"
-    assert plan.stage_enrichment_write == "1:CONFIGURED_NOT_WIRED"
+    assert plan.stage_enrichment_write == "1:READY_TO_EXECUTE"
     assert plan.stage_enrichment_export_json == "1:FOLLOWS_ENRICHMENT_WRITE"
-    assert plan.stage_structured_dashboard_build == "1:ENRICHMENT_SOURCE_CONFIGURED"
+    assert plan.stage_structured_dashboard_build == "1:ENRICHMENT_SOURCE_READY"
     assert plan.stage_acceptance_report == "1:CONFIG_ENABLED"
     assert plan.stage_fallback_reports_build == "1:FALLBACK_ENABLED"
-    assert "ENRICHMENT_EXECUTION_NOT_WIRED" in plan.warnings
+    assert "ENRICHMENT_EXECUTION_NOT_WIRED" not in plan.warnings
 
 
 def test_inspect_scheduler_enrichment_plan_warns_when_source_mode_enrichment_but_disabled(
@@ -3790,7 +4129,7 @@ def test_inspect_scheduler_enrichment_plan_warns_when_source_mode_enrichment_but
 
     assert plan.effective_status == "DISABLED"
     assert "ENRICHMENT_SOURCE_MODE_CONFIGURED_BUT_DISABLED" in plan.warnings
-    assert "ENRICHMENT_EXECUTION_NOT_WIRED" in plan.warnings
+    assert "ENRICHMENT_EXECUTION_NOT_WIRED" not in plan.warnings
 
 
 def test_inspect_scheduler_enrichment_plan_warns_when_apply_migrations_true(tmp_path):

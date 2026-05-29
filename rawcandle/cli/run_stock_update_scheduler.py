@@ -405,6 +405,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         f"{result.datacenter_dashboard_acceptance_report_status}"
     )
     print(
+        "SUMMARY datacenter_dashboard.acceptance_report_blockers="
+        f"{result.datacenter_dashboard_acceptance_report_blockers}"
+    )
+    print(
+        "SUMMARY datacenter_dashboard.acceptance_report_recommendation="
+        f"{result.datacenter_dashboard_acceptance_report_recommendation}"
+    )
+    print(
         "SUMMARY datacenter_dashboard.fallback_used="
         f"{result.datacenter_dashboard_fallback_used}"
     )

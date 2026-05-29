@@ -247,6 +247,8 @@ def test_scheduler_cli_successful_run_prints_top_level_summary_lines(monkeypatch
     assert "SUMMARY datacenter_dashboard.enrichment_export_status=SKIPPED" in captured.out
     assert "SUMMARY datacenter_dashboard.structured_build_status=SKIPPED" in captured.out
     assert "SUMMARY datacenter_dashboard.acceptance_report_status=SKIPPED" in captured.out
+    assert "SUMMARY datacenter_dashboard.acceptance_report_blockers=" in captured.out
+    assert "SUMMARY datacenter_dashboard.acceptance_report_recommendation=" in captured.out
     assert "SUMMARY datacenter_dashboard.fallback_used=0" in captured.out
     assert "SUMMARY datacenter_dashboard.final_source_mode=reports" in captured.out
     assert "SUMMARY datacenter_dashboard.error=" in captured.out
