@@ -105,6 +105,11 @@ def _make_perf_counter(values: list[float]):
     return _fake_perf_counter
 
 
+@pytest.fixture(autouse=True)
+def _isolate_windows_report_copy_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(orchestrator, "WINDOWS_REPORT_COPY_DIR", tmp_path / "windows_reports")
+
+
 def test_dry_run_prints_planned_stages_and_does_not_call_stage_runners(tmp_path, monkeypatch, capsys):
     def _fail(*args, **kwargs):
         raise AssertionError("stage runner should not be called in dry-run")
@@ -122,9 +127,10 @@ def test_dry_run_prints_planned_stages_and_does_not_call_stage_runners(tmp_path,
 
     assert exit_code == 0
     lines = capsys.readouterr().out.strip().splitlines()
-    assert lines[0] == "=== Stage 1/15: Datacenter base index ==="
+    assert lines[0] == "=== Stage 1/16: Datacenter base index ==="
     assert lines[1].startswith("PLAN --ohlcv-db ")
     assert any("Automatic technical relevance" in line for line in lines)
+    assert any(line == "=== Stage 16/16: Windows report copy ===" for line in lines)
     assert "SUMMARY pipeline_stage.automatic_technical_relevance.status=DRY_RUN" in lines
     assert "SUMMARY pipeline_stage.automatic_technical_relevance.duration_seconds=0.000" in lines
     assert "SUMMARY technical_relevance.status=DRY_RUN" in lines
@@ -415,6 +421,9 @@ def test_pipeline_calls_stages_in_correct_order_and_uses_index_base_date(tmp_pat
     assert "SUMMARY pipeline_stage.rolling_30_report.status=OK" in lines
     assert "SUMMARY pipeline_stage.rolling_5_report.status=OK" in lines
     assert "SUMMARY pipeline_stage.rolling_2_report.status=OK" in lines
+    assert "SUMMARY pipeline_stage.windows_report_copy.status=OK" in lines
+    assert any(line.startswith("SUMMARY windows_report_copy.destination_dir=") for line in lines)
+    assert any(line.startswith("SUMMARY windows_report_copy.copied_file_count=8") for line in lines)
     assert lines[-1] == "SUMMARY pipeline_status=OK"
 
 
@@ -470,6 +479,7 @@ def test_pipeline_threads_technical_relevance_run_id_to_daily_and_weekly_report_
     assert calls[3][0] == "weekly_2"
     assert calls[3][1]["technical_relevance_run_id"] == "REL_PIPE_B"
     assert len(calls) == 4
+    assert any((tmp_path / "windows_reports").glob("datacenter_daily_2026-05-15_*_full.md"))
 
 
 def test_pipeline_auto_technical_relevance_existing_run_reuse_is_reported_and_threaded(tmp_path, monkeypatch, capsys):

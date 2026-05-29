@@ -88,6 +88,11 @@ def _base_kwargs(tmp_path: Path) -> dict[str, object]:
     }
 
 
+@pytest.fixture(autouse=True)
+def _isolate_windows_report_copy_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(orchestrator, "WINDOWS_REPORT_COPY_DIR", tmp_path / "windows_reports")
+
+
 def _insert_technical_relevance_run(
     analysis_db: Path,
     *,
@@ -280,6 +285,7 @@ def test_pipeline_stage_keys_are_stable_and_contain_no_spaces():
         "rolling_30_report",
         "rolling_5_report",
         "rolling_2_report",
+        "windows_report_copy",
     )
     assert all(" " not in key for key in orchestrator.PIPELINE_STAGE_KEYS)
 
@@ -407,10 +413,10 @@ def test_default_mode_runs_automatic_technical_relevance_and_threads_generated_r
 
     perf_values = [0.0]
     stage_start = 1.0
-    for _ in range(15):
+    for _ in range(16):
         perf_values.extend([stage_start, stage_start + 0.25])
         stage_start += 1.0
-    perf_values.append(15.25)
+    perf_values.append(16.25)
 
     monkeypatch.setattr(orchestrator, "run_datacenter_indices_main", _runner)
     monkeypatch.setattr(orchestrator, "run_datacenter_ticker_swing_signals_main", _runner)
@@ -437,13 +443,14 @@ def test_default_mode_runs_automatic_technical_relevance_and_threads_generated_r
     assert summary["technical_relevance.ticker_count_status"] == "ACTUAL_RUN"
     assert summary["technical_relevance.status"] == "OK"
     assert "technical_relevance.existing_run_reused" not in summary
-    assert summary["pipeline.total_duration_seconds"] == "15.250"
+    assert summary["pipeline.total_duration_seconds"] == "16.250"
     assert summary["pipeline_stage.automatic_technical_relevance.status"] == "OK"
     assert summary["pipeline_stage.automatic_technical_relevance.duration_seconds"] == "0.250"
     assert summary["pipeline_stage.daily_report.duration_seconds"] == "0.250"
     assert summary["pipeline_stage.rolling_30_report.duration_seconds"] == "0.250"
     assert summary["pipeline_stage.rolling_5_report.duration_seconds"] == "0.250"
     assert summary["pipeline_stage.rolling_2_report.duration_seconds"] == "0.250"
+    assert summary["pipeline_stage.windows_report_copy.duration_seconds"] == "0.250"
     assert calls[0][0] == "techrel"
     assert calls[1][0] == "daily"
     assert calls[1][1]["technical_relevance_run_id"] == "AUTO_GENERATED_RUN"
@@ -456,6 +463,11 @@ def test_default_mode_runs_automatic_technical_relevance_and_threads_generated_r
     assert calls[4][0] == "weekly"
     assert calls[4][1]["technical_relevance_run_id"] == "AUTO_GENERATED_RUN"
     assert calls[4][1]["window_size"] == 2
+    copied_report_dir = tmp_path / "windows_reports"
+    assert (copied_report_dir / Path(summary["daily_report_path"]).name).read_text(encoding="utf-8") == "daily"
+    assert (copied_report_dir / Path(summary["rolling_30_report_path"]).name).read_text(encoding="utf-8") == "weekly"
+    assert (copied_report_dir / Path(summary["rolling_5_report_path"]).name).read_text(encoding="utf-8") == "weekly"
+    assert (copied_report_dir / Path(summary["rolling_2_report_path"]).name).read_text(encoding="utf-8") == "weekly"
 
 
 def test_existing_run_mode_skips_automatic_technical_relevance_and_threads_provided_run_id(tmp_path, monkeypatch):
@@ -678,3 +690,58 @@ def test_auto_mode_existing_run_reuse_threads_existing_run_id_to_all_reports(tmp
     assert calls[3][1]["technical_relevance_run_id"] == "DATACENTER_TECH_REL_DC_TAXONOMY_FULL_V1_2026_05_15"
     assert calls[4][1]["technical_relevance_run_id"] == "DATACENTER_TECH_REL_DC_TAXONOMY_FULL_V1_2026_05_15"
     assert calls[4][1]["technical_relevance_run_id"] == "DATACENTER_TECH_REL_DC_TAXONOMY_FULL_V1_2026_05_15"
+
+
+def test_windows_report_copy_stage_fails_when_active_report_file_is_missing(tmp_path, monkeypatch):
+    _create_analysis_db(tmp_path / "analysis.db")
+
+    def _runner(argv: list[str]) -> int:
+        return 0
+
+    def _audit(**kwargs):
+        return {"summary": {"validation_status": "OK"}}
+
+    def _auto(**kwargs):
+        return {
+            "summary": {
+                "run_id": "AUTO_GENERATED_RUN",
+                "ticker_count": 3,
+                "start_date": "2026-03-31",
+                "end_date": "2026-05-15",
+                "observations_seen": 10,
+                "records_written": 10,
+                "relevant_count": 4,
+                "weak_context_count": 3,
+                "noise_count": 3,
+                "unknown_signal_count": 0,
+                "missing_dow_context_count": 0,
+                "missing_bar_index_count": 0,
+            }
+        }
+
+    def _daily(**kwargs):
+        kwargs["output_md"].parent.mkdir(parents=True, exist_ok=True)
+        kwargs["output_md"].write_text("daily", encoding="utf-8")
+        kwargs["output_csv"].write_text("daily", encoding="utf-8")
+        return {"summary": {"output_markdown": str(kwargs["output_md"]), "output_csv": str(kwargs["output_csv"]), "validation_status": "OK"}}
+
+    def _weekly_missing_csv(**kwargs):
+        kwargs["output_md"].write_text("weekly", encoding="utf-8")
+        if kwargs["window_size"] != 5:
+            kwargs["output_csv"].write_text("weekly", encoding="utf-8")
+        return {"summary": {"output_markdown": str(kwargs["output_md"]), "output_csv": str(kwargs["output_csv"]), "validation_status": "OK"}}
+
+    monkeypatch.setattr(orchestrator, "run_datacenter_indices_main", _runner)
+    monkeypatch.setattr(orchestrator, "run_datacenter_ticker_swing_signals_main", _runner)
+    monkeypatch.setattr(orchestrator, "run_datacenter_group_swing_signals_main", _runner)
+    monkeypatch.setattr(orchestrator, "run_datacenter_group_synthetic_ohlc_main", _runner)
+    monkeypatch.setattr(orchestrator, "load_swing_pipeline_audit", _audit)
+    monkeypatch.setattr(orchestrator, "_run_automatic_technical_relevance_stage", _auto)
+    monkeypatch.setattr(orchestrator, "write_daily_swing_signal_report", _daily)
+    monkeypatch.setattr(orchestrator, "write_weekly_swing_report", _weekly_missing_csv)
+    monkeypatch.setattr(orchestrator, "format_swing_pipeline_audit_summary_lines", lambda summary: [])
+    monkeypatch.setattr(orchestrator, "format_daily_swing_report_summary_lines", lambda summary: [])
+    monkeypatch.setattr(orchestrator, "format_weekly_swing_report_summary_lines", lambda summary: [])
+
+    with pytest.raises(RuntimeError, match="windows report copy stage missing source files"):
+        orchestrator.run_datacenter_swing_pipeline(**_base_kwargs(tmp_path))

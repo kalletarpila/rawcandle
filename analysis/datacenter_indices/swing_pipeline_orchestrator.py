@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from shutil import copy2
 from time import perf_counter
 from typing import Callable
 import re
@@ -45,6 +46,9 @@ from rawcandle.technical_signal_relevance_persistence import (
     apply_technical_signal_relevance_migration,
     read_relevance_run,
 )
+
+
+WINDOWS_REPORT_COPY_DIR = Path("/mnt/d/swing_reports")
 
 
 FINAL_PIPELINE_SUMMARY_ORDER = (
@@ -97,6 +101,7 @@ PIPELINE_STAGE_KEYS = (
     "rolling_30_report",
     "rolling_5_report",
     "rolling_2_report",
+    "windows_report_copy",
 )
 
 
@@ -527,6 +532,31 @@ def _summary_lines_to_dict(lines: Sequence[str]) -> dict[str, object]:
         key, value = line[len("SUMMARY ") :].split("=", 1)
         summary[key] = value
     return summary
+
+
+def _copy_generated_report_files(
+    *,
+    destination_dir: Path,
+    source_paths: list[Path],
+) -> dict[str, object]:
+    missing_paths = [path for path in source_paths if not path.exists()]
+    if missing_paths:
+        missing_text = ", ".join(str(path) for path in missing_paths)
+        raise RuntimeError(f"windows report copy stage missing source files: {missing_text}")
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    copied_paths: list[Path] = []
+    for source_path in source_paths:
+        destination_path = destination_dir / source_path.name
+        copy2(source_path, destination_path)
+        copied_paths.append(destination_path)
+    return {
+        "summary": {
+            "destination_dir": str(destination_dir),
+            "copied_file_count": len(copied_paths),
+            "copied_files": ",".join(str(path) for path in copied_paths),
+            "missing_files": "",
+        }
+    }
 
 
 def run_datacenter_swing_pipeline(
@@ -1294,6 +1324,46 @@ def run_datacenter_swing_pipeline(
                 },
             )
         )
+        windows_report_copy_argv = [
+            "--destination-dir",
+            str(WINDOWS_REPORT_COPY_DIR),
+            "--source-report",
+            str(daily_output_md),
+            "--source-report",
+            str(daily_output_csv),
+            "--source-report",
+            str(rolling_30_output_md),
+            "--source-report",
+            str(rolling_30_output_csv),
+            "--source-report",
+            str(rolling_5_output_md),
+            "--source-report",
+            str(rolling_5_output_csv),
+            "--source-report",
+            str(rolling_2_output_md),
+            "--source-report",
+            str(rolling_2_output_csv),
+        ]
+        stages.append(
+            PipelineStage(
+                stage_key="windows_report_copy",
+                heading="Windows report copy",
+                argv=windows_report_copy_argv,
+                runner=lambda: _copy_generated_report_files(
+                    destination_dir=WINDOWS_REPORT_COPY_DIR,
+                    source_paths=[
+                        Path(daily_report_path),
+                        Path(daily_report_csv_path),
+                        Path(rolling_30_report_path),
+                        Path(rolling_30_report_csv_path),
+                        Path(rolling_5_report_path),
+                        Path(rolling_5_report_csv_path),
+                        Path(rolling_2_report_path),
+                        Path(rolling_2_report_csv_path),
+                    ],
+                ),
+            )
+        )
 
     if dry_run:
         if profile_technical_relevance:
@@ -1472,6 +1542,10 @@ def run_datacenter_swing_pipeline(
             rolling_2_report_result = result
             rolling_2_report_path = str(result["summary"]["output_markdown"])
             rolling_2_report_csv_path = str(result["summary"]["output_csv"])
+        elif stage.heading == "Windows report copy":
+            copy_summary = result["summary"]
+            for key, value in copy_summary.items():
+                print(f"SUMMARY windows_report_copy.{key}={value}")
 
     if export_dashboard_input_json is not None:
         _dashboard_input, export_summary_lines = write_datacenter_dashboard_input_json_from_pipeline_reports(
