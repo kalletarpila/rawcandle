@@ -397,8 +397,24 @@ def build_dashboard_rows_from_ticker_enrichment_rows(
                         extra_raw_fields["latest_exit_risk_severity"] = rolling2_payload.get("latest_exit_risk_severity")
                     if _normalized_text(rolling2_payload.get("latest_exit_reason")) is not None:
                         extra_raw_fields["latest_exit_reason"] = rolling2_payload.get("latest_exit_reason")
+                    current_watchlist_status = _normalized_text(
+                        rolling2_payload.get("current_watchlist_status")
+                    )
+                    window_watchlist_status = _normalized_text(
+                        rolling2_payload.get("window_watchlist_status")
+                    )
+                    if current_watchlist_status is not None:
+                        extra_raw_fields["current_watchlist_status"] = current_watchlist_status
+                    if window_watchlist_status is not None:
+                        extra_raw_fields["window_watchlist_status"] = window_watchlist_status
                     if _normalized_text(rolling2_payload.get("risk_reason")) is not None:
                         extra_raw_fields["risk_reason"] = rolling2_payload.get("risk_reason")
+                    if "GROUP_RISK" in {
+                        current_watchlist_status,
+                        window_watchlist_status,
+                        _normalized_text(rolling2_payload.get("risk_reason")),
+                    }:
+                        extra_raw_fields["current_status"] = "GROUP_RISK"
                     if _normalized_text(rolling2_payload.get("next_action")) is not None:
                         extra_raw_fields["next_action"] = rolling2_payload.get("next_action")
                     if _normalized_text(rolling2_payload.get("latest_bos_event_type")) is not None:
@@ -455,6 +471,12 @@ def build_dashboard_rows_from_ticker_enrichment_rows(
                 rolling30_blocking_reasons = _normalized_text(
                     rolling30_payload.get("blocking_reason")
                 )
+                current_watchlist_status = _normalized_text(
+                    rolling30_payload.get("current_watchlist_status")
+                )
+                window_watchlist_status = _normalized_text(
+                    rolling30_payload.get("window_watchlist_status")
+                )
                 for key in (
                     "rolling_30_buy_state",
                     "current_watchlist_status",
@@ -477,6 +499,11 @@ def build_dashboard_rows_from_ticker_enrichment_rows(
                 ):
                     if _normalized_text(rolling30_payload.get(key)) is not None:
                         extra_raw_fields[key] = rolling30_payload.get(key)
+                if "GROUP_RISK" in {
+                    current_watchlist_status,
+                    window_watchlist_status,
+                }:
+                    extra_raw_fields["current_status"] = "GROUP_RISK"
                 dashboard_rows.append(
                     _build_row(
                         row=rolling30_row,

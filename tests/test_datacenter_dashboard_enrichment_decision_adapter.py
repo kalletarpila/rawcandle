@@ -522,6 +522,160 @@ def test_decision_integration_returns_structure_blocked_for_failed_pullback_with
     assert decision.pullback_validity == "STRUCTURE_BLOCKED_PULLBACK"
 
 
+def test_adapter_exposes_group_risk_from_rolling2_helper_payload():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "HPQ",
+                "daily_status": "NEUTRAL_MONITOR",
+                "rolling_2d_status": "WATCH_PRESSURE",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "rolling2": {
+                            "rolling_2_sell_pressure_state": "WATCH_PRESSURE",
+                            "current_watchlist_status": "GROUP_RISK",
+                            "window_watchlist_status": "GROUP_RISK",
+                            "risk_reason": "GROUP_RISK",
+                        }
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    rolling_row = next(row for row in rows if row.horizon == "rolling 2d")
+    assert rolling_row.raw_fields["current_status"] == "GROUP_RISK"
+    assert rolling_row.raw_fields["risk_reason"] == "GROUP_RISK"
+    assert rolling_row.raw_fields["current_watchlist_status"] == "GROUP_RISK"
+    assert rolling_row.raw_fields["window_watchlist_status"] == "GROUP_RISK"
+
+
+def test_adapter_exposes_group_risk_from_rolling30_helper_payload():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "HPQ",
+                "daily_status": "NEUTRAL_MONITOR",
+                "rolling_30d_status": "WATCH_ZONE",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "rolling30": {
+                            "rolling_30_buy_state": "WATCH_ZONE",
+                            "current_watchlist_status": "HIGH_EXIT_RISK",
+                            "window_watchlist_status": "GROUP_RISK",
+                        }
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    rolling_row = next(row for row in rows if row.horizon == "rolling 30d")
+    assert rolling_row.raw_fields["window_watchlist_status"] == "GROUP_RISK"
+    assert rolling_row.raw_fields["current_watchlist_status"] == "HIGH_EXIT_RISK"
+    assert rolling_row.raw_fields["current_status"] == "GROUP_RISK"
+
+
+def test_decision_integration_prefers_group_risk_reduce_before_tighten_stop():
+    result = build_decisions_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "HPQ",
+                "daily_status": "NEUTRAL_MONITOR",
+                "rolling_2d_status": "WATCH_PRESSURE",
+                "rolling_5d_status": "PULLBACK_CANDIDATE",
+                "rolling_30d_status": "WATCH_ZONE",
+                "high_exit_risk_days_count": 23,
+                "ma_break_status": "OK",
+                "freshness_status": "FRESH_BULLISH_SIGNAL",
+                "trend_state": "UP",
+                "latest_structure_label": "HL",
+                "latest_bos_event_type": "BOS_UP",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "rolling2": {
+                            "rolling_2_sell_pressure_state": "WATCH_PRESSURE",
+                            "current_watchlist_status": "GROUP_RISK",
+                            "risk_reason": "GROUP_RISK",
+                            "high_exit_risk_days": 0,
+                        },
+                        "rolling30": {
+                            "rolling_30_buy_state": "WATCH_ZONE",
+                            "current_watchlist_status": "HIGH_EXIT_RISK",
+                            "window_watchlist_status": "GROUP_RISK",
+                            "exit_risk_days": 23,
+                            "pullback_days": 6,
+                            "primary_reason": "MIXED_OR_UNCONFIRMED_STRUCTURE",
+                            "blocking_reason": "HISTORICAL_WINDOW_HIGH_EXIT_RISK",
+                        },
+                        "rolling_5_pullback_state": "PULLBACK_CANDIDATE",
+                        "pullback_days": 3,
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    decision = result.decisions[0]
+    assert decision.action == "REDUCE"
+    assert decision.entry_readiness == "NEEDS_RISK_CLEARANCE"
+    assert decision.candidate_priority_label == "P3_RISK_CLEARANCE"
+
+
+def test_decision_integration_preserves_tighten_stop_without_group_risk():
+    result = build_decisions_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "HPQ",
+                "daily_status": "NEUTRAL_MONITOR",
+                "rolling_2d_status": "NO_EMERGENCY",
+                "rolling_5d_status": "PULLBACK_CANDIDATE",
+                "rolling_30d_status": "WATCH_ZONE",
+                "high_exit_risk_days_count": 23,
+                "ma_break_status": "OK",
+                "freshness_status": "FRESH_BULLISH_SIGNAL",
+                "trend_state": "UP",
+                "latest_structure_label": "HL",
+                "latest_bos_event_type": "BOS_UP",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "rolling2": {
+                            "rolling_2_sell_pressure_state": "NO_EMERGENCY",
+                            "current_watchlist_status": "NEUTRAL_MONITOR",
+                            "risk_reason": "",
+                            "high_exit_risk_days": 0,
+                        },
+                        "rolling30": {
+                            "rolling_30_buy_state": "WATCH_ZONE",
+                            "current_watchlist_status": "NEUTRAL_MONITOR",
+                            "window_watchlist_status": "PULLBACK_CANDIDATE",
+                            "exit_risk_days": 23,
+                            "pullback_days": 6,
+                            "primary_reason": "MIXED_OR_UNCONFIRMED_STRUCTURE",
+                            "blocking_reason": "HISTORICAL_WINDOW_HIGH_EXIT_RISK",
+                        },
+                        "rolling_5_pullback_state": "PULLBACK_CANDIDATE",
+                        "pullback_days": 3,
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    decision = result.decisions[0]
+    assert decision.action == "TIGHTEN_STOP"
+    assert decision.entry_readiness == "NEEDS_STOP_STABILIZATION"
+    assert decision.candidate_priority_label == "P2_STOP_STABILIZATION"
+
+
 def test_adapter_backward_compatibility_without_upstream_payload_is_unchanged():
     rows = build_dashboard_rows_from_ticker_enrichment_rows(
         [
