@@ -5,6 +5,7 @@ from pathlib import Path
 from dev_tools.run_datacenter_dashboard_enrichment_audit import main as audit_main
 from dev_tools.datacenter_dashboard_enrichment_decision_adapter import (
     build_dashboard_rows_from_ticker_enrichment_rows,
+    build_decisions_from_ticker_enrichment_rows,
 )
 from dev_tools.run_datacenter_dashboard_ticker_enrichment_write import main
 from analysis.datacenter_indices.rolling2_sell_pressure_classifier import (
@@ -73,6 +74,36 @@ def _create_source_table_only(path: Path) -> None:
                 latest_reset_event_date TEXT,
                 rolling_5d_status TEXT,
                 ma_break_status TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE dc_group_swing_signal_daily (
+                signal_date TEXT NOT NULL,
+                taxonomy_version TEXT NOT NULL,
+                group_type TEXT NOT NULL,
+                group_name TEXT NOT NULL,
+                member_count INTEGER,
+                eligible_count INTEGER,
+                return_5d REAL,
+                return_10d REAL,
+                return_20d REAL,
+                return_60d REAL,
+                pct_above_ma10 REAL,
+                pct_above_ema20 REAL,
+                pct_above_rising_ema20 REAL,
+                ma10_breadth_delta_5d REAL,
+                ema20_breadth_delta_5d REAL,
+                trend_breadth REAL,
+                weakness_breadth REAL,
+                overheat_risk_level TEXT,
+                timing_state TEXT,
+                timing_reason TEXT,
+                data_quality_status TEXT,
+                signal_version TEXT,
+                run_id TEXT,
+                created_at_utc TEXT
             )
             """
         )
@@ -185,6 +216,45 @@ def _insert_custom_source_row(path: Path, **overrides: object) -> None:
         conn.execute(
             f"""
             INSERT INTO dc_ticker_swing_signal_daily ({", ".join(columns)})
+            VALUES ({", ".join("?" for _ in columns)})
+            """,
+            tuple(row[column] for column in columns),
+        )
+
+
+def _insert_group_context_row(path: Path, **overrides: object) -> None:
+    row = {
+        "signal_date": "2026-05-22",
+        "taxonomy_version": "DC_TAXONOMY_FULL_V1",
+        "group_type": "subindustry",
+        "group_name": "AI Accelerators",
+        "member_count": 1,
+        "eligible_count": 1,
+        "return_5d": 0.0,
+        "return_10d": 0.0,
+        "return_20d": 0.0,
+        "return_60d": 0.0,
+        "pct_above_ma10": 0.0,
+        "pct_above_ema20": 0.0,
+        "pct_above_rising_ema20": 0.0,
+        "ma10_breadth_delta_5d": 0.0,
+        "ema20_breadth_delta_5d": 0.0,
+        "trend_breadth": 0.0,
+        "weakness_breadth": 0.0,
+        "overheat_risk_level": "LOW",
+        "timing_state": "BUY_ZONE",
+        "timing_reason": "TEST",
+        "data_quality_status": "OK",
+        "signal_version": "DC_SWING_SIGNAL_V1",
+        "run_id": "RUN_GROUP",
+        "created_at_utc": "2026-05-22T10:00:00Z",
+    }
+    row.update(overrides)
+    columns = list(row)
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            f"""
+            INSERT INTO dc_group_swing_signal_daily ({", ".join(columns)})
             VALUES ({", ".join("?" for _ in columns)})
             """,
             tuple(row[column] for column in columns),
@@ -1693,6 +1763,62 @@ def test_shared_rolling2_helper_output_is_preserved_in_source_run_ids_payload(tm
     assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.rolling2_payload_rows=1" in output
 
 
+def test_group_aware_context_can_drive_group_risk_in_shared_rolling2_payload(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(
+        db_path,
+        ticker="HPQ",
+        primary_layer="IT hardware",
+        primary_subindustry="Storage",
+        exit_risk_signal=0,
+        exit_risk_severity=None,
+        breakout_signal=0,
+        pullback_signal=0,
+        latest_structure_label="HL",
+        latest_bos_event_type="BOS_UP",
+        latest_bos_freshness="STALE",
+        latest_reset_reason="DOUBLE_BOS_UP",
+        latest_reset_freshness="STALE",
+    )
+    _insert_group_context_row(
+        db_path,
+        group_type="subindustry",
+        group_name="Storage",
+        timing_state="TRIM_WATCH",
+        overheat_risk_level="ELEVATED",
+    )
+    _insert_group_context_row(
+        db_path,
+        group_type="layer",
+        group_name="IT hardware",
+        timing_state="BUY_ZONE",
+        overheat_risk_level="LOW",
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    payload = json.loads(row["source_run_ids"].split(":", 1)[1])
+    assert payload["rolling2"]["rolling_2_sell_pressure_state"] == "WATCH_PRESSURE"
+    assert payload["rolling2"]["risk_reason"] == "GROUP_RISK"
+    assert payload["rolling2"]["current_watchlist_status"] == "GROUP_RISK"
+    assert payload["rolling2"]["window_watchlist_status"] == "GROUP_RISK"
+
+
 def test_shared_rolling30_helper_output_is_preserved_in_source_run_ids_payload(tmp_path, monkeypatch, capsys):
     db_path = tmp_path / "analysis.db"
     _create_source_and_destination_db(db_path)
@@ -1758,6 +1884,135 @@ def test_shared_rolling30_helper_output_is_preserved_in_source_run_ids_payload(t
     assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.rolling30_payload_rows=1" in output
 
 
+def test_group_aware_context_can_drive_group_risk_in_shared_rolling30_payload(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(
+        db_path,
+        ticker="HPQ",
+        primary_layer="IT hardware",
+        primary_subindustry="Storage",
+        exit_risk_signal=0,
+        exit_risk_severity=None,
+        breakout_signal=0,
+        pullback_signal=0,
+        ticker_trend_state="UP",
+        latest_structure_label="HL",
+        latest_bos_event_type="BOS_UP",
+        latest_bos_freshness="STALE",
+        latest_reset_reason="DOUBLE_BOS_UP",
+        latest_reset_freshness="STALE",
+    )
+    _insert_group_context_row(
+        db_path,
+        group_type="subindustry",
+        group_name="Storage",
+        timing_state="TRIM_WATCH",
+        overheat_risk_level="ELEVATED",
+    )
+    _insert_group_context_row(
+        db_path,
+        group_type="layer",
+        group_name="IT hardware",
+        timing_state="BUY_ZONE",
+        overheat_risk_level="LOW",
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    payload = json.loads(row["source_run_ids"].split(":", 1)[1])
+    assert payload["rolling30"]["current_watchlist_status"] == "GROUP_RISK"
+    assert payload["rolling30"]["window_watchlist_status"] == "GROUP_RISK"
+
+
+def test_group_aware_writer_payload_can_drive_reduce_before_tighten_stop(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    for signal_date, breakout_signal, pullback_signal, exit_risk_signal, exit_risk_severity in (
+        ("2026-05-19", 0, 0, 1, "MEDIUM"),
+        ("2026-05-20", 0, 0, 1, "MEDIUM"),
+        ("2026-05-21", 0, 0, 0, None),
+        ("2026-05-22", 1, 0, 0, None),
+        ("2026-05-23", 0, 0, 0, None),
+        ("2026-05-26", 0, 1, 0, None),
+        ("2026-05-27", 1, 0, 0, None),
+        ("2026-05-28", 0, 0, 0, None),
+    ):
+        _insert_custom_source_row(
+            db_path,
+            signal_date=signal_date,
+            ticker="HPQ",
+            primary_layer="IT hardware",
+            primary_subindustry="Storage",
+            exit_risk_signal=exit_risk_signal,
+            exit_risk_severity=exit_risk_severity,
+            breakout_signal=breakout_signal,
+            pullback_signal=pullback_signal,
+            high_exit_risk_days_count=23 if signal_date == "2026-05-28" else None,
+            latest_structure_label="HL",
+            latest_bos_event_type="BOS_UP",
+            latest_bos_freshness="STALE",
+            latest_reset_reason="DOUBLE_BOS_UP",
+            latest_reset_freshness="STALE",
+            bullish_candle_signal=1 if signal_date == "2026-05-28" else 0,
+            ma_break_status="OK",
+            ticker_trend_state="UP",
+            price_data_status="OK",
+        )
+    _insert_group_context_row(
+        db_path,
+        signal_date="2026-05-28",
+        group_type="subindustry",
+        group_name="Storage",
+        timing_state="TRIM_WATCH",
+        overheat_risk_level="ELEVATED",
+    )
+    _insert_group_context_row(
+        db_path,
+        signal_date="2026-05-28",
+        group_type="layer",
+        group_name="IT hardware",
+        timing_state="BUY_ZONE",
+        overheat_risk_level="LOW",
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-28",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    decisions = build_decisions_from_ticker_enrichment_rows([dict(row)])
+    decision = decisions.decisions[0]
+    assert decision.action == "REDUCE"
+    assert decision.entry_readiness == "NEEDS_RISK_CLEARANCE"
+    assert decision.candidate_priority_label == "P3_RISK_CLEARANCE"
+
+
 def test_rolling30_helper_fallback_keeps_status_empty_when_helper_output_missing(
     tmp_path, monkeypatch, capsys
 ):
@@ -1789,6 +2044,47 @@ def test_rolling30_helper_fallback_keeps_status_empty_when_helper_output_missing
     assert row["rolling_30d_status"] is None
     assert '"rolling30":' not in str(row["source_run_ids"] or "")
     assert "SUMMARY datacenter_dashboard_ticker_enrichment_write.rolling30_payload_rows=0" in output
+
+
+def test_missing_group_context_keeps_existing_ticker_only_rolling30_fallback(tmp_path, capsys):
+    db_path = tmp_path / "analysis.db"
+    _create_source_and_destination_db(db_path)
+    _insert_custom_source_row(
+        db_path,
+        signal_date="2026-05-20",
+        ticker="AAA",
+        exit_risk_signal=1,
+        exit_risk_severity="HIGH",
+    )
+    _insert_custom_source_row(
+        db_path,
+        signal_date="2026-05-22",
+        ticker="AAA",
+        exit_risk_signal=0,
+        exit_risk_severity=None,
+        breakout_signal=0,
+        pullback_signal=0,
+    )
+
+    exit_code = main(
+        [
+            "--analysis-db",
+            str(db_path),
+            "--signal-date",
+            "2026-05-22",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--mode",
+            "replace-date",
+        ]
+    )
+
+    assert exit_code == 0
+    _ = capsys.readouterr()
+    row = _destination_rows(db_path)[0]
+    payload = json.loads(row["source_run_ids"].split(":", 1)[1])
+    assert payload["rolling30"]["current_watchlist_status"] == "NEUTRAL_MONITOR"
+    assert payload["rolling30"]["window_watchlist_status"] == "HIGH_EXIT_RISK"
 
 
 def test_rolling_2d_status_maps_to_watch_pressure_from_medium_risk_without_bos_down(

@@ -26,8 +26,13 @@ from analysis.datacenter_indices.swing_signal_freshness import (
     build_swing_signal_freshness_rows,
     load_ticker_signal_freshness_history_rows,
 )
+from analysis.datacenter_indices.swing_weekly_report import (
+    _classify_rolling_current_watchlist_status,
+    _classify_rolling_window_watchlist_status,
+)
 
 SOURCE_TABLE = "dc_ticker_swing_signal_daily"
+GROUP_SOURCE_TABLE = "dc_group_swing_signal_daily"
 DESTINATION_TABLE = "dc_dashboard_ticker_enrichment_daily"
 CALC_VERSION = "DATACENTER_DASHBOARD_TICKER_ENRICHMENT_V1"
 SOURCE_COMPONENTS = "dc_ticker_swing_signal_daily,dc_ticker_swing_signal_daily:daily_status_mapping_v1"
@@ -323,6 +328,31 @@ def _load_source_history_by_ticker(
             continue
         history.append(row)
     return {ticker: list(reversed(history)) for ticker, history in grouped.items()}
+
+
+def _load_group_context_by_key(
+    conn: sqlite3.Connection,
+    *,
+    signal_date: str,
+    taxonomy_version: str,
+) -> dict[tuple[str, str], sqlite3.Row]:
+    if not _table_exists(conn, GROUP_SOURCE_TABLE):
+        return {}
+    rows = conn.execute(
+        f"""
+        SELECT group_type, group_name, timing_state, overheat_risk_level
+        FROM {GROUP_SOURCE_TABLE}
+        WHERE signal_date = ?
+          AND taxonomy_version = ?
+          AND group_type IN ('layer', 'subindustry')
+        """,
+        (signal_date, taxonomy_version),
+    ).fetchall()
+    return {
+        (str(row["group_type"] or ""), str(row["group_name"] or "")): row
+        for row in rows
+        if str(row["group_type"] or "") and str(row["group_name"] or "")
+    }
 
 
 def _normalized_text(value: object) -> str | None:
@@ -667,6 +697,8 @@ def _build_upstream_rolling5_payload(
             "next_action": rolling2_classification.next_action,
         }
         for source_key, target_key in (
+            ("current_watchlist_status", "current_watchlist_status"),
+            ("window_watchlist_status", "window_watchlist_status"),
             ("exit_risk_days", "exit_risk_days"),
             ("high_exit_risk_days", "high_exit_risk_days"),
             ("medium_exit_risk_days", "medium_exit_risk_days"),
@@ -866,6 +898,58 @@ def _derive_window_high_exit_risk_days_count(
     return count
 
 
+def _build_group_aware_watchlist_status_context(
+    row: sqlite3.Row,
+    *,
+    history_rows: list[sqlite3.Row] | None,
+    group_context_by_key: dict[tuple[str, str], sqlite3.Row],
+) -> dict[str, object]:
+    current_rows = history_rows or [row]
+    primary_layer = str(row["primary_layer"] or "")
+    primary_subindustry = str(row["primary_subindustry"] or "")
+    subindustry_context = group_context_by_key.get(("subindustry", primary_subindustry))
+    layer_context = group_context_by_key.get(("layer", primary_layer))
+    context: dict[str, object] = {
+        "in_datacenter_ecosystem": (
+            "NO"
+            if (_normalized_text(row["in_datacenter_ecosystem"]) or "").upper() == "NO"
+            else "YES"
+        ),
+        "last_price_data_status": row["price_data_status"],
+        "all_price_rows_missing": all(
+            (_normalized_text(history_row["price_data_status"]) or "").upper()
+            in {"MISSING_AS_OF_DATE", "MISSING_CLOSE_AS_OF_DATE"}
+            for history_row in current_rows
+        ),
+        "last_exit_risk_severity": row["exit_risk_severity"],
+        "last_breakout_signal": row["breakout_signal"],
+        "last_pullback_signal": row["pullback_signal"],
+        "breakout_days": sum(1 for history_row in current_rows if history_row["breakout_signal"] == 1),
+        "pullback_days": sum(1 for history_row in current_rows if history_row["pullback_signal"] == 1),
+        "high_exit_risk_days": sum(
+            1
+            for history_row in current_rows
+            if (_normalized_text(history_row["exit_risk_severity"]) or "").upper() == "HIGH"
+        ),
+        "medium_exit_risk_days": sum(
+            1
+            for history_row in current_rows
+            if (_normalized_text(history_row["exit_risk_severity"]) or "").upper() == "MEDIUM"
+        ),
+        "last_subindustry_timing_state": None if subindustry_context is None else subindustry_context["timing_state"],
+        "last_subindustry_overheat_risk_level": None
+        if subindustry_context is None
+        else subindustry_context["overheat_risk_level"],
+        "last_layer_timing_state": None if layer_context is None else layer_context["timing_state"],
+        "last_layer_overheat_risk_level": None
+        if layer_context is None
+        else layer_context["overheat_risk_level"],
+    }
+    context["current_watchlist_status"] = _classify_rolling_current_watchlist_status(context)
+    context["window_watchlist_status"] = _classify_rolling_window_watchlist_status(context)
+    return context
+
+
 def _resolve_high_exit_risk_days_count(
     row: sqlite3.Row,
     history_rows: list[sqlite3.Row] | None,
@@ -886,14 +970,20 @@ def _build_shared_rolling2_helper_row(
     *,
     daily_status: str,
     history_rows: list[sqlite3.Row] | None,
+    group_context_by_key: dict[tuple[str, str], sqlite3.Row],
 ) -> dict[str, object]:
+    group_aware_context = _build_group_aware_watchlist_status_context(
+        row,
+        history_rows=history_rows,
+        group_context_by_key=group_context_by_key,
+    )
     return {
         "ticker": str(row["ticker"]).strip().upper(),
         "last_price_data_status": row["price_data_status"],
         "all_price_rows_missing": (_normalized_text(row["price_data_status"]) or "").upper()
         in {"MISSING_AS_OF_DATE", "MISSING_CLOSE_AS_OF_DATE"},
-        "current_watchlist_status": daily_status,
-        "window_watchlist_status": None,
+        "current_watchlist_status": group_aware_context["current_watchlist_status"],
+        "window_watchlist_status": group_aware_context["window_watchlist_status"],
         "exit_risk_days": _count_recent_exit_days(history_rows),
         "high_exit_risk_days": _count_recent_exit_days(history_rows, severity="HIGH"),
         "medium_exit_risk_days": _count_recent_exit_days(history_rows, severity="MEDIUM"),
@@ -916,11 +1006,13 @@ def _classify_shared_rolling2(
     *,
     daily_status: str,
     history_rows: list[sqlite3.Row] | None,
+    group_context_by_key: dict[tuple[str, str], sqlite3.Row],
 ) -> tuple[Rolling2SellPressureClassification | None, dict[str, object] | None]:
     helper_row = _build_shared_rolling2_helper_row(
         row,
         daily_status=daily_status,
         history_rows=history_rows,
+        group_context_by_key=group_context_by_key,
     )
     if not helper_row:
         return None, None
@@ -955,6 +1047,7 @@ def _build_shared_rolling30_base_row(
     *,
     daily_status: str,
     history_rows: list[sqlite3.Row] | None,
+    group_context_by_key: dict[tuple[str, str], sqlite3.Row],
 ) -> dict[str, object] | None:
     current_rows = history_rows or [row]
     if not current_rows:
@@ -989,15 +1082,13 @@ def _build_shared_rolling30_base_row(
         for history_row in current_rows
         if (_normalized_text(history_row["exit_risk_severity"]) or "").upper() == "MEDIUM"
     )
-    current_watchlist_status = daily_status
-    window_watchlist_status = _derive_rolling_30_window_watchlist_status(
-        breakout_days=breakout_days,
-        pullback_days=pullback_days,
-        high_exit_risk_days=high_exit_risk_days,
-        medium_exit_risk_days=medium_exit_risk_days,
-        exit_risk_days=exit_risk_days,
-        current_watchlist_status=current_watchlist_status,
+    group_aware_context = _build_group_aware_watchlist_status_context(
+        row,
+        history_rows=history_rows,
+        group_context_by_key=group_context_by_key,
     )
+    current_watchlist_status = group_aware_context["current_watchlist_status"]
+    window_watchlist_status = group_aware_context["window_watchlist_status"]
     return {
         "ticker": str(row["ticker"]).strip().upper(),
         "primary_layer": last_row["primary_layer"],
@@ -1038,11 +1129,13 @@ def _build_shared_rolling30_buy_row(
     *,
     daily_status: str,
     history_rows: list[sqlite3.Row] | None,
+    group_context_by_key: dict[tuple[str, str], sqlite3.Row],
 ) -> dict[str, object] | None:
     base_row = _build_shared_rolling30_base_row(
         row,
         daily_status=daily_status,
         history_rows=history_rows,
+        group_context_by_key=group_context_by_key,
     )
     if base_row is None:
         return None
@@ -1133,6 +1226,7 @@ def _map_destination_row(
     pullback_history_rows: list[sqlite3.Row] | None,
     rolling2_history_rows: list[sqlite3.Row] | None,
     rolling30_history_rows: list[sqlite3.Row] | None,
+    group_context_by_key: dict[tuple[str, str], sqlite3.Row],
     upstream_row: dict[str, object] | None,
     use_shared_rolling5_helper: bool,
 ) -> tuple[object, ...]:
@@ -1153,6 +1247,7 @@ def _map_destination_row(
         row,
         daily_status=daily_status,
         history_rows=rolling2_history_rows,
+        group_context_by_key=group_context_by_key,
     )
     rolling_2d_status = (
         rolling2_helper_classification.rolling_2_sell_pressure_state
@@ -1175,6 +1270,7 @@ def _map_destination_row(
         row,
         daily_status=daily_status,
         history_rows=rolling30_history_rows,
+        group_context_by_key=group_context_by_key,
     )
     rolling_30d_status = (
         _normalized_text(rolling30_buy_row.get("rolling_30_buy_state"))
@@ -1407,6 +1503,11 @@ def main(argv: list[str] | None = None) -> int:
                     for row in valid_rows
                     if str(row["ticker"]).strip().upper() in upstream_rows_by_ticker
                 )
+            group_context_by_key = _load_group_context_by_key(
+                conn,
+                signal_date=signal_date,
+                taxonomy_version=taxonomy_version,
+            )
 
             run_id = _resolve_run_id(signal_date, args.run_id)
             created_at_utc = _utc_now_text()
@@ -1472,6 +1573,7 @@ def main(argv: list[str] | None = None) -> int:
                             pullback_history_rows=pullback_history_rows,
                             rolling2_history_rows=history_by_ticker.get(ticker),
                             rolling30_history_rows=rolling30_history_by_ticker.get(ticker),
+                            group_context_by_key=group_context_by_key,
                             upstream_row=upstream_rows_by_ticker.get(ticker),
                             use_shared_rolling5_helper=args.use_upstream_rolling5_pullback,
                         ),
