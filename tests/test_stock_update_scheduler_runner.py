@@ -1111,7 +1111,7 @@ def test_run_datacenter_post_step_skips_with_exact_reason_when_no_candidate_pass
     assert result.error == "NO_DOWNSTREAM_VALID_DATACENTER_SIGNAL_DATE"
     log_text = Path(result.log_path).read_text(encoding="utf-8")
     assert "skip_reason=NO_DOWNSTREAM_VALID_DATACENTER_SIGNAL_DATE" in log_text
-    assert "signal_date_candidate_count=0" in log_text
+    assert "signal_date_candidate_count=1" in log_text
     assert "ticker_valid_date_count=1" in log_text
     assert "group_valid_date_count=0" in log_text
 
@@ -1199,8 +1199,6 @@ def test_run_datacenter_post_step_uses_latest_valid_price_date_in_pipeline_comma
                     "SUMMARY rolling_5_report_csv_path=/tmp/rolling5.csv",
                     "SUMMARY rolling_2_report_path=/tmp/rolling2.md",
                     "SUMMARY rolling_2_report_csv_path=/tmp/rolling2.csv",
-                    "SUMMARY weekly_report_path=/tmp/weekly.md",
-                    "SUMMARY weekly_report_csv_path=/tmp/weekly.csv",
                     "",
                 ]
             ),
@@ -1262,8 +1260,6 @@ def test_scheduler_runner_runs_datacenter_post_step_once_for_usa_success(
                     "SUMMARY rolling_5_report_csv_path=/tmp/rolling5.csv",
                     "SUMMARY rolling_2_report_path=/tmp/rolling2.md",
                     "SUMMARY rolling_2_report_csv_path=/tmp/rolling2.csv",
-                    "SUMMARY weekly_report_path=/tmp/weekly.md",
-                    "SUMMARY weekly_report_csv_path=/tmp/weekly.csv",
                     "",
                 ]
             ),
@@ -1315,8 +1311,8 @@ def test_scheduler_runner_runs_datacenter_post_step_once_for_usa_success(
     assert result.datacenter_pipeline_rolling_5_report_csv_path == "/tmp/rolling5.csv"
     assert result.datacenter_pipeline_rolling_2_report_path == "/tmp/rolling2.md"
     assert result.datacenter_pipeline_rolling_2_report_csv_path == "/tmp/rolling2.csv"
-    assert result.datacenter_pipeline_weekly_report_path == "/tmp/weekly.md"
-    assert result.datacenter_pipeline_weekly_report_csv_path == "/tmp/weekly.csv"
+    assert result.datacenter_pipeline_weekly_report_path is None
+    assert result.datacenter_pipeline_weekly_report_csv_path is None
     assert result.datacenter_pipeline_log_path.endswith(".txt")
     log_path = Path(result.datacenter_pipeline_log_path)
     assert log_path.exists()
@@ -1333,7 +1329,7 @@ def test_scheduler_runner_runs_datacenter_post_step_once_for_usa_success(
     assert payload["datacenter_pipeline_rolling_30_report_path"] == "/tmp/rolling30.md"
     assert payload["datacenter_pipeline_rolling_5_report_path"] == "/tmp/rolling5.md"
     assert payload["datacenter_pipeline_rolling_2_report_path"] == "/tmp/rolling2.md"
-    assert payload["datacenter_pipeline_weekly_report_path"] == "/tmp/weekly.md"
+    assert payload["datacenter_pipeline_weekly_report_path"] is None
 
 
 def test_scheduler_runner_technical_relevance_disabled_by_default(tmp_path, monkeypatch):

@@ -122,7 +122,7 @@ def test_dry_run_prints_planned_stages_and_does_not_call_stage_runners(tmp_path,
 
     assert exit_code == 0
     lines = capsys.readouterr().out.strip().splitlines()
-    assert lines[0] == "=== Stage 1/16: Datacenter base index ==="
+    assert lines[0] == "=== Stage 1/15: Datacenter base index ==="
     assert lines[1].startswith("PLAN --ohlcv-db ")
     assert any("Automatic technical relevance" in line for line in lines)
     assert "SUMMARY pipeline_stage.automatic_technical_relevance.status=DRY_RUN" in lines
@@ -348,7 +348,6 @@ def test_pipeline_calls_stages_in_correct_order_and_uses_index_base_date(tmp_pat
         "weekly_30",
         "weekly_5",
         "weekly_2",
-        "weekly_3",
     ]
     index_argv = calls[0][1]
     assert index_argv[index_argv.index("--start-date") + 1] == "2020-01-01"
@@ -366,16 +365,12 @@ def test_pipeline_calls_stages_in_correct_order_and_uses_index_base_date(tmp_pat
     rolling_30_kwargs = calls[12][1]
     rolling_5_kwargs = calls[13][1]
     rolling_2_kwargs = calls[14][1]
-    weekly_kwargs = calls[15][1]
     assert techrel_kwargs["signal_date"] == "2026-05-15"
     assert techrel_kwargs["taxonomy_version"] == "DC_TAXONOMY_FULL_V1"
     assert techrel_kwargs["signal_version"] == orchestrator.DEFAULT_SIGNAL_VERSION
     assert techrel_kwargs["profile_technical_relevance"] is True
     assert str(daily_kwargs["watchlist_file"]) == orchestrator.DEFAULT_WATCHLIST_FILE
     assert daily_kwargs["technical_relevance_run_id"] == "AUTO_REL_RUN"
-    assert weekly_kwargs["window_size"] == 3
-    assert str(weekly_kwargs["watchlist_file"]) == orchestrator.DEFAULT_WATCHLIST_FILE
-    assert weekly_kwargs["technical_relevance_run_id"] == "AUTO_REL_RUN"
     assert rolling_30_kwargs["window_size"] == 30
     assert rolling_30_kwargs["technical_relevance_run_id"] == "AUTO_REL_RUN"
     assert rolling_5_kwargs["window_size"] == 5
@@ -474,8 +469,7 @@ def test_pipeline_threads_technical_relevance_run_id_to_daily_and_weekly_report_
     assert calls[2][1]["technical_relevance_run_id"] == "REL_PIPE_B"
     assert calls[3][0] == "weekly_2"
     assert calls[3][1]["technical_relevance_run_id"] == "REL_PIPE_B"
-    assert calls[4][0] == "weekly_20"
-    assert calls[4][1]["technical_relevance_run_id"] == "REL_PIPE_B"
+    assert len(calls) == 4
 
 
 def test_pipeline_auto_technical_relevance_existing_run_reuse_is_reported_and_threaded(tmp_path, monkeypatch, capsys):
@@ -907,7 +901,6 @@ def test_successful_orchestrator_writes_watermarks(tmp_path, monkeypatch):
     assert "TICKER_SCANNER" in component_names
     assert "PIPELINE_AUDIT" in component_names
     assert "DAILY_REPORT" in component_names
-    assert "WEEKLY_REPORT" in component_names
     assert "ROLLING_REPORT_30" in component_names
     assert "ROLLING_REPORT_5" in component_names
     assert "ROLLING_REPORT_2" in component_names
@@ -1013,5 +1006,4 @@ def test_existing_watermark_does_not_skip_any_stage(tmp_path, monkeypatch, capsy
         "weekly_30",
         "weekly_5",
         "weekly_2",
-        "weekly_20",
     ]

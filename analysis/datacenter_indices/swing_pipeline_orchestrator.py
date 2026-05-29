@@ -94,7 +94,6 @@ PIPELINE_STAGE_KEYS = (
     "pipeline_audit",
     "automatic_technical_relevance",
     "daily_report",
-    "weekly_swing_report",
     "rolling_30_report",
     "rolling_5_report",
     "rolling_2_report",
@@ -1284,37 +1283,6 @@ def run_datacenter_swing_pipeline(
                 ),
                 watermark_builder=lambda result: {
                     "component_name": "ROLLING_REPORT_2",
-                    "taxonomy_version": taxonomy_version,
-                    "market": "",
-                    "signal_version": signal_version,
-                    "calc_version": ohlc_calc_version,
-                    "start_date": str(result["summary"].get("window_start_date", signal_date)),
-                    "end_date": signal_date,
-                    "row_count": None,
-                    "status": "OK",
-                },
-            )
-        )
-        stages.append(
-            PipelineStage(
-                stage_key="weekly_swing_report",
-                heading="Weekly swing report",
-                argv=weekly_argv,
-                runner=lambda: _run_weekly_report_stage(
-                    analysis_db=analysis_db,
-                    end_date=signal_date,
-                    signal_version=signal_version,
-                    ohlc_calc_version=ohlc_calc_version,
-                    taxonomy_version=taxonomy_version,
-                    window_size=weekly_window_size,
-                    watchlist_file=selected_watchlist_file,
-                    output_md=weekly_output_md,
-                    output_csv=weekly_output_csv,
-                    include_taxonomy_listing=not no_taxonomy_listing,
-                    technical_relevance_run_id=resolved_technical_relevance_run_id,
-                ),
-                watermark_builder=lambda result: {
-                    "component_name": "WEEKLY_REPORT",
                     "taxonomy_version": taxonomy_version,
                     "market": "",
                     "signal_version": signal_version,
