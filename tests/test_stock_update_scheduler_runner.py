@@ -901,7 +901,9 @@ def test_resolve_technical_relevance_end_date_rejects_outlier_latest_day(tmp_pat
     assert resolution.candidate_count == 2
 
 
-def test_resolve_datacenter_signal_date_uses_latest_downstream_valid_intersection(tmp_path):
+def test_resolve_datacenter_signal_date_uses_latest_valid_price_date_when_group_index_lags(
+    tmp_path,
+):
     osakedata_db = tmp_path / "osakedata.db"
     analysis_db = tmp_path / "analysis.db"
     taxonomy_csv = tmp_path / "taxonomy.csv"
@@ -944,13 +946,13 @@ def test_resolve_datacenter_signal_date_uses_latest_downstream_valid_intersectio
         expected_ticker_count=8,
     )
 
-    assert resolution.signal_date == "2026-05-27"
+    assert resolution.signal_date == "2026-05-28"
     assert resolution.signal_date_source == "DOWNSTREAM_VALID_DATE"
     assert (
         resolution.signal_date_resolution
         == "TICKER_AND_GROUP_VALID_DATE_WITH_MIN_TICKER_COUNT"
     )
-    assert resolution.candidate_count == 1
+    assert resolution.candidate_count == 2
     assert resolution.ticker_valid_date_count == 2
     assert resolution.group_valid_date_count == 1
     assert resolution.skip_reason == ""
@@ -1112,6 +1114,110 @@ def test_run_datacenter_post_step_skips_with_exact_reason_when_no_candidate_pass
     assert "signal_date_candidate_count=0" in log_text
     assert "ticker_valid_date_count=1" in log_text
     assert "group_valid_date_count=0" in log_text
+
+
+def test_run_datacenter_post_step_uses_latest_valid_price_date_in_pipeline_command(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    taxonomy_csv = tmp_path / "taxonomy.csv"
+    log_dir = tmp_path / "logs"
+    reports_dir = tmp_path / "reports"
+    _create_osakedata_with_rows(
+        osakedata_db,
+        [
+            *[
+                (f"TICK{i:02d}", "2026-05-27", 1.0, 1.0, 1.0, 1.0, 100, "usa")
+                for i in range(1, 26)
+            ],
+            *[
+                (f"TICK{i:02d}", "2026-05-28", 1.0, 1.0, 1.0, 1.0, 100, "usa")
+                for i in range(1, 26)
+            ],
+        ],
+    )
+    _create_group_index_dates_db(
+        analysis_db,
+        [
+            ("2026-05-27", "DC_TAXONOMY_FULL_V1", "ecosystem", "DC_ECOSYSTEM_TOTAL"),
+        ],
+    )
+    _write_taxonomy_csv(
+        taxonomy_csv,
+        [
+            (
+                "DC_TAXONOMY_FULL_V1",
+                f"TICK{i:02d}",
+                "LayerA",
+                "SubA",
+                "CORE",
+                1,
+                1,
+                "",
+            )
+            for i in range(1, 26)
+        ],
+    )
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        osakedata_db=osakedata_db,
+        analysis_db=analysis_db,
+        log_dir=log_dir,
+    )
+    config = read_scheduler_config(str(config_path))
+    calls = []
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_datacenter_post_step_config",
+        lambda market: DatacenterPostStepConfig(
+            market="usa",
+            taxonomy_csv=str(taxonomy_csv),
+            taxonomy_version="DC_TAXONOMY_FULL_V1",
+            start_date="2026-05-01",
+            index_base_date="2020-01-01",
+            output_dir=str(reports_dir),
+            expected_ticker_count=8,
+            expected_group_count=54,
+            expected_synthetic_ohlc_count=53,
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda command, **kwargs: calls.append(command)
+        or _FakeCompletedProcess(
+            0,
+            "\n".join(
+                [
+                    "SUMMARY audit_validation_status=OK",
+                    "SUMMARY daily_report_path=/tmp/daily.md",
+                    "SUMMARY daily_report_csv_path=/tmp/daily.csv",
+                    "SUMMARY rolling_30_report_path=/tmp/rolling30.md",
+                    "SUMMARY rolling_30_report_csv_path=/tmp/rolling30.csv",
+                    "SUMMARY rolling_5_report_path=/tmp/rolling5.md",
+                    "SUMMARY rolling_5_report_csv_path=/tmp/rolling5.csv",
+                    "SUMMARY rolling_2_report_path=/tmp/rolling2.md",
+                    "SUMMARY rolling_2_report_csv_path=/tmp/rolling2.csv",
+                    "SUMMARY weekly_report_path=/tmp/weekly.md",
+                    "SUMMARY weekly_report_csv_path=/tmp/weekly.csv",
+                    "",
+                ]
+            ),
+        ),
+    )
+
+    result = scheduler_runner._run_datacenter_post_step(
+        config=config,
+        target_market="usa",
+        effective_today="2026-05-29",
+    )
+
+    assert result.status == "OK"
+    assert result.signal_date == "2026-05-28"
+    command = calls[0]
+    assert command[command.index("--signal-date") + 1] == "2026-05-28"
+    assert result.requested_calendar_signal_date == "2026-05-28"
 
 
 def test_scheduler_runner_runs_datacenter_post_step_once_for_usa_success(

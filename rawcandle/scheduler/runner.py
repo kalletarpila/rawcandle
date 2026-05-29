@@ -538,14 +538,7 @@ def _resolve_datacenter_signal_date(
         taxonomy_version,
     )
 
-    candidate_dates = sorted(
-        {
-            str(date_value)
-            for date_value in ticker_valid_dates
-            if date_value in set(group_valid_dates)
-        },
-        reverse=True,
-    )
+    candidate_dates = sorted({str(date_value) for date_value in ticker_valid_dates}, reverse=True)
     for candidate_date in candidate_dates:
         if candidate_date > requested_calendar_signal_date:
             continue
