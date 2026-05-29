@@ -114,6 +114,10 @@ class ScheduledStockUpdateRunResult:
     datacenter_dashboard_run_id: str = ""
     datacenter_dashboard_skip_reason: str = ""
     datacenter_dashboard_source_mode: str = "reports"
+    datacenter_dashboard_reports_reference_status: str = "SKIPPED"
+    datacenter_dashboard_reports_reference_run_id: str = ""
+    datacenter_dashboard_reports_reference_dashboard_db: str = ""
+    datacenter_dashboard_reports_reference_html_output_path: str = ""
     datacenter_enrichment_attempted: int = 0
     datacenter_enrichment_status: str = "SKIPPED"
     datacenter_enrichment_readiness: str = "SKIPPED"
@@ -234,6 +238,10 @@ class DatacenterDashboardPostStepResult:
     run_id: str = ""
     skip_reason: str = ""
     source_mode: str = "reports"
+    reports_reference_status: str = "SKIPPED"
+    reports_reference_run_id: str = ""
+    reports_reference_dashboard_db: str = ""
+    reports_reference_html_output_path: str = ""
     enrichment_attempted: int = 0
     enrichment_status: str = "SKIPPED"
     enrichment_readiness: str = "SKIPPED"
@@ -255,8 +263,12 @@ class SchedulerDashboardConfigInspection:
     dashboard_db: str
     reports_dir: str
     html_output_dir: str
+    reports_reference_enabled: int
+    reports_reference_db: str
+    reports_reference_html_output_dir: str
     expected_report_date: str
     expected_html_output_path: str
+    reports_reference_expected_html_output_path: str
     mode: str
     render_html: int
     usa_enabled: int
@@ -288,6 +300,7 @@ class SchedulerEnrichmentPlanInspection:
     analysis_db_status: str
     dashboard_db: str
     reports_dir: str
+    reports_reference_db: str
     watchlist_file: str
     watchlist_file_status: str
     taxonomy_version: str
@@ -297,12 +310,14 @@ class SchedulerEnrichmentPlanInspection:
     run_acceptance_report: int
     enrichment_json_output_path: str
     html_output_path: str
+    reports_reference_html_output_path: str
     acceptance_report_output_path: str
     stage_md_reports_generation: str
     stage_enrichment_write: str
     stage_enrichment_audit: str
     stage_enrichment_export_json: str
     stage_structured_dashboard_build: str
+    stage_reports_reference_build: str
     stage_html_render: str
     stage_acceptance_report: str
     stage_fallback_reports_build: str
@@ -748,6 +763,10 @@ def _default_datacenter_dashboard_result(
         run_id="",
         skip_reason=skip_reason,
         source_mode=config.datacenter_dashboard_source_mode,
+        reports_reference_status="SKIPPED",
+        reports_reference_run_id="",
+        reports_reference_dashboard_db=config.datacenter_dashboard_reports_reference_db,
+        reports_reference_html_output_path="",
         enrichment_attempted=0,
         enrichment_status="SKIPPED",
         enrichment_readiness="SKIPPED",
@@ -768,6 +787,16 @@ def _resolve_datacenter_dashboard_html_output_path(
     return str(
         Path(config.datacenter_dashboard_html_output_dir)
         / f"datacenter_dashboard_{report_date}.html"
+    )
+
+
+def _resolve_datacenter_dashboard_reports_reference_html_output_path(
+    config: StockUpdateSchedulerConfig,
+    report_date: str,
+) -> str:
+    return str(
+        Path(config.datacenter_dashboard_reports_reference_html_output_dir)
+        / f"datacenter_dashboard_reports_reference_{report_date}.html"
     )
 
 
@@ -872,11 +901,18 @@ def inspect_scheduler_dashboard_config(
     date_status = "UNAVAILABLE"
     expected_report_date = ""
     expected_html_output_path = ""
+    reports_reference_expected_html_output_path = ""
     if effective_today is not None:
         expected_report_date = _previous_calendar_date(effective_today)
         expected_html_output_path = _resolve_datacenter_dashboard_html_output_path(
             config,
             expected_report_date,
+        )
+        reports_reference_expected_html_output_path = (
+            _resolve_datacenter_dashboard_reports_reference_html_output_path(
+                config,
+                expected_report_date,
+            )
         )
         date_status = "OK"
 
@@ -886,8 +922,18 @@ def inspect_scheduler_dashboard_config(
         dashboard_db=config.datacenter_dashboard_db,
         reports_dir=reports_dir,
         html_output_dir=config.datacenter_dashboard_html_output_dir,
+        reports_reference_enabled=(
+            1 if config.datacenter_dashboard_reports_reference_enabled else 0
+        ),
+        reports_reference_db=config.datacenter_dashboard_reports_reference_db,
+        reports_reference_html_output_dir=(
+            config.datacenter_dashboard_reports_reference_html_output_dir
+        ),
         expected_report_date=expected_report_date,
         expected_html_output_path=expected_html_output_path,
+        reports_reference_expected_html_output_path=(
+            reports_reference_expected_html_output_path
+        ),
         mode="replace-date",
         render_html=1,
         usa_enabled=1 if "usa" in config.enabled_markets else 0,
@@ -931,6 +977,9 @@ def inspect_scheduler_enrichment_plan(
     watchlist_file = config.datacenter_enrichment_watchlist_file.strip()
     watchlist_file_status = dashboard_inspection.enrichment_watchlist_file_status
     html_output_path = dashboard_inspection.expected_html_output_path
+    reports_reference_html_output_path = (
+        dashboard_inspection.reports_reference_expected_html_output_path
+    )
     enrichment_json_output_path = ""
     acceptance_report_output_path = ""
     if reports_dir and expected_signal_date:
@@ -974,6 +1023,10 @@ def inspect_scheduler_enrichment_plan(
         config.datacenter_dashboard_source_mode == "enrichment"
         or config.datacenter_enrichment_enabled
     ) else 0
+    reports_reference_planned = 1 if (
+        config.datacenter_dashboard_source_mode == "enrichment"
+        and config.datacenter_dashboard_reports_reference_enabled
+    ) else 0
     acceptance_planned = 1 if config.datacenter_dashboard_run_acceptance_report else 0
     fallback_planned = 1 if config.datacenter_dashboard_fallback_to_reports else 0
     enrichment_ready = (
@@ -995,6 +1048,7 @@ def inspect_scheduler_enrichment_plan(
         analysis_db_status=analysis_db_status,
         dashboard_db=config.datacenter_dashboard_db,
         reports_dir=reports_dir,
+        reports_reference_db=config.datacenter_dashboard_reports_reference_db,
         watchlist_file=watchlist_file,
         watchlist_file_status=watchlist_file_status,
         taxonomy_version=config.datacenter_enrichment_taxonomy_version,
@@ -1004,6 +1058,7 @@ def inspect_scheduler_enrichment_plan(
         run_acceptance_report=1 if config.datacenter_dashboard_run_acceptance_report else 0,
         enrichment_json_output_path=enrichment_json_output_path,
         html_output_path=html_output_path,
+        reports_reference_html_output_path=reports_reference_html_output_path,
         acceptance_report_output_path=acceptance_report_output_path,
         stage_md_reports_generation=_stage(
             md_reports_generation_planned,
@@ -1040,6 +1095,12 @@ def inspect_scheduler_enrichment_plan(
             else "ENRICHMENT_SOURCE_CONFIGURED"
             if structured_build_planned
             else "REPORTS_MODE_REMAINS_ACTIVE",
+        ),
+        stage_reports_reference_build=_stage(
+            reports_reference_planned,
+            "FOLLOWS_STRUCTURED_BUILD"
+            if reports_reference_planned
+            else "CONFIG_DISABLED",
         ),
         stage_html_render=_stage(
             dashboard_inspection.render_html,
@@ -1305,6 +1366,10 @@ def _run_datacenter_dashboard_enrichment_post_step(
         "DATACENTER",
         report_date,
     )
+    reports_reference_status = "SKIPPED"
+    reports_reference_run_id = ""
+    reports_reference_dashboard_db = config.datacenter_dashboard_reports_reference_db
+    reports_reference_html_output_path = ""
 
     write_args = [
         "--analysis-db",
@@ -1473,16 +1538,99 @@ def _run_datacenter_dashboard_enrichment_post_step(
             error="STRUCTURED_DASHBOARD_BUILD_FAILED",
         )
 
+    reports_reference_enabled = (
+        config.datacenter_dashboard_source_mode == "enrichment"
+        and config.datacenter_dashboard_reports_reference_enabled
+    )
+    if reports_reference_enabled:
+        reports_reference_html_output_path = (
+            _resolve_datacenter_dashboard_reports_reference_html_output_path(
+                config,
+                report_date,
+            )
+        )
+        reports_reference_build_args = [
+            "--dashboard-db",
+            config.datacenter_dashboard_reports_reference_db,
+            "--report-date",
+            report_date,
+            "--input-mode",
+            "reports",
+            "--reports-dir",
+            reports_dir,
+            "--mode",
+            "replace-date",
+        ]
+        if render_html:
+            reports_reference_build_args.extend(
+                [
+                    "--render-html",
+                    "--html-output",
+                    reports_reference_html_output_path,
+                ]
+            )
+        reports_reference_exit_code, reports_reference_stdout = _run_python_cli_main(
+            build_main,
+            reports_reference_build_args,
+        )
+        reports_reference_run_id = (
+            _parse_summary_value(reports_reference_stdout, "ecosystem_dashboard_build.run_id")
+            or ""
+        )
+        reports_reference_status = (
+            _parse_summary_value(reports_reference_stdout, "ecosystem_dashboard_build.status")
+            or ("OK" if reports_reference_exit_code == 0 else "FAILED")
+        )
+        if reports_reference_exit_code != 0 or reports_reference_status != "OK":
+            acceptance_status_for_reference_failure = (
+                "FAILED" if config.datacenter_dashboard_run_acceptance_report else "SKIPPED"
+            )
+            return DatacenterDashboardPostStepResult(
+                attempted=1,
+                status="FAILED",
+                dashboard_db=config.datacenter_dashboard_db,
+                report_date=report_date,
+                md_reports_status="OK",
+                source_reports_available=source_reports_available,
+                html_output_path=html_output,
+                run_id=built_run_id,
+                skip_reason="REPORTS_REFERENCE_BUILD_FAILED",
+                source_mode="enrichment",
+                reports_reference_status="FAILED",
+                reports_reference_run_id=reports_reference_run_id,
+                reports_reference_dashboard_db=reports_reference_dashboard_db,
+                reports_reference_html_output_path=reports_reference_html_output_path,
+                enrichment_attempted=1,
+                enrichment_status="OK",
+                enrichment_readiness=audit_readiness or enrichment_readiness or "UNKNOWN",
+                enrichment_run_id=enrichment_run_id,
+                enrichment_export_status="OK",
+                structured_build_status="OK",
+                acceptance_report_status=acceptance_status_for_reference_failure,
+                acceptance_report_blockers="",
+                acceptance_report_recommendation="REPORTS_REFERENCE_BUILD_REQUIRED_FOR_ACCEPTANCE"
+                if config.datacenter_dashboard_run_acceptance_report
+                else "",
+                fallback_used=0,
+                final_source_mode="enrichment",
+                error="REPORTS_REFERENCE_BUILD_FAILED",
+            )
+
     acceptance_report_status = "SKIPPED"
     acceptance_report_blockers = ""
     acceptance_report_recommendation = ""
     if config.datacenter_dashboard_run_acceptance_report:
-        if previous_reports_run_id and built_run_id:
+        reports_dashboard_db = config.datacenter_dashboard_db
+        reports_run_id = previous_reports_run_id
+        if reports_reference_enabled:
+            reports_dashboard_db = config.datacenter_dashboard_reports_reference_db
+            reports_run_id = reports_reference_run_id
+        if reports_run_id and built_run_id:
             acceptance_args = [
                 "--reports-dashboard-db",
-                config.datacenter_dashboard_db,
+                reports_dashboard_db,
                 "--reports-run-id",
-                previous_reports_run_id,
+                reports_run_id,
                 "--enrichment-dashboard-db",
                 config.datacenter_dashboard_db,
                 "--enrichment-run-id",
@@ -1565,7 +1713,41 @@ def _run_datacenter_dashboard_enrichment_post_step(
                     error="ACCEPTANCE_BLOCKERS",
                 )
         else:
-            acceptance_report_status = "SKIPPED"
+            acceptance_report_status = "FAILED" if reports_reference_enabled else "SKIPPED"
+            acceptance_report_recommendation = (
+                "REPORTS_REFERENCE_BUILD_REQUIRED_FOR_ACCEPTANCE"
+                if reports_reference_enabled
+                else ""
+            )
+            if reports_reference_enabled:
+                return DatacenterDashboardPostStepResult(
+                    attempted=1,
+                    status="FAILED",
+                    dashboard_db=config.datacenter_dashboard_db,
+                    report_date=report_date,
+                    md_reports_status="OK",
+                    source_reports_available=source_reports_available,
+                    html_output_path=html_output,
+                    run_id=built_run_id,
+                    skip_reason="REPORTS_REFERENCE_RUN_ID_MISSING",
+                    source_mode="enrichment",
+                    reports_reference_status=reports_reference_status,
+                    reports_reference_run_id=reports_reference_run_id,
+                    reports_reference_dashboard_db=reports_reference_dashboard_db,
+                    reports_reference_html_output_path=reports_reference_html_output_path,
+                    enrichment_attempted=1,
+                    enrichment_status="OK",
+                    enrichment_readiness=audit_readiness or enrichment_readiness or "UNKNOWN",
+                    enrichment_run_id=enrichment_run_id,
+                    enrichment_export_status="OK",
+                    structured_build_status="OK",
+                    acceptance_report_status="FAILED",
+                    acceptance_report_blockers="",
+                    acceptance_report_recommendation=acceptance_report_recommendation,
+                    fallback_used=0,
+                    final_source_mode="enrichment",
+                    error="REPORTS_REFERENCE_RUN_ID_MISSING",
+                )
 
     return DatacenterDashboardPostStepResult(
         attempted=1,
@@ -1578,6 +1760,10 @@ def _run_datacenter_dashboard_enrichment_post_step(
         run_id=built_run_id,
         skip_reason="",
         source_mode="enrichment",
+        reports_reference_status=reports_reference_status,
+        reports_reference_run_id=reports_reference_run_id,
+        reports_reference_dashboard_db=reports_reference_dashboard_db,
+        reports_reference_html_output_path=reports_reference_html_output_path,
         enrichment_attempted=1,
         enrichment_status="OK",
         enrichment_readiness=audit_readiness or enrichment_readiness or "UNKNOWN",
@@ -1634,6 +1820,10 @@ def _datacenter_enrichment_failure_with_optional_fallback(
             run_id=fallback_result.run_id,
             skip_reason=fallback_result.skip_reason or error,
             source_mode="enrichment",
+            reports_reference_status="SKIPPED",
+            reports_reference_run_id="",
+            reports_reference_dashboard_db=config.datacenter_dashboard_reports_reference_db,
+            reports_reference_html_output_path="",
             enrichment_attempted=1,
             enrichment_status=enrichment_status,
             enrichment_readiness=enrichment_readiness,
@@ -1658,6 +1848,10 @@ def _datacenter_enrichment_failure_with_optional_fallback(
         run_id="",
         skip_reason=error,
         source_mode="enrichment",
+        reports_reference_status="SKIPPED",
+        reports_reference_run_id="",
+        reports_reference_dashboard_db=config.datacenter_dashboard_reports_reference_db,
+        reports_reference_html_output_path="",
         enrichment_attempted=1,
         enrichment_status=enrichment_status,
         enrichment_readiness=enrichment_readiness,
@@ -2501,6 +2695,18 @@ def run_scheduler_config(
                 datacenter_dashboard_run_id=datacenter_dashboard_result.run_id,
                 datacenter_dashboard_skip_reason=datacenter_dashboard_result.skip_reason,
                 datacenter_dashboard_source_mode=datacenter_dashboard_result.source_mode,
+                datacenter_dashboard_reports_reference_status=(
+                    datacenter_dashboard_result.reports_reference_status
+                ),
+                datacenter_dashboard_reports_reference_run_id=(
+                    datacenter_dashboard_result.reports_reference_run_id
+                ),
+                datacenter_dashboard_reports_reference_dashboard_db=(
+                    datacenter_dashboard_result.reports_reference_dashboard_db
+                ),
+                datacenter_dashboard_reports_reference_html_output_path=(
+                    datacenter_dashboard_result.reports_reference_html_output_path
+                ),
                 datacenter_enrichment_attempted=datacenter_dashboard_result.enrichment_attempted,
                 datacenter_enrichment_status=datacenter_dashboard_result.enrichment_status,
                 datacenter_enrichment_readiness=datacenter_dashboard_result.enrichment_readiness,

@@ -57,12 +57,28 @@ def main(argv: Optional[List[str]] = None) -> int:
             f"{inspection.html_output_dir}"
         )
         print(
+            "SUMMARY scheduler_dashboard_config.reports_reference_enabled="
+            f"{inspection.reports_reference_enabled}"
+        )
+        print(
+            "SUMMARY scheduler_dashboard_config.reports_reference_db="
+            f"{inspection.reports_reference_db}"
+        )
+        print(
+            "SUMMARY scheduler_dashboard_config.reports_reference_html_output_dir="
+            f"{inspection.reports_reference_html_output_dir}"
+        )
+        print(
             "SUMMARY scheduler_dashboard_config.expected_report_date="
             f"{inspection.expected_report_date}"
         )
         print(
             "SUMMARY scheduler_dashboard_config.expected_html_output_path="
             f"{inspection.expected_html_output_path}"
+        )
+        print(
+            "SUMMARY scheduler_dashboard_config.reports_reference_expected_html_output_path="
+            f"{inspection.reports_reference_expected_html_output_path}"
         )
         print(f"SUMMARY scheduler_dashboard_config.mode={inspection.mode}")
         print(f"SUMMARY scheduler_dashboard_config.render_html={inspection.render_html}")
@@ -154,6 +170,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                 f"{enrichment_plan.reports_dir}"
             )
             print(
+                "SUMMARY scheduler_enrichment_plan.reports_reference_db="
+                f"{enrichment_plan.reports_reference_db}"
+            )
+            print(
                 "SUMMARY scheduler_enrichment_plan.watchlist_file="
                 f"{enrichment_plan.watchlist_file}"
             )
@@ -190,6 +210,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                 f"{enrichment_plan.html_output_path}"
             )
             print(
+                "SUMMARY scheduler_enrichment_plan.reports_reference_html_output_path="
+                f"{enrichment_plan.reports_reference_html_output_path}"
+            )
+            print(
                 "SUMMARY scheduler_enrichment_plan.acceptance_report_output_path="
                 f"{enrichment_plan.acceptance_report_output_path}"
             )
@@ -212,6 +236,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(
                 "SUMMARY scheduler_enrichment_plan.stage.structured_dashboard_build="
                 f"{enrichment_plan.stage_structured_dashboard_build}"
+            )
+            print(
+                "SUMMARY scheduler_enrichment_plan.stage.reports_reference_build="
+                f"{enrichment_plan.stage_reports_reference_build}"
             )
             print(
                 "SUMMARY scheduler_enrichment_plan.stage.html_render="
@@ -375,6 +403,22 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(
         "SUMMARY datacenter_dashboard_source_mode="
         f"{result.datacenter_dashboard_source_mode}"
+    )
+    print(
+        "SUMMARY datacenter_dashboard.reports_reference_status="
+        f"{result.datacenter_dashboard_reports_reference_status}"
+    )
+    print(
+        "SUMMARY datacenter_dashboard.reports_reference_run_id="
+        f"{result.datacenter_dashboard_reports_reference_run_id}"
+    )
+    print(
+        "SUMMARY datacenter_dashboard.reports_reference_dashboard_db="
+        f"{result.datacenter_dashboard_reports_reference_dashboard_db}"
+    )
+    print(
+        "SUMMARY datacenter_dashboard.reports_reference_html_output_path="
+        f"{result.datacenter_dashboard_reports_reference_html_output_path}"
     )
     print(
         "SUMMARY datacenter_enrichment.attempted="

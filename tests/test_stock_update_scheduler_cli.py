@@ -91,6 +91,10 @@ def _result(overall_status):
         datacenter_dashboard_run_id="",
         datacenter_dashboard_skip_reason="",
         datacenter_dashboard_source_mode="reports",
+        datacenter_dashboard_reports_reference_status="SKIPPED",
+        datacenter_dashboard_reports_reference_run_id="",
+        datacenter_dashboard_reports_reference_dashboard_db="",
+        datacenter_dashboard_reports_reference_html_output_path="",
         datacenter_enrichment_attempted=0,
         datacenter_enrichment_status="SKIPPED",
         datacenter_enrichment_readiness="SKIPPED",
@@ -98,6 +102,8 @@ def _result(overall_status):
         datacenter_dashboard_enrichment_export_status="SKIPPED",
         datacenter_dashboard_structured_build_status="SKIPPED",
         datacenter_dashboard_acceptance_report_status="SKIPPED",
+        datacenter_dashboard_acceptance_report_blockers="",
+        datacenter_dashboard_acceptance_report_recommendation="",
         datacenter_dashboard_fallback_used=0,
         datacenter_dashboard_final_source_mode="reports",
         datacenter_dashboard_error="",
@@ -163,6 +169,10 @@ def _skipped_result():
         datacenter_dashboard_run_id="",
         datacenter_dashboard_skip_reason="SKIP_NEXT_RUN",
         datacenter_dashboard_source_mode="reports",
+        datacenter_dashboard_reports_reference_status="SKIPPED",
+        datacenter_dashboard_reports_reference_run_id="",
+        datacenter_dashboard_reports_reference_dashboard_db="",
+        datacenter_dashboard_reports_reference_html_output_path="",
         datacenter_enrichment_attempted=0,
         datacenter_enrichment_status="SKIPPED",
         datacenter_enrichment_readiness="SKIPPED",
@@ -170,6 +180,8 @@ def _skipped_result():
         datacenter_dashboard_enrichment_export_status="SKIPPED",
         datacenter_dashboard_structured_build_status="SKIPPED",
         datacenter_dashboard_acceptance_report_status="SKIPPED",
+        datacenter_dashboard_acceptance_report_blockers="",
+        datacenter_dashboard_acceptance_report_recommendation="",
         datacenter_dashboard_fallback_used=0,
         datacenter_dashboard_final_source_mode="reports",
         datacenter_dashboard_error="",
@@ -240,6 +252,10 @@ def test_scheduler_cli_successful_run_prints_top_level_summary_lines(monkeypatch
     assert "SUMMARY datacenter_dashboard.run_id=" in captured.out
     assert "SUMMARY datacenter_dashboard.skip_reason=" in captured.out
     assert "SUMMARY datacenter_dashboard_source_mode=reports" in captured.out
+    assert "SUMMARY datacenter_dashboard.reports_reference_status=SKIPPED" in captured.out
+    assert "SUMMARY datacenter_dashboard.reports_reference_run_id=" in captured.out
+    assert "SUMMARY datacenter_dashboard.reports_reference_dashboard_db=" in captured.out
+    assert "SUMMARY datacenter_dashboard.reports_reference_html_output_path=" in captured.out
     assert "SUMMARY datacenter_enrichment.attempted=0" in captured.out
     assert "SUMMARY datacenter_enrichment.status=SKIPPED" in captured.out
     assert "SUMMARY datacenter_enrichment.readiness=SKIPPED" in captured.out
@@ -326,8 +342,14 @@ def test_scheduler_cli_inspect_dashboard_config_prints_required_summary_lines(
         dashboard_db = "/tmp/ecosystem_dashboard.db"
         reports_dir = "/tmp/swing_reports"
         html_output_dir = "/tmp/html"
+        reports_reference_enabled = 0
+        reports_reference_db = "/tmp/reports_reference.db"
+        reports_reference_html_output_dir = "/tmp/html"
         expected_report_date = "2026-05-22"
         expected_html_output_path = "/tmp/html/datacenter_dashboard_2026-05-22.html"
+        reports_reference_expected_html_output_path = (
+            "/tmp/html/datacenter_dashboard_reports_reference_2026-05-22.html"
+        )
         mode = "replace-date"
         render_html = 1
         usa_enabled = 1
@@ -377,10 +399,17 @@ def test_scheduler_cli_inspect_dashboard_config_prints_required_summary_lines(
     assert "SUMMARY scheduler_dashboard_config.dashboard_db=/tmp/ecosystem_dashboard.db" in captured.out
     assert "SUMMARY scheduler_dashboard_config.reports_dir=/tmp/swing_reports" in captured.out
     assert "SUMMARY scheduler_dashboard_config.html_output_dir=/tmp/html" in captured.out
+    assert "SUMMARY scheduler_dashboard_config.reports_reference_enabled=0" in captured.out
+    assert "SUMMARY scheduler_dashboard_config.reports_reference_db=/tmp/reports_reference.db" in captured.out
+    assert "SUMMARY scheduler_dashboard_config.reports_reference_html_output_dir=/tmp/html" in captured.out
     assert "SUMMARY scheduler_dashboard_config.expected_report_date=2026-05-22" in captured.out
     assert (
         "SUMMARY scheduler_dashboard_config.expected_html_output_path="
         "/tmp/html/datacenter_dashboard_2026-05-22.html"
+    ) in captured.out
+    assert (
+        "SUMMARY scheduler_dashboard_config.reports_reference_expected_html_output_path="
+        "/tmp/html/datacenter_dashboard_reports_reference_2026-05-22.html"
     ) in captured.out
     assert "SUMMARY scheduler_dashboard_config.mode=replace-date" in captured.out
     assert "SUMMARY scheduler_dashboard_config.render_html=1" in captured.out
@@ -440,8 +469,14 @@ def test_scheduler_cli_inspect_dashboard_config_without_plan_remains_backward_co
         dashboard_db = "/tmp/ecosystem_dashboard.db"
         reports_dir = "/tmp/swing_reports"
         html_output_dir = "/tmp/html"
+        reports_reference_enabled = 0
+        reports_reference_db = "/tmp/reports_reference.db"
+        reports_reference_html_output_dir = "/tmp/html"
         expected_report_date = "2026-05-22"
         expected_html_output_path = "/tmp/html/datacenter_dashboard_2026-05-22.html"
+        reports_reference_expected_html_output_path = (
+            "/tmp/html/datacenter_dashboard_reports_reference_2026-05-22.html"
+        )
         mode = "replace-date"
         render_html = 1
         usa_enabled = 1
@@ -490,8 +525,14 @@ def test_scheduler_cli_inspect_dashboard_config_with_plan_prints_plan_lines(
         dashboard_db = "/tmp/ecosystem_dashboard.db"
         reports_dir = "/tmp/swing_reports"
         html_output_dir = "/tmp/html"
+        reports_reference_enabled = 1
+        reports_reference_db = "/tmp/reports_reference.db"
+        reports_reference_html_output_dir = "/tmp/reference_html"
         expected_report_date = "2026-05-22"
         expected_html_output_path = "/tmp/html/datacenter_dashboard_2026-05-22.html"
+        reports_reference_expected_html_output_path = (
+            "/tmp/reference_html/datacenter_dashboard_reports_reference_2026-05-22.html"
+        )
         mode = "replace-date"
         render_html = 1
         usa_enabled = 1
@@ -521,6 +562,7 @@ def test_scheduler_cli_inspect_dashboard_config_with_plan_prints_plan_lines(
         analysis_db_status = "OK"
         dashboard_db = "/tmp/ecosystem_dashboard.db"
         reports_dir = "/tmp/swing_reports"
+        reports_reference_db = "/tmp/reports_reference.db"
         watchlist_file = "/tmp/watchlist.txt"
         watchlist_file_status = "OK"
         taxonomy_version = "DC_TAXONOMY_FULL_V1"
@@ -530,12 +572,16 @@ def test_scheduler_cli_inspect_dashboard_config_with_plan_prints_plan_lines(
         run_acceptance_report = 0
         enrichment_json_output_path = "/tmp/swing_reports/datacenter_dashboard_enrichment_2026-05-22.json"
         html_output_path = "/tmp/html/datacenter_dashboard_2026-05-22.html"
+        reports_reference_html_output_path = (
+            "/tmp/reference_html/datacenter_dashboard_reports_reference_2026-05-22.html"
+        )
         acceptance_report_output_path = ""
         stage_md_reports_generation = "1:DATACENTER_PIPELINE_ENABLED"
         stage_enrichment_write = "0:ENRICHMENT_NOT_ENABLED"
         stage_enrichment_audit = "0:ENRICHMENT_NOT_ENABLED"
         stage_enrichment_export_json = "0:ENRICHMENT_NOT_ENABLED"
         stage_structured_dashboard_build = "0:REPORTS_MODE_REMAINS_ACTIVE"
+        stage_reports_reference_build = "1:FOLLOWS_STRUCTURED_BUILD"
         stage_html_render = "1:CURRENT_RENDER_HTML_CONFIG"
         stage_acceptance_report = "0:CONFIG_DISABLED"
         stage_fallback_reports_build = "1:FALLBACK_ENABLED"
@@ -573,5 +619,21 @@ def test_scheduler_cli_inspect_dashboard_config_with_plan_prints_plan_lines(
     assert code == 0
     assert "SUMMARY scheduler_enrichment_plan.status=OK" in captured.out
     assert "SUMMARY scheduler_enrichment_plan.source_mode=reports" in captured.out
+    assert "SUMMARY scheduler_dashboard_config.reports_reference_enabled=1" in captured.out
+    assert "SUMMARY scheduler_dashboard_config.reports_reference_db=/tmp/reports_reference.db" in captured.out
+    assert "SUMMARY scheduler_dashboard_config.reports_reference_html_output_dir=/tmp/reference_html" in captured.out
+    assert (
+        "SUMMARY scheduler_dashboard_config.reports_reference_expected_html_output_path="
+        "/tmp/reference_html/datacenter_dashboard_reports_reference_2026-05-22.html"
+    ) in captured.out
+    assert "SUMMARY scheduler_enrichment_plan.reports_reference_db=/tmp/reports_reference.db" in captured.out
+    assert (
+        "SUMMARY scheduler_enrichment_plan.reports_reference_html_output_path="
+        "/tmp/reference_html/datacenter_dashboard_reports_reference_2026-05-22.html"
+    ) in captured.out
     assert "SUMMARY scheduler_enrichment_plan.stage.md_reports_generation=1:DATACENTER_PIPELINE_ENABLED" in captured.out
     assert "SUMMARY scheduler_enrichment_plan.stage.enrichment_write=0:ENRICHMENT_NOT_ENABLED" in captured.out
+    assert (
+        "SUMMARY scheduler_enrichment_plan.stage.reports_reference_build="
+        "1:FOLLOWS_STRUCTURED_BUILD"
+    ) in captured.out

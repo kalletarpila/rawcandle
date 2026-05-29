@@ -24,6 +24,9 @@ _OPTIONAL_CONFIG_KEYS.update(
         "datacenter_dashboard_enabled",
         "datacenter_dashboard_db",
         "datacenter_dashboard_html_output_dir",
+        "datacenter_dashboard_reports_reference_enabled",
+        "datacenter_dashboard_reports_reference_db",
+        "datacenter_dashboard_reports_reference_html_output_dir",
         "datacenter_dashboard_source_mode",
         "datacenter_enrichment_enabled",
         "datacenter_enrichment_apply_migrations",
@@ -45,6 +48,9 @@ DEFAULT_DATACENTER_ENRICHMENT_WATCHLIST_FILE = (
     "/home/kalle/projects/rawcandle/watchlists/datacenter_watchlist.txt"
 )
 DEFAULT_DATACENTER_ENRICHMENT_WRITE_MODE = "replace-date"
+DEFAULT_DATACENTER_DASHBOARD_REPORTS_REFERENCE_DB = (
+    "/home/kalle/projects/rawcandle/temp/datacenter_dashboard_reports_reference.db"
+)
 
 
 @dataclass(eq=True)
@@ -64,6 +70,11 @@ class StockUpdateSchedulerConfig:
     datacenter_dashboard_html_output_dir: str = (
         "/home/kalle/projects/rawcandle/swing_reports"
     )
+    datacenter_dashboard_reports_reference_enabled: bool = False
+    datacenter_dashboard_reports_reference_db: str = (
+        DEFAULT_DATACENTER_DASHBOARD_REPORTS_REFERENCE_DB
+    )
+    datacenter_dashboard_reports_reference_html_output_dir: str = ""
     datacenter_dashboard_source_mode: str = "reports"
     datacenter_enrichment_enabled: bool = False
     datacenter_enrichment_apply_migrations: bool = False
@@ -126,6 +137,8 @@ def validate_scheduler_config(
         raise ValueError("technical_relevance_enabled must be a bool")
     if type(config.datacenter_dashboard_enabled) is not bool:
         raise ValueError("datacenter_dashboard_enabled must be a bool")
+    if type(config.datacenter_dashboard_reports_reference_enabled) is not bool:
+        raise ValueError("datacenter_dashboard_reports_reference_enabled must be a bool")
     if config.datacenter_dashboard_source_mode not in SUPPORTED_DATACENTER_DASHBOARD_SOURCE_MODES:
         raise ValueError(
             "datacenter_dashboard_source_mode must be one of: "
@@ -150,6 +163,13 @@ def validate_scheduler_config(
         raise ValueError("datacenter_dashboard_db must be non-empty")
     if not config.datacenter_dashboard_html_output_dir:
         raise ValueError("datacenter_dashboard_html_output_dir must be non-empty")
+    if not config.datacenter_dashboard_reports_reference_db:
+        raise ValueError("datacenter_dashboard_reports_reference_db must be non-empty")
+
+    normalized_reports_reference_html_output_dir = (
+        config.datacenter_dashboard_reports_reference_html_output_dir
+        or config.datacenter_dashboard_html_output_dir
+    )
 
     return StockUpdateSchedulerConfig(
         enabled_markets=enabled_markets,
@@ -163,6 +183,15 @@ def validate_scheduler_config(
         datacenter_dashboard_enabled=config.datacenter_dashboard_enabled,
         datacenter_dashboard_db=config.datacenter_dashboard_db,
         datacenter_dashboard_html_output_dir=config.datacenter_dashboard_html_output_dir,
+        datacenter_dashboard_reports_reference_enabled=(
+            config.datacenter_dashboard_reports_reference_enabled
+        ),
+        datacenter_dashboard_reports_reference_db=(
+            config.datacenter_dashboard_reports_reference_db
+        ),
+        datacenter_dashboard_reports_reference_html_output_dir=(
+            normalized_reports_reference_html_output_dir
+        ),
         datacenter_dashboard_source_mode=config.datacenter_dashboard_source_mode,
         datacenter_enrichment_enabled=config.datacenter_enrichment_enabled,
         datacenter_enrichment_apply_migrations=config.datacenter_enrichment_apply_migrations,
@@ -207,6 +236,17 @@ def scheduler_config_from_dict(data: Dict[str, Any]) -> StockUpdateSchedulerConf
         datacenter_dashboard_html_output_dir=data.get(
             "datacenter_dashboard_html_output_dir",
             "/home/kalle/projects/rawcandle/swing_reports",
+        ),
+        datacenter_dashboard_reports_reference_enabled=data.get(
+            "datacenter_dashboard_reports_reference_enabled", False
+        ),
+        datacenter_dashboard_reports_reference_db=data.get(
+            "datacenter_dashboard_reports_reference_db",
+            DEFAULT_DATACENTER_DASHBOARD_REPORTS_REFERENCE_DB,
+        ),
+        datacenter_dashboard_reports_reference_html_output_dir=data.get(
+            "datacenter_dashboard_reports_reference_html_output_dir",
+            "",
         ),
         datacenter_dashboard_source_mode=data.get("datacenter_dashboard_source_mode", "reports"),
         datacenter_enrichment_enabled=data.get("datacenter_enrichment_enabled", False),
