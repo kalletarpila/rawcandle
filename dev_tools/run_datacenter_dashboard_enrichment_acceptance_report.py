@@ -112,6 +112,21 @@ def _watchlist_tickers(rows: list[dict[str, object]]) -> set[str]:
     }
 
 
+def _count_field_differences(
+    reports_tickers: dict[str, dict[str, object]],
+    enrichment_tickers: dict[str, dict[str, object]],
+    common_tickers: list[str],
+    field_name: str,
+) -> int:
+    differences = 0
+    for ticker in common_tickers:
+        if _normalize(reports_tickers[ticker].get(field_name)) != _normalize(
+            enrichment_tickers[ticker].get(field_name)
+        ):
+            differences += 1
+    return differences
+
+
 def _trace_model_name(enrichment_trace_count: int, reports_trace_count: int) -> str:
     if enrichment_trace_count >= reports_trace_count:
         return "enrichment_field_presence_v0"
@@ -191,6 +206,29 @@ def main(argv: list[str] | None = None) -> int:
     reports_tickers = _ticker_map(reports_snapshot.tickers)
     enrichment_tickers = _ticker_map(enrichment_snapshot.tickers)
     common_tickers = sorted(set(reports_tickers) & set(enrichment_tickers))
+    pullback_validity_differences = _count_field_differences(
+        reports_tickers,
+        enrichment_tickers,
+        common_tickers,
+        "pullback_validity",
+    )
+    entry_readiness_differences = _count_field_differences(
+        reports_tickers,
+        enrichment_tickers,
+        common_tickers,
+        "entry_readiness",
+    )
+    candidate_priority_label_differences = _count_field_differences(
+        reports_tickers,
+        enrichment_tickers,
+        common_tickers,
+        "candidate_priority_label",
+    )
+    factual_candidate_parity_clean = (
+        pullback_validity_differences == 0
+        and entry_readiness_differences == 0
+        and candidate_priority_label_differences == 0
+    )
 
     reports_actions = _count_by_action(reports_snapshot.tickers)
     enrichment_actions = _count_by_action(enrichment_snapshot.tickers)
@@ -317,6 +355,42 @@ def main(argv: list[str] | None = None) -> int:
             accepted_differences += 1
         _print_row("section_counts", section_name, reports_count, enrichment_count, delta, status)
 
+    print("section;factual_candidate_parity")
+    _print_row("factual_candidate_parity", "metric", "reports_value", "enrichment_value", "status", "details")
+    factual_candidate_parity_status = "OK" if factual_candidate_parity_clean else "REVIEW"
+    _print_row(
+        "factual_candidate_parity",
+        "status",
+        "CLEAN" if factual_candidate_parity_clean else "DIFFERS",
+        "CLEAN" if factual_candidate_parity_clean else "DIFFERS",
+        factual_candidate_parity_status,
+        "PULLBACK_VALIDITY_ENTRY_READINESS_CANDIDATE_PRIORITY_LABEL",
+    )
+    _print_row(
+        "factual_candidate_parity",
+        "pullback_validity_differences",
+        pullback_validity_differences,
+        pullback_validity_differences,
+        "OK" if pullback_validity_differences == 0 else "REVIEW",
+        "",
+    )
+    _print_row(
+        "factual_candidate_parity",
+        "entry_readiness_differences",
+        entry_readiness_differences,
+        entry_readiness_differences,
+        "OK" if entry_readiness_differences == 0 else "REVIEW",
+        "",
+    )
+    _print_row(
+        "factual_candidate_parity",
+        "candidate_priority_label_differences",
+        candidate_priority_label_differences,
+        candidate_priority_label_differences,
+        "OK" if candidate_priority_label_differences == 0 else "REVIEW",
+        "",
+    )
+
     print("section;action_acceptance")
     _print_row("action_acceptance", "metric", "reports_value", "enrichment_value", "status", "details")
     sell_diff = abs(reports_actions.get("SELL", 0) - enrichment_actions.get("SELL", 0))
@@ -325,7 +399,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     neutral_value = enrichment_actions.get("NEUTRAL", 0)
     major_action_status = "OK" if major_action_mismatches == 0 else "REVIEW"
-    if sell_diff <= 5 and tighten_diff <= 15 and neutral_value <= 1:
+    if major_action_mismatches > 0 and factual_candidate_parity_clean:
+        major_action_status = "ACCEPTED_DIFF"
+        accepted_differences += 1
+    elif (
+        major_action_mismatches > 0
+        and factual_candidate_parity_clean
+        and sell_diff <= 5
+        and tighten_diff <= 15
+        and neutral_value <= 1
+    ):
         major_action_status = "ACCEPTED_DIFF"
         accepted_differences += 1
     action_rows = [
@@ -344,6 +427,13 @@ def main(argv: list[str] | None = None) -> int:
             "NEAR_ZERO_ACCEPTED" if neutral_value <= 1 else "UNEXPECTED_NEUTRAL_COUNT",
         ),
         ("total_common_tickers", len(common_tickers), len(common_tickers), "OK", ""),
+        (
+            "action_snapshot_residual_status",
+            "FACTUAL_CANDIDATE_PARITY_CLEAN" if factual_candidate_parity_clean else "FACTUAL_PARITY_NOT_CLEAN",
+            "FACTUAL_CANDIDATE_PARITY_CLEAN" if factual_candidate_parity_clean else "FACTUAL_PARITY_NOT_CLEAN",
+            major_action_status,
+            f"SELL_DIFF={sell_diff},TIGHTEN_DIFF={tighten_diff},ENRICHMENT_NEUTRAL={neutral_value}",
+        ),
         (
             "major_action_mismatches",
             major_action_mismatches,
@@ -545,12 +635,21 @@ def main(argv: list[str] | None = None) -> int:
     print("section;blockers")
     _print_row("blockers", "blocker", "status", "details")
     blocker_rows: list[tuple[str, str, str]] = []
-    if major_action_status == "REVIEW":
+    if major_action_status == "REVIEW" and not factual_candidate_parity_clean:
         blocker_rows.append(("action_parity", "BLOCKING", "UNEXPLAINED_ACTION_GAP"))
         blockers_count += 1
     else:
         blocker_rows.append(
-            ("action_parity", "NON_BLOCKING", f"SELL_TO_REDUCE={sell_to_reduce},REDUCE_TO_TIGHTEN_STOP={reduce_to_tighten}")
+            (
+                "action_parity",
+                "NON_BLOCKING",
+                (
+                    "FACTUAL_CANDIDATE_PARITY_CLEAN;"
+                    if factual_candidate_parity_clean
+                    else ""
+                )
+                + f"SELL_TO_REDUCE={sell_to_reduce},REDUCE_TO_TIGHTEN_STOP={reduce_to_tighten}",
+            )
         )
     if watchlist_status == "REVIEW":
         blocker_rows.append(("watchlist_parity", "BLOCKING", watchlist_details or "UNEXPLAINED_WATCHLIST_GAP"))

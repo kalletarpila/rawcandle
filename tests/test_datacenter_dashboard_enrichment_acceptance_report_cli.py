@@ -129,6 +129,10 @@ def _dashboard_input(
                 bullish_candle_signal=None,
                 bullish_divergence_signal=None,
                 hidden_bullish_divergence_signal=None,
+                pullback_validity=row.get("pullback_validity"),
+                entry_readiness=row.get("entry_readiness"),
+                candidate_priority=row.get("candidate_priority"),
+                candidate_priority_label=row.get("candidate_priority_label"),
                 action_bucket=row.get("action"),
                 action_label=row.get("action"),
                 data_status="READY",
@@ -457,7 +461,7 @@ def test_large_unexplained_action_gap_creates_blocker(tmp_path, capsys):
         reports_db,
         _dashboard_input(
             ticker_rows=[
-                {"ticker": "AAA", "action": "SELL"},
+                {"ticker": "AAA", "action": "SELL", "pullback_validity": "VALID_PULLBACK"},
                 {"ticker": "BBB", "action": "SELL"},
                 {"ticker": "CCC", "action": "SELL"},
                 {"ticker": "DDD", "action": "SELL"},
@@ -471,7 +475,7 @@ def test_large_unexplained_action_gap_creates_blocker(tmp_path, capsys):
         enrichment_db,
         _dashboard_input(
             ticker_rows=[
-                {"ticker": "AAA", "action": "REDUCE"},
+                {"ticker": "AAA", "action": "REDUCE", "pullback_validity": "NO_PULLBACK"},
                 {"ticker": "BBB", "action": "REDUCE"},
                 {"ticker": "CCC", "action": "REDUCE"},
                 {"ticker": "DDD", "action": "REDUCE"},
@@ -494,6 +498,140 @@ def test_large_unexplained_action_gap_creates_blocker(tmp_path, capsys):
 
     assert exit_code == 0
     assert error == ""
+    assert "blockers;action_parity;BLOCKING;UNEXPLAINED_ACTION_GAP" in output
+    assert (
+        "SUMMARY datacenter_dashboard_enrichment_acceptance_report.recommendation="
+        "NOT_READY_NEEDS_MORE_FIXES"
+    ) in output
+
+
+def test_action_mismatches_do_not_block_when_factual_candidate_parity_is_clean(tmp_path, capsys):
+    reports_db = tmp_path / "reports.db"
+    enrichment_db = tmp_path / "enrichment.db"
+    analysis_db = tmp_path / "analysis.db"
+    base_fields = {
+        "pullback_validity": "VALID_PULLBACK",
+        "entry_readiness": "READY",
+        "candidate_priority": 1,
+        "candidate_priority_label": "P1_READY",
+    }
+    reports_run_id = _persist(
+        reports_db,
+        _dashboard_input(
+            ticker_rows=[
+                {"ticker": "AAA", "action": "SELL", **base_fields},
+                {"ticker": "BBB", "action": "SELL", **base_fields},
+                {"ticker": "CCC", "action": "SELL", **base_fields},
+                {"ticker": "DDD", "action": "SELL", **base_fields},
+                {"ticker": "EEE", "action": "SELL", **base_fields},
+                {"ticker": "FFF", "action": "SELL", **base_fields},
+                {"ticker": "GGG", "action": "SELL", **base_fields},
+                {"ticker": "HHH", "action": "SELL", **base_fields},
+                {"ticker": "III", "action": "SELL", **base_fields},
+                {"ticker": "JJJ", "action": "SELL", **base_fields},
+                {"ticker": "KKK", "action": "SELL", **base_fields},
+                {"ticker": "LLL", "action": "SELL", **base_fields},
+            ],
+        ),
+        run_id="REPORTS_RUN",
+    )
+    enrichment_run_id = _persist(
+        enrichment_db,
+        _dashboard_input(
+            ticker_rows=[
+                {"ticker": "AAA", "action": "REDUCE", **base_fields},
+                {"ticker": "BBB", "action": "REDUCE", **base_fields},
+                {"ticker": "CCC", "action": "REDUCE", **base_fields},
+                {"ticker": "DDD", "action": "REDUCE", **base_fields},
+                {"ticker": "EEE", "action": "REDUCE", **base_fields},
+                {"ticker": "FFF", "action": "REDUCE", **base_fields},
+                {"ticker": "GGG", "action": "REDUCE", **base_fields},
+                {"ticker": "HHH", "action": "REDUCE", **base_fields},
+                {"ticker": "III", "action": "REDUCE", **base_fields},
+                {"ticker": "JJJ", "action": "REDUCE", **base_fields},
+                {"ticker": "KKK", "action": "REDUCE", **base_fields},
+                {"ticker": "LLL", "action": "REDUCE", **base_fields},
+            ],
+        ),
+        run_id="ENRICH_RUN",
+    )
+    _create_analysis_copy(analysis_db)
+
+    exit_code, output, error = _run_cli(
+        capsys,
+        reports_db=reports_db,
+        reports_run_id=reports_run_id,
+        enrichment_db=enrichment_db,
+        enrichment_run_id=enrichment_run_id,
+        analysis_db=analysis_db,
+    )
+
+    assert exit_code == 0
+    assert error == ""
+    assert "factual_candidate_parity;pullback_validity_differences;0;0;OK;" in output
+    assert "factual_candidate_parity;entry_readiness_differences;0;0;OK;" in output
+    assert "factual_candidate_parity;candidate_priority_label_differences;0;0;OK;" in output
+    assert (
+        "action_acceptance;major_action_mismatches;12;12;ACCEPTED_DIFF;"
+        "SELL_TO_REDUCE=12,REDUCE_TO_TIGHTEN_STOP=0"
+    ) in output
+    assert "blockers;action_parity;NON_BLOCKING;FACTUAL_CANDIDATE_PARITY_CLEAN" in output
+    assert (
+        "SUMMARY datacenter_dashboard_enrichment_acceptance_report.recommendation="
+        "READY_FOR_SCHEDULER_SWITCH_PLANNING"
+    ) in output
+
+
+def test_action_mismatches_still_block_when_factual_candidate_parity_is_not_clean(tmp_path, capsys):
+    reports_db = tmp_path / "reports.db"
+    enrichment_db = tmp_path / "enrichment.db"
+    analysis_db = tmp_path / "analysis.db"
+    reports_run_id = _persist(
+        reports_db,
+        _dashboard_input(
+            ticker_rows=[
+                {
+                    "ticker": "AAA",
+                    "action": "SELL",
+                    "pullback_validity": "VALID_PULLBACK",
+                    "entry_readiness": "READY",
+                    "candidate_priority": 1,
+                    "candidate_priority_label": "P1_READY",
+                }
+            ],
+        ),
+        run_id="REPORTS_RUN",
+    )
+    enrichment_run_id = _persist(
+        enrichment_db,
+        _dashboard_input(
+            ticker_rows=[
+                {
+                    "ticker": "AAA",
+                    "action": "REDUCE",
+                    "pullback_validity": "NO_PULLBACK",
+                    "entry_readiness": "NOT_READY",
+                    "candidate_priority": 5,
+                    "candidate_priority_label": "P5_NOT_READY",
+                }
+            ],
+        ),
+        run_id="ENRICH_RUN",
+    )
+    _create_analysis_copy(analysis_db)
+
+    exit_code, output, error = _run_cli(
+        capsys,
+        reports_db=reports_db,
+        reports_run_id=reports_run_id,
+        enrichment_db=enrichment_db,
+        enrichment_run_id=enrichment_run_id,
+        analysis_db=analysis_db,
+    )
+
+    assert exit_code == 0
+    assert error == ""
+    assert "factual_candidate_parity;pullback_validity_differences;1;1;REVIEW;" in output
     assert "blockers;action_parity;BLOCKING;UNEXPLAINED_ACTION_GAP" in output
     assert (
         "SUMMARY datacenter_dashboard_enrichment_acceptance_report.recommendation="
