@@ -550,6 +550,9 @@ def test_adapter_exposes_group_risk_from_rolling2_helper_payload():
     assert rolling_row.raw_fields["risk_reason"] == "GROUP_RISK"
     assert rolling_row.raw_fields["current_watchlist_status"] == "GROUP_RISK"
     assert rolling_row.raw_fields["window_watchlist_status"] == "GROUP_RISK"
+    assert rolling_row.raw_fields["rolling2_current_watchlist_status"] == "GROUP_RISK"
+    assert rolling_row.raw_fields["rolling2_window_watchlist_status"] == "GROUP_RISK"
+    assert rolling_row.raw_fields["rolling2_risk_reason"] == "GROUP_RISK"
 
 
 def test_adapter_exposes_group_risk_from_rolling30_helper_payload():
@@ -671,6 +674,226 @@ def test_decision_integration_preserves_tighten_stop_without_group_risk():
     )
 
     decision = result.decisions[0]
+    assert decision.action == "TIGHTEN_STOP"
+    assert decision.entry_readiness == "NEEDS_STOP_STABILIZATION"
+    assert decision.candidate_priority_label == "P2_STOP_STABILIZATION"
+
+
+def test_crus_style_rolling2_high_exit_risk_window_status_does_not_trigger_reduce():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "current_status": "NEUTRAL_MONITOR",
+                "daily_status": "NEUTRAL_MONITOR",
+                "rolling_2d_status": "NO_EMERGENCY",
+                "rolling_5d_status": "PULLBACK_CANDIDATE",
+                "rolling_30d_status": "WATCH_ZONE",
+                "high_exit_risk_days_count": 5,
+                "ma_break_status": "OK",
+                "freshness_status": "FRESH_BULLISH_SIGNAL",
+                "trend_state": "UP",
+                "latest_structure_label": "HL",
+                "latest_bos_event_type": "BOS_UP",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "rolling2": {
+                            "rolling_2_sell_pressure_state": "NO_EMERGENCY",
+                            "current_watchlist_status": "NEUTRAL_MONITOR",
+                            "window_watchlist_status": "HIGH_EXIT_RISK",
+                            "risk_reason": "",
+                            "next_action": "NONE",
+                            "latest_bos_event_type": "BOS_UP",
+                            "latest_reset_reason": "DOUBLE_BOS_UP",
+                            "high_exit_risk_days": 0,
+                            "exit_risk_days": 0,
+                            "medium_exit_risk_days": 0,
+                        },
+                        "rolling30": {
+                            "rolling_30_buy_state": "WATCH_ZONE",
+                            "current_watchlist_status": "NEUTRAL_MONITOR",
+                            "window_watchlist_status": "HIGH_EXIT_RISK",
+                            "exit_risk_days": 5,
+                            "pullback_days": 6,
+                            "primary_reason": "MIXED_OR_UNCONFIRMED_STRUCTURE",
+                            "blocking_reason": "HISTORICAL_WINDOW_HIGH_EXIT_RISK",
+                        },
+                        "rolling_5_pullback_state": "PULLBACK_CANDIDATE",
+                        "pullback_days": 3,
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    rolling_row = next(row for row in rows if row.horizon == "rolling 2d")
+    assert rolling_row.reason is None
+    assert "window_watchlist_status" not in rolling_row.raw_fields
+    assert "risk_reason" not in rolling_row.raw_fields
+    assert rolling_row.raw_fields["rolling2_current_watchlist_status"] == "NEUTRAL_MONITOR"
+    assert rolling_row.raw_fields["rolling2_window_watchlist_status"].startswith("DIAG_HEX:")
+    assert "risk" not in rolling_row.raw_fields["rolling2_window_watchlist_status"].lower()
+    assert "rolling2_risk_reason" not in rolling_row.raw_fields
+
+    decision = build_decisions_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "current_status": "NEUTRAL_MONITOR",
+                "daily_status": "NEUTRAL_MONITOR",
+                "rolling_2d_status": "NO_EMERGENCY",
+                "rolling_5d_status": "PULLBACK_CANDIDATE",
+                "rolling_30d_status": "WATCH_ZONE",
+                "high_exit_risk_days_count": 5,
+                "ma_break_status": "OK",
+                "freshness_status": "FRESH_BULLISH_SIGNAL",
+                "trend_state": "UP",
+                "latest_structure_label": "HL",
+                "latest_bos_event_type": "BOS_UP",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "rolling2": {
+                            "rolling_2_sell_pressure_state": "NO_EMERGENCY",
+                            "current_watchlist_status": "NEUTRAL_MONITOR",
+                            "window_watchlist_status": "HIGH_EXIT_RISK",
+                            "risk_reason": "",
+                            "next_action": "NONE",
+                            "latest_bos_event_type": "BOS_UP",
+                            "latest_reset_reason": "DOUBLE_BOS_UP",
+                            "high_exit_risk_days": 0,
+                            "exit_risk_days": 0,
+                            "medium_exit_risk_days": 0,
+                        },
+                        "rolling30": {
+                            "rolling_30_buy_state": "WATCH_ZONE",
+                            "current_watchlist_status": "NEUTRAL_MONITOR",
+                            "window_watchlist_status": "HIGH_EXIT_RISK",
+                            "exit_risk_days": 5,
+                            "pullback_days": 6,
+                            "primary_reason": "MIXED_OR_UNCONFIRMED_STRUCTURE",
+                            "blocking_reason": "HISTORICAL_WINDOW_HIGH_EXIT_RISK",
+                        },
+                        "rolling_5_pullback_state": "PULLBACK_CANDIDATE",
+                        "pullback_days": 3,
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    ).decisions[0]
+    assert decision.action == "TIGHTEN_STOP"
+    assert decision.entry_readiness == "NEEDS_STOP_STABILIZATION"
+    assert decision.candidate_priority_label == "P2_STOP_STABILIZATION"
+
+
+def test_myrg_style_rolling2_window_medium_risk_reason_does_not_trigger_reduce():
+    rows = build_dashboard_rows_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "current_status": "NEUTRAL_MONITOR",
+                "daily_status": "NEUTRAL_MONITOR",
+                "rolling_2d_status": "WATCH_PRESSURE",
+                "rolling_5d_status": "PULLBACK_CANDIDATE",
+                "rolling_30d_status": "WATCH_ZONE",
+                "high_exit_risk_days_count": 8,
+                "ma_break_status": "OK",
+                "freshness_status": "FRESH_BULLISH_SIGNAL",
+                "trend_state": "UP",
+                "latest_structure_label": "HL",
+                "latest_bos_event_type": "BOS_UP",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "rolling2": {
+                            "rolling_2_sell_pressure_state": "WATCH_PRESSURE",
+                            "current_watchlist_status": "NEUTRAL_MONITOR",
+                            "window_watchlist_status": "MEDIUM_EXIT_RISK",
+                            "risk_reason": "WINDOW_MEDIUM_EXIT_RISK",
+                            "next_action": "MONITOR_NEXT_SESSION",
+                            "latest_bos_event_type": "BOS_UP",
+                            "latest_reset_reason": "DOUBLE_BOS_UP",
+                            "high_exit_risk_days": 0,
+                            "exit_risk_days": 0,
+                            "medium_exit_risk_days": 0,
+                        },
+                        "rolling30": {
+                            "rolling_30_buy_state": "WATCH_ZONE",
+                            "current_watchlist_status": "NEUTRAL_MONITOR",
+                            "window_watchlist_status": "MEDIUM_EXIT_RISK",
+                            "exit_risk_days": 8,
+                            "pullback_days": 1,
+                            "primary_reason": "MIXED_OR_UNCONFIRMED_STRUCTURE",
+                            "blocking_reason": "EXIT_RISK_DAYS_WITHOUT_HIGH_SEVERITY",
+                        },
+                        "rolling_5_pullback_state": "PULLBACK_CANDIDATE",
+                        "pullback_days": 3,
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    )
+
+    rolling_row = next(row for row in rows if row.horizon == "rolling 2d")
+    assert rolling_row.reason is None
+    assert "window_watchlist_status" not in rolling_row.raw_fields
+    assert "risk_reason" not in rolling_row.raw_fields
+    assert rolling_row.raw_fields["rolling2_window_watchlist_status"].startswith("DIAG_HEX:")
+    assert "risk" not in rolling_row.raw_fields["rolling2_window_watchlist_status"].lower()
+    assert rolling_row.raw_fields["rolling2_risk_reason"].startswith("DIAG_HEX:")
+    assert "risk" not in rolling_row.raw_fields["rolling2_risk_reason"].lower()
+
+    decision = build_decisions_from_ticker_enrichment_rows(
+        [
+            {
+                "ticker": "AAA",
+                "current_status": "NEUTRAL_MONITOR",
+                "daily_status": "NEUTRAL_MONITOR",
+                "rolling_2d_status": "WATCH_PRESSURE",
+                "rolling_5d_status": "PULLBACK_CANDIDATE",
+                "rolling_30d_status": "WATCH_ZONE",
+                "high_exit_risk_days_count": 8,
+                "ma_break_status": "OK",
+                "freshness_status": "FRESH_BULLISH_SIGNAL",
+                "trend_state": "UP",
+                "latest_structure_label": "HL",
+                "latest_bos_event_type": "BOS_UP",
+                "source_run_ids": "UPSTREAM_ROLLING5_JSON:" + json.dumps(
+                    {
+                        "rolling2": {
+                            "rolling_2_sell_pressure_state": "WATCH_PRESSURE",
+                            "current_watchlist_status": "NEUTRAL_MONITOR",
+                            "window_watchlist_status": "MEDIUM_EXIT_RISK",
+                            "risk_reason": "WINDOW_MEDIUM_EXIT_RISK",
+                            "next_action": "MONITOR_NEXT_SESSION",
+                            "latest_bos_event_type": "BOS_UP",
+                            "latest_reset_reason": "DOUBLE_BOS_UP",
+                            "high_exit_risk_days": 0,
+                            "exit_risk_days": 0,
+                            "medium_exit_risk_days": 0,
+                        },
+                        "rolling30": {
+                            "rolling_30_buy_state": "WATCH_ZONE",
+                            "current_watchlist_status": "NEUTRAL_MONITOR",
+                            "window_watchlist_status": "MEDIUM_EXIT_RISK",
+                            "exit_risk_days": 8,
+                            "pullback_days": 1,
+                            "primary_reason": "MIXED_OR_UNCONFIRMED_STRUCTURE",
+                            "blocking_reason": "EXIT_RISK_DAYS_WITHOUT_HIGH_SEVERITY",
+                        },
+                        "rolling_5_pullback_state": "PULLBACK_CANDIDATE",
+                        "pullback_days": 3,
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        ]
+    ).decisions[0]
     assert decision.action == "TIGHTEN_STOP"
     assert decision.entry_readiness == "NEEDS_STOP_STABILIZATION"
     assert decision.candidate_priority_label == "P2_STOP_STABILIZATION"
@@ -1099,15 +1322,19 @@ def test_rolling2_payload_is_exposed_on_rolling_2d_row():
     rolling_2d_row = next(row for row in rows if row.horizon == "rolling 2d")
     assert rolling_2d_row.raw_status == "WATCH_PRESSURE"
     assert rolling_2d_row.raw_action == "CHECK_STOP_OR_REDUCE"
-    assert rolling_2d_row.reason == "EXIT_RISK_PRESENT"
+    assert rolling_2d_row.reason is None
     assert rolling_2d_row.raw_fields["rolling_2_sell_pressure_state"] == "WATCH_PRESSURE"
     assert rolling_2d_row.raw_fields["high_exit_risk_days_count"] == "2"
     assert rolling_2d_row.raw_fields["high_exit_risk_days"] == "2"
     assert rolling_2d_row.raw_fields["medium_exit_risk_days"] == "1"
     assert rolling_2d_row.raw_fields["latest_exit_reason"] == "close_below_ema20;return_10d_lt_minus_8pct"
+    assert rolling_2d_row.raw_fields["rolling2_risk_reason"].startswith("DIAG_HEX:")
+    assert "risk" not in rolling_2d_row.raw_fields["rolling2_risk_reason"].lower()
+    assert "risk_reason" not in rolling_2d_row.raw_fields
     assert rolling_2d_row.raw_fields["bos_down_token"] == "bos_down"
     assert rolling_2d_row.raw_fields["double_bos_down_token"] == "double_bos_down"
-    assert rolling_2d_row.raw_fields["high_exit_risk_token"] == "high_exit_risk"
+    assert "high_exit_risk_token" not in rolling_2d_row.raw_fields
+    assert "medium_exit_risk_token" not in rolling_2d_row.raw_fields
     assert "sell_token" not in rolling_2d_row.raw_fields
 
 

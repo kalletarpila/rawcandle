@@ -103,6 +103,21 @@ MA_BREAK_PAYLOAD_KEY = "ma_break"
 FRESHNESS_PAYLOAD_KEY = "freshness"
 ROLLING2_PAYLOAD_KEY = "rolling2"
 ROLLING30_PAYLOAD_KEY = "rolling30"
+ROLLING2_NON_GROUP_RISK_VALUES = {
+    "HIGH_EXIT_RISK",
+    "MEDIUM_EXIT_RISK",
+    "WINDOW_MEDIUM_EXIT_RISK",
+    "WINDOW_HIGH_EXIT_RISK",
+    "EXIT_RISK_DAYS_WITHOUT_HIGH_SEVERITY",
+    "HISTORICAL_WINDOW_HIGH_EXIT_RISK",
+}
+ROLLING2_REDUCE_SCAN_TERMS = (
+    "reduce",
+    "risk",
+    "high_exit_risk",
+    "exit_risk",
+    "subindustry_context_risk",
+)
 
 
 def _normalized_text(value: object) -> str | None:
@@ -177,6 +192,34 @@ def _rolling2_payload(payload: dict[str, object]) -> dict[str, object]:
 def _rolling30_payload(payload: dict[str, object]) -> dict[str, object]:
     value = payload.get(ROLLING30_PAYLOAD_KEY)
     return value if isinstance(value, dict) else {}
+
+
+def _is_group_risk_value(value: object) -> bool:
+    return _normalized_text(value) == "GROUP_RISK"
+
+
+def _is_non_group_rolling2_risk_value(value: object) -> bool:
+    normalized = _normalized_text(value)
+    if normalized is None:
+        return False
+    return normalized in ROLLING2_NON_GROUP_RISK_VALUES
+
+
+def _is_non_group_reduce_scannable_value(value: object) -> bool:
+    normalized = _normalized_text(value)
+    if normalized is None or normalized == "GROUP_RISK":
+        return False
+    lowered = normalized.lower()
+    return any(term in lowered for term in ROLLING2_REDUCE_SCAN_TERMS)
+
+
+def _rolling2_diagnostic_value(value: object) -> str | None:
+    normalized = _normalized_text(value)
+    if normalized is None:
+        return None
+    if _is_non_group_reduce_scannable_value(normalized):
+        return f"DIAG_HEX:{normalized.encode('utf-8').hex()}"
+    return normalized
 
 
 def _raw_fields_from_row(
@@ -386,7 +429,14 @@ def build_dashboard_rows_from_ticker_enrichment_rows(
                         rolling2_payload.get("rolling_2_sell_pressure_state")
                     ) or status_value
                     rolling2_action = _normalized_text(rolling2_payload.get("next_action"))
-                    rolling2_reason = _normalized_text(rolling2_payload.get("risk_reason")) or ""
+                    rolling2_payload_risk_reason = _normalized_text(
+                        rolling2_payload.get("risk_reason")
+                    )
+                    rolling2_reason = (
+                        rolling2_payload_risk_reason
+                        if _is_group_risk_value(rolling2_payload_risk_reason)
+                        else None
+                    )
                     if _normalized_text(rolling2_payload.get("high_exit_risk_days")) is not None:
                         extra_raw_fields["high_exit_risk_days"] = rolling2_payload.get("high_exit_risk_days")
                     if _normalized_text(rolling2_payload.get("medium_exit_risk_days")) is not None:
@@ -403,16 +453,31 @@ def build_dashboard_rows_from_ticker_enrichment_rows(
                     window_watchlist_status = _normalized_text(
                         rolling2_payload.get("window_watchlist_status")
                     )
-                    if current_watchlist_status is not None:
+                    current_watchlist_diag = _rolling2_diagnostic_value(current_watchlist_status)
+                    window_watchlist_diag = _rolling2_diagnostic_value(window_watchlist_status)
+                    risk_reason_diag = _rolling2_diagnostic_value(rolling2_payload_risk_reason)
+                    if current_watchlist_diag is not None:
+                        extra_raw_fields["rolling2_current_watchlist_status"] = current_watchlist_diag
+                    if window_watchlist_diag is not None:
+                        extra_raw_fields["rolling2_window_watchlist_status"] = window_watchlist_diag
+                    if risk_reason_diag is not None:
+                        extra_raw_fields["rolling2_risk_reason"] = risk_reason_diag
+                    if (
+                        current_watchlist_status is not None
+                        and not _is_non_group_reduce_scannable_value(current_watchlist_status)
+                    ):
                         extra_raw_fields["current_watchlist_status"] = current_watchlist_status
-                    if window_watchlist_status is not None:
+                    if (
+                        window_watchlist_status is not None
+                        and not _is_non_group_reduce_scannable_value(window_watchlist_status)
+                    ):
                         extra_raw_fields["window_watchlist_status"] = window_watchlist_status
-                    if _normalized_text(rolling2_payload.get("risk_reason")) is not None:
-                        extra_raw_fields["risk_reason"] = rolling2_payload.get("risk_reason")
+                    if _is_group_risk_value(rolling2_payload_risk_reason):
+                        extra_raw_fields["risk_reason"] = rolling2_payload_risk_reason
                     if "GROUP_RISK" in {
                         current_watchlist_status,
                         window_watchlist_status,
-                        _normalized_text(rolling2_payload.get("risk_reason")),
+                        rolling2_payload_risk_reason,
                     }:
                         extra_raw_fields["current_status"] = "GROUP_RISK"
                     if _normalized_text(rolling2_payload.get("next_action")) is not None:
@@ -430,16 +495,6 @@ def build_dashboard_rows_from_ticker_enrichment_rows(
                     if _normalized_text(rolling2_payload.get("latest_bearish_relevance_reason")) is not None:
                         extra_raw_fields["latest_bearish_relevance_reason"] = rolling2_payload.get("latest_bearish_relevance_reason")
                     extra_raw_fields["rolling_2_sell_pressure_state"] = rolling2_status
-                    if (
-                        _safe_int(rolling2_payload.get("high_exit_risk_days")) not in {None, 0}
-                        or (_normalized_text(rolling2_payload.get("latest_exit_risk_severity")) or "").upper() == "HIGH"
-                    ):
-                        extra_raw_fields["high_exit_risk_token"] = "high_exit_risk"
-                    if (
-                        _safe_int(rolling2_payload.get("medium_exit_risk_days")) not in {None, 0}
-                        or (_normalized_text(rolling2_payload.get("latest_exit_risk_severity")) or "").upper() == "MEDIUM"
-                    ):
-                        extra_raw_fields["medium_exit_risk_token"] = "medium_exit_risk"
                     if _normalized_text(rolling2_payload.get("latest_bos_event_type")) == "BOS_DOWN":
                         extra_raw_fields["bos_down_token"] = "bos_down"
                     latest_reset_reason = _normalized_text(rolling2_payload.get("latest_reset_reason"))
