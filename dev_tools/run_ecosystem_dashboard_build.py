@@ -25,6 +25,9 @@ from dev_tools.run_datacenter_dashboard_html import (
     build_dashboard_watchlist_model,
     generate_datacenter_dashboard_html_file,
 )
+from dev_tools.run_datacenter_dashboard_markdown import (
+    generate_datacenter_dashboard_markdown_file,
+)
 
 DEFAULT_DASHBOARD_DB = "/home/kalle/projects/rawcandle/data/ecosystem_dashboard.db"
 SUPPORTED_ECOSYSTEM_CODES = ("DATACENTER",)
@@ -44,6 +47,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--run-id")
     parser.add_argument("--render-html", action="store_true")
     parser.add_argument("--html-output")
+    parser.add_argument("--render-markdown", action="store_true")
+    parser.add_argument("--markdown-output")
     parser.add_argument("--title")
     return parser
 
@@ -258,6 +263,40 @@ def _validate_render_html_args(
     return normalized_output
 
 
+def _validate_render_markdown_args(
+    *,
+    render_markdown: bool,
+    markdown_output: str | None,
+    html_output: str | None,
+    report_date: str,
+) -> str | None:
+    normalized_output = (
+        markdown_output.strip()
+        if markdown_output is not None and markdown_output.strip()
+        else None
+    )
+    normalized_html_output = (
+        html_output.strip() if html_output is not None and html_output.strip() else None
+    )
+    if not render_markdown and normalized_output is not None:
+        raise ValueError("--markdown-output requires --render-markdown")
+    if not render_markdown:
+        return None
+    if normalized_output is None:
+        if normalized_html_output is None:
+            raise ValueError(
+                "--markdown-output is required when --render-markdown is provided unless "
+                "--html-output is also provided"
+            )
+        normalized_output = str(Path(normalized_html_output).with_suffix(".md"))
+    output_parent = Path(normalized_output).parent
+    if not output_parent.exists():
+        raise ValueError(f"markdown output parent directory does not exist: {output_parent}")
+    if not _REPORT_DATE_RE.match(report_date.strip()):
+        raise ValueError(f"invalid report_date format: {report_date.strip()}")
+    return normalized_output
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -265,6 +304,12 @@ def main(argv: list[str] | None = None) -> int:
             render_html=args.render_html,
             html_output=args.html_output,
             ecosystem_code=args.ecosystem_code,
+        )
+        normalized_markdown_output = _validate_render_markdown_args(
+            render_markdown=args.render_markdown,
+            markdown_output=args.markdown_output,
+            html_output=normalized_html_output,
+            report_date=args.report_date,
         )
         built_run_id, summary_lines = generate_ecosystem_dashboard_build(
             dashboard_db=args.dashboard_db,
@@ -301,12 +346,42 @@ def main(argv: list[str] | None = None) -> int:
             print(f"SUMMARY ecosystem_dashboard_build.html_output_path={normalized_html_output}")
             print(f"ERROR: HTML render failed after successful build: {exc}")
             return 1
+    if args.render_markdown:
+        try:
+            generate_datacenter_dashboard_markdown_file(
+                dashboard_db=args.dashboard_db,
+                ecosystem_code="DATACENTER",
+                run_id=built_run_id,
+                output_path=normalized_markdown_output,
+                report_date=None,
+                title=args.title,
+            )
+        except (ValueError, FileNotFoundError, sqlite3.DatabaseError, OSError) as exc:
+            for line in summary_lines:
+                print(line)
+            if args.render_html:
+                print("SUMMARY ecosystem_dashboard_build.render_html_requested=1")
+                print(f"SUMMARY ecosystem_dashboard_build.html_output_path={normalized_html_output}")
+                print("SUMMARY ecosystem_dashboard_build.html_render_status=OK")
+            print("SUMMARY ecosystem_dashboard_build.render_markdown_requested=1")
+            print(
+                f"SUMMARY ecosystem_dashboard_build.markdown_output_path={normalized_markdown_output}"
+            )
+            print("SUMMARY ecosystem_dashboard_build.markdown_render_status=FAILED")
+            print(f"ERROR: Markdown render failed after successful build: {exc}")
+            return 1
     for line in summary_lines:
         print(line)
     if args.render_html:
         print("SUMMARY ecosystem_dashboard_build.render_html_requested=1")
         print(f"SUMMARY ecosystem_dashboard_build.html_output_path={normalized_html_output}")
         print("SUMMARY ecosystem_dashboard_build.html_render_status=OK")
+    if args.render_markdown:
+        print("SUMMARY ecosystem_dashboard_build.render_markdown_requested=1")
+        print(
+            f"SUMMARY ecosystem_dashboard_build.markdown_output_path={normalized_markdown_output}"
+        )
+        print("SUMMARY ecosystem_dashboard_build.markdown_render_status=OK")
     return 0
 
 

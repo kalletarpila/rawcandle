@@ -88,6 +88,8 @@ def _result(overall_status):
         datacenter_dashboard_md_reports_status="SKIPPED",
         datacenter_dashboard_source_reports_available=0,
         datacenter_dashboard_html_output_path="",
+        datacenter_dashboard_markdown_output_path="",
+        datacenter_dashboard_markdown_render_status="SKIPPED",
         datacenter_dashboard_run_id="",
         datacenter_dashboard_skip_reason="",
         datacenter_dashboard_source_mode="reports",
@@ -95,6 +97,8 @@ def _result(overall_status):
         datacenter_dashboard_reports_reference_run_id="",
         datacenter_dashboard_reports_reference_dashboard_db="",
         datacenter_dashboard_reports_reference_html_output_path="",
+        datacenter_dashboard_reports_reference_markdown_output_path="",
+        datacenter_dashboard_reports_reference_markdown_render_status="SKIPPED",
         datacenter_enrichment_attempted=0,
         datacenter_enrichment_status="SKIPPED",
         datacenter_enrichment_readiness="SKIPPED",
@@ -166,6 +170,8 @@ def _skipped_result():
         datacenter_dashboard_md_reports_status="SKIPPED",
         datacenter_dashboard_source_reports_available=0,
         datacenter_dashboard_html_output_path="",
+        datacenter_dashboard_markdown_output_path="",
+        datacenter_dashboard_markdown_render_status="SKIPPED",
         datacenter_dashboard_run_id="",
         datacenter_dashboard_skip_reason="SKIP_NEXT_RUN",
         datacenter_dashboard_source_mode="reports",
@@ -173,6 +179,8 @@ def _skipped_result():
         datacenter_dashboard_reports_reference_run_id="",
         datacenter_dashboard_reports_reference_dashboard_db="",
         datacenter_dashboard_reports_reference_html_output_path="",
+        datacenter_dashboard_reports_reference_markdown_output_path="",
+        datacenter_dashboard_reports_reference_markdown_render_status="SKIPPED",
         datacenter_enrichment_attempted=0,
         datacenter_enrichment_status="SKIPPED",
         datacenter_enrichment_readiness="SKIPPED",
@@ -249,6 +257,8 @@ def test_scheduler_cli_successful_run_prints_top_level_summary_lines(monkeypatch
     assert "SUMMARY datacenter_dashboard.md_reports_status=SKIPPED" in captured.out
     assert "SUMMARY datacenter_dashboard.source_reports_available=0" in captured.out
     assert "SUMMARY datacenter_dashboard.html_output_path=" in captured.out
+    assert "SUMMARY datacenter_dashboard.markdown_output_path=" in captured.out
+    assert "SUMMARY datacenter_dashboard.markdown_render_status=SKIPPED" in captured.out
     assert "SUMMARY datacenter_dashboard.run_id=" in captured.out
     assert "SUMMARY datacenter_dashboard.skip_reason=" in captured.out
     assert "SUMMARY datacenter_dashboard_source_mode=reports" in captured.out
@@ -256,6 +266,11 @@ def test_scheduler_cli_successful_run_prints_top_level_summary_lines(monkeypatch
     assert "SUMMARY datacenter_dashboard.reports_reference_run_id=" in captured.out
     assert "SUMMARY datacenter_dashboard.reports_reference_dashboard_db=" in captured.out
     assert "SUMMARY datacenter_dashboard.reports_reference_html_output_path=" in captured.out
+    assert "SUMMARY datacenter_dashboard.reports_reference_markdown_output_path=" in captured.out
+    assert (
+        "SUMMARY datacenter_dashboard.reports_reference_markdown_render_status=SKIPPED"
+        in captured.out
+    )
     assert "SUMMARY datacenter_enrichment.attempted=0" in captured.out
     assert "SUMMARY datacenter_enrichment.status=SKIPPED" in captured.out
     assert "SUMMARY datacenter_enrichment.readiness=SKIPPED" in captured.out
@@ -286,6 +301,14 @@ def test_scheduler_cli_successful_run_prints_reports_reference_summary_when_pres
     result.datacenter_dashboard_reports_reference_html_output_path = (
         "/tmp/reference_html/datacenter_dashboard_reports_reference_2026-05-22.html"
     )
+    result.datacenter_dashboard_markdown_output_path = (
+        "/tmp/html/datacenter_dashboard_2026-05-22.md"
+    )
+    result.datacenter_dashboard_markdown_render_status = "OK"
+    result.datacenter_dashboard_reports_reference_markdown_output_path = (
+        "/tmp/reference_html/datacenter_dashboard_reports_reference_2026-05-22.md"
+    )
+    result.datacenter_dashboard_reports_reference_markdown_render_status = "OK"
     result.datacenter_dashboard_acceptance_report_status = "OK"
     result.datacenter_dashboard_acceptance_report_blockers = "0"
     result.datacenter_dashboard_acceptance_report_recommendation = (
@@ -306,6 +329,19 @@ def test_scheduler_cli_successful_run_prints_reports_reference_summary_when_pres
         "SUMMARY datacenter_dashboard.reports_reference_html_output_path="
         "/tmp/reference_html/datacenter_dashboard_reports_reference_2026-05-22.html"
     ) in captured.out
+    assert (
+        "SUMMARY datacenter_dashboard.markdown_output_path="
+        "/tmp/html/datacenter_dashboard_2026-05-22.md"
+    ) in captured.out
+    assert "SUMMARY datacenter_dashboard.markdown_render_status=OK" in captured.out
+    assert (
+        "SUMMARY datacenter_dashboard.reports_reference_markdown_output_path="
+        "/tmp/reference_html/datacenter_dashboard_reports_reference_2026-05-22.md"
+    ) in captured.out
+    assert (
+        "SUMMARY datacenter_dashboard.reports_reference_markdown_render_status=OK"
+        in captured.out
+    )
     assert "SUMMARY datacenter_dashboard.acceptance_report_status=OK" in captured.out
     assert "SUMMARY datacenter_dashboard.acceptance_report_blockers=0" in captured.out
     assert (

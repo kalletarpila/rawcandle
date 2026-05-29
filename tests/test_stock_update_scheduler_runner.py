@@ -2601,6 +2601,10 @@ def test_scheduler_runner_dashboard_runs_after_datacenter_reports(
             md_reports_status="OK",
             source_reports_available=4,
             html_output_path=kwargs["html_output"],
+            markdown_output_path=str(
+                Path(kwargs["html_output"]).with_suffix(".md")
+            ),
+            markdown_render_status="OK",
             run_id="ECO_DASHBOARD_DATACENTER_2026-05-22_20260525T000000Z",
             skip_reason="",
             error=None,
@@ -2619,6 +2623,10 @@ def test_scheduler_runner_dashboard_runs_after_datacenter_reports(
     assert calls[0]["reports_dir"] == "/home/kalle/projects/rawcandle/swing_reports"
     assert calls[0]["config"].datacenter_dashboard_db == str(dashboard_db)
     assert calls[0]["html_output"] == str(html_dir / "datacenter_dashboard_2026-05-22.html")
+    assert result.datacenter_dashboard_markdown_output_path == str(
+        html_dir / "datacenter_dashboard_2026-05-22.md"
+    )
+    assert result.datacenter_dashboard_markdown_render_status == "OK"
     assert result.datacenter_dashboard_attempted == 1
     assert result.datacenter_dashboard_status == "OK"
     assert result.datacenter_dashboard_md_reports_status == "OK"
@@ -2786,6 +2794,58 @@ def test_scheduler_runner_dashboard_failure_after_md_reports_is_visible(
     assert result.datacenter_dashboard_md_reports_status == "OK"
     assert result.datacenter_dashboard_skip_reason == "DASHBOARD_BUILD_FAILED"
     assert result.datacenter_dashboard_error == "build failed"
+
+
+def test_reports_mode_primary_dashboard_post_step_renders_markdown_directly(
+    tmp_path, monkeypatch, real_datacenter_dashboard
+):
+    dashboard_db = tmp_path / "ecosystem_dashboard.db"
+    html_dir = tmp_path / "html"
+    reports_dir = _prepare_ready_datacenter_reports_dir(tmp_path)
+    config = create_default_scheduler_config(
+        osakedata_db_path=str(tmp_path / "osakedata.db"),
+        analysis_db_path=str(tmp_path / "analysis.db"),
+        log_dir=str(tmp_path / "logs"),
+    )
+    config.datacenter_dashboard_db = str(dashboard_db)
+    config.datacenter_dashboard_html_output_dir = str(html_dir)
+
+    build_calls: list[dict[str, object]] = []
+    markdown_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        "dev_tools.run_ecosystem_dashboard_build.generate_ecosystem_dashboard_build",
+        lambda **kwargs: build_calls.append(kwargs)
+        or ("RUN_DIRECT", ["SUMMARY ecosystem_dashboard_build.status=OK"]),
+    )
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_html.generate_datacenter_dashboard_html_file",
+        lambda **kwargs: object(),
+    )
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_markdown.generate_datacenter_dashboard_markdown_file",
+        lambda **kwargs: markdown_calls.append(kwargs) or object(),
+    )
+
+    result = scheduler_runner._run_datacenter_dashboard_reports_post_step(
+        config=config,
+        reports_dir=str(reports_dir),
+        report_date="2026-05-22",
+        render_html=True,
+        html_output=str(html_dir / "datacenter_dashboard_2026-05-22.html"),
+        markdown_output=str(html_dir / "datacenter_dashboard_2026-05-22.md"),
+    )
+
+    assert len(build_calls) == 1
+    assert len(markdown_calls) == 1
+    assert markdown_calls[0]["dashboard_db"] == str(dashboard_db)
+    assert markdown_calls[0]["run_id"] == "RUN_DIRECT"
+    assert markdown_calls[0]["output_path"] == str(
+        html_dir / "datacenter_dashboard_2026-05-22.md"
+    )
+    assert result.status == "OK"
+    assert result.markdown_output_path == str(html_dir / "datacenter_dashboard_2026-05-22.md")
+    assert result.markdown_render_status == "OK"
 
 
 def test_scheduler_runner_enrichment_source_mode_disabled_keeps_reports_behavior(
@@ -2985,6 +3045,11 @@ def test_scheduler_runner_enrichment_enabled_executes_steps_in_order(
     assert any("--watchlist-file" in call for call in joined_calls)
     assert any("--output-json" in call for call in joined_calls)
     assert any("--input-mode structured" in call for call in joined_calls)
+    assert any("--render-markdown" in call for call in joined_calls)
+    assert any(
+        f"--markdown-output {html_dir / 'datacenter_dashboard_2026-05-22.md'}" in call
+        for call in joined_calls
+    )
     acceptance_call = next(call for call in joined_calls if "--reports-dashboard-db" in call)
     assert f"--reports-dashboard-db {dashboard_db}" in acceptance_call
     assert "--reports-run-id REPORTS_RUN" in acceptance_call
@@ -2994,6 +3059,10 @@ def test_scheduler_runner_enrichment_enabled_executes_steps_in_order(
     assert result.datacenter_dashboard_structured_build_status == "OK"
     assert result.datacenter_dashboard_reports_reference_status == "SKIPPED"
     assert result.datacenter_dashboard_reports_reference_run_id == ""
+    assert result.datacenter_dashboard_markdown_render_status == "OK"
+    assert result.datacenter_dashboard_markdown_output_path == str(
+        html_dir / "datacenter_dashboard_2026-05-22.md"
+    )
     assert result.datacenter_dashboard_acceptance_report_status == "OK"
     assert result.datacenter_dashboard_acceptance_report_blockers == "0"
     assert (
@@ -3144,6 +3213,10 @@ def test_scheduler_runner_enrichment_enabled_with_reports_reference_builds_separ
         in joined_calls[reference_idx]
     )
     assert (
+        f"--markdown-output {reference_html_dir / 'datacenter_dashboard_reports_reference_2026-05-22.md'}"
+        in joined_calls[reference_idx]
+    )
+    assert (
         f"--reports-dashboard-db {reference_db}" in joined_calls[acceptance_idx]
     )
     assert "--reports-run-id REPORTS_REFERENCE_RUN" in joined_calls[acceptance_idx]
@@ -3155,8 +3228,15 @@ def test_scheduler_runner_enrichment_enabled_with_reports_reference_builds_separ
     assert result.datacenter_dashboard_reports_reference_html_output_path == str(
         reference_html_dir / "datacenter_dashboard_reports_reference_2026-05-22.html"
     )
+    assert result.datacenter_dashboard_reports_reference_markdown_output_path == str(
+        reference_html_dir / "datacenter_dashboard_reports_reference_2026-05-22.md"
+    )
+    assert result.datacenter_dashboard_reports_reference_markdown_render_status == "OK"
     assert result.datacenter_dashboard_html_output_path == str(
         html_dir / "datacenter_dashboard_2026-05-22.html"
+    )
+    assert result.datacenter_dashboard_markdown_output_path == str(
+        html_dir / "datacenter_dashboard_2026-05-22.md"
     )
     assert result.datacenter_dashboard_fallback_used == 0
     assert result.datacenter_dashboard_final_source_mode == "enrichment"
@@ -3340,6 +3420,8 @@ def test_scheduler_runner_enrichment_write_failure_falls_back_when_enabled(
             md_reports_status="OK",
             source_reports_available=4,
             html_output_path=kwargs["html_output"],
+            markdown_output_path=kwargs["markdown_output"],
+            markdown_render_status="OK",
             run_id="REPORTS_RUN",
             source_mode="reports",
             final_source_mode="reports",
@@ -3348,6 +3430,7 @@ def test_scheduler_runner_enrichment_write_failure_falls_back_when_enabled(
 
     result = run_scheduler_config(config_path=str(config_path))
     assert len(fallback_calls) == 1
+    assert fallback_calls[0]["markdown_output"].endswith("datacenter_dashboard_2026-05-22.md")
     assert len(cli_calls) == 1
     assert result.datacenter_enrichment_attempted == 1
     assert result.datacenter_enrichment_status == "FAILED"
@@ -3356,6 +3439,9 @@ def test_scheduler_runner_enrichment_write_failure_falls_back_when_enabled(
     assert result.datacenter_dashboard_fallback_used == 1
     assert result.datacenter_dashboard_final_source_mode == "reports"
     assert result.datacenter_dashboard_status == "OK"
+    assert result.datacenter_dashboard_markdown_output_path.endswith(
+        "datacenter_dashboard_2026-05-22.md"
+    )
 
 
 def test_scheduler_runner_enrichment_audit_failure_falls_back_when_enabled(
@@ -4135,6 +4221,7 @@ def test_scheduler_runner_dashboard_helper_uses_dashboard_db_build_and_html_args
 
     build_calls = []
     html_calls = []
+    markdown_calls = []
 
     monkeypatch.setattr(
         "dev_tools.run_ecosystem_dashboard_build.generate_ecosystem_dashboard_build",
@@ -4144,6 +4231,10 @@ def test_scheduler_runner_dashboard_helper_uses_dashboard_db_build_and_html_args
     monkeypatch.setattr(
         "dev_tools.run_datacenter_dashboard_html.generate_datacenter_dashboard_html_file",
         lambda **kwargs: html_calls.append(kwargs),
+    )
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_markdown.generate_datacenter_dashboard_markdown_file",
+        lambda **kwargs: markdown_calls.append(kwargs),
     )
 
     config = create_default_scheduler_config(
@@ -4180,6 +4271,16 @@ def test_scheduler_runner_dashboard_helper_uses_dashboard_db_build_and_html_args
             "ecosystem_code": "DATACENTER",
             "run_id": "ECO_DASHBOARD_DATACENTER_2026-05-22_20260525T000000Z",
             "output": str(tmp_path / "html" / f"datacenter_dashboard_{report_date}.html"),
+            "report_date": None,
+            "title": None,
+        }
+    ]
+    assert markdown_calls == [
+        {
+            "dashboard_db": str(tmp_path / "ecosystem_dashboard.db"),
+            "ecosystem_code": "DATACENTER",
+            "run_id": "ECO_DASHBOARD_DATACENTER_2026-05-22_20260525T000000Z",
+            "output_path": str(tmp_path / "html" / f"datacenter_dashboard_{report_date}.md"),
             "report_date": None,
             "title": None,
         }

@@ -398,6 +398,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         "SUMMARY datacenter_dashboard.html_output_path="
         f"{result.datacenter_dashboard_html_output_path}"
     )
+    print(
+        "SUMMARY datacenter_dashboard.markdown_output_path="
+        f"{result.datacenter_dashboard_markdown_output_path}"
+    )
+    print(
+        "SUMMARY datacenter_dashboard.markdown_render_status="
+        f"{result.datacenter_dashboard_markdown_render_status}"
+    )
     print(f"SUMMARY datacenter_dashboard.run_id={result.datacenter_dashboard_run_id}")
     print(f"SUMMARY datacenter_dashboard.skip_reason={result.datacenter_dashboard_skip_reason}")
     print(
@@ -419,6 +427,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(
         "SUMMARY datacenter_dashboard.reports_reference_html_output_path="
         f"{result.datacenter_dashboard_reports_reference_html_output_path}"
+    )
+    print(
+        "SUMMARY datacenter_dashboard.reports_reference_markdown_output_path="
+        f"{result.datacenter_dashboard_reports_reference_markdown_output_path}"
+    )
+    print(
+        "SUMMARY datacenter_dashboard.reports_reference_markdown_render_status="
+        f"{result.datacenter_dashboard_reports_reference_markdown_render_status}"
     )
     print(
         "SUMMARY datacenter_enrichment.attempted="

@@ -193,6 +193,96 @@ def test_wrapper_forwards_render_html_and_html_output(tmp_path, monkeypatch, cap
     assert "SUMMARY ecosystem_dashboard_build.html_render_status=OK" in output
 
 
+def test_wrapper_forwards_markdown_args_and_writes_summary(
+    tmp_path, monkeypatch, capsys
+):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    markdown_output = tmp_path / "dashboard.md"
+    _write_report(
+        reports_dir / "datacenter_daily_2026-05-22_0000_full.csv",
+        "ticker;status\nNVDA;SELL\n",
+    )
+    captured_render: dict[str, object] = {}
+
+    def fake_generate(**kwargs):
+        return (
+            "RUN_MD",
+            (
+                "SUMMARY ecosystem_dashboard_build.status=OK",
+                "SUMMARY ecosystem_dashboard_build.run_id=RUN_MD",
+            ),
+        )
+
+    def fake_markdown_render(**kwargs):
+        captured_render.update(kwargs)
+        Path(kwargs["output_path"]).write_text("RUN_MD NVDA", encoding="utf-8")
+        return object()
+
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_build.generate_ecosystem_dashboard_build",
+        fake_generate,
+    )
+    monkeypatch.setattr(
+        "dev_tools.run_datacenter_dashboard_build.generate_datacenter_dashboard_markdown_file",
+        fake_markdown_render,
+    )
+
+    exit_code = main(
+        [
+            "--dashboard-db",
+            str(tmp_path / "ecosystem_dashboard.db"),
+            "--reports-dir",
+            str(reports_dir),
+            "--report-date",
+            "2026-05-22",
+            "--render-markdown",
+            "--markdown-output",
+            str(markdown_output),
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured_render == {
+        "dashboard_db": str(tmp_path / "ecosystem_dashboard.db"),
+        "ecosystem_code": "DATACENTER",
+        "run_id": "RUN_MD",
+        "output_path": str(markdown_output),
+        "report_date": None,
+        "title": None,
+    }
+    output = capsys.readouterr().out
+    assert f"SUMMARY ecosystem_dashboard_build.markdown_output_path={markdown_output}" in output
+    assert "SUMMARY ecosystem_dashboard_build.markdown_render_status=OK" in output
+
+
+def test_wrapper_markdown_output_without_render_markdown_fails(tmp_path, capsys):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    _write_report(
+        reports_dir / "datacenter_daily_2026-05-22_0000_full.csv",
+        "ticker;status\nNVDA;SELL\n",
+    )
+
+    exit_code = main(
+        [
+            "--dashboard-db",
+            str(tmp_path / "ecosystem_dashboard.db"),
+            "--reports-dir",
+            str(reports_dir),
+            "--report-date",
+            "2026-05-22",
+            "--markdown-output",
+            str(tmp_path / "dashboard.md"),
+        ]
+    )
+
+    assert exit_code == 2
+    output = capsys.readouterr().out
+    assert "SUMMARY ecosystem_dashboard_build.status=FAILED" in output
+    assert "--markdown-output requires --render-markdown" in output
+
+
 def test_wrapper_forwards_explicit_input_mode_reports(tmp_path, monkeypatch, capsys):
     reports_dir = tmp_path / "reports"
     reports_dir.mkdir()
