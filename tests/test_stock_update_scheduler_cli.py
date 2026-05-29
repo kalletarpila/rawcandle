@@ -275,6 +275,46 @@ def test_scheduler_cli_ok_overall_status_exits_zero(monkeypatch):
     assert cli.main(["--config", "/tmp/scheduler.json"]) == 0
 
 
+def test_scheduler_cli_successful_run_prints_reports_reference_summary_when_present(
+    monkeypatch, capsys
+):
+    result = _result(STATUS_OK)
+    result.datacenter_dashboard_run_id = "ENRICH_DASH_RUN"
+    result.datacenter_dashboard_reports_reference_status = "OK"
+    result.datacenter_dashboard_reports_reference_run_id = "REPORTS_REFERENCE_RUN"
+    result.datacenter_dashboard_reports_reference_dashboard_db = "/tmp/reference.db"
+    result.datacenter_dashboard_reports_reference_html_output_path = (
+        "/tmp/reference_html/datacenter_dashboard_reports_reference_2026-05-22.html"
+    )
+    result.datacenter_dashboard_acceptance_report_status = "OK"
+    result.datacenter_dashboard_acceptance_report_blockers = "0"
+    result.datacenter_dashboard_acceptance_report_recommendation = (
+        "READY_FOR_SCHEDULER_SWITCH_PLANNING"
+    )
+    result.datacenter_dashboard_final_source_mode = "enrichment"
+    monkeypatch.setattr(cli, "run_scheduler_config", lambda config_path: result)
+
+    code = cli.main(["--config", "/tmp/scheduler.json"])
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "SUMMARY datacenter_dashboard.run_id=ENRICH_DASH_RUN" in captured.out
+    assert "SUMMARY datacenter_dashboard.reports_reference_status=OK" in captured.out
+    assert "SUMMARY datacenter_dashboard.reports_reference_run_id=REPORTS_REFERENCE_RUN" in captured.out
+    assert "SUMMARY datacenter_dashboard.reports_reference_dashboard_db=/tmp/reference.db" in captured.out
+    assert (
+        "SUMMARY datacenter_dashboard.reports_reference_html_output_path="
+        "/tmp/reference_html/datacenter_dashboard_reports_reference_2026-05-22.html"
+    ) in captured.out
+    assert "SUMMARY datacenter_dashboard.acceptance_report_status=OK" in captured.out
+    assert "SUMMARY datacenter_dashboard.acceptance_report_blockers=0" in captured.out
+    assert (
+        "SUMMARY datacenter_dashboard.acceptance_report_recommendation="
+        "READY_FOR_SCHEDULER_SWITCH_PLANNING"
+    ) in captured.out
+    assert "SUMMARY datacenter_dashboard.final_source_mode=enrichment" in captured.out
+
+
 def test_scheduler_cli_ok_with_warnings_exits_one(monkeypatch):
     monkeypatch.setattr(
         cli, "run_scheduler_config", lambda config_path: _result(STATUS_OK_WITH_WARNINGS)

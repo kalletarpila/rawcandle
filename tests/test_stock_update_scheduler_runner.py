@@ -3066,7 +3066,9 @@ def test_scheduler_runner_enrichment_enabled_with_reports_reference_builds_separ
     )
     monkeypatch.setattr(
         "rawcandle.scheduler.runner._resolve_latest_dashboard_run_id",
-        lambda dashboard_db, ecosystem_code, report_date: "REPORTS_RUN",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("previous production reports run lookup should not be used")
+        ),
     )
 
     calls = []
@@ -3145,6 +3147,8 @@ def test_scheduler_runner_enrichment_enabled_with_reports_reference_builds_separ
         f"--reports-dashboard-db {reference_db}" in joined_calls[acceptance_idx]
     )
     assert "--reports-run-id REPORTS_REFERENCE_RUN" in joined_calls[acceptance_idx]
+    assert f"--enrichment-dashboard-db {dashboard_db}" in joined_calls[acceptance_idx]
+    assert "--enrichment-run-id ENRICH_DASH_RUN" in joined_calls[acceptance_idx]
     assert result.datacenter_dashboard_reports_reference_status == "OK"
     assert result.datacenter_dashboard_reports_reference_run_id == "REPORTS_REFERENCE_RUN"
     assert result.datacenter_dashboard_reports_reference_dashboard_db == str(reference_db)
@@ -3216,6 +3220,12 @@ def test_scheduler_runner_reports_reference_failure_does_not_trigger_fallback(
             expected_ticker_count=236,
             expected_group_count=54,
             expected_synthetic_ohlc_count=53,
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_latest_dashboard_run_id",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("previous production reports run lookup should not be used")
         ),
     )
 

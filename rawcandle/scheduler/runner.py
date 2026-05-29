@@ -1361,11 +1361,6 @@ def _run_datacenter_dashboard_enrichment_post_step(
         reports_dir,
         report_date,
     )
-    previous_reports_run_id = _resolve_latest_dashboard_run_id(
-        config.datacenter_dashboard_db,
-        "DATACENTER",
-        report_date,
-    )
     reports_reference_status = "SKIPPED"
     reports_reference_run_id = ""
     reports_reference_dashboard_db = config.datacenter_dashboard_reports_reference_db
@@ -1621,10 +1616,16 @@ def _run_datacenter_dashboard_enrichment_post_step(
     acceptance_report_recommendation = ""
     if config.datacenter_dashboard_run_acceptance_report:
         reports_dashboard_db = config.datacenter_dashboard_db
-        reports_run_id = previous_reports_run_id
+        reports_run_id = ""
         if reports_reference_enabled:
             reports_dashboard_db = config.datacenter_dashboard_reports_reference_db
             reports_run_id = reports_reference_run_id
+        else:
+            reports_run_id = _resolve_latest_dashboard_run_id(
+                config.datacenter_dashboard_db,
+                "DATACENTER",
+                report_date,
+            )
         if reports_run_id and built_run_id:
             acceptance_args = [
                 "--reports-dashboard-db",
