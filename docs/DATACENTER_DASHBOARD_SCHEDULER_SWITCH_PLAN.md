@@ -1,230 +1,329 @@
-# Datacenter Dashboard Scheduler Switch Plan
+# Datacenter Dashboard Scheduler Source-Mode Switch Plan
 
 ## 1. Purpose
 
-This document defines the planned staged transition from the current Datacenter dashboard scheduler flow, where dashboard snapshots are built from `.md` reports, to a future flow where dashboard snapshots are built from the enriched `analysis.db` path.
+This document defines the controlled operator plan for eventually switching the Datacenter dashboard scheduler post-step from reports-mode to enrichment-mode.
 
-This is a planning/spec document only.
+This is a docs/runbook planning step only.
 
 It does not:
 
-- switch scheduler behavior
-- change scheduler code
-- remove reports mode
+- switch scheduler source mode
+- change scheduler behavior
+- edit `scheduler_config.json`
+- authorize a production scheduler run
+- remove reports fallback
 - remove `.md` report generation
-- authorize production DB writes
-- authorize production schema changes
-
-Current acceptance status for planning input:
-
-- enrichment acceptance report recommendation: `READY_FOR_SCHEDULER_SWITCH_PLANNING`
-- blockers: `0`
-- accepted differences: known and classified
+- authorize production DB writes without explicit operator approval
 
 
-## 2. Current Production-Safe Flow
+## 2. Current Readiness Status
 
-Current scheduler post-step flow remains:
+Latest validated Datacenter parity state:
 
-`stock update`
--> `datacenter .md report generation`
--> `reports-mode dashboard build`
--> `ecosystem_dashboard.db`
--> `DB-backed HTML`
+- `pullback_validity_differences=0`
+- `entry_readiness_differences=0`
+- `candidate_priority_label_differences=0`
+- `final_field_parity_not_safe_for_switch=0`
+- `canonical_decision_input_missing=0`
 
-Operationally important points:
+Latest validated acceptance status after `3a977da`:
 
-- `.md` reports are still the current machine input source for the production-safe dashboard path.
-- reports mode remains the fallback and reference implementation
-- current scheduler summaries already expose Datacenter pipeline and dashboard status at a high level
+- `status=OK`
+- `blockers=0`
+- `recommendation=READY_FOR_SCHEDULER_SWITCH_PLANNING`
 
+Important interpretation:
 
-## 3. Target Future Flow
-
-Target future scheduler post-step flow:
-
-`stock update`
--> `datacenter .md report generation for audit/human review`
--> `enrichment write into analysis.db`
--> `enrichment audit`
--> `analysis-db enrichment export JSON`
--> `structured dashboard build into ecosystem_dashboard.db`
--> `DB-backed HTML`
--> `optional parity/acceptance report`
-
-Important boundary:
-
-- `.md` reports are still generated and retained
-- after switch completion they are no longer the machine input source for dashboard publishing
-- reports mode remains available as fallback/reference
+- enrichment source-mode is now factually aligned for:
+  - `pullback_validity`
+  - `entry_readiness`
+  - `candidate_priority_label`
+- raw snapshot `action` residuals remain visible
+- those residuals are non-blocking only under the updated factual candidate parity contract
 
 
-## 4. Required Production Preconditions Before Scheduler Switch
+## 3. Explicit Non-Goals
 
-Before any scheduler source-mode switch is allowed, all of the following should be true:
+This plan does not perform the switch by itself.
 
-- production `data/analysis.db` has the required enrichment schema applied
-- enrichment writer path can run non-dry against production `analysis.db`
-- temp-copy e2e smoke remains `OK`
-- enrichment acceptance report has `blockers=0`
-- reports-mode fallback still works end-to-end
-- dashboard HTML generated from the enrichment path has been reviewed visually
-- scheduler config paths are explicit and inspected
-- a backup and rollback plan exists before changing the scheduler source mode
+Required operational boundaries:
 
-These are preconditions for switch planning and later rollout, not proof that production switch should happen immediately.
+- reports-mode remains the default until config is intentionally changed
+- reports fallback must remain enabled for the initial switch attempt
+- Datacenter `.md` reports must still be generated before the dashboard post-step
+- no production `ecosystem_dashboard.db` switch should happen without backup and post-run validation
+- no scheduler migration step should be enabled implicitly
 
 
-## 5. Proposed Scheduler Config Additions
+## 4. Required Preconditions
 
-The following config fields are proposed for a future implementation. Exact names are proposal only unless already implemented in scheduler code.
+Before any operator changes scheduler config, all of the following must be true:
 
-- `datacenter_dashboard_source_mode = reports|enrichment`
-- `datacenter_enrichment_enabled = true|false`
-- `datacenter_enrichment_apply_migrations = false` by default
-- `datacenter_enrichment_taxonomy_version = DC_TAXONOMY_FULL_V1`
-- `datacenter_enrichment_watchlist_file = <path>`
-- `datacenter_enrichment_write_mode = replace-date`
-- `datacenter_dashboard_fallback_to_reports = true|false`
-- `datacenter_dashboard_run_acceptance_report = true|false`
+- tracked git worktree is clean
+- production `analysis.db` contains the Datacenter enrichment tables
+- production `analysis.db` contains the latest enrichment rows for the target signal date
+- latest enrichment audit is `READY`
+- latest acceptance report has:
+  - `status=OK`
+  - `blockers=0`
+  - `recommendation=READY_FOR_SCHEDULER_SWITCH_PLANNING`
+- watchlist file exists:
+  - `/home/kalle/projects/rawcandle/watchlists/datacenter_watchlist.txt`
+- Datacenter taxonomy CSV / pipeline prerequisites are OK through scheduler inspect
+- scheduler inspect-only output confirms:
+  - `datacenter_dashboard_source_mode` can be set to `enrichment`
+  - `datacenter_enrichment_enabled` can be set to `true`
+  - `datacenter_dashboard_fallback_to_reports` remains enabled
+  - `datacenter_enrichment_apply_migrations` remains `false`
 
-Intent of these proposals:
+Important current code reality:
 
-- source mode should be explicit
-- enrichment enablement should be independently controllable
-- production schema mutation should never happen implicitly
-- fallback behavior should be explicit and auditable
-
-
-## 6. Proposed Scheduler Execution Order
-
-Future staged execution order:
-
-1. Existing market stock update
-2. Existing Datacenter `.md` report generation
-3. Enrichment write
-4. Enrichment audit
-5. Enrichment export JSON
-6. Structured dashboard build
-7. HTML render
-8. Optional parity/acceptance report
-9. If enrichment path fails and fallback is enabled: reports-mode dashboard build
-
-Notes:
-
-- step 2 remains in place even after the enrichment path becomes primary
-- the reports build is retained as fallback until explicit later approval removes that dependency
+- current inspect-only code reports `enrichment_effective_status=CONFIGURED_NOT_WIRED` when enrichment is enabled
+- current enrichment plan also emits warning `ENRICHMENT_EXECUTION_NOT_WIRED`
+- therefore DB-20a prepares the switch plan and inspect-only validation path
+- DB-20a does not authorize an actual production source-mode flip yet
 
 
-## 7. Failure and Fallback Rules
+## 5. Exact Scheduler Config Fields
 
-Planned failure handling rules:
+Use the exact current scheduler config field names from [config.py](/home/kalle/projects/rawcandle/rawcandle/scheduler/config.py):
 
-### A. Enrichment write failure
+- `datacenter_dashboard_enabled`
+- `datacenter_dashboard_db`
+- `datacenter_dashboard_html_output_dir`
+- `datacenter_dashboard_source_mode`
+- `datacenter_enrichment_enabled`
+- `datacenter_enrichment_apply_migrations`
+- `datacenter_enrichment_taxonomy_version`
+- `datacenter_enrichment_watchlist_file`
+- `datacenter_enrichment_write_mode`
+- `datacenter_dashboard_fallback_to_reports`
+- `datacenter_dashboard_run_acceptance_report`
+- `analysis_db_path`
+- `osakedata_db_path`
 
-- do not write an enrichment dashboard snapshot as the canonical output
-- if fallback is enabled, run reports-mode dashboard build
-- scheduler summary should mark:
-  - enrichment failed
-  - fallback used
+Safe intended values for the eventual controlled switch:
 
-### B. Enrichment export failure
-
-- do not continue as if structured dashboard build succeeded
-- if fallback is enabled, run reports-mode dashboard build
-
-### C. Structured build failure
-
-- do not mark enrichment output as canonical
-- if fallback is enabled, run reports-mode dashboard build
-
-### D. Acceptance report blockers
-
-- if acceptance report returns blockers, reports-mode output remains canonical
-- do not mark the enrichment dashboard as production-ready solely because it was buildable
+- `datacenter_dashboard_enabled=true`
+- `datacenter_dashboard_source_mode="enrichment"`
+- `datacenter_enrichment_enabled=true`
+- `datacenter_enrichment_apply_migrations=false`
+- `datacenter_enrichment_taxonomy_version="DC_TAXONOMY_FULL_V1"`
+- `datacenter_enrichment_watchlist_file="/home/kalle/projects/rawcandle/watchlists/datacenter_watchlist.txt"`
+- `datacenter_enrichment_write_mode="replace-date"`
+- `datacenter_dashboard_fallback_to_reports=true`
+- `datacenter_dashboard_run_acceptance_report=true`
+- `analysis_db_path="/home/kalle/projects/rawcandle/data/analysis.db"`
+- `osakedata_db_path="/home/kalle/projects/rawcandle/data/osakedata.db"`
 
 
-## 8. Summary Lines Contract Proposal
+## 6. Inspect-Only Commands
 
-The scheduler should eventually emit explicit summary lines for the Datacenter dashboard source path. These are proposal-only for now:
+Inspect current scheduler dashboard config:
 
-```text
-SUMMARY datacenter_dashboard_source_mode=<reports|enrichment>
-SUMMARY datacenter_enrichment.attempted=<0|1>
-SUMMARY datacenter_enrichment.status=<OK|FAILED|SKIPPED>
-SUMMARY datacenter_enrichment.readiness=<READY|PARTIAL|FAILED>
-SUMMARY datacenter_enrichment.run_id=<...>
-SUMMARY datacenter_dashboard.enrichment_export_status=<OK|FAILED|SKIPPED>
-SUMMARY datacenter_dashboard.structured_build_status=<OK|FAILED|SKIPPED>
-SUMMARY datacenter_dashboard.fallback_used=<0|1>
-SUMMARY datacenter_dashboard.final_source_mode=<reports|enrichment>
+```bash
+PYTHONPATH=. python3 rawcandle/cli/run_stock_update_scheduler.py \
+  --config /home/kalle/projects/rawcandle/scheduler_config.json \
+  --inspect-dashboard-config \
+  --show-enrichment-plan
 ```
 
-Operational goals of the summary contract:
+Relevant inspect summary fields from the current CLI:
 
-- make fallback visible
-- distinguish attempted vs skipped
-- distinguish enrichment readiness from final published source mode
-
-
-## 9. Rollback Plan
-
-Rollback should be simple and explicit:
-
-- set source mode back to `reports`
-- leave enrichment tables in `analysis.db` in place for audit and diagnosis
-- do not delete `ecosystem_dashboard.db` snapshots
-- keep reports-mode build available
-- regenerate HTML from reports mode if needed
-
-Rollback should not require deleting enrichment data. It should only require switching the publishing source back to reports mode.
-
-
-## 10. First Implementation Steps After This Spec
-
-Planned staged follow-ups:
-
-### DB-17c
-
-- add scheduler config fields
-- add inspect-only visibility for those fields
-
-### DB-17d
-
-- add scheduler dry-run / plan output for the enrichment path
-
-### DB-17e
-
-- wire enrichment path behind a disabled config flag
-
-### DB-17f
-
-- enable fallback to reports mode
-
-### DB-17g
-
-- define local manual production DB migration and non-dry enrichment write procedure
-
-### DB-17h
-
-- final scheduler source-mode switch after explicit approval
+- `scheduler_dashboard_config.dashboard_source_mode`
+- `scheduler_dashboard_config.enrichment_enabled`
+- `scheduler_dashboard_config.enrichment_apply_migrations`
+- `scheduler_dashboard_config.enrichment_watchlist_file_status`
+- `scheduler_dashboard_config.dashboard_fallback_to_reports`
+- `scheduler_dashboard_config.dashboard_run_acceptance_report`
+- `scheduler_dashboard_config.enrichment_effective_status`
+- `scheduler_enrichment_plan.source_mode`
+- `scheduler_enrichment_plan.enrichment_enabled`
+- `scheduler_enrichment_plan.effective_status`
+- `scheduler_enrichment_plan.analysis_db_status`
+- `scheduler_enrichment_plan.watchlist_file_status`
+- `scheduler_enrichment_plan.fallback_to_reports`
+- `scheduler_enrichment_plan.run_acceptance_report`
+- `scheduler_enrichment_plan.stage.md_reports_generation`
+- `scheduler_enrichment_plan.stage.enrichment_write`
+- `scheduler_enrichment_plan.stage.enrichment_audit`
+- `scheduler_enrichment_plan.stage.enrichment_export_json`
+- `scheduler_enrichment_plan.stage.structured_dashboard_build`
+- `scheduler_enrichment_plan.stage.acceptance_report`
+- `scheduler_enrichment_plan.stage.fallback_reports_build`
 
 
-## 11. Explicit Non-Goals
+## 7. Controlled Switch Sequence
 
-This planning step does not include:
+### A. Backup
 
-- immediate scheduler switch
-- removal of reports mode
-- automatic migration of production `analysis.db` by scheduler without explicit approval
-- deletion of `.md` reports
-- production DB writes during planning
+Before any config change or scheduler run:
+
+- back up production `analysis.db`
+- back up production `ecosystem_dashboard.db`
+- use a timestamped directory under:
+  - `/home/kalle/projects/rawcandle/backups/`
+
+Example operator naming:
+
+- `/home/kalle/projects/rawcandle/backups/scheduler_switch_<UTC_TIMESTAMP>/analysis.db.before_switch`
+- `/home/kalle/projects/rawcandle/backups/scheduler_switch_<UTC_TIMESTAMP>/ecosystem_dashboard.db.before_switch`
+
+### B. Inspect Current Config
+
+Run:
+
+```bash
+PYTHONPATH=. python3 rawcandle/cli/run_stock_update_scheduler.py \
+  --config /home/kalle/projects/rawcandle/scheduler_config.json \
+  --inspect-dashboard-config \
+  --show-enrichment-plan
+```
+
+Expected pre-switch state today:
+
+- `scheduler_dashboard_config.dashboard_source_mode=reports`
+- `scheduler_dashboard_config.enrichment_enabled=0` or operator-chosen current local value
+- `scheduler_dashboard_config.dashboard_fallback_to_reports=1`
+- `scheduler_dashboard_config.enrichment_apply_migrations=0`
+
+### C. Update Config Intentionally
+
+Do not perform this inside DB-20a.
+
+When later authorized, update only the intended scheduler config fields:
+
+- `datacenter_dashboard_source_mode`
+- `datacenter_enrichment_enabled`
+- `datacenter_dashboard_fallback_to_reports`
+- `datacenter_dashboard_run_acceptance_report`
+
+Review the config diff before any run:
+
+- if config is tracked: inspect `git diff`
+- if config is local/untracked: inspect the file diff locally before execution
+
+### D. Inspect Switched Plan
+
+Run the same inspect-only command again after the intentional config edit.
+
+Minimum expected values for the planned switch:
+
+- `scheduler_dashboard_config.dashboard_source_mode=enrichment`
+- `scheduler_dashboard_config.enrichment_enabled=1`
+- `scheduler_dashboard_config.enrichment_apply_migrations=0`
+- `scheduler_dashboard_config.enrichment_watchlist_file_status=OK`
+- `scheduler_dashboard_config.dashboard_fallback_to_reports=1`
+- `scheduler_dashboard_config.dashboard_run_acceptance_report=1`
+- `scheduler_enrichment_plan.source_mode=enrichment`
+- `scheduler_enrichment_plan.enrichment_enabled=1`
+- `scheduler_enrichment_plan.analysis_db_status=OK`
+- `scheduler_enrichment_plan.watchlist_file_status=OK`
+- `scheduler_enrichment_plan.fallback_to_reports=1`
+- `scheduler_enrichment_plan.stage.md_reports_generation=1:DATACENTER_PIPELINE_ENABLED`
+- `scheduler_enrichment_plan.stage.fallback_reports_build=1:FALLBACK_ENABLED`
+
+Current important limitation:
+
+- current code is expected to show:
+  - `scheduler_dashboard_config.enrichment_effective_status=CONFIGURED_NOT_WIRED`
+  - `scheduler_enrichment_plan.effective_status=CONFIGURED_NOT_WIRED`
+  - warning `ENRICHMENT_EXECUTION_NOT_WIRED`
+- if those values remain present, stop after inspect-only review
+- do not perform a production scheduler source-mode switch yet
+
+### E. Controlled Manual Scheduler Execution
+
+Do not do this in DB-20a.
+
+Only after inspect-only output, code wiring, and explicit operator approval are complete:
+
+```bash
+PYTHONPATH=. python3 rawcandle/cli/run_stock_update_scheduler.py \
+  --config /home/kalle/projects/rawcandle/scheduler_config.json
+```
+
+Operational rule:
+
+- do not resume normal recurring scheduler operation first
+- use one controlled manual scheduler execution first
+
+### F. Post-Run Validation
+
+After the future manual scheduler run:
+
+- run enrichment audit
+- verify structured dashboard build status
+- run acceptance report
+- confirm production `ecosystem_dashboard.db` was updated only by the intended scheduler path
+- confirm reports fallback was not used unless explicitly noted and accepted
 
 
-## 12. Decision Boundary
+## 8. Rollback Plan
 
-Current interpretation of readiness:
+If the future switched run is not acceptable:
 
-- the enrichment path is ready for scheduler switch planning
-- it is not yet approved for automatic production scheduler switch
-- reports mode remains the operational fallback and reference path until later staged work is completed and approved
+1. Set config back to:
+   - `datacenter_dashboard_source_mode="reports"`
+   - `datacenter_enrichment_enabled=false`
+2. Keep:
+   - `datacenter_dashboard_fallback_to_reports=true`
+3. Re-run inspect-only command and confirm:
+   - `scheduler_dashboard_config.dashboard_source_mode=reports`
+   - fallback still enabled
+4. Restore `ecosystem_dashboard.db` from backup if the published dashboard needs rollback
+5. Restore `analysis.db` only if enrichment write corruption or unintended production write damage occurred
+6. If needed, rerun the reports-mode dashboard path after rollback
+
+
+## 9. Success Criteria
+
+A future source-mode switch is successful only if all of the following are true:
+
+- scheduler run status is `OK` or approved `OK_WITH_WARNINGS`
+- Datacenter dashboard post-step status is `OK`
+- source mode enrichment is confirmed by scheduler summary output
+- acceptance report returns:
+  - `blockers=0`
+  - ready recommendation
+- reports fallback was not used unless explicitly documented and accepted
+- production dashboard DB and HTML exist at the intended output paths
+- output row counts are sane
+- no unexpected tracked source changes are created locally
+
+
+## 10. Stop Conditions
+
+Stop immediately if any of the following occurs:
+
+- tracked worktree is dirty before switch
+- backup was not created
+- enrichment audit is not `READY`
+- acceptance report has `blockers > 0`
+- inspect-only output does not show fallback enabled
+- inspect-only output still shows `CONFIGURED_NOT_WIRED`
+- scheduler reports enrichment failure while fallback is disabled
+- production DB write errors occur
+- any unexpected schema or migration attempt is detected
+
+
+## 11. Open Residuals / Accepted Differences
+
+The following remain visible and must stay visible in acceptance reporting:
+
+- raw action residuals remain visible
+- those residuals are non-blocking only when factual candidate parity is clean
+- `review_later` items may remain, including production migration review items if still emitted
+
+These are not to be hidden by the switch plan. They must remain operator-visible.
+
+
+## 12. Next Step After DB-20a
+
+The next task after DB-20a should be:
+
+- an operator prompt for inspect-only scheduler config validation
+- not an immediate scheduler source-mode switch
+
+If inspect-only still reports `CONFIGURED_NOT_WIRED`, the next engineering task is to close that scheduler wiring gap before any production switch attempt.
