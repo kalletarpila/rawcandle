@@ -289,6 +289,34 @@ def test_window_context_horizon_check_rejects_invalid_value():
         )
 
 
+def test_classification_horizon_check_rejects_invalid_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            """
+            INSERT INTO dc_report_classification_v2 (
+                signal_date, taxonomy_version, market, ticker, horizon, classification_type,
+                classification_state, classification_status, classification_version, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "2026-05-30",
+                "DC_TAXONOMY_FULL_V1",
+                "usa",
+                "NVDA",
+                "rolling99",
+                "rolling30_buy",
+                "BUY_ZONE",
+                "OK",
+                "V2",
+                run_id,
+                "2026-05-30T00:00:00Z",
+            ),
+        )
+
+
 def test_classification_type_check_rejects_invalid_value():
     conn = _connect()
     run_id = _insert_run(conn)
@@ -317,6 +345,114 @@ def test_classification_type_check_rejects_invalid_value():
         )
 
 
+def test_run_status_check_rejects_invalid_value():
+    conn = _connect()
+
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            """
+            INSERT INTO dc_report_run_v2 (
+                run_id,
+                signal_date,
+                taxonomy_version,
+                market,
+                calculation_version,
+                source_versions_json,
+                created_at_utc,
+                status,
+                warning_count,
+                error_count,
+                notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "run-invalid-status",
+                "2026-05-30",
+                "DC_TAXONOMY_FULL_V1",
+                "usa",
+                "REPORT_CANONICAL_V2",
+                None,
+                "2026-05-30T00:00:00Z",
+                "READY",
+                0,
+                0,
+                None,
+            ),
+        )
+
+
+def test_run_warning_count_check_rejects_negative_value():
+    conn = _connect()
+
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            """
+            INSERT INTO dc_report_run_v2 (
+                run_id,
+                signal_date,
+                taxonomy_version,
+                market,
+                calculation_version,
+                source_versions_json,
+                created_at_utc,
+                status,
+                warning_count,
+                error_count,
+                notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "run-negative-warning-count",
+                "2026-05-30",
+                "DC_TAXONOMY_FULL_V1",
+                "usa",
+                "REPORT_CANONICAL_V2",
+                None,
+                "2026-05-30T00:00:00Z",
+                "OK",
+                -1,
+                0,
+                None,
+            ),
+        )
+
+
+def test_run_error_count_check_rejects_negative_value():
+    conn = _connect()
+
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            """
+            INSERT INTO dc_report_run_v2 (
+                run_id,
+                signal_date,
+                taxonomy_version,
+                market,
+                calculation_version,
+                source_versions_json,
+                created_at_utc,
+                status,
+                warning_count,
+                error_count,
+                notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "run-negative-error-count",
+                "2026-05-30",
+                "DC_TAXONOMY_FULL_V1",
+                "usa",
+                "REPORT_CANONICAL_V2",
+                None,
+                "2026-05-30T00:00:00Z",
+                "OK",
+                0,
+                -1,
+                None,
+            ),
+        )
+
+
 def test_classification_status_check_rejects_invalid_value():
     conn = _connect()
     run_id = _insert_run(conn)
@@ -339,6 +475,59 @@ def test_classification_status_check_rejects_invalid_value():
                 "BUY_ZONE",
                 "READY",
                 "V2",
+                run_id,
+                "2026-05-30T00:00:00Z",
+            ),
+        )
+
+
+def test_group_valid_signal_dates_check_rejects_negative_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            """
+            INSERT INTO dc_report_context_group_v2 (
+                signal_date, taxonomy_version, market, horizon, group_type, group_name,
+                group_context_readiness_status, window_end_date, valid_signal_dates, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "2026-05-30",
+                "DC_TAXONOMY_FULL_V1",
+                "usa",
+                "rolling30",
+                "layer",
+                "Infrastructure",
+                "READY",
+                "2026-05-30",
+                -1,
+                run_id,
+                "2026-05-30T00:00:00Z",
+            ),
+        )
+
+
+def test_daily_boolean_check_rejects_invalid_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            """
+            INSERT INTO dc_report_context_daily_v2 (
+                signal_date, taxonomy_version, market, ticker,
+                in_datacenter_ecosystem, context_readiness_status, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "2026-05-30",
+                "DC_TAXONOMY_FULL_V1",
+                "usa",
+                "NVDA",
+                2,
+                "READY",
                 run_id,
                 "2026-05-30T00:00:00Z",
             ),
@@ -373,6 +562,19 @@ def test_boolean_flag_check_rejects_invalid_value():
                 "2026-05-30T00:00:00Z",
             ),
         )
+
+
+def test_migration_is_idempotent():
+    conn = sqlite3.connect(":memory:")
+
+    apply_report_canonical_v2_migration(conn)
+    apply_report_canonical_v2_migration(conn)
+
+    assert _table_exists(conn, "dc_report_run_v2")
+    assert _table_exists(conn, "dc_report_context_group_v2")
+    assert _table_exists(conn, "dc_report_context_daily_v2")
+    assert _table_exists(conn, "dc_report_context_window_v2")
+    assert _table_exists(conn, "dc_report_classification_v2")
 
 
 def test_negative_count_check_rejects_invalid_value():
