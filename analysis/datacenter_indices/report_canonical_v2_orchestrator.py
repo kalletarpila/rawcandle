@@ -233,6 +233,15 @@ def run_report_canonical_v2(
         )
         if summary is not None
     )
+    steps = {
+        "group_context": group_context_summary,
+        "daily_context": daily_context_summary,
+        "window_context": window_context_summary,
+        "daily_classification": daily_classification_summary,
+        "rolling2_classification": rolling2_classification_summary,
+        "rolling5_classification": rolling5_classification_summary,
+        "rolling30_classification": rolling30_classification_summary,
+    }
 
     return {
         "run_id": run_id,
@@ -242,6 +251,7 @@ def run_report_canonical_v2(
         "status": "OK",
         "warning_count": 0,
         "error_count": 0,
+        "steps": steps,
         "group_context_summary": group_context_summary,
         "daily_context_summary": daily_context_summary,
         "window_context_summary": window_context_summary,

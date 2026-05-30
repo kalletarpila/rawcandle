@@ -413,6 +413,112 @@ def test_full_canonical_v2_run_writes_all_expected_table_families():
     assert summary["total_classification_rows_written"] == 5
 
 
+def test_run_row_persists_exact_contract_fields():
+    conn = _connect()
+    _seed_source_rows(conn)
+
+    run_report_canonical_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="contract-run",
+        market="usa",
+        calculation_version="REPORT_CANONICAL_V2_CONTRACT",
+        source_versions_json='{"signals":"DC_SWING_SIGNAL_V1"}',
+        created_at_utc="2026-05-30T12:34:56Z",
+        notes="contract-check",
+    )
+
+    row = conn.execute(
+        """
+        SELECT run_id, signal_date, taxonomy_version, market, calculation_version,
+               source_versions_json, created_at_utc, status, warning_count,
+               error_count, notes
+        FROM dc_report_run_v2
+        WHERE run_id = ?
+        """,
+        ("contract-run",),
+    ).fetchone()
+
+    assert row is not None
+    assert dict(row) == {
+        "run_id": "contract-run",
+        "signal_date": "2026-05-30",
+        "taxonomy_version": "DC_TAXONOMY_FULL_V1",
+        "market": "usa",
+        "calculation_version": "REPORT_CANONICAL_V2_CONTRACT",
+        "source_versions_json": '{"signals":"DC_SWING_SIGNAL_V1"}',
+        "created_at_utc": "2026-05-30T12:34:56Z",
+        "status": "OK",
+        "warning_count": 0,
+        "error_count": 0,
+        "notes": "contract-check",
+    }
+
+
+def test_summary_shape_includes_steps_subdict_for_full_run():
+    conn = _connect()
+    _seed_source_rows(conn)
+
+    summary = run_report_canonical_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="summary-run",
+        market="usa",
+    )
+
+    assert summary["run_id"] == "summary-run"
+    assert summary["signal_date"] == "2026-05-30"
+    assert summary["taxonomy_version"] == "DC_TAXONOMY_FULL_V1"
+    assert summary["market"] == "usa"
+    assert summary["status"] == "OK"
+    assert summary["warning_count"] == 0
+    assert summary["error_count"] == 0
+    assert "steps" in summary
+    assert "total_context_rows_written" in summary
+    assert "total_classification_rows_written" in summary
+
+    assert set(summary["steps"]) == {
+        "group_context",
+        "daily_context",
+        "window_context",
+        "daily_classification",
+        "rolling2_classification",
+        "rolling5_classification",
+        "rolling30_classification",
+    }
+
+
+def test_summary_totals_match_step_totals():
+    conn = _connect()
+    _seed_source_rows(conn)
+
+    summary = run_report_canonical_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="totals-run",
+        market="usa",
+    )
+
+    steps = summary["steps"]
+    context_total = (
+        steps["group_context"]["total_rows_written"]
+        + steps["daily_context"]["total_rows_written"]
+        + steps["window_context"]["total_rows_written"]
+    )
+    classification_total = (
+        steps["daily_classification"]["total_rows_written"]
+        + steps["rolling2_classification"]["total_rows_written"]
+        + steps["rolling5_classification"]["total_rows_written"]
+        + steps["rolling30_classification"]["total_rows_written"]
+    )
+
+    assert summary["total_context_rows_written"] == context_total
+    assert summary["total_classification_rows_written"] == classification_total
+
+
 def test_daily_only_run_does_not_create_rolling_rows():
     conn = _connect()
     _seed_source_rows(conn)
