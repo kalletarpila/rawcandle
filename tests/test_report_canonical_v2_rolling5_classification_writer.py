@@ -373,6 +373,92 @@ def test_reason_action_parity_for_blocked_pullback_case():
     assert row["next_action"] == "REMOVE_FROM_PULLBACK_LIST"
 
 
+def test_short_term_breakdown_branch_is_persisted_with_exact_reason_and_action():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_window_context_row(
+        conn,
+        ticker="NVDA",
+        latest_bos_event_type="BOS_DOWN",
+        latest_bos_freshness="CURRENT",
+        trend_state="UP",
+    )
+    conn.commit()
+
+    write_report_rolling5_pullback_classification_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+    )
+
+    row = conn.execute(
+        """
+        SELECT
+            horizon,
+            classification_type,
+            classification_state,
+            primary_reason,
+            blocking_reason,
+            risk_reason,
+            next_action,
+            classification_status
+        FROM dc_report_classification_v2
+        WHERE signal_date = ? AND taxonomy_version = ? AND ticker = ? AND horizon = ? AND classification_type = ?
+        """,
+        ("2026-05-30", "DC_TAXONOMY_FULL_V1", "NVDA", "rolling5", "rolling5_pullback"),
+    ).fetchone()
+
+    assert row is not None
+    assert row["horizon"] == "rolling5"
+    assert row["classification_type"] == "rolling5_pullback"
+    assert row["classification_state"] == "SHORT_TERM_BREAKDOWN"
+    assert row["primary_reason"] == "SHORT_TERM_BREAKDOWN_WITHOUT_PULLBACK_SETUP"
+    assert row["blocking_reason"] == "recent_bos_down"
+    assert row["risk_reason"] is None
+    assert row["next_action"] == "MONITOR_EXIT_RISK"
+    assert row["classification_status"] == "OK"
+
+
+def test_early_pullback_branch_persists_exact_reason_and_action():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_window_context_row(
+        conn,
+        ticker="NVDA",
+        pullback_days=1,
+        exit_risk_days=1,
+        trend_state="UP",
+    )
+    conn.commit()
+
+    write_report_rolling5_pullback_classification_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+    )
+
+    row = conn.execute(
+        """
+        SELECT classification_state, primary_reason, blocking_reason, risk_reason, next_action, classification_status
+        FROM dc_report_classification_v2
+        WHERE signal_date = ? AND taxonomy_version = ? AND ticker = ? AND horizon = ? AND classification_type = ?
+        """,
+        ("2026-05-30", "DC_TAXONOMY_FULL_V1", "NVDA", "rolling5", "rolling5_pullback"),
+    ).fetchone()
+
+    assert row is not None
+    assert row["classification_state"] == "EARLY_PULLBACK"
+    assert row["primary_reason"] == "EARLY_OR_UNCONFIRMED_PULLBACK"
+    assert row["blocking_reason"] == "EXIT_RISK_DAYS_WITHOUT_HIGH_SEVERITY"
+    assert row["risk_reason"] is None
+    assert row["next_action"] == "MONITOR_FOR_CONFIRMATION"
+    assert row["classification_status"] == "OK"
+
+
 def test_market_safe_delete_behavior_preserves_unrelated_market_rows():
     conn = _connect()
     _insert_run(conn)
