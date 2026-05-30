@@ -24,9 +24,14 @@ def _connect() -> sqlite3.Connection:
             primary_layer TEXT NULL,
             primary_subindustry TEXT NULL,
             close REAL NULL,
+            ema10 REAL NULL,
+            ema20 REAL NULL,
+            volume_vs_avg20 REAL NULL,
             price_data_status TEXT NULL,
             latest_bullish_relevance_class TEXT NULL,
+            latest_bullish_relevance_reason TEXT NULL,
             latest_bearish_relevance_class TEXT NULL,
+            latest_bearish_relevance_reason TEXT NULL,
             breakout_signal INTEGER NULL,
             pullback_signal INTEGER NULL,
             fast_ema10_pullback_signal INTEGER NULL,
@@ -49,10 +54,13 @@ def _connect() -> sqlite3.Connection:
             distance_to_ema50_pct REAL NULL,
             ticker_trend_state TEXT NULL,
             latest_structure_label TEXT NULL,
+            latest_structure_age_trading_days INTEGER NULL,
             latest_structure_freshness TEXT NULL,
             latest_bos_event_type TEXT NULL,
+            latest_bos_age_trading_days INTEGER NULL,
             latest_bos_freshness TEXT NULL,
             latest_reset_reason TEXT NULL,
+            latest_reset_age_trading_days INTEGER NULL,
             latest_reset_freshness TEXT NULL
         )
         """
@@ -162,8 +170,13 @@ def _insert_ticker_row(
     exit_risk_severity: str | None = None,
     price_data_status: str | None = "OK",
     close: float | None = 100.0,
+    ema10: float | None = 98.5,
+    ema20: float | None = 96.25,
+    volume_vs_avg20: float | None = 1.8,
     latest_bullish_relevance_class: str | None = None,
+    latest_bullish_relevance_reason: str | None = None,
     latest_bearish_relevance_class: str | None = None,
+    latest_bearish_relevance_reason: str | None = None,
     bullish_candle_signal: int = 0,
     bullish_divergence_signal: int = 0,
     hidden_bullish_divergence_signal: int = 0,
@@ -183,9 +196,14 @@ def _insert_ticker_row(
             primary_layer,
             primary_subindustry,
             close,
+            ema10,
+            ema20,
+            volume_vs_avg20,
             price_data_status,
             latest_bullish_relevance_class,
+            latest_bullish_relevance_reason,
             latest_bearish_relevance_class,
+            latest_bearish_relevance_reason,
             breakout_signal,
             pullback_signal,
             fast_ema10_pullback_signal,
@@ -208,12 +226,15 @@ def _insert_ticker_row(
             distance_to_ema50_pct,
             ticker_trend_state,
             latest_structure_label,
+            latest_structure_age_trading_days,
             latest_structure_freshness,
             latest_bos_event_type,
+            latest_bos_age_trading_days,
             latest_bos_freshness,
             latest_reset_reason,
+            latest_reset_age_trading_days,
             latest_reset_freshness
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             signal_date,
@@ -224,9 +245,14 @@ def _insert_ticker_row(
             primary_layer,
             primary_subindustry,
             close,
+            ema10,
+            ema20,
+            volume_vs_avg20,
             price_data_status,
             latest_bullish_relevance_class,
+            latest_bullish_relevance_reason,
             latest_bearish_relevance_class,
+            latest_bearish_relevance_reason,
             breakout_signal,
             pullback_signal,
             0,
@@ -249,10 +275,13 @@ def _insert_ticker_row(
             4.4,
             "UP",
             "HL",
+            6,
             "FRESH",
             "BOS_UP",
+            2,
             "FRESH",
             "NONE",
+            4,
             "STALE",
         ),
     )
@@ -289,6 +318,9 @@ def test_daily_ticker_context_rows_are_written():
     assert row["primary_subindustry"] == "Semis"
     assert row["price_data_status"] == "OK"
     assert row["close"] == 100.0
+    assert row["ema10"] == 98.5
+    assert row["ema20"] == 96.25
+    assert row["volume_vs_avg20"] == 1.8
     assert row["breakout_signal"] == 1
     assert row["pullback_signal"] == 0
     assert row["conservative_ema20_pullback_signal"] == 1
@@ -306,8 +338,11 @@ def test_daily_ticker_context_rows_are_written():
     assert row["distance_to_ema20_pct"] == 1.1
     assert row["trend_state"] == "UP"
     assert row["latest_structure_label"] == "HL"
+    assert row["latest_structure_age_trading_days"] == 6
     assert row["latest_bos_event_type"] == "BOS_UP"
+    assert row["latest_bos_age_trading_days"] == 2
     assert row["latest_reset_reason"] == "NONE"
+    assert row["latest_reset_age_trading_days"] == 4
     assert row["layer_timing_state"] == "BUY_ZONE"
     assert row["subindustry_timing_state"] == "BUY_ZONE"
     assert row["layer_context_risk_status"] == "NO"
@@ -330,7 +365,9 @@ def test_new_daily_trigger_input_fields_are_copied_from_source():
         price_data_status="MISSING_AS_OF_DATE",
         close=None,
         latest_bullish_relevance_class="RELEVANT",
+        latest_bullish_relevance_reason="BULLISH_STACK",
         latest_bearish_relevance_class="WEAK_CONTEXT",
+        latest_bearish_relevance_reason="MINOR_BEARISH_SIGNAL",
         bullish_candle_signal=1,
         bullish_divergence_signal=1,
         hidden_bullish_divergence_signal=1,
@@ -354,7 +391,9 @@ def test_new_daily_trigger_input_fields_are_copied_from_source():
             price_data_status,
             close,
             latest_bullish_relevance_class,
+            latest_bullish_relevance_reason,
             latest_bearish_relevance_class,
+            latest_bearish_relevance_reason,
             bullish_candle_signal,
             bullish_divergence_signal,
             hidden_bullish_divergence_signal,
@@ -371,7 +410,9 @@ def test_new_daily_trigger_input_fields_are_copied_from_source():
     assert row["price_data_status"] == "MISSING_AS_OF_DATE"
     assert row["close"] is None
     assert row["latest_bullish_relevance_class"] == "RELEVANT"
+    assert row["latest_bullish_relevance_reason"] == "BULLISH_STACK"
     assert row["latest_bearish_relevance_class"] == "WEAK_CONTEXT"
+    assert row["latest_bearish_relevance_reason"] == "MINOR_BEARISH_SIGNAL"
     assert row["bullish_candle_signal"] == 1
     assert row["bullish_divergence_signal"] == 1
     assert row["hidden_bullish_divergence_signal"] == 1
@@ -506,6 +547,7 @@ def test_missing_optional_daily_trigger_source_columns_default_deterministically
             bearish_candle_signal,
             bearish_divergence_signal,
             hidden_bearish_divergence_signal,
+            ema10,
             distance_to_ema10_pct
         FROM dc_report_context_daily_v2
         WHERE signal_date = ? AND taxonomy_version = ? AND ticker = ?
@@ -524,6 +566,7 @@ def test_missing_optional_daily_trigger_source_columns_default_deterministically
     assert row["bearish_candle_signal"] == 0
     assert row["bearish_divergence_signal"] == 0
     assert row["hidden_bearish_divergence_signal"] == 0
+    assert row["ema10"] is None
     assert row["distance_to_ema10_pct"] is None
 
 
