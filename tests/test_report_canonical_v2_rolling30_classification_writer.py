@@ -459,6 +459,203 @@ def test_reason_parity_for_buy_and_exit_cases():
     assert exit_row["next_action"] is None
 
 
+def test_buy_avoid_reason_variant_recent_bos_down():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_window_context_row(
+        conn,
+        ticker="BOSDOWN",
+        latest_bos_event_type="BOS_DOWN",
+        latest_bos_freshness="CURRENT",
+    )
+    conn.commit()
+
+    write_report_rolling30_buy_exit_classification_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+    )
+
+    row = conn.execute(
+        """
+        SELECT horizon, classification_type, classification_state, primary_reason,
+               blocking_reason, risk_reason, next_action, classification_status
+        FROM dc_report_classification_v2
+        WHERE ticker = ? AND horizon = ? AND classification_type = ?
+        """,
+        ("BOSDOWN", "rolling30", "rolling30_buy"),
+    ).fetchone()
+
+    assert row is not None
+    assert row["horizon"] == "rolling30"
+    assert row["classification_type"] == "rolling30_buy"
+    assert row["classification_state"] == "AVOID"
+    assert row["primary_reason"] == "clear_structural_or_exit_block"
+    assert row["blocking_reason"] == "recent_bos_down"
+    assert row["risk_reason"] is None
+    assert row["next_action"] is None
+    assert row["classification_status"] == "OK"
+
+
+def test_buy_avoid_reason_variant_recent_reset():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_window_context_row(
+        conn,
+        ticker="RESET",
+        latest_reset_reason="DOUBLE_BOS_DOWN",
+        latest_reset_freshness="CURRENT",
+    )
+    conn.commit()
+
+    write_report_rolling30_buy_exit_classification_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+    )
+
+    row = conn.execute(
+        """
+        SELECT horizon, classification_type, classification_state, primary_reason,
+               blocking_reason, risk_reason, next_action, classification_status
+        FROM dc_report_classification_v2
+        WHERE ticker = ? AND horizon = ? AND classification_type = ?
+        """,
+        ("RESET", "rolling30", "rolling30_buy"),
+    ).fetchone()
+
+    assert row is not None
+    assert row["horizon"] == "rolling30"
+    assert row["classification_type"] == "rolling30_buy"
+    assert row["classification_state"] == "AVOID"
+    assert row["primary_reason"] == "clear_structural_or_exit_block"
+    assert row["blocking_reason"] == "recent_reset"
+    assert row["risk_reason"] is None
+    assert row["next_action"] is None
+    assert row["classification_status"] == "OK"
+
+
+def test_buy_avoid_reason_variant_current_high_exit_risk():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_window_context_row(
+        conn,
+        ticker="HIGHRISK",
+        current_watchlist_status="HIGH_EXIT_RISK",
+    )
+    conn.commit()
+
+    write_report_rolling30_buy_exit_classification_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+    )
+
+    row = conn.execute(
+        """
+        SELECT horizon, classification_type, classification_state, primary_reason,
+               blocking_reason, risk_reason, next_action, classification_status
+        FROM dc_report_classification_v2
+        WHERE ticker = ? AND horizon = ? AND classification_type = ?
+        """,
+        ("HIGHRISK", "rolling30", "rolling30_buy"),
+    ).fetchone()
+
+    assert row is not None
+    assert row["horizon"] == "rolling30"
+    assert row["classification_type"] == "rolling30_buy"
+    assert row["classification_state"] == "AVOID"
+    assert row["primary_reason"] == "clear_structural_or_exit_block"
+    assert row["blocking_reason"] == "CURRENT_HIGH_EXIT_RISK"
+    assert row["risk_reason"] is None
+    assert row["next_action"] is None
+    assert row["classification_status"] == "OK"
+
+
+def test_exit_watch_reason_variant_group_risk():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_window_context_row(
+        conn,
+        ticker="GROUPWATCH",
+        window_watchlist_status="GROUP_RISK",
+    )
+    conn.commit()
+
+    write_report_rolling30_buy_exit_classification_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+    )
+
+    row = conn.execute(
+        """
+        SELECT horizon, classification_type, classification_state, primary_reason,
+               blocking_reason, risk_reason, next_action, classification_status
+        FROM dc_report_classification_v2
+        WHERE ticker = ? AND horizon = ? AND classification_type = ?
+        """,
+        ("GROUPWATCH", "rolling30", "rolling30_exit"),
+    ).fetchone()
+
+    assert row is not None
+    assert row["horizon"] == "rolling30"
+    assert row["classification_type"] == "rolling30_exit"
+    assert row["classification_state"] == "WATCH"
+    assert row["primary_reason"] == "MILD_OR_UNCONFIRMED_EXIT_RISK"
+    assert row["risk_reason"] == "GROUP_RISK"
+    assert row["blocking_reason"] is None
+    assert row["next_action"] is None
+    assert row["classification_status"] == "OK"
+
+
+def test_exit_watch_reason_variant_historical_window_high_exit_risk():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_window_context_row(
+        conn,
+        ticker="WINDOWHIGH",
+        window_watchlist_status="WINDOW_HIGH_EXIT_RISK",
+    )
+    conn.commit()
+
+    write_report_rolling30_buy_exit_classification_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+    )
+
+    row = conn.execute(
+        """
+        SELECT horizon, classification_type, classification_state, primary_reason,
+               blocking_reason, risk_reason, next_action, classification_status
+        FROM dc_report_classification_v2
+        WHERE ticker = ? AND horizon = ? AND classification_type = ?
+        """,
+        ("WINDOWHIGH", "rolling30", "rolling30_exit"),
+    ).fetchone()
+
+    assert row is not None
+    assert row["horizon"] == "rolling30"
+    assert row["classification_type"] == "rolling30_exit"
+    assert row["classification_state"] == "WATCH"
+    assert row["primary_reason"] == "MILD_OR_UNCONFIRMED_EXIT_RISK"
+    assert row["risk_reason"] == "HISTORICAL_WINDOW_HIGH_EXIT_RISK"
+    assert row["blocking_reason"] is None
+    assert row["next_action"] is None
+    assert row["classification_status"] == "OK"
+
+
 def test_market_safe_delete_behavior_preserves_unrelated_market_rows():
     conn = _connect()
     _insert_run(conn)
