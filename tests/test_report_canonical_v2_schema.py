@@ -193,6 +193,11 @@ def test_migration_creates_expected_primary_keys_and_columns():
         "incomplete_window",
         "current_watchlist_status",
         "window_watchlist_status",
+        "price_data_status",
+        "exit_risk_severity",
+        "latest_bearish_relevance_class",
+        "distance_to_ema20_pct",
+        "all_price_rows_missing",
         "close_below_ema20_flag",
         "double_bos_down_flag",
         "severe_exit_risk_flag",
@@ -324,6 +329,36 @@ def test_window_context_horizon_check_rejects_invalid_value():
                 "2026-05-30",
                 2,
                 "READY",
+                run_id,
+                "2026-05-30T00:00:00Z",
+            ),
+        )
+
+
+def test_window_context_all_price_rows_missing_check_rejects_invalid_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            """
+            INSERT INTO dc_report_context_window_v2 (
+                signal_date, taxonomy_version, market, ticker, horizon,
+                window_start_date, window_end_date, valid_signal_dates,
+                all_price_rows_missing, context_readiness_status, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "2026-05-30",
+                "DC_TAXONOMY_FULL_V1",
+                "usa",
+                "NVDA",
+                "rolling2",
+                "2026-05-29",
+                "2026-05-30",
+                2,
+                2,
+                "OK",
                 run_id,
                 "2026-05-30T00:00:00Z",
             ),

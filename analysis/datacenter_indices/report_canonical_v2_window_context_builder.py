@@ -317,6 +317,10 @@ def _write_rows(conn: sqlite3.Connection, rows: list[dict[str, object]]) -> None
             latest_bos_freshness,
             latest_reset_reason,
             latest_reset_freshness,
+            price_data_status,
+            exit_risk_severity,
+            latest_bearish_relevance_class,
+            distance_to_ema20_pct,
             ma_break_status,
             freshness_status,
             technical_relevance_status,
@@ -374,6 +378,10 @@ def _write_rows(conn: sqlite3.Connection, rows: list[dict[str, object]]) -> None
             :latest_bos_freshness,
             :latest_reset_reason,
             :latest_reset_freshness,
+            :price_data_status,
+            :exit_risk_severity,
+            :latest_bearish_relevance_class,
+            :distance_to_ema20_pct,
             :ma_break_status,
             :freshness_status,
             :technical_relevance_status,
@@ -552,6 +560,10 @@ def build_report_window_context_v2(
                 "latest_bos_freshness": _ticker_source_value(last_row, ticker_source_columns, "latest_bos_freshness"),
                 "latest_reset_reason": _ticker_source_value(last_row, ticker_source_columns, "latest_reset_reason"),
                 "latest_reset_freshness": _ticker_source_value(last_row, ticker_source_columns, "latest_reset_freshness"),
+                "price_data_status": _ticker_source_value(last_row, ticker_source_columns, "price_data_status"),
+                "exit_risk_severity": _ticker_source_value(last_row, ticker_source_columns, "exit_risk_severity"),
+                "latest_bearish_relevance_class": _ticker_source_value(last_row, ticker_source_columns, "latest_bearish_relevance_class"),
+                "distance_to_ema20_pct": _ticker_source_value(last_row, ticker_source_columns, "distance_to_ema20_pct"),
                 "ma_break_status": None,
                 "freshness_status": None,
                 "technical_relevance_status": None,
@@ -585,10 +597,10 @@ def build_report_window_context_v2(
                 "last_subindustry_overheat_risk_level": None if subindustry_context is None else subindustry_context.get("overheat_risk_level"),
                 "last_layer_timing_state": None if layer_context is None else layer_context.get("timing_state"),
                 "last_layer_overheat_risk_level": None if layer_context is None else layer_context.get("overheat_risk_level"),
-                "all_price_rows_missing": all(
+                "all_price_rows_missing": 1 if all(
                     _ticker_source_value(row, ticker_source_columns, "price_data_status") in WATCHLIST_MISSING_PRICE_STATUSES
                     for row in current_rows
-                ),
+                ) else 0,
             }
             output_row["current_watchlist_status"] = _classify_rolling_current_watchlist_status(output_row)
             output_row["window_watchlist_status"] = _classify_rolling_window_watchlist_status(output_row)
