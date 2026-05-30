@@ -59,6 +59,8 @@ def _insert_group_row(
     return_5d: float = 2.0,
     return_10d: float = 4.0,
     return_20d: float = 6.0,
+    pct_above_ema20: float | None = None,
+    pct_above_ma10: float | None = None,
     synthetic_trend_classification: str = "UP",
 ) -> None:
     conn.execute(
@@ -66,6 +68,7 @@ def _insert_group_row(
         INSERT INTO dc_report_context_group_v2 (
             signal_date, taxonomy_version, market, horizon, group_type, group_name,
             timing_state, overheat_risk_level, return_5d, return_10d, return_20d,
+            pct_above_ema20, pct_above_ma10,
             group_context_risk_status, group_context_readiness_status,
             synthetic_close, synthetic_trend_classification, synthetic_latest_structure_label,
             synthetic_latest_structure_age_trading_days, synthetic_latest_bos_event_type,
@@ -73,7 +76,7 @@ def _insert_group_row(
             synthetic_latest_reset_reason, synthetic_latest_reset_age_trading_days,
             synthetic_latest_reset_freshness, data_quality_status,
             group_current_status, window_end_date, run_id, created_at_utc
-        ) VALUES (?, ?, ?, 'daily', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, 'daily', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             "2026-05-30",
@@ -86,6 +89,8 @@ def _insert_group_row(
             return_5d,
             return_10d,
             return_20d,
+            pct_above_ema20,
+            pct_above_ma10,
             group_context_risk_status,
             "OK",
             synthetic_close,
@@ -364,6 +369,9 @@ def test_daily_trigger_join_uses_stored_classification():
     row = data["daily_trigger_rows"][0]
     assert row["ticker"] == "NVDA"
     assert row["classification_state"] == "BUY_WATCH"
+    assert row["primary_reason"] == "PRIMARY"
+    assert row["blocking_reason"] == ""
+    assert row["next_action"] == "REVIEW"
     assert row["primary_layer"] == "Infrastructure"
     assert row["primary_subindustry"] == "Semis"
 
@@ -437,6 +445,55 @@ def test_taxonomy_listing_rows_are_deterministic():
     ]
 
 
+def test_taxonomy_listing_group_rows_preserve_pct_fields_without_distance_aliasing():
+    conn = _connect()
+    _insert_run(conn, run_id="run-1", created_at_utc="2026-05-30T00:00:00Z")
+    _insert_group_row(
+        conn,
+        run_id="run-1",
+        group_type="layer",
+        group_name="Infrastructure",
+        pct_above_ema20=62.5,
+        pct_above_ma10=71.0,
+    )
+    _insert_group_row(
+        conn,
+        run_id="run-1",
+        group_type="subindustry",
+        group_name="Semis",
+        pct_above_ema20=58.0,
+        pct_above_ma10=66.0,
+    )
+    _insert_ticker_row(
+        conn,
+        run_id="run-1",
+        ticker="NVDA",
+        primary_layer="Infrastructure",
+        primary_subindustry="Semis",
+    )
+    conn.commit()
+
+    data = load_daily_canonical_formatter_data_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        market="usa",
+    )
+
+    layer_row = data["taxonomy_listing_rows"][0]
+    subindustry_row = data["taxonomy_listing_rows"][1]
+
+    assert layer_row["row_type"] == "LAYER"
+    assert layer_row["pct_above_ema20"] == 62.5
+    assert layer_row["pct_above_ma10"] == 71.0
+    assert "distance_to_ema20_pct" not in layer_row
+
+    assert subindustry_row["row_type"] == "SUBINDUSTRY"
+    assert subindustry_row["pct_above_ema20"] == 58.0
+    assert subindustry_row["pct_above_ma10"] == 66.0
+    assert "distance_to_ema20_pct" not in subindustry_row
+
+
 def test_section_counts_are_computed_from_canonical_rows():
     conn = _connect()
     _insert_run(conn, run_id="run-1", created_at_utc="2026-05-30T00:00:00Z")
@@ -484,3 +541,27 @@ def test_deferred_sections_are_explicitly_marked():
         "swing_signal_freshness": "DEFERRED",
         "technical_relevance_context": "DEFERRED",
     }
+
+
+def test_missing_run_returns_none_but_loader_still_returns_rows():
+    conn = _connect()
+    _insert_run(conn, run_id="run-1", created_at_utc="2026-05-30T00:00:00Z")
+    _insert_group_row(conn, run_id="run-1", group_type="layer", group_name="Infrastructure")
+    _insert_group_row(conn, run_id="run-1", group_type="subindustry", group_name="Semis")
+    _insert_ticker_row(conn, run_id="run-1", ticker="NVDA", primary_layer="Infrastructure", primary_subindustry="Semis")
+    _insert_classification_row(conn, run_id="run-1", ticker="NVDA", classification_state="BUY_TRIGGER")
+    conn.commit()
+
+    data = load_daily_canonical_formatter_data_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        market="usa",
+        run_id="missing-run",
+    )
+
+    assert data["run"] is None
+    assert data["metadata"]["selected_run_id"] is None
+    assert [row["group_name"] for row in data["group_rows"]] == ["Infrastructure", "Semis"]
+    assert [row["ticker"] for row in data["ticker_rows"]] == ["NVDA"]
+    assert [row["ticker"] for row in data["daily_trigger_rows"]] == ["NVDA"]
