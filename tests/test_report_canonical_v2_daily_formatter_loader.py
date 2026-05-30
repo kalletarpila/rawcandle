@@ -126,6 +126,7 @@ def _insert_ticker_row(
     pullback_signal: int = 0,
     exit_risk_signal: int = 0,
     exit_risk_severity: str | None = None,
+    distance_to_ema20_pct: float = 3.0,
 ) -> None:
     conn.execute(
         """
@@ -186,7 +187,7 @@ def _insert_ticker_row(
             8.0,
             12.0,
             1.5,
-            3.0,
+            distance_to_ema20_pct,
             4.0,
             "UP",
             "HL",
@@ -492,6 +493,49 @@ def test_taxonomy_listing_group_rows_preserve_pct_fields_without_distance_aliasi
     assert subindustry_row["pct_above_ema20"] == 58.0
     assert subindustry_row["pct_above_ma10"] == 66.0
     assert "distance_to_ema20_pct" not in subindustry_row
+
+
+def test_taxonomy_listing_ticker_rows_preserve_true_distance_to_ema20_pct():
+    conn = _connect()
+    _insert_run(conn, run_id="run-1", created_at_utc="2026-05-30T00:00:00Z")
+    _insert_group_row(
+        conn,
+        run_id="run-1",
+        group_type="layer",
+        group_name="Infrastructure",
+        pct_above_ema20=62.5,
+        pct_above_ma10=71.0,
+    )
+    _insert_group_row(
+        conn,
+        run_id="run-1",
+        group_type="subindustry",
+        group_name="Semis",
+        pct_above_ema20=58.0,
+        pct_above_ma10=66.0,
+    )
+    _insert_ticker_row(
+        conn,
+        run_id="run-1",
+        ticker="NVDA",
+        primary_layer="Infrastructure",
+        primary_subindustry="Semis",
+        distance_to_ema20_pct=1.2345,
+    )
+    conn.commit()
+
+    data = load_daily_canonical_formatter_data_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        market="usa",
+    )
+
+    ticker_row = next(row for row in data["taxonomy_listing_rows"] if row["row_type"] == "TICKER")
+    assert ticker_row["ticker"] == "NVDA"
+    assert ticker_row["distance_to_ema20_pct"] == 1.2345
+    assert ticker_row["distance_to_ema20_pct"] != 62.5
+    assert ticker_row["distance_to_ema20_pct"] != 58.0
 
 
 def test_section_counts_are_computed_from_canonical_rows():
