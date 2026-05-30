@@ -5,9 +5,6 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Iterable
 
-from .swing_daily_report import DEFAULT_OHLC_CALC_VERSION, DEFAULT_SIGNAL_VERSION
-
-
 ALLOWED_HORIZONS = ("daily", "rolling2", "rolling5", "rolling30")
 HORIZON_WINDOW_SIZES = {
     "daily": 1,
@@ -15,6 +12,8 @@ HORIZON_WINDOW_SIZES = {
     "rolling5": 5,
     "rolling30": 30,
 }
+DEFAULT_GROUP_CONTEXT_SIGNAL_VERSION = "DC_SWING_SIGNAL_V1"
+DEFAULT_GROUP_CONTEXT_OHLC_CALC_VERSION = "DC_SWING_OHLC_V1"
 
 # Keep the same severity ordering used by the current weekly report path.
 ROLLING_GROUP_STATUS_PRIORITY = {
@@ -252,19 +251,32 @@ def _write_rows(
     *,
     signal_date: str,
     taxonomy_version: str,
+    market: str | None,
     horizons: tuple[str, ...],
     rows: list[dict[str, object]],
 ) -> None:
     placeholders = ", ".join("?" for _ in horizons)
-    conn.execute(
-        f"""
-        DELETE FROM dc_report_context_group_v2
-        WHERE signal_date = ?
-          AND taxonomy_version = ?
-          AND horizon IN ({placeholders})
-        """,
-        (signal_date, taxonomy_version, *horizons),
-    )
+    if market is None:
+        conn.execute(
+            f"""
+            DELETE FROM dc_report_context_group_v2
+            WHERE signal_date = ?
+              AND taxonomy_version = ?
+              AND horizon IN ({placeholders})
+            """,
+            (signal_date, taxonomy_version, *horizons),
+        )
+    else:
+        conn.execute(
+            f"""
+            DELETE FROM dc_report_context_group_v2
+            WHERE signal_date = ?
+              AND taxonomy_version = ?
+              AND horizon IN ({placeholders})
+              AND market = ?
+            """,
+            (signal_date, taxonomy_version, *horizons, market),
+        )
     if not rows:
         return
     conn.executemany(
@@ -349,8 +361,8 @@ def build_report_group_context_v2(
     run_id: str,
     market: str | None = None,
     horizons: tuple[str, ...] = ("daily", "rolling2", "rolling5", "rolling30"),
-    signal_version: str | None = DEFAULT_SIGNAL_VERSION,
-    ohlc_calc_version: str | None = DEFAULT_OHLC_CALC_VERSION,
+    signal_version: str | None = DEFAULT_GROUP_CONTEXT_SIGNAL_VERSION,
+    ohlc_calc_version: str | None = DEFAULT_GROUP_CONTEXT_OHLC_CALC_VERSION,
     calculation_version: str = "REPORT_CANONICAL_GROUP_CONTEXT_V2_1",
     created_at_utc: str | None = None,
 ) -> dict[str, int]:
@@ -494,6 +506,7 @@ def build_report_group_context_v2(
         conn,
         signal_date=signal_date,
         taxonomy_version=taxonomy_version,
+        market=market,
         horizons=normalized_horizons,
         rows=rows_to_write,
     )

@@ -1,7 +1,9 @@
+import inspect
 import sqlite3
 
 import pytest
 
+import analysis.datacenter_indices.report_canonical_v2_group_context_builder as builder_module
 from analysis.datacenter_indices.report_canonical_v2_group_context_builder import (
     build_report_group_context_v2,
 )
@@ -100,6 +102,7 @@ def _insert_group_row(
     conn: sqlite3.Connection,
     *,
     signal_date: str,
+    taxonomy_version: str = "DC_TAXONOMY_FULL_V1",
     group_type: str = "layer",
     group_name: str = "Infrastructure",
     timing_state: str = "BUY_ZONE",
@@ -134,7 +137,7 @@ def _insert_group_row(
         """,
         (
             signal_date,
-            "DC_TAXONOMY_FULL_V1",
+            taxonomy_version,
             "DC_SWING_SIGNAL_V1",
             market,
             group_type,
@@ -160,6 +163,7 @@ def _insert_synthetic_row(
     conn: sqlite3.Connection,
     *,
     ohlc_date: str,
+    taxonomy_version: str = "DC_TAXONOMY_FULL_V1",
     group_type: str = "layer",
     group_name: str = "Infrastructure",
     market: str = "usa",
@@ -186,7 +190,7 @@ def _insert_synthetic_row(
         """,
         (
             ohlc_date,
-            "DC_TAXONOMY_FULL_V1",
+            taxonomy_version,
             "DC_SWING_OHLC_V1",
             market,
             group_type,
@@ -201,7 +205,15 @@ def _insert_synthetic_row(
             "NONE",
             "STALE",
         ),
-    )
+        )
+
+
+def test_builder_has_no_report_module_dependency():
+    source = inspect.getsource(builder_module)
+
+    assert "swing_daily_report" not in source
+    assert builder_module.DEFAULT_GROUP_CONTEXT_SIGNAL_VERSION == "DC_SWING_SIGNAL_V1"
+    assert builder_module.DEFAULT_GROUP_CONTEXT_OHLC_CALC_VERSION == "DC_SWING_OHLC_V1"
 
 
 def test_daily_group_context_rows_are_written():
@@ -281,6 +293,59 @@ def test_rolling2_window_fields_are_computed():
     assert row["group_context_readiness_status"] == "OK"
 
 
+def test_market_filtered_rebuild_preserves_unrelated_market_rows():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_group_row(conn, signal_date="2026-05-30", market="usa", group_name="Infrastructure")
+    _insert_synthetic_row(conn, ohlc_date="2026-05-30", market="usa", group_name="Infrastructure")
+    _insert_group_row(conn, signal_date="2026-05-30", market="omxh", group_name="NordicTech")
+    _insert_synthetic_row(conn, ohlc_date="2026-05-30", market="omxh", group_name="NordicTech")
+    conn.commit()
+
+    build_report_group_context_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+        horizons=("daily",),
+        created_at_utc="2026-05-30T00:00:00Z",
+    )
+    build_report_group_context_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="omxh",
+        horizons=("daily",),
+        created_at_utc="2026-05-30T00:00:00Z",
+    )
+    build_report_group_context_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+        horizons=("daily",),
+        created_at_utc="2026-05-30T00:00:00Z",
+    )
+
+    rows = conn.execute(
+        """
+        SELECT market, group_name
+        FROM dc_report_context_group_v2
+        WHERE signal_date = ? AND taxonomy_version = ? AND horizon = ?
+        ORDER BY market ASC, group_name ASC
+        """,
+        ("2026-05-30", "DC_TAXONOMY_FULL_V1", "daily"),
+    ).fetchall()
+
+    assert [(row["market"], row["group_name"]) for row in rows] == [
+        ("omxh", "NordicTech"),
+        ("usa", "Infrastructure"),
+    ]
+
+
 def test_rolling5_and_rolling30_can_be_requested_together():
     conn = _connect()
     _insert_run(conn)
@@ -314,6 +379,195 @@ def test_rolling5_and_rolling30_can_be_requested_together():
     assert [row["group_context_readiness_status"] for row in rows] == ["PARTIAL_WINDOW", "PARTIAL_WINDOW"]
     assert summary["rolling5_rows_written"] == 1
     assert summary["rolling30_rows_written"] == 1
+    assert summary["total_rows_written"] == 2
+
+
+def test_rebuild_preserves_unrelated_horizons():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_group_row(conn, signal_date="2026-05-29", timing_state="BUY_ZONE")
+    _insert_group_row(conn, signal_date="2026-05-30", timing_state="EXIT_ZONE")
+    _insert_synthetic_row(conn, ohlc_date="2026-05-29")
+    _insert_synthetic_row(conn, ohlc_date="2026-05-30")
+    conn.commit()
+
+    build_report_group_context_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+        horizons=("daily", "rolling2"),
+        created_at_utc="2026-05-30T00:00:00Z",
+    )
+    build_report_group_context_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+        horizons=("daily",),
+        created_at_utc="2026-05-30T00:00:00Z",
+    )
+
+    rows = conn.execute(
+        """
+        SELECT horizon, COUNT(*)
+        FROM dc_report_context_group_v2
+        WHERE signal_date = ? AND taxonomy_version = ?
+        GROUP BY horizon
+        ORDER BY horizon ASC
+        """,
+        ("2026-05-30", "DC_TAXONOMY_FULL_V1"),
+    ).fetchall()
+
+    assert [(row[0], row[1]) for row in rows] == [("daily", 1), ("rolling2", 1)]
+
+
+def test_rebuild_preserves_unrelated_signal_dates():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_group_row(conn, signal_date="2026-05-29")
+    _insert_group_row(conn, signal_date="2026-05-30")
+    _insert_synthetic_row(conn, ohlc_date="2026-05-29")
+    _insert_synthetic_row(conn, ohlc_date="2026-05-30")
+    conn.commit()
+
+    build_report_group_context_v2(
+        conn,
+        signal_date="2026-05-29",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+        horizons=("daily",),
+        created_at_utc="2026-05-29T00:00:00Z",
+    )
+    build_report_group_context_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+        horizons=("daily",),
+        created_at_utc="2026-05-30T00:00:00Z",
+    )
+    build_report_group_context_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+        horizons=("daily",),
+        created_at_utc="2026-05-30T00:00:00Z",
+    )
+
+    rows = conn.execute(
+        """
+        SELECT signal_date, COUNT(*)
+        FROM dc_report_context_group_v2
+        WHERE taxonomy_version = ? AND horizon = ?
+        GROUP BY signal_date
+        ORDER BY signal_date ASC
+        """,
+        ("DC_TAXONOMY_FULL_V1", "daily"),
+    ).fetchall()
+
+    assert [(row[0], row[1]) for row in rows] == [("2026-05-29", 1), ("2026-05-30", 1)]
+
+
+def test_missing_synthetic_row_sets_readiness_status():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_group_row(conn, signal_date="2026-05-30")
+    conn.commit()
+
+    build_report_group_context_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+        horizons=("daily",),
+        created_at_utc="2026-05-30T00:00:00Z",
+    )
+
+    row = conn.execute(
+        """
+        SELECT group_context_readiness_status
+        FROM dc_report_context_group_v2
+        WHERE signal_date = ? AND taxonomy_version = ? AND horizon = ?
+        """,
+        ("2026-05-30", "DC_TAXONOMY_FULL_V1", "daily"),
+    ).fetchone()
+
+    assert row is not None
+    assert row["group_context_readiness_status"] == "MISSING_SYNTHETIC_SOURCE"
+
+
+def test_nontrivial_severity_selection_uses_most_severe_state():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_group_row(conn, signal_date="2026-05-29", timing_state="EXIT_ZONE", overheat_risk_level="LOW")
+    _insert_group_row(conn, signal_date="2026-05-30", timing_state="BUY_ZONE", overheat_risk_level="LOW")
+    _insert_synthetic_row(conn, ohlc_date="2026-05-30")
+    conn.commit()
+
+    build_report_group_context_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+        horizons=("rolling2",),
+        created_at_utc="2026-05-30T00:00:00Z",
+    )
+
+    row = conn.execute(
+        """
+        SELECT group_current_status, group_window_status, group_status_change
+        FROM dc_report_context_group_v2
+        WHERE signal_date = ? AND taxonomy_version = ? AND horizon = ?
+        """,
+        ("2026-05-30", "DC_TAXONOMY_FULL_V1", "rolling2"),
+    ).fetchone()
+
+    assert row is not None
+    assert row["group_current_status"] == "BUY_ZONE"
+    assert row["group_window_status"] == "EXIT_ZONE"
+    assert row["group_status_change"] == "EXIT_ZONE -> BUY_ZONE"
+
+
+def test_multiple_groups_are_written_in_one_run():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_group_row(conn, signal_date="2026-05-30", group_name="Infrastructure")
+    _insert_group_row(conn, signal_date="2026-05-30", group_name="Semis")
+    _insert_synthetic_row(conn, ohlc_date="2026-05-30", group_name="Infrastructure")
+    _insert_synthetic_row(conn, ohlc_date="2026-05-30", group_name="Semis")
+    conn.commit()
+
+    summary = build_report_group_context_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+        horizons=("daily",),
+        created_at_utc="2026-05-30T00:00:00Z",
+    )
+
+    rows = conn.execute(
+        """
+        SELECT group_name
+        FROM dc_report_context_group_v2
+        WHERE signal_date = ? AND taxonomy_version = ? AND horizon = ?
+        ORDER BY group_name ASC
+        """,
+        ("2026-05-30", "DC_TAXONOMY_FULL_V1", "daily"),
+    ).fetchall()
+
+    assert [row["group_name"] for row in rows] == ["Infrastructure", "Semis"]
+    assert summary["daily_rows_written"] == 2
     assert summary["total_rows_written"] == 2
 
 
