@@ -162,8 +162,18 @@ def test_migration_creates_expected_primary_keys_and_columns():
         "in_datacenter_ecosystem",
         "is_watchlist",
         "current_watchlist_status",
+        "price_data_status",
+        "close",
         "breakout_signal",
         "pullback_signal",
+        "latest_bullish_relevance_class",
+        "latest_bearish_relevance_class",
+        "bullish_candle_signal",
+        "bullish_divergence_signal",
+        "hidden_bullish_divergence_signal",
+        "bearish_candle_signal",
+        "bearish_divergence_signal",
+        "hidden_bearish_divergence_signal",
         "exit_risk_signal",
         "ma_break_status",
         "freshness_status",
@@ -254,6 +264,37 @@ def test_group_context_horizon_check_rejects_invalid_value():
                 "Infrastructure",
                 "READY",
                 "2026-05-30",
+                run_id,
+                "2026-05-30T00:00:00Z",
+            ),
+        )
+
+
+def test_daily_context_new_signal_boolean_checks_reject_invalid_values():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            """
+            INSERT INTO dc_report_context_daily_v2 (
+                signal_date,
+                taxonomy_version,
+                market,
+                ticker,
+                bullish_candle_signal,
+                context_readiness_status,
+                run_id,
+                created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "2026-05-30",
+                "DC_TAXONOMY_FULL_V1",
+                "usa",
+                "NVDA",
+                2,
+                "OK",
                 run_id,
                 "2026-05-30T00:00:00Z",
             ),

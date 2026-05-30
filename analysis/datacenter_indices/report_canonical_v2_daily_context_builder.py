@@ -198,6 +198,8 @@ def _write_rows(conn: sqlite3.Connection, rows: list[dict[str, object]]) -> None
             in_datacenter_ecosystem,
             is_watchlist,
             current_watchlist_status,
+            price_data_status,
+            close,
             breakout_signal,
             pullback_signal,
             fast_ema10_pullback_signal,
@@ -205,6 +207,14 @@ def _write_rows(conn: sqlite3.Connection, rows: list[dict[str, object]]) -> None
             exit_risk_signal,
             exit_risk_severity,
             latest_exit_reason,
+            latest_bullish_relevance_class,
+            latest_bearish_relevance_class,
+            bullish_candle_signal,
+            bullish_divergence_signal,
+            hidden_bullish_divergence_signal,
+            bearish_candle_signal,
+            bearish_divergence_signal,
+            hidden_bearish_divergence_signal,
             return_5d,
             return_10d,
             return_20d,
@@ -241,6 +251,8 @@ def _write_rows(conn: sqlite3.Connection, rows: list[dict[str, object]]) -> None
             :in_datacenter_ecosystem,
             :is_watchlist,
             :current_watchlist_status,
+            :price_data_status,
+            :close,
             :breakout_signal,
             :pullback_signal,
             :fast_ema10_pullback_signal,
@@ -248,6 +260,14 @@ def _write_rows(conn: sqlite3.Connection, rows: list[dict[str, object]]) -> None
             :exit_risk_signal,
             :exit_risk_severity,
             :latest_exit_reason,
+            :latest_bullish_relevance_class,
+            :latest_bearish_relevance_class,
+            :bullish_candle_signal,
+            :bullish_divergence_signal,
+            :hidden_bullish_divergence_signal,
+            :bearish_candle_signal,
+            :bearish_divergence_signal,
+            :hidden_bearish_divergence_signal,
             :return_5d,
             :return_10d,
             :return_20d,
@@ -366,6 +386,8 @@ def build_report_daily_context_v2(
             "in_datacenter_ecosystem": in_datacenter_ecosystem,
             "is_watchlist": 1 if ticker_value.upper() in normalized_watchlist else 0,
             "current_watchlist_status": None,
+            "price_data_status": _ticker_source_value(ticker_row, ticker_source_columns, "price_data_status"),
+            "close": _ticker_source_value(ticker_row, ticker_source_columns, "close"),
             "breakout_signal": int(_ticker_source_value(ticker_row, ticker_source_columns, "breakout_signal") or 0),
             "pullback_signal": int(_ticker_source_value(ticker_row, ticker_source_columns, "pullback_signal") or 0),
             "fast_ema10_pullback_signal": int(
@@ -382,6 +404,34 @@ def build_report_daily_context_v2(
             "exit_risk_signal": int(_ticker_source_value(ticker_row, ticker_source_columns, "exit_risk_signal") or 0),
             "exit_risk_severity": _ticker_source_value(ticker_row, ticker_source_columns, "exit_risk_severity"),
             "latest_exit_reason": _ticker_source_value(ticker_row, ticker_source_columns, "exit_reason"),
+            "latest_bullish_relevance_class": _ticker_source_value(
+                ticker_row,
+                ticker_source_columns,
+                "latest_bullish_relevance_class",
+            ),
+            "latest_bearish_relevance_class": _ticker_source_value(
+                ticker_row,
+                ticker_source_columns,
+                "latest_bearish_relevance_class",
+            ),
+            "bullish_candle_signal": int(
+                _ticker_source_value(ticker_row, ticker_source_columns, "bullish_candle_signal") or 0
+            ),
+            "bullish_divergence_signal": int(
+                _ticker_source_value(ticker_row, ticker_source_columns, "bullish_divergence_signal") or 0
+            ),
+            "hidden_bullish_divergence_signal": int(
+                _ticker_source_value(ticker_row, ticker_source_columns, "hidden_bullish_divergence_signal") or 0
+            ),
+            "bearish_candle_signal": int(
+                _ticker_source_value(ticker_row, ticker_source_columns, "bearish_candle_signal") or 0
+            ),
+            "bearish_divergence_signal": int(
+                _ticker_source_value(ticker_row, ticker_source_columns, "bearish_divergence_signal") or 0
+            ),
+            "hidden_bearish_divergence_signal": int(
+                _ticker_source_value(ticker_row, ticker_source_columns, "hidden_bearish_divergence_signal") or 0
+            ),
             "return_5d": _ticker_source_value(ticker_row, ticker_source_columns, "return_5d"),
             "return_10d": _ticker_source_value(ticker_row, ticker_source_columns, "return_10d"),
             "return_20d": _ticker_source_value(ticker_row, ticker_source_columns, "return_20d"),
@@ -420,12 +470,8 @@ def build_report_daily_context_v2(
             "context_readiness_status": readiness_status,
             "run_id": run_id,
             "created_at_utc": created_at_value,
-            "price_data_status": _ticker_source_value(ticker_row, ticker_source_columns, "price_data_status"),
-            "close": _ticker_source_value(ticker_row, ticker_source_columns, "close"),
         }
         output_row["current_watchlist_status"] = _classify_daily_watchlist_status(output_row)
-        del output_row["price_data_status"]
-        del output_row["close"]
         rows_to_write.append(output_row)
 
     _delete_existing_rows(

@@ -25,6 +25,8 @@ def _connect() -> sqlite3.Connection:
             primary_subindustry TEXT NULL,
             close REAL NULL,
             price_data_status TEXT NULL,
+            latest_bullish_relevance_class TEXT NULL,
+            latest_bearish_relevance_class TEXT NULL,
             breakout_signal INTEGER NULL,
             pullback_signal INTEGER NULL,
             fast_ema10_pullback_signal INTEGER NULL,
@@ -32,6 +34,12 @@ def _connect() -> sqlite3.Connection:
             exit_risk_signal INTEGER NULL,
             exit_risk_severity TEXT NULL,
             exit_reason TEXT NULL,
+            bullish_candle_signal INTEGER NULL,
+            bullish_divergence_signal INTEGER NULL,
+            hidden_bullish_divergence_signal INTEGER NULL,
+            bearish_candle_signal INTEGER NULL,
+            bearish_divergence_signal INTEGER NULL,
+            hidden_bearish_divergence_signal INTEGER NULL,
             return_5d REAL NULL,
             return_10d REAL NULL,
             return_20d REAL NULL,
@@ -152,6 +160,15 @@ def _insert_ticker_row(
     exit_risk_signal: int = 0,
     exit_risk_severity: str | None = None,
     price_data_status: str | None = "OK",
+    close: float | None = 100.0,
+    latest_bullish_relevance_class: str | None = None,
+    latest_bearish_relevance_class: str | None = None,
+    bullish_candle_signal: int = 0,
+    bullish_divergence_signal: int = 0,
+    hidden_bullish_divergence_signal: int = 0,
+    bearish_candle_signal: int = 0,
+    bearish_divergence_signal: int = 0,
+    hidden_bearish_divergence_signal: int = 0,
 ) -> None:
     conn.execute(
         """
@@ -165,6 +182,8 @@ def _insert_ticker_row(
             primary_subindustry,
             close,
             price_data_status,
+            latest_bullish_relevance_class,
+            latest_bearish_relevance_class,
             breakout_signal,
             pullback_signal,
             fast_ema10_pullback_signal,
@@ -172,6 +191,12 @@ def _insert_ticker_row(
             exit_risk_signal,
             exit_risk_severity,
             exit_reason,
+            bullish_candle_signal,
+            bullish_divergence_signal,
+            hidden_bullish_divergence_signal,
+            bearish_candle_signal,
+            bearish_divergence_signal,
+            hidden_bearish_divergence_signal,
             return_5d,
             return_10d,
             return_20d,
@@ -185,7 +210,7 @@ def _insert_ticker_row(
             latest_bos_freshness,
             latest_reset_reason,
             latest_reset_freshness
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             signal_date,
@@ -195,8 +220,10 @@ def _insert_ticker_row(
             ticker,
             primary_layer,
             primary_subindustry,
-            100.0,
+            close,
             price_data_status,
+            latest_bullish_relevance_class,
+            latest_bearish_relevance_class,
             breakout_signal,
             pullback_signal,
             0,
@@ -204,6 +231,12 @@ def _insert_ticker_row(
             exit_risk_signal,
             exit_risk_severity,
             "reason-token",
+            bullish_candle_signal,
+            bullish_divergence_signal,
+            hidden_bullish_divergence_signal,
+            bearish_candle_signal,
+            bearish_divergence_signal,
+            hidden_bearish_divergence_signal,
             2.5,
             5.0,
             8.5,
@@ -250,10 +283,20 @@ def test_daily_ticker_context_rows_are_written():
     assert row["market"] == "usa"
     assert row["primary_layer"] == "Infrastructure"
     assert row["primary_subindustry"] == "Semis"
+    assert row["price_data_status"] == "OK"
+    assert row["close"] == 100.0
     assert row["breakout_signal"] == 1
     assert row["pullback_signal"] == 0
     assert row["conservative_ema20_pullback_signal"] == 1
     assert row["latest_exit_reason"] == "reason-token"
+    assert row["latest_bullish_relevance_class"] is None
+    assert row["latest_bearish_relevance_class"] is None
+    assert row["bullish_candle_signal"] == 0
+    assert row["bullish_divergence_signal"] == 0
+    assert row["hidden_bullish_divergence_signal"] == 0
+    assert row["bearish_candle_signal"] == 0
+    assert row["bearish_divergence_signal"] == 0
+    assert row["hidden_bearish_divergence_signal"] == 0
     assert row["return_5d"] == 2.5
     assert row["distance_to_ema20_pct"] == 1.1
     assert row["trend_state"] == "UP"
@@ -269,6 +312,212 @@ def test_daily_ticker_context_rows_are_written():
     assert summary["daily_rows_written"] == 1
     assert summary["group_context_rows_read"] == 2
     assert summary["rows_missing_group_context"] == 0
+
+
+def test_new_daily_trigger_input_fields_are_copied_from_source():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_group_context_row(conn, group_type="layer", group_name="Infrastructure")
+    _insert_group_context_row(conn, group_type="subindustry", group_name="Semis")
+    _insert_ticker_row(
+        conn,
+        ticker="NVDA",
+        price_data_status="MISSING_AS_OF_DATE",
+        close=None,
+        latest_bullish_relevance_class="RELEVANT",
+        latest_bearish_relevance_class="WEAK_CONTEXT",
+        bullish_candle_signal=1,
+        bullish_divergence_signal=1,
+        hidden_bullish_divergence_signal=1,
+        bearish_candle_signal=1,
+        bearish_divergence_signal=1,
+        hidden_bearish_divergence_signal=1,
+    )
+    conn.commit()
+
+    build_report_daily_context_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+    )
+
+    row = conn.execute(
+        """
+        SELECT
+            price_data_status,
+            close,
+            latest_bullish_relevance_class,
+            latest_bearish_relevance_class,
+            bullish_candle_signal,
+            bullish_divergence_signal,
+            hidden_bullish_divergence_signal,
+            bearish_candle_signal,
+            bearish_divergence_signal,
+            hidden_bearish_divergence_signal
+        FROM dc_report_context_daily_v2
+        WHERE signal_date = ? AND taxonomy_version = ? AND ticker = ?
+        """,
+        ("2026-05-30", "DC_TAXONOMY_FULL_V1", "NVDA"),
+    ).fetchone()
+
+    assert row is not None
+    assert row["price_data_status"] == "MISSING_AS_OF_DATE"
+    assert row["close"] is None
+    assert row["latest_bullish_relevance_class"] == "RELEVANT"
+    assert row["latest_bearish_relevance_class"] == "WEAK_CONTEXT"
+    assert row["bullish_candle_signal"] == 1
+    assert row["bullish_divergence_signal"] == 1
+    assert row["hidden_bullish_divergence_signal"] == 1
+    assert row["bearish_candle_signal"] == 1
+    assert row["bearish_divergence_signal"] == 1
+    assert row["hidden_bearish_divergence_signal"] == 1
+
+
+def test_missing_optional_daily_trigger_source_columns_default_deterministically():
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    apply_report_canonical_v2_migration(conn)
+    conn.execute(
+        """
+        CREATE TABLE dc_ticker_swing_signal_daily (
+            signal_date TEXT NOT NULL,
+            taxonomy_version TEXT NOT NULL,
+            signal_version TEXT NOT NULL,
+            market TEXT NULL,
+            ticker TEXT NOT NULL,
+            primary_layer TEXT NULL,
+            primary_subindustry TEXT NULL,
+            breakout_signal INTEGER NULL,
+            pullback_signal INTEGER NULL,
+            fast_ema10_pullback_signal INTEGER NULL,
+            conservative_ema20_pullback_signal INTEGER NULL,
+            exit_risk_signal INTEGER NULL,
+            exit_risk_severity TEXT NULL,
+            exit_reason TEXT NULL,
+            return_5d REAL NULL,
+            return_10d REAL NULL,
+            return_20d REAL NULL,
+            return_60d REAL NULL,
+            distance_to_ema20_pct REAL NULL,
+            distance_to_ema50_pct REAL NULL,
+            ticker_trend_state TEXT NULL,
+            latest_structure_label TEXT NULL,
+            latest_structure_freshness TEXT NULL,
+            latest_bos_event_type TEXT NULL,
+            latest_bos_freshness TEXT NULL,
+            latest_reset_reason TEXT NULL,
+            latest_reset_freshness TEXT NULL
+        )
+        """
+    )
+    _insert_run(conn)
+    _insert_group_context_row(conn, group_type="layer", group_name="Infrastructure")
+    _insert_group_context_row(conn, group_type="subindustry", group_name="Semis")
+    conn.execute(
+        """
+        INSERT INTO dc_ticker_swing_signal_daily (
+            signal_date,
+            taxonomy_version,
+            signal_version,
+            market,
+            ticker,
+            primary_layer,
+            primary_subindustry,
+            breakout_signal,
+            pullback_signal,
+            fast_ema10_pullback_signal,
+            conservative_ema20_pullback_signal,
+            exit_risk_signal,
+            exit_risk_severity,
+            exit_reason,
+            return_5d,
+            return_10d,
+            return_20d,
+            return_60d,
+            distance_to_ema20_pct,
+            distance_to_ema50_pct,
+            ticker_trend_state,
+            latest_structure_label,
+            latest_structure_freshness,
+            latest_bos_event_type,
+            latest_bos_freshness,
+            latest_reset_reason,
+            latest_reset_freshness
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "2026-05-30",
+            "DC_TAXONOMY_FULL_V1",
+            "DC_SWING_SIGNAL_V1",
+            "usa",
+            "NVDA",
+            "Infrastructure",
+            "Semis",
+            1,
+            0,
+            0,
+            1,
+            0,
+            None,
+            "reason-token",
+            2.5,
+            5.0,
+            8.5,
+            15.0,
+            1.1,
+            4.4,
+            "UP",
+            "HL",
+            "FRESH",
+            "BOS_UP",
+            "FRESH",
+            "NONE",
+            "STALE",
+        ),
+    )
+    conn.commit()
+
+    build_report_daily_context_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+    )
+
+    row = conn.execute(
+        """
+        SELECT
+            price_data_status,
+            close,
+            latest_bullish_relevance_class,
+            latest_bearish_relevance_class,
+            bullish_candle_signal,
+            bullish_divergence_signal,
+            hidden_bullish_divergence_signal,
+            bearish_candle_signal,
+            bearish_divergence_signal,
+            hidden_bearish_divergence_signal
+        FROM dc_report_context_daily_v2
+        WHERE signal_date = ? AND taxonomy_version = ? AND ticker = ?
+        """,
+        ("2026-05-30", "DC_TAXONOMY_FULL_V1", "NVDA"),
+    ).fetchone()
+
+    assert row is not None
+    assert row["price_data_status"] is None
+    assert row["close"] is None
+    assert row["latest_bullish_relevance_class"] is None
+    assert row["latest_bearish_relevance_class"] is None
+    assert row["bullish_candle_signal"] == 0
+    assert row["bullish_divergence_signal"] == 0
+    assert row["hidden_bullish_divergence_signal"] == 0
+    assert row["bearish_candle_signal"] == 0
+    assert row["bearish_divergence_signal"] == 0
+    assert row["hidden_bearish_divergence_signal"] == 0
 
 
 def test_missing_group_context_readiness_is_deterministic():

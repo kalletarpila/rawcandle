@@ -60,11 +60,21 @@ def _insert_daily_context_row(
     primary_layer: str = "Infrastructure",
     primary_subindustry: str = "Semis",
     current_watchlist_status: str = "NEUTRAL_MONITOR",
+    price_data_status: str | None = "OK",
+    close: float | None = 100.0,
     breakout_signal: int = 0,
     pullback_signal: int = 0,
     exit_risk_signal: int = 0,
     exit_risk_severity: str | None = None,
     latest_exit_reason: str | None = None,
+    latest_bullish_relevance_class: str | None = None,
+    latest_bearish_relevance_class: str | None = None,
+    bullish_candle_signal: int = 0,
+    bullish_divergence_signal: int = 0,
+    hidden_bullish_divergence_signal: int = 0,
+    bearish_candle_signal: int = 0,
+    bearish_divergence_signal: int = 0,
+    hidden_bearish_divergence_signal: int = 0,
     distance_to_ema20_pct: float | None = 0.05,
     trend_state: str | None = "UP",
     latest_structure_label: str | None = "HL",
@@ -86,6 +96,8 @@ def _insert_daily_context_row(
             in_datacenter_ecosystem,
             is_watchlist,
             current_watchlist_status,
+            price_data_status,
+            close,
             breakout_signal,
             pullback_signal,
             fast_ema10_pullback_signal,
@@ -93,6 +105,14 @@ def _insert_daily_context_row(
             exit_risk_signal,
             exit_risk_severity,
             latest_exit_reason,
+            latest_bullish_relevance_class,
+            latest_bearish_relevance_class,
+            bullish_candle_signal,
+            bullish_divergence_signal,
+            hidden_bullish_divergence_signal,
+            bearish_candle_signal,
+            bearish_divergence_signal,
+            hidden_bearish_divergence_signal,
             distance_to_ema20_pct,
             trend_state,
             latest_structure_label,
@@ -103,7 +123,7 @@ def _insert_daily_context_row(
             context_readiness_status,
             run_id,
             created_at_utc
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             signal_date,
@@ -115,6 +135,8 @@ def _insert_daily_context_row(
             1,
             0,
             current_watchlist_status,
+            price_data_status,
+            close,
             breakout_signal,
             pullback_signal,
             0,
@@ -122,6 +144,14 @@ def _insert_daily_context_row(
             exit_risk_signal,
             exit_risk_severity,
             latest_exit_reason,
+            latest_bullish_relevance_class,
+            latest_bearish_relevance_class,
+            bullish_candle_signal,
+            bullish_divergence_signal,
+            hidden_bullish_divergence_signal,
+            bearish_candle_signal,
+            bearish_divergence_signal,
+            hidden_bearish_divergence_signal,
             distance_to_ema20_pct,
             trend_state,
             latest_structure_label,
@@ -263,6 +293,149 @@ def test_classification_state_behavior_for_key_daily_cases():
         ("NVDA", "BUY_WATCH", "BULLISH_SETUP_NEEDS_CONFIRMATION", None, "MONITOR_FOR_DAILY_CONFIRMATION"),
         ("TSLA", "SELL_TRIGGER", "DAILY_SELL_TRIGGER", "EXIT_RISK_SIGNAL_MEDIUM_OR_HIGH", "REVIEW_SELL_OR_TIGHTEN_STOP"),
     ]
+
+
+def test_buy_trigger_is_reachable_through_bullish_relevance_and_signal_fields():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_daily_context_row(
+        conn,
+        ticker="NVDA",
+        pullback_signal=1,
+        latest_bullish_relevance_class="RELEVANT",
+        current_watchlist_status="PULLBACK_CANDIDATE",
+    )
+    conn.commit()
+
+    write_report_daily_trigger_classification_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+    )
+
+    row = conn.execute(
+        """
+        SELECT classification_state, primary_reason, blocking_reason, next_action
+        FROM dc_report_classification_v2
+        WHERE signal_date = ? AND taxonomy_version = ? AND ticker = ? AND horizon = ? AND classification_type = ?
+        """,
+        ("2026-05-30", "DC_TAXONOMY_FULL_V1", "NVDA", "daily", "daily_trigger"),
+    ).fetchone()
+
+    assert row is not None
+    assert row["classification_state"] == "BUY_TRIGGER"
+    assert row["primary_reason"] == "PULLBACK_TRIGGER_WITH_RELEVANT_BULLISH_CONTEXT"
+    assert row["blocking_reason"] is None
+    assert row["next_action"] == "REVIEW_WITH_ROLLING_CONTEXT"
+
+
+def test_stop_trigger_is_reachable_through_relevant_bearish_branch():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_daily_context_row(
+        conn,
+        ticker="NVDA",
+        current_watchlist_status="HIGH_EXIT_RISK",
+        latest_bearish_relevance_class="RELEVANT",
+        distance_to_ema20_pct=-0.10,
+    )
+    conn.commit()
+
+    write_report_daily_trigger_classification_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+    )
+
+    row = conn.execute(
+        """
+        SELECT classification_state, primary_reason, blocking_reason, next_action
+        FROM dc_report_classification_v2
+        WHERE signal_date = ? AND taxonomy_version = ? AND ticker = ? AND horizon = ? AND classification_type = ?
+        """,
+        ("2026-05-30", "DC_TAXONOMY_FULL_V1", "NVDA", "daily", "daily_trigger"),
+    ).fetchone()
+
+    assert row is not None
+    assert row["classification_state"] == "STOP_TRIGGER"
+    assert row["primary_reason"] == "CONFIRMED_DAILY_STOP_TRIGGER"
+    assert row["blocking_reason"] == "RELEVANT_BEARISH_CONTEXT_WITH_HIGH_EXIT_RISK_AND_PRICE_BREAK"
+    assert row["next_action"] == "CHECK_STOP_OR_EXIT"
+
+
+def test_exit_watch_is_reachable_through_weak_bearish_branch():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_daily_context_row(
+        conn,
+        ticker="NVDA",
+        latest_bearish_relevance_class="WEAK_CONTEXT",
+        current_watchlist_status="NEUTRAL_MONITOR",
+    )
+    conn.commit()
+
+    write_report_daily_trigger_classification_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+    )
+
+    row = conn.execute(
+        """
+        SELECT classification_state, primary_reason, blocking_reason, next_action
+        FROM dc_report_classification_v2
+        WHERE signal_date = ? AND taxonomy_version = ? AND ticker = ? AND horizon = ? AND classification_type = ?
+        """,
+        ("2026-05-30", "DC_TAXONOMY_FULL_V1", "NVDA", "daily", "daily_trigger"),
+    ).fetchone()
+
+    assert row is not None
+    assert row["classification_state"] == "EXIT_WATCH"
+    assert row["primary_reason"] == "DAILY_EXIT_WATCH"
+    assert row["blocking_reason"] == "MILD_OR_UNCONFIRMED_EXIT_PRESSURE"
+    assert row["next_action"] == "MONITOR_NEXT_SESSION"
+
+
+def test_insufficient_data_is_reachable_through_missing_price_context():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_daily_context_row(
+        conn,
+        ticker="NVDA",
+        price_data_status="MISSING_AS_OF_DATE",
+        close=None,
+        current_watchlist_status="MISSING_PRICE",
+    )
+    conn.commit()
+
+    write_report_daily_trigger_classification_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+    )
+
+    row = conn.execute(
+        """
+        SELECT classification_state, primary_reason, blocking_reason, next_action
+        FROM dc_report_classification_v2
+        WHERE signal_date = ? AND taxonomy_version = ? AND ticker = ? AND horizon = ? AND classification_type = ?
+        """,
+        ("2026-05-30", "DC_TAXONOMY_FULL_V1", "NVDA", "daily", "daily_trigger"),
+    ).fetchone()
+
+    assert row is not None
+    assert row["classification_state"] == "INSUFFICIENT_DATA"
+    assert row["primary_reason"] == "MISSING_PRICE_CONTEXT"
+    assert row["blocking_reason"] is None
+    assert row["next_action"] == "WAIT_FOR_DATA"
 
 
 def test_market_safe_delete_behavior_preserves_unrelated_market_rows():
@@ -461,3 +634,31 @@ def test_writer_reads_only_canonical_daily_context():
     assert row is not None
     assert row["classification_state"] == "BUY_WATCH"
     assert summary["daily_context_rows_read"] == 1
+
+
+def test_created_at_override_is_respected():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_daily_context_row(conn, ticker="NVDA", breakout_signal=1)
+    conn.commit()
+
+    write_report_daily_trigger_classification_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+        created_at_utc="2026-05-30T12:34:56Z",
+    )
+
+    row = conn.execute(
+        """
+        SELECT created_at_utc
+        FROM dc_report_classification_v2
+        WHERE signal_date = ? AND taxonomy_version = ? AND ticker = ? AND horizon = ? AND classification_type = ?
+        """,
+        ("2026-05-30", "DC_TAXONOMY_FULL_V1", "NVDA", "daily", "daily_trigger"),
+    ).fetchone()
+
+    assert row is not None
+    assert row["created_at_utc"] == "2026-05-30T12:34:56Z"

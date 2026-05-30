@@ -4,7 +4,7 @@ import sqlite3
 from datetime import datetime, timezone
 
 
-WATCHLIST_MISSING_PRICE_STATUSES = {"MISSING_PRICE"}
+WATCHLIST_MISSING_PRICE_STATUSES = {"MISSING_PRICE", "MISSING_AS_OF_DATE", "MISSING_CLOSE_AS_OF_DATE"}
 FRESH_SIGNAL_STATES = {"FRESH", "RECENT", "CURRENT"}
 SEVERE_EXIT_SEVERITIES = {"CRITICAL", "EXTREME"}
 HIGH_EXIT_SEVERITIES = {"HIGH", "CRITICAL", "EXTREME"}
@@ -80,7 +80,7 @@ def _classify_daily_trigger_row(row: dict[str, object]) -> tuple[str, str, str |
         return ("INSUFFICIENT_DATA", "MISSING_TICKER_CONTEXT", None, "WAIT_FOR_DATA")
 
     current_watchlist_status = _normalize_text(row.get("current_watchlist_status")).upper()
-    if current_watchlist_status in WATCHLIST_MISSING_PRICE_STATUSES:
+    if _normalize_text(row.get("price_data_status")).upper() in WATCHLIST_MISSING_PRICE_STATUSES or row.get("close") is None:
         return ("INSUFFICIENT_DATA", "MISSING_PRICE_CONTEXT", None, "WAIT_FOR_DATA")
 
     trend_state = _normalize_text(row.get("trend_state")).upper()
@@ -103,12 +103,28 @@ def _classify_daily_trigger_row(row: dict[str, object]) -> tuple[str, str, str |
     has_pullback_signal = int(row.get("pullback_signal") or 0) == 1
     has_breakout_signal = int(row.get("breakout_signal") or 0) == 1
     has_exit_risk_signal = int(row.get("exit_risk_signal") or 0) == 1
-    has_bullish_signal = False
-    has_bearish_signal = False
-    relevant_bullish = False
-    weak_bullish = False
-    relevant_bearish = False
-    weak_bearish = False
+    latest_bullish_relevance_class = _normalize_text(row.get("latest_bullish_relevance_class")).upper()
+    latest_bearish_relevance_class = _normalize_text(row.get("latest_bearish_relevance_class")).upper()
+    has_bullish_signal = any(
+        int(row.get(field_name) or 0) == 1
+        for field_name in (
+            "bullish_candle_signal",
+            "bullish_divergence_signal",
+            "hidden_bullish_divergence_signal",
+        )
+    )
+    has_bearish_signal = any(
+        int(row.get(field_name) or 0) == 1
+        for field_name in (
+            "bearish_candle_signal",
+            "bearish_divergence_signal",
+            "hidden_bearish_divergence_signal",
+        )
+    )
+    relevant_bullish = latest_bullish_relevance_class == "RELEVANT"
+    weak_bullish = latest_bullish_relevance_class == "WEAK_CONTEXT"
+    relevant_bearish = latest_bearish_relevance_class == "RELEVANT"
+    weak_bearish = latest_bearish_relevance_class == "WEAK_CONTEXT"
 
     high_exit_risk = current_watchlist_status == "HIGH_EXIT_RISK" or _is_high_or_worse_exit_severity(
         exit_risk_severity
