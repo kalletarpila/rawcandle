@@ -344,6 +344,209 @@ def test_missing_group_context_readiness_is_deterministic():
     assert row["subindustry_timing_state"] is None
 
 
+def test_missing_layer_context_readiness_is_deterministic():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_valid_date(conn, signal_date="2026-05-29")
+    _insert_valid_date(conn, signal_date="2026-05-30")
+    _insert_ticker_row(conn, signal_date="2026-05-29")
+    _insert_ticker_row(conn, signal_date="2026-05-30")
+    _insert_group_context_row(conn, horizon="rolling2", group_type="subindustry", group_name="Semis")
+    conn.commit()
+
+    build_report_window_context_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+        horizons=("rolling2",),
+    )
+
+    row = conn.execute(
+        """
+        SELECT context_readiness_status, layer_timing_state, subindustry_timing_state
+        FROM dc_report_context_window_v2
+        WHERE signal_date = ? AND taxonomy_version = ? AND horizon = ?
+        """,
+        ("2026-05-30", "DC_TAXONOMY_FULL_V1", "rolling2"),
+    ).fetchone()
+
+    assert row is not None
+    assert row["context_readiness_status"] == "MISSING_LAYER_CONTEXT"
+    assert row["layer_timing_state"] is None
+    assert row["subindustry_timing_state"] == "BUY_ZONE"
+
+
+def test_missing_subindustry_context_readiness_is_deterministic():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_valid_date(conn, signal_date="2026-05-29")
+    _insert_valid_date(conn, signal_date="2026-05-30")
+    _insert_ticker_row(conn, signal_date="2026-05-29")
+    _insert_ticker_row(conn, signal_date="2026-05-30")
+    _insert_group_context_row(conn, horizon="rolling2", group_type="layer", group_name="Infrastructure")
+    conn.commit()
+
+    build_report_window_context_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+        horizons=("rolling2",),
+    )
+
+    row = conn.execute(
+        """
+        SELECT context_readiness_status, layer_timing_state, subindustry_timing_state
+        FROM dc_report_context_window_v2
+        WHERE signal_date = ? AND taxonomy_version = ? AND horizon = ?
+        """,
+        ("2026-05-30", "DC_TAXONOMY_FULL_V1", "rolling2"),
+    ).fetchone()
+
+    assert row is not None
+    assert row["context_readiness_status"] == "MISSING_SUBINDUSTRY_CONTEXT"
+    assert row["layer_timing_state"] == "BUY_ZONE"
+    assert row["subindustry_timing_state"] is None
+
+
+def test_explicit_signal_flags_are_written_deterministically():
+    conn = _connect()
+    _insert_run(conn)
+    for date_value in ("2026-05-29", "2026-05-30"):
+        _insert_valid_date(conn, signal_date=date_value)
+    _insert_group_context_row(
+        conn,
+        horizon="rolling2",
+        group_type="layer",
+        group_name="Infrastructure",
+        overheat_risk_level="HIGH",
+    )
+    _insert_group_context_row(
+        conn,
+        horizon="rolling2",
+        group_type="subindustry",
+        group_name="Semis",
+        overheat_risk_level="EXTREME",
+    )
+    _insert_ticker_row(conn, signal_date="2026-05-29", ticker="NVDA")
+    _insert_ticker_row(
+        conn,
+        signal_date="2026-05-30",
+        ticker="NVDA",
+        exit_risk_signal=1,
+        exit_risk_severity="CRITICAL",
+        return_10d=-9.0,
+        distance_to_ema20_pct=-1.5,
+        distance_to_ema50_pct=-2.5,
+        latest_structure_freshness="AGING",
+        latest_bos_event_type="BOS_DOWN",
+        latest_bos_freshness="CURRENT",
+        latest_reset_reason="DOUBLE_BOS_DOWN",
+        latest_reset_freshness="CURRENT",
+    )
+    _insert_ticker_row(conn, signal_date="2026-05-29", ticker="AMD")
+    _insert_ticker_row(
+        conn,
+        signal_date="2026-05-30",
+        ticker="AMD",
+        latest_reset_reason="DOUBLE_BOS_UP",
+        latest_reset_freshness="CURRENT",
+    )
+    conn.commit()
+
+    build_report_window_context_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+        horizons=("rolling2",),
+    )
+
+    nvda_row = conn.execute(
+        """
+        SELECT
+            close_below_ema20_flag,
+            close_below_ema50_flag,
+            return_10d_lt_minus_8pct_flag,
+            double_bos_down_flag,
+            double_bos_up_flag,
+            fresh_bos_flag,
+            fresh_reset_flag,
+            stale_structure_flag,
+            layer_overheat_risk_flag,
+            subindustry_overheat_risk_flag,
+            severe_exit_risk_flag
+        FROM dc_report_context_window_v2
+        WHERE signal_date = ? AND taxonomy_version = ? AND ticker = ? AND horizon = ?
+        """,
+        ("2026-05-30", "DC_TAXONOMY_FULL_V1", "NVDA", "rolling2"),
+    ).fetchone()
+    amd_row = conn.execute(
+        """
+        SELECT double_bos_down_flag, double_bos_up_flag, fresh_reset_flag
+        FROM dc_report_context_window_v2
+        WHERE signal_date = ? AND taxonomy_version = ? AND ticker = ? AND horizon = ?
+        """,
+        ("2026-05-30", "DC_TAXONOMY_FULL_V1", "AMD", "rolling2"),
+    ).fetchone()
+
+    assert nvda_row is not None
+    assert nvda_row["close_below_ema20_flag"] == 1
+    assert nvda_row["close_below_ema50_flag"] == 1
+    assert nvda_row["return_10d_lt_minus_8pct_flag"] == 1
+    assert nvda_row["double_bos_down_flag"] == 1
+    assert nvda_row["double_bos_up_flag"] == 0
+    assert nvda_row["fresh_bos_flag"] == 1
+    assert nvda_row["fresh_reset_flag"] == 1
+    assert nvda_row["stale_structure_flag"] == 1
+    assert nvda_row["layer_overheat_risk_flag"] == 1
+    assert nvda_row["subindustry_overheat_risk_flag"] == 1
+    assert nvda_row["severe_exit_risk_flag"] == 1
+
+    assert amd_row is not None
+    assert amd_row["double_bos_down_flag"] == 0
+    assert amd_row["double_bos_up_flag"] == 1
+    assert amd_row["fresh_reset_flag"] == 1
+
+
+def test_missing_price_status_drives_current_and_window_watchlist_status():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_valid_date(conn, signal_date="2026-05-29")
+    _insert_valid_date(conn, signal_date="2026-05-30")
+    _insert_group_context_row(conn, horizon="rolling2", group_type="layer", group_name="Infrastructure")
+    _insert_group_context_row(conn, horizon="rolling2", group_type="subindustry", group_name="Semis")
+    _insert_ticker_row(conn, signal_date="2026-05-29", price_data_status="MISSING_AS_OF_DATE")
+    _insert_ticker_row(conn, signal_date="2026-05-30", price_data_status="MISSING_CLOSE_AS_OF_DATE")
+    conn.commit()
+
+    build_report_window_context_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+        horizons=("rolling2",),
+    )
+
+    row = conn.execute(
+        """
+        SELECT current_watchlist_status, window_watchlist_status
+        FROM dc_report_context_window_v2
+        WHERE signal_date = ? AND taxonomy_version = ? AND ticker = ? AND horizon = ?
+        """,
+        ("2026-05-30", "DC_TAXONOMY_FULL_V1", "NVDA", "rolling2"),
+    ).fetchone()
+
+    assert row is not None
+    assert row["current_watchlist_status"] == "MISSING_PRICE"
+    assert row["window_watchlist_status"] == "MISSING_PRICE"
+
+
 def test_market_safe_delete_behavior_preserves_unrelated_market_rows():
     conn = _connect()
     _insert_run(conn)
