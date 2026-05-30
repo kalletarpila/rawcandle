@@ -300,6 +300,157 @@ def test_missing_group_context_readiness_is_deterministic():
     assert row["subindustry_timing_state"] is None
 
 
+def test_explicit_ecosystem_membership_is_respected():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_group_context_row(conn, group_type="layer", group_name="Infrastructure")
+    _insert_group_context_row(conn, group_type="subindustry", group_name="Semis")
+    _insert_ticker_row(conn, ticker="NVDA")
+    _insert_ticker_row(conn, ticker="AMD")
+    conn.commit()
+
+    build_report_daily_context_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+        ecosystem_tickers={"NVDA"},
+    )
+
+    rows = conn.execute(
+        """
+        SELECT ticker, in_datacenter_ecosystem
+        FROM dc_report_context_daily_v2
+        WHERE signal_date = ? AND taxonomy_version = ?
+        ORDER BY ticker ASC
+        """,
+        ("2026-05-30", "DC_TAXONOMY_FULL_V1"),
+    ).fetchall()
+
+    assert [(row["ticker"], row["in_datacenter_ecosystem"]) for row in rows] == [("AMD", 0), ("NVDA", 1)]
+
+
+def test_default_ecosystem_membership_fallback_marks_source_rows_in_ecosystem():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_group_context_row(conn, group_type="layer", group_name="Infrastructure")
+    _insert_group_context_row(conn, group_type="subindustry", group_name="Semis")
+    _insert_ticker_row(conn, ticker="NVDA")
+    _insert_ticker_row(conn, ticker="AMD")
+    conn.commit()
+
+    build_report_daily_context_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+    )
+
+    rows = conn.execute(
+        """
+        SELECT ticker, in_datacenter_ecosystem
+        FROM dc_report_context_daily_v2
+        WHERE signal_date = ? AND taxonomy_version = ?
+        ORDER BY ticker ASC
+        """,
+        ("2026-05-30", "DC_TAXONOMY_FULL_V1"),
+    ).fetchall()
+
+    assert [(row["ticker"], row["in_datacenter_ecosystem"]) for row in rows] == [("AMD", 1), ("NVDA", 1)]
+
+
+def test_default_watchlist_behavior_is_deterministic():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_group_context_row(conn, group_type="layer", group_name="Infrastructure")
+    _insert_group_context_row(conn, group_type="subindustry", group_name="Semis")
+    _insert_ticker_row(conn, ticker="NVDA")
+    conn.commit()
+
+    build_report_daily_context_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+        watchlist_tickers=None,
+    )
+
+    row = conn.execute(
+        """
+        SELECT is_watchlist
+        FROM dc_report_context_daily_v2
+        WHERE signal_date = ? AND taxonomy_version = ? AND ticker = ?
+        """,
+        ("2026-05-30", "DC_TAXONOMY_FULL_V1", "NVDA"),
+    ).fetchone()
+
+    assert row is not None
+    assert row["is_watchlist"] == 0
+
+
+def test_missing_layer_context_readiness_is_deterministic():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_group_context_row(conn, group_type="subindustry", group_name="Semis")
+    _insert_ticker_row(conn)
+    conn.commit()
+
+    build_report_daily_context_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+    )
+
+    row = conn.execute(
+        """
+        SELECT context_readiness_status, layer_timing_state, subindustry_timing_state
+        FROM dc_report_context_daily_v2
+        WHERE signal_date = ? AND taxonomy_version = ? AND ticker = ?
+        """,
+        ("2026-05-30", "DC_TAXONOMY_FULL_V1", "NVDA"),
+    ).fetchone()
+
+    assert row is not None
+    assert row["context_readiness_status"] == "MISSING_LAYER_CONTEXT"
+    assert row["layer_timing_state"] is None
+    assert row["subindustry_timing_state"] == "BUY_ZONE"
+
+
+def test_missing_subindustry_context_readiness_is_deterministic():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_group_context_row(conn, group_type="layer", group_name="Infrastructure")
+    _insert_ticker_row(conn)
+    conn.commit()
+
+    build_report_daily_context_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+    )
+
+    row = conn.execute(
+        """
+        SELECT context_readiness_status, layer_timing_state, subindustry_timing_state
+        FROM dc_report_context_daily_v2
+        WHERE signal_date = ? AND taxonomy_version = ? AND ticker = ?
+        """,
+        ("2026-05-30", "DC_TAXONOMY_FULL_V1", "NVDA"),
+    ).fetchone()
+
+    assert row is not None
+    assert row["context_readiness_status"] == "MISSING_SUBINDUSTRY_CONTEXT"
+    assert row["layer_timing_state"] == "BUY_ZONE"
+    assert row["subindustry_timing_state"] is None
+
+
 def test_market_safe_delete_behavior_preserves_unrelated_market_rows():
     conn = _connect()
     _insert_run(conn)

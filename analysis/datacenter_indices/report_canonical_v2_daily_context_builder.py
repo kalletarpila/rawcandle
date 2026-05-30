@@ -290,6 +290,7 @@ def build_report_daily_context_v2(
     signal_version: str | None = DEFAULT_DAILY_CONTEXT_SIGNAL_VERSION,
     calculation_version: str = "REPORT_CANONICAL_DAILY_CONTEXT_V2_1",
     created_at_utc: str | None = None,
+    ecosystem_tickers: set[str] | None = None,
     watchlist_tickers: set[str] | None = None,
 ) -> dict[str, int]:
     del calculation_version
@@ -319,6 +320,9 @@ def build_report_daily_context_v2(
         for row in group_rows
     }
 
+    # At this builder stage, source ticker rows are already report-scope rows, so absent an
+    # explicit ecosystem set they are treated as ecosystem members.
+    normalized_ecosystem = None if ecosystem_tickers is None else {ticker.upper() for ticker in ecosystem_tickers}
     normalized_watchlist = {ticker.upper() for ticker in (watchlist_tickers or set())}
     rows_to_write: list[dict[str, object]] = []
     rows_missing_group_context = 0
@@ -349,6 +353,9 @@ def build_report_daily_context_v2(
             rows_missing_group_context += 1
 
         ticker_value = str(_ticker_source_value(ticker_row, ticker_source_columns, "ticker") or "")
+        in_datacenter_ecosystem = 1
+        if normalized_ecosystem is not None:
+            in_datacenter_ecosystem = 1 if ticker_value.upper() in normalized_ecosystem else 0
         output_row = {
             "signal_date": signal_date,
             "taxonomy_version": taxonomy_version,
@@ -356,7 +363,7 @@ def build_report_daily_context_v2(
             "ticker": ticker_value,
             "primary_layer": primary_layer,
             "primary_subindustry": primary_subindustry,
-            "in_datacenter_ecosystem": 1,
+            "in_datacenter_ecosystem": in_datacenter_ecosystem,
             "is_watchlist": 1 if ticker_value.upper() in normalized_watchlist else 0,
             "current_watchlist_status": None,
             "breakout_signal": int(_ticker_source_value(ticker_row, ticker_source_columns, "breakout_signal") or 0),
