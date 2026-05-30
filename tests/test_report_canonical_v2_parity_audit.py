@@ -320,6 +320,73 @@ def _run_v2(conn: sqlite3.Connection, run_id: str = "run-1") -> None:
     )
 
 
+def _insert_run_row(conn: sqlite3.Connection, run_id: str = "run-1") -> None:
+    conn.execute(
+        """
+        INSERT INTO dc_report_run_v2 (
+            run_id, signal_date, taxonomy_version, market, calculation_version,
+            source_versions_json, created_at_utc, status, warning_count,
+            error_count, notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            run_id,
+            "2026-05-30",
+            "DC_TAXONOMY_FULL_V1",
+            "usa",
+            "TEST",
+            None,
+            "2026-05-30T00:00:00Z",
+            "OK",
+            0,
+            0,
+            None,
+        ),
+    )
+
+
+def _insert_classification_row(
+    conn: sqlite3.Connection,
+    *,
+    ticker: str,
+    horizon: str,
+    classification_type: str,
+    classification_state: str,
+    primary_reason: str | None,
+    blocking_reason: str | None = None,
+    risk_reason: str | None = None,
+    next_action: str | None = None,
+    run_id: str = "run-1",
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO dc_report_classification_v2 (
+            signal_date, taxonomy_version, market, ticker, horizon,
+            classification_type, classification_state, primary_reason,
+            blocking_reason, risk_reason, next_action, classification_status,
+            classification_version, run_id, created_at_utc
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "2026-05-30",
+            "DC_TAXONOMY_FULL_V1",
+            "usa",
+            ticker,
+            horizon,
+            classification_type,
+            classification_state,
+            primary_reason,
+            blocking_reason,
+            risk_reason,
+            next_action,
+            "OK",
+            "TEST",
+            run_id,
+            "2026-05-30T00:00:00Z",
+        ),
+    )
+
+
 def test_parity_audit_reports_ok_when_current_and_v2_classifications_match(tmp_path: Path):
     conn = _connect(tmp_path)
     _seed_source_rows(conn)
@@ -402,32 +469,15 @@ def test_missing_current_row_is_detected(tmp_path: Path):
     conn = _connect(tmp_path)
     _seed_source_rows(conn)
     _run_v2(conn)
-    conn.execute(
-        """
-        INSERT INTO dc_report_classification_v2 (
-            signal_date, taxonomy_version, market, ticker, horizon,
-            classification_type, classification_state, primary_reason,
-            blocking_reason, risk_reason, next_action, classification_status,
-            classification_version, run_id, created_at_utc
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            "2026-05-30",
-            "DC_TAXONOMY_FULL_V1",
-            "usa",
-            "FAKE",
-            "rolling2",
-            "rolling2_sell_pressure",
-            "WATCH_PRESSURE",
-            "X",
-            None,
-            "Y",
-            "Z",
-            "OK",
-            "TEST",
-            "run-1",
-            "2026-05-30T00:00:00Z",
-        ),
+    _insert_classification_row(
+        conn,
+        ticker="FAKE",
+        horizon="rolling2",
+        classification_type="rolling2_sell_pressure",
+        classification_state="WATCH_PRESSURE",
+        primary_reason="X",
+        risk_reason="Y",
+        next_action="Z",
     )
     conn.commit()
 
@@ -445,6 +495,73 @@ def test_missing_current_row_is_detected(tmp_path: Path):
     assert result["mismatches"][0]["ticker"] == "FAKE"
 
 
+def test_no_current_data_status_is_reported_deterministically(tmp_path: Path):
+    conn = _connect(tmp_path)
+    _insert_run_row(conn)
+    _insert_classification_row(
+        conn,
+        ticker="NVDA",
+        horizon="rolling2",
+        classification_type="rolling2_sell_pressure",
+        classification_state="WATCH_PRESSURE",
+        primary_reason="CURRENT_EXIT_RISK",
+        risk_reason="ELEVATED_EXIT_RISK",
+        next_action="REVIEW_EXIT_RISK",
+    )
+    conn.commit()
+
+    result = audit_report_canonical_v2_parity(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        market="usa",
+        horizons=("rolling2",),
+    )
+
+    assert result["status"] == "NO_CURRENT_DATA"
+    assert result["missing_current_count"] == 1
+    assert result["mismatch_count"] == len(result["mismatches"]) == 1
+    assert result["mismatches"] == [
+        {
+            "horizon": "rolling2",
+            "ticker": "NVDA",
+            "classification_type": "rolling2_sell_pressure",
+            "field": "row_presence",
+            "current_value": None,
+            "v2_value": "PRESENT",
+            "reason": "missing_current_row",
+        }
+    ]
+
+
+def test_no_v2_data_status_is_reported_deterministically(tmp_path: Path):
+    conn = _connect(tmp_path)
+    _seed_source_rows(conn)
+
+    result = audit_report_canonical_v2_parity(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        market="usa",
+        horizons=("daily",),
+    )
+
+    assert result["status"] == "NO_V2_DATA"
+    assert result["missing_v2_count"] == 1
+    assert result["mismatch_count"] == len(result["mismatches"]) == 1
+    assert result["mismatches"] == [
+        {
+            "horizon": "daily",
+            "ticker": "NVDA",
+            "classification_type": "daily_trigger",
+            "field": "row_presence",
+            "current_value": "PRESENT",
+            "v2_value": None,
+            "reason": "missing_v2_row",
+        }
+    ]
+
+
 def test_empty_string_vs_null_reason_normalization(tmp_path: Path):
     conn = _connect(tmp_path)
     _seed_source_rows(conn)
@@ -460,6 +577,80 @@ def test_empty_string_vs_null_reason_normalization(tmp_path: Path):
 
     assert result["status"] == "OK"
     assert result["mismatch_count"] == 0
+
+
+def test_rolling2_reason_action_field_mismatch_is_detected(tmp_path: Path):
+    conn = _connect(tmp_path)
+    _seed_source_rows(conn)
+    _run_v2(conn)
+    conn.execute(
+        """
+        UPDATE dc_report_classification_v2
+        SET next_action = ?
+        WHERE ticker = ? AND classification_type = ?
+        """,
+        ("BROKEN_ACTION", "NVDA", "rolling2_sell_pressure"),
+    )
+    conn.commit()
+
+    result = audit_report_canonical_v2_parity(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        market="usa",
+        horizons=("rolling2",),
+    )
+
+    assert result["status"] == "MISMATCH"
+    assert result["mismatch_count"] == 1
+    assert result["mismatches"] == [
+        {
+            "horizon": "rolling2",
+            "ticker": "NVDA",
+            "classification_type": "rolling2_sell_pressure",
+            "field": "next_action",
+            "current_value": "NONE",
+            "v2_value": "BROKEN_ACTION",
+            "reason": "field_mismatch",
+        }
+    ]
+
+
+def test_rolling5_reason_action_field_mismatch_is_detected(tmp_path: Path):
+    conn = _connect(tmp_path)
+    _seed_source_rows(conn)
+    _run_v2(conn)
+    conn.execute(
+        """
+        UPDATE dc_report_classification_v2
+        SET blocking_reason = ?
+        WHERE ticker = ? AND classification_type = ?
+        """,
+        ("BROKEN_BLOCKING_REASON", "NVDA", "rolling5_pullback"),
+    )
+    conn.commit()
+
+    result = audit_report_canonical_v2_parity(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        market="usa",
+        horizons=("rolling5",),
+    )
+
+    assert result["status"] == "MISMATCH"
+    assert result["mismatch_count"] == 1
+    assert result["mismatches"] == [
+        {
+            "horizon": "rolling5",
+            "ticker": "NVDA",
+            "classification_type": "rolling5_pullback",
+            "field": "blocking_reason",
+            "current_value": "",
+            "v2_value": "BROKEN_BLOCKING_REASON",
+            "reason": "field_mismatch",
+        }
+    ]
 
 
 def test_selected_horizon_audit_excludes_other_horizon_mismatches(tmp_path: Path):
