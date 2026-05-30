@@ -147,6 +147,53 @@ def test_formatter_marks_deferred_sections_explicitly():
     assert "full technical relevance context: DEFERRED" in markdown
 
 
+def test_formatter_full_markdown_output_is_deterministic():
+    markdown = build_markdown_daily_canonical_v2_report(_sample_formatter_data())
+
+    assert markdown == """# Datacenter Daily Canonical V2 Report
+
+## 1. Title / metadata
+signal_date: 2026-05-30
+taxonomy_version: DC_TAXONOMY_FULL_V1
+selected_run_id: run-1
+status: OK
+
+## 2. Summary counts
+- ticker_count: 1
+- group_count: 2
+- daily_trigger_count: 1
+- watchlist_count: 1
+
+### Trigger state counts
+- BUY_WATCH: 1
+
+### Watchlist status counts
+- BREAKOUT_CANDIDATE: 1
+
+## 3. Daily trigger rows
+| ticker | classification_state | primary_reason | blocking_reason | next_action | current_watchlist_status | primary_layer | primary_subindustry |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| NVDA | BUY_WATCH | BULLISH_SETUP_NEEDS_CONFIRMATION |  | MONITOR_FOR_DAILY_CONFIRMATION | BREAKOUT_CANDIDATE | Infrastructure | Semis |
+
+## 4. Watchlist rows
+| ticker | current_watchlist_status | primary_layer | primary_subindustry | layer_context_risk_status | subindustry_context_risk_status | breakout_signal | pullback_signal | exit_risk_signal |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| NVDA | BREAKOUT_CANDIDATE | Infrastructure | Semis | NO | NO | 1 | 0 | 0 |
+
+## 5. Taxonomy listing preview
+| row_type | layer | subindustry | ticker | timing_state | overheat_risk_level | pct_above_ema20 | pct_above_ma10 | distance_to_ema20_pct | current_watchlist_status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| LAYER | Infrastructure |  |  | BUY_ZONE | LOW | 62.5 | 71.0 |  |  |
+| SUBINDUSTRY | Infrastructure | Semis |  | ADD_ON_PULLBACK | MEDIUM | 58.0 | 66.0 |  |  |
+| TICKER | Infrastructure | Semis | NVDA |  |  |  |  | 1.2345 | BREAKOUT_CANDIDATE |
+
+## 6. Deferred sections
+- detailed swing MA break status: DEFERRED
+- detailed swing signal freshness: DEFERRED
+- full technical relevance context: DEFERRED
+"""
+
+
 def test_formatter_works_without_source_tables_when_loader_is_canonical_only():
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
