@@ -7,6 +7,25 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, object]:
     return {key: row[key] for key in row.keys()}
 
 
+def _markdown_value(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _append_markdown_table(
+    lines: list[str],
+    *,
+    headers: list[str],
+    rows: list[list[object]],
+) -> None:
+    lines.append("| " + " | ".join(headers) + " |")
+    lines.append("| " + " | ".join("---" for _ in headers) + " |")
+    for row in rows:
+        lines.append("| " + " | ".join(_markdown_value(value) for value in row) + " |")
+    lines.append("")
+
+
 def _load_run(
     conn: sqlite3.Connection,
     *,
@@ -422,3 +441,170 @@ def load_daily_canonical_formatter_data_v2(
             "technical_relevance_context": "DEFERRED",
         },
     }
+
+
+def build_markdown_daily_canonical_v2_report(formatter_data: dict[str, object]) -> str:
+    metadata = dict(formatter_data.get("metadata") or {})
+    run = formatter_data.get("run")
+    group_rows = list(formatter_data.get("group_rows") or [])
+    daily_trigger_rows = list(formatter_data.get("daily_trigger_rows") or [])
+    watchlist_rows = list(formatter_data.get("watchlist_rows") or [])
+    taxonomy_listing_rows = list(formatter_data.get("taxonomy_listing_rows") or [])
+    section_counts = dict(formatter_data.get("section_counts") or {})
+    deferred_sections = dict(formatter_data.get("deferred_sections") or {})
+
+    group_lookup = {
+        (str(row.get("group_type") or ""), str(row.get("group_name") or "")): row
+        for row in group_rows
+    }
+
+    lines: list[str] = [
+        "# Datacenter Daily Canonical V2 Report",
+        "",
+        "## 1. Title / metadata",
+        f"signal_date: {_markdown_value(metadata.get('signal_date'))}",
+        f"taxonomy_version: {_markdown_value(metadata.get('taxonomy_version'))}",
+        f"selected_run_id: {_markdown_value(metadata.get('selected_run_id'))}",
+        f"status: {_markdown_value((run or {}).get('status') if isinstance(run, dict) else None)}",
+        "",
+        "## 2. Summary counts",
+        f"- ticker_count: {_markdown_value(section_counts.get('ticker_row_count'))}",
+        f"- group_count: {_markdown_value(section_counts.get('group_row_count'))}",
+        f"- daily_trigger_count: {_markdown_value(section_counts.get('daily_trigger_row_count'))}",
+        f"- watchlist_count: {_markdown_value(section_counts.get('watchlist_row_count'))}",
+        "",
+        "### Trigger state counts",
+    ]
+    trigger_state_counts = dict(section_counts.get("daily_trigger_state_counts") or {})
+    if trigger_state_counts:
+        for state, count in sorted(trigger_state_counts.items()):
+            lines.append(f"- {state}: {count}")
+    else:
+        lines.append("- none")
+    lines.extend(["", "### Watchlist status counts"])
+    watchlist_status_counts = dict(section_counts.get("watchlist_status_counts") or {})
+    if watchlist_status_counts:
+        for status, count in sorted(watchlist_status_counts.items()):
+            lines.append(f"- {status}: {count}")
+    else:
+        lines.append("- none")
+    lines.append("")
+
+    lines.append("## 3. Daily trigger rows")
+    _append_markdown_table(
+        lines,
+        headers=[
+            "ticker",
+            "classification_state",
+            "primary_reason",
+            "blocking_reason",
+            "next_action",
+            "current_watchlist_status",
+            "primary_layer",
+            "primary_subindustry",
+        ],
+        rows=[
+            [
+                row.get("ticker"),
+                row.get("classification_state"),
+                row.get("primary_reason"),
+                row.get("blocking_reason"),
+                row.get("next_action"),
+                row.get("current_watchlist_status"),
+                row.get("primary_layer"),
+                row.get("primary_subindustry"),
+            ]
+            for row in daily_trigger_rows
+        ],
+    )
+
+    lines.append("## 4. Watchlist rows")
+    _append_markdown_table(
+        lines,
+        headers=[
+            "ticker",
+            "current_watchlist_status",
+            "primary_layer",
+            "primary_subindustry",
+            "layer_context_risk_status",
+            "subindustry_context_risk_status",
+            "breakout_signal",
+            "pullback_signal",
+            "exit_risk_signal",
+        ],
+        rows=[
+            [
+                row.get("ticker"),
+                row.get("current_watchlist_status"),
+                row.get("primary_layer"),
+                row.get("primary_subindustry"),
+                row.get("layer_context_risk_status"),
+                row.get("subindustry_context_risk_status"),
+                row.get("breakout_signal"),
+                row.get("pullback_signal"),
+                row.get("exit_risk_signal"),
+            ]
+            for row in watchlist_rows
+        ],
+    )
+
+    lines.append("## 5. Taxonomy listing preview")
+    taxonomy_rows: list[list[object]] = []
+    for row in taxonomy_listing_rows:
+        row_type = str(row.get("row_type") or "")
+        layer_name = str(row.get("layer") or "")
+        subindustry_name = str(row.get("subindustry") or "")
+        overheat_risk_level = ""
+        if row_type == "LAYER":
+            overheat_risk_level = _markdown_value(
+                group_lookup.get(("layer", layer_name), {}).get("overheat_risk_level")
+            )
+        elif row_type == "SUBINDUSTRY":
+            overheat_risk_level = _markdown_value(
+                group_lookup.get(("subindustry", subindustry_name), {}).get("overheat_risk_level")
+            )
+        taxonomy_rows.append(
+            [
+                row.get("row_type"),
+                row.get("layer"),
+                row.get("subindustry"),
+                row.get("ticker"),
+                row.get("status") if row_type in {"LAYER", "SUBINDUSTRY"} else "",
+                overheat_risk_level,
+                row.get("pct_above_ema20"),
+                row.get("pct_above_ma10"),
+                row.get("distance_to_ema20_pct"),
+                row.get("status") if row_type == "TICKER" else "",
+            ]
+        )
+    _append_markdown_table(
+        lines,
+        headers=[
+            "row_type",
+            "layer",
+            "subindustry",
+            "ticker",
+            "timing_state",
+            "overheat_risk_level",
+            "pct_above_ema20",
+            "pct_above_ma10",
+            "distance_to_ema20_pct",
+            "current_watchlist_status",
+        ],
+        rows=taxonomy_rows,
+    )
+
+    lines.append("## 6. Deferred sections")
+    labels = {
+        "swing_ma_break_status": "detailed swing MA break status",
+        "swing_signal_freshness": "detailed swing signal freshness",
+        "technical_relevance_context": "full technical relevance context",
+    }
+    if deferred_sections:
+        for key in sorted(deferred_sections):
+            lines.append(f"- {labels.get(key, key)}: {_markdown_value(deferred_sections.get(key))}")
+    else:
+        lines.append("- none")
+    lines.append("")
+
+    return "\n".join(lines)
