@@ -219,6 +219,7 @@ def _write_rows(conn: sqlite3.Connection, rows: list[dict[str, object]]) -> None
             return_10d,
             return_20d,
             return_60d,
+            distance_to_ema10_pct,
             distance_to_ema20_pct,
             distance_to_ema50_pct,
             ma_break_status,
@@ -272,6 +273,7 @@ def _write_rows(conn: sqlite3.Connection, rows: list[dict[str, object]]) -> None
             :return_10d,
             :return_20d,
             :return_60d,
+            :distance_to_ema10_pct,
             :distance_to_ema20_pct,
             :distance_to_ema50_pct,
             :ma_break_status,
@@ -436,6 +438,7 @@ def build_report_daily_context_v2(
             "return_10d": _ticker_source_value(ticker_row, ticker_source_columns, "return_10d"),
             "return_20d": _ticker_source_value(ticker_row, ticker_source_columns, "return_20d"),
             "return_60d": _ticker_source_value(ticker_row, ticker_source_columns, "return_60d"),
+            "distance_to_ema10_pct": _ticker_source_value(ticker_row, ticker_source_columns, "distance_to_ema10_pct"),
             "distance_to_ema20_pct": _ticker_source_value(ticker_row, ticker_source_columns, "distance_to_ema20_pct"),
             "distance_to_ema50_pct": _ticker_source_value(ticker_row, ticker_source_columns, "distance_to_ema50_pct"),
             # MA/freshness helpers are intentionally left for a later focused task.

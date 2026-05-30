@@ -44,6 +44,7 @@ def _connect() -> sqlite3.Connection:
             return_10d REAL NULL,
             return_20d REAL NULL,
             return_60d REAL NULL,
+            distance_to_ema10_pct REAL NULL,
             distance_to_ema20_pct REAL NULL,
             distance_to_ema50_pct REAL NULL,
             ticker_trend_state TEXT NULL,
@@ -169,6 +170,7 @@ def _insert_ticker_row(
     bearish_candle_signal: int = 0,
     bearish_divergence_signal: int = 0,
     hidden_bearish_divergence_signal: int = 0,
+    distance_to_ema10_pct: float | None = 0.7,
 ) -> None:
     conn.execute(
         """
@@ -201,6 +203,7 @@ def _insert_ticker_row(
             return_10d,
             return_20d,
             return_60d,
+            distance_to_ema10_pct,
             distance_to_ema20_pct,
             distance_to_ema50_pct,
             ticker_trend_state,
@@ -210,7 +213,7 @@ def _insert_ticker_row(
             latest_bos_freshness,
             latest_reset_reason,
             latest_reset_freshness
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             signal_date,
@@ -241,6 +244,7 @@ def _insert_ticker_row(
             5.0,
             8.5,
             15.0,
+            distance_to_ema10_pct,
             1.1,
             4.4,
             "UP",
@@ -298,6 +302,7 @@ def test_daily_ticker_context_rows_are_written():
     assert row["bearish_divergence_signal"] == 0
     assert row["hidden_bearish_divergence_signal"] == 0
     assert row["return_5d"] == 2.5
+    assert row["distance_to_ema10_pct"] == 0.7
     assert row["distance_to_ema20_pct"] == 1.1
     assert row["trend_state"] == "UP"
     assert row["latest_structure_label"] == "HL"
@@ -500,7 +505,8 @@ def test_missing_optional_daily_trigger_source_columns_default_deterministically
             hidden_bullish_divergence_signal,
             bearish_candle_signal,
             bearish_divergence_signal,
-            hidden_bearish_divergence_signal
+            hidden_bearish_divergence_signal,
+            distance_to_ema10_pct
         FROM dc_report_context_daily_v2
         WHERE signal_date = ? AND taxonomy_version = ? AND ticker = ?
         """,
@@ -518,6 +524,7 @@ def test_missing_optional_daily_trigger_source_columns_default_deterministically
     assert row["bearish_candle_signal"] == 0
     assert row["bearish_divergence_signal"] == 0
     assert row["hidden_bearish_divergence_signal"] == 0
+    assert row["distance_to_ema10_pct"] is None
 
 
 def test_missing_group_context_readiness_is_deterministic():

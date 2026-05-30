@@ -75,6 +75,7 @@ def _insert_daily_context_row(
     bearish_candle_signal: int = 0,
     bearish_divergence_signal: int = 0,
     hidden_bearish_divergence_signal: int = 0,
+    distance_to_ema10_pct: float | None = None,
     distance_to_ema20_pct: float | None = 0.05,
     trend_state: str | None = "UP",
     latest_structure_label: str | None = "HL",
@@ -113,6 +114,7 @@ def _insert_daily_context_row(
             bearish_candle_signal,
             bearish_divergence_signal,
             hidden_bearish_divergence_signal,
+            distance_to_ema10_pct,
             distance_to_ema20_pct,
             trend_state,
             latest_structure_label,
@@ -123,7 +125,7 @@ def _insert_daily_context_row(
             context_readiness_status,
             run_id,
             created_at_utc
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             signal_date,
@@ -152,6 +154,7 @@ def _insert_daily_context_row(
             bearish_candle_signal,
             bearish_divergence_signal,
             hidden_bearish_divergence_signal,
+            distance_to_ema10_pct,
             distance_to_ema20_pct,
             trend_state,
             latest_structure_label,
@@ -681,6 +684,55 @@ def test_writer_reads_only_canonical_daily_context():
     assert row is not None
     assert row["classification_state"] == "BUY_WATCH"
     assert summary["daily_context_rows_read"] == 1
+
+
+def test_buy_watch_is_reachable_when_only_distance_to_ema10_is_near():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_daily_context_row(
+        conn,
+        ticker="LFUS",
+        breakout_signal=0,
+        pullback_signal=0,
+        bullish_candle_signal=0,
+        bullish_divergence_signal=0,
+        hidden_bullish_divergence_signal=0,
+        bearish_candle_signal=0,
+        bearish_divergence_signal=0,
+        hidden_bearish_divergence_signal=0,
+        exit_risk_signal=0,
+        current_watchlist_status="NEUTRAL_MONITOR",
+        trend_state="UP",
+        latest_bos_event_type="BOS_UP",
+        latest_bos_freshness="AGING",
+        latest_reset_reason="DOUBLE_BOS_UP",
+        latest_reset_freshness="AGING",
+        distance_to_ema10_pct=0.02,
+        distance_to_ema20_pct=0.05,
+    )
+    conn.commit()
+
+    write_report_daily_trigger_classification_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+    )
+
+    row = conn.execute(
+        """
+        SELECT classification_state, primary_reason, next_action
+        FROM dc_report_classification_v2
+        WHERE signal_date = ? AND taxonomy_version = ? AND ticker = ? AND horizon = ? AND classification_type = ?
+        """,
+        ("2026-05-30", "DC_TAXONOMY_FULL_V1", "LFUS", "daily", "daily_trigger"),
+    ).fetchone()
+
+    assert row is not None
+    assert row["classification_state"] == "BUY_WATCH"
+    assert row["primary_reason"] == "BULLISH_SETUP_NEEDS_CONFIRMATION"
+    assert row["next_action"] == "MONITOR_FOR_DAILY_CONFIRMATION"
 
 
 def test_created_at_override_is_respected():

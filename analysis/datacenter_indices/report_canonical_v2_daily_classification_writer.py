@@ -70,8 +70,11 @@ def _has_slightly_negative_ema20_context(value: object | None) -> bool:
 
 
 def _is_near_pullback_zone(row: dict[str, object]) -> bool:
-    distance = _float_value(row.get("distance_to_ema20_pct"))
-    return distance is not None and abs(distance) <= 0.03
+    for field_name in ("distance_to_ema10_pct", "distance_to_ema20_pct"):
+        distance = _float_value(row.get(field_name))
+        if distance is not None and abs(distance) <= 0.03:
+            return True
+    return False
 
 
 def _classify_daily_trigger_row(row: dict[str, object]) -> tuple[str, str, str | None, str | None]:

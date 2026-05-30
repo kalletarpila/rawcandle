@@ -164,6 +164,7 @@ def test_migration_creates_expected_primary_keys_and_columns():
         "current_watchlist_status",
         "price_data_status",
         "close",
+        "distance_to_ema10_pct",
         "breakout_signal",
         "pullback_signal",
         "latest_bullish_relevance_class",
