@@ -402,6 +402,53 @@ def test_exit_watch_is_reachable_through_weak_bearish_branch():
     assert row["next_action"] == "MONITOR_NEXT_SESSION"
 
 
+def test_sell_trigger_is_reachable_through_relevant_bearish_branch():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_daily_context_row(
+        conn,
+        ticker="NVDA",
+        latest_bearish_relevance_class="RELEVANT",
+        current_watchlist_status="NEUTRAL_MONITOR",
+    )
+    conn.commit()
+
+    write_report_daily_trigger_classification_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+    )
+
+    row = conn.execute(
+        """
+        SELECT
+            horizon,
+            classification_type,
+            classification_state,
+            primary_reason,
+            blocking_reason,
+            risk_reason,
+            next_action,
+            classification_status
+        FROM dc_report_classification_v2
+        WHERE signal_date = ? AND taxonomy_version = ? AND ticker = ? AND horizon = ? AND classification_type = ?
+        """,
+        ("2026-05-30", "DC_TAXONOMY_FULL_V1", "NVDA", "daily", "daily_trigger"),
+    ).fetchone()
+
+    assert row is not None
+    assert row["horizon"] == "daily"
+    assert row["classification_type"] == "daily_trigger"
+    assert row["classification_state"] == "SELL_TRIGGER"
+    assert row["primary_reason"] == "DAILY_SELL_TRIGGER"
+    assert row["blocking_reason"] == "RELEVANT_BEARISH_CONTEXT"
+    assert row["risk_reason"] is None
+    assert row["next_action"] == "REVIEW_SELL_OR_TIGHTEN_STOP"
+    assert row["classification_status"] == "OK"
+
+
 def test_insufficient_data_is_reachable_through_missing_price_context():
     conn = _connect()
     _insert_run(conn)
