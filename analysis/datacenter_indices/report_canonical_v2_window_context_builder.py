@@ -321,6 +321,7 @@ def _write_rows(conn: sqlite3.Connection, rows: list[dict[str, object]]) -> None
             exit_risk_severity,
             latest_bearish_relevance_class,
             distance_to_ema20_pct,
+            all_price_rows_missing,
             ma_break_status,
             freshness_status,
             technical_relevance_status,
@@ -382,6 +383,7 @@ def _write_rows(conn: sqlite3.Connection, rows: list[dict[str, object]]) -> None
             :exit_risk_severity,
             :latest_bearish_relevance_class,
             :distance_to_ema20_pct,
+            :all_price_rows_missing,
             :ma_break_status,
             :freshness_status,
             :technical_relevance_status,
@@ -612,7 +614,6 @@ def build_report_window_context_v2(
             del output_row["last_subindustry_overheat_risk_level"]
             del output_row["last_layer_timing_state"]
             del output_row["last_layer_overheat_risk_level"]
-            del output_row["all_price_rows_missing"]
             rows_to_write.append(output_row)
             written_counts[f"{horizon}_rows_written"] += 1
 

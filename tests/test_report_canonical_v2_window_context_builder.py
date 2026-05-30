@@ -43,6 +43,7 @@ def _connect() -> sqlite3.Connection:
             exit_risk_signal INTEGER NULL,
             exit_risk_severity TEXT NULL,
             exit_reason TEXT NULL,
+            latest_bearish_relevance_class TEXT NULL,
             return_10d REAL NULL,
             distance_to_ema20_pct REAL NULL,
             distance_to_ema50_pct REAL NULL,
@@ -127,6 +128,7 @@ def _insert_ticker_row(
     return_10d: float | None = 1.0,
     distance_to_ema20_pct: float | None = 1.0,
     distance_to_ema50_pct: float | None = 2.0,
+    latest_bearish_relevance_class: str | None = None,
     trend_state: str = "UP",
     latest_structure_label: str = "HL",
     latest_structure_freshness: str = "FRESH",
@@ -141,11 +143,11 @@ def _insert_ticker_row(
             signal_date, taxonomy_version, signal_version, market, ticker,
             primary_layer, primary_subindustry, price_data_status, breakout_signal,
             pullback_signal, fast_ema10_pullback_signal, conservative_ema20_pullback_signal,
-            exit_risk_signal, exit_risk_severity, exit_reason, return_10d,
+            exit_risk_signal, exit_risk_severity, exit_reason, latest_bearish_relevance_class, return_10d,
             distance_to_ema20_pct, distance_to_ema50_pct, ticker_trend_state,
             latest_structure_label, latest_structure_freshness, latest_bos_event_type,
             latest_bos_freshness, latest_reset_reason, latest_reset_freshness
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             signal_date,
@@ -163,6 +165,7 @@ def _insert_ticker_row(
             exit_risk_signal,
             exit_risk_severity,
             "reason-token",
+            latest_bearish_relevance_class,
             return_10d,
             distance_to_ema20_pct,
             distance_to_ema50_pct,
@@ -271,6 +274,64 @@ def test_rolling2_window_rows_are_written():
     assert row["context_readiness_status"] == "OK"
     assert summary["rolling2_rows_written"] == 1
     assert summary["total_rows_written"] == 1
+
+
+def test_rolling2_classifier_input_fields_are_persisted_from_source_to_canonical():
+    conn = _connect()
+    _insert_run(conn)
+    _insert_valid_date(conn, signal_date="2026-05-29")
+    _insert_valid_date(conn, signal_date="2026-05-30")
+    _insert_group_context_row(conn, horizon="rolling2", group_type="layer", group_name="Infrastructure")
+    _insert_group_context_row(conn, horizon="rolling2", group_type="subindustry", group_name="Semis")
+    _insert_ticker_row(
+        conn,
+        signal_date="2026-05-29",
+        ticker="NVDA",
+        price_data_status="OK",
+        exit_risk_severity="MEDIUM",
+        latest_bearish_relevance_class="WEAK_CONTEXT",
+        distance_to_ema20_pct=0.5,
+    )
+    _insert_ticker_row(
+        conn,
+        signal_date="2026-05-30",
+        ticker="NVDA",
+        price_data_status="MISSING_AS_OF_DATE",
+        exit_risk_severity="HIGH",
+        latest_bearish_relevance_class="RELEVANT",
+        distance_to_ema20_pct=-1.25,
+    )
+    conn.commit()
+
+    build_report_window_context_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        run_id="run-1",
+        market="usa",
+        horizons=("rolling2",),
+    )
+
+    row = conn.execute(
+        """
+        SELECT
+            price_data_status,
+            exit_risk_severity,
+            latest_bearish_relevance_class,
+            distance_to_ema20_pct,
+            all_price_rows_missing
+        FROM dc_report_context_window_v2
+        WHERE signal_date = ? AND taxonomy_version = ? AND ticker = ? AND horizon = ?
+        """,
+        ("2026-05-30", "DC_TAXONOMY_FULL_V1", "NVDA", "rolling2"),
+    ).fetchone()
+
+    assert row is not None
+    assert row["price_data_status"] == "MISSING_AS_OF_DATE"
+    assert row["exit_risk_severity"] == "HIGH"
+    assert row["latest_bearish_relevance_class"] == "RELEVANT"
+    assert row["distance_to_ema20_pct"] == pytest.approx(-1.25)
+    assert row["all_price_rows_missing"] == 0
 
 
 def test_rolling5_and_rolling30_can_be_requested_together():
@@ -535,7 +596,7 @@ def test_missing_price_status_drives_current_and_window_watchlist_status():
 
     row = conn.execute(
         """
-        SELECT current_watchlist_status, window_watchlist_status
+        SELECT current_watchlist_status, window_watchlist_status, all_price_rows_missing
         FROM dc_report_context_window_v2
         WHERE signal_date = ? AND taxonomy_version = ? AND ticker = ? AND horizon = ?
         """,
@@ -545,6 +606,7 @@ def test_missing_price_status_drives_current_and_window_watchlist_status():
     assert row is not None
     assert row["current_watchlist_status"] == "MISSING_PRICE"
     assert row["window_watchlist_status"] == "MISSING_PRICE"
+    assert row["all_price_rows_missing"] == 1
 
 
 def test_market_safe_delete_behavior_preserves_unrelated_market_rows():
