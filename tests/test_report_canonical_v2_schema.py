@@ -42,6 +42,17 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+def _connect_through_007() -> sqlite3.Connection:
+    conn = sqlite3.connect(":memory:")
+    from rawcandle.report_canonical_v2_migration import MIGRATION_SQL_PATHS
+
+    conn.executescript(MIGRATION_SQL_PATHS[0].read_text(encoding="utf-8"))
+    conn.executescript(MIGRATION_SQL_PATHS[1].read_text(encoding="utf-8"))
+    conn.executescript(MIGRATION_SQL_PATHS[3].read_text(encoding="utf-8"))
+    conn.executescript(MIGRATION_SQL_PATHS[2].read_text(encoding="utf-8"))
+    return conn
+
+
 def _insert_run(conn: sqlite3.Connection, *, run_id: str = "run-1") -> str:
     conn.execute(
         """
@@ -267,6 +278,45 @@ def test_migration_creates_expected_indexes():
         "idx_dc_report_classification_v2_date_horizon",
         "idx_dc_report_classification_v2_ticker",
     }.issubset(_index_names(conn, "dc_report_classification_v2"))
+
+
+def test_migration_008_fresh_migration_creates_representative_fields():
+    conn = _connect()
+
+    daily_columns = _table_columns(conn, "dc_report_context_daily_v2")
+    group_columns = _table_columns(conn, "dc_report_context_group_v2")
+
+    assert "ema10" in daily_columns
+    assert "return_10d" in group_columns
+    assert "synthetic_ema20" in group_columns
+
+
+def test_migration_008_partial_daily_side_only_state_is_repaired():
+    conn = _connect_through_007()
+    conn.execute("ALTER TABLE dc_report_context_daily_v2 ADD COLUMN ema10 REAL NULL;")
+
+    apply_report_canonical_v2_migration(conn)
+
+    daily_columns = _table_columns(conn, "dc_report_context_daily_v2")
+    group_columns = _table_columns(conn, "dc_report_context_group_v2")
+
+    assert "ema10" in daily_columns
+    assert "return_10d" in group_columns
+    assert "synthetic_ema20" in group_columns
+
+
+def test_migration_008_partial_group_side_only_state_is_repaired():
+    conn = _connect_through_007()
+    conn.execute("ALTER TABLE dc_report_context_group_v2 ADD COLUMN return_10d REAL NULL;")
+
+    apply_report_canonical_v2_migration(conn)
+
+    daily_columns = _table_columns(conn, "dc_report_context_daily_v2")
+    group_columns = _table_columns(conn, "dc_report_context_group_v2")
+
+    assert "ema10" in daily_columns
+    assert "return_10d" in group_columns
+    assert "synthetic_ema20" in group_columns
 
 
 def test_group_context_horizon_check_rejects_invalid_value():
