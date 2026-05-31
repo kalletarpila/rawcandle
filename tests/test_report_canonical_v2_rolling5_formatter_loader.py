@@ -52,6 +52,8 @@ def _insert_group_row(
     run_id: str,
     group_type: str,
     group_name: str,
+    parent_group_type: str | None = None,
+    parent_group_name: str | None = None,
     market: str | None = "usa",
     timing_state: str = "BUY_ZONE",
     overheat_risk_level: str = "LOW",
@@ -65,6 +67,7 @@ def _insert_group_row(
         """
         INSERT INTO dc_report_context_group_v2 (
             signal_date, taxonomy_version, market, horizon, group_type, group_name,
+            parent_group_type, parent_group_name,
             timing_state, overheat_risk_level, return_2d, return_5d, return_30d,
             breadth_json, synthetic_close, synthetic_ema_distance_json,
             synthetic_trend_classification, synthetic_latest_structure_label,
@@ -73,7 +76,7 @@ def _insert_group_row(
             group_context_risk_status, group_context_readiness_status, group_current_status,
             group_window_status, group_status_change, window_start_date, window_end_date,
             valid_signal_dates, run_id, created_at_utc
-        ) VALUES (?, ?, ?, 'rolling5', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, 'rolling5', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             "2026-05-30",
@@ -81,6 +84,8 @@ def _insert_group_row(
             market,
             group_type,
             group_name,
+            parent_group_type,
+            parent_group_name,
             timing_state,
             overheat_risk_level,
             1.0,
@@ -324,6 +329,44 @@ def test_run_selection_behavior():
 
     assert latest["run"]["run_id"] == "run-c"
     assert explicit["run"]["run_id"] == "run-a"
+
+
+def test_missing_run_behavior_still_loads_canonical_rows():
+    conn = _connect()
+    _insert_run(conn, run_id="actual-run", created_at_utc="2026-05-30T00:00:00Z")
+    _insert_group_row(conn, run_id="actual-run", group_type="layer", group_name="Infrastructure")
+    _insert_group_row(
+        conn,
+        run_id="actual-run",
+        group_type="subindustry",
+        group_name="Semis",
+        parent_group_type="layer",
+        parent_group_name="Infrastructure",
+    )
+    _insert_window_row(
+        conn,
+        run_id="actual-run",
+        ticker="NVDA",
+        primary_layer="Infrastructure",
+        primary_subindustry="Semis",
+        pullback_days=2,
+    )
+    _insert_classification_row(conn, run_id="actual-run", ticker="NVDA")
+    conn.commit()
+
+    data = load_rolling5_canonical_formatter_data_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        market="usa",
+        run_id="MISSING_RUN_ID",
+    )
+
+    assert data["run"] is None
+    assert data["metadata"]["selected_run_id"] is None
+    assert [row["group_name"] for row in data["group_rows"]] == ["Infrastructure", "Semis"]
+    assert [row["ticker"] for row in data["window_rows"]] == ["NVDA"]
+    assert [row["ticker"] for row in data["rolling5_pullback_rows"]] == ["NVDA"]
 
 
 def test_market_filtering():
@@ -570,6 +613,47 @@ def test_taxonomy_listing_rows_are_deterministic():
     assert rows[0]["group_current_status"] == "BUY_ZONE"
     assert rows[2]["current_watchlist_status"] == "PULLBACK_CANDIDATE"
     assert "group_current_status" not in rows[2]
+
+
+def test_taxonomy_listing_includes_orphan_group_rows_without_fake_tickers():
+    conn = _connect()
+    _insert_run(conn, run_id="run-1", created_at_utc="2026-05-30T00:00:00Z")
+    _insert_group_row(conn, run_id="run-1", group_type="layer", group_name="Compute")
+    _insert_group_row(
+        conn,
+        run_id="run-1",
+        group_type="subindustry",
+        group_name="OrphanSub",
+        parent_group_type="layer",
+        parent_group_name="Compute",
+    )
+    _insert_group_row(conn, run_id="run-1", group_type="layer", group_name="Infrastructure")
+    _insert_group_row(
+        conn,
+        run_id="run-1",
+        group_type="subindustry",
+        group_name="Semis",
+        parent_group_type="layer",
+        parent_group_name="Infrastructure",
+    )
+    _insert_window_row(conn, run_id="run-1", ticker="NVDA", primary_layer="Infrastructure", primary_subindustry="Semis")
+    conn.commit()
+
+    data = load_rolling5_canonical_formatter_data_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        market="usa",
+    )
+
+    rows = data["taxonomy_listing_rows"]
+    assert [(row["row_type"], row["layer"], row["subindustry"], row["ticker"]) for row in rows] == [
+        ("LAYER", "Compute", "", ""),
+        ("SUBINDUSTRY", "Compute", "OrphanSub", ""),
+        ("LAYER", "Infrastructure", "", ""),
+        ("SUBINDUSTRY", "Infrastructure", "Semis", ""),
+        ("TICKER", "Infrastructure", "Semis", "NVDA"),
+    ]
 
 
 def test_deferred_sections_are_explicit():

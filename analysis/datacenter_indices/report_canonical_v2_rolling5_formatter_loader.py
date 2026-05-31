@@ -255,6 +255,14 @@ def _build_taxonomy_listing_rows(
             continue
         tickers_by_layer_subindustry.setdefault((layer_name, subindustry_name), []).append(window_row)
 
+    subindustries_by_layer: dict[str, set[str]] = {}
+    for subindustry_name, subindustry_row in subindustry_rows.items():
+        parent_layer_name = str(subindustry_row.get("parent_group_name") or "")
+        if parent_layer_name:
+            subindustries_by_layer.setdefault(parent_layer_name, set()).add(subindustry_name)
+    for layer_name, subindustry_name in tickers_by_layer_subindustry:
+        subindustries_by_layer.setdefault(layer_name, set()).add(subindustry_name)
+
     output_rows: list[dict[str, object]] = []
     for layer_name in sorted(layer_rows):
         layer_row = layer_rows[layer_name]
@@ -278,13 +286,7 @@ def _build_taxonomy_listing_rows(
                 "synthetic_latest_reset_freshness": layer_row.get("synthetic_latest_reset_freshness"),
             }
         )
-        subindustries_for_layer = sorted(
-            {
-                subindustry_name
-                for candidate_layer, subindustry_name in tickers_by_layer_subindustry
-                if candidate_layer == layer_name
-            }
-        )
+        subindustries_for_layer = sorted(subindustries_by_layer.get(layer_name, set()))
         for subindustry_name in subindustries_for_layer:
             subindustry_row = subindustry_rows.get(subindustry_name, {})
             output_rows.append(
