@@ -7,6 +7,25 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, object]:
     return {key: row[key] for key in row.keys()}
 
 
+def _markdown_value(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _append_markdown_table(
+    lines: list[str],
+    *,
+    headers: list[str],
+    rows: list[list[object]],
+) -> None:
+    lines.append("| " + " | ".join(headers) + " |")
+    lines.append("| " + " | ".join("---" for _ in headers) + " |")
+    for row in rows:
+        lines.append("| " + " | ".join(_markdown_value(value) for value in row) + " |")
+    lines.append("")
+
+
 def _load_run(
     conn: sqlite3.Connection,
     *,
@@ -467,3 +486,305 @@ def load_rolling5_canonical_formatter_data_v2(
             "synthetic_event_history": "DEFERRED",
         },
     }
+
+
+def build_markdown_rolling5_canonical_v2_report(formatter_data: dict[str, object]) -> str:
+    metadata = dict(formatter_data.get("metadata") or {})
+    run = formatter_data.get("run")
+    window_rows = list(formatter_data.get("window_rows") or [])
+    rolling5_pullback_rows = list(formatter_data.get("rolling5_pullback_rows") or [])
+    watchlist_rows = list(formatter_data.get("watchlist_rows") or [])
+    repeated_breakout_rows = list(formatter_data.get("repeated_breakout_rows") or [])
+    repeated_pullback_rows = list(formatter_data.get("repeated_pullback_rows") or [])
+    repeated_exit_risk_rows = list(formatter_data.get("repeated_exit_risk_rows") or [])
+    taxonomy_listing_rows = list(formatter_data.get("taxonomy_listing_rows") or [])
+    section_counts = dict(formatter_data.get("section_counts") or {})
+    deferred_sections = dict(formatter_data.get("deferred_sections") or {})
+
+    window_start_date = ""
+    window_end_date = ""
+    valid_signal_dates = ""
+    if window_rows:
+        window_start_date = _markdown_value(window_rows[0].get("window_start_date"))
+        window_end_date = _markdown_value(window_rows[0].get("window_end_date"))
+        valid_signal_dates = _markdown_value(window_rows[0].get("valid_signal_dates"))
+
+    lines: list[str] = [
+        "# Datacenter Rolling5 Canonical V2 Report",
+        "",
+        "## 1. Title / metadata",
+        f"signal_date: {_markdown_value(metadata.get('signal_date'))}",
+        f"taxonomy_version: {_markdown_value(metadata.get('taxonomy_version'))}",
+        f"selected_run_id: {_markdown_value(metadata.get('selected_run_id'))}",
+        f"status: {_markdown_value((run or {}).get('status') if isinstance(run, dict) else None)}",
+        f"horizon: {_markdown_value(metadata.get('horizon'))}",
+        f"window_start_date: {window_start_date}",
+        f"window_end_date: {window_end_date}",
+        f"valid_signal_dates: {valid_signal_dates}",
+        "",
+        "## 2. Summary counts",
+        f"- group_count: {_markdown_value(section_counts.get('group_row_count'))}",
+        f"- window_row_count: {_markdown_value(section_counts.get('window_row_count'))}",
+        f"- rolling5_classification_count: {_markdown_value(section_counts.get('rolling5_classification_row_count'))}",
+        f"- watchlist_row_count: {_markdown_value(section_counts.get('watchlist_row_count'))}",
+        f"- repeated_breakout_row_count: {_markdown_value(section_counts.get('repeated_breakout_row_count'))}",
+        f"- repeated_pullback_row_count: {_markdown_value(section_counts.get('repeated_pullback_row_count'))}",
+        f"- repeated_exit_risk_row_count: {_markdown_value(section_counts.get('repeated_exit_risk_row_count'))}",
+        "",
+        "### Rolling5 classification state counts",
+    ]
+
+    classification_state_counts = dict(section_counts.get("rolling5_classification_state_counts") or {})
+    if classification_state_counts:
+        for state, count in sorted(classification_state_counts.items()):
+            lines.append(f"- {state}: {count}")
+    else:
+        lines.append("- none")
+
+    lines.extend(["", "### Current watchlist status counts"])
+    current_watchlist_status_counts = dict(section_counts.get("current_watchlist_status_counts") or {})
+    if current_watchlist_status_counts:
+        for status, count in sorted(current_watchlist_status_counts.items()):
+            lines.append(f"- {status}: {count}")
+    else:
+        lines.append("- none")
+
+    lines.extend(["", "### Window watchlist status counts"])
+    window_watchlist_status_counts = dict(section_counts.get("window_watchlist_status_counts") or {})
+    if window_watchlist_status_counts:
+        for status, count in sorted(window_watchlist_status_counts.items()):
+            lines.append(f"- {status}: {count}")
+    else:
+        lines.append("- none")
+    lines.append("")
+
+    lines.append("## 3. Rolling5 pullback rows")
+    _append_markdown_table(
+        lines,
+        headers=[
+            "ticker",
+            "classification_state",
+            "primary_reason",
+            "blocking_reason",
+            "next_action",
+            "current_watchlist_status",
+            "window_watchlist_status",
+            "pullback_days",
+            "fast_ema10_pullback_days",
+            "conservative_ema20_pullback_days",
+            "exit_risk_days",
+            "exit_risk_severity",
+            "latest_exit_reason",
+            "primary_layer",
+            "primary_subindustry",
+        ],
+        rows=[
+            [
+                row.get("ticker"),
+                row.get("classification_state"),
+                row.get("primary_reason"),
+                row.get("blocking_reason"),
+                row.get("next_action"),
+                row.get("current_watchlist_status"),
+                row.get("window_watchlist_status"),
+                row.get("pullback_days"),
+                row.get("fast_ema10_pullback_days"),
+                row.get("conservative_ema20_pullback_days"),
+                row.get("exit_risk_days"),
+                row.get("exit_risk_severity"),
+                row.get("latest_exit_reason"),
+                row.get("primary_layer"),
+                row.get("primary_subindustry"),
+            ]
+            for row in rolling5_pullback_rows
+        ],
+    )
+
+    lines.append("## 4. Watchlist rows")
+    if watchlist_rows:
+        _append_markdown_table(
+            lines,
+            headers=[
+                "ticker",
+                "current_watchlist_status",
+                "window_watchlist_status",
+                "primary_layer",
+                "primary_subindustry",
+                "layer_context_risk_status",
+                "subindustry_context_risk_status",
+                "breakout_days",
+                "pullback_days",
+                "exit_risk_days",
+            ],
+            rows=[
+                [
+                    row.get("ticker"),
+                    row.get("current_watchlist_status"),
+                    row.get("window_watchlist_status"),
+                    row.get("primary_layer"),
+                    row.get("primary_subindustry"),
+                    row.get("layer_context_risk_status"),
+                    row.get("subindustry_context_risk_status"),
+                    row.get("breakout_days"),
+                    row.get("pullback_days"),
+                    row.get("exit_risk_days"),
+                ]
+                for row in watchlist_rows
+            ],
+        )
+    else:
+        lines.extend(["- none", ""])
+
+    lines.append("## 5. Repeated breakout rows")
+    _append_markdown_table(
+        lines,
+        headers=[
+            "ticker",
+            "breakout_days",
+            "first_signal_date",
+            "last_signal_date",
+            "current_watchlist_status",
+            "window_watchlist_status",
+            "trend_state",
+            "latest_structure_label",
+            "primary_layer",
+            "primary_subindustry",
+        ],
+        rows=[
+            [
+                row.get("ticker"),
+                row.get("breakout_days"),
+                row.get("first_signal_date"),
+                row.get("last_signal_date"),
+                row.get("current_watchlist_status"),
+                row.get("window_watchlist_status"),
+                row.get("trend_state"),
+                row.get("latest_structure_label"),
+                row.get("primary_layer"),
+                row.get("primary_subindustry"),
+            ]
+            for row in repeated_breakout_rows
+        ],
+    )
+
+    lines.append("## 6. Repeated pullback rows")
+    _append_markdown_table(
+        lines,
+        headers=[
+            "ticker",
+            "pullback_days",
+            "fast_ema10_pullback_days",
+            "conservative_ema20_pullback_days",
+            "first_signal_date",
+            "last_signal_date",
+            "current_watchlist_status",
+            "window_watchlist_status",
+            "trend_state",
+            "latest_structure_label",
+            "primary_layer",
+            "primary_subindustry",
+        ],
+        rows=[
+            [
+                row.get("ticker"),
+                row.get("pullback_days"),
+                row.get("fast_ema10_pullback_days"),
+                row.get("conservative_ema20_pullback_days"),
+                row.get("first_signal_date"),
+                row.get("last_signal_date"),
+                row.get("current_watchlist_status"),
+                row.get("window_watchlist_status"),
+                row.get("trend_state"),
+                row.get("latest_structure_label"),
+                row.get("primary_layer"),
+                row.get("primary_subindustry"),
+            ]
+            for row in repeated_pullback_rows
+        ],
+    )
+
+    lines.append("## 7. Repeated exit-risk rows")
+    _append_markdown_table(
+        lines,
+        headers=[
+            "ticker",
+            "exit_risk_days",
+            "high_exit_risk_days",
+            "medium_exit_risk_days",
+            "exit_risk_severity",
+            "latest_exit_reason",
+            "current_watchlist_status",
+            "window_watchlist_status",
+            "trend_state",
+            "latest_structure_label",
+            "primary_layer",
+            "primary_subindustry",
+        ],
+        rows=[
+            [
+                row.get("ticker"),
+                row.get("exit_risk_days"),
+                row.get("high_exit_risk_days"),
+                row.get("medium_exit_risk_days"),
+                row.get("exit_risk_severity"),
+                row.get("latest_exit_reason"),
+                row.get("current_watchlist_status"),
+                row.get("window_watchlist_status"),
+                row.get("trend_state"),
+                row.get("latest_structure_label"),
+                row.get("primary_layer"),
+                row.get("primary_subindustry"),
+            ]
+            for row in repeated_exit_risk_rows
+        ],
+    )
+
+    lines.append("## 8. Taxonomy listing preview")
+    _append_markdown_table(
+        lines,
+        headers=[
+            "row_type",
+            "layer",
+            "subindustry",
+            "ticker",
+            "timing_state",
+            "overheat_risk_level",
+            "group_current_status",
+            "group_window_status",
+            "group_status_change",
+            "current_watchlist_status",
+            "window_watchlist_status",
+        ],
+        rows=[
+            [
+                row.get("row_type"),
+                row.get("layer"),
+                row.get("subindustry"),
+                row.get("ticker"),
+                row.get("timing_state"),
+                row.get("overheat_risk_level"),
+                row.get("group_current_status"),
+                row.get("group_window_status"),
+                row.get("group_status_change"),
+                row.get("current_watchlist_status"),
+                row.get("window_watchlist_status"),
+            ]
+            for row in taxonomy_listing_rows
+        ],
+    )
+
+    lines.append("## 9. Deferred sections")
+    labels = {
+        "swing_ma_break_status": "detailed swing MA break status",
+        "swing_signal_freshness": "detailed swing signal freshness",
+        "technical_relevance_context": "full technical relevance context",
+        "synthetic_event_history": "full synthetic event history",
+    }
+    if deferred_sections:
+        for key in sorted(deferred_sections):
+            lines.append(f"- {labels.get(key, key)}: {_markdown_value(deferred_sections.get(key))}")
+    else:
+        lines.append("- none")
+    lines.append("")
+
+    return "\n".join(lines)
