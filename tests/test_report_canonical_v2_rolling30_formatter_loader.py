@@ -706,6 +706,69 @@ def test_section_counts_watchlist_status_distributions_use_all_window_rows():
     }
 
 
+def test_section_counts_buy_and_exit_state_distributions_use_stored_classification_rows():
+    conn = _connect()
+    _insert_run(conn, run_id="run-1", created_at_utc="2026-05-30T00:00:00Z")
+    _insert_window_row(conn, run_id="run-1", ticker="AAA", primary_layer="Infrastructure", primary_subindustry="Semis")
+    _insert_window_row(conn, run_id="run-1", ticker="BBB", primary_layer="Infrastructure", primary_subindustry="Semis")
+    _insert_window_row(conn, run_id="run-1", ticker="CCC", primary_layer="Infrastructure", primary_subindustry="Semis")
+    _insert_buy_classification_row(
+        conn,
+        run_id="run-1",
+        ticker="AAA",
+        classification_state="BUY_ZONE",
+    )
+    _insert_buy_classification_row(
+        conn,
+        run_id="run-1",
+        ticker="BBB",
+        classification_state="WATCH_ZONE",
+    )
+    _insert_buy_classification_row(
+        conn,
+        run_id="run-1",
+        ticker="CCC",
+        classification_state="WATCH_ZONE",
+    )
+    _insert_exit_classification_row(
+        conn,
+        run_id="run-1",
+        ticker="AAA",
+        classification_state="EXIT_ZONE",
+    )
+    _insert_exit_classification_row(
+        conn,
+        run_id="run-1",
+        ticker="BBB",
+        classification_state="NORMAL",
+    )
+    _insert_exit_classification_row(
+        conn,
+        run_id="run-1",
+        ticker="CCC",
+        classification_state="EXIT_ZONE",
+    )
+    conn.commit()
+
+    data = load_rolling30_canonical_formatter_data_v2(
+        conn,
+        signal_date="2026-05-30",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        market="usa",
+    )
+
+    counts = data["section_counts"]
+    assert counts["rolling30_buy_classification_state_counts"] == {
+        "BUY_ZONE": 1,
+        "WATCH_ZONE": 2,
+    }
+    assert counts["rolling30_exit_classification_state_counts"] == {
+        "EXIT_ZONE": 2,
+        "NORMAL": 1,
+    }
+    assert counts["rolling30_buy_classification_state_counts"] != counts["rolling30_exit_classification_state_counts"]
+
+
 def test_taxonomy_listing_rows_are_deterministic_and_include_orphan_groups():
     conn = _connect()
     _insert_run(conn, run_id="run-1", created_at_utc="2026-05-30T00:00:00Z")
