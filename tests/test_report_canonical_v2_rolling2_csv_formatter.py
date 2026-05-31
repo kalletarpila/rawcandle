@@ -315,6 +315,35 @@ def test_csv_formatter_is_pure_in_memory_without_db_setup():
     assert deferred_row["status"] == "DEFERRED"
 
 
+def test_csv_zero_watchlist_output_is_deterministic():
+    formatter_data = _sample_formatter_data()
+    formatter_data["watchlist_rows"] = []
+    formatter_data["section_counts"] = {
+        **dict(formatter_data["section_counts"]),
+        "watchlist_row_count": 0,
+    }
+
+    csv_text = build_csv_rolling2_canonical_v2_report(formatter_data)
+    rows = _parse_csv(csv_text)
+    sections = {row["section"] for row in rows}
+
+    assert csv_text
+    assert csv_text.startswith("section,key,value,")
+    assert "metadata" in sections
+    assert "rolling2_sell_pressure_rows" in sections
+    assert "deferred_sections" in sections
+
+    watchlist_summary_row = next(
+        row
+        for row in rows
+        if row["section"] == "summary_counts" and row["key"] == "watchlist_row_count"
+    )
+    watchlist_data_rows = [row for row in rows if row["section"] == "watchlist_rows"]
+
+    assert watchlist_summary_row["value"] == "0"
+    assert watchlist_data_rows == []
+
+
 def test_csv_full_output_is_deterministic():
     csv_text = build_csv_rolling2_canonical_v2_report(_sample_formatter_data())
 
