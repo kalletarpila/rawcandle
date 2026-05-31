@@ -226,6 +226,20 @@ def test_formatter_marks_deferred_sections_explicitly():
     assert "full synthetic event history: DEFERRED" in markdown
 
 
+def test_formatter_renders_deterministic_no_watchlist_notice():
+    formatter_data = _sample_formatter_data()
+    formatter_data["watchlist_rows"] = []
+    formatter_data["section_counts"] = {
+        **dict(formatter_data["section_counts"]),
+        "watchlist_row_count": 0,
+    }
+
+    markdown = build_markdown_rolling2_canonical_v2_report(formatter_data)
+
+    assert "## 4. Watchlist rows" in markdown
+    assert "\n## 4. Watchlist rows\n- none\n\n## 5. Repeated breakout rows\n" in markdown
+
+
 def test_formatter_is_pure_in_memory_without_db_or_source_tables():
     markdown = build_markdown_rolling2_canonical_v2_report(_sample_formatter_data())
 
