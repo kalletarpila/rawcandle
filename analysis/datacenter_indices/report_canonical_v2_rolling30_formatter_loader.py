@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 import sqlite3
 
 
@@ -8,6 +10,12 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, object]:
 
 
 def _markdown_value(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _csv_value(value: object) -> str:
     if value is None:
         return ""
     return str(value)
@@ -894,3 +902,262 @@ def build_markdown_rolling30_canonical_v2_report(formatter_data: dict[str, objec
     lines.append("")
 
     return "\n".join(lines)
+
+
+def build_csv_rolling30_canonical_v2_report(formatter_data: dict[str, object]) -> str:
+    metadata = dict(formatter_data.get("metadata") or {})
+    run = formatter_data.get("run")
+    window_rows = list(formatter_data.get("window_rows") or [])
+    rolling30_buy_rows = list(formatter_data.get("rolling30_buy_rows") or [])
+    rolling30_exit_rows = list(formatter_data.get("rolling30_exit_rows") or [])
+    watchlist_rows = list(formatter_data.get("watchlist_rows") or [])
+    repeated_breakout_rows = list(formatter_data.get("repeated_breakout_rows") or [])
+    repeated_pullback_rows = list(formatter_data.get("repeated_pullback_rows") or [])
+    repeated_exit_risk_rows = list(formatter_data.get("repeated_exit_risk_rows") or [])
+    taxonomy_listing_rows = list(formatter_data.get("taxonomy_listing_rows") or [])
+    section_counts = dict(formatter_data.get("section_counts") or {})
+    deferred_sections = dict(formatter_data.get("deferred_sections") or {})
+
+    window_start_date = ""
+    window_end_date = ""
+    valid_signal_dates = ""
+    if window_rows:
+        window_start_date = _csv_value(window_rows[0].get("window_start_date"))
+        window_end_date = _csv_value(window_rows[0].get("window_end_date"))
+        valid_signal_dates = _csv_value(window_rows[0].get("valid_signal_dates"))
+
+    fieldnames = [
+        "section",
+        "key",
+        "value",
+        "ticker",
+        "classification_state",
+        "primary_reason",
+        "blocking_reason",
+        "risk_reason",
+        "current_watchlist_status",
+        "window_watchlist_status",
+        "primary_layer",
+        "primary_subindustry",
+        "layer_context_risk_status",
+        "subindustry_context_risk_status",
+        "breakout_days",
+        "pullback_days",
+        "fast_ema10_pullback_days",
+        "conservative_ema20_pullback_days",
+        "exit_risk_days",
+        "high_exit_risk_days",
+        "medium_exit_risk_days",
+        "exit_risk_severity",
+        "latest_exit_reason",
+        "first_signal_date",
+        "last_signal_date",
+        "trend_state",
+        "latest_structure_label",
+        "row_type",
+        "layer",
+        "subindustry",
+        "timing_state",
+        "overheat_risk_level",
+        "group_current_status",
+        "group_window_status",
+        "group_status_change",
+        "deferred_section",
+        "status",
+        "reason",
+    ]
+
+    def _empty_row(section: str) -> dict[str, str]:
+        row = {fieldname: "" for fieldname in fieldnames}
+        row["section"] = section
+        return row
+
+    rows: list[dict[str, str]] = []
+
+    metadata_rows = [
+        ("signal_date", metadata.get("signal_date")),
+        ("taxonomy_version", metadata.get("taxonomy_version")),
+        ("selected_run_id", metadata.get("selected_run_id")),
+        ("status", (run or {}).get("status") if isinstance(run, dict) else None),
+        ("horizon", metadata.get("horizon")),
+        ("window_start_date", window_start_date),
+        ("window_end_date", window_end_date),
+        ("valid_signal_dates", valid_signal_dates),
+    ]
+    for key, value in metadata_rows:
+        row = _empty_row("metadata")
+        row["key"] = str(key)
+        row["value"] = _csv_value(value)
+        rows.append(row)
+
+    summary_rows = [
+        ("group_count", section_counts.get("group_row_count")),
+        ("window_row_count", section_counts.get("window_row_count")),
+        ("rolling30_buy_classification_count", section_counts.get("rolling30_buy_classification_row_count")),
+        ("rolling30_exit_classification_count", section_counts.get("rolling30_exit_classification_row_count")),
+        ("watchlist_row_count", section_counts.get("watchlist_row_count")),
+        ("repeated_breakout_row_count", section_counts.get("repeated_breakout_row_count")),
+        ("repeated_pullback_row_count", section_counts.get("repeated_pullback_row_count")),
+        ("repeated_exit_risk_row_count", section_counts.get("repeated_exit_risk_row_count")),
+    ]
+    for key, value in summary_rows:
+        row = _empty_row("summary_counts")
+        row["key"] = str(key)
+        row["value"] = _csv_value(value)
+        rows.append(row)
+
+    for key, value in sorted(dict(section_counts.get("rolling30_buy_classification_state_counts") or {}).items()):
+        row = _empty_row("rolling30_buy_classification_state_counts")
+        row["key"] = str(key)
+        row["value"] = _csv_value(value)
+        rows.append(row)
+
+    for key, value in sorted(dict(section_counts.get("rolling30_exit_classification_state_counts") or {}).items()):
+        row = _empty_row("rolling30_exit_classification_state_counts")
+        row["key"] = str(key)
+        row["value"] = _csv_value(value)
+        rows.append(row)
+
+    for key, value in sorted(dict(section_counts.get("current_watchlist_status_counts") or {}).items()):
+        row = _empty_row("current_watchlist_status_counts")
+        row["key"] = str(key)
+        row["value"] = _csv_value(value)
+        rows.append(row)
+
+    for key, value in sorted(dict(section_counts.get("window_watchlist_status_counts") or {}).items()):
+        row = _empty_row("window_watchlist_status_counts")
+        row["key"] = str(key)
+        row["value"] = _csv_value(value)
+        rows.append(row)
+
+    for source_row in rolling30_buy_rows:
+        row = _empty_row("rolling30_buy_rows")
+        row["ticker"] = _csv_value(source_row.get("ticker"))
+        row["classification_state"] = _csv_value(source_row.get("classification_state"))
+        row["primary_reason"] = _csv_value(source_row.get("primary_reason"))
+        row["blocking_reason"] = _csv_value(source_row.get("blocking_reason"))
+        row["current_watchlist_status"] = _csv_value(source_row.get("current_watchlist_status"))
+        row["window_watchlist_status"] = _csv_value(source_row.get("window_watchlist_status"))
+        row["breakout_days"] = _csv_value(source_row.get("breakout_days"))
+        row["pullback_days"] = _csv_value(source_row.get("pullback_days"))
+        row["exit_risk_days"] = _csv_value(source_row.get("exit_risk_days"))
+        row["exit_risk_severity"] = _csv_value(source_row.get("exit_risk_severity"))
+        row["latest_exit_reason"] = _csv_value(source_row.get("latest_exit_reason"))
+        row["trend_state"] = _csv_value(source_row.get("trend_state"))
+        row["latest_structure_label"] = _csv_value(source_row.get("latest_structure_label"))
+        row["primary_layer"] = _csv_value(source_row.get("primary_layer"))
+        row["primary_subindustry"] = _csv_value(source_row.get("primary_subindustry"))
+        rows.append(row)
+
+    for source_row in rolling30_exit_rows:
+        row = _empty_row("rolling30_exit_rows")
+        row["ticker"] = _csv_value(source_row.get("ticker"))
+        row["classification_state"] = _csv_value(source_row.get("classification_state"))
+        row["primary_reason"] = _csv_value(source_row.get("primary_reason"))
+        row["risk_reason"] = _csv_value(source_row.get("risk_reason"))
+        row["current_watchlist_status"] = _csv_value(source_row.get("current_watchlist_status"))
+        row["window_watchlist_status"] = _csv_value(source_row.get("window_watchlist_status"))
+        row["exit_risk_days"] = _csv_value(source_row.get("exit_risk_days"))
+        row["high_exit_risk_days"] = _csv_value(source_row.get("high_exit_risk_days"))
+        row["medium_exit_risk_days"] = _csv_value(source_row.get("medium_exit_risk_days"))
+        row["exit_risk_severity"] = _csv_value(source_row.get("exit_risk_severity"))
+        row["latest_exit_reason"] = _csv_value(source_row.get("latest_exit_reason"))
+        row["trend_state"] = _csv_value(source_row.get("trend_state"))
+        row["latest_structure_label"] = _csv_value(source_row.get("latest_structure_label"))
+        row["primary_layer"] = _csv_value(source_row.get("primary_layer"))
+        row["primary_subindustry"] = _csv_value(source_row.get("primary_subindustry"))
+        rows.append(row)
+
+    for source_row in watchlist_rows:
+        row = _empty_row("watchlist_rows")
+        row["ticker"] = _csv_value(source_row.get("ticker"))
+        row["current_watchlist_status"] = _csv_value(source_row.get("current_watchlist_status"))
+        row["window_watchlist_status"] = _csv_value(source_row.get("window_watchlist_status"))
+        row["primary_layer"] = _csv_value(source_row.get("primary_layer"))
+        row["primary_subindustry"] = _csv_value(source_row.get("primary_subindustry"))
+        row["layer_context_risk_status"] = _csv_value(source_row.get("layer_context_risk_status"))
+        row["subindustry_context_risk_status"] = _csv_value(source_row.get("subindustry_context_risk_status"))
+        row["breakout_days"] = _csv_value(source_row.get("breakout_days"))
+        row["pullback_days"] = _csv_value(source_row.get("pullback_days"))
+        row["exit_risk_days"] = _csv_value(source_row.get("exit_risk_days"))
+        rows.append(row)
+
+    for source_row in repeated_breakout_rows:
+        row = _empty_row("repeated_breakout_rows")
+        row["ticker"] = _csv_value(source_row.get("ticker"))
+        row["breakout_days"] = _csv_value(source_row.get("breakout_days"))
+        row["first_signal_date"] = _csv_value(source_row.get("first_signal_date"))
+        row["last_signal_date"] = _csv_value(source_row.get("last_signal_date"))
+        row["current_watchlist_status"] = _csv_value(source_row.get("current_watchlist_status"))
+        row["window_watchlist_status"] = _csv_value(source_row.get("window_watchlist_status"))
+        row["trend_state"] = _csv_value(source_row.get("trend_state"))
+        row["latest_structure_label"] = _csv_value(source_row.get("latest_structure_label"))
+        row["primary_layer"] = _csv_value(source_row.get("primary_layer"))
+        row["primary_subindustry"] = _csv_value(source_row.get("primary_subindustry"))
+        rows.append(row)
+
+    for source_row in repeated_pullback_rows:
+        row = _empty_row("repeated_pullback_rows")
+        row["ticker"] = _csv_value(source_row.get("ticker"))
+        row["pullback_days"] = _csv_value(source_row.get("pullback_days"))
+        row["fast_ema10_pullback_days"] = _csv_value(source_row.get("fast_ema10_pullback_days"))
+        row["conservative_ema20_pullback_days"] = _csv_value(source_row.get("conservative_ema20_pullback_days"))
+        row["first_signal_date"] = _csv_value(source_row.get("first_signal_date"))
+        row["last_signal_date"] = _csv_value(source_row.get("last_signal_date"))
+        row["current_watchlist_status"] = _csv_value(source_row.get("current_watchlist_status"))
+        row["window_watchlist_status"] = _csv_value(source_row.get("window_watchlist_status"))
+        row["trend_state"] = _csv_value(source_row.get("trend_state"))
+        row["latest_structure_label"] = _csv_value(source_row.get("latest_structure_label"))
+        row["primary_layer"] = _csv_value(source_row.get("primary_layer"))
+        row["primary_subindustry"] = _csv_value(source_row.get("primary_subindustry"))
+        rows.append(row)
+
+    for source_row in repeated_exit_risk_rows:
+        row = _empty_row("repeated_exit_risk_rows")
+        row["ticker"] = _csv_value(source_row.get("ticker"))
+        row["exit_risk_days"] = _csv_value(source_row.get("exit_risk_days"))
+        row["high_exit_risk_days"] = _csv_value(source_row.get("high_exit_risk_days"))
+        row["medium_exit_risk_days"] = _csv_value(source_row.get("medium_exit_risk_days"))
+        row["exit_risk_severity"] = _csv_value(source_row.get("exit_risk_severity"))
+        row["latest_exit_reason"] = _csv_value(source_row.get("latest_exit_reason"))
+        row["current_watchlist_status"] = _csv_value(source_row.get("current_watchlist_status"))
+        row["window_watchlist_status"] = _csv_value(source_row.get("window_watchlist_status"))
+        row["trend_state"] = _csv_value(source_row.get("trend_state"))
+        row["latest_structure_label"] = _csv_value(source_row.get("latest_structure_label"))
+        row["primary_layer"] = _csv_value(source_row.get("primary_layer"))
+        row["primary_subindustry"] = _csv_value(source_row.get("primary_subindustry"))
+        rows.append(row)
+
+    for source_row in taxonomy_listing_rows:
+        row = _empty_row("taxonomy_listing_preview")
+        row["row_type"] = _csv_value(source_row.get("row_type"))
+        row["layer"] = _csv_value(source_row.get("layer"))
+        row["subindustry"] = _csv_value(source_row.get("subindustry"))
+        row["ticker"] = _csv_value(source_row.get("ticker"))
+        row["timing_state"] = _csv_value(source_row.get("timing_state"))
+        row["overheat_risk_level"] = _csv_value(source_row.get("overheat_risk_level"))
+        row["group_current_status"] = _csv_value(source_row.get("group_current_status"))
+        row["group_window_status"] = _csv_value(source_row.get("group_window_status"))
+        row["group_status_change"] = _csv_value(source_row.get("group_status_change"))
+        row["current_watchlist_status"] = _csv_value(source_row.get("current_watchlist_status"))
+        row["window_watchlist_status"] = _csv_value(source_row.get("window_watchlist_status"))
+        rows.append(row)
+
+    deferred_reasons = {
+        "swing_ma_break_status": "detailed swing MA break status",
+        "swing_signal_freshness": "detailed swing signal freshness",
+        "technical_relevance_context": "full technical relevance context",
+        "synthetic_event_history": "full synthetic event history",
+    }
+    for deferred_key, deferred_status in deferred_sections.items():
+        row = _empty_row("deferred_sections")
+        row["deferred_section"] = str(deferred_key)
+        row["status"] = _csv_value(deferred_status)
+        row["reason"] = deferred_reasons.get(str(deferred_key), "")
+        rows.append(row)
+
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=fieldnames, lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    return buffer.getvalue()
