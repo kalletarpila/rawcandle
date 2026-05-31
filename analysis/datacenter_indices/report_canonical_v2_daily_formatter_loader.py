@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 import sqlite3
 
 
@@ -608,3 +610,153 @@ def build_markdown_daily_canonical_v2_report(formatter_data: dict[str, object]) 
     lines.append("")
 
     return "\n".join(lines)
+
+
+def build_csv_daily_canonical_v2_report(formatter_data: dict[str, object]) -> str:
+    metadata = dict(formatter_data.get("metadata") or {})
+    run = formatter_data.get("run")
+    daily_trigger_rows = list(formatter_data.get("daily_trigger_rows") or [])
+    watchlist_rows = list(formatter_data.get("watchlist_rows") or [])
+    taxonomy_listing_rows = list(formatter_data.get("taxonomy_listing_rows") or [])
+    section_counts = dict(formatter_data.get("section_counts") or {})
+    deferred_sections = dict(formatter_data.get("deferred_sections") or {})
+
+    fieldnames = [
+        "section",
+        "key",
+        "value",
+        "ticker",
+        "classification_state",
+        "primary_reason",
+        "blocking_reason",
+        "next_action",
+        "current_watchlist_status",
+        "primary_layer",
+        "primary_subindustry",
+        "layer_context_risk_status",
+        "subindustry_context_risk_status",
+        "breakout_signal",
+        "pullback_signal",
+        "exit_risk_signal",
+        "row_type",
+        "layer",
+        "subindustry",
+        "timing_state",
+        "overheat_risk_level",
+        "pct_above_ema20",
+        "pct_above_ma10",
+        "distance_to_ema20_pct",
+        "deferred_section",
+        "status",
+        "reason",
+    ]
+
+    def _csv_value(value: object) -> str:
+        if value is None:
+            return ""
+        return str(value)
+
+    def _empty_row(section: str) -> dict[str, str]:
+        row = {field: "" for field in fieldnames}
+        row["section"] = section
+        return row
+
+    rows: list[dict[str, str]] = []
+
+    for key in ("signal_date", "taxonomy_version", "selected_run_id"):
+        row = _empty_row("metadata")
+        row["key"] = key
+        row["value"] = _csv_value(metadata.get(key))
+        rows.append(row)
+    row = _empty_row("metadata")
+    row["key"] = "status"
+    row["value"] = _csv_value((run or {}).get("status") if isinstance(run, dict) else None)
+    rows.append(row)
+
+    for key, value in (
+        ("ticker_count", section_counts.get("ticker_row_count")),
+        ("group_count", section_counts.get("group_row_count")),
+        ("daily_trigger_count", section_counts.get("daily_trigger_row_count")),
+        ("watchlist_count", section_counts.get("watchlist_row_count")),
+    ):
+        row = _empty_row("summary_counts")
+        row["key"] = key
+        row["value"] = _csv_value(value)
+        rows.append(row)
+
+    trigger_state_counts = dict(section_counts.get("daily_trigger_state_counts") or {})
+    for key, value in sorted(trigger_state_counts.items()):
+        row = _empty_row("trigger_state_counts")
+        row["key"] = key
+        row["value"] = _csv_value(value)
+        rows.append(row)
+
+    watchlist_status_counts = dict(section_counts.get("watchlist_status_counts") or {})
+    if watchlist_status_counts:
+        for key, value in sorted(watchlist_status_counts.items()):
+            row = _empty_row("watchlist_status_counts")
+            row["key"] = key
+            row["value"] = _csv_value(value)
+            rows.append(row)
+    else:
+        row = _empty_row("watchlist_status_counts")
+        row["key"] = "none"
+        row["value"] = ""
+        rows.append(row)
+
+    for source_row in daily_trigger_rows:
+        row = _empty_row("daily_trigger_rows")
+        row["ticker"] = _csv_value(source_row.get("ticker"))
+        row["classification_state"] = _csv_value(source_row.get("classification_state"))
+        row["primary_reason"] = _csv_value(source_row.get("primary_reason"))
+        row["blocking_reason"] = _csv_value(source_row.get("blocking_reason"))
+        row["next_action"] = _csv_value(source_row.get("next_action"))
+        row["current_watchlist_status"] = _csv_value(source_row.get("current_watchlist_status"))
+        row["primary_layer"] = _csv_value(source_row.get("primary_layer"))
+        row["primary_subindustry"] = _csv_value(source_row.get("primary_subindustry"))
+        rows.append(row)
+
+    for source_row in watchlist_rows:
+        row = _empty_row("watchlist_rows")
+        row["ticker"] = _csv_value(source_row.get("ticker"))
+        row["current_watchlist_status"] = _csv_value(source_row.get("current_watchlist_status"))
+        row["primary_layer"] = _csv_value(source_row.get("primary_layer"))
+        row["primary_subindustry"] = _csv_value(source_row.get("primary_subindustry"))
+        row["layer_context_risk_status"] = _csv_value(source_row.get("layer_context_risk_status"))
+        row["subindustry_context_risk_status"] = _csv_value(source_row.get("subindustry_context_risk_status"))
+        row["breakout_signal"] = _csv_value(source_row.get("breakout_signal"))
+        row["pullback_signal"] = _csv_value(source_row.get("pullback_signal"))
+        row["exit_risk_signal"] = _csv_value(source_row.get("exit_risk_signal"))
+        rows.append(row)
+
+    for source_row in taxonomy_listing_rows:
+        row = _empty_row("taxonomy_listing_preview")
+        row["row_type"] = _csv_value(source_row.get("row_type"))
+        row["layer"] = _csv_value(source_row.get("layer"))
+        row["subindustry"] = _csv_value(source_row.get("subindustry"))
+        row["ticker"] = _csv_value(source_row.get("ticker"))
+        row["timing_state"] = _csv_value(source_row.get("status"))
+        row["overheat_risk_level"] = _csv_value(source_row.get("overheat_risk_level"))
+        row["pct_above_ema20"] = _csv_value(source_row.get("pct_above_ema20"))
+        row["pct_above_ma10"] = _csv_value(source_row.get("pct_above_ma10"))
+        row["distance_to_ema20_pct"] = _csv_value(source_row.get("distance_to_ema20_pct"))
+        row["current_watchlist_status"] = _csv_value(source_row.get("current_watchlist_status"))
+        rows.append(row)
+
+    deferred_reasons = {
+        "swing_ma_break_status": "detailed swing MA break status",
+        "swing_signal_freshness": "detailed swing signal freshness",
+        "technical_relevance_context": "full technical relevance context",
+    }
+    for deferred_key, deferred_status in deferred_sections.items():
+        row = _empty_row("deferred_sections")
+        row["deferred_section"] = deferred_key
+        row["status"] = _csv_value(deferred_status)
+        row["reason"] = deferred_reasons.get(deferred_key, "")
+        rows.append(row)
+
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=fieldnames, lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    return buffer.getvalue()
