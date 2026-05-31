@@ -365,12 +365,14 @@ def _build_section_counts(
 
     current_watchlist_status_counts: dict[str, int] = {}
     window_watchlist_status_counts: dict[str, int] = {}
-    for row in watchlist_rows:
+    for row in window_rows:
         current_status = str(row.get("current_watchlist_status") or "")
-        current_watchlist_status_counts[current_status] = current_watchlist_status_counts.get(current_status, 0) + 1
+        if current_status:
+            current_watchlist_status_counts[current_status] = current_watchlist_status_counts.get(current_status, 0) + 1
 
         window_status = str(row.get("window_watchlist_status") or "")
-        window_watchlist_status_counts[window_status] = window_watchlist_status_counts.get(window_status, 0) + 1
+        if window_status:
+            window_watchlist_status_counts[window_status] = window_watchlist_status_counts.get(window_status, 0) + 1
 
     return {
         "group_row_count": len(group_rows),

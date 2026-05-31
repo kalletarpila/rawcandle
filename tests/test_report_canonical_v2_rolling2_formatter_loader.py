@@ -558,6 +558,7 @@ def test_section_counts_are_computed_from_canonical_rows():
         ticker="BBB",
         primary_layer="Infrastructure",
         primary_subindustry="Semis",
+        is_watchlist=0,
         current_watchlist_status="HIGH_EXIT_RISK",
         window_watchlist_status="HIGH_EXIT_RISK",
         exit_risk_days=1,
@@ -579,7 +580,8 @@ def test_section_counts_are_computed_from_canonical_rows():
     assert counts["group_row_count"] == 2
     assert counts["window_row_count"] == 2
     assert counts["rolling2_classification_row_count"] == 2
-    assert counts["watchlist_row_count"] == 2
+    assert counts["watchlist_row_count"] == 1
+    assert [row["ticker"] for row in data["watchlist_rows"]] == ["AAA"]
     assert counts["repeated_breakout_row_count"] == 1
     assert counts["repeated_pullback_row_count"] == 0
     assert counts["repeated_exit_risk_row_count"] == 1
