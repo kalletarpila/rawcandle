@@ -175,6 +175,37 @@ def test_csv_escaping_round_trips_through_csv_module():
     assert row["primary_reason"] == "BULLISH, SETUP / NEEDS CONFIRMATION"
 
 
+def test_csv_formatter_is_pure_in_memory_without_db_setup():
+    formatter_data = _sample_formatter_data()
+
+    csv_text = build_csv_daily_canonical_v2_report(formatter_data)
+    rows = _parse_csv(csv_text)
+
+    assert csv_text
+    assert csv_text.startswith("section,key,value,")
+
+    daily_trigger_row = next(row for row in rows if row["section"] == "daily_trigger_rows")
+    watchlist_row = next(row for row in rows if row["section"] == "watchlist_rows")
+    group_taxonomy_row = next(
+        row
+        for row in rows
+        if row["section"] == "taxonomy_listing_preview" and row["row_type"] == "LAYER"
+    )
+    ticker_taxonomy_row = next(
+        row
+        for row in rows
+        if row["section"] == "taxonomy_listing_preview" and row["row_type"] == "TICKER"
+    )
+    deferred_row = next(row for row in rows if row["section"] == "deferred_sections")
+
+    assert daily_trigger_row["classification_state"] == "BUY_WATCH"
+    assert watchlist_row["current_watchlist_status"] == "BREAKOUT_CANDIDATE"
+    assert group_taxonomy_row["pct_above_ema20"] == "62.5"
+    assert ticker_taxonomy_row["distance_to_ema20_pct"] == "1.2345"
+    assert deferred_row["deferred_section"] == "swing_ma_break_status"
+    assert deferred_row["status"] == "DEFERRED"
+
+
 def test_csv_full_output_is_deterministic():
     csv_text = build_csv_daily_canonical_v2_report(_sample_formatter_data())
 
