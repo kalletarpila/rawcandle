@@ -185,6 +185,131 @@ def _insert_taxonomy_ticker_coverage(
     )
 
 
+def _insert_technical_relevance_context(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+    signal_date: str = "2026-05-30",
+    taxonomy_version: str = "DC_TAXONOMY_FULL_V1",
+    report_window: str = "daily",
+    ticker: str = "NVDA",
+    signal_name: str = "bullish_divergence",
+    signal_confirmed_as_of_date: str = "2026-05-30",
+    relevance_class: str = "RELEVANT",
+    signal_direction: str | None = "BULLISH",
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO dc_report_technical_relevance_context_v2 (
+            run_id,
+            signal_date,
+            taxonomy_version,
+            report_window,
+            ticker,
+            timeframe,
+            signal_name,
+            signal_source_id,
+            signal_direction,
+            signal_family,
+            signal_confirmed_as_of_date,
+            relevance_class,
+            relevance_reason,
+            trend_state,
+            dow_context,
+            bos_context,
+            reset_context,
+            trend_alignment,
+            counter_trend_context,
+            source_run_id,
+            created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            run_id,
+            signal_date,
+            taxonomy_version,
+            report_window,
+            ticker,
+            "daily",
+            signal_name,
+            "src-1",
+            signal_direction,
+            "divergence",
+            signal_confirmed_as_of_date,
+            relevance_class,
+            "Aligned with trend",
+            "UPTREND",
+            "EARLY",
+            "CONFIRMED",
+            "NONE",
+            "ALIGNED",
+            None,
+            "source-run-1",
+            _utc_timestamp(),
+        ),
+    )
+
+
+def _insert_data_quality_summary(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+    signal_date: str = "2026-05-30",
+    taxonomy_version: str = "DC_TAXONOMY_FULL_V1",
+    report_window: str = "daily",
+    quality_scope: str = "RUN",
+    scope_key: str = "GLOBAL",
+    quality_status: str = "OK",
+    expected_count: int | None = 10,
+    actual_count: int | None = 10,
+    missing_count: int | None = 0,
+    incomplete_count: int | None = 0,
+    stale_count: int | None = 0,
+    warning_count: int | None = 0,
+    error_count: int | None = 0,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO dc_report_data_quality_summary_v2 (
+            run_id,
+            signal_date,
+            taxonomy_version,
+            report_window,
+            quality_scope,
+            scope_key,
+            quality_status,
+            expected_count,
+            actual_count,
+            missing_count,
+            incomplete_count,
+            stale_count,
+            warning_count,
+            error_count,
+            detail,
+            created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            run_id,
+            signal_date,
+            taxonomy_version,
+            report_window,
+            quality_scope,
+            scope_key,
+            quality_status,
+            expected_count,
+            actual_count,
+            missing_count,
+            incomplete_count,
+            stale_count,
+            warning_count,
+            error_count,
+            None,
+            _utc_timestamp(),
+        ),
+    )
+
+
 def test_migration_file_exists():
     assert MIGRATION_SQL_PATH.is_file()
 
@@ -202,6 +327,8 @@ def test_database_manager_initializes_report_canonical_v2_tables(tmp_path):
     assert _table_exists(conn, "dc_report_valid_signal_date_v2")
     assert _table_exists(conn, "dc_report_watchlist_ticker_v2")
     assert _table_exists(conn, "dc_report_taxonomy_ticker_coverage_v2")
+    assert _table_exists(conn, "dc_report_technical_relevance_context_v2")
+    assert _table_exists(conn, "dc_report_data_quality_summary_v2")
 
     manager.close()
 
@@ -253,6 +380,23 @@ def test_migration_creates_expected_primary_keys_and_columns():
         "signal_date",
         "taxonomy_version",
         "ticker",
+    ]
+    assert _primary_key_columns(conn, "dc_report_technical_relevance_context_v2") == [
+        "run_id",
+        "signal_date",
+        "taxonomy_version",
+        "report_window",
+        "ticker",
+        "signal_name",
+        "signal_confirmed_as_of_date",
+    ]
+    assert _primary_key_columns(conn, "dc_report_data_quality_summary_v2") == [
+        "run_id",
+        "signal_date",
+        "taxonomy_version",
+        "report_window",
+        "quality_scope",
+        "scope_key",
     ]
 
     assert {
@@ -419,6 +563,49 @@ def test_migration_creates_expected_primary_keys_and_columns():
         "created_at",
     }.issubset(_table_columns(conn, "dc_report_taxonomy_ticker_coverage_v2"))
 
+    assert {
+        "run_id",
+        "signal_date",
+        "taxonomy_version",
+        "report_window",
+        "ticker",
+        "timeframe",
+        "signal_name",
+        "signal_source_id",
+        "signal_direction",
+        "signal_family",
+        "signal_confirmed_as_of_date",
+        "relevance_class",
+        "relevance_reason",
+        "trend_state",
+        "dow_context",
+        "bos_context",
+        "reset_context",
+        "trend_alignment",
+        "counter_trend_context",
+        "source_run_id",
+        "created_at",
+    }.issubset(_table_columns(conn, "dc_report_technical_relevance_context_v2"))
+
+    assert {
+        "run_id",
+        "signal_date",
+        "taxonomy_version",
+        "report_window",
+        "quality_scope",
+        "scope_key",
+        "quality_status",
+        "expected_count",
+        "actual_count",
+        "missing_count",
+        "incomplete_count",
+        "stale_count",
+        "warning_count",
+        "error_count",
+        "detail",
+        "created_at",
+    }.issubset(_table_columns(conn, "dc_report_data_quality_summary_v2"))
+
 
 def test_migration_creates_expected_indexes():
     conn = _connect()
@@ -456,6 +643,16 @@ def test_migration_creates_expected_indexes():
         "idx_dc_report_taxonomy_ticker_coverage_v2_date_taxonomy_status",
         "idx_dc_report_taxonomy_ticker_coverage_v2_ticker",
     }.issubset(_index_names(conn, "dc_report_taxonomy_ticker_coverage_v2"))
+
+    assert {
+        "idx_dc_report_technical_relevance_context_v2_date_taxonomy_window_ticker",
+        "idx_dc_report_technical_relevance_context_v2_relevance_family",
+    }.issubset(_index_names(conn, "dc_report_technical_relevance_context_v2"))
+
+    assert {
+        "idx_dc_report_data_quality_summary_v2_date_taxonomy_window_status",
+        "idx_dc_report_data_quality_summary_v2_scope",
+    }.issubset(_index_names(conn, "dc_report_data_quality_summary_v2"))
 
 
 def test_migration_008_fresh_migration_creates_representative_fields():
@@ -903,6 +1100,182 @@ def test_migration_is_idempotent():
     assert _table_exists(conn, "dc_report_valid_signal_date_v2")
     assert _table_exists(conn, "dc_report_watchlist_ticker_v2")
     assert _table_exists(conn, "dc_report_taxonomy_ticker_coverage_v2")
+    assert _table_exists(conn, "dc_report_technical_relevance_context_v2")
+    assert _table_exists(conn, "dc_report_data_quality_summary_v2")
+
+
+def test_technical_relevance_context_primary_key_rejects_duplicate_row():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    _insert_technical_relevance_context(conn, run_id=run_id)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_technical_relevance_context(conn, run_id=run_id)
+
+
+def test_data_quality_summary_primary_key_rejects_duplicate_row():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    _insert_data_quality_summary(conn, run_id=run_id)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_data_quality_summary(conn, run_id=run_id)
+
+
+@pytest.mark.parametrize("report_window", ["daily", "rolling2", "rolling5", "rolling30"])
+def test_technical_relevance_context_report_window_accepts_known_values(report_window: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-tech-{report_window}")
+
+    _insert_technical_relevance_context(
+        conn,
+        run_id=run_id,
+        report_window=report_window,
+        ticker=f"T{report_window}",
+        signal_name=f"signal_{report_window}",
+    )
+
+
+def test_technical_relevance_context_report_window_rejects_unknown_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_technical_relevance_context(conn, run_id=run_id, report_window="rolling99")
+
+
+@pytest.mark.parametrize(
+    "relevance_class",
+    ["RELEVANT", "NOT_RELEVANT", "CONTEXTUAL", "CONFIRMING", "COUNTER_TREND", "STALE", "UNKNOWN"],
+)
+def test_technical_relevance_context_relevance_class_accepts_known_values(relevance_class: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-tech-rel-{relevance_class}")
+
+    _insert_technical_relevance_context(
+        conn,
+        run_id=run_id,
+        ticker=f"T{len(relevance_class)}{relevance_class[0]}",
+        signal_name=f"signal_{relevance_class.lower()}",
+        relevance_class=relevance_class,
+    )
+
+
+def test_technical_relevance_context_relevance_class_rejects_unknown_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_technical_relevance_context(conn, run_id=run_id, relevance_class="PRIORITY")
+
+
+@pytest.mark.parametrize("signal_direction", ["BULLISH", "BEARISH", "NEUTRAL", "MIXED", "UNKNOWN"])
+def test_technical_relevance_context_signal_direction_accepts_known_values(signal_direction: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-tech-dir-{signal_direction}")
+
+    _insert_technical_relevance_context(
+        conn,
+        run_id=run_id,
+        ticker=f"D{len(signal_direction)}{signal_direction[0]}",
+        signal_name=f"dir_{signal_direction.lower()}",
+        signal_direction=signal_direction,
+    )
+
+
+def test_technical_relevance_context_signal_direction_rejects_unknown_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_technical_relevance_context(conn, run_id=run_id, signal_direction="LONG")
+
+
+@pytest.mark.parametrize("report_window", ["daily", "rolling2", "rolling5", "rolling30"])
+def test_data_quality_summary_report_window_accepts_known_values(report_window: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-quality-{report_window}")
+
+    _insert_data_quality_summary(
+        conn,
+        run_id=run_id,
+        report_window=report_window,
+        scope_key=f"scope_{report_window}",
+    )
+
+
+def test_data_quality_summary_report_window_rejects_unknown_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_data_quality_summary(conn, run_id=run_id, report_window="rolling99")
+
+
+@pytest.mark.parametrize("quality_scope", ["RUN", "WINDOW", "TAXONOMY", "WATCHLIST", "LAYER", "SUBINDUSTRY", "TICKER", "SOURCE"])
+def test_data_quality_summary_quality_scope_accepts_known_values(quality_scope: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-quality-scope-{quality_scope}")
+
+    _insert_data_quality_summary(
+        conn,
+        run_id=run_id,
+        quality_scope=quality_scope,
+        scope_key=f"scope_{quality_scope.lower()}",
+    )
+
+
+def test_data_quality_summary_quality_scope_rejects_unknown_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_data_quality_summary(conn, run_id=run_id, quality_scope="GROUP")
+
+
+@pytest.mark.parametrize("quality_status", ["OK", "WARN", "ERROR", "MISSING", "INCOMPLETE", "STALE", "UNKNOWN"])
+def test_data_quality_summary_quality_status_accepts_known_values(quality_status: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-quality-status-{quality_status}")
+
+    _insert_data_quality_summary(
+        conn,
+        run_id=run_id,
+        quality_status=quality_status,
+        scope_key=f"status_{quality_status.lower()}",
+    )
+
+
+def test_data_quality_summary_quality_status_rejects_unknown_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_data_quality_summary(conn, run_id=run_id, quality_status="DEGRADED")
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "expected_count",
+        "actual_count",
+        "missing_count",
+        "incomplete_count",
+        "stale_count",
+        "warning_count",
+        "error_count",
+    ],
+)
+def test_data_quality_summary_negative_counts_reject_invalid_values(field_name: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-negative-{field_name}")
+
+    kwargs = {field_name: -1, "scope_key": f"neg_{field_name}"}
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_data_quality_summary(conn, run_id=run_id, **kwargs)
 
 
 def test_watchlist_ticker_primary_key_rejects_duplicate_row():
