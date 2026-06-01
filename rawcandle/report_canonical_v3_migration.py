@@ -8,6 +8,7 @@ MIGRATIONS_DIR = Path(__file__).resolve().parent / "sqlite" / "migrations"
 MIGRATION_SQL_PATHS = (
     MIGRATIONS_DIR / "015_create_eco_base_dimensions_v3.sql",
     MIGRATIONS_DIR / "016_create_eco_core_facts_v3.sql",
+    MIGRATIONS_DIR / "017_create_eco_signal_event_facts_v3.sql",
 )
 
 
