@@ -16,6 +16,7 @@ MIGRATION_SQL_PATHS = (
     MIGRATIONS_DIR / "010_create_report_ticker_coverage_v2.sql",
     MIGRATIONS_DIR / "011_create_report_relevance_quality_v2.sql",
     MIGRATIONS_DIR / "012_create_report_group_progression_v2.sql",
+    MIGRATIONS_DIR / "013_create_report_timing_freshness_v2.sql",
 )
 
 MIGRATION_008_COLUMNS = (
@@ -211,3 +212,4 @@ def apply_report_canonical_v2_migration(conn: sqlite3.Connection) -> None:
     conn.executescript(MIGRATION_SQL_PATHS[6].read_text(encoding="utf-8"))
     conn.executescript(MIGRATION_SQL_PATHS[7].read_text(encoding="utf-8"))
     conn.executescript(MIGRATION_SQL_PATHS[8].read_text(encoding="utf-8"))
+    conn.executescript(MIGRATION_SQL_PATHS[9].read_text(encoding="utf-8"))

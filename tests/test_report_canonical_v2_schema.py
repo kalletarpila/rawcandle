@@ -492,6 +492,206 @@ def _insert_group_relative_change(
     )
 
 
+def _insert_group_timing_persistence(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+    signal_date: str = "2026-05-30",
+    taxonomy_version: str = "DC_TAXONOMY_FULL_V1",
+    report_window: str = "rolling30",
+    group_scope: str = "LAYER",
+    group_key: str = "AI",
+    timing_signal_name: str = "momentum_timing",
+    persistence_class: str = "PERSISTENT",
+    persistence_days: int | None = 5,
+    status: str = "OK",
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO dc_report_group_timing_persistence_v2 (
+            run_id,
+            signal_date,
+            taxonomy_version,
+            report_window,
+            group_scope,
+            group_key,
+            primary_layer,
+            primary_subindustry,
+            timing_signal_name,
+            persistence_class,
+            persistence_days,
+            first_seen_date,
+            last_seen_date,
+            previous_state,
+            current_state,
+            state_delta,
+            status,
+            reason,
+            created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            run_id,
+            signal_date,
+            taxonomy_version,
+            report_window,
+            group_scope,
+            group_key,
+            "AI",
+            "Semiconductors",
+            timing_signal_name,
+            persistence_class,
+            persistence_days,
+            "2026-05-25",
+            "2026-05-30",
+            "EARLY",
+            "PERSISTING",
+            "STABLE",
+            status,
+            None,
+            _utc_timestamp(),
+        ),
+    )
+
+
+def _insert_ma_break_status(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+    signal_date: str = "2026-05-30",
+    taxonomy_version: str = "DC_TAXONOMY_FULL_V1",
+    report_window: str = "rolling30",
+    entity_scope: str = "TICKER",
+    entity_key: str = "NVDA",
+    ma_name: str = "ema20",
+    ma_period: int | None = 20,
+    break_status: str = "ABOVE",
+    break_direction: str = "UP",
+    days_since_break: int | None = 2,
+    status: str = "OK",
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO dc_report_ma_break_status_v2 (
+            run_id,
+            signal_date,
+            taxonomy_version,
+            report_window,
+            entity_scope,
+            entity_key,
+            ticker,
+            primary_layer,
+            primary_subindustry,
+            ma_name,
+            ma_period,
+            break_status,
+            break_direction,
+            break_date,
+            days_since_break,
+            close_value,
+            ma_value,
+            distance_pct,
+            status,
+            reason,
+            created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            run_id,
+            signal_date,
+            taxonomy_version,
+            report_window,
+            entity_scope,
+            entity_key,
+            "NVDA" if entity_scope == "TICKER" else None,
+            "AI",
+            "Semiconductors",
+            ma_name,
+            ma_period,
+            break_status,
+            break_direction,
+            "2026-05-28",
+            days_since_break,
+            100.0,
+            95.0,
+            5.26,
+            status,
+            None,
+            _utc_timestamp(),
+        ),
+    )
+
+
+def _insert_signal_freshness(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+    signal_date: str = "2026-05-30",
+    taxonomy_version: str = "DC_TAXONOMY_FULL_V1",
+    report_window: str = "rolling30",
+    entity_scope: str = "TICKER",
+    entity_key: str = "NVDA",
+    signal_name: str = "bullish_divergence",
+    freshness_class: str = "FRESH",
+    age_trading_days: int | None = 1,
+    age_calendar_days: int | None = 2,
+    max_fresh_trading_days: int | None = 5,
+    max_fresh_calendar_days: int | None = 7,
+    is_fresh: int = 1,
+    status: str = "OK",
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO dc_report_signal_freshness_v2 (
+            run_id,
+            signal_date,
+            taxonomy_version,
+            report_window,
+            entity_scope,
+            entity_key,
+            ticker,
+            primary_layer,
+            primary_subindustry,
+            signal_name,
+            signal_family,
+            signal_date_observed,
+            freshness_class,
+            age_trading_days,
+            age_calendar_days,
+            max_fresh_trading_days,
+            max_fresh_calendar_days,
+            is_fresh,
+            status,
+            reason,
+            created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            run_id,
+            signal_date,
+            taxonomy_version,
+            report_window,
+            entity_scope,
+            entity_key,
+            "NVDA" if entity_scope == "TICKER" else None,
+            "AI",
+            "Semiconductors",
+            signal_name,
+            "divergence",
+            "2026-05-29",
+            freshness_class,
+            age_trading_days,
+            age_calendar_days,
+            max_fresh_trading_days,
+            max_fresh_calendar_days,
+            is_fresh,
+            status,
+            None,
+            _utc_timestamp(),
+        ),
+    )
+
+
 def test_migration_file_exists():
     assert MIGRATION_SQL_PATH.is_file()
 
@@ -514,6 +714,9 @@ def test_database_manager_initializes_report_canonical_v2_tables(tmp_path):
     assert _table_exists(conn, "dc_report_ecosystem_window_change_v2")
     assert _table_exists(conn, "dc_report_group_overheat_progression_v2")
     assert _table_exists(conn, "dc_report_group_relative_change_v2")
+    assert _table_exists(conn, "dc_report_group_timing_persistence_v2")
+    assert _table_exists(conn, "dc_report_ma_break_status_v2")
+    assert _table_exists(conn, "dc_report_signal_freshness_v2")
 
     manager.close()
 
@@ -608,6 +811,33 @@ def test_migration_creates_expected_primary_keys_and_columns():
         "group_scope",
         "group_key",
         "metric_name",
+    ]
+    assert _primary_key_columns(conn, "dc_report_group_timing_persistence_v2") == [
+        "run_id",
+        "signal_date",
+        "taxonomy_version",
+        "report_window",
+        "group_scope",
+        "group_key",
+        "timing_signal_name",
+    ]
+    assert _primary_key_columns(conn, "dc_report_ma_break_status_v2") == [
+        "run_id",
+        "signal_date",
+        "taxonomy_version",
+        "report_window",
+        "entity_scope",
+        "entity_key",
+        "ma_name",
+    ]
+    assert _primary_key_columns(conn, "dc_report_signal_freshness_v2") == [
+        "run_id",
+        "signal_date",
+        "taxonomy_version",
+        "report_window",
+        "entity_scope",
+        "entity_key",
+        "signal_name",
     ]
 
     assert {
@@ -883,6 +1113,76 @@ def test_migration_creates_expected_primary_keys_and_columns():
         "created_at",
     }.issubset(_table_columns(conn, "dc_report_group_relative_change_v2"))
 
+    assert {
+        "run_id",
+        "signal_date",
+        "taxonomy_version",
+        "report_window",
+        "group_scope",
+        "group_key",
+        "primary_layer",
+        "primary_subindustry",
+        "timing_signal_name",
+        "persistence_class",
+        "persistence_days",
+        "first_seen_date",
+        "last_seen_date",
+        "previous_state",
+        "current_state",
+        "state_delta",
+        "status",
+        "reason",
+        "created_at",
+    }.issubset(_table_columns(conn, "dc_report_group_timing_persistence_v2"))
+
+    assert {
+        "run_id",
+        "signal_date",
+        "taxonomy_version",
+        "report_window",
+        "entity_scope",
+        "entity_key",
+        "ticker",
+        "primary_layer",
+        "primary_subindustry",
+        "ma_name",
+        "ma_period",
+        "break_status",
+        "break_direction",
+        "break_date",
+        "days_since_break",
+        "close_value",
+        "ma_value",
+        "distance_pct",
+        "status",
+        "reason",
+        "created_at",
+    }.issubset(_table_columns(conn, "dc_report_ma_break_status_v2"))
+
+    assert {
+        "run_id",
+        "signal_date",
+        "taxonomy_version",
+        "report_window",
+        "entity_scope",
+        "entity_key",
+        "ticker",
+        "primary_layer",
+        "primary_subindustry",
+        "signal_name",
+        "signal_family",
+        "signal_date_observed",
+        "freshness_class",
+        "age_trading_days",
+        "age_calendar_days",
+        "max_fresh_trading_days",
+        "max_fresh_calendar_days",
+        "is_fresh",
+        "status",
+        "reason",
+        "created_at",
+    }.issubset(_table_columns(conn, "dc_report_signal_freshness_v2"))
+
 
 def test_migration_creates_expected_indexes():
     conn = _connect()
@@ -945,6 +1245,21 @@ def test_migration_creates_expected_indexes():
         "idx_dc_report_group_relative_change_v2_date_taxonomy_window_scope",
         "idx_dc_report_group_relative_change_v2_metric_direction",
     }.issubset(_index_names(conn, "dc_report_group_relative_change_v2"))
+
+    assert {
+        "idx_dc_report_group_timing_persistence_v2_date_taxonomy_window_scope",
+        "idx_dc_report_group_timing_persistence_v2_persistence_status",
+    }.issubset(_index_names(conn, "dc_report_group_timing_persistence_v2"))
+
+    assert {
+        "idx_dc_report_ma_break_status_v2_date_taxonomy_window_scope",
+        "idx_dc_report_ma_break_status_v2_break_status",
+    }.issubset(_index_names(conn, "dc_report_ma_break_status_v2"))
+
+    assert {
+        "idx_dc_report_signal_freshness_v2_date_taxonomy_window_scope",
+        "idx_dc_report_signal_freshness_v2_freshness_status",
+    }.issubset(_index_names(conn, "dc_report_signal_freshness_v2"))
 
 
 def test_migration_008_fresh_migration_creates_representative_fields():
@@ -1397,6 +1712,223 @@ def test_migration_is_idempotent():
     assert _table_exists(conn, "dc_report_ecosystem_window_change_v2")
     assert _table_exists(conn, "dc_report_group_overheat_progression_v2")
     assert _table_exists(conn, "dc_report_group_relative_change_v2")
+    assert _table_exists(conn, "dc_report_group_timing_persistence_v2")
+    assert _table_exists(conn, "dc_report_ma_break_status_v2")
+    assert _table_exists(conn, "dc_report_signal_freshness_v2")
+
+
+def test_group_timing_persistence_primary_key_rejects_duplicate_row():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    _insert_group_timing_persistence(conn, run_id=run_id)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_group_timing_persistence(conn, run_id=run_id)
+
+
+def test_ma_break_status_primary_key_rejects_duplicate_row():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    _insert_ma_break_status(conn, run_id=run_id)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_ma_break_status(conn, run_id=run_id)
+
+
+def test_signal_freshness_primary_key_rejects_duplicate_row():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    _insert_signal_freshness(conn, run_id=run_id)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_signal_freshness(conn, run_id=run_id)
+
+
+@pytest.mark.parametrize("report_window", ["daily", "rolling2", "rolling5", "rolling30"])
+def test_timing_freshness_tables_report_window_accept_known_values(report_window: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-tf-{report_window}")
+
+    _insert_group_timing_persistence(conn, run_id=run_id, report_window=report_window, group_key=f"G{report_window}")
+    _insert_ma_break_status(conn, run_id=run_id, report_window=report_window, entity_key=f"M{report_window}")
+    _insert_signal_freshness(conn, run_id=run_id, report_window=report_window, entity_key=f"S{report_window}")
+
+
+def test_timing_freshness_tables_report_window_reject_unknown_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_group_timing_persistence(conn, run_id=run_id, report_window="rolling99")
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_ma_break_status(conn, run_id=run_id, report_window="rolling99", entity_key="M2")
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_signal_freshness(conn, run_id=run_id, report_window="rolling99", entity_key="S2")
+
+
+@pytest.mark.parametrize("group_scope", ["LAYER", "SUBINDUSTRY", "ECOSYSTEM", "WATCHLIST", "MARKET"])
+def test_group_timing_persistence_group_scope_accepts_known_values(group_scope: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-timing-scope-{group_scope}")
+
+    _insert_group_timing_persistence(conn, run_id=run_id, group_scope=group_scope, group_key=f"G{group_scope}")
+
+
+def test_group_timing_persistence_group_scope_rejects_unknown_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_group_timing_persistence(conn, run_id=run_id, group_scope="GROUP")
+
+
+@pytest.mark.parametrize("entity_scope", ["TICKER", "LAYER", "SUBINDUSTRY", "ECOSYSTEM", "WATCHLIST", "MARKET"])
+def test_timing_freshness_entity_scope_accepts_known_values(entity_scope: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-entity-scope-{entity_scope}")
+
+    _insert_ma_break_status(conn, run_id=run_id, entity_scope=entity_scope, entity_key=f"M{entity_scope}")
+    _insert_signal_freshness(conn, run_id=run_id, entity_scope=entity_scope, entity_key=f"S{entity_scope}")
+
+
+def test_timing_freshness_entity_scope_rejects_unknown_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_ma_break_status(conn, run_id=run_id, entity_scope="GROUP")
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_signal_freshness(conn, run_id=run_id, entity_scope="GROUP", entity_key="S3")
+
+
+@pytest.mark.parametrize(
+    "persistence_class",
+    ["PERSISTENT", "IMPROVING", "DETERIORATING", "FADING", "NEW", "LOST", "UNSTABLE", "UNKNOWN"],
+)
+def test_group_timing_persistence_class_accepts_known_values(persistence_class: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-persistence-{persistence_class}")
+
+    _insert_group_timing_persistence(
+        conn,
+        run_id=run_id,
+        group_key=f"P{persistence_class}",
+        timing_signal_name=f"signal_{persistence_class.lower()}",
+        persistence_class=persistence_class,
+    )
+
+
+def test_group_timing_persistence_class_rejects_unknown_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_group_timing_persistence(conn, run_id=run_id, persistence_class="STICKY")
+
+
+@pytest.mark.parametrize(
+    "break_status",
+    ["ABOVE", "BELOW", "BROKEN_UP", "BROKEN_DOWN", "TESTING", "RECLAIMED", "LOST", "NO_BREAK", "UNKNOWN"],
+)
+def test_ma_break_status_accepts_known_values(break_status: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-break-status-{break_status}")
+
+    _insert_ma_break_status(
+        conn,
+        run_id=run_id,
+        entity_key=f"B{break_status}",
+        ma_name=f"ma_{break_status.lower()}",
+        break_status=break_status,
+    )
+
+
+def test_ma_break_status_rejects_unknown_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_ma_break_status(conn, run_id=run_id, break_status="CROSSED")
+
+
+@pytest.mark.parametrize("break_direction", ["UP", "DOWN", "FLAT", "MIXED", "NONE", "UNKNOWN"])
+def test_ma_break_direction_accepts_known_values(break_direction: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-break-dir-{break_direction}")
+
+    _insert_ma_break_status(
+        conn,
+        run_id=run_id,
+        entity_key=f"D{break_direction}",
+        ma_name=f"ma_dir_{break_direction.lower()}",
+        break_direction=break_direction,
+    )
+
+
+def test_ma_break_direction_rejects_unknown_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_ma_break_status(conn, run_id=run_id, break_direction="SIDEWAYS")
+
+
+@pytest.mark.parametrize("freshness_class", ["FRESH", "AGING", "STALE", "EXPIRED", "MISSING", "UNKNOWN"])
+def test_signal_freshness_class_accepts_known_values(freshness_class: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-freshness-{freshness_class}")
+
+    _insert_signal_freshness(
+        conn,
+        run_id=run_id,
+        entity_key=f"F{freshness_class}",
+        signal_name=f"signal_{freshness_class.lower()}",
+        freshness_class=freshness_class,
+    )
+
+
+def test_signal_freshness_class_rejects_unknown_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_signal_freshness(conn, run_id=run_id, freshness_class="RECENT")
+
+
+def test_signal_freshness_is_fresh_rejects_invalid_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_signal_freshness(conn, run_id=run_id, is_fresh=2)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "builder"),
+    [
+        ("persistence_days", "_insert_group_timing_persistence"),
+        ("ma_period", "_insert_ma_break_status"),
+        ("days_since_break", "_insert_ma_break_status"),
+        ("age_trading_days", "_insert_signal_freshness"),
+        ("age_calendar_days", "_insert_signal_freshness"),
+        ("max_fresh_trading_days", "_insert_signal_freshness"),
+        ("max_fresh_calendar_days", "_insert_signal_freshness"),
+    ],
+)
+def test_timing_freshness_negative_numeric_fields_reject_invalid_values(field_name: str, builder: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-negative-{field_name}")
+
+    kwargs = {field_name: -1}
+
+    with pytest.raises(sqlite3.IntegrityError):
+        globals()[builder](conn, run_id=run_id, **kwargs)
 
 
 def test_ecosystem_window_change_primary_key_rejects_duplicate_row():
