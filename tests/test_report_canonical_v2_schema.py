@@ -310,6 +310,188 @@ def _insert_data_quality_summary(
     )
 
 
+def _insert_ecosystem_window_change(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+    signal_date: str = "2026-05-30",
+    taxonomy_version: str = "DC_TAXONOMY_FULL_V1",
+    report_window: str = "rolling30",
+    group_scope: str = "LAYER",
+    group_key: str = "AI",
+    change_type: str = "IMPROVED",
+    status: str = "OK",
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO dc_report_ecosystem_window_change_v2 (
+            run_id,
+            signal_date,
+            taxonomy_version,
+            report_window,
+            group_scope,
+            group_key,
+            primary_layer,
+            primary_subindustry,
+            change_type,
+            previous_value,
+            current_value,
+            delta_value,
+            delta_pct,
+            rank_previous,
+            rank_current,
+            rank_delta,
+            status,
+            reason,
+            created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            run_id,
+            signal_date,
+            taxonomy_version,
+            report_window,
+            group_scope,
+            group_key,
+            "AI",
+            "Semiconductors",
+            change_type,
+            1.0,
+            2.0,
+            1.0,
+            100.0,
+            5,
+            2,
+            -3,
+            status,
+            None,
+            _utc_timestamp(),
+        ),
+    )
+
+
+def _insert_group_overheat_progression(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+    signal_date: str = "2026-05-30",
+    taxonomy_version: str = "DC_TAXONOMY_FULL_V1",
+    report_window: str = "rolling30",
+    group_scope: str = "LAYER",
+    group_key: str = "AI",
+    overheat_status: str = "LOW",
+    rotation_risk_status: str = "LOW",
+    progression_class: str = "STABLE",
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO dc_report_group_overheat_progression_v2 (
+            run_id,
+            signal_date,
+            taxonomy_version,
+            report_window,
+            group_scope,
+            group_key,
+            primary_layer,
+            primary_subindustry,
+            overheat_status,
+            rotation_risk_status,
+            previous_overheat_score,
+            current_overheat_score,
+            overheat_delta,
+            previous_rotation_risk_score,
+            current_rotation_risk_score,
+            rotation_risk_delta,
+            progression_class,
+            reason,
+            created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            run_id,
+            signal_date,
+            taxonomy_version,
+            report_window,
+            group_scope,
+            group_key,
+            "AI",
+            "Semiconductors",
+            overheat_status,
+            rotation_risk_status,
+            0.2,
+            0.3,
+            0.1,
+            0.2,
+            0.4,
+            0.2,
+            progression_class,
+            None,
+            _utc_timestamp(),
+        ),
+    )
+
+
+def _insert_group_relative_change(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+    signal_date: str = "2026-05-30",
+    taxonomy_version: str = "DC_TAXONOMY_FULL_V1",
+    report_window: str = "rolling30",
+    group_scope: str = "LAYER",
+    group_key: str = "AI",
+    metric_name: str = "breadth",
+    direction: str = "IMPROVING",
+    status: str = "OK",
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO dc_report_group_relative_change_v2 (
+            run_id,
+            signal_date,
+            taxonomy_version,
+            report_window,
+            group_scope,
+            group_key,
+            primary_layer,
+            primary_subindustry,
+            metric_name,
+            previous_value,
+            current_value,
+            delta_value,
+            delta_pct,
+            direction,
+            relative_rank,
+            relative_rank_delta,
+            status,
+            reason,
+            created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            run_id,
+            signal_date,
+            taxonomy_version,
+            report_window,
+            group_scope,
+            group_key,
+            "AI",
+            "Semiconductors",
+            metric_name,
+            1.0,
+            2.0,
+            1.0,
+            100.0,
+            direction,
+            3,
+            -1,
+            status,
+            None,
+            _utc_timestamp(),
+        ),
+    )
+
+
 def test_migration_file_exists():
     assert MIGRATION_SQL_PATH.is_file()
 
@@ -329,6 +511,9 @@ def test_database_manager_initializes_report_canonical_v2_tables(tmp_path):
     assert _table_exists(conn, "dc_report_taxonomy_ticker_coverage_v2")
     assert _table_exists(conn, "dc_report_technical_relevance_context_v2")
     assert _table_exists(conn, "dc_report_data_quality_summary_v2")
+    assert _table_exists(conn, "dc_report_ecosystem_window_change_v2")
+    assert _table_exists(conn, "dc_report_group_overheat_progression_v2")
+    assert _table_exists(conn, "dc_report_group_relative_change_v2")
 
     manager.close()
 
@@ -397,6 +582,32 @@ def test_migration_creates_expected_primary_keys_and_columns():
         "report_window",
         "quality_scope",
         "scope_key",
+    ]
+    assert _primary_key_columns(conn, "dc_report_ecosystem_window_change_v2") == [
+        "run_id",
+        "signal_date",
+        "taxonomy_version",
+        "report_window",
+        "group_scope",
+        "group_key",
+        "change_type",
+    ]
+    assert _primary_key_columns(conn, "dc_report_group_overheat_progression_v2") == [
+        "run_id",
+        "signal_date",
+        "taxonomy_version",
+        "report_window",
+        "group_scope",
+        "group_key",
+    ]
+    assert _primary_key_columns(conn, "dc_report_group_relative_change_v2") == [
+        "run_id",
+        "signal_date",
+        "taxonomy_version",
+        "report_window",
+        "group_scope",
+        "group_key",
+        "metric_name",
     ]
 
     assert {
@@ -606,6 +817,72 @@ def test_migration_creates_expected_primary_keys_and_columns():
         "created_at",
     }.issubset(_table_columns(conn, "dc_report_data_quality_summary_v2"))
 
+    assert {
+        "run_id",
+        "signal_date",
+        "taxonomy_version",
+        "report_window",
+        "group_scope",
+        "group_key",
+        "primary_layer",
+        "primary_subindustry",
+        "change_type",
+        "previous_value",
+        "current_value",
+        "delta_value",
+        "delta_pct",
+        "rank_previous",
+        "rank_current",
+        "rank_delta",
+        "status",
+        "reason",
+        "created_at",
+    }.issubset(_table_columns(conn, "dc_report_ecosystem_window_change_v2"))
+
+    assert {
+        "run_id",
+        "signal_date",
+        "taxonomy_version",
+        "report_window",
+        "group_scope",
+        "group_key",
+        "primary_layer",
+        "primary_subindustry",
+        "overheat_status",
+        "rotation_risk_status",
+        "previous_overheat_score",
+        "current_overheat_score",
+        "overheat_delta",
+        "previous_rotation_risk_score",
+        "current_rotation_risk_score",
+        "rotation_risk_delta",
+        "progression_class",
+        "reason",
+        "created_at",
+    }.issubset(_table_columns(conn, "dc_report_group_overheat_progression_v2"))
+
+    assert {
+        "run_id",
+        "signal_date",
+        "taxonomy_version",
+        "report_window",
+        "group_scope",
+        "group_key",
+        "primary_layer",
+        "primary_subindustry",
+        "metric_name",
+        "previous_value",
+        "current_value",
+        "delta_value",
+        "delta_pct",
+        "direction",
+        "relative_rank",
+        "relative_rank_delta",
+        "status",
+        "reason",
+        "created_at",
+    }.issubset(_table_columns(conn, "dc_report_group_relative_change_v2"))
+
 
 def test_migration_creates_expected_indexes():
     conn = _connect()
@@ -653,6 +930,21 @@ def test_migration_creates_expected_indexes():
         "idx_dc_report_data_quality_summary_v2_date_taxonomy_window_status",
         "idx_dc_report_data_quality_summary_v2_scope",
     }.issubset(_index_names(conn, "dc_report_data_quality_summary_v2"))
+
+    assert {
+        "idx_dc_report_ecosystem_window_change_v2_date_taxonomy_window_scope",
+        "idx_dc_report_ecosystem_window_change_v2_change_status",
+    }.issubset(_index_names(conn, "dc_report_ecosystem_window_change_v2"))
+
+    assert {
+        "idx_dc_report_group_overheat_progression_v2_date_taxonomy_window_scope",
+        "idx_dc_report_group_overheat_progression_v2_progression",
+    }.issubset(_index_names(conn, "dc_report_group_overheat_progression_v2"))
+
+    assert {
+        "idx_dc_report_group_relative_change_v2_date_taxonomy_window_scope",
+        "idx_dc_report_group_relative_change_v2_metric_direction",
+    }.issubset(_index_names(conn, "dc_report_group_relative_change_v2"))
 
 
 def test_migration_008_fresh_migration_creates_representative_fields():
@@ -1102,6 +1394,201 @@ def test_migration_is_idempotent():
     assert _table_exists(conn, "dc_report_taxonomy_ticker_coverage_v2")
     assert _table_exists(conn, "dc_report_technical_relevance_context_v2")
     assert _table_exists(conn, "dc_report_data_quality_summary_v2")
+    assert _table_exists(conn, "dc_report_ecosystem_window_change_v2")
+    assert _table_exists(conn, "dc_report_group_overheat_progression_v2")
+    assert _table_exists(conn, "dc_report_group_relative_change_v2")
+
+
+def test_ecosystem_window_change_primary_key_rejects_duplicate_row():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    _insert_ecosystem_window_change(conn, run_id=run_id)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_ecosystem_window_change(conn, run_id=run_id)
+
+
+def test_group_overheat_progression_primary_key_rejects_duplicate_row():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    _insert_group_overheat_progression(conn, run_id=run_id)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_group_overheat_progression(conn, run_id=run_id)
+
+
+def test_group_relative_change_primary_key_rejects_duplicate_row():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    _insert_group_relative_change(conn, run_id=run_id)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_group_relative_change(conn, run_id=run_id)
+
+
+@pytest.mark.parametrize("report_window", ["daily", "rolling2", "rolling5", "rolling30"])
+def test_group_progression_tables_report_window_accept_known_values(report_window: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-prog-{report_window}")
+
+    _insert_ecosystem_window_change(conn, run_id=run_id, report_window=report_window, group_key=f"E{report_window}")
+    _insert_group_overheat_progression(conn, run_id=run_id, report_window=report_window, group_key=f"O{report_window}")
+    _insert_group_relative_change(conn, run_id=run_id, report_window=report_window, group_key=f"R{report_window}")
+
+
+def test_group_progression_tables_report_window_reject_unknown_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_ecosystem_window_change(conn, run_id=run_id, report_window="rolling99")
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_group_overheat_progression(conn, run_id=run_id, report_window="rolling99", group_key="O2")
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_group_relative_change(conn, run_id=run_id, report_window="rolling99", group_key="R2")
+
+
+@pytest.mark.parametrize("group_scope", ["LAYER", "SUBINDUSTRY", "ECOSYSTEM", "WATCHLIST", "MARKET"])
+def test_group_progression_tables_group_scope_accept_known_values(group_scope: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-scope-{group_scope}")
+
+    _insert_ecosystem_window_change(conn, run_id=run_id, group_scope=group_scope, group_key=f"E{group_scope}")
+    _insert_group_overheat_progression(conn, run_id=run_id, group_scope=group_scope, group_key=f"O{group_scope}")
+    _insert_group_relative_change(conn, run_id=run_id, group_scope=group_scope, group_key=f"R{group_scope}")
+
+
+def test_group_progression_tables_group_scope_reject_unknown_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_ecosystem_window_change(conn, run_id=run_id, group_scope="GROUP")
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_group_overheat_progression(conn, run_id=run_id, group_scope="GROUP", group_key="O3")
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_group_relative_change(conn, run_id=run_id, group_scope="GROUP", group_key="R3")
+
+
+@pytest.mark.parametrize(
+    "change_type",
+    [
+        "IMPROVED",
+        "DETERIORATED",
+        "APPEARED",
+        "DISAPPEARED",
+        "UNCHANGED",
+        "WORSENED",
+        "RECOVERED",
+        "ROTATED_IN",
+        "ROTATED_OUT",
+        "UNKNOWN",
+    ],
+)
+def test_ecosystem_window_change_change_type_accepts_known_values(change_type: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-change-{change_type}")
+
+    _insert_ecosystem_window_change(
+        conn,
+        run_id=run_id,
+        group_key=f"C{change_type}",
+        change_type=change_type,
+    )
+
+
+def test_ecosystem_window_change_change_type_rejects_unknown_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_ecosystem_window_change(conn, run_id=run_id, change_type="SHIFTED")
+
+
+@pytest.mark.parametrize("overheat_status", ["NONE", "LOW", "MODERATE", "HIGH", "EXTREME", "UNKNOWN"])
+def test_group_overheat_progression_overheat_status_accepts_known_values(overheat_status: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-overheat-{overheat_status}")
+
+    _insert_group_overheat_progression(
+        conn,
+        run_id=run_id,
+        group_key=f"H{overheat_status}",
+        overheat_status=overheat_status,
+    )
+
+
+@pytest.mark.parametrize("rotation_risk_status", ["NONE", "LOW", "MODERATE", "HIGH", "EXTREME", "UNKNOWN"])
+def test_group_overheat_progression_rotation_risk_status_accepts_known_values(rotation_risk_status: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-rotation-{rotation_risk_status}")
+
+    _insert_group_overheat_progression(
+        conn,
+        run_id=run_id,
+        group_key=f"RR{rotation_risk_status}",
+        rotation_risk_status=rotation_risk_status,
+    )
+
+
+@pytest.mark.parametrize(
+    "progression_class",
+    [
+        "HEATING_UP",
+        "COOLING_DOWN",
+        "STABLE",
+        "ROTATION_RISK_INCREASING",
+        "ROTATION_RISK_DECREASING",
+        "NORMALIZING",
+        "UNKNOWN",
+    ],
+)
+def test_group_overheat_progression_class_accepts_known_values(progression_class: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-progression-{progression_class}")
+
+    _insert_group_overheat_progression(
+        conn,
+        run_id=run_id,
+        group_key=f"P{progression_class}",
+        progression_class=progression_class,
+    )
+
+
+@pytest.mark.parametrize("direction", ["IMPROVING", "DETERIORATING", "FLAT", "MIXED", "UNKNOWN"])
+def test_group_relative_change_direction_accepts_known_values(direction: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-direction-{direction}")
+
+    _insert_group_relative_change(
+        conn,
+        run_id=run_id,
+        group_key=f"D{direction}",
+        metric_name=f"metric_{direction.lower()}",
+        direction=direction,
+    )
+
+
+@pytest.mark.parametrize("status", ["OK", "WARN", "ERROR", "MISSING", "INCOMPLETE", "UNKNOWN"])
+def test_group_progression_status_accepts_known_values(status: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-status-{status}")
+
+    _insert_ecosystem_window_change(conn, run_id=run_id, group_key=f"SE{status}", status=status)
+    _insert_group_relative_change(
+        conn,
+        run_id=run_id,
+        group_key=f"SR{status}",
+        metric_name=f"metric_status_{status.lower()}",
+        status=status,
+    )
 
 
 def test_technical_relevance_context_primary_key_rejects_duplicate_row():
