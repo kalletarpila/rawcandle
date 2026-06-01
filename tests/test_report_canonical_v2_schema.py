@@ -101,6 +101,7 @@ def test_database_manager_initializes_report_canonical_v2_tables(tmp_path):
     assert _table_exists(conn, "dc_report_context_daily_v2")
     assert _table_exists(conn, "dc_report_context_window_v2")
     assert _table_exists(conn, "dc_report_classification_v2")
+    assert _table_exists(conn, "dc_report_valid_signal_date_v2")
 
     manager.close()
 
@@ -133,6 +134,12 @@ def test_migration_creates_expected_primary_keys_and_columns():
         "ticker",
         "horizon",
         "classification_type",
+    ]
+    assert _primary_key_columns(conn, "dc_report_valid_signal_date_v2") == [
+        "run_id",
+        "signal_date",
+        "taxonomy_version",
+        "report_window",
     ]
 
     assert {
@@ -255,6 +262,19 @@ def test_migration_creates_expected_primary_keys_and_columns():
         "created_at_utc",
     }.issubset(_table_columns(conn, "dc_report_classification_v2"))
 
+    assert {
+        "run_id",
+        "signal_date",
+        "taxonomy_version",
+        "report_window",
+        "source_run_id",
+        "source_signal_date",
+        "is_valid",
+        "status",
+        "reason",
+        "created_at",
+    }.issubset(_table_columns(conn, "dc_report_valid_signal_date_v2"))
+
 
 def test_migration_creates_expected_indexes():
     conn = _connect()
@@ -278,6 +298,10 @@ def test_migration_creates_expected_indexes():
         "idx_dc_report_classification_v2_date_horizon",
         "idx_dc_report_classification_v2_ticker",
     }.issubset(_index_names(conn, "dc_report_classification_v2"))
+
+    assert {
+        "idx_dc_report_valid_signal_date_v2_date_taxonomy_window",
+    }.issubset(_index_names(conn, "dc_report_valid_signal_date_v2"))
 
 
 def test_migration_008_fresh_migration_creates_representative_fields():
@@ -722,6 +746,89 @@ def test_migration_is_idempotent():
     assert _table_exists(conn, "dc_report_context_daily_v2")
     assert _table_exists(conn, "dc_report_context_window_v2")
     assert _table_exists(conn, "dc_report_classification_v2")
+    assert _table_exists(conn, "dc_report_valid_signal_date_v2")
+
+
+def _insert_valid_signal_date(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+    signal_date: str = "2026-05-30",
+    taxonomy_version: str = "DC_TAXONOMY_FULL_V1",
+    report_window: str = "rolling30",
+    is_valid: int = 1,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO dc_report_valid_signal_date_v2 (
+            run_id,
+            signal_date,
+            taxonomy_version,
+            report_window,
+            source_run_id,
+            source_signal_date,
+            is_valid,
+            status,
+            reason
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            run_id,
+            signal_date,
+            taxonomy_version,
+            report_window,
+            "source-run-1",
+            signal_date,
+            is_valid,
+            "READY",
+            None,
+        ),
+    )
+
+
+def test_valid_signal_date_primary_key_rejects_duplicate_rows():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    _insert_valid_signal_date(conn, run_id=run_id)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_valid_signal_date(conn, run_id=run_id)
+
+
+def test_valid_signal_date_is_valid_check_rejects_invalid_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_valid_signal_date(conn, run_id=run_id, is_valid=2)
+
+
+@pytest.mark.parametrize("report_window", ["daily", "rolling2", "rolling5", "rolling30"])
+def test_valid_signal_date_report_window_accepts_known_values(report_window: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-{report_window}")
+
+    _insert_valid_signal_date(conn, run_id=run_id, report_window=report_window)
+
+    row = conn.execute(
+        """
+        SELECT report_window
+        FROM dc_report_valid_signal_date_v2
+        WHERE run_id = ?
+        """,
+        (run_id,),
+    ).fetchone()
+
+    assert row == (report_window,)
+
+
+def test_valid_signal_date_report_window_check_rejects_invalid_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_valid_signal_date(conn, run_id=run_id, report_window="rolling99")
 
 
 def test_negative_count_check_rejects_invalid_value():
