@@ -13,6 +13,7 @@ MIGRATION_SQL_PATHS = (
     MIGRATIONS_DIR / "007_add_daily_distance_to_ema10_to_report_context_daily_v2.sql",
     MIGRATIONS_DIR / "008_add_daily_formatter_source_fields_to_report_context_v2.sql",
     MIGRATIONS_DIR / "009_create_report_window_metadata_v2.sql",
+    MIGRATIONS_DIR / "010_create_report_ticker_coverage_v2.sql",
 )
 
 MIGRATION_008_COLUMNS = (
@@ -205,3 +206,4 @@ def apply_report_canonical_v2_migration(conn: sqlite3.Connection) -> None:
     if "price_data_status" not in existing_window_columns:
         conn.executescript(MIGRATION_SQL_PATHS[2].read_text(encoding="utf-8"))
     conn.executescript(MIGRATION_SQL_PATHS[5].read_text(encoding="utf-8"))
+    conn.executescript(MIGRATION_SQL_PATHS[6].read_text(encoding="utf-8"))
