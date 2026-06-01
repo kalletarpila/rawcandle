@@ -692,6 +692,79 @@ def _insert_signal_freshness(
     )
 
 
+def _insert_synthetic_event_history(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+    signal_date: str = "2026-05-30",
+    taxonomy_version: str = "DC_TAXONOMY_FULL_V1",
+    report_window: str = "rolling30",
+    entity_scope: str = "LAYER",
+    entity_key: str = "AI",
+    event_date: str = "2026-05-29",
+    event_type: str = "BOS",
+    event_direction: str = "UP",
+    bos_event_type: str | None = "BOS_UP",
+    freshness_class: str | None = "FRESH",
+    age_trading_days: int | None = 1,
+    status: str = "OK",
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO dc_report_synthetic_event_history_v2 (
+            run_id,
+            signal_date,
+            taxonomy_version,
+            report_window,
+            entity_scope,
+            entity_key,
+            primary_layer,
+            primary_subindustry,
+            event_date,
+            event_type,
+            event_direction,
+            structure_label_before,
+            structure_label_after,
+            trend_state_before,
+            trend_state_after,
+            bos_event_type,
+            reset_reason,
+            freshness_class,
+            age_trading_days,
+            source_run_id,
+            status,
+            reason,
+            created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            run_id,
+            signal_date,
+            taxonomy_version,
+            report_window,
+            entity_scope,
+            entity_key,
+            "AI",
+            "Semiconductors",
+            event_date,
+            event_type,
+            event_direction,
+            "BASE",
+            "BREAKOUT",
+            "RANGE",
+            "UPTREND",
+            bos_event_type,
+            None,
+            freshness_class,
+            age_trading_days,
+            "source-run-1",
+            status,
+            None,
+            _utc_timestamp(),
+        ),
+    )
+
+
 def test_migration_file_exists():
     assert MIGRATION_SQL_PATH.is_file()
 
@@ -717,6 +790,7 @@ def test_database_manager_initializes_report_canonical_v2_tables(tmp_path):
     assert _table_exists(conn, "dc_report_group_timing_persistence_v2")
     assert _table_exists(conn, "dc_report_ma_break_status_v2")
     assert _table_exists(conn, "dc_report_signal_freshness_v2")
+    assert _table_exists(conn, "dc_report_synthetic_event_history_v2")
 
     manager.close()
 
@@ -838,6 +912,16 @@ def test_migration_creates_expected_primary_keys_and_columns():
         "entity_scope",
         "entity_key",
         "signal_name",
+    ]
+    assert _primary_key_columns(conn, "dc_report_synthetic_event_history_v2") == [
+        "run_id",
+        "signal_date",
+        "taxonomy_version",
+        "report_window",
+        "entity_scope",
+        "entity_key",
+        "event_date",
+        "event_type",
     ]
 
     assert {
@@ -1183,6 +1267,32 @@ def test_migration_creates_expected_primary_keys_and_columns():
         "created_at",
     }.issubset(_table_columns(conn, "dc_report_signal_freshness_v2"))
 
+    assert {
+        "run_id",
+        "signal_date",
+        "taxonomy_version",
+        "report_window",
+        "entity_scope",
+        "entity_key",
+        "primary_layer",
+        "primary_subindustry",
+        "event_date",
+        "event_type",
+        "event_direction",
+        "structure_label_before",
+        "structure_label_after",
+        "trend_state_before",
+        "trend_state_after",
+        "bos_event_type",
+        "reset_reason",
+        "freshness_class",
+        "age_trading_days",
+        "source_run_id",
+        "status",
+        "reason",
+        "created_at",
+    }.issubset(_table_columns(conn, "dc_report_synthetic_event_history_v2"))
+
 
 def test_migration_creates_expected_indexes():
     conn = _connect()
@@ -1260,6 +1370,12 @@ def test_migration_creates_expected_indexes():
         "idx_dc_report_signal_freshness_v2_date_taxonomy_window_scope",
         "idx_dc_report_signal_freshness_v2_freshness_status",
     }.issubset(_index_names(conn, "dc_report_signal_freshness_v2"))
+
+    assert {
+        "idx_dc_report_synthetic_event_history_v2_date_taxonomy_window_scope",
+        "idx_dc_report_synthetic_event_history_v2_event_type_direction",
+        "idx_dc_report_synthetic_event_history_v2_bos_reset",
+    }.issubset(_index_names(conn, "dc_report_synthetic_event_history_v2"))
 
 
 def test_migration_008_fresh_migration_creates_representative_fields():
@@ -1715,6 +1831,176 @@ def test_migration_is_idempotent():
     assert _table_exists(conn, "dc_report_group_timing_persistence_v2")
     assert _table_exists(conn, "dc_report_ma_break_status_v2")
     assert _table_exists(conn, "dc_report_signal_freshness_v2")
+    assert _table_exists(conn, "dc_report_synthetic_event_history_v2")
+
+
+def test_synthetic_event_history_primary_key_rejects_duplicate_row():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    _insert_synthetic_event_history(conn, run_id=run_id)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_synthetic_event_history(conn, run_id=run_id)
+
+
+@pytest.mark.parametrize("report_window", ["daily", "rolling2", "rolling5", "rolling30"])
+def test_synthetic_event_history_report_window_accepts_known_values(report_window: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-synth-{report_window}")
+
+    _insert_synthetic_event_history(
+        conn,
+        run_id=run_id,
+        report_window=report_window,
+        entity_key=f"E{report_window}",
+        event_date=f"2026-05-{26 + ['daily', 'rolling2', 'rolling5', 'rolling30'].index(report_window)}",
+    )
+
+
+def test_synthetic_event_history_report_window_rejects_unknown_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_synthetic_event_history(conn, run_id=run_id, report_window="rolling99")
+
+
+@pytest.mark.parametrize("entity_scope", ["LAYER", "SUBINDUSTRY", "ECOSYSTEM", "WATCHLIST", "MARKET"])
+def test_synthetic_event_history_entity_scope_accepts_known_values(entity_scope: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-synth-scope-{entity_scope}")
+
+    _insert_synthetic_event_history(conn, run_id=run_id, entity_scope=entity_scope, entity_key=f"E{entity_scope}")
+
+
+def test_synthetic_event_history_entity_scope_rejects_unknown_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_synthetic_event_history(conn, run_id=run_id, entity_scope="GROUP")
+
+
+@pytest.mark.parametrize(
+    "event_type",
+    ["STRUCTURE_CHANGE", "BOS", "RESET", "STRUCTURE_BREAK", "TREND_STATE_CHANGE", "FRESHNESS_CHANGE", "UNKNOWN"],
+)
+def test_synthetic_event_history_event_type_accepts_known_values(event_type: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-synth-type-{event_type}")
+
+    _insert_synthetic_event_history(
+        conn,
+        run_id=run_id,
+        entity_key=f"T{event_type}",
+        event_date=f"2026-04-{10 + len(event_type):02d}",
+        event_type=event_type,
+    )
+
+
+def test_synthetic_event_history_event_type_rejects_unknown_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_synthetic_event_history(conn, run_id=run_id, event_type="ROTATION")
+
+
+@pytest.mark.parametrize("event_direction", ["UP", "DOWN", "NEUTRAL", "MIXED", "NONE", "UNKNOWN"])
+def test_synthetic_event_history_event_direction_accepts_known_values(event_direction: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-synth-dir-{event_direction}")
+
+    _insert_synthetic_event_history(
+        conn,
+        run_id=run_id,
+        entity_key=f"D{event_direction}",
+        event_date=f"2026-03-{10 + len(event_direction):02d}",
+        event_direction=event_direction,
+    )
+
+
+def test_synthetic_event_history_event_direction_rejects_unknown_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_synthetic_event_history(conn, run_id=run_id, event_direction="SIDEWAYS")
+
+
+@pytest.mark.parametrize("bos_event_type", ["BOS_UP", "BOS_DOWN", "DOUBLE_BOS_UP", "DOUBLE_BOS_DOWN", "NONE", "UNKNOWN"])
+def test_synthetic_event_history_bos_event_type_accepts_known_values(bos_event_type: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-synth-bos-{bos_event_type}")
+
+    _insert_synthetic_event_history(
+        conn,
+        run_id=run_id,
+        entity_key=f"B{bos_event_type}",
+        event_date=f"2026-02-{10 + len(bos_event_type):02d}",
+        bos_event_type=bos_event_type,
+    )
+
+
+def test_synthetic_event_history_bos_event_type_rejects_unknown_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_synthetic_event_history(conn, run_id=run_id, bos_event_type="BOS_SIDEWAYS")
+
+
+@pytest.mark.parametrize("freshness_class", ["FRESH", "AGING", "STALE", "EXPIRED", "MISSING", "UNKNOWN"])
+def test_synthetic_event_history_freshness_class_accepts_known_values(freshness_class: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-synth-fresh-{freshness_class}")
+
+    _insert_synthetic_event_history(
+        conn,
+        run_id=run_id,
+        entity_key=f"F{freshness_class}",
+        event_date=f"2026-01-{10 + len(freshness_class):02d}",
+        freshness_class=freshness_class,
+    )
+
+
+def test_synthetic_event_history_freshness_class_rejects_unknown_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_synthetic_event_history(conn, run_id=run_id, freshness_class="RECENT")
+
+
+@pytest.mark.parametrize("status", ["OK", "WARN", "ERROR", "MISSING", "INCOMPLETE", "UNKNOWN"])
+def test_synthetic_event_history_status_accepts_known_values(status: str):
+    conn = _connect()
+    run_id = _insert_run(conn, run_id=f"run-synth-status-{status}")
+
+    _insert_synthetic_event_history(
+        conn,
+        run_id=run_id,
+        entity_key=f"S{status}",
+        event_date=f"2025-12-{10 + len(status):02d}",
+        status=status,
+    )
+
+
+def test_synthetic_event_history_status_rejects_unknown_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_synthetic_event_history(conn, run_id=run_id, status="DEGRADED")
+
+
+def test_synthetic_event_history_age_trading_days_rejects_negative_value():
+    conn = _connect()
+    run_id = _insert_run(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_synthetic_event_history(conn, run_id=run_id, age_trading_days=-1)
 
 
 def test_group_timing_persistence_primary_key_rejects_duplicate_row():
