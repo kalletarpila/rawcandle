@@ -85,6 +85,26 @@ def _insert_run(conn: sqlite3.Connection, ecosystem_id: int, taxonomy_version_id
     )
 
 
+def _insert_coverage(conn: sqlite3.Connection, taxonomy_version_id: int, entity_id: int) -> None:
+    for window_code in ("daily", "rolling2", "rolling5", "rolling30"):
+        conn.execute(
+            """
+            INSERT INTO eco_entity_coverage (
+                run_id, ecosystem_id, signal_date, taxonomy_version_id, window_code,
+                entity_id, in_taxonomy, in_watchlist, has_instrument, has_price_data,
+                has_daily_signal, has_window_context, coverage_status, source_row_count,
+                missing_component_count, coverage_notes
+            ) VALUES (?, 1, '2026-05-29', ?, ?, ?, 1, 0, 1, 1, 1, 1, 'OK', NULL, 0, NULL)
+            """,
+            (
+                "V3_BASE_DATACENTER_2026_05_29_DC_TAXONOMY_FULL_V1",
+                taxonomy_version_id,
+                window_code,
+                entity_id,
+            ),
+        )
+
+
 def _create_source_table(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
@@ -144,9 +164,11 @@ def _setup_minimal_state(db_path: str) -> None:
     with _connect(db_path) as conn:
         ecosystem_id = _insert_ecosystem(conn)
         taxonomy_version_id = _insert_taxonomy_version(conn, ecosystem_id)
-        _insert_ticker_entity(conn, ecosystem_id, "NVDA")
-        _insert_ticker_entity(conn, ecosystem_id, "AMD")
+        nvda_id = _insert_ticker_entity(conn, ecosystem_id, "NVDA")
+        amd_id = _insert_ticker_entity(conn, ecosystem_id, "AMD")
         _insert_run(conn, ecosystem_id, taxonomy_version_id)
+        _insert_coverage(conn, taxonomy_version_id, nvda_id)
+        _insert_coverage(conn, taxonomy_version_id, amd_id)
         _create_source_table(conn)
         source_run_id = "stock-dow-run-1"
         _insert_source_row(
@@ -233,11 +255,37 @@ def _setup_minimal_state(db_path: str) -> None:
             ticker="AMD",
             event_date="2026-05-10",
             confirmed_as_of_date="2026-05-10",
-            event_type="ODD_EVENT",
+            event_type="PIVOT_HIGH",
             trend_state="MIXED",
             break_signal=None,
             reset_reason=None,
             structure_epoch_id=7,
+            source_run_id=source_run_id,
+        )
+        _insert_source_row(
+            conn,
+            row_id=8,
+            ticker="NVDA",
+            event_date="2026-05-11",
+            confirmed_as_of_date="2026-05-11",
+            event_type="PIVOT_LOW",
+            trend_state="UP",
+            break_signal=None,
+            reset_reason=None,
+            structure_epoch_id=8,
+            source_run_id=source_run_id,
+        )
+        _insert_source_row(
+            conn,
+            row_id=9,
+            ticker="AMD",
+            event_date="2026-05-10",
+            confirmed_as_of_date="2026-05-10",
+            event_type="ODD_EVENT",
+            trend_state="MIXED",
+            break_signal=None,
+            reset_reason=None,
+            structure_epoch_id=9,
             source_run_id=source_run_id,
         )
         conn.commit()
@@ -275,13 +323,14 @@ def test_entity_event_builder_maps_and_filters_rows(tmp_path) -> None:
         replace_existing=False,
     )
 
-    assert summary["source_rows_read"] == 6
-    assert summary["source_rows_mapped"] == 5
-    assert summary["source_rows_skipped"] == 1
-    assert summary["entity_events_inserted"] == 5
+    assert summary["source_rows_read"] == 7
+    assert summary["source_rows_mapped"] == 7
+    assert summary["source_rows_skipped"] == 0
+    assert summary["entity_events_inserted"] == 7
     assert summary["event_type_counts"] == {
         "BOS": 2,
         "RESET": 1,
+        "STRUCTURE_CHANGE": 2,
         "TREND_STATE_CHANGE": 1,
         "UNKNOWN": 1,
     }
@@ -289,10 +338,10 @@ def test_entity_event_builder_maps_and_filters_rows(tmp_path) -> None:
         "DOWN": 1,
         "MIXED": 1,
         "NEUTRAL": 1,
-        "NONE": 1,
+        "NONE": 3,
         "UP": 1,
     }
-    assert any("Missing V3 ticker entity for source ticker 'MISSING'" in warning for warning in summary["warnings"])
+    assert all("Missing V3 ticker entity" not in warning for warning in summary["warnings"])
     assert any("Unknown source event_type 'ODD_EVENT' mapped to UNKNOWN" in warning for warning in summary["warnings"])
 
     with _connect(str(db_path)) as conn:
@@ -307,13 +356,23 @@ def test_entity_event_builder_maps_and_filters_rows(tmp_path) -> None:
         assert ("BOS", "DOWN", "stock_dow_structure_events:2", "BOS_DOWN | BOS_DOWN") in [tuple(row) for row in rows]
         assert ("RESET", "NONE", "stock_dow_structure_events:3", "RESET | UP | DOUBLE_BOS_UP") in [tuple(row) for row in rows]
         assert ("TREND_STATE_CHANGE", "NEUTRAL", "stock_dow_structure_events:4", "TREND_CHANGE") in [tuple(row) for row in rows]
-        assert ("UNKNOWN", "MIXED", "stock_dow_structure_events:7", "ODD_EVENT") in [tuple(row) for row in rows]
-        assert conn.execute("SELECT COUNT(*) FROM eco_entity_event").fetchone()[0] == 5
+        assert ("STRUCTURE_CHANGE", "NONE", "stock_dow_structure_events:7", "PIVOT_HIGH") in [tuple(row) for row in rows]
+        assert ("STRUCTURE_CHANGE", "NONE", "stock_dow_structure_events:8", "PIVOT_LOW") in [tuple(row) for row in rows]
+        assert ("UNKNOWN", "MIXED", "stock_dow_structure_events:9", "ODD_EVENT") in [tuple(row) for row in rows]
+        assert conn.execute("SELECT COUNT(*) FROM eco_entity_event").fetchone()[0] == 7
+        event_entity_types = conn.execute(
+            """
+            SELECT DISTINCT e.entity_type
+            FROM eco_entity_event ev
+            JOIN eco_entity e ON e.entity_id = ev.entity_id
+            """
+        ).fetchall()
+        assert [row["entity_type"] for row in event_entity_types] == ["TICKER"]
         assert conn.execute("SELECT COUNT(*) FROM eco_signal_observation").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM eco_signal_relevance").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM eco_entity_window_snapshot").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM eco_entity_metric_value").fetchone()[0] == 0
-        assert conn.execute("SELECT COUNT(*) FROM eco_entity_coverage").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM eco_entity_coverage").fetchone()[0] == 8
         assert conn.execute("SELECT COUNT(*) FROM eco_quality_summary").fetchone()[0] == 0
 
 
@@ -340,10 +399,10 @@ def test_entity_event_builder_replace_existing_and_rollback(tmp_path, monkeypatc
         run_id="V3_BASE_DATACENTER_2026_05_29_DC_TAXONOMY_FULL_V1",
         replace_existing=True,
     )
-    assert summary["entity_events_inserted"] == 5
+    assert summary["entity_events_inserted"] == 7
 
     with _connect(str(db_path)) as conn:
-        assert conn.execute("SELECT COUNT(*) FROM eco_entity_event").fetchone()[0] == 5
+        assert conn.execute("SELECT COUNT(*) FROM eco_entity_event").fetchone()[0] == 7
 
     from rawcandle import report_canonical_v3_entity_event_builder as builder_module
 
@@ -360,4 +419,4 @@ def test_entity_event_builder_replace_existing_and_rollback(tmp_path, monkeypatc
         )
 
     with _connect(str(db_path)) as conn:
-        assert conn.execute("SELECT COUNT(*) FROM eco_entity_event").fetchone()[0] == 5
+        assert conn.execute("SELECT COUNT(*) FROM eco_entity_event").fetchone()[0] == 7

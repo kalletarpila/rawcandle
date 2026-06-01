@@ -70,6 +70,20 @@ def _load_ticker_entities(conn: sqlite3.Connection, ecosystem_id: int) -> dict[s
     return {str(row["entity_code"]): row for row in rows}
 
 
+def _load_eligible_ticker_codes(conn: sqlite3.Connection, run_id: str) -> list[str]:
+    rows = conn.execute(
+        """
+        SELECT DISTINCT e.entity_code
+        FROM eco_entity_coverage c
+        JOIN eco_entity e ON e.entity_id = c.entity_id
+        WHERE c.run_id = ? AND e.entity_type = 'TICKER'
+        ORDER BY e.entity_code
+        """,
+        (run_id,),
+    ).fetchall()
+    return [str(row["entity_code"]) for row in rows]
+
+
 def _normalize_date(value: str) -> dt.date:
     return dt.date.fromisoformat(value)
 
@@ -77,11 +91,16 @@ def _normalize_date(value: str) -> dt.date:
 def _load_source_rows(
     conn: sqlite3.Connection,
     *,
+    eligible_tickers: list[str],
     signal_date: str,
     lookback_calendar_days: int | None,
 ) -> list[sqlite3.Row]:
     if not _table_exists(conn, SOURCE_TABLE):
         raise ValueError(f"Missing source table '{SOURCE_TABLE}'")
+    if not eligible_tickers:
+        return []
+    placeholders = ", ".join("?" for _ in eligible_tickers)
+    params: list[object] = [signal_date, *eligible_tickers]
     rows = conn.execute(
         f"""
         SELECT
@@ -97,9 +116,10 @@ def _load_source_rows(
             run_id
         FROM {SOURCE_TABLE}
         WHERE confirmed_as_of_date <= ?
+          AND ticker IN ({placeholders})
         ORDER BY event_date, ticker, id
         """,
-        (signal_date,),
+        tuple(params),
     ).fetchall()
     signal_day = _normalize_date(signal_date)
     if lookback_calendar_days is None:
@@ -115,12 +135,14 @@ def _load_source_rows(
 
 def _map_event_type(source_row: sqlite3.Row, warnings: list[str]) -> str:
     reset_reason = str(source_row["reset_reason"]).strip() if source_row["reset_reason"] is not None else ""
-    event_type = str(source_row["event_type"]).strip().upper()
-    break_signal = str(source_row["break_signal"]).strip().upper() if source_row["break_signal"] is not None else ""
+    event_type = str(source_row["event_type"]).strip().upper().replace(" ", "_")
+    break_signal = str(source_row["break_signal"]).strip().upper().replace(" ", "_") if source_row["break_signal"] is not None else ""
 
     # RESET wins when the row explicitly represents a reset semantics.
     if reset_reason:
         return "RESET"
+    if event_type in {"PIVOT_HIGH", "PIVOT_LOW"}:
+        return "STRUCTURE_CHANGE"
     if event_type in {"BOS_UP", "BOS_DOWN", "DOUBLE_BOS_UP", "DOUBLE_BOS_DOWN"}:
         return "BOS"
     if break_signal in {"BOS_UP", "BOS_DOWN", "DOUBLE_BOS_UP", "DOUBLE_BOS_DOWN", "UP", "DOWN"}:
@@ -134,11 +156,13 @@ def _map_event_type(source_row: sqlite3.Row, warnings: list[str]) -> str:
 
 
 def _map_event_direction(source_row: sqlite3.Row) -> str:
-    event_type = str(source_row["event_type"]).strip().upper()
-    break_signal = str(source_row["break_signal"]).strip().upper() if source_row["break_signal"] is not None else ""
+    event_type = str(source_row["event_type"]).strip().upper().replace(" ", "_")
+    break_signal = str(source_row["break_signal"]).strip().upper().replace(" ", "_") if source_row["break_signal"] is not None else ""
     trend_state = str(source_row["trend_state"]).strip().upper() if source_row["trend_state"] is not None else ""
 
     if source_row["reset_reason"] is not None and str(source_row["reset_reason"]).strip():
+        return "NONE"
+    if event_type in {"PIVOT_HIGH", "PIVOT_LOW"}:
         return "NONE"
     if event_type in {"BOS_UP", "DOUBLE_BOS_UP"} or break_signal in {"BOS_UP", "DOUBLE_BOS_UP", "UP"}:
         return "UP"
@@ -296,8 +320,10 @@ def build_canonical_v3_ticker_structure_events(
     conn = _connect(db_path)
     try:
         run_row = _resolve_run(conn, run_id)
+        eligible_tickers = _load_eligible_ticker_codes(conn, str(run_row["run_id"]))
         source_rows = _load_source_rows(
             conn,
+            eligible_tickers=eligible_tickers,
             signal_date=str(run_row["signal_date"]),
             lookback_calendar_days=lookback_calendar_days,
         )
