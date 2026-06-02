@@ -14,8 +14,18 @@ WINDOW_CODE_BY_CLASSIFICATION_TYPE = {
     "daily_trigger": "daily",
     "rolling2_sell_pressure": "rolling2",
     "rolling5_pullback": "rolling5",
+    "rolling30_buy": "rolling30",
+    "rolling30_exit": "rolling30",
 }
-SUPPORTED_CLASSIFICATION_TYPES = frozenset(DEFAULT_CLASSIFICATION_TYPES)
+SUPPORTED_CLASSIFICATION_TYPES = frozenset(
+    (
+        "daily_trigger",
+        "rolling2_sell_pressure",
+        "rolling5_pullback",
+        "rolling30_buy",
+        "rolling30_exit",
+    )
+)
 
 
 def _connect(db_path: str) -> sqlite3.Connection:
@@ -97,6 +107,10 @@ def _classification_type_from_source(
         return "rolling2_sell_pressure"
     if normalized_type == "rolling5_pullback" or normalized_horizon == "rolling5":
         return "rolling5_pullback"
+    if normalized_type == "rolling30_buy":
+        return "rolling30_buy"
+    if normalized_type == "rolling30_exit":
+        return "rolling30_exit"
     return None
 
 
@@ -117,6 +131,7 @@ def _load_source_rows(
     *,
     signal_date: str,
     taxonomy_version_code: str,
+    classification_types: tuple[str, ...],
 ) -> list[sqlite3.Row]:
     if not _table_exists(conn, SOURCE_TABLE):
         raise ValueError(f"Missing source table '{SOURCE_TABLE}'")
@@ -135,6 +150,10 @@ def _load_source_rows(
         raise ValueError(
             f"Source table '{SOURCE_TABLE}' missing required columns: {', '.join(missing_required)}"
         )
+
+    horizons = tuple(dict.fromkeys(WINDOW_CODE_BY_CLASSIFICATION_TYPE[value] for value in classification_types))
+    horizon_placeholders = ", ".join("?" for _ in horizons)
+    type_placeholders = ", ".join("?" for _ in classification_types)
 
     query = f"""
         SELECT
@@ -157,10 +176,14 @@ def _load_source_rows(
         FROM {SOURCE_TABLE}
         WHERE signal_date = ?
           AND taxonomy_version = ?
-          AND horizon IN ('daily', 'rolling2', 'rolling5')
-        ORDER BY horizon, ticker
+          AND horizon IN ({horizon_placeholders})
+          AND classification_type IN ({type_placeholders})
+        ORDER BY horizon, classification_type, ticker
     """
-    return conn.execute(query, (signal_date, taxonomy_version_code)).fetchall()
+    return conn.execute(
+        query,
+        (signal_date, taxonomy_version_code, *horizons, *classification_types),
+    ).fetchall()
 
 
 def _load_eligible_ticker_entities(
@@ -268,7 +291,27 @@ def _source_classifier_for_type(classification_type: str, source_value: object) 
         return "daily_trigger"
     if classification_type == "rolling2_sell_pressure":
         return "rolling2_sell_pressure_classifier"
+    if classification_type in {"rolling30_buy", "rolling30_exit"}:
+        return "rolling30_watchlist_classifier"
     return "rolling5_pullback_classifier"
+
+
+def _priority_score_for_type(classification_type: str, value: object) -> float | None:
+    if classification_type in {"rolling30_buy", "rolling30_exit"}:
+        return None
+    return _normalize_float(value)
+
+
+def _priority_label_for_type(classification_type: str, value: object) -> str | None:
+    if classification_type in {"rolling30_buy", "rolling30_exit"}:
+        return None
+    return _normalize_text(value)
+
+
+def _sort_rank_for_type(classification_type: str, value: object) -> int | None:
+    if classification_type in {"rolling30_buy", "rolling30_exit"}:
+        return None
+    return _normalize_int(value)
 
 
 def build_canonical_v3_classification_decisions(
@@ -285,6 +328,7 @@ def build_canonical_v3_classification_decisions(
             conn,
             signal_date=str(run_row["signal_date"]),
             taxonomy_version_code=str(run_row["version_code"]),
+            classification_types=requested_types,
         )
         eligible_entities = _load_eligible_ticker_entities(
             conn,
@@ -334,9 +378,9 @@ def build_canonical_v3_classification_decisions(
                     _normalize_text(row["blocking_reason"]),
                     _normalize_text(row["risk_reason"]),
                     _normalize_text(row["next_action"]),
-                    _normalize_float(row["priority_score"]),
-                    _normalize_text(row["priority_label"]),
-                    _normalize_int(row["sort_rank"]),
+                    _priority_score_for_type(classification_type, row["priority_score"]),
+                    _priority_label_for_type(classification_type, row["priority_label"]),
+                    _sort_rank_for_type(classification_type, row["sort_rank"]),
                     _source_classifier_for_type(classification_type, row["source_classifier"]),
                     _normalize_text(row["classification_version"]),
                     _normalize_text(row["source_run_id"]),

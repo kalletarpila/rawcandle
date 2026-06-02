@@ -382,7 +382,7 @@ def _setup_builder_fixture(db_path):
     nvda_id = _insert_ticker_entity(conn, ecosystem_id, "NVDA")
     amd_id = _insert_ticker_entity(conn, ecosystem_id, "AMD")
     _insert_run(conn, ecosystem_id, taxonomy_version_id)
-    for window_code in ("daily", "rolling2", "rolling5"):
+    for window_code in ("daily", "rolling2", "rolling5", "rolling30"):
         _insert_coverage(
             conn,
             ecosystem_id=ecosystem_id,
@@ -629,12 +629,191 @@ def test_builder_rejects_unsupported_classification_types(tmp_path) -> None:
     conn, _ecosystem_id, _taxonomy_version_id, _nvda_id, _amd_id = _setup_builder_fixture(db_path)
     conn.close()
 
-    with pytest.raises(ValueError, match="rolling30_buy"):
+    with pytest.raises(ValueError, match="unsupported_type"):
         build_canonical_v3_classification_decisions(
             str(db_path),
             RUN_ID,
-            classification_types=["daily_trigger", "rolling30_buy"],
+            classification_types=["daily_trigger", "unsupported_type"],
         )
+
+
+def test_builder_builds_rolling30_types_and_leaves_priority_null(tmp_path) -> None:
+    db_path = tmp_path / "classification_decision_rolling30.db"
+    conn, _ecosystem_id, _taxonomy_version_id, nvda_id, amd_id = _setup_builder_fixture(db_path)
+    try:
+        _insert_source_row(
+            conn,
+            ticker="NVDA",
+            horizon="rolling30",
+            classification_type="rolling30_buy",
+            classification_state="WATCH_ZONE",
+            primary_reason="BUY_BLOCKED_BY_CONTEXT",
+            blocking_reason="NO_BREAKOUT_CONFIRMATION",
+            next_action=None,
+            candidate_priority=99.0,
+            candidate_priority_label="SHOULD_BE_IGNORED",
+            rank=7,
+        )
+        _insert_source_row(
+            conn,
+            ticker="AMD",
+            horizon="rolling30",
+            classification_type="rolling30_exit",
+            classification_state="WATCH",
+            primary_reason="EXIT_RISK_BUILDING",
+            risk_reason="REPEATED_EXIT_RISK",
+            next_action=None,
+            candidate_priority=88.0,
+            candidate_priority_label="IGNORE_ME_TOO",
+            rank=8,
+            source_classifier="rolling30_watchlist_classifier",
+        )
+        _insert_source_row(
+            conn,
+            ticker="MISSING",
+            horizon="rolling30",
+            classification_type="rolling30_buy",
+            classification_state="AVOID",
+            primary_reason="NO_ENTITY",
+            blocking_reason="UNMAPPED",
+        )
+        before_non_decision_counts = {
+            "snapshot": conn.execute("SELECT COUNT(*) FROM eco_entity_window_snapshot").fetchone()[0],
+            "metric": conn.execute("SELECT COUNT(*) FROM eco_entity_metric_value").fetchone()[0],
+            "coverage": conn.execute("SELECT COUNT(*) FROM eco_entity_coverage").fetchone()[0],
+            "quality": conn.execute("SELECT COUNT(*) FROM eco_quality_summary").fetchone()[0],
+            "signal": conn.execute("SELECT COUNT(*) FROM eco_signal_observation").fetchone()[0],
+            "relevance": conn.execute("SELECT COUNT(*) FROM eco_signal_relevance").fetchone()[0],
+            "event": conn.execute("SELECT COUNT(*) FROM eco_entity_event").fetchone()[0],
+            "run": conn.execute("SELECT COUNT(*) FROM eco_report_run").fetchone()[0],
+        }
+        conn.commit()
+
+        summary = build_canonical_v3_classification_decisions(
+            str(db_path),
+            RUN_ID,
+            classification_types=["rolling30_buy", "rolling30_exit"],
+            replace_existing=True,
+        )
+
+        assert summary["classification_types"] == ["rolling30_buy", "rolling30_exit"]
+        assert summary["source_rows_read"] == 3
+        assert summary["source_rows_mapped"] == 2
+        assert summary["source_rows_skipped"] == 1
+        assert summary["decision_rows_inserted"] == 2
+        assert summary["classification_type_counts"] == {
+            "rolling30_buy": 1,
+            "rolling30_exit": 1,
+        }
+        assert summary["warning_count"] == 1
+
+        rows = conn.execute(
+            """
+            SELECT classification_type, window_code, entity_id, classification_state,
+                   primary_reason, blocking_reason, risk_reason, next_action,
+                   priority_score, priority_label, sort_rank, source_classifier,
+                   classification_version, source_run_id, decision_status
+            FROM eco_classification_decision
+            ORDER BY classification_type, entity_id
+            """
+        ).fetchall()
+        assert len(rows) == 2
+        buy_row, exit_row = rows
+
+        assert buy_row["classification_type"] == "rolling30_buy"
+        assert buy_row["window_code"] == "rolling30"
+        assert buy_row["entity_id"] == nvda_id
+        assert buy_row["classification_state"] == "WATCH_ZONE"
+        assert buy_row["primary_reason"] == "BUY_BLOCKED_BY_CONTEXT"
+        assert buy_row["blocking_reason"] == "NO_BREAKOUT_CONFIRMATION"
+        assert buy_row["risk_reason"] is None
+        assert buy_row["next_action"] is None
+        assert buy_row["priority_score"] is None
+        assert buy_row["priority_label"] is None
+        assert buy_row["sort_rank"] is None
+        assert buy_row["source_classifier"] == "rolling30_watchlist_classifier"
+        assert buy_row["classification_version"] == "V2"
+        assert buy_row["source_run_id"] == "source-run-1"
+        assert buy_row["decision_status"] == "OK"
+
+        assert exit_row["classification_type"] == "rolling30_exit"
+        assert exit_row["window_code"] == "rolling30"
+        assert exit_row["entity_id"] == amd_id
+        assert exit_row["classification_state"] == "WATCH"
+        assert exit_row["primary_reason"] == "EXIT_RISK_BUILDING"
+        assert exit_row["blocking_reason"] is None
+        assert exit_row["risk_reason"] == "REPEATED_EXIT_RISK"
+        assert exit_row["next_action"] is None
+        assert exit_row["priority_score"] is None
+        assert exit_row["priority_label"] is None
+        assert exit_row["sort_rank"] is None
+        assert exit_row["source_classifier"] == "rolling30_watchlist_classifier"
+        assert exit_row["classification_version"] == "V2"
+        assert exit_row["source_run_id"] == "source-run-1"
+        assert exit_row["decision_status"] == "OK"
+
+        after_non_decision_counts = {
+            "snapshot": conn.execute("SELECT COUNT(*) FROM eco_entity_window_snapshot").fetchone()[0],
+            "metric": conn.execute("SELECT COUNT(*) FROM eco_entity_metric_value").fetchone()[0],
+            "coverage": conn.execute("SELECT COUNT(*) FROM eco_entity_coverage").fetchone()[0],
+            "quality": conn.execute("SELECT COUNT(*) FROM eco_quality_summary").fetchone()[0],
+            "signal": conn.execute("SELECT COUNT(*) FROM eco_signal_observation").fetchone()[0],
+            "relevance": conn.execute("SELECT COUNT(*) FROM eco_signal_relevance").fetchone()[0],
+            "event": conn.execute("SELECT COUNT(*) FROM eco_entity_event").fetchone()[0],
+            "run": conn.execute("SELECT COUNT(*) FROM eco_report_run").fetchone()[0],
+        }
+        assert after_non_decision_counts == before_non_decision_counts
+    finally:
+        conn.close()
+
+
+def test_builder_replace_existing_for_rolling30_only_preserves_daily_rows(tmp_path) -> None:
+    db_path = tmp_path / "classification_decision_rolling30_replace_only.db"
+    conn, _ecosystem_id, _taxonomy_version_id, _nvda_id, _amd_id = _setup_builder_fixture(db_path)
+    try:
+        _insert_source_row(
+            conn,
+            ticker="NVDA",
+            horizon="daily",
+            classification_type="daily_trigger",
+            classification_state="SELL_TRIGGER",
+            primary_reason="HAS_EXIT_RISK",
+        )
+        _insert_source_row(
+            conn,
+            ticker="NVDA",
+            horizon="rolling30",
+            classification_type="rolling30_buy",
+            classification_state="WATCH_ZONE",
+            primary_reason="BUY_BLOCKED",
+            blocking_reason="NO_BREAKOUT_CONFIRMATION",
+        )
+        conn.commit()
+
+        summary_daily = build_canonical_v3_classification_decisions(
+            str(db_path),
+            RUN_ID,
+            classification_types=["daily_trigger"],
+            replace_existing=True,
+        )
+        assert summary_daily["decision_rows_inserted"] == 1
+
+        summary_rolling30 = build_canonical_v3_classification_decisions(
+            str(db_path),
+            RUN_ID,
+            classification_types=["rolling30_buy"],
+            replace_existing=True,
+        )
+        assert summary_rolling30["decision_rows_inserted"] == 1
+
+        assert conn.execute(
+            "SELECT COUNT(*) FROM eco_classification_decision WHERE classification_type = 'daily_trigger'"
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM eco_classification_decision WHERE classification_type = 'rolling30_buy'"
+        ).fetchone()[0] == 1
+    finally:
+        conn.close()
 
 
 def test_builder_rolls_back_on_insert_failure(tmp_path) -> None:
