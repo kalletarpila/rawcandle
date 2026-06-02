@@ -271,7 +271,114 @@ However:
 - V2 source-data audits remain useful for identifying available upstream sources
 - V3 should avoid V2's report-section-table proliferation and instead model reusable canonical facts at ecosystem/entity/window grain
 
-## 10. First Implementation Sequence
+## 10. Source Dependency Policy
+
+Canonical V3 should prefer sources in this order:
+
+1. `eco_*` V3-native tables and V3-native derivations
+2. stable raw or maintained derived domain tables
+3. transitional `dc_report_*_v2` tables only when no better persisted source exists
+4. never generated reports or rendered outputs
+
+Explicit policy rules:
+
+- generated Markdown reports must not be used as V3 source data
+- generated CSV reports must not be used as V3 source data
+- dashboard rendered output must not be used as source data
+- taxonomy CSV and watchlist TXT are import/admin sources only, not daily runtime sources
+
+## 11. Source Classification Labels
+
+- `V3_NATIVE`: persisted canonical V3 tables or direct V3-native derivations
+- `STABLE_SOURCE`: persisted upstream source table accepted as a stable long-term dependency
+- `DERIVED_FROM_RAW_SOURCE`: persisted maintained derived table built from lower-level source data
+- `TRANSITIONAL_V2_SOURCE`: persisted V2/report-context table accepted only as transitional lineage
+- `BOOTSTRAP_ONLY`: import/admin source used to seed or maintain master data, not a runtime fact source
+- `EMPTY_OR_NOT_USABLE`: table exists but is empty or otherwise not ready as an implementation source
+- `UNKNOWN`: source status has not yet been audited clearly enough
+
+## 12. Current V3 Builder Dependency Classification
+
+- taxonomy import:
+  - source: taxonomy CSV
+  - classification: `BOOTSTRAP_ONLY`
+  - note: import/admin source only
+- watchlist import:
+  - source: watchlist TXT
+  - classification: `BOOTSTRAP_ONLY`
+  - note: import/admin source only
+- base builder:
+  - sources: `eco_*` tables and `dc_ticker_swing_signal_daily`
+  - classification: `V3_NATIVE` plus `DERIVED_FROM_RAW_SOURCE`
+- snapshot/metric builder:
+  - sources: `dc_report_context_daily_v2`, `dc_report_context_window_v2`, `dc_report_context_group_v2`, `dc_report_classification_v2`
+  - classification: `TRANSITIONAL_V2_SOURCE`
+  - risk: `HIGH`
+  - replacement need: yes
+- signal/relevance builder:
+  - source: `technical_signal_relevance`
+  - classification: `STABLE_SOURCE`
+- ticker event builder:
+  - source: `stock_dow_structure_events`
+  - classification: `STABLE_SOURCE`
+- group event builder:
+  - source: `dc_group_synthetic_ohlc_daily`
+  - classification: `DERIVED_FROM_RAW_SOURCE`
+- classification decision builder:
+  - source: `dc_report_classification_v2`
+  - classification: `TRANSITIONAL_V2_SOURCE`
+  - risk: `MEDIUM-HIGH`
+  - replacement need: yes
+
+## 13. Transitional V2 Source Debt
+
+The following tables are accepted current transitional/bootstrap dependencies:
+
+- `dc_report_context_daily_v2`
+- `dc_report_context_window_v2`
+- `dc_report_context_group_v2`
+- `dc_report_classification_v2`
+
+Policy for these dependencies:
+
+- they are accepted for current V3 materialization where needed
+- they must not be treated as permanent V3 source-of-truth
+- future V3-native or lower-level source builders should replace them where practical
+- existing materialized `eco_*` data remains valid if source lineage is documented explicitly
+- builders depending on these sources should report source classification in final summaries where practical
+
+## 14. Empty Support Table Warning
+
+Several `dc_report_*_v2` support tables exist but are currently empty and must not be treated as implementation-ready sources until they are populated and audited:
+
+- `dc_report_ma_break_status_v2`
+- `dc_report_signal_freshness_v2`
+- `dc_report_group_timing_persistence_v2`
+- `dc_report_group_overheat_progression_v2`
+- `dc_report_group_relative_change_v2`
+- `dc_report_ecosystem_window_change_v2`
+- `dc_report_synthetic_event_history_v2`
+- `dc_report_technical_relevance_context_v2`
+- `dc_report_data_quality_summary_v2`
+
+## 15. Next-Builder Guidance After DB-V3-28
+
+- Freshness builder may proceed.
+- It may use `dc_report_context_daily_v2`, `dc_report_context_window_v2`, and `dc_group_synthetic_ohlc_daily`.
+- Any use of `dc_report_context_*_v2` in that builder must be marked `TRANSITIONAL_V2_SOURCE`.
+- The builder should document source lineage and technical debt explicitly.
+- Rotation/relative-change builder should not proceed until usable persisted source tables exist.
+- MA break builder should prefer `dc_ticker_swing_signal_daily` over empty `dc_report_ma_break_status_v2`.
+- Overheat/status builder may use current persisted group context sources, but true progression or transition work should wait for populated transition sources.
+
+## 16. Replacement Roadmap
+
+- Replace snapshot/metric dependency on `dc_report_context_*_v2` with V3-native or lower-level derived builders where practical.
+- Replace classification decision dependency on `dc_report_classification_v2` with V3-native classification persistence or a V3-native classification builder if needed.
+- Keep `technical_signal_relevance` and `stock_dow_structure_events` as stable sources unless future architecture changes materially.
+- Treat `dc_group_synthetic_ohlc_daily` as an acceptable derived source while the group synthetic OHLC pipeline remains a maintained output.
+
+## 17. First Implementation Sequence
 
 The safe staged sequence is:
 
@@ -288,7 +395,7 @@ The safe staged sequence is:
 
 This sequence preserves low-risk base modeling first, then persistent taxonomy and watchlist state, and only after that windowed fact builders.
 
-## 11. Non-Goals
+## 18. Non-Goals
 
 - no V3 SQL migration in this task
 - no table creation in this task
@@ -299,7 +406,7 @@ This sequence preserves low-risk base modeling first, then persistent taxonomy a
 - no dashboard changes
 - no V2 deletion
 
-## 12. Open Questions
+## 19. Open Questions
 
 - What is the exact approved taxonomy import source and format for the first V3 load, given that current taxonomy appears to be CSV-driven and not reliably persisted in `analysis.db`?
 - Should taxonomy version identifiers be numeric surrogate IDs, stable text codes, or both?
