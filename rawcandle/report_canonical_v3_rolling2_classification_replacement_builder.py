@@ -318,6 +318,8 @@ def _context_row_for_classifier(
     last_row = current_rows[-1]
     output_row = {
         "ticker": ticker,
+        "breakout_days": sum(1 for row in current_rows if int(row["breakout_signal"] or 0) == 1),
+        "pullback_days": sum(1 for row in current_rows if int(row["pullback_signal"] or 0) == 1),
         "exit_risk_days": sum(1 for row in current_rows if int(row["exit_risk_signal"] or 0) == 1),
         "high_exit_risk_days": sum(1 for row in current_rows if row["exit_risk_severity"] == "HIGH"),
         "medium_exit_risk_days": sum(1 for row in current_rows if row["exit_risk_severity"] == "MEDIUM"),

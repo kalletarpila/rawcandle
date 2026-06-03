@@ -320,6 +320,137 @@ def _insert_existing_classifications(
     )
 
 
+def _insert_gfs_parity_source_rows(conn: sqlite3.Connection) -> None:
+    conn.executemany(
+        """
+        INSERT INTO dc_ticker_swing_signal_daily (
+            signal_date,
+            taxonomy_version,
+            ticker,
+            primary_layer,
+            primary_subindustry,
+            breakout_signal,
+            pullback_signal,
+            fast_ema10_pullback_signal,
+            conservative_ema20_pullback_signal,
+            exit_risk_signal,
+            exit_risk_severity,
+            exit_reason,
+            latest_bos_event_type,
+            latest_bos_freshness,
+            latest_reset_reason,
+            latest_reset_freshness,
+            latest_structure_label,
+            distance_to_ema20_pct,
+            price_data_status,
+            ticker_trend_state,
+            latest_bearish_relevance_class,
+            signal_version,
+            run_id
+        ) VALUES (
+            ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+        )
+        """,
+        [
+            (
+                "2026-05-28",
+                "DC_TAXONOMY_FULL_V1",
+                "GFS",
+                "SEMICONDUCTOR_MANUFACTURING",
+                "FOUNDRY_PACKAGING_OSAT",
+                0,
+                0,
+                0,
+                0,
+                0,
+                None,
+                None,
+                "BOS_UP",
+                "AGING",
+                "DOUBLE_BOS_UP",
+                "AGING",
+                "HL",
+                0.0933915741209563,
+                "OK",
+                "UP",
+                None,
+                "DC_SWING_SIGNAL_V1",
+                "DC_TICKER_SWING_RUN",
+            ),
+            (
+                "2026-05-29",
+                "DC_TAXONOMY_FULL_V1",
+                "GFS",
+                "SEMICONDUCTOR_MANUFACTURING",
+                "FOUNDRY_PACKAGING_OSAT",
+                0,
+                1,
+                1,
+                0,
+                0,
+                None,
+                None,
+                "BOS_UP",
+                "AGING",
+                "DOUBLE_BOS_UP",
+                "AGING",
+                "HH",
+                0.0757900603238781,
+                "OK",
+                "UP",
+                None,
+                "DC_SWING_SIGNAL_V1",
+                "DC_TICKER_SWING_RUN",
+            ),
+        ],
+    )
+    conn.executemany(
+        "INSERT INTO dc_group_swing_signal_daily VALUES (?,?,?,?,?,?,?,?)",
+        [
+            (
+                "2026-05-28",
+                "DC_TAXONOMY_FULL_V1",
+                "layer",
+                "SEMICONDUCTOR_MANUFACTURING",
+                "TRIM_WATCH",
+                "LOW",
+                "DC_SWING_SIGNAL_V1",
+                "DC_GROUP_SWING_RUN",
+            ),
+            (
+                "2026-05-28",
+                "DC_TAXONOMY_FULL_V1",
+                "subindustry",
+                "FOUNDRY_PACKAGING_OSAT",
+                "BUY_ZONE",
+                "LOW",
+                "DC_SWING_SIGNAL_V1",
+                "DC_GROUP_SWING_RUN",
+            ),
+            (
+                "2026-05-29",
+                "DC_TAXONOMY_FULL_V1",
+                "layer",
+                "SEMICONDUCTOR_MANUFACTURING",
+                "TRIM_WATCH",
+                "LOW",
+                "DC_SWING_SIGNAL_V1",
+                "DC_GROUP_SWING_RUN",
+            ),
+            (
+                "2026-05-29",
+                "DC_TAXONOMY_FULL_V1",
+                "subindustry",
+                "FOUNDRY_PACKAGING_OSAT",
+                "BUY_ZONE",
+                "LOW",
+                "DC_SWING_SIGNAL_V1",
+                "DC_GROUP_SWING_RUN",
+            ),
+        ],
+    )
+
+
 def _insert_unrelated_rows(
     conn: sqlite3.Connection,
     *,
@@ -524,6 +655,68 @@ def test_builder_replace_existing_false_rejects_existing_rows(tmp_path) -> None:
             RUN_ID,
             replace_existing=False,
         )
+
+
+def test_builder_preserves_gfs_pullback_parity_over_group_risk(tmp_path) -> None:
+    db_path = tmp_path / "rolling2_gfs_parity.db"
+    conn, ecosystem_id, taxonomy_version_id, entity_ids = _build_db(str(db_path))
+    gfs_entity_id = _insert_ticker_entity(conn, ecosystem_id, "GFS")
+    entity_ids["GFS"] = gfs_entity_id
+    _insert_coverage(
+        conn,
+        ecosystem_id=ecosystem_id,
+        taxonomy_version_id=taxonomy_version_id,
+        entity_id=gfs_entity_id,
+        window_code="rolling2",
+    )
+    _insert_gfs_parity_source_rows(conn)
+    _insert_existing_classifications(
+        conn,
+        ecosystem_id=ecosystem_id,
+        taxonomy_version_id=taxonomy_version_id,
+        entity_ids={"GFS": gfs_entity_id},
+    )
+    conn.commit()
+    conn.close()
+
+    summary = build_canonical_v3_rolling2_sell_pressure_classifications(
+        str(db_path),
+        RUN_ID,
+        replace_existing=True,
+    )
+
+    conn = _connect(str(db_path))
+    row = conn.execute(
+        """
+        SELECT d.classification_state, d.primary_reason, d.blocking_reason, d.risk_reason, d.next_action
+        FROM eco_classification_decision d
+        JOIN eco_entity e ON e.entity_id = d.entity_id
+        WHERE d.run_id = ?
+          AND d.classification_type = 'rolling2_sell_pressure'
+          AND e.entity_code = 'GFS'
+        """,
+        (RUN_ID,),
+    ).fetchone()
+    assert summary["classification_rows_inserted"] == 3
+    assert row["classification_state"] == "NO_EMERGENCY"
+    assert row["primary_reason"] == "NO_TWO_DAY_SELL_PRESSURE"
+    assert row["blocking_reason"] is None
+    assert row["risk_reason"] is None
+    assert row["next_action"] == "NONE"
+
+    current_rows = conn.execute(
+        """
+        SELECT breakout_signal, pullback_signal
+        FROM dc_ticker_swing_signal_daily
+        WHERE ticker = 'GFS'
+          AND taxonomy_version = 'DC_TAXONOMY_FULL_V1'
+          AND signal_date IN ('2026-05-28', '2026-05-29')
+        ORDER BY signal_date
+        """
+    ).fetchall()
+    assert sum(int(source_row["breakout_signal"] or 0) for source_row in current_rows) == 0
+    assert sum(int(source_row["pullback_signal"] or 0) for source_row in current_rows) == 1
+    conn.close()
 
 
 def test_builder_is_idempotent_and_reuses_classifier(tmp_path, monkeypatch) -> None:
