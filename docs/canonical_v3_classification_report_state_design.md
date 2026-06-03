@@ -282,11 +282,27 @@ Expected `classification_type`:
 
 - `daily_trigger`
 
-Likely sources:
+Accepted V3-native runtime sources after `DB-V3-48c`:
 
-- `dc_report_classification_v2` where `horizon = 'daily'`
-- `dc_report_context_daily_v2` for supporting state
-- daily classifier/report output only if already canonicalized through V2 classification rows
+- `dc_ticker_swing_signal_daily`
+- `dc_group_swing_signal_daily`
+- `eco_entity_coverage`
+- `eco_entity`
+
+Explicitly excluded runtime sources after `DB-V3-48c`:
+
+- `dc_report_classification_v2`
+- `dc_report_context_daily_v2`
+- generated Markdown reports
+- generated CSV reports
+
+Accepted semantic policy after `DB-V3-48c`:
+
+- V3-native `daily_trigger` uses current lower-level source truth.
+- frozen V2 parity is not required when source drift is explicitly reported and accepted.
+- coverage-complete V3 behavior is preferred over preserving the old frozen row count.
+- dormant relevance-class fields remain `NULL` in this step.
+- `priority_score`, `priority_label`, and `sort_rank` remain `NULL`.
 
 Expected mapped fields:
 
@@ -362,6 +378,105 @@ Expected mapped fields:
 ### Source Note
 
 Documentation and classifier contracts indicate that V2 already treats classification as a distinct canonical layer through `dc_report_classification_v2`. That strongly supports building V3 decision rows from canonical V2 classification rows first, instead of re-running classifier logic unless necessary.
+
+Exception after `DB-V3-48c`:
+
+- `daily_trigger` is no longer planned around runtime dependence on `dc_report_classification_v2`.
+- `daily_trigger` is explicitly accepted as a V3-native lower-level reconstruction path.
+- frozen V2 payload remains useful for smoke/delta reporting, but not as the runtime source of truth.
+
+
+## 8.1 Daily Trigger V3-Native Source-Truth Decision
+
+Decision record:
+
+- task: `DB-V3-48c`
+- date: `2026-06-03`
+
+Scope:
+
+- target table: `eco_classification_decision`
+- `classification_type = daily_trigger`
+- `window_code = daily`
+- `entity_type = TICKER`
+
+Accepted runtime sources:
+
+- `dc_ticker_swing_signal_daily`
+- `dc_group_swing_signal_daily`
+- `eco_entity_coverage`
+- `eco_entity`
+
+Explicitly excluded runtime sources:
+
+- `dc_report_classification_v2`
+- `dc_report_context_daily_v2`
+- generated Markdown reports
+- generated CSV reports
+
+Accepted semantic policy:
+
+- V3-native `daily_trigger` uses current lower-level source truth.
+- frozen V2 parity is not required when source drift is explicitly reported and accepted.
+- coverage-complete V3 behavior is preferred over preserving the frozen legacy row count.
+- no compatibility mode is required to reproduce frozen V2 `daily_trigger` exactly.
+- no new relevance sourcing is introduced in this step.
+- dormant relevance-class fields remain `NULL`.
+- `priority_score`, `priority_label`, and `sort_rank` remain `NULL`.
+
+Accepted `CRGY` policy:
+
+- if daily coverage exists but the lower-level ticker row is missing, `daily_trigger` is materialized as:
+  - `INSUFFICIENT_DATA`
+  - `MISSING_PRICE_CONTEXT`
+  - `WAIT_FOR_DATA`
+- this intentionally changes `daily_trigger` row count from `236` to `237`
+- coverage-complete V3 behavior is preferred over silently omitting the row
+
+Accepted `NXPI` source-drift policy:
+
+- changed classification caused by lower-level source drift is accepted
+- frozen V2 `NXPI` output is not preserved by force
+- known accepted example:
+  - frozen V2 / old production:
+    - `BUY_WATCH`
+    - `BULLISH_SETUP_NEEDS_CONFIRMATION`
+    - `next_action = MONITOR_FOR_DAILY_CONFIRMATION`
+  - V3-native lower-level rebuild:
+    - `SELL_TRIGGER`
+    - `DAILY_SELL_TRIGGER`
+    - `blocking_reason = BEARISH_DAILY_SIGNAL`
+    - `next_action = REVIEW_SELL_OR_TIGHTEN_STOP`
+
+Expected production effect after future daily production replacement:
+
+- `daily_trigger` expected row count:
+  - old frozen production = `236`
+  - expected V3-native = `237`
+- `eco_classification_decision` expected total row count:
+  - old total = `1180`
+  - expected new total = `1181`
+- `rolling2_sell_pressure`, `rolling5_pullback`, `rolling30_buy`, and `rolling30_exit` remain unchanged
+
+Guardrails for the future production run:
+
+- take a backup first
+- verify the exact production DB path before write
+- perform immediate post-run verification
+- report row-count delta explicitly
+- verify `CRGY` materialized as expected
+- verify `NXPI` changed as expected
+- verify no forbidden table changes
+- verify no duplicate rows
+- verify no orphan rows
+- verify no coverage drift
+
+Non-goals:
+
+- no compatibility mode to preserve frozen V2 `daily_trigger` exactly
+- no new relevance sourcing in this step
+- no priority/rank logic
+- no generated report parsing
 
 
 ## 8. Builder Strategy
