@@ -57,6 +57,38 @@ def _insert_run(conn: sqlite3.Connection, ecosystem_id: int, taxonomy_version_id
     )
 
 
+def _create_lower_level_source_tables(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE dc_ticker_swing_signal_daily (
+            signal_date TEXT NOT NULL,
+            taxonomy_version TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            signal_version TEXT NOT NULL,
+            run_id TEXT NOT NULL,
+            created_at_utc TEXT NOT NULL,
+            ticker_trend_state TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE dc_group_synthetic_ohlc_daily (
+            ohlc_date TEXT NOT NULL,
+            taxonomy_version TEXT NOT NULL,
+            group_type TEXT NOT NULL,
+            group_name TEXT NOT NULL,
+            calc_version TEXT NOT NULL,
+            run_id TEXT NOT NULL,
+            created_at_utc TEXT NOT NULL,
+            trend_classification TEXT,
+            latest_bos_freshness TEXT,
+            latest_reset_freshness TEXT
+        )
+        """
+    )
+
+
 def _insert_entity(
     conn: sqlite3.Connection,
     *,
@@ -227,6 +259,42 @@ def _insert_snapshot_row(
     )
 
 
+def _insert_ticker_trend_row(
+    conn: sqlite3.Connection,
+    *,
+    ticker: str,
+    trend_state: str | None,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO dc_ticker_swing_signal_daily (
+            signal_date, taxonomy_version, ticker, signal_version, run_id, created_at_utc, ticker_trend_state
+        ) VALUES (?, 'DC_TAXONOMY_FULL_V1', ?, 'DC_SWING_SIGNAL_V1', 'DC_TICKER_SWING_20260603_DC_SWING_SIGNAL_V1', '2026-06-04T00:00:00Z', ?)
+        """,
+        (SIGNAL_DATE, ticker, trend_state),
+    )
+
+
+def _insert_group_synthetic_row(
+    conn: sqlite3.Connection,
+    *,
+    group_type: str,
+    group_name: str,
+    trend_classification: str | None,
+    latest_bos_freshness: str | None,
+    latest_reset_freshness: str | None,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO dc_group_synthetic_ohlc_daily (
+            ohlc_date, taxonomy_version, group_type, group_name, calc_version, run_id, created_at_utc,
+            trend_classification, latest_bos_freshness, latest_reset_freshness
+        ) VALUES (?, 'DC_TAXONOMY_FULL_V1', ?, ?, 'DC_SWING_OHLC_V1', 'DC_GROUP_SYNTH_OHLC_20250801_20260603_DC_SWING_OHLC_V1', '2026-06-04T00:00:00Z', ?, ?, ?)
+        """,
+        (SIGNAL_DATE, group_type, group_name, trend_classification, latest_bos_freshness, latest_reset_freshness),
+    )
+
+
 def _insert_unrelated_rows(conn: sqlite3.Connection, ecosystem_id: int, taxonomy_version_id: int, entity_id: int) -> None:
     conn.execute(
         """
@@ -264,6 +332,7 @@ def _setup_fixture_db(db_path: str) -> dict[str, int]:
         ecosystem_id = _insert_ecosystem(conn)
         taxonomy_version_id = _insert_taxonomy_version(conn, ecosystem_id)
         _insert_run(conn, ecosystem_id, taxonomy_version_id)
+        _create_lower_level_source_tables(conn)
 
         entity_ids = {
             "ecosystem": _insert_entity(
@@ -385,6 +454,24 @@ def _setup_fixture_db(db_path: str) -> dict[str, int]:
             "rolling5": "BUY_ZONE",
             "rolling30": "EXIT_ZONE",
         }
+        _insert_group_synthetic_row(
+            conn,
+            group_type="layer",
+            group_name="AI Compute",
+            trend_classification="UP",
+            latest_bos_freshness="STALE",
+            latest_reset_freshness="FRESH",
+        )
+        _insert_group_synthetic_row(
+            conn,
+            group_type="subindustry",
+            group_name="GPU",
+            trend_classification="DOWN",
+            latest_bos_freshness=None,
+            latest_reset_freshness="AGING",
+        )
+        _insert_ticker_trend_row(conn, ticker="PANW", trend_state="DOWN")
+        _insert_ticker_trend_row(conn, ticker="CRGY", trend_state=None)
         for window_code in TARGET_WINDOWS:
             _insert_metric_text(
                 conn,
@@ -401,17 +488,8 @@ def _setup_fixture_db(db_path: str) -> dict[str, int]:
                 taxonomy_version_id=taxonomy_version_id,
                 entity_id=entity_ids["layer"],
                 window_code=window_code,
-                metric_name="pct_above_ema20",
+                metric_name="unused_numeric_fixture",
                 metric_value_num=42.0,
-            )
-            _insert_metric_text(
-                conn,
-                ecosystem_id=ecosystem_id,
-                taxonomy_version_id=taxonomy_version_id,
-                entity_id=entity_ids["layer"],
-                window_code=window_code,
-                metric_name="freshness_latest_structure_class",
-                metric_value_text="FRESH",
             )
             _insert_metric_text(
                 conn,
@@ -426,27 +504,9 @@ def _setup_fixture_db(db_path: str) -> dict[str, int]:
                 conn,
                 ecosystem_id=ecosystem_id,
                 taxonomy_version_id=taxonomy_version_id,
-                entity_id=entity_ids["subindustry"],
-                window_code=window_code,
-                metric_name="pct_above_ema20",
-                metric_value_num=100.0,
-            )
-            _insert_metric_text(
-                conn,
-                ecosystem_id=ecosystem_id,
-                taxonomy_version_id=taxonomy_version_id,
-                entity_id=entity_ids["subindustry"],
-                window_code=window_code,
-                metric_name="freshness_latest_structure_class",
-                metric_value_text="AGING",
-            )
-            _insert_metric_num(
-                conn,
-                ecosystem_id=ecosystem_id,
-                taxonomy_version_id=taxonomy_version_id,
                 entity_id=entity_ids["ticker_ok"],
                 window_code=window_code,
-                metric_name="distance_to_ema20_pct",
+                metric_name="unused_ticker_numeric_fixture",
                 metric_value_num=0.20,
             )
             _insert_metric_num(
@@ -455,7 +515,7 @@ def _setup_fixture_db(db_path: str) -> dict[str, int]:
                 taxonomy_version_id=taxonomy_version_id,
                 entity_id=entity_ids["ticker_warn"],
                 window_code=window_code,
-                metric_name="distance_to_ema20_pct",
+                metric_name="unused_ticker_numeric_fixture",
                 metric_value_num=-0.10,
             )
             if window_code != "daily":
@@ -644,9 +704,9 @@ def test_builder_rebuilds_window_snapshots_from_v3_facts(tmp_path) -> None:
         ).fetchone()
         assert dict(layer_daily) == {
             "timing_state": "TRIM_WATCH",
-            "trend_state": "NEUTRAL",
+            "trend_state": "UP",
             "summary_state": "TRIM_WATCH",
-            "freshness_status": "FRESH",
+            "freshness_status": "STALE",
             "snapshot_status": "OK",
             "quality_status": "OK",
             "source_run_id": REPLACEMENT_SOURCE_RUN_ID,
@@ -662,7 +722,7 @@ def test_builder_rebuilds_window_snapshots_from_v3_facts(tmp_path) -> None:
         ).fetchone()
         assert dict(sub_rolling30) == {
             "timing_state": "BUY_ZONE",
-            "trend_state": "UP",
+            "trend_state": "DOWN",
             "summary_state": "EXIT_ZONE",
             "freshness_status": "AGING",
         }
@@ -678,7 +738,7 @@ def test_builder_rebuilds_window_snapshots_from_v3_facts(tmp_path) -> None:
         assert dict(ticker_daily) == {
             "summary_state": "OK",
             "classification_state": "BUY_WATCH",
-            "trend_state": "UP",
+            "trend_state": "DOWN",
             "timing_state": None,
             "freshness_status": None,
         }

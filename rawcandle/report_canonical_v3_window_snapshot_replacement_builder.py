@@ -5,16 +5,19 @@ from collections import Counter, defaultdict
 
 
 TARGET_TABLE = "eco_entity_window_snapshot"
+SOURCE_TABLE_TICKER = "dc_ticker_swing_signal_daily"
+SOURCE_TABLE_GROUP_SYNTH = "dc_group_synthetic_ohlc_daily"
 TARGET_WINDOWS = ("daily", "rolling2", "rolling5", "rolling30")
 TARGET_ENTITY_TYPES = ("ECOSYSTEM", "LAYER", "SUBINDUSTRY", "TICKER")
 REPLACEMENT_SOURCE_PREFIX = "V3_WINDOW_SNAPSHOT_FROM_ECO_COVERAGE"
 V2_SOURCE_RUN_ID = "REPORT_CANONICAL_V2_PROD_BUILD_2026_05_29"
+GROUP_TYPE_BY_ENTITY_TYPE = {
+    "LAYER": "layer",
+    "SUBINDUSTRY": "subindustry",
+}
 
 GROUP_TIMING_METRIC = "group_timing_state"
 GROUP_WINDOW_METRIC = "group_window_status"
-GROUP_PCT_ABOVE_EMA20_METRIC = "pct_above_ema20"
-GROUP_FRESHNESS_METRIC = "freshness_latest_structure_class"
-TICKER_DISTANCE_EMA20_METRIC = "distance_to_ema20_pct"
 
 CLASSIFICATION_TYPE_BY_WINDOW = {
     "daily": "daily_trigger",
@@ -170,9 +173,6 @@ def _load_metrics(conn: sqlite3.Connection, run_row: sqlite3.Row) -> dict[tuple[
     metric_names = (
         GROUP_TIMING_METRIC,
         GROUP_WINDOW_METRIC,
-        GROUP_PCT_ABOVE_EMA20_METRIC,
-        GROUP_FRESHNESS_METRIC,
-        TICKER_DISTANCE_EMA20_METRIC,
     )
     rows = conn.execute(
         f"""
@@ -195,6 +195,92 @@ def _load_metrics(conn: sqlite3.Connection, run_row: sqlite3.Row) -> dict[tuple[
         ),
     ).fetchall()
     return {(int(row["entity_id"]), str(row["window_code"]), str(row["metric_name"])): row for row in rows}
+
+
+def _load_ticker_trend_rows(
+    conn: sqlite3.Connection,
+    *,
+    signal_date: str,
+    taxonomy_version_code: str,
+    ticker_codes: list[str],
+) -> dict[str, sqlite3.Row]:
+    if not ticker_codes:
+        return {}
+    if not _table_exists(conn, SOURCE_TABLE_TICKER):
+        raise ValueError(f"Missing source table '{SOURCE_TABLE_TICKER}'")
+    columns = set(_column_names(conn, SOURCE_TABLE_TICKER))
+    required = {"signal_date", "taxonomy_version", "ticker", "run_id"}
+    missing = sorted(required - columns)
+    if missing:
+        raise ValueError(f"Source table '{SOURCE_TABLE_TICKER}' missing required columns: {', '.join(missing)}")
+    trend_column = "ticker_trend_state" if "ticker_trend_state" in columns else "trend_state"
+    if trend_column not in columns:
+        raise ValueError(f"Source table '{SOURCE_TABLE_TICKER}' missing both ticker_trend_state and trend_state")
+    rows = conn.execute(
+        f"""
+        SELECT ticker, run_id, {trend_column} AS trend_state
+        FROM {SOURCE_TABLE_TICKER}
+        WHERE signal_date = ?
+          AND taxonomy_version = ?
+          AND ticker IN ({", ".join("?" for _ in ticker_codes)})
+        """,
+        (signal_date, taxonomy_version_code, *ticker_codes),
+    ).fetchall()
+    return {str(row["ticker"]): row for row in rows}
+
+
+def _load_group_synthetic_rows(
+    conn: sqlite3.Connection,
+    *,
+    signal_date: str,
+    taxonomy_version_code: str,
+    group_names_by_type: dict[str, list[str]],
+) -> dict[tuple[str, str], sqlite3.Row]:
+    if not group_names_by_type:
+        return {}
+    if not _table_exists(conn, SOURCE_TABLE_GROUP_SYNTH):
+        raise ValueError(f"Missing source table '{SOURCE_TABLE_GROUP_SYNTH}'")
+    columns = set(_column_names(conn, SOURCE_TABLE_GROUP_SYNTH))
+    required = {
+        "ohlc_date",
+        "taxonomy_version",
+        "group_type",
+        "group_name",
+        "run_id",
+        "trend_classification",
+        "latest_bos_freshness",
+        "latest_reset_freshness",
+    }
+    missing = sorted(required - columns)
+    if missing:
+        raise ValueError(f"Source table '{SOURCE_TABLE_GROUP_SYNTH}' missing required columns: {', '.join(missing)}")
+    predicates: list[str] = []
+    params: list[object] = [signal_date, taxonomy_version_code]
+    for group_type, group_names in group_names_by_type.items():
+        if not group_names:
+            continue
+        predicates.append(f"(group_type = ? AND group_name IN ({', '.join('?' for _ in group_names)}))")
+        params.append(group_type)
+        params.extend(group_names)
+    if not predicates:
+        return {}
+    rows = conn.execute(
+        f"""
+        SELECT
+            group_type,
+            group_name,
+            run_id,
+            trend_classification,
+            latest_bos_freshness,
+            latest_reset_freshness
+        FROM {SOURCE_TABLE_GROUP_SYNTH}
+        WHERE ohlc_date = ?
+          AND taxonomy_version = ?
+          AND ({' OR '.join(predicates)})
+        """,
+        tuple(params),
+    ).fetchall()
+    return {(str(row["group_type"]), str(row["group_name"])): row for row in rows}
 
 
 def _existing_target_row_count(conn: sqlite3.Connection, run_row: sqlite3.Row) -> int:
@@ -260,31 +346,6 @@ def _count_existing_lineage(conn: sqlite3.Connection, run_row: sqlite3.Row) -> t
     return int(row["v2_rows"] or 0), int(row["null_rows"] or 0)
 
 
-def _derive_group_trend_state(pct_above_ema20: float | None) -> str | None:
-    if pct_above_ema20 is None:
-        return None
-    if pct_above_ema20 >= 80.0:
-        return "UP"
-    if pct_above_ema20 <= 20.0:
-        return "DOWN"
-    return "NEUTRAL"
-
-
-def _derive_ticker_trend_state(
-    rolling30_buy_state: str | None,
-    distance_to_ema20_pct: float | None,
-) -> str | None:
-    if rolling30_buy_state in {"BUY_ZONE", "WATCH_ZONE"}:
-        return "UP"
-    if rolling30_buy_state == "AVOID":
-        if distance_to_ema20_pct is not None and distance_to_ema20_pct <= -0.05:
-            return "DOWN"
-        return "NEUTRAL"
-    if rolling30_buy_state == "INSUFFICIENT_DATA":
-        return None
-    return None
-
-
 def _derive_statuses(
     *,
     entity_type: str,
@@ -311,6 +372,8 @@ def _build_snapshot_row(
     quality_statuses_by_window: dict[str, set[str]],
     classifications: dict[tuple[int, str, str], str],
     metrics: dict[tuple[int, str, str], sqlite3.Row],
+    ticker_trend_rows: dict[str, sqlite3.Row],
+    group_synthetic_rows: dict[tuple[str, str], sqlite3.Row],
 ) -> dict[str, object]:
     entity_type = str(coverage_row["entity_type"])
     window_code = str(coverage_row["window_code"])
@@ -339,20 +402,21 @@ def _build_snapshot_row(
             else:
                 summary_metric_row = metrics.get((entity_id, window_code, GROUP_WINDOW_METRIC))
                 summary_state = _normalize_text(summary_metric_row["metric_value_text"]) if summary_metric_row else timing_state
-            pct_metric_row = metrics.get((entity_id, window_code, GROUP_PCT_ABOVE_EMA20_METRIC))
-            pct_above_ema20 = _normalize_float(pct_metric_row["metric_value_num"]) if pct_metric_row else None
-            trend_state = _derive_group_trend_state(pct_above_ema20)
-            freshness_metric_row = metrics.get((entity_id, window_code, GROUP_FRESHNESS_METRIC))
-            freshness_status = _normalize_text(freshness_metric_row["metric_value_text"]) if freshness_metric_row else None
+            group_type = GROUP_TYPE_BY_ENTITY_TYPE[entity_type]
+            group_row = group_synthetic_rows.get((group_type, str(coverage_row["entity_name"])))
+            if group_row is not None:
+                trend_state = _normalize_text(group_row["trend_classification"])
+                freshness_status = _normalize_text(group_row["latest_bos_freshness"])
+                if freshness_status is None:
+                    freshness_status = _normalize_text(group_row["latest_reset_freshness"])
         elif entity_type == "TICKER":
             classification_type = CLASSIFICATION_TYPE_BY_WINDOW.get(window_code)
             if classification_type is not None:
                 classification_state = classifications.get((entity_id, window_code, classification_type))
             summary_state = "OK"
-            rolling30_buy_state = classifications.get((entity_id, "rolling30", "rolling30_buy"))
-            distance_metric_row = metrics.get((entity_id, window_code, TICKER_DISTANCE_EMA20_METRIC))
-            distance_to_ema20_pct = _normalize_float(distance_metric_row["metric_value_num"]) if distance_metric_row else None
-            trend_state = _derive_ticker_trend_state(rolling30_buy_state, distance_to_ema20_pct)
+            ticker_row = ticker_trend_rows.get(str(coverage_row["entity_code"]))
+            if ticker_row is not None:
+                trend_state = _normalize_text(ticker_row["trend_state"])
 
     row: dict[str, object] = {
         "run_id": str(run_row["run_id"]),
@@ -408,6 +472,34 @@ def build_canonical_v3_window_snapshots(
         quality_rows = _load_quality_rows(conn, run_row)
         classifications = _load_classifications(conn, run_row)
         metrics = _load_metrics(conn, run_row)
+        ticker_codes = sorted(
+            {
+                str(row["entity_code"])
+                for row in coverage_rows
+                if str(row["entity_type"]) == "TICKER"
+            }
+        )
+        group_names_by_type: dict[str, list[str]] = defaultdict(list)
+        for row in coverage_rows:
+            entity_type = str(row["entity_type"])
+            if entity_type in GROUP_TYPE_BY_ENTITY_TYPE:
+                group_names_by_type[GROUP_TYPE_BY_ENTITY_TYPE[entity_type]].append(str(row["entity_name"]))
+        normalized_group_names_by_type = {
+            group_type: sorted(set(group_names))
+            for group_type, group_names in group_names_by_type.items()
+        }
+        ticker_trend_rows = _load_ticker_trend_rows(
+            conn,
+            signal_date=str(run_row["signal_date"]),
+            taxonomy_version_code=str(run_row["version_code"]),
+            ticker_codes=ticker_codes,
+        )
+        group_synthetic_rows = _load_group_synthetic_rows(
+            conn,
+            signal_date=str(run_row["signal_date"]),
+            taxonomy_version_code=str(run_row["version_code"]),
+            group_names_by_type=normalized_group_names_by_type,
+        )
         existing_rows = _existing_target_row_count(conn, run_row)
         if existing_rows and not replace_existing:
             raise ValueError(
@@ -440,6 +532,8 @@ def build_canonical_v3_window_snapshots(
                 quality_statuses_by_window=quality_statuses_by_window,
                 classifications=classifications,
                 metrics=metrics,
+                ticker_trend_rows=ticker_trend_rows,
+                group_synthetic_rows=group_synthetic_rows,
             )
             snapshot_rows.append(snapshot_row)
             entity_type = str(coverage_row["entity_type"])
@@ -478,6 +572,8 @@ def build_canonical_v3_window_snapshots(
                 "eco_quality_summary": "V3_BASE_CONTROL_FACT",
                 "eco_entity_metric_value": "V3_NATIVE_OPTIONAL_DERIVED_FACT",
                 "eco_classification_decision": "V3_NATIVE_OPTIONAL_DERIVED_FACT",
+                "dc_ticker_swing_signal_daily": "LOWER_LEVEL_EXACT_DATE_SOURCE",
+                "dc_group_synthetic_ohlc_daily": "LOWER_LEVEL_EXACT_DATE_SOURCE",
                 "runtime_excludes": [
                     "dc_report_context_daily_v2",
                     "dc_report_context_window_v2",
