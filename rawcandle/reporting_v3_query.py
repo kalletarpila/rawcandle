@@ -1378,45 +1378,23 @@ def _load_rolling_window_summary(
     window_code: str,
 ) -> dict[str, Any]:
     signal_day = str(run_row["signal_date"])
-    end_day = date.fromisoformat(signal_day)
-    start_bound = (end_day - timedelta(days=WINDOW_DAYS_BY_CODE[window_code] - 1)).isoformat()
-    included_dates = sorted(
-        {
-            str(row["included_date"])
-            for row in conn.execute(
-                """
-                SELECT observed_date AS included_date
-                FROM eco_signal_observation
-                WHERE run_id = ?
-                  AND taxonomy_version_id = ?
-                  AND window_code = ?
-                  AND observed_date >= ?
-                  AND observed_date <= ?
-                UNION
-                SELECT event_date AS included_date
-                FROM eco_entity_event
-                WHERE run_id = ?
-                  AND taxonomy_version_id = ?
-                  AND event_date >= ?
-                  AND event_date <= ?
-                ORDER BY included_date
-                """,
-                (
-                    str(run_row["run_id"]),
-                    int(run_row["taxonomy_version_id"]),
-                    window_code,
-                    start_bound,
-                    signal_day,
-                    str(run_row["run_id"]),
-                    int(run_row["taxonomy_version_id"]),
-                    start_bound,
-                    signal_day,
-                ),
-            ).fetchall()
-            if row["included_date"] is not None
-        }
-    )
     window_length = WINDOW_DAYS_BY_CODE[window_code]
+    included_dates = _load_rolling_metric_dates(
+        conn,
+        run_id=str(run_row["run_id"]),
+        taxonomy_version_id=int(run_row["taxonomy_version_id"]),
+        window_code=window_code,
+        signal_day=signal_day,
+        window_length=window_length,
+    )
+    if not included_dates:
+        included_dates = _load_rolling_fallback_dates(
+            conn,
+            run_id=str(run_row["run_id"]),
+            taxonomy_version_id=int(run_row["taxonomy_version_id"]),
+            window_code=window_code,
+            signal_day=signal_day,
+        )
     return {
         "requested_end_date": signal_day,
         "window_start_date": included_dates[0] if included_dates else None,
@@ -1425,6 +1403,75 @@ def _load_rolling_window_summary(
         "valid_signal_dates_included": included_dates,
         "incomplete_window": len(included_dates) < window_length,
     }
+
+
+def _load_rolling_metric_dates(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+    taxonomy_version_id: int,
+    window_code: str,
+    signal_day: str,
+    window_length: int,
+) -> list[str]:
+    rows = conn.execute(
+        """
+        SELECT signal_date
+        FROM (
+            SELECT DISTINCT signal_date
+            FROM eco_entity_metric_value
+            WHERE run_id = ?
+              AND taxonomy_version_id = ?
+              AND window_code = ?
+              AND signal_date <= ?
+            ORDER BY signal_date DESC
+            LIMIT ?
+        )
+        ORDER BY signal_date
+        """,
+        (run_id, taxonomy_version_id, window_code, signal_day, window_length),
+    ).fetchall()
+    return [str(row["signal_date"]) for row in rows if row["signal_date"] is not None]
+
+
+def _load_rolling_fallback_dates(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+    taxonomy_version_id: int,
+    window_code: str,
+    signal_day: str,
+) -> list[str]:
+    rows = conn.execute(
+        """
+        SELECT included_date
+        FROM (
+            SELECT DISTINCT observed_date AS included_date
+            FROM eco_signal_observation
+            WHERE run_id = ?
+              AND taxonomy_version_id = ?
+              AND window_code = ?
+              AND observed_date <= ?
+            UNION
+            SELECT DISTINCT event_date AS included_date
+            FROM eco_entity_event
+            WHERE run_id = ?
+              AND taxonomy_version_id = ?
+              AND event_date <= ?
+        )
+        ORDER BY included_date
+        """,
+        (
+            run_id,
+            taxonomy_version_id,
+            window_code,
+            signal_day,
+            run_id,
+            taxonomy_version_id,
+            signal_day,
+        ),
+    ).fetchall()
+    return [str(row["included_date"]) for row in rows if row["included_date"] is not None]
 
 
 def _load_rolling_ecosystem_window_change(

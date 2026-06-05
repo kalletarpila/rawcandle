@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import date, timedelta
 
 import pytest
 
@@ -15,6 +16,10 @@ from rawcandle.reporting_v3_query import (
 RUN_ID = "V3_BASE_DATACENTER_2026_05_29_DC_TAXONOMY_FULL_V1"
 SIGNAL_DATE = "2026-05-29"
 WINDOW_CODE = "rolling30"
+ROLLING30_METRIC_DATES = [
+    (date.fromisoformat("2026-05-29") - timedelta(days=offset)).isoformat()
+    for offset in range(29, -1, -1)
+]
 
 
 def _connect(db_path: str) -> sqlite3.Connection:
@@ -513,17 +518,14 @@ def _build_fixture_db(db_path: str) -> None:
                 metric_name=metric_name,
                 metric_value_num=metric_value,
             )
-        for signal_date, metric_name, metric_value_num in (
-            ("2026-05-20", "pct_above_ema20", 44.0),
-            ("2026-05-29", "pct_above_ema20", 51.0),
-        ):
+        for index, signal_date in enumerate(ROLLING30_METRIC_DATES):
             _insert_metric_num(
                 conn,
                 ecosystem_id=ecosystem_id,
                 taxonomy_version_id=taxonomy_version_id,
                 entity_id=subindustry_id,
-                metric_name=metric_name,
-                metric_value_num=metric_value_num,
+                metric_name="pct_above_ema20",
+                metric_value_num=44.0 + ((7.0 * index) / 29.0),
                 signal_date=signal_date,
             )
         for signal_date, metric_name, metric_value_text in (
@@ -608,11 +610,11 @@ def test_query_returns_rolling30_structured_data_from_eco_facts(tmp_path) -> Non
     assert data.report_header.signal_date == SIGNAL_DATE
     assert data.report_header.window_code == WINDOW_CODE
     assert data.window_summary["requested_end_date"] == "2026-05-29"
-    assert data.window_summary["window_start_date"] == "2026-05-20"
+    assert data.window_summary["window_start_date"] == "2026-04-30"
     assert data.window_summary["window_end_date"] == "2026-05-29"
-    assert data.window_summary["valid_signal_dates_count"] == 3
-    assert data.window_summary["valid_signal_dates_included"] == ["2026-05-20", "2026-05-28", "2026-05-29"]
-    assert data.window_summary["incomplete_window"] is True
+    assert data.window_summary["valid_signal_dates_count"] == 30
+    assert data.window_summary["valid_signal_dates_included"] == ROLLING30_METRIC_DATES
+    assert data.window_summary["incomplete_window"] is False
     assert data.ecosystem_window_change["rows_available"] == 10
     assert data.ecosystem_window_change["rows_rendered"] == 10
     assert data.ecosystem_window_change["is_truncated"] is False
@@ -690,7 +692,7 @@ def test_query_returns_rolling30_structured_data_from_eco_facts(tmp_path) -> Non
                 "entity_type": "SUBINDUSTRY",
                 "entity_code": "SEMIS",
                 "entity_name": "Semis",
-                "selected_dates_count": 3,
+                "selected_dates_count": 30,
                 "observed_timing_dates_count": 2,
                 "buy_zone_days": 1,
                 "add_on_pullback_days": 0,
@@ -708,7 +710,7 @@ def test_query_returns_rolling30_structured_data_from_eco_facts(tmp_path) -> Non
         "rows_available": 1,
         "rows_rendered": 1,
         "is_truncated": False,
-        "selected_dates_count": 3,
+        "selected_dates_count": 30,
     }
 
     assert data.ecosystem_snapshot is not None

@@ -15,6 +15,13 @@ from rawcandle.reporting_v3_query import (
 RUN_ID = "V3_BASE_DATACENTER_2026_05_29_DC_TAXONOMY_FULL_V1"
 SIGNAL_DATE = "2026-05-29"
 WINDOW_CODE = "rolling5"
+ROLLING5_METRIC_DATES = [
+    "2026-05-25",
+    "2026-05-26",
+    "2026-05-27",
+    "2026-05-28",
+    "2026-05-29",
+]
 
 
 def _connect(db_path: str) -> sqlite3.Connection:
@@ -428,7 +435,10 @@ def _build_fixture_db(db_path: str) -> None:
         ):
             _insert_metric_num(conn, ecosystem_id=ecosystem_id, taxonomy_version_id=taxonomy_version_id, entity_id=layer_id, metric_name=metric_name, metric_value_num=metric_value)
         for signal_date, metric_name, metric_value_num in (
+            ("2026-05-25", "trend_breadth", 60.0),
             ("2026-05-26", "trend_breadth", 61.0),
+            ("2026-05-27", "trend_breadth", 58.0),
+            ("2026-05-28", "trend_breadth", 59.0),
             ("2026-05-29", "trend_breadth", 57.0),
         ):
             _insert_metric_num(
@@ -492,11 +502,11 @@ def test_query_returns_rolling5_structured_data_from_eco_facts(tmp_path) -> None
     assert data.report_header.signal_date == SIGNAL_DATE
     assert data.report_header.window_code == WINDOW_CODE
     assert data.window_summary["requested_end_date"] == "2026-05-29"
-    assert data.window_summary["window_start_date"] == "2026-05-26"
+    assert data.window_summary["window_start_date"] == "2026-05-25"
     assert data.window_summary["window_end_date"] == "2026-05-29"
-    assert data.window_summary["valid_signal_dates_count"] == 3
-    assert data.window_summary["valid_signal_dates_included"] == ["2026-05-26", "2026-05-28", "2026-05-29"]
-    assert data.window_summary["incomplete_window"] is True
+    assert data.window_summary["valid_signal_dates_count"] == 5
+    assert data.window_summary["valid_signal_dates_included"] == ROLLING5_METRIC_DATES
+    assert data.window_summary["incomplete_window"] is False
     assert data.ecosystem_window_change["rows_available"] == 9
     assert data.ecosystem_window_change["rows_rendered"] == 9
     assert data.ecosystem_window_change["is_truncated"] is False
@@ -514,7 +524,7 @@ def test_query_returns_rolling5_structured_data_from_eco_facts(tmp_path) -> None
     assert row_lookup[("SUBINDUSTRY", "SEMIS", "group_timing_state")]["first_value"] == "BUY_ZONE"
     assert row_lookup[("SUBINDUSTRY", "SEMIS", "group_timing_state")]["last_value"] == "PULLBACK"
     assert row_lookup[("SUBINDUSTRY", "SEMIS", "group_timing_state")]["change"] == "n/a"
-    assert row_lookup[("SUBINDUSTRY", "SEMIS", "trend_breadth")]["change"] == -4.0
+    assert row_lookup[("SUBINDUSTRY", "SEMIS", "trend_breadth")]["change"] == -3.0
     assert data.overheat_rotation_risk_progression["risk_count_rows"] == [
         {
             "signal_date": "2026-05-29",
@@ -530,7 +540,7 @@ def test_query_returns_rolling5_structured_data_from_eco_facts(tmp_path) -> None
                 "entity_type": "SUBINDUSTRY",
                 "entity_code": "SEMIS",
                 "entity_name": "Semis",
-                "selected_dates_count": 3,
+                "selected_dates_count": 5,
                 "observed_timing_dates_count": 2,
                 "buy_zone_days": 1,
                 "add_on_pullback_days": 0,
@@ -548,7 +558,7 @@ def test_query_returns_rolling5_structured_data_from_eco_facts(tmp_path) -> None
         "rows_available": 1,
         "rows_rendered": 1,
         "is_truncated": False,
-        "selected_dates_count": 3,
+        "selected_dates_count": 5,
     }
 
     assert data.ecosystem_snapshot is not None
@@ -616,6 +626,27 @@ def test_query_returns_rolling5_structured_data_from_eco_facts(tmp_path) -> None
         "eco_entity_window_snapshot.classification_state is not used as the primary rolling5 classification source"
         in data.metadata["limitations"]
     )
+
+
+def test_query_falls_back_to_signal_and_event_dates_when_metric_history_is_missing(tmp_path) -> None:
+    db_path = tmp_path / "rolling5_query_fallback.db"
+    _build_fixture_db(str(db_path))
+
+    conn = _connect(str(db_path))
+    try:
+        conn.execute("DELETE FROM eco_entity_metric_value WHERE run_id = ?", (RUN_ID,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    data = build_rolling5_report_query_data(str(db_path), RUN_ID)
+
+    assert data.window_summary["window_start_date"] == "2026-05-26"
+    assert data.window_summary["window_end_date"] == "2026-05-29"
+    assert data.window_summary["valid_signal_dates_count"] == 3
+    assert data.window_summary["valid_signal_dates_included"] == ["2026-05-26", "2026-05-28", "2026-05-29"]
+    assert data.window_summary["incomplete_window"] is True
+    assert data.ecosystem_window_change["rows"] == []
 
 
 def test_ecosystem_window_change_truncation_fills_unused_share_from_other_entity_type() -> None:
