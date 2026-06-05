@@ -138,6 +138,7 @@ ROLLING_ECOSYSTEM_WINDOW_CHANGE_METRIC_NAMES = (
 )
 ROLLING_ECOSYSTEM_WINDOW_CHANGE_ROW_LIMIT = 100
 ROLLING_RISK_PROGRESSION_ROW_LIMIT = 100
+ROLLING_SUBINDUSTRY_TIMING_PERSISTENCE_ROW_LIMIT = 100
 RISK_LEVEL_ORDER = {
     "LOW": 0,
     "MEDIUM": 1,
@@ -148,6 +149,13 @@ RISK_CHANGE_ORDER = {
     "UNCHANGED": 1,
     "IMPROVED": 2,
     "n/a": 3,
+}
+TIMING_STATE_BUCKETS = {
+    "BUY_ZONE": "buy_zone_days",
+    "ADD_ON_PULLBACK": "add_on_pullback_days",
+    "TRIM_WATCH": "trim_watch_days",
+    "EXIT_ZONE": "exit_zone_days",
+    "NEUTRAL": "neutral_days",
 }
 DAILY_GROUP_METRIC_NAMES = (
     "pct_above_ema20",
@@ -189,6 +197,7 @@ class Rolling30ReportQueryData:
     window_summary: dict[str, Any]
     ecosystem_window_change: dict[str, Any]
     overheat_rotation_risk_progression: dict[str, Any]
+    subindustry_timing_persistence: dict[str, Any]
     watchlist_summary: dict[str, Any]
     quality_summary: dict[str, Any]
     ecosystem_snapshot: dict[str, Any] | None
@@ -210,6 +219,7 @@ class Rolling5ReportQueryData:
     window_summary: dict[str, Any]
     ecosystem_window_change: dict[str, Any]
     overheat_rotation_risk_progression: dict[str, Any]
+    subindustry_timing_persistence: dict[str, Any]
     watchlist_summary: dict[str, Any]
     quality_summary: dict[str, Any]
     ecosystem_snapshot: dict[str, Any] | None
@@ -230,6 +240,7 @@ class Rolling2ReportQueryData:
     window_summary: dict[str, Any]
     ecosystem_window_change: dict[str, Any]
     overheat_rotation_risk_progression: dict[str, Any]
+    subindustry_timing_persistence: dict[str, Any]
     watchlist_summary: dict[str, Any]
     quality_summary: dict[str, Any]
     ecosystem_snapshot: dict[str, Any] | None
@@ -336,6 +347,12 @@ def _build_rolling30_report_query_data(
                 window_summary,
             ),
             overheat_rotation_risk_progression=_load_rolling_overheat_rotation_risk_progression(
+                conn,
+                run_row,
+                ROLLING30_WINDOW_CODE,
+                window_summary,
+            ),
+            subindustry_timing_persistence=_load_rolling_subindustry_timing_persistence(
                 conn,
                 run_row,
                 ROLLING30_WINDOW_CODE,
@@ -498,6 +515,12 @@ def _build_rolling2_report_query_data(
                 ROLLING2_WINDOW_CODE,
                 window_summary,
             ),
+            subindustry_timing_persistence=_load_rolling_subindustry_timing_persistence(
+                conn,
+                run_row,
+                ROLLING2_WINDOW_CODE,
+                window_summary,
+            ),
             watchlist_summary=_load_rolling_watchlist_summary(
                 conn,
                 run_row,
@@ -577,6 +600,12 @@ def _build_rolling5_report_query_data(
                 window_summary,
             ),
             overheat_rotation_risk_progression=_load_rolling_overheat_rotation_risk_progression(
+                conn,
+                run_row,
+                ROLLING5_WINDOW_CODE,
+                window_summary,
+            ),
+            subindustry_timing_persistence=_load_rolling_subindustry_timing_persistence(
                 conn,
                 run_row,
                 ROLLING5_WINDOW_CODE,
@@ -1701,6 +1730,134 @@ def _empty_overheat_rotation_risk_progression() -> dict[str, Any]:
     }
 
 
+def _load_rolling_subindustry_timing_persistence(
+    conn: sqlite3.Connection,
+    run_row: sqlite3.Row,
+    window_code: str,
+    window_summary: dict[str, Any],
+) -> dict[str, Any]:
+    included_dates = list(window_summary.get("valid_signal_dates_included") or [])
+    if not included_dates:
+        return _empty_subindustry_timing_persistence(len(included_dates))
+
+    date_placeholders = ", ".join("?" for _ in included_dates)
+    rows = conn.execute(
+        f"""
+        SELECT
+            e.entity_type,
+            e.entity_code,
+            e.entity_name,
+            m.metric_name,
+            m.signal_date,
+            m.metric_value_num,
+            m.metric_value_text
+        FROM eco_entity_metric_value m
+        JOIN eco_entity e ON e.entity_id = m.entity_id
+        WHERE m.run_id = ?
+          AND m.taxonomy_version_id = ?
+          AND m.window_code = ?
+          AND e.entity_type = 'SUBINDUSTRY'
+          AND m.metric_name IN ('group_timing_state', 'group_overheat_risk_level')
+          AND m.signal_date IN ({date_placeholders})
+        ORDER BY e.entity_code, m.signal_date, m.metric_name
+        """,
+        (
+            str(run_row["run_id"]),
+            int(run_row["taxonomy_version_id"]),
+            window_code,
+            *included_dates,
+        ),
+    ).fetchall()
+    return _build_subindustry_timing_persistence_payload(rows, included_dates)
+
+
+def _build_subindustry_timing_persistence_payload(
+    rows: list[Any],
+    included_dates: list[str],
+) -> dict[str, Any]:
+    by_entity: dict[tuple[str, str, str], dict[str, dict[str, Any]]] = {}
+    for row in rows:
+        entity_key = (
+            str(row["entity_type"]),
+            str(row["entity_code"]),
+            str(row["entity_name"]),
+        )
+        signal_date = str(row["signal_date"])
+        metric_name = str(row["metric_name"])
+        metric_value = _metric_row_value(row)
+        by_entity.setdefault(entity_key, {}).setdefault(signal_date, {})[metric_name] = metric_value
+
+    output_rows: list[dict[str, Any]] = []
+    selected_dates_count = len(included_dates)
+    for entity_type, entity_code, entity_name in by_entity:
+        per_date = by_entity[(entity_type, entity_code, entity_name)]
+        timing_dates = [
+            signal_date
+            for signal_date in included_dates
+            if per_date.get(signal_date, {}).get("group_timing_state") is not None
+        ]
+        if not timing_dates:
+            continue
+        row = {
+            "entity_type": entity_type,
+            "entity_code": entity_code,
+            "entity_name": entity_name,
+            "selected_dates_count": selected_dates_count,
+            "observed_timing_dates_count": len(timing_dates),
+            "buy_zone_days": 0,
+            "add_on_pullback_days": 0,
+            "trim_watch_days": 0,
+            "exit_zone_days": 0,
+            "neutral_days": 0,
+            "other_timing_days": 0,
+            "first_date": timing_dates[0],
+            "first_timing_state": per_date[timing_dates[0]].get("group_timing_state"),
+            "last_date": timing_dates[-1],
+            "last_timing_state": per_date[timing_dates[-1]].get("group_timing_state"),
+            "last_overheat_risk_level": _latest_metric_value(per_date, included_dates, "group_overheat_risk_level"),
+        }
+        for signal_date in timing_dates:
+            timing_state = per_date[signal_date].get("group_timing_state")
+            bucket_name = TIMING_STATE_BUCKETS.get(str(timing_state))
+            if bucket_name is None:
+                row["other_timing_days"] += 1
+            else:
+                row[bucket_name] += 1
+        output_rows.append(row)
+
+    output_rows.sort(
+        key=lambda row: (
+            -int(row["exit_zone_days"]),
+            -int(row["trim_watch_days"]),
+            -int(row["add_on_pullback_days"]),
+            -int(row["buy_zone_days"]),
+            -int(row["other_timing_days"]),
+            str(row["last_timing_state"]),
+            str(row["entity_code"]),
+            str(row["entity_name"]),
+        )
+    )
+    rows_available = len(output_rows)
+    rendered_rows = output_rows[:ROLLING_SUBINDUSTRY_TIMING_PERSISTENCE_ROW_LIMIT]
+    return {
+        "rows": rendered_rows,
+        "rows_available": rows_available,
+        "rows_rendered": len(rendered_rows),
+        "is_truncated": rows_available > len(rendered_rows),
+        "selected_dates_count": selected_dates_count,
+    }
+
+
+def _empty_subindustry_timing_persistence(selected_dates_count: int) -> dict[str, Any]:
+    return {
+        "rows": [],
+        "rows_available": 0,
+        "rows_rendered": 0,
+        "is_truncated": False,
+        "selected_dates_count": selected_dates_count,
+    }
+
+
 def _select_ecosystem_window_change_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if len(rows) <= ROLLING_ECOSYSTEM_WINDOW_CHANGE_ROW_LIMIT:
         return rows
@@ -1754,6 +1911,18 @@ def _last_risk_sort_value(risk_level: Any) -> tuple[int, str]:
     if risk_label in {"HIGH", "MEDIUM", "LOW"}:
         return (-RISK_LEVEL_ORDER[risk_label], risk_label)
     return (99, risk_label)
+
+
+def _latest_metric_value(
+    per_date: dict[str, dict[str, Any]],
+    included_dates: list[str],
+    metric_name: str,
+) -> Any:
+    for signal_date in reversed(included_dates):
+        value = per_date.get(signal_date, {}).get(metric_name)
+        if value is not None:
+            return value
+    return None
 
 
 def _load_structural_events(conn: sqlite3.Connection, run_row: sqlite3.Row, window_code: str) -> list[dict[str, Any]]:

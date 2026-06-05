@@ -6,6 +6,7 @@ from rawcandle.report_canonical_v3_migration import apply_report_canonical_v3_mi
 from rawcandle.reporting_v3_query import (
     ROLLING_ECOSYSTEM_WINDOW_CHANGE_ROW_LIMIT,
     _build_overheat_rotation_risk_progression_payload,
+    _build_subindustry_timing_persistence_payload,
     _build_ecosystem_window_change_payload,
     build_rolling2_report_query_data,
 )
@@ -441,6 +442,8 @@ def _build_fixture_db(db_path: str) -> None:
                 signal_date=signal_date,
             )
         for signal_date, metric_name, metric_value_text in (
+            ("2026-05-28", "group_timing_state", "NEUTRAL"),
+            ("2026-05-29", "group_timing_state", "EXIT_ZONE"),
             ("2026-05-28", "group_overheat_risk_level", "MEDIUM"),
             ("2026-05-29", "group_overheat_risk_level", "LOW"),
         ):
@@ -497,12 +500,12 @@ def test_query_returns_rolling2_structured_data_from_eco_facts(tmp_path) -> None
     assert data.window_summary["valid_signal_dates_count"] == 2
     assert data.window_summary["valid_signal_dates_included"] == ["2026-05-28", "2026-05-29"]
     assert data.window_summary["incomplete_window"] is False
-    assert data.ecosystem_window_change["rows_available"] == 9
-    assert data.ecosystem_window_change["rows_rendered"] == 9
+    assert data.ecosystem_window_change["rows_available"] == 10
+    assert data.ecosystem_window_change["rows_rendered"] == 10
     assert data.ecosystem_window_change["is_truncated"] is False
     rows = data.ecosystem_window_change["rows"]
     assert [row["entity_type"] for row in rows[:7]] == ["LAYER"] * 7
-    assert [row["entity_type"] for row in rows[7:]] == ["SUBINDUSTRY"] * 2
+    assert [row["entity_type"] for row in rows[7:]] == ["SUBINDUSTRY"] * 3
     row_lookup = {
         (row["entity_type"], row["entity_code"], row["metric_name"]): row
         for row in rows
@@ -536,6 +539,32 @@ def test_query_returns_rolling2_structured_data_from_eco_facts(tmp_path) -> None
         },
     ]
     assert data.overheat_rotation_risk_progression["risk_progression_rows"] == []
+    assert data.subindustry_timing_persistence == {
+        "rows": [
+            {
+                "entity_type": "SUBINDUSTRY",
+                "entity_code": "SEMIS",
+                "entity_name": "Semis",
+                "selected_dates_count": 2,
+                "observed_timing_dates_count": 2,
+                "buy_zone_days": 0,
+                "add_on_pullback_days": 0,
+                "trim_watch_days": 0,
+                "exit_zone_days": 1,
+                "neutral_days": 1,
+                "other_timing_days": 0,
+                "first_date": "2026-05-28",
+                "first_timing_state": "NEUTRAL",
+                "last_date": "2026-05-29",
+                "last_timing_state": "EXIT_ZONE",
+                "last_overheat_risk_level": "LOW",
+            }
+        ],
+        "rows_available": 1,
+        "rows_rendered": 1,
+        "is_truncated": False,
+        "selected_dates_count": 2,
+    }
 
     assert data.ecosystem_snapshot is not None
     assert data.ecosystem_snapshot["entity_code"] == "DATACENTER"
@@ -653,3 +682,27 @@ def test_overheat_rotation_risk_progression_truncates_deterministically() -> Non
     assert payload["is_truncated"] is True
     assert payload["risk_progression_rows"][0]["entity_code"] == "S000"
     assert payload["risk_progression_rows"][-1]["entity_code"] == "S099"
+
+
+def test_subindustry_timing_persistence_payload_truncates_deterministically() -> None:
+    rows = []
+    for index in range(130):
+        rows.append(
+            {
+                "entity_type": "SUBINDUSTRY",
+                "entity_code": f"S{index:03d}",
+                "entity_name": f"Subindustry {index:03d}",
+                "metric_name": "group_timing_state",
+                "signal_date": "2026-05-29",
+                "metric_value_num": None,
+                "metric_value_text": "EXIT_ZONE",
+            }
+        )
+
+    payload = _build_subindustry_timing_persistence_payload(rows, ["2026-05-29"])
+
+    assert payload["rows_available"] == 130
+    assert payload["rows_rendered"] == 100
+    assert payload["is_truncated"] is True
+    assert payload["rows"][0]["entity_code"] == "S000"
+    assert payload["rows"][-1]["entity_code"] == "S099"

@@ -72,6 +72,32 @@ def _sample_query_data(*, with_empty_events: bool = False) -> Rolling2ReportQuer
             "progression_rows_rendered": 1,
             "is_truncated": False,
         },
+        subindustry_timing_persistence={
+            "rows": [
+                {
+                    "entity_type": "SUBINDUSTRY",
+                    "entity_code": "SEMIS",
+                    "entity_name": "Semis",
+                    "selected_dates_count": 2,
+                    "observed_timing_dates_count": 2,
+                    "buy_zone_days": 0,
+                    "add_on_pullback_days": 0,
+                    "trim_watch_days": 0,
+                    "exit_zone_days": 1,
+                    "neutral_days": 1,
+                    "other_timing_days": 0,
+                    "first_date": "2026-05-29",
+                    "first_timing_state": "NEUTRAL",
+                    "last_date": "2026-05-30",
+                    "last_timing_state": "EXIT_ZONE",
+                    "last_overheat_risk_level": "HIGH",
+                }
+            ],
+            "rows_available": 1,
+            "rows_rendered": 1,
+            "is_truncated": False,
+            "selected_dates_count": 2,
+        },
         watchlist_summary={
             "counts": {
                 "active_watchlist_count": 1,
@@ -307,6 +333,10 @@ def test_renderer_returns_deterministic_rolling2_markdown_from_query_data_only()
     assert "No non-low or worsened overheat / rotation risk progression rows available from current V3 query data." not in markdown
     assert "## 5. Overheat / rotation risk progression\nNot available from current V3 query data in DB-V3-70." not in markdown
     assert "## 6. Subindustry timing persistence" in markdown
+    assert "subindustry | dates | buy_zone_days | add_on_pullback_days | trim_watch_days | exit_zone_days | neutral_days | other_days | first_state | last_state | last_overheat" in markdown
+    assert "SEMIS" in markdown
+    assert "2/2" in markdown
+    assert "## 6. Subindustry timing persistence\nNot available from current V3 query data in DB-V3-70." not in markdown
     assert "## 7. Subindustry improvement / deterioration" in markdown
     assert "Not available from current V3 query data in DB-V3-70." in markdown
     assert "## 8. Repeated breakout tickers" in markdown

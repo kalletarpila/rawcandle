@@ -6,6 +6,7 @@ from rawcandle.report_canonical_v3_migration import apply_report_canonical_v3_mi
 from rawcandle.reporting_v3_query import (
     ROLLING_ECOSYSTEM_WINDOW_CHANGE_ROW_LIMIT,
     _build_overheat_rotation_risk_progression_payload,
+    _build_subindustry_timing_persistence_payload,
     _build_ecosystem_window_change_payload,
     build_rolling30_report_query_data,
 )
@@ -526,6 +527,8 @@ def _build_fixture_db(db_path: str) -> None:
                 signal_date=signal_date,
             )
         for signal_date, metric_name, metric_value_text in (
+            ("2026-05-20", "group_timing_state", "BUY_ZONE"),
+            ("2026-05-29", "group_timing_state", "EXIT_ZONE"),
             ("2026-05-20", "group_overheat_risk_level", "MEDIUM"),
             ("2026-05-29", "group_overheat_risk_level", "LOW"),
         ):
@@ -610,12 +613,12 @@ def test_query_returns_rolling30_structured_data_from_eco_facts(tmp_path) -> Non
     assert data.window_summary["valid_signal_dates_count"] == 3
     assert data.window_summary["valid_signal_dates_included"] == ["2026-05-20", "2026-05-28", "2026-05-29"]
     assert data.window_summary["incomplete_window"] is True
-    assert data.ecosystem_window_change["rows_available"] == 9
-    assert data.ecosystem_window_change["rows_rendered"] == 9
+    assert data.ecosystem_window_change["rows_available"] == 10
+    assert data.ecosystem_window_change["rows_rendered"] == 10
     assert data.ecosystem_window_change["is_truncated"] is False
     rows = data.ecosystem_window_change["rows"]
     assert [row["entity_type"] for row in rows[:7]] == ["LAYER"] * 7
-    assert [row["entity_type"] for row in rows[7:]] == ["SUBINDUSTRY"] * 2
+    assert [row["entity_type"] for row in rows[7:]] == ["SUBINDUSTRY"] * 3
     row_lookup = {
         (row["entity_type"], row["entity_code"], row["metric_name"]): row
         for row in rows
@@ -681,6 +684,32 @@ def test_query_returns_rolling30_structured_data_from_eco_facts(tmp_path) -> Non
     assert data.overheat_rotation_risk_progression["progression_rows_available"] == 0
     assert data.overheat_rotation_risk_progression["progression_rows_rendered"] == 0
     assert data.overheat_rotation_risk_progression["is_truncated"] is False
+    assert data.subindustry_timing_persistence == {
+        "rows": [
+            {
+                "entity_type": "SUBINDUSTRY",
+                "entity_code": "SEMIS",
+                "entity_name": "Semis",
+                "selected_dates_count": 3,
+                "observed_timing_dates_count": 2,
+                "buy_zone_days": 1,
+                "add_on_pullback_days": 0,
+                "trim_watch_days": 0,
+                "exit_zone_days": 1,
+                "neutral_days": 0,
+                "other_timing_days": 0,
+                "first_date": "2026-05-20",
+                "first_timing_state": "BUY_ZONE",
+                "last_date": "2026-05-29",
+                "last_timing_state": "EXIT_ZONE",
+                "last_overheat_risk_level": "LOW",
+            }
+        ],
+        "rows_available": 1,
+        "rows_rendered": 1,
+        "is_truncated": False,
+        "selected_dates_count": 3,
+    }
 
     assert data.ecosystem_snapshot is not None
     assert data.ecosystem_snapshot["entity_code"] == "DATACENTER"
@@ -848,5 +877,43 @@ def test_overheat_rotation_risk_progression_payload_builds_worsened_rows_determi
             "risk_change": "WORSENED",
             "first_timing_state": "BUY_ZONE",
             "last_timing_state": "EXIT_ZONE",
+        }
+    ]
+
+
+def test_subindustry_timing_persistence_payload_maps_known_states_and_unknowns() -> None:
+    rows = [
+        {"entity_type": "SUBINDUSTRY", "entity_code": "A", "entity_name": "Alpha", "metric_name": "group_timing_state", "signal_date": "2026-05-01", "metric_value_num": None, "metric_value_text": "BUY_ZONE"},
+        {"entity_type": "SUBINDUSTRY", "entity_code": "A", "entity_name": "Alpha", "metric_name": "group_timing_state", "signal_date": "2026-05-02", "metric_value_num": None, "metric_value_text": "ADD_ON_PULLBACK"},
+        {"entity_type": "SUBINDUSTRY", "entity_code": "A", "entity_name": "Alpha", "metric_name": "group_timing_state", "signal_date": "2026-05-03", "metric_value_num": None, "metric_value_text": "TRIM_WATCH"},
+        {"entity_type": "SUBINDUSTRY", "entity_code": "A", "entity_name": "Alpha", "metric_name": "group_timing_state", "signal_date": "2026-05-04", "metric_value_num": None, "metric_value_text": "EXIT_ZONE"},
+        {"entity_type": "SUBINDUSTRY", "entity_code": "A", "entity_name": "Alpha", "metric_name": "group_timing_state", "signal_date": "2026-05-05", "metric_value_num": None, "metric_value_text": "NEUTRAL"},
+        {"entity_type": "SUBINDUSTRY", "entity_code": "A", "entity_name": "Alpha", "metric_name": "group_timing_state", "signal_date": "2026-05-06", "metric_value_num": None, "metric_value_text": "PULLBACK"},
+        {"entity_type": "SUBINDUSTRY", "entity_code": "A", "entity_name": "Alpha", "metric_name": "group_overheat_risk_level", "signal_date": "2026-05-06", "metric_value_num": None, "metric_value_text": "MEDIUM"},
+    ]
+
+    payload = _build_subindustry_timing_persistence_payload(
+        rows,
+        ["2026-05-01", "2026-05-02", "2026-05-03", "2026-05-04", "2026-05-05", "2026-05-06"],
+    )
+
+    assert payload["rows"] == [
+        {
+            "entity_type": "SUBINDUSTRY",
+            "entity_code": "A",
+            "entity_name": "Alpha",
+            "selected_dates_count": 6,
+            "observed_timing_dates_count": 6,
+            "buy_zone_days": 1,
+            "add_on_pullback_days": 1,
+            "trim_watch_days": 1,
+            "exit_zone_days": 1,
+            "neutral_days": 1,
+            "other_timing_days": 1,
+            "first_date": "2026-05-01",
+            "first_timing_state": "BUY_ZONE",
+            "last_date": "2026-05-06",
+            "last_timing_state": "PULLBACK",
+            "last_overheat_risk_level": "MEDIUM",
         }
     ]

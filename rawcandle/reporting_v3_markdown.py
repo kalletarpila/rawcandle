@@ -25,6 +25,7 @@ def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
     window_summary = _get_field(query_data, "window_summary") or {}
     ecosystem_window_change = _get_field(query_data, "ecosystem_window_change") or {}
     overheat_rotation_risk_progression = _get_field(query_data, "overheat_rotation_risk_progression") or {}
+    subindustry_timing_persistence = _get_field(query_data, "subindustry_timing_persistence") or {}
     watchlist_summary = _get_field(query_data, "watchlist_summary") or {}
     quality_summary = _get_field(query_data, "quality_summary") or {}
     ecosystem_snapshot = _get_field(query_data, "ecosystem_snapshot")
@@ -49,6 +50,7 @@ def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
             window_summary=window_summary,
             ecosystem_window_change=ecosystem_window_change,
             overheat_rotation_risk_progression=overheat_rotation_risk_progression,
+            subindustry_timing_persistence=subindustry_timing_persistence,
             watchlist_summary=watchlist_summary,
             quality_summary=quality_summary,
             ecosystem_snapshot=ecosystem_snapshot,
@@ -93,6 +95,7 @@ def _render_rolling_legacy_shell(
     window_summary: dict[str, Any],
     ecosystem_window_change: dict[str, Any],
     overheat_rotation_risk_progression: dict[str, Any],
+    subindustry_timing_persistence: dict[str, Any],
     watchlist_summary: dict[str, Any],
     quality_summary: dict[str, Any],
     ecosystem_snapshot: Any,
@@ -339,8 +342,53 @@ def _render_rolling_legacy_shell(
     lines.extend(
         [
             "## 6. Subindustry timing persistence",
-            "Not available from current V3 query data in DB-V3-70.",
-            "",
+        ]
+    )
+    lines.extend(
+        _render_table_or_none(
+            headers=[
+                "subindustry",
+                "dates",
+                "buy_zone_days",
+                "add_on_pullback_days",
+                "trim_watch_days",
+                "exit_zone_days",
+                "neutral_days",
+                "other_days",
+                "first_state",
+                "last_state",
+                "last_overheat",
+            ],
+            rows=[
+                [
+                    row.get("entity_code"),
+                    f"{row.get('observed_timing_dates_count')}/{row.get('selected_dates_count')}",
+                    row.get("buy_zone_days"),
+                    row.get("add_on_pullback_days"),
+                    row.get("trim_watch_days"),
+                    row.get("exit_zone_days"),
+                    row.get("neutral_days"),
+                    row.get("other_timing_days"),
+                    row.get("first_timing_state"),
+                    row.get("last_timing_state"),
+                    row.get("last_overheat_risk_level"),
+                ]
+                for row in list(subindustry_timing_persistence.get("rows") or [])
+            ],
+            empty_message="No subindustry timing persistence rows available from current V3 query data.",
+        )
+    )
+    if subindustry_timing_persistence.get("is_truncated"):
+        lines.extend(
+            [
+                f"Showing {subindustry_timing_persistence.get('rows_rendered')} of {subindustry_timing_persistence.get('rows_available')} subindustry timing persistence rows.",
+                "",
+            ]
+        )
+    else:
+        lines.append("")
+    lines.extend(
+        [
             "## 7. Subindustry improvement / deterioration",
             "Not available from current V3 query data in DB-V3-70.",
             "",
