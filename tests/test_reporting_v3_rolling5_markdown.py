@@ -19,24 +19,35 @@ def _sample_query_data(*, with_empty_events: bool = False) -> Rolling5ReportQuer
             "valid_signal_dates_included": ["2026-05-26", "2026-05-29", "2026-05-30"],
             "incomplete_window": True,
         },
-        ecosystem_window_change=[
-            {
-                "metric_name": "return_5d",
-                "first_date": "2026-05-26",
-                "first_value": -2.0,
-                "last_date": "2026-05-30",
-                "last_value": 1.0,
-                "change": 3.0,
-            },
-            {
-                "metric_name": "group_overheat_risk_level",
-                "first_date": "2026-05-26",
-                "first_value": "MEDIUM",
-                "last_date": "2026-05-30",
-                "last_value": "LOW",
-                "change": "n/a",
-            },
-        ],
+        ecosystem_window_change={
+            "rows": [
+                {
+                    "entity_type": "LAYER",
+                    "entity_code": "INFRA",
+                    "entity_name": "Infrastructure",
+                    "metric_name": "return_5d",
+                    "first_date": "2026-05-26",
+                    "first_value": -2.0,
+                    "last_date": "2026-05-30",
+                    "last_value": 1.0,
+                    "change": 3.0,
+                },
+                {
+                    "entity_type": "SUBINDUSTRY",
+                    "entity_code": "SEMIS",
+                    "entity_name": "Semis",
+                    "metric_name": "group_overheat_risk_level",
+                    "first_date": "2026-05-26",
+                    "first_value": "MEDIUM",
+                    "last_date": "2026-05-30",
+                    "last_value": "LOW",
+                    "change": "n/a",
+                },
+            ],
+            "rows_available": 2,
+            "rows_rendered": 2,
+            "is_truncated": False,
+        },
         watchlist_summary={
             "counts": {
                 "active_watchlist_count": 1,
@@ -254,6 +265,9 @@ def test_renderer_returns_deterministic_rolling5_markdown_from_query_data_only()
     assert "last_price_data_status" in markdown
     assert "Full legacy watchlist read-model is not available from current V3 query data in DB-V3-70." not in markdown
     assert "## 4. Ecosystem window change" in markdown
+    assert "entity_type | entity | metric | first_date | first_value | last_date | last_value | change" in markdown
+    assert "LAYER" in markdown
+    assert "SUBINDUSTRY" in markdown
     assert "return_5d" in markdown
     assert "group_overheat_risk_level" in markdown
     assert "No ecosystem window change rows available from current V3 query data." not in markdown

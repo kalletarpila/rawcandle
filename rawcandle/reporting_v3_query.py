@@ -135,6 +135,7 @@ ROLLING_ECOSYSTEM_WINDOW_CHANGE_METRIC_NAMES = (
     "group_timing_state",
     "group_overheat_risk_level",
 )
+ROLLING_ECOSYSTEM_WINDOW_CHANGE_ROW_LIMIT = 100
 DAILY_GROUP_METRIC_NAMES = (
     "pct_above_ema20",
     "return_5d",
@@ -173,7 +174,7 @@ class Rolling30ReportHeader:
 class Rolling30ReportQueryData:
     report_header: Rolling30ReportHeader
     window_summary: dict[str, Any]
-    ecosystem_window_change: list[dict[str, Any]]
+    ecosystem_window_change: dict[str, Any]
     watchlist_summary: dict[str, Any]
     quality_summary: dict[str, Any]
     ecosystem_snapshot: dict[str, Any] | None
@@ -193,7 +194,7 @@ class Rolling30ReportQueryData:
 class Rolling5ReportQueryData:
     report_header: Rolling30ReportHeader
     window_summary: dict[str, Any]
-    ecosystem_window_change: list[dict[str, Any]]
+    ecosystem_window_change: dict[str, Any]
     watchlist_summary: dict[str, Any]
     quality_summary: dict[str, Any]
     ecosystem_snapshot: dict[str, Any] | None
@@ -212,7 +213,7 @@ class Rolling5ReportQueryData:
 class Rolling2ReportQueryData:
     report_header: Rolling30ReportHeader
     window_summary: dict[str, Any]
-    ecosystem_window_change: list[dict[str, Any]]
+    ecosystem_window_change: dict[str, Any]
     watchlist_summary: dict[str, Any]
     quality_summary: dict[str, Any]
     ecosystem_snapshot: dict[str, Any] | None
@@ -1368,10 +1369,13 @@ def _load_rolling_ecosystem_window_change(
     run_row: sqlite3.Row,
     window_code: str,
     window_summary: dict[str, Any],
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     included_dates = list(window_summary.get("valid_signal_dates_included") or [])
     if not included_dates:
-        return []
+        return _empty_ecosystem_window_change()
+
+    metric_name_placeholders = ", ".join("?" for _ in ROLLING_ECOSYSTEM_WINDOW_CHANGE_METRIC_NAMES)
+    date_placeholders = ", ".join("?" for _ in included_dates)
 
     ecosystem_entity_row = conn.execute(
         """
@@ -1384,45 +1388,93 @@ def _load_rolling_ecosystem_window_change(
         """,
         (int(run_row["ecosystem_id"]),),
     ).fetchone()
-    if ecosystem_entity_row is None:
-        return []
+    ecosystem_rows: list[sqlite3.Row] = []
+    if ecosystem_entity_row is not None:
+        ecosystem_rows = conn.execute(
+            f"""
+            SELECT
+                e.entity_type,
+                e.entity_code,
+                e.entity_name,
+                m.metric_name,
+                m.signal_date,
+                m.metric_value_num,
+                m.metric_value_text
+            FROM eco_entity_metric_value m
+            JOIN eco_entity e ON e.entity_id = m.entity_id
+            WHERE m.run_id = ?
+              AND m.taxonomy_version_id = ?
+              AND m.window_code = ?
+              AND m.entity_id = ?
+              AND m.metric_name IN ({metric_name_placeholders})
+              AND m.signal_date IN ({date_placeholders})
+            ORDER BY e.entity_type, e.entity_code, m.metric_name, m.signal_date
+            """,
+            (
+                str(run_row["run_id"]),
+                int(run_row["taxonomy_version_id"]),
+                window_code,
+                int(ecosystem_entity_row["entity_id"]),
+                *ROLLING_ECOSYSTEM_WINDOW_CHANGE_METRIC_NAMES,
+                *included_dates,
+            ),
+        ).fetchall()
+    if ecosystem_rows:
+        return _build_ecosystem_window_change_payload(ecosystem_rows)
 
-    metric_name_placeholders = ", ".join("?" for _ in ROLLING_ECOSYSTEM_WINDOW_CHANGE_METRIC_NAMES)
-    date_placeholders = ", ".join("?" for _ in included_dates)
-    rows = conn.execute(
+    group_rows = conn.execute(
         f"""
         SELECT
-            metric_name,
-            signal_date,
-            metric_value_num,
-            metric_value_text
-        FROM eco_entity_metric_value
-        WHERE run_id = ?
-          AND taxonomy_version_id = ?
-          AND window_code = ?
-          AND entity_id = ?
-          AND metric_name IN ({metric_name_placeholders})
-          AND signal_date IN ({date_placeholders})
-        ORDER BY metric_name, signal_date
+            e.entity_type,
+            e.entity_code,
+            e.entity_name,
+            m.metric_name,
+            m.signal_date,
+            m.metric_value_num,
+            m.metric_value_text
+        FROM eco_entity_metric_value m
+        JOIN eco_entity e ON e.entity_id = m.entity_id
+        WHERE m.run_id = ?
+          AND m.taxonomy_version_id = ?
+          AND m.window_code = ?
+          AND e.entity_type IN ('LAYER', 'SUBINDUSTRY')
+          AND m.metric_name IN ({metric_name_placeholders})
+          AND m.signal_date IN ({date_placeholders})
+        ORDER BY e.entity_type, e.entity_code, m.metric_name, m.signal_date
         """,
         (
             str(run_row["run_id"]),
             int(run_row["taxonomy_version_id"]),
             window_code,
-            int(ecosystem_entity_row["entity_id"]),
             *ROLLING_ECOSYSTEM_WINDOW_CHANGE_METRIC_NAMES,
             *included_dates,
         ),
     ).fetchall()
-    rows_by_metric: dict[str, list[sqlite3.Row]] = {}
-    for row in rows:
-        rows_by_metric.setdefault(str(row["metric_name"]), []).append(row)
+    if not group_rows:
+        return _empty_ecosystem_window_change()
+    return _build_ecosystem_window_change_payload(group_rows)
 
-    output: list[dict[str, Any]] = []
-    for metric_name in ROLLING_ECOSYSTEM_WINDOW_CHANGE_METRIC_NAMES:
-        metric_rows = rows_by_metric.get(metric_name, [])
-        if not metric_rows:
-            continue
+
+def _build_ecosystem_window_change_payload(rows: list[sqlite3.Row]) -> dict[str, Any]:
+    rows_by_key: dict[tuple[str, str, str], list[sqlite3.Row]] = {}
+    for row in rows:
+        key = (
+            str(row["entity_type"]),
+            str(row["entity_code"]),
+            str(row["metric_name"]),
+        )
+        rows_by_key.setdefault(key, []).append(row)
+
+    output_rows: list[dict[str, Any]] = []
+    for entity_type, entity_code, metric_name in sorted(
+        rows_by_key,
+        key=lambda item: (
+            ENTITY_TYPE_ORDER.get(item[0], 99),
+            item[1],
+            item[2],
+        ),
+    ):
+        metric_rows = rows_by_key[(entity_type, entity_code, metric_name)]
         first_row = metric_rows[0]
         last_row = metric_rows[-1]
         first_value = _metric_row_value(first_row)
@@ -1431,8 +1483,11 @@ def _load_rolling_ecosystem_window_change(
             change: Any = float(last_value) - float(first_value)
         else:
             change = "n/a"
-        output.append(
+        output_rows.append(
             {
+                "entity_type": entity_type,
+                "entity_code": entity_code,
+                "entity_name": str(first_row["entity_name"]),
                 "metric_name": metric_name,
                 "first_date": str(first_row["signal_date"]),
                 "first_value": first_value,
@@ -1441,7 +1496,24 @@ def _load_rolling_ecosystem_window_change(
                 "change": change,
             }
         )
-    return output
+
+    rows_available = len(output_rows)
+    rendered_rows = output_rows[:ROLLING_ECOSYSTEM_WINDOW_CHANGE_ROW_LIMIT]
+    return {
+        "rows": rendered_rows,
+        "rows_available": rows_available,
+        "rows_rendered": len(rendered_rows),
+        "is_truncated": rows_available > len(rendered_rows),
+    }
+
+
+def _empty_ecosystem_window_change() -> dict[str, Any]:
+    return {
+        "rows": [],
+        "rows_available": 0,
+        "rows_rendered": 0,
+        "is_truncated": False,
+    }
 
 
 def _metric_row_value(row: sqlite3.Row) -> Any:

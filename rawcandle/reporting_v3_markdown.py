@@ -23,7 +23,7 @@ def render_daily_markdown_report(query_data: Any) -> str:
 def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
     report_header = _get_field(query_data, "report_header")
     window_summary = _get_field(query_data, "window_summary") or {}
-    ecosystem_window_change = list(_get_field(query_data, "ecosystem_window_change") or [])
+    ecosystem_window_change = _get_field(query_data, "ecosystem_window_change") or {}
     watchlist_summary = _get_field(query_data, "watchlist_summary") or {}
     quality_summary = _get_field(query_data, "quality_summary") or {}
     ecosystem_snapshot = _get_field(query_data, "ecosystem_snapshot")
@@ -248,9 +248,11 @@ def _render_rolling_legacy_shell(
     )
     lines.extend(
         _render_table_or_none(
-            headers=["metric", "first_date", "first_value", "last_date", "last_value", "change"],
+            headers=["entity_type", "entity", "metric", "first_date", "first_value", "last_date", "last_value", "change"],
             rows=[
                 [
+                    row.get("entity_type"),
+                    row.get("entity_code"),
                     row.get("metric_name"),
                     row.get("first_date"),
                     row.get("first_value"),
@@ -258,11 +260,16 @@ def _render_rolling_legacy_shell(
                     row.get("last_value"),
                     row.get("change"),
                 ]
-                for row in ecosystem_window_change
+                for row in list(ecosystem_window_change.get("rows") or [])
             ],
             empty_message="No ecosystem window change rows available from current V3 query data.",
         )
     )
+    if ecosystem_window_change.get("is_truncated"):
+        lines.append(
+            f"Showing first {ecosystem_window_change.get('rows_rendered')} of {ecosystem_window_change.get('rows_available')} ecosystem window change rows."
+        )
+        lines.append("")
     lines.extend(
         [
             "## 5. Overheat / rotation risk progression",

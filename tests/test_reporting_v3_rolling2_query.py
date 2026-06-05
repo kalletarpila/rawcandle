@@ -423,30 +423,27 @@ def _build_fixture_db(db_path: str) -> None:
         ):
             _insert_metric_num(conn, ecosystem_id=ecosystem_id, taxonomy_version_id=taxonomy_version_id, entity_id=layer_id, metric_name=metric_name, metric_value_num=metric_value)
         for signal_date, metric_name, metric_value_num in (
-            ("2026-05-28", "pct_above_ema20", 48.0),
-            ("2026-05-29", "pct_above_ema20", 40.0),
-            ("2026-05-28", "return_5d", -3.0),
-            ("2026-05-29", "return_5d", -6.0),
-            ("2026-05-29", "trend_breadth", 25.0),
+            ("2026-05-28", "weakness_breadth", 68.0),
+            ("2026-05-29", "weakness_breadth", 75.0),
         ):
             _insert_metric_num(
                 conn,
                 ecosystem_id=ecosystem_id,
                 taxonomy_version_id=taxonomy_version_id,
-                entity_id=ecosystem_entity_id,
+                entity_id=subindustry_id,
                 metric_name=metric_name,
                 metric_value_num=metric_value_num,
                 signal_date=signal_date,
             )
         for signal_date, metric_name, metric_value_text in (
-            ("2026-05-28", "group_timing_state", "WATCH_PRESSURE"),
-            ("2026-05-29", "group_timing_state", "EMERGENCY_SELL_PRESSURE"),
+            ("2026-05-28", "group_overheat_risk_level", "MEDIUM"),
+            ("2026-05-29", "group_overheat_risk_level", "LOW"),
         ):
             _insert_metric_text(
                 conn,
                 ecosystem_id=ecosystem_id,
                 taxonomy_version_id=taxonomy_version_id,
-                entity_id=ecosystem_entity_id,
+                entity_id=subindustry_id,
                 metric_name=metric_name,
                 metric_value_text=metric_value_text,
                 signal_date=signal_date,
@@ -495,18 +492,24 @@ def test_query_returns_rolling2_structured_data_from_eco_facts(tmp_path) -> None
     assert data.window_summary["valid_signal_dates_count"] == 2
     assert data.window_summary["valid_signal_dates_included"] == ["2026-05-28", "2026-05-29"]
     assert data.window_summary["incomplete_window"] is False
-    assert [row["metric_name"] for row in data.ecosystem_window_change] == [
-        "pct_above_ema20",
-        "return_5d",
-        "trend_breadth",
-        "group_timing_state",
-    ]
-    assert data.ecosystem_window_change[0]["change"] == -8.0
-    assert data.ecosystem_window_change[1]["change"] == -3.0
-    assert data.ecosystem_window_change[2]["change"] == 0.0
-    assert data.ecosystem_window_change[3]["first_value"] == "WATCH_PRESSURE"
-    assert data.ecosystem_window_change[3]["last_value"] == "EMERGENCY_SELL_PRESSURE"
-    assert data.ecosystem_window_change[3]["change"] == "n/a"
+    assert data.ecosystem_window_change["rows_available"] == 9
+    assert data.ecosystem_window_change["rows_rendered"] == 9
+    assert data.ecosystem_window_change["is_truncated"] is False
+    rows = data.ecosystem_window_change["rows"]
+    assert [row["entity_type"] for row in rows[:7]] == ["LAYER"] * 7
+    assert [row["entity_type"] for row in rows[7:]] == ["SUBINDUSTRY"] * 2
+    row_lookup = {
+        (row["entity_type"], row["entity_code"], row["metric_name"]): row
+        for row in rows
+    }
+    assert row_lookup[("LAYER", "INFRA", "group_overheat_risk_level")]["change"] == "n/a"
+    assert row_lookup[("LAYER", "INFRA", "pct_above_ema20")]["change"] == 0.0
+    assert row_lookup[("LAYER", "INFRA", "return_5d")]["change"] == 0.0
+    assert row_lookup[("LAYER", "INFRA", "trend_breadth")]["change"] == 0.0
+    assert row_lookup[("SUBINDUSTRY", "SEMIS", "group_overheat_risk_level")]["first_value"] == "MEDIUM"
+    assert row_lookup[("SUBINDUSTRY", "SEMIS", "group_overheat_risk_level")]["last_value"] == "LOW"
+    assert row_lookup[("SUBINDUSTRY", "SEMIS", "group_overheat_risk_level")]["change"] == "n/a"
+    assert row_lookup[("SUBINDUSTRY", "SEMIS", "weakness_breadth")]["change"] == 7.0
 
     assert data.ecosystem_snapshot is not None
     assert data.ecosystem_snapshot["entity_code"] == "DATACENTER"
