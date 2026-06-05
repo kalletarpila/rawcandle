@@ -11,6 +11,66 @@ def _sample_query_data(*, with_empty_events: bool = False) -> DailyReportQueryDa
             signal_date="2026-05-30",
             window_code="daily",
         ),
+        watchlist_summary={
+            "counts": {
+                "active_watchlist_count": 2,
+                "in_ecosystem_count": 2,
+                "missing_price_data_count": 0,
+                "breakout_count": 1,
+                "pullback_count": 0,
+                "exit_risk_count": 1,
+                "high_exit_risk_count": 1,
+                "medium_exit_risk_count": 0,
+            },
+            "rows": [
+                {
+                    "ticker": "NXPI",
+                    "watchlist_status": "HIGH_EXIT_RISK",
+                    "in_datacenter_ecosystem": True,
+                    "primary_layer": "INFRA",
+                    "primary_subindustry": "SEMIS",
+                    "close": None,
+                    "return_5d": 1.0,
+                    "return_10d": 2.0,
+                    "return_20d": 3.0,
+                    "distance_to_ema20_pct": -0.5,
+                    "ticker_trend_state": "DOWN",
+                    "breakout_signal": False,
+                    "pullback_signal": None,
+                    "exit_risk_signal": True,
+                    "exit_risk_severity": "HIGH",
+                    "exit_reason": "BEARISH_DAILY_SIGNAL",
+                    "subindustry_timing_state": None,
+                    "subindustry_overheat_risk_level": None,
+                    "layer_timing_state": "BUY_ZONE",
+                    "layer_overheat_risk_level": "LOW",
+                    "price_data_status": "OK",
+                },
+                {
+                    "ticker": "NVDA",
+                    "watchlist_status": "BREAKOUT",
+                    "in_datacenter_ecosystem": True,
+                    "primary_layer": "INFRA",
+                    "primary_subindustry": "SEMIS",
+                    "close": None,
+                    "return_5d": 4.0,
+                    "return_10d": 6.0,
+                    "return_20d": 8.0,
+                    "distance_to_ema20_pct": 1.5,
+                    "ticker_trend_state": "UP",
+                    "breakout_signal": True,
+                    "pullback_signal": None,
+                    "exit_risk_signal": False,
+                    "exit_risk_severity": None,
+                    "exit_reason": None,
+                    "subindustry_timing_state": None,
+                    "subindustry_overheat_risk_level": None,
+                    "layer_timing_state": "BUY_ZONE",
+                    "layer_overheat_risk_level": "LOW",
+                    "price_data_status": "OK",
+                },
+            ],
+        },
         quality_summary={
             "rows": [
                 {
@@ -224,7 +284,14 @@ def test_renderer_returns_deterministic_daily_markdown_from_query_data_only() ->
     assert "## Ecosystem snapshot" in markdown
     assert "## Group overview" in markdown
     assert "## Daily trigger classifications" in markdown
-    assert "## Watchlist" in markdown
+    assert "## Watchlist Summary" in markdown
+    assert "active_watchlist_count" in markdown
+    assert "watchlist_status" in markdown
+    assert "primary_layer" in markdown
+    assert "primary_subindustry" in markdown
+    assert "distance_to_ema20_pct" in markdown
+    assert "breakout_signal" in markdown
+    assert "exit_risk_signal" in markdown
     assert "## Ticker metrics" in markdown
     assert "## Group metrics" in markdown
     assert "## Events and signals" in markdown

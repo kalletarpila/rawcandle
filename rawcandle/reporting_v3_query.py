@@ -218,6 +218,7 @@ class Rolling2ReportQueryData:
 @dataclass(frozen=True)
 class DailyReportQueryData:
     report_header: Rolling30ReportHeader
+    watchlist_summary: dict[str, Any]
     quality_summary: dict[str, Any]
     ecosystem_snapshot: dict[str, Any] | None
     group_snapshots: list[dict[str, Any]]
@@ -369,6 +370,16 @@ def _build_daily_report_query_data(
 
         return DailyReportQueryData(
             report_header=report_header,
+            watchlist_summary=_load_daily_watchlist_summary(
+                conn,
+                run_row,
+                watchlist_members,
+                ticker_metrics,
+                group_metrics,
+                ticker_snapshots,
+                daily_rows,
+                signal_observations,
+            ),
             quality_summary={
                 "rows": _load_quality_summary_rows(conn, run_row, DAILY_WINDOW_CODE),
                 "coverage_counts": _load_coverage_counts(conn, run_row, DAILY_WINDOW_CODE),
@@ -1098,6 +1109,170 @@ def _number_or_zero(value: Any) -> float:
     if value is None:
         return 0.0
     return float(value)
+
+
+def _load_daily_watchlist_summary(
+    conn: sqlite3.Connection,
+    run_row: sqlite3.Row,
+    watchlist_members: list[dict[str, Any]],
+    ticker_metrics: dict[str, dict[str, Any]],
+    group_metrics: list[dict[str, Any]],
+    ticker_snapshots: list[dict[str, Any]],
+    daily_classifications: list[dict[str, Any]],
+    signal_observations: list[dict[str, Any]],
+) -> dict[str, Any]:
+    entity_ids = [int(row["entity_id"]) for row in watchlist_members if row.get("entity_id") is not None]
+    group_metric_lookup = {
+        (str(row["entity_type"]), str(row["entity_code"])): row
+        for row in group_metrics
+    }
+    coverage_lookup = {
+        int(row["entity_id"]): str(row["coverage_status"])
+        for row in conn.execute(
+            """
+            SELECT entity_id, coverage_status
+            FROM eco_entity_coverage
+            WHERE run_id = ?
+              AND signal_date = ?
+              AND taxonomy_version_id = ?
+              AND window_code = ?
+            """,
+            (
+                str(run_row["run_id"]),
+                str(run_row["signal_date"]),
+                int(run_row["taxonomy_version_id"]),
+                DAILY_WINDOW_CODE,
+            ),
+        ).fetchall()
+    }
+    ticker_snapshot_lookup = {
+        str(row["entity_code"]): row
+        for row in ticker_snapshots
+    }
+    classification_lookup = {
+        str(row["ticker"]): row
+        for row in daily_classifications
+    }
+    taxonomy_rows = conn.execute(
+        f"""
+        SELECT
+            child.entity_id AS ticker_entity_id,
+            layer.entity_code AS primary_layer,
+            subindustry.entity_code AS primary_subindustry
+        FROM eco_taxonomy_entity_relation rel_sub
+        JOIN eco_taxonomy_entity_relation rel_layer
+          ON rel_layer.child_entity_id = rel_sub.parent_entity_id
+         AND rel_layer.taxonomy_version_id = rel_sub.taxonomy_version_id
+         AND rel_layer.ecosystem_id = rel_sub.ecosystem_id
+        JOIN eco_entity child ON child.entity_id = rel_sub.child_entity_id
+        JOIN eco_entity subindustry ON subindustry.entity_id = rel_sub.parent_entity_id
+        JOIN eco_entity layer ON layer.entity_id = rel_layer.parent_entity_id
+        WHERE rel_sub.taxonomy_version_id = ?
+          AND rel_sub.ecosystem_id = ?
+          AND child.entity_id IN ({", ".join("?" for _ in entity_ids)})
+        ORDER BY child.entity_code, layer.entity_code, subindustry.entity_code
+        """,
+        (
+            int(run_row["taxonomy_version_id"]),
+            int(run_row["ecosystem_id"]),
+            *entity_ids,
+        ),
+    ).fetchall() if entity_ids else []
+    taxonomy_lookup: dict[int, dict[str, str]] = {}
+    for row in taxonomy_rows:
+        ticker_entity_id = int(row["ticker_entity_id"])
+        taxonomy_lookup.setdefault(
+            ticker_entity_id,
+            {
+                "primary_layer": str(row["primary_layer"]),
+                "primary_subindustry": str(row["primary_subindustry"]),
+            },
+        )
+    signal_rows_by_ticker: dict[str, list[dict[str, Any]]] = {}
+    for row in signal_observations:
+        signal_rows_by_ticker.setdefault(str(row["entity_code"]), []).append(row)
+    rows: list[dict[str, Any]] = []
+    for member in watchlist_members:
+        entity_id = int(member["entity_id"])
+        ticker = str(member["ticker"])
+        metric_row = ticker_metrics.get(ticker, {})
+        classification_row = classification_lookup.get(ticker, {})
+        classification_state = str(classification_row.get("classification_state") or "")
+        signals = signal_rows_by_ticker.get(ticker, [])
+        breakout_signal = classification_state == "BUY_WATCH"
+        pullback_signal = None
+        exit_risk_signal = classification_state in {"SELL_TRIGGER", "STOP_TRIGGER", "EXIT_WATCH"}
+        if classification_state in {"SELL_TRIGGER", "STOP_TRIGGER"}:
+            exit_risk_severity = "HIGH"
+        elif classification_state == "EXIT_WATCH":
+            exit_risk_severity = "MEDIUM"
+        else:
+            exit_risk_severity = None
+        if exit_risk_signal and exit_risk_severity == "HIGH":
+            watchlist_status = "HIGH_EXIT_RISK"
+        elif exit_risk_signal:
+            watchlist_status = "EXIT_RISK"
+        elif pullback_signal:
+            watchlist_status = "PULLBACK"
+        elif breakout_signal:
+            watchlist_status = "BREAKOUT"
+        else:
+            watchlist_status = "WATCH"
+        taxonomy_info = taxonomy_lookup.get(entity_id, {})
+        subindustry_code = taxonomy_info.get("primary_subindustry")
+        layer_code = taxonomy_info.get("primary_layer")
+        subindustry_metrics = group_metric_lookup.get(("SUBINDUSTRY", str(subindustry_code))) if subindustry_code else None
+        layer_metrics = group_metric_lookup.get(("LAYER", str(layer_code))) if layer_code else None
+        row = {
+            "ticker": ticker,
+            "watchlist_status": watchlist_status,
+            "in_datacenter_ecosystem": entity_id in taxonomy_lookup,
+            "primary_layer": taxonomy_info.get("primary_layer"),
+            "primary_subindustry": taxonomy_info.get("primary_subindustry"),
+            "close": None,
+            "return_5d": metric_row.get("return_5d"),
+            "return_10d": metric_row.get("return_10d"),
+            "return_20d": metric_row.get("return_20d"),
+            "distance_to_ema20_pct": metric_row.get("distance_to_ema20_pct"),
+            "ticker_trend_state": ticker_snapshot_lookup.get(ticker, {}).get("trend_state"),
+            "breakout_signal": breakout_signal,
+            "pullback_signal": pullback_signal,
+            "exit_risk_signal": exit_risk_signal,
+            "exit_risk_severity": exit_risk_severity,
+            "exit_reason": classification_row.get("blocking_reason") or classification_row.get("primary_reason"),
+            "subindustry_timing_state": subindustry_metrics.get("group_timing_state") if subindustry_metrics else None,
+            "subindustry_overheat_risk_level": subindustry_metrics.get("group_overheat_risk_level") if subindustry_metrics else None,
+            "layer_timing_state": layer_metrics.get("group_timing_state") if layer_metrics else None,
+            "layer_overheat_risk_level": layer_metrics.get("group_overheat_risk_level") if layer_metrics else None,
+            "price_data_status": coverage_lookup.get(entity_id) or ticker_snapshot_lookup.get(ticker, {}).get("quality_status"),
+        }
+        rows.append(row)
+    severity_order = {
+        "HIGH_EXIT_RISK": 0,
+        "EXIT_RISK": 1,
+        "PULLBACK": 2,
+        "BREAKOUT": 3,
+        "WATCH": 4,
+    }
+    rows.sort(
+        key=lambda row: (
+            severity_order.get(str(row["watchlist_status"]), 99),
+            str(row["ticker"]),
+        )
+    )
+    return {
+        "counts": {
+            "active_watchlist_count": len(rows),
+            "in_ecosystem_count": sum(1 for row in rows if row["in_datacenter_ecosystem"]),
+            "missing_price_data_count": sum(1 for row in rows if row.get("price_data_status") not in (None, "OK")),
+            "breakout_count": sum(1 for row in rows if row.get("breakout_signal") is True),
+            "pullback_count": sum(1 for row in rows if row.get("pullback_signal") is True),
+            "exit_risk_count": sum(1 for row in rows if row.get("exit_risk_signal") is True),
+            "high_exit_risk_count": sum(1 for row in rows if row.get("exit_risk_severity") == "HIGH"),
+            "medium_exit_risk_count": sum(1 for row in rows if row.get("exit_risk_severity") == "MEDIUM"),
+        },
+        "rows": rows,
+    }
 
 
 def _load_rolling_window_summary(

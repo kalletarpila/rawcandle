@@ -524,6 +524,21 @@ def test_query_returns_daily_structured_data_from_eco_facts(tmp_path) -> None:
     assert data.group_metrics[0]["entity_code"] == "INFRA"
     assert data.group_metrics[0]["group_current_status"] == "BUY_ZONE"
     assert data.group_metrics[0]["freshness_latest_structure_class"] == "STALE"
+    assert data.watchlist_summary["counts"]["active_watchlist_count"] == 2
+    assert data.watchlist_summary["counts"]["in_ecosystem_count"] == 2
+    assert data.watchlist_summary["counts"]["missing_price_data_count"] == 0
+    assert data.watchlist_summary["counts"]["breakout_count"] == 1
+    assert data.watchlist_summary["counts"]["pullback_count"] == 0
+    assert data.watchlist_summary["counts"]["exit_risk_count"] == 1
+    assert data.watchlist_summary["counts"]["high_exit_risk_count"] == 1
+    assert data.watchlist_summary["counts"]["medium_exit_risk_count"] == 0
+    assert [row["ticker"] for row in data.watchlist_summary["rows"]] == ["NXPI", "NVDA"]
+    assert data.watchlist_summary["rows"][0]["watchlist_status"] == "HIGH_EXIT_RISK"
+    assert data.watchlist_summary["rows"][0]["exit_risk_signal"] is True
+    assert data.watchlist_summary["rows"][0]["primary_layer"] == "INFRA"
+    assert data.watchlist_summary["rows"][0]["primary_subindustry"] == "SEMIS"
+    assert data.watchlist_summary["rows"][1]["watchlist_status"] == "BREAKOUT"
+    assert data.watchlist_summary["rows"][1]["breakout_signal"] is True
 
     assert len(data.watchlist_members) == 2
     assert [row["ticker"] for row in data.watchlist_members] == ["NVDA", "NXPI"]

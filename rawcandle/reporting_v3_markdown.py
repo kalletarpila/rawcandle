@@ -428,7 +428,97 @@ def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
     )
     lines.extend(
         [
-            "## Watchlist",
+            "## Watchlist Summary",
+            "## Ticker metrics",
+            *_render_table_or_none(
+                headers=ticker_metric_headers,
+                rows=ticker_metric_rows,
+                empty_message="No ticker metric rows.",
+            ),
+            "## Group metrics",
+            *_render_table_or_none(
+                headers=group_metric_headers,
+                rows=group_metric_rows,
+                empty_message="No group metric rows.",
+            ),
+            "## Events and signals",
+        ]
+    )
+    if window_label == "daily" and watchlist_summary:
+        watchlist_index = lines.index("## Watchlist Summary")
+        lines[watchlist_index:watchlist_index + 1] = [
+            "## Watchlist Summary",
+            *_render_table_or_none(
+                headers=["field", "value"],
+                rows=[
+                    ["active_watchlist_count", watchlist_summary.get("counts", {}).get("active_watchlist_count")],
+                    ["in_ecosystem_count", watchlist_summary.get("counts", {}).get("in_ecosystem_count")],
+                    ["missing_price_data_count", watchlist_summary.get("counts", {}).get("missing_price_data_count")],
+                    ["breakout_count", watchlist_summary.get("counts", {}).get("breakout_count")],
+                    ["pullback_count", watchlist_summary.get("counts", {}).get("pullback_count")],
+                    ["exit_risk_count", watchlist_summary.get("counts", {}).get("exit_risk_count")],
+                    ["high_exit_risk_count", watchlist_summary.get("counts", {}).get("high_exit_risk_count")],
+                    ["medium_exit_risk_count", watchlist_summary.get("counts", {}).get("medium_exit_risk_count")],
+                ],
+                empty_message="No active watchlist rows available from current V3 query data.",
+            ),
+            *_render_table_or_none(
+                headers=[
+                    "ticker",
+                    "watchlist_status",
+                    "in_datacenter_ecosystem",
+                    "primary_layer",
+                    "primary_subindustry",
+                    "close",
+                    "return_5d",
+                    "return_10d",
+                    "return_20d",
+                    "distance_to_ema20_pct",
+                    "ticker_trend_state",
+                    "breakout_signal",
+                    "pullback_signal",
+                    "exit_risk_signal",
+                    "exit_risk_severity",
+                    "exit_reason",
+                    "subindustry_timing_state",
+                    "subindustry_overheat_risk_level",
+                    "layer_timing_state",
+                    "layer_overheat_risk_level",
+                    "price_data_status",
+                ],
+                rows=[
+                    [
+                        row.get("ticker"),
+                        row.get("watchlist_status"),
+                        row.get("in_datacenter_ecosystem"),
+                        row.get("primary_layer"),
+                        row.get("primary_subindustry"),
+                        row.get("close"),
+                        row.get("return_5d"),
+                        row.get("return_10d"),
+                        row.get("return_20d"),
+                        row.get("distance_to_ema20_pct"),
+                        row.get("ticker_trend_state"),
+                        row.get("breakout_signal"),
+                        row.get("pullback_signal"),
+                        row.get("exit_risk_signal"),
+                        row.get("exit_risk_severity"),
+                        row.get("exit_reason"),
+                        row.get("subindustry_timing_state"),
+                        row.get("subindustry_overheat_risk_level"),
+                        row.get("layer_timing_state"),
+                        row.get("layer_overheat_risk_level"),
+                        row.get("price_data_status"),
+                    ]
+                    for row in watchlist_summary.get("rows", [])
+                ],
+                empty_message="No active watchlist rows available from current V3 query data.",
+            ),
+        ]
+    else:
+        watchlist_index = lines.index("## Watchlist Summary")
+        lines[watchlist_index:watchlist_index + 1] = [
+            "## Watchlist Summary",
             *_render_table_or_none(
                 headers=[
                     "watchlist_code",
@@ -455,21 +545,7 @@ def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
                 ],
                 empty_message="No watchlist rows.",
             ),
-            "## Ticker metrics",
-            *_render_table_or_none(
-                headers=ticker_metric_headers,
-                rows=ticker_metric_rows,
-                empty_message="No ticker metric rows.",
-            ),
-            "## Group metrics",
-            *_render_table_or_none(
-                headers=group_metric_headers,
-                rows=group_metric_rows,
-                empty_message="No group metric rows.",
-            ),
-            "## Events and signals",
         ]
-    )
     lines.extend(_render_events_and_signals(structural_events, signal_observations, window_label=window_label))
     if window_label == "daily":
         lines.extend(
