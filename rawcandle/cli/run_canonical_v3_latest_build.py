@@ -19,6 +19,9 @@ from rawcandle.report_canonical_v3_entity_event_builder import (
 from rawcandle.report_canonical_v3_group_event_builder import (
     build_canonical_v3_group_structure_events,
 )
+from rawcandle.report_canonical_v3_group_historical_metric_builder import (
+    build_canonical_v3_group_historical_metrics,
+)
 from rawcandle.report_canonical_v3_group_status_replacement_builder import (
     build_canonical_v3_group_status_from_group_swing,
 )
@@ -192,6 +195,7 @@ def _builder_sequence() -> list[tuple[str, Callable[..., dict[str, object]], dic
         ("build_canonical_v3_group_window_status_from_group_swing", build_canonical_v3_group_window_status_from_group_swing, {}),
         ("build_canonical_v3_ticker_window_metrics", build_canonical_v3_ticker_window_metrics, {}),
         ("build_canonical_v3_group_window_metrics", build_canonical_v3_group_window_metrics, {}),
+        ("build_canonical_v3_group_historical_metrics", build_canonical_v3_group_historical_metrics, {}),
         ("build_canonical_v3_ticker_freshness_from_signal_daily", build_canonical_v3_ticker_freshness_from_signal_daily, {}),
         ("build_canonical_v3_daily_trigger_classifications", build_canonical_v3_daily_trigger_classifications, {}),
         ("build_canonical_v3_rolling2_sell_pressure_classifications", build_canonical_v3_rolling2_sell_pressure_classifications, {}),

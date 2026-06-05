@@ -397,11 +397,22 @@ def test_cli_includes_allowed_build_sequence_and_no_execution_notes(tmp_path, ca
     captured = capsys.readouterr()
     assert result == 0
     assert "1 | build_canonical_v3_base_run | eco_report_run, eco_entity_coverage, eco_quality_summary |" in captured.out
-    assert "12 | build_canonical_v3_window_snapshots | eco_entity_window_snapshot |" in captured.out
-    assert "15 | build_canonical_v3_signal_relevance | eco_signal_observation, eco_signal_relevance |" in captured.out
+    assert "7 | build_canonical_v3_group_historical_metrics | eco_entity_metric_value | dc_group_swing_signal_daily, dc_group_synthetic_ohlc_daily |" in captured.out
+    assert "13 | build_canonical_v3_window_snapshots | eco_entity_window_snapshot |" in captured.out
+    assert "16 | build_canonical_v3_signal_relevance | eco_signal_observation, eco_signal_relevance |" in captured.out
     assert "technical_relevance_run_id=DATACENTER_TECH_REL_DC_TAXONOMY_FULL_V1_2026_06_04" in captured.out
     assert "technical_relevance_V3_BASE_DATACENTER_2026_06_04_DC_TAXONOMY_FULL_V1" not in captured.out
     assert "not executed" in captured.out
+    assert captured.out.index(
+        "6 | build_canonical_v3_group_window_metrics | eco_entity_metric_value |"
+    ) < captured.out.index(
+        "7 | build_canonical_v3_group_historical_metrics | eco_entity_metric_value |"
+    )
+    assert captured.out.index(
+        "7 | build_canonical_v3_group_historical_metrics | eco_entity_metric_value |"
+    ) < captured.out.index(
+        "8 | build_canonical_v3_ticker_freshness_from_signal_daily | eco_entity_metric_value, eco_signal_observation |"
+    )
 
 
 def test_cli_uses_clear_placeholder_when_no_deterministic_technical_relevance_run_id_exists(tmp_path, capsys) -> None:
