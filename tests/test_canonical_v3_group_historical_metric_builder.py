@@ -145,7 +145,7 @@ def _create_group_source_tables(conn: sqlite3.Connection) -> None:
             taxonomy_version TEXT NOT NULL,
             group_type TEXT NOT NULL,
             group_name TEXT NOT NULL,
-            group_timing_state TEXT,
+            timing_state TEXT,
             overheat_risk_level TEXT,
             pct_above_ema20 REAL,
             trend_breadth REAL,
@@ -226,7 +226,7 @@ def _insert_group_swing_rows(conn: sqlite3.Connection) -> None:
         """
         INSERT INTO dc_group_swing_signal_daily (
             signal_date, taxonomy_version, group_type, group_name,
-            group_timing_state, overheat_risk_level, pct_above_ema20,
+            timing_state, overheat_risk_level, pct_above_ema20,
             trend_breadth, weakness_breadth, return_5d, return_10d, run_id
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
@@ -525,6 +525,22 @@ def test_builder_inserts_historical_rows_for_selected_rolling_windows(tmp_path) 
     sample_text = next(row for row in rows if str(row["metric_name"]) == "group_timing_state")
     assert sample_text["metric_value_num"] is None
     assert sample_text["metric_value_text"] is not None
+    assert sample_text["source_run_id"] == GROUP_SOURCE_RUN_ID
+
+    sample_overheat = next(row for row in rows if str(row["metric_name"]) == "group_overheat_risk_level")
+    assert sample_overheat["metric_value_num"] is None
+    assert sample_overheat["metric_value_text"] is not None
+    assert sample_overheat["source_run_id"] == GROUP_SOURCE_RUN_ID
+
+    text_rows = [
+        row for row in rows
+        if str(row["metric_name"]) in {"group_timing_state", "group_overheat_risk_level"}
+    ]
+    assert {str(row["entity_type"]) for row in text_rows} == {"LAYER", "SUBINDUSTRY"}
+    assert {str(row["window_code"]) for row in text_rows} == set(TARGET_WINDOWS)
+    assert sorted({str(row["signal_date"]) for row in text_rows if str(row["window_code"]) == "rolling2"}) == ROLLING2_DATES
+    assert sorted({str(row["signal_date"]) for row in text_rows if str(row["window_code"]) == "rolling5"}) == ROLLING5_DATES
+    assert sorted({str(row["signal_date"]) for row in text_rows if str(row["window_code"]) == "rolling30"}) == ROLLING30_DATES[-30:]
 
     sample_synth = next(row for row in rows if str(row["metric_name"]) == "synthetic_close")
     assert sample_synth["metric_value_num"] is not None
@@ -602,8 +618,25 @@ def test_builder_refuses_duplicates_without_replace_existing_and_replaces_only_o
                 (RUN_ID,),
             ).fetchone()[0]
         )
+        duplicated_text_rows = int(
+            conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM (
+                    SELECT window_code, signal_date, entity_id, metric_name, COUNT(*) AS duplicate_count
+                    FROM eco_entity_metric_value
+                    WHERE run_id = ?
+                      AND metric_name IN ('group_timing_state', 'group_overheat_risk_level')
+                    GROUP BY window_code, signal_date, entity_id, metric_name
+                    HAVING COUNT(*) > 1
+                )
+                """,
+                (RUN_ID,),
+            ).fetchone()[0]
+        )
     finally:
         conn.close()
 
     assert replaced_old_rows == 0
     assert preserved_unrelated_rows == 1
+    assert duplicated_text_rows == 0

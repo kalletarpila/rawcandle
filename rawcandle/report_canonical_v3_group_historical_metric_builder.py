@@ -24,17 +24,17 @@ ENTITY_TYPE_BY_GROUP_TYPE = {
     "subindustry": "SUBINDUSTRY",
 }
 GROUP_SWING_METRICS = (
-    ("group_timing_state", "group_timing_state", "text"),
-    ("group_overheat_risk_level", "overheat_risk_level", "text"),
-    ("pct_above_ema20", "pct_above_ema20", "numeric"),
-    ("trend_breadth", "trend_breadth", "numeric"),
-    ("weakness_breadth", "weakness_breadth", "numeric"),
-    ("return_5d", "return_5d", "numeric"),
-    ("return_10d", "return_10d", "numeric"),
-    ("return_20d", "return_20d", "numeric"),
+    ("group_timing_state", ("timing_state", "group_timing_state"), "text"),
+    ("group_overheat_risk_level", ("overheat_risk_level", "group_overheat_risk_level"), "text"),
+    ("pct_above_ema20", ("pct_above_ema20",), "numeric"),
+    ("trend_breadth", ("trend_breadth",), "numeric"),
+    ("weakness_breadth", ("weakness_breadth",), "numeric"),
+    ("return_5d", ("return_5d",), "numeric"),
+    ("return_10d", ("return_10d",), "numeric"),
+    ("return_20d", ("return_20d",), "numeric"),
 )
 GROUP_SYNTHETIC_METRICS = (
-    ("synthetic_close", "synthetic_close", "numeric"),
+    ("synthetic_close", ("synthetic_close",), "numeric"),
 )
 TARGET_METRIC_NAMES = tuple(
     metric_name for metric_name, _, _ in (*GROUP_SWING_METRICS, *GROUP_SYNTHETIC_METRICS)
@@ -242,9 +242,10 @@ def _load_group_swing_history_rows(
 
     skipped_missing_columns: list[str] = []
     available_metric_specs: list[tuple[str, str, str]] = []
-    for metric_name, source_column, value_kind in GROUP_SWING_METRICS:
-        if source_column in columns:
-            available_metric_specs.append((metric_name, source_column, value_kind))
+    for metric_name, source_columns, value_kind in GROUP_SWING_METRICS:
+        resolved_column = next((name for name in source_columns if name in columns), None)
+        if resolved_column is not None:
+            available_metric_specs.append((metric_name, resolved_column, value_kind))
         else:
             skipped_missing_columns.append(metric_name)
     if not selected_dates or not available_metric_specs:
@@ -286,9 +287,10 @@ def _load_group_synthetic_history_rows(
 
     skipped_missing_columns: list[str] = []
     available_metric_specs: list[tuple[str, str, str]] = []
-    for metric_name, source_column, value_kind in GROUP_SYNTHETIC_METRICS:
-        if source_column in columns:
-            available_metric_specs.append((metric_name, source_column, value_kind))
+    for metric_name, source_columns, value_kind in GROUP_SYNTHETIC_METRICS:
+        resolved_column = next((name for name in source_columns if name in columns), None)
+        if resolved_column is not None:
+            available_metric_specs.append((metric_name, resolved_column, value_kind))
         else:
             skipped_missing_columns.append(metric_name)
     if not selected_dates or not available_metric_specs:
@@ -571,7 +573,7 @@ def build_canonical_v3_group_historical_metrics(
                         unresolved_group_rows += 1
                         continue
                     for metric_name, source_column, value_kind in metric_specs:
-                        if source_column not in row.keys():
+                        if metric_name not in row.keys():
                             continue
                         metric_row = _build_metric_row(
                             run_row=run_row,
@@ -580,7 +582,7 @@ def build_canonical_v3_group_historical_metrics(
                             entity_id=int(entity_row["entity_id"]),
                             metric_name=metric_name,
                             value_kind=value_kind,
-                            source_value=row[source_column],
+                            source_value=row[metric_name],
                             source_run_id=_normalize_text(row["source_run_id"]),
                             metric_unit_by_name=metric_unit_by_name,
                         )
