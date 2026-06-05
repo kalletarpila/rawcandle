@@ -182,17 +182,25 @@ def test_renderer_returns_deterministic_rolling2_markdown_from_query_data_only()
     markdown = render_rolling2_markdown_report(query_data)
 
     assert isinstance(markdown, str)
-    assert "# Datacenter rolling2 report prototype" in markdown
-    assert "## Metadata" in markdown
-    assert "## Quality and coverage" in markdown
-    assert "## Ecosystem snapshot" in markdown
-    assert "## Group overview" in markdown
-    assert "## Rolling2 sell pressure classifications" in markdown
-    assert "## Watchlist" in markdown
-    assert "## Ticker metrics" in markdown
-    assert "## Group metrics" in markdown
-    assert "## Events and signals" in markdown
-    assert "## Metadata and limitations" in markdown
+    assert "# Datacenter Rolling Swing Report" in markdown
+    assert "## 1. Title and run metadata" in markdown
+    assert "## 2. Window summary" in markdown
+    assert "## Watchlist Summary" in markdown
+    assert "## 4. Ecosystem window change" in markdown
+    assert "## 5. Overheat / rotation risk progression" in markdown
+    assert "## 6. Subindustry timing persistence" in markdown
+    assert "## 7. Subindustry improvement / deterioration" in markdown
+    assert "## 8. Repeated breakout tickers" in markdown
+    assert "## 9. Repeated pullback tickers" in markdown
+    assert "## 10. Repeated exit-risk tickers" in markdown
+    assert "## Rolling 2 Sell Pressure" in markdown
+    assert "## 15. Data quality over the window" in markdown
+    assert "## 16. Missing / incomplete inputs summary" in markdown
+    assert "## V3 metadata / limitations appendix" in markdown
+    assert "## Metadata" not in markdown
+    assert "## Quality and coverage" not in markdown
+    assert "## Ecosystem snapshot" not in markdown
+    assert "## Group overview" not in markdown
     assert "run-2" in markdown
     assert "WATCHLIST_ONLY" in markdown
     assert "rolling2_classification_source: eco_classification_decision" in markdown
@@ -204,6 +212,8 @@ def test_renderer_returns_deterministic_rolling2_markdown_from_query_data_only()
     assert "No such table" not in markdown
     assert "RISK\\|STACKED_EXIT_SIGNALS" in markdown
     assert "AI\\|SEMIS" in markdown
+    assert markdown.index("## Watchlist Summary") < markdown.index("## Rolling 2 Sell Pressure")
+    assert markdown.index("## V3 metadata / limitations appendix") > markdown.index("## 16. Missing / incomplete inputs summary")
 
 
 def test_renderer_handles_empty_rolling2_events_and_signals_gracefully() -> None:

@@ -39,6 +39,27 @@ def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
     classification_source_key = f"{window_label}_classification_source"
     snapshot_source_key = f"{window_label}_snapshot_classification_source_used"
     event_window_mode_key = f"{window_label}_event_window_mode"
+    if window_label != "daily":
+        return _render_rolling_legacy_shell(
+            report_header=report_header,
+            quality_summary=quality_summary,
+            ecosystem_snapshot=ecosystem_snapshot,
+            group_snapshots=group_snapshots,
+            watchlist_members=watchlist_members,
+            ticker_metrics=ticker_metrics,
+            group_metrics=group_metrics,
+            structural_events=structural_events,
+            signal_observations=signal_observations,
+            metadata=metadata,
+            rolling2_sell_pressure_classifications=rolling2_sell_pressure_classifications,
+            rolling30_buy_classifications=rolling30_buy_classifications,
+            rolling30_exit_classifications=rolling30_exit_classifications,
+            rolling5_pullback_classifications=rolling5_pullback_classifications,
+            classification_source_key=classification_source_key,
+            snapshot_source_key=snapshot_source_key,
+            event_window_mode_key=event_window_mode_key,
+            window_label=window_label,
+        )
 
     lines = [
         f"# Datacenter {window_label} report prototype",
@@ -474,6 +495,496 @@ def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
     else:
         lines.append("- none")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_rolling_legacy_shell(
+    *,
+    report_header: Any,
+    quality_summary: dict[str, Any],
+    ecosystem_snapshot: Any,
+    group_snapshots: list[dict[str, Any]],
+    watchlist_members: list[dict[str, Any]],
+    ticker_metrics: list[dict[str, Any]],
+    group_metrics: list[dict[str, Any]],
+    structural_events: list[dict[str, Any]],
+    signal_observations: list[dict[str, Any]],
+    metadata: dict[str, Any],
+    rolling2_sell_pressure_classifications: list[dict[str, Any]],
+    rolling30_buy_classifications: list[dict[str, Any]],
+    rolling30_exit_classifications: list[dict[str, Any]],
+    rolling5_pullback_classifications: list[dict[str, Any]],
+    classification_source_key: str,
+    snapshot_source_key: str,
+    event_window_mode_key: str,
+    window_label: str,
+) -> str:
+    ticker_metric_rows = [
+        [
+            row.get("ticker"),
+            row.get("entity_name"),
+            row.get("breakout_days"),
+            row.get("pullback_days"),
+            row.get("exit_risk_days"),
+            row.get("high_exit_risk_days"),
+            row.get("medium_exit_risk_days"),
+            row.get("valid_signal_dates"),
+            row.get("distance_to_ema20_pct"),
+        ]
+        for row in ticker_metrics
+    ]
+    group_metric_rows = [
+        [
+            row.get("entity_type"),
+            row.get("entity_code"),
+            row.get("entity_name"),
+            row.get("pct_above_ema20"),
+            row.get("return_5d"),
+            row.get("synthetic_close"),
+            row.get("trend_breadth"),
+            row.get("weakness_breadth"),
+            row.get("valid_signal_dates"),
+            row.get("group_current_status"),
+            row.get("group_window_status"),
+            row.get("group_status_change"),
+            row.get("group_timing_state"),
+            row.get("group_timing_reason"),
+            row.get("group_overheat_risk_level"),
+        ]
+        for row in group_metrics
+    ]
+    lines = [
+        "# Datacenter Rolling Swing Report",
+        "",
+        "## 1. Title and run metadata",
+        f"- ecosystem_code: {_value(_get_field(report_header, 'ecosystem_code'))}",
+        f"- taxonomy_version_code: {_value(_get_field(report_header, 'taxonomy_version_code'))}",
+        f"- signal_date: {_value(_get_field(report_header, 'signal_date'))}",
+        f"- run_id: {_value(_get_field(report_header, 'run_id'))}",
+        f"- window_code: {_value(_get_field(report_header, 'window_code'))}",
+        "",
+        "## 2. Window summary",
+        f"- window_code: {_value(_get_field(report_header, 'window_code'))}",
+        f"- signal_date: {_value(_get_field(report_header, 'signal_date'))}",
+        "- Window start/end and valid selected dates: Not available from current V3 query data in DB-V3-70.",
+        "- Incomplete window flag: Not available from current V3 query data in DB-V3-70.",
+        "",
+        "## Watchlist Summary",
+    ]
+    lines.extend(
+        _render_table_or_none(
+            headers=[
+                "watchlist_code",
+                "watchlist_name",
+                "ticker",
+                "entity_name",
+                "member_role",
+                "member_status",
+                "effective_from",
+                "effective_to",
+            ],
+            rows=[
+                [
+                    row.get("watchlist_code"),
+                    row.get("watchlist_name"),
+                    row.get("ticker"),
+                    row.get("entity_name"),
+                    row.get("member_role"),
+                    row.get("member_status"),
+                    row.get("effective_from"),
+                    row.get("effective_to"),
+                ]
+                for row in watchlist_members
+            ],
+            empty_message="No watchlist rows.",
+        )
+    )
+    lines.extend(
+        [
+            "- Full legacy watchlist read-model is not available from current V3 query data in DB-V3-70.",
+            "## 4. Ecosystem window change",
+            "Not available from current V3 query data in DB-V3-70.",
+            "",
+            "## 5. Overheat / rotation risk progression",
+        ]
+    )
+    if group_metric_rows:
+        lines.extend(
+            _render_table_or_none(
+                headers=[
+                    "entity_type",
+                    "entity_code",
+                    "entity_name",
+                    "pct_above_ema20",
+                    "return_5d",
+                    "trend_breadth",
+                    "weakness_breadth",
+                    "group_current_status",
+                    "group_window_status",
+                    "group_status_change",
+                    "group_timing_state",
+                    "group_overheat_risk_level",
+                ],
+                rows=[
+                    [
+                        row.get("entity_type"),
+                        row.get("entity_code"),
+                        row.get("entity_name"),
+                        row.get("pct_above_ema20"),
+                        row.get("return_5d"),
+                        row.get("trend_breadth"),
+                        row.get("weakness_breadth"),
+                        row.get("group_current_status"),
+                        row.get("group_window_status"),
+                        row.get("group_status_change"),
+                        row.get("group_timing_state"),
+                        row.get("group_overheat_risk_level"),
+                    ]
+                    for row in group_metrics
+                ],
+                empty_message="Not available from current V3 query data in DB-V3-70.",
+            )
+        )
+        lines.append("- Historical progression across dates is not available from current V3 query data in DB-V3-70.")
+    else:
+        lines.append("Not available from current V3 query data in DB-V3-70.")
+    lines.extend(
+        [
+            "## 6. Subindustry timing persistence",
+            "Not available from current V3 query data in DB-V3-70.",
+            "",
+            "## 7. Subindustry improvement / deterioration",
+            "Not available from current V3 query data in DB-V3-70.",
+            "",
+            "## 8. Repeated breakout tickers",
+        ]
+    )
+    lines.extend(
+        _render_repeated_ticker_section(
+            ticker_metrics=ticker_metrics,
+            metric_name="breakout_days",
+            headers=[
+                "ticker",
+                "entity_name",
+                "breakout_days",
+                "pullback_days",
+                "exit_risk_days",
+                "valid_signal_dates",
+                "distance_to_ema20_pct",
+            ],
+            section_key="breakout_days",
+        )
+    )
+    lines.append("## 9. Repeated pullback tickers")
+    lines.extend(
+        _render_repeated_ticker_section(
+            ticker_metrics=ticker_metrics,
+            metric_name="pullback_days",
+            headers=[
+                "ticker",
+                "entity_name",
+                "pullback_days",
+                "breakout_days",
+                "exit_risk_days",
+                "valid_signal_dates",
+                "distance_to_ema20_pct",
+            ],
+            section_key="pullback_days",
+        )
+    )
+    lines.append("## 10. Repeated exit-risk tickers")
+    lines.extend(
+        _render_repeated_ticker_section(
+            ticker_metrics=ticker_metrics,
+            metric_name="exit_risk_days",
+            headers=[
+                "ticker",
+                "entity_name",
+                "exit_risk_days",
+                "high_exit_risk_days",
+                "medium_exit_risk_days",
+                "pullback_days",
+                "distance_to_ema20_pct",
+            ],
+            section_key="exit_risk_days",
+        )
+    )
+    lines.extend(
+        _render_rolling_classification_sections(
+            window_label=window_label,
+            rolling2_sell_pressure_classifications=rolling2_sell_pressure_classifications,
+            rolling30_buy_classifications=rolling30_buy_classifications,
+            rolling30_exit_classifications=rolling30_exit_classifications,
+            rolling5_pullback_classifications=rolling5_pullback_classifications,
+        )
+    )
+    lines.extend(
+        [
+            "## 15. Data quality over the window",
+        ]
+    )
+    lines.extend(_render_quality_and_coverage(quality_summary))
+    lines.extend(
+        [
+            "## 16. Missing / incomplete inputs summary",
+            "- Current V3 query data provides combined quality and coverage summaries; a separate legacy missing-input read-model is not available in DB-V3-70.",
+            "",
+            "## V3 metadata / limitations appendix",
+            f"- {classification_source_key}: {_value(metadata.get(classification_source_key))}",
+            f"- {snapshot_source_key}: {_value(metadata.get(snapshot_source_key))}",
+            f"- {event_window_mode_key}: {_value(metadata.get(event_window_mode_key))}",
+            f"- ranking_fields_mostly_null: {_value(metadata.get('ranking_fields_mostly_null'))}",
+            "",
+        ]
+    )
+    lines.extend(
+        _render_table_or_none(
+            headers=["entity_code", "snapshot_status", "trend_state", "summary_state", "quality_status"],
+            rows=[
+                [
+                    _get_field(ecosystem_snapshot, "entity_code"),
+                    _get_field(ecosystem_snapshot, "snapshot_status"),
+                    _get_field(ecosystem_snapshot, "trend_state"),
+                    _get_field(ecosystem_snapshot, "summary_state"),
+                    _get_field(ecosystem_snapshot, "quality_status"),
+                ]
+            ]
+            if ecosystem_snapshot
+            else [],
+            empty_message="No ecosystem snapshot rows.",
+        )
+    )
+    lines.extend(
+        _render_table_or_none(
+            headers=[
+                "entity_type",
+                "entity_code",
+                "entity_name",
+                "timing_state",
+                "trend_state",
+                "summary_state",
+                "freshness_status",
+                "quality_status",
+            ],
+            rows=[
+                [
+                    row.get("entity_type"),
+                    row.get("entity_code"),
+                    row.get("entity_name"),
+                    row.get("timing_state"),
+                    row.get("trend_state"),
+                    row.get("summary_state"),
+                    row.get("freshness_status"),
+                    row.get("quality_status"),
+                ]
+                for row in group_snapshots
+            ],
+            empty_message="No group snapshot rows.",
+        )
+    )
+    lines.extend(
+        _render_table_or_none(
+            headers=[
+                "ticker",
+                "entity_name",
+                "breakout_days",
+                "pullback_days",
+                "exit_risk_days",
+                "high_exit_risk_days",
+                "medium_exit_risk_days",
+                "valid_signal_dates",
+                "distance_to_ema20_pct",
+            ],
+            rows=ticker_metric_rows,
+            empty_message="No ticker metric rows.",
+        )
+    )
+    lines.extend(
+        _render_table_or_none(
+            headers=[
+                "entity_type",
+                "entity_code",
+                "entity_name",
+                "pct_above_ema20",
+                "return_5d",
+                "synthetic_close",
+                "trend_breadth",
+                "weakness_breadth",
+                "valid_signal_dates",
+                "group_current_status",
+                "group_window_status",
+                "group_status_change",
+                "group_timing_state",
+                "group_timing_reason",
+                "group_overheat_risk_level",
+            ],
+            rows=group_metric_rows,
+            empty_message="No group metric rows.",
+        )
+    )
+    lines.extend(_render_events_and_signals(structural_events, signal_observations, window_label=window_label))
+    limitations = list(metadata.get("limitations") or [])
+    if limitations:
+        lines.extend(f"- {_escape(str(item))}" for item in limitations)
+    else:
+        lines.append("- none")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_repeated_ticker_section(
+    *,
+    ticker_metrics: list[dict[str, Any]],
+    metric_name: str,
+    headers: list[str],
+    section_key: str,
+) -> list[str]:
+    filtered_rows = []
+    for row in ticker_metrics:
+        value = row.get(metric_name)
+        if value is not None and value != 0:
+            if section_key == "breakout_days":
+                filtered_rows.append(
+                    [
+                        row.get("ticker"),
+                        row.get("entity_name"),
+                        row.get("breakout_days"),
+                        row.get("pullback_days"),
+                        row.get("exit_risk_days"),
+                        row.get("valid_signal_dates"),
+                        row.get("distance_to_ema20_pct"),
+                    ]
+                )
+            elif section_key == "pullback_days":
+                filtered_rows.append(
+                    [
+                        row.get("ticker"),
+                        row.get("entity_name"),
+                        row.get("pullback_days"),
+                        row.get("breakout_days"),
+                        row.get("exit_risk_days"),
+                        row.get("valid_signal_dates"),
+                        row.get("distance_to_ema20_pct"),
+                    ]
+                )
+            else:
+                filtered_rows.append(
+                    [
+                        row.get("ticker"),
+                        row.get("entity_name"),
+                        row.get("exit_risk_days"),
+                        row.get("high_exit_risk_days"),
+                        row.get("medium_exit_risk_days"),
+                        row.get("pullback_days"),
+                        row.get("distance_to_ema20_pct"),
+                    ]
+                )
+    if not filtered_rows:
+        return ["Not available from current V3 query data in DB-V3-70.", ""]
+    lines = _render_table_or_none(headers=headers, rows=filtered_rows, empty_message="Not available from current V3 query data in DB-V3-70.")
+    lines.append("")
+    return lines
+
+
+def _render_rolling_classification_sections(
+    *,
+    window_label: str,
+    rolling2_sell_pressure_classifications: list[dict[str, Any]],
+    rolling30_buy_classifications: list[dict[str, Any]],
+    rolling30_exit_classifications: list[dict[str, Any]],
+    rolling5_pullback_classifications: list[dict[str, Any]],
+) -> list[str]:
+    if window_label == "rolling30":
+        lines = [
+            "## Rolling 30 Buy Filter",
+            f"- row_count: {len(rolling30_buy_classifications)}",
+        ]
+        lines.extend(_render_state_counts(rolling30_buy_classifications))
+        lines.extend(
+            _render_table_or_none(
+                headers=["ticker", "classification_state", "primary_reason", "blocking_reason", "decision_status"],
+                rows=[
+                    [
+                        row.get("ticker"),
+                        row.get("classification_state"),
+                        row.get("primary_reason"),
+                        row.get("blocking_reason"),
+                        row.get("decision_status"),
+                    ]
+                    for row in rolling30_buy_classifications
+                ],
+                empty_message="No rolling30 buy classification rows.",
+            )
+        )
+        lines.extend(
+            [
+                "## Rolling 30 Exit Prefilter",
+                f"- row_count: {len(rolling30_exit_classifications)}",
+            ]
+        )
+        lines.extend(_render_state_counts(rolling30_exit_classifications))
+        lines.extend(
+            _render_table_or_none(
+                headers=["ticker", "classification_state", "primary_reason", "risk_reason", "decision_status"],
+                rows=[
+                    [
+                        row.get("ticker"),
+                        row.get("classification_state"),
+                        row.get("primary_reason"),
+                        row.get("risk_reason"),
+                        row.get("decision_status"),
+                    ]
+                    for row in rolling30_exit_classifications
+                ],
+                empty_message="No rolling30 exit classification rows.",
+            )
+        )
+        return lines
+    if window_label == "rolling5":
+        lines = [
+            "## Rolling 5 Pullback Alerts",
+            f"- row_count: {len(rolling5_pullback_classifications)}",
+        ]
+        lines.extend(_render_state_counts(rolling5_pullback_classifications))
+        lines.extend(
+            _render_table_or_none(
+                headers=["ticker", "classification_state", "primary_reason", "blocking_reason", "next_action", "decision_status"],
+                rows=[
+                    [
+                        row.get("ticker"),
+                        row.get("classification_state"),
+                        row.get("primary_reason"),
+                        row.get("blocking_reason"),
+                        row.get("next_action"),
+                        row.get("decision_status"),
+                    ]
+                    for row in rolling5_pullback_classifications
+                ],
+                empty_message="No rolling5 pullback classification rows.",
+            )
+        )
+        return lines
+    lines = [
+        "## Rolling 2 Sell Pressure",
+        f"- row_count: {len(rolling2_sell_pressure_classifications)}",
+    ]
+    lines.extend(_render_state_counts(rolling2_sell_pressure_classifications))
+    lines.extend(
+        _render_table_or_none(
+            headers=["ticker", "classification_state", "primary_reason", "risk_reason", "next_action", "decision_status"],
+            rows=[
+                [
+                    row.get("ticker"),
+                    row.get("classification_state"),
+                    row.get("primary_reason"),
+                    row.get("risk_reason"),
+                    row.get("next_action"),
+                    row.get("decision_status"),
+                ]
+                for row in rolling2_sell_pressure_classifications
+            ],
+            empty_message="No rolling2 sell pressure classification rows.",
+        )
+    )
+    return lines
 
 
 def _render_quality_and_coverage(quality_summary: dict[str, Any]) -> list[str]:
