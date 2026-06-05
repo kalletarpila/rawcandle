@@ -278,12 +278,32 @@ def test_renderer_returns_deterministic_daily_markdown_from_query_data_only() ->
     markdown = render_daily_markdown_report(query_data)
 
     assert isinstance(markdown, str)
-    assert "# Datacenter daily report prototype" in markdown
-    assert "## Metadata" in markdown
-    assert "## Quality and coverage" in markdown
-    assert "## Ecosystem snapshot" in markdown
-    assert "## Group overview" in markdown
-    assert "## Daily trigger classifications" in markdown
+    expected_headings = [
+        "# Datacenter Daily Swing Signal Report",
+        "## 1. Title and run metadata",
+        "## Watchlist Summary",
+        "## 3. Dashboard",
+        "## 4. Rotation Risk / Overheat Index",
+        "## 5. Subindustry Timing States",
+        "## 6. Buy-Zone Subindustries",
+        "## 7. Add-On Pullback Subindustries",
+        "## 8. Trim/Watch Subindustries",
+        "## 9. Exit-Zone Subindustries",
+        "## 10. Synthetic OHLC Structure Summary",
+        "## 11. Group Structure Breaks / Resets",
+        "## 12. Breakout Ticker Scanner",
+        "## 13. Pullback Ticker Scanner",
+        "## 14. Exit-Risk Ticker Scanner",
+        "## 15. Daily Triggers",
+        "## 16. Swing MA Break Status",
+        "## 17. Swing Signal Freshness",
+        "## 18. Data Quality",
+        "## 19. Missing / Incomplete Inputs Summary",
+        "## 20. Technical Relevance Context",
+        "## V3 metadata / limitations appendix",
+    ]
+    heading_positions = [markdown.index(heading) for heading in expected_headings]
+    assert heading_positions == sorted(heading_positions)
     assert "## Watchlist Summary" in markdown
     assert "active_watchlist_count" in markdown
     assert "watchlist_status" in markdown
@@ -292,16 +312,24 @@ def test_renderer_returns_deterministic_daily_markdown_from_query_data_only() ->
     assert "distance_to_ema20_pct" in markdown
     assert "breakout_signal" in markdown
     assert "exit_risk_signal" in markdown
-    assert "## Ticker metrics" in markdown
-    assert "## Group metrics" in markdown
-    assert "## Events and signals" in markdown
-    assert "## Accepted special cases" in markdown
-    assert "## Metadata and limitations" in markdown
+    assert "## Metadata" not in markdown
+    assert "## Quality and coverage" not in markdown
+    assert "## Ecosystem snapshot" not in markdown
+    assert "## Group overview" not in markdown
+    assert "## Daily trigger classifications" not in markdown
+    assert "## Ticker metrics" not in markdown
+    assert "## Group metrics" not in markdown
+    assert "## Events and signals" not in markdown
+    assert "## Accepted special cases" not in markdown
+    assert "## Metadata and limitations" not in markdown
     assert "run-daily" in markdown
     assert "WATCHLIST_ONLY" in markdown
     assert "daily_classification_source: eco_classification_decision" in markdown
     assert "daily_snapshot_classification_source_used: False" in markdown
     assert "daily_event_window_mode: event_date_range_signal_day_only" in markdown
+    assert "Full legacy dashboard aggregation is not available from current V3 query data in DB-V3-73b." in markdown
+    assert "Current V3 query data provides combined quality and coverage summaries; a separate legacy missing-input read-model is not available in DB-V3-73b." in markdown
+    assert "Not available from current V3 query data in DB-V3-73b." in markdown
     assert "generated Markdown/CSV reports were not used as source data" in markdown
     assert "eco_entity_window_snapshot.classification_state is not the primary daily classification source" in markdown
     assert "CRGY is intentionally materialized as INSUFFICIENT_DATA in daily_trigger" in markdown
@@ -317,6 +345,8 @@ def test_renderer_handles_empty_daily_events_and_signals_gracefully() -> None:
 
     markdown = render_daily_markdown_report(query_data)
 
-    assert "- No structural event rows." in markdown
-    assert "- daily-compatible signal observations only: none" in markdown
-    assert "- No signal observation rows." in markdown
+    assert "## 11. Group Structure Breaks / Resets" in markdown
+    assert "## 16. Swing MA Break Status" in markdown
+    assert "## 17. Swing Signal Freshness" in markdown
+    assert "## 20. Technical Relevance Context" in markdown
+    assert markdown.count("Not available from current V3 query data in DB-V3-73b.") >= 4

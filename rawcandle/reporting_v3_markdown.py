@@ -64,517 +64,23 @@ def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
             event_window_mode_key=event_window_mode_key,
             window_label=window_label,
         )
-
-    lines = [
-        f"# Datacenter {window_label} report prototype",
-        "",
-        "## Metadata",
-        f"- ecosystem_code: {_value(_get_field(report_header, 'ecosystem_code'))}",
-        f"- taxonomy_version_code: {_value(_get_field(report_header, 'taxonomy_version_code'))}",
-        f"- signal_date: {_value(_get_field(report_header, 'signal_date'))}",
-        f"- run_id: {_value(_get_field(report_header, 'run_id'))}",
-        f"- window_code: {_value(_get_field(report_header, 'window_code'))}",
-        "",
-        "## Quality and coverage",
-    ]
-    lines.extend(_render_quality_and_coverage(quality_summary))
-    lines.extend(
-        [
-            "## Ecosystem snapshot",
-            *_render_table_or_none(
-                headers=["entity_code", "snapshot_status", "trend_state", "summary_state", "quality_status"],
-                rows=[
-                    [
-                        _get_field(ecosystem_snapshot, "entity_code"),
-                        _get_field(ecosystem_snapshot, "snapshot_status"),
-                        _get_field(ecosystem_snapshot, "trend_state"),
-                        _get_field(ecosystem_snapshot, "summary_state"),
-                        _get_field(ecosystem_snapshot, "quality_status"),
-                    ]
-                ]
-                if ecosystem_snapshot
-                else [],
-                empty_message="No ecosystem snapshot rows.",
-            ),
-            "## Group overview",
-            *_render_table_or_none(
-                headers=[
-                    "entity_type",
-                    "entity_code",
-                    "entity_name",
-                    "timing_state",
-                    "trend_state",
-                    "summary_state",
-                    "freshness_status",
-                    "quality_status",
-                ],
-                rows=[
-                    [
-                        row.get("entity_type"),
-                        row.get("entity_code"),
-                        row.get("entity_name"),
-                        row.get("timing_state"),
-                        row.get("trend_state"),
-                        row.get("summary_state"),
-                        row.get("freshness_status"),
-                        row.get("quality_status"),
-                    ]
-                    for row in group_snapshots
-                ],
-                empty_message="No group snapshot rows.",
-            ),
-        ]
+    return _render_daily_legacy_shell(
+        report_header=report_header,
+        watchlist_summary=watchlist_summary,
+        quality_summary=quality_summary,
+        ecosystem_snapshot=ecosystem_snapshot,
+        group_snapshots=group_snapshots,
+        watchlist_members=watchlist_members,
+        ticker_metrics=ticker_metrics,
+        group_metrics=group_metrics,
+        structural_events=structural_events,
+        signal_observations=signal_observations,
+        metadata=metadata,
+        daily_trigger_classifications=daily_trigger_classifications,
+        classification_source_key=classification_source_key,
+        snapshot_source_key=snapshot_source_key,
+        event_window_mode_key=event_window_mode_key,
     )
-    if window_label == "rolling30":
-        lines.extend(
-            [
-                "## Rolling30 buy classifications",
-                f"- row_count: {len(rolling30_buy_classifications)}",
-            ]
-        )
-        lines.extend(_render_state_counts(rolling30_buy_classifications))
-        lines.extend(
-            _render_table_or_none(
-                headers=["ticker", "classification_state", "primary_reason", "blocking_reason", "decision_status"],
-                rows=[
-                    [
-                        row.get("ticker"),
-                        row.get("classification_state"),
-                        row.get("primary_reason"),
-                        row.get("blocking_reason"),
-                        row.get("decision_status"),
-                    ]
-                    for row in rolling30_buy_classifications
-                ],
-                empty_message="No rolling30 buy classification rows.",
-            )
-        )
-        lines.extend(
-            [
-                "## Rolling30 exit classifications",
-                f"- row_count: {len(rolling30_exit_classifications)}",
-            ]
-        )
-        lines.extend(_render_state_counts(rolling30_exit_classifications))
-        lines.extend(
-            _render_table_or_none(
-                headers=["ticker", "classification_state", "primary_reason", "risk_reason", "decision_status"],
-                rows=[
-                    [
-                        row.get("ticker"),
-                        row.get("classification_state"),
-                        row.get("primary_reason"),
-                        row.get("risk_reason"),
-                        row.get("decision_status"),
-                    ]
-                    for row in rolling30_exit_classifications
-                ],
-                empty_message="No rolling30 exit classification rows.",
-            )
-        )
-    elif window_label == "rolling5":
-        lines.extend(
-            [
-                "## Rolling5 pullback classifications",
-                f"- row_count: {len(rolling5_pullback_classifications)}",
-            ]
-        )
-        lines.extend(_render_state_counts(rolling5_pullback_classifications))
-        lines.extend(
-            _render_table_or_none(
-                headers=[
-                    "ticker",
-                    "classification_state",
-                    "primary_reason",
-                    "blocking_reason",
-                    "next_action",
-                    "decision_status",
-                ],
-                rows=[
-                    [
-                        row.get("ticker"),
-                        row.get("classification_state"),
-                        row.get("primary_reason"),
-                        row.get("blocking_reason"),
-                        row.get("next_action"),
-                        row.get("decision_status"),
-                    ]
-                    for row in rolling5_pullback_classifications
-                ],
-                empty_message="No rolling5 pullback classification rows.",
-            )
-        )
-    elif window_label == "rolling2":
-        lines.extend(
-            [
-                "## Rolling2 sell pressure classifications",
-                f"- row_count: {len(rolling2_sell_pressure_classifications)}",
-            ]
-        )
-        lines.extend(_render_state_counts(rolling2_sell_pressure_classifications))
-        lines.extend(
-            _render_table_or_none(
-                headers=[
-                    "ticker",
-                    "classification_state",
-                    "primary_reason",
-                    "risk_reason",
-                    "next_action",
-                    "decision_status",
-                ],
-                rows=[
-                    [
-                        row.get("ticker"),
-                        row.get("classification_state"),
-                        row.get("primary_reason"),
-                        row.get("risk_reason"),
-                        row.get("next_action"),
-                        row.get("decision_status"),
-                    ]
-                    for row in rolling2_sell_pressure_classifications
-                ],
-                empty_message="No rolling2 sell pressure classification rows.",
-            )
-        )
-    else:
-        lines.extend(
-            [
-                "## Daily trigger classifications",
-                f"- row_count: {len(daily_trigger_classifications)}",
-            ]
-        )
-        lines.extend(_render_state_counts(daily_trigger_classifications))
-        lines.extend(
-            _render_table_or_none(
-                headers=[
-                    "ticker",
-                    "classification_state",
-                    "primary_reason",
-                    "blocking_reason",
-                    "next_action",
-                    "decision_status",
-                ],
-                rows=[
-                    [
-                        row.get("ticker"),
-                        row.get("classification_state"),
-                        row.get("primary_reason"),
-                        row.get("blocking_reason"),
-                        row.get("next_action"),
-                        row.get("decision_status"),
-                    ]
-                    for row in daily_trigger_classifications
-                ],
-                empty_message="No daily trigger classification rows.",
-            )
-        )
-    ticker_metric_headers = (
-        [
-            "ticker",
-            "entity_name",
-            "distance_to_ema10_pct",
-            "distance_to_ema20_pct",
-            "return_5d",
-            "return_10d",
-            "return_20d",
-            "return_60d",
-            "latest_bos_age_trading_days",
-            "latest_reset_age_trading_days",
-            "latest_structure_age_trading_days",
-            "freshness_latest_bos_age_trading_days",
-            "freshness_latest_bos_class",
-            "freshness_latest_reset_age_trading_days",
-            "freshness_latest_reset_class",
-            "freshness_latest_structure_age_trading_days",
-            "freshness_latest_structure_class",
-        ]
-        if window_label == "daily"
-        else [
-            "ticker",
-            "entity_name",
-            "breakout_days",
-            "pullback_days",
-            "exit_risk_days",
-            "high_exit_risk_days",
-            "medium_exit_risk_days",
-            "valid_signal_dates",
-            "distance_to_ema20_pct",
-        ]
-    )
-    ticker_metric_rows = (
-        [
-            [
-                row.get("ticker"),
-                row.get("entity_name"),
-                row.get("distance_to_ema10_pct"),
-                row.get("distance_to_ema20_pct"),
-                row.get("return_5d"),
-                row.get("return_10d"),
-                row.get("return_20d"),
-                row.get("return_60d"),
-                row.get("latest_bos_age_trading_days"),
-                row.get("latest_reset_age_trading_days"),
-                row.get("latest_structure_age_trading_days"),
-                row.get("freshness_latest_bos_age_trading_days"),
-                row.get("freshness_latest_bos_class"),
-                row.get("freshness_latest_reset_age_trading_days"),
-                row.get("freshness_latest_reset_class"),
-                row.get("freshness_latest_structure_age_trading_days"),
-                row.get("freshness_latest_structure_class"),
-            ]
-            for row in ticker_metrics
-        ]
-        if window_label == "daily"
-        else [
-            [
-                row.get("ticker"),
-                row.get("entity_name"),
-                row.get("breakout_days"),
-                row.get("pullback_days"),
-                row.get("exit_risk_days"),
-                row.get("high_exit_risk_days"),
-                row.get("medium_exit_risk_days"),
-                row.get("valid_signal_dates"),
-                row.get("distance_to_ema20_pct"),
-            ]
-            for row in ticker_metrics
-        ]
-    )
-    group_metric_headers = (
-        [
-            "entity_type",
-            "entity_code",
-            "entity_name",
-            "pct_above_ema20",
-            "return_5d",
-            "synthetic_close",
-            "trend_breadth",
-            "weakness_breadth",
-            "group_current_status",
-            "group_timing_state",
-            "group_timing_reason",
-            "group_overheat_risk_level",
-            "freshness_latest_bos_age_trading_days",
-            "freshness_latest_bos_class",
-            "freshness_latest_reset_age_trading_days",
-            "freshness_latest_reset_class",
-            "freshness_latest_structure_age_trading_days",
-            "freshness_latest_structure_class",
-        ]
-        if window_label == "daily"
-        else [
-            "entity_type",
-            "entity_code",
-            "entity_name",
-            "pct_above_ema20",
-            "return_5d",
-            "synthetic_close",
-            "trend_breadth",
-            "weakness_breadth",
-            "valid_signal_dates",
-            "group_current_status",
-            "group_window_status",
-            "group_status_change",
-            "group_timing_state",
-            "group_timing_reason",
-            "group_overheat_risk_level",
-        ]
-    )
-    group_metric_rows = (
-        [
-            [
-                row.get("entity_type"),
-                row.get("entity_code"),
-                row.get("entity_name"),
-                row.get("pct_above_ema20"),
-                row.get("return_5d"),
-                row.get("synthetic_close"),
-                row.get("trend_breadth"),
-                row.get("weakness_breadth"),
-                row.get("group_current_status"),
-                row.get("group_timing_state"),
-                row.get("group_timing_reason"),
-                row.get("group_overheat_risk_level"),
-                row.get("freshness_latest_bos_age_trading_days"),
-                row.get("freshness_latest_bos_class"),
-                row.get("freshness_latest_reset_age_trading_days"),
-                row.get("freshness_latest_reset_class"),
-                row.get("freshness_latest_structure_age_trading_days"),
-                row.get("freshness_latest_structure_class"),
-            ]
-            for row in group_metrics
-        ]
-        if window_label == "daily"
-        else [
-            [
-                row.get("entity_type"),
-                row.get("entity_code"),
-                row.get("entity_name"),
-                row.get("pct_above_ema20"),
-                row.get("return_5d"),
-                row.get("synthetic_close"),
-                row.get("trend_breadth"),
-                row.get("weakness_breadth"),
-                row.get("valid_signal_dates"),
-                row.get("group_current_status"),
-                row.get("group_window_status"),
-                row.get("group_status_change"),
-                row.get("group_timing_state"),
-                row.get("group_timing_reason"),
-                row.get("group_overheat_risk_level"),
-            ]
-            for row in group_metrics
-        ]
-    )
-    lines.extend(
-        [
-            "## Watchlist Summary",
-            "## Ticker metrics",
-            *_render_table_or_none(
-                headers=ticker_metric_headers,
-                rows=ticker_metric_rows,
-                empty_message="No ticker metric rows.",
-            ),
-            "## Group metrics",
-            *_render_table_or_none(
-                headers=group_metric_headers,
-                rows=group_metric_rows,
-                empty_message="No group metric rows.",
-            ),
-            "## Events and signals",
-        ]
-    )
-    if window_label == "daily" and watchlist_summary:
-        watchlist_index = lines.index("## Watchlist Summary")
-        lines[watchlist_index:watchlist_index + 1] = [
-            "## Watchlist Summary",
-            *_render_table_or_none(
-                headers=["field", "value"],
-                rows=[
-                    ["active_watchlist_count", watchlist_summary.get("counts", {}).get("active_watchlist_count")],
-                    ["in_ecosystem_count", watchlist_summary.get("counts", {}).get("in_ecosystem_count")],
-                    ["missing_price_data_count", watchlist_summary.get("counts", {}).get("missing_price_data_count")],
-                    ["breakout_count", watchlist_summary.get("counts", {}).get("breakout_count")],
-                    ["pullback_count", watchlist_summary.get("counts", {}).get("pullback_count")],
-                    ["exit_risk_count", watchlist_summary.get("counts", {}).get("exit_risk_count")],
-                    ["high_exit_risk_count", watchlist_summary.get("counts", {}).get("high_exit_risk_count")],
-                    ["medium_exit_risk_count", watchlist_summary.get("counts", {}).get("medium_exit_risk_count")],
-                ],
-                empty_message="No active watchlist rows available from current V3 query data.",
-            ),
-            *_render_table_or_none(
-                headers=[
-                    "ticker",
-                    "watchlist_status",
-                    "in_datacenter_ecosystem",
-                    "primary_layer",
-                    "primary_subindustry",
-                    "close",
-                    "return_5d",
-                    "return_10d",
-                    "return_20d",
-                    "distance_to_ema20_pct",
-                    "ticker_trend_state",
-                    "breakout_signal",
-                    "pullback_signal",
-                    "exit_risk_signal",
-                    "exit_risk_severity",
-                    "exit_reason",
-                    "subindustry_timing_state",
-                    "subindustry_overheat_risk_level",
-                    "layer_timing_state",
-                    "layer_overheat_risk_level",
-                    "price_data_status",
-                ],
-                rows=[
-                    [
-                        row.get("ticker"),
-                        row.get("watchlist_status"),
-                        row.get("in_datacenter_ecosystem"),
-                        row.get("primary_layer"),
-                        row.get("primary_subindustry"),
-                        row.get("close"),
-                        row.get("return_5d"),
-                        row.get("return_10d"),
-                        row.get("return_20d"),
-                        row.get("distance_to_ema20_pct"),
-                        row.get("ticker_trend_state"),
-                        row.get("breakout_signal"),
-                        row.get("pullback_signal"),
-                        row.get("exit_risk_signal"),
-                        row.get("exit_risk_severity"),
-                        row.get("exit_reason"),
-                        row.get("subindustry_timing_state"),
-                        row.get("subindustry_overheat_risk_level"),
-                        row.get("layer_timing_state"),
-                        row.get("layer_overheat_risk_level"),
-                        row.get("price_data_status"),
-                    ]
-                    for row in watchlist_summary.get("rows", [])
-                ],
-                empty_message="No active watchlist rows available from current V3 query data.",
-            ),
-        ]
-    else:
-        watchlist_index = lines.index("## Watchlist Summary")
-        lines[watchlist_index:watchlist_index + 1] = [
-            "## Watchlist Summary",
-            *_render_table_or_none(
-                headers=[
-                    "watchlist_code",
-                    "watchlist_name",
-                    "ticker",
-                    "entity_name",
-                    "member_role",
-                    "member_status",
-                    "effective_from",
-                    "effective_to",
-                ],
-                rows=[
-                    [
-                        row.get("watchlist_code"),
-                        row.get("watchlist_name"),
-                        row.get("ticker"),
-                        row.get("entity_name"),
-                        row.get("member_role"),
-                        row.get("member_status"),
-                        row.get("effective_from"),
-                        row.get("effective_to"),
-                    ]
-                    for row in watchlist_members
-                ],
-                empty_message="No watchlist rows.",
-            ),
-        ]
-    lines.extend(_render_events_and_signals(structural_events, signal_observations, window_label=window_label))
-    if window_label == "daily":
-        lines.extend(
-            [
-                "## Accepted special cases",
-                f"- CRGY is intentionally materialized as INSUFFICIENT_DATA in daily_trigger.",
-                f"- NXPI reflects accepted current lower-level source-truth SELL_TRIGGER semantics.",
-                "",
-            ]
-        )
-    lines.extend(
-        [
-            "## Metadata and limitations",
-            f"- used_v2_runtime_tables: {_value(metadata.get('used_v2_runtime_tables'))}",
-            f"- used_generated_reports: {_value(metadata.get('used_generated_reports'))}",
-            f"- used_dashboard_output: {_value(metadata.get('used_dashboard_output'))}",
-            f"- {classification_source_key}: {_value(metadata.get(classification_source_key))}",
-            f"- {snapshot_source_key}: {_value(metadata.get(snapshot_source_key))}",
-            f"- {event_window_mode_key}: {_value(metadata.get(event_window_mode_key))}",
-            f"- ranking_fields_mostly_null: {_value(metadata.get('ranking_fields_mostly_null'))}",
-            "",
-        ]
-    )
-    limitations = list(metadata.get("limitations") or [])
-    if limitations:
-        lines.extend(f"- {_escape(str(item))}" for item in limitations)
-    else:
-        lines.append("- none")
-    return "\n".join(lines).rstrip() + "\n"
 
 
 def _render_rolling_legacy_shell(
@@ -963,6 +469,333 @@ def _render_rolling_legacy_shell(
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _render_daily_legacy_shell(
+    *,
+    report_header: Any,
+    watchlist_summary: dict[str, Any],
+    quality_summary: dict[str, Any],
+    ecosystem_snapshot: Any,
+    group_snapshots: list[dict[str, Any]],
+    watchlist_members: list[dict[str, Any]],
+    ticker_metrics: list[dict[str, Any]],
+    group_metrics: list[dict[str, Any]],
+    structural_events: list[dict[str, Any]],
+    signal_observations: list[dict[str, Any]],
+    metadata: dict[str, Any],
+    daily_trigger_classifications: list[dict[str, Any]],
+    classification_source_key: str,
+    snapshot_source_key: str,
+    event_window_mode_key: str,
+) -> str:
+    timing_rows = _daily_timing_rows(group_metrics=group_metrics, group_snapshots=group_snapshots)
+    lines = [
+        "# Datacenter Daily Swing Signal Report",
+        "",
+        "## 1. Title and run metadata",
+        f"- ecosystem_code: {_value(_get_field(report_header, 'ecosystem_code'))}",
+        f"- taxonomy_version_code: {_value(_get_field(report_header, 'taxonomy_version_code'))}",
+        f"- signal_date: {_value(_get_field(report_header, 'signal_date'))}",
+        f"- run_id: {_value(_get_field(report_header, 'run_id'))}",
+        f"- window_code: {_value(_get_field(report_header, 'window_code'))}",
+        "",
+        "## Watchlist Summary",
+    ]
+    lines.extend(_render_daily_watchlist_summary(watchlist_summary, watchlist_members))
+    lines.extend(
+        [
+            "## 3. Dashboard",
+        ]
+    )
+    lines.extend(
+        _render_table_or_none(
+            headers=["entity_code", "snapshot_status", "trend_state", "summary_state", "quality_status"],
+            rows=[
+                [
+                    _get_field(ecosystem_snapshot, "entity_code"),
+                    _get_field(ecosystem_snapshot, "snapshot_status"),
+                    _get_field(ecosystem_snapshot, "trend_state"),
+                    _get_field(ecosystem_snapshot, "summary_state"),
+                    _get_field(ecosystem_snapshot, "quality_status"),
+                ]
+            ]
+            if ecosystem_snapshot
+            else [],
+            empty_message="Not available from current V3 query data in DB-V3-73b.",
+        )
+    )
+    lines.append("- Full legacy dashboard aggregation is not available from current V3 query data in DB-V3-73b.")
+    lines.append("")
+    lines.append("## 4. Rotation Risk / Overheat Index")
+    lines.extend(
+        _render_table_or_none(
+            headers=[
+                "entity_type",
+                "entity_code",
+                "entity_name",
+                "pct_above_ema20",
+                "return_5d",
+                "trend_breadth",
+                "weakness_breadth",
+                "group_current_status",
+                "group_timing_state",
+                "group_overheat_risk_level",
+            ],
+            rows=[
+                [
+                    row.get("entity_type"),
+                    row.get("entity_code"),
+                    row.get("entity_name"),
+                    row.get("pct_above_ema20"),
+                    row.get("return_5d"),
+                    row.get("trend_breadth"),
+                    row.get("weakness_breadth"),
+                    row.get("group_current_status"),
+                    row.get("group_timing_state"),
+                    row.get("group_overheat_risk_level"),
+                ]
+                for row in group_metrics
+            ],
+            empty_message="Not available from current V3 query data in DB-V3-73b.",
+        )
+    )
+    lines.extend(["## 5. Subindustry Timing States"])
+    lines.extend(
+        _render_table_or_none(
+            headers=[
+                "entity_code",
+                "entity_name",
+                "timing_state",
+                "trend_state",
+                "summary_state",
+                "freshness_status",
+                "quality_status",
+            ],
+            rows=timing_rows,
+            empty_message="Not available from current V3 query data in DB-V3-73b.",
+        )
+    )
+    lines.extend(["## 6. Buy-Zone Subindustries"])
+    lines.extend(
+        _render_filtered_daily_subindustry_rows(
+            timing_rows=timing_rows,
+            allowed_states={"BUY_ZONE"},
+        )
+    )
+    lines.extend(["## 7. Add-On Pullback Subindustries"])
+    lines.extend(
+        _render_filtered_daily_subindustry_rows(
+            timing_rows=timing_rows,
+            allowed_states={"ADD_ON_PULLBACK", "PULLBACK_CANDIDATE"},
+        )
+    )
+    lines.extend(["## 8. Trim/Watch Subindustries"])
+    lines.extend(
+        _render_filtered_daily_subindustry_rows(
+            timing_rows=timing_rows,
+            allowed_states={"TRIM_WATCH", "WATCH_ZONE", "EXIT_WATCH"},
+        )
+    )
+    lines.extend(["## 9. Exit-Zone Subindustries"])
+    lines.extend(
+        _render_filtered_daily_subindustry_rows(
+            timing_rows=timing_rows,
+            allowed_states={"EXIT_ZONE"},
+        )
+    )
+    lines.extend(
+        [
+            "## 10. Synthetic OHLC Structure Summary",
+            "Not available from current V3 query data in DB-V3-73b.",
+            "",
+            "## 11. Group Structure Breaks / Resets",
+        ]
+    )
+    lines.extend(
+        _render_table_or_none(
+            headers=["entity_type", "entity_code", "event_date", "event_type", "event_direction", "event_status"],
+            rows=[
+                [
+                    row.get("entity_type"),
+                    row.get("entity_code"),
+                    row.get("event_date"),
+                    row.get("event_type"),
+                    row.get("event_direction"),
+                    row.get("event_status"),
+                ]
+                for row in structural_events
+                if row.get("entity_type") in {"ECOSYSTEM", "LAYER", "SUBINDUSTRY"}
+            ],
+            empty_message="Not available from current V3 query data in DB-V3-73b.",
+        )
+    )
+    lines.extend(
+        [
+            "## 12. Breakout Ticker Scanner",
+            "Not available from current V3 query data in DB-V3-73b.",
+            "",
+            "## 13. Pullback Ticker Scanner",
+            "Not available from current V3 query data in DB-V3-73b.",
+            "",
+            "## 14. Exit-Risk Ticker Scanner",
+            "Not available from current V3 query data in DB-V3-73b.",
+            "",
+            "## 15. Daily Triggers",
+            f"- row_count: {len(daily_trigger_classifications)}",
+        ]
+    )
+    lines.extend(_render_state_counts(daily_trigger_classifications))
+    lines.extend(
+        _render_table_or_none(
+            headers=[
+                "ticker",
+                "classification_state",
+                "primary_reason",
+                "blocking_reason",
+                "next_action",
+                "decision_status",
+            ],
+            rows=[
+                [
+                    row.get("ticker"),
+                    row.get("classification_state"),
+                    row.get("primary_reason"),
+                    row.get("blocking_reason"),
+                    row.get("next_action"),
+                    row.get("decision_status"),
+                ]
+                for row in daily_trigger_classifications
+            ],
+            empty_message="No daily trigger classification rows.",
+        )
+    )
+    lines.extend(
+        [
+            "## 16. Swing MA Break Status",
+        ]
+    )
+    lines.extend(
+        _render_table_or_none(
+            headers=[
+                "entity_code",
+                "signal_name",
+                "signal_family",
+                "signal_direction",
+                "signal_value",
+                "observed_date",
+                "relevance_labels",
+            ],
+            rows=[
+                [
+                    row.get("entity_code"),
+                    row.get("signal_name"),
+                    row.get("signal_family"),
+                    row.get("signal_direction"),
+                    row.get("signal_value"),
+                    row.get("observed_date"),
+                    row.get("relevance_labels"),
+                ]
+                for row in signal_observations
+                if str(row.get("signal_family") or "") == "MA_STATUS" or "MA_" in str(row.get("signal_name") or "")
+            ],
+            empty_message="Not available from current V3 query data in DB-V3-73b.",
+        )
+    )
+    lines.extend(
+        [
+            "## 17. Swing Signal Freshness",
+        ]
+    )
+    lines.extend(
+        _render_table_or_none(
+            headers=[
+                "entity_code",
+                "signal_name",
+                "signal_family",
+                "signal_direction",
+                "signal_value",
+                "observed_date",
+                "relevance_labels",
+            ],
+            rows=[
+                [
+                    row.get("entity_code"),
+                    row.get("signal_name"),
+                    row.get("signal_family"),
+                    row.get("signal_direction"),
+                    row.get("signal_value"),
+                    row.get("observed_date"),
+                    row.get("relevance_labels"),
+                ]
+                for row in signal_observations
+                if str(row.get("signal_family") or "") == "FRESHNESS"
+            ],
+            empty_message="Not available from current V3 query data in DB-V3-73b.",
+        )
+    )
+    lines.extend(
+        [
+            "## 18. Data Quality",
+        ]
+    )
+    lines.extend(_render_quality_and_coverage(quality_summary))
+    lines.extend(
+        [
+            "## 19. Missing / Incomplete Inputs Summary",
+            "- Current V3 query data provides combined quality and coverage summaries; a separate legacy missing-input read-model is not available in DB-V3-73b.",
+            "",
+            "## 20. Technical Relevance Context",
+        ]
+    )
+    lines.extend(
+        _render_table_or_none(
+            headers=[
+                "entity_code",
+                "signal_name",
+                "signal_family",
+                "signal_direction",
+                "signal_value",
+                "observed_date",
+                "relevance_labels",
+            ],
+            rows=[
+                [
+                    row.get("entity_code"),
+                    row.get("signal_name"),
+                    row.get("signal_family"),
+                    row.get("signal_direction"),
+                    row.get("signal_value"),
+                    row.get("observed_date"),
+                    row.get("relevance_labels"),
+                ]
+                for row in signal_observations
+                if row.get("relevance_labels")
+            ],
+            empty_message="Not available from current V3 query data in DB-V3-73b.",
+        )
+    )
+    lines.extend(
+        [
+            "## V3 metadata / limitations appendix",
+            f"- used_v2_runtime_tables: {_value(metadata.get('used_v2_runtime_tables'))}",
+            f"- used_generated_reports: {_value(metadata.get('used_generated_reports'))}",
+            f"- used_dashboard_output: {_value(metadata.get('used_dashboard_output'))}",
+            f"- {classification_source_key}: {_value(metadata.get(classification_source_key))}",
+            f"- {snapshot_source_key}: {_value(metadata.get(snapshot_source_key))}",
+            f"- {event_window_mode_key}: {_value(metadata.get(event_window_mode_key))}",
+            f"- ranking_fields_mostly_null: {_value(metadata.get('ranking_fields_mostly_null'))}",
+            "- CRGY is intentionally materialized as INSUFFICIENT_DATA in daily_trigger.",
+            "- NXPI reflects accepted current lower-level source-truth SELL_TRIGGER semantics.",
+            "",
+        ]
+    )
+    limitations = list(metadata.get("limitations") or [])
+    if limitations:
+        lines.extend(f"- {_escape(str(item))}" for item in limitations)
+    else:
+        lines.append("- none")
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def _render_repeated_ticker_section(
     *,
     ticker_metrics: list[dict[str, Any]],
@@ -1015,6 +848,181 @@ def _render_repeated_ticker_section(
     lines = _render_table_or_none(headers=headers, rows=filtered_rows, empty_message="Not available from current V3 query data in DB-V3-70.")
     lines.append("")
     return lines
+
+
+def _render_daily_watchlist_summary(
+    watchlist_summary: dict[str, Any],
+    watchlist_members: list[dict[str, Any]],
+) -> list[str]:
+    if watchlist_summary:
+        lines = _render_table_or_none(
+            headers=["field", "value"],
+            rows=[
+                ["active_watchlist_count", watchlist_summary.get("counts", {}).get("active_watchlist_count")],
+                ["in_ecosystem_count", watchlist_summary.get("counts", {}).get("in_ecosystem_count")],
+                ["missing_price_data_count", watchlist_summary.get("counts", {}).get("missing_price_data_count")],
+                ["breakout_count", watchlist_summary.get("counts", {}).get("breakout_count")],
+                ["pullback_count", watchlist_summary.get("counts", {}).get("pullback_count")],
+                ["exit_risk_count", watchlist_summary.get("counts", {}).get("exit_risk_count")],
+                ["high_exit_risk_count", watchlist_summary.get("counts", {}).get("high_exit_risk_count")],
+                ["medium_exit_risk_count", watchlist_summary.get("counts", {}).get("medium_exit_risk_count")],
+            ],
+            empty_message="No active watchlist rows available from current V3 query data.",
+        )
+        lines.extend(
+            _render_table_or_none(
+                headers=[
+                    "ticker",
+                    "watchlist_status",
+                    "in_datacenter_ecosystem",
+                    "primary_layer",
+                    "primary_subindustry",
+                    "close",
+                    "return_5d",
+                    "return_10d",
+                    "return_20d",
+                    "distance_to_ema20_pct",
+                    "ticker_trend_state",
+                    "breakout_signal",
+                    "pullback_signal",
+                    "exit_risk_signal",
+                    "exit_risk_severity",
+                    "exit_reason",
+                    "subindustry_timing_state",
+                    "subindustry_overheat_risk_level",
+                    "layer_timing_state",
+                    "layer_overheat_risk_level",
+                    "price_data_status",
+                ],
+                rows=[
+                    [
+                        row.get("ticker"),
+                        row.get("watchlist_status"),
+                        row.get("in_datacenter_ecosystem"),
+                        row.get("primary_layer"),
+                        row.get("primary_subindustry"),
+                        row.get("close"),
+                        row.get("return_5d"),
+                        row.get("return_10d"),
+                        row.get("return_20d"),
+                        row.get("distance_to_ema20_pct"),
+                        row.get("ticker_trend_state"),
+                        row.get("breakout_signal"),
+                        row.get("pullback_signal"),
+                        row.get("exit_risk_signal"),
+                        row.get("exit_risk_severity"),
+                        row.get("exit_reason"),
+                        row.get("subindustry_timing_state"),
+                        row.get("subindustry_overheat_risk_level"),
+                        row.get("layer_timing_state"),
+                        row.get("layer_overheat_risk_level"),
+                        row.get("price_data_status"),
+                    ]
+                    for row in watchlist_summary.get("rows", [])
+                ],
+                empty_message="No active watchlist rows available from current V3 query data.",
+            )
+        )
+        return lines
+    return _render_table_or_none(
+        headers=[
+            "watchlist_code",
+            "watchlist_name",
+            "ticker",
+            "entity_name",
+            "member_role",
+            "member_status",
+            "effective_from",
+            "effective_to",
+        ],
+        rows=[
+            [
+                row.get("watchlist_code"),
+                row.get("watchlist_name"),
+                row.get("ticker"),
+                row.get("entity_name"),
+                row.get("member_role"),
+                row.get("member_status"),
+                row.get("effective_from"),
+                row.get("effective_to"),
+            ]
+            for row in watchlist_members
+        ],
+        empty_message="No watchlist rows.",
+    )
+
+
+def _daily_timing_rows(
+    *,
+    group_metrics: list[dict[str, Any]],
+    group_snapshots: list[dict[str, Any]],
+) -> list[list[Any]]:
+    metric_rows_by_code = {
+        str(row.get("entity_code") or ""): row
+        for row in group_metrics
+        if str(row.get("entity_type") or "") == "SUBINDUSTRY"
+    }
+    rows: list[list[Any]] = []
+    seen_codes: set[str] = set()
+    for row in group_snapshots:
+        if str(row.get("entity_type") or "") != "SUBINDUSTRY":
+            continue
+        entity_code = str(row.get("entity_code") or "")
+        metric_row = metric_rows_by_code.get(entity_code, {})
+        rows.append(
+            [
+                row.get("entity_code"),
+                row.get("entity_name"),
+                metric_row.get("group_timing_state") or row.get("timing_state"),
+                row.get("trend_state"),
+                row.get("summary_state"),
+                row.get("freshness_status"),
+                row.get("quality_status"),
+            ]
+        )
+        seen_codes.add(entity_code)
+    for row in group_metrics:
+        if str(row.get("entity_type") or "") != "SUBINDUSTRY":
+            continue
+        entity_code = str(row.get("entity_code") or "")
+        if entity_code in seen_codes:
+            continue
+        rows.append(
+            [
+                row.get("entity_code"),
+                row.get("entity_name"),
+                row.get("group_timing_state"),
+                None,
+                row.get("group_current_status"),
+                None,
+                None,
+            ]
+        )
+    rows.sort(key=lambda row: (str(row[2] or ""), str(row[0] or "")))
+    return rows
+
+
+def _render_filtered_daily_subindustry_rows(
+    *,
+    timing_rows: list[list[Any]],
+    allowed_states: set[str],
+) -> list[str]:
+    filtered_rows = [row for row in timing_rows if str(row[2] or "") in allowed_states]
+    if not filtered_rows:
+        return ["Not available from current V3 query data in DB-V3-73b.", ""]
+    return _render_table_or_none(
+        headers=[
+            "entity_code",
+            "entity_name",
+            "timing_state",
+            "trend_state",
+            "summary_state",
+            "freshness_status",
+            "quality_status",
+        ],
+        rows=filtered_rows,
+        empty_message="Not available from current V3 query data in DB-V3-73b.",
+    )
 
 
 def _render_rolling_classification_sections(
