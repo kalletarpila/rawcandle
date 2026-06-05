@@ -134,6 +134,18 @@ def _open_rw_sqlite(db_path: str) -> sqlite3.Connection:
     return conn
 
 
+REPLACE_CLEANUP_TABLE_ORDER = (
+    "eco_signal_relevance",
+    "eco_signal_observation",
+    "eco_entity_event",
+    "eco_entity_window_snapshot",
+    "eco_entity_metric_value",
+    "eco_classification_decision",
+    "eco_entity_coverage",
+    "eco_quality_summary",
+)
+
+
 def _existing_run_exists(db_path: str, run_id: str) -> bool:
     conn = _open_rw_sqlite(db_path)
     try:
@@ -144,6 +156,48 @@ def _existing_run_exists(db_path: str, run_id: str) -> bool:
             (run_id,),
         ).fetchone()
         return row is not None
+    finally:
+        conn.close()
+
+
+def _cleanup_existing_run_runtime_rows(db_path: str, run_id: str) -> dict[str, int]:
+    conn = _open_rw_sqlite(db_path)
+    try:
+        conn.execute("BEGIN")
+        deleted_counts: dict[str, int] = {}
+
+        if planner.table_exists(conn, "eco_signal_relevance") and planner.table_exists(conn, "eco_signal_observation"):
+            cursor = conn.execute(
+                """
+                DELETE FROM eco_signal_relevance
+                WHERE signal_observation_id IN (
+                    SELECT signal_observation_id
+                    FROM eco_signal_observation
+                    WHERE run_id = ?
+                )
+                """,
+                (run_id,),
+            )
+            deleted_counts["eco_signal_relevance"] = int(cursor.rowcount)
+        else:
+            deleted_counts["eco_signal_relevance"] = 0
+
+        for table_name in REPLACE_CLEANUP_TABLE_ORDER[1:]:
+            if not planner.table_exists(conn, table_name):
+                deleted_counts[table_name] = 0
+                continue
+            columns = planner._column_names(conn, table_name)
+            if "run_id" not in columns:
+                deleted_counts[table_name] = 0
+                continue
+            cursor = conn.execute(f"DELETE FROM {table_name} WHERE run_id = ?", (run_id,))
+            deleted_counts[table_name] = int(cursor.rowcount)
+
+        conn.commit()
+        return deleted_counts
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -369,6 +423,19 @@ def main(argv: list[str] | None = None) -> int:
                 f"backup_path: {backup_path}",
             ],
         )
+
+        if existing_run and args.replace_existing:
+            cleanup_counts = _cleanup_existing_run_runtime_rows(args.db, args.run_id)
+            cleanup_lines = [
+                "replace_cleanup_status: OK",
+                f"replace_cleanup_scope: run_id={args.run_id}",
+                "replace_cleanup_timing: after backup, before builder execution",
+            ]
+            for table_name in REPLACE_CLEANUP_TABLE_ORDER:
+                cleanup_lines.append(
+                    f"replace_cleanup_deleted {table_name}={cleanup_counts.get(table_name, 0)}"
+                )
+            _append_section(lines, "Replace Cleanup", cleanup_lines)
 
         execution_lines: list[str] = []
         for step_number, (builder_name, builder_fn, extra_kwargs) in enumerate(sequence, start=1):

@@ -244,6 +244,68 @@ def _insert_existing_run(db_path: str, run_id: str, signal_date: str = "2026-06-
         conn.close()
 
 
+def _insert_existing_runtime_rows(db_path: str, run_id: str, other_run_id: str) -> None:
+    conn = _connect(db_path)
+    try:
+        conn.execute("INSERT INTO eco_entity_coverage (run_id) VALUES (?)", (run_id,))
+        conn.execute("INSERT INTO eco_entity_coverage (run_id) VALUES (?)", (other_run_id,))
+        conn.execute("INSERT INTO eco_quality_summary (run_id) VALUES (?)", (run_id,))
+        conn.execute("INSERT INTO eco_quality_summary (run_id) VALUES (?)", (other_run_id,))
+        conn.execute(
+            "INSERT INTO eco_entity_window_snapshot (run_id, source_run_id) VALUES (?, 'TARGET_SOURCE')",
+            (run_id,),
+        )
+        conn.execute(
+            "INSERT INTO eco_entity_window_snapshot (run_id, source_run_id) VALUES (?, 'OTHER_SOURCE')",
+            (other_run_id,),
+        )
+        conn.execute(
+            "INSERT INTO eco_entity_metric_value (run_id, source_run_id) VALUES (?, 'TARGET_SOURCE')",
+            (run_id,),
+        )
+        conn.execute(
+            "INSERT INTO eco_entity_metric_value (run_id, source_run_id) VALUES (?, 'OTHER_SOURCE')",
+            (other_run_id,),
+        )
+        conn.execute(
+            "INSERT INTO eco_classification_decision (run_id, source_run_id) VALUES (?, 'TARGET_SOURCE')",
+            (run_id,),
+        )
+        conn.execute(
+            "INSERT INTO eco_classification_decision (run_id, source_run_id) VALUES (?, 'OTHER_SOURCE')",
+            (other_run_id,),
+        )
+        conn.execute(
+            "INSERT INTO eco_signal_observation (run_id, source_table, source_run_id) VALUES (?, 'allowed_source', 'TARGET_SOURCE')",
+            (run_id,),
+        )
+        target_observation_id = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
+        conn.execute(
+            "INSERT INTO eco_signal_observation (run_id, source_table, source_run_id) VALUES (?, 'allowed_source', 'OTHER_SOURCE')",
+            (other_run_id,),
+        )
+        other_observation_id = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
+        conn.execute(
+            "INSERT INTO eco_signal_relevance (signal_observation_id) VALUES (?)",
+            (target_observation_id,),
+        )
+        conn.execute(
+            "INSERT INTO eco_signal_relevance (signal_observation_id) VALUES (?)",
+            (other_observation_id,),
+        )
+        conn.execute(
+            "INSERT INTO eco_entity_event (run_id, source_table, source_run_id) VALUES (?, 'allowed_source', 'TARGET_SOURCE')",
+            (run_id,),
+        )
+        conn.execute(
+            "INSERT INTO eco_entity_event (run_id, source_table, source_run_id) VALUES (?, 'allowed_source', 'OTHER_SOURCE')",
+            (other_run_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _insert_ambiguous_technical_relevance_runs(db_path: str, signal_date: str = "2026-06-04") -> None:
     conn = _connect(db_path)
     try:
@@ -503,6 +565,95 @@ def test_creates_backup_before_first_builder_call_and_calls_builders_in_exact_or
     assert "status: BUILD_COMPLETED" in captured.out
 
 
+def test_replace_existing_cleans_target_run_rows_after_backup_and_before_first_builder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    db_path = tmp_path / "build.db"
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    _create_fixture_db(str(db_path))
+    run_id = "V3_BASE_DATACENTER_2026_06_04_DC_TAXONOMY_FULL_V1"
+    other_run_id = "OTHER_RUN"
+    _insert_existing_run(str(db_path), run_id)
+    _insert_existing_run(str(db_path), other_run_id)
+    _insert_existing_runtime_rows(str(db_path), run_id, other_run_id)
+
+    call_order: list[str] = []
+    original_create_backup = cli._create_backup
+
+    def _backup_then_record(db_path_value: str, backup_dir_value: Path, run_id_value: str) -> Path:
+        path = original_create_backup(db_path_value, backup_dir_value, run_id_value)
+        call_order.append("BACKUP_CREATED")
+        return path
+
+    def _base_stub(**kwargs):
+        call_order.append("build_canonical_v3_base_run")
+        conn = _connect(str(db_path))
+        try:
+            assert conn.execute("SELECT COUNT(*) FROM eco_entity_coverage WHERE run_id = ?", (run_id,)).fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM eco_quality_summary WHERE run_id = ?", (run_id,)).fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM eco_entity_window_snapshot WHERE run_id = ?", (run_id,)).fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM eco_entity_metric_value WHERE run_id = ?", (run_id,)).fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM eco_classification_decision WHERE run_id = ?", (run_id,)).fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM eco_signal_observation WHERE run_id = ?", (run_id,)).fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM eco_entity_event WHERE run_id = ?", (run_id,)).fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM eco_signal_relevance").fetchone()[0] == 1
+
+            assert conn.execute("SELECT COUNT(*) FROM eco_entity_coverage WHERE run_id = ?", (other_run_id,)).fetchone()[0] == 1
+            assert conn.execute("SELECT COUNT(*) FROM eco_quality_summary WHERE run_id = ?", (other_run_id,)).fetchone()[0] == 1
+            assert conn.execute("SELECT COUNT(*) FROM eco_entity_window_snapshot WHERE run_id = ?", (other_run_id,)).fetchone()[0] == 1
+            assert conn.execute("SELECT COUNT(*) FROM eco_entity_metric_value WHERE run_id = ?", (other_run_id,)).fetchone()[0] == 1
+            assert conn.execute("SELECT COUNT(*) FROM eco_classification_decision WHERE run_id = ?", (other_run_id,)).fetchone()[0] == 1
+            assert conn.execute("SELECT COUNT(*) FROM eco_signal_observation WHERE run_id = ?", (other_run_id,)).fetchone()[0] == 1
+            assert conn.execute("SELECT COUNT(*) FROM eco_entity_event WHERE run_id = ?", (other_run_id,)).fetchone()[0] == 1
+        finally:
+            conn.close()
+        return {"warning_count": 0}
+
+    def _generic_stub(**kwargs):
+        call_order.append("GENERIC_BUILDER")
+        return {"warning_count": 0}
+
+    monkeypatch.setattr(cli, "_create_backup", _backup_then_record)
+    monkeypatch.setattr(cli, "build_canonical_v3_base_run", _base_stub)
+    for builder_name, _, _ in cli._builder_sequence()[1:]:
+        monkeypatch.setattr(cli, builder_name, _generic_stub)
+    monkeypatch.setattr(
+        cli,
+        "_validate_post_build",
+        lambda *args, **kwargs: {
+            "run_exists": True,
+            "table_counts": {table_name: 1 for table_name in cli.TARGET_TABLES_BY_VALIDATION},
+            "forbidden_lineage_counts": {
+                "eco_entity_window_snapshot": 0,
+                "eco_entity_metric_value": 0,
+                "eco_classification_decision": 0,
+                "eco_signal_observation": 0,
+                "eco_entity_event": 0,
+            },
+            "latest_eco_signal_date": "2026-06-04",
+            "latest_signal_date_ok": True,
+        },
+    )
+
+    result = cli.main(_base_args(db_path, backup_dir) + ["--replace-existing"])
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert call_order[0] == "BACKUP_CREATED"
+    assert call_order[1] == "build_canonical_v3_base_run"
+    assert "Replace Cleanup" in captured.out
+    assert "replace_cleanup_status: OK" in captured.out
+    assert f"replace_cleanup_scope: run_id={run_id}" in captured.out
+    assert "replace_cleanup_timing: after backup, before builder execution" in captured.out
+    assert "replace_cleanup_deleted eco_signal_relevance=1" in captured.out
+    assert "replace_cleanup_deleted eco_signal_observation=1" in captured.out
+    assert "replace_cleanup_deleted eco_entity_event=1" in captured.out
+    assert "replace_cleanup_deleted eco_entity_window_snapshot=1" in captured.out
+    assert "replace_cleanup_deleted eco_entity_metric_value=1" in captured.out
+    assert "replace_cleanup_deleted eco_classification_decision=1" in captured.out
+    assert "replace_cleanup_deleted eco_entity_coverage=1" in captured.out
+    assert "replace_cleanup_deleted eco_quality_summary=1" in captured.out
+
+
 def test_does_not_call_forbidden_builders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     db_path = tmp_path / "build.db"
     backup_dir = tmp_path / "backups"
@@ -554,6 +705,39 @@ def test_passes_replace_flags_when_replace_existing_is_set(tmp_path: Path, monke
     assert result == 0
     assert seen_kwargs["base"]["replace_run"] is True
     assert seen_kwargs["generic"]["replace_existing"] is True
+
+
+def test_cleanup_failure_stops_before_any_builder_call_and_reports_build_failed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    db_path = tmp_path / "build.db"
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    _create_fixture_db(str(db_path))
+    run_id = "V3_BASE_DATACENTER_2026_06_04_DC_TAXONOMY_FULL_V1"
+    _insert_existing_run(str(db_path), run_id)
+
+    builder_called = {"value": False}
+    original_create_backup = cli._create_backup
+
+    def _base_stub(**kwargs):
+        builder_called["value"] = True
+        return {"warning_count": 0}
+
+    def _cleanup_boom(*args, **kwargs):
+        raise RuntimeError("forced cleanup failure")
+
+    monkeypatch.setattr(cli, "build_canonical_v3_base_run", _base_stub)
+    monkeypatch.setattr(cli, "_create_backup", original_create_backup)
+    monkeypatch.setattr(cli, "_cleanup_existing_run_runtime_rows", _cleanup_boom)
+
+    result = cli.main(_base_args(db_path, backup_dir) + ["--replace-existing"])
+    captured = capsys.readouterr()
+
+    assert result == 1
+    assert builder_called["value"] is False
+    assert "status: BUILD_FAILED" in captured.out
+    assert "forced cleanup failure" in captured.out
+    assert "backup_path:" in captured.out
+    assert "partial_writes_may_exist" in captured.out
 
 
 def test_call_order_places_group_historical_metrics_between_group_window_metrics_and_ticker_freshness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
