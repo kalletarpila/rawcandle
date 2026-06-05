@@ -22,6 +22,7 @@ def render_daily_markdown_report(query_data: Any) -> str:
 
 def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
     report_header = _get_field(query_data, "report_header")
+    window_summary = _get_field(query_data, "window_summary") or {}
     quality_summary = _get_field(query_data, "quality_summary") or {}
     ecosystem_snapshot = _get_field(query_data, "ecosystem_snapshot")
     group_snapshots = list(_get_field(query_data, "group_snapshots") or [])
@@ -42,6 +43,7 @@ def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
     if window_label != "daily":
         return _render_rolling_legacy_shell(
             report_header=report_header,
+            window_summary=window_summary,
             quality_summary=quality_summary,
             ecosystem_snapshot=ecosystem_snapshot,
             group_snapshots=group_snapshots,
@@ -500,6 +502,7 @@ def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
 def _render_rolling_legacy_shell(
     *,
     report_header: Any,
+    window_summary: dict[str, Any],
     quality_summary: dict[str, Any],
     ecosystem_snapshot: Any,
     group_snapshots: list[dict[str, Any]],
@@ -563,13 +566,30 @@ def _render_rolling_legacy_shell(
         f"- window_code: {_value(_get_field(report_header, 'window_code'))}",
         "",
         "## 2. Window summary",
-        f"- window_code: {_value(_get_field(report_header, 'window_code'))}",
-        f"- signal_date: {_value(_get_field(report_header, 'signal_date'))}",
-        "- Window start/end and valid selected dates: Not available from current V3 query data in DB-V3-70.",
-        "- Incomplete window flag: Not available from current V3 query data in DB-V3-70.",
-        "",
-        "## Watchlist Summary",
     ]
+    lines.extend(
+        _render_table_or_none(
+            headers=["field", "value"],
+            rows=[
+                ["requested_end_date", window_summary.get("requested_end_date")],
+                ["window_start_date", window_summary.get("window_start_date")],
+                ["window_end_date", window_summary.get("window_end_date")],
+                ["valid_signal_dates_count", window_summary.get("valid_signal_dates_count")],
+                [
+                    "valid_signal_dates_included",
+                    ", ".join(window_summary.get("valid_signal_dates_included") or []),
+                ],
+                ["incomplete_window", window_summary.get("incomplete_window")],
+            ],
+            empty_message="Not available from current V3 query data in DB-V3-70.",
+        )
+    )
+    lines.extend(
+        [
+            "",
+            "## Watchlist Summary",
+        ]
+    )
     lines.extend(
         _render_table_or_none(
             headers=[

@@ -11,6 +11,14 @@ def _sample_query_data(*, with_empty_events: bool = False) -> Rolling30ReportQue
             signal_date="2026-05-30",
             window_code="rolling30",
         ),
+        window_summary={
+            "requested_end_date": "2026-05-30",
+            "window_start_date": "2026-05-01",
+            "window_end_date": "2026-05-30",
+            "valid_signal_dates_count": 4,
+            "valid_signal_dates_included": ["2026-05-01", "2026-05-14", "2026-05-28", "2026-05-30"],
+            "incomplete_window": True,
+        },
         quality_summary={
             "rows": [
                 {
@@ -193,6 +201,13 @@ def test_renderer_returns_deterministic_markdown_from_query_data_only() -> None:
     assert "# Datacenter Rolling Swing Report" in markdown
     assert "## 1. Title and run metadata" in markdown
     assert "## 2. Window summary" in markdown
+    assert "requested_end_date" in markdown
+    assert "window_start_date" in markdown
+    assert "window_end_date" in markdown
+    assert "valid_signal_dates_count" in markdown
+    assert "valid_signal_dates_included" in markdown
+    assert "2026-05-01, 2026-05-14, 2026-05-28, 2026-05-30" in markdown
+    assert "Window start/end and valid selected dates: Not available from current V3 query data in DB-V3-70." not in markdown
     assert "## Watchlist Summary" in markdown
     assert "## 4. Ecosystem window change" in markdown
     assert "## 5. Overheat / rotation risk progression" in markdown

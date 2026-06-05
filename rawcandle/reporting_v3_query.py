@@ -163,6 +163,7 @@ class Rolling30ReportHeader:
 @dataclass(frozen=True)
 class Rolling30ReportQueryData:
     report_header: Rolling30ReportHeader
+    window_summary: dict[str, Any]
     quality_summary: dict[str, Any]
     ecosystem_snapshot: dict[str, Any] | None
     group_snapshots: list[dict[str, Any]]
@@ -180,6 +181,7 @@ class Rolling30ReportQueryData:
 @dataclass(frozen=True)
 class Rolling5ReportQueryData:
     report_header: Rolling30ReportHeader
+    window_summary: dict[str, Any]
     quality_summary: dict[str, Any]
     ecosystem_snapshot: dict[str, Any] | None
     group_snapshots: list[dict[str, Any]]
@@ -196,6 +198,7 @@ class Rolling5ReportQueryData:
 @dataclass(frozen=True)
 class Rolling2ReportQueryData:
     report_header: Rolling30ReportHeader
+    window_summary: dict[str, Any]
     quality_summary: dict[str, Any]
     ecosystem_snapshot: dict[str, Any] | None
     group_snapshots: list[dict[str, Any]]
@@ -291,6 +294,7 @@ def _build_rolling30_report_query_data(
 
         return Rolling30ReportQueryData(
             report_header=report_header,
+            window_summary=_load_rolling_window_summary(conn, run_row, ROLLING30_WINDOW_CODE),
             quality_summary={
                 "rows": _load_quality_summary_rows(conn, run_row, ROLLING30_WINDOW_CODE),
                 "coverage_counts": _load_coverage_counts(conn, run_row, ROLLING30_WINDOW_CODE),
@@ -416,6 +420,7 @@ def _build_rolling2_report_query_data(
 
         return Rolling2ReportQueryData(
             report_header=report_header,
+            window_summary=_load_rolling_window_summary(conn, run_row, ROLLING2_WINDOW_CODE),
             quality_summary={
                 "rows": _load_quality_summary_rows(conn, run_row, ROLLING2_WINDOW_CODE),
                 "coverage_counts": _load_coverage_counts(conn, run_row, ROLLING2_WINDOW_CODE),
@@ -478,6 +483,7 @@ def _build_rolling5_report_query_data(
 
         return Rolling5ReportQueryData(
             report_header=report_header,
+            window_summary=_load_rolling_window_summary(conn, run_row, ROLLING5_WINDOW_CODE),
             quality_summary={
                 "rows": _load_quality_summary_rows(conn, run_row, ROLLING5_WINDOW_CODE),
                 "coverage_counts": _load_coverage_counts(conn, run_row, ROLLING5_WINDOW_CODE),
@@ -911,6 +917,61 @@ def _load_watchlist_members(conn: sqlite3.Connection, run_row: sqlite3.Row) -> l
         ).fetchall()
     ]
     return rows
+
+
+def _load_rolling_window_summary(
+    conn: sqlite3.Connection,
+    run_row: sqlite3.Row,
+    window_code: str,
+) -> dict[str, Any]:
+    signal_day = str(run_row["signal_date"])
+    end_day = date.fromisoformat(signal_day)
+    start_bound = (end_day - timedelta(days=WINDOW_DAYS_BY_CODE[window_code] - 1)).isoformat()
+    included_dates = sorted(
+        {
+            str(row["included_date"])
+            for row in conn.execute(
+                """
+                SELECT observed_date AS included_date
+                FROM eco_signal_observation
+                WHERE run_id = ?
+                  AND taxonomy_version_id = ?
+                  AND window_code = ?
+                  AND observed_date >= ?
+                  AND observed_date <= ?
+                UNION
+                SELECT event_date AS included_date
+                FROM eco_entity_event
+                WHERE run_id = ?
+                  AND taxonomy_version_id = ?
+                  AND event_date >= ?
+                  AND event_date <= ?
+                ORDER BY included_date
+                """,
+                (
+                    str(run_row["run_id"]),
+                    int(run_row["taxonomy_version_id"]),
+                    window_code,
+                    start_bound,
+                    signal_day,
+                    str(run_row["run_id"]),
+                    int(run_row["taxonomy_version_id"]),
+                    start_bound,
+                    signal_day,
+                ),
+            ).fetchall()
+            if row["included_date"] is not None
+        }
+    )
+    window_length = WINDOW_DAYS_BY_CODE[window_code]
+    return {
+        "requested_end_date": signal_day,
+        "window_start_date": included_dates[0] if included_dates else None,
+        "window_end_date": included_dates[-1] if included_dates else signal_day,
+        "valid_signal_dates_count": len(included_dates),
+        "valid_signal_dates_included": included_dates,
+        "incomplete_window": len(included_dates) < window_length,
+    }
 
 
 def _load_structural_events(conn: sqlite3.Connection, run_row: sqlite3.Row, window_code: str) -> list[dict[str, Any]]:

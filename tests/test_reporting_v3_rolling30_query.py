@@ -571,6 +571,12 @@ def test_query_returns_rolling30_structured_data_from_eco_facts(tmp_path) -> Non
     assert data.report_header.taxonomy_version_code == "DC_TAXONOMY_FULL_V1"
     assert data.report_header.signal_date == SIGNAL_DATE
     assert data.report_header.window_code == WINDOW_CODE
+    assert data.window_summary["requested_end_date"] == "2026-05-29"
+    assert data.window_summary["window_start_date"] == "2026-05-20"
+    assert data.window_summary["window_end_date"] == "2026-05-29"
+    assert data.window_summary["valid_signal_dates_count"] == 3
+    assert data.window_summary["valid_signal_dates_included"] == ["2026-05-20", "2026-05-28", "2026-05-29"]
+    assert data.window_summary["incomplete_window"] is True
 
     assert data.ecosystem_snapshot is not None
     assert data.ecosystem_snapshot["entity_code"] == "DATACENTER"
