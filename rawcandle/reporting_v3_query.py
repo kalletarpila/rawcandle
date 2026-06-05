@@ -7,8 +7,12 @@ from pathlib import Path
 from typing import Any
 
 
-WINDOW_CODE = "rolling30"
-WINDOW_DAYS = 30
+ROLLING30_WINDOW_CODE = "rolling30"
+ROLLING5_WINDOW_CODE = "rolling5"
+WINDOW_DAYS_BY_CODE = {
+    ROLLING5_WINDOW_CODE: 5,
+    ROLLING30_WINDOW_CODE: 30,
+}
 REQUIRED_TABLES = (
     "eco_report_run",
     "eco_entity",
@@ -54,6 +58,14 @@ ROLLING30_EXIT_ORDER = {
     "WATCH": 2,
     "NORMAL": 3,
     "INSUFFICIENT_DATA": 4,
+}
+ROLLING5_PULLBACK_ORDER = {
+    "PULLBACK_CANDIDATE": 0,
+    "EARLY_PULLBACK": 1,
+    "FAILED_PULLBACK": 2,
+    "SHORT_TERM_BREAKDOWN": 3,
+    "NO_PULLBACK": 4,
+    "INSUFFICIENT_DATA": 5,
 }
 TICKER_METRIC_NAMES = (
     "breakout_days",
@@ -112,7 +124,37 @@ class Rolling30ReportQueryData:
     metadata: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class Rolling5ReportQueryData:
+    report_header: Rolling30ReportHeader
+    quality_summary: dict[str, Any]
+    ecosystem_snapshot: dict[str, Any] | None
+    group_snapshots: list[dict[str, Any]]
+    ticker_snapshots: list[dict[str, Any]]
+    rolling5_pullback_classifications: list[dict[str, Any]]
+    ticker_metrics: dict[str, dict[str, Any]]
+    group_metrics: list[dict[str, Any]]
+    watchlist_members: list[dict[str, Any]]
+    structural_events: list[dict[str, Any]]
+    signal_observations: list[dict[str, Any]]
+    metadata: dict[str, Any]
+
+
 def build_rolling30_report_query_data(
+    db_path: str,
+    run_id: str,
+) -> Rolling30ReportQueryData:
+    return _build_rolling30_report_query_data(db_path=db_path, run_id=run_id)
+
+
+def build_rolling5_report_query_data(
+    db_path: str,
+    run_id: str,
+) -> Rolling5ReportQueryData:
+    return _build_rolling5_report_query_data(db_path=db_path, run_id=run_id)
+
+
+def _build_rolling30_report_query_data(
     db_path: str,
     run_id: str,
 ) -> Rolling30ReportQueryData:
@@ -120,29 +162,29 @@ def build_rolling30_report_query_data(
     try:
         conn.row_factory = sqlite3.Row
         _check_required_tables(conn)
-        _require_window(conn, WINDOW_CODE)
+        _require_window(conn, ROLLING30_WINDOW_CODE)
         run_row = _resolve_run(conn, run_id)
         report_header = Rolling30ReportHeader(
             run_id=str(run_row["run_id"]),
             ecosystem_code=str(run_row["ecosystem_code"]),
             taxonomy_version_code=str(run_row["taxonomy_version_code"]),
             signal_date=str(run_row["signal_date"]),
-            window_code=WINDOW_CODE,
+            window_code=ROLLING30_WINDOW_CODE,
         )
-        snapshots = _load_snapshots(conn, run_row)
+        snapshots = _load_snapshots(conn, run_row, ROLLING30_WINDOW_CODE)
         if not snapshots:
-            raise ValueError(f"No {WINDOW_CODE} snapshot rows found for run_id '{run_id}'")
+            raise ValueError(f"No {ROLLING30_WINDOW_CODE} snapshot rows found for run_id '{run_id}'")
 
-        buy_rows = _load_classifications(conn, run_row, "rolling30_buy")
-        exit_rows = _load_classifications(conn, run_row, "rolling30_exit")
+        buy_rows = _load_classifications(conn, run_row, ROLLING30_WINDOW_CODE, "rolling30_buy")
+        exit_rows = _load_classifications(conn, run_row, ROLLING30_WINDOW_CODE, "rolling30_exit")
         if not buy_rows and not exit_rows:
-            raise ValueError(f"No {WINDOW_CODE} classification rows found for run_id '{run_id}'")
+            raise ValueError(f"No {ROLLING30_WINDOW_CODE} classification rows found for run_id '{run_id}'")
 
-        ticker_metrics = _load_ticker_metrics(conn, run_row)
-        group_metrics = _load_group_metrics(conn, run_row)
+        ticker_metrics = _load_ticker_metrics(conn, run_row, ROLLING30_WINDOW_CODE)
+        group_metrics = _load_group_metrics(conn, run_row, ROLLING30_WINDOW_CODE)
         watchlist_members = _load_watchlist_members(conn, run_row)
-        structural_events = _load_structural_events(conn, run_row)
-        signal_observations = _load_signal_observations(conn, run_row)
+        structural_events = _load_structural_events(conn, run_row, ROLLING30_WINDOW_CODE)
+        signal_observations = _load_signal_observations(conn, run_row, ROLLING30_WINDOW_CODE)
 
         ecosystem_snapshot = next((row for row in snapshots if row["entity_type"] == "ECOSYSTEM"), None)
         group_snapshots = [row for row in snapshots if row["entity_type"] in {"LAYER", "SUBINDUSTRY"}]
@@ -151,8 +193,8 @@ def build_rolling30_report_query_data(
         return Rolling30ReportQueryData(
             report_header=report_header,
             quality_summary={
-                "rows": _load_quality_summary_rows(conn, run_row),
-                "coverage_counts": _load_coverage_counts(conn, run_row),
+                "rows": _load_quality_summary_rows(conn, run_row, ROLLING30_WINDOW_CODE),
+                "coverage_counts": _load_coverage_counts(conn, run_row, ROLLING30_WINDOW_CODE),
             },
             ecosystem_snapshot=ecosystem_snapshot,
             group_snapshots=group_snapshots,
@@ -165,9 +207,71 @@ def build_rolling30_report_query_data(
             structural_events=structural_events,
             signal_observations=signal_observations,
             metadata=_build_metadata(
+                window_code=ROLLING30_WINDOW_CODE,
                 ticker_snapshots=ticker_snapshots,
-                buy_rows=buy_rows,
-                exit_rows=exit_rows,
+                classification_rows=[*buy_rows, *exit_rows],
+                signal_observations=signal_observations,
+                structural_events=structural_events,
+            ),
+        )
+    finally:
+        conn.close()
+
+
+def _build_rolling5_report_query_data(
+    db_path: str,
+    run_id: str,
+) -> Rolling5ReportQueryData:
+    conn = _connect_read_only(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        _check_required_tables(conn)
+        _require_window(conn, ROLLING5_WINDOW_CODE)
+        run_row = _resolve_run(conn, run_id)
+        report_header = Rolling30ReportHeader(
+            run_id=str(run_row["run_id"]),
+            ecosystem_code=str(run_row["ecosystem_code"]),
+            taxonomy_version_code=str(run_row["taxonomy_version_code"]),
+            signal_date=str(run_row["signal_date"]),
+            window_code=ROLLING5_WINDOW_CODE,
+        )
+        snapshots = _load_snapshots(conn, run_row, ROLLING5_WINDOW_CODE)
+        if not snapshots:
+            raise ValueError(f"No {ROLLING5_WINDOW_CODE} snapshot rows found for run_id '{run_id}'")
+
+        pullback_rows = _load_classifications(conn, run_row, ROLLING5_WINDOW_CODE, "rolling5_pullback")
+        if not pullback_rows:
+            raise ValueError(f"No {ROLLING5_WINDOW_CODE} classification rows found for run_id '{run_id}'")
+
+        ticker_metrics = _load_ticker_metrics(conn, run_row, ROLLING5_WINDOW_CODE)
+        group_metrics = _load_group_metrics(conn, run_row, ROLLING5_WINDOW_CODE)
+        watchlist_members = _load_watchlist_members(conn, run_row)
+        structural_events = _load_structural_events(conn, run_row, ROLLING5_WINDOW_CODE)
+        signal_observations = _load_signal_observations(conn, run_row, ROLLING5_WINDOW_CODE)
+
+        ecosystem_snapshot = next((row for row in snapshots if row["entity_type"] == "ECOSYSTEM"), None)
+        group_snapshots = [row for row in snapshots if row["entity_type"] in {"LAYER", "SUBINDUSTRY"}]
+        ticker_snapshots = [row for row in snapshots if row["entity_type"] == "TICKER"]
+
+        return Rolling5ReportQueryData(
+            report_header=report_header,
+            quality_summary={
+                "rows": _load_quality_summary_rows(conn, run_row, ROLLING5_WINDOW_CODE),
+                "coverage_counts": _load_coverage_counts(conn, run_row, ROLLING5_WINDOW_CODE),
+            },
+            ecosystem_snapshot=ecosystem_snapshot,
+            group_snapshots=group_snapshots,
+            ticker_snapshots=ticker_snapshots,
+            rolling5_pullback_classifications=pullback_rows,
+            ticker_metrics=ticker_metrics,
+            group_metrics=group_metrics,
+            watchlist_members=watchlist_members,
+            structural_events=structural_events,
+            signal_observations=signal_observations,
+            metadata=_build_metadata(
+                window_code=ROLLING5_WINDOW_CODE,
+                ticker_snapshots=ticker_snapshots,
+                classification_rows=pullback_rows,
                 signal_observations=signal_observations,
                 structural_events=structural_events,
             ),
@@ -236,7 +340,7 @@ def _resolve_run(conn: sqlite3.Connection, run_id: str) -> sqlite3.Row:
     return row
 
 
-def _load_quality_summary_rows(conn: sqlite3.Connection, run_row: sqlite3.Row) -> list[dict[str, Any]]:
+def _load_quality_summary_rows(conn: sqlite3.Connection, run_row: sqlite3.Row, window_code: str) -> list[dict[str, Any]]:
     rows = [
         _row_to_dict(row)
         for row in conn.execute(
@@ -280,7 +384,7 @@ def _load_quality_summary_rows(conn: sqlite3.Connection, run_row: sqlite3.Row) -
                 str(run_row["run_id"]),
                 str(run_row["signal_date"]),
                 int(run_row["taxonomy_version_id"]),
-                WINDOW_CODE,
+                window_code,
             ),
         ).fetchall()
     ]
@@ -293,7 +397,7 @@ def _load_quality_summary_rows(conn: sqlite3.Connection, run_row: sqlite3.Row) -
     return rows
 
 
-def _load_coverage_counts(conn: sqlite3.Connection, run_row: sqlite3.Row) -> list[dict[str, Any]]:
+def _load_coverage_counts(conn: sqlite3.Connection, run_row: sqlite3.Row, window_code: str) -> list[dict[str, Any]]:
     return [
         _row_to_dict(row)
         for row in conn.execute(
@@ -323,13 +427,13 @@ def _load_coverage_counts(conn: sqlite3.Connection, run_row: sqlite3.Row) -> lis
                 str(run_row["run_id"]),
                 str(run_row["signal_date"]),
                 int(run_row["taxonomy_version_id"]),
-                WINDOW_CODE,
+                window_code,
             ),
         ).fetchall()
     ]
 
 
-def _load_snapshots(conn: sqlite3.Connection, run_row: sqlite3.Row) -> list[dict[str, Any]]:
+def _load_snapshots(conn: sqlite3.Connection, run_row: sqlite3.Row, window_code: str) -> list[dict[str, Any]]:
     rows = [
         _row_to_dict(row)
         for row in conn.execute(
@@ -366,7 +470,7 @@ def _load_snapshots(conn: sqlite3.Connection, run_row: sqlite3.Row) -> list[dict
                 str(run_row["run_id"]),
                 str(run_row["signal_date"]),
                 int(run_row["taxonomy_version_id"]),
-                WINDOW_CODE,
+                window_code,
             ),
         ).fetchall()
     ]
@@ -379,7 +483,12 @@ def _load_snapshots(conn: sqlite3.Connection, run_row: sqlite3.Row) -> list[dict
     return rows
 
 
-def _load_classifications(conn: sqlite3.Connection, run_row: sqlite3.Row, classification_type: str) -> list[dict[str, Any]]:
+def _load_classifications(
+    conn: sqlite3.Connection,
+    run_row: sqlite3.Row,
+    window_code: str,
+    classification_type: str,
+) -> list[dict[str, Any]]:
     rows = [
         _row_to_dict(row)
         for row in conn.execute(
@@ -409,12 +518,17 @@ def _load_classifications(conn: sqlite3.Connection, run_row: sqlite3.Row, classi
                 str(run_row["run_id"]),
                 str(run_row["signal_date"]),
                 int(run_row["taxonomy_version_id"]),
-                WINDOW_CODE,
+                window_code,
                 classification_type,
             ),
         ).fetchall()
     ]
-    severity_order = ROLLING30_BUY_ORDER if classification_type == "rolling30_buy" else ROLLING30_EXIT_ORDER
+    if classification_type == "rolling30_buy":
+        severity_order = ROLLING30_BUY_ORDER
+    elif classification_type == "rolling30_exit":
+        severity_order = ROLLING30_EXIT_ORDER
+    else:
+        severity_order = ROLLING5_PULLBACK_ORDER
     rows.sort(
         key=lambda row: (
             severity_order.get(str(row["classification_state"]), 99),
@@ -424,7 +538,7 @@ def _load_classifications(conn: sqlite3.Connection, run_row: sqlite3.Row, classi
     return rows
 
 
-def _load_ticker_metrics(conn: sqlite3.Connection, run_row: sqlite3.Row) -> dict[str, dict[str, Any]]:
+def _load_ticker_metrics(conn: sqlite3.Connection, run_row: sqlite3.Row, window_code: str) -> dict[str, dict[str, Any]]:
     rows = conn.execute(
         f"""
         SELECT
@@ -449,7 +563,7 @@ def _load_ticker_metrics(conn: sqlite3.Connection, run_row: sqlite3.Row) -> dict
             str(run_row["run_id"]),
             str(run_row["signal_date"]),
             int(run_row["taxonomy_version_id"]),
-            WINDOW_CODE,
+            window_code,
             *TICKER_METRIC_NAMES,
         ),
     ).fetchall()
@@ -467,7 +581,7 @@ def _load_ticker_metrics(conn: sqlite3.Connection, run_row: sqlite3.Row) -> dict
     return ticker_metrics
 
 
-def _load_group_metrics(conn: sqlite3.Connection, run_row: sqlite3.Row) -> list[dict[str, Any]]:
+def _load_group_metrics(conn: sqlite3.Connection, run_row: sqlite3.Row, window_code: str) -> list[dict[str, Any]]:
     rows = conn.execute(
         f"""
         SELECT
@@ -493,7 +607,7 @@ def _load_group_metrics(conn: sqlite3.Connection, run_row: sqlite3.Row) -> list[
             str(run_row["run_id"]),
             str(run_row["signal_date"]),
             int(run_row["taxonomy_version_id"]),
-            WINDOW_CODE,
+            window_code,
             *GROUP_METRIC_NAMES,
         ),
     ).fetchall()
@@ -562,9 +676,9 @@ def _load_watchlist_members(conn: sqlite3.Connection, run_row: sqlite3.Row) -> l
     return rows
 
 
-def _load_structural_events(conn: sqlite3.Connection, run_row: sqlite3.Row) -> list[dict[str, Any]]:
+def _load_structural_events(conn: sqlite3.Connection, run_row: sqlite3.Row, window_code: str) -> list[dict[str, Any]]:
     signal_day = date.fromisoformat(str(run_row["signal_date"]))
-    start_day = signal_day - timedelta(days=WINDOW_DAYS - 1)
+    start_day = signal_day - timedelta(days=WINDOW_DAYS_BY_CODE[window_code] - 1)
     rows = [
         _row_to_dict(row)
         for row in conn.execute(
@@ -601,7 +715,7 @@ def _load_structural_events(conn: sqlite3.Connection, run_row: sqlite3.Row) -> l
     return rows
 
 
-def _load_signal_observations(conn: sqlite3.Connection, run_row: sqlite3.Row) -> list[dict[str, Any]]:
+def _load_signal_observations(conn: sqlite3.Connection, run_row: sqlite3.Row, window_code: str) -> list[dict[str, Any]]:
     rows = [
         _row_to_dict(row)
         for row in conn.execute(
@@ -642,7 +756,7 @@ def _load_signal_observations(conn: sqlite3.Connection, run_row: sqlite3.Row) ->
                 str(run_row["run_id"]),
                 str(run_row["signal_date"]),
                 int(run_row["taxonomy_version_id"]),
-                WINDOW_CODE,
+                window_code,
             ),
         ).fetchall()
     ]
@@ -651,15 +765,13 @@ def _load_signal_observations(conn: sqlite3.Connection, run_row: sqlite3.Row) ->
 
 def _build_metadata(
     *,
+    window_code: str,
     ticker_snapshots: list[dict[str, Any]],
-    buy_rows: list[dict[str, Any]],
-    exit_rows: list[dict[str, Any]],
+    classification_rows: list[dict[str, Any]],
     signal_observations: list[dict[str, Any]],
     structural_events: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    buy_tickers = {str(row["ticker"]) for row in buy_rows}
-    exit_tickers = {str(row["ticker"]) for row in exit_rows}
-    classified_tickers = buy_tickers | exit_tickers
+    classified_tickers = {str(row["ticker"]) for row in classification_rows}
     coverage_without_classification = sorted(
         str(row["entity_code"])
         for row in ticker_snapshots
@@ -667,18 +779,19 @@ def _build_metadata(
     )
     ranking_non_null_count = sum(
         1
-        for row in [*buy_rows, *exit_rows]
+        for row in classification_rows
         if row.get("priority_score") is not None or row.get("priority_label") is not None or row.get("sort_rank") is not None
     )
     signal_names = sorted({str(row["signal_name"]) for row in signal_observations})
+    window_prefix = "rolling30" if window_code == ROLLING30_WINDOW_CODE else "rolling5"
     return {
         "used_v2_runtime_tables": False,
         "used_generated_reports": False,
         "used_dashboard_output": False,
-        "rolling30_classification_source": "eco_classification_decision",
-        "rolling30_snapshot_classification_source_used": False,
-        "rolling30_event_window_mode": "event_date_range_within_30d_window",
-        "rolling30_signal_scope": "window_native_only",
+        f"{window_prefix}_classification_source": "eco_classification_decision",
+        f"{window_prefix}_snapshot_classification_source_used": False,
+        f"{window_prefix}_event_window_mode": "event_date_range_within_30d_window",
+        f"{window_prefix}_signal_scope": "window_native_only",
         "ranking_fields_mostly_null": ranking_non_null_count == 0,
         "coverage_without_classification_tickers": coverage_without_classification,
         "signal_names_present": signal_names,
@@ -686,12 +799,20 @@ def _build_metadata(
         "limitations": [
             "generated Markdown/CSV reports were not used as source data",
             "dashboard-rendered output was not used as source data",
-            "rolling30 classifications are read from eco_classification_decision",
-            "eco_entity_window_snapshot.classification_state is not used as the rolling30 classification source",
+            f"{window_prefix} classifications are read from eco_classification_decision",
+            (
+                "eco_entity_window_snapshot.classification_state is not used as the "
+                f"primary {window_prefix} classification source"
+                if window_prefix == "rolling5"
+                else "eco_entity_window_snapshot.classification_state is not used as the rolling30 classification source"
+            ),
             "ranking fields are mostly NULL; deterministic fallback ordering is used",
-            "rolling30 notable technical signals are limited unless a later daily signal join is added",
-            "rolling30 signal observations are limited to rolling30-compatible observations; daily candlestick/divergence semantics are not invented",
-            "coverage or snapshot rows can exist without rolling30 classification rows, for example CRGY-like cases",
+            f"{window_prefix} notable technical signals are limited unless a later daily signal join is added",
+            (
+                f"{window_prefix} signal observations are limited to {window_prefix}-compatible observations; "
+                "daily candlestick/divergence semantics are not invented"
+            ),
+            f"coverage or snapshot rows can exist without {window_prefix} classification rows, for example CRGY-like cases",
             "no V2 report/context tables were used",
         ],
     }
