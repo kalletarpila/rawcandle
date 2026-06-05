@@ -23,6 +23,7 @@ def render_daily_markdown_report(query_data: Any) -> str:
 def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
     report_header = _get_field(query_data, "report_header")
     window_summary = _get_field(query_data, "window_summary") or {}
+    watchlist_summary = _get_field(query_data, "watchlist_summary") or {}
     quality_summary = _get_field(query_data, "quality_summary") or {}
     ecosystem_snapshot = _get_field(query_data, "ecosystem_snapshot")
     group_snapshots = list(_get_field(query_data, "group_snapshots") or [])
@@ -44,6 +45,7 @@ def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
         return _render_rolling_legacy_shell(
             report_header=report_header,
             window_summary=window_summary,
+            watchlist_summary=watchlist_summary,
             quality_summary=quality_summary,
             ecosystem_snapshot=ecosystem_snapshot,
             group_snapshots=group_snapshots,
@@ -503,6 +505,7 @@ def _render_rolling_legacy_shell(
     *,
     report_header: Any,
     window_summary: dict[str, Any],
+    watchlist_summary: dict[str, Any],
     quality_summary: dict[str, Any],
     ecosystem_snapshot: Any,
     group_snapshots: list[dict[str, Any]],
@@ -590,37 +593,71 @@ def _render_rolling_legacy_shell(
             "## Watchlist Summary",
         ]
     )
-    lines.extend(
-        _render_table_or_none(
-            headers=[
-                "watchlist_code",
-                "watchlist_name",
-                "ticker",
-                "entity_name",
-                "member_role",
-                "member_status",
-                "effective_from",
-                "effective_to",
-            ],
-            rows=[
-                [
-                    row.get("watchlist_code"),
-                    row.get("watchlist_name"),
-                    row.get("ticker"),
-                    row.get("entity_name"),
-                    row.get("member_role"),
-                    row.get("member_status"),
-                    row.get("effective_from"),
-                    row.get("effective_to"),
-                ]
-                for row in watchlist_members
-            ],
-            empty_message="No watchlist rows.",
+    if watchlist_summary:
+        lines.extend(
+            _render_table_or_none(
+                headers=["field", "value"],
+                rows=[
+                    ["active_watchlist_count", watchlist_summary.get("counts", {}).get("active_watchlist_count")],
+                    ["in_ecosystem_count", watchlist_summary.get("counts", {}).get("in_ecosystem_count")],
+                    ["missing_price_data_count", watchlist_summary.get("counts", {}).get("missing_price_data_count")],
+                    ["breakout_count", watchlist_summary.get("counts", {}).get("breakout_count")],
+                    ["pullback_count", watchlist_summary.get("counts", {}).get("pullback_count")],
+                    ["exit_risk_count", watchlist_summary.get("counts", {}).get("exit_risk_count")],
+                    ["high_exit_risk_count", watchlist_summary.get("counts", {}).get("high_exit_risk_count")],
+                    ["medium_exit_risk_count", watchlist_summary.get("counts", {}).get("medium_exit_risk_count")],
+                ],
+                empty_message="No active watchlist rows available from current V3 query data.",
+            )
         )
-    )
+        lines.extend(
+            _render_table_or_none(
+                headers=[
+                    "ticker",
+                    "current_watchlist_status",
+                    "window_watchlist_status",
+                    "in_datacenter_ecosystem",
+                    "primary_layer",
+                    "primary_subindustry",
+                    "breakout_days",
+                    "pullback_days",
+                    "exit_risk_days",
+                    "high_exit_risk_days",
+                    "medium_exit_risk_days",
+                    "last_subindustry_timing_state",
+                    "last_subindustry_overheat_risk_level",
+                    "last_layer_timing_state",
+                    "last_layer_overheat_risk_level",
+                    "last_price_data_status",
+                ],
+                rows=[
+                    [
+                        row.get("ticker"),
+                        row.get("current_watchlist_status"),
+                        row.get("window_watchlist_status"),
+                        row.get("in_datacenter_ecosystem"),
+                        row.get("primary_layer"),
+                        row.get("primary_subindustry"),
+                        row.get("breakout_days"),
+                        row.get("pullback_days"),
+                        row.get("exit_risk_days"),
+                        row.get("high_exit_risk_days"),
+                        row.get("medium_exit_risk_days"),
+                        row.get("last_subindustry_timing_state"),
+                        row.get("last_subindustry_overheat_risk_level"),
+                        row.get("last_layer_timing_state"),
+                        row.get("last_layer_overheat_risk_level"),
+                        row.get("last_price_data_status"),
+                    ]
+                    for row in watchlist_summary.get("rows", [])
+                ],
+                empty_message="No active watchlist rows available from current V3 query data.",
+            )
+        )
+    else:
+        lines.append("No active watchlist rows available from current V3 query data.")
     lines.extend(
         [
-            "- Full legacy watchlist read-model is not available from current V3 query data in DB-V3-70.",
             "## 4. Ecosystem window change",
             "Not available from current V3 query data in DB-V3-70.",
             "",

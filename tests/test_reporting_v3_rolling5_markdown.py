@@ -19,6 +19,38 @@ def _sample_query_data(*, with_empty_events: bool = False) -> Rolling5ReportQuer
             "valid_signal_dates_included": ["2026-05-26", "2026-05-29", "2026-05-30"],
             "incomplete_window": True,
         },
+        watchlist_summary={
+            "counts": {
+                "active_watchlist_count": 1,
+                "in_ecosystem_count": 1,
+                "missing_price_data_count": 0,
+                "breakout_count": 1,
+                "pullback_count": 1,
+                "exit_risk_count": 1,
+                "high_exit_risk_count": 0,
+                "medium_exit_risk_count": 1,
+            },
+            "rows": [
+                {
+                    "ticker": "NVDA",
+                    "current_watchlist_status": "ACTIVE",
+                    "window_watchlist_status": "EXIT_RISK",
+                    "in_datacenter_ecosystem": True,
+                    "primary_layer": "INFRA",
+                    "primary_subindustry": "SEMIS",
+                    "breakout_days": 1.0,
+                    "pullback_days": 3.0,
+                    "exit_risk_days": 2.0,
+                    "high_exit_risk_days": 0.0,
+                    "medium_exit_risk_days": 2.0,
+                    "last_subindustry_timing_state": "PULLBACK",
+                    "last_subindustry_overheat_risk_level": "LOW",
+                    "last_layer_timing_state": "PULLBACK",
+                    "last_layer_overheat_risk_level": "LOW",
+                    "last_price_data_status": "OK",
+                }
+            ],
+        },
         quality_summary={
             "rows": [
                 {
@@ -197,6 +229,12 @@ def test_renderer_returns_deterministic_rolling5_markdown_from_query_data_only()
     assert "2026-05-26, 2026-05-29, 2026-05-30" in markdown
     assert "Window start/end and valid selected dates: Not available from current V3 query data in DB-V3-70." not in markdown
     assert "## Watchlist Summary" in markdown
+    assert "active_watchlist_count" in markdown
+    assert "window_watchlist_status" in markdown
+    assert "primary_layer" in markdown
+    assert "primary_subindustry" in markdown
+    assert "last_price_data_status" in markdown
+    assert "Full legacy watchlist read-model is not available from current V3 query data in DB-V3-70." not in markdown
     assert "## 4. Ecosystem window change" in markdown
     assert "## 5. Overheat / rotation risk progression" in markdown
     assert "## 6. Subindustry timing persistence" in markdown

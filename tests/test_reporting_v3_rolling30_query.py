@@ -603,6 +603,23 @@ def test_query_returns_rolling30_structured_data_from_eco_facts(tmp_path) -> Non
     assert len(data.watchlist_members) == 1
     assert data.watchlist_members[0]["ticker"] == "NVDA"
     assert data.watchlist_members[0]["watchlist_code"] == "PRIMARY"
+    assert data.watchlist_summary["counts"]["active_watchlist_count"] == 1
+    assert data.watchlist_summary["counts"]["in_ecosystem_count"] == 1
+    assert data.watchlist_summary["counts"]["missing_price_data_count"] == 0
+    assert data.watchlist_summary["counts"]["breakout_count"] == 1
+    assert data.watchlist_summary["counts"]["pullback_count"] == 1
+    assert data.watchlist_summary["counts"]["exit_risk_count"] == 1
+    assert data.watchlist_summary["counts"]["high_exit_risk_count"] == 1
+    assert data.watchlist_summary["counts"]["medium_exit_risk_count"] == 1
+    assert data.watchlist_summary["rows"][0]["ticker"] == "NVDA"
+    assert data.watchlist_summary["rows"][0]["current_watchlist_status"] == "ACTIVE"
+    assert data.watchlist_summary["rows"][0]["window_watchlist_status"] == "HIGH_EXIT_RISK"
+    assert data.watchlist_summary["rows"][0]["in_datacenter_ecosystem"] is True
+    assert data.watchlist_summary["rows"][0]["primary_layer"] == "INFRA"
+    assert data.watchlist_summary["rows"][0]["primary_subindustry"] == "SEMIS"
+    assert data.watchlist_summary["rows"][0]["breakout_days"] == 3.0
+    assert data.watchlist_summary["rows"][0]["pullback_days"] == 2.0
+    assert data.watchlist_summary["rows"][0]["exit_risk_days"] == 4.0
 
     assert [row["event_type"] for row in data.structural_events] == ["BOS", "STRUCTURE_CHANGE"]
     assert len(data.signal_observations) == 1
