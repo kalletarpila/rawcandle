@@ -226,6 +226,27 @@ def _group_concat_run_ids(
     return "" if value is None else str(value)
 
 
+def _run_ids_for_date(
+    conn: sqlite3.Connection,
+    table_name: str,
+    date_column: str,
+    signal_date: str,
+) -> list[str]:
+    columns = _column_names(conn, table_name)
+    if "run_id" not in columns:
+        return []
+    rows = conn.execute(
+        f"""
+        SELECT DISTINCT run_id
+        FROM {table_name}
+        WHERE {date_column} = ?
+        ORDER BY run_id
+        """,
+        (signal_date,),
+    ).fetchall()
+    return [str(row["run_id"]) for row in rows]
+
+
 def _latest_date(conn: sqlite3.Connection, table_name: str, date_column: str) -> str:
     value = _query_scalar(conn, f"SELECT MAX({date_column}) FROM {table_name}", ())
     return "" if value is None else str(value)
@@ -365,16 +386,64 @@ def _render_forbidden_sources(conn: sqlite3.Connection, signal_date: str) -> lis
     return lines
 
 
-def _render_allowed_build_sequence(run_id: str) -> list[str]:
+def _resolve_technical_relevance_run_id(
+    conn: sqlite3.Connection,
+    *,
+    ecosystem: str,
+    taxonomy_version: str,
+    signal_date: str,
+) -> str:
+    table_name = "technical_signal_relevance"
+    if not table_exists(conn, table_name):
+        return "technical_relevance_run_id=<SELECT_FROM_READY_TECHNICAL_SIGNAL_RELEVANCE_RUN_IDS>"
+    run_ids = _run_ids_for_date(conn, table_name, "signal_date", signal_date)
+    preferred = f"{ecosystem}_TECH_REL_{taxonomy_version}_{signal_date.replace('-', '_')}"
+    preferred_matches = [run_id for run_id in run_ids if run_id == preferred]
+    if len(preferred_matches) == 1:
+        return f"technical_relevance_run_id={preferred_matches[0]}"
+    return "technical_relevance_run_id=<SELECT_FROM_READY_TECHNICAL_SIGNAL_RELEVANCE_RUN_IDS>"
+
+
+def _format_required_parameters(
+    step: AllowedBuildStep,
+    *,
+    run_id: str,
+    technical_relevance_parameter: str,
+) -> str:
+    rendered: list[str] = []
+    for parameter in step.required_parameters:
+        if parameter == "run_id":
+            rendered.append(f"run_id={run_id}")
+        elif parameter == "technical_relevance_run_id":
+            rendered.append(technical_relevance_parameter)
+        else:
+            rendered.append(parameter)
+    return ", ".join(rendered)
+
+
+def _render_allowed_build_sequence(
+    conn: sqlite3.Connection,
+    *,
+    ecosystem: str,
+    taxonomy_version: str,
+    signal_date: str,
+    run_id: str,
+) -> list[str]:
     lines = [
         "Allowed Build Sequence",
         "step | function_name | target_tables | source_tables | status | required_parameters | note",
     ]
+    technical_relevance_parameter = _resolve_technical_relevance_run_id(
+        conn,
+        ecosystem=ecosystem,
+        taxonomy_version=taxonomy_version,
+        signal_date=signal_date,
+    )
     for step in ALLOWED_BUILD_STEPS:
         lines.append(
             f"{step.step_number} | {step.function_name} | {', '.join(step.target_tables)} | "
             f"{', '.join(step.source_tables)} | PLANNED_ALLOWED_SOURCE | "
-            f"{', '.join(step.required_parameters).replace('run_id', run_id)} | not executed"
+            f"{_format_required_parameters(step, run_id=run_id, technical_relevance_parameter=technical_relevance_parameter)} | not executed"
         )
     return lines
 
@@ -426,7 +495,13 @@ def render_text_plan(
         "",
         *_render_forbidden_sources(conn, signal_date),
         "",
-        *_render_allowed_build_sequence(run_id),
+        *_render_allowed_build_sequence(
+            conn,
+            ecosystem=ecosystem,
+            taxonomy_version=taxonomy_version,
+            signal_date=signal_date,
+            run_id=run_id,
+        ),
         "",
         *_render_bypassed_builders(),
         "",

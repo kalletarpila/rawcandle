@@ -206,6 +206,35 @@ def _create_fixture_db(db_path: str, *, signal_date: str = "2026-06-04", include
         conn.close()
 
 
+def _insert_ambiguous_technical_relevance_runs(db_path: str, signal_date: str = "2026-06-04") -> None:
+    conn = _connect(db_path)
+    try:
+        conn.execute("DELETE FROM technical_signal_relevance")
+        conn.execute(
+            """
+            INSERT INTO technical_signal_relevance (
+                run_id, signal_date, timeframe, ticker, signal_name, signal_source_type, signal_source_id
+            ) VALUES (
+                'ALT_TECH_REL_ONE', ?, '1d', 'NVDA', 'MA_STATUS', 'TICKER', 'src-1'
+            )
+            """,
+            (signal_date,),
+        )
+        conn.execute(
+            """
+            INSERT INTO technical_signal_relevance (
+                run_id, signal_date, timeframe, ticker, signal_name, signal_source_type, signal_source_id
+            ) VALUES (
+                'ALT_TECH_REL_TWO', ?, '1d', 'NVDA', 'MA_STATUS', 'TICKER', 'src-2'
+            )
+            """,
+            (signal_date,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _eco_target_counts(db_path: str) -> dict[str, int]:
     conn = _connect(db_path)
     try:
@@ -370,7 +399,35 @@ def test_cli_includes_allowed_build_sequence_and_no_execution_notes(tmp_path, ca
     assert "1 | build_canonical_v3_base_run | eco_report_run, eco_entity_coverage, eco_quality_summary |" in captured.out
     assert "12 | build_canonical_v3_window_snapshots | eco_entity_window_snapshot |" in captured.out
     assert "15 | build_canonical_v3_signal_relevance | eco_signal_observation, eco_signal_relevance |" in captured.out
+    assert "technical_relevance_run_id=DATACENTER_TECH_REL_DC_TAXONOMY_FULL_V1_2026_06_04" in captured.out
+    assert "technical_relevance_V3_BASE_DATACENTER_2026_06_04_DC_TAXONOMY_FULL_V1" not in captured.out
     assert "not executed" in captured.out
+
+
+def test_cli_uses_clear_placeholder_when_no_deterministic_technical_relevance_run_id_exists(tmp_path, capsys) -> None:
+    db_path = tmp_path / "plan.db"
+    _create_fixture_db(str(db_path))
+    _insert_ambiguous_technical_relevance_runs(str(db_path))
+
+    result = cli.main(
+        [
+            "--db",
+            str(db_path),
+            "--ecosystem",
+            "DATACENTER",
+            "--taxonomy-version",
+            "DC_TAXONOMY_FULL_V1",
+            "--signal-date",
+            "2026-06-04",
+            "--format",
+            "text",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert result == 0
+    assert "technical_relevance_run_id=<SELECT_FROM_READY_TECHNICAL_SIGNAL_RELEVANCE_RUN_IDS>" in captured.out
+    assert "technical_relevance_V3_BASE_DATACENTER_2026_06_04_DC_TAXONOMY_FULL_V1" not in captured.out
 
 
 def test_cli_output_includes_no_builders_executed_and_no_db_writes_performed(tmp_path, capsys) -> None:
