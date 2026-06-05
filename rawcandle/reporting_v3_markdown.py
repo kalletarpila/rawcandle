@@ -16,6 +16,10 @@ def render_rolling2_markdown_report(query_data: Any) -> str:
     return _render_window_markdown_report(query_data=query_data, window_label="rolling2")
 
 
+def render_daily_markdown_report(query_data: Any) -> str:
+    return _render_window_markdown_report(query_data=query_data, window_label="daily")
+
+
 def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
     report_header = _get_field(query_data, "report_header")
     quality_summary = _get_field(query_data, "quality_summary") or {}
@@ -27,6 +31,7 @@ def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
     structural_events = list(_get_field(query_data, "structural_events") or [])
     signal_observations = list(_get_field(query_data, "signal_observations") or [])
     metadata = _get_field(query_data, "metadata") or {}
+    daily_trigger_classifications = list(_get_field(query_data, "daily_trigger_classifications") or [])
     rolling2_sell_pressure_classifications = list(_get_field(query_data, "rolling2_sell_pressure_classifications") or [])
     rolling30_buy_classifications = list(_get_field(query_data, "rolling30_buy_classifications") or [])
     rolling30_exit_classifications = list(_get_field(query_data, "rolling30_exit_classifications") or [])
@@ -174,7 +179,7 @@ def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
                 empty_message="No rolling5 pullback classification rows.",
             )
         )
-    else:
+    elif window_label == "rolling2":
         lines.extend(
             [
                 "## Rolling2 sell pressure classifications",
@@ -206,6 +211,196 @@ def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
                 empty_message="No rolling2 sell pressure classification rows.",
             )
         )
+    else:
+        lines.extend(
+            [
+                "## Daily trigger classifications",
+                f"- row_count: {len(daily_trigger_classifications)}",
+            ]
+        )
+        lines.extend(_render_state_counts(daily_trigger_classifications))
+        lines.extend(
+            _render_table_or_none(
+                headers=[
+                    "ticker",
+                    "classification_state",
+                    "primary_reason",
+                    "blocking_reason",
+                    "next_action",
+                    "decision_status",
+                ],
+                rows=[
+                    [
+                        row.get("ticker"),
+                        row.get("classification_state"),
+                        row.get("primary_reason"),
+                        row.get("blocking_reason"),
+                        row.get("next_action"),
+                        row.get("decision_status"),
+                    ]
+                    for row in daily_trigger_classifications
+                ],
+                empty_message="No daily trigger classification rows.",
+            )
+        )
+    ticker_metric_headers = (
+        [
+            "ticker",
+            "entity_name",
+            "distance_to_ema10_pct",
+            "distance_to_ema20_pct",
+            "return_5d",
+            "return_10d",
+            "return_20d",
+            "return_60d",
+            "latest_bos_age_trading_days",
+            "latest_reset_age_trading_days",
+            "latest_structure_age_trading_days",
+            "freshness_latest_bos_age_trading_days",
+            "freshness_latest_bos_class",
+            "freshness_latest_reset_age_trading_days",
+            "freshness_latest_reset_class",
+            "freshness_latest_structure_age_trading_days",
+            "freshness_latest_structure_class",
+        ]
+        if window_label == "daily"
+        else [
+            "ticker",
+            "entity_name",
+            "breakout_days",
+            "pullback_days",
+            "exit_risk_days",
+            "high_exit_risk_days",
+            "medium_exit_risk_days",
+            "valid_signal_dates",
+            "distance_to_ema20_pct",
+        ]
+    )
+    ticker_metric_rows = (
+        [
+            [
+                row.get("ticker"),
+                row.get("entity_name"),
+                row.get("distance_to_ema10_pct"),
+                row.get("distance_to_ema20_pct"),
+                row.get("return_5d"),
+                row.get("return_10d"),
+                row.get("return_20d"),
+                row.get("return_60d"),
+                row.get("latest_bos_age_trading_days"),
+                row.get("latest_reset_age_trading_days"),
+                row.get("latest_structure_age_trading_days"),
+                row.get("freshness_latest_bos_age_trading_days"),
+                row.get("freshness_latest_bos_class"),
+                row.get("freshness_latest_reset_age_trading_days"),
+                row.get("freshness_latest_reset_class"),
+                row.get("freshness_latest_structure_age_trading_days"),
+                row.get("freshness_latest_structure_class"),
+            ]
+            for row in ticker_metrics
+        ]
+        if window_label == "daily"
+        else [
+            [
+                row.get("ticker"),
+                row.get("entity_name"),
+                row.get("breakout_days"),
+                row.get("pullback_days"),
+                row.get("exit_risk_days"),
+                row.get("high_exit_risk_days"),
+                row.get("medium_exit_risk_days"),
+                row.get("valid_signal_dates"),
+                row.get("distance_to_ema20_pct"),
+            ]
+            for row in ticker_metrics
+        ]
+    )
+    group_metric_headers = (
+        [
+            "entity_type",
+            "entity_code",
+            "entity_name",
+            "pct_above_ema20",
+            "return_5d",
+            "synthetic_close",
+            "trend_breadth",
+            "weakness_breadth",
+            "group_current_status",
+            "group_timing_state",
+            "group_timing_reason",
+            "group_overheat_risk_level",
+            "freshness_latest_bos_age_trading_days",
+            "freshness_latest_bos_class",
+            "freshness_latest_reset_age_trading_days",
+            "freshness_latest_reset_class",
+            "freshness_latest_structure_age_trading_days",
+            "freshness_latest_structure_class",
+        ]
+        if window_label == "daily"
+        else [
+            "entity_type",
+            "entity_code",
+            "entity_name",
+            "pct_above_ema20",
+            "return_5d",
+            "synthetic_close",
+            "trend_breadth",
+            "weakness_breadth",
+            "valid_signal_dates",
+            "group_current_status",
+            "group_window_status",
+            "group_status_change",
+            "group_timing_state",
+            "group_timing_reason",
+            "group_overheat_risk_level",
+        ]
+    )
+    group_metric_rows = (
+        [
+            [
+                row.get("entity_type"),
+                row.get("entity_code"),
+                row.get("entity_name"),
+                row.get("pct_above_ema20"),
+                row.get("return_5d"),
+                row.get("synthetic_close"),
+                row.get("trend_breadth"),
+                row.get("weakness_breadth"),
+                row.get("group_current_status"),
+                row.get("group_timing_state"),
+                row.get("group_timing_reason"),
+                row.get("group_overheat_risk_level"),
+                row.get("freshness_latest_bos_age_trading_days"),
+                row.get("freshness_latest_bos_class"),
+                row.get("freshness_latest_reset_age_trading_days"),
+                row.get("freshness_latest_reset_class"),
+                row.get("freshness_latest_structure_age_trading_days"),
+                row.get("freshness_latest_structure_class"),
+            ]
+            for row in group_metrics
+        ]
+        if window_label == "daily"
+        else [
+            [
+                row.get("entity_type"),
+                row.get("entity_code"),
+                row.get("entity_name"),
+                row.get("pct_above_ema20"),
+                row.get("return_5d"),
+                row.get("synthetic_close"),
+                row.get("trend_breadth"),
+                row.get("weakness_breadth"),
+                row.get("valid_signal_dates"),
+                row.get("group_current_status"),
+                row.get("group_window_status"),
+                row.get("group_status_change"),
+                row.get("group_timing_state"),
+                row.get("group_timing_reason"),
+                row.get("group_overheat_risk_level"),
+            ]
+            for row in group_metrics
+        ]
+    )
     lines.extend(
         [
             "## Watchlist",
@@ -237,78 +432,29 @@ def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
             ),
             "## Ticker metrics",
             *_render_table_or_none(
-                headers=[
-                    "ticker",
-                    "entity_name",
-                    "breakout_days",
-                    "pullback_days",
-                    "exit_risk_days",
-                    "high_exit_risk_days",
-                    "medium_exit_risk_days",
-                    "valid_signal_dates",
-                    "distance_to_ema20_pct",
-                ],
-                rows=[
-                    [
-                        row.get("ticker"),
-                        row.get("entity_name"),
-                        row.get("breakout_days"),
-                        row.get("pullback_days"),
-                        row.get("exit_risk_days"),
-                        row.get("high_exit_risk_days"),
-                        row.get("medium_exit_risk_days"),
-                        row.get("valid_signal_dates"),
-                        row.get("distance_to_ema20_pct"),
-                    ]
-                    for row in ticker_metrics
-                ],
+                headers=ticker_metric_headers,
+                rows=ticker_metric_rows,
                 empty_message="No ticker metric rows.",
             ),
             "## Group metrics",
             *_render_table_or_none(
-                headers=[
-                    "entity_type",
-                    "entity_code",
-                    "entity_name",
-                    "pct_above_ema20",
-                    "return_5d",
-                    "synthetic_close",
-                    "trend_breadth",
-                    "weakness_breadth",
-                    "valid_signal_dates",
-                    "group_current_status",
-                    "group_window_status",
-                    "group_status_change",
-                    "group_timing_state",
-                    "group_timing_reason",
-                    "group_overheat_risk_level",
-                ],
-                rows=[
-                    [
-                        row.get("entity_type"),
-                        row.get("entity_code"),
-                        row.get("entity_name"),
-                        row.get("pct_above_ema20"),
-                        row.get("return_5d"),
-                        row.get("synthetic_close"),
-                        row.get("trend_breadth"),
-                        row.get("weakness_breadth"),
-                        row.get("valid_signal_dates"),
-                        row.get("group_current_status"),
-                        row.get("group_window_status"),
-                        row.get("group_status_change"),
-                        row.get("group_timing_state"),
-                        row.get("group_timing_reason"),
-                        row.get("group_overheat_risk_level"),
-                    ]
-                    for row in group_metrics
-                ],
+                headers=group_metric_headers,
+                rows=group_metric_rows,
                 empty_message="No group metric rows.",
             ),
             "## Events and signals",
         ]
     )
     lines.extend(_render_events_and_signals(structural_events, signal_observations, window_label=window_label))
+    if window_label == "daily":
+        lines.extend(
+            [
+                "## Accepted special cases",
+                f"- CRGY is intentionally materialized as INSUFFICIENT_DATA in daily_trigger.",
+                f"- NXPI reflects accepted current lower-level source-truth SELL_TRIGGER semantics.",
+                "",
+            ]
+        )
     lines.extend(
         [
             "## Metadata and limitations",
