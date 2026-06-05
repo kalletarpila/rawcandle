@@ -12,6 +12,10 @@ def render_rolling5_markdown_report(query_data: Any) -> str:
     return _render_window_markdown_report(query_data=query_data, window_label="rolling5")
 
 
+def render_rolling2_markdown_report(query_data: Any) -> str:
+    return _render_window_markdown_report(query_data=query_data, window_label="rolling2")
+
+
 def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
     report_header = _get_field(query_data, "report_header")
     quality_summary = _get_field(query_data, "quality_summary") or {}
@@ -23,6 +27,7 @@ def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
     structural_events = list(_get_field(query_data, "structural_events") or [])
     signal_observations = list(_get_field(query_data, "signal_observations") or [])
     metadata = _get_field(query_data, "metadata") or {}
+    rolling2_sell_pressure_classifications = list(_get_field(query_data, "rolling2_sell_pressure_classifications") or [])
     rolling30_buy_classifications = list(_get_field(query_data, "rolling30_buy_classifications") or [])
     rolling30_exit_classifications = list(_get_field(query_data, "rolling30_exit_classifications") or [])
     rolling5_pullback_classifications = list(_get_field(query_data, "rolling5_pullback_classifications") or [])
@@ -137,7 +142,7 @@ def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
                 empty_message="No rolling30 exit classification rows.",
             )
         )
-    else:
+    elif window_label == "rolling5":
         lines.extend(
             [
                 "## Rolling5 pullback classifications",
@@ -167,6 +172,38 @@ def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
                     for row in rolling5_pullback_classifications
                 ],
                 empty_message="No rolling5 pullback classification rows.",
+            )
+        )
+    else:
+        lines.extend(
+            [
+                "## Rolling2 sell pressure classifications",
+                f"- row_count: {len(rolling2_sell_pressure_classifications)}",
+            ]
+        )
+        lines.extend(_render_state_counts(rolling2_sell_pressure_classifications))
+        lines.extend(
+            _render_table_or_none(
+                headers=[
+                    "ticker",
+                    "classification_state",
+                    "primary_reason",
+                    "risk_reason",
+                    "next_action",
+                    "decision_status",
+                ],
+                rows=[
+                    [
+                        row.get("ticker"),
+                        row.get("classification_state"),
+                        row.get("primary_reason"),
+                        row.get("risk_reason"),
+                        row.get("next_action"),
+                        row.get("decision_status"),
+                    ]
+                    for row in rolling2_sell_pressure_classifications
+                ],
+                empty_message="No rolling2 sell pressure classification rows.",
             )
         )
     lines.extend(
