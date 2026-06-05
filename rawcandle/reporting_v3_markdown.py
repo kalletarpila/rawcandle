@@ -89,7 +89,7 @@ def _render_rolling_legacy_shell(
     *,
     report_header: Any,
     window_summary: dict[str, Any],
-    ecosystem_window_change: list[dict[str, Any]],
+    ecosystem_window_change: dict[str, Any],
     watchlist_summary: dict[str, Any],
     quality_summary: dict[str, Any],
     ecosystem_snapshot: Any,
@@ -267,8 +267,16 @@ def _render_rolling_legacy_shell(
     )
     if ecosystem_window_change.get("is_truncated"):
         lines.append(
-            f"Showing first {ecosystem_window_change.get('rows_rendered')} of {ecosystem_window_change.get('rows_available')} ecosystem window change rows."
+            f"Showing {ecosystem_window_change.get('rows_rendered')} of {ecosystem_window_change.get('rows_available')} ecosystem window change rows using stratified LAYER/SUBINDUSTRY selection."
         )
+        rendered_counts = ecosystem_window_change.get("rows_rendered_by_entity_type") or {}
+        if rendered_counts:
+            count_parts = []
+            for entity_type in ("LAYER", "SUBINDUSTRY", "ECOSYSTEM"):
+                if entity_type in rendered_counts:
+                    count_parts.append(f"{entity_type}={rendered_counts[entity_type]}")
+            if count_parts:
+                lines.append(f"Rendered rows by entity type: {', '.join(count_parts)}.")
         lines.append("")
     lines.extend(
         [

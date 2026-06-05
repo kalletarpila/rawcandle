@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 import sqlite3
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -1456,25 +1457,27 @@ def _load_rolling_ecosystem_window_change(
 
 
 def _build_ecosystem_window_change_payload(rows: list[sqlite3.Row]) -> dict[str, Any]:
-    rows_by_key: dict[tuple[str, str, str], list[sqlite3.Row]] = {}
+    rows_by_key: dict[tuple[str, str, str, str], list[sqlite3.Row]] = {}
     for row in rows:
         key = (
             str(row["entity_type"]),
             str(row["entity_code"]),
+            str(row["entity_name"]),
             str(row["metric_name"]),
         )
         rows_by_key.setdefault(key, []).append(row)
 
     output_rows: list[dict[str, Any]] = []
-    for entity_type, entity_code, metric_name in sorted(
+    for entity_type, entity_code, entity_name, metric_name in sorted(
         rows_by_key,
         key=lambda item: (
             ENTITY_TYPE_ORDER.get(item[0], 99),
             item[1],
             item[2],
+            item[3],
         ),
     ):
-        metric_rows = rows_by_key[(entity_type, entity_code, metric_name)]
+        metric_rows = rows_by_key[(entity_type, entity_code, entity_name, metric_name)]
         first_row = metric_rows[0]
         last_row = metric_rows[-1]
         first_value = _metric_row_value(first_row)
@@ -1487,7 +1490,7 @@ def _build_ecosystem_window_change_payload(rows: list[sqlite3.Row]) -> dict[str,
             {
                 "entity_type": entity_type,
                 "entity_code": entity_code,
-                "entity_name": str(first_row["entity_name"]),
+                "entity_name": entity_name,
                 "metric_name": metric_name,
                 "first_date": str(first_row["signal_date"]),
                 "first_value": first_value,
@@ -1498,12 +1501,16 @@ def _build_ecosystem_window_change_payload(rows: list[sqlite3.Row]) -> dict[str,
         )
 
     rows_available = len(output_rows)
-    rendered_rows = output_rows[:ROLLING_ECOSYSTEM_WINDOW_CHANGE_ROW_LIMIT]
+    rows_available_by_entity_type = dict(Counter(row["entity_type"] for row in output_rows))
+    rendered_rows = _select_ecosystem_window_change_rows(output_rows)
+    rows_rendered_by_entity_type = dict(Counter(row["entity_type"] for row in rendered_rows))
     return {
         "rows": rendered_rows,
         "rows_available": rows_available,
         "rows_rendered": len(rendered_rows),
         "is_truncated": rows_available > len(rendered_rows),
+        "rows_available_by_entity_type": rows_available_by_entity_type,
+        "rows_rendered_by_entity_type": rows_rendered_by_entity_type,
     }
 
 
@@ -1513,7 +1520,39 @@ def _empty_ecosystem_window_change() -> dict[str, Any]:
         "rows_available": 0,
         "rows_rendered": 0,
         "is_truncated": False,
+        "rows_available_by_entity_type": {},
+        "rows_rendered_by_entity_type": {},
     }
+
+
+def _select_ecosystem_window_change_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if len(rows) <= ROLLING_ECOSYSTEM_WINDOW_CHANGE_ROW_LIMIT:
+        return rows
+
+    rows_by_entity_type: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        rows_by_entity_type.setdefault(str(row["entity_type"]), []).append(row)
+
+    layer_rows = rows_by_entity_type.get("LAYER", [])
+    subindustry_rows = rows_by_entity_type.get("SUBINDUSTRY", [])
+    if layer_rows and subindustry_rows:
+        layer_share = ROLLING_ECOSYSTEM_WINDOW_CHANGE_ROW_LIMIT // 2
+        subindustry_share = ROLLING_ECOSYSTEM_WINDOW_CHANGE_ROW_LIMIT - layer_share
+        selected_layer = layer_rows[:layer_share]
+        selected_subindustry = subindustry_rows[:subindustry_share]
+        remaining_capacity = ROLLING_ECOSYSTEM_WINDOW_CHANGE_ROW_LIMIT - (
+            len(selected_layer) + len(selected_subindustry)
+        )
+        if remaining_capacity > 0:
+            layer_remaining = layer_rows[len(selected_layer) :]
+            subindustry_remaining = subindustry_rows[len(selected_subindustry) :]
+            if len(selected_layer) < layer_share:
+                selected_subindustry.extend(subindustry_remaining[:remaining_capacity])
+            else:
+                selected_layer.extend(layer_remaining[:remaining_capacity])
+        return selected_layer + selected_subindustry
+
+    return rows[:ROLLING_ECOSYSTEM_WINDOW_CHANGE_ROW_LIMIT]
 
 
 def _metric_row_value(row: sqlite3.Row) -> Any:

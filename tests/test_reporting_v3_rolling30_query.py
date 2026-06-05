@@ -3,7 +3,11 @@ import sqlite3
 import pytest
 
 from rawcandle.report_canonical_v3_migration import apply_report_canonical_v3_migration
-from rawcandle.reporting_v3_query import build_rolling30_report_query_data
+from rawcandle.reporting_v3_query import (
+    ROLLING_ECOSYSTEM_WINDOW_CHANGE_ROW_LIMIT,
+    _build_ecosystem_window_change_payload,
+    build_rolling30_report_query_data,
+)
 
 
 RUN_ID = "V3_BASE_DATACENTER_2026_05_29_DC_TAXONOMY_FULL_V1"
@@ -718,3 +722,44 @@ def test_query_returns_rolling30_structured_data_from_eco_facts(tmp_path) -> Non
         "eco_entity_window_snapshot.classification_state is not used as the rolling30 classification source"
         in data.metadata["limitations"]
     )
+
+
+def test_ecosystem_window_change_truncation_uses_stratified_entity_type_selection() -> None:
+    rows = []
+    for index in range(80):
+        rows.append(
+            {
+                "entity_type": "LAYER",
+                "entity_code": f"L{index:03d}",
+                "entity_name": f"Layer {index:03d}",
+                "metric_name": "pct_above_ema20",
+                "signal_date": "2026-05-29",
+                "metric_value_num": float(index),
+                "metric_value_text": None,
+            }
+        )
+    for index in range(80):
+        rows.append(
+            {
+                "entity_type": "SUBINDUSTRY",
+                "entity_code": f"S{index:03d}",
+                "entity_name": f"Subindustry {index:03d}",
+                "metric_name": "pct_above_ema20",
+                "signal_date": "2026-05-29",
+                "metric_value_num": float(index),
+                "metric_value_text": None,
+            }
+        )
+
+    payload = _build_ecosystem_window_change_payload(rows)
+
+    assert payload["rows_available"] == 160
+    assert payload["rows_rendered"] == ROLLING_ECOSYSTEM_WINDOW_CHANGE_ROW_LIMIT
+    assert payload["is_truncated"] is True
+    assert payload["rows_rendered_by_entity_type"] == {"LAYER": 50, "SUBINDUSTRY": 50}
+    assert [row["entity_type"] for row in payload["rows"][:50]] == ["LAYER"] * 50
+    assert [row["entity_type"] for row in payload["rows"][50:]] == ["SUBINDUSTRY"] * 50
+    assert payload["rows"][0]["entity_code"] == "L000"
+    assert payload["rows"][49]["entity_code"] == "L049"
+    assert payload["rows"][50]["entity_code"] == "S000"
+    assert payload["rows"][99]["entity_code"] == "S049"

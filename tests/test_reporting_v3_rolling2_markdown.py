@@ -44,9 +44,10 @@ def _sample_query_data(*, with_empty_events: bool = False) -> Rolling2ReportQuer
                     "change": "n/a",
                 },
             ],
-            "rows_available": 2,
-            "rows_rendered": 2,
-            "is_truncated": False,
+            "rows_available": 120,
+            "rows_rendered": 100,
+            "is_truncated": True,
+            "rows_rendered_by_entity_type": {"LAYER": 50, "SUBINDUSTRY": 50},
         },
         watchlist_summary={
             "counts": {
@@ -273,6 +274,8 @@ def test_renderer_returns_deterministic_rolling2_markdown_from_query_data_only()
     assert "group_timing_state" in markdown
     assert "No ecosystem window change rows available from current V3 query data." not in markdown
     assert "## 4. Ecosystem window change\nNot available from current V3 query data in DB-V3-70." not in markdown
+    assert "Showing 100 of 120 ecosystem window change rows using stratified LAYER/SUBINDUSTRY selection." in markdown
+    assert "Rendered rows by entity type: LAYER=50, SUBINDUSTRY=50." in markdown
     assert "## 5. Overheat / rotation risk progression" in markdown
     assert "## 6. Subindustry timing persistence" in markdown
     assert "## 7. Subindustry improvement / deterioration" in markdown

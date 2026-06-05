@@ -3,7 +3,11 @@ import sqlite3
 import pytest
 
 from rawcandle.report_canonical_v3_migration import apply_report_canonical_v3_migration
-from rawcandle.reporting_v3_query import build_rolling2_report_query_data
+from rawcandle.reporting_v3_query import (
+    ROLLING_ECOSYSTEM_WINDOW_CHANGE_ROW_LIMIT,
+    _build_ecosystem_window_change_payload,
+    build_rolling2_report_query_data,
+)
 
 
 RUN_ID = "V3_BASE_DATACENTER_2026_05_29_DC_TAXONOMY_FULL_V1"
@@ -577,3 +581,29 @@ def test_query_returns_rolling2_structured_data_from_eco_facts(tmp_path) -> None
         "eco_entity_window_snapshot.classification_state is not used as the primary rolling2 classification source"
         in data.metadata["limitations"]
     )
+
+
+def test_ecosystem_window_change_truncation_uses_full_limit_when_only_one_entity_type_exists() -> None:
+    rows = []
+    for index in range(140):
+        rows.append(
+            {
+                "entity_type": "SUBINDUSTRY",
+                "entity_code": f"S{index:03d}",
+                "entity_name": f"Subindustry {index:03d}",
+                "metric_name": "trend_breadth",
+                "signal_date": "2026-05-29",
+                "metric_value_num": float(index),
+                "metric_value_text": None,
+            }
+        )
+
+    payload = _build_ecosystem_window_change_payload(rows)
+
+    assert payload["rows_available"] == 140
+    assert payload["rows_rendered"] == ROLLING_ECOSYSTEM_WINDOW_CHANGE_ROW_LIMIT
+    assert payload["is_truncated"] is True
+    assert payload["rows_rendered_by_entity_type"] == {"SUBINDUSTRY": 100}
+    assert all(row["entity_type"] == "SUBINDUSTRY" for row in payload["rows"])
+    assert payload["rows"][0]["entity_code"] == "S000"
+    assert payload["rows"][99]["entity_code"] == "S099"
