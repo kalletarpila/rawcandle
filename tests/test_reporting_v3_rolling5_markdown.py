@@ -49,6 +49,29 @@ def _sample_query_data(*, with_empty_events: bool = False) -> Rolling5ReportQuer
             "is_truncated": True,
             "rows_rendered_by_entity_type": {"LAYER": 50, "SUBINDUSTRY": 50},
         },
+        overheat_rotation_risk_progression={
+            "risk_count_rows": [
+                {"signal_date": "2026-05-26", "entity_type": "LAYER", "risk_level": "LOW", "group_count": 1},
+                {"signal_date": "2026-05-29", "entity_type": "SUBINDUSTRY", "risk_level": "MEDIUM", "group_count": 1},
+            ],
+            "risk_progression_rows": [
+                {
+                    "entity_type": "SUBINDUSTRY",
+                    "entity_code": "SEMIS",
+                    "entity_name": "Semis",
+                    "first_date": "2026-05-26",
+                    "first_risk_level": "LOW",
+                    "last_date": "2026-05-29",
+                    "last_risk_level": "MEDIUM",
+                    "risk_change": "WORSENED",
+                    "first_timing_state": "BUY_ZONE",
+                    "last_timing_state": "PULLBACK",
+                }
+            ],
+            "progression_rows_available": 1,
+            "progression_rows_rendered": 1,
+            "is_truncated": False,
+        },
         watchlist_summary={
             "counts": {
                 "active_watchlist_count": 1,
@@ -276,6 +299,12 @@ def test_renderer_returns_deterministic_rolling5_markdown_from_query_data_only()
     assert "Showing 100 of 120 ecosystem window change rows using stratified LAYER/SUBINDUSTRY selection." in markdown
     assert "Rendered rows by entity type: LAYER=50, SUBINDUSTRY=50." in markdown
     assert "## 5. Overheat / rotation risk progression" in markdown
+    assert "signal_date | entity_type | risk_level | group_count" in markdown
+    assert "entity_type | entity | first_date | first_risk | last_date | last_risk | change | first_timing | last_timing" in markdown
+    assert "WORSENED" in markdown
+    assert "No overheat / rotation risk count rows available from current V3 query data." not in markdown
+    assert "No non-low or worsened overheat / rotation risk progression rows available from current V3 query data." not in markdown
+    assert "## 5. Overheat / rotation risk progression\nNot available from current V3 query data in DB-V3-70." not in markdown
     assert "## 6. Subindustry timing persistence" in markdown
     assert "## 7. Subindustry improvement / deterioration" in markdown
     assert "Not available from current V3 query data in DB-V3-70." in markdown

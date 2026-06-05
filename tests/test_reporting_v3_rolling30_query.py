@@ -5,6 +5,7 @@ import pytest
 from rawcandle.report_canonical_v3_migration import apply_report_canonical_v3_migration
 from rawcandle.reporting_v3_query import (
     ROLLING_ECOSYSTEM_WINDOW_CHANGE_ROW_LIMIT,
+    _build_overheat_rotation_risk_progression_payload,
     _build_ecosystem_window_change_payload,
     build_rolling30_report_query_data,
 )
@@ -656,6 +657,30 @@ def test_query_returns_rolling30_structured_data_from_eco_facts(tmp_path) -> Non
     assert row_lookup[("SUBINDUSTRY", "SEMIS", "group_overheat_risk_level")]["last_value"] == "LOW"
     assert row_lookup[("SUBINDUSTRY", "SEMIS", "group_overheat_risk_level")]["change"] == "n/a"
     assert row_lookup[("SUBINDUSTRY", "SEMIS", "pct_above_ema20")]["change"] == 7.0
+    assert data.overheat_rotation_risk_progression["risk_count_rows"] == [
+        {
+            "signal_date": "2026-05-20",
+            "entity_type": "SUBINDUSTRY",
+            "risk_level": "MEDIUM",
+            "group_count": 1,
+        },
+        {
+            "signal_date": "2026-05-29",
+            "entity_type": "LAYER",
+            "risk_level": "LOW",
+            "group_count": 1,
+        },
+        {
+            "signal_date": "2026-05-29",
+            "entity_type": "SUBINDUSTRY",
+            "risk_level": "LOW",
+            "group_count": 1,
+        },
+    ]
+    assert data.overheat_rotation_risk_progression["risk_progression_rows"] == []
+    assert data.overheat_rotation_risk_progression["progression_rows_available"] == 0
+    assert data.overheat_rotation_risk_progression["progression_rows_rendered"] == 0
+    assert data.overheat_rotation_risk_progression["is_truncated"] is False
 
     assert data.ecosystem_snapshot is not None
     assert data.ecosystem_snapshot["entity_code"] == "DATACENTER"
@@ -763,3 +788,65 @@ def test_ecosystem_window_change_truncation_uses_stratified_entity_type_selectio
     assert payload["rows"][49]["entity_code"] == "L049"
     assert payload["rows"][50]["entity_code"] == "S000"
     assert payload["rows"][99]["entity_code"] == "S049"
+
+
+def test_overheat_rotation_risk_progression_payload_builds_worsened_rows_deterministically() -> None:
+    rows = [
+        {
+            "entity_type": "LAYER",
+            "entity_code": "INFRA",
+            "entity_name": "Infrastructure",
+            "metric_name": "group_overheat_risk_level",
+            "signal_date": "2026-05-20",
+            "metric_value_num": None,
+            "metric_value_text": "MEDIUM",
+        },
+        {
+            "entity_type": "LAYER",
+            "entity_code": "INFRA",
+            "entity_name": "Infrastructure",
+            "metric_name": "group_overheat_risk_level",
+            "signal_date": "2026-05-29",
+            "metric_value_num": None,
+            "metric_value_text": "HIGH",
+        },
+        {
+            "entity_type": "LAYER",
+            "entity_code": "INFRA",
+            "entity_name": "Infrastructure",
+            "metric_name": "group_timing_state",
+            "signal_date": "2026-05-20",
+            "metric_value_num": None,
+            "metric_value_text": "BUY_ZONE",
+        },
+        {
+            "entity_type": "LAYER",
+            "entity_code": "INFRA",
+            "entity_name": "Infrastructure",
+            "metric_name": "group_timing_state",
+            "signal_date": "2026-05-29",
+            "metric_value_num": None,
+            "metric_value_text": "EXIT_ZONE",
+        },
+    ]
+
+    payload = _build_overheat_rotation_risk_progression_payload(rows, ["2026-05-20", "2026-05-29"])
+
+    assert payload["risk_count_rows"] == [
+        {"signal_date": "2026-05-20", "entity_type": "LAYER", "risk_level": "MEDIUM", "group_count": 1},
+        {"signal_date": "2026-05-29", "entity_type": "LAYER", "risk_level": "HIGH", "group_count": 1},
+    ]
+    assert payload["risk_progression_rows"] == [
+        {
+            "entity_type": "LAYER",
+            "entity_code": "INFRA",
+            "entity_name": "Infrastructure",
+            "first_date": "2026-05-20",
+            "first_risk_level": "MEDIUM",
+            "last_date": "2026-05-29",
+            "last_risk_level": "HIGH",
+            "risk_change": "WORSENED",
+            "first_timing_state": "BUY_ZONE",
+            "last_timing_state": "EXIT_ZONE",
+        }
+    ]

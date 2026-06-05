@@ -5,6 +5,7 @@ import pytest
 from rawcandle.report_canonical_v3_migration import apply_report_canonical_v3_migration
 from rawcandle.reporting_v3_query import (
     ROLLING_ECOSYSTEM_WINDOW_CHANGE_ROW_LIMIT,
+    _build_overheat_rotation_risk_progression_payload,
     _build_ecosystem_window_change_payload,
     build_rolling5_report_query_data,
 )
@@ -513,6 +514,15 @@ def test_query_returns_rolling5_structured_data_from_eco_facts(tmp_path) -> None
     assert row_lookup[("SUBINDUSTRY", "SEMIS", "group_timing_state")]["last_value"] == "PULLBACK"
     assert row_lookup[("SUBINDUSTRY", "SEMIS", "group_timing_state")]["change"] == "n/a"
     assert row_lookup[("SUBINDUSTRY", "SEMIS", "trend_breadth")]["change"] == -4.0
+    assert data.overheat_rotation_risk_progression["risk_count_rows"] == [
+        {
+            "signal_date": "2026-05-29",
+            "entity_type": "LAYER",
+            "risk_level": "LOW",
+            "group_count": 1,
+        }
+    ]
+    assert data.overheat_rotation_risk_progression["risk_progression_rows"] == []
 
     assert data.ecosystem_snapshot is not None
     assert data.ecosystem_snapshot["entity_code"] == "DATACENTER"
@@ -620,3 +630,47 @@ def test_ecosystem_window_change_truncation_fills_unused_share_from_other_entity
     assert payload["rows"][29]["entity_code"] == "L029"
     assert payload["rows"][30]["entity_code"] == "S000"
     assert payload["rows"][99]["entity_code"] == "S069"
+
+
+def test_overheat_rotation_risk_progression_handles_unknown_risk_values_deterministically() -> None:
+    rows = [
+        {
+            "entity_type": "SUBINDUSTRY",
+            "entity_code": "SEMIS",
+            "entity_name": "Semis",
+            "metric_name": "group_overheat_risk_level",
+            "signal_date": "2026-05-26",
+            "metric_value_num": None,
+            "metric_value_text": "ELEVATED",
+        },
+        {
+            "entity_type": "SUBINDUSTRY",
+            "entity_code": "SEMIS",
+            "entity_name": "Semis",
+            "metric_name": "group_overheat_risk_level",
+            "signal_date": "2026-05-29",
+            "metric_value_num": None,
+            "metric_value_text": "ELEVATED",
+        },
+    ]
+
+    payload = _build_overheat_rotation_risk_progression_payload(rows, ["2026-05-26", "2026-05-29"])
+
+    assert payload["risk_count_rows"] == [
+        {"signal_date": "2026-05-26", "entity_type": "SUBINDUSTRY", "risk_level": "ELEVATED", "group_count": 1},
+        {"signal_date": "2026-05-29", "entity_type": "SUBINDUSTRY", "risk_level": "ELEVATED", "group_count": 1},
+    ]
+    assert payload["risk_progression_rows"] == [
+        {
+            "entity_type": "SUBINDUSTRY",
+            "entity_code": "SEMIS",
+            "entity_name": "Semis",
+            "first_date": "2026-05-26",
+            "first_risk_level": "ELEVATED",
+            "last_date": "2026-05-29",
+            "last_risk_level": "ELEVATED",
+            "risk_change": "n/a",
+            "first_timing_state": None,
+            "last_timing_state": None,
+        }
+    ]

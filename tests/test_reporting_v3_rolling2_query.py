@@ -5,6 +5,7 @@ import pytest
 from rawcandle.report_canonical_v3_migration import apply_report_canonical_v3_migration
 from rawcandle.reporting_v3_query import (
     ROLLING_ECOSYSTEM_WINDOW_CHANGE_ROW_LIMIT,
+    _build_overheat_rotation_risk_progression_payload,
     _build_ecosystem_window_change_payload,
     build_rolling2_report_query_data,
 )
@@ -514,6 +515,27 @@ def test_query_returns_rolling2_structured_data_from_eco_facts(tmp_path) -> None
     assert row_lookup[("SUBINDUSTRY", "SEMIS", "group_overheat_risk_level")]["last_value"] == "LOW"
     assert row_lookup[("SUBINDUSTRY", "SEMIS", "group_overheat_risk_level")]["change"] == "n/a"
     assert row_lookup[("SUBINDUSTRY", "SEMIS", "weakness_breadth")]["change"] == 7.0
+    assert data.overheat_rotation_risk_progression["risk_count_rows"] == [
+        {
+            "signal_date": "2026-05-28",
+            "entity_type": "SUBINDUSTRY",
+            "risk_level": "MEDIUM",
+            "group_count": 1,
+        },
+        {
+            "signal_date": "2026-05-29",
+            "entity_type": "LAYER",
+            "risk_level": "LOW",
+            "group_count": 1,
+        },
+        {
+            "signal_date": "2026-05-29",
+            "entity_type": "SUBINDUSTRY",
+            "risk_level": "LOW",
+            "group_count": 1,
+        },
+    ]
+    assert data.overheat_rotation_risk_progression["risk_progression_rows"] == []
 
     assert data.ecosystem_snapshot is not None
     assert data.ecosystem_snapshot["entity_code"] == "DATACENTER"
@@ -607,3 +629,27 @@ def test_ecosystem_window_change_truncation_uses_full_limit_when_only_one_entity
     assert all(row["entity_type"] == "SUBINDUSTRY" for row in payload["rows"])
     assert payload["rows"][0]["entity_code"] == "S000"
     assert payload["rows"][99]["entity_code"] == "S099"
+
+
+def test_overheat_rotation_risk_progression_truncates_deterministically() -> None:
+    rows = []
+    for index in range(130):
+        rows.append(
+            {
+                "entity_type": "SUBINDUSTRY",
+                "entity_code": f"S{index:03d}",
+                "entity_name": f"Subindustry {index:03d}",
+                "metric_name": "group_overheat_risk_level",
+                "signal_date": "2026-05-29",
+                "metric_value_num": None,
+                "metric_value_text": "MEDIUM",
+            }
+        )
+
+    payload = _build_overheat_rotation_risk_progression_payload(rows, ["2026-05-29"])
+
+    assert payload["progression_rows_available"] == 130
+    assert payload["progression_rows_rendered"] == 100
+    assert payload["is_truncated"] is True
+    assert payload["risk_progression_rows"][0]["entity_code"] == "S000"
+    assert payload["risk_progression_rows"][-1]["entity_code"] == "S099"

@@ -24,6 +24,7 @@ def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
     report_header = _get_field(query_data, "report_header")
     window_summary = _get_field(query_data, "window_summary") or {}
     ecosystem_window_change = _get_field(query_data, "ecosystem_window_change") or {}
+    overheat_rotation_risk_progression = _get_field(query_data, "overheat_rotation_risk_progression") or {}
     watchlist_summary = _get_field(query_data, "watchlist_summary") or {}
     quality_summary = _get_field(query_data, "quality_summary") or {}
     ecosystem_snapshot = _get_field(query_data, "ecosystem_snapshot")
@@ -47,6 +48,7 @@ def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
             report_header=report_header,
             window_summary=window_summary,
             ecosystem_window_change=ecosystem_window_change,
+            overheat_rotation_risk_progression=overheat_rotation_risk_progression,
             watchlist_summary=watchlist_summary,
             quality_summary=quality_summary,
             ecosystem_snapshot=ecosystem_snapshot,
@@ -90,6 +92,7 @@ def _render_rolling_legacy_shell(
     report_header: Any,
     window_summary: dict[str, Any],
     ecosystem_window_change: dict[str, Any],
+    overheat_rotation_risk_progression: dict[str, Any],
     watchlist_summary: dict[str, Any],
     quality_summary: dict[str, Any],
     ecosystem_snapshot: Any,
@@ -283,46 +286,56 @@ def _render_rolling_legacy_shell(
             "## 5. Overheat / rotation risk progression",
         ]
     )
-    if group_metric_rows:
-        lines.extend(
-            _render_table_or_none(
-                headers=[
-                    "entity_type",
-                    "entity_code",
-                    "entity_name",
-                    "pct_above_ema20",
-                    "return_5d",
-                    "trend_breadth",
-                    "weakness_breadth",
-                    "group_current_status",
-                    "group_window_status",
-                    "group_status_change",
-                    "group_timing_state",
-                    "group_overheat_risk_level",
-                ],
-                rows=[
-                    [
-                        row.get("entity_type"),
-                        row.get("entity_code"),
-                        row.get("entity_name"),
-                        row.get("pct_above_ema20"),
-                        row.get("return_5d"),
-                        row.get("trend_breadth"),
-                        row.get("weakness_breadth"),
-                        row.get("group_current_status"),
-                        row.get("group_window_status"),
-                        row.get("group_status_change"),
-                        row.get("group_timing_state"),
-                        row.get("group_overheat_risk_level"),
-                    ]
-                    for row in group_metrics
-                ],
-                empty_message="Not available from current V3 query data in DB-V3-70.",
-            )
+    lines.extend(
+        _render_table_or_none(
+            headers=["signal_date", "entity_type", "risk_level", "group_count"],
+            rows=[
+                [
+                    row.get("signal_date"),
+                    row.get("entity_type"),
+                    row.get("risk_level"),
+                    row.get("group_count"),
+                ]
+                for row in list(overheat_rotation_risk_progression.get("risk_count_rows") or [])
+            ],
+            empty_message="No overheat / rotation risk count rows available from current V3 query data.",
         )
-        lines.append("- Historical progression across dates is not available from current V3 query data in DB-V3-70.")
-    else:
-        lines.append("Not available from current V3 query data in DB-V3-70.")
+    )
+    lines.extend(
+        _render_table_or_none(
+            headers=[
+                "entity_type",
+                "entity",
+                "first_date",
+                "first_risk",
+                "last_date",
+                "last_risk",
+                "change",
+                "first_timing",
+                "last_timing",
+            ],
+            rows=[
+                [
+                    row.get("entity_type"),
+                    row.get("entity_code"),
+                    row.get("first_date"),
+                    row.get("first_risk_level"),
+                    row.get("last_date"),
+                    row.get("last_risk_level"),
+                    row.get("risk_change"),
+                    row.get("first_timing_state"),
+                    row.get("last_timing_state"),
+                ]
+                for row in list(overheat_rotation_risk_progression.get("risk_progression_rows") or [])
+            ],
+            empty_message="No non-low or worsened overheat / rotation risk progression rows available from current V3 query data.",
+        )
+    )
+    if overheat_rotation_risk_progression.get("is_truncated"):
+        lines.append(
+            f"Showing {overheat_rotation_risk_progression.get('progression_rows_rendered')} of {overheat_rotation_risk_progression.get('progression_rows_available')} overheat / rotation risk progression rows."
+        )
+        lines.append("")
     lines.extend(
         [
             "## 6. Subindustry timing persistence",

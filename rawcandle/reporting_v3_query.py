@@ -137,6 +137,18 @@ ROLLING_ECOSYSTEM_WINDOW_CHANGE_METRIC_NAMES = (
     "group_overheat_risk_level",
 )
 ROLLING_ECOSYSTEM_WINDOW_CHANGE_ROW_LIMIT = 100
+ROLLING_RISK_PROGRESSION_ROW_LIMIT = 100
+RISK_LEVEL_ORDER = {
+    "LOW": 0,
+    "MEDIUM": 1,
+    "HIGH": 2,
+}
+RISK_CHANGE_ORDER = {
+    "WORSENED": 0,
+    "UNCHANGED": 1,
+    "IMPROVED": 2,
+    "n/a": 3,
+}
 DAILY_GROUP_METRIC_NAMES = (
     "pct_above_ema20",
     "return_5d",
@@ -176,6 +188,7 @@ class Rolling30ReportQueryData:
     report_header: Rolling30ReportHeader
     window_summary: dict[str, Any]
     ecosystem_window_change: dict[str, Any]
+    overheat_rotation_risk_progression: dict[str, Any]
     watchlist_summary: dict[str, Any]
     quality_summary: dict[str, Any]
     ecosystem_snapshot: dict[str, Any] | None
@@ -196,6 +209,7 @@ class Rolling5ReportQueryData:
     report_header: Rolling30ReportHeader
     window_summary: dict[str, Any]
     ecosystem_window_change: dict[str, Any]
+    overheat_rotation_risk_progression: dict[str, Any]
     watchlist_summary: dict[str, Any]
     quality_summary: dict[str, Any]
     ecosystem_snapshot: dict[str, Any] | None
@@ -215,6 +229,7 @@ class Rolling2ReportQueryData:
     report_header: Rolling30ReportHeader
     window_summary: dict[str, Any]
     ecosystem_window_change: dict[str, Any]
+    overheat_rotation_risk_progression: dict[str, Any]
     watchlist_summary: dict[str, Any]
     quality_summary: dict[str, Any]
     ecosystem_snapshot: dict[str, Any] | None
@@ -315,6 +330,12 @@ def _build_rolling30_report_query_data(
             report_header=report_header,
             window_summary=window_summary,
             ecosystem_window_change=_load_rolling_ecosystem_window_change(
+                conn,
+                run_row,
+                ROLLING30_WINDOW_CODE,
+                window_summary,
+            ),
+            overheat_rotation_risk_progression=_load_rolling_overheat_rotation_risk_progression(
                 conn,
                 run_row,
                 ROLLING30_WINDOW_CODE,
@@ -471,6 +492,12 @@ def _build_rolling2_report_query_data(
                 ROLLING2_WINDOW_CODE,
                 window_summary,
             ),
+            overheat_rotation_risk_progression=_load_rolling_overheat_rotation_risk_progression(
+                conn,
+                run_row,
+                ROLLING2_WINDOW_CODE,
+                window_summary,
+            ),
             watchlist_summary=_load_rolling_watchlist_summary(
                 conn,
                 run_row,
@@ -544,6 +571,12 @@ def _build_rolling5_report_query_data(
             report_header=report_header,
             window_summary=window_summary,
             ecosystem_window_change=_load_rolling_ecosystem_window_change(
+                conn,
+                run_row,
+                ROLLING5_WINDOW_CODE,
+                window_summary,
+            ),
+            overheat_rotation_risk_progression=_load_rolling_overheat_rotation_risk_progression(
                 conn,
                 run_row,
                 ROLLING5_WINDOW_CODE,
@@ -1525,6 +1558,149 @@ def _empty_ecosystem_window_change() -> dict[str, Any]:
     }
 
 
+def _load_rolling_overheat_rotation_risk_progression(
+    conn: sqlite3.Connection,
+    run_row: sqlite3.Row,
+    window_code: str,
+    window_summary: dict[str, Any],
+) -> dict[str, Any]:
+    included_dates = list(window_summary.get("valid_signal_dates_included") or [])
+    if not included_dates:
+        return _empty_overheat_rotation_risk_progression()
+
+    date_placeholders = ", ".join("?" for _ in included_dates)
+    rows = conn.execute(
+        f"""
+        SELECT
+            e.entity_type,
+            e.entity_code,
+            e.entity_name,
+            m.metric_name,
+            m.signal_date,
+            m.metric_value_num,
+            m.metric_value_text
+        FROM eco_entity_metric_value m
+        JOIN eco_entity e ON e.entity_id = m.entity_id
+        WHERE m.run_id = ?
+          AND m.taxonomy_version_id = ?
+          AND m.window_code = ?
+          AND e.entity_type IN ('LAYER', 'SUBINDUSTRY')
+          AND m.metric_name IN ('group_overheat_risk_level', 'group_timing_state')
+          AND m.signal_date IN ({date_placeholders})
+        ORDER BY m.signal_date, e.entity_type, e.entity_code, m.metric_name
+        """,
+        (
+            str(run_row["run_id"]),
+            int(run_row["taxonomy_version_id"]),
+            window_code,
+            *included_dates,
+        ),
+    ).fetchall()
+    return _build_overheat_rotation_risk_progression_payload(rows, included_dates)
+
+
+def _build_overheat_rotation_risk_progression_payload(
+    rows: list[Any],
+    included_dates: list[str],
+) -> dict[str, Any]:
+    per_entity: dict[tuple[str, str, str], dict[str, dict[str, Any]]] = {}
+    risk_counts: Counter[tuple[str, str, str]] = Counter()
+    for row in rows:
+        entity_type = str(row["entity_type"])
+        entity_code = str(row["entity_code"])
+        entity_name = str(row["entity_name"])
+        metric_name = str(row["metric_name"])
+        signal_date = str(row["signal_date"])
+        metric_value = _metric_row_value(row)
+        per_date = per_entity.setdefault((entity_type, entity_code, entity_name), {})
+        per_date.setdefault(signal_date, {})[metric_name] = metric_value
+        if metric_name == "group_overheat_risk_level":
+            risk_counts[(signal_date, entity_type, str(metric_value))] += 1
+
+    risk_count_rows = [
+        {
+            "signal_date": signal_date,
+            "entity_type": entity_type,
+            "risk_level": risk_level,
+            "group_count": group_count,
+        }
+        for signal_date, entity_type, risk_level, group_count in sorted(
+            (
+                (signal_date, entity_type, risk_level, group_count)
+                for (signal_date, entity_type, risk_level), group_count in risk_counts.items()
+            ),
+            key=lambda item: (
+                item[0],
+                item[1],
+                RISK_LEVEL_ORDER.get(item[2], 99),
+                item[2],
+            ),
+        )
+    ]
+
+    progression_rows: list[dict[str, Any]] = []
+    for entity_type, entity_code, entity_name in sorted(
+        per_entity,
+        key=lambda item: (item[0], item[1], item[2]),
+    ):
+        date_values = per_entity[(entity_type, entity_code, entity_name)]
+        risk_dates = [
+            signal_date
+            for signal_date in included_dates
+            if date_values.get(signal_date, {}).get("group_overheat_risk_level") is not None
+        ]
+        if not risk_dates:
+            continue
+        first_date = risk_dates[0]
+        last_date = risk_dates[-1]
+        first_risk_level = date_values[first_date].get("group_overheat_risk_level")
+        last_risk_level = date_values[last_date].get("group_overheat_risk_level")
+        risk_change = _calculate_risk_change(first_risk_level, last_risk_level)
+        row = {
+            "entity_type": entity_type,
+            "entity_code": entity_code,
+            "entity_name": entity_name,
+            "first_date": first_date,
+            "first_risk_level": first_risk_level,
+            "last_date": last_date,
+            "last_risk_level": last_risk_level,
+            "risk_change": risk_change,
+            "first_timing_state": date_values.get(first_date, {}).get("group_timing_state"),
+            "last_timing_state": date_values.get(last_date, {}).get("group_timing_state"),
+        }
+        if str(last_risk_level) != "LOW" or risk_change == "WORSENED":
+            progression_rows.append(row)
+
+    progression_rows.sort(
+        key=lambda row: (
+            RISK_CHANGE_ORDER.get(str(row["risk_change"]), 99),
+            _last_risk_sort_value(row["last_risk_level"]),
+            row["entity_type"],
+            row["entity_code"],
+            row["entity_name"],
+        )
+    )
+    progression_rows_available = len(progression_rows)
+    rendered_rows = progression_rows[:ROLLING_RISK_PROGRESSION_ROW_LIMIT]
+    return {
+        "risk_count_rows": risk_count_rows,
+        "risk_progression_rows": rendered_rows,
+        "progression_rows_available": progression_rows_available,
+        "progression_rows_rendered": len(rendered_rows),
+        "is_truncated": progression_rows_available > len(rendered_rows),
+    }
+
+
+def _empty_overheat_rotation_risk_progression() -> dict[str, Any]:
+    return {
+        "risk_count_rows": [],
+        "risk_progression_rows": [],
+        "progression_rows_available": 0,
+        "progression_rows_rendered": 0,
+        "is_truncated": False,
+    }
+
+
 def _select_ecosystem_window_change_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if len(rows) <= ROLLING_ECOSYSTEM_WINDOW_CHANGE_ROW_LIMIT:
         return rows
@@ -1559,6 +1735,25 @@ def _metric_row_value(row: sqlite3.Row) -> Any:
     if row["metric_value_num"] is not None:
         return row["metric_value_num"]
     return row["metric_value_text"]
+
+
+def _calculate_risk_change(first_risk_level: Any, last_risk_level: Any) -> str:
+    first_rank = RISK_LEVEL_ORDER.get(str(first_risk_level))
+    last_rank = RISK_LEVEL_ORDER.get(str(last_risk_level))
+    if first_rank is None or last_rank is None:
+        return "n/a"
+    if last_rank > first_rank:
+        return "WORSENED"
+    if last_rank < first_rank:
+        return "IMPROVED"
+    return "UNCHANGED"
+
+
+def _last_risk_sort_value(risk_level: Any) -> tuple[int, str]:
+    risk_label = str(risk_level)
+    if risk_label in {"HIGH", "MEDIUM", "LOW"}:
+        return (-RISK_LEVEL_ORDER[risk_label], risk_label)
+    return (99, risk_label)
 
 
 def _load_structural_events(conn: sqlite3.Connection, run_row: sqlite3.Row, window_code: str) -> list[dict[str, Any]]:
