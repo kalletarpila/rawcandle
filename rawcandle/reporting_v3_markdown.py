@@ -23,6 +23,7 @@ def render_daily_markdown_report(query_data: Any) -> str:
 def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
     report_header = _get_field(query_data, "report_header")
     window_summary = _get_field(query_data, "window_summary") or {}
+    ecosystem_window_change = list(_get_field(query_data, "ecosystem_window_change") or [])
     watchlist_summary = _get_field(query_data, "watchlist_summary") or {}
     quality_summary = _get_field(query_data, "quality_summary") or {}
     ecosystem_snapshot = _get_field(query_data, "ecosystem_snapshot")
@@ -45,6 +46,7 @@ def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
         return _render_rolling_legacy_shell(
             report_header=report_header,
             window_summary=window_summary,
+            ecosystem_window_change=ecosystem_window_change,
             watchlist_summary=watchlist_summary,
             quality_summary=quality_summary,
             ecosystem_snapshot=ecosystem_snapshot,
@@ -87,6 +89,7 @@ def _render_rolling_legacy_shell(
     *,
     report_header: Any,
     window_summary: dict[str, Any],
+    ecosystem_window_change: list[dict[str, Any]],
     watchlist_summary: dict[str, Any],
     quality_summary: dict[str, Any],
     ecosystem_snapshot: Any,
@@ -241,8 +244,27 @@ def _render_rolling_legacy_shell(
     lines.extend(
         [
             "## 4. Ecosystem window change",
-            "Not available from current V3 query data in DB-V3-70.",
-            "",
+        ]
+    )
+    lines.extend(
+        _render_table_or_none(
+            headers=["metric", "first_date", "first_value", "last_date", "last_value", "change"],
+            rows=[
+                [
+                    row.get("metric_name"),
+                    row.get("first_date"),
+                    row.get("first_value"),
+                    row.get("last_date"),
+                    row.get("last_value"),
+                    row.get("change"),
+                ]
+                for row in ecosystem_window_change
+            ],
+            empty_message="No ecosystem window change rows available from current V3 query data.",
+        )
+    )
+    lines.extend(
+        [
             "## 5. Overheat / rotation risk progression",
         ]
     )

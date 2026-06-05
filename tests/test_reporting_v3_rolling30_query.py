@@ -242,6 +242,7 @@ def _insert_metric_num(
     entity_id: int,
     metric_name: str,
     metric_value_num: float,
+    signal_date: str = SIGNAL_DATE,
 ) -> None:
     conn.execute(
         """
@@ -253,7 +254,7 @@ def _insert_metric_num(
         (
             RUN_ID,
             ecosystem_id,
-            SIGNAL_DATE,
+            signal_date,
             taxonomy_version_id,
             WINDOW_CODE,
             entity_id,
@@ -271,6 +272,7 @@ def _insert_metric_text(
     entity_id: int,
     metric_name: str,
     metric_value_text: str,
+    signal_date: str = SIGNAL_DATE,
 ) -> None:
     conn.execute(
         """
@@ -282,7 +284,7 @@ def _insert_metric_text(
         (
             RUN_ID,
             ecosystem_id,
-            SIGNAL_DATE,
+            signal_date,
             taxonomy_version_id,
             WINDOW_CODE,
             entity_id,
@@ -505,6 +507,35 @@ def _build_fixture_db(db_path: str) -> None:
                 metric_name=metric_name,
                 metric_value_num=metric_value,
             )
+        for signal_date, metric_name, metric_value_num in (
+            ("2026-05-20", "pct_above_ema20", 55.0),
+            ("2026-05-29", "pct_above_ema20", 66.0),
+            ("2026-05-20", "return_5d", 1.0),
+            ("2026-05-29", "return_5d", 4.0),
+            ("2026-05-29", "trend_breadth", 70.0),
+        ):
+            _insert_metric_num(
+                conn,
+                ecosystem_id=ecosystem_id,
+                taxonomy_version_id=taxonomy_version_id,
+                entity_id=ecosystem_entity_id,
+                metric_name=metric_name,
+                metric_value_num=metric_value_num,
+                signal_date=signal_date,
+            )
+        for signal_date, metric_name, metric_value_text in (
+            ("2026-05-20", "group_timing_state", "BUY_ZONE"),
+            ("2026-05-29", "group_timing_state", "WATCH_ZONE"),
+        ):
+            _insert_metric_text(
+                conn,
+                ecosystem_id=ecosystem_id,
+                taxonomy_version_id=taxonomy_version_id,
+                entity_id=ecosystem_entity_id,
+                metric_name=metric_name,
+                metric_value_text=metric_value_text,
+                signal_date=signal_date,
+            )
         for metric_name, metric_value in (
             ("group_current_status", "BUY_ZONE"),
             ("group_window_status", "EXIT_ZONE"),
@@ -577,6 +608,31 @@ def test_query_returns_rolling30_structured_data_from_eco_facts(tmp_path) -> Non
     assert data.window_summary["valid_signal_dates_count"] == 3
     assert data.window_summary["valid_signal_dates_included"] == ["2026-05-20", "2026-05-28", "2026-05-29"]
     assert data.window_summary["incomplete_window"] is True
+    assert [row["metric_name"] for row in data.ecosystem_window_change] == [
+        "pct_above_ema20",
+        "return_5d",
+        "trend_breadth",
+        "group_timing_state",
+    ]
+    assert data.ecosystem_window_change[0] == {
+        "metric_name": "pct_above_ema20",
+        "first_date": "2026-05-20",
+        "first_value": 55.0,
+        "last_date": "2026-05-29",
+        "last_value": 66.0,
+        "change": 11.0,
+    }
+    assert data.ecosystem_window_change[2] == {
+        "metric_name": "trend_breadth",
+        "first_date": "2026-05-29",
+        "first_value": 70.0,
+        "last_date": "2026-05-29",
+        "last_value": 70.0,
+        "change": 0.0,
+    }
+    assert data.ecosystem_window_change[3]["first_value"] == "BUY_ZONE"
+    assert data.ecosystem_window_change[3]["last_value"] == "WATCH_ZONE"
+    assert data.ecosystem_window_change[3]["change"] == "n/a"
 
     assert data.ecosystem_snapshot is not None
     assert data.ecosystem_snapshot["entity_code"] == "DATACENTER"

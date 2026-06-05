@@ -126,6 +126,15 @@ ROLLING_GROUP_METRIC_NAMES = (
     "group_timing_reason",
     "group_overheat_risk_level",
 )
+ROLLING_ECOSYSTEM_WINDOW_CHANGE_METRIC_NAMES = (
+    "pct_above_ema20",
+    "return_5d",
+    "synthetic_close",
+    "trend_breadth",
+    "weakness_breadth",
+    "group_timing_state",
+    "group_overheat_risk_level",
+)
 DAILY_GROUP_METRIC_NAMES = (
     "pct_above_ema20",
     "return_5d",
@@ -164,6 +173,7 @@ class Rolling30ReportHeader:
 class Rolling30ReportQueryData:
     report_header: Rolling30ReportHeader
     window_summary: dict[str, Any]
+    ecosystem_window_change: list[dict[str, Any]]
     watchlist_summary: dict[str, Any]
     quality_summary: dict[str, Any]
     ecosystem_snapshot: dict[str, Any] | None
@@ -183,6 +193,7 @@ class Rolling30ReportQueryData:
 class Rolling5ReportQueryData:
     report_header: Rolling30ReportHeader
     window_summary: dict[str, Any]
+    ecosystem_window_change: list[dict[str, Any]]
     watchlist_summary: dict[str, Any]
     quality_summary: dict[str, Any]
     ecosystem_snapshot: dict[str, Any] | None
@@ -201,6 +212,7 @@ class Rolling5ReportQueryData:
 class Rolling2ReportQueryData:
     report_header: Rolling30ReportHeader
     window_summary: dict[str, Any]
+    ecosystem_window_change: list[dict[str, Any]]
     watchlist_summary: dict[str, Any]
     quality_summary: dict[str, Any]
     ecosystem_snapshot: dict[str, Any] | None
@@ -296,9 +308,16 @@ def _build_rolling30_report_query_data(
         group_snapshots = [row for row in snapshots if row["entity_type"] in {"LAYER", "SUBINDUSTRY"}]
         ticker_snapshots = [row for row in snapshots if row["entity_type"] == "TICKER"]
 
+        window_summary = _load_rolling_window_summary(conn, run_row, ROLLING30_WINDOW_CODE)
         return Rolling30ReportQueryData(
             report_header=report_header,
-            window_summary=_load_rolling_window_summary(conn, run_row, ROLLING30_WINDOW_CODE),
+            window_summary=window_summary,
+            ecosystem_window_change=_load_rolling_ecosystem_window_change(
+                conn,
+                run_row,
+                ROLLING30_WINDOW_CODE,
+                window_summary,
+            ),
             watchlist_summary=_load_rolling_watchlist_summary(
                 conn,
                 run_row,
@@ -440,9 +459,16 @@ def _build_rolling2_report_query_data(
         group_snapshots = [row for row in snapshots if row["entity_type"] in {"LAYER", "SUBINDUSTRY"}]
         ticker_snapshots = [row for row in snapshots if row["entity_type"] == "TICKER"]
 
+        window_summary = _load_rolling_window_summary(conn, run_row, ROLLING2_WINDOW_CODE)
         return Rolling2ReportQueryData(
             report_header=report_header,
-            window_summary=_load_rolling_window_summary(conn, run_row, ROLLING2_WINDOW_CODE),
+            window_summary=window_summary,
+            ecosystem_window_change=_load_rolling_ecosystem_window_change(
+                conn,
+                run_row,
+                ROLLING2_WINDOW_CODE,
+                window_summary,
+            ),
             watchlist_summary=_load_rolling_watchlist_summary(
                 conn,
                 run_row,
@@ -511,9 +537,16 @@ def _build_rolling5_report_query_data(
         group_snapshots = [row for row in snapshots if row["entity_type"] in {"LAYER", "SUBINDUSTRY"}]
         ticker_snapshots = [row for row in snapshots if row["entity_type"] == "TICKER"]
 
+        window_summary = _load_rolling_window_summary(conn, run_row, ROLLING5_WINDOW_CODE)
         return Rolling5ReportQueryData(
             report_header=report_header,
-            window_summary=_load_rolling_window_summary(conn, run_row, ROLLING5_WINDOW_CODE),
+            window_summary=window_summary,
+            ecosystem_window_change=_load_rolling_ecosystem_window_change(
+                conn,
+                run_row,
+                ROLLING5_WINDOW_CODE,
+                window_summary,
+            ),
             watchlist_summary=_load_rolling_watchlist_summary(
                 conn,
                 run_row,
@@ -1328,6 +1361,93 @@ def _load_rolling_window_summary(
         "valid_signal_dates_included": included_dates,
         "incomplete_window": len(included_dates) < window_length,
     }
+
+
+def _load_rolling_ecosystem_window_change(
+    conn: sqlite3.Connection,
+    run_row: sqlite3.Row,
+    window_code: str,
+    window_summary: dict[str, Any],
+) -> list[dict[str, Any]]:
+    included_dates = list(window_summary.get("valid_signal_dates_included") or [])
+    if not included_dates:
+        return []
+
+    ecosystem_entity_row = conn.execute(
+        """
+        SELECT entity_id
+        FROM eco_entity
+        WHERE ecosystem_id = ?
+          AND entity_type = 'ECOSYSTEM'
+        ORDER BY entity_id
+        LIMIT 1
+        """,
+        (int(run_row["ecosystem_id"]),),
+    ).fetchone()
+    if ecosystem_entity_row is None:
+        return []
+
+    metric_name_placeholders = ", ".join("?" for _ in ROLLING_ECOSYSTEM_WINDOW_CHANGE_METRIC_NAMES)
+    date_placeholders = ", ".join("?" for _ in included_dates)
+    rows = conn.execute(
+        f"""
+        SELECT
+            metric_name,
+            signal_date,
+            metric_value_num,
+            metric_value_text
+        FROM eco_entity_metric_value
+        WHERE run_id = ?
+          AND taxonomy_version_id = ?
+          AND window_code = ?
+          AND entity_id = ?
+          AND metric_name IN ({metric_name_placeholders})
+          AND signal_date IN ({date_placeholders})
+        ORDER BY metric_name, signal_date
+        """,
+        (
+            str(run_row["run_id"]),
+            int(run_row["taxonomy_version_id"]),
+            window_code,
+            int(ecosystem_entity_row["entity_id"]),
+            *ROLLING_ECOSYSTEM_WINDOW_CHANGE_METRIC_NAMES,
+            *included_dates,
+        ),
+    ).fetchall()
+    rows_by_metric: dict[str, list[sqlite3.Row]] = {}
+    for row in rows:
+        rows_by_metric.setdefault(str(row["metric_name"]), []).append(row)
+
+    output: list[dict[str, Any]] = []
+    for metric_name in ROLLING_ECOSYSTEM_WINDOW_CHANGE_METRIC_NAMES:
+        metric_rows = rows_by_metric.get(metric_name, [])
+        if not metric_rows:
+            continue
+        first_row = metric_rows[0]
+        last_row = metric_rows[-1]
+        first_value = _metric_row_value(first_row)
+        last_value = _metric_row_value(last_row)
+        if isinstance(first_value, (int, float)) and isinstance(last_value, (int, float)):
+            change: Any = float(last_value) - float(first_value)
+        else:
+            change = "n/a"
+        output.append(
+            {
+                "metric_name": metric_name,
+                "first_date": str(first_row["signal_date"]),
+                "first_value": first_value,
+                "last_date": str(last_row["signal_date"]),
+                "last_value": last_value,
+                "change": change,
+            }
+        )
+    return output
+
+
+def _metric_row_value(row: sqlite3.Row) -> Any:
+    if row["metric_value_num"] is not None:
+        return row["metric_value_num"]
+    return row["metric_value_text"]
 
 
 def _load_structural_events(conn: sqlite3.Connection, run_row: sqlite3.Row, window_code: str) -> list[dict[str, Any]]:

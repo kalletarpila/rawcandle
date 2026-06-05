@@ -240,6 +240,7 @@ def _insert_metric_num(
     entity_id: int,
     metric_name: str,
     metric_value_num: float,
+    signal_date: str = SIGNAL_DATE,
 ) -> None:
     conn.execute(
         """
@@ -251,7 +252,7 @@ def _insert_metric_num(
         (
             RUN_ID,
             ecosystem_id,
-            SIGNAL_DATE,
+            signal_date,
             taxonomy_version_id,
             WINDOW_CODE,
             entity_id,
@@ -269,6 +270,7 @@ def _insert_metric_text(
     entity_id: int,
     metric_name: str,
     metric_value_text: str,
+    signal_date: str = SIGNAL_DATE,
 ) -> None:
     conn.execute(
         """
@@ -280,7 +282,7 @@ def _insert_metric_text(
         (
             RUN_ID,
             ecosystem_id,
-            SIGNAL_DATE,
+            signal_date,
             taxonomy_version_id,
             WINDOW_CODE,
             entity_id,
@@ -419,6 +421,35 @@ def _build_fixture_db(db_path: str) -> None:
             ("valid_signal_dates", 5.0),
         ):
             _insert_metric_num(conn, ecosystem_id=ecosystem_id, taxonomy_version_id=taxonomy_version_id, entity_id=layer_id, metric_name=metric_name, metric_value_num=metric_value)
+        for signal_date, metric_name, metric_value_num in (
+            ("2026-05-26", "pct_above_ema20", 58.0),
+            ("2026-05-29", "pct_above_ema20", 62.5),
+            ("2026-05-26", "return_5d", -2.0),
+            ("2026-05-29", "return_5d", 1.0),
+            ("2026-05-29", "weakness_breadth", 30.0),
+        ):
+            _insert_metric_num(
+                conn,
+                ecosystem_id=ecosystem_id,
+                taxonomy_version_id=taxonomy_version_id,
+                entity_id=ecosystem_entity_id,
+                metric_name=metric_name,
+                metric_value_num=metric_value_num,
+                signal_date=signal_date,
+            )
+        for signal_date, metric_name, metric_value_text in (
+            ("2026-05-26", "group_overheat_risk_level", "MEDIUM"),
+            ("2026-05-29", "group_overheat_risk_level", "LOW"),
+        ):
+            _insert_metric_text(
+                conn,
+                ecosystem_id=ecosystem_id,
+                taxonomy_version_id=taxonomy_version_id,
+                entity_id=ecosystem_entity_id,
+                metric_name=metric_name,
+                metric_value_text=metric_value_text,
+                signal_date=signal_date,
+            )
         for metric_name, metric_value in (
             ("group_current_status", "BUY_ZONE"),
             ("group_window_status", "EXIT_ZONE"),
@@ -463,6 +494,18 @@ def test_query_returns_rolling5_structured_data_from_eco_facts(tmp_path) -> None
     assert data.window_summary["valid_signal_dates_count"] == 3
     assert data.window_summary["valid_signal_dates_included"] == ["2026-05-26", "2026-05-28", "2026-05-29"]
     assert data.window_summary["incomplete_window"] is True
+    assert [row["metric_name"] for row in data.ecosystem_window_change] == [
+        "pct_above_ema20",
+        "return_5d",
+        "weakness_breadth",
+        "group_overheat_risk_level",
+    ]
+    assert data.ecosystem_window_change[0]["change"] == 4.5
+    assert data.ecosystem_window_change[1]["change"] == 3.0
+    assert data.ecosystem_window_change[2]["change"] == 0.0
+    assert data.ecosystem_window_change[3]["first_value"] == "MEDIUM"
+    assert data.ecosystem_window_change[3]["last_value"] == "LOW"
+    assert data.ecosystem_window_change[3]["change"] == "n/a"
 
     assert data.ecosystem_snapshot is not None
     assert data.ecosystem_snapshot["entity_code"] == "DATACENTER"

@@ -19,6 +19,24 @@ def _sample_query_data(*, with_empty_events: bool = False) -> Rolling2ReportQuer
             "valid_signal_dates_included": ["2026-05-29", "2026-05-30"],
             "incomplete_window": False,
         },
+        ecosystem_window_change=[
+            {
+                "metric_name": "trend_breadth",
+                "first_date": "2026-05-29",
+                "first_value": 35.0,
+                "last_date": "2026-05-30",
+                "last_value": 25.0,
+                "change": -10.0,
+            },
+            {
+                "metric_name": "group_timing_state",
+                "first_date": "2026-05-29",
+                "first_value": "WATCH_PRESSURE",
+                "last_date": "2026-05-30",
+                "last_value": "EMERGENCY_SELL_PRESSURE",
+                "change": "n/a",
+            },
+        ],
         watchlist_summary={
             "counts": {
                 "active_watchlist_count": 1,
@@ -237,9 +255,14 @@ def test_renderer_returns_deterministic_rolling2_markdown_from_query_data_only()
     assert "last_price_data_status" in markdown
     assert "Full legacy watchlist read-model is not available from current V3 query data in DB-V3-70." not in markdown
     assert "## 4. Ecosystem window change" in markdown
+    assert "trend_breadth" in markdown
+    assert "group_timing_state" in markdown
+    assert "No ecosystem window change rows available from current V3 query data." not in markdown
+    assert "## 4. Ecosystem window change\nNot available from current V3 query data in DB-V3-70." not in markdown
     assert "## 5. Overheat / rotation risk progression" in markdown
     assert "## 6. Subindustry timing persistence" in markdown
     assert "## 7. Subindustry improvement / deterioration" in markdown
+    assert "Not available from current V3 query data in DB-V3-70." in markdown
     assert "## 8. Repeated breakout tickers" in markdown
     assert "## 9. Repeated pullback tickers" in markdown
     assert "## 10. Repeated exit-risk tickers" in markdown
