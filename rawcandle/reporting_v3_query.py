@@ -7,9 +7,11 @@ from pathlib import Path
 from typing import Any
 
 
+ROLLING2_WINDOW_CODE = "rolling2"
 ROLLING30_WINDOW_CODE = "rolling30"
 ROLLING5_WINDOW_CODE = "rolling5"
 WINDOW_DAYS_BY_CODE = {
+    ROLLING2_WINDOW_CODE: 2,
     ROLLING5_WINDOW_CODE: 5,
     ROLLING30_WINDOW_CODE: 30,
 }
@@ -66,6 +68,13 @@ ROLLING5_PULLBACK_ORDER = {
     "SHORT_TERM_BREAKDOWN": 3,
     "NO_PULLBACK": 4,
     "INSUFFICIENT_DATA": 5,
+}
+ROLLING2_SELL_PRESSURE_ORDER = {
+    "EMERGENCY_SELL_PRESSURE": 0,
+    "SHARP_2D_DROP": 1,
+    "WATCH_PRESSURE": 2,
+    "NO_EMERGENCY": 3,
+    "INSUFFICIENT_DATA": 4,
 }
 TICKER_METRIC_NAMES = (
     "breakout_days",
@@ -140,6 +149,22 @@ class Rolling5ReportQueryData:
     metadata: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class Rolling2ReportQueryData:
+    report_header: Rolling30ReportHeader
+    quality_summary: dict[str, Any]
+    ecosystem_snapshot: dict[str, Any] | None
+    group_snapshots: list[dict[str, Any]]
+    ticker_snapshots: list[dict[str, Any]]
+    rolling2_sell_pressure_classifications: list[dict[str, Any]]
+    ticker_metrics: dict[str, dict[str, Any]]
+    group_metrics: list[dict[str, Any]]
+    watchlist_members: list[dict[str, Any]]
+    structural_events: list[dict[str, Any]]
+    signal_observations: list[dict[str, Any]]
+    metadata: dict[str, Any]
+
+
 def build_rolling30_report_query_data(
     db_path: str,
     run_id: str,
@@ -152,6 +177,13 @@ def build_rolling5_report_query_data(
     run_id: str,
 ) -> Rolling5ReportQueryData:
     return _build_rolling5_report_query_data(db_path=db_path, run_id=run_id)
+
+
+def build_rolling2_report_query_data(
+    db_path: str,
+    run_id: str,
+) -> Rolling2ReportQueryData:
+    return _build_rolling2_report_query_data(db_path=db_path, run_id=run_id)
 
 
 def _build_rolling30_report_query_data(
@@ -210,6 +242,68 @@ def _build_rolling30_report_query_data(
                 window_code=ROLLING30_WINDOW_CODE,
                 ticker_snapshots=ticker_snapshots,
                 classification_rows=[*buy_rows, *exit_rows],
+                signal_observations=signal_observations,
+                structural_events=structural_events,
+            ),
+        )
+    finally:
+        conn.close()
+
+
+def _build_rolling2_report_query_data(
+    db_path: str,
+    run_id: str,
+) -> Rolling2ReportQueryData:
+    conn = _connect_read_only(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        _check_required_tables(conn)
+        _require_window(conn, ROLLING2_WINDOW_CODE)
+        run_row = _resolve_run(conn, run_id)
+        report_header = Rolling30ReportHeader(
+            run_id=str(run_row["run_id"]),
+            ecosystem_code=str(run_row["ecosystem_code"]),
+            taxonomy_version_code=str(run_row["taxonomy_version_code"]),
+            signal_date=str(run_row["signal_date"]),
+            window_code=ROLLING2_WINDOW_CODE,
+        )
+        snapshots = _load_snapshots(conn, run_row, ROLLING2_WINDOW_CODE)
+        if not snapshots:
+            raise ValueError(f"No {ROLLING2_WINDOW_CODE} snapshot rows found for run_id '{run_id}'")
+
+        sell_pressure_rows = _load_classifications(conn, run_row, ROLLING2_WINDOW_CODE, "rolling2_sell_pressure")
+        if not sell_pressure_rows:
+            raise ValueError(f"No {ROLLING2_WINDOW_CODE} classification rows found for run_id '{run_id}'")
+
+        ticker_metrics = _load_ticker_metrics(conn, run_row, ROLLING2_WINDOW_CODE)
+        group_metrics = _load_group_metrics(conn, run_row, ROLLING2_WINDOW_CODE)
+        watchlist_members = _load_watchlist_members(conn, run_row)
+        structural_events = _load_structural_events(conn, run_row, ROLLING2_WINDOW_CODE)
+        signal_observations = _load_signal_observations(conn, run_row, ROLLING2_WINDOW_CODE)
+
+        ecosystem_snapshot = next((row for row in snapshots if row["entity_type"] == "ECOSYSTEM"), None)
+        group_snapshots = [row for row in snapshots if row["entity_type"] in {"LAYER", "SUBINDUSTRY"}]
+        ticker_snapshots = [row for row in snapshots if row["entity_type"] == "TICKER"]
+
+        return Rolling2ReportQueryData(
+            report_header=report_header,
+            quality_summary={
+                "rows": _load_quality_summary_rows(conn, run_row, ROLLING2_WINDOW_CODE),
+                "coverage_counts": _load_coverage_counts(conn, run_row, ROLLING2_WINDOW_CODE),
+            },
+            ecosystem_snapshot=ecosystem_snapshot,
+            group_snapshots=group_snapshots,
+            ticker_snapshots=ticker_snapshots,
+            rolling2_sell_pressure_classifications=sell_pressure_rows,
+            ticker_metrics=ticker_metrics,
+            group_metrics=group_metrics,
+            watchlist_members=watchlist_members,
+            structural_events=structural_events,
+            signal_observations=signal_observations,
+            metadata=_build_metadata(
+                window_code=ROLLING2_WINDOW_CODE,
+                ticker_snapshots=ticker_snapshots,
+                classification_rows=sell_pressure_rows,
                 signal_observations=signal_observations,
                 structural_events=structural_events,
             ),
@@ -527,6 +621,8 @@ def _load_classifications(
         severity_order = ROLLING30_BUY_ORDER
     elif classification_type == "rolling30_exit":
         severity_order = ROLLING30_EXIT_ORDER
+    elif classification_type == "rolling2_sell_pressure":
+        severity_order = ROLLING2_SELL_PRESSURE_ORDER
     else:
         severity_order = ROLLING5_PULLBACK_ORDER
     rows.sort(
@@ -783,18 +879,14 @@ def _build_metadata(
         if row.get("priority_score") is not None or row.get("priority_label") is not None or row.get("sort_rank") is not None
     )
     signal_names = sorted({str(row["signal_name"]) for row in signal_observations})
-    window_prefix = "rolling30" if window_code == ROLLING30_WINDOW_CODE else "rolling5"
+    window_prefix = _window_prefix(window_code)
     return {
         "used_v2_runtime_tables": False,
         "used_generated_reports": False,
         "used_dashboard_output": False,
         f"{window_prefix}_classification_source": "eco_classification_decision",
         f"{window_prefix}_snapshot_classification_source_used": False,
-        f"{window_prefix}_event_window_mode": (
-            "event_date_range_within_30d_window"
-            if window_code == ROLLING30_WINDOW_CODE
-            else "event_date_range_within_5d_window"
-        ),
+        f"{window_prefix}_event_window_mode": _event_window_mode(window_code),
         f"{window_prefix}_signal_scope": "window_native_only",
         "ranking_fields_mostly_null": ranking_non_null_count == 0,
         "coverage_without_classification_tickers": coverage_without_classification,
@@ -805,10 +897,9 @@ def _build_metadata(
             "dashboard-rendered output was not used as source data",
             f"{window_prefix} classifications are read from eco_classification_decision",
             (
-                "eco_entity_window_snapshot.classification_state is not used as the "
-                f"primary {window_prefix} classification source"
-                if window_prefix == "rolling5"
-                else "eco_entity_window_snapshot.classification_state is not used as the rolling30 classification source"
+                "eco_entity_window_snapshot.classification_state is not used as the rolling30 classification source"
+                if window_prefix == "rolling30"
+                else f"eco_entity_window_snapshot.classification_state is not used as the primary {window_prefix} classification source"
             ),
             "ranking fields are mostly NULL; deterministic fallback ordering is used",
             f"{window_prefix} notable technical signals are limited unless a later daily signal join is added",
@@ -820,3 +911,23 @@ def _build_metadata(
             "no V2 report/context tables were used",
         ],
     }
+
+
+def _window_prefix(window_code: str) -> str:
+    if window_code == ROLLING30_WINDOW_CODE:
+        return "rolling30"
+    if window_code == ROLLING5_WINDOW_CODE:
+        return "rolling5"
+    if window_code == ROLLING2_WINDOW_CODE:
+        return "rolling2"
+    raise ValueError(f"Unsupported reporting window_code '{window_code}'")
+
+
+def _event_window_mode(window_code: str) -> str:
+    if window_code == ROLLING30_WINDOW_CODE:
+        return "event_date_range_within_30d_window"
+    if window_code == ROLLING5_WINDOW_CODE:
+        return "event_date_range_within_5d_window"
+    if window_code == ROLLING2_WINDOW_CODE:
+        return "event_date_range_within_2d_window"
+    raise ValueError(f"Unsupported reporting window_code '{window_code}'")
