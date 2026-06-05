@@ -496,9 +496,11 @@ def test_query_returns_rolling5_structured_data_from_eco_facts(tmp_path) -> None
     assert data.metadata["used_dashboard_output"] is False
     assert data.metadata["rolling5_classification_source"] == "eco_classification_decision"
     assert data.metadata["rolling5_snapshot_classification_source_used"] is False
+    assert data.metadata["rolling5_event_window_mode"] == "event_date_range_within_5d_window"
     assert data.metadata["ranking_fields_mostly_null"] is True
     assert data.metadata["coverage_without_classification_tickers"] == ["CRGY"]
     assert data.metadata["signal_names_present"] == ["BOS_FRESHNESS"]
+    assert data.metadata["rolling5_event_window_mode"] != "event_date_range_within_30d_window"
     assert "generated Markdown/CSV reports were not used as source data" in data.metadata["limitations"]
     assert (
         "eco_entity_window_snapshot.classification_state is not used as the primary rolling5 classification source"

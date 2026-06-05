@@ -790,7 +790,11 @@ def _build_metadata(
         "used_dashboard_output": False,
         f"{window_prefix}_classification_source": "eco_classification_decision",
         f"{window_prefix}_snapshot_classification_source_used": False,
-        f"{window_prefix}_event_window_mode": "event_date_range_within_30d_window",
+        f"{window_prefix}_event_window_mode": (
+            "event_date_range_within_30d_window"
+            if window_code == ROLLING30_WINDOW_CODE
+            else "event_date_range_within_5d_window"
+        ),
         f"{window_prefix}_signal_scope": "window_native_only",
         "ranking_fields_mostly_null": ranking_non_null_count == 0,
         "coverage_without_classification_tickers": coverage_without_classification,
