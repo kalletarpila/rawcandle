@@ -673,6 +673,10 @@ def _build_metadata(
     signal_names = sorted({str(row["signal_name"]) for row in signal_observations})
     return {
         "used_v2_runtime_tables": False,
+        "used_generated_reports": False,
+        "used_dashboard_output": False,
+        "rolling30_classification_source": "eco_classification_decision",
+        "rolling30_snapshot_classification_source_used": False,
         "rolling30_event_window_mode": "event_date_range_within_30d_window",
         "rolling30_signal_scope": "window_native_only",
         "ranking_fields_mostly_null": ranking_non_null_count == 0,
@@ -680,8 +684,13 @@ def _build_metadata(
         "signal_names_present": signal_names,
         "structural_event_types_present": sorted({str(row["event_type"]) for row in structural_events}),
         "limitations": [
+            "generated Markdown/CSV reports were not used as source data",
+            "dashboard-rendered output was not used as source data",
+            "rolling30 classifications are read from eco_classification_decision",
+            "eco_entity_window_snapshot.classification_state is not used as the rolling30 classification source",
             "ranking fields are mostly NULL; deterministic fallback ordering is used",
             "rolling30 notable technical signals are limited unless a later daily signal join is added",
+            "rolling30 signal observations are limited to rolling30-compatible observations; daily candlestick/divergence semantics are not invented",
             "coverage or snapshot rows can exist without rolling30 classification rows, for example CRGY-like cases",
             "no V2 report/context tables were used",
         ],
