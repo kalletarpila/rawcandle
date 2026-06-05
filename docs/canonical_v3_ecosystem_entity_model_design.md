@@ -419,6 +419,203 @@ This sequence preserves low-risk base modeling first, then persistent taxonomy a
 - Should `eco_signal_relevance` allow multiple simultaneous relevance labels per observation or only one current canonical relevance result?
 - Which quality scopes are mandatory in the first migration, for example ecosystem-level, watchlist-level, and entity-level?
 
+## 20. DB-V3-57 Eco Lineage Baseline
+
+This section records the accepted Eco lineage baseline after explicit V2 lineage replacement work was completed for the Datacenter ecosystem.
+
+### Decision scope
+
+This baseline applies to:
+
+- `run_id = V3_BASE_DATACENTER_2026_05_29_DC_TAXONOMY_FULL_V1`
+- `ecosystem = DATACENTER`
+- `taxonomy_version = DC_TAXONOMY_FULL_V1`
+- `signal_date = 2026-05-29`
+
+### Current accepted baseline counts
+
+- `eco_report_run = 1`
+- `eco_entity = 291`
+- `eco_taxonomy_entity_relation = 382`
+- `eco_watchlist = 1`
+- `eco_watchlist_member = 16`
+- `eco_entity_coverage = 1164`
+- `eco_quality_summary = 8`
+- `eco_entity_window_snapshot = 1164`
+- `eco_entity_metric_value = 14024`
+- `eco_signal_observation = 4379`
+- `eco_signal_relevance = 47`
+- `eco_entity_event = 6558`
+- `eco_classification_decision = 1181`
+
+### Accepted fact-table lineage status
+
+- `eco_classification_decision`
+  - accepted as `V3-native`
+  - explicit V2 lineage removed
+  - accepted source ids:
+    - `V3_DAILY_TRIGGER_CLASSIFICATION_FROM_LOWER_LEVEL_2026_05_29`
+    - `V3_ROLLING2_CLASSIFICATION_FROM_LOWER_LEVEL_2026_05_29`
+    - `V3_ROLLING5_CLASSIFICATION_FROM_LOWER_LEVEL_2026_05_29`
+    - `V3_ROLLING30_CLASSIFICATION_FROM_LOWER_LEVEL_2026_05_29`
+
+- `eco_entity_metric_value`
+  - accepted as `off explicit V2 lineage`
+  - explicit V2 metric debt removed
+  - accepted lower-level `source_run_id` families include:
+    - `DC_TICKER_SWING_20260601_DC_SWING_SIGNAL_V1`
+    - `DC_TICKER_SWING_20260603_DC_SWING_SIGNAL_V1`
+    - `DC_GROUP_SWING_20260602_DC_SWING_SIGNAL_V1`
+    - `DC_GROUP_SWING_20260603_DC_SWING_SIGNAL_V1`
+    - `DC_GROUP_SYNTH_OHLC_20250801_20260601_DC_SWING_OHLC_V1`
+    - `DC_GROUP_SYNTH_OHLC_20250801_20260603_DC_SWING_OHLC_V1`
+  - ecosystem summary/control rows with `NULL source_run_id` remain accepted and documented below
+
+- `eco_entity_window_snapshot`
+  - accepted as `V3-native`
+  - accepted source id:
+    - `V3_WINDOW_SNAPSHOT_FROM_ECO_COVERAGE_2026_05_29`
+  - old snapshot lineage removed:
+    - `REPORT_CANONICAL_V2_PROD_BUILD_2026_05_29 = 0`
+    - `NULL source_run_id = 0`
+
+- `eco_signal_observation`
+  - accepted as `off explicit V2 context/classification lineage`
+  - accepted lower-level sources:
+    - `dc_ticker_swing_signal_daily`
+    - `dc_group_synthetic_ohlc_daily`
+  - maintained derived source requiring follow-up documentation:
+    - `technical_signal_relevance`
+
+- `eco_entity_event`
+  - accepted as `off explicit V2 source-table lineage`
+  - accepted lower-level source:
+    - `dc_group_synthetic_ohlc_daily`
+  - maintained derived source requiring follow-up documentation:
+    - `stock_dow_structure_events`
+
+- `eco_signal_relevance`
+  - accepted as `indirect-lineage fact`
+  - lineage is understood through joined `eco_signal_observation` rows
+  - no direct V2 dependency was found
+
+- `eco_entity_coverage`
+  - accepted as `V3-native control/coverage output`
+  - no direct `source_run_id` or `source_table`
+
+- `eco_quality_summary`
+  - accepted as `V3-native run/window quality output`
+  - no direct `source_run_id` or `source_table`
+
+### Accepted maintained lower-level source families
+
+The following persisted lower-level or maintained derived source tables are accepted as lineage-bearing sources for the current Datacenter baseline:
+
+- `dc_ticker_swing_signal_daily`
+- `dc_group_swing_signal_daily`
+- `dc_group_synthetic_ohlc_daily`
+
+Accepted observed `source_run_id` families in the baseline include:
+
+- `DC_TICKER_SWING_20260601_DC_SWING_SIGNAL_V1`
+- `DC_TICKER_SWING_20260603_DC_SWING_SIGNAL_V1`
+- `DC_GROUP_SWING_20260602_DC_SWING_SIGNAL_V1`
+- `DC_GROUP_SWING_20260603_DC_SWING_SIGNAL_V1`
+- `DC_GROUP_SYNTH_OHLC_20250801_20260601_DC_SWING_OHLC_V1`
+- `DC_GROUP_SYNTH_OHLC_20250801_20260603_DC_SWING_OHLC_V1`
+- `DC_GROUP_SYNTH_OHLC_20250801_20260529_DC_SWING_OHLC_V1`
+
+### Accepted V3-native generated source ids
+
+The following generated source ids are accepted as V3-native lineage in the current baseline:
+
+- `V3_DAILY_TRIGGER_CLASSIFICATION_FROM_LOWER_LEVEL_2026_05_29`
+- `V3_ROLLING2_CLASSIFICATION_FROM_LOWER_LEVEL_2026_05_29`
+- `V3_ROLLING5_CLASSIFICATION_FROM_LOWER_LEVEL_2026_05_29`
+- `V3_ROLLING30_CLASSIFICATION_FROM_LOWER_LEVEL_2026_05_29`
+- `V3_WINDOW_SNAPSHOT_FROM_ECO_COVERAGE_2026_05_29`
+
+### Explicitly forbidden long-term V3 source-of-truth
+
+The following are not accepted as long-term V3 source-of-truth for new runtime builders:
+
+- `dc_report_context_daily_v2`
+- `dc_report_context_window_v2`
+- `dc_report_context_group_v2`
+- `dc_report_classification_v2`
+- generated Markdown reports
+- generated CSV reports
+- dashboard-rendered output
+
+These artifacts may remain as historical, bootstrap, or reference material, but they should not be used as runtime source tables for new V3/Eco lineage work.
+
+### Maintained derived source documentation debt
+
+The following sources are accepted as non-V2 lineage, but still require explicit documentation or later normalization:
+
+- `technical_signal_relevance`
+- `DATACENTER_TECH_REL_DC_TAXONOMY_FULL_V1_2026_05_29`
+- `stock_dow_structure_events`
+- `stock-dow-*` `source_run_id` family
+
+These sources:
+
+- are not explicit V2 lineage
+- do not block reporting/query-layer planning
+- should be documented or normalized before broader multi-ecosystem production hardening
+
+### NULL / implicit lineage policy
+
+Accepted NULL or implicit lineage cases in the current baseline are:
+
+- `eco_entity_metric_value` rows with `NULL source_run_id` for ecosystem summary/control metrics:
+  - `selected_entity_count`
+  - `ok_coverage_count`
+  - `warning_count`
+  - `watchlist_only_count`
+  - `missing_coverage_count`
+  - these are control/coverage summary rows, not market-source-derived facts
+
+- `eco_entity_coverage`
+  - no direct `source_run_id` / `source_table`
+  - accepted as V3 control/coverage output
+
+- `eco_quality_summary`
+  - no direct `source_run_id` / `source_table`
+  - accepted as V3 run/window quality output
+
+- `eco_signal_relevance`
+  - indirect lineage through `eco_signal_observation`
+  - no direct lineage columns
+
+### Accepted semantic exceptions
+
+- `daily_trigger` uses current lower-level source truth
+- `CRGY` is materialized as `INSUFFICIENT_DATA` in `daily_trigger` because covered entities must not silently disappear from canonical state
+- `NXPI` `daily_trigger` and `eco_entity_window_snapshot.classification_state` reflect the accepted lower-level source-truth delta:
+  - `BUY_WATCH -> SELL_TRIGGER`
+
+### Remaining non-blocking technical debt
+
+The following remain as known non-blocking lineage debt:
+
+- documentation for `technical_signal_relevance`
+- documentation or normalization of `stock_dow_structure_events`
+- documentation or normalization of the `stock-dow-*` `source_run_id` family
+- documentation for NULL summary/control lineage in `eco_entity_metric_value`
+- documentation for implicit lineage in `eco_entity_coverage`
+- documentation for implicit lineage in `eco_quality_summary`
+- possible future cleanup of older lower-level `source_run_id` families if stronger run-family normalization is later required
+- possible future expansion from a Datacenter-only baseline to multi-ecosystem lineage conventions
+
+### Handoff statement
+
+Explicit V2 lineage is now removed from Eco fact tables.
+
+Remaining lineage work is documentation/normalization work, not blocker-level replacement debt.
+
+Reporting/query-layer planning may proceed, provided new reporting/query implementations use `eco_*` / V3 fact tables and do not use generated reports or `dc_report_*_v2` context/classification tables as source-of-truth.
+
 ## Notes from Current Audit Findings
 
 The following current-state findings materially affect the V3 design direction:
