@@ -5,21 +5,33 @@ from typing import Any
 
 
 def render_rolling30_markdown_report(query_data: Any) -> str:
+    return _render_window_markdown_report(query_data=query_data, window_label="rolling30")
+
+
+def render_rolling5_markdown_report(query_data: Any) -> str:
+    return _render_window_markdown_report(query_data=query_data, window_label="rolling5")
+
+
+def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
     report_header = _get_field(query_data, "report_header")
     quality_summary = _get_field(query_data, "quality_summary") or {}
     ecosystem_snapshot = _get_field(query_data, "ecosystem_snapshot")
     group_snapshots = list(_get_field(query_data, "group_snapshots") or [])
-    rolling30_buy_classifications = list(_get_field(query_data, "rolling30_buy_classifications") or [])
-    rolling30_exit_classifications = list(_get_field(query_data, "rolling30_exit_classifications") or [])
     watchlist_members = list(_get_field(query_data, "watchlist_members") or [])
     ticker_metrics = _normalize_ticker_metrics(_get_field(query_data, "ticker_metrics") or {})
     group_metrics = list(_get_field(query_data, "group_metrics") or [])
     structural_events = list(_get_field(query_data, "structural_events") or [])
     signal_observations = list(_get_field(query_data, "signal_observations") or [])
     metadata = _get_field(query_data, "metadata") or {}
+    rolling30_buy_classifications = list(_get_field(query_data, "rolling30_buy_classifications") or [])
+    rolling30_exit_classifications = list(_get_field(query_data, "rolling30_exit_classifications") or [])
+    rolling5_pullback_classifications = list(_get_field(query_data, "rolling5_pullback_classifications") or [])
+    classification_source_key = f"{window_label}_classification_source"
+    snapshot_source_key = f"{window_label}_snapshot_classification_source_used"
+    event_window_mode_key = f"{window_label}_event_window_mode"
 
     lines = [
-        "# Datacenter rolling30 report prototype",
+        f"# Datacenter {window_label} report prototype",
         "",
         "## Metadata",
         f"- ecosystem_code: {_value(_get_field(report_header, 'ecosystem_code'))}",
@@ -76,50 +88,87 @@ def render_rolling30_markdown_report(query_data: Any) -> str:
                 ],
                 empty_message="No group snapshot rows.",
             ),
-            "## Rolling30 buy classifications",
-            f"- row_count: {len(rolling30_buy_classifications)}",
         ]
     )
-    lines.extend(_render_state_counts(rolling30_buy_classifications))
-    lines.extend(
-        _render_table_or_none(
-            headers=["ticker", "classification_state", "primary_reason", "blocking_reason", "decision_status"],
-            rows=[
-                [
-                    row.get("ticker"),
-                    row.get("classification_state"),
-                    row.get("primary_reason"),
-                    row.get("blocking_reason"),
-                    row.get("decision_status"),
-                ]
-                for row in rolling30_buy_classifications
-            ],
-            empty_message="No rolling30 buy classification rows.",
+    if window_label == "rolling30":
+        lines.extend(
+            [
+                "## Rolling30 buy classifications",
+                f"- row_count: {len(rolling30_buy_classifications)}",
+            ]
         )
-    )
-    lines.extend(
-        [
-            "## Rolling30 exit classifications",
-            f"- row_count: {len(rolling30_exit_classifications)}",
-        ]
-    )
-    lines.extend(_render_state_counts(rolling30_exit_classifications))
-    lines.extend(
-        _render_table_or_none(
-            headers=["ticker", "classification_state", "primary_reason", "risk_reason", "decision_status"],
-            rows=[
-                [
-                    row.get("ticker"),
-                    row.get("classification_state"),
-                    row.get("primary_reason"),
-                    row.get("risk_reason"),
-                    row.get("decision_status"),
-                ]
-                for row in rolling30_exit_classifications
-            ],
-            empty_message="No rolling30 exit classification rows.",
+        lines.extend(_render_state_counts(rolling30_buy_classifications))
+        lines.extend(
+            _render_table_or_none(
+                headers=["ticker", "classification_state", "primary_reason", "blocking_reason", "decision_status"],
+                rows=[
+                    [
+                        row.get("ticker"),
+                        row.get("classification_state"),
+                        row.get("primary_reason"),
+                        row.get("blocking_reason"),
+                        row.get("decision_status"),
+                    ]
+                    for row in rolling30_buy_classifications
+                ],
+                empty_message="No rolling30 buy classification rows.",
+            )
         )
-    )
+        lines.extend(
+            [
+                "## Rolling30 exit classifications",
+                f"- row_count: {len(rolling30_exit_classifications)}",
+            ]
+        )
+        lines.extend(_render_state_counts(rolling30_exit_classifications))
+        lines.extend(
+            _render_table_or_none(
+                headers=["ticker", "classification_state", "primary_reason", "risk_reason", "decision_status"],
+                rows=[
+                    [
+                        row.get("ticker"),
+                        row.get("classification_state"),
+                        row.get("primary_reason"),
+                        row.get("risk_reason"),
+                        row.get("decision_status"),
+                    ]
+                    for row in rolling30_exit_classifications
+                ],
+                empty_message="No rolling30 exit classification rows.",
+            )
+        )
+    else:
+        lines.extend(
+            [
+                "## Rolling5 pullback classifications",
+                f"- row_count: {len(rolling5_pullback_classifications)}",
+            ]
+        )
+        lines.extend(_render_state_counts(rolling5_pullback_classifications))
+        lines.extend(
+            _render_table_or_none(
+                headers=[
+                    "ticker",
+                    "classification_state",
+                    "primary_reason",
+                    "blocking_reason",
+                    "next_action",
+                    "decision_status",
+                ],
+                rows=[
+                    [
+                        row.get("ticker"),
+                        row.get("classification_state"),
+                        row.get("primary_reason"),
+                        row.get("blocking_reason"),
+                        row.get("next_action"),
+                        row.get("decision_status"),
+                    ]
+                    for row in rolling5_pullback_classifications
+                ],
+                empty_message="No rolling5 pullback classification rows.",
+            )
+        )
     lines.extend(
         [
             "## Watchlist",
@@ -222,18 +271,16 @@ def render_rolling30_markdown_report(query_data: Any) -> str:
             "## Events and signals",
         ]
     )
-    lines.extend(_render_events_and_signals(structural_events, signal_observations))
+    lines.extend(_render_events_and_signals(structural_events, signal_observations, window_label=window_label))
     lines.extend(
         [
             "## Metadata and limitations",
             f"- used_v2_runtime_tables: {_value(metadata.get('used_v2_runtime_tables'))}",
             f"- used_generated_reports: {_value(metadata.get('used_generated_reports'))}",
             f"- used_dashboard_output: {_value(metadata.get('used_dashboard_output'))}",
-            f"- rolling30_classification_source: {_value(metadata.get('rolling30_classification_source'))}",
-            (
-                "- rolling30_snapshot_classification_source_used: "
-                f"{_value(metadata.get('rolling30_snapshot_classification_source_used'))}"
-            ),
+            f"- {classification_source_key}: {_value(metadata.get(classification_source_key))}",
+            f"- {snapshot_source_key}: {_value(metadata.get(snapshot_source_key))}",
+            f"- {event_window_mode_key}: {_value(metadata.get(event_window_mode_key))}",
             f"- ranking_fields_mostly_null: {_value(metadata.get('ranking_fields_mostly_null'))}",
             "",
         ]
@@ -305,6 +352,7 @@ def _render_state_counts(rows: list[dict[str, Any]]) -> list[str]:
 def _render_events_and_signals(
     structural_events: list[dict[str, Any]],
     signal_observations: list[dict[str, Any]],
+    window_label: str,
 ) -> list[str]:
     lines = [
         "### Structural events",
@@ -328,12 +376,12 @@ def _render_events_and_signals(
     if signal_observations:
         signal_names = sorted({str(row.get("signal_name") or "") for row in signal_observations})
         lines.append(
-            "- rolling30-compatible signal observations only: "
+            f"- {window_label}-compatible signal observations only: "
             + _escape(", ".join(name for name in signal_names if name))
         )
         lines.append("")
     else:
-        lines.append("- rolling30-compatible signal observations only: none")
+        lines.append(f"- {window_label}-compatible signal observations only: none")
         lines.append("")
     lines.extend(
         _render_table_or_none(
