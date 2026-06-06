@@ -444,6 +444,27 @@ def test_scheduler_cli_prints_v3_error_when_present(monkeypatch, capsys):
     assert "SUMMARY v3_reports.error=write failed" in captured.out
 
 
+def test_scheduler_cli_prints_v3_no_matching_run_when_present(monkeypatch, capsys):
+    result = _result(STATUS_OK_WITH_WARNINGS)
+    result.v3_reports_attempted = 1
+    result.v3_reports_status = "NO_MATCHING_ECO_RUN"
+    result.v3_reports_signal_date = "2026-05-22"
+    result.v3_reports_error = "no matching Eco run for DATACENTER/DC_TAXONOMY_FULL_V1 on 2026-05-22"
+    monkeypatch.setattr(cli, "run_scheduler_config", lambda config_path: result)
+
+    code = cli.main(["--config", "/tmp/scheduler.json"])
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "SUMMARY v3_reports.attempted=1" in captured.out
+    assert "SUMMARY v3_reports.status=NO_MATCHING_ECO_RUN" in captured.out
+    assert "SUMMARY v3_reports.signal_date=2026-05-22" in captured.out
+    assert (
+        "SUMMARY v3_reports.error="
+        "no matching Eco run for DATACENTER/DC_TAXONOMY_FULL_V1 on 2026-05-22"
+    ) in captured.out
+
+
 def test_scheduler_cli_ok_with_warnings_exits_one(monkeypatch):
     monkeypatch.setattr(
         cli, "run_scheduler_config", lambda config_path: _result(STATUS_OK_WITH_WARNINGS)
