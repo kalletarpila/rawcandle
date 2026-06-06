@@ -19,6 +19,9 @@ from rawcandle.report_canonical_v3_entity_event_builder import (
 from rawcandle.report_canonical_v3_group_event_builder import (
     build_canonical_v3_group_structure_events,
 )
+from rawcandle.report_canonical_v3_group_freshness_metric_builder import (
+    build_canonical_v3_group_freshness_metrics,
+)
 from rawcandle.report_canonical_v3_group_historical_metric_builder import (
     build_canonical_v3_group_historical_metrics,
 )
@@ -261,6 +264,7 @@ def _builder_sequence() -> list[tuple[str, Callable[..., dict[str, object]], dic
         ("build_canonical_v3_signal_relevance", build_canonical_v3_signal_relevance, {"window_code": "daily"}),
         ("build_canonical_v3_ticker_structure_events", build_canonical_v3_ticker_structure_events, {}),
         ("build_canonical_v3_group_structure_events", build_canonical_v3_group_structure_events, {}),
+        ("build_canonical_v3_group_freshness_metrics", build_canonical_v3_group_freshness_metrics, {}),
     ]
 
 

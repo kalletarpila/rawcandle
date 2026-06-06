@@ -400,6 +400,7 @@ def test_cli_includes_allowed_build_sequence_and_no_execution_notes(tmp_path, ca
     assert "7 | build_canonical_v3_group_historical_metrics | eco_entity_metric_value | dc_group_swing_signal_daily, dc_group_synthetic_ohlc_daily |" in captured.out
     assert "13 | build_canonical_v3_window_snapshots | eco_entity_window_snapshot |" in captured.out
     assert "16 | build_canonical_v3_signal_relevance | eco_signal_observation, eco_signal_relevance |" in captured.out
+    assert "19 | build_canonical_v3_group_freshness_metrics | eco_entity_metric_value | eco_entity_event, eco_entity_metric_value, eco_entity, eco_report_run |" in captured.out
     assert "technical_relevance_run_id=DATACENTER_TECH_REL_DC_TAXONOMY_FULL_V1_2026_06_04" in captured.out
     assert "technical_relevance_V3_BASE_DATACENTER_2026_06_04_DC_TAXONOMY_FULL_V1" not in captured.out
     assert "not executed" in captured.out
@@ -413,6 +414,17 @@ def test_cli_includes_allowed_build_sequence_and_no_execution_notes(tmp_path, ca
     ) < captured.out.index(
         "8 | build_canonical_v3_ticker_freshness_from_signal_daily | eco_entity_metric_value, eco_signal_observation |"
     )
+    assert captured.out.index(
+        "17 | build_canonical_v3_ticker_structure_events | eco_entity_event |"
+    ) < captured.out.index(
+        "19 | build_canonical_v3_group_freshness_metrics | eco_entity_metric_value |"
+    )
+    assert captured.out.index(
+        "18 | build_canonical_v3_group_structure_events | eco_entity_event |"
+    ) < captured.out.index(
+        "19 | build_canonical_v3_group_freshness_metrics | eco_entity_metric_value |"
+    )
+    assert "19 | build_canonical_v3_group_freshness_metrics | eco_entity_metric_value | dc_" not in captured.out
 
 
 def test_cli_uses_clear_placeholder_when_no_deterministic_technical_relevance_run_id_exists(tmp_path, capsys) -> None:

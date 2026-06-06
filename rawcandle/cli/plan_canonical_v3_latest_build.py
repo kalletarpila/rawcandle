@@ -102,6 +102,7 @@ ALLOWED_BUILD_STEPS = (
     AllowedBuildStep(16, "build_canonical_v3_signal_relevance", ("eco_signal_observation", "eco_signal_relevance"), ("technical_signal_relevance",), ("db_path", "run_id", "technical_relevance_run_id", "window_code='daily'", "replace_existing=True")),
     AllowedBuildStep(17, "build_canonical_v3_ticker_structure_events", ("eco_entity_event",), ("stock_dow_structure_events",), ("db_path", "run_id", "replace_existing=True")),
     AllowedBuildStep(18, "build_canonical_v3_group_structure_events", ("eco_entity_event",), ("dc_group_synthetic_ohlc_daily",), ("db_path", "run_id", "replace_existing=True")),
+    AllowedBuildStep(19, "build_canonical_v3_group_freshness_metrics", ("eco_entity_metric_value",), ("eco_entity_event", "eco_entity_metric_value", "eco_entity", "eco_report_run"), ("db_path", "run_id", "replace_existing=True")),
 )
 
 BYPASSED_BUILDERS = (

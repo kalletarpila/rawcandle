@@ -373,6 +373,7 @@ def _install_success_builder_stubs(monkeypatch: pytest.MonkeyPatch, db_path: Pat
         "build_canonical_v3_signal_relevance": ("eco_signal_observation", "eco_signal_relevance"),
         "build_canonical_v3_ticker_structure_events": ("eco_entity_event",),
         "build_canonical_v3_group_structure_events": ("eco_entity_event",),
+        "build_canonical_v3_group_freshness_metrics": ("eco_entity_metric_value",),
     }
 
     def make_stub(builder_name: str):
@@ -740,7 +741,7 @@ def test_cleanup_failure_stops_before_any_builder_call_and_reports_build_failed(
     assert "partial_writes_may_exist" in captured.out
 
 
-def test_call_order_places_group_historical_metrics_between_group_window_metrics_and_ticker_freshness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_call_order_places_group_freshness_after_event_builders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     db_path = tmp_path / "build.db"
     backup_dir = tmp_path / "backups"
     backup_dir.mkdir()
@@ -751,11 +752,11 @@ def test_call_order_places_group_historical_metrics_between_group_window_metrics
     result = cli.main(_base_args(db_path, backup_dir) + ["--replace-existing"])
 
     assert result == 0
-    assert call_order.index("build_canonical_v3_group_window_metrics") < call_order.index(
-        "build_canonical_v3_group_historical_metrics"
+    assert call_order.index("build_canonical_v3_ticker_structure_events") < call_order.index(
+        "build_canonical_v3_group_freshness_metrics"
     )
-    assert call_order.index("build_canonical_v3_group_historical_metrics") < call_order.index(
-        "build_canonical_v3_ticker_freshness_from_signal_daily"
+    assert call_order.index("build_canonical_v3_group_structure_events") < call_order.index(
+        "build_canonical_v3_group_freshness_metrics"
     )
 
 
@@ -806,6 +807,55 @@ def test_group_historical_metrics_builder_receives_expected_parameters(tmp_path:
     assert seen_kwargs["historical"]["db_path"] == str(db_path)
     assert seen_kwargs["historical"]["run_id"] == "V3_BASE_DATACENTER_2026_06_04_DC_TAXONOMY_FULL_V1"
     assert seen_kwargs["historical"]["replace_existing"] is True
+
+
+def test_group_freshness_metrics_builder_receives_expected_parameters(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = tmp_path / "build.db"
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    _create_fixture_db(str(db_path))
+    seen_kwargs: dict[str, dict[str, object]] = {}
+
+    def _base_stub(**kwargs):
+        return {"warning_count": 0}
+
+    def _freshness_stub(**kwargs):
+        seen_kwargs["freshness"] = kwargs
+        return {"warning_count": 0}
+
+    def _generic_stub(**kwargs):
+        return {"warning_count": 0}
+
+    monkeypatch.setattr(cli, "build_canonical_v3_base_run", _base_stub)
+    monkeypatch.setattr(cli, "build_canonical_v3_group_freshness_metrics", _freshness_stub)
+    for builder_name, _, _ in cli._builder_sequence()[1:]:
+        if builder_name == "build_canonical_v3_group_freshness_metrics":
+            continue
+        monkeypatch.setattr(cli, builder_name, _generic_stub)
+    monkeypatch.setattr(
+        cli,
+        "_validate_post_build",
+        lambda *args, **kwargs: {
+            "run_exists": True,
+            "table_counts": {table_name: 1 for table_name in cli.TARGET_TABLES_BY_VALIDATION},
+            "forbidden_lineage_counts": {
+                "eco_entity_window_snapshot": 0,
+                "eco_entity_metric_value": 0,
+                "eco_classification_decision": 0,
+                "eco_signal_observation": 0,
+                "eco_entity_event": 0,
+            },
+            "latest_eco_signal_date": "2026-06-04",
+            "latest_signal_date_ok": True,
+        },
+    )
+
+    result = cli.main(_base_args(db_path, backup_dir) + ["--replace-existing"])
+
+    assert result == 0
+    assert seen_kwargs["freshness"]["db_path"] == str(db_path)
+    assert seen_kwargs["freshness"]["run_id"] == "V3_BASE_DATACENTER_2026_06_04_DC_TAXONOMY_FULL_V1"
+    assert seen_kwargs["freshness"]["replace_existing"] is True
 
 
 def test_stops_on_first_builder_failure_and_reports_backup_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
