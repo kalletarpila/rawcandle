@@ -1597,7 +1597,7 @@ def _daily_classification_signal_strength(classification_row: dict[str, Any] | N
 def _is_daily_pullback_signal(signal_row: dict[str, Any]) -> bool:
     signal_family = str(signal_row.get("signal_family") or "")
     signal_direction = str(signal_row.get("signal_direction") or "")
-    return signal_family == "REVERSAL_MEDIUM" and signal_direction == "UP"
+    return signal_family == "REVERSAL_MEDIUM" and signal_direction in {"BULLISH", "UP"}
 
 
 def _daily_pullback_signal_strength_rank(signal_row: dict[str, Any]) -> int:

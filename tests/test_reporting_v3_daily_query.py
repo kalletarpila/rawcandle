@@ -488,7 +488,7 @@ def _build_fixture_db(db_path: str) -> None:
         _insert_event(conn, ecosystem_id=ecosystem_id, taxonomy_version_id=taxonomy_version_id, entity_id=layer_id, event_date=SIGNAL_DATE, event_type="BOS", event_key="infra-bos")
         _insert_event(conn, ecosystem_id=ecosystem_id, taxonomy_version_id=taxonomy_version_id, entity_id=subindustry_id, event_date=SIGNAL_DATE, event_type="RESET", event_key="semis-reset")
         freshness_signal_id = _insert_signal(conn, ecosystem_id=ecosystem_id, taxonomy_version_id=taxonomy_version_id, entity_id=nvda_id, signal_name="RESET_FRESHNESS", signal_family="FRESHNESS", signal_value="FRESH")
-        pullback_signal_id = _insert_signal(conn, ecosystem_id=ecosystem_id, taxonomy_version_id=taxonomy_version_id, entity_id=nvda_id, signal_name="REVERSAL_MEDIUM", signal_family="REVERSAL_MEDIUM", signal_value="BULLISH", signal_direction="UP")
+        pullback_signal_id = _insert_signal(conn, ecosystem_id=ecosystem_id, taxonomy_version_id=taxonomy_version_id, entity_id=nvda_id, signal_name="REVERSAL_MEDIUM", signal_family="REVERSAL_MEDIUM", signal_value="BULLISH", signal_direction="BULLISH")
         divergence_signal_id = _insert_signal(conn, ecosystem_id=ecosystem_id, taxonomy_version_id=taxonomy_version_id, entity_id=nxpi_id, signal_name="REVERSAL_MEDIUM", signal_family="REVERSAL_MEDIUM", signal_value="BEARISH")
         _insert_relevance(conn, freshness_signal_id, "daily freshness")
         _insert_relevance(conn, pullback_signal_id, "daily pullback")
@@ -569,7 +569,7 @@ def test_query_returns_daily_structured_data_from_eco_facts(tmp_path) -> None:
         for row in data.signal_observations
         if row["entity_code"] == "NVDA" and row["signal_name"] == "REVERSAL_MEDIUM"
     )
-    assert bullish_reversal_row["signal_direction"] == "UP"
+    assert bullish_reversal_row["signal_direction"] == "BULLISH"
     assert bullish_reversal_row["signal_value"] == "BULLISH"
     assert bullish_reversal_row["relevance_labels"] == "CONTEXTUAL"
 
@@ -638,7 +638,137 @@ def test_query_returns_daily_structured_data_from_eco_facts(tmp_path) -> None:
     assert data.synthetic_ohlc_structure_summary["is_truncated"] is False
 
     coverage_counts = {(row["entity_type"], row["coverage_status"]): row["row_count"] for row in data.quality_summary["coverage_counts"]}
-    assert coverage_counts[("TICKER", "OK")] == 3
+
+
+def test_query_pullback_scanner_accepts_bullish_and_up_but_excludes_bearish_and_non_watchlist(tmp_path) -> None:
+    db_path = tmp_path / "daily_query_pullback_direction_compat.db"
+    _build_fixture_db(str(db_path))
+
+    conn = _connect(str(db_path))
+    try:
+        ecosystem_id = int(conn.execute("SELECT ecosystem_id FROM eco_ecosystem WHERE ecosystem_code = 'DATACENTER'").fetchone()[0])
+        taxonomy_version_id = int(
+            conn.execute(
+                "SELECT taxonomy_version_id FROM eco_taxonomy_version WHERE version_code = 'DC_TAXONOMY_FULL_V1'"
+            ).fetchone()[0]
+        )
+        watchlist_id = int(conn.execute("SELECT watchlist_id FROM eco_watchlist WHERE watchlist_code = 'PRIMARY'").fetchone()[0])
+        subindustry_id = int(conn.execute("SELECT entity_id FROM eco_entity WHERE entity_code = 'SEMIS'").fetchone()[0])
+
+        avgo_id = _insert_entity(
+            conn,
+            ecosystem_id,
+            entity_type="TICKER",
+            entity_code="AVGO",
+            entity_name="Broadcom Test",
+            ticker="AVGO",
+        )
+        _insert_relation(
+            conn,
+            taxonomy_version_id=taxonomy_version_id,
+            ecosystem_id=ecosystem_id,
+            parent_entity_id=subindustry_id,
+            child_entity_id=avgo_id,
+        )
+        _insert_watchlist_member(conn, watchlist_id, avgo_id)
+        _insert_coverage(
+            conn,
+            ecosystem_id=ecosystem_id,
+            taxonomy_version_id=taxonomy_version_id,
+            entity_id=avgo_id,
+        )
+        _insert_snapshot(
+            conn,
+            ecosystem_id=ecosystem_id,
+            taxonomy_version_id=taxonomy_version_id,
+            entity_id=avgo_id,
+            trend_state="UP",
+            summary_state="READY",
+            classification_state="WRONG_FROM_SNAPSHOT",
+            quality_status="OK",
+        )
+        for metric_name, metric_value in (
+            ("distance_to_ema10_pct", 2.0),
+            ("distance_to_ema20_pct", 2.5),
+            ("return_5d", 1.0),
+            ("return_10d", 2.0),
+            ("return_20d", 3.0),
+        ):
+            _insert_metric_num(
+                conn,
+                ecosystem_id=ecosystem_id,
+                taxonomy_version_id=taxonomy_version_id,
+                entity_id=avgo_id,
+                metric_name=metric_name,
+                metric_value_num=metric_value,
+            )
+        _insert_signal(
+            conn,
+            ecosystem_id=ecosystem_id,
+            taxonomy_version_id=taxonomy_version_id,
+            entity_id=avgo_id,
+            signal_name="REVERSAL_MEDIUM",
+            signal_family="REVERSAL_MEDIUM",
+            signal_value="BULLISH",
+            signal_direction="UP",
+        )
+
+        aloy_id = _insert_entity(
+            conn,
+            ecosystem_id,
+            entity_type="TICKER",
+            entity_code="ALOY",
+            entity_name="Alloy Test",
+            ticker="ALOY",
+        )
+        _insert_relation(
+            conn,
+            taxonomy_version_id=taxonomy_version_id,
+            ecosystem_id=ecosystem_id,
+            parent_entity_id=subindustry_id,
+            child_entity_id=aloy_id,
+        )
+        _insert_coverage(
+            conn,
+            ecosystem_id=ecosystem_id,
+            taxonomy_version_id=taxonomy_version_id,
+            entity_id=aloy_id,
+        )
+        _insert_snapshot(
+            conn,
+            ecosystem_id=ecosystem_id,
+            taxonomy_version_id=taxonomy_version_id,
+            entity_id=aloy_id,
+            trend_state="UP",
+            summary_state="READY",
+            classification_state="WRONG_FROM_SNAPSHOT",
+            quality_status="OK",
+        )
+        _insert_signal(
+            conn,
+            ecosystem_id=ecosystem_id,
+            taxonomy_version_id=taxonomy_version_id,
+            entity_id=aloy_id,
+            signal_name="REVERSAL_MEDIUM",
+            signal_family="REVERSAL_MEDIUM",
+            signal_value="BULLISH",
+            signal_direction="BULLISH",
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    data = build_daily_report_query_data(str(db_path), RUN_ID)
+
+    assert [row["ticker"] for row in data.ticker_scanners["pullback_rows"]] == ["NVDA", "AVGO"]
+    assert data.ticker_scanners["pullback_rows"][0]["signal_value"] == "BULLISH"
+    assert data.ticker_scanners["pullback_rows"][0]["signal_strength"] == "REVERSAL_MEDIUM"
+    assert data.ticker_scanners["pullback_rows"][1]["signal_value"] == "BULLISH"
+    assert data.ticker_scanners["pullback_rows"][1]["signal_strength"] == "REVERSAL_MEDIUM"
+    assert all(row["ticker"] != "ALOY" for row in data.ticker_scanners["pullback_rows"])
+    assert data.ticker_scanners["pullback_rows_available"] == 2
+    coverage_counts = {(row["entity_type"], row["coverage_status"]): row["row_count"] for row in data.quality_summary["coverage_counts"]}
+    assert coverage_counts[("TICKER", "OK")] == 5
 
     assert data.metadata["used_v2_runtime_tables"] is False
     assert data.metadata["used_generated_reports"] is False
