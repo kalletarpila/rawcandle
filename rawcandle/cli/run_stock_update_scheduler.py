@@ -382,6 +382,28 @@ def main(argv: Optional[List[str]] = None) -> int:
         f"{result.datacenter_pipeline_weekly_report_csv_path or 'NONE'}"
     )
     print(f"SUMMARY datacenter_pipeline.error={result.datacenter_pipeline_error}")
+    print(f"SUMMARY v3_reports.attempted={result.v3_reports_attempted}")
+    print(f"SUMMARY v3_reports.status={result.v3_reports_status}")
+    print(f"SUMMARY v3_reports.run_id={result.v3_reports_run_id}")
+    print(f"SUMMARY v3_reports.signal_date={result.v3_reports_signal_date}")
+    print(f"SUMMARY v3_reports.output_dir={result.v3_reports_output_dir or 'NONE'}")
+    print(
+        "SUMMARY v3_reports.daily_report_path="
+        f"{result.v3_reports_daily_report_path or 'NONE'}"
+    )
+    print(
+        "SUMMARY v3_reports.rolling_30_report_path="
+        f"{result.v3_reports_rolling_30_report_path or 'NONE'}"
+    )
+    print(
+        "SUMMARY v3_reports.rolling_5_report_path="
+        f"{result.v3_reports_rolling_5_report_path or 'NONE'}"
+    )
+    print(
+        "SUMMARY v3_reports.rolling_2_report_path="
+        f"{result.v3_reports_rolling_2_report_path or 'NONE'}"
+    )
+    print(f"SUMMARY v3_reports.error={result.v3_reports_error}")
     print(f"SUMMARY datacenter_dashboard.attempted={result.datacenter_dashboard_attempted}")
     print(f"SUMMARY datacenter_dashboard.status={result.datacenter_dashboard_status}")
     print(f"SUMMARY datacenter_dashboard.dashboard_db={result.datacenter_dashboard_dashboard_db}")

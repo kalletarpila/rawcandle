@@ -16,6 +16,8 @@ from typing import IO, Iterator, List, Optional
 from zoneinfo import ZoneInfo
 
 from main import RawCandleApp, _today_exclusive_end_date
+from rawcandle.cli.write_latest_v3_markdown_reports import resolve_latest_run
+from rawcandle.cli.write_v3_markdown_prototypes import write_reports
 from rawcandle.scheduler.config import (
     StockUpdateSchedulerConfig,
     read_scheduler_config,
@@ -104,6 +106,16 @@ class ScheduledStockUpdateRunResult:
     datacenter_pipeline_weekly_report_path: Optional[str] = None
     datacenter_pipeline_weekly_report_csv_path: Optional[str] = None
     datacenter_pipeline_error: str = ""
+    v3_reports_attempted: int = 0
+    v3_reports_status: str = "SKIPPED"
+    v3_reports_run_id: str = "NONE"
+    v3_reports_signal_date: str = "NONE"
+    v3_reports_output_dir: str = ""
+    v3_reports_daily_report_path: Optional[str] = None
+    v3_reports_rolling_30_report_path: Optional[str] = None
+    v3_reports_rolling_5_report_path: Optional[str] = None
+    v3_reports_rolling_2_report_path: Optional[str] = None
+    v3_reports_error: str = ""
     datacenter_dashboard_attempted: int = 0
     datacenter_dashboard_status: str = "SKIPPED"
     datacenter_dashboard_dashboard_db: str = ""
@@ -227,6 +239,20 @@ class TechnicalRelevancePostStepResult:
     missing_bar_index_count: int = 0
     duration_seconds: str = "0.000"
     skip_reason: str = ""
+    error: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class V3ReportsPostStepResult:
+    attempted: int
+    status: str
+    run_id: str = "NONE"
+    signal_date: str = "NONE"
+    output_dir: str = ""
+    daily_report_path: Optional[str] = None
+    rolling_30_report_path: Optional[str] = None
+    rolling_5_report_path: Optional[str] = None
+    rolling_2_report_path: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -734,6 +760,104 @@ def _parse_datacenter_report_paths(stdout: str) -> dict[str, Optional[str]]:
         "weekly_report_csv_path",
     )
     return {key: _parse_summary_value(stdout, key) for key in keys}
+
+
+def _default_v3_reports_post_step_result(
+    *,
+    status: str = "SKIPPED",
+    signal_date: str = "NONE",
+    error: str | None = None,
+) -> V3ReportsPostStepResult:
+    return V3ReportsPostStepResult(
+        attempted=0,
+        status=status,
+        signal_date=signal_date,
+        error=error,
+    )
+
+
+def _resolve_v3_reports_base_output_dir(
+    *,
+    config: StockUpdateSchedulerConfig,
+    market: str,
+) -> Path:
+    configured_base_dir = (config.datacenter_v3_reports_output_dir or "").strip()
+    if configured_base_dir:
+        return Path(configured_base_dir)
+    resolved = _resolve_datacenter_post_step_config(market)
+    if resolved is None:
+        raise ValueError(f"no datacenter post-step config for market: {market}")
+    return Path(resolved.output_dir) / "v3"
+
+
+def _run_v3_datacenter_report_generation(
+    *,
+    config: StockUpdateSchedulerConfig,
+    target_market: str,
+    signal_date: str,
+) -> V3ReportsPostStepResult:
+    if not config.datacenter_v3_reports_enabled:
+        return _default_v3_reports_post_step_result()
+
+    try:
+        selected = resolve_latest_run(
+            db_path=config.analysis_db_path,
+            ecosystem=config.datacenter_v3_reports_ecosystem,
+            taxonomy_version=config.datacenter_v3_reports_taxonomy_version,
+            signal_date=signal_date,
+            allowed_statuses=("OK", "OK_WITH_WARNINGS"),
+        )
+        if selected is None:
+            return V3ReportsPostStepResult(
+                attempted=1,
+                status="NO_MATCHING_ECO_RUN",
+                signal_date=signal_date,
+                error=(
+                    "no matching Eco run for "
+                    f"{config.datacenter_v3_reports_ecosystem}/"
+                    f"{config.datacenter_v3_reports_taxonomy_version} "
+                    f"on {signal_date}"
+                ),
+            )
+
+        output_dir = (
+            _resolve_v3_reports_base_output_dir(
+                config=config,
+                market=target_market,
+            )
+            / selected.ecosystem_code.lower()
+            / selected.signal_date
+        )
+        out_dir_resolved, written = write_reports(
+            db_path=config.analysis_db_path,
+            run_id=selected.run_id,
+            out_dir=str(output_dir),
+            overwrite=False,
+            only=None,
+        )
+    except Exception as exc:
+        return V3ReportsPostStepResult(
+            attempted=1,
+            status="FAILED",
+            signal_date=signal_date,
+            error=str(exc),
+        )
+
+    written_by_horizon = {
+        horizon: str(output_path) for horizon, output_path, _, _ in written
+    }
+    return V3ReportsPostStepResult(
+        attempted=1,
+        status="OK",
+        run_id=selected.run_id,
+        signal_date=selected.signal_date,
+        output_dir=str(out_dir_resolved),
+        daily_report_path=written_by_horizon.get("daily"),
+        rolling_30_report_path=written_by_horizon.get("rolling30"),
+        rolling_5_report_path=written_by_horizon.get("rolling5"),
+        rolling_2_report_path=written_by_horizon.get("rolling2"),
+        error=None,
+    )
 
 
 def _build_datacenter_log_path(log_dir: Path, market: str, started_at: datetime.datetime) -> Path:
@@ -2602,6 +2726,12 @@ def run_scheduler_config(
                     timezone=config.timezone,
                     skip_next_run=False,
                     technical_relevance_enabled=config.technical_relevance_enabled,
+                    datacenter_v3_reports_enabled=config.datacenter_v3_reports_enabled,
+                    datacenter_v3_reports_output_dir=config.datacenter_v3_reports_output_dir,
+                    datacenter_v3_reports_ecosystem=config.datacenter_v3_reports_ecosystem,
+                    datacenter_v3_reports_taxonomy_version=(
+                        config.datacenter_v3_reports_taxonomy_version
+                    ),
                     datacenter_dashboard_enabled=config.datacenter_dashboard_enabled,
                     datacenter_dashboard_db=config.datacenter_dashboard_db,
                     datacenter_dashboard_html_output_dir=config.datacenter_dashboard_html_output_dir,
@@ -2661,6 +2791,16 @@ def run_scheduler_config(
                     datacenter_pipeline_weekly_report_path=None,
                     datacenter_pipeline_weekly_report_csv_path=None,
                     datacenter_pipeline_error="",
+                    v3_reports_attempted=0,
+                    v3_reports_status="SKIPPED",
+                    v3_reports_run_id="NONE",
+                    v3_reports_signal_date="NONE",
+                    v3_reports_output_dir="",
+                    v3_reports_daily_report_path=None,
+                    v3_reports_rolling_30_report_path=None,
+                    v3_reports_rolling_5_report_path=None,
+                    v3_reports_rolling_2_report_path=None,
+                    v3_reports_error="",
                     datacenter_dashboard_attempted=0,
                     datacenter_dashboard_status="SKIPPED",
                     datacenter_dashboard_dashboard_db=config.datacenter_dashboard_db,
@@ -2733,6 +2873,7 @@ def run_scheduler_config(
                 status="SKIPPED",
                 market="usa",
             )
+            v3_reports_result = _default_v3_reports_post_step_result()
             datacenter_dashboard_result = _default_datacenter_dashboard_result(
                 config=config,
                 skip_reason="USA_NOT_ENABLED"
@@ -2751,6 +2892,11 @@ def run_scheduler_config(
                     effective_today=effective_today,
                 )
                 if datacenter_result.status == "OK" and datacenter_result.signal_date:
+                    v3_reports_result = _run_v3_datacenter_report_generation(
+                        config=config,
+                        target_market=datacenter_result.market,
+                        signal_date=datacenter_result.signal_date,
+                    )
                     datacenter_dashboard_result = _run_datacenter_dashboard_post_step(
                         config=config,
                         reports_dir=_resolve_datacenter_post_step_config(
@@ -2779,6 +2925,9 @@ def run_scheduler_config(
                         skip_reason="DATACENTER_PIPELINE_SKIPPED",
                         error=datacenter_result.error,
                     )
+                    v3_reports_result = _default_v3_reports_post_step_result(
+                        signal_date=datacenter_result.signal_date or "NONE",
+                    )
             overall_status = (
                 STATUS_FAILED
                 if technical_relevance_result.status == "FAILED"
@@ -2786,6 +2935,11 @@ def run_scheduler_config(
                 or datacenter_dashboard_result.status == "FAILED"
                 else market_update_phase_status
             )
+            if (
+                overall_status == STATUS_OK
+                and v3_reports_result.status in ("FAILED", "NO_MATCHING_ECO_RUN")
+            ):
+                overall_status = STATUS_OK_WITH_WARNINGS
 
             log_dir = Path(config.log_dir)
             log_dir.mkdir(parents=True, exist_ok=True)
@@ -2850,6 +3004,16 @@ def run_scheduler_config(
                 datacenter_pipeline_weekly_report_path=datacenter_result.weekly_report_path,
                 datacenter_pipeline_weekly_report_csv_path=datacenter_result.weekly_report_csv_path,
                 datacenter_pipeline_error=datacenter_result.error or "",
+                v3_reports_attempted=v3_reports_result.attempted,
+                v3_reports_status=v3_reports_result.status,
+                v3_reports_run_id=v3_reports_result.run_id,
+                v3_reports_signal_date=v3_reports_result.signal_date,
+                v3_reports_output_dir=v3_reports_result.output_dir,
+                v3_reports_daily_report_path=v3_reports_result.daily_report_path,
+                v3_reports_rolling_30_report_path=v3_reports_result.rolling_30_report_path,
+                v3_reports_rolling_5_report_path=v3_reports_result.rolling_5_report_path,
+                v3_reports_rolling_2_report_path=v3_reports_result.rolling_2_report_path,
+                v3_reports_error=v3_reports_result.error or "",
                 datacenter_dashboard_attempted=datacenter_dashboard_result.attempted,
                 datacenter_dashboard_status=datacenter_dashboard_result.status,
                 datacenter_dashboard_dashboard_db=datacenter_dashboard_result.dashboard_db,

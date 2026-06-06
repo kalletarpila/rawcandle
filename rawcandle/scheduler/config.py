@@ -21,6 +21,10 @@ _REQUIRED_CONFIG_KEYS = {
 _OPTIONAL_CONFIG_KEYS = {"timezone", "skip_next_run", "technical_relevance_enabled"}
 _OPTIONAL_CONFIG_KEYS.update(
     {
+        "datacenter_v3_reports_enabled",
+        "datacenter_v3_reports_output_dir",
+        "datacenter_v3_reports_ecosystem",
+        "datacenter_v3_reports_taxonomy_version",
         "datacenter_dashboard_enabled",
         "datacenter_dashboard_db",
         "datacenter_dashboard_html_output_dir",
@@ -63,6 +67,10 @@ class StockUpdateSchedulerConfig:
     timezone: str = DEFAULT_TIMEZONE
     skip_next_run: bool = False
     technical_relevance_enabled: bool = False
+    datacenter_v3_reports_enabled: bool = False
+    datacenter_v3_reports_output_dir: str | None = None
+    datacenter_v3_reports_ecosystem: str = "DATACENTER"
+    datacenter_v3_reports_taxonomy_version: str = "DC_TAXONOMY_FULL_V1"
     datacenter_dashboard_enabled: bool = True
     datacenter_dashboard_db: str = (
         "/home/kalle/projects/rawcandle/data/ecosystem_dashboard.db"
@@ -135,6 +143,16 @@ def validate_scheduler_config(
         raise ValueError("skip_next_run must be a bool")
     if type(config.technical_relevance_enabled) is not bool:
         raise ValueError("technical_relevance_enabled must be a bool")
+    if type(config.datacenter_v3_reports_enabled) is not bool:
+        raise ValueError("datacenter_v3_reports_enabled must be a bool")
+    if config.datacenter_v3_reports_output_dir is not None and not isinstance(
+        config.datacenter_v3_reports_output_dir, str
+    ):
+        raise ValueError("datacenter_v3_reports_output_dir must be a string or None")
+    if not config.datacenter_v3_reports_ecosystem:
+        raise ValueError("datacenter_v3_reports_ecosystem must be non-empty")
+    if not config.datacenter_v3_reports_taxonomy_version:
+        raise ValueError("datacenter_v3_reports_taxonomy_version must be non-empty")
     if type(config.datacenter_dashboard_enabled) is not bool:
         raise ValueError("datacenter_dashboard_enabled must be a bool")
     if type(config.datacenter_dashboard_reports_reference_enabled) is not bool:
@@ -180,6 +198,10 @@ def validate_scheduler_config(
         timezone=config.timezone,
         skip_next_run=config.skip_next_run,
         technical_relevance_enabled=config.technical_relevance_enabled,
+        datacenter_v3_reports_enabled=config.datacenter_v3_reports_enabled,
+        datacenter_v3_reports_output_dir=config.datacenter_v3_reports_output_dir,
+        datacenter_v3_reports_ecosystem=config.datacenter_v3_reports_ecosystem,
+        datacenter_v3_reports_taxonomy_version=config.datacenter_v3_reports_taxonomy_version,
         datacenter_dashboard_enabled=config.datacenter_dashboard_enabled,
         datacenter_dashboard_db=config.datacenter_dashboard_db,
         datacenter_dashboard_html_output_dir=config.datacenter_dashboard_html_output_dir,
@@ -228,6 +250,14 @@ def scheduler_config_from_dict(data: Dict[str, Any]) -> StockUpdateSchedulerConf
         timezone=data.get("timezone", DEFAULT_TIMEZONE),
         skip_next_run=data.get("skip_next_run", False),
         technical_relevance_enabled=data.get("technical_relevance_enabled", False),
+        datacenter_v3_reports_enabled=data.get("datacenter_v3_reports_enabled", False),
+        datacenter_v3_reports_output_dir=data.get("datacenter_v3_reports_output_dir"),
+        datacenter_v3_reports_ecosystem=data.get(
+            "datacenter_v3_reports_ecosystem", "DATACENTER"
+        ),
+        datacenter_v3_reports_taxonomy_version=data.get(
+            "datacenter_v3_reports_taxonomy_version", "DC_TAXONOMY_FULL_V1"
+        ),
         datacenter_dashboard_enabled=data.get("datacenter_dashboard_enabled", True),
         datacenter_dashboard_db=data.get(
             "datacenter_dashboard_db",
@@ -302,6 +332,10 @@ def create_default_scheduler_config(
         timezone=DEFAULT_TIMEZONE,
         skip_next_run=False,
         technical_relevance_enabled=False,
+        datacenter_v3_reports_enabled=False,
+        datacenter_v3_reports_output_dir=None,
+        datacenter_v3_reports_ecosystem="DATACENTER",
+        datacenter_v3_reports_taxonomy_version="DC_TAXONOMY_FULL_V1",
         datacenter_dashboard_enabled=True,
         datacenter_dashboard_db="/home/kalle/projects/rawcandle/data/ecosystem_dashboard.db",
         datacenter_dashboard_html_output_dir="/home/kalle/projects/rawcandle/swing_reports",
