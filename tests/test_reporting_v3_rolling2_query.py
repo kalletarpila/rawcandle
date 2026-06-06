@@ -5,7 +5,9 @@ import pytest
 from rawcandle.report_canonical_v3_migration import apply_report_canonical_v3_migration
 from rawcandle.reporting_v3_query import (
     ROLLING_ECOSYSTEM_WINDOW_CHANGE_ROW_LIMIT,
+    ROLLING_SUBINDUSTRY_IMPROVEMENT_DETERIORATION_ROW_LIMIT,
     _build_overheat_rotation_risk_progression_payload,
+    _build_subindustry_improvement_deterioration_payload,
     _build_subindustry_timing_persistence_payload,
     _build_ecosystem_window_change_payload,
     build_rolling2_report_query_data,
@@ -565,6 +567,27 @@ def test_query_returns_rolling2_structured_data_from_eco_facts(tmp_path) -> None
         "is_truncated": False,
         "selected_dates_count": 2,
     }
+    assert data.subindustry_improvement_deterioration == {
+        "rows": [
+            {
+                "entity_type": "SUBINDUSTRY",
+                "entity_code": "SEMIS",
+                "entity_name": "Semis",
+                "metric_name": "weakness_breadth",
+                "first_date": "2026-05-28",
+                "first_value": 68.0,
+                "last_date": "2026-05-29",
+                "last_value": 75.0,
+                "change": 7.0,
+                "change_pct": pytest.approx((7.0 / 68.0) * 100.0),
+                "direction": "IMPROVED",
+            }
+        ],
+        "rows_available": 1,
+        "rows_rendered": 1,
+        "is_truncated": False,
+        "selected_dates_count": 2,
+    }
 
     assert data.ecosystem_snapshot is not None
     assert data.ecosystem_snapshot["entity_code"] == "DATACENTER"
@@ -706,3 +729,80 @@ def test_subindustry_timing_persistence_payload_truncates_deterministically() ->
     assert payload["is_truncated"] is True
     assert payload["rows"][0]["entity_code"] == "S000"
     assert payload["rows"][-1]["entity_code"] == "S099"
+
+
+def test_subindustry_improvement_deterioration_payload_handles_direction_rules_deterministically() -> None:
+    rows = [
+        {"entity_type": "SUBINDUSTRY", "entity_code": "A", "entity_name": "Alpha", "metric_name": "return_5d", "signal_date": "2026-05-28", "metric_value_num": 10.0, "metric_value_text": None},
+        {"entity_type": "SUBINDUSTRY", "entity_code": "A", "entity_name": "Alpha", "metric_name": "return_5d", "signal_date": "2026-05-29", "metric_value_num": 7.0, "metric_value_text": None},
+        {"entity_type": "SUBINDUSTRY", "entity_code": "B", "entity_name": "Beta", "metric_name": "return_5d", "signal_date": "2026-05-28", "metric_value_num": 3.0, "metric_value_text": None},
+        {"entity_type": "SUBINDUSTRY", "entity_code": "B", "entity_name": "Beta", "metric_name": "return_5d", "signal_date": "2026-05-29", "metric_value_num": 8.0, "metric_value_text": None},
+        {"entity_type": "SUBINDUSTRY", "entity_code": "C", "entity_name": "Gamma", "metric_name": "return_5d", "signal_date": "2026-05-28", "metric_value_num": 0.0, "metric_value_text": None},
+        {"entity_type": "SUBINDUSTRY", "entity_code": "C", "entity_name": "Gamma", "metric_name": "return_5d", "signal_date": "2026-05-29", "metric_value_num": 0.0, "metric_value_text": None},
+        {"entity_type": "SUBINDUSTRY", "entity_code": "D", "entity_name": "Delta", "metric_name": "return_5d", "signal_date": "2026-05-29", "metric_value_num": 5.0, "metric_value_text": None},
+    ]
+
+    payload = _build_subindustry_improvement_deterioration_payload(rows, ["2026-05-28", "2026-05-29"])
+
+    assert [row["entity_code"] for row in payload["rows"]] == ["A", "B", "C"]
+    assert [row["direction"] for row in payload["rows"]] == ["DETERIORATED", "IMPROVED", "UNCHANGED"]
+    row_lookup = {(row["entity_code"], row["metric_name"]): row for row in payload["rows"]}
+    assert row_lookup[("A", "return_5d")]["change"] == -3.0
+    assert row_lookup[("A", "return_5d")]["change_pct"] == -30.0
+    assert row_lookup[("B", "return_5d")]["change"] == 5.0
+    assert row_lookup[("B", "return_5d")]["change_pct"] == pytest.approx((5.0 / 3.0) * 100.0)
+    assert row_lookup[("C", "return_5d")]["change"] == 0.0
+    assert row_lookup[("C", "return_5d")]["change_pct"] == "n/a"
+    assert payload["selected_dates_count"] == 2
+
+    single_date_payload = _build_subindustry_improvement_deterioration_payload(rows[-1:], ["2026-05-28", "2026-05-29"])
+    assert single_date_payload["rows"] == [
+        {
+            "entity_type": "SUBINDUSTRY",
+            "entity_code": "D",
+            "entity_name": "Delta",
+            "metric_name": "return_5d",
+            "first_date": "2026-05-29",
+            "first_value": 5.0,
+            "last_date": "2026-05-29",
+            "last_value": 5.0,
+            "change": 0.0,
+            "change_pct": 0.0,
+            "direction": "UNCHANGED",
+        }
+    ]
+
+
+def test_subindustry_improvement_deterioration_payload_truncates_deterministically() -> None:
+    rows = []
+    for index in range(130):
+        rows.extend(
+            [
+                {
+                    "entity_type": "SUBINDUSTRY",
+                    "entity_code": f"S{index:03d}",
+                    "entity_name": f"Subindustry {index:03d}",
+                    "metric_name": "trend_breadth",
+                    "signal_date": "2026-05-28",
+                    "metric_value_num": 100.0,
+                    "metric_value_text": None,
+                },
+                {
+                    "entity_type": "SUBINDUSTRY",
+                    "entity_code": f"S{index:03d}",
+                    "entity_name": f"Subindustry {index:03d}",
+                    "metric_name": "trend_breadth",
+                    "signal_date": "2026-05-29",
+                    "metric_value_num": 100.0 - index,
+                    "metric_value_text": None,
+                },
+            ]
+        )
+
+    payload = _build_subindustry_improvement_deterioration_payload(rows, ["2026-05-28", "2026-05-29"])
+
+    assert payload["rows_available"] == 130
+    assert payload["rows_rendered"] == ROLLING_SUBINDUSTRY_IMPROVEMENT_DETERIORATION_ROW_LIMIT
+    assert payload["is_truncated"] is True
+    assert payload["rows"][0]["entity_code"] == "S129"
+    assert payload["rows"][-1]["entity_code"] == "S030"

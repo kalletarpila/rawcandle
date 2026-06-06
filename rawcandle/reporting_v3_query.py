@@ -139,6 +139,16 @@ ROLLING_ECOSYSTEM_WINDOW_CHANGE_METRIC_NAMES = (
 ROLLING_ECOSYSTEM_WINDOW_CHANGE_ROW_LIMIT = 100
 ROLLING_RISK_PROGRESSION_ROW_LIMIT = 100
 ROLLING_SUBINDUSTRY_TIMING_PERSISTENCE_ROW_LIMIT = 100
+ROLLING_SUBINDUSTRY_IMPROVEMENT_DETERIORATION_ROW_LIMIT = 100
+ROLLING_SUBINDUSTRY_IMPROVEMENT_DETERIORATION_METRIC_NAMES = (
+    "return_5d",
+    "return_10d",
+    "return_20d",
+    "pct_above_ema20",
+    "trend_breadth",
+    "weakness_breadth",
+    "synthetic_close",
+)
 RISK_LEVEL_ORDER = {
     "LOW": 0,
     "MEDIUM": 1,
@@ -198,6 +208,7 @@ class Rolling30ReportQueryData:
     ecosystem_window_change: dict[str, Any]
     overheat_rotation_risk_progression: dict[str, Any]
     subindustry_timing_persistence: dict[str, Any]
+    subindustry_improvement_deterioration: dict[str, Any]
     watchlist_summary: dict[str, Any]
     quality_summary: dict[str, Any]
     ecosystem_snapshot: dict[str, Any] | None
@@ -220,6 +231,7 @@ class Rolling5ReportQueryData:
     ecosystem_window_change: dict[str, Any]
     overheat_rotation_risk_progression: dict[str, Any]
     subindustry_timing_persistence: dict[str, Any]
+    subindustry_improvement_deterioration: dict[str, Any]
     watchlist_summary: dict[str, Any]
     quality_summary: dict[str, Any]
     ecosystem_snapshot: dict[str, Any] | None
@@ -241,6 +253,7 @@ class Rolling2ReportQueryData:
     ecosystem_window_change: dict[str, Any]
     overheat_rotation_risk_progression: dict[str, Any]
     subindustry_timing_persistence: dict[str, Any]
+    subindustry_improvement_deterioration: dict[str, Any]
     watchlist_summary: dict[str, Any]
     quality_summary: dict[str, Any]
     ecosystem_snapshot: dict[str, Any] | None
@@ -353,6 +366,12 @@ def _build_rolling30_report_query_data(
                 window_summary,
             ),
             subindustry_timing_persistence=_load_rolling_subindustry_timing_persistence(
+                conn,
+                run_row,
+                ROLLING30_WINDOW_CODE,
+                window_summary,
+            ),
+            subindustry_improvement_deterioration=_load_rolling_subindustry_improvement_deterioration(
                 conn,
                 run_row,
                 ROLLING30_WINDOW_CODE,
@@ -521,6 +540,12 @@ def _build_rolling2_report_query_data(
                 ROLLING2_WINDOW_CODE,
                 window_summary,
             ),
+            subindustry_improvement_deterioration=_load_rolling_subindustry_improvement_deterioration(
+                conn,
+                run_row,
+                ROLLING2_WINDOW_CODE,
+                window_summary,
+            ),
             watchlist_summary=_load_rolling_watchlist_summary(
                 conn,
                 run_row,
@@ -606,6 +631,12 @@ def _build_rolling5_report_query_data(
                 window_summary,
             ),
             subindustry_timing_persistence=_load_rolling_subindustry_timing_persistence(
+                conn,
+                run_row,
+                ROLLING5_WINDOW_CODE,
+                window_summary,
+            ),
+            subindustry_improvement_deterioration=_load_rolling_subindustry_improvement_deterioration(
                 conn,
                 run_row,
                 ROLLING5_WINDOW_CODE,
@@ -1905,6 +1936,138 @@ def _empty_subindustry_timing_persistence(selected_dates_count: int) -> dict[str
     }
 
 
+def _load_rolling_subindustry_improvement_deterioration(
+    conn: sqlite3.Connection,
+    run_row: sqlite3.Row,
+    window_code: str,
+    window_summary: dict[str, Any],
+) -> dict[str, Any]:
+    included_dates = list(window_summary.get("valid_signal_dates_included") or [])
+    if not included_dates:
+        return _empty_subindustry_improvement_deterioration(len(included_dates))
+
+    metric_placeholders = ", ".join("?" for _ in ROLLING_SUBINDUSTRY_IMPROVEMENT_DETERIORATION_METRIC_NAMES)
+    date_placeholders = ", ".join("?" for _ in included_dates)
+    rows = conn.execute(
+        f"""
+        SELECT
+            e.entity_type,
+            e.entity_code,
+            e.entity_name,
+            m.metric_name,
+            m.signal_date,
+            m.metric_value_num,
+            m.metric_value_text
+        FROM eco_entity_metric_value m
+        JOIN eco_entity e ON e.entity_id = m.entity_id
+        WHERE m.run_id = ?
+          AND m.taxonomy_version_id = ?
+          AND m.window_code = ?
+          AND e.entity_type = 'SUBINDUSTRY'
+          AND m.metric_name IN ({metric_placeholders})
+          AND m.signal_date IN ({date_placeholders})
+        ORDER BY e.entity_code, m.metric_name, m.signal_date
+        """,
+        (
+            str(run_row["run_id"]),
+            int(run_row["taxonomy_version_id"]),
+            window_code,
+            *ROLLING_SUBINDUSTRY_IMPROVEMENT_DETERIORATION_METRIC_NAMES,
+            *included_dates,
+        ),
+    ).fetchall()
+    return _build_subindustry_improvement_deterioration_payload(rows, included_dates)
+
+
+def _build_subindustry_improvement_deterioration_payload(
+    rows: list[Any],
+    included_dates: list[str],
+) -> dict[str, Any]:
+    by_entity_metric: dict[tuple[str, str, str, str], dict[str, float]] = {}
+    for row in rows:
+        if row["metric_value_num"] is None:
+            continue
+        entity_key = (
+            str(row["entity_type"]),
+            str(row["entity_code"]),
+            str(row["entity_name"]),
+            str(row["metric_name"]),
+        )
+        by_entity_metric.setdefault(entity_key, {})[str(row["signal_date"])] = float(row["metric_value_num"])
+
+    output_rows: list[dict[str, Any]] = []
+    selected_dates_count = len(included_dates)
+    for entity_type, entity_code, entity_name, metric_name in sorted(
+        by_entity_metric,
+        key=lambda item: (item[1], item[3], item[2]),
+    ):
+        per_date = by_entity_metric[(entity_type, entity_code, entity_name, metric_name)]
+        metric_dates = [signal_date for signal_date in included_dates if signal_date in per_date]
+        if not metric_dates:
+            continue
+        first_date = metric_dates[0]
+        last_date = metric_dates[-1]
+        first_value = per_date[first_date]
+        last_value = per_date[last_date]
+        change = float(last_value - first_value)
+        change_pct: float | str
+        if first_value == 0:
+            change_pct = "n/a"
+        else:
+            change_pct = float(((last_value - first_value) / abs(first_value)) * 100.0)
+        direction = _calculate_numeric_direction(change)
+        output_rows.append(
+            {
+                "entity_type": entity_type,
+                "entity_code": entity_code,
+                "entity_name": entity_name,
+                "metric_name": metric_name,
+                "first_date": first_date,
+                "first_value": first_value,
+                "last_date": last_date,
+                "last_value": last_value,
+                "change": change,
+                "change_pct": change_pct,
+                "direction": direction,
+                "_abs_change": abs(change),
+                "_observed_dates_count": len(metric_dates),
+            }
+        )
+
+    rows_with_multiple_dates = [row for row in output_rows if int(row["_observed_dates_count"]) >= 2]
+    rows_for_render = rows_with_multiple_dates or output_rows
+    rows_for_render.sort(
+        key=lambda row: (
+            _direction_sort_value(row.get("direction")),
+            -float(row["_abs_change"]),
+            str(row["entity_code"]),
+            str(row["metric_name"]),
+        )
+    )
+    rows_available = len(rows_for_render)
+    rendered_rows = rows_for_render[:ROLLING_SUBINDUSTRY_IMPROVEMENT_DETERIORATION_ROW_LIMIT]
+    for row in rendered_rows:
+        row.pop("_abs_change", None)
+        row.pop("_observed_dates_count", None)
+    return {
+        "rows": rendered_rows,
+        "rows_available": rows_available,
+        "rows_rendered": len(rendered_rows),
+        "is_truncated": rows_available > len(rendered_rows),
+        "selected_dates_count": selected_dates_count,
+    }
+
+
+def _empty_subindustry_improvement_deterioration(selected_dates_count: int) -> dict[str, Any]:
+    return {
+        "rows": [],
+        "rows_available": 0,
+        "rows_rendered": 0,
+        "is_truncated": False,
+        "selected_dates_count": selected_dates_count,
+    }
+
+
 def _select_ecosystem_window_change_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if len(rows) <= ROLLING_ECOSYSTEM_WINDOW_CHANGE_ROW_LIMIT:
         return rows
@@ -1951,6 +2114,27 @@ def _calculate_risk_change(first_risk_level: Any, last_risk_level: Any) -> str:
     if last_rank < first_rank:
         return "IMPROVED"
     return "UNCHANGED"
+
+
+def _calculate_numeric_direction(change: Any) -> str:
+    if not isinstance(change, (int, float)):
+        return "n/a"
+    if change > 0:
+        return "IMPROVED"
+    if change < 0:
+        return "DETERIORATED"
+    return "UNCHANGED"
+
+
+def _direction_sort_value(direction: Any) -> int:
+    direction_label = str(direction)
+    if direction_label == "DETERIORATED":
+        return 0
+    if direction_label == "IMPROVED":
+        return 1
+    if direction_label == "UNCHANGED":
+        return 2
+    return 3
 
 
 def _last_risk_sort_value(risk_level: Any) -> tuple[int, str]:

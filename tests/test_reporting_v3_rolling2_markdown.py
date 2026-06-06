@@ -98,6 +98,27 @@ def _sample_query_data(*, with_empty_events: bool = False) -> Rolling2ReportQuer
             "is_truncated": False,
             "selected_dates_count": 2,
         },
+        subindustry_improvement_deterioration={
+            "rows": [
+                {
+                    "entity_type": "SUBINDUSTRY",
+                    "entity_code": "SEMIS",
+                    "entity_name": "Semis",
+                    "metric_name": "synthetic_close",
+                    "first_date": "2026-05-29",
+                    "first_value": 100.0,
+                    "last_date": "2026-05-30",
+                    "last_value": 100.0,
+                    "change": 0.0,
+                    "change_pct": 0.0,
+                    "direction": "UNCHANGED",
+                }
+            ],
+            "rows_available": 1,
+            "rows_rendered": 1,
+            "is_truncated": False,
+            "selected_dates_count": 2,
+        },
         watchlist_summary={
             "counts": {
                 "active_watchlist_count": 1,
@@ -338,7 +359,11 @@ def test_renderer_returns_deterministic_rolling2_markdown_from_query_data_only()
     assert "2/2" in markdown
     assert "## 6. Subindustry timing persistence\nNot available from current V3 query data in DB-V3-70." not in markdown
     assert "## 7. Subindustry improvement / deterioration" in markdown
-    assert "Not available from current V3 query data in DB-V3-70." in markdown
+    assert "subindustry | metric | first_date | first_value | last_date | last_value | change | change_pct | direction" in markdown
+    assert "SEMIS" in markdown
+    assert "synthetic_close" in markdown
+    assert "UNCHANGED" in markdown
+    assert "## 7. Subindustry improvement / deterioration\nNot available from current V3 query data in DB-V3-70." not in markdown
     assert "## 8. Repeated breakout tickers" in markdown
     assert "## 9. Repeated pullback tickers" in markdown
     assert "## 10. Repeated exit-risk tickers" in markdown

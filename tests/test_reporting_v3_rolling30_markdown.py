@@ -98,6 +98,27 @@ def _sample_query_data(*, with_empty_events: bool = False) -> Rolling30ReportQue
             "is_truncated": False,
             "selected_dates_count": 4,
         },
+        subindustry_improvement_deterioration={
+            "rows": [
+                {
+                    "entity_type": "SUBINDUSTRY",
+                    "entity_code": "SEMIS",
+                    "entity_name": "Semis",
+                    "metric_name": "trend_breadth",
+                    "first_date": "2026-05-01",
+                    "first_value": 42.0,
+                    "last_date": "2026-05-30",
+                    "last_value": 55.0,
+                    "change": 13.0,
+                    "change_pct": 30.952380952380953,
+                    "direction": "IMPROVED",
+                }
+            ],
+            "rows_available": 1,
+            "rows_rendered": 1,
+            "is_truncated": False,
+            "selected_dates_count": 4,
+        },
         watchlist_summary={
             "counts": {
                 "active_watchlist_count": 1,
@@ -350,7 +371,11 @@ def test_renderer_returns_deterministic_markdown_from_query_data_only() -> None:
     assert "3/4" in markdown
     assert "## 6. Subindustry timing persistence\nNot available from current V3 query data in DB-V3-70." not in markdown
     assert "## 7. Subindustry improvement / deterioration" in markdown
-    assert "Not available from current V3 query data in DB-V3-70." in markdown
+    assert "subindustry | metric | first_date | first_value | last_date | last_value | change | change_pct | direction" in markdown
+    assert "SEMIS" in markdown
+    assert "trend_breadth" in markdown
+    assert "IMPROVED" in markdown
+    assert "Not available from current V3 query data in DB-V3-70." not in markdown
     assert "## 8. Repeated breakout tickers" in markdown
     assert "## 9. Repeated pullback tickers" in markdown
     assert "## 10. Repeated exit-risk tickers" in markdown

@@ -8,6 +8,7 @@ from rawcandle.reporting_v3_query import (
     _build_overheat_rotation_risk_progression_payload,
     _build_subindustry_timing_persistence_payload,
     _build_ecosystem_window_change_payload,
+    _build_subindustry_improvement_deterioration_payload,
     build_rolling5_report_query_data,
 )
 
@@ -560,6 +561,27 @@ def test_query_returns_rolling5_structured_data_from_eco_facts(tmp_path) -> None
         "is_truncated": False,
         "selected_dates_count": 5,
     }
+    assert data.subindustry_improvement_deterioration == {
+        "rows": [
+            {
+                "entity_type": "SUBINDUSTRY",
+                "entity_code": "SEMIS",
+                "entity_name": "Semis",
+                "metric_name": "trend_breadth",
+                "first_date": "2026-05-25",
+                "first_value": 60.0,
+                "last_date": "2026-05-29",
+                "last_value": 57.0,
+                "change": -3.0,
+                "change_pct": -5.0,
+                "direction": "DETERIORATED",
+            }
+        ],
+        "rows_available": 1,
+        "rows_rendered": 1,
+        "is_truncated": False,
+        "selected_dates_count": 5,
+    }
 
     assert data.ecosystem_snapshot is not None
     assert data.ecosystem_snapshot["entity_code"] == "DATACENTER"
@@ -744,3 +766,16 @@ def test_subindustry_timing_persistence_payload_sorts_deterministically() -> Non
     payload = _build_subindustry_timing_persistence_payload(rows, ["2026-05-01"])
 
     assert [row["entity_code"] for row in payload["rows"]] == ["A", "B", "C"]
+
+
+def test_subindustry_improvement_deterioration_payload_prefers_multi_date_rows() -> None:
+    rows = [
+        {"entity_type": "SUBINDUSTRY", "entity_code": "A", "entity_name": "Alpha", "metric_name": "return_5d", "signal_date": "2026-05-26", "metric_value_num": 2.0, "metric_value_text": None},
+        {"entity_type": "SUBINDUSTRY", "entity_code": "A", "entity_name": "Alpha", "metric_name": "return_5d", "signal_date": "2026-05-29", "metric_value_num": 5.0, "metric_value_text": None},
+        {"entity_type": "SUBINDUSTRY", "entity_code": "B", "entity_name": "Beta", "metric_name": "return_5d", "signal_date": "2026-05-29", "metric_value_num": 9.0, "metric_value_text": None},
+    ]
+
+    payload = _build_subindustry_improvement_deterioration_payload(rows, ["2026-05-26", "2026-05-29"])
+
+    assert [row["entity_code"] for row in payload["rows"]] == ["A"]
+    assert payload["rows"][0]["direction"] == "IMPROVED"

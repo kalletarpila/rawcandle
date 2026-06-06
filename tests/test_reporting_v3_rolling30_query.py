@@ -7,6 +7,7 @@ from rawcandle.report_canonical_v3_migration import apply_report_canonical_v3_mi
 from rawcandle.reporting_v3_query import (
     ROLLING_ECOSYSTEM_WINDOW_CHANGE_ROW_LIMIT,
     _build_overheat_rotation_risk_progression_payload,
+    _build_subindustry_improvement_deterioration_payload,
     _build_subindustry_timing_persistence_payload,
     _build_ecosystem_window_change_payload,
     build_rolling30_report_query_data,
@@ -712,6 +713,21 @@ def test_query_returns_rolling30_structured_data_from_eco_facts(tmp_path) -> Non
         "is_truncated": False,
         "selected_dates_count": 30,
     }
+    improvement_rows = data.subindustry_improvement_deterioration["rows"]
+    assert data.subindustry_improvement_deterioration["rows_available"] == 1
+    assert data.subindustry_improvement_deterioration["rows_rendered"] == 1
+    assert data.subindustry_improvement_deterioration["is_truncated"] is False
+    assert data.subindustry_improvement_deterioration["selected_dates_count"] == 30
+    assert improvement_rows[0]["entity_type"] == "SUBINDUSTRY"
+    assert improvement_rows[0]["entity_code"] == "SEMIS"
+    assert improvement_rows[0]["metric_name"] == "pct_above_ema20"
+    assert improvement_rows[0]["first_date"] == "2026-04-30"
+    assert improvement_rows[0]["first_value"] == 44.0
+    assert improvement_rows[0]["last_date"] == "2026-05-29"
+    assert improvement_rows[0]["last_value"] == 51.0
+    assert improvement_rows[0]["change"] == pytest.approx(7.0)
+    assert improvement_rows[0]["change_pct"] == pytest.approx((7.0 / 44.0) * 100.0)
+    assert improvement_rows[0]["direction"] == "IMPROVED"
 
     assert data.ecosystem_snapshot is not None
     assert data.ecosystem_snapshot["entity_code"] == "DATACENTER"
@@ -919,3 +935,21 @@ def test_subindustry_timing_persistence_payload_maps_known_states_and_unknowns()
             "last_overheat_risk_level": "MEDIUM",
         }
     ]
+
+
+def test_subindustry_improvement_deterioration_payload_sorts_by_direction_then_abs_change() -> None:
+    rows = [
+        {"entity_type": "SUBINDUSTRY", "entity_code": "B", "entity_name": "Beta", "metric_name": "return_5d", "signal_date": "2026-05-20", "metric_value_num": 10.0, "metric_value_text": None},
+        {"entity_type": "SUBINDUSTRY", "entity_code": "B", "entity_name": "Beta", "metric_name": "return_5d", "signal_date": "2026-05-29", "metric_value_num": 6.0, "metric_value_text": None},
+        {"entity_type": "SUBINDUSTRY", "entity_code": "A", "entity_name": "Alpha", "metric_name": "return_5d", "signal_date": "2026-05-20", "metric_value_num": 10.0, "metric_value_text": None},
+        {"entity_type": "SUBINDUSTRY", "entity_code": "A", "entity_name": "Alpha", "metric_name": "return_5d", "signal_date": "2026-05-29", "metric_value_num": 2.0, "metric_value_text": None},
+        {"entity_type": "SUBINDUSTRY", "entity_code": "C", "entity_name": "Gamma", "metric_name": "return_5d", "signal_date": "2026-05-20", "metric_value_num": 2.0, "metric_value_text": None},
+        {"entity_type": "SUBINDUSTRY", "entity_code": "C", "entity_name": "Gamma", "metric_name": "return_5d", "signal_date": "2026-05-29", "metric_value_num": 7.0, "metric_value_text": None},
+        {"entity_type": "SUBINDUSTRY", "entity_code": "D", "entity_name": "Delta", "metric_name": "return_5d", "signal_date": "2026-05-20", "metric_value_num": 4.0, "metric_value_text": None},
+        {"entity_type": "SUBINDUSTRY", "entity_code": "D", "entity_name": "Delta", "metric_name": "return_5d", "signal_date": "2026-05-29", "metric_value_num": 4.0, "metric_value_text": None},
+    ]
+
+    payload = _build_subindustry_improvement_deterioration_payload(rows, ["2026-05-20", "2026-05-29"])
+
+    assert [row["entity_code"] for row in payload["rows"]] == ["A", "B", "C", "D"]
+    assert [row["direction"] for row in payload["rows"]] == ["DETERIORATED", "DETERIORATED", "IMPROVED", "UNCHANGED"]
