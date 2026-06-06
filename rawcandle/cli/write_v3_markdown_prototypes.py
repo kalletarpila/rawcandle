@@ -102,32 +102,50 @@ def _horizon_specs() -> dict[str, tuple[Callable[[str, str], Any], Callable[[Any
     }
 
 
+def write_reports(
+    *,
+    db_path: str,
+    run_id: str,
+    out_dir: str,
+    overwrite: bool = False,
+    only: str | None = None,
+) -> tuple[Path, list[tuple[str, Path, int, int]]]:
+    horizons = _resolve_horizons(only)
+    out_dir_path = Path(out_dir)
+    out_dir_path.mkdir(parents=True, exist_ok=True)
+    out_dir_resolved = out_dir_path.resolve()
+
+    written: list[tuple[str, Path, int, int]] = []
+    specs = _horizon_specs()
+    for horizon in horizons:
+        build_query_data, render_markdown = specs[horizon]
+        query_data = build_query_data(db_path, run_id)
+        markdown = render_markdown(query_data)
+        output_path = _safe_output_path(out_dir_resolved, _filename_for(query_data))
+        _write_report(output_path, markdown, overwrite)
+        written.append(
+            (
+                horizon,
+                output_path,
+                len(markdown.encode("utf-8")),
+                _line_count(markdown),
+            )
+        )
+    return out_dir_resolved, written
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
     try:
-        horizons = _resolve_horizons(args.only)
-        out_dir = Path(args.out_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out_dir_resolved = out_dir.resolve()
-
-        written: list[tuple[str, Path, int, int]] = []
-        specs = _horizon_specs()
-        for horizon in horizons:
-            build_query_data, render_markdown = specs[horizon]
-            query_data = build_query_data(args.db, args.run_id)
-            markdown = render_markdown(query_data)
-            output_path = _safe_output_path(out_dir_resolved, _filename_for(query_data))
-            _write_report(output_path, markdown, args.overwrite)
-            written.append(
-                (
-                    horizon,
-                    output_path,
-                    len(markdown.encode("utf-8")),
-                    _line_count(markdown),
-                )
-            )
+        out_dir_resolved, written = write_reports(
+            db_path=args.db,
+            run_id=args.run_id,
+            out_dir=args.out_dir,
+            overwrite=args.overwrite,
+            only=args.only,
+        )
     except Exception as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
