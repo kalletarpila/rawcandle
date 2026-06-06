@@ -37,6 +37,7 @@ def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
     structural_events = list(_get_field(query_data, "structural_events") or [])
     signal_observations = list(_get_field(query_data, "signal_observations") or [])
     metadata = _get_field(query_data, "metadata") or {}
+    ticker_scanners = _get_field(query_data, "ticker_scanners") or {}
     daily_trigger_classifications = list(_get_field(query_data, "daily_trigger_classifications") or [])
     rolling2_sell_pressure_classifications = list(_get_field(query_data, "rolling2_sell_pressure_classifications") or [])
     rolling30_buy_classifications = list(_get_field(query_data, "rolling30_buy_classifications") or [])
@@ -84,6 +85,7 @@ def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
         structural_events=structural_events,
         signal_observations=signal_observations,
         metadata=metadata,
+        ticker_scanners=ticker_scanners,
         daily_trigger_classifications=daily_trigger_classifications,
         classification_source_key=classification_source_key,
         snapshot_source_key=snapshot_source_key,
@@ -627,6 +629,7 @@ def _render_daily_legacy_shell(
     structural_events: list[dict[str, Any]],
     signal_observations: list[dict[str, Any]],
     metadata: dict[str, Any],
+    ticker_scanners: dict[str, Any],
     daily_trigger_classifications: list[dict[str, Any]],
     classification_source_key: str,
     snapshot_source_key: str,
@@ -776,14 +779,44 @@ def _render_daily_legacy_shell(
     lines.extend(
         [
             "## 12. Breakout Ticker Scanner",
-            "Not available from current V3 query data in DB-V3-73b.",
-            "",
+        ]
+    )
+    lines.extend(
+        _render_daily_ticker_scanner_section(
+            rows=list(ticker_scanners.get("breakout_rows") or []),
+            rows_available=ticker_scanners.get("breakout_rows_available"),
+            is_truncated=bool(ticker_scanners.get("is_breakout_truncated")),
+            scanner_label="breakout",
+        )
+    )
+    lines.extend(
+        [
             "## 13. Pullback Ticker Scanner",
-            "Not available from current V3 query data in DB-V3-73b.",
-            "",
+        ]
+    )
+    lines.extend(
+        _render_daily_ticker_scanner_section(
+            rows=list(ticker_scanners.get("pullback_rows") or []),
+            rows_available=ticker_scanners.get("pullback_rows_available"),
+            is_truncated=bool(ticker_scanners.get("is_pullback_truncated")),
+            scanner_label="pullback",
+        )
+    )
+    lines.extend(
+        [
             "## 14. Exit-Risk Ticker Scanner",
-            "Not available from current V3 query data in DB-V3-73b.",
-            "",
+        ]
+    )
+    lines.extend(
+        _render_daily_ticker_scanner_section(
+            rows=list(ticker_scanners.get("exit_risk_rows") or []),
+            rows_available=ticker_scanners.get("exit_risk_rows_available"),
+            is_truncated=bool(ticker_scanners.get("is_exit_risk_truncated")),
+            scanner_label="exit-risk",
+        )
+    )
+    lines.extend(
+        [
             "## 15. Daily Triggers",
             f"- row_count: {len(daily_trigger_classifications)}",
         ]
@@ -1095,6 +1128,72 @@ def _render_daily_watchlist_summary(
         ],
         empty_message="No watchlist rows.",
     )
+
+
+def _render_daily_ticker_scanner_section(
+    *,
+    rows: list[dict[str, Any]],
+    rows_available: Any,
+    is_truncated: bool,
+    scanner_label: str,
+) -> list[str]:
+    empty_messages = {
+        "breakout": "No breakout ticker scanner rows available from current V3 query data.",
+        "pullback": "No pullback ticker scanner rows available from current V3 query data.",
+        "exit-risk": "No exit-risk ticker scanner rows available from current V3 query data.",
+    }
+    lines = _render_table_or_none(
+        headers=[
+            "ticker",
+            "layer",
+            "subindustry",
+            "close",
+            "return_5d",
+            "return_10d",
+            "return_20d",
+            "distance_to_ema20_pct",
+            "trend_state",
+            "signal",
+            "strength",
+            "exit_severity",
+            "exit_reason",
+            "subindustry_timing",
+            "subindustry_overheat",
+            "layer_timing",
+            "layer_overheat",
+            "price_status",
+        ],
+        rows=[
+            [
+                row.get("ticker"),
+                row.get("primary_layer"),
+                row.get("primary_subindustry"),
+                row.get("close"),
+                row.get("return_5d"),
+                row.get("return_10d"),
+                row.get("return_20d"),
+                row.get("distance_to_ema20_pct"),
+                row.get("ticker_trend_state"),
+                row.get("signal_value"),
+                row.get("signal_strength"),
+                row.get("exit_risk_severity"),
+                row.get("exit_reason"),
+                row.get("subindustry_timing_state"),
+                row.get("subindustry_overheat_risk_level"),
+                row.get("layer_timing_state"),
+                row.get("layer_overheat_risk_level"),
+                row.get("price_data_status"),
+            ]
+            for row in rows
+        ],
+        empty_message=empty_messages[scanner_label],
+    )
+    if is_truncated:
+        lines.append(
+            f"- Showing {len(rows)} of {_value(rows_available)} {scanner_label} ticker scanner rows."
+        )
+        lines.append("")
+    return lines
 
 
 def _daily_timing_rows(

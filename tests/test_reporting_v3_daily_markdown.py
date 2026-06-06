@@ -71,6 +71,86 @@ def _sample_query_data(*, with_empty_events: bool = False) -> DailyReportQueryDa
                 },
             ],
         },
+        ticker_scanners={
+            "breakout_rows": [
+                {
+                    "ticker": "NVDA",
+                    "scanner_type": "breakout",
+                    "primary_layer": "INFRA",
+                    "primary_subindustry": "SEMIS",
+                    "close": None,
+                    "return_5d": 4.0,
+                    "return_10d": 6.0,
+                    "return_20d": 8.0,
+                    "distance_to_ema20_pct": 1.5,
+                    "ticker_trend_state": "UP",
+                    "signal_value": "BUY_WATCH",
+                    "signal_strength": None,
+                    "exit_risk_severity": None,
+                    "exit_reason": None,
+                    "subindustry_timing_state": None,
+                    "subindustry_overheat_risk_level": None,
+                    "layer_timing_state": "BUY_ZONE",
+                    "layer_overheat_risk_level": "LOW",
+                    "price_data_status": "OK",
+                }
+            ],
+            "pullback_rows": [] if with_empty_events else [
+                {
+                    "ticker": "NVDA",
+                    "scanner_type": "pullback",
+                    "primary_layer": "INFRA",
+                    "primary_subindustry": "SEMIS",
+                    "close": None,
+                    "return_5d": 4.0,
+                    "return_10d": 6.0,
+                    "return_20d": 8.0,
+                    "distance_to_ema20_pct": 1.5,
+                    "ticker_trend_state": "UP",
+                    "signal_value": "BULLISH",
+                    "signal_strength": "REVERSAL_MEDIUM",
+                    "exit_risk_severity": None,
+                    "exit_reason": None,
+                    "subindustry_timing_state": None,
+                    "subindustry_overheat_risk_level": None,
+                    "layer_timing_state": "BUY_ZONE",
+                    "layer_overheat_risk_level": "LOW",
+                    "price_data_status": "OK",
+                }
+            ],
+            "exit_risk_rows": [
+                {
+                    "ticker": "NXPI",
+                    "scanner_type": "exit_risk",
+                    "primary_layer": "INFRA",
+                    "primary_subindustry": "SEMIS",
+                    "close": None,
+                    "return_5d": 1.0,
+                    "return_10d": 2.0,
+                    "return_20d": 3.0,
+                    "distance_to_ema20_pct": -0.5,
+                    "ticker_trend_state": "DOWN",
+                    "signal_value": "SELL_TRIGGER",
+                    "signal_strength": None,
+                    "exit_risk_severity": "HIGH",
+                    "exit_reason": "BEARISH_DAILY_SIGNAL",
+                    "subindustry_timing_state": None,
+                    "subindustry_overheat_risk_level": None,
+                    "layer_timing_state": "BUY_ZONE",
+                    "layer_overheat_risk_level": "LOW",
+                    "price_data_status": "OK",
+                }
+            ],
+            "breakout_rows_available": 1,
+            "pullback_rows_available": 0 if with_empty_events else 1,
+            "exit_risk_rows_available": 1,
+            "breakout_rows_rendered": 1,
+            "pullback_rows_rendered": 0 if with_empty_events else 1,
+            "exit_risk_rows_rendered": 1,
+            "is_breakout_truncated": False,
+            "is_pullback_truncated": False,
+            "is_exit_risk_truncated": False,
+        },
         quality_summary={
             "rows": [
                 {
@@ -329,7 +409,12 @@ def test_renderer_returns_deterministic_daily_markdown_from_query_data_only() ->
     assert "daily_event_window_mode: event_date_range_signal_day_only" in markdown
     assert "Full legacy dashboard aggregation is not available from current V3 query data in DB-V3-73b." in markdown
     assert "Current V3 query data provides combined quality and coverage summaries; a separate legacy missing-input read-model is not available in DB-V3-73b." in markdown
-    assert "Not available from current V3 query data in DB-V3-73b." in markdown
+    assert "No breakout ticker scanner rows available from current V3 query data." not in markdown
+    assert "No exit-risk ticker scanner rows available from current V3 query data." not in markdown
+    assert "| NVDA | INFRA | SEMIS |  | 4.0 | 6.0 | 8.0 | 1.5 | UP | BUY_WATCH |  |  |  |  |  | BUY_ZONE | LOW | OK |" in markdown
+    assert "| NVDA | INFRA | SEMIS |  | 4.0 | 6.0 | 8.0 | 1.5 | UP | BULLISH | REVERSAL_MEDIUM |  |  |  |  | BUY_ZONE | LOW | OK |" in markdown
+    assert "| NXPI | INFRA | SEMIS |  | 1.0 | 2.0 | 3.0 | -0.5 | DOWN | SELL_TRIGGER |  | HIGH | BEARISH_DAILY_SIGNAL |  |  | BUY_ZONE | LOW | OK |" in markdown
+    assert markdown.count("Not available from current V3 query data in DB-V3-73b.") == 6
     assert "generated Markdown/CSV reports were not used as source data" in markdown
     assert "eco_entity_window_snapshot.classification_state is not the primary daily classification source" in markdown
     assert "CRGY is intentionally materialized as INSUFFICIENT_DATA in daily_trigger" in markdown
@@ -349,4 +434,6 @@ def test_renderer_handles_empty_daily_events_and_signals_gracefully() -> None:
     assert "## 16. Swing MA Break Status" in markdown
     assert "## 17. Swing Signal Freshness" in markdown
     assert "## 20. Technical Relevance Context" in markdown
-    assert markdown.count("Not available from current V3 query data in DB-V3-73b.") >= 4
+    assert "No pullback ticker scanner rows available from current V3 query data." in markdown
+    assert "Not available from current V3 query data in DB-V3-73b." not in markdown.split("## 12. Breakout Ticker Scanner", 1)[1].split("## 15. Daily Triggers", 1)[0]
+    assert markdown.count("Not available from current V3 query data in DB-V3-73b.") >= 5

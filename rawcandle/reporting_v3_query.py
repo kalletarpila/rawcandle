@@ -140,6 +140,7 @@ ROLLING_ECOSYSTEM_WINDOW_CHANGE_ROW_LIMIT = 100
 ROLLING_RISK_PROGRESSION_ROW_LIMIT = 100
 ROLLING_SUBINDUSTRY_TIMING_PERSISTENCE_ROW_LIMIT = 100
 ROLLING_SUBINDUSTRY_IMPROVEMENT_DETERIORATION_ROW_LIMIT = 100
+DAILY_TICKER_SCANNER_ROW_LIMIT = 100
 ROLLING_SUBINDUSTRY_IMPROVEMENT_DIRECTION_SHARES = {
     "DETERIORATED": 50,
     "IMPROVED": 30,
@@ -284,6 +285,7 @@ class Rolling2ReportQueryData:
 class DailyReportQueryData:
     report_header: Rolling30ReportHeader
     watchlist_summary: dict[str, Any]
+    ticker_scanners: dict[str, Any]
     quality_summary: dict[str, Any]
     ecosystem_snapshot: dict[str, Any] | None
     group_snapshots: list[dict[str, Any]]
@@ -457,18 +459,24 @@ def _build_daily_report_query_data(
         ecosystem_snapshot = next((row for row in snapshots if row["entity_type"] == "ECOSYSTEM"), None)
         group_snapshots = [row for row in snapshots if row["entity_type"] in {"LAYER", "SUBINDUSTRY"}]
         ticker_snapshots = [row for row in snapshots if row["entity_type"] == "TICKER"]
+        watchlist_summary = _load_daily_watchlist_summary(
+            conn,
+            run_row,
+            watchlist_members,
+            ticker_metrics,
+            group_metrics,
+            ticker_snapshots,
+            daily_rows,
+            signal_observations,
+        )
 
         return DailyReportQueryData(
             report_header=report_header,
-            watchlist_summary=_load_daily_watchlist_summary(
-                conn,
-                run_row,
-                watchlist_members,
-                ticker_metrics,
-                group_metrics,
-                ticker_snapshots,
-                daily_rows,
-                signal_observations,
+            watchlist_summary=watchlist_summary,
+            ticker_scanners=_load_daily_ticker_scanners(
+                watchlist_summary=watchlist_summary,
+                daily_classifications=daily_rows,
+                signal_observations=signal_observations,
             ),
             quality_summary={
                 "rows": _load_quality_summary_rows(conn, run_row, DAILY_WINDOW_CODE),
@@ -1413,6 +1421,215 @@ def _load_daily_watchlist_summary(
         },
         "rows": rows,
     }
+
+
+def _load_daily_ticker_scanners(
+    *,
+    watchlist_summary: dict[str, Any],
+    daily_classifications: list[dict[str, Any]],
+    signal_observations: list[dict[str, Any]],
+) -> dict[str, Any]:
+    watchlist_rows = [dict(row) for row in list(watchlist_summary.get("rows") or [])]
+    watchlist_row_by_ticker = {
+        str(row.get("ticker") or ""): row
+        for row in watchlist_rows
+        if row.get("ticker")
+    }
+    classification_by_ticker = {
+        str(row.get("ticker") or ""): row
+        for row in daily_classifications
+        if row.get("ticker")
+    }
+    signal_rows_by_ticker: dict[str, list[dict[str, Any]]] = {}
+    for row in signal_observations:
+        ticker = str(row.get("entity_code") or "")
+        if ticker:
+            signal_rows_by_ticker.setdefault(ticker, []).append(row)
+
+    breakout_candidates = [
+        _build_daily_ticker_scanner_row(
+            base_row=base_row,
+            scanner_type="breakout",
+            signal_value=(classification_by_ticker.get(str(base_row.get("ticker") or "")) or {}).get("classification_state"),
+            signal_strength=_daily_classification_signal_strength(
+                classification_by_ticker.get(str(base_row.get("ticker") or ""))
+            ),
+            exit_risk_severity=None,
+            exit_reason=None,
+        )
+        for base_row in watchlist_rows
+        if base_row.get("breakout_signal") is True
+    ]
+
+    pullback_candidates: list[dict[str, Any]] = []
+    for ticker, signals in signal_rows_by_ticker.items():
+        base_row = watchlist_row_by_ticker.get(ticker)
+        if base_row is None:
+            continue
+        matching_signals = [row for row in signals if _is_daily_pullback_signal(row)]
+        if not matching_signals:
+            continue
+        matching_signals.sort(
+            key=lambda row: (
+                -_daily_pullback_signal_strength_rank(row),
+                str(row.get("signal_name") or ""),
+            )
+        )
+        signal_row = matching_signals[0]
+        pullback_candidates.append(
+            _build_daily_ticker_scanner_row(
+                base_row=base_row,
+                scanner_type="pullback",
+                signal_value=signal_row.get("signal_value"),
+                signal_strength=signal_row.get("signal_name") or signal_row.get("signal_family"),
+                exit_risk_severity=None,
+                exit_reason=None,
+            )
+        )
+
+    exit_risk_candidates = [
+        _build_daily_ticker_scanner_row(
+            base_row=base_row,
+            scanner_type="exit_risk",
+            signal_value=(classification_by_ticker.get(str(base_row.get("ticker") or "")) or {}).get("classification_state"),
+            signal_strength=_daily_classification_signal_strength(
+                classification_by_ticker.get(str(base_row.get("ticker") or ""))
+            ),
+            exit_risk_severity=base_row.get("exit_risk_severity"),
+            exit_reason=base_row.get("exit_reason"),
+        )
+        for base_row in watchlist_rows
+        if base_row.get("exit_risk_signal") is True
+    ]
+
+    breakout_candidates.sort(
+        key=lambda row: (
+            -_daily_scanner_strength_rank(row.get("signal_strength")),
+            -_number_or_zero(row.get("return_5d")),
+            str(row.get("ticker") or ""),
+        )
+    )
+    pullback_candidates.sort(
+        key=lambda row: (
+            -_daily_scanner_strength_rank(row.get("signal_strength")),
+            _distance_abs_sort_value(row.get("distance_to_ema20_pct")),
+            str(row.get("ticker") or ""),
+        )
+    )
+    exit_risk_candidates.sort(
+        key=lambda row: (
+            _exit_risk_severity_rank(row.get("exit_risk_severity")),
+            _number_or_zero(row.get("return_5d")),
+            str(row.get("ticker") or ""),
+        )
+    )
+
+    breakout_rows, breakout_rows_available, breakout_is_truncated = _truncate_daily_scanner_rows(breakout_candidates)
+    pullback_rows, pullback_rows_available, pullback_is_truncated = _truncate_daily_scanner_rows(pullback_candidates)
+    exit_risk_rows, exit_risk_rows_available, exit_risk_is_truncated = _truncate_daily_scanner_rows(exit_risk_candidates)
+
+    return {
+        "breakout_rows": breakout_rows,
+        "pullback_rows": pullback_rows,
+        "exit_risk_rows": exit_risk_rows,
+        "breakout_rows_available": breakout_rows_available,
+        "pullback_rows_available": pullback_rows_available,
+        "exit_risk_rows_available": exit_risk_rows_available,
+        "breakout_rows_rendered": len(breakout_rows),
+        "pullback_rows_rendered": len(pullback_rows),
+        "exit_risk_rows_rendered": len(exit_risk_rows),
+        "is_breakout_truncated": breakout_is_truncated,
+        "is_pullback_truncated": pullback_is_truncated,
+        "is_exit_risk_truncated": exit_risk_is_truncated,
+    }
+
+
+def _build_daily_ticker_scanner_row(
+    *,
+    base_row: dict[str, Any],
+    scanner_type: str,
+    signal_value: Any,
+    signal_strength: Any,
+    exit_risk_severity: Any,
+    exit_reason: Any,
+) -> dict[str, Any]:
+    return {
+        "ticker": base_row.get("ticker"),
+        "scanner_type": scanner_type,
+        "primary_layer": base_row.get("primary_layer"),
+        "primary_subindustry": base_row.get("primary_subindustry"),
+        "close": base_row.get("close"),
+        "return_5d": base_row.get("return_5d"),
+        "return_10d": base_row.get("return_10d"),
+        "return_20d": base_row.get("return_20d"),
+        "distance_to_ema20_pct": base_row.get("distance_to_ema20_pct"),
+        "ticker_trend_state": base_row.get("ticker_trend_state"),
+        "signal_value": signal_value,
+        "signal_strength": signal_strength,
+        "exit_risk_severity": exit_risk_severity,
+        "exit_reason": exit_reason,
+        "subindustry_timing_state": base_row.get("subindustry_timing_state"),
+        "subindustry_overheat_risk_level": base_row.get("subindustry_overheat_risk_level"),
+        "layer_timing_state": base_row.get("layer_timing_state"),
+        "layer_overheat_risk_level": base_row.get("layer_overheat_risk_level"),
+        "price_data_status": base_row.get("price_data_status"),
+    }
+
+
+def _daily_classification_signal_strength(classification_row: dict[str, Any] | None) -> Any:
+    if not classification_row:
+        return None
+    return (
+        classification_row.get("priority_label")
+        or classification_row.get("priority_score")
+        or classification_row.get("sort_rank")
+    )
+
+
+def _is_daily_pullback_signal(signal_row: dict[str, Any]) -> bool:
+    signal_family = str(signal_row.get("signal_family") or "")
+    signal_direction = str(signal_row.get("signal_direction") or "")
+    return signal_family == "REVERSAL_MEDIUM" and signal_direction == "UP"
+
+
+def _daily_pullback_signal_strength_rank(signal_row: dict[str, Any]) -> int:
+    return _daily_scanner_strength_rank(signal_row.get("signal_name") or signal_row.get("signal_family"))
+
+
+def _daily_scanner_strength_rank(value: Any) -> float:
+    if value is None:
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).upper()
+    if "STRONG" in text:
+        return 3.0
+    if "MEDIUM" in text:
+        return 2.0
+    if "WEAK" in text:
+        return 1.0
+    return 0.0
+
+
+def _distance_abs_sort_value(value: Any) -> float:
+    if value is None:
+        return float("inf")
+    return abs(float(value))
+
+
+def _exit_risk_severity_rank(value: Any) -> int:
+    severity_order = {
+        "HIGH": 0,
+        "MEDIUM": 1,
+        "LOW": 2,
+    }
+    return severity_order.get(str(value or ""), 3)
+
+
+def _truncate_daily_scanner_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int, bool]:
+    rows_available = len(rows)
+    rows_rendered = rows[:DAILY_TICKER_SCANNER_ROW_LIMIT]
+    return rows_rendered, rows_available, rows_available > len(rows_rendered)
 
 
 def _load_rolling_window_summary(

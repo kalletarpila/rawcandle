@@ -320,6 +320,7 @@ def _insert_signal(
     signal_name: str,
     signal_family: str,
     signal_value: str,
+    signal_direction: str = "DOWN",
 ) -> int:
     cursor = conn.execute(
         """
@@ -327,9 +328,21 @@ def _insert_signal(
             run_id, ecosystem_id, signal_date, taxonomy_version_id, window_code, entity_id,
             signal_name, signal_family, signal_direction, signal_value, observed_date,
             source_table, source_run_id, source_event_id, signal_status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'DOWN', ?, ?, 'eco_signal_source', 'SIG_SOURCE', 'SIG-1', 'ACTIVE')
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'eco_signal_source', 'SIG_SOURCE', 'SIG-1', 'ACTIVE')
         """,
-        (RUN_ID, ecosystem_id, SIGNAL_DATE, taxonomy_version_id, WINDOW_CODE, entity_id, signal_name, signal_family, signal_value, SIGNAL_DATE),
+        (
+            RUN_ID,
+            ecosystem_id,
+            SIGNAL_DATE,
+            taxonomy_version_id,
+            WINDOW_CODE,
+            entity_id,
+            signal_name,
+            signal_family,
+            signal_direction,
+            signal_value,
+            SIGNAL_DATE,
+        ),
     )
     return int(cursor.lastrowid)
 
@@ -473,8 +486,10 @@ def _build_fixture_db(db_path: str) -> None:
         _insert_event(conn, ecosystem_id=ecosystem_id, taxonomy_version_id=taxonomy_version_id, entity_id=nvda_id, event_date=SIGNAL_DATE, event_type="BOS", event_key="nvda-bos")
         _insert_event(conn, ecosystem_id=ecosystem_id, taxonomy_version_id=taxonomy_version_id, entity_id=nxpi_id, event_date=SIGNAL_DATE, event_type="STRUCTURE_CHANGE", event_key="nxpi-structure")
         freshness_signal_id = _insert_signal(conn, ecosystem_id=ecosystem_id, taxonomy_version_id=taxonomy_version_id, entity_id=nvda_id, signal_name="RESET_FRESHNESS", signal_family="FRESHNESS", signal_value="FRESH")
+        pullback_signal_id = _insert_signal(conn, ecosystem_id=ecosystem_id, taxonomy_version_id=taxonomy_version_id, entity_id=nvda_id, signal_name="REVERSAL_MEDIUM", signal_family="REVERSAL_MEDIUM", signal_value="BULLISH", signal_direction="UP")
         divergence_signal_id = _insert_signal(conn, ecosystem_id=ecosystem_id, taxonomy_version_id=taxonomy_version_id, entity_id=nxpi_id, signal_name="REVERSAL_MEDIUM", signal_family="REVERSAL_MEDIUM", signal_value="BEARISH")
         _insert_relevance(conn, freshness_signal_id, "daily freshness")
+        _insert_relevance(conn, pullback_signal_id, "daily pullback")
         _insert_relevance(conn, divergence_signal_id, "daily reversal")
         conn.commit()
     finally:
@@ -539,13 +554,61 @@ def test_query_returns_daily_structured_data_from_eco_facts(tmp_path) -> None:
     assert data.watchlist_summary["rows"][0]["primary_subindustry"] == "SEMIS"
     assert data.watchlist_summary["rows"][1]["watchlist_status"] == "BREAKOUT"
     assert data.watchlist_summary["rows"][1]["breakout_signal"] is True
+    assert data.watchlist_summary["rows"][1]["pullback_signal"] is None
 
     assert len(data.watchlist_members) == 2
     assert [row["ticker"] for row in data.watchlist_members] == ["NVDA", "NXPI"]
 
     assert [row["event_type"] for row in data.structural_events] == ["BOS", "STRUCTURE_CHANGE"]
-    assert [row["signal_name"] for row in data.signal_observations] == ["RESET_FRESHNESS", "REVERSAL_MEDIUM"]
-    assert data.signal_observations[1]["relevance_labels"] == "CONTEXTUAL"
+    assert [row["signal_name"] for row in data.signal_observations] == ["RESET_FRESHNESS", "REVERSAL_MEDIUM", "REVERSAL_MEDIUM"]
+    bullish_reversal_row = next(
+        row
+        for row in data.signal_observations
+        if row["entity_code"] == "NVDA" and row["signal_name"] == "REVERSAL_MEDIUM"
+    )
+    assert bullish_reversal_row["signal_direction"] == "UP"
+    assert bullish_reversal_row["signal_value"] == "BULLISH"
+    assert bullish_reversal_row["relevance_labels"] == "CONTEXTUAL"
+
+    assert set(data.ticker_scanners) == {
+        "breakout_rows",
+        "pullback_rows",
+        "exit_risk_rows",
+        "breakout_rows_available",
+        "pullback_rows_available",
+        "exit_risk_rows_available",
+        "breakout_rows_rendered",
+        "pullback_rows_rendered",
+        "exit_risk_rows_rendered",
+        "is_breakout_truncated",
+        "is_pullback_truncated",
+        "is_exit_risk_truncated",
+    }
+    assert [row["ticker"] for row in data.ticker_scanners["breakout_rows"]] == ["NVDA"]
+    assert data.ticker_scanners["breakout_rows"][0]["scanner_type"] == "breakout"
+    assert data.ticker_scanners["breakout_rows"][0]["signal_value"] == "BUY_WATCH"
+    assert data.ticker_scanners["breakout_rows"][0]["signal_strength"] is None
+    assert data.ticker_scanners["breakout_rows"][0]["primary_layer"] == "INFRA"
+    assert data.ticker_scanners["breakout_rows"][0]["primary_subindustry"] == "SEMIS"
+
+    assert [row["ticker"] for row in data.ticker_scanners["pullback_rows"]] == ["NVDA"]
+    assert data.ticker_scanners["pullback_rows"][0]["scanner_type"] == "pullback"
+    assert data.ticker_scanners["pullback_rows"][0]["signal_value"] == "BULLISH"
+    assert data.ticker_scanners["pullback_rows"][0]["signal_strength"] == "REVERSAL_MEDIUM"
+    assert data.ticker_scanners["pullback_rows"][0]["distance_to_ema20_pct"] == 1.5
+    assert data.ticker_scanners["pullback_rows"][0]["exit_reason"] is None
+
+    assert [row["ticker"] for row in data.ticker_scanners["exit_risk_rows"]] == ["NXPI"]
+    assert data.ticker_scanners["exit_risk_rows"][0]["scanner_type"] == "exit_risk"
+    assert data.ticker_scanners["exit_risk_rows"][0]["signal_value"] == "SELL_TRIGGER"
+    assert data.ticker_scanners["exit_risk_rows"][0]["exit_risk_severity"] == "HIGH"
+    assert data.ticker_scanners["exit_risk_rows"][0]["exit_reason"] == "BEARISH_DAILY_SIGNAL"
+    assert data.ticker_scanners["breakout_rows_available"] == 1
+    assert data.ticker_scanners["pullback_rows_available"] == 1
+    assert data.ticker_scanners["exit_risk_rows_available"] == 1
+    assert data.ticker_scanners["is_breakout_truncated"] is False
+    assert data.ticker_scanners["is_pullback_truncated"] is False
+    assert data.ticker_scanners["is_exit_risk_truncated"] is False
 
     coverage_counts = {(row["entity_type"], row["coverage_status"]): row["row_count"] for row in data.quality_summary["coverage_counts"]}
     assert coverage_counts[("TICKER", "OK")] == 3
