@@ -151,6 +151,45 @@ def _sample_query_data(*, with_empty_events: bool = False) -> DailyReportQueryDa
             "is_pullback_truncated": False,
             "is_exit_risk_truncated": False,
         },
+        synthetic_ohlc_structure_summary={
+            "rows": [] if with_empty_events else [
+                {
+                    "entity_type": "LAYER",
+                    "entity_code": "INFRA",
+                    "entity_name": "Infrastructure",
+                    "latest_structure_label": "STRONG",
+                    "latest_structure_date": "2026-05-30",
+                    "latest_bos_event_type": "BOS",
+                    "latest_bos_date": "2026-05-30",
+                    "latest_reset_reason": None,
+                    "latest_reset_date": None,
+                    "structure_freshness": "STALE",
+                    "bos_freshness": "FRESH",
+                    "reset_freshness": "AGING",
+                    "timing_state": "BUY_ZONE",
+                    "overheat_risk_level": "LOW",
+                },
+                {
+                    "entity_type": "SUBINDUSTRY",
+                    "entity_code": "AI|SEMIS",
+                    "entity_name": "AI|Semis",
+                    "latest_structure_label": "MIXED",
+                    "latest_structure_date": "2026-05-30",
+                    "latest_bos_event_type": None,
+                    "latest_bos_date": None,
+                    "latest_reset_reason": "RESET",
+                    "latest_reset_date": "2026-05-30",
+                    "structure_freshness": None,
+                    "bos_freshness": None,
+                    "reset_freshness": None,
+                    "timing_state": "EXIT_WATCH",
+                    "overheat_risk_level": None,
+                },
+            ],
+            "rows_available": 0 if with_empty_events else 2,
+            "rows_rendered": 0 if with_empty_events else 2,
+            "is_truncated": False,
+        },
         quality_summary={
             "rows": [
                 {
@@ -409,12 +448,15 @@ def test_renderer_returns_deterministic_daily_markdown_from_query_data_only() ->
     assert "daily_event_window_mode: event_date_range_signal_day_only" in markdown
     assert "Full legacy dashboard aggregation is not available from current V3 query data in DB-V3-73b." in markdown
     assert "Current V3 query data provides combined quality and coverage summaries; a separate legacy missing-input read-model is not available in DB-V3-73b." in markdown
+    assert "No synthetic OHLC structure summary rows available from current V3 query data." not in markdown
     assert "No breakout ticker scanner rows available from current V3 query data." not in markdown
     assert "No exit-risk ticker scanner rows available from current V3 query data." not in markdown
+    assert "| LAYER | INFRA | STRONG | 2026-05-30 | BOS | 2026-05-30 |  |  | STALE | FRESH | AGING | BUY_ZONE | LOW |" in markdown
+    assert "| SUBINDUSTRY | AI\\|SEMIS | MIXED | 2026-05-30 |  |  | RESET | 2026-05-30 |  |  |  | EXIT_WATCH |  |" in markdown
     assert "| NVDA | INFRA | SEMIS |  | 4.0 | 6.0 | 8.0 | 1.5 | UP | BUY_WATCH |  |  |  |  |  | BUY_ZONE | LOW | OK |" in markdown
     assert "| NVDA | INFRA | SEMIS |  | 4.0 | 6.0 | 8.0 | 1.5 | UP | BULLISH | REVERSAL_MEDIUM |  |  |  |  | BUY_ZONE | LOW | OK |" in markdown
     assert "| NXPI | INFRA | SEMIS |  | 1.0 | 2.0 | 3.0 | -0.5 | DOWN | SELL_TRIGGER |  | HIGH | BEARISH_DAILY_SIGNAL |  |  | BUY_ZONE | LOW | OK |" in markdown
-    assert markdown.count("Not available from current V3 query data in DB-V3-73b.") == 6
+    assert markdown.count("Not available from current V3 query data in DB-V3-73b.") == 5
     assert "generated Markdown/CSV reports were not used as source data" in markdown
     assert "eco_entity_window_snapshot.classification_state is not the primary daily classification source" in markdown
     assert "CRGY is intentionally materialized as INSUFFICIENT_DATA in daily_trigger" in markdown
@@ -434,6 +476,8 @@ def test_renderer_handles_empty_daily_events_and_signals_gracefully() -> None:
     assert "## 16. Swing MA Break Status" in markdown
     assert "## 17. Swing Signal Freshness" in markdown
     assert "## 20. Technical Relevance Context" in markdown
+    assert "No synthetic OHLC structure summary rows available from current V3 query data." in markdown
     assert "No pullback ticker scanner rows available from current V3 query data." in markdown
     assert "Not available from current V3 query data in DB-V3-73b." not in markdown.split("## 12. Breakout Ticker Scanner", 1)[1].split("## 15. Daily Triggers", 1)[0]
-    assert markdown.count("Not available from current V3 query data in DB-V3-73b.") >= 5
+    assert "Not available from current V3 query data in DB-V3-73b." not in markdown.split("## 10. Synthetic OHLC Structure Summary", 1)[1].split("## 11. Group Structure Breaks / Resets", 1)[0]
+    assert markdown.count("Not available from current V3 query data in DB-V3-73b.") >= 4

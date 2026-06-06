@@ -38,6 +38,7 @@ def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
     signal_observations = list(_get_field(query_data, "signal_observations") or [])
     metadata = _get_field(query_data, "metadata") or {}
     ticker_scanners = _get_field(query_data, "ticker_scanners") or {}
+    synthetic_ohlc_structure_summary = _get_field(query_data, "synthetic_ohlc_structure_summary") or {}
     daily_trigger_classifications = list(_get_field(query_data, "daily_trigger_classifications") or [])
     rolling2_sell_pressure_classifications = list(_get_field(query_data, "rolling2_sell_pressure_classifications") or [])
     rolling30_buy_classifications = list(_get_field(query_data, "rolling30_buy_classifications") or [])
@@ -86,6 +87,7 @@ def _render_window_markdown_report(query_data: Any, window_label: str) -> str:
         signal_observations=signal_observations,
         metadata=metadata,
         ticker_scanners=ticker_scanners,
+        synthetic_ohlc_structure_summary=synthetic_ohlc_structure_summary,
         daily_trigger_classifications=daily_trigger_classifications,
         classification_source_key=classification_source_key,
         snapshot_source_key=snapshot_source_key,
@@ -630,6 +632,7 @@ def _render_daily_legacy_shell(
     signal_observations: list[dict[str, Any]],
     metadata: dict[str, Any],
     ticker_scanners: dict[str, Any],
+    synthetic_ohlc_structure_summary: dict[str, Any],
     daily_trigger_classifications: list[dict[str, Any]],
     classification_source_key: str,
     snapshot_source_key: str,
@@ -753,8 +756,15 @@ def _render_daily_legacy_shell(
     lines.extend(
         [
             "## 10. Synthetic OHLC Structure Summary",
-            "Not available from current V3 query data in DB-V3-73b.",
-            "",
+        ]
+    )
+    lines.extend(
+        _render_daily_synthetic_ohlc_structure_summary(
+            summary=synthetic_ohlc_structure_summary,
+        )
+    )
+    lines.extend(
+        [
             "## 11. Group Structure Breaks / Resets",
         ]
     )
@@ -1191,6 +1201,55 @@ def _render_daily_ticker_scanner_section(
     if is_truncated:
         lines.append(
             f"- Showing {len(rows)} of {_value(rows_available)} {scanner_label} ticker scanner rows."
+        )
+        lines.append("")
+    return lines
+
+
+def _render_daily_synthetic_ohlc_structure_summary(
+    *,
+    summary: dict[str, Any],
+) -> list[str]:
+    rows = list(summary.get("rows") or [])
+    lines = _render_table_or_none(
+        headers=[
+            "entity_type",
+            "entity",
+            "structure",
+            "structure_date",
+            "bos_event",
+            "bos_date",
+            "reset_reason",
+            "reset_date",
+            "structure_freshness",
+            "bos_freshness",
+            "reset_freshness",
+            "timing_state",
+            "overheat",
+        ],
+        rows=[
+            [
+                row.get("entity_type"),
+                row.get("entity_code"),
+                row.get("latest_structure_label"),
+                row.get("latest_structure_date"),
+                row.get("latest_bos_event_type"),
+                row.get("latest_bos_date"),
+                row.get("latest_reset_reason"),
+                row.get("latest_reset_date"),
+                row.get("structure_freshness"),
+                row.get("bos_freshness"),
+                row.get("reset_freshness"),
+                row.get("timing_state"),
+                row.get("overheat_risk_level"),
+            ]
+            for row in rows
+        ],
+        empty_message="No synthetic OHLC structure summary rows available from current V3 query data.",
+    )
+    if summary.get("is_truncated"):
+        lines.append(
+            f"- Showing {len(rows)} of {_value(summary.get('rows_available'))} synthetic OHLC structure summary rows."
         )
         lines.append("")
     return lines

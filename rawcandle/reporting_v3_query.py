@@ -141,6 +141,7 @@ ROLLING_RISK_PROGRESSION_ROW_LIMIT = 100
 ROLLING_SUBINDUSTRY_TIMING_PERSISTENCE_ROW_LIMIT = 100
 ROLLING_SUBINDUSTRY_IMPROVEMENT_DETERIORATION_ROW_LIMIT = 100
 DAILY_TICKER_SCANNER_ROW_LIMIT = 100
+DAILY_SYNTHETIC_OHLC_STRUCTURE_SUMMARY_ROW_LIMIT = 100
 ROLLING_SUBINDUSTRY_IMPROVEMENT_DIRECTION_SHARES = {
     "DETERIORATED": 50,
     "IMPROVED": 30,
@@ -286,6 +287,7 @@ class DailyReportQueryData:
     report_header: Rolling30ReportHeader
     watchlist_summary: dict[str, Any]
     ticker_scanners: dict[str, Any]
+    synthetic_ohlc_structure_summary: dict[str, Any]
     quality_summary: dict[str, Any]
     ecosystem_snapshot: dict[str, Any] | None
     group_snapshots: list[dict[str, Any]]
@@ -477,6 +479,12 @@ def _build_daily_report_query_data(
                 watchlist_summary=watchlist_summary,
                 daily_classifications=daily_rows,
                 signal_observations=signal_observations,
+            ),
+            synthetic_ohlc_structure_summary=_load_daily_synthetic_ohlc_structure_summary(
+                run_row=run_row,
+                group_snapshots=group_snapshots,
+                group_metrics=group_metrics,
+                structural_events=structural_events,
             ),
             quality_summary={
                 "rows": _load_quality_summary_rows(conn, run_row, DAILY_WINDOW_CODE),
@@ -1630,6 +1638,147 @@ def _truncate_daily_scanner_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[
     rows_available = len(rows)
     rows_rendered = rows[:DAILY_TICKER_SCANNER_ROW_LIMIT]
     return rows_rendered, rows_available, rows_available > len(rows_rendered)
+
+
+def _load_daily_synthetic_ohlc_structure_summary(
+    *,
+    run_row: sqlite3.Row,
+    group_snapshots: list[dict[str, Any]],
+    group_metrics: list[dict[str, Any]],
+    structural_events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    signal_date = str(run_row["signal_date"])
+    summary_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    group_metric_lookup = {
+        (str(row.get("entity_type") or ""), str(row.get("entity_code") or "")): row
+        for row in group_metrics
+        if str(row.get("entity_type") or "") in {"LAYER", "SUBINDUSTRY"}
+    }
+
+    for snapshot in group_snapshots:
+        entity_type = str(snapshot.get("entity_type") or "")
+        if entity_type not in {"LAYER", "SUBINDUSTRY"}:
+            continue
+        entity_code = str(snapshot.get("entity_code") or "")
+        key = (entity_type, entity_code)
+        metric_row = group_metric_lookup.get(key, {})
+        summary_by_key[key] = {
+            "entity_type": entity_type,
+            "entity_code": entity_code,
+            "entity_name": snapshot.get("entity_name"),
+            "latest_structure_label": snapshot.get("summary_state"),
+            "latest_structure_date": signal_date if snapshot.get("summary_state") else None,
+            "latest_bos_event_type": None,
+            "latest_bos_date": None,
+            "latest_reset_reason": None,
+            "latest_reset_date": None,
+            "structure_freshness": metric_row.get("freshness_latest_structure_class"),
+            "bos_freshness": metric_row.get("freshness_latest_bos_class"),
+            "reset_freshness": metric_row.get("freshness_latest_reset_class"),
+            "timing_state": metric_row.get("group_timing_state") or snapshot.get("timing_state"),
+            "overheat_risk_level": metric_row.get("group_overheat_risk_level"),
+        }
+
+    for metric_row in group_metrics:
+        entity_type = str(metric_row.get("entity_type") or "")
+        if entity_type not in {"LAYER", "SUBINDUSTRY"}:
+            continue
+        entity_code = str(metric_row.get("entity_code") or "")
+        key = (entity_type, entity_code)
+        row = summary_by_key.setdefault(
+            key,
+            {
+                "entity_type": entity_type,
+                "entity_code": entity_code,
+                "entity_name": metric_row.get("entity_name"),
+                "latest_structure_label": None,
+                "latest_structure_date": None,
+                "latest_bos_event_type": None,
+                "latest_bos_date": None,
+                "latest_reset_reason": None,
+                "latest_reset_date": None,
+                "structure_freshness": None,
+                "bos_freshness": None,
+                "reset_freshness": None,
+                "timing_state": None,
+                "overheat_risk_level": None,
+            },
+        )
+        row["structure_freshness"] = row.get("structure_freshness") or metric_row.get("freshness_latest_structure_class")
+        row["bos_freshness"] = row.get("bos_freshness") or metric_row.get("freshness_latest_bos_class")
+        row["reset_freshness"] = row.get("reset_freshness") or metric_row.get("freshness_latest_reset_class")
+        row["timing_state"] = row.get("timing_state") or metric_row.get("group_timing_state")
+        row["overheat_risk_level"] = row.get("overheat_risk_level") or metric_row.get("group_overheat_risk_level")
+
+    for event_row in structural_events:
+        entity_type = str(event_row.get("entity_type") or "")
+        if entity_type not in {"LAYER", "SUBINDUSTRY"}:
+            continue
+        entity_code = str(event_row.get("entity_code") or "")
+        key = (entity_type, entity_code)
+        row = summary_by_key.setdefault(
+            key,
+            {
+                "entity_type": entity_type,
+                "entity_code": entity_code,
+                "entity_name": event_row.get("entity_name"),
+                "latest_structure_label": None,
+                "latest_structure_date": None,
+                "latest_bos_event_type": None,
+                "latest_bos_date": None,
+                "latest_reset_reason": None,
+                "latest_reset_date": None,
+                "structure_freshness": None,
+                "bos_freshness": None,
+                "reset_freshness": None,
+                "timing_state": None,
+                "overheat_risk_level": None,
+            },
+        )
+        event_type = str(event_row.get("event_type") or "")
+        event_date = event_row.get("event_date")
+        if event_type == "STRUCTURE_CHANGE" and row.get("latest_structure_date") is None:
+            row["latest_structure_label"] = row.get("latest_structure_label") or event_row.get("event_label") or event_type
+            row["latest_structure_date"] = event_date
+        elif event_type == "BOS" and row.get("latest_bos_date") is None:
+            row["latest_bos_event_type"] = event_row.get("event_label") or event_type
+            row["latest_bos_date"] = event_date
+        elif event_type == "RESET" and row.get("latest_reset_date") is None:
+            row["latest_reset_reason"] = event_row.get("event_label") or event_type
+            row["latest_reset_date"] = event_date
+
+    rows = [
+        row
+        for row in summary_by_key.values()
+        if any(
+            row.get(field)
+            for field in (
+                "latest_structure_label",
+                "latest_bos_event_type",
+                "latest_reset_reason",
+                "structure_freshness",
+                "bos_freshness",
+                "reset_freshness",
+                "timing_state",
+                "overheat_risk_level",
+            )
+        )
+    ]
+    rows.sort(
+        key=lambda row: (
+            ENTITY_TYPE_ORDER.get(str(row.get("entity_type") or ""), 99),
+            str(row.get("entity_code") or ""),
+            str(row.get("entity_name") or ""),
+        )
+    )
+    rows_available = len(rows)
+    rows_rendered = rows[:DAILY_SYNTHETIC_OHLC_STRUCTURE_SUMMARY_ROW_LIMIT]
+    return {
+        "rows": rows_rendered,
+        "rows_available": rows_available,
+        "rows_rendered": len(rows_rendered),
+        "is_truncated": rows_available > len(rows_rendered),
+    }
 
 
 def _load_rolling_window_summary(

@@ -485,6 +485,8 @@ def _build_fixture_db(db_path: str) -> None:
 
         _insert_event(conn, ecosystem_id=ecosystem_id, taxonomy_version_id=taxonomy_version_id, entity_id=nvda_id, event_date=SIGNAL_DATE, event_type="BOS", event_key="nvda-bos")
         _insert_event(conn, ecosystem_id=ecosystem_id, taxonomy_version_id=taxonomy_version_id, entity_id=nxpi_id, event_date=SIGNAL_DATE, event_type="STRUCTURE_CHANGE", event_key="nxpi-structure")
+        _insert_event(conn, ecosystem_id=ecosystem_id, taxonomy_version_id=taxonomy_version_id, entity_id=layer_id, event_date=SIGNAL_DATE, event_type="BOS", event_key="infra-bos")
+        _insert_event(conn, ecosystem_id=ecosystem_id, taxonomy_version_id=taxonomy_version_id, entity_id=subindustry_id, event_date=SIGNAL_DATE, event_type="RESET", event_key="semis-reset")
         freshness_signal_id = _insert_signal(conn, ecosystem_id=ecosystem_id, taxonomy_version_id=taxonomy_version_id, entity_id=nvda_id, signal_name="RESET_FRESHNESS", signal_family="FRESHNESS", signal_value="FRESH")
         pullback_signal_id = _insert_signal(conn, ecosystem_id=ecosystem_id, taxonomy_version_id=taxonomy_version_id, entity_id=nvda_id, signal_name="REVERSAL_MEDIUM", signal_family="REVERSAL_MEDIUM", signal_value="BULLISH", signal_direction="UP")
         divergence_signal_id = _insert_signal(conn, ecosystem_id=ecosystem_id, taxonomy_version_id=taxonomy_version_id, entity_id=nxpi_id, signal_name="REVERSAL_MEDIUM", signal_family="REVERSAL_MEDIUM", signal_value="BEARISH")
@@ -559,7 +561,8 @@ def test_query_returns_daily_structured_data_from_eco_facts(tmp_path) -> None:
     assert len(data.watchlist_members) == 2
     assert [row["ticker"] for row in data.watchlist_members] == ["NVDA", "NXPI"]
 
-    assert [row["event_type"] for row in data.structural_events] == ["BOS", "STRUCTURE_CHANGE"]
+    assert [row["event_type"] for row in data.structural_events] == ["BOS", "BOS", "STRUCTURE_CHANGE", "RESET"]
+    assert [row["entity_code"] for row in data.structural_events] == ["INFRA", "NVDA", "NXPI", "SEMIS"]
     assert [row["signal_name"] for row in data.signal_observations] == ["RESET_FRESHNESS", "REVERSAL_MEDIUM", "REVERSAL_MEDIUM"]
     bullish_reversal_row = next(
         row
@@ -609,6 +612,30 @@ def test_query_returns_daily_structured_data_from_eco_facts(tmp_path) -> None:
     assert data.ticker_scanners["is_breakout_truncated"] is False
     assert data.ticker_scanners["is_pullback_truncated"] is False
     assert data.ticker_scanners["is_exit_risk_truncated"] is False
+
+    assert set(data.synthetic_ohlc_structure_summary) == {
+        "rows",
+        "rows_available",
+        "rows_rendered",
+        "is_truncated",
+    }
+    assert [row["entity_type"] for row in data.synthetic_ohlc_structure_summary["rows"]] == ["LAYER", "SUBINDUSTRY"]
+    assert [row["entity_code"] for row in data.synthetic_ohlc_structure_summary["rows"]] == ["INFRA", "SEMIS"]
+    assert data.synthetic_ohlc_structure_summary["rows"][0]["latest_structure_label"] == "STRONG"
+    assert data.synthetic_ohlc_structure_summary["rows"][0]["latest_structure_date"] == SIGNAL_DATE
+    assert data.synthetic_ohlc_structure_summary["rows"][0]["latest_bos_event_type"] == "BOS"
+    assert data.synthetic_ohlc_structure_summary["rows"][0]["latest_bos_date"] == SIGNAL_DATE
+    assert data.synthetic_ohlc_structure_summary["rows"][0]["structure_freshness"] == "STALE"
+    assert data.synthetic_ohlc_structure_summary["rows"][0]["bos_freshness"] == "FRESH"
+    assert data.synthetic_ohlc_structure_summary["rows"][0]["reset_freshness"] == "AGING"
+    assert data.synthetic_ohlc_structure_summary["rows"][0]["timing_state"] == "BUY_ZONE"
+    assert data.synthetic_ohlc_structure_summary["rows"][0]["overheat_risk_level"] == "LOW"
+    assert data.synthetic_ohlc_structure_summary["rows"][1]["latest_structure_label"] == "MIXED"
+    assert data.synthetic_ohlc_structure_summary["rows"][1]["latest_reset_reason"] == "RESET"
+    assert data.synthetic_ohlc_structure_summary["rows"][1]["latest_reset_date"] == SIGNAL_DATE
+    assert data.synthetic_ohlc_structure_summary["rows_available"] == 2
+    assert data.synthetic_ohlc_structure_summary["rows_rendered"] == 2
+    assert data.synthetic_ohlc_structure_summary["is_truncated"] is False
 
     coverage_counts = {(row["entity_type"], row["coverage_status"]): row["row_count"] for row in data.quality_summary["coverage_counts"]}
     assert coverage_counts[("TICKER", "OK")] == 3
