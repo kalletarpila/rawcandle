@@ -715,7 +715,9 @@ def test_query_returns_rolling30_structured_data_from_eco_facts(tmp_path) -> Non
     }
     improvement_rows = data.subindustry_improvement_deterioration["rows"]
     assert data.subindustry_improvement_deterioration["rows_available"] == 1
+    assert data.subindustry_improvement_deterioration["rows_available_by_direction"] == {"IMPROVED": 1}
     assert data.subindustry_improvement_deterioration["rows_rendered"] == 1
+    assert data.subindustry_improvement_deterioration["rows_rendered_by_direction"] == {"IMPROVED": 1}
     assert data.subindustry_improvement_deterioration["is_truncated"] is False
     assert data.subindustry_improvement_deterioration["selected_dates_count"] == 30
     assert improvement_rows[0]["entity_type"] == "SUBINDUSTRY"
@@ -953,3 +955,13 @@ def test_subindustry_improvement_deterioration_payload_sorts_by_direction_then_a
 
     assert [row["entity_code"] for row in payload["rows"]] == ["A", "B", "C", "D"]
     assert [row["direction"] for row in payload["rows"]] == ["DETERIORATED", "DETERIORATED", "IMPROVED", "UNCHANGED"]
+    assert payload["rows_available_by_direction"] == {
+        "DETERIORATED": 2,
+        "IMPROVED": 1,
+        "UNCHANGED": 1,
+    }
+    assert payload["rows_rendered_by_direction"] == {
+        "DETERIORATED": 2,
+        "IMPROVED": 1,
+        "UNCHANGED": 1,
+    }

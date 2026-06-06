@@ -416,12 +416,25 @@ def _render_rolling_legacy_shell(
         )
     )
     if subindustry_improvement_deterioration.get("is_truncated"):
+        rendered_by_direction = subindustry_improvement_deterioration.get("rows_rendered_by_direction") or {}
         lines.extend(
             [
-                f"Showing {subindustry_improvement_deterioration.get('rows_rendered')} of {subindustry_improvement_deterioration.get('rows_available')} subindustry improvement / deterioration rows.",
-                "",
+                f"Showing {subindustry_improvement_deterioration.get('rows_rendered')} of {subindustry_improvement_deterioration.get('rows_available')} subindustry improvement / deterioration rows using direction-aware selection.",
             ]
         )
+        if rendered_by_direction:
+            lines.extend(
+                [
+                    "Rendered rows by direction: "
+                    f"DETERIORATED={rendered_by_direction.get('DETERIORATED', 0)}, "
+                    f"IMPROVED={rendered_by_direction.get('IMPROVED', 0)}, "
+                    f"UNCHANGED={rendered_by_direction.get('UNCHANGED', 0)}, "
+                    f"n/a={rendered_by_direction.get('n/a', 0)}.",
+                    "",
+                ]
+            )
+        else:
+            lines.append("")
     else:
         lines.append("")
     lines.extend(

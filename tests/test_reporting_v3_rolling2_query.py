@@ -584,7 +584,9 @@ def test_query_returns_rolling2_structured_data_from_eco_facts(tmp_path) -> None
             }
         ],
         "rows_available": 1,
+        "rows_available_by_direction": {"IMPROVED": 1},
         "rows_rendered": 1,
+        "rows_rendered_by_direction": {"IMPROVED": 1},
         "is_truncated": False,
         "selected_dates_count": 2,
     }
@@ -746,6 +748,16 @@ def test_subindustry_improvement_deterioration_payload_handles_direction_rules_d
 
     assert [row["entity_code"] for row in payload["rows"]] == ["A", "B", "C"]
     assert [row["direction"] for row in payload["rows"]] == ["DETERIORATED", "IMPROVED", "UNCHANGED"]
+    assert payload["rows_available_by_direction"] == {
+        "DETERIORATED": 1,
+        "IMPROVED": 1,
+        "UNCHANGED": 1,
+    }
+    assert payload["rows_rendered_by_direction"] == {
+        "DETERIORATED": 1,
+        "IMPROVED": 1,
+        "UNCHANGED": 1,
+    }
     row_lookup = {(row["entity_code"], row["metric_name"]): row for row in payload["rows"]}
     assert row_lookup[("A", "return_5d")]["change"] == -3.0
     assert row_lookup[("A", "return_5d")]["change_pct"] == -30.0
@@ -771,17 +783,19 @@ def test_subindustry_improvement_deterioration_payload_handles_direction_rules_d
             "direction": "UNCHANGED",
         }
     ]
+    assert single_date_payload["rows_available_by_direction"] == {"UNCHANGED": 1}
+    assert single_date_payload["rows_rendered_by_direction"] == {"UNCHANGED": 1}
 
 
-def test_subindustry_improvement_deterioration_payload_truncates_deterministically() -> None:
+def test_subindustry_improvement_deterioration_payload_uses_direction_aware_selection() -> None:
     rows = []
-    for index in range(130):
+    for index in range(80):
         rows.extend(
             [
                 {
                     "entity_type": "SUBINDUSTRY",
-                    "entity_code": f"S{index:03d}",
-                    "entity_name": f"Subindustry {index:03d}",
+                    "entity_code": f"D{index:03d}",
+                    "entity_name": f"Deteriorated {index:03d}",
                     "metric_name": "trend_breadth",
                     "signal_date": "2026-05-28",
                     "metric_value_num": 100.0,
@@ -789,11 +803,57 @@ def test_subindustry_improvement_deterioration_payload_truncates_deterministical
                 },
                 {
                     "entity_type": "SUBINDUSTRY",
-                    "entity_code": f"S{index:03d}",
-                    "entity_name": f"Subindustry {index:03d}",
+                    "entity_code": f"D{index:03d}",
+                    "entity_name": f"Deteriorated {index:03d}",
                     "metric_name": "trend_breadth",
                     "signal_date": "2026-05-29",
-                    "metric_value_num": 100.0 - index,
+                    "metric_value_num": 99.0 - index,
+                    "metric_value_text": None,
+                },
+            ]
+        )
+    for index in range(40):
+        rows.extend(
+            [
+                {
+                    "entity_type": "SUBINDUSTRY",
+                    "entity_code": f"I{index:03d}",
+                    "entity_name": f"Improved {index:03d}",
+                    "metric_name": "trend_breadth",
+                    "signal_date": "2026-05-28",
+                    "metric_value_num": 10.0,
+                    "metric_value_text": None,
+                },
+                {
+                    "entity_type": "SUBINDUSTRY",
+                    "entity_code": f"I{index:03d}",
+                    "entity_name": f"Improved {index:03d}",
+                    "metric_name": "trend_breadth",
+                    "signal_date": "2026-05-29",
+                    "metric_value_num": 10.0 + index + 1,
+                    "metric_value_text": None,
+                },
+            ]
+        )
+    for index in range(25):
+        rows.extend(
+            [
+                {
+                    "entity_type": "SUBINDUSTRY",
+                    "entity_code": f"U{index:03d}",
+                    "entity_name": f"Unchanged {index:03d}",
+                    "metric_name": "trend_breadth",
+                    "signal_date": "2026-05-28",
+                    "metric_value_num": 50.0 + index,
+                    "metric_value_text": None,
+                },
+                {
+                    "entity_type": "SUBINDUSTRY",
+                    "entity_code": f"U{index:03d}",
+                    "entity_name": f"Unchanged {index:03d}",
+                    "metric_name": "trend_breadth",
+                    "signal_date": "2026-05-29",
+                    "metric_value_num": 50.0 + index,
                     "metric_value_text": None,
                 },
             ]
@@ -801,8 +861,25 @@ def test_subindustry_improvement_deterioration_payload_truncates_deterministical
 
     payload = _build_subindustry_improvement_deterioration_payload(rows, ["2026-05-28", "2026-05-29"])
 
-    assert payload["rows_available"] == 130
+    assert payload["rows_available"] == 145
     assert payload["rows_rendered"] == ROLLING_SUBINDUSTRY_IMPROVEMENT_DETERIORATION_ROW_LIMIT
     assert payload["is_truncated"] is True
-    assert payload["rows"][0]["entity_code"] == "S129"
-    assert payload["rows"][-1]["entity_code"] == "S030"
+    assert payload["rows_available_by_direction"] == {
+        "DETERIORATED": 80,
+        "IMPROVED": 40,
+        "UNCHANGED": 25,
+    }
+    assert payload["rows_rendered_by_direction"] == {
+        "DETERIORATED": 55,
+        "IMPROVED": 30,
+        "UNCHANGED": 15,
+    }
+    assert [row["direction"] for row in payload["rows"][:55]] == ["DETERIORATED"] * 55
+    assert [row["direction"] for row in payload["rows"][55:85]] == ["IMPROVED"] * 30
+    assert [row["direction"] for row in payload["rows"][85:]] == ["UNCHANGED"] * 15
+    assert payload["rows"][0]["entity_code"] == "D079"
+    assert payload["rows"][54]["entity_code"] == "D025"
+    assert payload["rows"][55]["entity_code"] == "I039"
+    assert payload["rows"][84]["entity_code"] == "I010"
+    assert payload["rows"][85]["entity_code"] == "U000"
+    assert payload["rows"][-1]["entity_code"] == "U014"

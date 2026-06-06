@@ -578,7 +578,9 @@ def test_query_returns_rolling5_structured_data_from_eco_facts(tmp_path) -> None
             }
         ],
         "rows_available": 1,
+        "rows_available_by_direction": {"DETERIORATED": 1},
         "rows_rendered": 1,
+        "rows_rendered_by_direction": {"DETERIORATED": 1},
         "is_truncated": False,
         "selected_dates_count": 5,
     }
@@ -779,3 +781,5 @@ def test_subindustry_improvement_deterioration_payload_prefers_multi_date_rows()
 
     assert [row["entity_code"] for row in payload["rows"]] == ["A"]
     assert payload["rows"][0]["direction"] == "IMPROVED"
+    assert payload["rows_available_by_direction"] == {"IMPROVED": 1}
+    assert payload["rows_rendered_by_direction"] == {"IMPROVED": 1}

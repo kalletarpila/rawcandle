@@ -140,6 +140,18 @@ ROLLING_ECOSYSTEM_WINDOW_CHANGE_ROW_LIMIT = 100
 ROLLING_RISK_PROGRESSION_ROW_LIMIT = 100
 ROLLING_SUBINDUSTRY_TIMING_PERSISTENCE_ROW_LIMIT = 100
 ROLLING_SUBINDUSTRY_IMPROVEMENT_DETERIORATION_ROW_LIMIT = 100
+ROLLING_SUBINDUSTRY_IMPROVEMENT_DIRECTION_SHARES = {
+    "DETERIORATED": 50,
+    "IMPROVED": 30,
+    "UNCHANGED": 15,
+    "n/a": 5,
+}
+ROLLING_SUBINDUSTRY_IMPROVEMENT_DIRECTION_PRIORITY = [
+    "DETERIORATED",
+    "IMPROVED",
+    "UNCHANGED",
+    "n/a",
+]
 ROLLING_SUBINDUSTRY_IMPROVEMENT_DETERIORATION_METRIC_NAMES = (
     "return_5d",
     "return_10d",
@@ -2036,23 +2048,20 @@ def _build_subindustry_improvement_deterioration_payload(
 
     rows_with_multiple_dates = [row for row in output_rows if int(row["_observed_dates_count"]) >= 2]
     rows_for_render = rows_with_multiple_dates or output_rows
-    rows_for_render.sort(
-        key=lambda row: (
-            _direction_sort_value(row.get("direction")),
-            -float(row["_abs_change"]),
-            str(row["entity_code"]),
-            str(row["metric_name"]),
-        )
-    )
     rows_available = len(rows_for_render)
-    rendered_rows = rows_for_render[:ROLLING_SUBINDUSTRY_IMPROVEMENT_DETERIORATION_ROW_LIMIT]
+    rows_available_by_direction = _count_rows_by_direction(rows_for_render)
+    selected_rows = _select_subindustry_improvement_deterioration_rows(rows_for_render)
+    rendered_rows = selected_rows[:ROLLING_SUBINDUSTRY_IMPROVEMENT_DETERIORATION_ROW_LIMIT]
+    rows_rendered_by_direction = _count_rows_by_direction(rendered_rows)
     for row in rendered_rows:
         row.pop("_abs_change", None)
         row.pop("_observed_dates_count", None)
     return {
         "rows": rendered_rows,
         "rows_available": rows_available,
+        "rows_available_by_direction": rows_available_by_direction,
         "rows_rendered": len(rendered_rows),
+        "rows_rendered_by_direction": rows_rendered_by_direction,
         "is_truncated": rows_available > len(rendered_rows),
         "selected_dates_count": selected_dates_count,
     }
@@ -2062,10 +2071,76 @@ def _empty_subindustry_improvement_deterioration(selected_dates_count: int) -> d
     return {
         "rows": [],
         "rows_available": 0,
+        "rows_available_by_direction": {},
         "rows_rendered": 0,
+        "rows_rendered_by_direction": {},
         "is_truncated": False,
         "selected_dates_count": selected_dates_count,
     }
+
+
+def _count_rows_by_direction(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        direction = str(row.get("direction") or "n/a")
+        counts[direction] = counts.get(direction, 0) + 1
+    return counts
+
+
+def _sort_subindustry_improvement_deterioration_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        rows,
+        key=lambda row: (
+            -float(row["_abs_change"]),
+            str(row["entity_code"]),
+            str(row["metric_name"]),
+        ),
+    )
+
+
+def _select_subindustry_improvement_deterioration_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows_by_direction = {
+        direction: _sort_subindustry_improvement_deterioration_rows(
+            [row for row in rows if str(row.get("direction") or "n/a") == direction]
+        )
+        for direction in ROLLING_SUBINDUSTRY_IMPROVEMENT_DIRECTION_PRIORITY
+    }
+    selected_rows: list[dict[str, Any]] = []
+    selected_counts = {direction: 0 for direction in ROLLING_SUBINDUSTRY_IMPROVEMENT_DIRECTION_PRIORITY}
+
+    for direction in ROLLING_SUBINDUSTRY_IMPROVEMENT_DIRECTION_PRIORITY:
+        direction_rows = rows_by_direction[direction]
+        share = ROLLING_SUBINDUSTRY_IMPROVEMENT_DIRECTION_SHARES[direction]
+        take_count = min(len(direction_rows), share)
+        if take_count <= 0:
+            continue
+        selected_rows.extend(direction_rows[:take_count])
+        selected_counts[direction] = take_count
+
+    remaining_capacity = ROLLING_SUBINDUSTRY_IMPROVEMENT_DETERIORATION_ROW_LIMIT - len(selected_rows)
+    if remaining_capacity > 0:
+        for direction in ROLLING_SUBINDUSTRY_IMPROVEMENT_DIRECTION_PRIORITY:
+            if remaining_capacity <= 0:
+                break
+            direction_rows = rows_by_direction[direction]
+            start_index = selected_counts[direction]
+            extra_rows = direction_rows[start_index : start_index + remaining_capacity]
+            if not extra_rows:
+                continue
+            selected_rows.extend(extra_rows)
+            selected_counts[direction] += len(extra_rows)
+            remaining_capacity -= len(extra_rows)
+
+    selected_row_ids = {id(row) for row in selected_rows}
+    return sorted(
+        [row for row in rows if id(row) in selected_row_ids],
+        key=lambda row: (
+            _direction_sort_value(row.get("direction")),
+            -float(row["_abs_change"]),
+            str(row["entity_code"]),
+            str(row["metric_name"]),
+        ),
+    )
 
 
 def _select_ecosystem_window_change_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -114,9 +114,11 @@ def _sample_query_data(*, with_empty_events: bool = False) -> Rolling30ReportQue
                     "direction": "IMPROVED",
                 }
             ],
-            "rows_available": 1,
-            "rows_rendered": 1,
-            "is_truncated": False,
+            "rows_available": 120,
+            "rows_available_by_direction": {"DETERIORATED": 60, "IMPROVED": 35, "UNCHANGED": 20, "n/a": 5},
+            "rows_rendered": 100,
+            "rows_rendered_by_direction": {"DETERIORATED": 50, "IMPROVED": 30, "UNCHANGED": 15, "n/a": 5},
+            "is_truncated": True,
             "selected_dates_count": 4,
         },
         watchlist_summary={
@@ -375,6 +377,8 @@ def test_renderer_returns_deterministic_markdown_from_query_data_only() -> None:
     assert "SEMIS" in markdown
     assert "trend_breadth" in markdown
     assert "IMPROVED" in markdown
+    assert "Showing 100 of 120 subindustry improvement / deterioration rows using direction-aware selection." in markdown
+    assert "Rendered rows by direction: DETERIORATED=50, IMPROVED=30, UNCHANGED=15, n/a=5." in markdown
     assert "Not available from current V3 query data in DB-V3-70." not in markdown
     assert "## 8. Repeated breakout tickers" in markdown
     assert "## 9. Repeated pullback tickers" in markdown
