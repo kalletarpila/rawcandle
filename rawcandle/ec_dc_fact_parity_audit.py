@@ -78,15 +78,47 @@ def _fetch_latest_dates(conn: sqlite3.Connection) -> dict[str, str | None]:
     }
 
 
+def _fetch_explicit_date_source_counts(conn: sqlite3.Connection, signal_date: str) -> dict[str, int]:
+    return {
+        "dc_ticker_swing_signal_daily": int(
+            conn.execute(
+                "SELECT COUNT(*) FROM dc_ticker_swing_signal_daily WHERE signal_date = ?",
+                (signal_date,),
+            ).fetchone()[0]
+        ),
+        "dc_group_swing_signal_daily": int(
+            conn.execute(
+                "SELECT COUNT(*) FROM dc_group_swing_signal_daily WHERE signal_date = ?",
+                (signal_date,),
+            ).fetchone()[0]
+        ),
+        "dc_group_synthetic_ohlc_daily": int(
+            conn.execute(
+                "SELECT COUNT(*) FROM dc_group_synthetic_ohlc_daily WHERE ohlc_date = ?",
+                (signal_date,),
+            ).fetchone()[0]
+        ),
+        "dc_group_index_daily": int(
+            conn.execute(
+                "SELECT COUNT(*) FROM dc_group_index_daily WHERE index_date = ?",
+                (signal_date,),
+            ).fetchone()[0]
+        ),
+    }
+
+
 def _resolve_aligned_signal_date(
     conn: sqlite3.Connection,
     signal_date: str | None,
 ) -> tuple[str | None, dict[str, str | None], str]:
     latest_dates = _fetch_latest_dates(conn)
     if signal_date is not None:
-        selected_values = {signal_date}
-    else:
-        selected_values = {value for value in latest_dates.values() if value is not None}
+        explicit_counts = _fetch_explicit_date_source_counts(conn, signal_date)
+        if all(row_count > 0 for row_count in explicit_counts.values()):
+            return signal_date, latest_dates, "EXPLICIT_DATE_ALIGNED"
+        return None, latest_dates, "EXPLICIT_DATE_MISSING_SOURCE_ROWS"
+
+    selected_values = {value for value in latest_dates.values() if value is not None}
     if len(selected_values) != 1:
         return None, latest_dates, "MISMATCH"
     selected_signal_date = next(iter(selected_values))
@@ -866,19 +898,28 @@ def audit_dc_ec_fact_parity(
         _require_table(target_conn, "ec_signal_run", "target")
 
         selected_signal_date, latest_dates, date_alignment = _resolve_aligned_signal_date(source_conn, signal_date)
-        if date_alignment != "OK" or selected_signal_date is None:
+        if selected_signal_date is None:
+            explicit_date_source_counts = (
+                _fetch_explicit_date_source_counts(source_conn, signal_date)
+                if signal_date is not None
+                else None
+            )
+            warning = "Source dc_ dates are not aligned for formal parity audit"
+            if signal_date is not None and date_alignment == "EXPLICIT_DATE_MISSING_SOURCE_ROWS":
+                warning = "Explicit signal_date is missing rows in one or more dc_ source tables"
             return {
                 "status": "FAILED",
                 "signal_date": signal_date,
                 "date_alignment": date_alignment,
                 "latest_dates": latest_dates,
+                "explicit_date_source_counts": explicit_date_source_counts,
                 "ticker_parity": None,
                 "group_signal_parity": None,
                 "synthetic_ohlc_parity": None,
                 "group_index_parity": None,
                 "pipeline_watermark_parity": None,
                 "total_mismatch_count": 1,
-                "warnings": ["Source dc_ dates are not aligned for formal parity audit"],
+                "warnings": [warning],
             }
 
         ecosystem_id, taxonomy_version_id = _resolve_target_context(

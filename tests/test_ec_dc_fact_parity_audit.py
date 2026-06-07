@@ -41,7 +41,77 @@ def _write_watchlist_txt(path: Path) -> None:
     path.write_text("NVDA\nCRGY\n", encoding="utf-8")
 
 
-def _create_source_db(path: Path) -> None:
+def _insert_source_rows_for_date(
+    conn: sqlite3.Connection,
+    *,
+    signal_date: str,
+    omit_group_index: bool = False,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO dc_ticker_swing_signal_daily VALUES (
+            ?,'DC_TAXONOMY_FULL_V1','NVDA','Compute silicon','GPUs',
+            124.5,1500000,0.02,0.05,0.11,0.22,120.0,121.0,122.0,0.0375,0.0289,0.0205,
+            1,1,1,1,1,5,5,126.0,1400000,1.07,'HH',?,1,0,0,1,0,NULL,'OK',
+            'DC_SWING_SIGNAL_V1',?,'2026-06-07T06:00:00Z','LOW',1,'FRESH','UP','epoch-1',
+            'BOS_UP','2026-06-03','2026-06-03',2,'FRESH',NULL,NULL,NULL,NULL,NULL,0,0,0,0,1,0
+        )
+        """,
+        (signal_date, signal_date, f"TICKER_RUN_{signal_date.replace('-', '')}"),
+    )
+    for group_type, group_name in (
+        ("ecosystem", "DC_ECOSYSTEM_TOTAL"),
+        ("layer", "Compute silicon"),
+        ("subindustry", "GPUs"),
+    ):
+        conn.execute(
+            """
+            INSERT INTO dc_group_swing_signal_daily VALUES (
+                ?,'DC_TAXONOMY_FULL_V1',?,?,?,?,0.03,0.07,0.12,0.21,1.0,1.0,1.0,0.1,0.1,1.0,0.0,
+                'LOW','READY','All clear','OK','DC_SWING_SIGNAL_V1',?,'2026-06-07T06:05:00Z'
+            )
+            """,
+            (signal_date, group_type, group_name, 1, 1, f"GROUP_SIGNAL_RUN_{signal_date.replace('-', '')}"),
+        )
+    for group_type, group_name in (
+        ("layer", "Compute silicon"),
+        ("subindustry", "GPUs"),
+    ):
+        conn.execute(
+            """
+            INSERT INTO dc_group_synthetic_ohlc_daily VALUES (
+                ?,'DC_TAXONOMY_FULL_V1',?,?,?,?,120.0,126.0,119.0,124.0,1000000.0,121.0,122.0,0.0164,0.02,5,
+                '2026-06-01',126.0,'2026-05-20',110.0,'HH','UP',20,1.0,1.02,0.98,1.01,0.01,0.02,0.01,0.02,-0.02,1,
+                'OK','DC_SWING_OHLC_V1',?,'2026-06-07T06:10:00Z',1,'FRESH','BOS_UP','2026-06-03',
+                '2026-06-03',2,'FRESH',NULL,NULL,NULL,NULL,NULL
+            )
+            """,
+            (signal_date, group_type, group_name, 1, 1, f"SYNTH_RUN_{signal_date.replace('-', '')}"),
+        )
+    if not omit_group_index:
+        for group_type, group_name in (
+            ("ecosystem", "DC_ECOSYSTEM_TOTAL"),
+            ("layer", "Compute silicon"),
+            ("subindustry", "GPUs"),
+        ):
+            conn.execute(
+                """
+                INSERT INTO dc_group_index_daily VALUES (
+                    ?,'DC_TAXONOMY_FULL_V1',?,?,?,?,1,1,0.01,0.01,1.0,100.0,0.05,0.1,0.2,1.0,1.0,0.02,0.03,0.04,0.05,
+                    'OK','DC_INDEX_CALC_V1',?,'2026-06-07T06:15:00Z'
+                )
+                """,
+                (signal_date, group_type, group_name, 1, 1, f"GROUP_INDEX_RUN_{signal_date.replace('-', '')}"),
+            )
+
+
+def _create_source_db(
+    path: Path,
+    *,
+    include_historical_date: bool = False,
+    omit_historical_group_index: bool = False,
+    latest_mismatch_table: str | None = None,
+) -> None:
     if path.exists():
         path.unlink()
     conn = sqlite3.connect(path)
@@ -252,59 +322,25 @@ def _create_source_db(path: Path) -> None:
             """
         )
 
-        conn.execute(
-            """
-            INSERT INTO dc_ticker_swing_signal_daily VALUES (
-                '2026-06-05','DC_TAXONOMY_FULL_V1','NVDA','Compute silicon','GPUs',
-                124.5,1500000,0.02,0.05,0.11,0.22,120.0,121.0,122.0,0.0375,0.0289,0.0205,
-                1,1,1,1,1,5,5,126.0,1400000,1.07,'HH','2026-06-05',1,0,0,1,0,NULL,'OK',
-                'DC_SWING_SIGNAL_V1','TICKER_RUN_20260605','2026-06-07T06:00:00Z','LOW',1,'FRESH','UP','epoch-1',
-                'BOS_UP','2026-06-03','2026-06-03',2,'FRESH',NULL,NULL,NULL,NULL,NULL,0,0,0,0,1,0
+        if include_historical_date:
+            _insert_source_rows_for_date(
+                conn,
+                signal_date="2026-05-29",
+                omit_group_index=omit_historical_group_index,
             )
-            """
-        )
-        for group_type, group_name in (
-            ("ecosystem", "DC_ECOSYSTEM_TOTAL"),
-            ("layer", "Compute silicon"),
-            ("subindustry", "GPUs"),
-        ):
+        _insert_source_rows_for_date(conn, signal_date="2026-06-05")
+
+        if latest_mismatch_table == "dc_ticker_swing_signal_daily":
             conn.execute(
                 """
-                INSERT INTO dc_group_swing_signal_daily VALUES (
-                    '2026-06-05','DC_TAXONOMY_FULL_V1',?,?,?,?,0.03,0.07,0.12,0.21,1.0,1.0,1.0,0.1,0.1,1.0,0.0,
-                    'LOW','READY','All clear','OK','DC_SWING_SIGNAL_V1','GROUP_SIGNAL_RUN_20260605','2026-06-07T06:05:00Z'
+                INSERT INTO dc_ticker_swing_signal_daily VALUES (
+                    '2026-06-06','DC_TAXONOMY_FULL_V1','NVDA','Compute silicon','GPUs',
+                    124.5,1500000,0.02,0.05,0.11,0.22,120.0,121.0,122.0,0.0375,0.0289,0.0205,
+                    1,1,1,1,1,5,5,126.0,1400000,1.07,'HH','2026-06-06',1,0,0,1,0,NULL,'OK',
+                    'DC_SWING_SIGNAL_V1','TICKER_RUN_20260606','2026-06-07T06:00:00Z','LOW',1,'FRESH','UP','epoch-1',
+                    'BOS_UP','2026-06-03','2026-06-03',2,'FRESH',NULL,NULL,NULL,NULL,NULL,0,0,0,0,1,0
                 )
-                """,
-                (group_type, group_name, 1, 1),
-            )
-        for group_type, group_name in (
-            ("layer", "Compute silicon"),
-            ("subindustry", "GPUs"),
-        ):
-            conn.execute(
                 """
-                INSERT INTO dc_group_synthetic_ohlc_daily VALUES (
-                    '2026-06-05','DC_TAXONOMY_FULL_V1',?,?,?,?,120.0,126.0,119.0,124.0,1000000.0,121.0,122.0,0.0164,0.02,5,
-                    '2026-06-01',126.0,'2026-05-20',110.0,'HH','UP',20,1.0,1.02,0.98,1.01,0.01,0.02,0.01,0.02,-0.02,1,
-                    'OK','DC_SWING_OHLC_V1','SYNTH_RUN_20260605','2026-06-07T06:10:00Z',1,'FRESH','BOS_UP','2026-06-03',
-                    '2026-06-03',2,'FRESH',NULL,NULL,NULL,NULL,NULL
-                )
-                """,
-                (group_type, group_name, 1, 1),
-            )
-        for group_type, group_name in (
-            ("ecosystem", "DC_ECOSYSTEM_TOTAL"),
-            ("layer", "Compute silicon"),
-            ("subindustry", "GPUs"),
-        ):
-            conn.execute(
-                """
-                INSERT INTO dc_group_index_daily VALUES (
-                    '2026-06-05','DC_TAXONOMY_FULL_V1',?,?,?,?,1,1,0.01,0.01,1.0,100.0,0.05,0.1,0.2,1.0,1.0,0.02,0.03,0.04,0.05,
-                    'OK','DC_INDEX_CALC_V1','GROUP_INDEX_RUN_20260605','2026-06-07T06:15:00Z'
-                )
-                """,
-                (group_type, group_name, 1, 1),
             )
         conn.execute(
             """
@@ -325,13 +361,25 @@ def _create_source_db(path: Path) -> None:
         conn.close()
 
 
-def _build_target(tmp_path) -> tuple[Path, Path]:
+def _build_target(
+    tmp_path,
+    *,
+    signal_dates: tuple[str, ...] = ("2026-06-05",),
+    include_historical_date: bool = False,
+    omit_historical_group_index: bool = False,
+    latest_mismatch_table: str | None = None,
+) -> tuple[Path, Path]:
     source_db = tmp_path / "source.db"
     target_db = tmp_path / "target.db"
     taxonomy_csv = tmp_path / "taxonomy.csv"
     watchlist_txt = tmp_path / "watchlist.txt"
 
-    _create_source_db(source_db)
+    _create_source_db(
+        source_db,
+        include_historical_date=include_historical_date,
+        omit_historical_group_index=omit_historical_group_index,
+        latest_mismatch_table=latest_mismatch_table,
+    )
     apply_ec_sidecar_migration(str(target_db))
     _write_taxonomy_csv(taxonomy_csv)
     _write_watchlist_txt(watchlist_txt)
@@ -344,10 +392,11 @@ def _build_target(tmp_path) -> tuple[Path, Path]:
         db_path=str(target_db),
         watchlist_path=str(watchlist_txt),
     )
-    load_ec_ticker_signal_daily_from_dc(str(source_db), str(target_db), signal_date="2026-06-05")
-    load_ec_group_signal_daily_from_dc(str(source_db), str(target_db), signal_date="2026-06-05")
-    load_ec_group_synthetic_ohlc_daily_from_dc(str(source_db), str(target_db), signal_date="2026-06-05")
-    load_ec_group_index_daily_from_dc(str(source_db), str(target_db), signal_date="2026-06-05")
+    for signal_date in signal_dates:
+        load_ec_ticker_signal_daily_from_dc(str(source_db), str(target_db), signal_date=signal_date)
+        load_ec_group_signal_daily_from_dc(str(source_db), str(target_db), signal_date=signal_date)
+        load_ec_group_synthetic_ohlc_daily_from_dc(str(source_db), str(target_db), signal_date=signal_date)
+        load_ec_group_index_daily_from_dc(str(source_db), str(target_db), signal_date=signal_date)
     load_ec_pipeline_watermark_from_dc(str(source_db), str(target_db))
     return source_db, target_db
 
@@ -450,3 +499,56 @@ def test_parity_audit_group_index_eligible_count_mismatch_fails(tmp_path) -> Non
     assert summary["status"] == "FAILED"
     assert summary["group_index_parity"]["status"] == "FAILED"
     assert any(example["field"] == "eligible_count" for example in summary["group_index_parity"]["field_mismatch_examples"])
+
+
+def test_explicit_historical_signal_date_with_aligned_rows_passes_date_alignment(tmp_path) -> None:
+    source_db, target_db = _build_target(
+        tmp_path,
+        signal_dates=("2026-05-29", "2026-06-05"),
+        include_historical_date=True,
+    )
+    summary = audit_dc_ec_fact_parity(str(source_db), str(target_db), signal_date="2026-05-29")
+    assert summary["status"] == "OK_WITH_WARNINGS"
+    assert summary["date_alignment"] == "EXPLICIT_DATE_ALIGNED"
+    assert summary["signal_date"] == "2026-05-29"
+    assert summary["total_mismatch_count"] == 0
+
+
+def test_explicit_historical_signal_date_older_than_latest_does_not_fail_only_because_latest_is_newer(tmp_path) -> None:
+    source_db, target_db = _build_target(
+        tmp_path,
+        signal_dates=("2026-05-29",),
+        include_historical_date=True,
+        latest_mismatch_table="dc_ticker_swing_signal_daily",
+    )
+    summary = audit_dc_ec_fact_parity(str(source_db), str(target_db), signal_date="2026-05-29")
+    assert summary["status"] == "OK_WITH_WARNINGS"
+    assert summary["date_alignment"] == "EXPLICIT_DATE_ALIGNED"
+    assert summary["latest_dates"]["dc_ticker_swing_signal_daily"] == "2026-06-06"
+    assert summary["total_mismatch_count"] == 0
+
+
+def test_explicit_historical_signal_date_missing_one_source_table_returns_failed(tmp_path) -> None:
+    source_db, target_db = _build_target(
+        tmp_path,
+        signal_dates=(),
+        include_historical_date=True,
+        omit_historical_group_index=True,
+    )
+    summary = audit_dc_ec_fact_parity(str(source_db), str(target_db), signal_date="2026-05-29")
+    assert summary["status"] == "FAILED"
+    assert summary["date_alignment"] == "EXPLICIT_DATE_MISSING_SOURCE_ROWS"
+    assert summary["explicit_date_source_counts"]["dc_group_index_daily"] == 0
+    assert "missing rows" in summary["warnings"][0]
+
+
+def test_no_explicit_signal_date_still_uses_latest_date_alignment_and_fails_on_latest_date_mismatch(tmp_path) -> None:
+    source_db, target_db = _build_target(
+        tmp_path,
+        signal_dates=("2026-06-05",),
+        latest_mismatch_table="dc_ticker_swing_signal_daily",
+    )
+    summary = audit_dc_ec_fact_parity(str(source_db), str(target_db))
+    assert summary["status"] == "FAILED"
+    assert summary["date_alignment"] == "MISMATCH"
+    assert summary["total_mismatch_count"] == 1
