@@ -506,6 +506,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"SUMMARY ec_source_layer.attempted={result.ec_source_layer_attempted}")
     print(f"SUMMARY ec_source_layer.status={result.ec_source_layer_status}")
     print(
+        "SUMMARY ec_source_layer.log_path="
+        f"{result.ec_source_layer_log_path or 'NONE'}"
+    )
+    print(
         "SUMMARY ec_source_layer.signal_date="
         f"{result.ec_source_layer_signal_date or 'NONE'}"
     )

@@ -249,6 +249,7 @@ def test_list_scheduler_log_files_returns_recent_logs_newest_first(tmp_path):
         tmp_path / "stock_update_scheduler_summary_20260516T010000Z.json",
         tmp_path / "stock_update_omxh_20260516T0200Z.log",
         tmp_path / "datacenter_pipeline_usa_20260516T0250Z.txt",
+        tmp_path / "ec_source_layer_usa_20260516T0255Z.txt",
         tmp_path / "stock_update_omxs_20260516T0300Z.txt",
         tmp_path / "ignore_me.txt",
     ]
@@ -259,6 +260,7 @@ def test_list_scheduler_log_files_returns_recent_logs_newest_first(tmp_path):
 
     assert [entry["filename"] for entry in entries] == [
         "stock_update_omxs_20260516T0300Z.txt",
+        "ec_source_layer_usa_20260516T0255Z.txt",
         "datacenter_pipeline_usa_20260516T0250Z.txt",
         "stock_update_omxh_20260516T0200Z.log",
         "stock_update_scheduler_summary_20260516T010000Z.json",
@@ -267,7 +269,8 @@ def test_list_scheduler_log_files_returns_recent_logs_newest_first(tmp_path):
     assert entries[0]["text_openable"] is True
     assert entries[1]["text_openable"] is True
     assert entries[2]["text_openable"] is True
-    assert entries[3]["text_openable"] is False
+    assert entries[3]["text_openable"] is True
+    assert entries[4]["text_openable"] is False
 
 
 def test_list_scheduler_log_files_ignores_unrelated_files(tmp_path):

@@ -2740,6 +2740,10 @@ def test_scheduler_runner_ec_source_layer_disabled_skips_without_call(
     assert result.ec_source_layer_attempted == 0
     assert result.ec_source_layer_status == "SKIPPED"
     assert result.ec_source_layer_skipped_reason == "DISABLED"
+    assert result.ec_source_layer_log_path.endswith(".txt")
+    log_text = Path(result.ec_source_layer_log_path).read_text(encoding="utf-8")
+    assert "status=SKIPPED" in log_text
+    assert "skipped_reason=DISABLED" in log_text
 
 
 def test_scheduler_runner_ec_source_layer_enabled_runs_after_legacy_success(
@@ -2811,8 +2815,13 @@ def test_scheduler_runner_ec_source_layer_enabled_runs_after_legacy_success(
     assert result.datacenter_pipeline_daily_report_path == "/tmp/daily.md"
     assert result.ec_source_layer_attempted == 1
     assert result.ec_source_layer_status == "REFRESH_COMPLETED"
+    assert result.ec_source_layer_log_path.endswith(".txt")
     assert result.ec_source_layer_backup_path == "/tmp/backups/refresh.sqlite"
     assert result.ec_source_layer_ticker_rows == 236
+    log_text = Path(result.ec_source_layer_log_path).read_text(encoding="utf-8")
+    assert "status=REFRESH_COMPLETED" in log_text
+    assert "coverage_status=OK_WITH_WARNINGS" in log_text
+    assert "parity_status=OK_WITH_WARNINGS" in log_text
     assert called_kwargs["db_path"] == str(analysis_db)
     assert called_kwargs["confirm_db"] == str(analysis_db)
     assert called_kwargs["allow_replace_date"] is False
@@ -2881,6 +2890,10 @@ def test_scheduler_runner_ec_source_layer_skipped_keeps_ok_status(
 
     assert result.overall_status == STATUS_OK
     assert result.ec_source_layer_status == "REFRESH_SKIPPED"
+    assert result.ec_source_layer_log_path.endswith(".txt")
+    log_text = Path(result.ec_source_layer_log_path).read_text(encoding="utf-8")
+    assert "status=REFRESH_SKIPPED" in log_text
+    assert "skipped_reason=planner reported SKIP_UP_TO_DATE" in log_text
 
 
 def test_scheduler_runner_ec_source_layer_failure_degrades_to_warning(
@@ -2948,6 +2961,64 @@ def test_scheduler_runner_ec_source_layer_failure_degrades_to_warning(
     assert result.datacenter_pipeline_daily_report_path == "/tmp/daily.md"
     assert result.ec_source_layer_status == "REFRESH_FAILED"
     assert result.ec_source_layer_error == "refresh failed"
+    assert result.ec_source_layer_log_path.endswith(".txt")
+    log_text = Path(result.ec_source_layer_log_path).read_text(encoding="utf-8")
+    assert "status=REFRESH_FAILED" in log_text
+    assert "error=refresh failed" in log_text
+
+
+def test_scheduler_runner_ec_source_layer_exception_writes_log_and_warns(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        ec_source_layer_enabled=True,
+        ec_source_layer_taxonomy_csv=tmp_path / "taxonomy.csv",
+        ec_source_layer_watchlist=tmp_path / "watchlist.txt",
+        ec_source_layer_backup_dir=tmp_path / "backups",
+    )
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_one_market",
+        lambda **kwargs: ScheduledMarketRunResult(
+            market=kwargs["market"],
+            started_at_utc="2026-06-07T00:00:00Z",
+            finished_at_utc="2026-06-07T00:01:00Z",
+            exit_code=0,
+            summary_status=STATUS_OK,
+            log_path="/tmp/usa.log",
+            summary_lines=["SUMMARY market=usa"],
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_post_step",
+        lambda **kwargs: DatacenterPostStepResult(
+            attempted=1,
+            status="OK",
+            market="usa",
+            signal_date="2026-06-05",
+            daily_report_path="/tmp/daily.md",
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.run_ec_source_layer_refresh",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("refresh exploded")),
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.overall_status == STATUS_OK_WITH_WARNINGS
+    assert result.ec_source_layer_status == "REFRESH_FAILED"
+    assert result.ec_source_layer_error == "refresh exploded"
+    assert result.ec_source_layer_log_path.endswith(".txt")
+    log_text = Path(result.ec_source_layer_log_path).read_text(encoding="utf-8")
+    assert "status=REFRESH_FAILED" in log_text
+    assert "error=refresh exploded" in log_text
 
 
 def test_scheduler_runner_ec_source_layer_skips_when_legacy_failed_and_required(
@@ -3002,6 +3073,10 @@ def test_scheduler_runner_ec_source_layer_skips_when_legacy_failed_and_required(
     assert result.ec_source_layer_attempted == 0
     assert result.ec_source_layer_status == "SKIPPED"
     assert result.ec_source_layer_skipped_reason == "LEGACY_DATACENTER_NOT_READY"
+    assert result.ec_source_layer_log_path.endswith(".txt")
+    log_text = Path(result.ec_source_layer_log_path).read_text(encoding="utf-8")
+    assert "status=SKIPPED" in log_text
+    assert "skipped_reason=LEGACY_DATACENTER_NOT_READY" in log_text
 
 
 def test_scheduler_runner_lock_conflict_raises_and_runs_no_markets(tmp_path, monkeypatch):

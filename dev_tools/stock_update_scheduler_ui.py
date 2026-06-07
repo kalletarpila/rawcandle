@@ -69,6 +69,9 @@ _MARKET_LOG_FILENAME_RE = re.compile(
 _DATACENTER_LOG_FILENAME_RE = re.compile(
     r"^datacenter_pipeline_([a-z0-9_]+)_(\d{8}T\d{4,6}Z)(?:_(\d+))?\.(txt|log)$"
 )
+_EC_SOURCE_LAYER_LOG_FILENAME_RE = re.compile(
+    r"^ec_source_layer_([a-z0-9_]+)_(\d{8}T\d{4,6}Z)(?:_(\d+))?\.(txt|log)$"
+)
 _STATUS_OK_COLOR = "#43A047"
 _STATUS_WARNING_COLOR = "#EF6C00"
 _STATUS_ERROR_COLOR = "#E53935"
@@ -283,6 +286,7 @@ def list_scheduler_log_files(log_dir: str, limit: int = 10) -> List[Dict[str, An
         summary_match = _SUMMARY_FILENAME_RE.match(path.name)
         log_match = _MARKET_LOG_FILENAME_RE.match(path.name)
         datacenter_log_match = _DATACENTER_LOG_FILENAME_RE.match(path.name)
+        ec_source_layer_log_match = _EC_SOURCE_LAYER_LOG_FILENAME_RE.match(path.name)
         if summary_match:
             timestamp = summary_match.group(1)
             entry_type = "summary_json"
@@ -295,6 +299,10 @@ def list_scheduler_log_files(log_dir: str, limit: int = 10) -> List[Dict[str, An
             timestamp = datacenter_log_match.group(2)
             suffix = datacenter_log_match.group(3) or "0"
             entry_type = "datacenter_log"
+        elif ec_source_layer_log_match:
+            timestamp = ec_source_layer_log_match.group(2)
+            suffix = ec_source_layer_log_match.group(3) or "0"
+            entry_type = "ec_source_layer_log"
         else:
             continue
 
@@ -308,7 +316,8 @@ def list_scheduler_log_files(log_dir: str, limit: int = 10) -> List[Dict[str, An
                 "timestamp": timestamp,
                 "sort_key": f"{timestamp}_{suffix}",
                 "type": entry_type,
-                "text_openable": entry_type in {"market_log", "datacenter_log"},
+                "text_openable": entry_type
+                in {"market_log", "datacenter_log", "ec_source_layer_log"},
             }
         )
 

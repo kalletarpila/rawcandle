@@ -149,6 +149,7 @@ class ScheduledStockUpdateRunResult:
     datacenter_dashboard_error: str = ""
     ec_source_layer_attempted: int = 0
     ec_source_layer_status: str = "SKIPPED"
+    ec_source_layer_log_path: str = ""
     ec_source_layer_signal_date: str = "NONE"
     ec_source_layer_refresh_mode: str = "NONE"
     ec_source_layer_skipped_reason: str = "NONE"
@@ -262,6 +263,7 @@ class TechnicalRelevancePostStepResult:
 class EcSourceLayerRefreshPostStepResult:
     attempted: int
     status: str
+    log_path: str = ""
     signal_date: str = "NONE"
     refresh_mode: str = "NONE"
     skipped_reason: str = "NONE"
@@ -898,6 +900,23 @@ def _run_v3_datacenter_report_generation(
 def _build_datacenter_log_path(log_dir: Path, market: str, started_at: datetime.datetime) -> Path:
     minute_timestamp = _format_utc_filename_minute_timestamp(started_at)
     base_name = f"datacenter_pipeline_{market}_{minute_timestamp}"
+    candidate = log_dir / f"{base_name}.txt"
+    if not candidate.exists():
+        return candidate
+
+    suffix = 2
+    while True:
+        candidate = log_dir / f"{base_name}_{suffix}.txt"
+        if not candidate.exists():
+            return candidate
+        suffix += 1
+
+
+def _build_ec_source_layer_log_path(
+    log_dir: Path, market: str, started_at: datetime.datetime
+) -> Path:
+    minute_timestamp = _format_utc_filename_minute_timestamp(started_at)
+    base_name = f"ec_source_layer_{market}_{minute_timestamp}"
     candidate = log_dir / f"{base_name}.txt"
     if not candidate.exists():
         return candidate
@@ -2574,66 +2593,137 @@ def _run_ec_source_layer_refresh_post_step(
     datacenter_result: DatacenterPostStepResult,
     datacenter_dashboard_result: DatacenterDashboardPostStepResult,
 ) -> EcSourceLayerRefreshPostStepResult:
-    if not config.ec_source_layer_enabled:
+    started_at = _utc_now()
+    log_dir = Path(config.log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = _build_ec_source_layer_log_path(log_dir, target_market, started_at)
+
+    def _write_log(result: EcSourceLayerRefreshPostStepResult) -> EcSourceLayerRefreshPostStepResult:
+        finished_at = _utc_now()
+        lines = [
+            f"run_started_at_local={_format_local_timestamp(started_at, config.timezone)}",
+            f"run_finished_at_local={_format_local_timestamp(finished_at, config.timezone)}",
+            f"market={target_market}",
+            f"ecosystem={config.ec_source_layer_ecosystem}",
+            f"ec_source_layer_enabled={str(config.ec_source_layer_enabled).lower()}",
+            f"attempted={result.attempted}",
+            f"status={result.status}",
+            f"signal_date={result.signal_date}",
+            f"refresh_mode={result.refresh_mode}",
+            f"skipped_reason={result.skipped_reason}",
+            f"backup_path={result.backup_path}",
+            f"coverage_status={result.coverage_status}",
+            f"parity_status={result.parity_status}",
+            f"total_mismatch_count={result.total_mismatch_count}",
+            f"ticker_rows={result.ticker_rows}",
+            f"group_signal_rows={result.group_signal_rows}",
+            f"synthetic_ohlc_rows={result.synthetic_ohlc_rows}",
+            f"group_index_rows={result.group_index_rows}",
+            f"watermark_rows={result.watermark_rows}",
+            f"error={result.error}",
+            f"analysis_db_path={config.analysis_db_path}",
+        ]
+        log_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
         return EcSourceLayerRefreshPostStepResult(
-            attempted=0,
-            status="SKIPPED",
-            skipped_reason="DISABLED",
+            attempted=result.attempted,
+            status=result.status,
+            log_path=str(log_path),
+            signal_date=result.signal_date,
+            refresh_mode=result.refresh_mode,
+            skipped_reason=result.skipped_reason,
+            backup_path=result.backup_path,
+            coverage_status=result.coverage_status,
+            parity_status=result.parity_status,
+            total_mismatch_count=result.total_mismatch_count,
+            ticker_rows=result.ticker_rows,
+            group_signal_rows=result.group_signal_rows,
+            synthetic_ohlc_rows=result.synthetic_ohlc_rows,
+            group_index_rows=result.group_index_rows,
+            watermark_rows=result.watermark_rows,
+            error=result.error,
+        )
+
+    if not config.ec_source_layer_enabled:
+        return _write_log(
+            EcSourceLayerRefreshPostStepResult(
+                attempted=0,
+                status="SKIPPED",
+                skipped_reason="DISABLED",
+            )
         )
     if target_market not in config.enabled_markets:
-        return EcSourceLayerRefreshPostStepResult(
-            attempted=0,
-            status="SKIPPED",
-            skipped_reason="MARKET_NOT_ENABLED",
+        return _write_log(
+            EcSourceLayerRefreshPostStepResult(
+                attempted=0,
+                status="SKIPPED",
+                skipped_reason="MARKET_NOT_ENABLED",
+            )
         )
     if datacenter_result.status != "OK" or not datacenter_result.signal_date:
-        return EcSourceLayerRefreshPostStepResult(
-            attempted=0,
-            status="SKIPPED",
-            skipped_reason="LEGACY_DATACENTER_NOT_READY",
-            signal_date=datacenter_result.signal_date or "NONE",
+        return _write_log(
+            EcSourceLayerRefreshPostStepResult(
+                attempted=0,
+                status="SKIPPED",
+                skipped_reason="LEGACY_DATACENTER_NOT_READY",
+                signal_date=datacenter_result.signal_date or "NONE",
+            )
         )
     if (
         config.ec_source_layer_require_legacy_reports_success
         and datacenter_dashboard_result.status != "OK"
     ):
-        return EcSourceLayerRefreshPostStepResult(
-            attempted=0,
-            status="SKIPPED",
-            skipped_reason="LEGACY_REPORTS_NOT_SUCCESSFUL",
-            signal_date=datacenter_result.signal_date,
+        return _write_log(
+            EcSourceLayerRefreshPostStepResult(
+                attempted=0,
+                status="SKIPPED",
+                skipped_reason="LEGACY_REPORTS_NOT_SUCCESSFUL",
+                signal_date=datacenter_result.signal_date,
+            )
         )
 
-    refresh_summary = run_ec_source_layer_refresh(
-        db_path=config.analysis_db_path,
-        ecosystem_code=config.ec_source_layer_ecosystem,
-        taxonomy_version_code=config.ec_source_layer_taxonomy_version,
-        taxonomy_csv_path=config.ec_source_layer_taxonomy_csv or "",
-        watchlist_path=config.ec_source_layer_watchlist or "",
-        backup_dir=config.ec_source_layer_backup_dir or "",
-        confirm_db=config.analysis_db_path,
-        confirm_ecosystem=config.ec_source_layer_ecosystem,
-        confirm_taxonomy_version=config.ec_source_layer_taxonomy_version,
-        signal_date=datacenter_result.signal_date,
-        allow_replace_date=not config.ec_source_layer_only_on_new_signal_date,
-    )
+    try:
+        refresh_summary = run_ec_source_layer_refresh(
+            db_path=config.analysis_db_path,
+            ecosystem_code=config.ec_source_layer_ecosystem,
+            taxonomy_version_code=config.ec_source_layer_taxonomy_version,
+            taxonomy_csv_path=config.ec_source_layer_taxonomy_csv or "",
+            watchlist_path=config.ec_source_layer_watchlist or "",
+            backup_dir=config.ec_source_layer_backup_dir or "",
+            confirm_db=config.analysis_db_path,
+            confirm_ecosystem=config.ec_source_layer_ecosystem,
+            confirm_taxonomy_version=config.ec_source_layer_taxonomy_version,
+            signal_date=datacenter_result.signal_date,
+            allow_replace_date=not config.ec_source_layer_only_on_new_signal_date,
+        )
+    except Exception as exc:
+        return _write_log(
+            EcSourceLayerRefreshPostStepResult(
+                attempted=1,
+                status="REFRESH_FAILED",
+                signal_date=datacenter_result.signal_date,
+                refresh_mode="scheduler_post_step",
+                error=str(exc),
+            )
+        )
 
-    return EcSourceLayerRefreshPostStepResult(
-        attempted=1 if refresh_summary.get("attempted") else 0,
-        status=str(refresh_summary.get("status") or "UNKNOWN"),
-        signal_date=str(refresh_summary.get("signal_date") or "NONE"),
-        refresh_mode=str(refresh_summary.get("refresh_mode") or "NONE"),
-        skipped_reason=str(refresh_summary.get("skipped_reason") or "NONE"),
-        backup_path=str(refresh_summary.get("backup_path") or "NONE"),
-        coverage_status=str(refresh_summary.get("coverage_status") or "NONE"),
-        parity_status=str(refresh_summary.get("parity_status") or "NONE"),
-        total_mismatch_count=int(refresh_summary.get("total_mismatch_count") or 0),
-        ticker_rows=int(refresh_summary.get("ticker_rows") or 0),
-        group_signal_rows=int(refresh_summary.get("group_signal_rows") or 0),
-        synthetic_ohlc_rows=int(refresh_summary.get("synthetic_ohlc_rows") or 0),
-        group_index_rows=int(refresh_summary.get("group_index_rows") or 0),
-        watermark_rows=int(refresh_summary.get("watermark_rows") or 0),
-        error=str(refresh_summary.get("error") or "NONE"),
+    return _write_log(
+        EcSourceLayerRefreshPostStepResult(
+            attempted=1 if refresh_summary.get("attempted") else 0,
+            status=str(refresh_summary.get("status") or "UNKNOWN"),
+            signal_date=str(refresh_summary.get("signal_date") or "NONE"),
+            refresh_mode=str(refresh_summary.get("refresh_mode") or "NONE"),
+            skipped_reason=str(refresh_summary.get("skipped_reason") or "NONE"),
+            backup_path=str(refresh_summary.get("backup_path") or "NONE"),
+            coverage_status=str(refresh_summary.get("coverage_status") or "NONE"),
+            parity_status=str(refresh_summary.get("parity_status") or "NONE"),
+            total_mismatch_count=int(refresh_summary.get("total_mismatch_count") or 0),
+            ticker_rows=int(refresh_summary.get("ticker_rows") or 0),
+            group_signal_rows=int(refresh_summary.get("group_signal_rows") or 0),
+            synthetic_ohlc_rows=int(refresh_summary.get("synthetic_ohlc_rows") or 0),
+            group_index_rows=int(refresh_summary.get("group_index_rows") or 0),
+            watermark_rows=int(refresh_summary.get("watermark_rows") or 0),
+            error=str(refresh_summary.get("error") or "NONE"),
+        )
     )
 
 
@@ -2939,6 +3029,7 @@ def run_scheduler_config(
                     datacenter_dashboard_reports_reference_markdown_output_path="",
                     datacenter_dashboard_reports_reference_markdown_render_status="SKIPPED",
                     datacenter_dashboard_error="",
+                    ec_source_layer_log_path="",
                 )
                 _write_summary_json(config=config, run_started_at=run_started_at, result=result)
                 write_scheduler_status(
@@ -3207,6 +3298,7 @@ def run_scheduler_config(
                 datacenter_dashboard_error=datacenter_dashboard_result.error or "",
                 ec_source_layer_attempted=ec_source_layer_result.attempted,
                 ec_source_layer_status=ec_source_layer_result.status,
+                ec_source_layer_log_path=ec_source_layer_result.log_path,
                 ec_source_layer_signal_date=ec_source_layer_result.signal_date,
                 ec_source_layer_refresh_mode=ec_source_layer_result.refresh_mode,
                 ec_source_layer_skipped_reason=ec_source_layer_result.skipped_reason,

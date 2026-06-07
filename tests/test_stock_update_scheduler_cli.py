@@ -315,6 +315,7 @@ def test_scheduler_cli_successful_run_prints_top_level_summary_lines(monkeypatch
     assert "SUMMARY datacenter_dashboard.error=" in captured.out
     assert "SUMMARY ec_source_layer.attempted=0" in captured.out
     assert "SUMMARY ec_source_layer.status=SKIPPED" in captured.out
+    assert "SUMMARY ec_source_layer.log_path=NONE" in captured.out
     assert "SUMMARY ec_source_layer.signal_date=NONE" in captured.out
     assert "SUMMARY ec_source_layer.refresh_mode=NONE" in captured.out
     assert "SUMMARY ec_source_layer.skipped_reason=NONE" in captured.out
@@ -339,6 +340,7 @@ def test_scheduler_cli_prints_ec_source_layer_summary_when_present(monkeypatch, 
     result = _result(STATUS_OK)
     result.ec_source_layer_attempted = 1
     result.ec_source_layer_status = "REFRESH_COMPLETED"
+    result.ec_source_layer_log_path = "/tmp/ec_source_layer_usa_20260607T0339Z.txt"
     result.ec_source_layer_signal_date = "2026-06-05"
     result.ec_source_layer_refresh_mode = "new_selected_date"
     result.ec_source_layer_skipped_reason = "NONE"
@@ -360,6 +362,10 @@ def test_scheduler_cli_prints_ec_source_layer_summary_when_present(monkeypatch, 
     assert code == 0
     assert "SUMMARY ec_source_layer.attempted=1" in captured.out
     assert "SUMMARY ec_source_layer.status=REFRESH_COMPLETED" in captured.out
+    assert (
+        "SUMMARY ec_source_layer.log_path=/tmp/ec_source_layer_usa_20260607T0339Z.txt"
+        in captured.out
+    )
     assert "SUMMARY ec_source_layer.signal_date=2026-06-05" in captured.out
     assert "SUMMARY ec_source_layer.refresh_mode=new_selected_date" in captured.out
     assert "SUMMARY ec_source_layer.backup_path=/tmp/refresh.sqlite" in captured.out
