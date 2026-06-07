@@ -190,12 +190,80 @@ def test_ec_fact_schema_keys_columns_indexes_and_foreign_keys(tmp_path) -> None:
             "entity_id",
             "ticker",
             "signal_version",
+            "volume",
+            "ma10",
+            "ema10",
+            "ema20",
+            "distance_to_ema10_pct",
+            "above_ma10",
+            "above_ema10",
+            "above_ema20",
+            "ema10_slope_positive",
+            "ema20_slope_positive",
+            "ema10_slope_lookback",
+            "ema20_slope_lookback",
+            "highest_close_20d",
+            "volume_avg_20d",
+            "volume_vs_avg20",
+            "latest_structure_age_trading_days",
+            "structure_epoch_id",
+            "latest_bos_confirmed_as_of_date",
+            "latest_bos_age_trading_days",
+            "latest_reset_confirmed_as_of_date",
+            "latest_reset_age_trading_days",
+            "bullish_divergence_signal",
+            "bearish_divergence_signal",
+            "hidden_bullish_divergence_signal",
+            "hidden_bearish_divergence_signal",
+            "bullish_candle_signal",
+            "bearish_candle_signal",
             "source_table",
             "source_pk_json",
             "source_row_hash",
             "source_run_id",
             "created_at_utc",
         }.issubset(_table_columns(conn, "ec_ticker_signal_daily"))
+        assert "pct_above_rising_ema20" in _table_columns(conn, "ec_group_signal_daily")
+        assert {
+            "member_count",
+            "eligible_count",
+            "ma20",
+            "ema20",
+            "distance_to_ema20_pct",
+            "volatility_20d",
+            "pivot_radius",
+            "latest_pivot_high_date",
+            "latest_pivot_high_value",
+            "latest_pivot_low_date",
+            "latest_pivot_low_value",
+            "relative_base_window",
+            "relative_open_20",
+            "relative_high_20",
+            "relative_low_20",
+            "relative_close_20",
+            "relative_upper_wick_20",
+            "relative_lower_wick_20",
+            "relative_close_extension_20",
+            "relative_high_extension_20",
+            "relative_low_extension_20",
+            "relative_eligible_count",
+            "latest_structure_age_trading_days",
+            "latest_bos_confirmed_as_of_date",
+            "latest_bos_age_trading_days",
+            "latest_reset_confirmed_as_of_date",
+            "latest_reset_age_trading_days",
+        }.issubset(_table_columns(conn, "ec_group_synthetic_ohlc_daily"))
+        assert {
+            "ma50_eligible_count",
+            "ma200_eligible_count",
+            "median_return",
+            "pct_positive",
+            "pct_above_ma50",
+            "pct_above_ma200",
+            "volatility_60d",
+            "relative_strength_spy_60d",
+            "relative_strength_qqq_60d",
+        }.issubset(_table_columns(conn, "ec_group_index_daily"))
         assert "watchlist_status" not in _table_columns(conn, "ec_ticker_signal_daily")
         assert "signal_date" in _table_columns(conn, "ec_group_synthetic_ohlc_daily")
         assert "ohlc_date" not in _table_columns(conn, "ec_group_synthetic_ohlc_daily")
@@ -283,12 +351,35 @@ def test_ec_fact_schema_minimal_insert_paths_and_duplicate_pk_rejection(tmp_path
             INSERT INTO ec_ticker_signal_daily (
                 ecosystem_id, taxonomy_version_id, signal_date, entity_id, ticker, signal_version,
                 primary_group_l1_entity_id, primary_group_l2_entity_id,
+                volume, ma10, ema10, ema20, distance_to_ema10_pct,
+                above_ma10, above_ema10, above_ema20,
+                ema10_slope_positive, ema20_slope_positive,
+                ema10_slope_lookback, ema20_slope_lookback,
+                highest_close_20d, volume_avg_20d, volume_vs_avg20,
+                latest_structure_age_trading_days, structure_epoch_id,
+                latest_bos_confirmed_as_of_date, latest_bos_age_trading_days,
+                latest_reset_confirmed_as_of_date, latest_reset_age_trading_days,
+                bullish_divergence_signal, bearish_divergence_signal,
+                hidden_bullish_divergence_signal, hidden_bearish_divergence_signal,
+                bullish_candle_signal, bearish_candle_signal,
                 source_table, source_pk_json, source_row_hash, source_run_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 ctx["ecosystem_id"], ctx["taxonomy_version_id"], "2026-06-05", ctx["ticker_entity_id"], "NVDA", "v1",
-                ctx["group_l1_id"], ctx["group_l2_id"], "dc_ticker_swing_signal_daily",
+                ctx["group_l1_id"], ctx["group_l2_id"],
+                1000.0, 950.0, 960.0, 970.0, 0.04,
+                1, 1, 1,
+                1, 1,
+                3, 5,
+                1010.0, 800.0, 1.25,
+                4, "epoch-12",
+                "2026-06-04", 2,
+                "2026-06-01", 5,
+                0, 0,
+                0, 0,
+                1, 0,
+                "dc_ticker_swing_signal_daily",
                 '{"signal_date":"2026-06-05","ticker":"NVDA"}', "hash-ticker-1", ctx["source_run_id"],
             ),
         )
@@ -296,11 +387,13 @@ def test_ec_fact_schema_minimal_insert_paths_and_duplicate_pk_rejection(tmp_path
             """
             INSERT INTO ec_group_signal_daily (
                 ecosystem_id, taxonomy_version_id, signal_date, entity_id, entity_type, signal_version,
+                pct_above_rising_ema20,
                 source_table, source_pk_json, source_row_hash, source_run_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 ctx["ecosystem_id"], ctx["taxonomy_version_id"], "2026-06-05", ctx["group_l1_id"], "GROUP_L1", "v1",
+                42.0,
                 "dc_group_swing_signal_daily", '{"signal_date":"2026-06-05","group":"COMPUTE_SILICON"}',
                 "hash-group-signal-1", ctx["source_run_id"],
             ),
@@ -309,11 +402,19 @@ def test_ec_fact_schema_minimal_insert_paths_and_duplicate_pk_rejection(tmp_path
             """
             INSERT INTO ec_group_synthetic_ohlc_daily (
                 ecosystem_id, taxonomy_version_id, signal_date, entity_id, entity_type, ohlc_calc_version,
+                member_count, eligible_count, ma20, ema20, distance_to_ema20_pct, volatility_20d,
+                pivot_radius, latest_pivot_high_date, latest_pivot_high_value,
+                relative_base_window, relative_open_20, relative_close_20,
+                latest_bos_confirmed_as_of_date, latest_bos_age_trading_days,
                 source_table, source_pk_json, source_row_hash, source_run_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 ctx["ecosystem_id"], ctx["taxonomy_version_id"], "2026-06-05", ctx["group_l2_id"], "GROUP_L2", "v1",
+                11, 11, 82.1, 82.2, -0.01, 0.02,
+                5, "2026-05-29", 87.1,
+                20, 1.0, 1.0,
+                "2026-02-27", 68,
                 "dc_group_synthetic_ohlc_daily", '{"ohlc_date":"2026-06-05","group":"GPUS"}',
                 "hash-group-ohlc-1", ctx["source_run_id"],
             ),
@@ -322,11 +423,17 @@ def test_ec_fact_schema_minimal_insert_paths_and_duplicate_pk_rejection(tmp_path
             """
             INSERT INTO ec_group_index_daily (
                 ecosystem_id, taxonomy_version_id, signal_date, entity_id, entity_type, calc_version,
+                ma50_eligible_count, ma200_eligible_count, median_return, pct_positive,
+                pct_above_ma50, pct_above_ma200, volatility_60d,
+                relative_strength_spy_60d, relative_strength_qqq_60d,
                 source_table, source_pk_json, source_row_hash, source_run_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 ctx["ecosystem_id"], ctx["taxonomy_version_id"], "2026-06-05", ctx["ecosystem_entity_id"], "ECOSYSTEM", "v1",
+                229, 229, -0.05, 6.5,
+                63.7, 75.9, 0.022,
+                0.20, 0.13,
                 "dc_group_index_daily", '{"index_date":"2026-06-05","group":"DATACENTER"}',
                 "hash-group-index-1", ctx["source_run_id"],
             ),

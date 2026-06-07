@@ -10,6 +10,7 @@ MIGRATION_SQL_PATHS = (
     MIGRATIONS_DIR / "020_harden_ec_sidecar_schema.sql",
     MIGRATIONS_DIR / "021_patch_ec_signal_calendar_p0_fields.sql",
     MIGRATIONS_DIR / "022_create_ec_fact_tables.sql",
+    MIGRATIONS_DIR / "023_patch_ec_fact_schema_for_dc_parity.sql",
 )
 
 
@@ -174,10 +175,101 @@ def _patch_ec_signal_calendar_if_needed(conn: sqlite3.Connection) -> None:
     )
 
 
+def _add_column_if_missing(conn: sqlite3.Connection, table_name: str, column_name: str, column_sql: str) -> None:
+    if column_name in _table_columns(conn, table_name):
+        return
+    conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_sql}")
+
+
+def _patch_ec_fact_schema_for_dc_parity_if_needed(conn: sqlite3.Connection) -> None:
+    for column_name, column_sql in (
+        ("volume", "volume REAL NULL"),
+        ("ma10", "ma10 REAL NULL"),
+        ("ema10", "ema10 REAL NULL"),
+        ("ema20", "ema20 REAL NULL"),
+        ("distance_to_ema10_pct", "distance_to_ema10_pct REAL NULL"),
+        ("above_ma10", "above_ma10 INTEGER NULL"),
+        ("above_ema10", "above_ema10 INTEGER NULL"),
+        ("above_ema20", "above_ema20 INTEGER NULL"),
+        ("ema10_slope_positive", "ema10_slope_positive INTEGER NULL"),
+        ("ema20_slope_positive", "ema20_slope_positive INTEGER NULL"),
+        ("ema10_slope_lookback", "ema10_slope_lookback INTEGER NULL"),
+        ("ema20_slope_lookback", "ema20_slope_lookback INTEGER NULL"),
+        ("highest_close_20d", "highest_close_20d REAL NULL"),
+        ("volume_avg_20d", "volume_avg_20d REAL NULL"),
+        ("volume_vs_avg20", "volume_vs_avg20 REAL NULL"),
+        ("latest_structure_age_trading_days", "latest_structure_age_trading_days INTEGER NULL"),
+        ("structure_epoch_id", "structure_epoch_id TEXT NULL"),
+        ("latest_bos_confirmed_as_of_date", "latest_bos_confirmed_as_of_date TEXT NULL"),
+        ("latest_bos_age_trading_days", "latest_bos_age_trading_days INTEGER NULL"),
+        ("latest_reset_confirmed_as_of_date", "latest_reset_confirmed_as_of_date TEXT NULL"),
+        ("latest_reset_age_trading_days", "latest_reset_age_trading_days INTEGER NULL"),
+        ("bullish_divergence_signal", "bullish_divergence_signal INTEGER NULL"),
+        ("bearish_divergence_signal", "bearish_divergence_signal INTEGER NULL"),
+        ("hidden_bullish_divergence_signal", "hidden_bullish_divergence_signal INTEGER NULL"),
+        ("hidden_bearish_divergence_signal", "hidden_bearish_divergence_signal INTEGER NULL"),
+        ("bullish_candle_signal", "bullish_candle_signal INTEGER NULL"),
+        ("bearish_candle_signal", "bearish_candle_signal INTEGER NULL"),
+    ):
+        _add_column_if_missing(conn, "ec_ticker_signal_daily", column_name, column_sql)
+
+    _add_column_if_missing(
+        conn,
+        "ec_group_signal_daily",
+        "pct_above_rising_ema20",
+        "pct_above_rising_ema20 REAL NULL",
+    )
+
+    for column_name, column_sql in (
+        ("member_count", "member_count INTEGER NULL"),
+        ("eligible_count", "eligible_count INTEGER NULL"),
+        ("ma20", "ma20 REAL NULL"),
+        ("ema20", "ema20 REAL NULL"),
+        ("distance_to_ema20_pct", "distance_to_ema20_pct REAL NULL"),
+        ("volatility_20d", "volatility_20d REAL NULL"),
+        ("pivot_radius", "pivot_radius INTEGER NULL"),
+        ("latest_pivot_high_date", "latest_pivot_high_date TEXT NULL"),
+        ("latest_pivot_high_value", "latest_pivot_high_value REAL NULL"),
+        ("latest_pivot_low_date", "latest_pivot_low_date TEXT NULL"),
+        ("latest_pivot_low_value", "latest_pivot_low_value REAL NULL"),
+        ("relative_base_window", "relative_base_window INTEGER NULL"),
+        ("relative_open_20", "relative_open_20 REAL NULL"),
+        ("relative_high_20", "relative_high_20 REAL NULL"),
+        ("relative_low_20", "relative_low_20 REAL NULL"),
+        ("relative_close_20", "relative_close_20 REAL NULL"),
+        ("relative_upper_wick_20", "relative_upper_wick_20 REAL NULL"),
+        ("relative_lower_wick_20", "relative_lower_wick_20 REAL NULL"),
+        ("relative_close_extension_20", "relative_close_extension_20 REAL NULL"),
+        ("relative_high_extension_20", "relative_high_extension_20 REAL NULL"),
+        ("relative_low_extension_20", "relative_low_extension_20 REAL NULL"),
+        ("relative_eligible_count", "relative_eligible_count INTEGER NULL"),
+        ("latest_structure_age_trading_days", "latest_structure_age_trading_days INTEGER NULL"),
+        ("latest_bos_confirmed_as_of_date", "latest_bos_confirmed_as_of_date TEXT NULL"),
+        ("latest_bos_age_trading_days", "latest_bos_age_trading_days INTEGER NULL"),
+        ("latest_reset_confirmed_as_of_date", "latest_reset_confirmed_as_of_date TEXT NULL"),
+        ("latest_reset_age_trading_days", "latest_reset_age_trading_days INTEGER NULL"),
+    ):
+        _add_column_if_missing(conn, "ec_group_synthetic_ohlc_daily", column_name, column_sql)
+
+    for column_name, column_sql in (
+        ("ma50_eligible_count", "ma50_eligible_count INTEGER NULL"),
+        ("ma200_eligible_count", "ma200_eligible_count INTEGER NULL"),
+        ("median_return", "median_return REAL NULL"),
+        ("pct_positive", "pct_positive REAL NULL"),
+        ("pct_above_ma50", "pct_above_ma50 REAL NULL"),
+        ("pct_above_ma200", "pct_above_ma200 REAL NULL"),
+        ("volatility_60d", "volatility_60d REAL NULL"),
+        ("relative_strength_spy_60d", "relative_strength_spy_60d REAL NULL"),
+        ("relative_strength_qqq_60d", "relative_strength_qqq_60d REAL NULL"),
+    ):
+        _add_column_if_missing(conn, "ec_group_index_daily", column_name, column_sql)
+
+
 def _apply_ec_sidecar_migration_to_connection(conn: sqlite3.Connection) -> None:
     for migration_sql_path in MIGRATION_SQL_PATHS:
         conn.executescript(migration_sql_path.read_text(encoding="utf-8"))
     _harden_ec_sidecar_schema(conn)
+    _patch_ec_fact_schema_for_dc_parity_if_needed(conn)
 
 
 def apply_ec_sidecar_migration(db_path: str) -> None:

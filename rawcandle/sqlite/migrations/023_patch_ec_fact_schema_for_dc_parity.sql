@@ -1,0 +1,2 @@
+-- Narrow follow-up migration for ec_ fact schema dc_ parity columns.
+-- SQLite-safe additive column patching is applied by ec_sidecar_migration.py.
