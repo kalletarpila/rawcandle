@@ -83,16 +83,16 @@ def test_watchlist_loader_creates_watchlist_and_members(tmp_path) -> None:
 
         member_rows = conn.execute(
             """
-            SELECT e.entity_code, wm.member_role, wm.status
+            SELECT e.entity_code, wm.member_role, wm.status, wm.active_from
             FROM ec_watchlist_member wm
             JOIN ec_entity e ON e.entity_id = wm.entity_id
             ORDER BY e.entity_code
             """
         ).fetchall()
         assert member_rows == [
-            ("AMD", "WATCH", "ACTIVE"),
-            ("AVGO", "WATCH", "ACTIVE"),
-            ("NVDA", "WATCH", "ACTIVE"),
+            ("AMD", "WATCH", "ACTIVE", "1900-01-01"),
+            ("AVGO", "WATCH", "ACTIVE", "1900-01-01"),
+            ("NVDA", "WATCH", "ACTIVE", "1900-01-01"),
         ]
 
         assert summary == {

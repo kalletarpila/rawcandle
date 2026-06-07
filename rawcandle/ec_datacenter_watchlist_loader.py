@@ -157,12 +157,11 @@ def _insert_watchlist_member(
             entity_id,
             member_role,
             status,
-            active_from,
             active_to,
             notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?)
         """,
-        (watchlist_id, entity_id, "WATCH", "ACTIVE", None, None, None),
+        (watchlist_id, entity_id, "WATCH", "ACTIVE", None, None),
     )
     return 1
 

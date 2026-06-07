@@ -1,4 +1,5 @@
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -34,6 +35,14 @@ def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
 def _index_names(conn: sqlite3.Connection, table_name: str) -> set[str]:
     rows = conn.execute(f"PRAGMA index_list({table_name})").fetchall()
     return {str(row[1]) for row in rows}
+
+
+def _table_info_row(conn: sqlite3.Connection, table_name: str, column_name: str) -> tuple | None:
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    for row in rows:
+        if str(row[1]) == column_name:
+            return row
+    return None
 
 
 def _foreign_key_tables(conn: sqlite3.Connection, table_name: str) -> set[str]:
@@ -268,6 +277,8 @@ def test_ec_sidecar_migration_creates_tables_and_is_idempotent(tmp_path) -> None
             "ec_membership",
             "ec_watchlist",
             "ec_watchlist_member",
+            "ec_signal_run",
+            "ec_signal_calendar",
         }
         for table_name in expected_tables:
             assert _table_exists(conn, table_name)
@@ -306,6 +317,8 @@ def test_ec_sidecar_schema_columns_indexes_and_foreign_keys(tmp_path) -> None:
             "entity_code",
             "entity_name",
             "ticker",
+            "entity_level",
+            "entity_role_code",
             "status",
             "active_from",
             "active_to",
@@ -364,6 +377,26 @@ def test_ec_sidecar_schema_columns_indexes_and_foreign_keys(tmp_path) -> None:
             "notes",
             "created_at_utc",
         }.issubset(_table_columns(conn, "ec_watchlist_member"))
+        assert {
+            "run_id",
+            "ecosystem_id",
+            "taxonomy_version_id",
+            "signal_date",
+            "run_type",
+            "source_mode",
+            "status",
+            "started_at_utc",
+            "created_at_utc",
+        }.issubset(_table_columns(conn, "ec_signal_run"))
+        assert {
+            "ecosystem_id",
+            "signal_date",
+            "market_code",
+            "is_valid_signal_date",
+            "data_quality_status",
+            "source_run_id",
+            "created_at_utc",
+        }.issubset(_table_columns(conn, "ec_signal_calendar"))
 
         assert {
             "idx_ec_entity_ecosystem_type_code",
@@ -376,6 +409,12 @@ def test_ec_sidecar_schema_columns_indexes_and_foreign_keys(tmp_path) -> None:
         }.issubset(_index_names(conn, "ec_membership"))
         assert "idx_ec_watchlist_member_watchlist" in _index_names(conn, "ec_watchlist_member")
         assert "idx_ec_taxonomy_version_ecosystem_active" in _index_names(conn, "ec_taxonomy_version")
+        assert {
+            "idx_ec_signal_run_ecosystem_signal_date",
+            "idx_ec_signal_run_ecosystem_run_type_signal_date",
+            "idx_ec_signal_run_status",
+        }.issubset(_index_names(conn, "ec_signal_run"))
+        assert "idx_ec_signal_calendar_validity" in _index_names(conn, "ec_signal_calendar")
 
         assert _foreign_key_tables(conn, "ec_taxonomy_version") == {"ec_ecosystem"}
         assert _foreign_key_tables(conn, "ec_entity") == {"ec_ecosystem"}
@@ -387,6 +426,17 @@ def test_ec_sidecar_schema_columns_indexes_and_foreign_keys(tmp_path) -> None:
         }
         assert _foreign_key_tables(conn, "ec_watchlist") == {"ec_ecosystem"}
         assert _foreign_key_tables(conn, "ec_watchlist_member") == {"ec_watchlist", "ec_entity"}
+        assert _foreign_key_tables(conn, "ec_signal_run") == {"ec_ecosystem", "ec_taxonomy_version"}
+        assert _foreign_key_tables(conn, "ec_signal_calendar") == {"ec_ecosystem", "ec_signal_run"}
+
+        source_system_row = _table_info_row(conn, "ec_entity_alias", "source_system")
+        active_from_row = _table_info_row(conn, "ec_watchlist_member", "active_from")
+        assert source_system_row is not None
+        assert int(source_system_row[3]) == 1
+        assert source_system_row[4] == "'UNKNOWN'"
+        assert active_from_row is not None
+        assert int(active_from_row[3]) == 1
+        assert active_from_row[4] == "'1900-01-01'"
     finally:
         conn.close()
 
@@ -437,6 +487,14 @@ def test_ec_sidecar_basic_insert_path_and_constraints(tmp_path) -> None:
             entity_name="NVIDIA",
             ticker="NVDA",
         )
+        other_ticker_id = _insert_entity(
+            conn,
+            ecosystem_id,
+            entity_type="TICKER",
+            entity_code="AMD",
+            entity_name="AMD",
+            ticker="AMD",
+        )
 
         _insert_alias(
             conn,
@@ -475,6 +533,56 @@ def test_ec_sidecar_basic_insert_path_and_constraints(tmp_path) -> None:
         )
         watchlist_id = _insert_watchlist(conn, ecosystem_id, "DATACENTER_DEFAULT")
         _insert_watchlist_member(conn, watchlist_id, ticker_id, active_from="2026-06-01")
+        conn.execute(
+            """
+            INSERT INTO ec_signal_run (
+                run_id,
+                ecosystem_id,
+                taxonomy_version_id,
+                signal_date,
+                run_type,
+                signal_version,
+                ohlc_calc_version,
+                source_mode,
+                status,
+                started_at_utc,
+                finished_at_utc,
+                source_hash,
+                config_hash,
+                notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "run-1",
+                ecosystem_id,
+                taxonomy_version_id,
+                "2026-06-05",
+                "FULL_DAILY",
+                "v1",
+                "v1",
+                "TEST",
+                "OK",
+                "2026-06-05T00:00:00Z",
+                None,
+                None,
+                None,
+                None,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO ec_signal_calendar (
+                ecosystem_id,
+                signal_date,
+                market_code,
+                is_valid_signal_date,
+                validity_reason,
+                data_quality_status,
+                source_run_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (ecosystem_id, "2026-06-05", "USA", 1, None, "OK", "run-1"),
+        )
 
         other_ecosystem_id = _insert_ecosystem(conn, ecosystem_code="ALTDC", ecosystem_name="Alt DC")
         _insert_entity(
@@ -504,6 +612,34 @@ def test_ec_sidecar_basic_insert_path_and_constraints(tmp_path) -> None:
                 alias_value="DC_ECOSYSTEM_TOTAL",
                 source_system="dc_group_swing_signal_daily",
             )
+        conn.execute(
+            """
+            INSERT INTO ec_entity_alias (
+                ecosystem_id,
+                entity_id,
+                alias_type,
+                alias_value,
+                status
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (ecosystem_id, ticker_id, "DISPLAY_NAME", "NVDA_DISPLAY", "ACTIVE"),
+        )
+        assert conn.execute(
+            "SELECT source_system FROM ec_entity_alias WHERE alias_value = 'NVDA_DISPLAY'"
+        ).fetchone()[0] == "UNKNOWN"
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                """
+                INSERT INTO ec_entity_alias (
+                    ecosystem_id,
+                    entity_id,
+                    alias_type,
+                    alias_value,
+                    status
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (ecosystem_id, ticker_id, "DISPLAY_NAME", "NVDA_DISPLAY", "ACTIVE"),
+            )
         with pytest.raises(sqlite3.IntegrityError):
             _insert_membership(
                 conn,
@@ -516,8 +652,39 @@ def test_ec_sidecar_basic_insert_path_and_constraints(tmp_path) -> None:
             )
         with pytest.raises(sqlite3.IntegrityError):
             _insert_watchlist(conn, ecosystem_id, "DATACENTER_DEFAULT")
+        conn.execute(
+            """
+            INSERT INTO ec_watchlist_member (
+                watchlist_id,
+                entity_id,
+                member_role,
+                status,
+                notes
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (watchlist_id, other_ticker_id, "WATCH", "ACTIVE", None),
+        )
+        assert conn.execute(
+            """
+            SELECT active_from
+            FROM ec_watchlist_member
+            WHERE watchlist_id = ? AND entity_id = ?
+            """,
+            (watchlist_id, other_ticker_id),
+        ).fetchone()[0] == "1900-01-01"
         with pytest.raises(sqlite3.IntegrityError):
-            _insert_watchlist_member(conn, watchlist_id, ticker_id, active_from="2026-06-01")
+            conn.execute(
+                """
+                INSERT INTO ec_watchlist_member (
+                    watchlist_id,
+                    entity_id,
+                    member_role,
+                    status,
+                    notes
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (watchlist_id, other_ticker_id, "WATCH", "ACTIVE", None),
+            )
     finally:
         conn.close()
 
@@ -529,5 +696,62 @@ def test_ec_sidecar_connection_helper_applies_schema_in_memory() -> None:
         _apply_ec_sidecar_migration_to_connection(conn)
         assert _table_exists(conn, "ec_entity_alias")
         assert _table_exists(conn, "ec_membership")
+        assert _table_exists(conn, "ec_signal_run")
+        assert _table_exists(conn, "ec_signal_calendar")
+    finally:
+        conn.close()
+
+
+def test_ec_sidecar_migration_hardens_existing_019_rows(tmp_path) -> None:
+    db_path = tmp_path / "ec_sidecar_harden_existing.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys = ON")
+    try:
+        migration_019 = (
+            Path(__file__).resolve().parents[1]
+            / "rawcandle"
+            / "sqlite"
+            / "migrations"
+            / "019_create_ec_sidecar_schema.sql"
+        )
+        conn.executescript(migration_019.read_text(encoding="utf-8"))
+        conn.execute("INSERT INTO ec_ecosystem (ecosystem_code, ecosystem_name, status) VALUES ('DATACENTER', 'Datacenter', 'ACTIVE')")
+        conn.execute(
+            """
+            INSERT INTO ec_entity (ecosystem_id, entity_type, entity_code, entity_name, ticker, status)
+            VALUES (1, 'ECOSYSTEM', 'DATACENTER', 'Datacenter', NULL, 'ACTIVE')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO ec_entity_alias (
+                ecosystem_id, entity_id, alias_type, alias_value, source_system, status
+            ) VALUES (1, 1, 'DC_GROUP_NAME', 'DC_ECOSYSTEM_TOTAL', NULL, 'ACTIVE')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO ec_watchlist (
+                ecosystem_id, watchlist_code, watchlist_name, source_type, source_reference, status
+            ) VALUES (1, 'PRIMARY', 'Primary', 'FILE', 'watchlist.txt', 'ACTIVE')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO ec_watchlist_member (
+                watchlist_id, entity_id, member_role, status, active_from, notes
+            ) VALUES (1, 1, 'WATCH', 'ACTIVE', NULL, NULL)
+            """
+        )
+        conn.commit()
+
+        _apply_ec_sidecar_migration_to_connection(conn)
+
+        assert conn.execute("SELECT source_system FROM ec_entity_alias").fetchone()[0] == "UNKNOWN"
+        assert conn.execute("SELECT active_from FROM ec_watchlist_member").fetchone()[0] == "1900-01-01"
+        assert "entity_level" in _table_columns(conn, "ec_entity")
+        assert "entity_role_code" in _table_columns(conn, "ec_entity")
+        assert _table_exists(conn, "ec_signal_run")
+        assert _table_exists(conn, "ec_signal_calendar")
     finally:
         conn.close()
