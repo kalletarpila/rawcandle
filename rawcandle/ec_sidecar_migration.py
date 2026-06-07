@@ -11,6 +11,7 @@ MIGRATION_SQL_PATHS = (
     MIGRATIONS_DIR / "021_patch_ec_signal_calendar_p0_fields.sql",
     MIGRATIONS_DIR / "022_create_ec_fact_tables.sql",
     MIGRATIONS_DIR / "023_patch_ec_fact_schema_for_dc_parity.sql",
+    MIGRATIONS_DIR / "024_patch_ec_group_index_counts.sql",
 )
 
 
@@ -265,11 +266,20 @@ def _patch_ec_fact_schema_for_dc_parity_if_needed(conn: sqlite3.Connection) -> N
         _add_column_if_missing(conn, "ec_group_index_daily", column_name, column_sql)
 
 
+def _patch_ec_group_index_counts_if_needed(conn: sqlite3.Connection) -> None:
+    for column_name, column_sql in (
+        ("member_count", "member_count INTEGER NULL"),
+        ("eligible_count", "eligible_count INTEGER NULL"),
+    ):
+        _add_column_if_missing(conn, "ec_group_index_daily", column_name, column_sql)
+
+
 def _apply_ec_sidecar_migration_to_connection(conn: sqlite3.Connection) -> None:
     for migration_sql_path in MIGRATION_SQL_PATHS:
         conn.executescript(migration_sql_path.read_text(encoding="utf-8"))
     _harden_ec_sidecar_schema(conn)
     _patch_ec_fact_schema_for_dc_parity_if_needed(conn)
+    _patch_ec_group_index_counts_if_needed(conn)
 
 
 def apply_ec_sidecar_migration(db_path: str) -> None:

@@ -378,6 +378,7 @@ def test_full_source_layer_build_runs_all_loaders_into_single_temp_db(tmp_path) 
         assert conn.execute("SELECT COUNT(*) FROM ec_group_signal_daily").fetchone()[0] == 3
         assert conn.execute("SELECT COUNT(*) FROM ec_group_synthetic_ohlc_daily").fetchone()[0] == 2
         assert conn.execute("SELECT COUNT(*) FROM ec_group_index_daily").fetchone()[0] == 3
+        assert conn.execute("SELECT COUNT(*) FROM ec_group_index_daily WHERE member_count = 1 AND eligible_count = 1").fetchone()[0] == 3
         assert conn.execute("SELECT COUNT(*) FROM ec_pipeline_watermark").fetchone()[0] == 2
         assert conn.execute("SELECT COUNT(*) FROM ec_signal_run").fetchone()[0] == 4
         assert conn.execute("SELECT COUNT(*) FROM ec_entity WHERE entity_code='CRGY' AND entity_type='TICKER'").fetchone()[0] == 1

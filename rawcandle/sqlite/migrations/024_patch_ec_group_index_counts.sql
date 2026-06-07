@@ -1,0 +1,2 @@
+-- Narrow follow-up migration for ec_group_index_daily parity-gap columns.
+-- SQLite-safe additive column patching is applied by ec_sidecar_migration.py.

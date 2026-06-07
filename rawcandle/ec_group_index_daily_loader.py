@@ -273,6 +273,8 @@ def _insert_target_row(
             entity_id,
             entity_type,
             calc_version,
+            member_count,
+            eligible_count,
             index_value,
             return_1d,
             return_5d,
@@ -300,7 +302,7 @@ def _insert_target_row(
             source_run_id,
             created_at_utc
         ) VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         )
         """,
         (
@@ -310,6 +312,8 @@ def _insert_target_row(
             entity_id,
             entity_type,
             row["calc_version"],
+            row["member_count"],
+            row["eligible_count"],
             row["index_level_equal"],
             row["daily_return_equal"],
             None,

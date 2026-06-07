@@ -363,6 +363,10 @@ def test_parity_audit_succeeds_for_small_fixture_build(tmp_path) -> None:
     assert summary["group_index_parity"]["status"] == "OK_WITH_WARNINGS"
     assert summary["pipeline_watermark_parity"]["status"] == "OK_WITH_WARNINGS"
     assert summary["pipeline_watermark_parity"]["unknown_components"] == ["WEEKLY_REPORT"]
+    assert not any(
+        "member_count" in warning or "eligible_count" in warning
+        for warning in summary["group_index_parity"]["warnings"]
+    )
 
 
 def test_parity_audit_numeric_tolerance_allows_small_difference(tmp_path) -> None:
@@ -424,3 +428,25 @@ def test_parity_audit_missing_lineage_fails(tmp_path) -> None:
     assert summary["status"] == "FAILED"
     assert summary["synthetic_ohlc_parity"]["status"] == "FAILED"
     assert any(example["field"] == "source_row_hash" for example in summary["synthetic_ohlc_parity"]["field_mismatch_examples"])
+
+
+def test_parity_audit_group_index_member_count_mismatch_fails(tmp_path) -> None:
+    source_db, target_db = _build_target(tmp_path)
+    with _connect(str(target_db)) as conn:
+        conn.execute("UPDATE ec_group_index_daily SET member_count = member_count + 1 WHERE entity_type = 'GROUP_L1'")
+        conn.commit()
+    summary = audit_dc_ec_fact_parity(str(source_db), str(target_db), signal_date="2026-06-05")
+    assert summary["status"] == "FAILED"
+    assert summary["group_index_parity"]["status"] == "FAILED"
+    assert any(example["field"] == "member_count" for example in summary["group_index_parity"]["field_mismatch_examples"])
+
+
+def test_parity_audit_group_index_eligible_count_mismatch_fails(tmp_path) -> None:
+    source_db, target_db = _build_target(tmp_path)
+    with _connect(str(target_db)) as conn:
+        conn.execute("UPDATE ec_group_index_daily SET eligible_count = eligible_count + 1 WHERE entity_type = 'GROUP_L2'")
+        conn.commit()
+    summary = audit_dc_ec_fact_parity(str(source_db), str(target_db), signal_date="2026-06-05")
+    assert summary["status"] == "FAILED"
+    assert summary["group_index_parity"]["status"] == "FAILED"
+    assert any(example["field"] == "eligible_count" for example in summary["group_index_parity"]["field_mismatch_examples"])

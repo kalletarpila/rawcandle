@@ -155,7 +155,7 @@ def test_loader_persists_group_index_rows_lineage_and_signal_run(tmp_path) -> No
     try:
         rows = conn.execute(
             """
-            SELECT entity_type, signal_date, calc_version, index_value, return_1d,
+            SELECT entity_type, signal_date, calc_version, member_count, eligible_count, index_value, return_1d,
                    return_20d, relative_strength_20d, relative_strength_spy_60d,
                    relative_strength_qqq_60d, data_quality_status, source_table,
                    source_pk_json, source_row_hash, source_run_id
@@ -163,10 +163,12 @@ def test_loader_persists_group_index_rows_lineage_and_signal_run(tmp_path) -> No
             ORDER BY entity_type, entity_id
             """
         ).fetchall()
-        assert rows[0][:10] == (
+        assert rows[0][:12] == (
             "ECOSYSTEM",
             "2026-06-05",
             "DC_INDEX_CALC_V1",
+            11,
+            10,
             124.55,
             0.0134,
             0.082,
@@ -175,10 +177,12 @@ def test_loader_persists_group_index_rows_lineage_and_signal_run(tmp_path) -> No
             0.067,
             "OK",
         )
-        assert rows[1][:10] == (
+        assert rows[1][:12] == (
             "GROUP_L1",
             "2026-06-05",
             "DC_INDEX_CALC_V1",
+            11,
+            10,
             124.55,
             0.0134,
             0.082,
@@ -187,10 +191,12 @@ def test_loader_persists_group_index_rows_lineage_and_signal_run(tmp_path) -> No
             0.067,
             "OK",
         )
-        assert rows[2][:10] == (
+        assert rows[2][:12] == (
             "GROUP_L2",
             "2026-06-05",
             "DC_INDEX_CALC_V1",
+            11,
+            10,
             124.55,
             0.0134,
             0.082,
@@ -199,8 +205,8 @@ def test_loader_persists_group_index_rows_lineage_and_signal_run(tmp_path) -> No
             0.067,
             "OK",
         )
-        assert all(row[10] == "dc_group_index_daily" for row in rows)
-        source_pk = json.loads(rows[0][11])
+        assert all(row[12] == "dc_group_index_daily" for row in rows)
+        source_pk = json.loads(rows[0][13])
         assert source_pk == {
             "calc_version": "DC_INDEX_CALC_V1",
             "group_name": "DC_ECOSYSTEM_TOTAL",
@@ -209,8 +215,8 @@ def test_loader_persists_group_index_rows_lineage_and_signal_run(tmp_path) -> No
             "run_id": "DC_INDEX_DC_TAXONOMY_FULL_V1_BASE20200101_20200101_20260605",
             "taxonomy_version": "DC_TAXONOMY_FULL_V1",
         }
-        assert len(rows[0][12]) == 64
-        assert rows[0][13] == "DC_INDEX_DC_TAXONOMY_FULL_V1_BASE20200101_20200101_20260605"
+        assert len(rows[0][14]) == 64
+        assert rows[0][15] == "DC_INDEX_DC_TAXONOMY_FULL_V1_BASE20200101_20200101_20260605"
 
         signal_run = conn.execute(
             """

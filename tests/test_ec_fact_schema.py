@@ -254,6 +254,8 @@ def test_ec_fact_schema_keys_columns_indexes_and_foreign_keys(tmp_path) -> None:
             "latest_reset_age_trading_days",
         }.issubset(_table_columns(conn, "ec_group_synthetic_ohlc_daily"))
         assert {
+            "member_count",
+            "eligible_count",
             "ma50_eligible_count",
             "ma200_eligible_count",
             "median_return",
@@ -423,14 +425,16 @@ def test_ec_fact_schema_minimal_insert_paths_and_duplicate_pk_rejection(tmp_path
             """
             INSERT INTO ec_group_index_daily (
                 ecosystem_id, taxonomy_version_id, signal_date, entity_id, entity_type, calc_version,
+                member_count, eligible_count,
                 ma50_eligible_count, ma200_eligible_count, median_return, pct_positive,
                 pct_above_ma50, pct_above_ma200, volatility_60d,
                 relative_strength_spy_60d, relative_strength_qqq_60d,
                 source_table, source_pk_json, source_row_hash, source_run_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 ctx["ecosystem_id"], ctx["taxonomy_version_id"], "2026-06-05", ctx["ecosystem_entity_id"], "ECOSYSTEM", "v1",
+                229, 229,
                 229, 229, -0.05, 6.5,
                 63.7, 75.9, 0.022,
                 0.20, 0.13,
@@ -598,5 +602,18 @@ def test_ec_fact_schema_foreign_keys_are_enforced(tmp_path) -> None:
                     "2026-06-05", "missing-run", "OK",
                 ),
             )
+    finally:
+        conn.close()
+
+
+def test_ec_fact_schema_migration_runner_applies_group_index_count_patch(tmp_path) -> None:
+    db_path = tmp_path / "ec_fact_group_index_count_patch.db"
+    apply_ec_sidecar_migration(str(db_path))
+
+    conn = _connect(str(db_path))
+    try:
+        columns = _table_columns(conn, "ec_group_index_daily")
+        assert "member_count" in columns
+        assert "eligible_count" in columns
     finally:
         conn.close()
