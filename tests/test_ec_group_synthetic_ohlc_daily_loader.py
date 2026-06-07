@@ -1,0 +1,436 @@
+import csv
+import json
+import sqlite3
+from pathlib import Path
+
+import pytest
+
+from rawcandle.ec_datacenter_taxonomy_loader import load_datacenter_taxonomy_to_ec_sidecar
+from rawcandle.ec_group_synthetic_ohlc_daily_loader import load_ec_group_synthetic_ohlc_daily_from_dc
+from rawcandle.ec_sidecar_migration import apply_ec_sidecar_migration
+
+
+def _connect(db_path: str) -> sqlite3.Connection:
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def _write_taxonomy_csv(path: Path) -> None:
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(
+            [
+                "taxonomy_version",
+                "ticker",
+                "layer",
+                "subindustry",
+                "report_group_status",
+                "is_primary",
+                "role_weight",
+                "notes",
+            ]
+        )
+        writer.writerow(["DC_TAXONOMY_FULL_V1", "NVDA", "Compute silicon", "GPUs", "CORE", 1, 1.0, ""])
+        writer.writerow(["DC_TAXONOMY_FULL_V1", "AVGO", "Networking", "Switch silicon", "CORE", 1, 1.0, ""])
+
+
+def _create_source_db(path: Path, rows: list[dict[str, object]]) -> None:
+    if path.exists():
+        path.unlink()
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE dc_group_synthetic_ohlc_daily (
+                ohlc_date TEXT NOT NULL,
+                taxonomy_version TEXT NOT NULL,
+                group_type TEXT NOT NULL,
+                group_name TEXT NOT NULL,
+                member_count INTEGER NULL,
+                eligible_count INTEGER NULL,
+                synthetic_open REAL NULL,
+                synthetic_high REAL NULL,
+                synthetic_low REAL NULL,
+                synthetic_close REAL NULL,
+                synthetic_volume REAL NULL,
+                ma20 REAL NULL,
+                ema20 REAL NULL,
+                distance_to_ema20_pct REAL NULL,
+                volatility_20d REAL NULL,
+                pivot_radius INTEGER NULL,
+                latest_pivot_high_date TEXT NULL,
+                latest_pivot_high_value REAL NULL,
+                latest_pivot_low_date TEXT NULL,
+                latest_pivot_low_value REAL NULL,
+                latest_structure_label TEXT NULL,
+                trend_classification TEXT NULL,
+                relative_base_window INTEGER NULL,
+                relative_open_20 REAL NULL,
+                relative_high_20 REAL NULL,
+                relative_low_20 REAL NULL,
+                relative_close_20 REAL NULL,
+                relative_upper_wick_20 REAL NULL,
+                relative_lower_wick_20 REAL NULL,
+                relative_close_extension_20 REAL NULL,
+                relative_high_extension_20 REAL NULL,
+                relative_low_extension_20 REAL NULL,
+                relative_eligible_count INTEGER NULL,
+                data_quality_status TEXT NULL,
+                calc_version TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                created_at_utc TEXT NOT NULL,
+                latest_structure_age_trading_days INTEGER NULL,
+                latest_structure_freshness TEXT NULL,
+                latest_bos_event_type TEXT NULL,
+                latest_bos_event_date TEXT NULL,
+                latest_bos_confirmed_as_of_date TEXT NULL,
+                latest_bos_age_trading_days INTEGER NULL,
+                latest_bos_freshness TEXT NULL,
+                latest_reset_event_date TEXT NULL,
+                latest_reset_confirmed_as_of_date TEXT NULL,
+                latest_reset_reason TEXT NULL,
+                latest_reset_age_trading_days INTEGER NULL,
+                latest_reset_freshness TEXT NULL,
+                PRIMARY KEY (ohlc_date, taxonomy_version, group_type, group_name, calc_version)
+            )
+            """
+        )
+        columns = list(rows[0].keys()) if rows else []
+        placeholders = ", ".join("?" for _ in columns)
+        conn.executemany(
+            f"INSERT INTO dc_group_synthetic_ohlc_daily ({', '.join(columns)}) VALUES ({placeholders})",
+            [tuple(row[column] for column in columns) for row in rows],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _source_row(
+    *,
+    group_type: str,
+    group_name: str,
+    ohlc_date: str = "2026-06-05",
+    calc_version: str = "DC_SWING_OHLC_V1",
+    run_id: str = "DC_GROUP_SYNTH_OHLC_20250801_20260605_DC_SWING_OHLC_V1",
+) -> dict[str, object]:
+    return {
+        "ohlc_date": ohlc_date,
+        "taxonomy_version": "DC_TAXONOMY_FULL_V1",
+        "group_type": group_type,
+        "group_name": group_name,
+        "member_count": 11,
+        "eligible_count": 11,
+        "synthetic_open": 82.8,
+        "synthetic_high": 84.2,
+        "synthetic_low": 81.9,
+        "synthetic_close": 82.83,
+        "synthetic_volume": 13132054.0,
+        "ma20": 82.81,
+        "ema20": 83.62,
+        "distance_to_ema20_pct": -0.0094,
+        "volatility_20d": 0.0185,
+        "pivot_radius": 5,
+        "latest_pivot_high_date": "2026-05-29",
+        "latest_pivot_high_value": 87.13,
+        "latest_pivot_low_date": "2026-05-20",
+        "latest_pivot_low_value": 75.98,
+        "latest_structure_label": "LH",
+        "trend_classification": "DOWN",
+        "relative_base_window": 20,
+        "relative_open_20": 0.9997,
+        "relative_high_20": 1.0163,
+        "relative_low_20": 0.9889,
+        "relative_close_20": 0.9995,
+        "relative_upper_wick_20": 0.0165,
+        "relative_lower_wick_20": 0.0106,
+        "relative_close_extension_20": -0.0004,
+        "relative_high_extension_20": 0.0163,
+        "relative_low_extension_20": -0.0110,
+        "relative_eligible_count": 11,
+        "data_quality_status": "OK",
+        "calc_version": calc_version,
+        "run_id": run_id,
+        "created_at_utc": "2026-06-07T03:48:00Z",
+        "latest_structure_age_trading_days": 5,
+        "latest_structure_freshness": "FRESH",
+        "latest_bos_event_type": "BOS_DOWN",
+        "latest_bos_event_date": "2026-02-27",
+        "latest_bos_confirmed_as_of_date": "2026-02-27",
+        "latest_bos_age_trading_days": 68,
+        "latest_bos_freshness": "STALE",
+        "latest_reset_event_date": "2026-02-27",
+        "latest_reset_confirmed_as_of_date": "2026-02-27",
+        "latest_reset_reason": "DOUBLE_BOS_DOWN",
+        "latest_reset_age_trading_days": 68,
+        "latest_reset_freshness": "STALE",
+    }
+
+
+def _setup_target_db(tmp_path) -> tuple[Path, Path]:
+    Path(tmp_path).mkdir(parents=True, exist_ok=True)
+    target_db = tmp_path / "target.db"
+    taxonomy_path = tmp_path / "taxonomy.csv"
+    apply_ec_sidecar_migration(str(target_db))
+    _write_taxonomy_csv(taxonomy_path)
+    load_datacenter_taxonomy_to_ec_sidecar(
+        db_path=str(target_db),
+        taxonomy_csv_path=str(taxonomy_path),
+        taxonomy_version_code="DC_TAXONOMY_FULL_V1",
+    )
+    return target_db, taxonomy_path
+
+
+def test_loader_persists_synthetic_ohlc_rows_lineage_and_signal_run(tmp_path) -> None:
+    source_db = tmp_path / "source.db"
+    target_db, _ = _setup_target_db(tmp_path)
+    _create_source_db(
+        source_db,
+        [
+            _source_row(group_type="layer", group_name="Compute silicon"),
+            _source_row(group_type="subindustry", group_name="GPUs"),
+            _source_row(group_type="ecosystem", group_name="DC_ECOSYSTEM_TOTAL"),
+        ],
+    )
+
+    summary = load_ec_group_synthetic_ohlc_daily_from_dc(
+        source_db_path=str(source_db),
+        target_db_path=str(target_db),
+    )
+
+    conn = _connect(str(target_db))
+    try:
+        rows = conn.execute(
+            """
+            SELECT entity_type, signal_date, ohlc_calc_version, synthetic_close,
+                   relative_close_20, relative_strength_20d, latest_structure_date,
+                   trend_state, data_quality_status, source_table, source_pk_json, source_row_hash, source_run_id
+            FROM ec_group_synthetic_ohlc_daily
+            ORDER BY entity_type, entity_id
+            """
+        ).fetchall()
+        assert rows[0][:9] == ("ECOSYSTEM", "2026-06-05", "DC_SWING_OHLC_V1", 82.83, 0.9995, None, None, "DOWN", "OK")
+        assert rows[1][:9] == ("GROUP_L1", "2026-06-05", "DC_SWING_OHLC_V1", 82.83, 0.9995, None, None, "DOWN", "OK")
+        assert rows[2][:9] == ("GROUP_L2", "2026-06-05", "DC_SWING_OHLC_V1", 82.83, 0.9995, None, None, "DOWN", "OK")
+        assert all(row[9] == "dc_group_synthetic_ohlc_daily" for row in rows)
+        source_pk = json.loads(rows[0][10])
+        assert source_pk == {
+            "calc_version": "DC_SWING_OHLC_V1",
+            "group_name": "DC_ECOSYSTEM_TOTAL",
+            "group_type": "ecosystem",
+            "ohlc_date": "2026-06-05",
+            "run_id": "DC_GROUP_SYNTH_OHLC_20250801_20260605_DC_SWING_OHLC_V1",
+            "taxonomy_version": "DC_TAXONOMY_FULL_V1",
+        }
+        assert len(rows[0][11]) == 64
+        assert rows[0][12] == "DC_GROUP_SYNTH_OHLC_20250801_20260605_DC_SWING_OHLC_V1"
+
+        signal_run = conn.execute(
+            """
+            SELECT run_type, signal_version, ohlc_calc_version, source_mode, status, started_at_utc, finished_at_utc
+            FROM ec_signal_run
+            WHERE run_id = 'DC_GROUP_SYNTH_OHLC_20250801_20260605_DC_SWING_OHLC_V1'
+            """
+        ).fetchone()
+        assert signal_run == (
+            "SYNTHETIC_OHLC",
+            None,
+            "DC_SWING_OHLC_V1",
+            "DC_BACKFILL",
+            "OK",
+            "2026-06-07T03:48:00Z",
+            "2026-06-07T03:48:00Z",
+        )
+
+        assert summary == {
+            "status": "OK_WITH_WARNINGS",
+            "ecosystem_code": "DATACENTER",
+            "taxonomy_version_code": "DC_TAXONOMY_FULL_V1",
+            "signal_date": "2026-06-05",
+            "ohlc_calc_version": "DC_SWING_OHLC_V1",
+            "source_table": "dc_group_synthetic_ohlc_daily",
+            "source_row_count": 3,
+            "loaded_row_count": 3,
+            "failed_row_count": 0,
+            "unmapped_source_columns": [],
+            "unmapped_target_columns": [
+                "latest_structure_date",
+                "structure_state",
+                "relative_strength_5d",
+                "relative_strength_20d",
+            ],
+            "missing_group_entities": [],
+            "missing_group_aliases": [],
+            "multiple_group_matches": [],
+            "source_run_ids": ["DC_GROUP_SYNTH_OHLC_20250801_20260605_DC_SWING_OHLC_V1"],
+            "created_signal_run_count": 1,
+            "reused_signal_run_count": 0,
+            "group_count_by_type": {
+                "ecosystem": 1,
+                "layer": 1,
+                "subindustry": 1,
+            },
+            "warnings": [
+                "Target columns left NULL because current dc source has no values: latest_structure_date, structure_state, relative_strength_5d, relative_strength_20d"
+            ],
+        }
+    finally:
+        conn.close()
+
+
+def test_loader_fails_when_layer_entity_is_missing(tmp_path) -> None:
+    source_db = tmp_path / "source_missing_layer.db"
+    target_db, _ = _setup_target_db(tmp_path)
+    _create_source_db(source_db, [_source_row(group_type="layer", group_name="Missing layer")])
+
+    summary = load_ec_group_synthetic_ohlc_daily_from_dc(
+        source_db_path=str(source_db),
+        target_db_path=str(target_db),
+    )
+
+    assert summary["status"] == "FAILED"
+    assert summary["missing_group_entities"] == ["layer:Missing layer"]
+    assert summary["failed_row_count"] == 1
+
+
+def test_loader_fails_when_subindustry_entity_is_missing(tmp_path) -> None:
+    source_db = tmp_path / "source_missing_subindustry.db"
+    target_db, _ = _setup_target_db(tmp_path)
+    _create_source_db(source_db, [_source_row(group_type="subindustry", group_name="GPUs")])
+
+    with _connect(str(target_db)) as conn:
+        conn.execute("DELETE FROM ec_membership WHERE parent_entity_id IN (SELECT entity_id FROM ec_entity WHERE entity_type='GROUP_L2' AND entity_code='GPUS')")
+        conn.execute("DELETE FROM ec_membership WHERE child_entity_id IN (SELECT entity_id FROM ec_entity WHERE entity_type='GROUP_L2' AND entity_code='GPUS')")
+        conn.execute("DELETE FROM ec_entity WHERE entity_type='GROUP_L2' AND entity_code='GPUS'")
+        conn.commit()
+
+    summary = load_ec_group_synthetic_ohlc_daily_from_dc(
+        source_db_path=str(source_db),
+        target_db_path=str(target_db),
+    )
+
+    assert summary["status"] == "FAILED"
+    assert summary["missing_group_entities"] == ["subindustry:GPUs"]
+    assert summary["failed_row_count"] == 1
+
+
+def test_loader_fails_when_ecosystem_alias_is_missing(tmp_path) -> None:
+    source_db = tmp_path / "source_missing_alias.db"
+    target_db, _ = _setup_target_db(tmp_path)
+    _create_source_db(source_db, [_source_row(group_type="ecosystem", group_name="DC_ECOSYSTEM_TOTAL")])
+
+    with _connect(str(target_db)) as conn:
+        conn.execute(
+            """
+            DELETE FROM ec_entity_alias
+            WHERE alias_type = 'DC_GROUP_NAME'
+              AND alias_value = 'DC_ECOSYSTEM_TOTAL'
+              AND source_system = 'dc_group_facts'
+            """
+        )
+        conn.commit()
+
+    summary = load_ec_group_synthetic_ohlc_daily_from_dc(
+        source_db_path=str(source_db),
+        target_db_path=str(target_db),
+    )
+
+    assert summary["status"] == "FAILED"
+    assert summary["missing_group_aliases"] == ["DC_ECOSYSTEM_TOTAL"]
+    assert summary["failed_row_count"] == 1
+
+
+def test_loader_duplicate_scope_requires_replace_existing_and_replace_is_scoped(tmp_path) -> None:
+    source_db = tmp_path / "source_replace.db"
+    target_db, _ = _setup_target_db(tmp_path)
+    _create_source_db(source_db, [_source_row(group_type="layer", group_name="Compute silicon")])
+
+    first_summary = load_ec_group_synthetic_ohlc_daily_from_dc(
+        source_db_path=str(source_db),
+        target_db_path=str(target_db),
+    )
+    assert first_summary["loaded_row_count"] == 1
+
+    with pytest.raises(ValueError, match="Target synthetic OHLC fact rows already exist"):
+        load_ec_group_synthetic_ohlc_daily_from_dc(
+            source_db_path=str(source_db),
+            target_db_path=str(target_db),
+            replace_existing=False,
+        )
+
+    with _connect(str(target_db)) as conn:
+        conn.execute(
+            """
+            INSERT INTO ec_signal_run (
+                run_id, ecosystem_id, taxonomy_version_id, signal_date, run_type, ohlc_calc_version,
+                source_mode, status, started_at_utc
+            ) VALUES ('legacy-ohlc-run', 1, 1, '2026-06-04', 'SYNTHETIC_OHLC', 'DC_SWING_OHLC_V1', 'TEST', 'OK', '2026-06-07T00:00:00Z')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO ec_group_synthetic_ohlc_daily (
+                ecosystem_id, taxonomy_version_id, signal_date, entity_id, entity_type, ohlc_calc_version,
+                source_table, source_pk_json, source_row_hash, source_run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1,
+                1,
+                "2026-06-04",
+                1,
+                "ECOSYSTEM",
+                "DC_SWING_OHLC_V1",
+                "dc_group_synthetic_ohlc_daily",
+                '{"ohlc_date":"2026-06-04","group_name":"legacy"}',
+                "legacy-hash",
+                "legacy-ohlc-run",
+                "2026-06-07T00:00:00Z",
+            ),
+        )
+        conn.commit()
+
+    _create_source_db(source_db, [_source_row(group_type="layer", group_name="Compute silicon", calc_version="DC_SWING_OHLC_V1")])
+    summary = load_ec_group_synthetic_ohlc_daily_from_dc(
+        source_db_path=str(source_db),
+        target_db_path=str(target_db),
+        replace_existing=True,
+    )
+
+    with _connect(str(target_db)) as conn:
+        rows = conn.execute(
+            """
+            SELECT signal_date, entity_type, synthetic_close
+            FROM ec_group_synthetic_ohlc_daily
+            ORDER BY signal_date, entity_type
+            """
+        ).fetchall()
+        assert rows == [
+            ("2026-06-04", "ECOSYSTEM", None),
+            ("2026-06-05", "GROUP_L1", 82.83),
+        ]
+    assert summary["loaded_row_count"] == 1
+    assert summary["reused_signal_run_count"] == 1
+    assert summary["created_signal_run_count"] == 0
+
+
+def test_loader_source_row_hash_is_deterministic(tmp_path) -> None:
+    source_db = tmp_path / "source_hash.db"
+    target_db_a, _ = _setup_target_db(tmp_path / "a")
+    target_db_b, _ = _setup_target_db(tmp_path / "b")
+    _create_source_db(source_db, [_source_row(group_type="layer", group_name="Compute silicon")])
+
+    load_ec_group_synthetic_ohlc_daily_from_dc(
+        source_db_path=str(source_db),
+        target_db_path=str(target_db_a),
+    )
+    load_ec_group_synthetic_ohlc_daily_from_dc(
+        source_db_path=str(source_db),
+        target_db_path=str(target_db_b),
+    )
+
+    with _connect(str(target_db_a)) as conn_a, _connect(str(target_db_b)) as conn_b:
+        hash_a = conn_a.execute("SELECT source_row_hash FROM ec_group_synthetic_ohlc_daily").fetchone()[0]
+        hash_b = conn_b.execute("SELECT source_row_hash FROM ec_group_synthetic_ohlc_daily").fetchone()[0]
+        assert hash_a == hash_b
