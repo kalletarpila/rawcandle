@@ -166,6 +166,25 @@ def _fetch_dc_tickers(conn: sqlite3.Connection, selected_date: str) -> set[str]:
     return {str(row[0]) for row in rows}
 
 
+def _fetch_taxonomy_tickers(
+    conn: sqlite3.Connection,
+    *,
+    taxonomy_version_id: int,
+) -> set[str]:
+    rows = conn.execute(
+        """
+        SELECT DISTINCT child.entity_code
+        FROM ec_membership m
+        JOIN ec_entity child ON child.entity_id = m.child_entity_id
+        WHERE m.taxonomy_version_id = ?
+          AND child.entity_type = 'TICKER'
+        ORDER BY child.entity_code
+        """,
+        (taxonomy_version_id,),
+    ).fetchall()
+    return {str(row[0]) for row in rows}
+
+
 def _entity_match_exists(
     conn: sqlite3.Connection,
     *,
@@ -319,45 +338,54 @@ def _primary_membership_checks(
     conn: sqlite3.Connection,
     *,
     taxonomy_version_id: int,
+    required_ticker_codes: set[str],
 ) -> dict[str, object]:
-    tickers_without_primary = sorted(
-        str(row[0])
-        for row in conn.execute(
-            """
-            SELECT child.entity_code
-            FROM ec_entity child
-            LEFT JOIN ec_membership m
-              ON m.child_entity_id = child.entity_id
-             AND m.taxonomy_version_id = ?
-             AND m.is_primary = 1
-            LEFT JOIN ec_entity parent
-              ON parent.entity_id = m.parent_entity_id
-             AND parent.entity_type = 'GROUP_L2'
-            WHERE child.entity_type = 'TICKER'
-            GROUP BY child.entity_code
-            HAVING SUM(CASE WHEN parent.entity_id IS NOT NULL THEN 1 ELSE 0 END) = 0
-            """,
-            (taxonomy_version_id,),
-        ).fetchall()
-    )
-    tickers_with_multiple_primary = sorted(
-        str(row[0])
-        for row in conn.execute(
-            """
-            SELECT child.entity_code
-            FROM ec_membership m
-            JOIN ec_entity child ON child.entity_id = m.child_entity_id
-            JOIN ec_entity parent ON parent.entity_id = m.parent_entity_id
-            WHERE m.taxonomy_version_id = ?
-              AND child.entity_type = 'TICKER'
-              AND parent.entity_type = 'GROUP_L2'
-              AND m.is_primary = 1
-            GROUP BY child.entity_code
-            HAVING COUNT(*) > 1
-            """,
-            (taxonomy_version_id,),
-        ).fetchall()
-    )
+    if required_ticker_codes:
+        ticker_placeholders = ", ".join("?" for _ in required_ticker_codes)
+        ticker_params: tuple[object, ...] = (taxonomy_version_id, *sorted(required_ticker_codes))
+        tickers_without_primary = sorted(
+            str(row[0])
+            for row in conn.execute(
+                f"""
+                SELECT child.entity_code
+                FROM ec_entity child
+                LEFT JOIN ec_membership m
+                  ON m.child_entity_id = child.entity_id
+                 AND m.taxonomy_version_id = ?
+                 AND m.is_primary = 1
+                LEFT JOIN ec_entity parent
+                  ON parent.entity_id = m.parent_entity_id
+                 AND parent.entity_type = 'GROUP_L2'
+                WHERE child.entity_type = 'TICKER'
+                  AND child.entity_code IN ({ticker_placeholders})
+                GROUP BY child.entity_code
+                HAVING SUM(CASE WHEN parent.entity_id IS NOT NULL THEN 1 ELSE 0 END) = 0
+                """,
+                ticker_params,
+            ).fetchall()
+        )
+        tickers_with_multiple_primary = sorted(
+            str(row[0])
+            for row in conn.execute(
+                f"""
+                SELECT child.entity_code
+                FROM ec_membership m
+                JOIN ec_entity child ON child.entity_id = m.child_entity_id
+                JOIN ec_entity parent ON parent.entity_id = m.parent_entity_id
+                WHERE m.taxonomy_version_id = ?
+                  AND child.entity_type = 'TICKER'
+                  AND child.entity_code IN ({ticker_placeholders})
+                  AND parent.entity_type = 'GROUP_L2'
+                  AND m.is_primary = 1
+                GROUP BY child.entity_code
+                HAVING COUNT(*) > 1
+                """,
+                ticker_params,
+            ).fetchall()
+        )
+    else:
+        tickers_without_primary = []
+        tickers_with_multiple_primary = []
     group_l2_without_parent_group_l1 = sorted(
         str(row[0])
         for row in conn.execute(
@@ -418,6 +446,7 @@ def _primary_membership_checks(
 
     return {
         "ticker_primary_membership_ok": not tickers_without_primary and not tickers_with_multiple_primary,
+        "required_ticker_count": len(required_ticker_codes),
         "tickers_without_primary_group_l2": tickers_without_primary,
         "tickers_with_multiple_primary_group_l2": tickers_with_multiple_primary,
         "group_l2_without_parent_group_l1": group_l2_without_parent_group_l1,
@@ -479,6 +508,10 @@ def audit_dc_facts_against_ec_sidecar(
 
         dc_tickers = _fetch_dc_tickers(analysis_conn, selected_signal_date)
         ec_tickers = _fetch_ec_ticker_codes(ec_conn, ecosystem_id)
+        taxonomy_tickers = _fetch_taxonomy_tickers(
+            ec_conn,
+            taxonomy_version_id=taxonomy_version_id,
+        )
         matched_tickers = sorted(dc_tickers & ec_tickers)
         missing_in_ec_tickers = sorted(dc_tickers - ec_tickers)
         ec_only_tickers = sorted(ec_tickers - dc_tickers)
@@ -489,6 +522,12 @@ def audit_dc_facts_against_ec_sidecar(
             for ticker in _parse_watchlist_source(source_reference):
                 if ticker not in watchlist_member_tickers and ticker not in watchlist_missing_tickers:
                     watchlist_missing_tickers.append(ticker)
+        watchlist_tickers = set(watchlist_member_tickers)
+        dc_fact_tickers = set(dc_tickers)
+        watchlist_only_tickers = sorted(watchlist_tickers - taxonomy_tickers)
+        watchlist_without_taxonomy_membership_tickers = list(watchlist_only_tickers)
+        watchlist_without_dc_fact_tickers = sorted(watchlist_tickers - dc_fact_tickers)
+        required_primary_membership_tickers = taxonomy_tickers | dc_fact_tickers
 
         group_result = _audit_group_table(
             analysis_conn,
@@ -515,6 +554,7 @@ def audit_dc_facts_against_ec_sidecar(
         membership_result = _primary_membership_checks(
             ec_conn,
             taxonomy_version_id=taxonomy_version_id,
+            required_ticker_codes=required_primary_membership_tickers,
         )
 
         failures = (
@@ -529,7 +569,11 @@ def audit_dc_facts_against_ec_sidecar(
             or bool(membership_result["group_l2_without_parent_group_l1"])
             or bool(membership_result["group_l1_without_parent_ecosystem"])
         )
-        warnings = bool(watchlist_missing_tickers)
+        warnings = bool(
+            watchlist_missing_tickers
+            or watchlist_only_tickers
+            or watchlist_without_dc_fact_tickers
+        )
 
         if failures:
             status = "FAILED"
@@ -547,10 +591,16 @@ def audit_dc_facts_against_ec_sidecar(
             "selected_group_index_date": selected_group_index_date,
             "dc_ticker_count": len(dc_tickers),
             "ec_ticker_count": len(ec_tickers),
+            "taxonomy_ticker_count": len(taxonomy_tickers),
+            "watchlist_ticker_count": len(watchlist_tickers),
+            "dc_fact_ticker_count": len(dc_fact_tickers),
             "matched_ticker_count": len(matched_tickers),
             "missing_in_ec_tickers": missing_in_ec_tickers,
             "ec_only_tickers": ec_only_tickers,
             "watchlist_member_count": len(watchlist_member_tickers),
+            "watchlist_only_tickers": watchlist_only_tickers,
+            "watchlist_without_taxonomy_membership_tickers": watchlist_without_taxonomy_membership_tickers,
+            "watchlist_without_dc_fact_tickers": watchlist_without_dc_fact_tickers,
             "watchlist_missing_tickers": watchlist_missing_tickers,
             "dc_group_count": int(group_result["count"]),
             "matched_group_count": int(group_result["matched_count"]),

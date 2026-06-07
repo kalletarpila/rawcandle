@@ -162,7 +162,7 @@ def test_audit_returns_ok_when_all_tickers_groups_and_watchlist_map(tmp_path) ->
     assert summary["matched_group_index_count"] == 5
 
 
-def test_audit_reports_watchlist_only_ticker_via_membership_gap_not_missing_member(tmp_path) -> None:
+def test_audit_reports_watchlist_only_ticker_as_warning_not_failure(tmp_path) -> None:
     analysis_db = tmp_path / "analysis.db"
     ec_db, _ = _setup_ec_db(tmp_path, ["NVDA", "CRGY"])
     _create_analysis_db(
@@ -175,10 +175,14 @@ def test_audit_reports_watchlist_only_ticker_via_membership_gap_not_missing_memb
 
     summary = audit_dc_facts_against_ec_sidecar(str(analysis_db), str(ec_db))
 
-    assert summary["status"] == "FAILED"
+    assert summary["status"] == "OK_WITH_WARNINGS"
     assert summary["watchlist_member_count"] == 2
     assert summary["watchlist_missing_tickers"] == []
-    assert summary["tickers_without_primary_group_l2"] == ["CRGY"]
+    assert summary["watchlist_only_tickers"] == ["CRGY"]
+    assert summary["watchlist_without_taxonomy_membership_tickers"] == ["CRGY"]
+    assert summary["watchlist_without_dc_fact_tickers"] == ["CRGY"]
+    assert summary["tickers_without_primary_group_l2"] == []
+    assert summary["ticker_primary_membership_ok"] is True
 
 
 def test_audit_fails_when_dc_ticker_is_missing_in_ec(tmp_path) -> None:
@@ -245,6 +249,35 @@ def test_audit_reports_ticker_without_primary_group_l2(tmp_path) -> None:
     assert summary["status"] == "FAILED"
     assert summary["ticker_primary_membership_ok"] is False
     assert summary["tickers_without_primary_group_l2"] == ["NVDA"]
+
+
+def test_audit_fails_when_taxonomy_ticker_without_dc_fact_lacks_primary_group_l2(tmp_path) -> None:
+    analysis_db = tmp_path / "analysis.db"
+    ec_db, _ = _setup_ec_db(tmp_path, ["NVDA"])
+    with _connect(str(ec_db)) as conn:
+        conn.execute(
+            """
+            UPDATE ec_membership
+            SET is_primary = 0
+            WHERE child_entity_id = (
+                SELECT entity_id FROM ec_entity WHERE entity_type = 'TICKER' AND entity_code = 'AMD'
+            )
+            """
+        )
+        conn.commit()
+    _create_analysis_db(
+        analysis_db,
+        ticker_rows=[("2026-06-05", "NVDA"), ("2026-06-05", "AVGO")],
+        group_rows=_default_group_rows(),
+        synthetic_rows=_default_group_rows(),
+        index_rows=[],
+    )
+
+    summary = audit_dc_facts_against_ec_sidecar(str(analysis_db), str(ec_db))
+
+    assert summary["status"] == "FAILED"
+    assert summary["ticker_primary_membership_ok"] is False
+    assert summary["tickers_without_primary_group_l2"] == ["AMD"]
 
 
 def test_audit_reports_ticker_with_multiple_primary_group_l2(tmp_path) -> None:
