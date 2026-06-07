@@ -26,6 +26,12 @@ def test_default_scheduler_config_uses_omxh_and_omxs_not_usa():
     assert config.enabled_markets == ["omxh", "omxs"]
     assert config.skip_next_run is False
     assert config.technical_relevance_enabled is False
+    assert config.ec_source_layer_enabled is False
+    assert config.ec_source_layer_ecosystem == "DATACENTER"
+    assert config.ec_source_layer_taxonomy_version == "DC_TAXONOMY_FULL_V1"
+    assert config.ec_source_layer_mode == "refresh_latest"
+    assert config.ec_source_layer_require_legacy_reports_success is True
+    assert config.ec_source_layer_only_on_new_signal_date is True
 
 
 def test_market_validation_normalizes_case_whitespace_and_deduplicates():
@@ -58,6 +64,18 @@ def test_scheduler_config_serialization_roundtrip():
         timezone=DEFAULT_TIMEZONE,
         skip_next_run=False,
         technical_relevance_enabled=True,
+        ec_source_layer_enabled=True,
+        ec_source_layer_ecosystem="DATACENTER",
+        ec_source_layer_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        ec_source_layer_taxonomy_csv="/tmp/taxonomy.csv",
+        ec_source_layer_watchlist="/tmp/watchlist.txt",
+        ec_source_layer_backup_dir="/tmp/backups",
+        ec_source_layer_mode="refresh_latest",
+        ec_source_layer_require_legacy_reports_success=True,
+        ec_source_layer_only_on_new_signal_date=False,
+        datacenter_dashboard_reports_reference_html_output_dir=(
+            "/home/kalle/projects/rawcandle/swing_reports"
+        ),
     )
 
     serialized = scheduler_config_to_dict(config)
@@ -72,6 +90,18 @@ def test_scheduler_config_serialization_roundtrip():
         timezone=DEFAULT_TIMEZONE,
         skip_next_run=False,
         technical_relevance_enabled=True,
+        ec_source_layer_enabled=True,
+        ec_source_layer_ecosystem="DATACENTER",
+        ec_source_layer_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        ec_source_layer_taxonomy_csv="/tmp/taxonomy.csv",
+        ec_source_layer_watchlist="/tmp/watchlist.txt",
+        ec_source_layer_backup_dir="/tmp/backups",
+        ec_source_layer_mode="refresh_latest",
+        ec_source_layer_require_legacy_reports_success=True,
+        ec_source_layer_only_on_new_signal_date=False,
+        datacenter_dashboard_reports_reference_html_output_dir=(
+            "/home/kalle/projects/rawcandle/swing_reports"
+        ),
     )
 
 
@@ -198,6 +228,114 @@ def test_scheduler_config_from_dict_defaults_missing_skip_next_run_to_false():
 
     assert config.skip_next_run is False
     assert config.technical_relevance_enabled is False
+    assert config.ec_source_layer_enabled is False
+    assert config.ec_source_layer_taxonomy_csv is None
+    assert config.ec_source_layer_watchlist is None
+    assert config.ec_source_layer_backup_dir is None
+    assert config.ec_source_layer_mode == "refresh_latest"
+
+
+def test_scheduler_config_to_dict_includes_ec_source_layer_fields():
+    config = StockUpdateSchedulerConfig(
+        enabled_markets=["omxh", "omxs"],
+        run_time="05:30",
+        osakedata_db_path="/tmp/osakedata.db",
+        analysis_db_path="/tmp/analysis.db",
+        log_dir="/tmp/logs",
+        ec_source_layer_enabled=True,
+        ec_source_layer_ecosystem="DATACENTER",
+        ec_source_layer_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        ec_source_layer_taxonomy_csv="/tmp/taxonomy.csv",
+        ec_source_layer_watchlist="/tmp/watchlist.txt",
+        ec_source_layer_backup_dir="/tmp/backups",
+        ec_source_layer_mode="refresh_latest",
+        ec_source_layer_require_legacy_reports_success=False,
+        ec_source_layer_only_on_new_signal_date=False,
+    )
+
+    data = scheduler_config_to_dict(config)
+
+    assert data["ec_source_layer_enabled"] is True
+    assert data["ec_source_layer_ecosystem"] == "DATACENTER"
+    assert data["ec_source_layer_taxonomy_version"] == "DC_TAXONOMY_FULL_V1"
+    assert data["ec_source_layer_taxonomy_csv"] == "/tmp/taxonomy.csv"
+    assert data["ec_source_layer_watchlist"] == "/tmp/watchlist.txt"
+    assert data["ec_source_layer_backup_dir"] == "/tmp/backups"
+    assert data["ec_source_layer_mode"] == "refresh_latest"
+    assert data["ec_source_layer_require_legacy_reports_success"] is False
+    assert data["ec_source_layer_only_on_new_signal_date"] is False
+
+
+def test_enabled_ec_source_layer_without_required_paths_fails_validation():
+    config = StockUpdateSchedulerConfig(
+        enabled_markets=["omxh", "omxs"],
+        run_time="05:30",
+        osakedata_db_path="/tmp/osakedata.db",
+        analysis_db_path="/tmp/analysis.db",
+        log_dir="/tmp/logs",
+        ec_source_layer_enabled=True,
+    )
+
+    with pytest.raises(ValueError, match="ec_source_layer_taxonomy_csv"):
+        validate_scheduler_config(config)
+
+
+def test_enabled_ec_source_layer_with_required_fields_passes_validation():
+    config = StockUpdateSchedulerConfig(
+        enabled_markets=["omxh", "omxs"],
+        run_time="05:30",
+        osakedata_db_path="/tmp/osakedata.db",
+        analysis_db_path="/tmp/analysis.db",
+        log_dir="/tmp/logs",
+        ec_source_layer_enabled=True,
+        ec_source_layer_ecosystem="DATACENTER",
+        ec_source_layer_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        ec_source_layer_taxonomy_csv="/tmp/taxonomy.csv",
+        ec_source_layer_watchlist="/tmp/watchlist.txt",
+        ec_source_layer_backup_dir="/tmp/backups",
+        ec_source_layer_mode="refresh_latest",
+        ec_source_layer_require_legacy_reports_success=True,
+        ec_source_layer_only_on_new_signal_date=True,
+    )
+
+    validated = validate_scheduler_config(config)
+
+    assert validated.ec_source_layer_enabled is True
+    assert validated.ec_source_layer_taxonomy_csv == "/tmp/taxonomy.csv"
+    assert validated.ec_source_layer_watchlist == "/tmp/watchlist.txt"
+    assert validated.ec_source_layer_backup_dir == "/tmp/backups"
+
+
+def test_disabled_ec_source_layer_with_missing_paths_passes_validation():
+    config = StockUpdateSchedulerConfig(
+        enabled_markets=["omxh", "omxs"],
+        run_time="05:30",
+        osakedata_db_path="/tmp/osakedata.db",
+        analysis_db_path="/tmp/analysis.db",
+        log_dir="/tmp/logs",
+        ec_source_layer_enabled=False,
+        ec_source_layer_taxonomy_csv=None,
+        ec_source_layer_watchlist=None,
+        ec_source_layer_backup_dir=None,
+    )
+
+    validated = validate_scheduler_config(config)
+
+    assert validated.ec_source_layer_enabled is False
+
+
+def test_invalid_ec_source_layer_mode_fails_validation():
+    config = StockUpdateSchedulerConfig(
+        enabled_markets=["omxh", "omxs"],
+        run_time="05:30",
+        osakedata_db_path="/tmp/osakedata.db",
+        analysis_db_path="/tmp/analysis.db",
+        log_dir="/tmp/logs",
+        ec_source_layer_mode="replace_all",
+    )
+
+    with pytest.raises(ValueError, match="ec_source_layer_mode"):
+        validate_scheduler_config(config)
 
 
 def test_scheduler_config_from_dict_accepts_skip_next_run_true():

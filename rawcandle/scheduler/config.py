@@ -21,6 +21,15 @@ _REQUIRED_CONFIG_KEYS = {
 _OPTIONAL_CONFIG_KEYS = {"timezone", "skip_next_run", "technical_relevance_enabled"}
 _OPTIONAL_CONFIG_KEYS.update(
     {
+        "ec_source_layer_enabled",
+        "ec_source_layer_ecosystem",
+        "ec_source_layer_taxonomy_version",
+        "ec_source_layer_taxonomy_csv",
+        "ec_source_layer_watchlist",
+        "ec_source_layer_backup_dir",
+        "ec_source_layer_mode",
+        "ec_source_layer_require_legacy_reports_success",
+        "ec_source_layer_only_on_new_signal_date",
         "datacenter_v3_reports_enabled",
         "datacenter_v3_reports_output_dir",
         "datacenter_v3_reports_ecosystem",
@@ -41,6 +50,7 @@ _OPTIONAL_CONFIG_KEYS.update(
         "datacenter_dashboard_run_acceptance_report",
     }
 )
+SUPPORTED_EC_SOURCE_LAYER_MODES = ("refresh_latest",)
 SUPPORTED_DATACENTER_DASHBOARD_SOURCE_MODES = ("reports", "enrichment")
 SUPPORTED_DATACENTER_ENRICHMENT_WRITE_MODES = (
     "insert-missing",
@@ -67,6 +77,15 @@ class StockUpdateSchedulerConfig:
     timezone: str = DEFAULT_TIMEZONE
     skip_next_run: bool = False
     technical_relevance_enabled: bool = False
+    ec_source_layer_enabled: bool = False
+    ec_source_layer_ecosystem: str = "DATACENTER"
+    ec_source_layer_taxonomy_version: str = "DC_TAXONOMY_FULL_V1"
+    ec_source_layer_taxonomy_csv: str | None = None
+    ec_source_layer_watchlist: str | None = None
+    ec_source_layer_backup_dir: str | None = None
+    ec_source_layer_mode: str = "refresh_latest"
+    ec_source_layer_require_legacy_reports_success: bool = True
+    ec_source_layer_only_on_new_signal_date: bool = True
     datacenter_v3_reports_enabled: bool = False
     datacenter_v3_reports_output_dir: str | None = None
     datacenter_v3_reports_ecosystem: str = "DATACENTER"
@@ -143,6 +162,30 @@ def validate_scheduler_config(
         raise ValueError("skip_next_run must be a bool")
     if type(config.technical_relevance_enabled) is not bool:
         raise ValueError("technical_relevance_enabled must be a bool")
+    if type(config.ec_source_layer_enabled) is not bool:
+        raise ValueError("ec_source_layer_enabled must be a bool")
+    if config.ec_source_layer_mode not in SUPPORTED_EC_SOURCE_LAYER_MODES:
+        raise ValueError(
+            "ec_source_layer_mode must be one of: "
+            + ", ".join(SUPPORTED_EC_SOURCE_LAYER_MODES)
+        )
+    if type(config.ec_source_layer_require_legacy_reports_success) is not bool:
+        raise ValueError("ec_source_layer_require_legacy_reports_success must be a bool")
+    if type(config.ec_source_layer_only_on_new_signal_date) is not bool:
+        raise ValueError("ec_source_layer_only_on_new_signal_date must be a bool")
+    if config.ec_source_layer_enabled:
+        if not config.ec_source_layer_ecosystem:
+            raise ValueError("ec_source_layer_ecosystem must be non-empty when ec_source_layer_enabled is true")
+        if not config.ec_source_layer_taxonomy_version:
+            raise ValueError(
+                "ec_source_layer_taxonomy_version must be non-empty when ec_source_layer_enabled is true"
+            )
+        if not config.ec_source_layer_taxonomy_csv:
+            raise ValueError("ec_source_layer_taxonomy_csv must be non-empty when ec_source_layer_enabled is true")
+        if not config.ec_source_layer_watchlist:
+            raise ValueError("ec_source_layer_watchlist must be non-empty when ec_source_layer_enabled is true")
+        if not config.ec_source_layer_backup_dir:
+            raise ValueError("ec_source_layer_backup_dir must be non-empty when ec_source_layer_enabled is true")
     if type(config.datacenter_v3_reports_enabled) is not bool:
         raise ValueError("datacenter_v3_reports_enabled must be a bool")
     if config.datacenter_v3_reports_output_dir is not None and not isinstance(
@@ -198,6 +241,19 @@ def validate_scheduler_config(
         timezone=config.timezone,
         skip_next_run=config.skip_next_run,
         technical_relevance_enabled=config.technical_relevance_enabled,
+        ec_source_layer_enabled=config.ec_source_layer_enabled,
+        ec_source_layer_ecosystem=config.ec_source_layer_ecosystem,
+        ec_source_layer_taxonomy_version=config.ec_source_layer_taxonomy_version,
+        ec_source_layer_taxonomy_csv=config.ec_source_layer_taxonomy_csv,
+        ec_source_layer_watchlist=config.ec_source_layer_watchlist,
+        ec_source_layer_backup_dir=config.ec_source_layer_backup_dir,
+        ec_source_layer_mode=config.ec_source_layer_mode,
+        ec_source_layer_require_legacy_reports_success=(
+            config.ec_source_layer_require_legacy_reports_success
+        ),
+        ec_source_layer_only_on_new_signal_date=(
+            config.ec_source_layer_only_on_new_signal_date
+        ),
         datacenter_v3_reports_enabled=config.datacenter_v3_reports_enabled,
         datacenter_v3_reports_output_dir=config.datacenter_v3_reports_output_dir,
         datacenter_v3_reports_ecosystem=config.datacenter_v3_reports_ecosystem,
@@ -250,6 +306,21 @@ def scheduler_config_from_dict(data: Dict[str, Any]) -> StockUpdateSchedulerConf
         timezone=data.get("timezone", DEFAULT_TIMEZONE),
         skip_next_run=data.get("skip_next_run", False),
         technical_relevance_enabled=data.get("technical_relevance_enabled", False),
+        ec_source_layer_enabled=data.get("ec_source_layer_enabled", False),
+        ec_source_layer_ecosystem=data.get("ec_source_layer_ecosystem", "DATACENTER"),
+        ec_source_layer_taxonomy_version=data.get(
+            "ec_source_layer_taxonomy_version", "DC_TAXONOMY_FULL_V1"
+        ),
+        ec_source_layer_taxonomy_csv=data.get("ec_source_layer_taxonomy_csv"),
+        ec_source_layer_watchlist=data.get("ec_source_layer_watchlist"),
+        ec_source_layer_backup_dir=data.get("ec_source_layer_backup_dir"),
+        ec_source_layer_mode=data.get("ec_source_layer_mode", "refresh_latest"),
+        ec_source_layer_require_legacy_reports_success=data.get(
+            "ec_source_layer_require_legacy_reports_success", True
+        ),
+        ec_source_layer_only_on_new_signal_date=data.get(
+            "ec_source_layer_only_on_new_signal_date", True
+        ),
         datacenter_v3_reports_enabled=data.get("datacenter_v3_reports_enabled", False),
         datacenter_v3_reports_output_dir=data.get("datacenter_v3_reports_output_dir"),
         datacenter_v3_reports_ecosystem=data.get(
@@ -332,6 +403,15 @@ def create_default_scheduler_config(
         timezone=DEFAULT_TIMEZONE,
         skip_next_run=False,
         technical_relevance_enabled=False,
+        ec_source_layer_enabled=False,
+        ec_source_layer_ecosystem="DATACENTER",
+        ec_source_layer_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        ec_source_layer_taxonomy_csv=None,
+        ec_source_layer_watchlist=None,
+        ec_source_layer_backup_dir=None,
+        ec_source_layer_mode="refresh_latest",
+        ec_source_layer_require_legacy_reports_success=True,
+        ec_source_layer_only_on_new_signal_date=True,
         datacenter_v3_reports_enabled=False,
         datacenter_v3_reports_output_dir=None,
         datacenter_v3_reports_ecosystem="DATACENTER",
