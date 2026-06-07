@@ -103,6 +103,9 @@ def test_watchlist_loader_creates_watchlist_and_members(tmp_path) -> None:
             "source_ticker_count": 3,
             "unique_ticker_count": 3,
             "loaded_member_count": 3,
+            "existing_entity_member_count": 3,
+            "created_watchlist_only_entity_count": 0,
+            "watchlist_only_tickers": [],
             "missing_ticker_count": 0,
             "missing_tickers": [],
             "duplicate_ticker_count": 0,
@@ -130,7 +133,7 @@ def test_watchlist_loader_deduplicates_in_file_order_and_ignores_comments(tmp_pa
     assert summary["duplicate_ticker_count"] == 2
 
 
-def test_watchlist_loader_reports_missing_ticker_and_loads_valid_members(tmp_path) -> None:
+def test_watchlist_loader_creates_watchlist_only_ticker_entity_and_loads_all_members(tmp_path) -> None:
     db_path, _ = _setup_db_with_taxonomy(tmp_path)
     watchlist_path = tmp_path / "watchlist.txt"
     _write_watchlist(watchlist_path, ["NVDA", "CRGY", "AMD"])
@@ -143,16 +146,57 @@ def test_watchlist_loader_reports_missing_ticker_and_loads_valid_members(tmp_pat
     conn = _connect(str(db_path))
     try:
         member_count = conn.execute("SELECT COUNT(*) FROM ec_watchlist_member").fetchone()[0]
-        assert member_count == 2
+        assert member_count == 3
+        crgy_entity = conn.execute(
+            """
+            SELECT entity_type, entity_code, entity_name, ticker, status, entity_level, entity_role_code
+            FROM ec_entity
+            WHERE entity_type = 'TICKER' AND entity_code = 'CRGY'
+            """
+        ).fetchone()
+        assert crgy_entity == ("TICKER", "CRGY", "CRGY", "CRGY", "ACTIVE", None, "TICKER")
+        crgy_membership_count = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM ec_membership m
+            JOIN ec_entity e ON e.entity_id = m.child_entity_id
+            WHERE e.entity_type = 'TICKER' AND e.entity_code = 'CRGY'
+            """
+        ).fetchone()[0]
+        assert crgy_membership_count == 0
+        member_entity_codes = [
+            row[0]
+            for row in conn.execute(
+                """
+                SELECT e.entity_code
+                FROM ec_watchlist_member wm
+                JOIN ec_entity e ON e.entity_id = wm.entity_id
+                ORDER BY e.entity_code
+                """
+            ).fetchall()
+        ]
+        assert member_entity_codes == ["AMD", "CRGY", "NVDA"]
+        crgy_active_from = conn.execute(
+            """
+            SELECT wm.active_from
+            FROM ec_watchlist_member wm
+            JOIN ec_entity e ON e.entity_id = wm.entity_id
+            WHERE e.entity_code = 'CRGY'
+            """
+        ).fetchone()[0]
+        assert crgy_active_from == "1900-01-01"
         assert summary["status"] == "OK_WITH_WARNINGS"
-        assert summary["loaded_member_count"] == 2
-        assert summary["missing_ticker_count"] == 1
-        assert summary["missing_tickers"] == ["CRGY"]
+        assert summary["loaded_member_count"] == 3
+        assert summary["existing_entity_member_count"] == 2
+        assert summary["created_watchlist_only_entity_count"] == 1
+        assert summary["watchlist_only_tickers"] == ["CRGY"]
+        assert summary["missing_ticker_count"] == 0
+        assert summary["missing_tickers"] == []
     finally:
         conn.close()
 
 
-def test_watchlist_loader_returns_no_valid_members_when_all_tickers_are_missing(tmp_path) -> None:
+def test_watchlist_loader_creates_all_watchlist_only_entities_when_no_taxonomy_tickers_exist(tmp_path) -> None:
     db_path, _ = _setup_db_with_taxonomy(tmp_path)
     watchlist_path = tmp_path / "watchlist.txt"
     _write_watchlist(watchlist_path, ["CRGY", "XYZX"])
@@ -165,10 +209,25 @@ def test_watchlist_loader_returns_no_valid_members_when_all_tickers_are_missing(
     conn = _connect(str(db_path))
     try:
         assert conn.execute("SELECT COUNT(*) FROM ec_watchlist").fetchone()[0] == 1
-        assert conn.execute("SELECT COUNT(*) FROM ec_watchlist_member").fetchone()[0] == 0
-        assert summary["status"] == "NO_VALID_MEMBERS"
-        assert summary["loaded_member_count"] == 0
-        assert summary["missing_tickers"] == ["CRGY", "XYZX"]
+        assert conn.execute("SELECT COUNT(*) FROM ec_watchlist_member").fetchone()[0] == 2
+        created_rows = conn.execute(
+            """
+            SELECT entity_code, ticker, status, entity_role_code
+            FROM ec_entity
+            WHERE entity_code IN ('CRGY', 'XYZX')
+            ORDER BY entity_code
+            """
+        ).fetchall()
+        assert created_rows == [
+            ("CRGY", "CRGY", "ACTIVE", "TICKER"),
+            ("XYZX", "XYZX", "ACTIVE", "TICKER"),
+        ]
+        assert summary["status"] == "OK_WITH_WARNINGS"
+        assert summary["loaded_member_count"] == 2
+        assert summary["existing_entity_member_count"] == 0
+        assert summary["created_watchlist_only_entity_count"] == 2
+        assert summary["watchlist_only_tickers"] == ["CRGY", "XYZX"]
+        assert summary["missing_tickers"] == []
     finally:
         conn.close()
 

@@ -162,7 +162,7 @@ def test_audit_returns_ok_when_all_tickers_groups_and_watchlist_map(tmp_path) ->
     assert summary["matched_group_index_count"] == 5
 
 
-def test_audit_reports_watchlist_missing_ticker_as_warning(tmp_path) -> None:
+def test_audit_reports_watchlist_only_ticker_via_membership_gap_not_missing_member(tmp_path) -> None:
     analysis_db = tmp_path / "analysis.db"
     ec_db, _ = _setup_ec_db(tmp_path, ["NVDA", "CRGY"])
     _create_analysis_db(
@@ -175,9 +175,10 @@ def test_audit_reports_watchlist_missing_ticker_as_warning(tmp_path) -> None:
 
     summary = audit_dc_facts_against_ec_sidecar(str(analysis_db), str(ec_db))
 
-    assert summary["status"] == "OK_WITH_WARNINGS"
-    assert summary["watchlist_member_count"] == 1
-    assert summary["watchlist_missing_tickers"] == ["CRGY"]
+    assert summary["status"] == "FAILED"
+    assert summary["watchlist_member_count"] == 2
+    assert summary["watchlist_missing_tickers"] == []
+    assert summary["tickers_without_primary_group_l2"] == ["CRGY"]
 
 
 def test_audit_fails_when_dc_ticker_is_missing_in_ec(tmp_path) -> None:
@@ -330,4 +331,3 @@ def test_audit_resolves_latest_signal_date_when_not_provided(tmp_path) -> None:
 
     assert summary["selected_signal_date"] == "2026-06-05"
     assert summary["selected_synthetic_date"] == "2026-06-05"
-

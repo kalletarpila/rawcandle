@@ -144,6 +144,29 @@ def _find_ticker_entity_id(
     )
 
 
+def _create_watchlist_only_ticker_entity(
+    conn: sqlite3.Connection,
+    *,
+    ecosystem_id: int,
+    ticker: str,
+) -> int:
+    cursor = conn.execute(
+        """
+        INSERT INTO ec_entity (
+            ecosystem_id,
+            entity_type,
+            entity_code,
+            entity_name,
+            ticker,
+            entity_role_code,
+            status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (ecosystem_id, "TICKER", ticker, ticker, ticker, "TICKER", "ACTIVE"),
+    )
+    return int(cursor.lastrowid)
+
+
 def _insert_watchlist_member(
     conn: sqlite3.Connection,
     *,
@@ -199,13 +222,26 @@ def load_datacenter_watchlist_to_ec_sidecar(
             )
 
             loaded_member_count = 0
+            existing_entity_member_count = 0
+            created_watchlist_only_entity_count = 0
+            watchlist_only_tickers: list[str] = []
             missing_tickers: list[str] = []
             for ticker in unique_tickers:
                 entity_id = _find_ticker_entity_id(conn, ecosystem_id=ecosystem_id, ticker=ticker)
                 if entity_id is None:
-                    missing_tickers.append(ticker)
-                    warnings.append(f"Ticker entity not found for watchlist ticker {ticker}")
-                    continue
+                    entity_id = _create_watchlist_only_ticker_entity(
+                        conn,
+                        ecosystem_id=ecosystem_id,
+                        ticker=ticker,
+                    )
+                    created_watchlist_only_entity_count += 1
+                    watchlist_only_tickers.append(ticker)
+                    warnings.append(
+                        "Created watchlist-only ticker entity without taxonomy membership "
+                        f"for watchlist ticker {ticker}"
+                    )
+                else:
+                    existing_entity_member_count += 1
                 loaded_member_count += _insert_watchlist_member(
                     conn,
                     watchlist_id=watchlist_id,
@@ -214,7 +250,7 @@ def load_datacenter_watchlist_to_ec_sidecar(
 
         if loaded_member_count == 0:
             status = "NO_VALID_MEMBERS"
-        elif missing_tickers:
+        elif watchlist_only_tickers:
             status = "OK_WITH_WARNINGS"
         else:
             status = "OK"
@@ -227,6 +263,9 @@ def load_datacenter_watchlist_to_ec_sidecar(
             "source_ticker_count": source_ticker_count,
             "unique_ticker_count": len(unique_tickers),
             "loaded_member_count": loaded_member_count,
+            "existing_entity_member_count": existing_entity_member_count,
+            "created_watchlist_only_entity_count": created_watchlist_only_entity_count,
+            "watchlist_only_tickers": watchlist_only_tickers,
             "missing_ticker_count": len(missing_tickers),
             "missing_tickers": missing_tickers,
             "duplicate_ticker_count": duplicate_ticker_count,
