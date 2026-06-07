@@ -392,7 +392,11 @@ def test_ec_sidecar_schema_columns_indexes_and_foreign_keys(tmp_path) -> None:
             "ecosystem_id",
             "signal_date",
             "market_code",
+            "is_market_open",
+            "has_required_source_data",
             "is_valid_signal_date",
+            "valid_signal_seq",
+            "validity_reason",
             "data_quality_status",
             "source_run_id",
             "created_at_utc",
@@ -414,7 +418,10 @@ def test_ec_sidecar_schema_columns_indexes_and_foreign_keys(tmp_path) -> None:
             "idx_ec_signal_run_ecosystem_run_type_signal_date",
             "idx_ec_signal_run_status",
         }.issubset(_index_names(conn, "ec_signal_run"))
-        assert "idx_ec_signal_calendar_validity" in _index_names(conn, "ec_signal_calendar")
+        assert {
+            "idx_ec_signal_calendar_validity",
+            "idx_ec_signal_calendar_valid_signal_seq",
+        }.issubset(_index_names(conn, "ec_signal_calendar"))
 
         assert _foreign_key_tables(conn, "ec_taxonomy_version") == {"ec_ecosystem"}
         assert _foreign_key_tables(conn, "ec_entity") == {"ec_ecosystem"}
@@ -575,13 +582,16 @@ def test_ec_sidecar_basic_insert_path_and_constraints(tmp_path) -> None:
                 ecosystem_id,
                 signal_date,
                 market_code,
+                is_market_open,
+                has_required_source_data,
                 is_valid_signal_date,
+                valid_signal_seq,
                 validity_reason,
                 data_quality_status,
                 source_run_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (ecosystem_id, "2026-06-05", "USA", 1, None, "OK", "run-1"),
+            (ecosystem_id, "2026-06-05", "USA", 1, 1, 1, 42, None, "OK", "run-1"),
         )
 
         other_ecosystem_id = _insert_ecosystem(conn, ecosystem_code="ALTDC", ecosystem_name="Alt DC")
@@ -753,5 +763,11 @@ def test_ec_sidecar_migration_hardens_existing_019_rows(tmp_path) -> None:
         assert "entity_role_code" in _table_columns(conn, "ec_entity")
         assert _table_exists(conn, "ec_signal_run")
         assert _table_exists(conn, "ec_signal_calendar")
+        assert {
+            "is_market_open",
+            "has_required_source_data",
+            "valid_signal_seq",
+        }.issubset(_table_columns(conn, "ec_signal_calendar"))
+        assert "idx_ec_signal_calendar_valid_signal_seq" in _index_names(conn, "ec_signal_calendar")
     finally:
         conn.close()

@@ -8,6 +8,7 @@ MIGRATIONS_DIR = Path(__file__).resolve().parent / "sqlite" / "migrations"
 MIGRATION_SQL_PATHS = (
     MIGRATIONS_DIR / "019_create_ec_sidecar_schema.sql",
     MIGRATIONS_DIR / "020_harden_ec_sidecar_schema.sql",
+    MIGRATIONS_DIR / "021_patch_ec_signal_calendar_p0_fields.sql",
 )
 
 
@@ -136,6 +137,40 @@ def _harden_ec_sidecar_schema(conn: sqlite3.Connection) -> None:
 
     _rebuild_ec_entity_alias_if_needed(conn)
     _rebuild_ec_watchlist_member_if_needed(conn)
+    _patch_ec_signal_calendar_if_needed(conn)
+
+
+def _patch_ec_signal_calendar_if_needed(conn: sqlite3.Connection) -> None:
+    calendar_columns = _table_columns(conn, "ec_signal_calendar")
+    if "is_market_open" not in calendar_columns:
+        conn.execute(
+            """
+            ALTER TABLE ec_signal_calendar
+            ADD COLUMN is_market_open INTEGER NOT NULL DEFAULT 0 CHECK (is_market_open IN (0, 1))
+            """
+        )
+    if "has_required_source_data" not in calendar_columns:
+        conn.execute(
+            """
+            ALTER TABLE ec_signal_calendar
+            ADD COLUMN has_required_source_data INTEGER NOT NULL DEFAULT 0
+            CHECK (has_required_source_data IN (0, 1))
+            """
+        )
+    if "valid_signal_seq" not in calendar_columns:
+        conn.execute(
+            """
+            ALTER TABLE ec_signal_calendar
+            ADD COLUMN valid_signal_seq INTEGER NULL
+            """
+        )
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_ec_signal_calendar_valid_signal_seq
+        ON ec_signal_calendar (ecosystem_id, valid_signal_seq)
+        """
+    )
 
 
 def _apply_ec_sidecar_migration_to_connection(conn: sqlite3.Connection) -> None:

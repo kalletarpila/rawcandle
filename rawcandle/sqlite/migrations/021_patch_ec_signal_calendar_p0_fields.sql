@@ -1,0 +1,2 @@
+-- Narrow follow-up migration for ec_signal_calendar final P0 shape.
+-- SQLite-safe additive column/index patching is applied by ec_sidecar_migration.py.
