@@ -9,6 +9,7 @@ MIGRATION_SQL_PATHS = (
     MIGRATIONS_DIR / "019_create_ec_sidecar_schema.sql",
     MIGRATIONS_DIR / "020_harden_ec_sidecar_schema.sql",
     MIGRATIONS_DIR / "021_patch_ec_signal_calendar_p0_fields.sql",
+    MIGRATIONS_DIR / "022_create_ec_fact_tables.sql",
 )
 
 
