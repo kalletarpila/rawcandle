@@ -313,11 +313,59 @@ def test_scheduler_cli_successful_run_prints_top_level_summary_lines(monkeypatch
     assert "SUMMARY datacenter_dashboard.fallback_used=0" in captured.out
     assert "SUMMARY datacenter_dashboard.final_source_mode=reports" in captured.out
     assert "SUMMARY datacenter_dashboard.error=" in captured.out
+    assert "SUMMARY ec_source_layer.attempted=0" in captured.out
+    assert "SUMMARY ec_source_layer.status=SKIPPED" in captured.out
+    assert "SUMMARY ec_source_layer.signal_date=NONE" in captured.out
+    assert "SUMMARY ec_source_layer.refresh_mode=NONE" in captured.out
+    assert "SUMMARY ec_source_layer.skipped_reason=NONE" in captured.out
+    assert "SUMMARY ec_source_layer.backup_path=NONE" in captured.out
+    assert "SUMMARY ec_source_layer.coverage_status=NONE" in captured.out
+    assert "SUMMARY ec_source_layer.parity_status=NONE" in captured.out
+    assert "SUMMARY ec_source_layer.total_mismatch_count=0" in captured.out
+    assert "SUMMARY ec_source_layer.ticker_rows=0" in captured.out
+    assert "SUMMARY ec_source_layer.group_signal_rows=0" in captured.out
+    assert "SUMMARY ec_source_layer.synthetic_ohlc_rows=0" in captured.out
+    assert "SUMMARY ec_source_layer.group_index_rows=0" in captured.out
+    assert "SUMMARY ec_source_layer.watermark_rows=0" in captured.out
+    assert "SUMMARY ec_source_layer.error=NONE" in captured.out
 
 
 def test_scheduler_cli_ok_overall_status_exits_zero(monkeypatch):
     monkeypatch.setattr(cli, "run_scheduler_config", lambda config_path: _result(STATUS_OK))
     assert cli.main(["--config", "/tmp/scheduler.json"]) == 0
+
+
+def test_scheduler_cli_prints_ec_source_layer_summary_when_present(monkeypatch, capsys):
+    result = _result(STATUS_OK)
+    result.ec_source_layer_attempted = 1
+    result.ec_source_layer_status = "REFRESH_COMPLETED"
+    result.ec_source_layer_signal_date = "2026-06-05"
+    result.ec_source_layer_refresh_mode = "new_selected_date"
+    result.ec_source_layer_skipped_reason = "NONE"
+    result.ec_source_layer_backup_path = "/tmp/refresh.sqlite"
+    result.ec_source_layer_coverage_status = "OK_WITH_WARNINGS"
+    result.ec_source_layer_parity_status = "OK_WITH_WARNINGS"
+    result.ec_source_layer_total_mismatch_count = 0
+    result.ec_source_layer_ticker_rows = 236
+    result.ec_source_layer_group_signal_rows = 54
+    result.ec_source_layer_synthetic_ohlc_rows = 53
+    result.ec_source_layer_group_index_rows = 54
+    result.ec_source_layer_watermark_rows = 15
+    result.ec_source_layer_error = "NONE"
+    monkeypatch.setattr(cli, "run_scheduler_config", lambda config_path: result)
+
+    code = cli.main(["--config", "/tmp/scheduler.json"])
+    captured = capsys.readouterr()
+
+    assert code == 0
+    assert "SUMMARY ec_source_layer.attempted=1" in captured.out
+    assert "SUMMARY ec_source_layer.status=REFRESH_COMPLETED" in captured.out
+    assert "SUMMARY ec_source_layer.signal_date=2026-06-05" in captured.out
+    assert "SUMMARY ec_source_layer.refresh_mode=new_selected_date" in captured.out
+    assert "SUMMARY ec_source_layer.backup_path=/tmp/refresh.sqlite" in captured.out
+    assert "SUMMARY ec_source_layer.coverage_status=OK_WITH_WARNINGS" in captured.out
+    assert "SUMMARY ec_source_layer.parity_status=OK_WITH_WARNINGS" in captured.out
+    assert "SUMMARY ec_source_layer.group_index_rows=54" in captured.out
 
 
 def test_scheduler_cli_successful_run_prints_reports_reference_summary_when_present(

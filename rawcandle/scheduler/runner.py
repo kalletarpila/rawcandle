@@ -16,6 +16,7 @@ from typing import IO, Iterator, List, Optional
 from zoneinfo import ZoneInfo
 
 from main import RawCandleApp, _today_exclusive_end_date
+from rawcandle.cli.run_ec_source_layer_refresh import run_ec_source_layer_refresh
 from rawcandle.cli.write_latest_v3_markdown_reports import resolve_latest_run
 from rawcandle.cli.write_v3_markdown_prototypes import write_reports
 from rawcandle.scheduler.config import (
@@ -146,6 +147,21 @@ class ScheduledStockUpdateRunResult:
     datacenter_dashboard_fallback_used: int = 0
     datacenter_dashboard_final_source_mode: str = "reports"
     datacenter_dashboard_error: str = ""
+    ec_source_layer_attempted: int = 0
+    ec_source_layer_status: str = "SKIPPED"
+    ec_source_layer_signal_date: str = "NONE"
+    ec_source_layer_refresh_mode: str = "NONE"
+    ec_source_layer_skipped_reason: str = "NONE"
+    ec_source_layer_backup_path: str = "NONE"
+    ec_source_layer_coverage_status: str = "NONE"
+    ec_source_layer_parity_status: str = "NONE"
+    ec_source_layer_total_mismatch_count: int = 0
+    ec_source_layer_ticker_rows: int = 0
+    ec_source_layer_group_signal_rows: int = 0
+    ec_source_layer_synthetic_ohlc_rows: int = 0
+    ec_source_layer_group_index_rows: int = 0
+    ec_source_layer_watermark_rows: int = 0
+    ec_source_layer_error: str = "NONE"
 
 
 class SchedulerAlreadyRunningError(RuntimeError):
@@ -240,6 +256,25 @@ class TechnicalRelevancePostStepResult:
     duration_seconds: str = "0.000"
     skip_reason: str = ""
     error: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class EcSourceLayerRefreshPostStepResult:
+    attempted: int
+    status: str
+    signal_date: str = "NONE"
+    refresh_mode: str = "NONE"
+    skipped_reason: str = "NONE"
+    backup_path: str = "NONE"
+    coverage_status: str = "NONE"
+    parity_status: str = "NONE"
+    total_mismatch_count: int = 0
+    ticker_rows: int = 0
+    group_signal_rows: int = 0
+    synthetic_ohlc_rows: int = 0
+    group_index_rows: int = 0
+    watermark_rows: int = 0
+    error: str = "NONE"
 
 
 @dataclass(frozen=True)
@@ -2532,6 +2567,76 @@ def _run_datacenter_post_step(
     )
 
 
+def _run_ec_source_layer_refresh_post_step(
+    *,
+    config: StockUpdateSchedulerConfig,
+    target_market: str,
+    datacenter_result: DatacenterPostStepResult,
+    datacenter_dashboard_result: DatacenterDashboardPostStepResult,
+) -> EcSourceLayerRefreshPostStepResult:
+    if not config.ec_source_layer_enabled:
+        return EcSourceLayerRefreshPostStepResult(
+            attempted=0,
+            status="SKIPPED",
+            skipped_reason="DISABLED",
+        )
+    if target_market not in config.enabled_markets:
+        return EcSourceLayerRefreshPostStepResult(
+            attempted=0,
+            status="SKIPPED",
+            skipped_reason="MARKET_NOT_ENABLED",
+        )
+    if datacenter_result.status != "OK" or not datacenter_result.signal_date:
+        return EcSourceLayerRefreshPostStepResult(
+            attempted=0,
+            status="SKIPPED",
+            skipped_reason="LEGACY_DATACENTER_NOT_READY",
+            signal_date=datacenter_result.signal_date or "NONE",
+        )
+    if (
+        config.ec_source_layer_require_legacy_reports_success
+        and datacenter_dashboard_result.status != "OK"
+    ):
+        return EcSourceLayerRefreshPostStepResult(
+            attempted=0,
+            status="SKIPPED",
+            skipped_reason="LEGACY_REPORTS_NOT_SUCCESSFUL",
+            signal_date=datacenter_result.signal_date,
+        )
+
+    refresh_summary = run_ec_source_layer_refresh(
+        db_path=config.analysis_db_path,
+        ecosystem_code=config.ec_source_layer_ecosystem,
+        taxonomy_version_code=config.ec_source_layer_taxonomy_version,
+        taxonomy_csv_path=config.ec_source_layer_taxonomy_csv or "",
+        watchlist_path=config.ec_source_layer_watchlist or "",
+        backup_dir=config.ec_source_layer_backup_dir or "",
+        confirm_db=config.analysis_db_path,
+        confirm_ecosystem=config.ec_source_layer_ecosystem,
+        confirm_taxonomy_version=config.ec_source_layer_taxonomy_version,
+        signal_date=datacenter_result.signal_date,
+        allow_replace_date=not config.ec_source_layer_only_on_new_signal_date,
+    )
+
+    return EcSourceLayerRefreshPostStepResult(
+        attempted=1 if refresh_summary.get("attempted") else 0,
+        status=str(refresh_summary.get("status") or "UNKNOWN"),
+        signal_date=str(refresh_summary.get("signal_date") or "NONE"),
+        refresh_mode=str(refresh_summary.get("refresh_mode") or "NONE"),
+        skipped_reason=str(refresh_summary.get("skipped_reason") or "NONE"),
+        backup_path=str(refresh_summary.get("backup_path") or "NONE"),
+        coverage_status=str(refresh_summary.get("coverage_status") or "NONE"),
+        parity_status=str(refresh_summary.get("parity_status") or "NONE"),
+        total_mismatch_count=int(refresh_summary.get("total_mismatch_count") or 0),
+        ticker_rows=int(refresh_summary.get("ticker_rows") or 0),
+        group_signal_rows=int(refresh_summary.get("group_signal_rows") or 0),
+        synthetic_ohlc_rows=int(refresh_summary.get("synthetic_ohlc_rows") or 0),
+        group_index_rows=int(refresh_summary.get("group_index_rows") or 0),
+        watermark_rows=int(refresh_summary.get("watermark_rows") or 0),
+        error=str(refresh_summary.get("error") or "NONE"),
+    )
+
+
 def _build_app(config: StockUpdateSchedulerConfig) -> RawCandleApp:
     osakedata_db_path = Path(config.osakedata_db_path)
     app = object.__new__(RawCandleApp)
@@ -2726,6 +2831,19 @@ def run_scheduler_config(
                     timezone=config.timezone,
                     skip_next_run=False,
                     technical_relevance_enabled=config.technical_relevance_enabled,
+                    ec_source_layer_enabled=config.ec_source_layer_enabled,
+                    ec_source_layer_ecosystem=config.ec_source_layer_ecosystem,
+                    ec_source_layer_taxonomy_version=config.ec_source_layer_taxonomy_version,
+                    ec_source_layer_taxonomy_csv=config.ec_source_layer_taxonomy_csv,
+                    ec_source_layer_watchlist=config.ec_source_layer_watchlist,
+                    ec_source_layer_backup_dir=config.ec_source_layer_backup_dir,
+                    ec_source_layer_mode=config.ec_source_layer_mode,
+                    ec_source_layer_require_legacy_reports_success=(
+                        config.ec_source_layer_require_legacy_reports_success
+                    ),
+                    ec_source_layer_only_on_new_signal_date=(
+                        config.ec_source_layer_only_on_new_signal_date
+                    ),
                     datacenter_v3_reports_enabled=config.datacenter_v3_reports_enabled,
                     datacenter_v3_reports_output_dir=config.datacenter_v3_reports_output_dir,
                     datacenter_v3_reports_ecosystem=config.datacenter_v3_reports_ecosystem,
@@ -2874,6 +2992,15 @@ def run_scheduler_config(
                 market="usa",
             )
             v3_reports_result = _default_v3_reports_post_step_result()
+            ec_source_layer_result = EcSourceLayerRefreshPostStepResult(
+                attempted=0,
+                status="SKIPPED",
+                skipped_reason="MARKET_PHASE_FAILED"
+                if market_update_phase_status not in (STATUS_OK, STATUS_OK_WITH_WARNINGS)
+                else "MARKET_NOT_ENABLED"
+                if datacenter_result.market not in config.enabled_markets
+                else "NOT_RUN",
+            )
             datacenter_dashboard_result = _default_datacenter_dashboard_result(
                 config=config,
                 skip_reason="USA_NOT_ENABLED"
@@ -2928,6 +3055,12 @@ def run_scheduler_config(
                     v3_reports_result = _default_v3_reports_post_step_result(
                         signal_date=datacenter_result.signal_date or "NONE",
                     )
+                ec_source_layer_result = _run_ec_source_layer_refresh_post_step(
+                    config=config,
+                    target_market=datacenter_result.market,
+                    datacenter_result=datacenter_result,
+                    datacenter_dashboard_result=datacenter_dashboard_result,
+                )
             overall_status = (
                 STATUS_FAILED
                 if technical_relevance_result.status == "FAILED"
@@ -2938,6 +3071,12 @@ def run_scheduler_config(
             if (
                 overall_status == STATUS_OK
                 and v3_reports_result.status in ("FAILED", "NO_MATCHING_ECO_RUN")
+            ):
+                overall_status = STATUS_OK_WITH_WARNINGS
+            if (
+                overall_status == STATUS_OK
+                and ec_source_layer_result.status
+                in {"REFRESH_REFUSED", "REFRESH_FAILED_BEFORE_WRITE", "REFRESH_FAILED"}
             ):
                 overall_status = STATUS_OK_WITH_WARNINGS
 
@@ -3066,6 +3205,21 @@ def run_scheduler_config(
                 datacenter_dashboard_fallback_used=datacenter_dashboard_result.fallback_used,
                 datacenter_dashboard_final_source_mode=datacenter_dashboard_result.final_source_mode,
                 datacenter_dashboard_error=datacenter_dashboard_result.error or "",
+                ec_source_layer_attempted=ec_source_layer_result.attempted,
+                ec_source_layer_status=ec_source_layer_result.status,
+                ec_source_layer_signal_date=ec_source_layer_result.signal_date,
+                ec_source_layer_refresh_mode=ec_source_layer_result.refresh_mode,
+                ec_source_layer_skipped_reason=ec_source_layer_result.skipped_reason,
+                ec_source_layer_backup_path=ec_source_layer_result.backup_path,
+                ec_source_layer_coverage_status=ec_source_layer_result.coverage_status,
+                ec_source_layer_parity_status=ec_source_layer_result.parity_status,
+                ec_source_layer_total_mismatch_count=ec_source_layer_result.total_mismatch_count,
+                ec_source_layer_ticker_rows=ec_source_layer_result.ticker_rows,
+                ec_source_layer_group_signal_rows=ec_source_layer_result.group_signal_rows,
+                ec_source_layer_synthetic_ohlc_rows=ec_source_layer_result.synthetic_ohlc_rows,
+                ec_source_layer_group_index_rows=ec_source_layer_result.group_index_rows,
+                ec_source_layer_watermark_rows=ec_source_layer_result.watermark_rows,
+                ec_source_layer_error=ec_source_layer_result.error,
             )
             _write_summary_json(config=config, run_started_at=run_started_at, result=result)
             write_scheduler_status(

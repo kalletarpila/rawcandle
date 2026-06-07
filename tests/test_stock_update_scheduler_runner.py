@@ -18,7 +18,9 @@ from rawcandle.scheduler.config import (
 from rawcandle.scheduler.runner import (
     DatacenterDashboardPostStepResult,
     DatacenterPostStepConfig,
+    DatacenterPostStepResult,
     DatacenterSignalDateResolution,
+    ScheduledMarketRunResult,
     SchedulerDashboardConfigInspection,
     SchedulerEnrichmentPlanInspection,
     SchedulerAlreadyRunningError,
@@ -227,6 +229,15 @@ def _write_config(
     datacenter_v3_reports_output_dir=None,
     datacenter_v3_reports_ecosystem=None,
     datacenter_v3_reports_taxonomy_version=None,
+    ec_source_layer_enabled=None,
+    ec_source_layer_ecosystem=None,
+    ec_source_layer_taxonomy_version=None,
+    ec_source_layer_taxonomy_csv=None,
+    ec_source_layer_watchlist=None,
+    ec_source_layer_backup_dir=None,
+    ec_source_layer_mode=None,
+    ec_source_layer_require_legacy_reports_success=None,
+    ec_source_layer_only_on_new_signal_date=None,
 ):
     osakedata_db = osakedata_db or (tmp_path / "osakedata.db")
     analysis_db = analysis_db or (tmp_path / "analysis.db")
@@ -283,6 +294,28 @@ def _write_config(
         config.datacenter_v3_reports_ecosystem = datacenter_v3_reports_ecosystem
     if datacenter_v3_reports_taxonomy_version is not None:
         config.datacenter_v3_reports_taxonomy_version = datacenter_v3_reports_taxonomy_version
+    if ec_source_layer_enabled is not None:
+        config.ec_source_layer_enabled = ec_source_layer_enabled
+    if ec_source_layer_ecosystem is not None:
+        config.ec_source_layer_ecosystem = ec_source_layer_ecosystem
+    if ec_source_layer_taxonomy_version is not None:
+        config.ec_source_layer_taxonomy_version = ec_source_layer_taxonomy_version
+    if ec_source_layer_taxonomy_csv is not None:
+        config.ec_source_layer_taxonomy_csv = str(ec_source_layer_taxonomy_csv)
+    if ec_source_layer_watchlist is not None:
+        config.ec_source_layer_watchlist = str(ec_source_layer_watchlist)
+    if ec_source_layer_backup_dir is not None:
+        config.ec_source_layer_backup_dir = str(ec_source_layer_backup_dir)
+    if ec_source_layer_mode is not None:
+        config.ec_source_layer_mode = ec_source_layer_mode
+    if ec_source_layer_require_legacy_reports_success is not None:
+        config.ec_source_layer_require_legacy_reports_success = (
+            ec_source_layer_require_legacy_reports_success
+        )
+    if ec_source_layer_only_on_new_signal_date is not None:
+        config.ec_source_layer_only_on_new_signal_date = (
+            ec_source_layer_only_on_new_signal_date
+        )
     path = tmp_path / "scheduler_config.json"
     write_scheduler_config(str(path), config)
     return path
@@ -2662,6 +2695,313 @@ def test_scheduler_runner_status_file_written_for_normal_run(tmp_path, monkeypat
     assert status["last_status"] == STATUS_OK
     assert status["summary_json_path"] == result.summary_json_path
     assert status["current_market"] is None
+
+
+def test_scheduler_runner_ec_source_layer_disabled_skips_without_call(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(tmp_path, enabled_markets=["usa"])
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_one_market",
+        lambda **kwargs: ScheduledMarketRunResult(
+            market=kwargs["market"],
+            started_at_utc="2026-06-07T00:00:00Z",
+            finished_at_utc="2026-06-07T00:01:00Z",
+            exit_code=0,
+            summary_status=STATUS_OK,
+            log_path="/tmp/usa.log",
+            summary_lines=["SUMMARY market=usa"],
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_post_step",
+        lambda **kwargs: DatacenterPostStepResult(
+            attempted=1,
+            status="OK",
+            market="usa",
+            signal_date="2026-06-05",
+            daily_report_path="/tmp/daily.md",
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.run_ec_source_layer_refresh",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("ec refresh should not be called when disabled")
+        ),
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.ec_source_layer_attempted == 0
+    assert result.ec_source_layer_status == "SKIPPED"
+    assert result.ec_source_layer_skipped_reason == "DISABLED"
+
+
+def test_scheduler_runner_ec_source_layer_enabled_runs_after_legacy_success(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        ec_source_layer_enabled=True,
+        ec_source_layer_taxonomy_csv=tmp_path / "taxonomy.csv",
+        ec_source_layer_watchlist=tmp_path / "watchlist.txt",
+        ec_source_layer_backup_dir=tmp_path / "backups",
+    )
+
+    called_kwargs: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_one_market",
+        lambda **kwargs: ScheduledMarketRunResult(
+            market=kwargs["market"],
+            started_at_utc="2026-06-07T00:00:00Z",
+            finished_at_utc="2026-06-07T00:01:00Z",
+            exit_code=0,
+            summary_status=STATUS_OK,
+            log_path="/tmp/usa.log",
+            summary_lines=["SUMMARY market=usa"],
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_post_step",
+        lambda **kwargs: DatacenterPostStepResult(
+            attempted=1,
+            status="OK",
+            market="usa",
+            signal_date="2026-06-05",
+            daily_report_path="/tmp/daily.md",
+        ),
+    )
+
+    def fake_refresh(**kwargs):
+        called_kwargs.update(kwargs)
+        return {
+            "attempted": True,
+            "status": "REFRESH_COMPLETED",
+            "signal_date": "2026-06-05",
+            "refresh_mode": "new_selected_date",
+            "skipped_reason": None,
+            "backup_path": "/tmp/backups/refresh.sqlite",
+            "coverage_status": "OK_WITH_WARNINGS",
+            "parity_status": "OK_WITH_WARNINGS",
+            "total_mismatch_count": 0,
+            "ticker_rows": 236,
+            "group_signal_rows": 54,
+            "synthetic_ohlc_rows": 53,
+            "group_index_rows": 54,
+            "watermark_rows": 15,
+            "error": None,
+        }
+
+    monkeypatch.setattr("rawcandle.scheduler.runner.run_ec_source_layer_refresh", fake_refresh)
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.overall_status == STATUS_OK
+    assert result.datacenter_pipeline_daily_report_path == "/tmp/daily.md"
+    assert result.ec_source_layer_attempted == 1
+    assert result.ec_source_layer_status == "REFRESH_COMPLETED"
+    assert result.ec_source_layer_backup_path == "/tmp/backups/refresh.sqlite"
+    assert result.ec_source_layer_ticker_rows == 236
+    assert called_kwargs["db_path"] == str(analysis_db)
+    assert called_kwargs["confirm_db"] == str(analysis_db)
+    assert called_kwargs["allow_replace_date"] is False
+
+
+def test_scheduler_runner_ec_source_layer_skipped_keeps_ok_status(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        ec_source_layer_enabled=True,
+        ec_source_layer_taxonomy_csv=tmp_path / "taxonomy.csv",
+        ec_source_layer_watchlist=tmp_path / "watchlist.txt",
+        ec_source_layer_backup_dir=tmp_path / "backups",
+    )
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_one_market",
+        lambda **kwargs: ScheduledMarketRunResult(
+            market=kwargs["market"],
+            started_at_utc="2026-06-07T00:00:00Z",
+            finished_at_utc="2026-06-07T00:01:00Z",
+            exit_code=0,
+            summary_status=STATUS_OK,
+            log_path="/tmp/usa.log",
+            summary_lines=["SUMMARY market=usa"],
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_post_step",
+        lambda **kwargs: DatacenterPostStepResult(
+            attempted=1,
+            status="OK",
+            market="usa",
+            signal_date="2026-06-05",
+            daily_report_path="/tmp/daily.md",
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.run_ec_source_layer_refresh",
+        lambda **kwargs: {
+            "attempted": False,
+            "status": "REFRESH_SKIPPED",
+            "signal_date": "2026-06-05",
+            "refresh_mode": "skip_up_to_date",
+            "skipped_reason": "planner reported SKIP_UP_TO_DATE",
+            "backup_path": None,
+            "coverage_status": None,
+            "parity_status": None,
+            "total_mismatch_count": None,
+            "ticker_rows": None,
+            "group_signal_rows": None,
+            "synthetic_ohlc_rows": None,
+            "group_index_rows": None,
+            "watermark_rows": None,
+            "error": None,
+        },
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.overall_status == STATUS_OK
+    assert result.ec_source_layer_status == "REFRESH_SKIPPED"
+
+
+def test_scheduler_runner_ec_source_layer_failure_degrades_to_warning(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        ec_source_layer_enabled=True,
+        ec_source_layer_taxonomy_csv=tmp_path / "taxonomy.csv",
+        ec_source_layer_watchlist=tmp_path / "watchlist.txt",
+        ec_source_layer_backup_dir=tmp_path / "backups",
+    )
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_one_market",
+        lambda **kwargs: ScheduledMarketRunResult(
+            market=kwargs["market"],
+            started_at_utc="2026-06-07T00:00:00Z",
+            finished_at_utc="2026-06-07T00:01:00Z",
+            exit_code=0,
+            summary_status=STATUS_OK,
+            log_path="/tmp/usa.log",
+            summary_lines=["SUMMARY market=usa"],
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_post_step",
+        lambda **kwargs: DatacenterPostStepResult(
+            attempted=1,
+            status="OK",
+            market="usa",
+            signal_date="2026-06-05",
+            daily_report_path="/tmp/daily.md",
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.run_ec_source_layer_refresh",
+        lambda **kwargs: {
+            "attempted": True,
+            "status": "REFRESH_FAILED",
+            "signal_date": "2026-06-05",
+            "refresh_mode": "new_selected_date",
+            "skipped_reason": None,
+            "backup_path": "/tmp/backups/refresh.sqlite",
+            "coverage_status": None,
+            "parity_status": None,
+            "total_mismatch_count": None,
+            "ticker_rows": None,
+            "group_signal_rows": None,
+            "synthetic_ohlc_rows": None,
+            "group_index_rows": None,
+            "watermark_rows": None,
+            "error": "refresh failed",
+        },
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.overall_status == STATUS_OK_WITH_WARNINGS
+    assert result.datacenter_pipeline_daily_report_path == "/tmp/daily.md"
+    assert result.ec_source_layer_status == "REFRESH_FAILED"
+    assert result.ec_source_layer_error == "refresh failed"
+
+
+def test_scheduler_runner_ec_source_layer_skips_when_legacy_failed_and_required(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        ec_source_layer_enabled=True,
+        ec_source_layer_taxonomy_csv=tmp_path / "taxonomy.csv",
+        ec_source_layer_watchlist=tmp_path / "watchlist.txt",
+        ec_source_layer_backup_dir=tmp_path / "backups",
+        ec_source_layer_require_legacy_reports_success=True,
+    )
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_one_market",
+        lambda **kwargs: ScheduledMarketRunResult(
+            market=kwargs["market"],
+            started_at_utc="2026-06-07T00:00:00Z",
+            finished_at_utc="2026-06-07T00:01:00Z",
+            exit_code=0,
+            summary_status=STATUS_OK,
+            log_path="/tmp/usa.log",
+            summary_lines=["SUMMARY market=usa"],
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_post_step",
+        lambda **kwargs: DatacenterPostStepResult(
+            attempted=1,
+            status="FAILED",
+            market="usa",
+            signal_date="2026-06-05",
+            daily_report_path="/tmp/daily.md",
+            error="legacy failed",
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.run_ec_source_layer_refresh",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("ec refresh should not be called when legacy failed")
+        ),
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.ec_source_layer_attempted == 0
+    assert result.ec_source_layer_status == "SKIPPED"
+    assert result.ec_source_layer_skipped_reason == "LEGACY_DATACENTER_NOT_READY"
 
 
 def test_scheduler_runner_lock_conflict_raises_and_runs_no_markets(tmp_path, monkeypatch):

@@ -503,6 +503,54 @@ def main(argv: Optional[List[str]] = None) -> int:
         f"{result.datacenter_dashboard_final_source_mode}"
     )
     print(f"SUMMARY datacenter_dashboard.error={result.datacenter_dashboard_error}")
+    print(f"SUMMARY ec_source_layer.attempted={result.ec_source_layer_attempted}")
+    print(f"SUMMARY ec_source_layer.status={result.ec_source_layer_status}")
+    print(
+        "SUMMARY ec_source_layer.signal_date="
+        f"{result.ec_source_layer_signal_date or 'NONE'}"
+    )
+    print(
+        "SUMMARY ec_source_layer.refresh_mode="
+        f"{result.ec_source_layer_refresh_mode or 'NONE'}"
+    )
+    print(
+        "SUMMARY ec_source_layer.skipped_reason="
+        f"{result.ec_source_layer_skipped_reason or 'NONE'}"
+    )
+    print(
+        "SUMMARY ec_source_layer.backup_path="
+        f"{result.ec_source_layer_backup_path or 'NONE'}"
+    )
+    print(
+        "SUMMARY ec_source_layer.coverage_status="
+        f"{result.ec_source_layer_coverage_status or 'NONE'}"
+    )
+    print(
+        "SUMMARY ec_source_layer.parity_status="
+        f"{result.ec_source_layer_parity_status or 'NONE'}"
+    )
+    print(
+        "SUMMARY ec_source_layer.total_mismatch_count="
+        f"{result.ec_source_layer_total_mismatch_count}"
+    )
+    print(f"SUMMARY ec_source_layer.ticker_rows={result.ec_source_layer_ticker_rows}")
+    print(
+        "SUMMARY ec_source_layer.group_signal_rows="
+        f"{result.ec_source_layer_group_signal_rows}"
+    )
+    print(
+        "SUMMARY ec_source_layer.synthetic_ohlc_rows="
+        f"{result.ec_source_layer_synthetic_ohlc_rows}"
+    )
+    print(
+        "SUMMARY ec_source_layer.group_index_rows="
+        f"{result.ec_source_layer_group_index_rows}"
+    )
+    print(
+        "SUMMARY ec_source_layer.watermark_rows="
+        f"{result.ec_source_layer_watermark_rows}"
+    )
+    print(f"SUMMARY ec_source_layer.error={result.ec_source_layer_error or 'NONE'}")
 
     for market_result in result.market_results:
         print(f"SUMMARY market.{market_result.market}.status={market_result.summary_status}")
