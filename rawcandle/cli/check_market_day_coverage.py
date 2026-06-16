@@ -15,6 +15,15 @@ CLASSIFICATION_NORMAL_COVERAGE = "NORMAL_COVERAGE"
 CLASSIFICATION_PARTIAL_SMALL_GAP = "PARTIAL_SMALL_GAP"
 CLASSIFICATION_DAY_LEVEL_GAP = "DAY_LEVEL_GAP"
 
+GAP_POSITION_INTERIOR = "INTERIOR_GAP"
+GAP_POSITION_LATEST_OR_RIGHT_EDGE = "LATEST_OR_RIGHT_EDGE_GAP"
+GAP_POSITION_LEFT_EDGE_OR_OLD_START = "LEFT_EDGE_OR_OLD_START_GAP"
+GAP_POSITION_NO_REFERENCE = "NO_REFERENCE"
+
+DOWNSREAM_RECOMPUTE_MODE_LATEST = "LATEST_DAY_RECOMPUTE_OK"
+DOWNSREAM_RECOMPUTE_MODE_FORWARD = "FROM_RECOVERED_DATE_FORWARD_REQUIRED"
+DOWNSREAM_RECOMPUTE_MODE_REPORT_ONLY = "REPORT_ONLY_NO_SAFE_RECOMPUTE_MODE"
+
 NORMAL_COVERAGE_THRESHOLD = 0.98
 DAY_LEVEL_GAP_THRESHOLD = 0.90
 SMALL_GAP_MAX_MISSING = 25
@@ -44,6 +53,8 @@ class CoverageReport:
     missing_tickers_count: int
     coverage_ratio: float
     classification: str
+    gap_position: str
+    downstream_recompute_mode: str
     missing_tickers: list[str]
 
 
@@ -154,8 +165,8 @@ def _classify_coverage(
     coverage_ratio: float,
     min_reference_count: int,
 ) -> str:
-    if previous_reference_date is None or next_reference_date is None:
-        if present_tickers_count < min_reference_count:
+    if previous_reference_date is None and next_reference_date is None:
+        if present_tickers_count <= 0:
             return CLASSIFICATION_MARKET_CLOSED_OR_NO_NORMAL_COVERAGE
         return CLASSIFICATION_NO_REFERENCE_DATES
     if expected_tickers_count <= 0:
@@ -167,6 +178,28 @@ def _classify_coverage(
     if missing_tickers_count <= SMALL_GAP_MAX_MISSING:
         return CLASSIFICATION_PARTIAL_SMALL_GAP
     return CLASSIFICATION_DAY_LEVEL_GAP
+
+
+def _determine_gap_position(
+    *,
+    previous_reference_date: Optional[str],
+    next_reference_date: Optional[str],
+) -> str:
+    if previous_reference_date is not None and next_reference_date is not None:
+        return GAP_POSITION_INTERIOR
+    if previous_reference_date is not None:
+        return GAP_POSITION_LATEST_OR_RIGHT_EDGE
+    if next_reference_date is not None:
+        return GAP_POSITION_LEFT_EDGE_OR_OLD_START
+    return GAP_POSITION_NO_REFERENCE
+
+
+def _determine_downstream_recompute_mode(gap_position: str) -> str:
+    if gap_position == GAP_POSITION_LATEST_OR_RIGHT_EDGE:
+        return DOWNSREAM_RECOMPUTE_MODE_LATEST
+    if gap_position in (GAP_POSITION_INTERIOR, GAP_POSITION_LEFT_EDGE_OR_OLD_START):
+        return DOWNSREAM_RECOMPUTE_MODE_FORWARD
+    return DOWNSREAM_RECOMPUTE_MODE_REPORT_ONLY
 
 
 def build_coverage_report(
@@ -221,7 +254,12 @@ def build_coverage_report(
             target_date=target_date,
         )
 
-    expected_tickers = previous_reference_tickers | next_reference_tickers
+    if previous_reference_tickers and next_reference_tickers:
+        expected_tickers = previous_reference_tickers | next_reference_tickers
+    elif previous_reference_tickers:
+        expected_tickers = previous_reference_tickers
+    else:
+        expected_tickers = next_reference_tickers
     missing_tickers = sorted(expected_tickers - present_tickers)
     expected_tickers_count = len(expected_tickers)
     present_tickers_count = len(present_tickers)
@@ -240,6 +278,11 @@ def build_coverage_report(
         coverage_ratio=coverage_ratio,
         min_reference_count=min_reference_count,
     )
+    gap_position = _determine_gap_position(
+        previous_reference_date=previous_reference_date,
+        next_reference_date=next_reference_date,
+    )
+    downstream_recompute_mode = _determine_downstream_recompute_mode(gap_position)
 
     return CoverageReport(
         db_path=str(Path(db_path).resolve()),
@@ -254,6 +297,8 @@ def build_coverage_report(
         missing_tickers_count=missing_tickers_count,
         coverage_ratio=coverage_ratio,
         classification=classification,
+        gap_position=gap_position,
+        downstream_recompute_mode=downstream_recompute_mode,
         missing_tickers=missing_tickers,
     )
 
@@ -276,6 +321,10 @@ def _print_text_report(report: CoverageReport, missing_limit: int) -> None:
     print(f"missing_tickers: {report.missing_tickers_count}")
     print(f"coverage_ratio: {report.coverage_ratio:.4f}")
     print(f"classification: {report.classification}")
+    print(f"gap_position: {report.gap_position}")
+    print(
+        f"downstream_recompute_mode: {report.downstream_recompute_mode}"
+    )
     print()
     print("missing_examples:")
     for ticker in report.missing_tickers[: max(0, missing_limit)]:

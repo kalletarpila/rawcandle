@@ -70,9 +70,14 @@ def test_normal_coverage_report(tmp_path) -> None:
     assert report.missing_tickers_count == 0
     assert report.coverage_ratio == 1.0
     assert report.classification == cli.CLASSIFICATION_NORMAL_COVERAGE
+    assert report.gap_position == cli.GAP_POSITION_INTERIOR
+    assert (
+        report.downstream_recompute_mode
+        == cli.DOWNSREAM_RECOMPUTE_MODE_FORWARD
+    )
 
 
-def test_day_level_gap_report(tmp_path) -> None:
+def test_interior_day_level_gap_report(tmp_path) -> None:
     db_path = _build_test_db(tmp_path)
     all_tickers = ["AAPL", "MSFT", "NVDA", "SPY", "QQQ"]
     _insert_day(db_path, date="2026-06-12", tickers=all_tickers)
@@ -92,6 +97,38 @@ def test_day_level_gap_report(tmp_path) -> None:
     assert report.missing_tickers_count == 3
     assert report.missing_tickers == ["NVDA", "QQQ", "SPY"]
     assert report.classification == cli.CLASSIFICATION_DAY_LEVEL_GAP
+    assert report.gap_position == cli.GAP_POSITION_INTERIOR
+    assert (
+        report.downstream_recompute_mode
+        == cli.DOWNSREAM_RECOMPUTE_MODE_FORWARD
+    )
+
+
+def test_latest_right_edge_day_level_gap_report(tmp_path) -> None:
+    db_path = _build_test_db(tmp_path)
+    all_tickers = ["AAPL", "MSFT", "NVDA", "SPY", "QQQ"]
+    _insert_day(db_path, date="2026-06-12", tickers=all_tickers)
+    _insert_day(db_path, date="2026-06-13", tickers=["AAPL", "MSFT"])
+
+    report = cli.build_coverage_report(
+        db_path=str(db_path),
+        market="usa",
+        target_date="2026-06-13",
+        reference_window_days=10,
+        min_reference_count=3,
+    )
+
+    assert report.previous_reference_date == "2026-06-12"
+    assert report.next_reference_date is None
+    assert report.expected_tickers_count == 5
+    assert report.present_tickers_count == 2
+    assert report.missing_tickers_count == 3
+    assert report.classification == cli.CLASSIFICATION_DAY_LEVEL_GAP
+    assert report.gap_position == cli.GAP_POSITION_LATEST_OR_RIGHT_EDGE
+    assert (
+        report.downstream_recompute_mode
+        == cli.DOWNSREAM_RECOMPUTE_MODE_LATEST
+    )
 
 
 def test_text_output_respects_missing_limit(tmp_path, capsys) -> None:
@@ -120,6 +157,11 @@ def test_text_output_respects_missing_limit(tmp_path, capsys) -> None:
     assert code == 0
     assert "missing_tickers: 5" in captured.out
     assert "classification: DAY_LEVEL_GAP" in captured.out
+    assert "gap_position: INTERIOR_GAP" in captured.out
+    assert (
+        "downstream_recompute_mode: FROM_RECOVERED_DATE_FORWARD_REQUIRED"
+        in captured.out
+    )
     assert "BBB" in captured.out
     assert "CCC" in captured.out
     assert "DDD" not in captured.out
@@ -158,6 +200,11 @@ def test_json_output_contains_expected_fields(tmp_path, capsys) -> None:
     assert payload["present_tickers_count"] == 2
     assert payload["missing_tickers_count"] == 3
     assert payload["classification"] == "DAY_LEVEL_GAP"
+    assert payload["gap_position"] == "INTERIOR_GAP"
+    assert (
+        payload["downstream_recompute_mode"]
+        == "FROM_RECOVERED_DATE_FORWARD_REQUIRED"
+    )
     assert payload["missing_tickers"] == ["NVDA", "QQQ", "SPY"]
 
 
@@ -184,4 +231,9 @@ def test_no_reference_dates_is_handled(tmp_path, capsys) -> None:
     assert code == 0
     assert "previous_reference_date: NONE" in captured.out
     assert "next_reference_date: NONE" in captured.out
-    assert "classification: MARKET_CLOSED_OR_NO_NORMAL_COVERAGE" in captured.out
+    assert "classification: NO_REFERENCE_DATES" in captured.out
+    assert "gap_position: NO_REFERENCE" in captured.out
+    assert (
+        "downstream_recompute_mode: REPORT_ONLY_NO_SAFE_RECOMPUTE_MODE"
+        in captured.out
+    )
