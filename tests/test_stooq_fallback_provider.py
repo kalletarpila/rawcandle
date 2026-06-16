@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 
 from services.stooq_fallback_provider import (
-    build_stooq_daily_url,
+    build_stooq_daily_csv_url,
     map_ticker_to_stooq_symbol,
     parse_stooq_daily_csv_to_rows,
     recover_missing_ohlcv_rows_from_stooq,
@@ -19,8 +19,34 @@ def test_map_ticker_to_stooq_symbol_rejects_suffix_tickers() -> None:
     assert map_ticker_to_stooq_symbol("NOBI.ST") is None
 
 
-def test_build_stooq_daily_url_uses_daily_csv_template() -> None:
-    assert build_stooq_daily_url("aapl.us") == "https://stooq.com/q/d/l/?s=aapl.us&i=d"
+def test_build_stooq_daily_csv_url_uses_single_day_range() -> None:
+    assert (
+        build_stooq_daily_csv_url("aapl.us", date(2026, 6, 15), date(2026, 6, 15))
+        == "https://stooq.com/q/d/l/?s=aapl.us&d1=20260615&d2=20260615&i=d"
+    )
+
+
+def test_build_stooq_daily_csv_url_uses_min_max_range_for_multiple_dates() -> None:
+    rows = recover_missing_ohlcv_rows_from_stooq(
+        "AAPL",
+        "usa",
+        ["2026-06-13", "2026-06-15", "2026-06-16"],
+        http_get=lambda url: "",
+    )
+
+    assert rows == []
+
+
+def test_build_stooq_daily_csv_url_supports_base_domain_override() -> None:
+    assert (
+        build_stooq_daily_csv_url(
+            "aapl.us",
+            "2026-06-15",
+            "2026-06-15",
+            base_url="https://stooq.pl",
+        )
+        == "https://stooq.pl/q/d/l/?s=aapl.us&d1=20260615&d2=20260615&i=d"
+    )
 
 
 def test_parse_stooq_daily_csv_returns_only_requested_day() -> None:
@@ -105,6 +131,17 @@ def test_parse_stooq_daily_csv_handles_no_data_response() -> None:
     assert rows == []
 
 
+def test_parse_stooq_daily_csv_handles_html_response() -> None:
+    rows = parse_stooq_daily_csv_to_rows(
+        csv_text="<!DOCTYPE html><html><body>browser verification</body></html>",
+        ticker="AAPL",
+        market="usa",
+        missing_dates=["2026-06-15"],
+    )
+
+    assert rows == []
+
+
 def test_recover_missing_ohlcv_rows_from_stooq_uses_injected_http_get() -> None:
     calls = []
 
@@ -121,9 +158,27 @@ def test_recover_missing_ohlcv_rows_from_stooq_uses_injected_http_get() -> None:
         http_get=fake_http_get,
     )
 
-    assert calls == ["https://stooq.com/q/d/l/?s=aapl.us&i=d"]
+    assert calls == ["https://stooq.com/q/d/l/?s=aapl.us&d1=20260615&d2=20260615&i=d"]
     assert len(rows) == 1
     assert rows[0].date == "2026-06-15"
+
+
+def test_recover_missing_ohlcv_rows_from_stooq_uses_min_max_date_range() -> None:
+    calls = []
+
+    def fake_http_get(url: str) -> str:
+        calls.append(url)
+        return ""
+
+    rows = recover_missing_ohlcv_rows_from_stooq(
+        "AAPL",
+        "usa",
+        ["2026-06-13", "2026-06-15", "2026-06-16"],
+        http_get=fake_http_get,
+    )
+
+    assert rows == []
+    assert calls == ["https://stooq.com/q/d/l/?s=aapl.us&d1=20260613&d2=20260616&i=d"]
 
 
 def test_recover_missing_ohlcv_rows_from_stooq_rejects_unsupported_ticker_without_fetch() -> None:

@@ -4,11 +4,12 @@ import csv
 import io
 from datetime import date
 from typing import Callable, List, Optional, Sequence
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from services.stock_update_service import StockOhlcvRow
 
-STOOQ_DAILY_URL_TEMPLATE = "https://stooq.com/q/d/l/?s={symbol}&i=d"
+DEFAULT_STOOQ_BASE_URL = "https://stooq.com"
+STOOQ_DAILY_URL_TEMPLATE = "{base_url}/q/d/l/?s={symbol}&d1={start_date}&d2={end_date}&i=d"
 
 
 def map_ticker_to_stooq_symbol(ticker: str) -> Optional[str]:
@@ -18,8 +19,25 @@ def map_ticker_to_stooq_symbol(ticker: str) -> Optional[str]:
     return f"{normalized.lower()}.us"
 
 
-def build_stooq_daily_url(symbol: str) -> str:
-    return STOOQ_DAILY_URL_TEMPLATE.format(symbol=symbol)
+def _format_stooq_date_param(value: object) -> str:
+    if isinstance(value, date):
+        return value.strftime("%Y%m%d")
+    return str(value).strip().replace("-", "")
+
+
+def build_stooq_daily_csv_url(
+    symbol: str,
+    start_date: object,
+    end_date: object,
+    *,
+    base_url: str = DEFAULT_STOOQ_BASE_URL,
+) -> str:
+    return STOOQ_DAILY_URL_TEMPLATE.format(
+        base_url=base_url.rstrip("/"),
+        symbol=symbol,
+        start_date=_format_stooq_date_param(start_date),
+        end_date=_format_stooq_date_param(end_date),
+    )
 
 
 def _normalize_missing_dates(missing_dates: Sequence[object]) -> List[str]:
@@ -78,7 +96,15 @@ def parse_stooq_daily_csv_to_rows(
         return []
 
     stripped_csv = csv_text.strip()
-    if not stripped_csv or stripped_csv.lower().startswith("no data"):
+    lower_csv = stripped_csv.lower()
+    if (
+        not stripped_csv
+        or lower_csv.startswith("no data")
+        or lower_csv.startswith("<!doctype html")
+        or lower_csv.startswith("<html")
+        or "browser verification" in lower_csv
+        or "requires javascript" in lower_csv
+    ):
         return []
 
     rows: List[StockOhlcvRow] = []
@@ -117,7 +143,8 @@ def parse_stooq_daily_csv_to_rows(
 
 
 def _default_http_get(url: str) -> str:
-    with urlopen(url) as response:
+    request = Request(url, headers={"User-Agent": "RawCandle/1.0"})
+    with urlopen(request) as response:
         return response.read().decode("utf-8")
 
 
@@ -127,6 +154,7 @@ def recover_missing_ohlcv_rows_from_stooq(
     missing_dates: Sequence[object],
     *,
     http_get: Optional[Callable[[str], str]] = None,
+    base_url: str = DEFAULT_STOOQ_BASE_URL,
 ) -> Sequence[StockOhlcvRow]:
     symbol = map_ticker_to_stooq_symbol(ticker)
     if symbol is None:
@@ -136,8 +164,18 @@ def recover_missing_ohlcv_rows_from_stooq(
     if not normalized_missing_dates:
         return []
 
+    start_date = min(normalized_missing_dates)
+    end_date = max(normalized_missing_dates)
+
     fetch_text = http_get or _default_http_get
-    csv_text = fetch_text(build_stooq_daily_url(symbol))
+    csv_text = fetch_text(
+        build_stooq_daily_csv_url(
+            symbol,
+            start_date,
+            end_date,
+            base_url=base_url,
+        )
+    )
     return parse_stooq_daily_csv_to_rows(
         csv_text=csv_text,
         ticker=ticker,
