@@ -3834,6 +3834,11 @@ class RawCandleApp:
                             # Ohita jos päivä on jo tietokannassa
                             if date_str in existing_dates:
                                 continue
+                            if any(
+                                pd.isna(row[column])
+                                for column in ("Open", "High", "Low", "Close")
+                            ):
+                                continue
 
                             cursor.execute(
                                 """

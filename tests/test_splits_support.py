@@ -10,6 +10,7 @@ import pytest
 from stock import splits as splits_mod
 from stock.splits import SplitEvent, sync_splits_for_ticker
 from analysis import backfill_splits_data
+from analysis import splits_price_backfill
 
 
 def _make_temp_osakedata(tmp_path: Path) -> Path:
@@ -132,3 +133,41 @@ def test_backfill_dry_run_does_not_write(monkeypatch, tmp_path):
     count = conn.execute("SELECT COUNT(*) FROM splits_data").fetchone()[0]
     conn.close()
     assert count == 0
+
+
+def test_refetch_prices_from_yahoo_skips_incomplete_ohlc_rows(monkeypatch, tmp_path):
+    db_path = _make_temp_osakedata(tmp_path)
+    history = pd.DataFrame(
+        {
+            "Open": [1.0, 2.0],
+            "High": [2.0, 3.0],
+            "Low": [0.5, 1.5],
+            "Close": [1.5, float("nan")],
+            "Volume": [100, 200],
+        },
+        index=pd.to_datetime(["2024-01-03", "2024-01-04"]),
+    )
+    monkeypatch.setattr(
+        splits_price_backfill,
+        "yf",
+        SimpleNamespace(Ticker=lambda ticker: SimpleNamespace(history=lambda start=None, end=None: history)),
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        inserted = splits_price_backfill.refetch_prices_from_yahoo(
+            conn,
+            "AAA",
+            start_date="2024-01-03",
+            end_date="2024-01-04",
+        )
+        rows = conn.execute(
+            """
+            SELECT pvm, open, high, low, close, volume
+            FROM osakedata
+            WHERE osake = 'AAA' AND pvm >= '2024-01-03'
+            ORDER BY pvm
+            """
+        ).fetchall()
+
+    assert inserted == 1
+    assert rows == [("2024-01-03", 1.0, 2.0, 0.5, 1.5, 100)]

@@ -255,6 +255,18 @@ def _is_missing_ohlcv_value(value: Any) -> bool:
         return False
 
 
+def _has_complete_ohlc_values(
+    open_value: Any,
+    high_value: Any,
+    low_value: Any,
+    close_value: Any,
+) -> bool:
+    return not any(
+        _is_missing_ohlcv_value(value)
+        for value in (open_value, high_value, low_value, close_value)
+    )
+
+
 def _format_history_index_date(index_value: Any) -> str:
     return index_value.strftime("%Y-%m-%d")
 
@@ -503,6 +515,13 @@ def convert_history_to_ohlcv_rows(
         low_value = row["Low"]
         close_value = row["Close"]
         volume_value = row["Volume"]
+        if not _has_complete_ohlc_values(
+            open_value,
+            high_value,
+            low_value,
+            close_value,
+        ):
+            continue
 
         rows.append(
             StockOhlcvRow(

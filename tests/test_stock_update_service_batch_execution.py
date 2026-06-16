@@ -395,6 +395,53 @@ def test_execute_stock_update_batch_empty_history_counts_as_skipped(tmp_path) ->
     assert result.ticker_results[0].skip_reason == "no_history_data"
 
 
+def test_execute_stock_update_batch_incomplete_ohlc_history_counts_as_skipped(
+    tmp_path,
+) -> None:
+    if pd is None:
+        pytest.skip("pandas not available")
+
+    db_path = tmp_path / "osakedata.db"
+    _create_osakedata_table(db_path)
+
+    incomplete_history = pd.DataFrame(
+        {
+            "Open": [10.0],
+            "High": [11.0],
+            "Low": [9.5],
+            "Close": [float("nan")],
+            "Volume": [12345],
+        },
+        index=pd.to_datetime(["2026-01-02"]),
+    )
+    plan = StockUpdateTickerPlan(
+        candidate=StockUpdateTickerCandidate("AAA", "2026-01-01", "2026-01-01", "omxh"),
+        needs_update=True,
+        update_start_date="2026-01-02",
+        fetch_until_exclusive="2026-01-10",
+        date_ranges=[StockUpdateDateRange("2026-01-02", "2026-01-10")],
+    )
+
+    result = execute_stock_update_batch(
+        osakedata_db_path=str(db_path),
+        market="usa",
+        plans=[plan],
+        stock_factory=lambda ticker: _GuardStock(results=[incomplete_history]),
+        sync_splits=lambda ticker, stock: 0,
+        maybe_backfill_splits=lambda ticker: False,
+        calculate_divergences=lambda ticker, only_missing: (True, 1, ""),
+        run_candlestick_analysis=lambda ticker, analysis_start, analysis_end: (0, None),
+    )
+
+    assert result.tickers_checked == 1
+    assert result.tickers_skipped == 1
+    assert result.tickers_updated == 0
+    assert result.ticker_results[0].skip_reason == "no_history_data"
+    assert result.ohlcv_rows_inserted == 0
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM osakedata").fetchone()[0] == 0
+
+
 def test_execute_stock_update_batch_empty_history_uses_short_terminal_sleep(
     tmp_path, monkeypatch
 ) -> None:

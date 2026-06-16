@@ -4,6 +4,7 @@ import pytest
 
 from services.stock_update_service import (
     _format_history_index_date,
+    _has_complete_ohlc_values,
     _is_missing_ohlcv_value,
     convert_history_to_ohlcv_rows,
     run_stock_data_update,
@@ -81,7 +82,13 @@ def test_is_missing_ohlcv_value_behavior():
     assert _is_missing_ohlcv_value("") is False
 
 
-def test_convert_history_to_ohlcv_rows_converts_nan_values_to_none():
+def test_has_complete_ohlc_values_rejects_incomplete_ohlc():
+    assert _has_complete_ohlc_values(1.0, 2.0, 0.5, 1.5) is True
+    assert _has_complete_ohlc_values(1.0, 2.0, 0.5, float("nan")) is False
+    assert _has_complete_ohlc_values(None, 2.0, 0.5, 1.5) is False
+
+
+def test_convert_history_to_ohlcv_rows_skips_incomplete_ohlc_row():
     history = _build_history(
         {
             "Open": [float("nan")],
@@ -99,12 +106,7 @@ def test_convert_history_to_ohlcv_rows_converts_nan_values_to_none():
         market="usa",
     )
 
-    assert len(rows) == 1
-    assert rows[0].open is None
-    assert rows[0].high is None
-    assert rows[0].low is None
-    assert rows[0].close is None
-    assert rows[0].volume is None
+    assert rows == []
 
 
 def test_convert_history_to_ohlcv_rows_missing_required_column_propagates():
@@ -144,4 +146,3 @@ def test_convert_history_to_ohlcv_rows_invalid_non_nan_value_propagates():
             ticker="AAA",
             market="usa",
         )
-

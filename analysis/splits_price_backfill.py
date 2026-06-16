@@ -92,6 +92,10 @@ def _infer_market(conn: sqlite3.Connection, ticker: str) -> str:
     return "usa"
 
 
+def _has_complete_ohlc_values(row: pd.Series) -> bool:
+    return not any(pd.isna(row.get(column)) for column in ("Open", "High", "Low", "Close"))
+
+
 def refetch_prices_from_yahoo(
     conn: sqlite3.Connection,
     ticker: str,
@@ -126,6 +130,8 @@ def refetch_prices_from_yahoo(
         try:
             date_str = date.strftime("%Y-%m-%d")
         except Exception:
+            continue
+        if not _has_complete_ohlc_values(row):
             continue
         cursor.execute(
             """
