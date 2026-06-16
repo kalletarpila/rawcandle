@@ -5,7 +5,7 @@ import sqlite3
 import time
 from datetime import date, timedelta
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 DEFAULT_STOCK_UPDATE_MARKET = "omxh"
 FALLBACK_TICKER_MARKET = "usa"
@@ -74,6 +74,7 @@ class StockUpdateTickerPlan:
     update_start_date: Optional[str] = None
     fetch_until_exclusive: Optional[str] = None
     date_ranges: List[StockUpdateDateRange] = field(default_factory=list)
+    expected_dates: List[str] = field(default_factory=list)
     skip_reason: Optional[str] = None
 
 
@@ -95,6 +96,7 @@ class StockOhlcvInsertResult:
     rows_seen: int = 0
     rows_inserted: int = 0
     rows_skipped_existing: int = 0
+    inserted_dates: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -118,6 +120,10 @@ class StockTickerOhlcvUpdateResult:
     ohlcv_rows_seen: int = 0
     ohlcv_rows_inserted: int = 0
     ohlcv_rows_skipped_existing: int = 0
+    fallback_attempted_rows: int = 0
+    fallback_recovered_rows: int = 0
+    fallback_failed_rows: int = 0
+    rows_inserted_from_fallback: int = 0
 
 
 @dataclass
@@ -159,6 +165,10 @@ class StockUpdateBatchExecutionResult:
     tickers_skipped: int = 0
     tickers_failed: int = 0
     ohlcv_rows_inserted: int = 0
+    fallback_attempted_rows: int = 0
+    fallback_recovered_rows: int = 0
+    fallback_failed_rows: int = 0
+    rows_inserted_from_fallback: int = 0
     quarter_state_checked: int = 0
     quarter_state_new_detected: int = 0
     quarter_state_detection_missing: int = 0
@@ -206,6 +216,10 @@ class StockUpdateResult:
     tickers_skipped: int = 0
     tickers_failed: int = 0
     ohlcv_rows_inserted: int = 0
+    fallback_attempted_rows: int = 0
+    fallback_recovered_rows: int = 0
+    fallback_failed_rows: int = 0
+    rows_inserted_from_fallback: int = 0
     quarter_state_checked: int = 0
     quarter_state_new_detected: int = 0
     quarter_state_detection_missing: int = 0
@@ -233,6 +247,10 @@ SplitBackfillCallable = Callable[[str], bool]
 DivergenceUpdateCallable = Callable[[str, bool], tuple]
 CandlestickUpdateCallable = Callable[[str, str, str], tuple]
 QuarterStateUpdateCallable = Callable[[str, str, Any], Any]
+MissingOhlcvRecoveryCallable = Callable[
+    [str, Optional[str], Sequence[str]],
+    Sequence[StockOhlcvRow],
+]
 
 # Still intentionally conservative, but reduced to shorten USA overnight runs.
 YAHOO_SHORT_BRANCH_SLEEP_SECONDS = 0.1
@@ -264,6 +282,15 @@ def _has_complete_ohlc_values(
     return not any(
         _is_missing_ohlcv_value(value)
         for value in (open_value, high_value, low_value, close_value)
+    )
+
+
+def _row_has_complete_ohlc(row: StockOhlcvRow) -> bool:
+    return _has_complete_ohlc_values(
+        row.open,
+        row.high,
+        row.low,
+        row.close,
     )
 
 
@@ -486,6 +513,7 @@ def insert_missing_ohlcv_rows(
                 ),
             )
             result.rows_inserted += 1
+            result.inserted_dates.append(row.date)
             existing_dates.add(row.date)
 
         if result.rows_inserted > 0:
@@ -579,12 +607,75 @@ def convert_histories_to_ohlcv_rows(
     return rows
 
 
+def determine_missing_expected_dates(
+    expected_dates: Sequence[str],
+    yahoo_rows: Sequence[StockOhlcvRow],
+) -> List[str]:
+    if not expected_dates:
+        return []
+    yahoo_dates = {row.date for row in yahoo_rows}
+    return [expected_date for expected_date in expected_dates if expected_date not in yahoo_dates]
+
+
+def recover_missing_ohlcv_rows_if_enabled(
+    *,
+    ticker: str,
+    market: Optional[str],
+    expected_dates: Sequence[str],
+    yahoo_rows: Sequence[StockOhlcvRow],
+    fallback_enabled: bool,
+    recover_missing_ohlcv_rows: Optional[MissingOhlcvRecoveryCallable],
+) -> tuple[List[StockOhlcvRow], int, int, int]:
+    if not fallback_enabled or recover_missing_ohlcv_rows is None:
+        return ([], 0, 0, 0)
+
+    missing_dates = determine_missing_expected_dates(expected_dates, yahoo_rows)
+    if not missing_dates:
+        return ([], 0, 0, 0)
+
+    recovered_rows = recover_missing_ohlcv_rows(ticker, market, missing_dates)
+    valid_missing_dates = set(missing_dates)
+    yahoo_dates = {row.date for row in yahoo_rows}
+    accepted_rows: List[StockOhlcvRow] = []
+    accepted_dates = set()
+
+    for row in recovered_rows:
+        if row.date not in valid_missing_dates:
+            continue
+        if row.date in yahoo_dates:
+            continue
+        if row.date in accepted_dates:
+            continue
+        if not _row_has_complete_ohlc(row):
+            continue
+        accepted_rows.append(
+            StockOhlcvRow(
+                ticker=ticker,
+                date=row.date,
+                open=row.open,
+                high=row.high,
+                low=row.low,
+                close=row.close,
+                volume=row.volume,
+                market=market if market is not None else row.market,
+            )
+        )
+        accepted_dates.add(row.date)
+
+    attempted_rows = len(missing_dates)
+    recovered_count = len(accepted_rows)
+    failed_count = attempted_rows - recovered_count
+    return (accepted_rows, attempted_rows, recovered_count, failed_count)
+
+
 def execute_ticker_ohlcv_update_plan(
     *,
     osakedata_db_path: str,
     stock: Any,
     plan: StockUpdateTickerPlan,
     market: str,
+    fallback_enabled: bool = False,
+    recover_missing_ohlcv_rows: Optional[MissingOhlcvRecoveryCallable] = None,
 ) -> StockTickerOhlcvUpdateResult:
     if plan.needs_update is False:
         return StockTickerOhlcvUpdateResult(
@@ -607,11 +698,29 @@ def execute_ticker_ohlcv_update_plan(
         ticker=plan.candidate.ticker,
         market=market,
     )
+    (
+        fallback_rows,
+        fallback_attempted_rows,
+        fallback_recovered_rows,
+        fallback_failed_rows,
+    ) = recover_missing_ohlcv_rows_if_enabled(
+        ticker=plan.candidate.ticker,
+        market=market,
+        expected_dates=plan.expected_dates,
+        yahoo_rows=converted_rows,
+        fallback_enabled=fallback_enabled,
+        recover_missing_ohlcv_rows=recover_missing_ohlcv_rows,
+    )
+    all_rows = list(converted_rows)
+    all_rows.extend(fallback_rows)
     insert_result = insert_missing_ohlcv_rows(
         osakedata_db_path=osakedata_db_path,
         ticker=plan.candidate.ticker,
-        rows=converted_rows,
+        rows=all_rows,
     )
+    fallback_inserted_dates = set(insert_result.inserted_dates) & {
+        row.date for row in fallback_rows
+    }
     return StockTickerOhlcvUpdateResult(
         ticker=plan.candidate.ticker,
         needs_update=True,
@@ -620,10 +729,14 @@ def execute_ticker_ohlcv_update_plan(
         ranges_requested=fetch_result.ranges_requested,
         ranges_returned=fetch_result.ranges_returned,
         history_objects_seen=len(fetch_result.histories),
-        ohlcv_rows_converted=len(converted_rows),
+        ohlcv_rows_converted=len(all_rows),
         ohlcv_rows_seen=insert_result.rows_seen,
         ohlcv_rows_inserted=insert_result.rows_inserted,
         ohlcv_rows_skipped_existing=insert_result.rows_skipped_existing,
+        fallback_attempted_rows=fallback_attempted_rows,
+        fallback_recovered_rows=fallback_recovered_rows,
+        fallback_failed_rows=fallback_failed_rows,
+        rows_inserted_from_fallback=len(fallback_inserted_dates),
     )
 
 
@@ -702,6 +815,8 @@ def execute_ticker_update_flow(
     calculate_divergences: DivergenceUpdateCallable,
     run_candlestick_analysis: CandlestickUpdateCallable,
     maybe_update_quarter_state: Optional[QuarterStateUpdateCallable] = None,
+    fallback_enabled: bool = False,
+    recover_missing_ohlcv_rows: Optional[MissingOhlcvRecoveryCallable] = None,
 ) -> StockTickerUpdateFlowResult:
     if plan.needs_update is False:
         return StockTickerUpdateFlowResult(
@@ -717,6 +832,8 @@ def execute_ticker_update_flow(
         stock=stock,
         plan=plan,
         market=market,
+        fallback_enabled=fallback_enabled,
+        recover_missing_ohlcv_rows=recover_missing_ohlcv_rows,
     )
 
     quarter_state_outcome: Optional[Dict[str, Any]] = None
@@ -774,6 +891,8 @@ def execute_stock_update_batch(
     calculate_divergences: DivergenceUpdateCallable,
     run_candlestick_analysis: CandlestickUpdateCallable,
     maybe_update_quarter_state: Optional[QuarterStateUpdateCallable] = None,
+    fallback_enabled: bool = False,
+    recover_missing_ohlcv_rows: Optional[MissingOhlcvRecoveryCallable] = None,
 ) -> StockUpdateBatchExecutionResult:
     result = StockUpdateBatchExecutionResult(market=market)
 
@@ -796,6 +915,8 @@ def execute_stock_update_batch(
                 calculate_divergences=calculate_divergences,
                 run_candlestick_analysis=run_candlestick_analysis,
                 maybe_update_quarter_state=maybe_update_quarter_state,
+                fallback_enabled=fallback_enabled,
+                recover_missing_ohlcv_rows=recover_missing_ohlcv_rows,
             )
             result.ticker_results.append(ticker_result)
 
@@ -811,6 +932,18 @@ def execute_stock_update_batch(
             if ticker_result.ohlcv_result is not None:
                 result.ohlcv_rows_inserted += (
                     ticker_result.ohlcv_result.ohlcv_rows_inserted
+                )
+                result.fallback_attempted_rows += (
+                    ticker_result.ohlcv_result.fallback_attempted_rows
+                )
+                result.fallback_recovered_rows += (
+                    ticker_result.ohlcv_result.fallback_recovered_rows
+                )
+                result.fallback_failed_rows += (
+                    ticker_result.ohlcv_result.fallback_failed_rows
+                )
+                result.rows_inserted_from_fallback += (
+                    ticker_result.ohlcv_result.rows_inserted_from_fallback
                 )
             if ticker_result.downstream_result is not None:
                 result.warnings.extend(ticker_result.downstream_result.warnings)
@@ -900,6 +1033,8 @@ def execute_stock_update_orchestration(
     dow_dry_run: bool = False,
     dow_run_id: Optional[str] = None,
     dow_created_at_utc: Optional[str] = None,
+    fallback_enabled: bool = False,
+    recover_missing_ohlcv_rows: Optional[MissingOhlcvRecoveryCallable] = None,
 ) -> StockUpdateOrchestrationResult:
     batch_result = execute_stock_update_batch(
         osakedata_db_path=osakedata_db_path,
@@ -911,6 +1046,8 @@ def execute_stock_update_orchestration(
         calculate_divergences=calculate_divergences,
         run_candlestick_analysis=run_candlestick_analysis,
         maybe_update_quarter_state=maybe_update_quarter_state,
+        fallback_enabled=fallback_enabled,
+        recover_missing_ohlcv_rows=recover_missing_ohlcv_rows,
     )
     dow_result = execute_final_dow_update(
         calculate_dow_structures=calculate_dow_structures,
@@ -949,6 +1086,10 @@ def format_stock_update_summary_lines(result: StockUpdateResult) -> List[str]:
         f"SUMMARY tickers_skipped={result.tickers_skipped}",
         f"SUMMARY tickers_failed={result.tickers_failed}",
         f"SUMMARY ohlcv_rows_inserted={result.ohlcv_rows_inserted}",
+        f"SUMMARY fallback_attempted_rows={result.fallback_attempted_rows}",
+        f"SUMMARY fallback_recovered_rows={result.fallback_recovered_rows}",
+        f"SUMMARY fallback_failed_rows={result.fallback_failed_rows}",
+        f"SUMMARY rows_inserted_from_fallback={result.rows_inserted_from_fallback}",
         f"SUMMARY quarter_state_checked={result.quarter_state_checked}",
         f"SUMMARY quarter_state_new_detected={result.quarter_state_new_detected}",
         f"SUMMARY quarter_state_detection_missing={result.quarter_state_detection_missing}",
@@ -986,6 +1127,8 @@ def run_stock_data_update(
     dow_run_id: Optional[str] = None,
     dow_created_at_utc: Optional[str] = None,
     progress_callback: ProgressCallback = None,
+    fallback_enabled: bool = False,
+    recover_missing_ohlcv_rows: Optional[MissingOhlcvRecoveryCallable] = None,
 ) -> StockUpdateResult:
     selected_market = resolve_stock_update_market(market)
     candidates = load_grouped_stock_update_candidates(osakedata_db_path)
@@ -1017,6 +1160,8 @@ def run_stock_data_update(
         dow_dry_run=dow_dry_run,
         dow_run_id=dow_run_id,
         dow_created_at_utc=dow_created_at_utc,
+        fallback_enabled=fallback_enabled,
+        recover_missing_ohlcv_rows=recover_missing_ohlcv_rows,
     )
     dow_summary = (
         orchestration_result.dow_result.dow_summary
@@ -1046,6 +1191,10 @@ def run_stock_data_update(
         tickers_skipped=orchestration_result.batch_result.tickers_skipped,
         tickers_failed=orchestration_result.batch_result.tickers_failed,
         ohlcv_rows_inserted=orchestration_result.batch_result.ohlcv_rows_inserted,
+        fallback_attempted_rows=orchestration_result.batch_result.fallback_attempted_rows,
+        fallback_recovered_rows=orchestration_result.batch_result.fallback_recovered_rows,
+        fallback_failed_rows=orchestration_result.batch_result.fallback_failed_rows,
+        rows_inserted_from_fallback=orchestration_result.batch_result.rows_inserted_from_fallback,
         quarter_state_checked=orchestration_result.batch_result.quarter_state_checked,
         quarter_state_new_detected=orchestration_result.batch_result.quarter_state_new_detected,
         quarter_state_detection_missing=orchestration_result.batch_result.quarter_state_detection_missing,

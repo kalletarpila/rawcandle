@@ -6,6 +6,7 @@ import pytest
 import main
 
 from services.stock_update_service import (
+    StockOhlcvRow,
     StockUpdateBatchExecutionResult,
     StockUpdateDateRange,
     StockUpdateTickerCandidate,
@@ -532,6 +533,333 @@ def test_execute_stock_update_batch_zero_insert_still_counts_updated(tmp_path) -
     assert result.ohlcv_rows_inserted == 0
     assert calls == ["split_sync", "backfill", "divergence"]
     assert result.ticker_results[0].downstream_result.candlestick_attempted is False
+
+
+def test_execute_stock_update_batch_missing_day_fallback_recovers_row(tmp_path) -> None:
+    if pd is None:
+        pytest.skip("pandas not available")
+
+    db_path = tmp_path / "osakedata.db"
+    _create_osakedata_table(db_path)
+
+    yahoo_history = pd.DataFrame(
+        {"Open": [11.0], "High": [12.0], "Low": [10.5], "Close": [11.8], "Volume": [200]},
+        index=pd.to_datetime(["2026-01-03"]),
+    )
+    plan = StockUpdateTickerPlan(
+        candidate=StockUpdateTickerCandidate("AAA", "2026-01-01", "2026-01-01", "omxh"),
+        needs_update=True,
+        update_start_date="2026-01-02",
+        fetch_until_exclusive="2026-01-10",
+        date_ranges=[StockUpdateDateRange("2026-01-02", "2026-01-10")],
+        expected_dates=["2026-01-02", "2026-01-03"],
+    )
+    fallback_calls = []
+
+    def recover_missing(ticker: str, market: str | None, missing_dates):
+        fallback_calls.append((ticker, market, list(missing_dates)))
+        return [
+            StockOhlcvRow(
+                ticker=ticker,
+                date="2026-01-02",
+                open=10.0,
+                high=11.0,
+                low=9.5,
+                close=10.8,
+                volume=100,
+                market="unexpected",
+            )
+        ]
+
+    result = execute_stock_update_batch(
+        osakedata_db_path=str(db_path),
+        market="usa",
+        plans=[plan],
+        stock_factory=lambda ticker: _GuardStock(results=[yahoo_history]),
+        sync_splits=lambda ticker, stock: 0,
+        maybe_backfill_splits=lambda ticker: False,
+        calculate_divergences=lambda ticker, only_missing: (True, 1, ""),
+        run_candlestick_analysis=lambda ticker, analysis_start, analysis_end: (0, None),
+        fallback_enabled=True,
+        recover_missing_ohlcv_rows=recover_missing,
+    )
+
+    assert fallback_calls == [("AAA", "usa", ["2026-01-02"])]
+    assert result.tickers_updated == 1
+    assert result.tickers_skipped == 0
+    assert result.ohlcv_rows_inserted == 2
+    assert result.fallback_attempted_rows == 1
+    assert result.fallback_recovered_rows == 1
+    assert result.fallback_failed_rows == 0
+    assert result.rows_inserted_from_fallback == 1
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT pvm, open, high, low, close, volume, market FROM osakedata ORDER BY pvm"
+        ).fetchall()
+    assert rows == [
+        ("2026-01-02", 10.0, 11.0, 9.5, 10.8, 100, "usa"),
+        ("2026-01-03", 11.0, 12.0, 10.5, 11.8, 200, "usa"),
+    ]
+
+
+def test_execute_stock_update_batch_missing_day_fallback_failure_preserves_skip(tmp_path) -> None:
+    if pd is None:
+        pytest.skip("pandas not available")
+
+    db_path = tmp_path / "osakedata.db"
+    _create_osakedata_table(db_path)
+
+    empty_history = pd.DataFrame(
+        {"Open": [], "High": [], "Low": [], "Close": [], "Volume": []},
+        index=[],
+    )
+    plan = StockUpdateTickerPlan(
+        candidate=StockUpdateTickerCandidate("AAA", "2026-01-01", "2026-01-01", "omxh"),
+        needs_update=True,
+        update_start_date="2026-01-02",
+        fetch_until_exclusive="2026-01-10",
+        date_ranges=[StockUpdateDateRange("2026-01-02", "2026-01-10")],
+        expected_dates=["2026-01-02"],
+    )
+
+    result = execute_stock_update_batch(
+        osakedata_db_path=str(db_path),
+        market="usa",
+        plans=[plan],
+        stock_factory=lambda ticker: _GuardStock(results=[empty_history]),
+        sync_splits=lambda ticker, stock: 0,
+        maybe_backfill_splits=lambda ticker: False,
+        calculate_divergences=lambda ticker, only_missing: (True, 1, ""),
+        run_candlestick_analysis=lambda ticker, analysis_start, analysis_end: (0, None),
+        fallback_enabled=True,
+        recover_missing_ohlcv_rows=lambda ticker, market, missing_dates: [],
+    )
+
+    assert result.tickers_skipped == 1
+    assert result.ticker_results[0].skip_reason == "no_history_data"
+    assert result.fallback_attempted_rows == 1
+    assert result.fallback_recovered_rows == 0
+    assert result.fallback_failed_rows == 1
+    assert result.rows_inserted_from_fallback == 0
+
+
+def test_execute_stock_update_batch_valid_yahoo_row_does_not_call_fallback(tmp_path) -> None:
+    if pd is None:
+        pytest.skip("pandas not available")
+
+    db_path = tmp_path / "osakedata.db"
+    _create_osakedata_table(db_path)
+
+    yahoo_history = pd.DataFrame(
+        {"Open": [10.0], "High": [11.0], "Low": [9.5], "Close": [10.8], "Volume": [100]},
+        index=pd.to_datetime(["2026-01-02"]),
+    )
+    plan = StockUpdateTickerPlan(
+        candidate=StockUpdateTickerCandidate("AAA", "2026-01-01", "2026-01-01", "omxh"),
+        needs_update=True,
+        update_start_date="2026-01-02",
+        fetch_until_exclusive="2026-01-10",
+        date_ranges=[StockUpdateDateRange("2026-01-02", "2026-01-10")],
+        expected_dates=["2026-01-02"],
+    )
+
+    result = execute_stock_update_batch(
+        osakedata_db_path=str(db_path),
+        market="usa",
+        plans=[plan],
+        stock_factory=lambda ticker: _GuardStock(results=[yahoo_history]),
+        sync_splits=lambda ticker, stock: 0,
+        maybe_backfill_splits=lambda ticker: False,
+        calculate_divergences=lambda ticker, only_missing: (True, 1, ""),
+        run_candlestick_analysis=lambda ticker, analysis_start, analysis_end: (0, None),
+        fallback_enabled=True,
+        recover_missing_ohlcv_rows=lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("fallback should not be called")
+        ),
+    )
+
+    assert result.ohlcv_rows_inserted == 1
+    assert result.fallback_attempted_rows == 0
+    assert result.fallback_recovered_rows == 0
+    assert result.fallback_failed_rows == 0
+
+
+def test_execute_stock_update_batch_incomplete_yahoo_row_can_use_fallback_only_with_opt_in(
+    tmp_path,
+) -> None:
+    if pd is None:
+        pytest.skip("pandas not available")
+
+    db_path_disabled = tmp_path / "disabled.db"
+    _create_osakedata_table(db_path_disabled)
+    db_path_enabled = tmp_path / "enabled.db"
+    _create_osakedata_table(db_path_enabled)
+
+    incomplete_history = pd.DataFrame(
+        {
+            "Open": [10.0],
+            "High": [11.0],
+            "Low": [9.5],
+            "Close": [float("nan")],
+            "Volume": [12345],
+        },
+        index=pd.to_datetime(["2026-01-02"]),
+    )
+    plan = StockUpdateTickerPlan(
+        candidate=StockUpdateTickerCandidate("AAA", "2026-01-01", "2026-01-01", "omxh"),
+        needs_update=True,
+        update_start_date="2026-01-02",
+        fetch_until_exclusive="2026-01-10",
+        date_ranges=[StockUpdateDateRange("2026-01-02", "2026-01-10")],
+        expected_dates=["2026-01-02"],
+    )
+
+    disabled_result = execute_stock_update_batch(
+        osakedata_db_path=str(db_path_disabled),
+        market="usa",
+        plans=[plan],
+        stock_factory=lambda ticker: _GuardStock(results=[incomplete_history]),
+        sync_splits=lambda ticker, stock: 0,
+        maybe_backfill_splits=lambda ticker: False,
+        calculate_divergences=lambda ticker, only_missing: (True, 1, ""),
+        run_candlestick_analysis=lambda ticker, analysis_start, analysis_end: (0, None),
+    )
+    enabled_result = execute_stock_update_batch(
+        osakedata_db_path=str(db_path_enabled),
+        market="usa",
+        plans=[plan],
+        stock_factory=lambda ticker: _GuardStock(results=[incomplete_history]),
+        sync_splits=lambda ticker, stock: 0,
+        maybe_backfill_splits=lambda ticker: False,
+        calculate_divergences=lambda ticker, only_missing: (True, 1, ""),
+        run_candlestick_analysis=lambda ticker, analysis_start, analysis_end: (0, None),
+        fallback_enabled=True,
+        recover_missing_ohlcv_rows=lambda ticker, market, missing_dates: [
+            StockOhlcvRow(
+                ticker=ticker,
+                date="2026-01-02",
+                open=10.0,
+                high=11.0,
+                low=9.5,
+                close=10.8,
+                volume=100,
+                market="usa",
+            )
+        ],
+    )
+
+    assert disabled_result.ticker_results[0].skip_reason == "no_history_data"
+    assert disabled_result.fallback_attempted_rows == 0
+    assert enabled_result.tickers_updated == 1
+    assert enabled_result.fallback_attempted_rows == 1
+    assert enabled_result.fallback_recovered_rows == 1
+    assert enabled_result.ohlcv_rows_inserted == 1
+
+
+def test_execute_stock_update_batch_fallback_row_for_yahoo_date_is_ignored(tmp_path) -> None:
+    if pd is None:
+        pytest.skip("pandas not available")
+
+    db_path = tmp_path / "osakedata.db"
+    _create_osakedata_table(db_path)
+
+    yahoo_history = pd.DataFrame(
+        {"Open": [10.0], "High": [11.0], "Low": [9.5], "Close": [10.8], "Volume": [100]},
+        index=pd.to_datetime(["2026-01-02"]),
+    )
+    plan = StockUpdateTickerPlan(
+        candidate=StockUpdateTickerCandidate("AAA", "2026-01-01", "2026-01-01", "omxh"),
+        needs_update=True,
+        update_start_date="2026-01-02",
+        fetch_until_exclusive="2026-01-10",
+        date_ranges=[StockUpdateDateRange("2026-01-02", "2026-01-10")],
+        expected_dates=["2026-01-02", "2026-01-03"],
+    )
+
+    result = execute_stock_update_batch(
+        osakedata_db_path=str(db_path),
+        market="usa",
+        plans=[plan],
+        stock_factory=lambda ticker: _GuardStock(results=[yahoo_history]),
+        sync_splits=lambda ticker, stock: 0,
+        maybe_backfill_splits=lambda ticker: False,
+        calculate_divergences=lambda ticker, only_missing: (True, 1, ""),
+        run_candlestick_analysis=lambda ticker, analysis_start, analysis_end: (0, None),
+        fallback_enabled=True,
+        recover_missing_ohlcv_rows=lambda ticker, market, missing_dates: [
+            StockOhlcvRow(
+                ticker=ticker,
+                date="2026-01-02",
+                open=99.0,
+                high=99.0,
+                low=99.0,
+                close=99.0,
+                volume=99,
+                market="usa",
+            )
+        ],
+    )
+
+    assert result.fallback_attempted_rows == 1
+    assert result.fallback_recovered_rows == 0
+    assert result.fallback_failed_rows == 1
+    assert result.rows_inserted_from_fallback == 0
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute("SELECT pvm, close FROM osakedata ORDER BY pvm").fetchall()
+    assert rows == [("2026-01-02", 10.8)]
+
+
+def test_execute_stock_update_batch_incomplete_fallback_row_is_ignored(tmp_path) -> None:
+    if pd is None:
+        pytest.skip("pandas not available")
+
+    db_path = tmp_path / "osakedata.db"
+    _create_osakedata_table(db_path)
+
+    empty_history = pd.DataFrame(
+        {"Open": [], "High": [], "Low": [], "Close": [], "Volume": []},
+        index=[],
+    )
+    plan = StockUpdateTickerPlan(
+        candidate=StockUpdateTickerCandidate("AAA", "2026-01-01", "2026-01-01", "omxh"),
+        needs_update=True,
+        update_start_date="2026-01-02",
+        fetch_until_exclusive="2026-01-10",
+        date_ranges=[StockUpdateDateRange("2026-01-02", "2026-01-10")],
+        expected_dates=["2026-01-02"],
+    )
+
+    result = execute_stock_update_batch(
+        osakedata_db_path=str(db_path),
+        market="usa",
+        plans=[plan],
+        stock_factory=lambda ticker: _GuardStock(results=[empty_history]),
+        sync_splits=lambda ticker, stock: 0,
+        maybe_backfill_splits=lambda ticker: False,
+        calculate_divergences=lambda ticker, only_missing: (True, 1, ""),
+        run_candlestick_analysis=lambda ticker, analysis_start, analysis_end: (0, None),
+        fallback_enabled=True,
+        recover_missing_ohlcv_rows=lambda ticker, market, missing_dates: [
+            StockOhlcvRow(
+                ticker=ticker,
+                date="2026-01-02",
+                open=10.0,
+                high=11.0,
+                low=9.5,
+                close=None,
+                volume=100,
+                market="usa",
+            )
+        ],
+    )
+
+    assert result.tickers_skipped == 1
+    assert result.fallback_attempted_rows == 1
+    assert result.fallback_recovered_rows == 0
+    assert result.fallback_failed_rows == 1
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM osakedata").fetchone()[0] == 0
 
 
 def test_execute_stock_update_batch_factory_exception_increments_failed_and_continues(
