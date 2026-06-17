@@ -4,13 +4,13 @@
 
 This document started as an audit-only step for retired compatibility surfaces left after old `eco_*` and Canonical Report V2 cleanup. R1 implementation has now removed the retired V3 scheduler/config/output compatibility surface.
 
-Assessment: remove in phases, not as one broad cleanup. R1 is complete; R2 remains.
+Assessment: retired compatibility cleanup is complete for R1 and R2. Migration-file cleanup remains a separate later decision.
 
 R1 status: scheduler `v3_reports_*` result fields, `datacenter_v3_reports_*` config fields, neutralized V3 helper functions, and CLI `SUMMARY v3_reports.*` output were removed. Old config keys are no longer accepted by the strict scheduler config parser. No DB, migration, current `dc_*`, current `ec_*`, `ec_source_layer`, Datacenter, dashboard, or Canonical Report V2 retired-stub behavior was changed.
 
-Canonical Report V2 active code has also been removed. The remaining `dev_tools/run_report_canonical_v2_*.py` files are retired stubs that import only `dev_tools.report_canonical_v2_retired`, print a retirement message to stderr, return exit code `2`, and do not open databases or write outputs.
+R2 status: Canonical Report V2 retired dev_tools stubs and their retired-stub test were removed. The deleted files were compatibility/discoverability stubs only; no DB, migration, current `dc_*`, current `ec_*`, `ec_source_layer`, Datacenter, dashboard, or scheduler behavior was changed.
 
-Recommended next Codex step: R2, delete Canonical Report V2 retired dev_tools stubs and their retired-stub test if compatibility/discoverability is no longer needed.
+Recommended next Codex step: decide whether to leave migrations `004`-`014` and `015`-`018` as historical inert migrations or plan a separate migration-file archive/removal audit.
 
 ## Scope
 
@@ -42,11 +42,11 @@ Excluded:
 | `rawcandle/cli/run_stock_update_scheduler.py` | retired V3 CLI summary output | SAFE_REMOVE_LATER | R1 removed the retired V3 summary lines. | Complete for R1. |
 | `tests/test_stock_update_scheduler_runner.py` | retired V3 compatibility assertions | TEST_ONLY | R1 removed V3 compatibility assertions and added absence/rejection checks without preserving the old output shape. | Complete for R1. |
 | `tests/test_stock_update_scheduler_cli.py` | retired V3 CLI summary assertions | TEST_ONLY | R1 removed old V3 summary assertions and verifies no retired V3 summary prefix is printed. | Complete for R1. |
-| `dev_tools/report_canonical_v2_retired.py` | `RETIRED_MESSAGE`, `main` returns `2` | KEEP_TEMPORARILY | Shared retired-stub implementation; no DB or output writes. | R2: delete when retired stubs are removed. |
-| `dev_tools/run_report_canonical_v2_*.py` | `from dev_tools.report_canonical_v2_retired import main` | SAFE_REMOVE_LATER | Stubs are compatibility/discoverability only and do not import removed V2 core modules. | R2: delete all stubs after R1. |
-| `tests/test_report_canonical_v2_retired_cli.py` | exit code `2` and retirement message | TEST_ONLY | Tests enforce retired-stub behavior. | R2: delete with stubs. |
-| `docs/dc_report_v2_retirement_decision.md` | V2 stub policy | DOCS_ONLY | Active retirement decision explaining why stubs remain. | R3: update if stubs are deleted. |
-| `docs/dc_report_v2_removal_audit.md` | retired V2 stubs and migrations | DOCS_ONLY | Historical audit/status document. | R3: update status only if useful; otherwise keep as audit trail. |
+| `dev_tools/report_canonical_v2_retired.py` | retired stub implementation | SAFE_REMOVE_LATER | R2 removed the shared retired-stub implementation. | Complete for R2. |
+| `dev_tools/run_report_canonical_v2_*.py` | retired CLI stubs | SAFE_REMOVE_LATER | R2 removed all retired Canonical Report V2 dev_tools stubs. | Complete for R2. |
+| `tests/test_report_canonical_v2_retired_cli.py` | retired-stub test | TEST_ONLY | R2 removed the test because the stubs no longer exist. | Complete for R2. |
+| `docs/dc_report_v2_retirement_decision.md` | V2 stub policy | DOCS_ONLY | Active retirement decision updated for R2 removal. | Complete for R2. |
+| `docs/dc_report_v2_removal_audit.md` | retired V2 stubs and migrations | DOCS_ONLY | Historical audit/status document updated with R2 status. | Keep as audit trail. |
 | `docs/eco_legacy_migration_cleanup_strategy.md` | `v3_reports_*` compatibility fields | DOCS_ONLY | Documents intentional deferred V3 compatibility fields. | R3: update after R1. |
 | `docs/datacenter_legacy_report_generation_reference.md` | `v3_reports.*` summary mentions | DOCS_ONLY | Legacy reference still mentions scheduler V3 summary fields. | R3: update after R1. |
 | `docs/archive/old_v3_eco/**` | old V3/eco references | DOCS_ONLY | Archived historical docs only. | Keep unless documentation retention policy changes. |
@@ -69,27 +69,13 @@ Current assessment:
 
 ## V2 retired stub assessment
 
-The remaining Canonical Report V2 entrypoints are:
+R2 removed the Canonical Report V2 retired dev_tools stubs:
 
-- `dev_tools/run_report_canonical_v2_all_outputs_smoke.py`
-- `dev_tools/run_report_canonical_v2_daily_csv.py`
-- `dev_tools/run_report_canonical_v2_daily_markdown.py`
-- `dev_tools/run_report_canonical_v2_daily_markdown_smoke.py`
-- `dev_tools/run_report_canonical_v2_output.py`
-- `dev_tools/run_report_canonical_v2_parity_audit.py`
-- `dev_tools/run_report_canonical_v2_publish_outputs.py`
-- `dev_tools/run_report_canonical_v2_rolling2_csv.py`
-- `dev_tools/run_report_canonical_v2_rolling2_markdown.py`
-- `dev_tools/run_report_canonical_v2_rolling30_csv.py`
-- `dev_tools/run_report_canonical_v2_rolling30_markdown.py`
-- `dev_tools/run_report_canonical_v2_rolling5_csv.py`
-- `dev_tools/run_report_canonical_v2_rolling5_markdown.py`
+- `dev_tools/report_canonical_v2_retired.py`
+- `dev_tools/run_report_canonical_v2_*.py`
+- `tests/test_report_canonical_v2_retired_cli.py`
 
-Each imports only `main` from `dev_tools.report_canonical_v2_retired` and exits through that function. The shared retired implementation prints `Canonical Report V2 has been retired. See docs/dc_report_v2_retirement_decision.md.` to stderr and returns code `2`.
-
-The stubs do not import removed Canonical Report V2 core modules. The targeted retired CLI test passes a fake DB path and asserts there is no stdout, the stderr retirement message is exact, and the exit code is `2`.
-
-Current assessment: these stubs are safe to delete later if compatibility/discoverability is no longer needed. Deleting them should be R2, after the active scheduler V3 result/config shape is handled.
+The deleted files were compatibility/discoverability-only stubs. They did not import removed V2 core modules, open DBs, or write outputs. After R2, running `dev_tools/run_report_canonical_v2_*` is unsupported because those files no longer exist.
 
 ## Phased removal plan
 
@@ -108,7 +94,9 @@ Checks before and after R1:
 
 ### R2: remove V2 retired dev_tools stubs and tests
 
-Delete `dev_tools/report_canonical_v2_retired.py`, all `dev_tools/run_report_canonical_v2_*.py` stubs, and `tests/test_report_canonical_v2_retired_cli.py`.
+Status: complete.
+
+Deleted `dev_tools/report_canonical_v2_retired.py`, all `dev_tools/run_report_canonical_v2_*.py` stubs, and `tests/test_report_canonical_v2_retired_cli.py`.
 
 Checks before and after R2:
 

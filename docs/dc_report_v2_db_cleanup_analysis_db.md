@@ -134,14 +134,14 @@ Current `ec_*` key tables remained present:
 |---|---|
 | `pytest -q tests/test_preflight_dc_report_v2_db_cleanup_cli.py` | 10 passed |
 | `pytest -q tests/test_preflight_eco_legacy_db_cleanup_cli.py` | 8 passed |
-| `pytest -q tests/test_report_canonical_v2_retired_cli.py` | 13 passed |
+| `pytest -q tests -k "report_canonical_v2"` | R2 follow-up check passed |
 | `pytest -q tests/test_plan_ec_source_layer_build_cli.py tests/test_plan_ec_source_layer_refresh_cli.py tests/test_plan_ec_source_layer_backfill_cli.py` | 30 passed |
 | `pytest -q tests/test_run_ec_source_layer_build_cli.py` | 13 passed |
 | `pytest -q tests/test_stock_update_scheduler_runner.py -k "v3_reports or ec_source_layer or datacenter_pipeline"` | 9 passed, 101 deselected |
 | `pytest -q tests/test_stock_update_scheduler_cli.py -k "v3_reports or summary or datacenter"` | 7 passed, 10 deselected |
 | `python3 -m py_compile rawcandle/cli/preflight_dc_report_v2_db_cleanup.py rawcandle/cli/preflight_eco_legacy_db_cleanup.py` | passed |
 | `python3 -m py_compile analysis/database_manager.py rawcandle/scheduler/runner.py rawcandle/scheduler/config.py rawcandle/cli/run_stock_update_scheduler.py` | passed |
-| `python3 -m py_compile dev_tools/run_report_canonical_v2_*.py` | passed |
+| Canonical Report V2 retired dev_tools py_compile | removed in R2; no stub files remain |
 
 No scheduler, stock update, refresh, backfill, recovery, report generation, or Canonical V2 build/publish/smoke command was run.
 

@@ -10,11 +10,11 @@ This decision does not retire current `dc_*` source facts, current `ec_*` sideca
 
 No code, tests, migrations, runtime behavior, scheduler config, or databases were changed by this decision document.
 
-Phase B status: DatabaseManager no longer applies Canonical Report V2 migrations during general analysis DB initialization, and `dev_tools/run_report_canonical_v2_*.py` entrypoints are retired/disabled with a deterministic non-zero exit. No DB cleanup was performed. Migrations `004`-`014` remain unchanged. Current `dc_*`, `ec_*`, `ec_source_layer`, scheduler, and legacy Datacenter paths are preserved.
+Phase B status: DatabaseManager no longer applies Canonical Report V2 migrations during general analysis DB initialization, and `dev_tools/run_report_canonical_v2_*.py` entrypoints were retired/disabled with a deterministic non-zero exit. No DB cleanup was performed. Migrations `004`-`014` remained unchanged. Current `dc_*`, `ec_*`, `ec_source_layer`, scheduler, and legacy Datacenter paths were preserved.
 
-Phase C status: Canonical Report V2 core modules and direct non-CLI V2 tests were removed. Retired `dev_tools/run_report_canonical_v2_*.py` stubs remain and still exit non-zero. No DB cleanup was performed. Migrations `004`-`014` remain unchanged. Current `dc_*`, `ec_*`, `ec_source_layer`, scheduler, and legacy Datacenter paths are preserved.
+Phase C status: Canonical Report V2 core modules and direct non-CLI V2 tests were removed. Retired `dev_tools/run_report_canonical_v2_*.py` stubs remained temporarily and exited non-zero. No DB cleanup was performed. Migrations `004`-`014` remained unchanged. Current `dc_*`, `ec_*`, `ec_source_layer`, scheduler, and legacy Datacenter paths were preserved.
 
-Phase D status: V2-only documents were archived under `docs/archive/canonical_report_v2/`. Retired `dev_tools/run_report_canonical_v2_*.py` stubs remain intentionally for compatibility and discoverability. Stub policy: return exit code `2`, do not access DBs, do not write outputs, do not import V2 core modules, and point users to this retirement decision. Full deletion of retired stubs is a later optional step after consumers have had time to discover the retirement behavior.
+Phase D status: V2-only documents were archived under `docs/archive/canonical_report_v2/`. Retired `dev_tools/run_report_canonical_v2_*.py` stubs remained temporarily for compatibility and discoverability. Stub policy at that time: return exit code `2`, do not access DBs, do not write outputs, do not import V2 core modules, and point users to this retirement decision.
 
 Phase E status: migration and database retirement strategy is documented in `docs/dc_report_v2_migration_db_retirement_strategy.md`. Recommendation: keep migrations `004`-`014` temporarily as historical inert migrations; handle any `dc_report_*_v2` DB cleanup later through explicit read-only preflight, verified backup, and approved drop plan.
 
@@ -26,6 +26,8 @@ Phase H status: backup-confirmed cleanup of the 17 known `dc_report_*_v2` tables
 
 Final verification status: combined read-only verification for old `eco_*` and retired `dc_report_*_v2` cleanup is documented in `docs/analysis_db_legacy_cleanup_final_verification.md`. Assessment: `LEGACY_CLEANUP_VERIFIED`.
 
+R2 retired compatibility cleanup status: Canonical Report V2 retired dev_tools stubs were removed. `dev_tools/run_report_canonical_v2_*` is no longer supported because those files no longer exist. Canonical Report V2 remains retired history. No DB files, migrations, current `dc_*`, current `ec_*`, `ec_source_layer`, scheduler, dashboard, or legacy Datacenter behavior was changed by R2.
+
 ## Scope boundary
 
 Targeted for later retirement:
@@ -33,7 +35,7 @@ Targeted for later retirement:
 - `dc_report_*_v2` readmodel tables.
 - `rawcandle/report_canonical_v2_migration.py` and automatic V2 migration application.
 - `analysis/datacenter_indices/report_canonical_v2_*.py` V2 builders, writers, formatter loaders, and parity code.
-- `dev_tools/run_report_canonical_v2_*.py` manual V2 build, output, smoke, parity, and publish CLIs.
+- removed `dev_tools/run_report_canonical_v2_*.py` manual V2 build, output, smoke, parity, and publish CLIs.
 - `tests/test_report_canonical_v2_*.py` V2-only tests.
 - `docs/report_canonical_v2_*.md` and `docs/datacenter_report_canonical_v2_architecture*.md` V2-only operational/design documentation.
 
@@ -85,7 +87,7 @@ After active hooks are neutralized, remove V2-only code and direct tests:
 
 - `analysis/datacenter_indices/report_canonical_v2_*.py`.
 - `rawcandle/report_canonical_v2_migration.py`, after all imports/references are gone.
-- `dev_tools/run_report_canonical_v2_*.py`.
+- `dev_tools/run_report_canonical_v2_*.py` were removed in R2.
 - `tests/test_report_canonical_v2_*.py`.
 
 Required checks:

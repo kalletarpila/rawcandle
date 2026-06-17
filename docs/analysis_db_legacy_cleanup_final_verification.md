@@ -8,7 +8,7 @@ Assessment: `LEGACY_CLEANUP_VERIFIED`.
 
 The database has no old `eco_*` tables and no known retired Canonical Report V2 `dc_report_*_v2` tables. Current preserved `dc_*` source fact tables and current `ec_*` key tables are present. `PRAGMA integrity_check` returned `ok`, and `PRAGMA foreign_key_check` reported 0 violations. No `VACUUM` was run.
 
-Retired compatibility surface follow-up is documented in `docs/retired_compatibility_surface_audit.md`. R1 removed the retired V3 scheduler/config/output compatibility surface; Canonical Report V2 retired dev_tools stubs remain for a later R2 decision. This does not change the verified database cleanup state.
+Retired compatibility surface follow-up is documented in `docs/retired_compatibility_surface_audit.md`. R1 removed the retired V3 scheduler/config/output compatibility surface; R2 removed Canonical Report V2 retired dev_tools stubs and their retired-stub test. This does not change the verified database cleanup state.
 
 This verification step did not drop tables, modify databases, create backups, modify migrations, change runtime code, change tests, run scheduler, run stock update, or run any RawCandle DB-writing pipeline.
 
@@ -116,13 +116,13 @@ The command prints a planned refresh sequence but does not perform the refresh.
 |---|---|
 | `pytest -q tests/test_preflight_eco_legacy_db_cleanup_cli.py` | 8 passed |
 | `pytest -q tests/test_preflight_dc_report_v2_db_cleanup_cli.py` | 10 passed |
-| `pytest -q tests/test_report_canonical_v2_retired_cli.py` | 13 passed |
+| `pytest -q tests -k "report_canonical_v2"` | R2 follow-up check passed |
 | `pytest -q tests/test_plan_ec_source_layer_build_cli.py tests/test_plan_ec_source_layer_refresh_cli.py tests/test_plan_ec_source_layer_backfill_cli.py` | 30 passed |
 | `pytest -q tests/test_run_ec_source_layer_build_cli.py` | 13 passed |
 | `pytest -q tests/test_stock_update_scheduler_runner.py -k "ec_source_layer or datacenter_pipeline or dashboard or summary"` | R1 follow-up check passed |
 | `pytest -q tests/test_stock_update_scheduler_cli.py -k "summary or datacenter or ec_source_layer"` | R1 follow-up check passed |
 | `python3 -m py_compile rawcandle/cli/preflight_eco_legacy_db_cleanup.py rawcandle/cli/preflight_dc_report_v2_db_cleanup.py analysis/database_manager.py rawcandle/scheduler/runner.py rawcandle/scheduler/config.py rawcandle/cli/run_stock_update_scheduler.py` | passed |
-| `python3 -m py_compile dev_tools/run_report_canonical_v2_*.py` | passed |
+| Canonical Report V2 retired dev_tools py_compile | removed in R2; no stub files remain |
 
 ## VACUUM Note
 

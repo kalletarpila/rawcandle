@@ -4,7 +4,7 @@
 
 This is a planning-only step for Canonical Report V2 / `dc_report_*_v2` migration and database retirement. No migration files, runtime code, tests, scheduler behavior, `dc_*` source fact paths, `ec_*` sidecar paths, `ec_source_layer`, `scheduler_config.json`, or database files were changed.
 
-Canonical Report V2 is retired. The V2 hooks are neutralized, the V2 core modules are removed, V2-only documentation is archived, and retired dev_tools stubs remain as a controlled compatibility layer. Migrations `004`-`014` and any existing `dc_report_*_v2` DB tables are not changed in this step.
+Canonical Report V2 is retired. The V2 hooks are neutralized, the V2 core modules are removed, V2-only documentation is archived, and the temporary retired dev_tools stubs were removed in R2. Migrations `004`-`014` remain unchanged pending a separate migration-history decision.
 
 Recommended default: keep migrations `004`-`014` temporarily as historical inert migrations unless a later compatibility check proves they can be archived, removed, or replaced by tombstones safely.
 
@@ -16,12 +16,14 @@ Phase H note: backup-confirmed cleanup of the 17 known `dc_report_*_v2` tables f
 
 Final verification note: combined read-only verification for old `eco_*` and retired `dc_report_*_v2` cleanup is documented in `docs/analysis_db_legacy_cleanup_final_verification.md`. Assessment: `LEGACY_CLEANUP_VERIFIED`.
 
+R2 note: Canonical Report V2 retired dev_tools stubs and their retired-stub test were removed. No migration files, DB files, current `dc_*`, current `ec_*`, `ec_source_layer`, scheduler, dashboard, or legacy Datacenter behavior was changed.
+
 ## Current state summary
 
-- Phase B neutralized V2 hooks: `analysis/database_manager.py` no longer applies Canonical Report V2 migrations during general analysis DB initialization, and `dev_tools/run_report_canonical_v2_*.py` entrypoints now return a deterministic retirement error.
+- Phase B neutralized V2 hooks: `analysis/database_manager.py` no longer applies Canonical Report V2 migrations during general analysis DB initialization, and `dev_tools/run_report_canonical_v2_*.py` entrypoints returned a deterministic retirement error until R2 removed them.
 - Phase C removed Canonical Report V2 core modules and direct non-CLI V2 tests.
 - Phase D archived V2-only docs under `docs/archive/canonical_report_v2/`.
-- Retired dev_tools stubs remain intentionally for compatibility and discoverability. They return exit code `2`, do not access DBs, do not write outputs, do not import V2 core modules, and point users to the retirement decision.
+- Retired dev_tools stubs were removed in R2. Running `dev_tools/run_report_canonical_v2_*` is no longer supported because those files no longer exist.
 - Migrations `004`-`014` remain present under `rawcandle/sqlite/migrations/`.
 - DB cleanup for `/home/kalle/projects/rawcandle/data/analysis.db` was completed in Phase H after verified backup.
 
@@ -36,8 +38,7 @@ Current evidence:
 - No inspected current migration path uses a `schema_migrations` table or `PRAGMA user_version` convention that requires numbered files to be contiguous.
 - Migrations `019`-`024` are independent of `004`-`014`; they create or patch current `ec_*` sidecar tables and do not reference `dc_report_*_v2`.
 - No current `dc_*` source fact builder/loader reference to `dc_report_*_v2` was found in the targeted searches.
-- Tests still reference Canonical V2 only through the retired CLI behavior test and retirement/audit context.
-- Retired dev_tools stubs import only `dev_tools.report_canonical_v2_retired`, which prints the retirement message and returns exit code `2`.
+- Tests no longer reference Canonical V2 retired stubs after R2.
 
 ## Migration inventory
 
@@ -61,8 +62,8 @@ Current evidence:
 |---|---|---|
 | `rawcandle/sqlite/migrations/004_create_datacenter_report_canonical_v2.sql` through `014_create_report_synthetic_event_history_v2.sql` | MIGRATION_ONLY | Keep unchanged until a separate migration-file cleanup decision. |
 | `docs/archive/canonical_report_v2/**` | ARCHIVE_DOC_ONLY | Keep as historical context; do not treat as current architecture or runnable runbook. |
-| `dev_tools/run_report_canonical_v2_*.py` and `dev_tools/report_canonical_v2_retired.py` | RETIRED_STUB_ONLY | Keep until a later compatibility decision deletes retired entrypoints. |
-| `tests/test_report_canonical_v2_retired_cli.py` | RETIRED_STUB_ONLY | Keep while retired stubs remain. |
+| `dev_tools/run_report_canonical_v2_*.py` and `dev_tools/report_canonical_v2_retired.py` | REMOVED_R2 | Removed after compatibility/discoverability window. |
+| `tests/test_report_canonical_v2_retired_cli.py` | REMOVED_R2 | Removed with retired stubs. |
 | `docs/dc_report_v2_retirement_decision.md` and `docs/dc_report_v2_removal_audit.md` | RETIREMENT_DOC_ONLY | Keep as status and audit trail. |
 | `docs/eco_legacy_*` references to `dc_report_*_v2` | RETIREMENT_DOC_ONLY | Keep as historical DB cleanup context; not current V2 runtime evidence. |
 | Current `dc_*` source fact tables and docs: `dc_ticker_swing_signal_daily`, `dc_group_swing_signal_daily`, `dc_group_synthetic_ohlc_daily`, `dc_group_index_daily`, `dc_pipeline_watermark` | CURRENT_PRESERVE | Preserve. These are not Canonical Report V2 readmodels. |
