@@ -37,13 +37,23 @@ analysis/archive/
 analysis/*.log*
 
 # Data files and databases 
+*.db
+*.db.*
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
 data/*.db
+data/*.db-wal
+data/*.db-shm
 data/osakedata.csv
 data/loki.txt
 data/results_backup.csv
 data/reverse/*
 !data/reverse/.gitkeep
 data/test_*.txt
+data/yf_cache/
 
 # Large data files
 *.csv
@@ -85,7 +95,16 @@ logs/
 *.html
 __pycache__/
 *.pyc
+temp/
+exports/
+canonical_reports/
+swing_reports/
+data_backup_*/
+/scheduler_config.json
 
 # Local logs
 *.log
 analysis/*.log
+
+# Local API keys / environment overrides
+.env.local
