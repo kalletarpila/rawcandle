@@ -19,6 +19,8 @@ Phase 2A status: old V3/eco core modules `report_canonical_v3_*`, `reporting_v3_
 
 Phase 2B status: old V3/eco historical docs were archived under `docs/archive/old_v3_eco/`. Runtime code, migrations `015`-`018`, production DBs, scheduler compatibility fields, `ec_*`, and `dc_*` paths were not changed; DB cleanup remains a separate later phase.
 
+Phase 3A planning status: migration and database cleanup strategy was documented in `docs/eco_legacy_migration_cleanup_strategy.md`. Migrations `015`-`018`, runtime code, production DBs, scheduler compatibility fields, `ec_*`, and `dc_*` paths were not changed.
+
 ## Evidence scope
 
 Read-only checks used targeted `rg` searches for:
