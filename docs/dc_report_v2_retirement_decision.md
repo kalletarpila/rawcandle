@@ -10,6 +10,8 @@ This decision does not retire current `dc_*` source facts, current `ec_*` sideca
 
 No code, tests, migrations, runtime behavior, scheduler config, or databases were changed by this decision document.
 
+Phase B status: DatabaseManager no longer applies Canonical Report V2 migrations during general analysis DB initialization, and `dev_tools/run_report_canonical_v2_*.py` entrypoints are retired/disabled with a deterministic non-zero exit. No DB cleanup was performed. Migrations `004`-`014` remain unchanged. Current `dc_*`, `ec_*`, `ec_source_layer`, scheduler, and legacy Datacenter paths are preserved.
+
 ## Scope boundary
 
 Targeted for later retirement:

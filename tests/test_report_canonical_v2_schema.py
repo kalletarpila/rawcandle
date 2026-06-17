@@ -769,28 +769,29 @@ def test_migration_file_exists():
     assert MIGRATION_SQL_PATH.is_file()
 
 
-def test_database_manager_initializes_report_canonical_v2_tables(tmp_path):
+def test_database_manager_does_not_initialize_report_canonical_v2_tables(tmp_path):
     db_path = tmp_path / "analysis.db"
     manager = DatabaseManager(str(db_path))
     conn = manager.get_connection()
 
-    assert _table_exists(conn, "dc_report_run_v2")
-    assert _table_exists(conn, "dc_report_context_group_v2")
-    assert _table_exists(conn, "dc_report_context_daily_v2")
-    assert _table_exists(conn, "dc_report_context_window_v2")
-    assert _table_exists(conn, "dc_report_classification_v2")
-    assert _table_exists(conn, "dc_report_valid_signal_date_v2")
-    assert _table_exists(conn, "dc_report_watchlist_ticker_v2")
-    assert _table_exists(conn, "dc_report_taxonomy_ticker_coverage_v2")
-    assert _table_exists(conn, "dc_report_technical_relevance_context_v2")
-    assert _table_exists(conn, "dc_report_data_quality_summary_v2")
-    assert _table_exists(conn, "dc_report_ecosystem_window_change_v2")
-    assert _table_exists(conn, "dc_report_group_overheat_progression_v2")
-    assert _table_exists(conn, "dc_report_group_relative_change_v2")
-    assert _table_exists(conn, "dc_report_group_timing_persistence_v2")
-    assert _table_exists(conn, "dc_report_ma_break_status_v2")
-    assert _table_exists(conn, "dc_report_signal_freshness_v2")
-    assert _table_exists(conn, "dc_report_synthetic_event_history_v2")
+    assert _table_exists(conn, "dc_ticker_swing_signal_daily")
+    assert not _table_exists(conn, "dc_report_run_v2")
+    assert not _table_exists(conn, "dc_report_context_group_v2")
+    assert not _table_exists(conn, "dc_report_context_daily_v2")
+    assert not _table_exists(conn, "dc_report_context_window_v2")
+    assert not _table_exists(conn, "dc_report_classification_v2")
+    assert not _table_exists(conn, "dc_report_valid_signal_date_v2")
+    assert not _table_exists(conn, "dc_report_watchlist_ticker_v2")
+    assert not _table_exists(conn, "dc_report_taxonomy_ticker_coverage_v2")
+    assert not _table_exists(conn, "dc_report_technical_relevance_context_v2")
+    assert not _table_exists(conn, "dc_report_data_quality_summary_v2")
+    assert not _table_exists(conn, "dc_report_ecosystem_window_change_v2")
+    assert not _table_exists(conn, "dc_report_group_overheat_progression_v2")
+    assert not _table_exists(conn, "dc_report_group_relative_change_v2")
+    assert not _table_exists(conn, "dc_report_group_timing_persistence_v2")
+    assert not _table_exists(conn, "dc_report_ma_break_status_v2")
+    assert not _table_exists(conn, "dc_report_signal_freshness_v2")
+    assert not _table_exists(conn, "dc_report_synthetic_event_history_v2")
 
     manager.close()
 
