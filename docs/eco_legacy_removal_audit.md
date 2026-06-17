@@ -17,6 +17,8 @@ Phase 1B status: old V3/eco CLI entrypoints and their direct CLI tests were remo
 
 Phase 2A status: old V3/eco core modules `report_canonical_v3_*`, `reporting_v3_query.py`, `reporting_v3_markdown.py`, and their direct core tests were removed. Migrations `015`-`018`, historical docs, scheduler compatibility fields, `ec_*`, and `dc_*` paths remain for later phases.
 
+Phase 2B status: old V3/eco historical docs were archived under `docs/archive/old_v3_eco/`. Runtime code, migrations `015`-`018`, production DBs, scheduler compatibility fields, `ec_*`, and `dc_*` paths were not changed; DB cleanup remains a separate later phase.
+
 ## Evidence scope
 
 Read-only checks used targeted `rg` searches for:
