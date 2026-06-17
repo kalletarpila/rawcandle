@@ -25,7 +25,7 @@ from dev_tools.stock_update_scheduler_ui import (
     list_scheduler_log_files,
     load_latest_scheduler_summary,
     main,
-    read_text_log_file,
+    get_systemd_user_timer_path,
     read_systemd_timer_on_calendar,
     read_systemd_user_timer_status,
     run_app,
@@ -169,13 +169,6 @@ def test_build_text_log_browser_url_quotes_path(tmp_path):
     assert build_text_log_browser_url(str(path)) == "/log%20file.txt"
 
 
-def test_read_text_log_file_returns_contents(tmp_path):
-    path = tmp_path / "scheduler.txt"
-    path.write_text("line1\nline2\n", encoding="utf-8")
-
-    assert read_text_log_file(str(path)) == "line1\nline2\n"
-
-
 def test_launch_browser_url_handles_sync_page_method():
     page = _FakePage()
 
@@ -211,6 +204,47 @@ def test_read_systemd_user_timer_status_reports_missing(tmp_path, monkeypatch):
 
     assert status["installed"] is False
     assert status["status_summary"] == "missing"
+
+
+def test_get_systemd_user_timer_path_uses_stock_update_scheduler_name():
+    assert get_systemd_user_timer_path().name == "stock-update-scheduler.timer"
+
+
+def test_read_systemd_user_timer_status_checks_stock_update_scheduler_unit(monkeypatch):
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return Mock(stdout="active\n", stderr="", returncode=0)
+
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.subprocess.run",
+        fake_run,
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.get_systemd_user_timer_path",
+        lambda: Path("/tmp/stock-update-scheduler.timer"),
+    )
+    monkeypatch.setattr(
+        Path,
+        "exists",
+        lambda self: str(self) == "/tmp/stock-update-scheduler.timer",
+    )
+    monkeypatch.setattr(
+        Path,
+        "read_text",
+        lambda self, encoding="utf-8": "[Timer]\nOnCalendar=*-*-* 05:30:00\n",
+    )
+
+    status = read_systemd_user_timer_status()
+
+    assert calls[0] == [
+        "systemctl",
+        "--user",
+        "is-active",
+        "stock-update-scheduler.timer",
+    ]
+    assert status["status_summary"] == "active"
 
 
 def test_save_config_and_sync_systemd_timer_reports_missing_timer(tmp_path, monkeypatch):
@@ -390,29 +424,6 @@ def test_run_app_loads_current_style_local_config_with_legacy_dashboard_keys(
     assert loaded.datacenter_enrichment_enabled is True
 
 
-def test_run_app_log_button_loads_selected_log_content(tmp_path, monkeypatch):
-    config_path = tmp_path / "scheduler.json"
-    _write_config(config_path)
-    log_dir = tmp_path / "logs"
-    log_dir.mkdir()
-    (log_dir / "stock_update_omxh_20260617T0900Z.txt").write_text(
-        "hello log\n", encoding="utf-8"
-    )
-    monkeypatch.setattr(
-        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
-        lambda: {"installed": False, "status_summary": "missing"},
-    )
-
-    page = _FakePage()
-    run_app(page, str(config_path))
-
-    assert len(page.logs_column.controls) == 1
-    page.logs_column.controls[0].controls[1].on_click(None)
-
-    assert page.selected_log_field.value == "hello log\n"
-    assert "size=" in page.logs_column.controls[0].controls[0].value
-
-
 def test_run_app_log_open_button_launches_asset_url(tmp_path, monkeypatch):
     config_path = tmp_path / "scheduler.json"
     _write_config(config_path)
@@ -429,7 +440,8 @@ def test_run_app_log_open_button_launches_asset_url(tmp_path, monkeypatch):
     page = _FakePage()
     run_app(page, str(config_path))
 
-    page.logs_column.controls[0].controls[2].on_click(None)
+    assert "size=" in page.logs_column.controls[0].controls[0].value
+    page.logs_column.controls[0].controls[1].on_click(None)
 
     assert page.launched_urls == ["/stock_update_omxh_20260617T0900Z.txt"]
 

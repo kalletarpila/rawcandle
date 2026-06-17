@@ -52,7 +52,7 @@ _DATACENTER_LOG_FILENAME_RE = re.compile(
 _EC_SOURCE_LAYER_LOG_FILENAME_RE = re.compile(
     r"^ec_source_layer_([a-z0-9_]+)_(\d{8}T\d{4,6}Z)(?:_(\d+))?\.(txt|log)$"
 )
-_TIMER_PATH = Path.home() / ".config/systemd/user/rawcandle-stock-update-scheduler.timer"
+_TIMER_PATH = Path.home() / ".config/systemd/user/stock-update-scheduler.timer"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -151,13 +151,6 @@ def build_text_log_browser_url(path: str) -> str:
     return f"/{quote(Path(path).name)}"
 
 
-def read_text_log_file(path: str, max_chars: int = 200_000) -> str:
-    content = Path(path).read_text(encoding="utf-8", errors="replace")
-    if len(content) <= max_chars:
-        return content
-    return f"[truncated to last {max_chars} chars]\n{content[-max_chars:]}"
-
-
 def launch_browser_url(page: Any, url: str) -> None:
     result = page.launch_url(url)
     if inspect.isawaitable(result):
@@ -215,7 +208,7 @@ def read_systemd_user_timer_status() -> dict[str, Any]:
     installed = timer_path.exists()
     try:
         proc = subprocess.run(
-            ["systemctl", "--user", "is-active", "rawcandle-stock-update-scheduler.timer"],
+            ["systemctl", "--user", "is-active", "stock-update-scheduler.timer"],
             check=False,
             capture_output=True,
             text=True,
@@ -526,7 +519,6 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
     status_field = ft.TextField(label="Status", read_only=True, multiline=True)
     summary_field = ft.TextField(label="Latest summary", read_only=True, multiline=True)
     timer_status_field = ft.TextField(label="Timer status", read_only=True, multiline=True)
-    selected_log_field = ft.TextField(label="Selected log", read_only=True, multiline=True)
     skip_next_run_text = ft.Text(scheduler_skip_next_run_label(config))
     running_status_text = ft.Text("Scheduler running: UNKNOWN")
     logs_column = ft.Column(spacing=8)
@@ -577,14 +569,6 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
         cancel_skip_next_run_button.disabled = button_state["cancel_disabled"]
         refresh_timer_status()
 
-    def load_log_into_view(path: Path) -> None:
-        try:
-            selected_log_field.value = read_text_log_file(str(path))
-            status_field.value = f"Loaded log: {path.name}"
-        except Exception as exc:
-            selected_log_field.value = ""
-            status_field.value = f"Load log failed: {exc}"
-
     def open_log_in_browser(path: Path) -> None:
         launch_browser_url(page, build_text_log_browser_url(str(path)))
         status_field.value = f"Opened log: {path.name}"
@@ -611,7 +595,6 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
         logs_column.controls = []
         if not log_entries:
             logs_column.controls.append(ft.Text("No text log files found."))
-            selected_log_field.value = ""
         else:
             for log_entry in log_entries:
                 path = Path(log_entry["path"])
@@ -623,10 +606,6 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
                                 f"[{log_entry['type']}] "
                                 f"(size={log_entry['size_bytes']}, modified_at={log_entry['modified_at']})",
                                 expand=True,
-                            ),
-                            ft.TextButton(
-                                "Preview",
-                                on_click=lambda _e, path=path: load_log_into_view(path),
                             ),
                             ft.TextButton(
                                 "Open",
@@ -837,7 +816,6 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
             status_field,
             summary_field,
             timer_status_field,
-            selected_log_field,
             logs_column,
         ],
         spacing=12,
@@ -898,7 +876,6 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
     page.summary_field = summary_field
     page.timer_status_field = timer_status_field
     page.running_status_text = running_status_text
-    page.selected_log_field = selected_log_field
     page.logs_column = logs_column
     page.datacenter_price_db_field = datacenter_price_db_field
     page.datacenter_analysis_db_field = datacenter_analysis_db_field
