@@ -13,6 +13,8 @@ The main old `eco_*` implementation is concentrated in `rawcandle/report_canonic
 
 No runtime code, tests, config, schema, reports, or database files were changed in this step.
 
+Phase 1B status: old V3/eco CLI entrypoints and their direct CLI tests were removed after scheduler imports were neutralized in Phase 1A. Core `report_canonical_v3_*`, `reporting_v3_*`, and migrations `015`-`018` remain for later phases.
+
 ## Evidence scope
 
 Read-only checks used targeted `rg` searches for:
