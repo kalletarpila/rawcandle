@@ -10,6 +10,8 @@ The database has no old `eco_*` tables and no known retired Canonical Report V2 
 
 Retired compatibility surface follow-up is documented in `docs/retired_compatibility_surface_audit.md`. R1 removed the retired V3 scheduler/config/output compatibility surface; R2 removed Canonical Report V2 retired dev_tools stubs and their retired-stub test. This does not change the verified database cleanup state.
 
+Historical migration-file policy is documented in `docs/legacy_migration_policy_decision.md`. Decision: keep migrations `004`-`018` as historical inert migrations for now. This does not change the verified database cleanup state.
+
 This verification step did not drop tables, modify databases, create backups, modify migrations, change runtime code, change tests, run scheduler, run stock update, or run any RawCandle DB-writing pipeline.
 
 ## Scope
@@ -131,8 +133,7 @@ The command prints a planned refresh sequence but does not perform the refresh.
 ## Remaining Optional Future Decisions
 
 - `VACUUM` or `VACUUM INTO`, only if file-size reduction is required.
-- Archive/remove migrations `004`-`014`, only after migration-history compatibility is approved.
-- Archive/remove migrations `015`-`018`, only after migration-history compatibility is approved.
+- Migrations `004`-`018` are kept as historical inert migrations by `docs/legacy_migration_policy_decision.md`; revisit only if a concrete migration-history trigger appears.
 - Delete retired Canonical Report V2 dev_tools stubs later if compatibility/discoverability is no longer needed.
 - R2: delete Canonical Report V2 retired dev_tools stubs later if compatibility/discoverability is no longer needed.
 

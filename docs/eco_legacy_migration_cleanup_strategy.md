@@ -20,6 +20,8 @@ Final verification note: combined read-only verification for old `eco_*` and ret
 
 R1 compatibility cleanup note: retired V3 scheduler/config/output compatibility fields were removed after `docs/retired_compatibility_surface_audit.md`. Runtime code, scheduler behavior outside the retired V3 compatibility surface, migrations, DB files, current `dc_*`, current `ec_*`, and `ec_source_layer` were not changed by that cleanup.
 
+Final policy note: `docs/legacy_migration_policy_decision.md` selects `KEEP_HISTORICAL_INERT_MIGRATIONS`. Migrations `015`-`018` remain in place as historical inert migrations and should not be moved, deleted, or tombstoned without a separate explicit migration-history compatibility decision.
+
 ## Current removal state
 
 - Old V3/eco scheduler execution was neutralized.

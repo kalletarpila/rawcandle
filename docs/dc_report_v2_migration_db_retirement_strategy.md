@@ -18,6 +18,8 @@ Final verification note: combined read-only verification for old `eco_*` and ret
 
 R2 note: Canonical Report V2 retired dev_tools stubs and their retired-stub test were removed. No migration files, DB files, current `dc_*`, current `ec_*`, `ec_source_layer`, scheduler, dashboard, or legacy Datacenter behavior was changed.
 
+Final policy note: `docs/legacy_migration_policy_decision.md` selects `KEEP_HISTORICAL_INERT_MIGRATIONS`. Migrations `004`-`014` remain in place as historical inert migrations and should not be moved, deleted, or tombstoned without a separate explicit migration-history compatibility decision.
+
 ## Current state summary
 
 - Phase B neutralized V2 hooks: `analysis/database_manager.py` no longer applies Canonical Report V2 migrations during general analysis DB initialization, and `dev_tools/run_report_canonical_v2_*.py` entrypoints returned a deterministic retirement error until R2 removed them.

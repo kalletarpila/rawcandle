@@ -10,7 +10,9 @@ R1 status: scheduler `v3_reports_*` result fields, `datacenter_v3_reports_*` con
 
 R2 status: Canonical Report V2 retired dev_tools stubs and their retired-stub test were removed. The deleted files were compatibility/discoverability stubs only; no DB, migration, current `dc_*`, current `ec_*`, `ec_source_layer`, Datacenter, dashboard, or scheduler behavior was changed.
 
-Recommended next Codex step: decide whether to leave migrations `004`-`014` and `015`-`018` as historical inert migrations or plan a separate migration-file archive/removal audit.
+R4 status: resolved by `docs/legacy_migration_policy_decision.md`. Migrations `004`-`014` and `015`-`018` are kept as historical inert migrations for now.
+
+Recommended next Codex step: move to a new cleanup target only if desired; no immediate migration-file action is recommended.
 
 ## Scope
 
@@ -121,7 +123,9 @@ Handle migration files only after a separate migration-history compatibility dec
 - `004`-`014` for retired `dc_report_*_v2`.
 - `015`-`018` for old `eco_*`.
 
-This phase must not touch `019`-`024` current `ec_*` migrations. Any DB table cleanup remains separate from migration-file cleanup and requires explicit backup and confirmation.
+Status: resolved by `docs/legacy_migration_policy_decision.md` with `KEEP_HISTORICAL_INERT_MIGRATIONS`.
+
+This phase must not touch `019`-`024` current `ec_*` migrations. Any future DB table cleanup remains separate from migration-file cleanup and requires explicit backup and confirmation.
 
 ## Safeguards
 
