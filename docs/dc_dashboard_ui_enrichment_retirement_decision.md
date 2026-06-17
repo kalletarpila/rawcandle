@@ -24,6 +24,8 @@ Phase 3 status: read-only DB/migration cleanup strategy and `analysis.db` prefli
 
 Phase 4 status: the five retired dashboard enrichment `_daily` tables were dropped from `/home/kalle/projects/rawcandle/data/analysis.db` after verified backup. Details are documented in [dc_dashboard_enrichment_db_cleanup_analysis_db.md](/home/kalle/projects/rawcandle/docs/dc_dashboard_enrichment_db_cleanup_analysis_db.md). No `VACUUM` was run; migrations `002`/`003`, runtime code, current `dc_*`, current `ec_*`, and `ec_source_layer` remain unchanged.
 
+Migration policy status: migrations `002`/`003` are kept as historical inert migration files by [dashboard_enrichment_migration_policy_decision.md](/home/kalle/projects/rawcandle/docs/dashboard_enrichment_migration_policy_decision.md). No migration files were changed by that decision.
+
 ## Scope
 
 Retirement target:

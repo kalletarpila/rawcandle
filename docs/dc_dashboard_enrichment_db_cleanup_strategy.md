@@ -14,6 +14,8 @@ The read-only preflight shows the five retired `_daily` tables are present, old 
 
 Phase 4 status: backup-confirmed cleanup for `/home/kalle/projects/rawcandle/data/analysis.db` is documented in [dc_dashboard_enrichment_db_cleanup_analysis_db.md](/home/kalle/projects/rawcandle/docs/dc_dashboard_enrichment_db_cleanup_analysis_db.md). Assessment: `DASHBOARD_ENRICHMENT_TABLE_CLEANUP_COMPLETED`. No `VACUUM` was run and migrations `002`/`003` remain unchanged.
 
+Migration policy status: migrations `002`/`003` are kept as historical inert migration files by [dashboard_enrichment_migration_policy_decision.md](/home/kalle/projects/rawcandle/docs/dashboard_enrichment_migration_policy_decision.md). No migration files were changed by that decision.
+
 ## Current removal state
 
 | Phase | State |

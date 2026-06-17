@@ -9,6 +9,8 @@ This decision applies to:
 - Migrations `004`-`014` for retired Canonical Report V2 / `dc_report_*_v2`.
 - Migrations `015`-`018` for old legacy `eco_*`.
 
+Dashboard enrichment migrations `002`/`003` are covered by a separate decision: [dashboard_enrichment_migration_policy_decision.md](/home/kalle/projects/rawcandle/docs/dashboard_enrichment_migration_policy_decision.md).
+
 The files remain in `rawcandle/sqlite/migrations/` as historical schema and audit artifacts. They should not be applied by current runtime paths, and they should not be moved, deleted, or replaced with tombstones without a separate explicit migration-history compatibility decision.
 
 ## Scope

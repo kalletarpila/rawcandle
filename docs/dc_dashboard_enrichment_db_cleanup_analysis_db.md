@@ -8,6 +8,8 @@ The five retired dashboard enrichment `_daily` tables were removed from `/home/k
 
 No `VACUUM` or `VACUUM INTO` was run. Migrations `002`/`003`, runtime code, tests, `scheduler_config.json`, current `dc_*` source facts, current `ec_*` sidecar tables, and `ec_source_layer` were not modified.
 
+Migration policy follow-up: migrations `002`/`003` are kept as historical inert migration files by [dashboard_enrichment_migration_policy_decision.md](/home/kalle/projects/rawcandle/docs/dashboard_enrichment_migration_policy_decision.md). No migration files were changed by that decision.
+
 ## Scope
 
 | Field | Value |
