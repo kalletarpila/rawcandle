@@ -14,6 +14,8 @@ Phase 3C note: read-only preflight was run against `/home/kalle/projects/rawcand
 
 Phase 3D note: backup-confirmed old `eco_*` table cleanup was completed for `/home/kalle/projects/rawcandle/data/analysis.db` and documented in `docs/eco_legacy_db_cleanup_analysis_db.md`. A verified backup was created at `/home/kalle/projects/rawcandle/temp/analysis__before_eco_legacy_cleanup__20260617T132223Z.sqlite`; no `VACUUM` was run, and migrations remain unchanged.
 
+Phase 3E note: read-only post-cleanup verification was completed for `/home/kalle/projects/rawcandle/data/analysis.db` and documented in `docs/eco_legacy_post_cleanup_verification_analysis_db.md`. Assessment: `POST_CLEANUP_READINESS_OK`; no `VACUUM` was run, and runtime code, scheduler behavior, and migrations remain unchanged.
+
 ## Current removal state
 
 - Old V3/eco scheduler execution was neutralized.
