@@ -12,6 +12,8 @@ Phase F note: `rawcandle/cli/preflight_dc_report_v2_db_cleanup.py` now provides 
 
 Phase G note: read-only preflight was run against `/home/kalle/projects/rawcandle/data/analysis.db` and documented in `docs/dc_report_v2_db_preflight_analysis_db.md`. The DB contains 17 known `dc_report_*_v2` tables with 2,341 total rows; integrity and foreign-key checks were clean. No DB cleanup was performed.
 
+Phase H note: backup-confirmed cleanup of the 17 known `dc_report_*_v2` tables from `/home/kalle/projects/rawcandle/data/analysis.db` was completed and documented in `docs/dc_report_v2_db_cleanup_analysis_db.md`. Backup path: `/home/kalle/projects/rawcandle/temp/analysis__before_dc_report_v2_cleanup__20260617T143742Z.sqlite`. No `VACUUM` was run; migrations and runtime code remain unchanged.
+
 ## Current state summary
 
 - Phase B neutralized V2 hooks: `analysis/database_manager.py` no longer applies Canonical Report V2 migrations during general analysis DB initialization, and `dev_tools/run_report_canonical_v2_*.py` entrypoints now return a deterministic retirement error.
@@ -19,7 +21,7 @@ Phase G note: read-only preflight was run against `/home/kalle/projects/rawcandl
 - Phase D archived V2-only docs under `docs/archive/canonical_report_v2/`.
 - Retired dev_tools stubs remain intentionally for compatibility and discoverability. They return exit code `2`, do not access DBs, do not write outputs, do not import V2 core modules, and point users to the retirement decision.
 - Migrations `004`-`014` remain present under `rawcandle/sqlite/migrations/`.
-- DB cleanup for possible `dc_report_*_v2` tables has not been performed.
+- DB cleanup for `/home/kalle/projects/rawcandle/data/analysis.db` was completed in Phase H after verified backup.
 
 ## Migration system findings
 

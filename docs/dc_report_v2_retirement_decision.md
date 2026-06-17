@@ -22,6 +22,8 @@ Phase F status: read-only preflight CLI `rawcandle/cli/preflight_dc_report_v2_db
 
 Phase G status: read-only preflight against `/home/kalle/projects/rawcandle/data/analysis.db` is documented in `docs/dc_report_v2_db_preflight_analysis_db.md`. Result: `CLEANUP_CANDIDATE_WITH_BACKUP_REQUIRED`; 17 known V2 tables and 2,341 rows were found, with clean integrity and FK checks. No DB cleanup was performed.
 
+Phase H status: backup-confirmed cleanup of the 17 known `dc_report_*_v2` tables from `/home/kalle/projects/rawcandle/data/analysis.db` is documented in `docs/dc_report_v2_db_cleanup_analysis_db.md`. Post-cleanup result: `NO_DC_REPORT_V2_TABLES_FOUND`, integrity `ok`, FK violations `0`. No `VACUUM` was run.
+
 ## Scope boundary
 
 Targeted for later retirement:

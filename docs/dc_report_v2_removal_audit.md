@@ -20,9 +20,11 @@ Phase F status: read-only preflight CLI `rawcandle/cli/preflight_dc_report_v2_db
 
 Phase G status: read-only `analysis.db` preflight completed and documented in `docs/dc_report_v2_db_preflight_analysis_db.md`. Assessment: `CLEANUP_CANDIDATE_WITH_BACKUP_REQUIRED`. No DB cleanup was performed.
 
+Phase H status: backup-confirmed `analysis.db` cleanup completed and documented in `docs/dc_report_v2_db_cleanup_analysis_db.md`. The 17 known `dc_report_*_v2` tables were dropped; post-cleanup preflight found no V2 tables. No `VACUUM` was run.
+
 The repository still contains archived historical Canonical Report V2 documentation, migrations `004`-`014`, retired dev_tools CLI stubs, and DB cleanup references around `dc_report_*_v2`. It does not appear wired into the current scheduler path. The original audit found that `analysis/database_manager.py` applied the Canonical V2 migrations during general analysis DB initialization; Phase B neutralized that hook. Phase C removed the V2 builders/writers/formatter loaders/parity code and their direct non-CLI tests. Phase D archived the old V2 docs as historical material only.
 
-The safe next step is not DB cleanup. Archive/remove V2-only documentation in Phase D, then handle migration and DB cleanup strategy separately.
+The `analysis.db` V2 table cleanup is complete as of Phase H. Any later work should be limited to read-only post-cleanup verification, optional retired-stub cleanup, or a separate explicitly approved `VACUUM`/file-size decision.
 
 No code, tests, migrations, runtime behavior, scheduler config, or databases were changed in this audit.
 
