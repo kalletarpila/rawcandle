@@ -8,6 +8,8 @@ Assessment: `LEGACY_CLEANUP_VERIFIED`.
 
 The database has no old `eco_*` tables and no known retired Canonical Report V2 `dc_report_*_v2` tables. Current preserved `dc_*` source fact tables and current `ec_*` key tables are present. `PRAGMA integrity_check` returned `ok`, and `PRAGMA foreign_key_check` reported 0 violations. No `VACUUM` was run.
 
+Retired compatibility surface follow-up is documented in `docs/retired_compatibility_surface_audit.md`. That audit covers scheduler `v3_reports_*` / `datacenter_v3_reports_*` compatibility fields and Canonical Report V2 retired dev_tools stubs; it does not change the verified database cleanup state.
+
 This verification step did not drop tables, modify databases, create backups, modify migrations, change runtime code, change tests, run scheduler, run stock update, or run any RawCandle DB-writing pipeline.
 
 ## Scope
