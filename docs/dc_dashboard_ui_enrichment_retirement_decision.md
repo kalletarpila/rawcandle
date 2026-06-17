@@ -18,6 +18,8 @@ Phase 1 did not perform DB cleanup. Migrations `002` and `003` remain unchanged.
 
 Phase 2 status: dashboard/enrichment dev_tools, builders, exporters, diagnostics, UI/HTML paths, and their direct tests have been removed. Active dashboard/enrichment runbooks/specs were moved under `docs/archive/dashboard_ui_enrichment/`. The read-only DB cleanup preflight `rawcandle/cli/preflight_dc_dashboard_legacy_db_cleanup.py` and its test remain preserved for later DB validation. No DB cleanup was done; migrations `002`/`003`, current `dc_*`, legacy Datacenter Markdown/CSV reports, current `ec_*`, and `ec_source_layer` remain preserved.
 
+Phase 3-prestep status: the `DatabaseManager` dashboard enrichment migration hook has been neutralized, and the write-capable dashboard enrichment migration helper has been removed. General analysis DB initialization no longer applies dashboard enrichment migrations `002`/`003`. Migrations `002`/`003` remain unchanged as historical migration files. No DB cleanup was done; current `dc_*`, legacy Datacenter Markdown/CSV reports, current `ec_*`, and `ec_source_layer` remain preserved.
+
 ## Scope
 
 Retirement target:

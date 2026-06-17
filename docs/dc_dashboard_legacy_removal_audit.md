@@ -18,6 +18,8 @@ Phase 1 status: scheduler/config/dashboard hooks for dashboard UI/HTML/enrichmen
 
 Phase 2 status: dashboard/enrichment dev_tools, builders, exporters, diagnostics, UI/HTML code, and their direct tests have now been removed. Active dashboard/enrichment docs were moved to `docs/archive/dashboard_ui_enrichment/`. The read-only `preflight_dc_dashboard_legacy_db_cleanup` CLI/test remain preserved for later DB validation. No DB cleanup was done; migrations `002`/`003`, current `dc_*`, current legacy Datacenter reports, current `ec_*`, and `ec_source_layer` were preserved.
 
+Phase 3-prestep status: the active `DatabaseManager` hook that applied dashboard enrichment migrations during general analysis DB initialization has been neutralized, and the write-capable dashboard enrichment migration helper has been removed. Migrations `002`/`003` remain unchanged for a later migration-policy decision. No DB cleanup was done; current `dc_*`, current legacy Datacenter reports, current `ec_*`, and `ec_source_layer` were preserved.
+
 Runtime hook removal is no longer blocked because the retirement decision has been made and Phase 1 has neutralized scheduler/config hooks. DB removal remains blocked until a separate preflight, backup, rollback plan, and explicit drop approval are completed for the five current `dc_dashboard_*_daily` tables.
 
 This audit does not affect current `dc_*` source facts, current legacy Datacenter reports, current `ec_*`, or `ec_source_layer`.
