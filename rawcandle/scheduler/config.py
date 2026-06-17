@@ -21,6 +21,18 @@ _REQUIRED_CONFIG_KEYS = {
 _OPTIONAL_CONFIG_KEYS = {"timezone", "skip_next_run", "technical_relevance_enabled"}
 _OPTIONAL_CONFIG_KEYS.update(
     {
+        "datacenter_dashboard_fallback_to_reports",
+        "datacenter_dashboard_reports_reference_db",
+        "datacenter_dashboard_reports_reference_enabled",
+        "datacenter_dashboard_reports_reference_html_output_dir",
+        "datacenter_dashboard_run_acceptance_report",
+        "datacenter_dashboard_source_mode",
+        "datacenter_enrichment_apply_migrations",
+        "datacenter_enrichment_enabled",
+        "datacenter_v3_reports_ecosystem",
+        "datacenter_v3_reports_enabled",
+        "datacenter_v3_reports_output_dir",
+        "datacenter_v3_reports_taxonomy_version",
         "ec_source_layer_enabled",
         "ec_source_layer_ecosystem",
         "ec_source_layer_taxonomy_version",
@@ -45,6 +57,18 @@ class StockUpdateSchedulerConfig:
     timezone: str = DEFAULT_TIMEZONE
     skip_next_run: bool = False
     technical_relevance_enabled: bool = False
+    datacenter_dashboard_fallback_to_reports: bool = True
+    datacenter_dashboard_reports_reference_db: str | None = None
+    datacenter_dashboard_reports_reference_enabled: bool = False
+    datacenter_dashboard_reports_reference_html_output_dir: str | None = None
+    datacenter_dashboard_run_acceptance_report: bool = True
+    datacenter_dashboard_source_mode: str = "reports"
+    datacenter_enrichment_apply_migrations: bool = False
+    datacenter_enrichment_enabled: bool = False
+    datacenter_v3_reports_ecosystem: str = "DATACENTER"
+    datacenter_v3_reports_enabled: bool = False
+    datacenter_v3_reports_output_dir: str | None = None
+    datacenter_v3_reports_taxonomy_version: str = "DC_TAXONOMY_FULL_V1"
     ec_source_layer_enabled: bool = False
     ec_source_layer_ecosystem: str = "DATACENTER"
     ec_source_layer_taxonomy_version: str = "DC_TAXONOMY_FULL_V1"
@@ -102,6 +126,18 @@ def validate_scheduler_config(
         raise ValueError("skip_next_run must be a bool")
     if type(config.technical_relevance_enabled) is not bool:
         raise ValueError("technical_relevance_enabled must be a bool")
+    if type(config.datacenter_dashboard_fallback_to_reports) is not bool:
+        raise ValueError("datacenter_dashboard_fallback_to_reports must be a bool")
+    if type(config.datacenter_dashboard_reports_reference_enabled) is not bool:
+        raise ValueError("datacenter_dashboard_reports_reference_enabled must be a bool")
+    if type(config.datacenter_dashboard_run_acceptance_report) is not bool:
+        raise ValueError("datacenter_dashboard_run_acceptance_report must be a bool")
+    if type(config.datacenter_enrichment_apply_migrations) is not bool:
+        raise ValueError("datacenter_enrichment_apply_migrations must be a bool")
+    if type(config.datacenter_enrichment_enabled) is not bool:
+        raise ValueError("datacenter_enrichment_enabled must be a bool")
+    if type(config.datacenter_v3_reports_enabled) is not bool:
+        raise ValueError("datacenter_v3_reports_enabled must be a bool")
     if type(config.ec_source_layer_enabled) is not bool:
         raise ValueError("ec_source_layer_enabled must be a bool")
     if config.ec_source_layer_mode not in SUPPORTED_EC_SOURCE_LAYER_MODES:
@@ -135,6 +171,32 @@ def validate_scheduler_config(
         timezone=config.timezone,
         skip_next_run=config.skip_next_run,
         technical_relevance_enabled=config.technical_relevance_enabled,
+        datacenter_dashboard_fallback_to_reports=(
+            config.datacenter_dashboard_fallback_to_reports
+        ),
+        datacenter_dashboard_reports_reference_db=(
+            config.datacenter_dashboard_reports_reference_db
+        ),
+        datacenter_dashboard_reports_reference_enabled=(
+            config.datacenter_dashboard_reports_reference_enabled
+        ),
+        datacenter_dashboard_reports_reference_html_output_dir=(
+            config.datacenter_dashboard_reports_reference_html_output_dir
+        ),
+        datacenter_dashboard_run_acceptance_report=(
+            config.datacenter_dashboard_run_acceptance_report
+        ),
+        datacenter_dashboard_source_mode=config.datacenter_dashboard_source_mode,
+        datacenter_enrichment_apply_migrations=(
+            config.datacenter_enrichment_apply_migrations
+        ),
+        datacenter_enrichment_enabled=config.datacenter_enrichment_enabled,
+        datacenter_v3_reports_ecosystem=config.datacenter_v3_reports_ecosystem,
+        datacenter_v3_reports_enabled=config.datacenter_v3_reports_enabled,
+        datacenter_v3_reports_output_dir=config.datacenter_v3_reports_output_dir,
+        datacenter_v3_reports_taxonomy_version=(
+            config.datacenter_v3_reports_taxonomy_version
+        ),
         ec_source_layer_enabled=config.ec_source_layer_enabled,
         ec_source_layer_ecosystem=config.ec_source_layer_ecosystem,
         ec_source_layer_taxonomy_version=config.ec_source_layer_taxonomy_version,
@@ -176,6 +238,36 @@ def scheduler_config_from_dict(data: Dict[str, Any]) -> StockUpdateSchedulerConf
         timezone=data.get("timezone", DEFAULT_TIMEZONE),
         skip_next_run=data.get("skip_next_run", False),
         technical_relevance_enabled=data.get("technical_relevance_enabled", False),
+        datacenter_dashboard_fallback_to_reports=data.get(
+            "datacenter_dashboard_fallback_to_reports", True
+        ),
+        datacenter_dashboard_reports_reference_db=data.get(
+            "datacenter_dashboard_reports_reference_db"
+        ),
+        datacenter_dashboard_reports_reference_enabled=data.get(
+            "datacenter_dashboard_reports_reference_enabled", False
+        ),
+        datacenter_dashboard_reports_reference_html_output_dir=data.get(
+            "datacenter_dashboard_reports_reference_html_output_dir"
+        ),
+        datacenter_dashboard_run_acceptance_report=data.get(
+            "datacenter_dashboard_run_acceptance_report", True
+        ),
+        datacenter_dashboard_source_mode=data.get(
+            "datacenter_dashboard_source_mode", "reports"
+        ),
+        datacenter_enrichment_apply_migrations=data.get(
+            "datacenter_enrichment_apply_migrations", False
+        ),
+        datacenter_enrichment_enabled=data.get("datacenter_enrichment_enabled", False),
+        datacenter_v3_reports_ecosystem=data.get(
+            "datacenter_v3_reports_ecosystem", "DATACENTER"
+        ),
+        datacenter_v3_reports_enabled=data.get("datacenter_v3_reports_enabled", False),
+        datacenter_v3_reports_output_dir=data.get("datacenter_v3_reports_output_dir"),
+        datacenter_v3_reports_taxonomy_version=data.get(
+            "datacenter_v3_reports_taxonomy_version", "DC_TAXONOMY_FULL_V1"
+        ),
         ec_source_layer_enabled=data.get("ec_source_layer_enabled", False),
         ec_source_layer_ecosystem=data.get("ec_source_layer_ecosystem", "DATACENTER"),
         ec_source_layer_taxonomy_version=data.get(
@@ -222,6 +314,18 @@ def create_default_scheduler_config(
         timezone=DEFAULT_TIMEZONE,
         skip_next_run=False,
         technical_relevance_enabled=False,
+        datacenter_dashboard_fallback_to_reports=True,
+        datacenter_dashboard_reports_reference_db=None,
+        datacenter_dashboard_reports_reference_enabled=False,
+        datacenter_dashboard_reports_reference_html_output_dir=None,
+        datacenter_dashboard_run_acceptance_report=True,
+        datacenter_dashboard_source_mode="reports",
+        datacenter_enrichment_apply_migrations=False,
+        datacenter_enrichment_enabled=False,
+        datacenter_v3_reports_ecosystem="DATACENTER",
+        datacenter_v3_reports_enabled=False,
+        datacenter_v3_reports_output_dir=None,
+        datacenter_v3_reports_taxonomy_version="DC_TAXONOMY_FULL_V1",
         ec_source_layer_enabled=False,
         ec_source_layer_ecosystem="DATACENTER",
         ec_source_layer_taxonomy_version="DC_TAXONOMY_FULL_V1",

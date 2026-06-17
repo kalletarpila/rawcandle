@@ -800,7 +800,7 @@ def main(argv: list[str] | None = None) -> None:
     def _app(page: Any) -> None:
         run_app(page, args.config)
 
-    ft.app(target=_app, port=args.port)
+    ft.app(target=_app, port=args.port, view=ft.AppView.WEB_BROWSER)
 
 
 if __name__ == "__main__":
