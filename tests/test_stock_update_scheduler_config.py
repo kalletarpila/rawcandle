@@ -15,6 +15,25 @@ from rawcandle.scheduler.config import (
     write_scheduler_config,
 )
 
+_LEGACY_DASHBOARD_CONFIG_KEYS = {
+    "datacenter_dashboard_fallback_to_reports": True,
+    "datacenter_dashboard_reports_reference_db": (
+        "/home/kalle/projects/rawcandle/temp/datacenter_dashboard_reports_reference.db"
+    ),
+    "datacenter_dashboard_reports_reference_enabled": True,
+    "datacenter_dashboard_reports_reference_html_output_dir": (
+        "/home/kalle/projects/rawcandle/swing_reports"
+    ),
+    "datacenter_dashboard_run_acceptance_report": True,
+    "datacenter_dashboard_source_mode": "enrichment",
+    "datacenter_enrichment_apply_migrations": False,
+    "datacenter_enrichment_enabled": True,
+    "datacenter_v3_reports_ecosystem": "DATACENTER",
+    "datacenter_v3_reports_enabled": False,
+    "datacenter_v3_reports_output_dir": "/home/kalle/projects/rawcandle/swing_reports/v3",
+    "datacenter_v3_reports_taxonomy_version": "DC_TAXONOMY_FULL_V1",
+}
+
 
 def test_default_scheduler_config_uses_omxh_and_omxs_not_usa():
     config = create_default_scheduler_config(
@@ -160,6 +179,65 @@ def test_scheduler_config_from_dict_rejects_unexpected_keys():
                 "analysis_db_path": "/tmp/analysis.db",
                 "log_dir": "/tmp/logs",
                 "unexpected": "value",
+            }
+        )
+
+
+def test_scheduler_config_from_dict_accepts_known_retired_dashboard_keys():
+    config = scheduler_config_from_dict(
+        {
+            "enabled_markets": ["omxh", "usa"],
+            "run_time": "05:30",
+            "osakedata_db_path": "/tmp/osakedata.db",
+            "analysis_db_path": "/tmp/analysis.db",
+            "log_dir": "/tmp/logs",
+            "technical_relevance_enabled": True,
+            "timezone": "Europe/Helsinki",
+            **_LEGACY_DASHBOARD_CONFIG_KEYS,
+        }
+    )
+
+    assert config.datacenter_dashboard_source_mode == "enrichment"
+    assert config.datacenter_enrichment_enabled is True
+    assert config.datacenter_dashboard_reports_reference_enabled is True
+    assert config.datacenter_v3_reports_output_dir == (
+        "/home/kalle/projects/rawcandle/swing_reports/v3"
+    )
+
+
+def test_scheduler_config_roundtrip_preserves_known_retired_dashboard_keys(tmp_path):
+    path = tmp_path / "scheduler.json"
+    source = {
+        "enabled_markets": ["omxh", "usa"],
+        "run_time": "05:30",
+        "osakedata_db_path": "/tmp/osakedata.db",
+        "analysis_db_path": "/tmp/analysis.db",
+        "log_dir": "/tmp/logs",
+        "technical_relevance_enabled": True,
+        "timezone": "Europe/Helsinki",
+        **_LEGACY_DASHBOARD_CONFIG_KEYS,
+    }
+
+    config = scheduler_config_from_dict(source)
+    write_scheduler_config(str(path), config)
+    roundtripped = read_scheduler_config(str(path))
+    serialized = scheduler_config_to_dict(roundtripped)
+
+    for key, value in _LEGACY_DASHBOARD_CONFIG_KEYS.items():
+        assert serialized[key] == value
+
+
+def test_scheduler_config_rejects_truly_unknown_key_even_with_known_legacy_keys():
+    with pytest.raises(ValueError, match="Unexpected config keys: totally_unknown"):
+        scheduler_config_from_dict(
+            {
+                "enabled_markets": ["omxh", "usa"],
+                "run_time": "05:30",
+                "osakedata_db_path": "/tmp/osakedata.db",
+                "analysis_db_path": "/tmp/analysis.db",
+                "log_dir": "/tmp/logs",
+                **_LEGACY_DASHBOARD_CONFIG_KEYS,
+                "totally_unknown": "value",
             }
         )
 

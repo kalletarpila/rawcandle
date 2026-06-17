@@ -39,6 +39,25 @@ from dev_tools.stock_update_scheduler_ui import (
 from rawcandle.scheduler.config import read_scheduler_config, write_scheduler_config
 from rawcandle.scheduler.runner import SchedulerAlreadyRunningError
 
+_LEGACY_DASHBOARD_CONFIG_KEYS = {
+    "datacenter_dashboard_fallback_to_reports": True,
+    "datacenter_dashboard_reports_reference_db": (
+        "/home/kalle/projects/rawcandle/temp/datacenter_dashboard_reports_reference.db"
+    ),
+    "datacenter_dashboard_reports_reference_enabled": True,
+    "datacenter_dashboard_reports_reference_html_output_dir": (
+        "/home/kalle/projects/rawcandle/swing_reports"
+    ),
+    "datacenter_dashboard_run_acceptance_report": True,
+    "datacenter_dashboard_source_mode": "enrichment",
+    "datacenter_enrichment_apply_migrations": False,
+    "datacenter_enrichment_enabled": True,
+    "datacenter_v3_reports_ecosystem": "DATACENTER",
+    "datacenter_v3_reports_enabled": False,
+    "datacenter_v3_reports_output_dir": "/home/kalle/projects/rawcandle/swing_reports/v3",
+    "datacenter_v3_reports_taxonomy_version": "DC_TAXONOMY_FULL_V1",
+}
+
 
 class _FakePage:
     def __init__(self):
@@ -74,6 +93,7 @@ def _write_config(path: Path, *, skip_next_run: bool = False) -> None:
                 "skip_next_run": skip_next_run,
                 "technical_relevance_enabled": False,
                 "timezone": "Europe/Helsinki",
+                **_LEGACY_DASHBOARD_CONFIG_KEYS,
             }
         ),
         encoding="utf-8",
@@ -306,6 +326,25 @@ def test_run_app_exposes_scheduler_and_datacenter_controls(tmp_path, monkeypatch
     assert not hasattr(page, "datacenter_dashboard_content")
 
 
+def test_run_app_loads_current_style_local_config_with_legacy_dashboard_keys(
+    tmp_path, monkeypatch
+):
+    config_path = tmp_path / "scheduler.json"
+    _write_config(config_path)
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
+        lambda: {"installed": False, "status_summary": "missing"},
+    )
+
+    page = _FakePage()
+    run_app(page, str(config_path))
+
+    loaded = read_scheduler_config(str(config_path))
+    assert page.title == "RawCandle stock update scheduler"
+    assert loaded.datacenter_dashboard_source_mode == "enrichment"
+    assert loaded.datacenter_enrichment_enabled is True
+
+
 def test_run_app_save_config_persists_technical_relevance(tmp_path, monkeypatch):
     config_path = tmp_path / "scheduler.json"
     _write_config(config_path)
@@ -339,6 +378,7 @@ def test_scheduler_ui_startup_passes_fixed_port_to_ft_app(tmp_path, monkeypatch)
     main(["--config", str(config_path)])
 
     assert app_mock.call_args.kwargs["port"] == 8555
+    assert app_mock.call_args.kwargs["view"].value == "web_browser"
 
 
 def test_skip_next_run_helpers_roundtrip(tmp_path, monkeypatch):
