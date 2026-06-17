@@ -16,6 +16,8 @@ Phase D status: V2-only documents were archived under `docs/archive/canonical_re
 
 Phase E status: migration and database retirement strategy is documented in `docs/dc_report_v2_migration_db_retirement_strategy.md`. Migrations `004`-`014` remain unchanged; no DB cleanup was performed.
 
+Phase F status: read-only preflight CLI `rawcandle/cli/preflight_dc_report_v2_db_cleanup.py` was added. It inspects only explicit DB paths and does not perform cleanup, backup, `VACUUM`, or DB writes.
+
 The repository still contains archived historical Canonical Report V2 documentation, migrations `004`-`014`, retired dev_tools CLI stubs, and DB cleanup references around `dc_report_*_v2`. It does not appear wired into the current scheduler path. The original audit found that `analysis/database_manager.py` applied the Canonical V2 migrations during general analysis DB initialization; Phase B neutralized that hook. Phase C removed the V2 builders/writers/formatter loaders/parity code and their direct non-CLI tests. Phase D archived the old V2 docs as historical material only.
 
 The safe next step is not DB cleanup. Archive/remove V2-only documentation in Phase D, then handle migration and DB cleanup strategy separately.

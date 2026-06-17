@@ -18,6 +18,8 @@ Phase D status: V2-only documents were archived under `docs/archive/canonical_re
 
 Phase E status: migration and database retirement strategy is documented in `docs/dc_report_v2_migration_db_retirement_strategy.md`. Recommendation: keep migrations `004`-`014` temporarily as historical inert migrations; handle any `dc_report_*_v2` DB cleanup later through explicit read-only preflight, verified backup, and approved drop plan.
 
+Phase F status: read-only preflight CLI `rawcandle/cli/preflight_dc_report_v2_db_cleanup.py` was added for explicit DB paths. It inventories known `dc_report_*_v2` tables and preserved current `dc_*` / `ec_*` table presence without modifying DBs; cleanup still requires a separate backup-confirmed prompt.
+
 ## Scope boundary
 
 Targeted for later retirement:
