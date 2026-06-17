@@ -25,6 +25,8 @@ Phase 3B status: read-only DB cleanup preflight CLI `rawcandle/cli/preflight_eco
 
 Phase 3C status: read-only analysis DB preflight completed and documented in `docs/eco_legacy_db_preflight_analysis_db.md`. No DB cleanup was performed; no tables were dropped; migrations `015`-`018`, runtime scheduler behavior, `ec_*`, and `dc_*` paths were not changed.
 
+Phase 3D status: analysis DB old `eco_*` table cleanup completed and documented in `docs/eco_legacy_db_cleanup_analysis_db.md`. Backup path: `/home/kalle/projects/rawcandle/temp/analysis__before_eco_legacy_cleanup__20260617T132223Z.sqlite`. No `VACUUM` was run; migrations `015`-`018`, migrations `019`-`024`, runtime scheduler behavior, `ec_*`, and `dc_*` paths were not changed.
+
 ## Evidence scope
 
 Read-only checks used targeted `rg` searches for:

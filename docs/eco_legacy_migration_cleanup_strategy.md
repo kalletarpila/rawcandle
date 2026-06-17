@@ -12,6 +12,8 @@ Phase 3B note: `rawcandle/cli/preflight_eco_legacy_db_cleanup.py` now provides a
 
 Phase 3C note: read-only preflight was run against `/home/kalle/projects/rawcandle/data/analysis.db` and documented in `docs/eco_legacy_db_preflight_analysis_db.md`. The DB contains 16 old `eco_*` tables with 72,931 rows; integrity and foreign-key checks were clean. No DB cleanup was performed.
 
+Phase 3D note: backup-confirmed old `eco_*` table cleanup was completed for `/home/kalle/projects/rawcandle/data/analysis.db` and documented in `docs/eco_legacy_db_cleanup_analysis_db.md`. A verified backup was created at `/home/kalle/projects/rawcandle/temp/analysis__before_eco_legacy_cleanup__20260617T132223Z.sqlite`; no `VACUUM` was run, and migrations remain unchanged.
+
 ## Current removal state
 
 - Old V3/eco scheduler execution was neutralized.
