@@ -22,6 +22,8 @@ Phase G status: read-only `analysis.db` preflight completed and documented in `d
 
 Phase H status: backup-confirmed `analysis.db` cleanup completed and documented in `docs/dc_report_v2_db_cleanup_analysis_db.md`. The 17 known `dc_report_*_v2` tables were dropped; post-cleanup preflight found no V2 tables. No `VACUUM` was run.
 
+Final verification status: combined read-only verification for old `eco_*` and retired `dc_report_*_v2` cleanup is documented in `docs/analysis_db_legacy_cleanup_final_verification.md`. Assessment: `LEGACY_CLEANUP_VERIFIED`.
+
 The repository still contains archived historical Canonical Report V2 documentation, migrations `004`-`014`, retired dev_tools CLI stubs, and DB cleanup references around `dc_report_*_v2`. It does not appear wired into the current scheduler path. The original audit found that `analysis/database_manager.py` applied the Canonical V2 migrations during general analysis DB initialization; Phase B neutralized that hook. Phase C removed the V2 builders/writers/formatter loaders/parity code and their direct non-CLI tests. Phase D archived the old V2 docs as historical material only.
 
 The `analysis.db` V2 table cleanup is complete as of Phase H. Any later work should be limited to read-only post-cleanup verification, optional retired-stub cleanup, or a separate explicitly approved `VACUUM`/file-size decision.

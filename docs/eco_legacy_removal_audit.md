@@ -29,6 +29,8 @@ Phase 3D status: analysis DB old `eco_*` table cleanup completed and documented 
 
 Phase 3E status: post-cleanup read-only verification completed and documented in `docs/eco_legacy_post_cleanup_verification_analysis_db.md`. Assessment: `POST_CLEANUP_READINESS_OK`. No `VACUUM` was run; migrations `015`-`024`, runtime scheduler behavior, `ec_*`, and `dc_*` paths were not changed.
 
+Final verification status: combined read-only verification for old `eco_*` and retired `dc_report_*_v2` cleanup is documented in `docs/analysis_db_legacy_cleanup_final_verification.md`. Assessment: `LEGACY_CLEANUP_VERIFIED`.
+
 ## Evidence scope
 
 Read-only checks used targeted `rg` searches for:

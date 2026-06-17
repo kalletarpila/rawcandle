@@ -16,6 +16,8 @@ Phase 3D note: backup-confirmed old `eco_*` table cleanup was completed for `/ho
 
 Phase 3E note: read-only post-cleanup verification was completed for `/home/kalle/projects/rawcandle/data/analysis.db` and documented in `docs/eco_legacy_post_cleanup_verification_analysis_db.md`. Assessment: `POST_CLEANUP_READINESS_OK`; no `VACUUM` was run, and runtime code, scheduler behavior, and migrations remain unchanged.
 
+Final verification note: combined read-only verification for old `eco_*` and retired `dc_report_*_v2` cleanup is documented in `docs/analysis_db_legacy_cleanup_final_verification.md`. Assessment: `LEGACY_CLEANUP_VERIFIED`.
+
 ## Current removal state
 
 - Old V3/eco scheduler execution was neutralized.

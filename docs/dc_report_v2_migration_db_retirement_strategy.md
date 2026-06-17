@@ -14,6 +14,8 @@ Phase G note: read-only preflight was run against `/home/kalle/projects/rawcandl
 
 Phase H note: backup-confirmed cleanup of the 17 known `dc_report_*_v2` tables from `/home/kalle/projects/rawcandle/data/analysis.db` was completed and documented in `docs/dc_report_v2_db_cleanup_analysis_db.md`. Backup path: `/home/kalle/projects/rawcandle/temp/analysis__before_dc_report_v2_cleanup__20260617T143742Z.sqlite`. No `VACUUM` was run; migrations and runtime code remain unchanged.
 
+Final verification note: combined read-only verification for old `eco_*` and retired `dc_report_*_v2` cleanup is documented in `docs/analysis_db_legacy_cleanup_final_verification.md`. Assessment: `LEGACY_CLEANUP_VERIFIED`.
+
 ## Current state summary
 
 - Phase B neutralized V2 hooks: `analysis/database_manager.py` no longer applies Canonical Report V2 migrations during general analysis DB initialization, and `dev_tools/run_report_canonical_v2_*.py` entrypoints now return a deterministic retirement error.

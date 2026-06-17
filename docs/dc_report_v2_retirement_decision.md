@@ -24,6 +24,8 @@ Phase G status: read-only preflight against `/home/kalle/projects/rawcandle/data
 
 Phase H status: backup-confirmed cleanup of the 17 known `dc_report_*_v2` tables from `/home/kalle/projects/rawcandle/data/analysis.db` is documented in `docs/dc_report_v2_db_cleanup_analysis_db.md`. Post-cleanup result: `NO_DC_REPORT_V2_TABLES_FOUND`, integrity `ok`, FK violations `0`. No `VACUUM` was run.
 
+Final verification status: combined read-only verification for old `eco_*` and retired `dc_report_*_v2` cleanup is documented in `docs/analysis_db_legacy_cleanup_final_verification.md`. Assessment: `LEGACY_CLEANUP_VERIFIED`.
+
 ## Scope boundary
 
 Targeted for later retirement:
