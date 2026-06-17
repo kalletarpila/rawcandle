@@ -6,6 +6,8 @@ This audit is for removing old/transitional `dc_report_*_v2` readmodel/reporting
 
 Assessment: `REMOVAL_NOT_READY_ACTIVE_MANUAL_V2_PATHS_EXIST`.
 
+Decision status: `DECISION: RETIRE_CANONICAL_REPORT_V2` is documented in `docs/dc_report_v2_retirement_decision.md`. That decision step made no runtime, code, test, migration, scheduler, config, or DB changes.
+
 The repository still contains a substantial Canonical Report V2 stack around `dc_report_*_v2`: schema migrations, a migration applier, analysis builders/writers, formatter loaders, parity audit code, dev_tools CLIs, production/publish documentation, and extensive tests. It does not appear wired into the current scheduler path, but it is not merely dead schema: `analysis/database_manager.py` applies the Canonical V2 migrations during general analysis DB initialization, and docs record an accepted manual production publish baseline for `2026-05-29`.
 
 The safe next step is not deletion. First decide whether the manual Canonical V2 output/publish workflow is obsolete. If it is obsolete, neutralize the migration/application and manual CLI paths before removing code or dropping DB tables.
