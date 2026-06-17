@@ -12,6 +12,8 @@ Assessment: `DASHBOARD_ENRICHMENT_DB_CLEANUP_CANDIDATE_WITH_BACKUP_REQUIRED`.
 
 The read-only preflight shows the five retired `_daily` tables are present, old snapshot-style dashboard tables are absent, no unknown `dc_dashboard%` tables are present, `PRAGMA integrity_check` is `ok`, and `PRAGMA foreign_key_check` reports 0 violations. A later cleanup can be planned for the five `_daily` tables only after an explicit backup-confirmed DB cleanup prompt.
 
+Phase 4 status: backup-confirmed cleanup for `/home/kalle/projects/rawcandle/data/analysis.db` is documented in [dc_dashboard_enrichment_db_cleanup_analysis_db.md](/home/kalle/projects/rawcandle/docs/dc_dashboard_enrichment_db_cleanup_analysis_db.md). Assessment: `DASHBOARD_ENRICHMENT_TABLE_CLEANUP_COMPLETED`. No `VACUUM` was run and migrations `002`/`003` remain unchanged.
+
 ## Current removal state
 
 | Phase | State |
@@ -20,7 +22,7 @@ The read-only preflight shows the five retired `_daily` tables are present, old 
 | Phase 2 | Dashboard/enrichment dev_tools, builders, exporters, diagnostics, UI/HTML paths, and direct tests removed. |
 | Phase 3-prestep | `DatabaseManager` no longer applies dashboard enrichment migrations; write-capable migration helper removed. |
 | Read-only preflight CLI | Preserved as `rawcandle/cli/preflight_dc_dashboard_legacy_db_cleanup.py`. |
-| DB cleanup | Not yet performed. |
+| DB cleanup | Completed for `/home/kalle/projects/rawcandle/data/analysis.db` in Phase 4; see `docs/dc_dashboard_enrichment_db_cleanup_analysis_db.md`. |
 | Migrations `002`/`003` | Unchanged historical migration files. |
 
 ## Remaining reference classification

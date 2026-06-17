@@ -14,6 +14,8 @@ Phase 3-prestep status: the remaining active analysis DB initialization hook for
 
 Phase 3 status: read-only DB/migration cleanup strategy and `analysis.db` preflight are documented in [dc_dashboard_enrichment_db_cleanup_strategy.md](/home/kalle/projects/rawcandle/docs/dc_dashboard_enrichment_db_cleanup_strategy.md). The five retired `_daily` tables are now classified as cleanup candidates only after verified backup and explicit approval. No DB cleanup was performed.
 
+Phase 4 status: the five retired dashboard enrichment `_daily` tables were dropped from `/home/kalle/projects/rawcandle/data/analysis.db` after verified backup. Details are documented in [dc_dashboard_enrichment_db_cleanup_analysis_db.md](/home/kalle/projects/rawcandle/docs/dc_dashboard_enrichment_db_cleanup_analysis_db.md). No `VACUUM` was run and migrations `002`/`003` remain unchanged.
+
 Historical note: sections below this point describe the repository state before Phase 1 and Phase 2 retirement work. They are retained as evidence for the removal decision, not as current active-code documentation.
 
 The current `dc_dashboard_*_daily` tables are not required by the default scheduler dashboard path: `datacenter_dashboard_source_mode` defaults to `reports`, and `datacenter_enrichment_enabled` defaults to `False`. The production-safe reference path documented in the repository remains `.md reports` -> parser / decision logic -> `EcosystemDashboardInput` -> `ecosystem_dashboard.db` -> HTML.

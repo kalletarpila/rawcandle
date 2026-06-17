@@ -22,7 +22,9 @@ Phase 3-prestep status: the active `DatabaseManager` hook that applied dashboard
 
 Phase 3 status: read-only DB/migration cleanup strategy and `analysis.db` preflight are documented in [dc_dashboard_enrichment_db_cleanup_strategy.md](/home/kalle/projects/rawcandle/docs/dc_dashboard_enrichment_db_cleanup_strategy.md). Assessment: `DASHBOARD_ENRICHMENT_DB_CLEANUP_CANDIDATE_WITH_BACKUP_REQUIRED`. No DB cleanup was done and migrations `002`/`003` remain unchanged.
 
-Runtime hook removal is no longer blocked because the retirement decision has been made and Phase 1 has neutralized scheduler/config hooks. DB removal remains blocked until a separate preflight, backup, rollback plan, and explicit drop approval are completed for the five current `dc_dashboard_*_daily` tables.
+Phase 4 status: the five retired dashboard enrichment `_daily` tables were dropped from `/home/kalle/projects/rawcandle/data/analysis.db` after verified backup. Details are documented in [dc_dashboard_enrichment_db_cleanup_analysis_db.md](/home/kalle/projects/rawcandle/docs/dc_dashboard_enrichment_db_cleanup_analysis_db.md). No `VACUUM` was run; migrations `002`/`003`, current `dc_*`, current legacy Datacenter reports, current `ec_*`, and `ec_source_layer` were preserved.
+
+Runtime hook removal is no longer blocked because the retirement decision has been made and Phase 1 has neutralized scheduler/config hooks. DB removal for `/home/kalle/projects/rawcandle/data/analysis.db` is complete for the five retired `dc_dashboard_*_daily` tables; other DBs still require separate preflight, backup, rollback plan, and explicit approval.
 
 This audit does not affect current `dc_*` source facts, current legacy Datacenter reports, current `ec_*`, or `ec_source_layer`.
 
