@@ -10,6 +10,8 @@ Existing database `eco_*` tables should be handled later through a separate appr
 
 Phase 3B note: `rawcandle/cli/preflight_eco_legacy_db_cleanup.py` now provides a read-only preflight CLI for an explicitly supplied SQLite DB path. It inventories `eco_*` tables, row counts, related schema objects, integrity status, foreign-key violations, and page/freelist counts. It does not modify DBs, create backups, drop tables, run VACUUM, or approve cleanup; actual cleanup still requires a separate backup-confirmed prompt.
 
+Phase 3C note: read-only preflight was run against `/home/kalle/projects/rawcandle/data/analysis.db` and documented in `docs/eco_legacy_db_preflight_analysis_db.md`. The DB contains 16 old `eco_*` tables with 72,931 rows; integrity and foreign-key checks were clean. No DB cleanup was performed.
+
 ## Current removal state
 
 - Old V3/eco scheduler execution was neutralized.
