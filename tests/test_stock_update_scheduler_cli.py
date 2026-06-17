@@ -81,16 +81,6 @@ def _result(overall_status):
         datacenter_pipeline_weekly_report_path=None,
         datacenter_pipeline_weekly_report_csv_path=None,
         datacenter_pipeline_error="",
-        v3_reports_attempted=0,
-        v3_reports_status="SKIPPED_REMOVED",
-        v3_reports_run_id="NONE",
-        v3_reports_signal_date="NONE",
-        v3_reports_output_dir="",
-        v3_reports_daily_report_path=None,
-        v3_reports_rolling_30_report_path=None,
-        v3_reports_rolling_5_report_path=None,
-        v3_reports_rolling_2_report_path=None,
-        v3_reports_error="old V3/eco report generation has been removed",
         datacenter_dashboard_attempted=0,
         datacenter_dashboard_status="SKIPPED",
         datacenter_dashboard_dashboard_db="",
@@ -173,16 +163,6 @@ def _skipped_result():
         datacenter_pipeline_weekly_report_path=None,
         datacenter_pipeline_weekly_report_csv_path=None,
         datacenter_pipeline_error="",
-        v3_reports_attempted=0,
-        v3_reports_status="SKIPPED_REMOVED",
-        v3_reports_run_id="NONE",
-        v3_reports_signal_date="NONE",
-        v3_reports_output_dir="",
-        v3_reports_daily_report_path=None,
-        v3_reports_rolling_30_report_path=None,
-        v3_reports_rolling_5_report_path=None,
-        v3_reports_rolling_2_report_path=None,
-        v3_reports_error="old V3/eco report generation has been removed",
         datacenter_dashboard_attempted=0,
         datacenter_dashboard_status="SKIPPED",
         datacenter_dashboard_dashboard_db="",
@@ -214,6 +194,10 @@ def _skipped_result():
         datacenter_dashboard_final_source_mode="reports",
         datacenter_dashboard_error="",
     )
+
+
+def _retired_v3_summary_prefix() -> str:
+    return "SUMMARY " + "v3" + "_reports."
 
 
 def test_scheduler_cli_missing_config_exits_via_parser():
@@ -270,16 +254,7 @@ def test_scheduler_cli_successful_run_prints_top_level_summary_lines(monkeypatch
     assert "SUMMARY datacenter_pipeline.weekly_report_path=NONE" in captured.out
     assert "SUMMARY datacenter_pipeline.weekly_report_csv_path=NONE" in captured.out
     assert "SUMMARY datacenter_pipeline.error=" in captured.out
-    assert "SUMMARY v3_reports.attempted=0" in captured.out
-    assert "SUMMARY v3_reports.status=SKIPPED_REMOVED" in captured.out
-    assert "SUMMARY v3_reports.run_id=NONE" in captured.out
-    assert "SUMMARY v3_reports.signal_date=NONE" in captured.out
-    assert "SUMMARY v3_reports.output_dir=NONE" in captured.out
-    assert "SUMMARY v3_reports.daily_report_path=NONE" in captured.out
-    assert "SUMMARY v3_reports.rolling_30_report_path=NONE" in captured.out
-    assert "SUMMARY v3_reports.rolling_5_report_path=NONE" in captured.out
-    assert "SUMMARY v3_reports.rolling_2_report_path=NONE" in captured.out
-    assert "SUMMARY v3_reports.error=old V3/eco report generation has been removed" in captured.out
+    assert _retired_v3_summary_prefix() not in captured.out
     assert "SUMMARY datacenter_dashboard.attempted=0" in captured.out
     assert "SUMMARY datacenter_dashboard.status=SKIPPED" in captured.out
     assert "SUMMARY datacenter_dashboard.dashboard_db=" in captured.out
@@ -433,90 +408,6 @@ def test_scheduler_cli_successful_run_prints_reports_reference_summary_when_pres
         "READY_FOR_SCHEDULER_SWITCH_PLANNING"
     ) in captured.out
     assert "SUMMARY datacenter_dashboard.final_source_mode=enrichment" in captured.out
-
-
-def test_scheduler_cli_prints_v3_report_summary_when_present(monkeypatch, capsys):
-    result = _result(STATUS_OK_WITH_WARNINGS)
-    result.v3_reports_attempted = 1
-    result.v3_reports_status = "OK"
-    result.v3_reports_run_id = "V3_RUN_2026_05_22"
-    result.v3_reports_signal_date = "2026-05-22"
-    result.v3_reports_output_dir = "/tmp/swing_reports/v3/datacenter/2026-05-22"
-    result.v3_reports_daily_report_path = (
-        "/tmp/swing_reports/v3/datacenter/2026-05-22/datacenter_v3_daily_2026-05-22.md"
-    )
-    result.v3_reports_rolling_30_report_path = (
-        "/tmp/swing_reports/v3/datacenter/2026-05-22/datacenter_v3_rolling30_2026-05-22.md"
-    )
-    result.v3_reports_rolling_5_report_path = (
-        "/tmp/swing_reports/v3/datacenter/2026-05-22/datacenter_v3_rolling5_2026-05-22.md"
-    )
-    result.v3_reports_rolling_2_report_path = (
-        "/tmp/swing_reports/v3/datacenter/2026-05-22/datacenter_v3_rolling2_2026-05-22.md"
-    )
-    monkeypatch.setattr(cli, "run_scheduler_config", lambda config_path: result)
-
-    code = cli.main(["--config", "/tmp/scheduler.json"])
-
-    captured = capsys.readouterr()
-    assert code == 1
-    assert "SUMMARY v3_reports.attempted=1" in captured.out
-    assert "SUMMARY v3_reports.status=OK" in captured.out
-    assert "SUMMARY v3_reports.run_id=V3_RUN_2026_05_22" in captured.out
-    assert "SUMMARY v3_reports.signal_date=2026-05-22" in captured.out
-    assert "SUMMARY v3_reports.output_dir=/tmp/swing_reports/v3/datacenter/2026-05-22" in captured.out
-    assert (
-        "SUMMARY v3_reports.daily_report_path="
-        "/tmp/swing_reports/v3/datacenter/2026-05-22/datacenter_v3_daily_2026-05-22.md"
-    ) in captured.out
-    assert (
-        "SUMMARY v3_reports.rolling_30_report_path="
-        "/tmp/swing_reports/v3/datacenter/2026-05-22/datacenter_v3_rolling30_2026-05-22.md"
-    ) in captured.out
-    assert (
-        "SUMMARY v3_reports.rolling_5_report_path="
-        "/tmp/swing_reports/v3/datacenter/2026-05-22/datacenter_v3_rolling5_2026-05-22.md"
-    ) in captured.out
-    assert (
-        "SUMMARY v3_reports.rolling_2_report_path="
-        "/tmp/swing_reports/v3/datacenter/2026-05-22/datacenter_v3_rolling2_2026-05-22.md"
-    ) in captured.out
-
-
-def test_scheduler_cli_prints_v3_error_when_present(monkeypatch, capsys):
-    result = _result(STATUS_OK_WITH_WARNINGS)
-    result.v3_reports_attempted = 1
-    result.v3_reports_status = "FAILED"
-    result.v3_reports_error = "write failed"
-    monkeypatch.setattr(cli, "run_scheduler_config", lambda config_path: result)
-
-    code = cli.main(["--config", "/tmp/scheduler.json"])
-
-    captured = capsys.readouterr()
-    assert code == 1
-    assert "SUMMARY v3_reports.status=FAILED" in captured.out
-    assert "SUMMARY v3_reports.error=write failed" in captured.out
-
-
-def test_scheduler_cli_prints_v3_no_matching_run_when_present(monkeypatch, capsys):
-    result = _result(STATUS_OK_WITH_WARNINGS)
-    result.v3_reports_attempted = 1
-    result.v3_reports_status = "NO_MATCHING_ECO_RUN"
-    result.v3_reports_signal_date = "2026-05-22"
-    result.v3_reports_error = "no matching Eco run for DATACENTER/DC_TAXONOMY_FULL_V1 on 2026-05-22"
-    monkeypatch.setattr(cli, "run_scheduler_config", lambda config_path: result)
-
-    code = cli.main(["--config", "/tmp/scheduler.json"])
-
-    captured = capsys.readouterr()
-    assert code == 1
-    assert "SUMMARY v3_reports.attempted=1" in captured.out
-    assert "SUMMARY v3_reports.status=NO_MATCHING_ECO_RUN" in captured.out
-    assert "SUMMARY v3_reports.signal_date=2026-05-22" in captured.out
-    assert (
-        "SUMMARY v3_reports.error="
-        "no matching Eco run for DATACENTER/DC_TAXONOMY_FULL_V1 on 2026-05-22"
-    ) in captured.out
 
 
 def test_scheduler_cli_ok_with_warnings_exits_one(monkeypatch):

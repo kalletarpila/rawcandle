@@ -43,6 +43,22 @@ from rawcandle.scheduler.runner import (
 from services.stock_update_service import StockUpdateResult
 
 
+def _retired_v3_result_prefix() -> str:
+    return "v3" + "_reports_"
+
+
+def _retired_v3_generation_helper_name() -> str:
+    return "_run_" + "v3" + "_datacenter_report_generation"
+
+
+def _retired_v3_default_helper_name() -> str:
+    return "_default_" + "v3" + "_reports_post_step_result"
+
+
+def _retired_v3_config_enabled_key() -> str:
+    return "datacenter_" + "v3" + "_reports_enabled"
+
+
 def _touch(path):
     path.write_text("", encoding="utf-8")
 
@@ -224,10 +240,6 @@ def _write_config(
     datacenter_enrichment_write_mode=None,
     datacenter_dashboard_fallback_to_reports=None,
     datacenter_dashboard_run_acceptance_report=None,
-    datacenter_v3_reports_enabled=None,
-    datacenter_v3_reports_output_dir=None,
-    datacenter_v3_reports_ecosystem=None,
-    datacenter_v3_reports_taxonomy_version=None,
     ec_source_layer_enabled=None,
     ec_source_layer_ecosystem=None,
     ec_source_layer_taxonomy_version=None,
@@ -285,14 +297,6 @@ def _write_config(
         config.datacenter_dashboard_fallback_to_reports = datacenter_dashboard_fallback_to_reports
     if datacenter_dashboard_run_acceptance_report is not None:
         config.datacenter_dashboard_run_acceptance_report = datacenter_dashboard_run_acceptance_report
-    if datacenter_v3_reports_enabled is not None:
-        config.datacenter_v3_reports_enabled = datacenter_v3_reports_enabled
-    if datacenter_v3_reports_output_dir is not None:
-        config.datacenter_v3_reports_output_dir = str(datacenter_v3_reports_output_dir)
-    if datacenter_v3_reports_ecosystem is not None:
-        config.datacenter_v3_reports_ecosystem = datacenter_v3_reports_ecosystem
-    if datacenter_v3_reports_taxonomy_version is not None:
-        config.datacenter_v3_reports_taxonomy_version = datacenter_v3_reports_taxonomy_version
     if ec_source_layer_enabled is not None:
         config.ec_source_layer_enabled = ec_source_layer_enabled
     if ec_source_layer_ecosystem is not None:
@@ -1411,102 +1415,10 @@ def test_scheduler_runner_runs_datacenter_post_step_once_for_usa_success(
     assert payload["datacenter_pipeline_rolling_5_report_path"] == "/tmp/rolling5.md"
     assert payload["datacenter_pipeline_rolling_2_report_path"] == "/tmp/rolling2.md"
     assert payload["datacenter_pipeline_weekly_report_path"] is None
-    assert payload["v3_reports_attempted"] == 0
-    assert payload["v3_reports_status"] == "SKIPPED_REMOVED"
+    assert not any(key.startswith(_retired_v3_result_prefix()) for key in payload)
 
 
-def test_scheduler_runner_v3_reports_enabled_returns_removed_without_old_imports(
-    tmp_path, monkeypatch
-):
-    osakedata_db = tmp_path / "osakedata.db"
-    analysis_db = tmp_path / "analysis.db"
-    _create_osakedata_with_rows(
-        osakedata_db,
-        [("USA_A", "2026-05-16", 1.0, 1.0, 1.0, 2.0, 100, "usa")],
-    )
-    _touch(analysis_db)
-    legacy_reports_dir = tmp_path / "swing_reports"
-    config_path = _write_config(
-        tmp_path,
-        enabled_markets=["usa"],
-        datacenter_v3_reports_enabled=True,
-    )
-
-    monkeypatch.setattr(
-        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
-        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
-    )
-    monkeypatch.setattr(
-        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
-        lambda self, result: f"UI {result.market}",
-    )
-    monkeypatch.setattr(
-        "rawcandle.scheduler.runner._resolve_datacenter_post_step_config",
-        lambda market: DatacenterPostStepConfig(
-            market="usa",
-            taxonomy_csv="data/datacenter_ecosystem_taxonomy_full_v1.csv",
-            taxonomy_version="DC_TAXONOMY_FULL_V1",
-            start_date="2025-08-01",
-            index_base_date="2020-01-01",
-            output_dir=str(legacy_reports_dir),
-            expected_ticker_count=236,
-            expected_group_count=54,
-            expected_synthetic_ohlc_count=53,
-        ),
-    )
-    monkeypatch.setattr(
-        "rawcandle.scheduler.runner._resolve_datacenter_signal_date",
-        lambda **kwargs: _build_datacenter_signal_date_resolution(
-            signal_date="2026-05-16",
-            requested_calendar_signal_date="2026-05-27",
-        ),
-    )
-    lifecycle: list[object] = []
-
-    def fake_subprocess_run(command, **kwargs):
-        lifecycle.append(("legacy", command))
-        return _FakeCompletedProcess(
-            0,
-            "\n".join(
-                [
-                    "SUMMARY audit_validation_status=OK",
-                    "SUMMARY daily_report_path=/tmp/daily.md",
-                    "SUMMARY daily_report_csv_path=/tmp/daily.csv",
-                    "SUMMARY rolling_30_report_path=/tmp/rolling30.md",
-                    "SUMMARY rolling_30_report_csv_path=/tmp/rolling30.csv",
-                    "SUMMARY rolling_5_report_path=/tmp/rolling5.md",
-                    "SUMMARY rolling_5_report_csv_path=/tmp/rolling5.csv",
-                    "SUMMARY rolling_2_report_path=/tmp/rolling2.md",
-                    "SUMMARY rolling_2_report_csv_path=/tmp/rolling2.csv",
-                    "",
-                ]
-            ),
-        )
-
-    monkeypatch.setattr("rawcandle.scheduler.runner.subprocess.run", fake_subprocess_run)
-
-    result = run_scheduler_config(config_path=str(config_path))
-
-    assert [item[0] for item in lifecycle] == ["legacy"]
-    assert not hasattr(scheduler_runner, "resolve_latest_run")
-    assert not hasattr(scheduler_runner, "write_reports")
-    assert result.datacenter_pipeline_daily_report_path == "/tmp/daily.md"
-    assert result.v3_reports_attempted == 0
-    assert result.v3_reports_status == "SKIPPED_REMOVED"
-    assert result.v3_reports_run_id == "NONE"
-    assert result.v3_reports_signal_date == "2026-05-16"
-    assert result.v3_reports_output_dir == ""
-    assert result.v3_reports_daily_report_path is None
-    assert result.v3_reports_rolling_30_report_path is None
-    assert result.v3_reports_rolling_5_report_path is None
-    assert result.v3_reports_rolling_2_report_path is None
-    assert result.v3_reports_error == "old V3/eco report generation has been removed"
-    assert result.overall_status == STATUS_OK
-
-
-def test_scheduler_runner_disabled_v3_reports_does_not_call_resolver_or_writer(
-    tmp_path, monkeypatch
-):
+def test_scheduler_runner_datacenter_success_has_no_v3_result_fields(tmp_path, monkeypatch):
     osakedata_db = tmp_path / "osakedata.db"
     analysis_db = tmp_path / "analysis.db"
     _create_osakedata_with_rows(
@@ -1517,7 +1429,6 @@ def test_scheduler_runner_disabled_v3_reports_does_not_call_resolver_or_writer(
     config_path = _write_config(
         tmp_path,
         enabled_markets=["usa"],
-        datacenter_v3_reports_enabled=False,
     )
 
     monkeypatch.setattr(
@@ -1556,13 +1467,10 @@ def test_scheduler_runner_disabled_v3_reports_does_not_call_resolver_or_writer(
 
     assert not hasattr(scheduler_runner, "resolve_latest_run")
     assert not hasattr(scheduler_runner, "write_reports")
+    assert not hasattr(scheduler_runner, _retired_v3_generation_helper_name())
+    assert not hasattr(scheduler_runner, _retired_v3_default_helper_name())
     assert result.datacenter_pipeline_daily_report_path == "/tmp/daily.md"
-    assert result.v3_reports_attempted == 0
-    assert result.v3_reports_status == "SKIPPED_REMOVED"
-    assert result.v3_reports_run_id == "NONE"
-    assert result.v3_reports_signal_date == "2026-05-16"
-    assert result.v3_reports_output_dir == ""
-    assert result.v3_reports_error == "old V3/eco report generation has been removed"
+    assert not any(key.startswith(_retired_v3_result_prefix()) for key in result.__dict__)
     assert result.overall_status == STATUS_OK
 
 
@@ -2705,12 +2613,6 @@ def test_scheduler_runner_finished_at_utc_reflects_post_step_completion(
             market="usa",
             signal_date="2026-06-06",
             daily_report_path="/tmp/daily.md",
-        ),
-    )
-    monkeypatch.setattr(
-        "rawcandle.scheduler.runner._run_v3_datacenter_report_generation",
-        lambda **kwargs: scheduler_runner._default_v3_reports_post_step_result(
-            signal_date=kwargs["signal_date"]
         ),
     )
     monkeypatch.setattr(
@@ -5230,6 +5132,24 @@ def test_invalid_enrichment_write_mode_fails_clearly():
                 "analysis_db_path": "/tmp/analysis.db",
                 "log_dir": "/tmp/logs",
                 "datacenter_enrichment_write_mode": "bad-write-mode",
+            }
+        )
+
+
+def test_retired_v3_scheduler_config_keys_are_rejected():
+    removed_key = _retired_v3_config_enabled_key()
+    with pytest.raises(
+        ValueError,
+        match=f"Unexpected config keys: {removed_key}",
+    ):
+        scheduler_config_from_dict(
+            {
+                "enabled_markets": ["omxh"],
+                "run_time": "05:30",
+                "osakedata_db_path": "/tmp/osakedata.db",
+                "analysis_db_path": "/tmp/analysis.db",
+                "log_dir": "/tmp/logs",
+                removed_key: True,
             }
         )
 

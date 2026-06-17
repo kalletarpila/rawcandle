@@ -174,5 +174,5 @@ If rollback is required:
 - Runtime scheduler behavior was not changed.
 - `scheduler_config.json` was not changed.
 - `ec_*`, `ec_source_layer`, and `dc_*` behavior was not changed.
-- Scheduler `v3_reports_*` compatibility fields were not removed.
+- Retired V3 scheduler/config/output compatibility fields were removed later in R1.
 - The backup file and DB files were not staged for commit.

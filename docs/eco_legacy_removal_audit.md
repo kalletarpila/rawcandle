@@ -9,7 +9,7 @@ The repository contains two similarly named systems that must be kept separate:
 - `eco_*`: old Canonical V3 ecosystem tables, builders, query layer, Markdown report generation, and related tests. This is the later removal target.
 - `ec_*`: current sidecar/source-layer system. This must be preserved, including `ec_source_layer`, `ec_*` loaders, `ec_*` migrations, and `dc_*` source facts used by legacy Datacenter reporting.
 
-The main old `eco_*` implementation is concentrated in `rawcandle/report_canonical_v3_*.py`, `rawcandle/reporting_v3_*.py`, V3 CLI modules, migrations `015`-`018`, and matching tests. Current scheduler code still has V3 report hooks and imports the old V3 report writer modules at import time, even though `datacenter_v3_reports_enabled` defaults to `false`. Therefore the safe removal path is code-first: remove or neutralize scheduler/config hooks before dropping old `eco_*` tables in any database.
+The original audit found the main old `eco_*` implementation in `rawcandle/report_canonical_v3_*.py`, `rawcandle/reporting_v3_*.py`, V3 CLI modules, migrations `015`-`018`, and matching tests. Later cleanup removed the old V3/eco runtime code, old DB tables from `analysis.db`, and the retired V3 scheduler/config/output compatibility surface. Migrations `015`-`018` remain as historical migration files until a separate migration-history decision.
 
 No runtime code, tests, config, schema, reports, or database files were changed in this step.
 
@@ -31,6 +31,8 @@ Phase 3E status: post-cleanup read-only verification completed and documented in
 
 Final verification status: combined read-only verification for old `eco_*` and retired `dc_report_*_v2` cleanup is documented in `docs/analysis_db_legacy_cleanup_final_verification.md`. Assessment: `LEGACY_CLEANUP_VERIFIED`.
 
+R1 compatibility cleanup status: retired V3 scheduler/config/output compatibility fields were removed and documented in `docs/retired_compatibility_surface_audit.md`. Canonical Report V2 retired dev_tools stubs remain for a later R2 decision.
+
 ## Evidence scope
 
 Read-only checks used targeted `rg` searches for:
@@ -43,16 +45,15 @@ Read-only checks used targeted `rg` searches for:
 - `eco_pipeline`
 - `eco_source`
 - `datacenter_v3`
-- `v3_reports`
+- retired V3 scheduler summary fields
 
 The audit intentionally excluded generated reports, DB files, exports, backups, temp artifacts, and logs. It did not inspect production DB contents and did not run scheduler, stock update, refresh, backfill, recovery, or DB-mutating commands.
 
 ## Active configuration assumptions from repo files
 
 - `ec_source_layer` is represented as the current sidecar path in scheduler config and scheduler runner fields.
-- `datacenter_v3_reports_enabled` defaults to `False` in [rawcandle/scheduler/config.py](/home/kalle/projects/rawcandle/rawcandle/scheduler/config.py:89).
-- `scheduler_config.json` currently contains `"datacenter_v3_reports_enabled": false`.
-- Scheduler still imports old V3 report modules unconditionally in [rawcandle/scheduler/runner.py](/home/kalle/projects/rawcandle/rawcandle/scheduler/runner.py:20), so disabled config alone is not enough for complete removal.
+- R1 later removed retired V3 scheduler/config/output compatibility from `rawcandle/scheduler/config.py`, `rawcandle/scheduler/runner.py`, and `rawcandle/cli/run_stock_update_scheduler.py`.
+- `scheduler_config.json` was not edited by this cleanup track.
 - The audit does not rely on `data/analysis.db` or any other production DB content.
 
 ## Categorized inventory
@@ -102,10 +103,10 @@ The audit intentionally excluded generated reports, DB files, exports, backups, 
 | `tests/test_run_ec_source_layer_build_cli.py` | Tests | PRESERVE | Current `ec_*` source-layer CLI coverage. | Keep. |
 | `docs/datacenter_dc_tables_reference.md` | Documentation | PRESERVE | Documents `dc_*` source facts and legacy Datacenter report dependencies. | Keep; remove old V3 references only in a later doc cleanup pass. |
 | `docs/datacenter_legacy_report_generation_reference.md` | Documentation | PRESERVE | Documents legacy Datacenter reports over `dc_*`. | Keep; remove old V3 comparison references only later. |
-| `rawcandle/scheduler/runner.py` | Scheduler | AMBIGUOUS | Current scheduler operation is required, but it still imports and can run old V3 Markdown generation via `v3_reports`. | First remove/neutralize old V3 report hooks while preserving scheduler and `ec_source_layer`. |
-| `rawcandle/scheduler/config.py` | Config | AMBIGUOUS | `datacenter_v3_reports_*` config keys default disabled but remain part of scheduler config shape. | Decide whether to keep compatibility fields as ignored/deprecated or remove them with migration notes. |
-| `rawcandle/cli/run_stock_update_scheduler.py` | CLI summary output | AMBIGUOUS | Prints `v3_reports.*` summary fields from scheduler result. | Decide whether summary compatibility is required before removing fields. |
-| `scheduler_config.json` | Local config | AMBIGUOUS | Contains disabled `datacenter_v3_reports_*` keys. | Do not change in this audit; later remove only with config compatibility decision. |
+| `rawcandle/scheduler/runner.py` | Scheduler | REMOVED_LATER | R1 later removed retired V3 scheduler result fields and helper call paths while preserving scheduler, Datacenter, dashboard, and `ec_source_layer`. | No further R1 action. |
+| `rawcandle/scheduler/config.py` | Config | REMOVED_LATER | R1 later removed retired V3 config fields and old keys are no longer accepted by the strict parser. | No further R1 action. |
+| `rawcandle/cli/run_stock_update_scheduler.py` | CLI summary output | REMOVED_LATER | R1 later removed retired V3 summary output lines. | No further R1 action. |
+| `scheduler_config.json` | Local config | NOT_TOUCHED | Local config was intentionally not edited in this cleanup track. | Handle separately if needed; do not stage local config in cleanup commits. |
 | `rawcandle/cli/plan_ec_source_layer_build.py` lines mentioning `eco_tables` | Planner inventory | AMBIGUOUS | Uses `eco_tables = _glob_table_names(conn, "eco_*")` as read-only old-schema visibility, while preserving `ec_*`. | Keep for now; later remove inventory output after old schema cleanup. |
 | `rawcandle/cli/plan_ec_source_layer_refresh.py` lines mentioning `eco_tables` | Planner inventory | AMBIGUOUS | Same read-only old-schema visibility. | Keep for now; later remove inventory output after old schema cleanup. |
 | `rawcandle/cli/plan_ec_source_layer_backfill.py` lines mentioning `eco_tables` | Planner inventory | AMBIGUOUS | Same read-only old-schema visibility. | Keep for now; later remove inventory output after old schema cleanup. |
@@ -142,7 +143,7 @@ Suggested actions:
 
 Checks before and after:
 
-- `rg -n "datacenter_v3|v3_reports|reporting_v3|eco_report_run" rawcandle tests`
+- targeted search for old V3 runtime/reporting references in `rawcandle` and `tests`
 - Datacenter legacy report tests to ensure `dc_*`-based reports still work.
 - Dashboard tests if dashboard report references consume scheduler summaries.
 
@@ -150,21 +151,13 @@ Checks before and after:
 
 Goal: remove compatibility surface for disabled old V3 reports without breaking active scheduler/dashboard consumers.
 
-Decision needed:
-
-- Keep `v3_reports_*` result fields as deprecated always-skipped fields for one release, or remove them immediately.
-- Keep `datacenter_v3_reports_*` config keys as accepted ignored keys for backward compatibility, or reject/remove them immediately.
-
-Suggested actions:
-
-- If compatibility is needed, keep fields but mark status as `REMOVED` or `SKIPPED`.
-- If compatibility is not needed, remove config fields, validation, CLI summary printing, and tests expecting `v3_reports.*`.
+R1 decision completed later: remove the retired V3 scheduler/config/output compatibility surface immediately. Old retired V3 config keys are no longer accepted by the strict scheduler config parser.
 
 Checks before and after:
 
-- `rg -n "datacenter_v3_reports|v3_reports" rawcandle tests dev_tools scheduler_config.json`
+- targeted search for retired V3 scheduler/config/output strings in `rawcandle`, `tests`, and relevant docs
 - Scheduler CLI tests.
-- Scheduler UI tests if they display old `v3_reports` fields.
+- Scheduler UI tests if they display old retired V3 fields.
 
 ### Phase 4: optional schema cleanup strategy for old eco_* tables
 

@@ -196,12 +196,7 @@ Remaining old `eco_*` references are limited to expected categories:
 
 No active old V3 runtime module or test reference was found.
 
-Scheduler compatibility references remain intentional:
-
-- `rawcandle/scheduler/config.py` still accepts `datacenter_v3_reports_*` compatibility fields.
-- `rawcandle/scheduler/runner.py` still emits deterministic removed/skipped V3 report status.
-- `rawcandle/cli/run_stock_update_scheduler.py` still prints `v3_reports.*` summary fields.
-- Scheduler tests assert `v3_reports_status="SKIPPED_REMOVED"` and error text `old V3/eco report generation has been removed`.
+Later R1 compatibility cleanup removed the retired V3 scheduler/config/output compatibility surface. The current scheduler no longer accepts old V3 config keys, emits retired V3 result fields, or prints retired V3 summary fields.
 
 ## Tests And Checks
 
@@ -245,5 +240,5 @@ If rollback is required:
 - Runtime scheduler behavior was not changed.
 - `scheduler_config.json` was not changed.
 - `ec_*`, `ec_source_layer`, and `dc_*` behavior was not changed.
-- Scheduler `v3_reports_*` compatibility fields were not removed.
+- Retired V3 scheduler/config/output compatibility fields were removed later in R1.
 - DB, WAL/SHM, backup, export, temp, and unrelated files were not staged or committed.

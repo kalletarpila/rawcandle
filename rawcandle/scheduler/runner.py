@@ -105,16 +105,6 @@ class ScheduledStockUpdateRunResult:
     datacenter_pipeline_weekly_report_path: Optional[str] = None
     datacenter_pipeline_weekly_report_csv_path: Optional[str] = None
     datacenter_pipeline_error: str = ""
-    v3_reports_attempted: int = 0
-    v3_reports_status: str = "SKIPPED_REMOVED"
-    v3_reports_run_id: str = "NONE"
-    v3_reports_signal_date: str = "NONE"
-    v3_reports_output_dir: str = ""
-    v3_reports_daily_report_path: Optional[str] = None
-    v3_reports_rolling_30_report_path: Optional[str] = None
-    v3_reports_rolling_5_report_path: Optional[str] = None
-    v3_reports_rolling_2_report_path: Optional[str] = None
-    v3_reports_error: str = ""
     datacenter_dashboard_attempted: int = 0
     datacenter_dashboard_status: str = "SKIPPED"
     datacenter_dashboard_dashboard_db: str = ""
@@ -275,20 +265,6 @@ class EcSourceLayerRefreshPostStepResult:
     group_index_rows: int = 0
     watermark_rows: int = 0
     error: str = "NONE"
-
-
-@dataclass(frozen=True)
-class V3ReportsPostStepResult:
-    attempted: int
-    status: str
-    run_id: str = "NONE"
-    signal_date: str = "NONE"
-    output_dir: str = ""
-    daily_report_path: Optional[str] = None
-    rolling_30_report_path: Optional[str] = None
-    rolling_5_report_path: Optional[str] = None
-    rolling_2_report_path: Optional[str] = None
-    error: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -795,32 +771,6 @@ def _parse_datacenter_report_paths(stdout: str) -> dict[str, Optional[str]]:
         "weekly_report_csv_path",
     )
     return {key: _parse_summary_value(stdout, key) for key in keys}
-
-
-def _default_v3_reports_post_step_result(
-    *,
-    status: str = "SKIPPED_REMOVED",
-    signal_date: str = "NONE",
-    error: str | None = None,
-) -> V3ReportsPostStepResult:
-    return V3ReportsPostStepResult(
-        attempted=0,
-        status=status,
-        signal_date=signal_date,
-        error=error or "old V3/eco report generation has been removed",
-    )
-
-
-def _run_v3_datacenter_report_generation(
-    *,
-    config: StockUpdateSchedulerConfig,
-    target_market: str,
-    signal_date: str,
-) -> V3ReportsPostStepResult:
-    _ = (config, target_market)
-    return _default_v3_reports_post_step_result(
-        signal_date=signal_date,
-    )
 
 
 def _build_datacenter_log_path(log_dir: Path, market: str, started_at: datetime.datetime) -> Path:
@@ -2860,12 +2810,6 @@ def run_scheduler_config(
                     ec_source_layer_only_on_new_signal_date=(
                         config.ec_source_layer_only_on_new_signal_date
                     ),
-                    datacenter_v3_reports_enabled=config.datacenter_v3_reports_enabled,
-                    datacenter_v3_reports_output_dir=config.datacenter_v3_reports_output_dir,
-                    datacenter_v3_reports_ecosystem=config.datacenter_v3_reports_ecosystem,
-                    datacenter_v3_reports_taxonomy_version=(
-                        config.datacenter_v3_reports_taxonomy_version
-                    ),
                     datacenter_dashboard_enabled=config.datacenter_dashboard_enabled,
                     datacenter_dashboard_db=config.datacenter_dashboard_db,
                     datacenter_dashboard_html_output_dir=config.datacenter_dashboard_html_output_dir,
@@ -2925,16 +2869,6 @@ def run_scheduler_config(
                     datacenter_pipeline_weekly_report_path=None,
                     datacenter_pipeline_weekly_report_csv_path=None,
                     datacenter_pipeline_error="",
-                    v3_reports_attempted=0,
-                    v3_reports_status="SKIPPED_REMOVED",
-                    v3_reports_run_id="NONE",
-                    v3_reports_signal_date="NONE",
-                    v3_reports_output_dir="",
-                    v3_reports_daily_report_path=None,
-                    v3_reports_rolling_30_report_path=None,
-                    v3_reports_rolling_5_report_path=None,
-                    v3_reports_rolling_2_report_path=None,
-                    v3_reports_error="old V3/eco report generation has been removed",
                     datacenter_dashboard_attempted=0,
                     datacenter_dashboard_status="SKIPPED",
                     datacenter_dashboard_dashboard_db=config.datacenter_dashboard_db,
@@ -3007,7 +2941,6 @@ def run_scheduler_config(
                 status="SKIPPED",
                 market="usa",
             )
-            v3_reports_result = _default_v3_reports_post_step_result()
             ec_source_layer_result = EcSourceLayerRefreshPostStepResult(
                 attempted=0,
                 status="SKIPPED",
@@ -3035,11 +2968,6 @@ def run_scheduler_config(
                     effective_today=effective_today,
                 )
                 if datacenter_result.status == "OK" and datacenter_result.signal_date:
-                    v3_reports_result = _run_v3_datacenter_report_generation(
-                        config=config,
-                        target_market=datacenter_result.market,
-                        signal_date=datacenter_result.signal_date,
-                    )
                     datacenter_dashboard_result = _run_datacenter_dashboard_post_step(
                         config=config,
                         reports_dir=_resolve_datacenter_post_step_config(
@@ -3068,9 +2996,6 @@ def run_scheduler_config(
                         skip_reason="DATACENTER_PIPELINE_SKIPPED",
                         error=datacenter_result.error,
                     )
-                    v3_reports_result = _default_v3_reports_post_step_result(
-                        signal_date=datacenter_result.signal_date or "NONE",
-                    )
                 ec_source_layer_result = _run_ec_source_layer_refresh_post_step(
                     config=config,
                     target_market=datacenter_result.market,
@@ -3084,11 +3009,6 @@ def run_scheduler_config(
                 or datacenter_dashboard_result.status == "FAILED"
                 else market_update_phase_status
             )
-            if (
-                overall_status == STATUS_OK
-                and v3_reports_result.status in ("FAILED", "NO_MATCHING_ECO_RUN")
-            ):
-                overall_status = STATUS_OK_WITH_WARNINGS
             if (
                 overall_status == STATUS_OK
                 and ec_source_layer_result.status
@@ -3160,16 +3080,6 @@ def run_scheduler_config(
                 datacenter_pipeline_weekly_report_path=datacenter_result.weekly_report_path,
                 datacenter_pipeline_weekly_report_csv_path=datacenter_result.weekly_report_csv_path,
                 datacenter_pipeline_error=datacenter_result.error or "",
-                v3_reports_attempted=v3_reports_result.attempted,
-                v3_reports_status=v3_reports_result.status,
-                v3_reports_run_id=v3_reports_result.run_id,
-                v3_reports_signal_date=v3_reports_result.signal_date,
-                v3_reports_output_dir=v3_reports_result.output_dir,
-                v3_reports_daily_report_path=v3_reports_result.daily_report_path,
-                v3_reports_rolling_30_report_path=v3_reports_result.rolling_30_report_path,
-                v3_reports_rolling_5_report_path=v3_reports_result.rolling_5_report_path,
-                v3_reports_rolling_2_report_path=v3_reports_result.rolling_2_report_path,
-                v3_reports_error=v3_reports_result.error or "",
                 datacenter_dashboard_attempted=datacenter_dashboard_result.attempted,
                 datacenter_dashboard_status=datacenter_dashboard_result.status,
                 datacenter_dashboard_dashboard_db=datacenter_dashboard_result.dashboard_db,

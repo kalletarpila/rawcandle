@@ -30,10 +30,6 @@ _OPTIONAL_CONFIG_KEYS.update(
         "ec_source_layer_mode",
         "ec_source_layer_require_legacy_reports_success",
         "ec_source_layer_only_on_new_signal_date",
-        "datacenter_v3_reports_enabled",
-        "datacenter_v3_reports_output_dir",
-        "datacenter_v3_reports_ecosystem",
-        "datacenter_v3_reports_taxonomy_version",
         "datacenter_dashboard_enabled",
         "datacenter_dashboard_db",
         "datacenter_dashboard_html_output_dir",
@@ -86,10 +82,6 @@ class StockUpdateSchedulerConfig:
     ec_source_layer_mode: str = "refresh_latest"
     ec_source_layer_require_legacy_reports_success: bool = True
     ec_source_layer_only_on_new_signal_date: bool = True
-    datacenter_v3_reports_enabled: bool = False
-    datacenter_v3_reports_output_dir: str | None = None
-    datacenter_v3_reports_ecosystem: str = "DATACENTER"
-    datacenter_v3_reports_taxonomy_version: str = "DC_TAXONOMY_FULL_V1"
     datacenter_dashboard_enabled: bool = True
     datacenter_dashboard_db: str = (
         "/home/kalle/projects/rawcandle/data/ecosystem_dashboard.db"
@@ -186,16 +178,6 @@ def validate_scheduler_config(
             raise ValueError("ec_source_layer_watchlist must be non-empty when ec_source_layer_enabled is true")
         if not config.ec_source_layer_backup_dir:
             raise ValueError("ec_source_layer_backup_dir must be non-empty when ec_source_layer_enabled is true")
-    if type(config.datacenter_v3_reports_enabled) is not bool:
-        raise ValueError("datacenter_v3_reports_enabled must be a bool")
-    if config.datacenter_v3_reports_output_dir is not None and not isinstance(
-        config.datacenter_v3_reports_output_dir, str
-    ):
-        raise ValueError("datacenter_v3_reports_output_dir must be a string or None")
-    if not config.datacenter_v3_reports_ecosystem:
-        raise ValueError("datacenter_v3_reports_ecosystem must be non-empty")
-    if not config.datacenter_v3_reports_taxonomy_version:
-        raise ValueError("datacenter_v3_reports_taxonomy_version must be non-empty")
     if type(config.datacenter_dashboard_enabled) is not bool:
         raise ValueError("datacenter_dashboard_enabled must be a bool")
     if type(config.datacenter_dashboard_reports_reference_enabled) is not bool:
@@ -254,10 +236,6 @@ def validate_scheduler_config(
         ec_source_layer_only_on_new_signal_date=(
             config.ec_source_layer_only_on_new_signal_date
         ),
-        datacenter_v3_reports_enabled=config.datacenter_v3_reports_enabled,
-        datacenter_v3_reports_output_dir=config.datacenter_v3_reports_output_dir,
-        datacenter_v3_reports_ecosystem=config.datacenter_v3_reports_ecosystem,
-        datacenter_v3_reports_taxonomy_version=config.datacenter_v3_reports_taxonomy_version,
         datacenter_dashboard_enabled=config.datacenter_dashboard_enabled,
         datacenter_dashboard_db=config.datacenter_dashboard_db,
         datacenter_dashboard_html_output_dir=config.datacenter_dashboard_html_output_dir,
@@ -320,14 +298,6 @@ def scheduler_config_from_dict(data: Dict[str, Any]) -> StockUpdateSchedulerConf
         ),
         ec_source_layer_only_on_new_signal_date=data.get(
             "ec_source_layer_only_on_new_signal_date", True
-        ),
-        datacenter_v3_reports_enabled=data.get("datacenter_v3_reports_enabled", False),
-        datacenter_v3_reports_output_dir=data.get("datacenter_v3_reports_output_dir"),
-        datacenter_v3_reports_ecosystem=data.get(
-            "datacenter_v3_reports_ecosystem", "DATACENTER"
-        ),
-        datacenter_v3_reports_taxonomy_version=data.get(
-            "datacenter_v3_reports_taxonomy_version", "DC_TAXONOMY_FULL_V1"
         ),
         datacenter_dashboard_enabled=data.get("datacenter_dashboard_enabled", True),
         datacenter_dashboard_db=data.get(
@@ -412,10 +382,6 @@ def create_default_scheduler_config(
         ec_source_layer_mode="refresh_latest",
         ec_source_layer_require_legacy_reports_success=True,
         ec_source_layer_only_on_new_signal_date=True,
-        datacenter_v3_reports_enabled=False,
-        datacenter_v3_reports_output_dir=None,
-        datacenter_v3_reports_ecosystem="DATACENTER",
-        datacenter_v3_reports_taxonomy_version="DC_TAXONOMY_FULL_V1",
         datacenter_dashboard_enabled=True,
         datacenter_dashboard_db="/home/kalle/projects/rawcandle/data/ecosystem_dashboard.db",
         datacenter_dashboard_html_output_dir="/home/kalle/projects/rawcandle/swing_reports",

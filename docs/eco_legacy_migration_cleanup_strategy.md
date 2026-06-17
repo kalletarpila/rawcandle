@@ -18,13 +18,15 @@ Phase 3E note: read-only post-cleanup verification was completed for `/home/kall
 
 Final verification note: combined read-only verification for old `eco_*` and retired `dc_report_*_v2` cleanup is documented in `docs/analysis_db_legacy_cleanup_final_verification.md`. Assessment: `LEGACY_CLEANUP_VERIFIED`.
 
+R1 compatibility cleanup note: retired V3 scheduler/config/output compatibility fields were removed after `docs/retired_compatibility_surface_audit.md`. Runtime code, scheduler behavior outside the retired V3 compatibility surface, migrations, DB files, current `dc_*`, current `ec_*`, and `ec_source_layer` were not changed by that cleanup.
+
 ## Current removal state
 
 - Old V3/eco scheduler execution was neutralized.
 - Old V3/eco CLI entrypoints and direct CLI tests were removed.
 - Old V3/eco core modules and direct core tests were removed.
 - Old V3/eco docs were archived under `docs/archive/old_v3_eco/`.
-- Remaining old V3/eco references are expected in migrations `015`-`018`, archive docs, audit/status docs, and allowed `v3_reports_*` scheduler compatibility fields.
+- Remaining old V3/eco references are expected in migrations `015`-`018`, archive docs, and audit/status docs.
 - Current `ec_*` sidecar, `ec_source_layer`, `dc_*` source facts, and legacy Datacenter reports remain current paths.
 
 ## Migration System Findings
@@ -65,9 +67,7 @@ Findings:
 | `rawcandle/sqlite/migrations/015_create_eco_base_dimensions_v3.sql` through `018_create_eco_classification_decision_v3.sql` | MIGRATION_ONLY | Keep unchanged until a separate migration-file cleanup decision. |
 | `docs/archive/old_v3_eco/**` | ARCHIVE_DOC_ONLY | Keep as historical context; not current architecture. |
 | `docs/eco_legacy_removal_audit.md` | AUDIT_STATUS_ONLY | Keep as audit trail and phase status. |
-| `rawcandle/scheduler/runner.py`, `rawcandle/scheduler/config.py`, `rawcandle/cli/run_stock_update_scheduler.py` `v3_reports_*` / `datacenter_v3_reports_*` fields | COMPATIBILITY_FIELD_ONLY | Keep until a separate config/summary compatibility removal decision. |
-| `tests/test_stock_update_scheduler_runner.py`, `tests/test_stock_update_scheduler_cli.py` `v3_reports` assertions | COMPATIBILITY_FIELD_ONLY | Keep while scheduler compatibility fields remain. |
-| `docs/datacenter_legacy_report_generation_reference.md` `v3_reports.*` summary mentions | COMPATIBILITY_FIELD_ONLY | Update only if compatibility fields are later removed. |
+| retired V3 scheduler/config/output compatibility fields | REMOVED_R1 | No further runtime action for this compatibility surface. |
 
 No unexpected ACTIVE_RUNTIME reference to old `eco_*` builders, query layer, report renderer, or CLIs was found in this planning step.
 

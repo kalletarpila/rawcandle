@@ -118,21 +118,14 @@ Pipeline-vaiheet sisältävät erikseen:
 
 Lisäksi putki ajaa myös yhden geneerisen weekly-raportin (`datacenter_weekly_<date>_full.*`) parametrilla `--weekly-window-size`, mutta tämän dokumentin fokus on nimenomaan legacy `daily`, `rolling_30`, `rolling_5` ja `rolling_2` -raporteissa.
 
-Scheduler-puolella legacy datacenter pipeline -raportit ja V3-raportit kulkevat erillisinä tulosryhminä. Tarkastettu scheduler-koodi raportoi erikseen:
+Scheduler-puolella legacy datacenter pipeline -raportit raportoidaan omana tulosryhmänään. Tarkastettu scheduler-koodi raportoi:
 
 - `datacenter_pipeline.daily_report_path`
 - `datacenter_pipeline.rolling_30_report_path`
 - `datacenter_pipeline.rolling_5_report_path`
 - `datacenter_pipeline.rolling_2_report_path`
 
-ja erikseen:
-
-- `v3_reports.daily_report_path`
-- `v3_reports.rolling_30_report_path`
-- `v3_reports.rolling_5_report_path`
-- `v3_reports.rolling_2_report_path`
-
-Tämä tukee tulkintaa, että legacy-raportit ovat edelleen aktiivisessa ajossa V3-raporttien rinnalla.
+Retired V3 scheduler/config/output compatibility fields have been removed. This supports the narrower current interpretation: legacy Datacenter reports are still active, but the old V3/eco report output surface is no longer a current scheduler output group.
 
 ## Report-by-report reference
 
@@ -472,13 +465,13 @@ Legacy-polku:
 - rakentaa osan luokituksista vasta raportin generoinnin aikana
 - tuottaa legacy Markdown/CSV-raportit suoraan näistä lähteistä
 
-V3-polku:
+Retired V3-polku:
 
-- käyttää erillisiä `eco_*`-tauluja
-- scheduler- ja CLI-yhteenvedoissa raportoidaan erikseen `v3_reports.*`
+- käytti erillisiä `eco_*`-tauluja
+- ei ole enää current scheduler/CLI output -pinta
 - ei ole tämän dokumentin pääaihe
 
-Tarkastetun evidenssin perusteella legacy-raportit ovat edelleen aktiivisia ja niitä ajetaan V3-raporttien rinnalla, eivätkä ne ole vielä irronneet `dc_*`-lähteistä.
+Tarkastetun evidenssin perusteella legacy-raportit ovat edelleen aktiivisia ja ne nojaavat yhä `dc_*`-lähteisiin. Vanha V3/eco output -pinta ei ole enää rinnakkainen scheduler-output.
 
 ## Status assessment
 
