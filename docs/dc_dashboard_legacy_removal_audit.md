@@ -8,6 +8,8 @@ The `dc_dashboard_*` name is not a safe remove-by-prefix target. Repository evid
 
 Phase F note: `rawcandle/cli/preflight_dc_dashboard_legacy_db_cleanup.py` now provides a read-only preflight CLI for an explicitly supplied SQLite DB path. It distinguishes the five current `_daily` enrichment tables from old snapshot-style dashboard tables, does not modify DBs, and does not approve cleanup. Actual cleanup still requires explicit DB path confirmation, reviewed preflight output, verified backup, rollback plan, and approved drop plan.
 
+Analysis DB preflight note: read-only preflight for `/home/kalle/projects/rawcandle/data/analysis.db` is documented in `docs/dc_dashboard_legacy_db_preflight_analysis_db.md`. Assessment: `NO_DASHBOARD_SNAPSHOT_CLEANUP_NEEDED`; no old snapshot-style dashboard tables or unknown `dc_dashboard%` tables were found, and the five current `_daily` enrichment tables were present.
+
 Removal is blocked. Current dashboard/enrichment behavior appears entangled with the `dc_dashboard_*_daily` tables. Any removal decision must first split current enrichment from truly obsolete snapshot-style tables.
 
 This audit does not affect current `dc_*` source facts, current legacy Datacenter reports, current `ec_*`, or `ec_source_layer`.
