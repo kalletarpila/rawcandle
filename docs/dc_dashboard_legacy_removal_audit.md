@@ -6,6 +6,8 @@ Assessment: `ACTIVE_AND_ENTANGLED_CURRENT_DASHBOARD_ENRICHMENT`.
 
 The `dc_dashboard_*` name is not a safe remove-by-prefix target. Repository evidence shows five current `dc_dashboard_*_daily` analysis-layer enrichment tables, active migrations for them, write-capable dev_tools, read-only audit/dev_tools, a dashboard input builder that reads them, scheduler configuration for `reports` versus `enrichment` dashboard source modes, and scheduler tests that enforce the current dashboard/enrichment compatibility surface.
 
+Phase F note: `rawcandle/cli/preflight_dc_dashboard_legacy_db_cleanup.py` now provides a read-only preflight CLI for an explicitly supplied SQLite DB path. It distinguishes the five current `_daily` enrichment tables from old snapshot-style dashboard tables, does not modify DBs, and does not approve cleanup. Actual cleanup still requires explicit DB path confirmation, reviewed preflight output, verified backup, rollback plan, and approved drop plan.
+
 Removal is blocked. Current dashboard/enrichment behavior appears entangled with the `dc_dashboard_*_daily` tables. Any removal decision must first split current enrichment from truly obsolete snapshot-style tables.
 
 This audit does not affect current `dc_*` source facts, current legacy Datacenter reports, current `ec_*`, or `ec_source_layer`.
