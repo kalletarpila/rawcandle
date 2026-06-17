@@ -29,10 +29,6 @@ from analysis.datacenter_indices.swing_weekly_report import (
     format_weekly_swing_report_summary_lines,
     write_weekly_swing_report,
 )
-from dev_tools.datacenter_dashboard_structured_export import (
-    DatacenterStructuredExportReport,
-    write_datacenter_dashboard_input_json_from_pipeline_reports,
-)
 from run_datacenter_group_swing_signals import main as run_datacenter_group_swing_signals_main
 from run_datacenter_group_synthetic_ohlc import main as run_datacenter_group_synthetic_ohlc_main
 from run_datacenter_indices import main as run_datacenter_indices_main
@@ -487,43 +483,6 @@ def _build_timestamped_report_output_paths(
     return output_md, output_csv
 
 
-def _pipeline_report_for_structured_export(
-    *,
-    horizon: str,
-    result: dict[str, object] | None,
-) -> DatacenterStructuredExportReport:
-    if not isinstance(result, dict):
-        raise ValueError(
-            f"structured export missing internal report result for horizon={horizon}"
-        )
-    summary = result.get("summary")
-    if not isinstance(summary, dict):
-        raise ValueError(
-            f"structured export missing summary payload for horizon={horizon}"
-        )
-    markdown_path = str(summary.get("output_markdown") or "").strip()
-    if not markdown_path:
-        raise ValueError(
-            f"structured export missing output_markdown for horizon={horizon}"
-        )
-    csv_text = result.get("csv")
-    if not isinstance(csv_text, str) or not csv_text.strip():
-        raise ValueError(
-            f"structured export missing in-memory csv payload for horizon={horizon}"
-        )
-    report_data = result.get("report_data")
-    if not isinstance(report_data, dict):
-        raise ValueError(
-            f"structured export missing in-memory report_data for horizon={horizon}"
-        )
-    return DatacenterStructuredExportReport(
-        horizon=horizon,
-        markdown_path=markdown_path,
-        csv_text=csv_text,
-        report_data=report_data,
-    )
-
-
 def _summary_lines_to_dict(lines: Sequence[str]) -> dict[str, object]:
     summary: dict[str, object] = {}
     for line in lines:
@@ -588,17 +547,12 @@ def run_datacenter_swing_pipeline(
     audit_strict: bool = False,
     dry_run: bool = False,
     generated_at_utc: str | None = None,
-    export_dashboard_input_json: Path | None = None,
 ) -> dict[str, object]:
     total_start = perf_counter()
     if technical_relevance_run_id is not None and not technical_relevance_run_id.strip():
         raise ValueError("technical_relevance_run_id must be non-empty when provided")
     if no_technical_relevance and technical_relevance_run_id is not None:
         raise ValueError("--no-technical-relevance and --technical-relevance-run-id cannot be used together")
-    if export_dashboard_input_json is not None and dry_run:
-        raise ValueError("--export-dashboard-input-json cannot be used with --dry-run")
-    if export_dashboard_input_json is not None and skip_reports:
-        raise ValueError("--export-dashboard-input-json requires generated reports; cannot be used with --skip-reports")
     technical_relevance_mode = (
         "disabled"
         if no_technical_relevance
@@ -1431,8 +1385,6 @@ def run_datacenter_swing_pipeline(
     rolling_30_report_result: dict[str, object] | None = None
     rolling_5_report_result: dict[str, object] | None = None
     rolling_2_report_result: dict[str, object] | None = None
-    structured_export_summary: dict[str, object] = {}
-
     if not skip_reports:
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1547,31 +1499,6 @@ def run_datacenter_swing_pipeline(
             for key, value in copy_summary.items():
                 print(f"SUMMARY windows_report_copy.{key}={value}")
 
-    if export_dashboard_input_json is not None:
-        _dashboard_input, export_summary_lines = write_datacenter_dashboard_input_json_from_pipeline_reports(
-            ecosystem_code="DATACENTER",
-            report_date=signal_date,
-            reports_dir=str(output_dir),
-            output_json=str(export_dashboard_input_json),
-            daily_report=_pipeline_report_for_structured_export(
-                horizon="daily",
-                result=daily_report_result,
-            ),
-            rolling_30_report=_pipeline_report_for_structured_export(
-                horizon="rolling 30d",
-                result=rolling_30_report_result,
-            ),
-            rolling_5_report=_pipeline_report_for_structured_export(
-                horizon="rolling 5d",
-                result=rolling_5_report_result,
-            ),
-            rolling_2_report=_pipeline_report_for_structured_export(
-                horizon="rolling 2d",
-                result=rolling_2_report_result,
-            ),
-        )
-        structured_export_summary = _summary_lines_to_dict(export_summary_lines)
-
     pipeline_status = "OK"
     if audit_validation_status == "WARN":
         pipeline_status = "WARN"
@@ -1617,7 +1544,6 @@ def run_datacenter_swing_pipeline(
             "rolling_2_report_csv_path": rolling_2_report_csv_path,
             "pipeline_status": pipeline_status,
             **stage_duration_summary,
-            **structured_export_summary,
             **ticker_swing_snapshot_profile_summary,
             **technical_relevance_profile_summary,
         }

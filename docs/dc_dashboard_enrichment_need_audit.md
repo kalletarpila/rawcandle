@@ -8,6 +8,10 @@ Decision follow-up: [dc_dashboard_ui_enrichment_retirement_decision.md](/home/ka
 
 Phase 1 status: scheduler/config/dashboard hooks for dashboard UI/HTML/enrichment have been neutralized after that decision. The scheduler and scheduler CLI no longer keep the enrichment source-mode path active. No DB tables were dropped, migrations `002`/`003` were not changed, and this audit remains historical evidence for why DB cleanup must stay behind a separate preflight/backup step.
 
+Phase 2 status: repository dev_tools, builders, exporters, UI/HTML paths, diagnostics, and direct tests for the retired dashboard/enrichment direction have been removed. Active dashboard/enrichment docs were archived under `docs/archive/dashboard_ui_enrichment/`. The read-only dashboard DB cleanup preflight remains preserved. No DB tables were dropped and migrations `002`/`003` were not changed.
+
+Historical note: sections below this point describe the repository state before Phase 1 and Phase 2 retirement work. They are retained as evidence for the removal decision, not as current active-code documentation.
+
 The current `dc_dashboard_*_daily` tables are not required by the default scheduler dashboard path: `datacenter_dashboard_source_mode` defaults to `reports`, and `datacenter_enrichment_enabled` defaults to `False`. The production-safe reference path documented in the repository remains `.md reports` -> parser / decision logic -> `EcosystemDashboardInput` -> `ecosystem_dashboard.db` -> HTML.
 
 They are still not safe to delete as a pure cleanup. Repository evidence shows an implemented opt-in/manual enrichment path, scheduler/source-mode hooks, scheduler UI fields, tests, diagnostics, acceptance checks, and a builder/export path that consume these five `_daily` tables.

@@ -16,6 +16,8 @@ Phase 1 status: scheduler/config/dashboard hooks for dashboard UI/HTML/enrichmen
 
 Phase 1 did not perform DB cleanup. Migrations `002` and `003` remain unchanged. Current `dc_*` source facts, current legacy Datacenter Markdown/CSV reports, current `ec_*`, and `ec_source_layer` remain preserved.
 
+Phase 2 status: dashboard/enrichment dev_tools, builders, exporters, diagnostics, UI/HTML paths, and their direct tests have been removed. Active dashboard/enrichment runbooks/specs were moved under `docs/archive/dashboard_ui_enrichment/`. The read-only DB cleanup preflight `rawcandle/cli/preflight_dc_dashboard_legacy_db_cleanup.py` and its test remain preserved for later DB validation. No DB cleanup was done; migrations `002`/`003`, current `dc_*`, legacy Datacenter Markdown/CSV reports, current `ec_*`, and `ec_source_layer` remain preserved.
+
 ## Scope
 
 Retirement target:
