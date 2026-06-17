@@ -186,3 +186,22 @@ Review the remaining untracked paths:
 - `commit`
 
 If `scripts/recompute_divergence_all.py` is intentional, decide whether to add and test it in a separate code-focused change. If `commit` is accidental, remove it only after explicit user approval.
+
+## Follow-up Resolution
+
+Follow-up inspection resolved the two remaining untracked paths from the initial audit:
+
+| Path | Decision | Reason | Action |
+|---|---|---|---|
+| `commit` | `ACCIDENTAL_REMOVE` | One-byte empty local artifact with no meaningful content. | Removed from working tree. |
+| `scripts/recompute_divergence_all.py` | `NEEDS_REWORK_BEFORE_TRACK` | Potentially useful maintenance script, but it uses hard-coded `/home/kalle/projects/rawcandle/data/osakedata.db` and `/home/kalle/projects/rawcandle/data/analysis.db`, executes work at top level, lacks CLI guards/dry-run, and calls divergence recomputation with `only_missing=False`. | Left untracked; do not commit until rewritten with explicit CLI arguments, safe defaults, and dry-run/confirmation behavior. |
+
+Safe check run:
+
+- `python3 -m py_compile scripts/recompute_divergence_all.py`: passed.
+
+Expected `git status --short` after this follow-up:
+
+```text
+?? scripts/recompute_divergence_all.py
+```
