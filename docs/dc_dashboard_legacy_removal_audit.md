@@ -20,6 +20,8 @@ Phase 2 status: dashboard/enrichment dev_tools, builders, exporters, diagnostics
 
 Phase 3-prestep status: the active `DatabaseManager` hook that applied dashboard enrichment migrations during general analysis DB initialization has been neutralized, and the write-capable dashboard enrichment migration helper has been removed. Migrations `002`/`003` remain unchanged for a later migration-policy decision. No DB cleanup was done; current `dc_*`, current legacy Datacenter reports, current `ec_*`, and `ec_source_layer` were preserved.
 
+Phase 3 status: read-only DB/migration cleanup strategy and `analysis.db` preflight are documented in [dc_dashboard_enrichment_db_cleanup_strategy.md](/home/kalle/projects/rawcandle/docs/dc_dashboard_enrichment_db_cleanup_strategy.md). Assessment: `DASHBOARD_ENRICHMENT_DB_CLEANUP_CANDIDATE_WITH_BACKUP_REQUIRED`. No DB cleanup was done and migrations `002`/`003` remain unchanged.
+
 Runtime hook removal is no longer blocked because the retirement decision has been made and Phase 1 has neutralized scheduler/config hooks. DB removal remains blocked until a separate preflight, backup, rollback plan, and explicit drop approval are completed for the five current `dc_dashboard_*_daily` tables.
 
 This audit does not affect current `dc_*` source facts, current legacy Datacenter reports, current `ec_*`, or `ec_source_layer`.
