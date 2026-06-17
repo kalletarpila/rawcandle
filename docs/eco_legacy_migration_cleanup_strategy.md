@@ -8,6 +8,8 @@ Recommendation: keep migrations `015`-`018` in place for now as historical inert
 
 Existing database `eco_*` tables should be handled later through a separate approved DB cleanup phase with explicit backups, read-only preflight counts, a reviewed drop order, integrity checks, and rollback instructions.
 
+Phase 3B note: `rawcandle/cli/preflight_eco_legacy_db_cleanup.py` now provides a read-only preflight CLI for an explicitly supplied SQLite DB path. It inventories `eco_*` tables, row counts, related schema objects, integrity status, foreign-key violations, and page/freelist counts. It does not modify DBs, create backups, drop tables, run VACUUM, or approve cleanup; actual cleanup still requires a separate backup-confirmed prompt.
+
 ## Current removal state
 
 - Old V3/eco scheduler execution was neutralized.
@@ -216,4 +218,4 @@ VACUUM warning:
 
 ## Recommended Next Codex Step
 
-Prepare a read-only DB cleanup preflight script or SQL checklist that inventories `eco_*` tables and row counts for an explicitly supplied DB path. Do not execute cleanup or table drops until that preflight output is reviewed and a separate backup-confirmed cleanup prompt is approved.
+Run the read-only preflight CLI against an explicitly chosen DB path, review the reported `eco_*` table row counts and integrity status, then decide whether to prepare a separate backup-confirmed cleanup prompt. Do not execute cleanup or table drops until that preflight output is reviewed and a separate cleanup prompt is approved.

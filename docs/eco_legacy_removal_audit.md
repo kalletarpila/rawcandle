@@ -21,6 +21,8 @@ Phase 2B status: old V3/eco historical docs were archived under `docs/archive/ol
 
 Phase 3A planning status: migration and database cleanup strategy was documented in `docs/eco_legacy_migration_cleanup_strategy.md`. Migrations `015`-`018`, runtime code, production DBs, scheduler compatibility fields, `ec_*`, and `dc_*` paths were not changed.
 
+Phase 3B status: read-only DB cleanup preflight CLI `rawcandle/cli/preflight_eco_legacy_db_cleanup.py` was added. No DB cleanup was performed; migrations `015`-`018`, runtime scheduler behavior, `ec_*`, and `dc_*` paths were not changed.
+
 ## Evidence scope
 
 Read-only checks used targeted `rg` searches for:
