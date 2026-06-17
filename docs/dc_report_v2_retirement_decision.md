@@ -12,6 +12,8 @@ No code, tests, migrations, runtime behavior, scheduler config, or databases wer
 
 Phase B status: DatabaseManager no longer applies Canonical Report V2 migrations during general analysis DB initialization, and `dev_tools/run_report_canonical_v2_*.py` entrypoints are retired/disabled with a deterministic non-zero exit. No DB cleanup was performed. Migrations `004`-`014` remain unchanged. Current `dc_*`, `ec_*`, `ec_source_layer`, scheduler, and legacy Datacenter paths are preserved.
 
+Phase C status: Canonical Report V2 core modules and direct non-CLI V2 tests were removed. Retired `dev_tools/run_report_canonical_v2_*.py` stubs remain and still exit non-zero. No DB cleanup was performed. Migrations `004`-`014` remain unchanged. Current `dc_*`, `ec_*`, `ec_source_layer`, scheduler, and legacy Datacenter paths are preserved.
+
 ## Scope boundary
 
 Targeted for later retirement:
