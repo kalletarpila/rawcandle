@@ -18,6 +18,8 @@ Phase E status: migration and database retirement strategy is documented in `doc
 
 Phase F status: read-only preflight CLI `rawcandle/cli/preflight_dc_report_v2_db_cleanup.py` was added. It inspects only explicit DB paths and does not perform cleanup, backup, `VACUUM`, or DB writes.
 
+Phase G status: read-only `analysis.db` preflight completed and documented in `docs/dc_report_v2_db_preflight_analysis_db.md`. Assessment: `CLEANUP_CANDIDATE_WITH_BACKUP_REQUIRED`. No DB cleanup was performed.
+
 The repository still contains archived historical Canonical Report V2 documentation, migrations `004`-`014`, retired dev_tools CLI stubs, and DB cleanup references around `dc_report_*_v2`. It does not appear wired into the current scheduler path. The original audit found that `analysis/database_manager.py` applied the Canonical V2 migrations during general analysis DB initialization; Phase B neutralized that hook. Phase C removed the V2 builders/writers/formatter loaders/parity code and their direct non-CLI tests. Phase D archived the old V2 docs as historical material only.
 
 The safe next step is not DB cleanup. Archive/remove V2-only documentation in Phase D, then handle migration and DB cleanup strategy separately.
@@ -210,7 +212,7 @@ For each explicit DB path, run a separate read-only preflight that lists:
 
 No DB contents were inspected in this audit. Do not infer actual table presence from code or migrations.
 
-### Phase G: backup-confirmed DB cleanup
+### Phase H: backup-confirmed DB cleanup
 
 Only after code/runtime removal and DB preflight:
 

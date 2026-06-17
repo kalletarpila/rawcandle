@@ -20,6 +20,8 @@ Phase E status: migration and database retirement strategy is documented in `doc
 
 Phase F status: read-only preflight CLI `rawcandle/cli/preflight_dc_report_v2_db_cleanup.py` was added for explicit DB paths. It inventories known `dc_report_*_v2` tables and preserved current `dc_*` / `ec_*` table presence without modifying DBs; cleanup still requires a separate backup-confirmed prompt.
 
+Phase G status: read-only preflight against `/home/kalle/projects/rawcandle/data/analysis.db` is documented in `docs/dc_report_v2_db_preflight_analysis_db.md`. Result: `CLEANUP_CANDIDATE_WITH_BACKUP_REQUIRED`; 17 known V2 tables and 2,341 rows were found, with clean integrity and FK checks. No DB cleanup was performed.
+
 ## Scope boundary
 
 Targeted for later retirement:
@@ -116,7 +118,7 @@ For each explicit DB path, run a separate read-only preflight for `dc_report_*_v
 
 Do not infer live DB state from code, docs, or migrations.
 
-### Phase G: backup-confirmed DB cleanup
+### Phase H: backup-confirmed DB cleanup
 
 Only after code/runtime removal and DB preflight:
 

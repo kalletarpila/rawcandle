@@ -10,6 +10,8 @@ Recommended default: keep migrations `004`-`014` temporarily as historical inert
 
 Phase F note: `rawcandle/cli/preflight_dc_report_v2_db_cleanup.py` now provides a read-only preflight CLI for an explicitly supplied SQLite DB path. It inventories known retired `dc_report_*_v2` tables, row counts, related schema objects, integrity status, foreign-key violations, and preserved current `dc_*` / `ec_*` table presence. It does not modify DBs, create backups, drop tables, run `VACUUM`, or approve cleanup; actual cleanup still requires a separate backup-confirmed prompt.
 
+Phase G note: read-only preflight was run against `/home/kalle/projects/rawcandle/data/analysis.db` and documented in `docs/dc_report_v2_db_preflight_analysis_db.md`. The DB contains 17 known `dc_report_*_v2` tables with 2,341 total rows; integrity and foreign-key checks were clean. No DB cleanup was performed.
+
 ## Current state summary
 
 - Phase B neutralized V2 hooks: `analysis/database_manager.py` no longer applies Canonical Report V2 migrations during general analysis DB initialization, and `dev_tools/run_report_canonical_v2_*.py` entrypoints now return a deterministic retirement error.
@@ -178,7 +180,7 @@ Post-cleanup checks:
 
 ## Recommended next Codex step
 
-Phase G: run `rawcandle.cli.preflight_dc_report_v2_db_cleanup` read-only against an explicit DB path, such as `data/analysis.db` only after the user supplies that path for this purpose. Do not drop tables in Phase G; use the result to decide whether a later backup-confirmed cleanup prompt is appropriate.
+Phase H: prepare a separate backup-confirmed cleanup prompt only if the user approves table removal. Do not drop tables without verified backup, explicit drop list, rollback plan, and post-cleanup checks.
 
 ## Searches and files inspected
 
