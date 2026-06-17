@@ -82,7 +82,7 @@ def _result(overall_status):
         datacenter_pipeline_weekly_report_csv_path=None,
         datacenter_pipeline_error="",
         v3_reports_attempted=0,
-        v3_reports_status="SKIPPED",
+        v3_reports_status="SKIPPED_REMOVED",
         v3_reports_run_id="NONE",
         v3_reports_signal_date="NONE",
         v3_reports_output_dir="",
@@ -90,7 +90,7 @@ def _result(overall_status):
         v3_reports_rolling_30_report_path=None,
         v3_reports_rolling_5_report_path=None,
         v3_reports_rolling_2_report_path=None,
-        v3_reports_error="",
+        v3_reports_error="old V3/eco report generation has been removed",
         datacenter_dashboard_attempted=0,
         datacenter_dashboard_status="SKIPPED",
         datacenter_dashboard_dashboard_db="",
@@ -174,7 +174,7 @@ def _skipped_result():
         datacenter_pipeline_weekly_report_csv_path=None,
         datacenter_pipeline_error="",
         v3_reports_attempted=0,
-        v3_reports_status="SKIPPED",
+        v3_reports_status="SKIPPED_REMOVED",
         v3_reports_run_id="NONE",
         v3_reports_signal_date="NONE",
         v3_reports_output_dir="",
@@ -182,7 +182,7 @@ def _skipped_result():
         v3_reports_rolling_30_report_path=None,
         v3_reports_rolling_5_report_path=None,
         v3_reports_rolling_2_report_path=None,
-        v3_reports_error="",
+        v3_reports_error="old V3/eco report generation has been removed",
         datacenter_dashboard_attempted=0,
         datacenter_dashboard_status="SKIPPED",
         datacenter_dashboard_dashboard_db="",
@@ -271,7 +271,7 @@ def test_scheduler_cli_successful_run_prints_top_level_summary_lines(monkeypatch
     assert "SUMMARY datacenter_pipeline.weekly_report_csv_path=NONE" in captured.out
     assert "SUMMARY datacenter_pipeline.error=" in captured.out
     assert "SUMMARY v3_reports.attempted=0" in captured.out
-    assert "SUMMARY v3_reports.status=SKIPPED" in captured.out
+    assert "SUMMARY v3_reports.status=SKIPPED_REMOVED" in captured.out
     assert "SUMMARY v3_reports.run_id=NONE" in captured.out
     assert "SUMMARY v3_reports.signal_date=NONE" in captured.out
     assert "SUMMARY v3_reports.output_dir=NONE" in captured.out
@@ -279,7 +279,7 @@ def test_scheduler_cli_successful_run_prints_top_level_summary_lines(monkeypatch
     assert "SUMMARY v3_reports.rolling_30_report_path=NONE" in captured.out
     assert "SUMMARY v3_reports.rolling_5_report_path=NONE" in captured.out
     assert "SUMMARY v3_reports.rolling_2_report_path=NONE" in captured.out
-    assert "SUMMARY v3_reports.error=" in captured.out
+    assert "SUMMARY v3_reports.error=old V3/eco report generation has been removed" in captured.out
     assert "SUMMARY datacenter_dashboard.attempted=0" in captured.out
     assert "SUMMARY datacenter_dashboard.status=SKIPPED" in captured.out
     assert "SUMMARY datacenter_dashboard.dashboard_db=" in captured.out

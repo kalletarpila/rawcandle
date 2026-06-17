@@ -17,8 +17,6 @@ from zoneinfo import ZoneInfo
 
 from main import RawCandleApp, _today_exclusive_end_date
 from rawcandle.cli.run_ec_source_layer_refresh import run_ec_source_layer_refresh
-from rawcandle.cli.write_latest_v3_markdown_reports import resolve_latest_run
-from rawcandle.cli.write_v3_markdown_prototypes import write_reports
 from rawcandle.scheduler.config import (
     StockUpdateSchedulerConfig,
     read_scheduler_config,
@@ -108,7 +106,7 @@ class ScheduledStockUpdateRunResult:
     datacenter_pipeline_weekly_report_csv_path: Optional[str] = None
     datacenter_pipeline_error: str = ""
     v3_reports_attempted: int = 0
-    v3_reports_status: str = "SKIPPED"
+    v3_reports_status: str = "SKIPPED_REMOVED"
     v3_reports_run_id: str = "NONE"
     v3_reports_signal_date: str = "NONE"
     v3_reports_output_dir: str = ""
@@ -801,7 +799,7 @@ def _parse_datacenter_report_paths(stdout: str) -> dict[str, Optional[str]]:
 
 def _default_v3_reports_post_step_result(
     *,
-    status: str = "SKIPPED",
+    status: str = "SKIPPED_REMOVED",
     signal_date: str = "NONE",
     error: str | None = None,
 ) -> V3ReportsPostStepResult:
@@ -809,22 +807,8 @@ def _default_v3_reports_post_step_result(
         attempted=0,
         status=status,
         signal_date=signal_date,
-        error=error,
+        error=error or "old V3/eco report generation has been removed",
     )
-
-
-def _resolve_v3_reports_base_output_dir(
-    *,
-    config: StockUpdateSchedulerConfig,
-    market: str,
-) -> Path:
-    configured_base_dir = (config.datacenter_v3_reports_output_dir or "").strip()
-    if configured_base_dir:
-        return Path(configured_base_dir)
-    resolved = _resolve_datacenter_post_step_config(market)
-    if resolved is None:
-        raise ValueError(f"no datacenter post-step config for market: {market}")
-    return Path(resolved.output_dir) / "v3"
 
 
 def _run_v3_datacenter_report_generation(
@@ -833,67 +817,9 @@ def _run_v3_datacenter_report_generation(
     target_market: str,
     signal_date: str,
 ) -> V3ReportsPostStepResult:
-    if not config.datacenter_v3_reports_enabled:
-        return _default_v3_reports_post_step_result()
-
-    try:
-        selected = resolve_latest_run(
-            db_path=config.analysis_db_path,
-            ecosystem=config.datacenter_v3_reports_ecosystem,
-            taxonomy_version=config.datacenter_v3_reports_taxonomy_version,
-            signal_date=signal_date,
-            allowed_statuses=("OK", "OK_WITH_WARNINGS"),
-        )
-        if selected is None:
-            return V3ReportsPostStepResult(
-                attempted=1,
-                status="NO_MATCHING_ECO_RUN",
-                signal_date=signal_date,
-                error=(
-                    "no matching Eco run for "
-                    f"{config.datacenter_v3_reports_ecosystem}/"
-                    f"{config.datacenter_v3_reports_taxonomy_version} "
-                    f"on {signal_date}"
-                ),
-            )
-
-        output_dir = (
-            _resolve_v3_reports_base_output_dir(
-                config=config,
-                market=target_market,
-            )
-            / selected.ecosystem_code.lower()
-            / selected.signal_date
-        )
-        out_dir_resolved, written = write_reports(
-            db_path=config.analysis_db_path,
-            run_id=selected.run_id,
-            out_dir=str(output_dir),
-            overwrite=False,
-            only=None,
-        )
-    except Exception as exc:
-        return V3ReportsPostStepResult(
-            attempted=1,
-            status="FAILED",
-            signal_date=signal_date,
-            error=str(exc),
-        )
-
-    written_by_horizon = {
-        horizon: str(output_path) for horizon, output_path, _, _ in written
-    }
-    return V3ReportsPostStepResult(
-        attempted=1,
-        status="OK",
-        run_id=selected.run_id,
-        signal_date=selected.signal_date,
-        output_dir=str(out_dir_resolved),
-        daily_report_path=written_by_horizon.get("daily"),
-        rolling_30_report_path=written_by_horizon.get("rolling30"),
-        rolling_5_report_path=written_by_horizon.get("rolling5"),
-        rolling_2_report_path=written_by_horizon.get("rolling2"),
-        error=None,
+    _ = (config, target_market)
+    return _default_v3_reports_post_step_result(
+        signal_date=signal_date,
     )
 
 
@@ -3000,7 +2926,7 @@ def run_scheduler_config(
                     datacenter_pipeline_weekly_report_csv_path=None,
                     datacenter_pipeline_error="",
                     v3_reports_attempted=0,
-                    v3_reports_status="SKIPPED",
+                    v3_reports_status="SKIPPED_REMOVED",
                     v3_reports_run_id="NONE",
                     v3_reports_signal_date="NONE",
                     v3_reports_output_dir="",
@@ -3008,7 +2934,7 @@ def run_scheduler_config(
                     v3_reports_rolling_30_report_path=None,
                     v3_reports_rolling_5_report_path=None,
                     v3_reports_rolling_2_report_path=None,
-                    v3_reports_error="",
+                    v3_reports_error="old V3/eco report generation has been removed",
                     datacenter_dashboard_attempted=0,
                     datacenter_dashboard_status="SKIPPED",
                     datacenter_dashboard_dashboard_db=config.datacenter_dashboard_db,
