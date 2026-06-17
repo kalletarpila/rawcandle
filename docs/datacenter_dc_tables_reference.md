@@ -775,7 +775,7 @@ V3-suhde:
 ### docs
 
 - `docs/datacenter_swing_signal_runbook.md`: tästä varmistettiin nykyinen build / refresh flow sekä `dc_pipeline_watermark`-taulun nykyinen visibility/audit-rooli.
-- `docs/datacenter_report_canonical_v2_architecture.md`: tästä varmistettiin, että nykyiset daily/rolling datacenter-raportit lukevat edelleen `dc_ticker_swing_signal_daily`, `dc_group_swing_signal_daily` ja `dc_group_synthetic_ohlc_daily` -tauluja.
+- `docs/archive/canonical_report_v2/datacenter_report_canonical_v2_architecture.md`: tästä historiallisesta taustadokumentista varmistettiin, että nykyiset daily/rolling datacenter-raportit lukevat edelleen `dc_ticker_swing_signal_daily`, `dc_group_swing_signal_daily` ja `dc_group_synthetic_ohlc_daily` -tauluja.
 - `docs/canonical_v3_ecosystem_entity_model_design.md`: tästä varmistettiin V3-siirtymän tavoitetila sekä huomio siitä, että `dc_ecosystem_membership` on tarkastetussa tilassa tyhjä ja nykyinen taksonomia näyttää tulevan CSV:stä.
 
 ## Open questions

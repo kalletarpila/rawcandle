@@ -535,5 +535,5 @@ Epävarmuus:
 ### Existing docs
 
 - `docs/datacenter_swing_signal_runbook.md`: tarjosi olemassa olevan käyttö- ja ajokontekstin datacenter swing -raporteille.
-- `docs/datacenter_report_canonical_v2_architecture.md`: tarjosi taustakontekstin vanhemman raporttiarkkitehtuurin rakenteesta ja käsitteistä.
+- `docs/archive/canonical_report_v2/datacenter_report_canonical_v2_architecture.md`: tarjosi historiallista taustakontekstia vanhemman raporttiarkkitehtuurin rakenteesta ja käsitteistä.
 - `docs/datacenter_dc_tables_reference.md`: tarjosi erillisen viitteen legacy-raporttien käyttämien `dc_*`-taulujen rooleihin.

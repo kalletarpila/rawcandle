@@ -14,6 +14,8 @@ Phase B status: DatabaseManager no longer applies Canonical Report V2 migrations
 
 Phase C status: Canonical Report V2 core modules and direct non-CLI V2 tests were removed. Retired `dev_tools/run_report_canonical_v2_*.py` stubs remain and still exit non-zero. No DB cleanup was performed. Migrations `004`-`014` remain unchanged. Current `dc_*`, `ec_*`, `ec_source_layer`, scheduler, and legacy Datacenter paths are preserved.
 
+Phase D status: V2-only documents were archived under `docs/archive/canonical_report_v2/`. Retired `dev_tools/run_report_canonical_v2_*.py` stubs remain intentionally for compatibility and discoverability. Stub policy: return exit code `2`, do not access DBs, do not write outputs, do not import V2 core modules, and point users to this retirement decision. Full deletion of retired stubs is a later optional step after consumers have had time to discover the retirement behavior.
+
 ## Scope boundary
 
 Targeted for later retirement:
