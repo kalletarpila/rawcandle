@@ -2827,6 +2827,109 @@ def test_scheduler_runner_ec_source_layer_enabled_runs_after_legacy_success(
     assert called_kwargs["allow_replace_date"] is False
 
 
+def test_scheduler_runner_finished_at_utc_reflects_post_step_completion(
+    tmp_path, monkeypatch
+):
+    import datetime as real_datetime
+
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        ec_source_layer_enabled=True,
+        ec_source_layer_taxonomy_csv=tmp_path / "taxonomy.csv",
+        ec_source_layer_watchlist=tmp_path / "watchlist.txt",
+        ec_source_layer_backup_dir=tmp_path / "backups",
+    )
+
+    utc_now_values = iter(
+        [
+            real_datetime.datetime(2026, 6, 7, 0, 0, 0, tzinfo=real_datetime.timezone.utc),
+            real_datetime.datetime(2026, 6, 7, 0, 10, 0, tzinfo=real_datetime.timezone.utc),
+        ]
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._utc_now",
+        lambda: next(utc_now_values),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_one_market",
+        lambda **kwargs: ScheduledMarketRunResult(
+            market=kwargs["market"],
+            started_at_utc="2026-06-07T00:00:00Z",
+            finished_at_utc="2026-06-07T00:01:00Z",
+            exit_code=0,
+            summary_status=STATUS_OK,
+            log_path="/tmp/usa.log",
+            summary_lines=["SUMMARY market=usa"],
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_technical_relevance_post_step",
+        lambda **kwargs: scheduler_runner.TechnicalRelevancePostStepResult(
+            attempted=1,
+            enabled=True,
+            status="OK",
+            market="usa",
+            run_id="TECH_RUN_20260607",
+            start_date="2026-05-01",
+            end_date="2026-06-06",
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_post_step",
+        lambda **kwargs: DatacenterPostStepResult(
+            attempted=1,
+            status="OK",
+            market="usa",
+            signal_date="2026-06-06",
+            daily_report_path="/tmp/daily.md",
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_v3_datacenter_report_generation",
+        lambda **kwargs: scheduler_runner._default_v3_reports_post_step_result(
+            signal_date=kwargs["signal_date"]
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_ec_source_layer_refresh_post_step",
+        lambda **kwargs: scheduler_runner.EcSourceLayerRefreshPostStepResult(
+            attempted=1,
+            status="REFRESH_COMPLETED",
+            log_path="/tmp/ec_source_layer_usa_20260607T0010Z.txt",
+            signal_date="2026-06-06",
+            refresh_mode="new_selected_date",
+            skipped_reason="NONE",
+            backup_path="/tmp/backups/refresh.sqlite",
+            coverage_status="OK_WITH_WARNINGS",
+            parity_status="OK_WITH_WARNINGS",
+            total_mismatch_count=0,
+            ticker_rows=236,
+            group_signal_rows=54,
+            synthetic_ohlc_rows=53,
+            group_index_rows=54,
+            watermark_rows=15,
+            error="NONE",
+        ),
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.finished_at_utc == "2026-06-07T00:10:00Z"
+    assert result.ec_source_layer_status == "REFRESH_COMPLETED"
+    assert result.ec_source_layer_backup_path == "/tmp/backups/refresh.sqlite"
+    assert result.datacenter_dashboard_run_id == "ECO_DASHBOARD_DATACENTER_2026-05-22_20260525T000000Z"
+    payload = json.loads(Path(result.summary_json_path).read_text(encoding="utf-8"))
+    assert payload["finished_at_utc"] == "2026-06-07T00:10:00Z"
+    assert payload["ec_source_layer_status"] == "REFRESH_COMPLETED"
+    assert payload["ec_source_layer_backup_path"] == "/tmp/backups/refresh.sqlite"
+    assert payload["datacenter_dashboard_run_id"] == result.datacenter_dashboard_run_id
+
+
 def test_scheduler_runner_ec_source_layer_skipped_keeps_ok_status(
     tmp_path, monkeypatch
 ):

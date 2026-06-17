@@ -3069,7 +3069,6 @@ def run_scheduler_config(
                     )
                 )
 
-            finished_at_utc = _format_utc_timestamp(_utc_now())
             market_update_phase_status = _derive_overall_status(market_results)
             technical_relevance_result = _run_technical_relevance_post_step(
                 config=config,
@@ -3177,6 +3176,7 @@ def run_scheduler_config(
                 "stock_update_scheduler_summary_"
                 f"{_format_utc_filename_timestamp(run_started_at)}.json"
             )
+            finished_at_utc = _format_utc_timestamp(_utc_now())
 
             result = ScheduledStockUpdateRunResult(
                 started_at_utc=started_at_utc,
