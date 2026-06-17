@@ -10,6 +10,8 @@ Phase F note: `rawcandle/cli/preflight_dc_dashboard_legacy_db_cleanup.py` now pr
 
 Analysis DB preflight note: read-only preflight for `/home/kalle/projects/rawcandle/data/analysis.db` is documented in `docs/dc_dashboard_legacy_db_preflight_analysis_db.md`. Assessment: `NO_DASHBOARD_SNAPSHOT_CLEANUP_NEEDED`; no old snapshot-style dashboard tables or unknown `dc_dashboard%` tables were found, and the five current `_daily` enrichment tables were present.
 
+Need audit follow-up: [dc_dashboard_enrichment_need_audit.md](/home/kalle/projects/rawcandle/docs/dc_dashboard_enrichment_need_audit.md) assesses whether the five current `_daily` enrichment tables are still needed. Assessment: `AMBIGUOUS_NEEDS_UI_DECISION`, with interim recommendation `PRESERVE_FOR_NOW`. They are not required by default reports-mode scheduler operation, but they are still an implemented opt-in/manual dashboard enrichment path and cannot be removed as cleanup without a separate dashboard source decision.
+
 Removal is blocked. Current dashboard/enrichment behavior appears entangled with the `dc_dashboard_*_daily` tables. Any removal decision must first split current enrichment from truly obsolete snapshot-style tables.
 
 This audit does not affect current `dc_*` source facts, current legacy Datacenter reports, current `ec_*`, or `ec_source_layer`.
