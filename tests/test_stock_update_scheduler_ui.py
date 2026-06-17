@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from pathlib import Path
 from unittest.mock import Mock
@@ -26,6 +25,7 @@ from dev_tools.stock_update_scheduler_ui import (
     list_scheduler_log_files,
     load_latest_scheduler_summary,
     main,
+    read_text_log_file,
     read_systemd_timer_on_calendar,
     read_systemd_user_timer_status,
     run_app,
@@ -129,13 +129,20 @@ def test_list_scheduler_log_files_returns_recent_text_logs(tmp_path):
 
 def test_build_text_log_browser_url_quotes_path(tmp_path):
     path = tmp_path / "log file.txt"
-    assert "%20" in build_text_log_browser_url(str(path))
+    assert build_text_log_browser_url(str(path)) == "/log%20file.txt"
+
+
+def test_read_text_log_file_returns_contents(tmp_path):
+    path = tmp_path / "scheduler.txt"
+    path.write_text("line1\nline2\n", encoding="utf-8")
+
+    assert read_text_log_file(str(path)) == "line1\nline2\n"
 
 
 def test_launch_browser_url_handles_sync_page_method():
     page = _FakePage()
 
-    asyncio.run(launch_browser_url(page, "https://example.test"))
+    launch_browser_url(page, "https://example.test")
 
     assert page.launched_urls == ["https://example.test"]
 
@@ -324,6 +331,7 @@ def test_run_app_exposes_scheduler_and_datacenter_controls(tmp_path, monkeypatch
     assert page.technical_relevance_checkbox.value is False
     assert page.datacenter_plan_button is not None
     assert not hasattr(page, "datacenter_dashboard_content")
+    assert page.running_status_text.value == "Scheduler status: not running"
 
 
 def test_run_app_loads_current_style_local_config_with_legacy_dashboard_keys(
@@ -343,6 +351,46 @@ def test_run_app_loads_current_style_local_config_with_legacy_dashboard_keys(
     assert page.title == "RawCandle stock update scheduler"
     assert loaded.datacenter_dashboard_source_mode == "enrichment"
     assert loaded.datacenter_enrichment_enabled is True
+
+
+def test_run_app_log_button_loads_selected_log_content(tmp_path, monkeypatch):
+    config_path = tmp_path / "scheduler.json"
+    _write_config(config_path)
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    (log_dir / "scheduler_20260617.txt").write_text("hello log\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
+        lambda: {"installed": False, "status_summary": "missing"},
+    )
+
+    page = _FakePage()
+    run_app(page, str(config_path))
+
+    assert len(page.logs_column.controls) == 1
+    page.logs_column.controls[0].controls[1].on_click(None)
+
+    assert page.selected_log_field.value == "hello log\n"
+    assert "size=" in page.logs_column.controls[0].controls[0].value
+
+
+def test_run_app_log_open_button_launches_asset_url(tmp_path, monkeypatch):
+    config_path = tmp_path / "scheduler.json"
+    _write_config(config_path)
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    (log_dir / "scheduler log.txt").write_text("hello log\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
+        lambda: {"installed": False, "status_summary": "missing"},
+    )
+
+    page = _FakePage()
+    run_app(page, str(config_path))
+
+    page.logs_column.controls[0].controls[2].on_click(None)
+
+    assert page.launched_urls == ["/scheduler%20log.txt"]
 
 
 def test_run_app_save_config_persists_technical_relevance(tmp_path, monkeypatch):
@@ -379,6 +427,59 @@ def test_scheduler_ui_startup_passes_fixed_port_to_ft_app(tmp_path, monkeypatch)
 
     assert app_mock.call_args.kwargs["port"] == 8555
     assert app_mock.call_args.kwargs["view"].value == "web_browser"
+    assert app_mock.call_args.kwargs["assets_dir"] == str(config_path.parent / "logs")
+
+
+def test_run_app_without_summary_or_logs_shows_clear_messages(tmp_path, monkeypatch):
+    config_path = tmp_path / "scheduler.json"
+    _write_config(config_path)
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
+        lambda: {"installed": False, "status_summary": "missing", "on_calendar": None, "timer_path": "x", "error": None},
+    )
+
+    page = _FakePage()
+    run_app(page, str(config_path))
+
+    assert page.summary_field.value == "No scheduler summary JSON found."
+    assert page.logs_column.controls[0].value == "No text log files found."
+
+
+def test_run_app_formats_summary_lines_from_latest_summary(tmp_path, monkeypatch):
+    config_path = tmp_path / "scheduler.json"
+    _write_config(config_path)
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir(exist_ok=True)
+    (log_dir / "stock_update_scheduler_summary_20260617T080000Z.json").write_text(
+        json.dumps(
+            {
+                "overall_status": "OK",
+                "enabled_markets": ["omxh", "usa"],
+                "summary_json_path": "/tmp/summary.json",
+                "technical_relevance_status": "OK",
+                "ec_source_layer_status": "SKIPPED",
+                "market_results": [
+                    {
+                        "market": "omxh",
+                        "summary_status": "OK",
+                        "log_path": "/tmp/omxh.txt",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
+        lambda: {"installed": False, "status_summary": "missing", "on_calendar": None, "timer_path": "x", "error": None},
+    )
+
+    page = _FakePage()
+    run_app(page, str(config_path))
+
+    assert "overall_status=OK" in page.summary_field.value
+    assert "enabled_markets=omxh,usa" in page.summary_field.value
+    assert "market=omxh status=OK log=/tmp/omxh.txt" in page.summary_field.value
 
 
 def test_skip_next_run_helpers_roundtrip(tmp_path, monkeypatch):

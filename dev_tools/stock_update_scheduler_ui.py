@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
+import inspect
 import json
 import os
 import subprocess
@@ -105,7 +105,7 @@ def list_scheduler_log_files(log_dir: str, limit: int = 10) -> list[Path]:
         (
             path
             for path in directory.iterdir()
-            if path.is_file() and path.suffix == ".txt"
+            if path.is_file() and path.suffix.lower() in {".txt", ".log"}
         ),
         key=lambda path: path.name,
         reverse=True,
@@ -113,13 +113,23 @@ def list_scheduler_log_files(log_dir: str, limit: int = 10) -> list[Path]:
 
 
 def build_text_log_browser_url(path: str) -> str:
-    return f"file://{quote(str(Path(path).resolve()))}"
+    return f"/{quote(Path(path).name)}"
 
 
-async def launch_browser_url(page: Any, url: str) -> None:
+def read_text_log_file(path: str, max_chars: int = 200_000) -> str:
+    content = Path(path).read_text(encoding="utf-8", errors="replace")
+    if len(content) <= max_chars:
+        return content
+    return f"[truncated to last {max_chars} chars]\n{content[-max_chars:]}"
+
+
+def launch_browser_url(page: Any, url: str) -> None:
     result = page.launch_url(url)
-    if asyncio.iscoroutine(result):
-        await result
+    if inspect.isawaitable(result):
+        async def _await_launch() -> None:
+            await result
+
+        page.run_task(_await_launch)
 
 
 def format_run_now_error_message(exc: Exception) -> str:
@@ -481,6 +491,7 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
     status_field = ft.TextField(label="Status", read_only=True, multiline=True)
     summary_field = ft.TextField(label="Latest summary", read_only=True, multiline=True)
     timer_status_field = ft.TextField(label="Timer status", read_only=True, multiline=True)
+    selected_log_field = ft.TextField(label="Selected log", read_only=True, multiline=True)
     skip_next_run_text = ft.Text(scheduler_skip_next_run_label(config))
     running_status_text = ft.Text("Scheduler running: UNKNOWN")
     logs_column = ft.Column(spacing=8)
@@ -495,10 +506,99 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
             markets.append("usa")
         return markets
 
+    def _market_row_text(market_result: dict[str, Any]) -> str:
+        return (
+            f"market={market_result.get('market', '')} "
+            f"status={market_result.get('summary_status', '')} "
+            f"log={market_result.get('log_path', '')}"
+        )
+
+    def refresh_timer_status() -> None:
+        timer_status = read_systemd_user_timer_status()
+        timer_status_field.value = "\n".join(
+            [
+                f"installed={timer_status.get('installed', False)}",
+                f"status_summary={timer_status.get('status_summary', '')}",
+                f"on_calendar={timer_status.get('on_calendar', '')}",
+                f"timer_path={timer_status.get('timer_path', '')}",
+                f"error={timer_status.get('error', '')}",
+            ]
+        )
+
+    def refresh_running_state(log_dir: str) -> None:
+        status = read_scheduler_status(log_dir)
+        state = scheduler_running_state(status)
+        running_status_text.value = (
+            "Scheduler status: running"
+            if state["is_running"]
+            else "Scheduler status: not running"
+        )
+        current_config = _load_config_or_raise(config_path)
+        button_state = scheduler_skip_button_state(
+            is_running=state["is_running"],
+            skip_next_run=current_config.skip_next_run,
+        )
+        skip_next_run_button.disabled = button_state["skip_disabled"]
+        cancel_skip_next_run_button.disabled = button_state["cancel_disabled"]
+        refresh_timer_status()
+
+    def load_log_into_view(path: Path) -> None:
+        try:
+            selected_log_field.value = read_text_log_file(str(path))
+            status_field.value = f"Loaded log: {path.name}"
+        except Exception as exc:
+            selected_log_field.value = ""
+            status_field.value = f"Load log failed: {exc}"
+
+    def open_log_in_browser(path: Path) -> None:
+        launch_browser_url(page, build_text_log_browser_url(str(path)))
+        status_field.value = f"Opened log: {path.name}"
+
     def refresh_logs_view(log_dir: str) -> None:
-        logs_column.controls = [ft.Text(path.name) for path in list_scheduler_log_files(log_dir)]
+        log_paths = list_scheduler_log_files(log_dir)
         latest = load_latest_scheduler_summary(log_dir)
-        summary_field.value = json.dumps(latest, indent=2, sort_keys=True) if latest else ""
+        if latest is None:
+            summary_field.value = "No scheduler summary JSON found."
+        else:
+            lines = [
+                f"overall_status={latest.get('overall_status', '')}",
+                "enabled_markets=" + ",".join(latest.get("enabled_markets", [])),
+                f"summary_json_path={latest.get('summary_json_path', '')}",
+                "technical_relevance_status="
+                f"{latest.get('technical_relevance_status', '')}",
+                "ec_source_layer_status="
+                f"{latest.get('ec_source_layer_status', '')}",
+            ]
+            for market_result in latest.get("market_results", []):
+                lines.append(_market_row_text(market_result))
+            summary_field.value = "\n".join(lines)
+
+        logs_column.controls = []
+        if not log_paths:
+            logs_column.controls.append(ft.Text("No text log files found."))
+            selected_log_field.value = ""
+        else:
+            for path in log_paths:
+                stat_result = path.stat()
+                logs_column.controls.append(
+                    ft.Row(
+                        [
+                            ft.Text(
+                                f"{path.name} (size={stat_result.st_size}, modified_at={int(stat_result.st_mtime)})",
+                                expand=True,
+                            ),
+                            ft.TextButton(
+                                "Preview",
+                                on_click=lambda _e, path=path: load_log_into_view(path),
+                            ),
+                            ft.TextButton(
+                                "Open",
+                                on_click=lambda _e, path=path: open_log_in_browser(path),
+                            ),
+                        ]
+                    )
+                )
+        refresh_running_state(log_dir)
 
     def update_ui_from_config(next_config: StockUpdateSchedulerConfig) -> None:
         osakedata_db_field.value = next_config.osakedata_db_path
@@ -559,12 +659,14 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
     def on_skip_next_run(_e: Any) -> None:
         next_config = apply_skip_next_run_to_config(config_path)
         update_ui_from_config(next_config)
+        refresh_running_state(next_config.log_dir)
         if hasattr(page, "update"):
             page.update()
 
     def on_cancel_skip_next_run(_e: Any) -> None:
         next_config = apply_cancel_skip_next_run_to_config(config_path)
         update_ui_from_config(next_config)
+        refresh_running_state(next_config.log_dir)
         if hasattr(page, "update"):
             page.update()
 
@@ -698,6 +800,7 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
             status_field,
             summary_field,
             timer_status_field,
+            selected_log_field,
             logs_column,
         ],
         spacing=12,
@@ -738,7 +841,6 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
     )
 
     refresh_logs_view(config.log_dir)
-    timer_status_field.value = json.dumps(read_systemd_user_timer_status(), sort_keys=True)
 
     page.osakedata_db_field = osakedata_db_field
     page.analysis_db_field = analysis_db_field
@@ -758,6 +860,8 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
     page.status_field = status_field
     page.summary_field = summary_field
     page.timer_status_field = timer_status_field
+    page.running_status_text = running_status_text
+    page.selected_log_field = selected_log_field
     page.logs_column = logs_column
     page.datacenter_price_db_field = datacenter_price_db_field
     page.datacenter_analysis_db_field = datacenter_analysis_db_field
@@ -796,11 +900,17 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
 
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
+    initial_config = read_scheduler_config(args.config)
 
     def _app(page: Any) -> None:
         run_app(page, args.config)
 
-    ft.app(target=_app, port=args.port, view=ft.AppView.WEB_BROWSER)
+    ft.app(
+        target=_app,
+        port=args.port,
+        view=ft.AppView.WEB_BROWSER,
+        assets_dir=initial_config.log_dir,
+    )
 
 
 if __name__ == "__main__":
