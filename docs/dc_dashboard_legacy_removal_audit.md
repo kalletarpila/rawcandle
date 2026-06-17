@@ -12,6 +12,8 @@ Analysis DB preflight note: read-only preflight for `/home/kalle/projects/rawcan
 
 Need audit follow-up: [dc_dashboard_enrichment_need_audit.md](/home/kalle/projects/rawcandle/docs/dc_dashboard_enrichment_need_audit.md) assesses whether the five current `_daily` enrichment tables are still needed. Assessment: `AMBIGUOUS_NEEDS_UI_DECISION`, with interim recommendation `PRESERVE_FOR_NOW`. They are not required by default reports-mode scheduler operation, but they are still an implemented opt-in/manual dashboard enrichment path and cannot be removed as cleanup without a separate dashboard source decision.
 
+Decision follow-up: [dc_dashboard_ui_enrichment_retirement_decision.md](/home/kalle/projects/rawcandle/docs/dc_dashboard_ui_enrichment_retirement_decision.md) records the user decision `RETIRE_DASHBOARD_UI_HTML_AND_ENRICHMENT`. Runtime neutralization and DB cleanup remain separate later phases.
+
 Removal is blocked. Current dashboard/enrichment behavior appears entangled with the `dc_dashboard_*_daily` tables. Any removal decision must first split current enrichment from truly obsolete snapshot-style tables.
 
 This audit does not affect current `dc_*` source facts, current legacy Datacenter reports, current `ec_*`, or `ec_source_layer`.
