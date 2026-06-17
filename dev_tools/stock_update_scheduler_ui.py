@@ -4,6 +4,7 @@ import argparse
 import inspect
 import json
 import os
+import re
 import subprocess
 from datetime import date, timedelta
 from pathlib import Path
@@ -42,6 +43,15 @@ DEFAULT_DATACENTER_WATCHLIST_FILE = "/home/kalle/projects/rawcandle/watchlists/d
 DEFAULT_DATACENTER_SIGNAL_DATE = (date.today() - timedelta(days=1)).isoformat()
 DEFAULT_DATACENTER_START_DATE = "2025-08-01"
 _SUMMARY_FILENAME_RE = r"stock_update_scheduler_summary_"
+_MARKET_LOG_FILENAME_RE = re.compile(
+    r"^stock_update_(omxh|omxs|usa)_(\d{8}T\d{4,6}Z)(?:_(\d+))?\.(txt|log)$"
+)
+_DATACENTER_LOG_FILENAME_RE = re.compile(
+    r"^datacenter_pipeline_([a-z0-9_]+)_(\d{8}T\d{4,6}Z)(?:_(\d+))?\.(txt|log)$"
+)
+_EC_SOURCE_LAYER_LOG_FILENAME_RE = re.compile(
+    r"^ec_source_layer_([a-z0-9_]+)_(\d{8}T\d{4,6}Z)(?:_(\d+))?\.(txt|log)$"
+)
 _TIMER_PATH = Path.home() / ".config/systemd/user/rawcandle-stock-update-scheduler.timer"
 
 
@@ -97,19 +107,44 @@ def load_latest_scheduler_summary(log_dir: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def list_scheduler_log_files(log_dir: str, limit: int = 10) -> list[Path]:
+def list_scheduler_log_files(log_dir: str, limit: int = 10) -> list[dict[str, Any]]:
     directory = Path(log_dir)
     if not directory.exists():
         return []
-    return sorted(
-        (
-            path
-            for path in directory.iterdir()
-            if path.is_file() and path.suffix.lower() in {".txt", ".log"}
-        ),
-        key=lambda path: path.name,
-        reverse=True,
-    )[:limit]
+    entries: list[dict[str, Any]] = []
+    for path in directory.iterdir():
+        if not path.is_file():
+            continue
+        market_match = _MARKET_LOG_FILENAME_RE.match(path.name)
+        datacenter_match = _DATACENTER_LOG_FILENAME_RE.match(path.name)
+        ec_source_layer_match = _EC_SOURCE_LAYER_LOG_FILENAME_RE.match(path.name)
+        if market_match:
+            timestamp = market_match.group(2)
+            suffix = market_match.group(3) or "0"
+            entry_type = "market_log"
+        elif datacenter_match:
+            timestamp = datacenter_match.group(2)
+            suffix = datacenter_match.group(3) or "0"
+            entry_type = "datacenter_log"
+        elif ec_source_layer_match:
+            timestamp = ec_source_layer_match.group(2)
+            suffix = ec_source_layer_match.group(3) or "0"
+            entry_type = "ec_source_layer_log"
+        else:
+            continue
+        stat_result = path.stat()
+        entries.append(
+            {
+                "filename": path.name,
+                "path": str(path),
+                "size_bytes": stat_result.st_size,
+                "modified_at": str(int(stat_result.st_mtime)),
+                "sort_key": f"{timestamp}_{suffix}",
+                "type": entry_type,
+            }
+        )
+    entries.sort(key=lambda item: item["sort_key"], reverse=True)
+    return entries[:limit]
 
 
 def build_text_log_browser_url(path: str) -> str:
@@ -555,7 +590,7 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
         status_field.value = f"Opened log: {path.name}"
 
     def refresh_logs_view(log_dir: str) -> None:
-        log_paths = list_scheduler_log_files(log_dir)
+        log_entries = list_scheduler_log_files(log_dir)
         latest = load_latest_scheduler_summary(log_dir)
         if latest is None:
             summary_field.value = "No scheduler summary JSON found."
@@ -574,17 +609,19 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
             summary_field.value = "\n".join(lines)
 
         logs_column.controls = []
-        if not log_paths:
+        if not log_entries:
             logs_column.controls.append(ft.Text("No text log files found."))
             selected_log_field.value = ""
         else:
-            for path in log_paths:
-                stat_result = path.stat()
+            for log_entry in log_entries:
+                path = Path(log_entry["path"])
                 logs_column.controls.append(
                     ft.Row(
                         [
                             ft.Text(
-                                f"{path.name} (size={stat_result.st_size}, modified_at={int(stat_result.st_mtime)})",
+                                f"{log_entry['filename']} "
+                                f"[{log_entry['type']}] "
+                                f"(size={log_entry['size_bytes']}, modified_at={log_entry['modified_at']})",
                                 expand=True,
                             ),
                             ft.TextButton(

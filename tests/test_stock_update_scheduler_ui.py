@@ -118,13 +118,50 @@ def test_load_latest_scheduler_summary_picks_newest_by_filename_timestamp(tmp_pa
 def test_list_scheduler_log_files_returns_recent_text_logs(tmp_path):
     log_dir = tmp_path / "logs"
     log_dir.mkdir()
-    for name in ["b.txt", "a.txt", "ignore.json"]:
+    for name in [
+        "stock_update_omxh_20260617T0900Z.txt",
+        "datacenter_pipeline_usa_20260617T0901Z.txt",
+        "ec_source_layer_usa_20260617T0902Z.txt",
+        "ignore.json",
+    ]:
         (log_dir / name).write_text("x", encoding="utf-8")
 
-    assert [path.name for path in list_scheduler_log_files(str(log_dir))] == [
-        "b.txt",
-        "a.txt",
+    assert [entry["filename"] for entry in list_scheduler_log_files(str(log_dir))] == [
+        "ec_source_layer_usa_20260617T0902Z.txt",
+        "datacenter_pipeline_usa_20260617T0901Z.txt",
+        "stock_update_omxh_20260617T0900Z.txt",
     ]
+
+
+def test_list_scheduler_log_files_limits_to_10_newest_known_scheduler_logs(tmp_path):
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    names = [
+        "stock_update_omxh_20260617T0900Z.txt",
+        "stock_update_usa_20260617T0901Z.txt",
+        "datacenter_pipeline_usa_20260617T0902Z.txt",
+        "ec_source_layer_usa_20260617T0903Z.txt",
+        "stock_update_omxs_20260617T0904Z.txt",
+        "datacenter_pipeline_usa_20260617T0905Z.txt",
+        "ec_source_layer_usa_20260617T0906Z.txt",
+        "stock_update_usa_20260617T0907Z.txt",
+        "datacenter_pipeline_usa_20260617T0908Z.txt",
+        "ec_source_layer_usa_20260617T0909Z.txt",
+        "stock_update_omxh_20260617T0910Z.txt",
+        "random_notes_20260617T0911Z.txt",
+    ]
+    for name in names:
+        (log_dir / name).write_text(name, encoding="utf-8")
+
+    results = list_scheduler_log_files(str(log_dir))
+
+    assert len(results) == 10
+    assert results[0]["filename"] == "stock_update_omxh_20260617T0910Z.txt"
+    assert results[-1]["filename"] == "stock_update_usa_20260617T0901Z.txt"
+    assert all(
+        entry["type"] in {"market_log", "datacenter_log", "ec_source_layer_log"}
+        for entry in results
+    )
 
 
 def test_build_text_log_browser_url_quotes_path(tmp_path):
@@ -358,7 +395,9 @@ def test_run_app_log_button_loads_selected_log_content(tmp_path, monkeypatch):
     _write_config(config_path)
     log_dir = tmp_path / "logs"
     log_dir.mkdir()
-    (log_dir / "scheduler_20260617.txt").write_text("hello log\n", encoding="utf-8")
+    (log_dir / "stock_update_omxh_20260617T0900Z.txt").write_text(
+        "hello log\n", encoding="utf-8"
+    )
     monkeypatch.setattr(
         "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
         lambda: {"installed": False, "status_summary": "missing"},
@@ -379,7 +418,9 @@ def test_run_app_log_open_button_launches_asset_url(tmp_path, monkeypatch):
     _write_config(config_path)
     log_dir = tmp_path / "logs"
     log_dir.mkdir()
-    (log_dir / "scheduler log.txt").write_text("hello log\n", encoding="utf-8")
+    (log_dir / "stock_update_omxh_20260617T0900Z.txt").write_text(
+        "hello log\n", encoding="utf-8"
+    )
     monkeypatch.setattr(
         "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
         lambda: {"installed": False, "status_summary": "missing"},
@@ -390,7 +431,7 @@ def test_run_app_log_open_button_launches_asset_url(tmp_path, monkeypatch):
 
     page.logs_column.controls[0].controls[2].on_click(None)
 
-    assert page.launched_urls == ["/scheduler%20log.txt"]
+    assert page.launched_urls == ["/stock_update_omxh_20260617T0900Z.txt"]
 
 
 def test_run_app_save_config_persists_technical_relevance(tmp_path, monkeypatch):
