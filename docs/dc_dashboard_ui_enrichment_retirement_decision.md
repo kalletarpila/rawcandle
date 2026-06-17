@@ -12,6 +12,10 @@ Current `dc_*` source facts, current `ec_*` sidecar tables/loaders, and `ec_sour
 
 No code, tests, migrations, scheduler behavior, scheduler config, or DB contents are changed by this decision document.
 
+Phase 1 status: scheduler/config/dashboard hooks for dashboard UI/HTML/enrichment have now been neutralized in code. The scheduler no longer exposes dashboard/enrichment source-mode config, enrichment migration toggles, dashboard post-step result fields, or dashboard/enrichment CLI summary output. This intentionally breaks compatibility with scheduler config files that still contain retired dashboard/enrichment keys; `scheduler_config.json` was not edited in this step.
+
+Phase 1 did not perform DB cleanup. Migrations `002` and `003` remain unchanged. Current `dc_*` source facts, current legacy Datacenter Markdown/CSV reports, current `ec_*`, and `ec_source_layer` remain preserved.
+
 ## Scope
 
 Retirement target:

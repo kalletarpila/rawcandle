@@ -42,10 +42,6 @@ from dev_tools.run_datacenter_dashboard_html import (
 )
 from dev_tools.run_ecosystem_dashboard_build import generate_ecosystem_dashboard_build
 from rawcandle.scheduler.config import (
-    DEFAULT_DATACENTER_DASHBOARD_REPORTS_REFERENCE_DB,
-    DEFAULT_DATACENTER_ENRICHMENT_TAXONOMY_VERSION,
-    DEFAULT_DATACENTER_ENRICHMENT_WATCHLIST_FILE,
-    DEFAULT_DATACENTER_ENRICHMENT_WRITE_MODE,
     StockUpdateSchedulerConfig,
     read_scheduler_config,
     validate_run_time,
@@ -54,7 +50,6 @@ from rawcandle.scheduler.config import (
 )
 from rawcandle.scheduler.runner import (
     SchedulerAlreadyRunningError,
-    inspect_scheduler_dashboard_config,
     read_scheduler_status,
     run_scheduler_config,
 )
@@ -92,6 +87,7 @@ DEFAULT_DATACENTER_WATCHLIST_FILE = "/home/kalle/projects/rawcandle/watchlists/d
 DEFAULT_DATACENTER_SIGNAL_DATE = (date.today() - timedelta(days=1)).isoformat()
 DEFAULT_DATACENTER_START_DATE = "2025-08-01"
 DEFAULT_DATACENTER_DASHBOARD_REPORTS_DIR = "/home/kalle/projects/rawcandle/temp"
+DEFAULT_DATACENTER_DASHBOARD_DB = "/home/kalle/projects/rawcandle/data/ecosystem_dashboard.db"
 _DATACENTER_DASHBOARD_REPORT_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
@@ -108,6 +104,36 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def build_retired_datacenter_dashboard_ui_plan(
+    *,
+    reports_dir: str,
+    report_date: str,
+    html_output_dir: str,
+) -> Any:
+    return type(
+        "DatacenterDashboardUiPlan",
+        (),
+        {
+            "enabled": False,
+            "ecosystem_code": "datacenter",
+            "dashboard_db": DEFAULT_DATACENTER_DASHBOARD_DB,
+            "reports_dir": reports_dir,
+            "html_output_dir": html_output_dir,
+            "expected_report_date": report_date,
+            "expected_html_output_path": str(
+                Path(html_output_dir) / f"datacenter_dashboard_{report_date}.html"
+            ),
+            "mode": "retired",
+            "render_html": False,
+            "usa_enabled": False,
+            "datacenter_pipeline_enabled": False,
+            "skip_next_run": False,
+            "date_status": "manual",
+            "status": "RETIRED",
+        },
+    )
+
+
 def build_config_from_ui_values(
     *,
     osakedata_db_path: str,
@@ -117,20 +143,6 @@ def build_config_from_ui_values(
     run_time: str,
     selected_markets: List[str],
     technical_relevance_enabled: bool,
-    datacenter_dashboard_enabled: bool,
-    datacenter_dashboard_db: str,
-    datacenter_dashboard_html_output_dir: str,
-    datacenter_dashboard_reports_reference_enabled: bool,
-    datacenter_dashboard_reports_reference_db: str,
-    datacenter_dashboard_reports_reference_html_output_dir: str,
-    datacenter_dashboard_source_mode: str,
-    datacenter_enrichment_enabled: bool,
-    datacenter_enrichment_apply_migrations: bool,
-    datacenter_enrichment_taxonomy_version: str,
-    datacenter_enrichment_watchlist_file: str,
-    datacenter_enrichment_write_mode: str,
-    datacenter_dashboard_fallback_to_reports: bool,
-    datacenter_dashboard_run_acceptance_report: bool,
 ) -> StockUpdateSchedulerConfig:
     config = StockUpdateSchedulerConfig(
         enabled_markets=selected_markets,
@@ -140,36 +152,6 @@ def build_config_from_ui_values(
         log_dir=log_dir,
         timezone=timezone,
         technical_relevance_enabled=technical_relevance_enabled,
-        datacenter_dashboard_enabled=datacenter_dashboard_enabled,
-        datacenter_dashboard_db=datacenter_dashboard_db,
-        datacenter_dashboard_html_output_dir=datacenter_dashboard_html_output_dir,
-        datacenter_dashboard_reports_reference_enabled=(
-            datacenter_dashboard_reports_reference_enabled
-        ),
-        datacenter_dashboard_reports_reference_db=(
-            datacenter_dashboard_reports_reference_db
-        ),
-        datacenter_dashboard_reports_reference_html_output_dir=(
-            datacenter_dashboard_reports_reference_html_output_dir
-        ),
-        datacenter_dashboard_source_mode=datacenter_dashboard_source_mode,
-        datacenter_enrichment_enabled=datacenter_enrichment_enabled,
-        datacenter_enrichment_apply_migrations=(
-            datacenter_enrichment_apply_migrations
-        ),
-        datacenter_enrichment_taxonomy_version=(
-            datacenter_enrichment_taxonomy_version
-        ),
-        datacenter_enrichment_watchlist_file=(
-            datacenter_enrichment_watchlist_file
-        ),
-        datacenter_enrichment_write_mode=datacenter_enrichment_write_mode,
-        datacenter_dashboard_fallback_to_reports=(
-            datacenter_dashboard_fallback_to_reports
-        ),
-        datacenter_dashboard_run_acceptance_report=(
-            datacenter_dashboard_run_acceptance_report
-        ),
     )
     return validate_scheduler_config(config)
 
@@ -1765,80 +1747,6 @@ def run_app(page: ft.Page, config_path: str) -> None:
             "OHLCV/candle/divergence/Dow updates. Default off."
         ),
     )
-    datacenter_dashboard_enabled_checkbox = ft.Checkbox(
-        label="Datacenter dashboard enabled",
-        value=True,
-    )
-    datacenter_enrichment_enabled_checkbox = ft.Checkbox(
-        label="Use enrichment source mode",
-        value=False,
-    )
-    datacenter_enrichment_apply_migrations_checkbox = ft.Checkbox(
-        label="Run enrichment apply migrations",
-        value=False,
-        tooltip="Risky option. Keep disabled unless explicitly needed.",
-    )
-    datacenter_dashboard_fallback_to_reports_checkbox = ft.Checkbox(
-        label="Fallback to reports if enrichment fails",
-        value=True,
-    )
-    datacenter_dashboard_run_acceptance_report_checkbox = ft.Checkbox(
-        label="Run acceptance report",
-        value=False,
-    )
-    datacenter_dashboard_reports_reference_enabled_checkbox = ft.Checkbox(
-        label="Build reports-reference dashboard",
-        value=False,
-    )
-    datacenter_dashboard_source_mode_dropdown = ft.Dropdown(
-        label="Datacenter dashboard source mode",
-        value="reports",
-        options=[
-            ft.dropdown.Option("reports"),
-            ft.dropdown.Option("enrichment"),
-        ],
-        width=260,
-    )
-    datacenter_enrichment_taxonomy_version_config_field = ft.TextField(
-        label="Datacenter enrichment taxonomy version",
-        value=DEFAULT_DATACENTER_ENRICHMENT_TAXONOMY_VERSION,
-        expand=True,
-    )
-    datacenter_enrichment_write_mode_field = ft.Dropdown(
-        label="Datacenter enrichment write mode",
-        value=DEFAULT_DATACENTER_ENRICHMENT_WRITE_MODE,
-        options=[
-            ft.dropdown.Option("insert-missing"),
-            ft.dropdown.Option("upsert"),
-            ft.dropdown.Option("replace-date"),
-        ],
-        width=220,
-    )
-    datacenter_enrichment_watchlist_file_config_field = ft.TextField(
-        label="Datacenter enrichment watchlist file",
-        value=DEFAULT_DATACENTER_ENRICHMENT_WATCHLIST_FILE,
-        expand=True,
-    )
-    datacenter_dashboard_db_config_field = ft.TextField(
-        label="Datacenter dashboard DB",
-        value="/home/kalle/projects/rawcandle/data/ecosystem_dashboard.db",
-        expand=True,
-    )
-    datacenter_dashboard_html_output_dir_config_field = ft.TextField(
-        label="Datacenter dashboard HTML output dir",
-        value="/home/kalle/projects/rawcandle/swing_reports",
-        expand=True,
-    )
-    datacenter_dashboard_reports_reference_db_field = ft.TextField(
-        label="Reports-reference dashboard DB",
-        value=DEFAULT_DATACENTER_DASHBOARD_REPORTS_REFERENCE_DB,
-        expand=True,
-    )
-    datacenter_dashboard_reports_reference_html_output_dir_field = ft.TextField(
-        label="Reports-reference HTML output dir",
-        value="/home/kalle/projects/rawcandle/swing_reports",
-        expand=True,
-    )
     skip_next_run_text = ft.Text("")
     running_status_text = ft.Text("")
     skip_next_run_button = ft.ElevatedButton("Ohita seuraava ajastettu ajo")
@@ -2091,49 +1999,17 @@ def run_app(page: ft.Page, config_path: str) -> None:
         omxs_checkbox.value = "omxs" in enabled_markets
         usa_checkbox.value = "usa" in enabled_markets
         technical_relevance_checkbox.value = config.technical_relevance_enabled
-        datacenter_dashboard_enabled_checkbox.value = config.datacenter_dashboard_enabled
-        datacenter_enrichment_enabled_checkbox.value = (
-            config.datacenter_enrichment_enabled
-        )
-        datacenter_enrichment_apply_migrations_checkbox.value = (
-            config.datacenter_enrichment_apply_migrations
-        )
-        datacenter_dashboard_fallback_to_reports_checkbox.value = (
-            config.datacenter_dashboard_fallback_to_reports
-        )
-        datacenter_dashboard_run_acceptance_report_checkbox.value = (
-            config.datacenter_dashboard_run_acceptance_report
-        )
-        datacenter_dashboard_reports_reference_enabled_checkbox.value = (
-            config.datacenter_dashboard_reports_reference_enabled
-        )
-        datacenter_dashboard_source_mode_dropdown.value = (
-            config.datacenter_dashboard_source_mode
-        )
-        datacenter_enrichment_taxonomy_version_config_field.value = (
-            config.datacenter_enrichment_taxonomy_version
-        )
-        datacenter_enrichment_write_mode_field.value = (
-            config.datacenter_enrichment_write_mode
-        )
-        datacenter_enrichment_watchlist_file_config_field.value = (
-            config.datacenter_enrichment_watchlist_file
-        )
-        datacenter_dashboard_db_config_field.value = config.datacenter_dashboard_db
-        datacenter_dashboard_html_output_dir_config_field.value = (
-            config.datacenter_dashboard_html_output_dir
-        )
-        datacenter_dashboard_reports_reference_db_field.value = (
-            config.datacenter_dashboard_reports_reference_db
-        )
-        datacenter_dashboard_reports_reference_html_output_dir_field.value = (
-            config.datacenter_dashboard_reports_reference_html_output_dir
-        )
 
     def _inspect_datacenter_dashboard_plan() -> Any:
-        return inspect_scheduler_dashboard_config(
-            config_path=config_path,
-            effective_today=date.today().isoformat(),
+        reports_dir = (
+            datacenter_dashboard_reports_dir_field.value or DEFAULT_DATACENTER_OUTPUT_DIR
+        )
+        report_date = datacenter_report_date_field.value.strip() or date.today().isoformat()
+        html_output_dir = datacenter_output_dir_field.value or DEFAULT_DATACENTER_OUTPUT_DIR
+        return build_retired_datacenter_dashboard_ui_plan(
+            reports_dir=reports_dir,
+            report_date=report_date,
+            html_output_dir=html_output_dir,
         )
 
     def _resolved_datacenter_dashboard_plan_lines(inspection: Any) -> list[str]:
@@ -2460,47 +2336,6 @@ def run_app(page: ft.Page, config_path: str) -> None:
                 run_time=run_time_field.value,
                 selected_markets=selected_markets_from_ui(),
                 technical_relevance_enabled=bool(technical_relevance_checkbox.value),
-                datacenter_dashboard_enabled=bool(
-                    datacenter_dashboard_enabled_checkbox.value
-                ),
-                datacenter_dashboard_db=datacenter_dashboard_db_config_field.value,
-                datacenter_dashboard_html_output_dir=(
-                    datacenter_dashboard_html_output_dir_config_field.value
-                ),
-                datacenter_dashboard_reports_reference_enabled=bool(
-                    datacenter_dashboard_reports_reference_enabled_checkbox.value
-                ),
-                datacenter_dashboard_reports_reference_db=(
-                    datacenter_dashboard_reports_reference_db_field.value
-                ),
-                datacenter_dashboard_reports_reference_html_output_dir=(
-                    datacenter_dashboard_reports_reference_html_output_dir_field.value
-                ),
-                datacenter_dashboard_source_mode=(
-                    datacenter_dashboard_source_mode_dropdown.value or "reports"
-                ),
-                datacenter_enrichment_enabled=bool(
-                    datacenter_enrichment_enabled_checkbox.value
-                ),
-                datacenter_enrichment_apply_migrations=bool(
-                    datacenter_enrichment_apply_migrations_checkbox.value
-                ),
-                datacenter_enrichment_taxonomy_version=(
-                    datacenter_enrichment_taxonomy_version_config_field.value
-                ),
-                datacenter_enrichment_watchlist_file=(
-                    datacenter_enrichment_watchlist_file_config_field.value
-                ),
-                datacenter_enrichment_write_mode=(
-                    datacenter_enrichment_write_mode_field.value
-                    or DEFAULT_DATACENTER_ENRICHMENT_WRITE_MODE
-                ),
-                datacenter_dashboard_fallback_to_reports=bool(
-                    datacenter_dashboard_fallback_to_reports_checkbox.value
-                ),
-                datacenter_dashboard_run_acceptance_report=bool(
-                    datacenter_dashboard_run_acceptance_report_checkbox.value
-                ),
             )
             save_result = save_config_and_sync_systemd_timer(
                 config_path=config_path,
@@ -2822,42 +2657,6 @@ def run_app(page: ft.Page, config_path: str) -> None:
             run_time_field,
             ft.Row([omxh_checkbox, omxs_checkbox, usa_checkbox]),
             technical_relevance_checkbox,
-            ft.Divider(),
-            ft.Text("Datacenter dashboard config", size=18, weight=ft.FontWeight.BOLD),
-            ft.Row(
-                [
-                    datacenter_dashboard_enabled_checkbox,
-                    datacenter_enrichment_enabled_checkbox,
-                ],
-                wrap=True,
-            ),
-            ft.Row(
-                [
-                    datacenter_dashboard_fallback_to_reports_checkbox,
-                    datacenter_dashboard_run_acceptance_report_checkbox,
-                ],
-                wrap=True,
-            ),
-            ft.Row(
-                [
-                    datacenter_dashboard_reports_reference_enabled_checkbox,
-                    datacenter_enrichment_apply_migrations_checkbox,
-                ],
-                wrap=True,
-            ),
-            ft.Row(
-                [
-                    datacenter_dashboard_source_mode_dropdown,
-                    datacenter_enrichment_write_mode_field,
-                ],
-                wrap=True,
-            ),
-            datacenter_dashboard_db_config_field,
-            datacenter_dashboard_html_output_dir_config_field,
-            datacenter_enrichment_taxonomy_version_config_field,
-            datacenter_enrichment_watchlist_file_config_field,
-            datacenter_dashboard_reports_reference_db_field,
-            datacenter_dashboard_reports_reference_html_output_dir_field,
             skip_next_run_text,
             running_status_text,
             ft.Row(
@@ -3437,42 +3236,6 @@ def run_app(page: ft.Page, config_path: str) -> None:
     page.summary_field = summary_field
     page.logs_column = logs_column
     page.technical_relevance_checkbox = technical_relevance_checkbox
-    page.datacenter_dashboard_enabled_checkbox = datacenter_dashboard_enabled_checkbox
-    page.datacenter_enrichment_enabled_checkbox = datacenter_enrichment_enabled_checkbox
-    page.datacenter_enrichment_apply_migrations_checkbox = (
-        datacenter_enrichment_apply_migrations_checkbox
-    )
-    page.datacenter_dashboard_fallback_to_reports_checkbox = (
-        datacenter_dashboard_fallback_to_reports_checkbox
-    )
-    page.datacenter_dashboard_run_acceptance_report_checkbox = (
-        datacenter_dashboard_run_acceptance_report_checkbox
-    )
-    page.datacenter_dashboard_reports_reference_enabled_checkbox = (
-        datacenter_dashboard_reports_reference_enabled_checkbox
-    )
-    page.datacenter_dashboard_source_mode_dropdown = (
-        datacenter_dashboard_source_mode_dropdown
-    )
-    page.datacenter_enrichment_taxonomy_version_config_field = (
-        datacenter_enrichment_taxonomy_version_config_field
-    )
-    page.datacenter_enrichment_write_mode_field = (
-        datacenter_enrichment_write_mode_field
-    )
-    page.datacenter_enrichment_watchlist_file_config_field = (
-        datacenter_enrichment_watchlist_file_config_field
-    )
-    page.datacenter_dashboard_db_config_field = datacenter_dashboard_db_config_field
-    page.datacenter_dashboard_html_output_dir_config_field = (
-        datacenter_dashboard_html_output_dir_config_field
-    )
-    page.datacenter_dashboard_reports_reference_db_field = (
-        datacenter_dashboard_reports_reference_db_field
-    )
-    page.datacenter_dashboard_reports_reference_html_output_dir_field = (
-        datacenter_dashboard_reports_reference_html_output_dir_field
-    )
     page.save_config_button = save_config_button
     page.reload_config_button = reload_config_button
     page.datacenter_content = datacenter_content

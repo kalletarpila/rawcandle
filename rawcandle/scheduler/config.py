@@ -30,37 +30,9 @@ _OPTIONAL_CONFIG_KEYS.update(
         "ec_source_layer_mode",
         "ec_source_layer_require_legacy_reports_success",
         "ec_source_layer_only_on_new_signal_date",
-        "datacenter_dashboard_enabled",
-        "datacenter_dashboard_db",
-        "datacenter_dashboard_html_output_dir",
-        "datacenter_dashboard_reports_reference_enabled",
-        "datacenter_dashboard_reports_reference_db",
-        "datacenter_dashboard_reports_reference_html_output_dir",
-        "datacenter_dashboard_source_mode",
-        "datacenter_enrichment_enabled",
-        "datacenter_enrichment_apply_migrations",
-        "datacenter_enrichment_taxonomy_version",
-        "datacenter_enrichment_watchlist_file",
-        "datacenter_enrichment_write_mode",
-        "datacenter_dashboard_fallback_to_reports",
-        "datacenter_dashboard_run_acceptance_report",
     }
 )
 SUPPORTED_EC_SOURCE_LAYER_MODES = ("refresh_latest",)
-SUPPORTED_DATACENTER_DASHBOARD_SOURCE_MODES = ("reports", "enrichment")
-SUPPORTED_DATACENTER_ENRICHMENT_WRITE_MODES = (
-    "insert-missing",
-    "upsert",
-    "replace-date",
-)
-DEFAULT_DATACENTER_ENRICHMENT_TAXONOMY_VERSION = "DC_TAXONOMY_FULL_V1"
-DEFAULT_DATACENTER_ENRICHMENT_WATCHLIST_FILE = (
-    "/home/kalle/projects/rawcandle/watchlists/datacenter_watchlist.txt"
-)
-DEFAULT_DATACENTER_ENRICHMENT_WRITE_MODE = "replace-date"
-DEFAULT_DATACENTER_DASHBOARD_REPORTS_REFERENCE_DB = (
-    "/home/kalle/projects/rawcandle/temp/datacenter_dashboard_reports_reference.db"
-)
 
 
 @dataclass(eq=True)
@@ -82,30 +54,6 @@ class StockUpdateSchedulerConfig:
     ec_source_layer_mode: str = "refresh_latest"
     ec_source_layer_require_legacy_reports_success: bool = True
     ec_source_layer_only_on_new_signal_date: bool = True
-    datacenter_dashboard_enabled: bool = True
-    datacenter_dashboard_db: str = (
-        "/home/kalle/projects/rawcandle/data/ecosystem_dashboard.db"
-    )
-    datacenter_dashboard_html_output_dir: str = (
-        "/home/kalle/projects/rawcandle/swing_reports"
-    )
-    datacenter_dashboard_reports_reference_enabled: bool = False
-    datacenter_dashboard_reports_reference_db: str = (
-        DEFAULT_DATACENTER_DASHBOARD_REPORTS_REFERENCE_DB
-    )
-    datacenter_dashboard_reports_reference_html_output_dir: str = ""
-    datacenter_dashboard_source_mode: str = "reports"
-    datacenter_enrichment_enabled: bool = False
-    datacenter_enrichment_apply_migrations: bool = False
-    datacenter_enrichment_taxonomy_version: str = (
-        DEFAULT_DATACENTER_ENRICHMENT_TAXONOMY_VERSION
-    )
-    datacenter_enrichment_watchlist_file: str = (
-        DEFAULT_DATACENTER_ENRICHMENT_WATCHLIST_FILE
-    )
-    datacenter_enrichment_write_mode: str = DEFAULT_DATACENTER_ENRICHMENT_WRITE_MODE
-    datacenter_dashboard_fallback_to_reports: bool = True
-    datacenter_dashboard_run_acceptance_report: bool = False
 
 
 def validate_market_list(markets: List[str]) -> List[str]:
@@ -178,42 +126,6 @@ def validate_scheduler_config(
             raise ValueError("ec_source_layer_watchlist must be non-empty when ec_source_layer_enabled is true")
         if not config.ec_source_layer_backup_dir:
             raise ValueError("ec_source_layer_backup_dir must be non-empty when ec_source_layer_enabled is true")
-    if type(config.datacenter_dashboard_enabled) is not bool:
-        raise ValueError("datacenter_dashboard_enabled must be a bool")
-    if type(config.datacenter_dashboard_reports_reference_enabled) is not bool:
-        raise ValueError("datacenter_dashboard_reports_reference_enabled must be a bool")
-    if config.datacenter_dashboard_source_mode not in SUPPORTED_DATACENTER_DASHBOARD_SOURCE_MODES:
-        raise ValueError(
-            "datacenter_dashboard_source_mode must be one of: "
-            + ", ".join(SUPPORTED_DATACENTER_DASHBOARD_SOURCE_MODES)
-        )
-    if type(config.datacenter_enrichment_enabled) is not bool:
-        raise ValueError("datacenter_enrichment_enabled must be a bool")
-    if type(config.datacenter_enrichment_apply_migrations) is not bool:
-        raise ValueError("datacenter_enrichment_apply_migrations must be a bool")
-    if not config.datacenter_enrichment_taxonomy_version:
-        raise ValueError("datacenter_enrichment_taxonomy_version must be non-empty")
-    if config.datacenter_enrichment_write_mode not in SUPPORTED_DATACENTER_ENRICHMENT_WRITE_MODES:
-        raise ValueError(
-            "datacenter_enrichment_write_mode must be one of: "
-            + ", ".join(SUPPORTED_DATACENTER_ENRICHMENT_WRITE_MODES)
-        )
-    if type(config.datacenter_dashboard_fallback_to_reports) is not bool:
-        raise ValueError("datacenter_dashboard_fallback_to_reports must be a bool")
-    if type(config.datacenter_dashboard_run_acceptance_report) is not bool:
-        raise ValueError("datacenter_dashboard_run_acceptance_report must be a bool")
-    if not config.datacenter_dashboard_db:
-        raise ValueError("datacenter_dashboard_db must be non-empty")
-    if not config.datacenter_dashboard_html_output_dir:
-        raise ValueError("datacenter_dashboard_html_output_dir must be non-empty")
-    if not config.datacenter_dashboard_reports_reference_db:
-        raise ValueError("datacenter_dashboard_reports_reference_db must be non-empty")
-
-    normalized_reports_reference_html_output_dir = (
-        config.datacenter_dashboard_reports_reference_html_output_dir
-        or config.datacenter_dashboard_html_output_dir
-    )
-
     return StockUpdateSchedulerConfig(
         enabled_markets=enabled_markets,
         run_time=run_time,
@@ -236,26 +148,6 @@ def validate_scheduler_config(
         ec_source_layer_only_on_new_signal_date=(
             config.ec_source_layer_only_on_new_signal_date
         ),
-        datacenter_dashboard_enabled=config.datacenter_dashboard_enabled,
-        datacenter_dashboard_db=config.datacenter_dashboard_db,
-        datacenter_dashboard_html_output_dir=config.datacenter_dashboard_html_output_dir,
-        datacenter_dashboard_reports_reference_enabled=(
-            config.datacenter_dashboard_reports_reference_enabled
-        ),
-        datacenter_dashboard_reports_reference_db=(
-            config.datacenter_dashboard_reports_reference_db
-        ),
-        datacenter_dashboard_reports_reference_html_output_dir=(
-            normalized_reports_reference_html_output_dir
-        ),
-        datacenter_dashboard_source_mode=config.datacenter_dashboard_source_mode,
-        datacenter_enrichment_enabled=config.datacenter_enrichment_enabled,
-        datacenter_enrichment_apply_migrations=config.datacenter_enrichment_apply_migrations,
-        datacenter_enrichment_taxonomy_version=config.datacenter_enrichment_taxonomy_version,
-        datacenter_enrichment_watchlist_file=config.datacenter_enrichment_watchlist_file,
-        datacenter_enrichment_write_mode=config.datacenter_enrichment_write_mode,
-        datacenter_dashboard_fallback_to_reports=config.datacenter_dashboard_fallback_to_reports,
-        datacenter_dashboard_run_acceptance_report=config.datacenter_dashboard_run_acceptance_report,
     )
 
 
@@ -299,49 +191,6 @@ def scheduler_config_from_dict(data: Dict[str, Any]) -> StockUpdateSchedulerConf
         ec_source_layer_only_on_new_signal_date=data.get(
             "ec_source_layer_only_on_new_signal_date", True
         ),
-        datacenter_dashboard_enabled=data.get("datacenter_dashboard_enabled", True),
-        datacenter_dashboard_db=data.get(
-            "datacenter_dashboard_db",
-            "/home/kalle/projects/rawcandle/data/ecosystem_dashboard.db",
-        ),
-        datacenter_dashboard_html_output_dir=data.get(
-            "datacenter_dashboard_html_output_dir",
-            "/home/kalle/projects/rawcandle/swing_reports",
-        ),
-        datacenter_dashboard_reports_reference_enabled=data.get(
-            "datacenter_dashboard_reports_reference_enabled", False
-        ),
-        datacenter_dashboard_reports_reference_db=data.get(
-            "datacenter_dashboard_reports_reference_db",
-            DEFAULT_DATACENTER_DASHBOARD_REPORTS_REFERENCE_DB,
-        ),
-        datacenter_dashboard_reports_reference_html_output_dir=data.get(
-            "datacenter_dashboard_reports_reference_html_output_dir",
-            "",
-        ),
-        datacenter_dashboard_source_mode=data.get("datacenter_dashboard_source_mode", "reports"),
-        datacenter_enrichment_enabled=data.get("datacenter_enrichment_enabled", False),
-        datacenter_enrichment_apply_migrations=data.get(
-            "datacenter_enrichment_apply_migrations", False
-        ),
-        datacenter_enrichment_taxonomy_version=data.get(
-            "datacenter_enrichment_taxonomy_version",
-            DEFAULT_DATACENTER_ENRICHMENT_TAXONOMY_VERSION,
-        ),
-        datacenter_enrichment_watchlist_file=data.get(
-            "datacenter_enrichment_watchlist_file",
-            DEFAULT_DATACENTER_ENRICHMENT_WATCHLIST_FILE,
-        ),
-        datacenter_enrichment_write_mode=data.get(
-            "datacenter_enrichment_write_mode",
-            DEFAULT_DATACENTER_ENRICHMENT_WRITE_MODE,
-        ),
-        datacenter_dashboard_fallback_to_reports=data.get(
-            "datacenter_dashboard_fallback_to_reports", True
-        ),
-        datacenter_dashboard_run_acceptance_report=data.get(
-            "datacenter_dashboard_run_acceptance_report", False
-        ),
     )
     return validate_scheduler_config(config)
 
@@ -382,16 +231,5 @@ def create_default_scheduler_config(
         ec_source_layer_mode="refresh_latest",
         ec_source_layer_require_legacy_reports_success=True,
         ec_source_layer_only_on_new_signal_date=True,
-        datacenter_dashboard_enabled=True,
-        datacenter_dashboard_db="/home/kalle/projects/rawcandle/data/ecosystem_dashboard.db",
-        datacenter_dashboard_html_output_dir="/home/kalle/projects/rawcandle/swing_reports",
-        datacenter_dashboard_source_mode="reports",
-        datacenter_enrichment_enabled=False,
-        datacenter_enrichment_apply_migrations=False,
-        datacenter_enrichment_taxonomy_version=DEFAULT_DATACENTER_ENRICHMENT_TAXONOMY_VERSION,
-        datacenter_enrichment_watchlist_file=DEFAULT_DATACENTER_ENRICHMENT_WATCHLIST_FILE,
-        datacenter_enrichment_write_mode=DEFAULT_DATACENTER_ENRICHMENT_WRITE_MODE,
-        datacenter_dashboard_fallback_to_reports=True,
-        datacenter_dashboard_run_acceptance_report=False,
     )
     return validate_scheduler_config(config)

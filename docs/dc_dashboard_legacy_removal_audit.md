@@ -14,7 +14,9 @@ Need audit follow-up: [dc_dashboard_enrichment_need_audit.md](/home/kalle/projec
 
 Decision follow-up: [dc_dashboard_ui_enrichment_retirement_decision.md](/home/kalle/projects/rawcandle/docs/dc_dashboard_ui_enrichment_retirement_decision.md) records the user decision `RETIRE_DASHBOARD_UI_HTML_AND_ENRICHMENT`. Runtime neutralization and DB cleanup remain separate later phases.
 
-Removal is blocked. Current dashboard/enrichment behavior appears entangled with the `dc_dashboard_*_daily` tables. Any removal decision must first split current enrichment from truly obsolete snapshot-style tables.
+Phase 1 status: scheduler/config/dashboard hooks for dashboard UI/HTML/enrichment have now been neutralized. Scheduler config, scheduler runner, scheduler CLI output, and scheduler UI settings no longer expose the retired dashboard/enrichment path. No DB cleanup was done; migrations `002`/`003`, current `dc_*`, current legacy Datacenter reports, current `ec_*`, and `ec_source_layer` were preserved.
+
+Runtime hook removal is no longer blocked because the retirement decision has been made and Phase 1 has neutralized scheduler/config hooks. DB removal remains blocked until a separate preflight, backup, rollback plan, and explicit drop approval are completed for the five current `dc_dashboard_*_daily` tables.
 
 This audit does not affect current `dc_*` source facts, current legacy Datacenter reports, current `ec_*`, or `ec_source_layer`.
 

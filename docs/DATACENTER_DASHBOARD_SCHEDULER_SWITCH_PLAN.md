@@ -1,5 +1,7 @@
 # Datacenter Dashboard Scheduler Source-Mode Switch Plan
 
+Status: RETIRED. The decision `RETIRE_DASHBOARD_UI_HTML_AND_ENRICHMENT` supersedes this switch plan. Phase 1 neutralized the scheduler/config/dashboard hooks that would have switched the scheduler dashboard post-step from reports mode to enrichment mode. This document is retained as historical planning context only.
+
 ## 1. Purpose
 
 This document defines the controlled operator plan for eventually switching the Datacenter dashboard scheduler post-step from reports-mode to enrichment-mode.

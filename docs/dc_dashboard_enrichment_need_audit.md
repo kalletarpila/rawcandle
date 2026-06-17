@@ -6,6 +6,8 @@ Decision assessment: `AMBIGUOUS_NEEDS_UI_DECISION`, with interim recommendation 
 
 Decision follow-up: [dc_dashboard_ui_enrichment_retirement_decision.md](/home/kalle/projects/rawcandle/docs/dc_dashboard_ui_enrichment_retirement_decision.md) now records the user decision `RETIRE_DASHBOARD_UI_HTML_AND_ENRICHMENT`. This supersedes the interim preserve-for-now stance for future work, while preserving current `dc_*`, current `ec_*`, and `ec_source_layer` boundaries.
 
+Phase 1 status: scheduler/config/dashboard hooks for dashboard UI/HTML/enrichment have been neutralized after that decision. The scheduler and scheduler CLI no longer keep the enrichment source-mode path active. No DB tables were dropped, migrations `002`/`003` were not changed, and this audit remains historical evidence for why DB cleanup must stay behind a separate preflight/backup step.
+
 The current `dc_dashboard_*_daily` tables are not required by the default scheduler dashboard path: `datacenter_dashboard_source_mode` defaults to `reports`, and `datacenter_enrichment_enabled` defaults to `False`. The production-safe reference path documented in the repository remains `.md reports` -> parser / decision logic -> `EcosystemDashboardInput` -> `ecosystem_dashboard.db` -> HTML.
 
 They are still not safe to delete as a pure cleanup. Repository evidence shows an implemented opt-in/manual enrichment path, scheduler/source-mode hooks, scheduler UI fields, tests, diagnostics, acceptance checks, and a builder/export path that consume these five `_daily` tables.

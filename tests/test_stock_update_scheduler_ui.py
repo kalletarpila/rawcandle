@@ -68,26 +68,6 @@ from dev_tools.stock_update_scheduler_ui import (
 from rawcandle.scheduler.config import StockUpdateSchedulerConfig, read_scheduler_config, write_scheduler_config
 from rawcandle.scheduler.runner import SchedulerAlreadyRunningError
 
-
-def _build_config_kwargs():
-    return {
-        "datacenter_dashboard_enabled": True,
-        "datacenter_dashboard_db": "/tmp/ecosystem_dashboard.db",
-        "datacenter_dashboard_html_output_dir": "/tmp/html",
-        "datacenter_dashboard_reports_reference_enabled": False,
-        "datacenter_dashboard_reports_reference_db": "/tmp/reports_reference.db",
-        "datacenter_dashboard_reports_reference_html_output_dir": "/tmp/reference_html",
-        "datacenter_dashboard_source_mode": "reports",
-        "datacenter_enrichment_enabled": False,
-        "datacenter_enrichment_apply_migrations": False,
-        "datacenter_enrichment_taxonomy_version": "DC_TAXONOMY_FULL_V1",
-        "datacenter_enrichment_watchlist_file": "/tmp/watchlist.txt",
-        "datacenter_enrichment_write_mode": "replace-date",
-        "datacenter_dashboard_fallback_to_reports": True,
-        "datacenter_dashboard_run_acceptance_report": False,
-    }
-
-
 class _FakePage:
     def __init__(self):
         self.controls = []
@@ -647,7 +627,6 @@ def test_build_config_from_ui_values_normalizes_markets():
         run_time="05:30",
         selected_markets=["OMXH", " omxs "],
         technical_relevance_enabled=True,
-        **_build_config_kwargs(),
     )
 
     assert config.enabled_markets == ["omxh", "omxs"]
@@ -663,7 +642,6 @@ def test_build_config_from_ui_values_does_not_include_usa_unless_selected():
         run_time="05:30",
         selected_markets=["OMXH", " omxs "],
         technical_relevance_enabled=False,
-        **_build_config_kwargs(),
     )
 
     assert config.enabled_markets == ["omxh", "omxs"]
@@ -681,7 +659,6 @@ def test_build_config_from_ui_values_invalid_run_time_raises_value_error():
             run_time="5:30",
             selected_markets=["OMXH"],
             technical_relevance_enabled=False,
-            **_build_config_kwargs(),
         )
 
 
@@ -694,7 +671,6 @@ def test_config_write_read_roundtrip_through_existing_config_module(tmp_path):
         run_time="05:30",
         selected_markets=["OMXH", "OMXS"],
         technical_relevance_enabled=True,
-        **_build_config_kwargs(),
     )
     path = tmp_path / "scheduler.json"
 
@@ -823,181 +799,6 @@ def test_run_app_save_config_persists_technical_relevance_checkbox_state(
     unchecked_page.save_config_button.on_click(None)
     saved_unchecked = read_scheduler_config(str(config_path))
     assert saved_unchecked.technical_relevance_enabled is False
-
-
-def test_run_app_loads_datacenter_dashboard_scheduler_fields(
-    tmp_path, monkeypatch
-):
-    config_path = tmp_path / "scheduler_datacenter_fields.json"
-    config_path.write_text(
-        json.dumps(
-            {
-                "analysis_db_path": "/tmp/analysis.db",
-                "enabled_markets": ["omxh", "usa"],
-                "log_dir": "/tmp/logs",
-                "osakedata_db_path": "/tmp/osakedata.db",
-                "run_time": "05:30",
-                "timezone": "Europe/Helsinki",
-                "datacenter_dashboard_enabled": True,
-                "datacenter_enrichment_enabled": True,
-                "datacenter_enrichment_apply_migrations": False,
-                "datacenter_dashboard_fallback_to_reports": True,
-                "datacenter_dashboard_run_acceptance_report": True,
-                "datacenter_dashboard_reports_reference_enabled": True,
-                "datacenter_dashboard_source_mode": "enrichment",
-                "datacenter_enrichment_taxonomy_version": "DC_TAXONOMY_FULL_V1",
-                "datacenter_enrichment_watchlist_file": "/tmp/watchlist.txt",
-                "datacenter_enrichment_write_mode": "replace-date",
-                "datacenter_dashboard_db": "/tmp/ecosystem_dashboard.db",
-                "datacenter_dashboard_html_output_dir": "/tmp/html",
-                "datacenter_dashboard_reports_reference_db": "/tmp/reports_reference.db",
-                "datacenter_dashboard_reports_reference_html_output_dir": "/tmp/reference_html",
-            }
-        ),
-        encoding="utf-8",
-    )
-    _install_dashboard_launcher_common_mocks(monkeypatch, available_dates=["2026-05-25"])
-
-    page = _FakePage()
-    run_app(page, str(config_path))
-
-    assert page.datacenter_dashboard_enabled_checkbox.value is True
-    assert page.datacenter_enrichment_enabled_checkbox.value is True
-    assert page.datacenter_enrichment_apply_migrations_checkbox.value is False
-    assert page.datacenter_dashboard_fallback_to_reports_checkbox.value is True
-    assert page.datacenter_dashboard_run_acceptance_report_checkbox.value is True
-    assert page.datacenter_dashboard_reports_reference_enabled_checkbox.value is True
-    assert page.datacenter_dashboard_source_mode_dropdown.value == "enrichment"
-    assert page.datacenter_enrichment_taxonomy_version_config_field.value == "DC_TAXONOMY_FULL_V1"
-    assert page.datacenter_enrichment_watchlist_file_config_field.value == "/tmp/watchlist.txt"
-    assert page.datacenter_enrichment_write_mode_field.value == "replace-date"
-    assert page.datacenter_dashboard_db_config_field.value == "/tmp/ecosystem_dashboard.db"
-    assert page.datacenter_dashboard_html_output_dir_config_field.value == "/tmp/html"
-    assert page.datacenter_dashboard_reports_reference_db_field.value == "/tmp/reports_reference.db"
-    assert (
-        page.datacenter_dashboard_reports_reference_html_output_dir_field.value
-        == "/tmp/reference_html"
-    )
-
-
-def test_run_app_save_config_persists_datacenter_dashboard_scheduler_fields(
-    tmp_path, monkeypatch
-):
-    config_path = tmp_path / "scheduler_save_datacenter_fields.json"
-    config_path.write_text(
-        json.dumps(
-            {
-                "analysis_db_path": "/tmp/analysis.db",
-                "enabled_markets": ["omxh"],
-                "log_dir": str(tmp_path / "logs"),
-                "osakedata_db_path": "/tmp/osakedata.db",
-                "run_time": "05:30",
-                "technical_relevance_enabled": False,
-                "timezone": "Europe/Helsinki",
-            }
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.load_latest_scheduler_summary", lambda log_dir: None)
-    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.list_scheduler_log_files", lambda log_dir: [])
-    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.read_scheduler_status", lambda log_dir: None)
-    monkeypatch.setattr(
-        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
-        lambda: {"timer_path": "/tmp/timer", "on_calendar": "*-*-* 05:30:00", "installed": False, "status_summary": "missing", "error": None},
-    )
-    monkeypatch.setattr(
-        "dev_tools.stock_update_scheduler_ui.get_systemd_user_timer_path",
-        lambda: tmp_path / "missing.timer",
-    )
-
-    page = _FakePage()
-    run_app(page, str(config_path))
-    page.datacenter_enrichment_enabled_checkbox.value = True
-    page.datacenter_dashboard_source_mode_dropdown.value = "enrichment"
-    page.datacenter_dashboard_fallback_to_reports_checkbox.value = True
-    page.datacenter_dashboard_run_acceptance_report_checkbox.value = True
-    page.datacenter_dashboard_reports_reference_enabled_checkbox.value = True
-    page.datacenter_enrichment_apply_migrations_checkbox.value = False
-    page.datacenter_dashboard_reports_reference_db_field.value = "/tmp/reports_reference.db"
-    page.datacenter_dashboard_reports_reference_html_output_dir_field.value = "/tmp/reference_html"
-    page.datacenter_dashboard_db_config_field.value = "/tmp/ecosystem_dashboard.db"
-    page.datacenter_dashboard_html_output_dir_config_field.value = "/tmp/html"
-    page.datacenter_enrichment_taxonomy_version_config_field.value = "DC_TAXONOMY_FULL_V1"
-    page.datacenter_enrichment_watchlist_file_config_field.value = "/tmp/watchlist.txt"
-    page.datacenter_enrichment_write_mode_field.value = "replace-date"
-    page.save_config_button.on_click(None)
-
-    saved = read_scheduler_config(str(config_path))
-    assert saved.datacenter_enrichment_enabled is True
-    assert saved.datacenter_dashboard_source_mode == "enrichment"
-    assert saved.datacenter_dashboard_fallback_to_reports is True
-    assert saved.datacenter_dashboard_run_acceptance_report is True
-    assert saved.datacenter_dashboard_reports_reference_enabled is True
-    assert saved.datacenter_enrichment_apply_migrations is False
-    assert saved.datacenter_dashboard_reports_reference_db == "/tmp/reports_reference.db"
-    assert (
-        saved.datacenter_dashboard_reports_reference_html_output_dir
-        == "/tmp/reference_html"
-    )
-    assert saved.datacenter_dashboard_db == "/tmp/ecosystem_dashboard.db"
-    assert saved.datacenter_dashboard_html_output_dir == "/tmp/html"
-    assert saved.datacenter_enrichment_taxonomy_version == "DC_TAXONOMY_FULL_V1"
-    assert saved.datacenter_enrichment_watchlist_file == "/tmp/watchlist.txt"
-    assert saved.datacenter_enrichment_write_mode == "replace-date"
-
-
-def test_run_app_backward_compatible_missing_reports_reference_fields_saves_defaults(
-    tmp_path, monkeypatch
-):
-    config_path = tmp_path / "scheduler_backward_compatible.json"
-    config_path.write_text(
-        json.dumps(
-            {
-                "analysis_db_path": "/tmp/analysis.db",
-                "enabled_markets": ["omxh"],
-                "log_dir": str(tmp_path / "logs"),
-                "osakedata_db_path": "/tmp/osakedata.db",
-                "run_time": "05:30",
-                "datacenter_dashboard_enabled": True,
-                "datacenter_dashboard_db": "/tmp/ecosystem_dashboard.db",
-                "datacenter_dashboard_html_output_dir": "/tmp/html",
-                "datacenter_dashboard_source_mode": "reports",
-                "datacenter_enrichment_enabled": False,
-                "datacenter_enrichment_apply_migrations": False,
-                "datacenter_enrichment_taxonomy_version": "DC_TAXONOMY_FULL_V1",
-                "datacenter_enrichment_watchlist_file": "/tmp/watchlist.txt",
-                "datacenter_enrichment_write_mode": "replace-date",
-                "datacenter_dashboard_fallback_to_reports": True,
-                "datacenter_dashboard_run_acceptance_report": False,
-                "timezone": "Europe/Helsinki",
-            }
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.load_latest_scheduler_summary", lambda log_dir: None)
-    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.list_scheduler_log_files", lambda log_dir: [])
-    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.read_scheduler_status", lambda log_dir: None)
-    monkeypatch.setattr(
-        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
-        lambda: {"timer_path": "/tmp/timer", "on_calendar": "*-*-* 05:30:00", "installed": False, "status_summary": "missing", "error": None},
-    )
-    monkeypatch.setattr(
-        "dev_tools.stock_update_scheduler_ui.get_systemd_user_timer_path",
-        lambda: tmp_path / "missing.timer",
-    )
-
-    page = _FakePage()
-    run_app(page, str(config_path))
-
-    assert page.datacenter_dashboard_reports_reference_enabled_checkbox.value is False
-    assert page.datacenter_dashboard_reports_reference_db_field.value
-    assert page.datacenter_dashboard_reports_reference_html_output_dir_field.value == "/tmp/html"
-
-    page.save_config_button.on_click(None)
-    saved = read_scheduler_config(str(config_path))
-    assert saved.datacenter_dashboard_reports_reference_enabled is False
-    assert saved.datacenter_dashboard_reports_reference_db
-    assert saved.datacenter_dashboard_reports_reference_html_output_dir == "/tmp/html"
 
 
 def test_scheduler_ui_port_constant_is_fixed():
@@ -1353,7 +1154,7 @@ def test_run_app_exposes_datacenter_tab_defaults_and_button_wiring(
         lambda **kwargs: captured.append(kwargs),
     )
     monkeypatch.setattr(
-        "dev_tools.stock_update_scheduler_ui.inspect_scheduler_dashboard_config",
+        "dev_tools.stock_update_scheduler_ui.build_retired_datacenter_dashboard_ui_plan",
         lambda **kwargs: type(
             "Inspection",
             (),
@@ -1567,7 +1368,7 @@ def test_datacenter_build_db_html_for_date_invalid_or_empty_date_shows_error_and
     )
     _install_dashboard_launcher_common_mocks(monkeypatch, available_dates=["2026-05-25"])
     monkeypatch.setattr(
-        "dev_tools.stock_update_scheduler_ui.inspect_scheduler_dashboard_config",
+        "dev_tools.stock_update_scheduler_ui.build_retired_datacenter_dashboard_ui_plan",
         lambda **kwargs: type(
             "Inspection",
             (),
@@ -1628,7 +1429,7 @@ def test_datacenter_refresh_status_and_plan_do_not_call_heavy_paths(
     )
     _install_dashboard_launcher_common_mocks(monkeypatch, available_dates=["2026-05-25"])
     monkeypatch.setattr(
-        "dev_tools.stock_update_scheduler_ui.inspect_scheduler_dashboard_config",
+        "dev_tools.stock_update_scheduler_ui.build_retired_datacenter_dashboard_ui_plan",
         lambda **kwargs: type(
             "Inspection",
             (),
@@ -1857,7 +1658,7 @@ def test_datacenter_dashboard_viewer_refresh_status_updates_paths_and_existence(
     html_path.write_text("ok", encoding="utf-8")
     dashboard_db.write_text("db", encoding="utf-8")
     monkeypatch.setattr(
-        "dev_tools.stock_update_scheduler_ui.inspect_scheduler_dashboard_config",
+        "dev_tools.stock_update_scheduler_ui.build_retired_datacenter_dashboard_ui_plan",
         lambda **kwargs: SimpleNamespace(
             enabled=1,
             ecosystem_code="DATACENTER",
@@ -1937,7 +1738,7 @@ def test_datacenter_dashboard_viewer_inspect_snapshot_uses_read_model_and_shows_
     _install_dashboard_launcher_common_mocks(monkeypatch)
     snapshot = _dashboard_snapshot()
     monkeypatch.setattr(
-        "dev_tools.stock_update_scheduler_ui.inspect_scheduler_dashboard_config",
+        "dev_tools.stock_update_scheduler_ui.build_retired_datacenter_dashboard_ui_plan",
         lambda **kwargs: SimpleNamespace(
             enabled=1,
             ecosystem_code="DATACENTER",
@@ -2010,7 +1811,7 @@ def test_datacenter_dashboard_viewer_render_existing_snapshot_calls_db_backed_ht
     html_dir.mkdir()
     snapshot = _dashboard_snapshot(report_date="2026-05-22", run_id="RUN456")
     monkeypatch.setattr(
-        "dev_tools.stock_update_scheduler_ui.inspect_scheduler_dashboard_config",
+        "dev_tools.stock_update_scheduler_ui.build_retired_datacenter_dashboard_ui_plan",
         lambda **kwargs: SimpleNamespace(
             enabled=1,
             ecosystem_code="DATACENTER",
@@ -2081,7 +1882,7 @@ def test_datacenter_dashboard_viewer_render_existing_snapshot_fails_clearly_when
     )
     _install_dashboard_launcher_common_mocks(monkeypatch)
     monkeypatch.setattr(
-        "dev_tools.stock_update_scheduler_ui.inspect_scheduler_dashboard_config",
+        "dev_tools.stock_update_scheduler_ui.build_retired_datacenter_dashboard_ui_plan",
         lambda **kwargs: SimpleNamespace(
             enabled=1,
             ecosystem_code="DATACENTER",
@@ -2139,7 +1940,7 @@ def test_datacenter_dashboard_viewer_open_html_file_uses_open_helper_and_missing
     html_path = html_dir / "datacenter_dashboard_2026-05-22.html"
     html_path.write_text("ok", encoding="utf-8")
     monkeypatch.setattr(
-        "dev_tools.stock_update_scheduler_ui.inspect_scheduler_dashboard_config",
+        "dev_tools.stock_update_scheduler_ui.build_retired_datacenter_dashboard_ui_plan",
         lambda **kwargs: SimpleNamespace(
             enabled=1,
             ecosystem_code="DATACENTER",
