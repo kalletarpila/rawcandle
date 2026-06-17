@@ -14,6 +14,8 @@ Phase C status: Canonical V2 core modules and direct non-CLI V2 tests were remov
 
 Phase D status: V2-only documents were archived under `docs/archive/canonical_report_v2/`, and the retired dev_tools stub policy was documented. No DB cleanup was performed.
 
+Phase E status: migration and database retirement strategy is documented in `docs/dc_report_v2_migration_db_retirement_strategy.md`. Migrations `004`-`014` remain unchanged; no DB cleanup was performed.
+
 The repository still contains archived historical Canonical Report V2 documentation, migrations `004`-`014`, retired dev_tools CLI stubs, and DB cleanup references around `dc_report_*_v2`. It does not appear wired into the current scheduler path. The original audit found that `analysis/database_manager.py` applied the Canonical V2 migrations during general analysis DB initialization; Phase B neutralized that hook. Phase C removed the V2 builders/writers/formatter loaders/parity code and their direct non-CLI tests. Phase D archived the old V2 docs as historical material only.
 
 The safe next step is not DB cleanup. Archive/remove V2-only documentation in Phase D, then handle migration and DB cleanup strategy separately.

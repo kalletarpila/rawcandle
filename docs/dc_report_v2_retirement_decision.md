@@ -16,6 +16,8 @@ Phase C status: Canonical Report V2 core modules and direct non-CLI V2 tests wer
 
 Phase D status: V2-only documents were archived under `docs/archive/canonical_report_v2/`. Retired `dev_tools/run_report_canonical_v2_*.py` stubs remain intentionally for compatibility and discoverability. Stub policy: return exit code `2`, do not access DBs, do not write outputs, do not import V2 core modules, and point users to this retirement decision. Full deletion of retired stubs is a later optional step after consumers have had time to discover the retirement behavior.
 
+Phase E status: migration and database retirement strategy is documented in `docs/dc_report_v2_migration_db_retirement_strategy.md`. Recommendation: keep migrations `004`-`014` temporarily as historical inert migrations; handle any `dc_report_*_v2` DB cleanup later through explicit read-only preflight, verified backup, and approved drop plan.
+
 ## Scope boundary
 
 Targeted for later retirement:
