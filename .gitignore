@@ -108,3 +108,13 @@ analysis/*.log
 
 # Local API keys / environment overrides
 .env.local
+
+# Local databases and SQLite runtime files
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
