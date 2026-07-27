@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import run_datacenter_swing_pipeline as pipeline_cli
 from analysis.datacenter_indices import swing_pipeline_orchestrator as orchestrator
 from analysis.database_manager import DatabaseManager
 from analysis.datacenter_indices.pipeline_watermark import list_pipeline_watermarks
@@ -51,6 +52,53 @@ def _fake_technical_relevance_summary(run_id: str = "AUTO_REL_RUN") -> dict[str,
             "missing_bar_index_count": 0,
         }
     }
+
+
+def test_pipeline_cli_passes_stage2_incremental_flags_to_orchestrator(tmp_path, monkeypatch, capsys):
+    calls: list[dict[str, object]] = []
+
+    def _run_pipeline(**kwargs):
+        calls.append(dict(kwargs))
+        return {
+            "summary": {
+                "pipeline_status": "OK",
+                "stage2_incremental_enabled": "true",
+                "stage2_plan_mode": "INCREMENTAL",
+            }
+        }
+
+    monkeypatch.setattr(pipeline_cli, "run_datacenter_swing_pipeline", _run_pipeline)
+
+    exit_code = run_datacenter_swing_pipeline_main(
+        _base_args(tmp_path)
+        + [
+            "--stage2-incremental",
+            "--stage2-overlap-trading-days",
+            "0",
+        ]
+    )
+
+    assert exit_code == 0
+    assert calls[0]["stage2_incremental"] is True
+    assert calls[0]["stage2_overlap_trading_days"] == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert "SUMMARY stage2_incremental_enabled=true" in lines
+    assert "SUMMARY stage2_plan_mode=INCREMENTAL" in lines
+
+
+def test_pipeline_cli_rejects_negative_stage2_overlap(tmp_path, capsys):
+    exit_code = run_datacenter_swing_pipeline_main(
+        _base_args(tmp_path)
+        + [
+            "--stage2-incremental",
+            "--stage2-overlap-trading-days",
+            "-1",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "stage2-overlap-trading-days" in captured.err
 
 
 def _seed_persisted_ticker_rows(

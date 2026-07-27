@@ -25,6 +25,11 @@ from analysis.datacenter_indices.technical_relevance_context import (
     load_datacenter_pipeline_technical_relevance_tickers,
 )
 from analysis.datacenter_indices.pipeline_watermark import upsert_pipeline_watermark
+from analysis.datacenter_indices.pipeline_plan import (
+    DEFAULT_STAGE2_INCREMENTAL_OVERLAP_TRADING_DAYS,
+    Stage2IncrementalPlan,
+    build_stage2_incremental_plan,
+)
 from analysis.datacenter_indices.swing_weekly_report import (
     format_weekly_swing_report_summary_lines,
     write_weekly_swing_report,
@@ -108,6 +113,8 @@ class PipelineStage:
     argv: list[str]
     runner: Callable[[], dict[str, object] | None]
     watermark_builder: Callable[[dict[str, object] | None], dict[str, object]] | None = None
+    skip_status: str | None = None
+    skip_reason: str | None = None
 
 
 def _normalize_run_id_token(value: str) -> str:
@@ -152,20 +159,26 @@ def _timestamp_output_path(path: Path, *, date_value: str, hhmm: str) -> Path:
 
 def format_pipeline_final_summary_lines(summary: dict[str, object]) -> list[str]:
     lines: list[str] = []
+    printed_keys: set[str] = set()
     for key in FINAL_PIPELINE_SUMMARY_ORDER:
         if key == "pipeline_status":
             continue
         if key in summary:
             lines.append(f"SUMMARY {key}={summary[key]}")
+            printed_keys.add(key)
     for stage_key in PIPELINE_STAGE_KEYS:
-        status_key = f"pipeline_stage.{stage_key}.status"
-        duration_key = f"pipeline_stage.{stage_key}.duration_seconds"
-        if status_key in summary:
-            lines.append(f"SUMMARY {status_key}={summary[status_key]}")
-        if duration_key in summary:
-            lines.append(f"SUMMARY {duration_key}={summary[duration_key]}")
+        for suffix in (
+            "status",
+            "duration_seconds",
+            "execution_status",
+            "skip_reason",
+        ):
+            key = f"pipeline_stage.{stage_key}.{suffix}"
+            if key in summary:
+                lines.append(f"SUMMARY {key}={summary[key]}")
+                printed_keys.add(key)
     for key, value in summary.items():
-        if key not in FINAL_PIPELINE_SUMMARY_ORDER and not key.startswith("pipeline_stage."):
+        if key not in printed_keys and key != "pipeline_status":
             lines.append(f"SUMMARY {key}={value}")
     if "pipeline_status" in summary:
         lines.append(f"SUMMARY pipeline_status={summary['pipeline_status']}")
@@ -181,7 +194,86 @@ def _build_stage_duration_summary_defaults() -> dict[str, str]:
     for stage_key in PIPELINE_STAGE_KEYS:
         summary[f"pipeline_stage.{stage_key}.status"] = "SKIPPED"
         summary[f"pipeline_stage.{stage_key}.duration_seconds"] = "0.000"
+        summary[f"pipeline_stage.{stage_key}.execution_status"] = "NOT_RUN"
     return summary
+
+
+def _csv_or_none(values: list[str]) -> str:
+    return ",".join(values) if values else "NONE"
+
+
+def _stage2_plan_summary_defaults(*, enabled: bool) -> dict[str, object]:
+    return {
+        "stage2_incremental_enabled": "true" if enabled else "false",
+        "stage2_plan": "NOT_REQUESTED" if not enabled else "UNKNOWN",
+        "stage2_plan_mode": "LEGACY_FULL_RANGE" if not enabled else "UNKNOWN",
+        "stage2_planned_materialization_start": "NONE",
+        "stage2_planned_materialization_end": "NONE",
+        "stage2_execution_status": "LEGACY_EXECUTION" if not enabled else "NOT_RUN",
+        "stage2_attempted_dates": "NONE",
+        "stage2_completed_dates": "NONE",
+        "stage2_actual_materialized_start": "NONE",
+        "stage2_actual_materialized_end": "NONE",
+        "stage2_retry_required": "false",
+        "downstream_dirty_start": "NONE",
+        "downstream_dirty_end": "NONE",
+        "downstream_incremental_stages": "NONE",
+        "planner_skipped_stages": "NONE",
+    }
+
+
+def _stage2_plan_summary(plan: Stage2IncrementalPlan) -> dict[str, object]:
+    downstream_stages = [
+        str(item.stage_number)
+        for item in plan.downstream_stage_plans
+        if item.included_in_pilot_dirty_chain
+    ]
+    planned_start = plan.materialization_start or "NONE"
+    planned_end = plan.materialization_end or "NONE"
+    return {
+        "stage2_incremental_enabled": "true",
+        "stage2_plan": plan.reason_code,
+        "stage2_plan_mode": plan.mode,
+        "stage2_planned_materialization_start": planned_start,
+        "stage2_planned_materialization_end": planned_end,
+        "stage2_execution_status": "SKIPPED_BY_INCREMENTAL_PLAN" if plan.mode == "SKIP" else "PLANNED",
+        "stage2_attempted_dates": "NONE",
+        "stage2_completed_dates": "NONE",
+        "stage2_actual_materialized_start": "NONE",
+        "stage2_actual_materialized_end": "NONE",
+        "stage2_retry_required": "false",
+        "downstream_dirty_start": planned_start if plan.mode != "SKIP" else "NONE",
+        "downstream_dirty_end": planned_end if plan.mode != "SKIP" else "NONE",
+        "downstream_incremental_stages": ",".join(downstream_stages) if downstream_stages else "NONE",
+        "planner_skipped_stages": (
+            "ticker_swing_base_snapshots,group_swing_base_metrics,group_timing_states,"
+            "group_overheat_risk,ticker_scanners"
+            if plan.mode == "SKIP"
+            else "NONE"
+        ),
+    }
+
+
+def _stage2_success_summary(plan: Stage2IncrementalPlan) -> dict[str, object]:
+    return {
+        "stage2_execution_status": "EXECUTED",
+        "stage2_attempted_dates": _csv_or_none(plan.output_dates),
+        "stage2_completed_dates": _csv_or_none(plan.output_dates),
+        "stage2_actual_materialized_start": plan.materialization_start or "NONE",
+        "stage2_actual_materialized_end": plan.materialization_end or "NONE",
+        "stage2_retry_required": "false",
+    }
+
+
+def _stage2_failed_summary(plan: Stage2IncrementalPlan) -> dict[str, object]:
+    return {
+        "stage2_execution_status": "FAILED",
+        "stage2_attempted_dates": _csv_or_none(plan.output_dates),
+        "stage2_completed_dates": "NONE",
+        "stage2_actual_materialized_start": "NONE",
+        "stage2_actual_materialized_end": "NONE",
+        "stage2_retry_required": "true",
+    }
 
 
 def _format_technical_relevance_stage_summary_lines(
@@ -545,10 +637,14 @@ def run_datacenter_swing_pipeline(
     skip_audit: bool = False,
     skip_reports: bool = False,
     audit_strict: bool = False,
+    stage2_incremental: bool = False,
+    stage2_overlap_trading_days: int = DEFAULT_STAGE2_INCREMENTAL_OVERLAP_TRADING_DAYS,
     dry_run: bool = False,
     generated_at_utc: str | None = None,
 ) -> dict[str, object]:
     total_start = perf_counter()
+    if stage2_overlap_trading_days < 0:
+        raise ValueError("stage2_overlap_trading_days must be zero or greater")
     if technical_relevance_run_id is not None and not technical_relevance_run_id.strip():
         raise ValueError("technical_relevance_run_id must be non-empty when provided")
     if no_technical_relevance and technical_relevance_run_id is not None:
@@ -603,6 +699,32 @@ def run_datacenter_swing_pipeline(
     ticker_swing_snapshot_profile_summary: dict[str, object] = {}
     if profile_technical_relevance and technical_relevance_mode != "auto":
         technical_relevance_profile_summary["technical_relevance_profile.status"] = technical_relevance_status
+    stage2_plan: Stage2IncrementalPlan | None = None
+    stage2_summary: dict[str, object] = _stage2_plan_summary_defaults(enabled=stage2_incremental)
+    stage2_start_date = start_date
+    stage2_end_date = signal_date
+    stage2_chain_start_date = start_date
+    stage2_chain_end_date = signal_date
+    if stage2_incremental:
+        stage2_plan = build_stage2_incremental_plan(
+            analysis_db_path=analysis_db,
+            price_db_path=price_db,
+            taxonomy_csv_path=taxonomy_csv,
+            taxonomy_version=taxonomy_version,
+            market=market,
+            requested_start=start_date,
+            requested_end=signal_date,
+            signal_version=signal_version,
+            overlap_trading_days=stage2_overlap_trading_days,
+        )
+        stage2_summary = _stage2_plan_summary(stage2_plan)
+        if stage2_plan.mode != "SKIP":
+            if stage2_plan.materialization_start is None or stage2_plan.materialization_end is None:
+                raise ValueError("Stage 2 incremental plan is missing materialization range")
+            stage2_start_date = stage2_plan.materialization_start
+            stage2_end_date = stage2_plan.materialization_end
+            stage2_chain_start_date = stage2_plan.materialization_start
+            stage2_chain_end_date = stage2_plan.materialization_end
     output_hhmm = _resolve_output_timestamp_hhmm(generated_at_utc)
     daily_output_md, daily_output_csv = _build_timestamped_report_output_paths(
         output_dir=output_dir,
@@ -685,9 +807,9 @@ def run_datacenter_swing_pipeline(
         "--taxonomy-csv",
         str(taxonomy_csv),
         "--start-date",
-        start_date,
+        stage2_start_date,
         "--end-date",
-        signal_date,
+        stage2_end_date,
         "--market",
         market,
         "--signal-version",
@@ -709,11 +831,21 @@ def run_datacenter_swing_pipeline(
                 "market": market,
                 "signal_version": signal_version,
                 "calc_version": "",
-                "start_date": start_date,
-                "end_date": signal_date,
+                "start_date": stage2_start_date,
+                "end_date": stage2_end_date,
                 "row_count": None,
                 "status": "OK",
             },
+            skip_status=(
+                "SKIPPED_BY_INCREMENTAL_PLAN"
+                if stage2_plan is not None and stage2_plan.mode == "SKIP"
+                else None
+            ),
+            skip_reason=(
+                str(stage2_plan.reason_code)
+                if stage2_plan is not None and stage2_plan.mode == "SKIP"
+                else None
+            ),
         )
     )
 
@@ -723,9 +855,9 @@ def run_datacenter_swing_pipeline(
         "--taxonomy-csv",
         str(taxonomy_csv),
         "--start-date",
-        start_date,
+        stage2_chain_start_date,
         "--end-date",
-        signal_date,
+        stage2_chain_end_date,
         "--signal-version",
         signal_version,
         "--write-mode",
@@ -743,11 +875,21 @@ def run_datacenter_swing_pipeline(
                 "market": "",
                 "signal_version": signal_version,
                 "calc_version": "",
-                "start_date": start_date,
-                "end_date": signal_date,
+                "start_date": stage2_chain_start_date,
+                "end_date": stage2_chain_end_date,
                 "row_count": None,
                 "status": "OK",
             },
+            skip_status=(
+                "SKIPPED_BY_INCREMENTAL_PLAN"
+                if stage2_plan is not None and stage2_plan.mode == "SKIP"
+                else None
+            ),
+            skip_reason=(
+                str(stage2_plan.reason_code)
+                if stage2_plan is not None and stage2_plan.mode == "SKIP"
+                else None
+            ),
         )
     )
 
@@ -865,9 +1007,9 @@ def run_datacenter_swing_pipeline(
         "--analysis-db",
         str(analysis_db),
         "--start-date",
-        start_date,
+        stage2_chain_start_date,
         "--end-date",
-        signal_date,
+        stage2_chain_end_date,
         "--signal-version",
         signal_version,
         "--write-mode",
@@ -886,11 +1028,21 @@ def run_datacenter_swing_pipeline(
                 "market": "",
                 "signal_version": signal_version,
                 "calc_version": "",
-                "start_date": start_date,
-                "end_date": signal_date,
+                "start_date": stage2_chain_start_date,
+                "end_date": stage2_chain_end_date,
                 "row_count": None,
                 "status": "OK",
             },
+            skip_status=(
+                "SKIPPED_BY_INCREMENTAL_PLAN"
+                if stage2_plan is not None and stage2_plan.mode == "SKIP"
+                else None
+            ),
+            skip_reason=(
+                str(stage2_plan.reason_code)
+                if stage2_plan is not None and stage2_plan.mode == "SKIP"
+                else None
+            ),
         )
     )
 
@@ -898,9 +1050,9 @@ def run_datacenter_swing_pipeline(
         "--analysis-db",
         str(analysis_db),
         "--start-date",
-        start_date,
+        stage2_chain_start_date,
         "--end-date",
-        signal_date,
+        stage2_chain_end_date,
         "--signal-version",
         signal_version,
         "--write-mode",
@@ -919,11 +1071,21 @@ def run_datacenter_swing_pipeline(
                 "market": "",
                 "signal_version": signal_version,
                 "calc_version": "",
-                "start_date": start_date,
-                "end_date": signal_date,
+                "start_date": stage2_chain_start_date,
+                "end_date": stage2_chain_end_date,
                 "row_count": None,
                 "status": "OK",
             },
+            skip_status=(
+                "SKIPPED_BY_INCREMENTAL_PLAN"
+                if stage2_plan is not None and stage2_plan.mode == "SKIP"
+                else None
+            ),
+            skip_reason=(
+                str(stage2_plan.reason_code)
+                if stage2_plan is not None and stage2_plan.mode == "SKIP"
+                else None
+            ),
         )
     )
 
@@ -931,9 +1093,9 @@ def run_datacenter_swing_pipeline(
         "--analysis-db",
         str(analysis_db),
         "--start-date",
-        start_date,
+        stage2_chain_start_date,
         "--end-date",
-        signal_date,
+        stage2_chain_end_date,
         "--signal-version",
         signal_version,
         "--taxonomy-version",
@@ -954,11 +1116,21 @@ def run_datacenter_swing_pipeline(
                 "market": "",
                 "signal_version": signal_version,
                 "calc_version": "",
-                "start_date": start_date,
-                "end_date": signal_date,
+                "start_date": stage2_chain_start_date,
+                "end_date": stage2_chain_end_date,
                 "row_count": None,
                 "status": "OK",
             },
+            skip_status=(
+                "SKIPPED_BY_INCREMENTAL_PLAN"
+                if stage2_plan is not None and stage2_plan.mode == "SKIP"
+                else None
+            ),
+            skip_reason=(
+                str(stage2_plan.reason_code)
+                if stage2_plan is not None and stage2_plan.mode == "SKIP"
+                else None
+            ),
         )
     )
 
@@ -1327,7 +1499,14 @@ def run_datacenter_swing_pipeline(
         if profile_ticker_swing_snapshots:
             ticker_swing_snapshot_profile_summary["ticker_swing_snapshot_profile.status"] = "DRY_RUN"
         for index, stage in enumerate(stages, start=1):
-            stage_duration_summary[f"pipeline_stage.{stage.stage_key}.status"] = "DRY_RUN"
+            if stage.skip_status is not None:
+                stage_duration_summary[f"pipeline_stage.{stage.stage_key}.status"] = "SKIPPED"
+                stage_duration_summary[f"pipeline_stage.{stage.stage_key}.execution_status"] = stage.skip_status
+                if stage.skip_reason is not None:
+                    stage_duration_summary[f"pipeline_stage.{stage.stage_key}.skip_reason"] = stage.skip_reason
+            else:
+                stage_duration_summary[f"pipeline_stage.{stage.stage_key}.status"] = "DRY_RUN"
+                stage_duration_summary[f"pipeline_stage.{stage.stage_key}.execution_status"] = "DRY_RUN"
             print(f"=== Stage {index}/{len(stages)}: {stage.heading} ===")
             print("PLAN " + " ".join(stage.argv))
         return {
@@ -1364,6 +1543,7 @@ def run_datacenter_swing_pipeline(
                 "rolling_2_report_csv_path": "",
                 "pipeline_status": "DRY_RUN",
                 **stage_duration_summary,
+                **stage2_summary,
                 **ticker_swing_snapshot_profile_summary,
                 **technical_relevance_profile_summary,
             }
@@ -1394,19 +1574,36 @@ def run_datacenter_swing_pipeline(
         if stage.heading == "Weekly swing report" and audit_validation_status == "FAIL":
             break
         print(f"=== Stage {index}/{len(stages)}: {stage.heading} ===")
+        if stage.skip_status is not None:
+            stage_duration_summary[f"pipeline_stage.{stage.stage_key}.status"] = "SKIPPED"
+            stage_duration_summary[f"pipeline_stage.{stage.stage_key}.execution_status"] = stage.skip_status
+            if stage.skip_reason is not None:
+                stage_duration_summary[f"pipeline_stage.{stage.stage_key}.skip_reason"] = stage.skip_reason
+                print(f"SUMMARY pipeline_stage.{stage.stage_key}.skip_reason={stage.skip_reason}")
+            print(f"SUMMARY pipeline_stage.{stage.stage_key}.execution_status={stage.skip_status}")
+            continue
         stage_start = perf_counter()
         try:
             result = stage.runner()
         except Exception:
             stage_duration_summary[f"pipeline_stage.{stage.stage_key}.status"] = "FAILED"
+            stage_duration_summary[f"pipeline_stage.{stage.stage_key}.execution_status"] = "FAILED"
             stage_duration_summary[f"pipeline_stage.{stage.stage_key}.duration_seconds"] = _format_duration_seconds(
                 perf_counter() - stage_start
             )
+            if stage2_plan is not None and stage.stage_key == "ticker_swing_base_snapshots":
+                stage2_summary.update(_stage2_failed_summary(stage2_plan))
+                for key, value in stage2_summary.items():
+                    if key.startswith("stage2_"):
+                        print(f"SUMMARY {key}={value}")
             raise
         stage_duration_summary[f"pipeline_stage.{stage.stage_key}.status"] = "OK"
+        stage_duration_summary[f"pipeline_stage.{stage.stage_key}.execution_status"] = "EXECUTED"
         stage_duration_summary[f"pipeline_stage.{stage.stage_key}.duration_seconds"] = _format_duration_seconds(
             perf_counter() - stage_start
         )
+        if stage2_plan is not None and stage.stage_key == "ticker_swing_base_snapshots":
+            stage2_summary.update(_stage2_success_summary(stage2_plan))
         _write_stage_watermark(
             analysis_db=analysis_db,
             builder=stage.watermark_builder,
@@ -1451,6 +1648,7 @@ def run_datacenter_swing_pipeline(
                         "rolling_2_report_csv_path": "",
                         "pipeline_status": "FAIL",
                         **stage_duration_summary,
+                        **stage2_summary,
                         **ticker_swing_snapshot_profile_summary,
                         **technical_relevance_profile_summary,
                     }
@@ -1544,6 +1742,7 @@ def run_datacenter_swing_pipeline(
             "rolling_2_report_csv_path": rolling_2_report_csv_path,
             "pipeline_status": pipeline_status,
             **stage_duration_summary,
+            **stage2_summary,
             **ticker_swing_snapshot_profile_summary,
             **technical_relevance_profile_summary,
         }

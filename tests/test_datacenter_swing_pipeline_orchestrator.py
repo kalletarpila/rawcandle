@@ -7,6 +7,11 @@ import pytest
 
 from analysis.database_manager import DatabaseManager
 from analysis.datacenter_indices import swing_pipeline_orchestrator as orchestrator
+from analysis.datacenter_indices.pipeline_plan import (
+    Stage2DownstreamPlan,
+    Stage2IncrementalPlan,
+)
+from analysis.datacenter_indices.pipeline_watermark import list_pipeline_watermarks
 from analysis.datacenter_indices.technical_relevance_context import (
     load_datacenter_pipeline_technical_relevance_tickers,
 )
@@ -86,6 +91,84 @@ def _base_kwargs(tmp_path: Path) -> dict[str, object]:
         "index_base_date": "2020-01-01",
         "output_dir": tmp_path / "reports",
     }
+
+
+def _stage2_plan(
+    *,
+    mode: str = "INCREMENTAL",
+    materialization_start: str | None = "2026-05-13",
+    materialization_end: str | None = "2026-05-15",
+    output_dates: list[str] | None = None,
+    reason_code: str = "NEW_SIGNAL_DATES_WITH_LOOKBACK_OVERLAP",
+) -> Stage2IncrementalPlan:
+    output_dates = (
+        ["2026-05-13", "2026-05-14", "2026-05-15"]
+        if output_dates is None
+        else output_dates
+    )
+    return Stage2IncrementalPlan(
+        component="TICKER_SWING_BASE",
+        mode=mode,
+        requested_start="2026-01-01",
+        requested_end="2026-05-15",
+        effective_requested_end="2026-05-15",
+        watermark_start="2026-01-01",
+        watermark_end="2026-05-12",
+        materialization_start=materialization_start,
+        materialization_end=materialization_end,
+        calculation_input_start="2026-01-01" if output_dates else None,
+        calculation_input_end=materialization_end,
+        overlap_trading_days=5,
+        max_valid_price_rows=220,
+        write_mode="replace-date",
+        reason_code=reason_code,
+        reason_details={},
+        valid_signal_dates=output_dates,
+        output_dates=output_dates,
+        downstream_stage_plans=[
+            Stage2DownstreamPlan(
+                3,
+                "GROUP_SWING_BASE",
+                "Group swing base metrics",
+                True,
+                materialization_start or "",
+                materialization_end or "",
+                "TEST",
+            ),
+            Stage2DownstreamPlan(
+                7,
+                "GROUP_TIMING",
+                "Group timing states",
+                True,
+                materialization_start or "",
+                materialization_end or "",
+                "TEST",
+            ),
+            Stage2DownstreamPlan(
+                8,
+                "GROUP_OVERHEAT",
+                "Group overheat risk",
+                True,
+                materialization_start or "",
+                materialization_end or "",
+                "TEST",
+            ),
+            Stage2DownstreamPlan(
+                9,
+                "TICKER_SCANNER",
+                "Ticker scanners",
+                True,
+                materialization_start or "",
+                materialization_end or "",
+                "TEST",
+            ),
+        ],
+        excluded_stage_plans=[],
+    )
+
+
+def _arg_value(argv: list[str], option: str) -> str:
+    return argv[argv.index(option) + 1]
 
 
 @pytest.fixture(autouse=True)
@@ -613,6 +696,308 @@ def test_automatic_technical_relevance_reuses_existing_run_id_without_recomputin
     assert result["summary"]["skip_reason"] == "RUN_ID_ALREADY_EXISTS"
     assert result["summary"]["ticker_count"] == 1
     assert result["summary"]["records_written"] == 0
+
+
+def test_stage2_incremental_success_wires_planner_range_to_dirty_chain_and_watermarks(
+    tmp_path,
+    monkeypatch,
+):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    calls: list[tuple[str, list[str]]] = []
+
+    def _planner(**kwargs):
+        assert kwargs["overlap_trading_days"] == 2
+        return _stage2_plan(
+            materialization_start="2026-05-13",
+            materialization_end="2026-05-15",
+        )
+
+    def _index(argv: list[str]) -> int:
+        calls.append(("index", list(argv)))
+        return 0
+
+    def _ticker(argv: list[str]) -> int:
+        calls.append(("ticker", list(argv)))
+        return 0
+
+    def _group(argv: list[str]) -> int:
+        calls.append(("group", list(argv)))
+        return 0
+
+    def _synthetic(argv: list[str]) -> int:
+        calls.append(("synthetic", list(argv)))
+        return 0
+
+    monkeypatch.setattr(orchestrator, "build_stage2_incremental_plan", _planner)
+    monkeypatch.setattr(orchestrator, "run_datacenter_indices_main", _index)
+    monkeypatch.setattr(orchestrator, "run_datacenter_ticker_swing_signals_main", _ticker)
+    monkeypatch.setattr(orchestrator, "run_datacenter_group_swing_signals_main", _group)
+    monkeypatch.setattr(orchestrator, "run_datacenter_group_synthetic_ohlc_main", _synthetic)
+
+    result = orchestrator.run_datacenter_swing_pipeline(
+        **_base_kwargs(tmp_path),
+        stage2_incremental=True,
+        stage2_overlap_trading_days=2,
+        skip_audit=True,
+        skip_reports=True,
+        no_technical_relevance=True,
+    )
+
+    summary = result["summary"]
+    assert summary["stage2_incremental_enabled"] == "true"
+    assert summary["stage2_plan_mode"] == "INCREMENTAL"
+    assert summary["stage2_planned_materialization_start"] == "2026-05-13"
+    assert summary["stage2_execution_status"] == "EXECUTED"
+    assert summary["stage2_attempted_dates"] == "2026-05-13,2026-05-14,2026-05-15"
+    assert summary["stage2_completed_dates"] == "2026-05-13,2026-05-14,2026-05-15"
+    assert summary["downstream_dirty_start"] == "2026-05-13"
+    assert summary["downstream_incremental_stages"] == "3,7,8,9"
+
+    ticker_base = calls[1][1]
+    group_base = calls[2][1]
+    structure = calls[5][1]
+    timing = calls[6][1]
+    overheat = calls[7][1]
+    scanner = calls[8][1]
+    assert (_arg_value(ticker_base, "--start-date"), _arg_value(ticker_base, "--end-date")) == (
+        "2026-05-13",
+        "2026-05-15",
+    )
+    assert (_arg_value(group_base, "--start-date"), _arg_value(group_base, "--end-date")) == (
+        "2026-05-13",
+        "2026-05-15",
+    )
+    assert (_arg_value(timing, "--start-date"), _arg_value(timing, "--end-date")) == (
+        "2026-05-13",
+        "2026-05-15",
+    )
+    assert (_arg_value(overheat, "--start-date"), _arg_value(overheat, "--end-date")) == (
+        "2026-05-13",
+        "2026-05-15",
+    )
+    assert (_arg_value(scanner, "--start-date"), _arg_value(scanner, "--end-date")) == (
+        "2026-05-13",
+        "2026-05-15",
+    )
+    assert (_arg_value(structure, "--start-date"), _arg_value(structure, "--end-date")) == (
+        "2026-01-01",
+        "2026-05-15",
+    )
+
+    watermarks = {
+        row["component_name"]: row
+        for row in list_pipeline_watermarks(
+            analysis_db_path=analysis_db,
+            taxonomy_version="DC_TAXONOMY_FULL_V1",
+        )
+    }
+    assert watermarks["TICKER_SWING_BASE"]["start_date"] == "2026-05-13"
+    assert watermarks["GROUP_SWING_BASE"]["start_date"] == "2026-05-13"
+    assert watermarks["GROUP_TIMING"]["start_date"] == "2026-05-13"
+    assert watermarks["GROUP_OVERHEAT"]["start_date"] == "2026-05-13"
+    assert watermarks["TICKER_SCANNER"]["start_date"] == "2026-05-13"
+    assert watermarks["SYNTHETIC_OHLC_STRUCTURE"]["start_date"] == "2026-01-01"
+
+
+def test_stage2_incremental_full_mode_uses_planner_materialization_range(
+    tmp_path,
+    monkeypatch,
+):
+    _create_analysis_db(tmp_path / "analysis.db")
+    calls: list[list[str]] = []
+
+    monkeypatch.setattr(
+        orchestrator,
+        "build_stage2_incremental_plan",
+        lambda **kwargs: _stage2_plan(
+            mode="FULL",
+            materialization_start="2026-01-01",
+            materialization_end="2026-05-15",
+            reason_code="MISSING_COMPATIBLE_WATERMARK",
+        ),
+    )
+    monkeypatch.setattr(orchestrator, "run_datacenter_indices_main", lambda argv: 0)
+    monkeypatch.setattr(
+        orchestrator,
+        "run_datacenter_ticker_swing_signals_main",
+        lambda argv: calls.append(list(argv)) or 0,
+    )
+    monkeypatch.setattr(orchestrator, "run_datacenter_group_swing_signals_main", lambda argv: 0)
+    monkeypatch.setattr(orchestrator, "run_datacenter_group_synthetic_ohlc_main", lambda argv: 0)
+
+    result = orchestrator.run_datacenter_swing_pipeline(
+        **_base_kwargs(tmp_path),
+        stage2_incremental=True,
+        skip_audit=True,
+        skip_reports=True,
+        no_technical_relevance=True,
+    )
+
+    assert result["summary"]["stage2_plan_mode"] == "FULL"
+    assert (_arg_value(calls[0], "--start-date"), _arg_value(calls[0], "--end-date")) == (
+        "2026-01-01",
+        "2026-05-15",
+    )
+
+
+def test_stage2_incremental_skip_skips_only_stage2_dirty_chain_without_watermarks(
+    tmp_path,
+    monkeypatch,
+):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        orchestrator,
+        "build_stage2_incremental_plan",
+        lambda **kwargs: _stage2_plan(
+            mode="SKIP",
+            materialization_start=None,
+            materialization_end=None,
+            output_dates=[],
+            reason_code="WATERMARK_COVERS_REQUESTED_TARGET",
+        ),
+    )
+    monkeypatch.setattr(orchestrator, "run_datacenter_indices_main", lambda argv: calls.append("index") or 0)
+    monkeypatch.setattr(
+        orchestrator,
+        "run_datacenter_ticker_swing_signals_main",
+        lambda argv: (_ for _ in ()).throw(AssertionError("ticker dirty chain must be skipped")),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "run_datacenter_group_swing_signals_main",
+        lambda argv: (_ for _ in ()).throw(AssertionError("group dirty chain must be skipped")),
+    )
+    monkeypatch.setattr(orchestrator, "run_datacenter_group_synthetic_ohlc_main", lambda argv: calls.append("synthetic") or 0)
+
+    result = orchestrator.run_datacenter_swing_pipeline(
+        **_base_kwargs(tmp_path),
+        stage2_incremental=True,
+        skip_audit=True,
+        skip_reports=True,
+        no_technical_relevance=True,
+    )
+
+    assert calls == ["index", "synthetic", "synthetic", "synthetic"]
+    summary = result["summary"]
+    assert summary["stage2_plan_mode"] == "SKIP"
+    assert summary["stage2_execution_status"] == "SKIPPED_BY_INCREMENTAL_PLAN"
+    assert summary["planner_skipped_stages"] == (
+        "ticker_swing_base_snapshots,group_swing_base_metrics,group_timing_states,"
+        "group_overheat_risk,ticker_scanners"
+    )
+    assert summary["pipeline_stage.ticker_swing_base_snapshots.status"] == "SKIPPED"
+    assert summary["pipeline_stage.ticker_swing_base_snapshots.execution_status"] == "SKIPPED_BY_INCREMENTAL_PLAN"
+    assert summary["pipeline_stage.group_structure_bos_reset.execution_status"] == "EXECUTED"
+
+    watermarks = list_pipeline_watermarks(
+        analysis_db_path=analysis_db,
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+    )
+    dirty_components = {
+        "TICKER_SWING_BASE",
+        "GROUP_SWING_BASE",
+        "GROUP_TIMING",
+        "GROUP_OVERHEAT",
+        "TICKER_SCANNER",
+    }
+    assert dirty_components.isdisjoint({row["component_name"] for row in watermarks})
+
+
+def test_stage2_incremental_stage2_failure_requires_retry_and_writes_no_stage2_watermark(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+
+    monkeypatch.setattr(orchestrator, "build_stage2_incremental_plan", lambda **kwargs: _stage2_plan())
+    monkeypatch.setattr(orchestrator, "run_datacenter_indices_main", lambda argv: 0)
+    monkeypatch.setattr(orchestrator, "run_datacenter_ticker_swing_signals_main", lambda argv: 1)
+    monkeypatch.setattr(
+        orchestrator,
+        "run_datacenter_group_swing_signals_main",
+        lambda argv: (_ for _ in ()).throw(AssertionError("downstream must not run")),
+    )
+
+    with pytest.raises(RuntimeError, match="Stage failed"):
+        orchestrator.run_datacenter_swing_pipeline(
+            **_base_kwargs(tmp_path),
+            stage2_incremental=True,
+            skip_audit=True,
+            skip_reports=True,
+            no_technical_relevance=True,
+        )
+
+    lines = capsys.readouterr().out.splitlines()
+    assert "SUMMARY stage2_execution_status=FAILED" in lines
+    assert "SUMMARY stage2_retry_required=true" in lines
+    watermarks = list_pipeline_watermarks(
+        analysis_db_path=analysis_db,
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+    )
+    assert "TICKER_SWING_BASE" not in {row["component_name"] for row in watermarks}
+
+
+@pytest.mark.parametrize(
+    ("failing_stage", "blocked_later_stage"),
+    [
+        ("group_swing_base_metrics", "group_timing_states"),
+        ("group_timing_states", "group_overheat_risk"),
+        ("group_overheat_risk", "ticker_scanners"),
+        ("ticker_scanners", None),
+    ],
+)
+def test_stage2_incremental_downstream_failure_stops_later_dirty_chain(
+    tmp_path,
+    monkeypatch,
+    failing_stage: str,
+    blocked_later_stage: str | None,
+):
+    _create_analysis_db(tmp_path / "analysis.db")
+    stage_calls: list[str] = []
+
+    def _stage_from_argv(kind: str, argv: list[str]) -> str:
+        if kind == "ticker":
+            return "ticker_scanners" if "--scanner-only" in argv else "ticker_swing_base_snapshots"
+        if "--timing-only" in argv:
+            return "group_timing_states"
+        if "--overheat-only" in argv:
+            return "group_overheat_risk"
+        return "group_swing_base_metrics"
+
+    def _ticker(argv: list[str]) -> int:
+        stage = _stage_from_argv("ticker", argv)
+        stage_calls.append(stage)
+        return 1 if stage == failing_stage else 0
+
+    def _group(argv: list[str]) -> int:
+        stage = _stage_from_argv("group", argv)
+        stage_calls.append(stage)
+        return 1 if stage == failing_stage else 0
+
+    monkeypatch.setattr(orchestrator, "build_stage2_incremental_plan", lambda **kwargs: _stage2_plan())
+    monkeypatch.setattr(orchestrator, "run_datacenter_indices_main", lambda argv: stage_calls.append("index") or 0)
+    monkeypatch.setattr(orchestrator, "run_datacenter_ticker_swing_signals_main", _ticker)
+    monkeypatch.setattr(orchestrator, "run_datacenter_group_swing_signals_main", _group)
+    monkeypatch.setattr(orchestrator, "run_datacenter_group_synthetic_ohlc_main", lambda argv: stage_calls.append("synthetic") or 0)
+
+    with pytest.raises(RuntimeError, match="Stage failed"):
+        orchestrator.run_datacenter_swing_pipeline(
+            **_base_kwargs(tmp_path),
+            stage2_incremental=True,
+            skip_audit=True,
+            skip_reports=True,
+            no_technical_relevance=True,
+        )
+
+    assert failing_stage in stage_calls
+    if blocked_later_stage is not None:
+        assert blocked_later_stage not in stage_calls
 
 
 def test_auto_mode_existing_run_reuse_threads_existing_run_id_to_all_reports(tmp_path, monkeypatch):

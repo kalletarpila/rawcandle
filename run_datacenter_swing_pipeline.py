@@ -12,6 +12,7 @@ if str(CURRENT_DIR) not in sys.path:
     sys.path.insert(0, str(CURRENT_DIR))
 
 from analysis.datacenter_indices.swing_pipeline_orchestrator import (
+    DEFAULT_STAGE2_INCREMENTAL_OVERLAP_TRADING_DAYS,
     DEFAULT_OHLC_CALC_VERSION,
     DEFAULT_SIGNAL_VERSION,
     format_pipeline_final_summary_lines,
@@ -44,6 +45,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--no-technical-relevance", action="store_true", help="Disable automatic or explicit technical relevance usage in daily and weekly reports")
     parser.add_argument("--profile-technical-relevance", action="store_true", help="Print optional profiling SUMMARY lines for automatic technical relevance when it executes")
     parser.add_argument("--profile-ticker-swing-snapshots", action="store_true", help="Print optional profiling SUMMARY lines for Stage 2 ticker swing base snapshots")
+    parser.add_argument("--stage2-incremental", action="store_true", help="Opt in to Stage 2 incremental execution planning")
+    parser.add_argument(
+        "--stage2-overlap-trading-days",
+        type=int,
+        default=DEFAULT_STAGE2_INCREMENTAL_OVERLAP_TRADING_DAYS,
+        help="Stage 2 incremental output overlap in valid trading days",
+    )
     parser.add_argument("--skip-index", action="store_true", help="Skip the datacenter base index stage")
     parser.add_argument("--skip-audit", action="store_true", help="Skip the read-only pipeline audit stage")
     parser.add_argument("--skip-reports", action="store_true", help="Skip daily and weekly report generation")
@@ -56,6 +64,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     if args.weekly_window_size <= 0:
         print("ERROR weekly-window-size must be greater than 0", file=sys.stderr)
+        return 1
+    if args.stage2_overlap_trading_days < 0:
+        print("ERROR stage2-overlap-trading-days must be zero or greater", file=sys.stderr)
         return 1
     if args.technical_relevance_run_id is not None and not args.technical_relevance_run_id.strip():
         print("ERROR technical-relevance-run-id must be non-empty when provided", file=sys.stderr)
@@ -89,6 +100,8 @@ def main(argv: list[str] | None = None) -> int:
             no_technical_relevance=args.no_technical_relevance,
             profile_technical_relevance=args.profile_technical_relevance,
             profile_ticker_swing_snapshots=args.profile_ticker_swing_snapshots,
+            stage2_incremental=args.stage2_incremental,
+            stage2_overlap_trading_days=args.stage2_overlap_trading_days,
             skip_index=args.skip_index,
             skip_audit=args.skip_audit,
             skip_reports=args.skip_reports,
