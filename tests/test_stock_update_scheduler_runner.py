@@ -196,6 +196,8 @@ def _write_config(
     ec_source_layer_mode=None,
     ec_source_layer_require_legacy_reports_success=None,
     ec_source_layer_only_on_new_signal_date=None,
+    datacenter_stage2_incremental_enabled=None,
+    datacenter_stage2_overlap_trading_days=None,
 ):
     osakedata_db = osakedata_db or (tmp_path / "osakedata.db")
     analysis_db = analysis_db or (tmp_path / "analysis.db")
@@ -231,6 +233,10 @@ def _write_config(
         config.ec_source_layer_only_on_new_signal_date = (
             ec_source_layer_only_on_new_signal_date
         )
+    if datacenter_stage2_incremental_enabled is not None:
+        config.datacenter_stage2_incremental_enabled = datacenter_stage2_incremental_enabled
+    if datacenter_stage2_overlap_trading_days is not None:
+        config.datacenter_stage2_overlap_trading_days = datacenter_stage2_overlap_trading_days
     path = tmp_path / "scheduler_config.json"
     write_scheduler_config(str(path), config)
     return path
@@ -1281,6 +1287,7 @@ def test_scheduler_runner_runs_datacenter_post_step_once_for_usa_success(
     assert "--expected-group-count" in command and command[command.index("--expected-group-count") + 1] == "54"
     assert "--expected-synthetic-ohlc-count" in command and command[command.index("--expected-synthetic-ohlc-count") + 1] == "53"
     assert "--signal-date" in command and command[command.index("--signal-date") + 1] == "2026-05-16"
+    assert "--stage2-incremental" not in command
     assert result.datacenter_pipeline_attempted == 1
     assert result.datacenter_pipeline_status == "OK"
     assert result.datacenter_pipeline_market == "usa"
@@ -1319,6 +1326,63 @@ def test_scheduler_runner_runs_datacenter_post_step_once_for_usa_success(
     assert payload["datacenter_pipeline_rolling_2_report_path"] == "/tmp/rolling2.md"
     assert payload["datacenter_pipeline_weekly_report_path"] is None
     assert not any(key.startswith(_retired_v3_result_prefix()) for key in payload)
+
+
+def test_scheduler_runner_datacenter_incremental_config_passes_stage2_flags(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        datacenter_stage2_incremental_enabled=True,
+        datacenter_stage2_overlap_trading_days=0,
+    )
+    calls: list[list[str]] = []
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._resolve_datacenter_signal_date",
+        lambda **kwargs: _build_datacenter_signal_date_resolution(
+            signal_date="2026-05-16",
+            requested_calendar_signal_date="2026-05-27",
+        ),
+    )
+
+    def fake_subprocess_run(command, **_):
+        calls.append(command)
+        return _FakeCompletedProcess(
+            0,
+            "\n".join(
+                [
+                    "SUMMARY audit_validation_status=OK",
+                    "SUMMARY stage2_incremental_enabled=true",
+                    "SUMMARY stage2_execution_status=EXECUTED",
+                    "SUMMARY stage2_actual_materialized_start=2026-05-16",
+                    "SUMMARY stage2_actual_materialized_end=2026-05-16",
+                    "",
+                ]
+            ),
+        )
+
+    monkeypatch.setattr("rawcandle.scheduler.runner.subprocess.run", fake_subprocess_run)
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    command = calls[0]
+    assert "--stage2-incremental" in command
+    assert command[command.index("--stage2-overlap-trading-days") + 1] == "0"
+    assert result.overall_status == STATUS_OK
 
 
 def test_scheduler_runner_datacenter_success_has_no_v3_result_fields(tmp_path, monkeypatch):
@@ -2373,6 +2437,128 @@ def test_scheduler_runner_ec_source_layer_disabled_skips_without_call(
     log_text = Path(result.ec_source_layer_log_path).read_text(encoding="utf-8")
     assert "status=SKIPPED" in log_text
     assert "skipped_reason=DISABLED" in log_text
+    assert "ec_bridge_mode=DISABLED" in log_text
+
+
+@pytest.mark.parametrize(
+    ("incremental_enabled", "pipeline_summary", "dc_status", "expected_mode", "expected_reason"),
+    [
+        (
+            False,
+            {},
+            "OK",
+            "LATEST_REFRESH",
+            "LEGACY_EC_REFRESH_BEHAVIOR",
+        ),
+        (
+            True,
+            {
+                "stage2_execution_status": "EXECUTED",
+                "stage2_actual_materialized_start": "2026-06-05",
+                "stage2_actual_materialized_end": "2026-06-05",
+            },
+            "OK",
+            "LATEST_REFRESH",
+            "SINGLE_DATE_MATERIALIZATION",
+        ),
+        (
+            True,
+            {
+                "stage2_execution_status": "EXECUTED",
+                "stage2_actual_materialized_start": "2026-06-01",
+                "stage2_actual_materialized_end": "2026-06-05",
+            },
+            "OK",
+            "HISTORICAL_BACKFILL",
+            "MULTI_DATE_MATERIALIZATION",
+        ),
+        (
+            True,
+            {
+                "stage2_execution_status": "SKIPPED_BY_INCREMENTAL_PLAN",
+                "stage2_actual_materialized_start": "NONE",
+                "stage2_actual_materialized_end": "NONE",
+            },
+            "OK",
+            "SKIPPED_NO_MATERIALIZATION",
+            "NO_SUCCESSFUL_MATERIALIZATION",
+        ),
+        (
+            True,
+            {
+                "stage2_execution_status": "FAILED",
+                "stage2_actual_materialized_start": "2026-06-01",
+                "stage2_actual_materialized_end": "2026-06-05",
+            },
+            "OK",
+            "SKIPPED_NO_MATERIALIZATION",
+            "NO_SUCCESSFUL_MATERIALIZATION",
+        ),
+        (
+            True,
+            {
+                "stage2_execution_status": "EXECUTED",
+                "stage2_actual_materialized_start": "bad-date",
+                "stage2_actual_materialized_end": "2026-06-05",
+            },
+            "OK",
+            "SKIPPED_NO_MATERIALIZATION",
+            "NO_SUCCESSFUL_MATERIALIZATION",
+        ),
+        (
+            True,
+            {
+                "stage2_execution_status": "EXECUTED",
+                "stage2_actual_materialized_start": "2026-06-05",
+                "stage2_actual_materialized_end": "2026-06-05",
+            },
+            "FAILED",
+            "SKIPPED_NO_MATERIALIZATION",
+            "DATACENTER_PIPELINE_NOT_SUCCESSFUL",
+        ),
+    ],
+)
+def test_ec_bridge_decision_model(
+    incremental_enabled,
+    pipeline_summary,
+    dc_status,
+    expected_mode,
+    expected_reason,
+):
+    decision = scheduler_runner._build_ec_bridge_decision(
+        datacenter_result=DatacenterPostStepResult(
+            attempted=1,
+            status=dc_status,
+            market="usa",
+            signal_date="2026-06-05",
+            pipeline_summary=pipeline_summary,
+        ),
+        stage2_incremental_enabled=incremental_enabled,
+    )
+
+    assert decision.bridge_mode == expected_mode
+    assert decision.reason_code == expected_reason
+
+
+def test_ec_bridge_decision_multi_date_range_ends_at_selected_date():
+    decision = scheduler_runner._build_ec_bridge_decision(
+        datacenter_result=DatacenterPostStepResult(
+            attempted=1,
+            status="OK",
+            market="usa",
+            signal_date="2026-06-05",
+            pipeline_summary={
+                "stage2_execution_status": "EXECUTED",
+                "stage2_actual_materialized_start": "2026-06-01",
+                "stage2_actual_materialized_end": "2026-06-05",
+            },
+        ),
+        stage2_incremental_enabled=True,
+    )
+
+    assert decision.bridge_mode == "HISTORICAL_BACKFILL"
+    assert decision.required_refresh_start == "2026-06-01"
+    assert decision.required_refresh_end == "2026-06-05"
 
 
 def test_scheduler_runner_ec_source_layer_enabled_runs_after_legacy_success(
@@ -2444,6 +2630,12 @@ def test_scheduler_runner_ec_source_layer_enabled_runs_after_legacy_success(
     assert result.datacenter_pipeline_daily_report_path == "/tmp/daily.md"
     assert result.ec_source_layer_attempted == 1
     assert result.ec_source_layer_status == "REFRESH_COMPLETED"
+    assert result.ec_bridge_mode == "LATEST_REFRESH"
+    assert result.ec_bridge_reason == "LEGACY_EC_REFRESH_BEHAVIOR"
+    assert result.ec_bridge_status == "OK"
+    assert result.ec_bridge_required_start == "2026-06-05"
+    assert result.ec_bridge_required_end == "2026-06-05"
+    assert result.ec_bridge_watermark_refresh_performed is True
     assert result.ec_source_layer_log_path.endswith(".txt")
     assert result.ec_source_layer_backup_path == "/tmp/backups/refresh.sqlite"
     assert result.ec_source_layer_ticker_rows == 236
@@ -2451,9 +2643,428 @@ def test_scheduler_runner_ec_source_layer_enabled_runs_after_legacy_success(
     assert "status=REFRESH_COMPLETED" in log_text
     assert "coverage_status=OK_WITH_WARNINGS" in log_text
     assert "parity_status=OK_WITH_WARNINGS" in log_text
+    assert "ec_bridge_mode=LATEST_REFRESH" in log_text
+    assert "ec_bridge_status=OK" in log_text
     assert called_kwargs["db_path"] == str(analysis_db)
     assert called_kwargs["confirm_db"] == str(analysis_db)
     assert called_kwargs["allow_replace_date"] is False
+
+
+def test_scheduler_runner_ec_bridge_single_date_incremental_uses_latest_refresh(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        ec_source_layer_enabled=True,
+        ec_source_layer_taxonomy_csv=tmp_path / "taxonomy.csv",
+        ec_source_layer_watchlist=tmp_path / "watchlist.txt",
+        ec_source_layer_backup_dir=tmp_path / "backups",
+        datacenter_stage2_incremental_enabled=True,
+    )
+    refresh_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_one_market",
+        lambda **kwargs: ScheduledMarketRunResult(
+            market=kwargs["market"],
+            started_at_utc="2026-06-07T00:00:00Z",
+            finished_at_utc="2026-06-07T00:01:00Z",
+            exit_code=0,
+            summary_status=STATUS_OK,
+            log_path="/tmp/usa.log",
+            summary_lines=["SUMMARY market=usa"],
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_post_step",
+        lambda **kwargs: DatacenterPostStepResult(
+            attempted=1,
+            status="OK",
+            market="usa",
+            signal_date="2026-06-05",
+            pipeline_summary={
+                "stage2_incremental_enabled": "true",
+                "stage2_execution_status": "EXECUTED",
+                "stage2_actual_materialized_start": "2026-06-05",
+                "stage2_actual_materialized_end": "2026-06-05",
+            },
+        ),
+    )
+
+    def fake_refresh(**kwargs):
+        refresh_calls.append(kwargs)
+        return {
+            "attempted": True,
+            "status": "REFRESH_COMPLETED",
+            "signal_date": "2026-06-05",
+            "refresh_mode": "replace_selected_date",
+            "backup_path": "/tmp/backups/refresh.sqlite",
+            "coverage_status": "OK",
+            "parity_status": "OK",
+            "total_mismatch_count": 0,
+            "error": None,
+        }
+
+    monkeypatch.setattr("rawcandle.scheduler.runner.run_ec_source_layer_refresh", fake_refresh)
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.run_ec_source_layer_backfill",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("backfill should not run")),
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert len(refresh_calls) == 1
+    assert result.ec_bridge_mode == "LATEST_REFRESH"
+    assert result.ec_bridge_reason == "SINGLE_DATE_MATERIALIZATION"
+    assert result.ec_bridge_status == "OK"
+    assert result.ec_bridge_watermark_refresh_performed is True
+
+
+def test_scheduler_runner_ec_bridge_multi_date_uses_backfill_only(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        ec_source_layer_enabled=True,
+        ec_source_layer_taxonomy_csv=tmp_path / "taxonomy.csv",
+        ec_source_layer_watchlist=tmp_path / "watchlist.txt",
+        ec_source_layer_backup_dir=tmp_path / "backups",
+        ec_source_layer_only_on_new_signal_date=True,
+        datacenter_stage2_incremental_enabled=True,
+    )
+    backfill_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_one_market",
+        lambda **kwargs: ScheduledMarketRunResult(
+            market=kwargs["market"],
+            started_at_utc="2026-06-07T00:00:00Z",
+            finished_at_utc="2026-06-07T00:01:00Z",
+            exit_code=0,
+            summary_status=STATUS_OK,
+            log_path="/tmp/usa.log",
+            summary_lines=["SUMMARY market=usa"],
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_post_step",
+        lambda **kwargs: DatacenterPostStepResult(
+            attempted=1,
+            status="OK",
+            market="usa",
+            signal_date="2026-06-05",
+            pipeline_summary={
+                "stage2_incremental_enabled": "true",
+                "stage2_execution_status": "EXECUTED",
+                "stage2_actual_materialized_start": "2026-06-01",
+                "stage2_actual_materialized_end": "2026-06-05",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.run_ec_source_layer_refresh",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("latest refresh should not run")),
+    )
+
+    def fake_backfill(**kwargs):
+        backfill_calls.append(kwargs)
+        return {
+            "status": "BACKFILL_COMPLETED",
+            "date_from": "2026-06-01",
+            "date_to": "2026-06-05",
+            "backup_path": "/tmp/backups/backfill.sqlite",
+            "per_date_results": [
+                {"date": "2026-06-01", "coverage_status": "OK", "parity_status": "OK"},
+                {"date": "2026-06-05", "coverage_status": "OK_WITH_WARNINGS", "parity_status": "OK"},
+            ],
+            "total_mismatch_count": 0,
+            "error": None,
+        }
+
+    monkeypatch.setattr("rawcandle.scheduler.runner.run_ec_source_layer_backfill", fake_backfill)
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.overall_status == STATUS_OK
+    assert len(backfill_calls) == 1
+    assert backfill_calls[0]["date_from"] == "2026-06-01"
+    assert backfill_calls[0]["date_to"] == "2026-06-05"
+    assert backfill_calls[0]["ecosystem_code"] == "DATACENTER"
+    assert backfill_calls[0]["taxonomy_version_code"] == "DC_TAXONOMY_FULL_V1"
+    assert backfill_calls[0]["allow_replace_existing"] is True
+    assert result.ec_source_layer_status == "BACKFILL_COMPLETED"
+    assert result.ec_source_layer_refresh_mode == "historical_backfill"
+    assert result.ec_bridge_mode == "HISTORICAL_BACKFILL"
+    assert result.ec_bridge_status == "OK"
+    assert result.ec_bridge_required_start == "2026-06-01"
+    assert result.ec_bridge_required_end == "2026-06-05"
+    assert result.ec_bridge_coverage_status == "OK_WITH_WARNINGS"
+    assert result.ec_bridge_parity_status == "OK"
+    assert result.ec_bridge_watermark_refresh_performed is False
+    log_text = Path(result.ec_source_layer_log_path).read_text(encoding="utf-8")
+    assert "ec_bridge_mode=HISTORICAL_BACKFILL" in log_text
+    assert "ec_bridge_watermark_refresh_performed=false" in log_text
+
+
+def test_scheduler_runner_ec_bridge_multi_date_failure_warns_and_records_retry_range(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        ec_source_layer_enabled=True,
+        ec_source_layer_taxonomy_csv=tmp_path / "taxonomy.csv",
+        ec_source_layer_watchlist=tmp_path / "watchlist.txt",
+        ec_source_layer_backup_dir=tmp_path / "backups",
+        datacenter_stage2_incremental_enabled=True,
+    )
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_one_market",
+        lambda **kwargs: ScheduledMarketRunResult(
+            market=kwargs["market"],
+            started_at_utc="2026-06-07T00:00:00Z",
+            finished_at_utc="2026-06-07T00:01:00Z",
+            exit_code=0,
+            summary_status=STATUS_OK,
+            log_path="/tmp/usa.log",
+            summary_lines=["SUMMARY market=usa"],
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_post_step",
+        lambda **kwargs: DatacenterPostStepResult(
+            attempted=1,
+            status="OK",
+            market="usa",
+            signal_date="2026-06-05",
+            pipeline_summary={
+                "stage2_execution_status": "EXECUTED",
+                "stage2_actual_materialized_start": "2026-06-01",
+                "stage2_actual_materialized_end": "2026-06-05",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.run_ec_source_layer_backfill",
+        lambda **kwargs: {
+            "status": "BACKFILL_FAILED",
+            "date_from": "2026-06-01",
+            "date_to": "2026-06-05",
+            "backup_path": "/tmp/backups/backfill.sqlite",
+            "per_date_results": [
+                {"date": "2026-06-01", "coverage_status": "OK", "parity_status": "OK"},
+            ],
+            "total_mismatch_count": 0,
+            "error": "parity failed",
+        },
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.overall_status == STATUS_OK_WITH_WARNINGS
+    assert result.ec_bridge_mode == "HISTORICAL_BACKFILL"
+    assert result.ec_bridge_status == "FAILED"
+    assert result.ec_bridge_retry_required is True
+    assert result.ec_bridge_required_start == "2026-06-01"
+    assert result.ec_bridge_required_end == "2026-06-05"
+    assert result.ec_bridge_error == "parity failed"
+
+
+def test_scheduler_runner_ec_bridge_multi_date_exception_writes_summary(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        ec_source_layer_enabled=True,
+        ec_source_layer_taxonomy_csv=tmp_path / "taxonomy.csv",
+        ec_source_layer_watchlist=tmp_path / "watchlist.txt",
+        ec_source_layer_backup_dir=tmp_path / "backups",
+        datacenter_stage2_incremental_enabled=True,
+    )
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_one_market",
+        lambda **kwargs: ScheduledMarketRunResult(
+            market=kwargs["market"],
+            started_at_utc="2026-06-07T00:00:00Z",
+            finished_at_utc="2026-06-07T00:01:00Z",
+            exit_code=0,
+            summary_status=STATUS_OK,
+            log_path="/tmp/usa.log",
+            summary_lines=["SUMMARY market=usa"],
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_post_step",
+        lambda **kwargs: DatacenterPostStepResult(
+            attempted=1,
+            status="OK",
+            market="usa",
+            signal_date="2026-06-05",
+            pipeline_summary={
+                "stage2_execution_status": "EXECUTED",
+                "stage2_actual_materialized_start": "2026-06-01",
+                "stage2_actual_materialized_end": "2026-06-05",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.run_ec_source_layer_backfill",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("backfill exploded")),
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.overall_status == STATUS_OK_WITH_WARNINGS
+    assert result.ec_source_layer_status == "BACKFILL_FAILED"
+    assert result.ec_bridge_status == "FAILED"
+    assert result.ec_bridge_retry_required is True
+    assert result.ec_bridge_error == "backfill exploded"
+    payload = json.loads(Path(result.summary_json_path).read_text(encoding="utf-8"))
+    assert payload["ec_bridge_required_start"] == "2026-06-01"
+    assert payload["ec_bridge_retry_required"] is True
+
+
+def test_scheduler_runner_ec_bridge_malformed_backfill_output_is_not_success(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        ec_source_layer_enabled=True,
+        ec_source_layer_taxonomy_csv=tmp_path / "taxonomy.csv",
+        ec_source_layer_watchlist=tmp_path / "watchlist.txt",
+        ec_source_layer_backup_dir=tmp_path / "backups",
+        datacenter_stage2_incremental_enabled=True,
+    )
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_one_market",
+        lambda **kwargs: ScheduledMarketRunResult(
+            market=kwargs["market"],
+            started_at_utc="2026-06-07T00:00:00Z",
+            finished_at_utc="2026-06-07T00:01:00Z",
+            exit_code=0,
+            summary_status=STATUS_OK,
+            log_path="/tmp/usa.log",
+            summary_lines=["SUMMARY market=usa"],
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_post_step",
+        lambda **kwargs: DatacenterPostStepResult(
+            attempted=1,
+            status="OK",
+            market="usa",
+            signal_date="2026-06-05",
+            pipeline_summary={
+                "stage2_execution_status": "EXECUTED",
+                "stage2_actual_materialized_start": "2026-06-01",
+                "stage2_actual_materialized_end": "2026-06-05",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.run_ec_source_layer_backfill",
+        lambda **kwargs: {
+            "status": "BACKFILL_COMPLETED",
+            "per_date_results": [],
+            "total_mismatch_count": 0,
+            "error": None,
+        },
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.overall_status == STATUS_OK_WITH_WARNINGS
+    assert result.ec_bridge_status == "FAILED"
+    assert result.ec_bridge_coverage_status == "NONE"
+    assert result.ec_bridge_retry_required is True
+
+
+def test_scheduler_runner_ec_bridge_skip_no_materialization_invokes_no_ec(
+    tmp_path, monkeypatch
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        ec_source_layer_enabled=True,
+        ec_source_layer_taxonomy_csv=tmp_path / "taxonomy.csv",
+        ec_source_layer_watchlist=tmp_path / "watchlist.txt",
+        ec_source_layer_backup_dir=tmp_path / "backups",
+        datacenter_stage2_incremental_enabled=True,
+    )
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_one_market",
+        lambda **kwargs: ScheduledMarketRunResult(
+            market=kwargs["market"],
+            started_at_utc="2026-06-07T00:00:00Z",
+            finished_at_utc="2026-06-07T00:01:00Z",
+            exit_code=0,
+            summary_status=STATUS_OK,
+            log_path="/tmp/usa.log",
+            summary_lines=["SUMMARY market=usa"],
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_post_step",
+        lambda **kwargs: DatacenterPostStepResult(
+            attempted=1,
+            status="OK",
+            market="usa",
+            signal_date="2026-06-05",
+            pipeline_summary={
+                "stage2_execution_status": "SKIPPED_BY_INCREMENTAL_PLAN",
+                "stage2_actual_materialized_start": "NONE",
+                "stage2_actual_materialized_end": "NONE",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.run_ec_source_layer_refresh",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("refresh should not run")),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.run_ec_source_layer_backfill",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("backfill should not run")),
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.overall_status == STATUS_OK
+    assert result.ec_source_layer_status == "SKIPPED"
+    assert result.ec_bridge_mode == "SKIPPED_NO_MATERIALIZATION"
+    assert result.ec_bridge_status == "SKIPPED"
+    assert result.ec_bridge_reason == "NO_SUCCESSFUL_MATERIALIZATION"
 
 
 def test_scheduler_runner_finished_at_utc_reflects_post_step_completion(
@@ -2614,6 +3225,8 @@ def test_scheduler_runner_ec_source_layer_skipped_keeps_ok_status(
 
     assert result.overall_status == STATUS_OK
     assert result.ec_source_layer_status == "REFRESH_SKIPPED"
+    assert result.ec_bridge_mode == "LATEST_REFRESH"
+    assert result.ec_bridge_status == "NOT_REQUIRED"
     assert result.ec_source_layer_log_path.endswith(".txt")
     log_text = Path(result.ec_source_layer_log_path).read_text(encoding="utf-8")
     assert "status=REFRESH_SKIPPED" in log_text
@@ -2684,6 +3297,8 @@ def test_scheduler_runner_ec_source_layer_failure_degrades_to_warning(
     assert result.overall_status == STATUS_OK_WITH_WARNINGS
     assert result.datacenter_pipeline_daily_report_path == "/tmp/daily.md"
     assert result.ec_source_layer_status == "REFRESH_FAILED"
+    assert result.ec_bridge_status == "FAILED"
+    assert result.ec_bridge_retry_required is True
     assert result.ec_source_layer_error == "refresh failed"
     assert result.ec_source_layer_log_path.endswith(".txt")
     log_text = Path(result.ec_source_layer_log_path).read_text(encoding="utf-8")
@@ -2738,6 +3353,8 @@ def test_scheduler_runner_ec_source_layer_exception_writes_log_and_warns(
 
     assert result.overall_status == STATUS_OK_WITH_WARNINGS
     assert result.ec_source_layer_status == "REFRESH_FAILED"
+    assert result.ec_bridge_status == "FAILED"
+    assert result.ec_bridge_retry_required is True
     assert result.ec_source_layer_error == "refresh exploded"
     assert result.ec_source_layer_log_path.endswith(".txt")
     log_text = Path(result.ec_source_layer_log_path).read_text(encoding="utf-8")

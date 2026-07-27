@@ -29,6 +29,8 @@ _OPTIONAL_CONFIG_KEYS.update(
         "datacenter_dashboard_source_mode",
         "datacenter_enrichment_apply_migrations",
         "datacenter_enrichment_enabled",
+        "datacenter_stage2_incremental_enabled",
+        "datacenter_stage2_overlap_trading_days",
         "datacenter_v3_reports_ecosystem",
         "datacenter_v3_reports_enabled",
         "datacenter_v3_reports_output_dir",
@@ -65,6 +67,8 @@ class StockUpdateSchedulerConfig:
     datacenter_dashboard_source_mode: str = "reports"
     datacenter_enrichment_apply_migrations: bool = False
     datacenter_enrichment_enabled: bool = False
+    datacenter_stage2_incremental_enabled: bool = False
+    datacenter_stage2_overlap_trading_days: int = 5
     datacenter_v3_reports_ecosystem: str = "DATACENTER"
     datacenter_v3_reports_enabled: bool = False
     datacenter_v3_reports_output_dir: str | None = None
@@ -136,6 +140,12 @@ def validate_scheduler_config(
         raise ValueError("datacenter_enrichment_apply_migrations must be a bool")
     if type(config.datacenter_enrichment_enabled) is not bool:
         raise ValueError("datacenter_enrichment_enabled must be a bool")
+    if type(config.datacenter_stage2_incremental_enabled) is not bool:
+        raise ValueError("datacenter_stage2_incremental_enabled must be a bool")
+    if type(config.datacenter_stage2_overlap_trading_days) is not int:
+        raise ValueError("datacenter_stage2_overlap_trading_days must be an int")
+    if config.datacenter_stage2_overlap_trading_days < 0:
+        raise ValueError("datacenter_stage2_overlap_trading_days must be zero or greater")
     if type(config.datacenter_v3_reports_enabled) is not bool:
         raise ValueError("datacenter_v3_reports_enabled must be a bool")
     if type(config.ec_source_layer_enabled) is not bool:
@@ -191,6 +201,12 @@ def validate_scheduler_config(
             config.datacenter_enrichment_apply_migrations
         ),
         datacenter_enrichment_enabled=config.datacenter_enrichment_enabled,
+        datacenter_stage2_incremental_enabled=(
+            config.datacenter_stage2_incremental_enabled
+        ),
+        datacenter_stage2_overlap_trading_days=(
+            config.datacenter_stage2_overlap_trading_days
+        ),
         datacenter_v3_reports_ecosystem=config.datacenter_v3_reports_ecosystem,
         datacenter_v3_reports_enabled=config.datacenter_v3_reports_enabled,
         datacenter_v3_reports_output_dir=config.datacenter_v3_reports_output_dir,
@@ -260,6 +276,12 @@ def scheduler_config_from_dict(data: Dict[str, Any]) -> StockUpdateSchedulerConf
             "datacenter_enrichment_apply_migrations", False
         ),
         datacenter_enrichment_enabled=data.get("datacenter_enrichment_enabled", False),
+        datacenter_stage2_incremental_enabled=data.get(
+            "datacenter_stage2_incremental_enabled", False
+        ),
+        datacenter_stage2_overlap_trading_days=data.get(
+            "datacenter_stage2_overlap_trading_days", 5
+        ),
         datacenter_v3_reports_ecosystem=data.get(
             "datacenter_v3_reports_ecosystem", "DATACENTER"
         ),
@@ -322,6 +344,8 @@ def create_default_scheduler_config(
         datacenter_dashboard_source_mode="reports",
         datacenter_enrichment_apply_migrations=False,
         datacenter_enrichment_enabled=False,
+        datacenter_stage2_incremental_enabled=False,
+        datacenter_stage2_overlap_trading_days=5,
         datacenter_v3_reports_ecosystem="DATACENTER",
         datacenter_v3_reports_enabled=False,
         datacenter_v3_reports_output_dir=None,

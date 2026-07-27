@@ -16,6 +16,7 @@ from typing import IO, Iterator, List, Optional
 from zoneinfo import ZoneInfo
 
 from main import RawCandleApp, _today_exclusive_end_date
+from rawcandle.cli.run_ec_source_layer_backfill import run_ec_source_layer_backfill
 from rawcandle.cli.run_ec_source_layer_refresh import run_ec_source_layer_refresh
 from rawcandle.scheduler.config import (
     StockUpdateSchedulerConfig,
@@ -121,6 +122,19 @@ class ScheduledStockUpdateRunResult:
     ec_source_layer_group_index_rows: int = 0
     ec_source_layer_watermark_rows: int = 0
     ec_source_layer_error: str = "NONE"
+    ec_bridge_mode: str = "DISABLED"
+    ec_bridge_reason: str = "INCREMENTAL_FEATURE_DISABLED"
+    ec_bridge_required_start: str = "NONE"
+    ec_bridge_required_end: str = "NONE"
+    ec_bridge_status: str = "SKIPPED"
+    ec_bridge_load_status: str = "NONE"
+    ec_bridge_coverage_status: str = "NONE"
+    ec_bridge_parity_status: str = "NONE"
+    ec_bridge_retry_required: bool = False
+    ec_bridge_exit_code: int | None = None
+    ec_bridge_error: str = "NONE"
+    ec_bridge_log: str = "NONE"
+    ec_bridge_watermark_refresh_performed: bool = False
 
 
 class SchedulerAlreadyRunningError(RuntimeError):
@@ -186,6 +200,7 @@ class DatacenterPostStepResult:
     rolling_2_report_csv_path: Optional[str] = None
     weekly_report_path: Optional[str] = None
     weekly_report_csv_path: Optional[str] = None
+    pipeline_summary: dict[str, str] = field(default_factory=dict)
     error: Optional[str] = None
 
 
@@ -235,6 +250,31 @@ class EcSourceLayerRefreshPostStepResult:
     group_index_rows: int = 0
     watermark_rows: int = 0
     error: str = "NONE"
+    bridge_mode: str = "DISABLED"
+    bridge_reason: str = "INCREMENTAL_FEATURE_DISABLED"
+    bridge_required_start: str = "NONE"
+    bridge_required_end: str = "NONE"
+    bridge_status: str = "SKIPPED"
+    bridge_load_status: str = "NONE"
+    bridge_coverage_status: str = "NONE"
+    bridge_parity_status: str = "NONE"
+    bridge_retry_required: bool = False
+    bridge_exit_code: int | None = None
+    bridge_error: str = "NONE"
+    bridge_log: str = "NONE"
+    bridge_watermark_refresh_performed: bool = False
+
+
+@dataclass(frozen=True)
+class EcBridgeDecision:
+    bridge_mode: str
+    selected_signal_date: str
+    materialized_start: str
+    materialized_end: str
+    required_refresh_start: str
+    required_refresh_end: str
+    reason_code: str
+    reason_details: dict[str, object] = field(default_factory=dict)
 
 
 def scheduler_status_path(log_dir: str) -> str:
@@ -625,6 +665,17 @@ def _parse_summary_value(stdout: str, key: str) -> Optional[str]:
     return None
 
 
+def _parse_summary_lines(stdout: str) -> dict[str, str]:
+    summary: dict[str, str] = {}
+    for line in stdout.splitlines():
+        if not line.startswith("SUMMARY ") or "=" not in line:
+            continue
+        key, value = line[len("SUMMARY ") :].split("=", 1)
+        if key:
+            summary[key] = value
+    return summary
+
+
 def _parse_datacenter_report_paths(stdout: str) -> dict[str, Optional[str]]:
     keys = (
         "daily_report_path",
@@ -639,6 +690,139 @@ def _parse_datacenter_report_paths(stdout: str) -> dict[str, Optional[str]]:
         "weekly_report_csv_path",
     )
     return {key: _parse_summary_value(stdout, key) for key in keys}
+
+
+def _valid_iso_date_or_none(value: str | None) -> str | None:
+    if value is None or value == "NONE":
+        return None
+    try:
+        return datetime.date.fromisoformat(value).isoformat()
+    except ValueError:
+        return None
+
+
+def _build_ec_bridge_decision(
+    *,
+    datacenter_result: DatacenterPostStepResult,
+    stage2_incremental_enabled: bool,
+) -> EcBridgeDecision:
+    selected_signal_date = datacenter_result.signal_date or "NONE"
+    if datacenter_result.status != "OK" or not datacenter_result.signal_date:
+        return EcBridgeDecision(
+            bridge_mode="SKIPPED_NO_MATERIALIZATION",
+            selected_signal_date=selected_signal_date,
+            materialized_start="NONE",
+            materialized_end="NONE",
+            required_refresh_start="NONE",
+            required_refresh_end="NONE",
+            reason_code="DATACENTER_PIPELINE_NOT_SUCCESSFUL",
+            reason_details={"datacenter_status": datacenter_result.status},
+        )
+
+    if not stage2_incremental_enabled:
+        return EcBridgeDecision(
+            bridge_mode="LATEST_REFRESH",
+            selected_signal_date=selected_signal_date,
+            materialized_start=selected_signal_date,
+            materialized_end=selected_signal_date,
+            required_refresh_start=selected_signal_date,
+            required_refresh_end=selected_signal_date,
+            reason_code="LEGACY_EC_REFRESH_BEHAVIOR",
+            reason_details={"stage2_incremental_enabled": False},
+        )
+
+    summary = datacenter_result.pipeline_summary
+    execution_status = summary.get("stage2_execution_status")
+    materialized_start = _valid_iso_date_or_none(
+        summary.get("stage2_actual_materialized_start")
+    )
+    materialized_end = _valid_iso_date_or_none(
+        summary.get("stage2_actual_materialized_end")
+    )
+    selected_date = _valid_iso_date_or_none(datacenter_result.signal_date)
+    if (
+        execution_status != "EXECUTED"
+        or materialized_start is None
+        or materialized_end is None
+        or selected_date is None
+        or materialized_start > materialized_end
+        or not (materialized_start <= selected_date <= materialized_end)
+    ):
+        return EcBridgeDecision(
+            bridge_mode="SKIPPED_NO_MATERIALIZATION",
+            selected_signal_date=selected_signal_date,
+            materialized_start=materialized_start or "NONE",
+            materialized_end=materialized_end or "NONE",
+            required_refresh_start="NONE",
+            required_refresh_end="NONE",
+            reason_code="NO_SUCCESSFUL_MATERIALIZATION",
+            reason_details={
+                "stage2_execution_status": execution_status or "MISSING",
+                "stage2_actual_materialized_start": summary.get(
+                    "stage2_actual_materialized_start", "MISSING"
+                ),
+                "stage2_actual_materialized_end": summary.get(
+                    "stage2_actual_materialized_end", "MISSING"
+                ),
+            },
+        )
+
+    if materialized_start == selected_date and materialized_end == selected_date:
+        return EcBridgeDecision(
+            bridge_mode="LATEST_REFRESH",
+            selected_signal_date=selected_signal_date,
+            materialized_start=materialized_start,
+            materialized_end=materialized_end,
+            required_refresh_start=selected_signal_date,
+            required_refresh_end=selected_signal_date,
+            reason_code="SINGLE_DATE_MATERIALIZATION",
+            reason_details={"stage2_execution_status": execution_status},
+        )
+
+    return EcBridgeDecision(
+        bridge_mode="HISTORICAL_BACKFILL",
+        selected_signal_date=selected_signal_date,
+        materialized_start=materialized_start,
+        materialized_end=materialized_end,
+        required_refresh_start=materialized_start,
+        required_refresh_end=materialized_end,
+        reason_code="MULTI_DATE_MATERIALIZATION",
+        reason_details={"stage2_execution_status": execution_status},
+    )
+
+
+def _bridge_failure_statuses() -> set[str]:
+    return {
+        "REFRESH_REFUSED",
+        "REFRESH_FAILED_BEFORE_WRITE",
+        "REFRESH_FAILED",
+        "BACKFILL_REFUSED",
+        "BACKFILL_FAILED_BEFORE_WRITE",
+        "BACKFILL_FAILED",
+        "BACKFILL_SKIPPED",
+        "UNKNOWN",
+    }
+
+
+def _aggregate_backfill_audit_status(
+    per_date_results: object,
+    field_name: str,
+) -> str:
+    if not isinstance(per_date_results, list) or not per_date_results:
+        return "NONE"
+    statuses: list[str] = []
+    for item in per_date_results:
+        if not isinstance(item, dict):
+            return "MALFORMED"
+        value = item.get(field_name)
+        if not isinstance(value, str) or not value:
+            return "MALFORMED"
+        statuses.append(value)
+    if any(status not in {"OK", "OK_WITH_WARNINGS"} for status in statuses):
+        return "FAILED"
+    if any(status == "OK_WITH_WARNINGS" for status in statuses):
+        return "OK_WITH_WARNINGS"
+    return "OK"
 
 
 def _build_datacenter_log_path(log_dir: Path, market: str, started_at: datetime.datetime) -> Path:
@@ -987,6 +1171,14 @@ def _run_datacenter_post_step(
         "--expected-synthetic-ohlc-count",
         str(resolved.expected_synthetic_ohlc_count),
     ]
+    if config.datacenter_stage2_incremental_enabled:
+        command.extend(
+            [
+                "--stage2-incremental",
+                "--stage2-overlap-trading-days",
+                str(config.datacenter_stage2_overlap_trading_days),
+            ]
+        )
     completed = subprocess.run(
         command,
         cwd=str(_repo_root()),
@@ -1020,6 +1212,7 @@ def _run_datacenter_post_step(
     audit_validation_status = _parse_summary_value(
         completed.stdout or "", "audit_validation_status"
     )
+    pipeline_summary = _parse_summary_lines(completed.stdout or "")
     parsed_report_paths = _parse_datacenter_report_paths(completed.stdout or "")
     if completed.returncode != 0:
         return DatacenterPostStepResult(
@@ -1042,6 +1235,7 @@ def _run_datacenter_post_step(
             rolling_2_report_csv_path=parsed_report_paths["rolling_2_report_csv_path"],
             weekly_report_path=parsed_report_paths["weekly_report_path"],
             weekly_report_csv_path=parsed_report_paths["weekly_report_csv_path"],
+            pipeline_summary=pipeline_summary,
             error=f"datacenter pipeline exited with code {completed.returncode}",
         )
     return DatacenterPostStepResult(
@@ -1064,6 +1258,7 @@ def _run_datacenter_post_step(
         rolling_2_report_csv_path=parsed_report_paths["rolling_2_report_csv_path"],
         weekly_report_path=parsed_report_paths["weekly_report_path"],
         weekly_report_csv_path=parsed_report_paths["weekly_report_csv_path"],
+        pipeline_summary=pipeline_summary,
     )
 
 
@@ -1101,6 +1296,20 @@ def _run_ec_source_layer_refresh_post_step(
             f"group_index_rows={result.group_index_rows}",
             f"watermark_rows={result.watermark_rows}",
             f"error={result.error}",
+            f"ec_bridge_mode={result.bridge_mode}",
+            f"ec_bridge_reason={result.bridge_reason}",
+            f"ec_bridge_required_start={result.bridge_required_start}",
+            f"ec_bridge_required_end={result.bridge_required_end}",
+            f"ec_bridge_status={result.bridge_status}",
+            f"ec_bridge_load_status={result.bridge_load_status}",
+            f"ec_bridge_coverage_status={result.bridge_coverage_status}",
+            f"ec_bridge_parity_status={result.bridge_parity_status}",
+            f"ec_bridge_retry_required={str(result.bridge_retry_required).lower()}",
+            f"ec_bridge_exit_code={result.bridge_exit_code}",
+            f"ec_bridge_error={result.bridge_error}",
+            f"ec_bridge_log={result.bridge_log}",
+            "ec_bridge_watermark_refresh_performed="
+            f"{str(result.bridge_watermark_refresh_performed).lower()}",
             f"analysis_db_path={config.analysis_db_path}",
         ]
         log_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
@@ -1121,6 +1330,19 @@ def _run_ec_source_layer_refresh_post_step(
             group_index_rows=result.group_index_rows,
             watermark_rows=result.watermark_rows,
             error=result.error,
+            bridge_mode=result.bridge_mode,
+            bridge_reason=result.bridge_reason,
+            bridge_required_start=result.bridge_required_start,
+            bridge_required_end=result.bridge_required_end,
+            bridge_status=result.bridge_status,
+            bridge_load_status=result.bridge_load_status,
+            bridge_coverage_status=result.bridge_coverage_status,
+            bridge_parity_status=result.bridge_parity_status,
+            bridge_retry_required=result.bridge_retry_required,
+            bridge_exit_code=result.bridge_exit_code,
+            bridge_error=result.bridge_error,
+            bridge_log=str(log_path),
+            bridge_watermark_refresh_performed=result.bridge_watermark_refresh_performed,
         )
 
     if not config.ec_source_layer_enabled:
@@ -1129,6 +1351,9 @@ def _run_ec_source_layer_refresh_post_step(
                 attempted=0,
                 status="SKIPPED",
                 skipped_reason="DISABLED",
+                bridge_mode="DISABLED",
+                bridge_reason="EC_SOURCE_LAYER_DISABLED",
+                bridge_status="SKIPPED",
             )
         )
     if target_market not in config.enabled_markets:
@@ -1137,8 +1362,16 @@ def _run_ec_source_layer_refresh_post_step(
                 attempted=0,
                 status="SKIPPED",
                 skipped_reason="MARKET_NOT_ENABLED",
+                bridge_mode="DISABLED",
+                bridge_reason="MARKET_NOT_ENABLED",
+                bridge_status="SKIPPED",
             )
         )
+
+    bridge_decision = _build_ec_bridge_decision(
+        datacenter_result=datacenter_result,
+        stage2_incremental_enabled=config.datacenter_stage2_incremental_enabled,
+    )
     if datacenter_result.status != "OK" or not datacenter_result.signal_date:
         return _write_log(
             EcSourceLayerRefreshPostStepResult(
@@ -1146,6 +1379,11 @@ def _run_ec_source_layer_refresh_post_step(
                 status="SKIPPED",
                 skipped_reason="LEGACY_DATACENTER_NOT_READY",
                 signal_date=datacenter_result.signal_date or "NONE",
+                bridge_mode=bridge_decision.bridge_mode,
+                bridge_reason=bridge_decision.reason_code,
+                bridge_required_start=bridge_decision.required_refresh_start,
+                bridge_required_end=bridge_decision.required_refresh_end,
+                bridge_status="SKIPPED",
             )
         )
     if config.ec_source_layer_require_legacy_reports_success and datacenter_result.status != "OK":
@@ -1155,6 +1393,104 @@ def _run_ec_source_layer_refresh_post_step(
                 status="SKIPPED",
                 skipped_reason="LEGACY_REPORTS_NOT_SUCCESSFUL",
                 signal_date=datacenter_result.signal_date,
+                bridge_mode=bridge_decision.bridge_mode,
+                bridge_reason=bridge_decision.reason_code,
+                bridge_required_start=bridge_decision.required_refresh_start,
+                bridge_required_end=bridge_decision.required_refresh_end,
+                bridge_status="SKIPPED",
+            )
+        )
+
+    if bridge_decision.bridge_mode == "SKIPPED_NO_MATERIALIZATION":
+        return _write_log(
+            EcSourceLayerRefreshPostStepResult(
+                attempted=0,
+                status="SKIPPED",
+                skipped_reason=bridge_decision.reason_code,
+                signal_date=datacenter_result.signal_date,
+                bridge_mode=bridge_decision.bridge_mode,
+                bridge_reason=bridge_decision.reason_code,
+                bridge_required_start=bridge_decision.required_refresh_start,
+                bridge_required_end=bridge_decision.required_refresh_end,
+                bridge_status="SKIPPED",
+            )
+        )
+
+    if bridge_decision.bridge_mode == "HISTORICAL_BACKFILL":
+        try:
+            backfill_summary = run_ec_source_layer_backfill(
+                db_path=config.analysis_db_path,
+                ecosystem_code=config.ec_source_layer_ecosystem,
+                taxonomy_version_code=config.ec_source_layer_taxonomy_version,
+                date_from=bridge_decision.required_refresh_start,
+                date_to=bridge_decision.required_refresh_end,
+                taxonomy_csv_path=config.ec_source_layer_taxonomy_csv or "",
+                watchlist_path=config.ec_source_layer_watchlist or "",
+                backup_dir=config.ec_source_layer_backup_dir or "",
+                confirm_db=config.analysis_db_path,
+                confirm_ecosystem=config.ec_source_layer_ecosystem,
+                confirm_taxonomy_version=config.ec_source_layer_taxonomy_version,
+                allow_replace_existing=True,
+            )
+        except Exception as exc:
+            return _write_log(
+                EcSourceLayerRefreshPostStepResult(
+                    attempted=1,
+                    status="BACKFILL_FAILED",
+                    signal_date=datacenter_result.signal_date,
+                    refresh_mode="historical_backfill",
+                    error=str(exc),
+                    bridge_mode=bridge_decision.bridge_mode,
+                    bridge_reason=bridge_decision.reason_code,
+                    bridge_required_start=bridge_decision.required_refresh_start,
+                    bridge_required_end=bridge_decision.required_refresh_end,
+                    bridge_status="FAILED",
+                    bridge_load_status="EXCEPTION",
+                    bridge_retry_required=True,
+                    bridge_exit_code=1,
+                    bridge_error=str(exc),
+                    bridge_watermark_refresh_performed=False,
+                )
+            )
+
+        backfill_status = str(backfill_summary.get("status") or "UNKNOWN")
+        coverage_status = _aggregate_backfill_audit_status(
+            backfill_summary.get("per_date_results"), "coverage_status"
+        )
+        parity_status = _aggregate_backfill_audit_status(
+            backfill_summary.get("per_date_results"), "parity_status"
+        )
+        total_mismatch_count = int(backfill_summary.get("total_mismatch_count") or 0)
+        bridge_ok = (
+            backfill_status == "BACKFILL_COMPLETED"
+            and coverage_status in {"OK", "OK_WITH_WARNINGS"}
+            and parity_status in {"OK", "OK_WITH_WARNINGS"}
+            and total_mismatch_count == 0
+        )
+        return _write_log(
+            EcSourceLayerRefreshPostStepResult(
+                attempted=1,
+                status=backfill_status,
+                signal_date=datacenter_result.signal_date,
+                refresh_mode="historical_backfill",
+                skipped_reason=str(backfill_summary.get("skipped_reason") or "NONE"),
+                backup_path=str(backfill_summary.get("backup_path") or "NONE"),
+                coverage_status=coverage_status,
+                parity_status=parity_status,
+                total_mismatch_count=total_mismatch_count,
+                error=str(backfill_summary.get("error") or "NONE"),
+                bridge_mode=bridge_decision.bridge_mode,
+                bridge_reason=bridge_decision.reason_code,
+                bridge_required_start=bridge_decision.required_refresh_start,
+                bridge_required_end=bridge_decision.required_refresh_end,
+                bridge_status="OK" if bridge_ok else "FAILED",
+                bridge_load_status=backfill_status,
+                bridge_coverage_status=coverage_status,
+                bridge_parity_status=parity_status,
+                bridge_retry_required=not bridge_ok,
+                bridge_exit_code=0 if bridge_ok else 1,
+                bridge_error="NONE" if bridge_ok else str(backfill_summary.get("error") or backfill_status),
+                bridge_watermark_refresh_performed=False,
             )
         )
 
@@ -1180,13 +1516,26 @@ def _run_ec_source_layer_refresh_post_step(
                 signal_date=datacenter_result.signal_date,
                 refresh_mode="scheduler_post_step",
                 error=str(exc),
+                bridge_mode=bridge_decision.bridge_mode,
+                bridge_reason=bridge_decision.reason_code,
+                bridge_required_start=bridge_decision.required_refresh_start,
+                bridge_required_end=bridge_decision.required_refresh_end,
+                bridge_status="FAILED",
+                bridge_load_status="EXCEPTION",
+                bridge_retry_required=True,
+                bridge_exit_code=1,
+                bridge_error=str(exc),
+                bridge_watermark_refresh_performed=False,
             )
         )
 
+    refresh_status = str(refresh_summary.get("status") or "UNKNOWN")
+    bridge_ok = refresh_status == "REFRESH_COMPLETED"
+    bridge_status = "OK" if bridge_ok else ("NOT_REQUIRED" if refresh_status == "REFRESH_SKIPPED" else "FAILED")
     return _write_log(
         EcSourceLayerRefreshPostStepResult(
             attempted=1 if refresh_summary.get("attempted") else 0,
-            status=str(refresh_summary.get("status") or "UNKNOWN"),
+            status=refresh_status,
             signal_date=str(refresh_summary.get("signal_date") or "NONE"),
             refresh_mode=str(refresh_summary.get("refresh_mode") or "NONE"),
             skipped_reason=str(refresh_summary.get("skipped_reason") or "NONE"),
@@ -1200,6 +1549,18 @@ def _run_ec_source_layer_refresh_post_step(
             group_index_rows=int(refresh_summary.get("group_index_rows") or 0),
             watermark_rows=int(refresh_summary.get("watermark_rows") or 0),
             error=str(refresh_summary.get("error") or "NONE"),
+            bridge_mode=bridge_decision.bridge_mode,
+            bridge_reason=bridge_decision.reason_code,
+            bridge_required_start=bridge_decision.required_refresh_start,
+            bridge_required_end=bridge_decision.required_refresh_end,
+            bridge_status=bridge_status,
+            bridge_load_status=refresh_status,
+            bridge_coverage_status=str(refresh_summary.get("coverage_status") or "NONE"),
+            bridge_parity_status=str(refresh_summary.get("parity_status") or "NONE"),
+            bridge_retry_required=bridge_status == "FAILED",
+            bridge_exit_code=0 if bridge_status != "FAILED" else 1,
+            bridge_error="NONE" if bridge_status != "FAILED" else str(refresh_summary.get("error") or refresh_status),
+            bridge_watermark_refresh_performed=refresh_status == "REFRESH_COMPLETED",
         )
     )
 
@@ -1398,6 +1759,12 @@ def run_scheduler_config(
                     timezone=config.timezone,
                     skip_next_run=False,
                     technical_relevance_enabled=config.technical_relevance_enabled,
+                    datacenter_stage2_incremental_enabled=(
+                        config.datacenter_stage2_incremental_enabled
+                    ),
+                    datacenter_stage2_overlap_trading_days=(
+                        config.datacenter_stage2_overlap_trading_days
+                    ),
                     ec_source_layer_enabled=config.ec_source_layer_enabled,
                     ec_source_layer_ecosystem=config.ec_source_layer_ecosystem,
                     ec_source_layer_taxonomy_version=config.ec_source_layer_taxonomy_version,
@@ -1550,8 +1917,10 @@ def run_scheduler_config(
             )
             if (
                 overall_status == STATUS_OK
-                and ec_source_layer_result.status
-                in {"REFRESH_REFUSED", "REFRESH_FAILED_BEFORE_WRITE", "REFRESH_FAILED"}
+                and (
+                    ec_source_layer_result.status in _bridge_failure_statuses()
+                    or ec_source_layer_result.bridge_status == "FAILED"
+                )
             ):
                 overall_status = STATUS_OK_WITH_WARNINGS
 
@@ -1635,6 +2004,21 @@ def run_scheduler_config(
                 ec_source_layer_group_index_rows=ec_source_layer_result.group_index_rows,
                 ec_source_layer_watermark_rows=ec_source_layer_result.watermark_rows,
                 ec_source_layer_error=ec_source_layer_result.error,
+                ec_bridge_mode=ec_source_layer_result.bridge_mode,
+                ec_bridge_reason=ec_source_layer_result.bridge_reason,
+                ec_bridge_required_start=ec_source_layer_result.bridge_required_start,
+                ec_bridge_required_end=ec_source_layer_result.bridge_required_end,
+                ec_bridge_status=ec_source_layer_result.bridge_status,
+                ec_bridge_load_status=ec_source_layer_result.bridge_load_status,
+                ec_bridge_coverage_status=ec_source_layer_result.bridge_coverage_status,
+                ec_bridge_parity_status=ec_source_layer_result.bridge_parity_status,
+                ec_bridge_retry_required=ec_source_layer_result.bridge_retry_required,
+                ec_bridge_exit_code=ec_source_layer_result.bridge_exit_code,
+                ec_bridge_error=ec_source_layer_result.bridge_error,
+                ec_bridge_log=ec_source_layer_result.bridge_log,
+                ec_bridge_watermark_refresh_performed=(
+                    ec_source_layer_result.bridge_watermark_refresh_performed
+                ),
             )
             _write_summary_json(config=config, run_started_at=run_started_at, result=result)
             write_scheduler_status(

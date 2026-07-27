@@ -28,6 +28,8 @@ _LEGACY_DASHBOARD_CONFIG_KEYS = {
     "datacenter_dashboard_source_mode": "enrichment",
     "datacenter_enrichment_apply_migrations": False,
     "datacenter_enrichment_enabled": True,
+    "datacenter_stage2_incremental_enabled": False,
+    "datacenter_stage2_overlap_trading_days": 5,
     "datacenter_v3_reports_ecosystem": "DATACENTER",
     "datacenter_v3_reports_enabled": False,
     "datacenter_v3_reports_output_dir": "/home/kalle/projects/rawcandle/swing_reports/v3",
@@ -45,6 +47,8 @@ def test_default_scheduler_config_uses_omxh_and_omxs_not_usa():
     assert config.enabled_markets == ["omxh", "omxs"]
     assert config.skip_next_run is False
     assert config.technical_relevance_enabled is False
+    assert config.datacenter_stage2_incremental_enabled is False
+    assert config.datacenter_stage2_overlap_trading_days == 5
     assert config.ec_source_layer_enabled is False
     assert config.ec_source_layer_ecosystem == "DATACENTER"
     assert config.ec_source_layer_taxonomy_version == "DC_TAXONOMY_FULL_V1"
