@@ -4,6 +4,7 @@ import sqlite3
 
 import pytest
 import main
+import services.stock_update_service as sus
 
 from services.stock_update_service import (
     StockOhlcvRow,
@@ -230,7 +231,7 @@ def test_execute_stock_update_batch_skipped_plan_uses_short_terminal_sleep(
         run_candlestick_analysis=lambda ticker, analysis_start, analysis_end: (0, None),
     )
 
-    assert sleep_calls == [0.5]
+    assert sleep_calls == [sus.YAHOO_SHORT_BRANCH_SLEEP_SECONDS]
 
 
 def test_execute_stock_update_batch_successful_update_increments_updated(tmp_path) -> None:
@@ -315,7 +316,10 @@ def test_execute_stock_update_batch_successful_large_insert_uses_1s_terminal_sle
         run_candlestick_analysis=lambda ticker, analysis_start, analysis_end: (0, None),
     )
 
-    assert sleep_calls == [0.5, 1.0]
+    assert sleep_calls == [
+        sus.YAHOO_SHORT_BRANCH_SLEEP_SECONDS,
+        sus.YAHOO_SUCCESS_LARGE_INSERT_SLEEP_SECONDS,
+    ]
 
 
 def test_execute_stock_update_batch_successful_small_insert_uses_1_5s_terminal_sleep(
@@ -356,7 +360,10 @@ def test_execute_stock_update_batch_successful_small_insert_uses_1_5s_terminal_s
         run_candlestick_analysis=lambda ticker, analysis_start, analysis_end: (0, None),
     )
 
-    assert sleep_calls == [0.5, 1.5]
+    assert sleep_calls == [
+        sus.YAHOO_SHORT_BRANCH_SLEEP_SECONDS,
+        sus.YAHOO_SUCCESS_SMALL_INSERT_SLEEP_SECONDS,
+    ]
 
 
 def test_execute_stock_update_batch_empty_history_counts_as_skipped(tmp_path) -> None:
@@ -481,7 +488,10 @@ def test_execute_stock_update_batch_empty_history_uses_short_terminal_sleep(
         run_candlestick_analysis=lambda ticker, analysis_start, analysis_end: (0, None),
     )
 
-    assert sleep_calls == [0.5, 0.5]
+    assert sleep_calls == [
+        sus.YAHOO_SHORT_BRANCH_SLEEP_SECONDS,
+        sus.YAHOO_SHORT_BRANCH_SLEEP_SECONDS,
+    ]
 
 
 def test_execute_stock_update_batch_zero_insert_still_counts_updated(tmp_path) -> None:
@@ -945,7 +955,7 @@ def test_execute_stock_update_batch_exception_uses_short_terminal_sleep(
 
     assert result.tickers_failed == 1
     assert any("factory failed" in error for error in result.errors)
-    assert sleep_calls == [0.5]
+    assert sleep_calls == [sus.YAHOO_SHORT_BRANCH_SLEEP_SECONDS]
 
 
 def test_execute_stock_update_batch_ticker_flow_exception_increments_failed_and_continues(
@@ -1027,8 +1037,8 @@ def test_execute_stock_update_batch_sleeps_30s_after_500_processed_tickers(
 
     assert result.tickers_checked == 500
     assert len(sleep_calls) == 501
-    assert sleep_calls.count(0.5) == 500
-    assert sleep_calls[-1] == 30.0
+    assert sleep_calls.count(sus.YAHOO_SHORT_BRANCH_SLEEP_SECONDS) == 500
+    assert sleep_calls[-1] == sus.YAHOO_LARGE_BATCH_SLEEP_SECONDS
 
 
 def test_fetch_history_for_date_ranges_sleeps_after_each_range_call(
@@ -1078,7 +1088,11 @@ def test_fetch_history_for_date_ranges_sleeps_after_each_range_call(
     )
 
     assert stock.calls == [("2026-01-02", "2026-01-03"), ("2026-01-03", "2026-01-10")]
-    assert sleep_calls == [0.5, 0.5, 1.5]
+    assert sleep_calls == [
+        sus.YAHOO_SHORT_BRANCH_SLEEP_SECONDS,
+        sus.YAHOO_SHORT_BRANCH_SLEEP_SECONDS,
+        sus.YAHOO_SUCCESS_SMALL_INSERT_SLEEP_SECONDS,
+    ]
 
 
 def test_execute_stock_update_batch_aggregates_split_warning(tmp_path) -> None:
