@@ -157,11 +157,26 @@ Normative rules:
   permanently coupled to the temporary date source.
 - `CONFIRMED_FROM_CODE`: current Stage 2 uses
   `max_valid_price_rows=220` as its implementation history limit.
-- `REQUIRES_VERIFICATION`: the exact pilot overlap and warmup policy must be
-  confirmed before implementation.
+- `CONFIRMED_FROM_CODE`: Stage 2 range preload finds up to 220 valid
+  `close IS NOT NULL` rows per ticker before the earliest output date and chooses
+  a global earliest input date.
+- `CONFIRMED_FROM_CODE`: per-date `history_for()` still limits each ticker to
+  its most recent 220 valid rows relative to the relevant `as_of_date`.
 
-The contract must not infer a final overlap value only from the current
-`max_valid_price_rows=220` implementation detail.
+Stage 2 input warmup baseline:
+
+```text
+current 220-valid-price-row history behavior
+```
+
+Stage 2 output overlap:
+
+```text
+planner policy, not implied by the 220-row warmup
+```
+
+The exact output-overlap length, whether it is fixed, and whether it depends on
+the invalidation reason are design decisions for implementation planning.
 
 ## 4. Planner Contract
 
@@ -251,18 +266,35 @@ Current Stage 2:
 - Range mode already separates effective price-history input from selected
   output dates through bounded history preload.
 - Current implementation history limit is `max_valid_price_rows=220`.
+- Stage 2 does not depend on earlier rows from
+  `dc_ticker_swing_signal_daily` when calculating a signal date. It calculates
+  each date from OHLCV history and enrichment sources.
+- Range preload finds up to 220 valid `close IS NOT NULL` rows per ticker before
+  the earliest output date and chooses a global earliest input date.
+- Per-date `history_for()` still limits each ticker to its most recent 220 valid
+  rows relative to the relevant `as_of_date`.
 - Current orchestrator execution does not use `dc_pipeline_watermark` to skip or
   narrow Stage 2.
+- The 220-valid-row history behavior is the pilot input warmup baseline. It is
+  not the output overlap.
 
 Partial-write risk:
 
+- Stage 2 range execution calls per-date persistence one date at a time.
 - Each per-date write commits inside the Stage 2 persistence function.
 - If range execution fails after earlier dates have completed, earlier per-date
   writes may remain while later dates are not processed.
+- Successful dates are available in returned per-date summaries during normal
+  return flow.
+- There is currently no durable completed-range artifact when execution aborts
+  partway through the range.
 - The orchestrator watermark is written only if the whole Stage 2 CLI returns
   success.
 - Therefore the pilot must distinguish planned range from actual completed and
   validated materialized range.
+- Do not claim that a continuous successfully materialized range can always be
+  reconstructed after abrupt process termination unless a durable mechanism is
+  implemented.
 
 Illustrative plan output, not final policy:
 
@@ -287,7 +319,12 @@ Stage ordering must be distinguished from proven data dependency. The dependency
 map confirms the following Stage 2 effects:
 
 - Stage 3 group swing base metrics read `dc_ticker_swing_signal_daily`.
-- Stage 7 group timing is affected through Stage 3 outputs.
+- Stage 3 uses group index history for 5/10/20/60 return-related calculations.
+- Stage 7 reads existing group swing rows in the requested range and updates
+  timing fields for that range.
+- Stage 8 reads group swing rows and related historical/current context,
+  including `ema20_breadth_delta_5d`, a prior valid delta, and
+  `dc_group_index_daily.pct_above_ma200`.
 - Stage 9 ticker scanners read `dc_ticker_swing_signal_daily` and same-date
   subindustry timing state from `dc_group_swing_signal_daily`.
 - Stage 10 audit reads Datacenter facts for validation.
@@ -303,15 +340,22 @@ The confirmed materialization chain is at least:
 ```text
 Stage 2
   -> Stage 3
-     -> Stage 7
-        -> Stage 9
+  -> Stage 7
+  -> Stage 8
   -> Stage 9
 ```
 
-`REQUIRES_VERIFICATION`: exact downstream ranges for Stage 6-8 and any
-additional stateful behavior must be confirmed before later pipeline-wide
-incremental optimization. The Stage 2 pilot may use a wider conservative range
-for downstream execution.
+Safe pilot policy:
+
+- Run Stage 3, Stage 7, Stage 8, and Stage 9 for at least the Stage 2
+  materialized output range.
+- Keep Stage 6 outside the Stage 2 pilot when synthetic OHLC base data has not
+  been rematerialized.
+- Stage 6 is stateful and must not be independently narrowed as part of this
+  pilot.
+
+`REQUIRES_VERIFICATION`: exact minimal downstream ranges and later
+pipeline-wide incremental optimization remain out of scope for this pilot.
 
 ## 8. Materialized-Range Reporting
 
@@ -373,6 +417,12 @@ Important distinctions:
   materialized range.
 - A completed and validated materialized range is the only state that can safely
   support watermark advancement.
+- Stage 2 and Stage 3 can commit earlier dates before a later range failure.
+- Stages 7-9 perform their range clear/update operations in one transaction per
+  stage.
+- No stage watermark advances unless the entire stage completes and validates.
+- Physical writes can therefore be ahead of the validated watermark after a
+  partial failure.
 
 This document does not define a full new status persistence schema.
 
@@ -430,6 +480,17 @@ outputs, not merely on the initially planned range.
 For the pilot, a single conservative affected range is acceptable even if
 component-level ranges could later differ.
 
+Current behavior and pilot extension:
+
+- `CONFIRMED_FROM_CODE`: the existing scheduler path invokes the current
+  single-date EC latest refresh after a successful Datacenter post-step.
+- `CONFIRMED_FROM_CODE`: the existing EC historical backfill CLI can perform
+  date-based replace loads over selected historical dates.
+- The multi-date EC backfill bridge required by this pilot is not currently
+  wired into the scheduler.
+- The pilot must add that bridge at orchestration level without changing the
+  future EC architecture boundary.
+
 ## 12. EC Bridge Validation
 
 Evidence status: `CONFIRMED_FROM_CODE`
@@ -442,6 +503,8 @@ Rules:
 - A bridge load is not successful merely because loader execution returned.
 - The affected range must pass the existing parity and coverage checks
   appropriate to the current tools.
+- `CONFIRMED_FROM_CODE`: existing EC refresh and backfill CLIs return exit code
+  `1` when parity or coverage is unacceptable.
 - Historical EC refresh must not move the EC latest watermark backwards.
 - Current historical backfill behavior intentionally skips
   `ec_pipeline_watermark` refresh and must be acknowledged in scheduler/post-step
@@ -472,6 +535,16 @@ Normative requirement:
 
 > If the transitional EC bridge fails or parity is not acceptable, the overall
 > Datacenter scheduler/post-step result must not be reported as a clean `OK`.
+
+`CONFIRMED_FROM_CODE`: for the current single-date refresh path, an EC refresh
+failure changes an otherwise successful scheduler result from `OK` to
+`OK_WITH_WARNINGS`. That satisfies the "not clean OK" requirement for the
+existing path.
+
+Design decision for the pilot:
+
+- Preserve current `OK_WITH_WARNINGS` for EC bridge failure, or
+- elevate required bridge failure to `FAILED`.
 
 This is a temporary operational safeguard, not the future EC invalidation
 architecture.
@@ -567,16 +640,17 @@ asserted facts.
 
 Implementation questions still requiring verification:
 
-- `REQUIRES_VERIFICATION`: exact safe Stage 2 overlap policy.
-- `REQUIRES_VERIFICATION`: how `max_valid_price_rows=220` maps to warmup versus
-  output overlap.
-- `REQUIRES_VERIFICATION`: actual completed-range reporting under per-date
-  partial failure.
-- `REQUIRES_VERIFICATION`: exact downstream stage ranges for the pilot.
-- `REQUIRES_VERIFICATION`: Stage 6-8 state/lookback behavior.
-- `REQUIRES_VERIFICATION`: transaction boundaries in range-update stages.
-- `REQUIRES_VERIFICATION`: precise scheduler status propagation for EC bridge
-  failure.
+- Design decision: exact Stage 2 output-overlap length.
+- Design decision: whether Stage 2 output overlap is fixed or can depend on the
+  invalidation reason.
+- Design decision: how to persist attempted and successful materialized dates
+  across abrupt process termination.
+- Design decision: whether EC bridge failures should remain
+  `OK_WITH_WARNINGS` or become `FAILED` in the pilot.
+- `REQUIRES_VERIFICATION`: exact minimal downstream ranges beyond the
+  conservative Stage 3, Stage 7, Stage 8, Stage 9 pilot chain.
+- `REQUIRES_VERIFICATION`: production scheduler behavior for invoking
+  multi-date EC backfill, because that bridge is not currently wired.
 
 ## Explicit Constraints
 
@@ -588,4 +662,3 @@ Implementation questions still requiring verification:
 - Do not modify watermark behavior.
 - Do not modify EC loaders.
 - Do not stage or commit files unless explicitly requested later.
-
