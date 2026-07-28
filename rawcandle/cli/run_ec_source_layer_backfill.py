@@ -473,6 +473,7 @@ def run_ec_source_layer_backfill(
                     "ecosystem_code": ecosystem_code,
                     "taxonomy_version_code": taxonomy_version_code,
                     "signal_date": current_date,
+                    "include_pipeline_watermark": False,
                 },
             )
             parity_status = str(parity_audit_summary.get("status"))

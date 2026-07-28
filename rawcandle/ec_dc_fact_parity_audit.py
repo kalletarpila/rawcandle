@@ -889,6 +889,7 @@ def audit_dc_ec_fact_parity(
     taxonomy_version_code: str = "DC_TAXONOMY_FULL_V1",
     signal_date: str | None = None,
     numeric_tolerance: float = 1e-9,
+    include_pipeline_watermark: bool = True,
 ) -> dict[str, object]:
     source_conn = _connect_readonly(source_db_path)
     target_conn = _connect_readonly(target_db_path)
@@ -960,11 +961,28 @@ def audit_dc_ec_fact_parity(
             signal_date=selected_signal_date,
             numeric_tolerance=numeric_tolerance,
         )
-        pipeline_watermark_parity = _pipeline_watermark_parity(
-            source_conn,
-            target_conn,
-            ecosystem_id=ecosystem_id,
-            taxonomy_version_code=taxonomy_version_code,
+        pipeline_watermark_parity = (
+            _pipeline_watermark_parity(
+                source_conn,
+                target_conn,
+                ecosystem_id=ecosystem_id,
+                taxonomy_version_code=taxonomy_version_code,
+            )
+            if include_pipeline_watermark
+            else {
+                "status": "SKIPPED",
+                "source_row_count": 0,
+                "target_row_count": 0,
+                "missing_in_target": [],
+                "extra_in_target": [],
+                "field_mismatch_count": 0,
+                "field_mismatch_examples": [],
+                "accepted_unmapped_target_fields": [],
+                "unknown_components": [],
+                "warnings": [
+                    "Pipeline watermark parity skipped by caller policy",
+                ],
+            }
         )
 
         sections = [

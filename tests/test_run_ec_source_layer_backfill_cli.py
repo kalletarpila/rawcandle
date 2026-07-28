@@ -368,6 +368,7 @@ def test_does_not_run_pipeline_watermark_per_historical_date(tmp_path: Path, mon
 def test_runs_coverage_and_parity_audits_per_date(tmp_path: Path, monkeypatch) -> None:
     args = _base_args(tmp_path)
     called = {"coverage": 0, "parity": 0}
+    parity_include_pipeline_watermark_values = []
     planner_dates = [
         {"date": "2026-05-29", "action": "BACKFILL_MISSING"},
         {"date": "2026-06-01", "action": "BACKFILL_MISSING"},
@@ -384,8 +385,9 @@ def test_runs_coverage_and_parity_audits_per_date(tmp_path: Path, monkeypatch) -
         called["coverage"] += 1
         return {"status": "OK_WITH_WARNINGS"}
 
-    def parity(**_):
+    def parity(**kwargs):
         called["parity"] += 1
+        parity_include_pipeline_watermark_values.append(kwargs["include_pipeline_watermark"])
         return {"status": "OK_WITH_WARNINGS", "total_mismatch_count": 0}
 
     monkeypatch.setattr(cli, "audit_dc_facts_against_ec_sidecar", coverage)
@@ -413,6 +415,7 @@ def test_runs_coverage_and_parity_audits_per_date(tmp_path: Path, monkeypatch) -
 
     assert summary["status"] == "BACKFILL_COMPLETED"
     assert called == {"coverage": 2, "parity": 2}
+    assert parity_include_pipeline_watermark_values == [False, False]
 
 
 def test_stops_on_ticker_loader_failure_and_reports_backup_path(tmp_path: Path, monkeypatch, capsys) -> None:

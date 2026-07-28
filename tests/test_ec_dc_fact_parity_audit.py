@@ -468,6 +468,38 @@ def test_parity_audit_extra_target_row_fails(tmp_path) -> None:
     assert summary["pipeline_watermark_parity"]["extra_in_target"]
 
 
+def test_parity_audit_can_skip_pipeline_watermark_for_historical_backfill(tmp_path) -> None:
+    source_db, target_db = _build_target(tmp_path)
+    with _connect(str(target_db)) as conn:
+        conn.execute(
+            """
+            UPDATE ec_pipeline_watermark
+            SET latest_signal_date = '2026-05-29'
+            WHERE latest_signal_date = '2026-06-05'
+            """
+        )
+        conn.commit()
+
+    strict_summary = audit_dc_ec_fact_parity(
+        str(source_db),
+        str(target_db),
+        signal_date="2026-06-05",
+    )
+    assert strict_summary["status"] == "FAILED"
+    assert strict_summary["pipeline_watermark_parity"]["status"] == "FAILED"
+    assert strict_summary["pipeline_watermark_parity"]["field_mismatch_count"] > 0
+
+    historical_summary = audit_dc_ec_fact_parity(
+        str(source_db),
+        str(target_db),
+        signal_date="2026-06-05",
+        include_pipeline_watermark=False,
+    )
+    assert historical_summary["status"] == "OK_WITH_WARNINGS"
+    assert historical_summary["total_mismatch_count"] == 0
+    assert historical_summary["pipeline_watermark_parity"]["status"] == "SKIPPED"
+
+
 def test_parity_audit_missing_lineage_fails(tmp_path) -> None:
     source_db, target_db = _build_target(tmp_path)
     with _connect(str(target_db)) as conn:
