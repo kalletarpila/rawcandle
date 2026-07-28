@@ -25,7 +25,9 @@ ec_bridge_retry_required=true
 error=Fact parity audit did not meet acceptance criteria: status=FAILED, total_mismatch_count=14
 ```
 
-No production repair was executed during this diagnostic/fix increment.
+No production repair was executed during the initial diagnostic/fix increment.
+The later production repair is recorded in the Completed Production Repair
+section below.
 
 ## Immediate Safety Action
 
@@ -260,6 +262,122 @@ pre-backfill ec_pipeline_watermark == fixed-temp-copy ec_pipeline_watermark
 
 The diff was empty; historical backfill did not refresh EC watermarks.
 
+## Completed Production Repair
+
+Repair timestamp:
+
+```text
+2026-07-28 12:06:59 EEST
+```
+
+Command:
+
+```text
+PYTHONPATH=. python3 -m rawcandle.cli.run_ec_source_layer_backfill \
+  --db /home/kalle/projects/rawcandle/data/analysis.db \
+  --ecosystem DATACENTER \
+  --taxonomy-version DC_TAXONOMY_FULL_V1 \
+  --date-from 2026-07-20 \
+  --date-to 2026-07-27 \
+  --taxonomy-csv /home/kalle/projects/rawcandle/data/datacenter_ecosystem_taxonomy_full_v1.csv \
+  --watchlist /home/kalle/projects/rawcandle/watchlists/datacenter_watchlist.txt \
+  --backup-dir /home/kalle/projects/rawcandle/temp \
+  --confirm-db /home/kalle/projects/rawcandle/data/analysis.db \
+  --confirm-ecosystem DATACENTER \
+  --confirm-taxonomy-version DC_TAXONOMY_FULL_V1 \
+  --allow-replace-existing
+```
+
+Fresh pre-repair backup:
+
+```text
+/home/kalle/projects/rawcandle/temp/analysis__ec_source_layer_backfill__DATACENTER__DC_TAXONOMY_FULL_V1__20260720_20260727__20260728T090659Z.sqlite
+size=7128670208
+sha256=2ecb2206a9555b63f47a43b93931fae1914293b9f55f87963a8a0a8194520945
+```
+
+Pre-repair EC state:
+
+```text
+ec_ticker_signal_daily         max_date=2026-07-24
+ec_group_signal_daily          max_date=2026-07-24
+ec_group_synthetic_ohlc_daily  max_date=2026-07-24
+ec_group_index_daily           max_date=2026-07-24
+```
+
+Pre-repair row counts:
+
+```text
+2026-07-20 ticker=236 group_signal=54 synthetic_ohlc=53 group_index=54
+2026-07-21 ticker=236 group_signal=54 synthetic_ohlc=53 group_index=54
+2026-07-22 ticker=236 group_signal=54 synthetic_ohlc=53 group_index=54
+2026-07-23 ticker=236 group_signal=54 synthetic_ohlc=53 group_index=54
+2026-07-24 ticker=236 group_signal=54 synthetic_ohlc=53 group_index=54
+2026-07-27 ticker=0   group_signal=0  synthetic_ohlc=0  group_index=0
+```
+
+Backfill result:
+
+```text
+status=BACKFILL_COMPLETED
+exit_code=0
+total_mismatch_count=0
+selected_dates=2026-07-20,2026-07-21,2026-07-22,2026-07-23,2026-07-24,2026-07-27
+skipped_dates=2026-07-25,2026-07-26
+```
+
+Per-date audit after repair:
+
+```text
+2026-07-20 coverage=OK_WITH_WARNINGS parity=OK_WITH_WARNINGS mismatches=0
+2026-07-21 coverage=OK_WITH_WARNINGS parity=OK_WITH_WARNINGS mismatches=0
+2026-07-22 coverage=OK_WITH_WARNINGS parity=OK_WITH_WARNINGS mismatches=0
+2026-07-23 coverage=OK_WITH_WARNINGS parity=OK_WITH_WARNINGS mismatches=0
+2026-07-24 coverage=OK_WITH_WARNINGS parity=OK_WITH_WARNINGS mismatches=0
+2026-07-27 coverage=OK_WITH_WARNINGS parity=OK_WITH_WARNINGS mismatches=0
+```
+
+Post-repair EC state:
+
+```text
+ec_ticker_signal_daily         max_date=2026-07-27 rows=11328
+ec_group_signal_daily          max_date=2026-07-27 rows=2592
+ec_group_synthetic_ohlc_daily  max_date=2026-07-27 rows=2544
+ec_group_index_daily           max_date=2026-07-27 rows=2592
+```
+
+Post-repair row counts:
+
+```text
+2026-07-20 ticker=236 group_signal=54 synthetic_ohlc=53 group_index=54
+2026-07-21 ticker=236 group_signal=54 synthetic_ohlc=53 group_index=54
+2026-07-22 ticker=236 group_signal=54 synthetic_ohlc=53 group_index=54
+2026-07-23 ticker=236 group_signal=54 synthetic_ohlc=53 group_index=54
+2026-07-24 ticker=236 group_signal=54 synthetic_ohlc=53 group_index=54
+2026-07-27 ticker=236 group_signal=54 synthetic_ohlc=53 group_index=54
+```
+
+EC watermark verification:
+
+```text
+pre_hash=4bf7a777b17f377653c1f54d2ac3e10691dd51e239ff76352245d0eca095c541
+post_hash=4bf7a777b17f377653c1f54d2ac3e10691dd51e239ff76352245d0eca095c541
+result=UNCHANGED
+```
+
+Incremental execution remained disabled:
+
+```text
+datacenter_stage2_incremental_enabled=false
+datacenter_stage2_overlap_trading_days=5
+```
+
+Final readiness classification:
+
+```text
+REPAIR_VERIFIED_READY_TO_REENABLE
+```
+
 ## Tests
 
 Focused tests run:
@@ -284,24 +402,26 @@ pytest \
 The full suite was not run because the changed interface is narrow and focused
 plus downstream bridge/refresh/build tests passed.
 
-## Production Repair Plan
+## Completed Production Repair Procedure
 
-Do not execute automatically. Later manual repair should:
+The approved manual repair was executed after the parity-audit fix was committed
+and verified.
 
-1. Confirm `datacenter_stage2_incremental_enabled=false`.
-2. Back up current production `analysis.db`.
-3. Record current EC fact counts and `ec_pipeline_watermark`.
-4. Run the corrected historical backfill for:
+1. Confirmed `datacenter_stage2_incremental_enabled=false`.
+2. Backed up current production `analysis.db`.
+3. Recorded current EC fact counts and `ec_pipeline_watermark`.
+4. Ran the corrected historical backfill for:
 
 ```text
 2026-07-20 .. 2026-07-27
 ```
 
-5. Verify coverage and fact parity.
-6. Confirm `total_mismatch_count=0`.
-7. Confirm historical backfill did not move or refresh `ec_pipeline_watermark`.
-8. Inspect scheduler/manual repair summary.
-9. Only then consider re-enabling Stage 2 incremental execution.
+5. Verified coverage and fact parity.
+6. Confirmed `total_mismatch_count=0`.
+7. Confirmed historical backfill did not move or refresh `ec_pipeline_watermark`.
+8. Inspected the manual repair summary.
+9. Left Stage 2 incremental execution disabled until a separate config-only
+   re-enable step.
 
 Rollback considerations:
 
@@ -315,7 +435,21 @@ exist.
 
 ## Explicit Non-Actions
 
-No production database repair was executed. No production scheduler run,
-Datacenter pipeline run, Stage 2 run, downstream production stage, production EC
-refresh/backfill, production database write, watermark update, schema migration,
-network call, re-enable, push, or unrelated cleanup was performed.
+The approved production EC historical backfill was executed for
+`2026-07-20..2026-07-27` and updated the four EC fact tables. No production
+scheduler run, Datacenter pipeline run, Stage 2 run, downstream production
+stage, latest-date EC refresh, schema migration, EC watermark update, network
+call, incremental re-enable, push during the repair operation, or unrelated
+cleanup was performed.
+
+## Final Current Status
+
+```text
+root_cause=PARITY_AUDIT_DEFECT
+code_fix_commit=3a02938
+production_repair_status=BACKFILL_COMPLETED
+total_mismatch_count=0
+ec_fact_head=2026-07-27
+ec_pipeline_watermark=UNCHANGED
+incremental_reenable_readiness=READY
+```
