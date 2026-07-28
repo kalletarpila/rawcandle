@@ -36,7 +36,11 @@ from dev_tools.stock_update_scheduler_ui import (
     scheduler_skip_next_run_label,
     update_systemd_timer_on_calendar,
 )
-from rawcandle.scheduler.config import read_scheduler_config, write_scheduler_config
+from rawcandle.scheduler.config import (
+    StockUpdateSchedulerConfig,
+    read_scheduler_config,
+    write_scheduler_config,
+)
 from rawcandle.scheduler.runner import SchedulerAlreadyRunningError
 
 _LEGACY_DASHBOARD_CONFIG_KEYS = {
@@ -286,6 +290,49 @@ def test_build_config_from_ui_values_normalizes_markets():
 
     assert config.enabled_markets == ["omxh", "omxs"]
     assert config.technical_relevance_enabled is True
+
+
+def test_build_config_from_ui_values_preserves_hidden_existing_settings():
+    base_config = StockUpdateSchedulerConfig(
+        enabled_markets=["omxh", "usa"],
+        run_time="05:30",
+        osakedata_db_path="/tmp/osakedata.db",
+        analysis_db_path="/tmp/analysis.db",
+        log_dir="/tmp/logs",
+        timezone="Europe/Helsinki",
+        technical_relevance_enabled=True,
+        datacenter_stage2_incremental_enabled=True,
+        datacenter_stage2_overlap_trading_days=5,
+        ec_source_layer_enabled=True,
+        ec_source_layer_ecosystem="DATACENTER",
+        ec_source_layer_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        ec_source_layer_taxonomy_csv="/tmp/taxonomy.csv",
+        ec_source_layer_watchlist="/tmp/watchlist.txt",
+        ec_source_layer_backup_dir="/tmp/backups",
+        ec_source_layer_mode="refresh_latest",
+    )
+
+    config = build_config_from_ui_values(
+        osakedata_db_path="/tmp/osakedata-next.db",
+        analysis_db_path="/tmp/analysis-next.db",
+        log_dir="/tmp/logs-next",
+        timezone="Europe/Helsinki",
+        run_time="06:15",
+        selected_markets=["USA"],
+        technical_relevance_enabled=False,
+        base_config=base_config,
+    )
+
+    assert config.osakedata_db_path == "/tmp/osakedata-next.db"
+    assert config.analysis_db_path == "/tmp/analysis-next.db"
+    assert config.enabled_markets == ["usa"]
+    assert config.run_time == "06:15"
+    assert config.datacenter_stage2_incremental_enabled is True
+    assert config.datacenter_stage2_overlap_trading_days == 5
+    assert config.ec_source_layer_enabled is True
+    assert config.ec_source_layer_mode == "refresh_latest"
+    assert config.ec_source_layer_taxonomy_csv == base_config.ec_source_layer_taxonomy_csv
+    assert config.ec_source_layer_watchlist == base_config.ec_source_layer_watchlist
 
 
 def test_build_config_from_ui_values_invalid_run_time_raises_value_error():

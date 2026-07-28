@@ -6,6 +6,7 @@ import json
 import os
 import re
 import subprocess
+from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -73,8 +74,10 @@ def build_config_from_ui_values(
     run_time: str,
     selected_markets: List[str],
     technical_relevance_enabled: bool,
+    base_config: StockUpdateSchedulerConfig | None = None,
 ) -> StockUpdateSchedulerConfig:
-    config = StockUpdateSchedulerConfig(
+    config = replace(
+        base_config or StockUpdateSchedulerConfig(),
         enabled_markets=selected_markets,
         run_time=run_time,
         osakedata_db_path=osakedata_db_path,
@@ -631,6 +634,7 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
 
     def on_save_config(_e: Any) -> None:
         try:
+            current_config = _load_config_or_raise(config_path)
             next_config = build_config_from_ui_values(
                 osakedata_db_path=osakedata_db_field.value,
                 analysis_db_path=analysis_db_field.value,
@@ -639,6 +643,7 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
                 run_time=run_time_field.value,
                 selected_markets=selected_markets_from_ui(),
                 technical_relevance_enabled=bool(technical_relevance_checkbox.value),
+                base_config=current_config,
             )
             result = save_config_and_sync_systemd_timer(
                 config_path=config_path,
