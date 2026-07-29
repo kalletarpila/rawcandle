@@ -8,6 +8,7 @@ import pytest
 
 from analysis.database_manager import DatabaseManager
 from analysis.datacenter_indices import swing_pipeline_orchestrator as orchestrator
+from analysis.datacenter_indices.pipeline_plan import build_stage2_incremental_plan
 from analysis.datacenter_indices.pipeline_watermark import (
     list_pipeline_watermarks,
     upsert_pipeline_watermark,
@@ -27,6 +28,17 @@ def _weekdays(start: str, count: int) -> list[str]:
     cursor = date.fromisoformat(start)
     values: list[str] = []
     while len(values) < count:
+        if cursor.weekday() < 5:
+            values.append(cursor.isoformat())
+        cursor += timedelta(days=1)
+    return values
+
+
+def _weekdays_until(start: str, end: str) -> list[str]:
+    cursor = date.fromisoformat(start)
+    end_date = date.fromisoformat(end)
+    values: list[str] = []
+    while cursor <= end_date:
         if cursor.weekday() < 5:
             values.append(cursor.isoformat())
         cursor += timedelta(days=1)
@@ -334,7 +346,6 @@ def test_e2e_incremental_multi_date_success_drives_historical_bridge(
         )
     }
     for component in (
-        "TICKER_SWING_BASE",
         "GROUP_SWING_BASE",
         "GROUP_TIMING",
         "GROUP_OVERHEAT",
@@ -342,6 +353,8 @@ def test_e2e_incremental_multi_date_success_drives_historical_bridge(
     ):
         assert watermarks[component]["start_date"] == expected_start
         assert watermarks[component]["end_date"] == dates[-1]
+    assert watermarks["TICKER_SWING_BASE"]["start_date"] == dates[0]
+    assert watermarks["TICKER_SWING_BASE"]["end_date"] == dates[-1]
     assert watermarks["SYNTHETIC_OHLC_STRUCTURE"]["start_date"] == dates[0]
 
     bridge_result, bridge_calls = _run_bridge(
@@ -357,6 +370,72 @@ def test_e2e_incremental_multi_date_success_drives_historical_bridge(
     assert bridge_result.bridge_mode == "HISTORICAL_BACKFILL"
     assert bridge_result.bridge_status == "OK"
     assert bridge_result.bridge_watermark_refresh_performed is False
+
+
+def test_e2e_production_regression_next_day_plan_stays_incremental_after_overlap_run(
+    tmp_path, monkeypatch
+):
+    dates = _weekdays_until("2025-08-01", "2026-07-28")
+    kwargs = _orchestrator_kwargs(tmp_path, dates)
+    analysis_db = kwargs["analysis_db"]
+    price_db = kwargs["price_db"]
+    taxonomy_csv = kwargs["taxonomy_csv"]
+    assert isinstance(analysis_db, Path)
+    assert isinstance(price_db, Path)
+    assert isinstance(taxonomy_csv, Path)
+    upsert_pipeline_watermark(
+        analysis_db_path=analysis_db,
+        component_name="TICKER_SWING_BASE",
+        taxonomy_version=TAXONOMY_VERSION,
+        market="usa",
+        signal_version=SIGNAL_VERSION,
+        start_date="2025-08-01",
+        end_date="2026-07-24",
+        status="OK",
+        last_successful_at_utc="2026-07-27T05:00:00Z",
+    )
+    calls: list[tuple[str, list[str]]] = []
+    _fake_orchestrator_runners(monkeypatch, calls)
+
+    first_result = orchestrator.run_datacenter_swing_pipeline(
+        **{
+            **kwargs,
+            "signal_date": "2026-07-27",
+        },
+        stage2_incremental=True,
+        stage2_overlap_trading_days=5,
+    )
+
+    first_summary = first_result["summary"]
+    assert first_summary["stage2_plan_mode"] == "INCREMENTAL"
+    assert first_summary["stage2_actual_materialized_start"] == "2026-07-20"
+    assert first_summary["stage2_actual_materialized_end"] == "2026-07-27"
+    watermarks = {
+        row["component_name"]: row
+        for row in list_pipeline_watermarks(
+            analysis_db_path=analysis_db,
+            taxonomy_version=TAXONOMY_VERSION,
+        )
+    }
+    assert watermarks["TICKER_SWING_BASE"]["start_date"] == "2025-08-01"
+    assert watermarks["TICKER_SWING_BASE"]["end_date"] == "2026-07-27"
+
+    next_plan = build_stage2_incremental_plan(
+        analysis_db_path=analysis_db,
+        price_db_path=price_db,
+        taxonomy_csv_path=taxonomy_csv,
+        taxonomy_version=TAXONOMY_VERSION,
+        market="usa",
+        requested_start="2025-08-01",
+        requested_end="2026-07-28",
+        signal_version=SIGNAL_VERSION,
+        overlap_trading_days=5,
+    )
+
+    assert next_plan.mode == "INCREMENTAL"
+    assert next_plan.reason_code == "NEW_SIGNAL_DATES_WITH_LOOKBACK_OVERLAP"
+    assert next_plan.materialization_start == "2026-07-21"
+    assert next_plan.materialization_end == "2026-07-28"
 
 
 def test_e2e_incremental_single_date_success_drives_latest_bridge(

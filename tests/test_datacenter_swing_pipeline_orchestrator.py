@@ -11,7 +11,10 @@ from analysis.datacenter_indices.pipeline_plan import (
     Stage2DownstreamPlan,
     Stage2IncrementalPlan,
 )
-from analysis.datacenter_indices.pipeline_watermark import list_pipeline_watermarks
+from analysis.datacenter_indices.pipeline_watermark import (
+    list_pipeline_watermarks,
+    upsert_pipeline_watermark,
+)
 from analysis.datacenter_indices.technical_relevance_context import (
     load_datacenter_pipeline_technical_relevance_tickers,
 )
@@ -798,6 +801,66 @@ def test_stage2_incremental_success_wires_planner_range_to_dirty_chain_and_water
     assert watermarks["GROUP_OVERHEAT"]["start_date"] == "2026-05-13"
     assert watermarks["TICKER_SCANNER"]["start_date"] == "2026-05-13"
     assert watermarks["SYNTHETIC_OHLC_STRUCTURE"]["start_date"] == "2026-01-01"
+
+
+def test_stage2_incremental_success_preserves_existing_dirty_chain_coverage_start(
+    tmp_path,
+    monkeypatch,
+):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+    coverage_components = (
+        ("TICKER_SWING_BASE", "usa"),
+        ("GROUP_SWING_BASE", ""),
+        ("GROUP_TIMING", ""),
+        ("GROUP_OVERHEAT", ""),
+        ("TICKER_SCANNER", ""),
+    )
+    for component_name, market in coverage_components:
+        upsert_pipeline_watermark(
+            analysis_db_path=analysis_db,
+            component_name=component_name,
+            taxonomy_version="DC_TAXONOMY_FULL_V1",
+            market=market,
+            signal_version="DC_SWING_SIGNAL_V1",
+            start_date="2026-01-01",
+            end_date="2026-05-14",
+            status="OK",
+            last_successful_at_utc="2026-05-18T10:00:00Z",
+        )
+
+    def _planner(**kwargs):
+        return _stage2_plan(
+            materialization_start="2026-05-13",
+            materialization_end="2026-05-15",
+        )
+
+    monkeypatch.setattr(orchestrator, "build_stage2_incremental_plan", _planner)
+    monkeypatch.setattr(orchestrator, "run_datacenter_indices_main", lambda argv: 0)
+    monkeypatch.setattr(orchestrator, "run_datacenter_ticker_swing_signals_main", lambda argv: 0)
+    monkeypatch.setattr(orchestrator, "run_datacenter_group_swing_signals_main", lambda argv: 0)
+    monkeypatch.setattr(orchestrator, "run_datacenter_group_synthetic_ohlc_main", lambda argv: 0)
+
+    result = orchestrator.run_datacenter_swing_pipeline(
+        **_base_kwargs(tmp_path),
+        stage2_incremental=True,
+        skip_audit=True,
+        skip_reports=True,
+        no_technical_relevance=True,
+    )
+
+    assert result["summary"]["stage2_plan_mode"] == "INCREMENTAL"
+    assert result["summary"]["stage2_actual_materialized_start"] == "2026-05-13"
+    watermarks = {
+        row["component_name"]: row
+        for row in list_pipeline_watermarks(
+            analysis_db_path=analysis_db,
+            taxonomy_version="DC_TAXONOMY_FULL_V1",
+        )
+    }
+    for component_name, _market in coverage_components:
+        assert watermarks[component_name]["start_date"] == "2026-01-01"
+        assert watermarks[component_name]["end_date"] == "2026-05-15"
 
 
 def test_stage2_incremental_full_mode_uses_planner_materialization_range(

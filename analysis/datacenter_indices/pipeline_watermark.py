@@ -31,6 +31,7 @@ def upsert_pipeline_watermark(
     last_successful_run_id: str | None = None,
     last_successful_at_utc: str | None = None,
     notes: str | None = None,
+    preserve_coverage_start: bool = False,
 ) -> dict[str, Any]:
     normalized_market = _normalize_dimension(market)
     normalized_signal_version = _normalize_dimension(signal_version)
@@ -57,8 +58,24 @@ def upsert_pipeline_watermark(
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(component_name, taxonomy_version, market, signal_version, calc_version)
             DO UPDATE SET
-                start_date = excluded.start_date,
-                end_date = excluded.end_date,
+                start_date = CASE
+                    WHEN ?
+                     AND dc_pipeline_watermark.status = 'OK'
+                     AND excluded.status = 'OK'
+                     AND excluded.start_date <= dc_pipeline_watermark.end_date
+                     AND excluded.end_date >= dc_pipeline_watermark.start_date
+                    THEN MIN(dc_pipeline_watermark.start_date, excluded.start_date)
+                    ELSE excluded.start_date
+                END,
+                end_date = CASE
+                    WHEN ?
+                     AND dc_pipeline_watermark.status = 'OK'
+                     AND excluded.status = 'OK'
+                     AND excluded.start_date <= dc_pipeline_watermark.end_date
+                     AND excluded.end_date >= dc_pipeline_watermark.start_date
+                    THEN MAX(dc_pipeline_watermark.end_date, excluded.end_date)
+                    ELSE excluded.end_date
+                END,
                 row_count = excluded.row_count,
                 status = excluded.status,
                 last_successful_run_id = excluded.last_successful_run_id,
@@ -78,6 +95,8 @@ def upsert_pipeline_watermark(
                 last_successful_run_id,
                 timestamp,
                 notes,
+                1 if preserve_coverage_start else 0,
+                1 if preserve_coverage_start else 0,
             ),
         )
         row = conn.execute(

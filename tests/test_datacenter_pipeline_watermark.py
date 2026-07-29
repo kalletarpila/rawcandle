@@ -188,3 +188,112 @@ def test_primary_key_uniqueness_is_enforced_for_watermark_table(tmp_path):
         count = conn.execute("SELECT COUNT(*) FROM dc_pipeline_watermark").fetchone()[0]
 
     assert count == 1
+
+
+def test_preserve_coverage_start_merges_overlapping_ok_range(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+
+    upsert_pipeline_watermark(
+        analysis_db_path=analysis_db,
+        component_name="TICKER_SWING_BASE",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        market="usa",
+        signal_version="DC_SWING_SIGNAL_V1",
+        start_date="2025-08-01",
+        end_date="2026-07-24",
+        status="OK",
+        last_successful_at_utc="2026-07-27T05:00:00Z",
+    )
+
+    row = upsert_pipeline_watermark(
+        analysis_db_path=analysis_db,
+        component_name="TICKER_SWING_BASE",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        market="usa",
+        signal_version="DC_SWING_SIGNAL_V1",
+        start_date="2026-07-20",
+        end_date="2026-07-27",
+        status="OK",
+        last_successful_at_utc="2026-07-28T05:00:00Z",
+        preserve_coverage_start=True,
+    )
+
+    assert row["start_date"] == "2025-08-01"
+    assert row["end_date"] == "2026-07-27"
+
+
+def test_preserve_coverage_start_does_not_merge_disjoint_range(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+
+    upsert_pipeline_watermark(
+        analysis_db_path=analysis_db,
+        component_name="TICKER_SWING_BASE",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        market="usa",
+        signal_version="DC_SWING_SIGNAL_V1",
+        start_date="2025-08-01",
+        end_date="2025-08-15",
+        status="OK",
+        last_successful_at_utc="2026-07-27T05:00:00Z",
+    )
+
+    row = upsert_pipeline_watermark(
+        analysis_db_path=analysis_db,
+        component_name="TICKER_SWING_BASE",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        market="usa",
+        signal_version="DC_SWING_SIGNAL_V1",
+        start_date="2026-07-20",
+        end_date="2026-07-27",
+        status="OK",
+        last_successful_at_utc="2026-07-28T05:00:00Z",
+        preserve_coverage_start=True,
+    )
+
+    assert row["start_date"] == "2026-07-20"
+    assert row["end_date"] == "2026-07-27"
+
+
+def test_preserve_coverage_start_does_not_merge_incompatible_identity(tmp_path):
+    analysis_db = tmp_path / "analysis.db"
+    _create_analysis_db(analysis_db)
+
+    upsert_pipeline_watermark(
+        analysis_db_path=analysis_db,
+        component_name="TICKER_SWING_BASE",
+        taxonomy_version="OLD_TAXONOMY",
+        market="usa",
+        signal_version="DC_SWING_SIGNAL_V1",
+        start_date="2025-08-01",
+        end_date="2026-07-24",
+        status="OK",
+        last_successful_at_utc="2026-07-27T05:00:00Z",
+    )
+
+    row = upsert_pipeline_watermark(
+        analysis_db_path=analysis_db,
+        component_name="TICKER_SWING_BASE",
+        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        market="usa",
+        signal_version="DC_SWING_SIGNAL_V1",
+        start_date="2026-07-20",
+        end_date="2026-07-27",
+        status="OK",
+        last_successful_at_utc="2026-07-28T05:00:00Z",
+        preserve_coverage_start=True,
+    )
+
+    old_row = get_pipeline_watermark(
+        analysis_db_path=analysis_db,
+        component_name="TICKER_SWING_BASE",
+        taxonomy_version="OLD_TAXONOMY",
+        market="usa",
+        signal_version="DC_SWING_SIGNAL_V1",
+    )
+
+    assert old_row is not None
+    assert old_row["start_date"] == "2025-08-01"
+    assert row["start_date"] == "2026-07-20"
+    assert row["end_date"] == "2026-07-27"

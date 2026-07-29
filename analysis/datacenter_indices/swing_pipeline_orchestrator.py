@@ -113,6 +113,7 @@ class PipelineStage:
     argv: list[str]
     runner: Callable[[], dict[str, object] | None]
     watermark_builder: Callable[[dict[str, object] | None], dict[str, object]] | None = None
+    preserve_watermark_coverage_start: bool = False
     skip_status: str | None = None
     skip_reason: str | None = None
 
@@ -320,6 +321,7 @@ def _write_stage_watermark(
     builder: Callable[[dict[str, object] | None], dict[str, object]] | None,
     result: dict[str, object] | None,
     generated_at_utc: str | None,
+    preserve_coverage_start: bool = False,
 ) -> None:
     if builder is None:
         return
@@ -327,6 +329,7 @@ def _write_stage_watermark(
     upsert_pipeline_watermark(
         analysis_db_path=analysis_db,
         last_successful_at_utc=generated_at_utc,
+        preserve_coverage_start=preserve_coverage_start,
         **payload,
     )
 
@@ -836,6 +839,7 @@ def run_datacenter_swing_pipeline(
                 "row_count": None,
                 "status": "OK",
             },
+            preserve_watermark_coverage_start=True,
             skip_status=(
                 "SKIPPED_BY_INCREMENTAL_PLAN"
                 if stage2_plan is not None and stage2_plan.mode == "SKIP"
@@ -880,6 +884,7 @@ def run_datacenter_swing_pipeline(
                 "row_count": None,
                 "status": "OK",
             },
+            preserve_watermark_coverage_start=True,
             skip_status=(
                 "SKIPPED_BY_INCREMENTAL_PLAN"
                 if stage2_plan is not None and stage2_plan.mode == "SKIP"
@@ -1033,6 +1038,7 @@ def run_datacenter_swing_pipeline(
                 "row_count": None,
                 "status": "OK",
             },
+            preserve_watermark_coverage_start=True,
             skip_status=(
                 "SKIPPED_BY_INCREMENTAL_PLAN"
                 if stage2_plan is not None and stage2_plan.mode == "SKIP"
@@ -1076,6 +1082,7 @@ def run_datacenter_swing_pipeline(
                 "row_count": None,
                 "status": "OK",
             },
+            preserve_watermark_coverage_start=True,
             skip_status=(
                 "SKIPPED_BY_INCREMENTAL_PLAN"
                 if stage2_plan is not None and stage2_plan.mode == "SKIP"
@@ -1121,6 +1128,7 @@ def run_datacenter_swing_pipeline(
                 "row_count": None,
                 "status": "OK",
             },
+            preserve_watermark_coverage_start=True,
             skip_status=(
                 "SKIPPED_BY_INCREMENTAL_PLAN"
                 if stage2_plan is not None and stage2_plan.mode == "SKIP"
@@ -1609,6 +1617,7 @@ def run_datacenter_swing_pipeline(
             builder=stage.watermark_builder,
             result=result,
             generated_at_utc=generated_at_utc,
+            preserve_coverage_start=stage.preserve_watermark_coverage_start,
         )
         completed_stage_count += 1
         if stage.heading == "Pipeline audit":
