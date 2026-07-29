@@ -367,11 +367,15 @@ dc_fact_head=2026-07-28
 ec_fact_head=2026-07-28
 total_mismatch_count=0
 production_repair_status=OK
-working_tree_commit_created=false
-incremental_reenable_status=WAITING_FOR_COMMIT
+working_tree_commit_created=true
+code_fix_commit=a353409
+incremental_reenable_status=REENABLED
+datacenter_stage2_incremental_enabled=true
+datacenter_stage2_overlap_trading_days=5
 ```
 
-Stage 2 incremental remains disabled until the task commit exists.
+Stage 2 incremental was re-enabled only after the fix, focused tests,
+production EC repair, and implementation commit succeeded.
 
 ## Explicit Production Actions and Non-Actions
 
@@ -381,6 +385,7 @@ Production actions performed:
 disabled datacenter_stage2_incremental_enabled
 created production analysis.db backup
 ran one-day EC latest refresh for 2026-07-28
+re-enabled datacenter_stage2_incremental_enabled after commit a353409
 ```
 
 Production actions not performed:
