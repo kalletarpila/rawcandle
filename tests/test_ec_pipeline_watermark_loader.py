@@ -3,7 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from rawcandle.ec_pipeline_watermark_loader import load_ec_pipeline_watermark_from_dc
+from rawcandle.ec_pipeline_watermark_loader import (
+    advance_ec_pipeline_watermarks_after_historical_backfill,
+    load_ec_pipeline_watermark_from_dc,
+)
 from rawcandle.ec_sidecar_migration import apply_ec_sidecar_migration
 
 
@@ -243,6 +246,112 @@ def test_loader_unknown_component_maps_to_unknown_prefix_with_warning(tmp_path) 
     assert summary["component_name_to_source_table"]["WEEKLY_REPORT"] == "UNKNOWN:WEEKLY_REPORT"
 
 
+def test_historical_backfill_advances_only_canonical_fact_watermarks_forward(tmp_path) -> None:
+    target_db = _setup_target_db(tmp_path)
+    with _connect(str(target_db)) as conn:
+        conn.executemany(
+            """
+            INSERT INTO ec_pipeline_watermark (
+                ecosystem_id,
+                pipeline_name,
+                source_table,
+                latest_signal_date,
+                latest_run_id,
+                status,
+                created_at_utc,
+                updated_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (1, "TICKER_SWING_BASE", "dc_ticker_swing_signal_daily", "2026-07-28", None, "OK", "2026-07-28T00:00:00Z", "2026-07-28T00:00:00Z"),
+                (1, "GROUP_SWING_BASE", "dc_group_swing_signal_daily", "2026-07-30", None, "OK", "2026-07-30T00:00:00Z", "2026-07-30T00:00:00Z"),
+                (1, "SYNTHETIC_OHLC_RELATIVE", "dc_group_synthetic_ohlc_daily", "2026-07-20", None, "OK", "2026-07-20T00:00:00Z", "2026-07-20T00:00:00Z"),
+                (1, "DAILY_REPORT", "UNKNOWN:DAILY_REPORT", "2026-07-20", None, "OK", "2026-07-20T00:00:00Z", "2026-07-20T00:00:00Z"),
+            ],
+        )
+        conn.commit()
+
+    summary = advance_ec_pipeline_watermarks_after_historical_backfill(
+        target_db_path=str(target_db),
+        latest_signal_date="2026-07-29",
+    )
+
+    with _connect(str(target_db)) as conn:
+        rows = conn.execute(
+            """
+            SELECT pipeline_name, source_table, latest_signal_date, status
+            FROM ec_pipeline_watermark
+            ORDER BY pipeline_name, source_table
+            """
+        ).fetchall()
+
+    assert summary["status"] == "OK"
+    assert summary["watermark_refresh_performed"] is True
+    assert summary["watermark_advanced"] is True
+    assert summary["watermark_candidate_latest_signal_date"] == "2026-07-29"
+    assert summary["watermark_rows_inserted"] == 2
+    assert summary["watermark_rows_updated"] == 1
+    assert summary["watermark_rows_unchanged"] == 1
+    assert summary["watermark_rows_total"] == 4
+    assert rows == [
+        ("DAILY_REPORT", "UNKNOWN:DAILY_REPORT", "2026-07-20", "OK"),
+        ("GROUP_INDEX", "dc_group_index_daily", "2026-07-29", "OK"),
+        ("GROUP_SWING_BASE", "dc_group_swing_signal_daily", "2026-07-30", "OK"),
+        ("SYNTHETIC_OHLC_BASE", "dc_group_synthetic_ohlc_daily", "2026-07-29", "OK"),
+        ("SYNTHETIC_OHLC_RELATIVE", "dc_group_synthetic_ohlc_daily", "2026-07-20", "OK"),
+        ("TICKER_SWING_BASE", "dc_ticker_swing_signal_daily", "2026-07-29", "OK"),
+    ]
+
+
+def test_historical_backfill_watermark_noops_when_canonical_heads_are_newer(tmp_path) -> None:
+    target_db = _setup_target_db(tmp_path)
+    canonical_rows = [
+        ("TICKER_SWING_BASE", "dc_ticker_swing_signal_daily"),
+        ("GROUP_SWING_BASE", "dc_group_swing_signal_daily"),
+        ("SYNTHETIC_OHLC_BASE", "dc_group_synthetic_ohlc_daily"),
+        ("GROUP_INDEX", "dc_group_index_daily"),
+    ]
+    with _connect(str(target_db)) as conn:
+        conn.executemany(
+            """
+            INSERT INTO ec_pipeline_watermark (
+                ecosystem_id,
+                pipeline_name,
+                source_table,
+                latest_signal_date,
+                latest_run_id,
+                status,
+                created_at_utc,
+                updated_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (1, pipeline_name, source_table, "2026-07-30", None, "OK", "2026-07-30T00:00:00Z", "2026-07-30T00:00:00Z")
+                for pipeline_name, source_table in canonical_rows
+            ],
+        )
+        conn.commit()
+
+    summary = advance_ec_pipeline_watermarks_after_historical_backfill(
+        target_db_path=str(target_db),
+        latest_signal_date="2026-07-29",
+    )
+
+    with _connect(str(target_db)) as conn:
+        latest_dates = [
+            row[0]
+            for row in conn.execute(
+                "SELECT latest_signal_date FROM ec_pipeline_watermark ORDER BY pipeline_name"
+            ).fetchall()
+        ]
+
+    assert summary["watermark_advanced"] is False
+    assert summary["watermark_rows_inserted"] == 0
+    assert summary["watermark_rows_updated"] == 0
+    assert summary["watermark_rows_unchanged"] == 4
+    assert latest_dates == ["2026-07-30", "2026-07-30", "2026-07-30", "2026-07-30"]
+
+
 def test_loader_duplicate_scope_requires_replace_existing_and_replace_is_scoped(tmp_path) -> None:
     source_db = tmp_path / "source_replace.db"
     target_db = _setup_target_db(tmp_path)
@@ -302,4 +411,3 @@ def test_loader_duplicate_scope_requires_replace_existing_and_replace_is_scoped(
             ("TICKER_SWING_BASE", "dc_ticker_swing_signal_daily", "2026-06-04", "WARN"),
         ]
     assert summary["loaded_row_count"] == 1
-

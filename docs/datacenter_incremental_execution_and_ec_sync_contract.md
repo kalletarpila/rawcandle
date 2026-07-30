@@ -506,9 +506,12 @@ Rules:
 - `CONFIRMED_FROM_CODE`: existing EC refresh and backfill CLIs return exit code
   `1` when parity or coverage is unacceptable.
 - Historical EC refresh must not move the EC latest watermark backwards.
-- Current historical backfill behavior intentionally skips
-  `ec_pipeline_watermark` refresh and must be acknowledged in scheduler/post-step
-  status.
+- Historical EC backfill must advance only canonical EC fact watermark heads,
+  forward-only, after the full selected-date range has loaded and coverage/fact
+  parity are accepted with zero mismatches.
+- Historical EC backfill must not copy the full Datacenter pipeline watermark
+  set and must not update UNKNOWN/report/audit or derived synthetic
+  relative/structure watermark rows.
 
 ## 13. Visible and Persistent Failure Reporting
 
@@ -598,6 +601,11 @@ Historical Datacenter rewrites require transitional EC range backfill.
 `REQ-EC-BRIDGE-002`
 
 EC bridge success requires load plus parity/coverage acceptance.
+
+`REQ-EC-WATERMARK-001`
+
+Historical EC backfill advances canonical fact watermark heads only after the
+validated backfill completes, and never moves those heads backwards.
 
 `REQ-STATUS-001`
 

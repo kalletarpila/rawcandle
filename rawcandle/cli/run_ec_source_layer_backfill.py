@@ -13,12 +13,14 @@ from rawcandle.ec_dc_fact_parity_audit import audit_dc_ec_fact_parity
 from rawcandle.ec_group_index_daily_loader import load_ec_group_index_daily_from_dc
 from rawcandle.ec_group_signal_daily_loader import load_ec_group_signal_daily_from_dc
 from rawcandle.ec_group_synthetic_ohlc_daily_loader import load_ec_group_synthetic_ohlc_daily_from_dc
+from rawcandle.ec_pipeline_watermark_loader import advance_ec_pipeline_watermarks_after_historical_backfill
 from rawcandle.ec_ticker_signal_daily_loader import load_ec_ticker_signal_daily_from_dc
 
 
 SUCCESS_PARITY_STATUSES = {"OK", "OK_WITH_WARNINGS"}
 SUCCESS_COVERAGE_STATUSES = {"OK", "OK_WITH_WARNINGS"}
 REPLACE_ACTIONS = {"REPLACE_PARTIAL", "REPLACE_EXISTING"}
+WATERMARK_POLICY = "ADVANCE_CANONICAL_FACT_HEADS_AFTER_VALIDATED_BACKFILL"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -156,7 +158,41 @@ def _backfill_refused_summary(
         "error": "; ".join(errors) if errors else None,
         "errors": errors,
         "planner_summary": planner_summary,
+        **_watermark_not_run_summary(),
     }
+
+
+def _watermark_not_run_summary() -> dict[str, object]:
+    return {
+        "watermark_policy": WATERMARK_POLICY,
+        "watermark_refresh_performed": False,
+        "watermark_advanced": False,
+        "watermark_candidate_latest_signal_date": None,
+        "watermark_rows_inserted": 0,
+        "watermark_rows_updated": 0,
+        "watermark_rows_unchanged": 0,
+        "watermark_rows_total": 0,
+        "watermark_advance_status": "NOT_RUN",
+    }
+
+
+def _merge_watermark_summary(summary: dict[str, object], watermark_summary: dict[str, object]) -> dict[str, object]:
+    merged = dict(summary)
+    merged.update(
+        {
+            "watermark_policy": watermark_summary.get("watermark_policy", WATERMARK_POLICY),
+            "watermark_refresh_performed": bool(watermark_summary.get("watermark_refresh_performed", False)),
+            "watermark_advanced": bool(watermark_summary.get("watermark_advanced", False)),
+            "watermark_candidate_latest_signal_date": watermark_summary.get("watermark_candidate_latest_signal_date"),
+            "watermark_rows_inserted": int(watermark_summary.get("watermark_rows_inserted") or 0),
+            "watermark_rows_updated": int(watermark_summary.get("watermark_rows_updated") or 0),
+            "watermark_rows_unchanged": int(watermark_summary.get("watermark_rows_unchanged") or 0),
+            "watermark_rows_total": int(watermark_summary.get("watermark_rows_total") or 0),
+            "watermark_advance_status": str(watermark_summary.get("watermark_advance_status") or watermark_summary.get("status") or "UNKNOWN"),
+            "watermark_summary": watermark_summary,
+        }
+    )
+    return merged
 
 
 def _extract_selected_dates(planner_summary: dict[str, object]) -> list[dict[str, str]]:
@@ -304,6 +340,7 @@ def run_ec_source_layer_backfill(
             "errors": [],
             "planner_summary": planner_summary,
             "skipped_reason": "planner reported SKIP_ALL_DATES_ALREADY_LOADED",
+            **_watermark_not_run_summary(),
         }
 
     if planner_status != "READY_BACKFILL_PLAN":
@@ -340,6 +377,7 @@ def run_ec_source_layer_backfill(
             "errors": [],
             "planner_summary": planner_summary,
             "skipped_reason": "planner returned READY_BACKFILL_PLAN with zero eligible selected dates",
+            **_watermark_not_run_summary(),
         }
 
     assert resolved_backup_dir is not None
@@ -370,6 +408,7 @@ def run_ec_source_layer_backfill(
             "error": str(exc),
             "errors": [str(exc)],
             "planner_summary": planner_summary,
+            **_watermark_not_run_summary(),
         }
 
     per_date_results: list[dict[str, object]] = []
@@ -523,9 +562,50 @@ def run_ec_source_layer_backfill(
             "planner_summary": planner_summary,
             "failed_date_completed_steps": list(completed_steps),
             "warning": "Partial selected-date ec_ writes may exist; no automatic rollback was attempted",
+            **_watermark_not_run_summary(),
         }
 
-    return {
+    try:
+        watermark_candidate_latest_signal_date = max(completed_dates)
+        watermark_summary = advance_ec_pipeline_watermarks_after_historical_backfill(
+            target_db_path=db_path,
+            ecosystem_code=ecosystem_code,
+            taxonomy_version_code=taxonomy_version_code,
+            latest_signal_date=watermark_candidate_latest_signal_date,
+        )
+        watermark_advance_status = str(
+            watermark_summary.get("watermark_advance_status")
+            or watermark_summary.get("status")
+            or "UNKNOWN"
+        )
+        if watermark_advance_status != "OK":
+            raise RuntimeError(f"Historical backfill watermark advancement returned {watermark_advance_status}")
+    except Exception as exc:
+        failed_summary = {
+            "status": "BACKFILL_FAILED",
+            "ecosystem_code": ecosystem_code,
+            "taxonomy_version_code": taxonomy_version_code,
+            "date_from": date_from,
+            "date_to": date_to,
+            "selected_dates": selected_dates,
+            "completed_dates": completed_dates,
+            "skipped_dates": skipped_dates,
+            "failed_date": None,
+            "failed_step": "advance_ec_pipeline_watermarks_after_historical_backfill",
+            "backup_path": str(backup_path),
+            "per_date_results": per_date_results,
+            "total_mismatch_count": total_mismatch_count,
+            "error": str(exc),
+            "errors": [str(exc)],
+            "planner_summary": planner_summary,
+            "warning": "Selected-date ec_ fact writes completed, but final watermark advancement failed; retry is required",
+            **_watermark_not_run_summary(),
+        }
+        failed_summary["watermark_candidate_latest_signal_date"] = max(completed_dates) if completed_dates else None
+        failed_summary["watermark_advance_status"] = "FAILED"
+        return failed_summary
+
+    completed_summary = {
         "status": "BACKFILL_COMPLETED",
         "ecosystem_code": ecosystem_code,
         "taxonomy_version_code": taxonomy_version_code,
@@ -542,8 +622,9 @@ def run_ec_source_layer_backfill(
         "error": None,
         "errors": [],
         "planner_summary": planner_summary,
-        "watermark_policy_note": "Historical backfill intentionally skipped ec_pipeline_watermark writes; consider one watermark refresh only after a full backfill policy is defined.",
+        "watermark_policy_note": "Historical backfill advanced canonical EC fact watermark heads once after successful coverage and fact parity validation.",
     }
+    return _merge_watermark_summary(completed_summary, watermark_summary)
 
 
 def render_backfill_text(summary: dict[str, object]) -> str:
@@ -627,9 +708,19 @@ def render_backfill_text(summary: dict[str, object]) -> str:
     lines.append(f"- total_mismatch_count={summary.get('total_mismatch_count')}")
     lines.append(f"- error={summary.get('error')}")
 
-    if summary.get("watermark_policy_note"):
+    if summary.get("watermark_policy"):
         lines.extend(["", "Watermark Policy"])
-        lines.append(f"- {summary.get('watermark_policy_note')}")
+        lines.append(f"- watermark_policy={summary.get('watermark_policy')}")
+        lines.append(f"- watermark_refresh_performed={str(bool(summary.get('watermark_refresh_performed'))).lower()}")
+        lines.append(f"- watermark_advanced={str(bool(summary.get('watermark_advanced'))).lower()}")
+        lines.append(f"- watermark_candidate_latest_signal_date={summary.get('watermark_candidate_latest_signal_date')}")
+        lines.append(f"- watermark_rows_inserted={summary.get('watermark_rows_inserted')}")
+        lines.append(f"- watermark_rows_updated={summary.get('watermark_rows_updated')}")
+        lines.append(f"- watermark_rows_unchanged={summary.get('watermark_rows_unchanged')}")
+        lines.append(f"- watermark_rows_total={summary.get('watermark_rows_total')}")
+        lines.append(f"- watermark_advance_status={summary.get('watermark_advance_status')}")
+        if summary.get("watermark_policy_note"):
+            lines.append(f"- {summary.get('watermark_policy_note')}")
 
     if summary.get("errors"):
         lines.extend(["", "Errors"])

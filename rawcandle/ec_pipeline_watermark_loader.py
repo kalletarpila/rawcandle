@@ -38,6 +38,12 @@ KNOWN_COMPONENT_SOURCE_TABLES = {
     "SYNTHETIC_OHLC_RELATIVE": "dc_group_synthetic_ohlc_daily",
     "GROUP_INDEX": "dc_group_index_daily",
 }
+HISTORICAL_BACKFILL_CANONICAL_FACT_WATERMARKS = (
+    ("TICKER_SWING_BASE", "dc_ticker_swing_signal_daily"),
+    ("GROUP_SWING_BASE", "dc_group_swing_signal_daily"),
+    ("SYNTHETIC_OHLC_BASE", "dc_group_synthetic_ohlc_daily"),
+    ("GROUP_INDEX", "dc_group_index_daily"),
+)
 
 
 def _table_names(conn: sqlite3.Connection) -> set[str]:
@@ -292,4 +298,110 @@ def load_ec_pipeline_watermark_from_dc(
         }
     finally:
         source_conn.close()
+        target_conn.close()
+
+
+def advance_ec_pipeline_watermarks_after_historical_backfill(
+    *,
+    target_db_path: str | Path,
+    ecosystem_code: str = "DATACENTER",
+    taxonomy_version_code: str = "DC_TAXONOMY_FULL_V1",
+    latest_signal_date: str,
+) -> dict[str, object]:
+    if not _normalize_text(latest_signal_date):
+        raise ValueError("latest_signal_date is required for historical backfill watermark advancement")
+
+    target_conn = _connect_readwrite(target_db_path)
+    try:
+        _require_tables(target_conn, REQUIRED_TARGET_TABLES, "target")
+
+        ecosystem_id = _resolve_ecosystem_id(target_conn, ecosystem_code)
+        loader_timestamp_utc = _now_utc_iso()
+        rows_inserted = 0
+        rows_updated = 0
+        rows_unchanged = 0
+
+        with target_conn:
+            for pipeline_name, source_table in HISTORICAL_BACKFILL_CANONICAL_FACT_WATERMARKS:
+                row = target_conn.execute(
+                    """
+                    SELECT latest_signal_date
+                    FROM ec_pipeline_watermark
+                    WHERE ecosystem_id = ?
+                      AND pipeline_name = ?
+                      AND source_table = ?
+                    """,
+                    (ecosystem_id, pipeline_name, source_table),
+                ).fetchone()
+                if row is None:
+                    target_conn.execute(
+                        """
+                        INSERT INTO ec_pipeline_watermark (
+                            ecosystem_id,
+                            pipeline_name,
+                            source_table,
+                            latest_signal_date,
+                            latest_run_id,
+                            status,
+                            created_at_utc,
+                            updated_at_utc
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            ecosystem_id,
+                            pipeline_name,
+                            source_table,
+                            latest_signal_date,
+                            None,
+                            "OK",
+                            loader_timestamp_utc,
+                            loader_timestamp_utc,
+                        ),
+                    )
+                    rows_inserted += 1
+                    continue
+
+                existing_latest_signal_date = _normalize_text(row[0])
+                if existing_latest_signal_date is None or existing_latest_signal_date < latest_signal_date:
+                    target_conn.execute(
+                        """
+                        UPDATE ec_pipeline_watermark
+                        SET latest_signal_date = ?,
+                            latest_run_id = NULL,
+                            status = ?,
+                            updated_at_utc = ?
+                        WHERE ecosystem_id = ?
+                          AND pipeline_name = ?
+                          AND source_table = ?
+                        """,
+                        (
+                            latest_signal_date,
+                            "OK",
+                            loader_timestamp_utc,
+                            ecosystem_id,
+                            pipeline_name,
+                            source_table,
+                        ),
+                    )
+                    rows_updated += 1
+                else:
+                    rows_unchanged += 1
+
+        rows_total = len(HISTORICAL_BACKFILL_CANONICAL_FACT_WATERMARKS)
+        return {
+            "status": "OK",
+            "ecosystem_code": ecosystem_code,
+            "taxonomy_version_code": taxonomy_version_code,
+            "watermark_policy": "ADVANCE_CANONICAL_FACT_HEADS_AFTER_VALIDATED_BACKFILL",
+            "watermark_refresh_performed": True,
+            "watermark_advanced": (rows_inserted + rows_updated) > 0,
+            "watermark_candidate_latest_signal_date": latest_signal_date,
+            "watermark_rows_inserted": rows_inserted,
+            "watermark_rows_updated": rows_updated,
+            "watermark_rows_unchanged": rows_unchanged,
+            "watermark_rows_total": rows_total,
+            "watermark_advance_status": "OK",
+            "canonical_component_to_source_table": dict(HISTORICAL_BACKFILL_CANONICAL_FACT_WATERMARKS),
+        }
+    finally:
         target_conn.close()

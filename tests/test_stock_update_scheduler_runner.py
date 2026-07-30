@@ -2789,6 +2789,8 @@ def test_scheduler_runner_ec_bridge_multi_date_uses_backfill_only(
             ],
             "total_mismatch_count": 0,
             "error": None,
+            "watermark_refresh_performed": True,
+            "watermark_advance_status": "OK",
         }
 
     monkeypatch.setattr("rawcandle.scheduler.runner.run_ec_source_layer_backfill", fake_backfill)
@@ -2810,10 +2812,10 @@ def test_scheduler_runner_ec_bridge_multi_date_uses_backfill_only(
     assert result.ec_bridge_required_end == "2026-06-05"
     assert result.ec_bridge_coverage_status == "OK_WITH_WARNINGS"
     assert result.ec_bridge_parity_status == "OK"
-    assert result.ec_bridge_watermark_refresh_performed is False
+    assert result.ec_bridge_watermark_refresh_performed is True
     log_text = Path(result.ec_source_layer_log_path).read_text(encoding="utf-8")
     assert "ec_bridge_mode=HISTORICAL_BACKFILL" in log_text
-    assert "ec_bridge_watermark_refresh_performed=false" in log_text
+    assert "ec_bridge_watermark_refresh_performed=true" in log_text
 
 
 def test_scheduler_runner_ec_bridge_multi_date_failure_warns_and_records_retry_range(

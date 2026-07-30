@@ -229,6 +229,8 @@ def _run_bridge(
             ],
             "total_mismatch_count": 0,
             "error": None,
+            "watermark_refresh_performed": True,
+            "watermark_advance_status": "OK",
         }
     monkeypatch.setattr(
         scheduler_runner,
@@ -369,7 +371,7 @@ def test_e2e_incremental_multi_date_success_drives_historical_bridge(
     assert backfill_kwargs["date_to"] == dates[-1]
     assert bridge_result.bridge_mode == "HISTORICAL_BACKFILL"
     assert bridge_result.bridge_status == "OK"
-    assert bridge_result.bridge_watermark_refresh_performed is False
+    assert bridge_result.bridge_watermark_refresh_performed is True
 
 
 def test_e2e_production_regression_next_day_plan_stays_incremental_after_overlap_run(

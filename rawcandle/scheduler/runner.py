@@ -825,6 +825,14 @@ def _aggregate_backfill_audit_status(
     return "OK"
 
 
+def _summary_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y"}
+    return bool(value)
+
+
 def _build_datacenter_log_path(log_dir: Path, market: str, started_at: datetime.datetime) -> Path:
     minute_timestamp = _format_utc_filename_minute_timestamp(started_at)
     base_name = f"datacenter_pipeline_{market}_{minute_timestamp}"
@@ -1461,11 +1469,15 @@ def _run_ec_source_layer_refresh_post_step(
             backfill_summary.get("per_date_results"), "parity_status"
         )
         total_mismatch_count = int(backfill_summary.get("total_mismatch_count") or 0)
+        bridge_watermark_refresh_performed = _summary_bool(
+            backfill_summary.get("watermark_refresh_performed")
+        )
         bridge_ok = (
             backfill_status == "BACKFILL_COMPLETED"
             and coverage_status in {"OK", "OK_WITH_WARNINGS"}
             and parity_status in {"OK", "OK_WITH_WARNINGS"}
             and total_mismatch_count == 0
+            and bridge_watermark_refresh_performed
         )
         return _write_log(
             EcSourceLayerRefreshPostStepResult(
@@ -1490,7 +1502,7 @@ def _run_ec_source_layer_refresh_post_step(
                 bridge_retry_required=not bridge_ok,
                 bridge_exit_code=0 if bridge_ok else 1,
                 bridge_error="NONE" if bridge_ok else str(backfill_summary.get("error") or backfill_status),
-                bridge_watermark_refresh_performed=False,
+                bridge_watermark_refresh_performed=bridge_watermark_refresh_performed,
             )
         )
 

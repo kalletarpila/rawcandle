@@ -93,6 +93,32 @@ def _ready_backfill_plan(status: str = "READY_BACKFILL_PLAN", candidate_dates: l
     }
 
 
+def _successful_watermark_summary(latest_signal_date: str = "2026-06-01") -> dict[str, object]:
+    return {
+        "status": "OK",
+        "watermark_policy": "ADVANCE_CANONICAL_FACT_HEADS_AFTER_VALIDATED_BACKFILL",
+        "watermark_refresh_performed": True,
+        "watermark_advanced": True,
+        "watermark_candidate_latest_signal_date": latest_signal_date,
+        "watermark_rows_inserted": 4,
+        "watermark_rows_updated": 0,
+        "watermark_rows_unchanged": 0,
+        "watermark_rows_total": 4,
+        "watermark_advance_status": "OK",
+    }
+
+
+def _patch_successful_watermark_finalizer(monkeypatch) -> list[dict[str, object]]:
+    calls: list[dict[str, object]] = []
+
+    def fake_finalizer(**kwargs):
+        calls.append(kwargs)
+        return _successful_watermark_summary(str(kwargs["latest_signal_date"]))
+
+    monkeypatch.setattr(cli, "advance_ec_pipeline_watermarks_after_historical_backfill", fake_finalizer)
+    return calls
+
+
 def test_refuses_when_confirm_db_mismatches(tmp_path: Path, monkeypatch, capsys) -> None:
     args = _base_args(tmp_path)
     args[args.index("--confirm-db") + 1] = str(tmp_path / "wrong.sqlite")
@@ -177,6 +203,7 @@ def test_refuses_when_planner_is_blocked(tmp_path: Path, monkeypatch, capsys) ->
 def test_creates_backup_before_first_write(tmp_path: Path, monkeypatch) -> None:
     args = _base_args(tmp_path)
     call_order: list[str] = []
+    _patch_successful_watermark_finalizer(monkeypatch)
 
     def fake_backup(**_):
         call_order.append("backup")
@@ -221,6 +248,7 @@ def test_uses_planner_selected_dates_not_independently_inferred_dates(tmp_path: 
     args = _base_args(tmp_path)
     seen_dates: list[str] = []
     planner_dates = [{"date": "2026-06-03", "action": "BACKFILL_MISSING"}]
+    watermark_calls = _patch_successful_watermark_finalizer(monkeypatch)
 
     monkeypatch.setattr(cli, "plan_ec_source_layer_backfill", lambda **_: _ready_backfill_plan(candidate_dates=planner_dates))
     monkeypatch.setattr(cli, "_create_backup", lambda **_: tmp_path / "backups" / "backup.sqlite")
@@ -258,6 +286,7 @@ def test_uses_planner_selected_dates_not_independently_inferred_dates(tmp_path: 
 
     assert summary["status"] == "BACKFILL_COMPLETED"
     assert seen_dates == ["2026-06-03"]
+    assert watermark_calls[0]["latest_signal_date"] == "2026-06-03"
 
 
 def test_runs_four_fact_loaders_per_date_in_correct_order(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -268,6 +297,7 @@ def test_runs_four_fact_loaders_per_date_in_correct_order(tmp_path: Path, monkey
         {"date": "2026-05-29", "action": "BACKFILL_MISSING"},
         {"date": "2026-06-01", "action": "REPLACE_PARTIAL"},
     ]
+    _patch_successful_watermark_finalizer(monkeypatch)
 
     monkeypatch.setattr(cli, "plan_ec_source_layer_backfill", lambda **_: _ready_backfill_plan(candidate_dates=planner_dates))
     monkeypatch.setattr(cli, "_create_backup", lambda **_: (call_order.append("backup") or (tmp_path / "backups" / "backup.sqlite")))
@@ -331,6 +361,7 @@ def test_runs_four_fact_loaders_per_date_in_correct_order(tmp_path: Path, monkey
 
 def test_does_not_run_pipeline_watermark_per_historical_date(tmp_path: Path, monkeypatch) -> None:
     args = _base_args(tmp_path)
+    watermark_calls = _patch_successful_watermark_finalizer(monkeypatch)
     monkeypatch.setattr(cli, "plan_ec_source_layer_backfill", lambda **_: _ready_backfill_plan(candidate_dates=[{"date": "2026-05-29", "action": "BACKFILL_MISSING"}]))
     monkeypatch.setattr(cli, "_create_backup", lambda **_: tmp_path / "backups" / "backup.sqlite")
     monkeypatch.setattr(cli, "load_ec_ticker_signal_daily_from_dc", lambda **_: {"status": "OK"})
@@ -363,6 +394,9 @@ def test_does_not_run_pipeline_watermark_per_historical_date(tmp_path: Path, mon
     assert summary["status"] == "BACKFILL_COMPLETED"
     for date_result in summary["per_date_results"]:
         assert "pipeline_watermark_summary" not in date_result
+    assert len(watermark_calls) == 1
+    assert watermark_calls[0]["latest_signal_date"] == "2026-05-29"
+    assert summary["watermark_refresh_performed"] is True
 
 
 def test_runs_coverage_and_parity_audits_per_date(tmp_path: Path, monkeypatch) -> None:
@@ -373,6 +407,7 @@ def test_runs_coverage_and_parity_audits_per_date(tmp_path: Path, monkeypatch) -
         {"date": "2026-05-29", "action": "BACKFILL_MISSING"},
         {"date": "2026-06-01", "action": "BACKFILL_MISSING"},
     ]
+    _patch_successful_watermark_finalizer(monkeypatch)
 
     monkeypatch.setattr(cli, "plan_ec_source_layer_backfill", lambda **_: _ready_backfill_plan(candidate_dates=planner_dates))
     monkeypatch.setattr(cli, "_create_backup", lambda **_: tmp_path / "backups" / "backup.sqlite")
@@ -460,6 +495,7 @@ def test_success_path_returns_completed_dates_and_row_counts(tmp_path: Path, mon
         {"date": "2026-05-29", "action": "BACKFILL_MISSING"},
         {"date": "2026-06-01", "action": "BACKFILL_MISSING"},
     ]
+    _patch_successful_watermark_finalizer(monkeypatch)
     monkeypatch.setattr(cli, "plan_ec_source_layer_backfill", lambda **_: _ready_backfill_plan(candidate_dates=planner_dates))
     monkeypatch.setattr(cli, "_create_backup", lambda **_: tmp_path / "backups" / "backup.sqlite")
     monkeypatch.setattr(cli, "load_ec_ticker_signal_daily_from_dc", lambda **_: {"status": "OK"})
@@ -502,11 +538,14 @@ def test_success_path_returns_completed_dates_and_row_counts(tmp_path: Path, mon
     assert summary["completed_dates"] == ["2026-05-29", "2026-06-01"]
     assert summary["per_date_results"][0]["row_counts"]["ticker_rows"] == 236
     assert summary["per_date_results"][1]["row_counts"]["ticker_rows"] == 240
+    assert summary["watermark_candidate_latest_signal_date"] == "2026-06-01"
+    assert summary["watermark_rows_total"] == 4
 
 
 def test_no_scheduler_or_osakedata_paths_are_touched(tmp_path: Path, monkeypatch) -> None:
     args = _base_args(tmp_path)
     seen_kwargs: list[dict[str, object]] = []
+    _patch_successful_watermark_finalizer(monkeypatch)
     monkeypatch.setattr(cli, "plan_ec_source_layer_backfill", lambda **_: _ready_backfill_plan(candidate_dates=[{"date": "2026-05-29", "action": "BACKFILL_MISSING"}]))
     monkeypatch.setattr(cli, "_create_backup", lambda **_: tmp_path / "backups" / "backup.sqlite")
 
@@ -545,3 +584,46 @@ def test_no_scheduler_or_osakedata_paths_are_touched(tmp_path: Path, monkeypatch
     assert seen_kwargs
     for kwargs in seen_kwargs:
         assert "osakedata.db" not in str(kwargs)
+
+
+def test_final_watermark_failure_makes_backfill_fail_after_fact_writes(tmp_path: Path, monkeypatch) -> None:
+    args = _base_args(tmp_path)
+    monkeypatch.setattr(cli, "plan_ec_source_layer_backfill", lambda **_: _ready_backfill_plan(candidate_dates=[{"date": "2026-05-29", "action": "BACKFILL_MISSING"}]))
+    monkeypatch.setattr(cli, "_create_backup", lambda **_: tmp_path / "backups" / "backup.sqlite")
+    monkeypatch.setattr(cli, "load_ec_ticker_signal_daily_from_dc", lambda **_: {"status": "OK"})
+    monkeypatch.setattr(cli, "load_ec_group_signal_daily_from_dc", lambda **_: {"status": "OK"})
+    monkeypatch.setattr(cli, "load_ec_group_synthetic_ohlc_daily_from_dc", lambda **_: {"status": "OK"})
+    monkeypatch.setattr(cli, "load_ec_group_index_daily_from_dc", lambda **_: {"status": "OK"})
+    monkeypatch.setattr(cli, "audit_dc_facts_against_ec_sidecar", lambda **_: {"status": "OK"})
+    monkeypatch.setattr(cli, "audit_dc_ec_fact_parity", lambda **_: {"status": "OK", "total_mismatch_count": 0})
+    monkeypatch.setattr(cli, "_selected_date_row_counts", lambda *_: {
+        "ticker_rows": 236,
+        "group_signal_rows": 54,
+        "synthetic_ohlc_rows": 53,
+        "group_index_rows": 54,
+    })
+    monkeypatch.setattr(
+        cli,
+        "advance_ec_pipeline_watermarks_after_historical_backfill",
+        lambda **_: (_ for _ in ()).throw(RuntimeError("watermark write failed")),
+    )
+
+    summary = cli.run_ec_source_layer_backfill(
+        db_path=args[1],
+        ecosystem_code="DATACENTER",
+        taxonomy_version_code="DC_TAXONOMY_FULL_V1",
+        date_from="2026-05-29",
+        date_to="2026-06-04",
+        taxonomy_csv_path=args[11],
+        watchlist_path=args[13],
+        backup_dir=args[15],
+        confirm_db=args[17],
+        confirm_ecosystem=args[19],
+        confirm_taxonomy_version=args[21],
+    )
+
+    assert summary["status"] == "BACKFILL_FAILED"
+    assert summary["completed_dates"] == ["2026-05-29"]
+    assert summary["failed_step"] == "advance_ec_pipeline_watermarks_after_historical_backfill"
+    assert summary["watermark_advance_status"] == "FAILED"
+    assert "watermark write failed" in str(summary["error"])

@@ -45,14 +45,36 @@ behavior.
 
 Multi-date mode calls the existing `run_ec_source_layer_backfill` function with
 `allow_replace_existing=True` for the conservative materialized range. It does
-not run an additional latest refresh and does not update `ec_pipeline_watermark`;
-that is the current historical backfill policy.
+not run an additional latest refresh.
+
+After the entire historical backfill succeeds and coverage/fact parity are
+accepted with zero mismatches, the backfill performs one final canonical EC fact
+watermark advancement. This is a forward-only update using the actual latest
+completed selected date, not the requested `date_to`.
+
+The historical backfill advances only these canonical fact heads:
+
+```text
+TICKER_SWING_BASE -> ec_ticker_signal_daily
+GROUP_SWING_BASE -> ec_group_swing_signal_daily
+SYNTHETIC_OHLC_BASE -> ec_group_synthetic_ohlc_daily
+GROUP_INDEX -> ec_group_index_daily
+```
+
+It does not copy the full `dc_pipeline_watermark` table and does not update
+UNKNOWN/report/audit rows or derived synthetic OHLC relative/structure
+watermarks.
 
 ## Status and Retry
 
 Bridge success requires an accepted loader/backfill result and acceptable
 existing coverage/parity evidence. For backfill, per-date coverage and parity
 statuses are aggregated and total mismatches must be zero.
+
+For historical backfill, bridge success also requires successful final
+canonical fact watermark advancement or validation. If that final step fails,
+the backfill is reported as failed even though selected-date fact rows may
+already have been committed.
 
 Bridge failure is scheduler-visible:
 
@@ -68,6 +90,17 @@ existing primary scheduler failure.
 This increment does not implement automatic retry or a durable pending queue.
 The retry range is retained in the scheduler summary/log so an operator can run
 the existing EC backfill manually.
+
+## Deferred Production Repair Plan
+
+If production canonical EC fact watermarks lag after a previously successful
+historical backfill, the preferred repair is to rerun the corrected historical
+backfill for the affected range, for example `2026-07-22..2026-07-29`, using
+the supported backfill CLI and its normal coverage/parity gates.
+
+A supported watermark-only repair may be used later only if the codebase
+provides an audited CLI or function for that purpose. Do not repair production
+watermarks with ad hoc SQL.
 
 ## Summary Fields
 
@@ -90,6 +123,20 @@ ec_bridge_watermark_refresh_performed
 ```
 
 Existing `ec_source_layer_*` fields remain present for compatibility.
+
+The historical backfill summary also exposes:
+
+```text
+watermark_policy=ADVANCE_CANONICAL_FACT_HEADS_AFTER_VALIDATED_BACKFILL
+watermark_refresh_performed
+watermark_advanced
+watermark_candidate_latest_signal_date
+watermark_rows_inserted
+watermark_rows_updated
+watermark_rows_unchanged
+watermark_rows_total
+watermark_advance_status
+```
 
 ## Tests
 
