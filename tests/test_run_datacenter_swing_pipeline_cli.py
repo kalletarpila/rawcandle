@@ -505,6 +505,24 @@ def test_pipeline_threads_technical_relevance_run_id_to_daily_and_weekly_report_
     monkeypatch.setattr(orchestrator, "run_datacenter_ticker_swing_signals_main", _runner)
     monkeypatch.setattr(orchestrator, "run_datacenter_group_swing_signals_main", _runner)
     monkeypatch.setattr(orchestrator, "run_datacenter_group_synthetic_ohlc_main", _runner)
+    monkeypatch.setattr(
+        pipeline_cli,
+        "apply_datacenter_watchlist_reconciliation",
+        lambda **kwargs: {
+            "watchlist_reconciliation_attempted": True,
+            "watchlist_reconciliation_status": "NO_CHANGE",
+            "watchlist_source_reference": str(watchlist_file),
+            "watchlist_source_sha256": "abc123",
+            "watchlist_source_member_count": 1,
+            "watchlist_previous_member_count": 1,
+            "watchlist_current_member_count": 1,
+            "watchlist_added_count": 0,
+            "watchlist_removed_count": 0,
+            "watchlist_added_tickers": [],
+            "watchlist_removed_tickers": [],
+            "watchlist_reconciliation_error": "NONE",
+        },
+    )
     monkeypatch.setattr(orchestrator, "load_swing_pipeline_audit", _audit)
     monkeypatch.setattr(orchestrator, "_run_automatic_technical_relevance_stage", _fail_technical_relevance)
     monkeypatch.setattr(orchestrator, "write_daily_swing_signal_report", _daily)
@@ -577,6 +595,24 @@ def test_pipeline_auto_technical_relevance_existing_run_reuse_is_reported_and_th
     monkeypatch.setattr(orchestrator, "run_datacenter_ticker_swing_signals_main", _runner)
     monkeypatch.setattr(orchestrator, "run_datacenter_group_swing_signals_main", _runner)
     monkeypatch.setattr(orchestrator, "run_datacenter_group_synthetic_ohlc_main", _runner)
+    monkeypatch.setattr(
+        pipeline_cli,
+        "apply_datacenter_watchlist_reconciliation",
+        lambda **kwargs: {
+            "watchlist_reconciliation_attempted": True,
+            "watchlist_reconciliation_status": "NO_CHANGE",
+            "watchlist_source_reference": str(watchlist_file),
+            "watchlist_source_sha256": "abc123",
+            "watchlist_source_member_count": 1,
+            "watchlist_previous_member_count": 1,
+            "watchlist_current_member_count": 1,
+            "watchlist_added_count": 0,
+            "watchlist_removed_count": 0,
+            "watchlist_added_tickers": [],
+            "watchlist_removed_tickers": [],
+            "watchlist_reconciliation_error": "NONE",
+        },
+    )
     monkeypatch.setattr(orchestrator, "load_swing_pipeline_audit", _audit)
     monkeypatch.setattr(orchestrator, "_run_automatic_technical_relevance_stage", _auto)
     monkeypatch.setattr(orchestrator, "write_daily_swing_signal_report", _daily)
@@ -626,6 +662,24 @@ def test_pipeline_profiling_disabled_by_default_does_not_print_profile_lines_in_
     monkeypatch.setattr(orchestrator, "run_datacenter_ticker_swing_signals_main", _runner)
     monkeypatch.setattr(orchestrator, "run_datacenter_group_swing_signals_main", _runner)
     monkeypatch.setattr(orchestrator, "run_datacenter_group_synthetic_ohlc_main", _runner)
+    monkeypatch.setattr(
+        pipeline_cli,
+        "apply_datacenter_watchlist_reconciliation",
+        lambda **kwargs: {
+            "watchlist_reconciliation_attempted": True,
+            "watchlist_reconciliation_status": "NO_CHANGE",
+            "watchlist_source_reference": str(watchlist_file),
+            "watchlist_source_sha256": "abc123",
+            "watchlist_source_member_count": 1,
+            "watchlist_previous_member_count": 1,
+            "watchlist_current_member_count": 1,
+            "watchlist_added_count": 0,
+            "watchlist_removed_count": 0,
+            "watchlist_added_tickers": [],
+            "watchlist_removed_tickers": [],
+            "watchlist_reconciliation_error": "NONE",
+        },
+    )
     monkeypatch.setattr(orchestrator, "load_swing_pipeline_audit", _audit)
     monkeypatch.setattr(orchestrator, "_run_automatic_technical_relevance_stage", _technical_relevance)
     monkeypatch.setattr(orchestrator, "write_daily_swing_signal_report", _daily)
@@ -674,6 +728,24 @@ def test_pipeline_watchlist_override_is_passed_to_daily_and_weekly_report_stages
     monkeypatch.setattr(orchestrator, "run_datacenter_ticker_swing_signals_main", _runner)
     monkeypatch.setattr(orchestrator, "run_datacenter_group_swing_signals_main", _runner)
     monkeypatch.setattr(orchestrator, "run_datacenter_group_synthetic_ohlc_main", _runner)
+    monkeypatch.setattr(
+        pipeline_cli,
+        "apply_datacenter_watchlist_reconciliation",
+        lambda **kwargs: {
+            "watchlist_reconciliation_attempted": True,
+            "watchlist_reconciliation_status": "NO_CHANGE",
+            "watchlist_source_reference": str(watchlist_file),
+            "watchlist_source_sha256": "abc123",
+            "watchlist_source_member_count": 1,
+            "watchlist_previous_member_count": 1,
+            "watchlist_current_member_count": 1,
+            "watchlist_added_count": 0,
+            "watchlist_removed_count": 0,
+            "watchlist_added_tickers": [],
+            "watchlist_removed_tickers": [],
+            "watchlist_reconciliation_error": "NONE",
+        },
+    )
     monkeypatch.setattr(orchestrator, "load_swing_pipeline_audit", _audit)
     monkeypatch.setattr(orchestrator, "_run_automatic_technical_relevance_stage", _technical_relevance)
     monkeypatch.setattr(orchestrator, "write_daily_swing_signal_report", _daily)
@@ -690,6 +762,90 @@ def test_pipeline_watchlist_override_is_passed_to_daily_and_weekly_report_stages
     assert str(calls[0][1]["watchlist_file"]) == str(watchlist_file)
     assert all(str(call[1]["watchlist_file"]) == str(watchlist_file) for call in calls)
     assert all(call[1]["technical_relevance_run_id"] == "AUTO_REL_RUN" for call in calls)
+
+
+def test_pipeline_reconciles_watchlist_before_canonical_processing(tmp_path, monkeypatch, capsys):
+    calls: list[dict[str, object]] = []
+    watchlist_file = tmp_path / "watchlist.txt"
+    watchlist_file.write_text("AAA\n", encoding="utf-8")
+
+    def _reconcile(**kwargs):
+        calls.append({"reconcile": dict(kwargs)})
+        return {
+            "watchlist_reconciliation_attempted": True,
+            "watchlist_reconciliation_status": "APPLIED",
+            "watchlist_source_reference": str(watchlist_file),
+            "watchlist_source_sha256": "abc123",
+            "watchlist_source_member_count": 1,
+            "watchlist_previous_member_count": 0,
+            "watchlist_current_member_count": 1,
+            "watchlist_added_count": 1,
+            "watchlist_removed_count": 0,
+            "watchlist_added_tickers": ["AAA"],
+            "watchlist_removed_tickers": [],
+            "watchlist_reconciliation_error": "NONE",
+        }
+
+    def _run_pipeline(**kwargs):
+        calls.append({"pipeline": dict(kwargs)})
+        return {"summary": {"pipeline_status": "OK", "audit_validation_status": "OK"}}
+
+    monkeypatch.setattr(pipeline_cli, "apply_datacenter_watchlist_reconciliation", _reconcile)
+    monkeypatch.setattr(pipeline_cli, "run_datacenter_swing_pipeline", _run_pipeline)
+
+    exit_code = run_datacenter_swing_pipeline_main(
+        _base_args(tmp_path) + ["--watchlist-file", str(watchlist_file)]
+    )
+
+    assert exit_code == 0
+    assert [list(call.keys())[0] for call in calls] == ["reconcile", "pipeline"]
+    assert calls[0]["reconcile"]["watchlist_path"] == watchlist_file
+    assert calls[0]["reconcile"]["invocation_source"] == "DATACENTER_PIPELINE"
+    lines = capsys.readouterr().out.splitlines()
+    assert "SUMMARY watchlist_reconciliation_status=APPLIED" in lines
+    assert "SUMMARY watchlist_source_reference=" + str(watchlist_file) in lines
+    assert "SUMMARY watchlist_source_sha256=abc123" in lines
+    assert "SUMMARY watchlist_added_tickers=['AAA']" in lines
+
+
+def test_pipeline_watchlist_reconciliation_failure_stops_before_canonical_processing(
+    tmp_path, monkeypatch, capsys
+):
+    watchlist_file = tmp_path / "watchlist.txt"
+    watchlist_file.write_text("BAD TICKER\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        pipeline_cli,
+        "apply_datacenter_watchlist_reconciliation",
+        lambda **kwargs: {
+            "watchlist_reconciliation_attempted": True,
+            "watchlist_reconciliation_status": "FAILED",
+            "watchlist_source_reference": str(watchlist_file),
+            "watchlist_source_sha256": "abc123",
+            "watchlist_source_member_count": 0,
+            "watchlist_previous_member_count": 0,
+            "watchlist_current_member_count": 0,
+            "watchlist_added_count": 0,
+            "watchlist_removed_count": 0,
+            "watchlist_added_tickers": [],
+            "watchlist_removed_tickers": [],
+            "watchlist_reconciliation_error": "invalid watchlist",
+        },
+    )
+    monkeypatch.setattr(
+        pipeline_cli,
+        "run_datacenter_swing_pipeline",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("pipeline should not run")),
+    )
+
+    exit_code = run_datacenter_swing_pipeline_main(
+        _base_args(tmp_path) + ["--watchlist-file", str(watchlist_file)]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "SUMMARY watchlist_reconciliation_status=FAILED" in captured.out
+    assert "invalid watchlist" in captured.err
 
 
 def test_pipeline_no_taxonomy_listing_flag_is_passed_to_daily_and_weekly_report_stages(tmp_path, monkeypatch, capsys):

@@ -18,6 +18,7 @@ from analysis.datacenter_indices.swing_pipeline_orchestrator import (
     format_pipeline_final_summary_lines,
     run_datacenter_swing_pipeline,
 )
+from rawcandle.ec_datacenter_watchlist_loader import apply_datacenter_watchlist_reconciliation
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -77,6 +78,50 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
+    reconciliation_summary: dict[str, object] = {
+        "watchlist_reconciliation_attempted": False,
+        "watchlist_reconciliation_status": "SKIPPED",
+        "watchlist_source_reference": "NONE",
+        "watchlist_source_sha256": "NONE",
+        "watchlist_source_member_count": 0,
+        "watchlist_previous_member_count": 0,
+        "watchlist_current_member_count": 0,
+        "watchlist_added_count": 0,
+        "watchlist_removed_count": 0,
+        "watchlist_added_tickers": [],
+        "watchlist_removed_tickers": [],
+        "watchlist_reconciliation_error": "NONE",
+    }
+    if args.watchlist_file is not None and not args.dry_run:
+        reconciliation_summary = apply_datacenter_watchlist_reconciliation(
+            db_path=args.analysis_db,
+            watchlist_path=args.watchlist_file,
+            ecosystem_code="DATACENTER",
+            taxonomy_version_code=args.taxonomy_version,
+            invocation_source="DATACENTER_PIPELINE",
+        )
+        for key in (
+            "watchlist_reconciliation_attempted",
+            "watchlist_reconciliation_status",
+            "watchlist_source_reference",
+            "watchlist_source_sha256",
+            "watchlist_source_member_count",
+            "watchlist_previous_member_count",
+            "watchlist_current_member_count",
+            "watchlist_added_count",
+            "watchlist_removed_count",
+            "watchlist_added_tickers",
+            "watchlist_removed_tickers",
+            "watchlist_reconciliation_error",
+        ):
+            print(f"SUMMARY {key}={reconciliation_summary.get(key)}")
+        if reconciliation_summary.get("watchlist_reconciliation_status") == "FAILED":
+            print(
+                "ERROR watchlist reconciliation failed before Datacenter canonical processing: "
+                f"{reconciliation_summary.get('watchlist_reconciliation_error')}",
+                file=sys.stderr,
+            )
+            return 1
     try:
         result = run_datacenter_swing_pipeline(
             price_db=args.price_db,

@@ -106,6 +106,18 @@ class ScheduledStockUpdateRunResult:
     datacenter_pipeline_weekly_report_path: Optional[str] = None
     datacenter_pipeline_weekly_report_csv_path: Optional[str] = None
     datacenter_pipeline_error: str = ""
+    watchlist_reconciliation_attempted: bool = False
+    watchlist_reconciliation_status: str = "SKIPPED"
+    watchlist_source_reference: str = "NONE"
+    watchlist_source_sha256: str = "NONE"
+    watchlist_source_member_count: int = 0
+    watchlist_previous_member_count: int = 0
+    watchlist_current_member_count: int = 0
+    watchlist_added_count: int = 0
+    watchlist_removed_count: int = 0
+    watchlist_added_tickers: str = "[]"
+    watchlist_removed_tickers: str = "[]"
+    watchlist_reconciliation_error: str = "NONE"
     ec_source_layer_attempted: int = 0
     ec_source_layer_status: str = "SKIPPED"
     ec_source_layer_log_path: str = ""
@@ -156,6 +168,7 @@ class DatacenterPostStepConfig:
     expected_ticker_count: int
     expected_group_count: int
     expected_synthetic_ohlc_count: int
+    watchlist_file: str
 
 
 @dataclass(frozen=True)
@@ -205,6 +218,18 @@ class DatacenterPostStepResult:
     weekly_report_path: Optional[str] = None
     weekly_report_csv_path: Optional[str] = None
     pipeline_summary: dict[str, str] = field(default_factory=dict)
+    watchlist_reconciliation_attempted: bool = False
+    watchlist_reconciliation_status: str = "SKIPPED"
+    watchlist_source_reference: str = "NONE"
+    watchlist_source_sha256: str = "NONE"
+    watchlist_source_member_count: int = 0
+    watchlist_previous_member_count: int = 0
+    watchlist_current_member_count: int = 0
+    watchlist_added_count: int = 0
+    watchlist_removed_count: int = 0
+    watchlist_added_tickers: str = "[]"
+    watchlist_removed_tickers: str = "[]"
+    watchlist_reconciliation_error: str = "NONE"
     error: Optional[str] = None
 
 
@@ -412,6 +437,7 @@ def _resolve_datacenter_post_step_config(market: str) -> Optional[DatacenterPost
         expected_ticker_count=236,
         expected_group_count=54,
         expected_synthetic_ohlc_count=53,
+        watchlist_file="watchlists/datacenter_watchlist.txt",
     )
 
 
@@ -682,6 +708,45 @@ def _parse_summary_lines(stdout: str) -> dict[str, str]:
         if key:
             summary[key] = value
     return summary
+
+
+def _datacenter_watchlist_reconciliation_fields(
+    pipeline_summary: dict[str, str],
+) -> dict[str, object]:
+    def _int_value(key: str) -> int:
+        try:
+            return int(pipeline_summary.get(key) or 0)
+        except ValueError:
+            return 0
+
+    return {
+        "watchlist_reconciliation_attempted": _summary_bool(
+            pipeline_summary.get("watchlist_reconciliation_attempted")
+        ),
+        "watchlist_reconciliation_status": pipeline_summary.get(
+            "watchlist_reconciliation_status", "SKIPPED"
+        ),
+        "watchlist_source_reference": pipeline_summary.get(
+            "watchlist_source_reference", "NONE"
+        ),
+        "watchlist_source_sha256": pipeline_summary.get(
+            "watchlist_source_sha256", "NONE"
+        ),
+        "watchlist_source_member_count": _int_value("watchlist_source_member_count"),
+        "watchlist_previous_member_count": _int_value("watchlist_previous_member_count"),
+        "watchlist_current_member_count": _int_value("watchlist_current_member_count"),
+        "watchlist_added_count": _int_value("watchlist_added_count"),
+        "watchlist_removed_count": _int_value("watchlist_removed_count"),
+        "watchlist_added_tickers": pipeline_summary.get(
+            "watchlist_added_tickers", "[]"
+        ),
+        "watchlist_removed_tickers": pipeline_summary.get(
+            "watchlist_removed_tickers", "[]"
+        ),
+        "watchlist_reconciliation_error": pipeline_summary.get(
+            "watchlist_reconciliation_error", "NONE"
+        ),
+    }
 
 
 def _parse_datacenter_report_paths(stdout: str) -> dict[str, Optional[str]]:
@@ -1187,6 +1252,9 @@ def _run_datacenter_post_step(
         "--expected-synthetic-ohlc-count",
         str(resolved.expected_synthetic_ohlc_count),
     ]
+    watchlist_file = config.ec_source_layer_watchlist or resolved.watchlist_file
+    if watchlist_file:
+        command.extend(["--watchlist-file", watchlist_file])
     if config.datacenter_stage2_incremental_enabled:
         command.extend(
             [
@@ -1229,6 +1297,7 @@ def _run_datacenter_post_step(
         completed.stdout or "", "audit_validation_status"
     )
     pipeline_summary = _parse_summary_lines(completed.stdout or "")
+    watchlist_reconciliation_fields = _datacenter_watchlist_reconciliation_fields(pipeline_summary)
     parsed_report_paths = _parse_datacenter_report_paths(completed.stdout or "")
     if completed.returncode != 0:
         return DatacenterPostStepResult(
@@ -1252,6 +1321,7 @@ def _run_datacenter_post_step(
             weekly_report_path=parsed_report_paths["weekly_report_path"],
             weekly_report_csv_path=parsed_report_paths["weekly_report_csv_path"],
             pipeline_summary=pipeline_summary,
+            **watchlist_reconciliation_fields,
             error=f"datacenter pipeline exited with code {completed.returncode}",
         )
     return DatacenterPostStepResult(
@@ -1275,6 +1345,7 @@ def _run_datacenter_post_step(
         weekly_report_path=parsed_report_paths["weekly_report_path"],
         weekly_report_csv_path=parsed_report_paths["weekly_report_csv_path"],
         pipeline_summary=pipeline_summary,
+        **watchlist_reconciliation_fields,
     )
 
 
@@ -1458,6 +1529,7 @@ def _run_ec_source_layer_refresh_post_step(
                 confirm_ecosystem=config.ec_source_layer_ecosystem,
                 confirm_taxonomy_version=config.ec_source_layer_taxonomy_version,
                 allow_replace_existing=True,
+                reconcile_watchlist=False,
             )
         except Exception as exc:
             return _write_log(
@@ -1550,6 +1622,7 @@ def _run_ec_source_layer_refresh_post_step(
             confirm_taxonomy_version=config.ec_source_layer_taxonomy_version,
             signal_date=datacenter_result.signal_date,
             allow_replace_date=not config.ec_source_layer_only_on_new_signal_date,
+            reconcile_watchlist=False,
         )
     except Exception as exc:
         return _write_log(
@@ -2043,6 +2116,22 @@ def run_scheduler_config(
                 datacenter_pipeline_weekly_report_path=datacenter_result.weekly_report_path,
                 datacenter_pipeline_weekly_report_csv_path=datacenter_result.weekly_report_csv_path,
                 datacenter_pipeline_error=datacenter_result.error or "",
+                watchlist_reconciliation_attempted=(
+                    datacenter_result.watchlist_reconciliation_attempted
+                ),
+                watchlist_reconciliation_status=(
+                    datacenter_result.watchlist_reconciliation_status
+                ),
+                watchlist_source_reference=datacenter_result.watchlist_source_reference,
+                watchlist_source_sha256=datacenter_result.watchlist_source_sha256,
+                watchlist_source_member_count=datacenter_result.watchlist_source_member_count,
+                watchlist_previous_member_count=datacenter_result.watchlist_previous_member_count,
+                watchlist_current_member_count=datacenter_result.watchlist_current_member_count,
+                watchlist_added_count=datacenter_result.watchlist_added_count,
+                watchlist_removed_count=datacenter_result.watchlist_removed_count,
+                watchlist_added_tickers=datacenter_result.watchlist_added_tickers,
+                watchlist_removed_tickers=datacenter_result.watchlist_removed_tickers,
+                watchlist_reconciliation_error=datacenter_result.watchlist_reconciliation_error,
                 ec_source_layer_attempted=ec_source_layer_result.attempted,
                 ec_source_layer_status=ec_source_layer_result.status,
                 ec_source_layer_log_path=ec_source_layer_result.log_path,

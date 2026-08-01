@@ -32,6 +32,8 @@ Watchlist membership drift is a non-blocking diagnostic condition for canonical 
 
 When taxonomy/source checks, source fact availability, mapping checks, and replacement safety checks pass, the planner remains ready even if the source watchlist and stored EC watchlist membership differ.
 
+Datacenter production entry points now reconcile the Datacenter TXT watchlist into EC watchlist membership before canonical Datacenter or standalone Datacenter EC processing starts. The drift fields below remain diagnostics and must not be reintroduced as canonical fact blockers.
+
 The planner and execution summaries expose structured fields:
 
 ```text
@@ -75,15 +77,15 @@ unclear taxonomy/entity mapping
 database or schema failures
 ```
 
-## Deferred Work
+## Reconciliation Boundary
 
-This phase does not automatically update:
+Automatic start-of-run reconciliation updates:
 
 ```text
 ec_watchlist
 ec_watchlist_member
 ```
 
-Intentional membership changes require a later explicit watchlist plan/apply workflow and UI support with preview, validation, audit evidence, and controlled membership writes.
+when the current TXT watchlist differs from stored active membership. Applied changes are audited separately and do not change canonical fact watermarks.
 
-After this code is deployed, the current production EC fact lag still requires a controlled EC bridge recovery/backfill task. This policy change only removes the incorrect planner block.
+UI support remains deferred. The UI should reuse the same plan/apply service boundary rather than implementing separate membership write logic.

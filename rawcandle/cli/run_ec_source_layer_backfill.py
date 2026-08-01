@@ -9,6 +9,7 @@ from pathlib import Path
 
 from rawcandle.cli.ec_source_layer_watchlist_policy import extract_watchlist_membership_fields
 from rawcandle.cli.plan_ec_source_layer_backfill import plan_ec_source_layer_backfill
+from rawcandle.ec_datacenter_watchlist_loader import apply_datacenter_watchlist_reconciliation
 from rawcandle.ec_dc_coverage_audit import audit_dc_facts_against_ec_sidecar
 from rawcandle.ec_dc_fact_parity_audit import audit_dc_ec_fact_parity
 from rawcandle.ec_group_index_daily_loader import load_ec_group_index_daily_from_dc
@@ -42,6 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Must exactly match --taxonomy-version before any write",
     )
     parser.add_argument("--allow-replace-existing", action="store_true", help="Allow planner-approved replacement of partial or fully loaded dates")
+    parser.add_argument("--skip-watchlist-reconciliation", action="store_true", help="Internal scheduler use only: skip automatic watchlist reconciliation")
     parser.add_argument("--format", choices=("text",), default="text")
     return parser
 
@@ -283,6 +285,7 @@ def run_ec_source_layer_backfill(
     confirm_ecosystem: str,
     confirm_taxonomy_version: str,
     allow_replace_existing: bool = False,
+    reconcile_watchlist: bool = False,
 ) -> dict[str, object]:
     gate_errors: list[str] = []
     if confirm_db != db_path:
@@ -297,6 +300,41 @@ def run_ec_source_layer_backfill(
     except Exception as exc:
         gate_errors.append(str(exc))
         resolved_backup_dir = None
+
+    reconciliation_summary: dict[str, object] = {
+        "watchlist_reconciliation_attempted": False,
+        "watchlist_reconciliation_status": "SKIPPED",
+        "watchlist_source_reference": str(watchlist_path),
+        "watchlist_source_sha256": "NONE",
+        "watchlist_source_member_count": 0,
+        "watchlist_previous_member_count": 0,
+        "watchlist_current_member_count": 0,
+        "watchlist_added_count": 0,
+        "watchlist_removed_count": 0,
+        "watchlist_added_tickers": [],
+        "watchlist_removed_tickers": [],
+        "watchlist_reconciliation_error": None,
+    }
+    if reconcile_watchlist and not gate_errors:
+        reconciliation_summary = apply_datacenter_watchlist_reconciliation(
+            db_path=db_path,
+            watchlist_path=watchlist_path,
+            ecosystem_code=ecosystem_code,
+            taxonomy_version_code=taxonomy_version_code,
+            invocation_source="EC_HISTORICAL_BACKFILL",
+        )
+        if reconciliation_summary.get("watchlist_reconciliation_status") == "FAILED":
+            summary = _backfill_refused_summary(
+                status="BACKFILL_REFUSED",
+                errors=[str(reconciliation_summary.get("watchlist_reconciliation_error") or "watchlist reconciliation failed")],
+                planner_summary=None,
+                date_from=date_from,
+                date_to=date_to,
+            )
+            summary["ecosystem_code"] = ecosystem_code
+            summary["taxonomy_version_code"] = taxonomy_version_code
+            summary.update(reconciliation_summary)
+            return summary
 
     planner_summary = plan_ec_source_layer_backfill(
         db_path=db_path,
@@ -322,6 +360,7 @@ def run_ec_source_layer_backfill(
         summary["ecosystem_code"] = ecosystem_code
         summary["taxonomy_version_code"] = taxonomy_version_code
         summary.update(watchlist_membership_fields)
+        summary.update(reconciliation_summary)
         return summary
 
     if planner_status == "SKIP_ALL_DATES_ALREADY_LOADED":
@@ -345,6 +384,7 @@ def run_ec_source_layer_backfill(
             "skipped_reason": "planner reported SKIP_ALL_DATES_ALREADY_LOADED",
             **_watermark_not_run_summary(),
             **watchlist_membership_fields,
+            **reconciliation_summary,
         }
 
     if planner_status != "READY_BACKFILL_PLAN":
@@ -359,6 +399,7 @@ def run_ec_source_layer_backfill(
         summary["ecosystem_code"] = ecosystem_code
         summary["taxonomy_version_code"] = taxonomy_version_code
         summary.update(watchlist_membership_fields)
+        summary.update(reconciliation_summary)
         return summary
 
     selected_dates = _extract_selected_dates(planner_summary)
@@ -384,6 +425,7 @@ def run_ec_source_layer_backfill(
             "skipped_reason": "planner returned READY_BACKFILL_PLAN with zero eligible selected dates",
             **_watermark_not_run_summary(),
             **watchlist_membership_fields,
+            **reconciliation_summary,
         }
 
     assert resolved_backup_dir is not None
@@ -570,6 +612,7 @@ def run_ec_source_layer_backfill(
             "warning": "Partial selected-date ec_ writes may exist; no automatic rollback was attempted",
             **_watermark_not_run_summary(),
             **watchlist_membership_fields,
+            **reconciliation_summary,
         }
 
     try:
@@ -608,6 +651,7 @@ def run_ec_source_layer_backfill(
             "warning": "Selected-date ec_ fact writes completed, but final watermark advancement failed; retry is required",
             **_watermark_not_run_summary(),
             **watchlist_membership_fields,
+            **reconciliation_summary,
         }
         failed_summary["watermark_candidate_latest_signal_date"] = max(completed_dates) if completed_dates else None
         failed_summary["watermark_advance_status"] = "FAILED"
@@ -632,6 +676,7 @@ def run_ec_source_layer_backfill(
         "planner_summary": planner_summary,
         "watermark_policy_note": "Historical backfill advanced canonical EC fact watermark heads once after successful coverage and fact parity validation.",
         **watchlist_membership_fields,
+        **reconciliation_summary,
     }
     return _merge_watermark_summary(completed_summary, watermark_summary)
 
@@ -657,6 +702,18 @@ def render_backfill_text(summary: dict[str, object]) -> str:
     lines.extend(["", "Planner Result"])
     if isinstance(planner_summary, dict):
         lines.append(f"- planner_status={planner_summary.get('status')}")
+    lines.append(f"- watchlist_reconciliation_attempted={str(bool(summary.get('watchlist_reconciliation_attempted'))).lower()}")
+    lines.append(f"- watchlist_reconciliation_status={summary.get('watchlist_reconciliation_status')}")
+    lines.append(f"- watchlist_source_reference={summary.get('watchlist_source_reference')}")
+    lines.append(f"- watchlist_source_sha256={summary.get('watchlist_source_sha256')}")
+    lines.append(f"- watchlist_source_member_count={summary.get('watchlist_source_member_count')}")
+    lines.append(f"- watchlist_previous_member_count={summary.get('watchlist_previous_member_count')}")
+    lines.append(f"- watchlist_current_member_count={summary.get('watchlist_current_member_count')}")
+    lines.append(f"- watchlist_added_count={summary.get('watchlist_added_count')}")
+    lines.append(f"- watchlist_removed_count={summary.get('watchlist_removed_count')}")
+    lines.append(f"- watchlist_added_tickers={summary.get('watchlist_added_tickers')}")
+    lines.append(f"- watchlist_removed_tickers={summary.get('watchlist_removed_tickers')}")
+    lines.append(f"- watchlist_reconciliation_error={summary.get('watchlist_reconciliation_error')}")
     lines.append(f"- watchlist_membership_status={summary.get('watchlist_membership_status')}")
     lines.append(f"- watchlist_sync_required={str(bool(summary.get('watchlist_sync_required'))).lower()}")
     lines.append(f"- watchlist_missing_in_loaded_count={summary.get('watchlist_missing_in_loaded_count')}")
@@ -759,6 +816,7 @@ def main(argv: list[str] | None = None) -> int:
         confirm_ecosystem=args.confirm_ecosystem,
         confirm_taxonomy_version=args.confirm_taxonomy_version,
         allow_replace_existing=args.allow_replace_existing,
+        reconcile_watchlist=not args.skip_watchlist_reconciliation,
     )
     sys.stdout.write(render_backfill_text(summary) + "\n")
     return 0 if summary.get("status") == "BACKFILL_COMPLETED" else 1

@@ -12,6 +12,7 @@ MIGRATION_SQL_PATHS = (
     MIGRATIONS_DIR / "022_create_ec_fact_tables.sql",
     MIGRATIONS_DIR / "023_patch_ec_fact_schema_for_dc_parity.sql",
     MIGRATIONS_DIR / "024_patch_ec_group_index_counts.sql",
+    MIGRATIONS_DIR / "025_create_ec_watchlist_reconciliation_audit.sql",
 )
 
 

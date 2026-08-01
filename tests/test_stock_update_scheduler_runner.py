@@ -1086,6 +1086,7 @@ def test_run_datacenter_post_step_skips_with_exact_reason_when_no_candidate_pass
             expected_ticker_count=236,
             expected_group_count=54,
             expected_synthetic_ohlc_count=53,
+            watchlist_file=str(tmp_path / "watchlist.txt"),
         ),
     )
 
@@ -1175,6 +1176,7 @@ def test_run_datacenter_post_step_uses_latest_valid_price_date_in_pipeline_comma
             expected_ticker_count=8,
             expected_group_count=54,
             expected_synthetic_ohlc_count=53,
+            watchlist_file=str(tmp_path / "watchlist.txt"),
         ),
     )
     monkeypatch.setattr(
@@ -1254,6 +1256,18 @@ def test_scheduler_runner_runs_datacenter_post_step_once_for_usa_success(
                     "SUMMARY rolling_5_report_csv_path=/tmp/rolling5.csv",
                     "SUMMARY rolling_2_report_path=/tmp/rolling2.md",
                     "SUMMARY rolling_2_report_csv_path=/tmp/rolling2.csv",
+                    "SUMMARY watchlist_reconciliation_attempted=true",
+                    "SUMMARY watchlist_reconciliation_status=NO_CHANGE",
+                    "SUMMARY watchlist_source_reference=/tmp/watchlist.txt",
+                    "SUMMARY watchlist_source_sha256=abc123",
+                    "SUMMARY watchlist_source_member_count=37",
+                    "SUMMARY watchlist_previous_member_count=37",
+                    "SUMMARY watchlist_current_member_count=37",
+                    "SUMMARY watchlist_added_count=0",
+                    "SUMMARY watchlist_removed_count=0",
+                    "SUMMARY watchlist_added_tickers=[]",
+                    "SUMMARY watchlist_removed_tickers=[]",
+                    "SUMMARY watchlist_reconciliation_error=NONE",
                     "",
                 ]
             ),
@@ -1287,6 +1301,11 @@ def test_scheduler_runner_runs_datacenter_post_step_once_for_usa_success(
     assert "--expected-group-count" in command and command[command.index("--expected-group-count") + 1] == "54"
     assert "--expected-synthetic-ohlc-count" in command and command[command.index("--expected-synthetic-ohlc-count") + 1] == "53"
     assert "--signal-date" in command and command[command.index("--signal-date") + 1] == "2026-05-16"
+    assert "--watchlist-file" in command
+    assert (
+        command[command.index("--watchlist-file") + 1]
+        == "watchlists/datacenter_watchlist.txt"
+    )
     assert "--stage2-incremental" not in command
     assert result.datacenter_pipeline_attempted == 1
     assert result.datacenter_pipeline_status == "OK"
@@ -1309,6 +1328,17 @@ def test_scheduler_runner_runs_datacenter_post_step_once_for_usa_success(
     assert result.datacenter_pipeline_weekly_report_path is None
     assert result.datacenter_pipeline_weekly_report_csv_path is None
     assert result.datacenter_pipeline_log_path.endswith(".txt")
+    assert result.watchlist_reconciliation_attempted is True
+    assert result.watchlist_reconciliation_status == "NO_CHANGE"
+    assert result.watchlist_source_reference == "/tmp/watchlist.txt"
+    assert result.watchlist_source_sha256 == "abc123"
+    assert result.watchlist_source_member_count == 37
+    assert result.watchlist_previous_member_count == 37
+    assert result.watchlist_current_member_count == 37
+    assert result.watchlist_added_count == 0
+    assert result.watchlist_removed_count == 0
+    assert result.watchlist_added_tickers == "[]"
+    assert result.watchlist_removed_tickers == "[]"
     log_path = Path(result.datacenter_pipeline_log_path)
     assert log_path.exists()
     log_text = log_path.read_text(encoding="utf-8")
@@ -2658,6 +2688,7 @@ def test_scheduler_runner_ec_source_layer_enabled_runs_after_legacy_success(
     assert called_kwargs["db_path"] == str(analysis_db)
     assert called_kwargs["confirm_db"] == str(analysis_db)
     assert called_kwargs["allow_replace_date"] is False
+    assert called_kwargs["reconcile_watchlist"] is False
 
 
 def test_scheduler_runner_ec_bridge_single_date_incremental_uses_latest_refresh(
@@ -2729,6 +2760,7 @@ def test_scheduler_runner_ec_bridge_single_date_incremental_uses_latest_refresh(
     result = run_scheduler_config(config_path=str(config_path))
 
     assert len(refresh_calls) == 1
+    assert refresh_calls[0]["reconcile_watchlist"] is False
     assert result.ec_bridge_mode == "LATEST_REFRESH"
     assert result.ec_bridge_reason == "SINGLE_DATE_MATERIALIZATION"
     assert result.ec_bridge_status == "OK"
@@ -2818,6 +2850,7 @@ def test_scheduler_runner_ec_bridge_multi_date_uses_backfill_only(
     assert backfill_calls[0]["ecosystem_code"] == "DATACENTER"
     assert backfill_calls[0]["taxonomy_version_code"] == "DC_TAXONOMY_FULL_V1"
     assert backfill_calls[0]["allow_replace_existing"] is True
+    assert backfill_calls[0]["reconcile_watchlist"] is False
     assert result.ec_source_layer_status == "BACKFILL_COMPLETED"
     assert result.ec_source_layer_refresh_mode == "historical_backfill"
     assert result.ec_bridge_mode == "HISTORICAL_BACKFILL"

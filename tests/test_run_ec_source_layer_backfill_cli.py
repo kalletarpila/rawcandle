@@ -71,6 +71,7 @@ def _base_args(tmp_path: Path) -> list[str]:
         "DC_TAXONOMY_FULL_V1",
         "--format",
         "text",
+        "--skip-watchlist-reconciliation",
     ]
 
 
@@ -216,6 +217,86 @@ def test_refuses_when_planner_is_blocked(tmp_path: Path, monkeypatch, capsys) ->
     assert exit_code == 1
     assert "Backfill Status: BACKFILL_REFUSED" in output
     assert "planner gate did not pass: BLOCKED_TAXONOMY_SOURCE" in output
+
+
+def test_reconciles_watchlist_before_backfill_planner_when_enabled(tmp_path: Path, monkeypatch) -> None:
+    args = _base_args(tmp_path)
+    call_order: list[str] = []
+
+    def fake_reconcile(**_):
+        call_order.append("reconcile")
+        return {
+            "watchlist_reconciliation_attempted": True,
+            "watchlist_reconciliation_status": "NO_CHANGE",
+            "watchlist_reconciliation_error": None,
+        }
+
+    def fake_plan(**_):
+        call_order.append("planner")
+        return _ready_backfill_plan(status="SKIP_ALL_DATES_ALREADY_LOADED", candidate_dates=[])
+
+    monkeypatch.setattr(cli, "apply_datacenter_watchlist_reconciliation", fake_reconcile)
+    monkeypatch.setattr(cli, "plan_ec_source_layer_backfill", fake_plan)
+
+    summary = cli.run_ec_source_layer_backfill(
+        db_path=args[1],
+        ecosystem_code="DATACENTER",
+        taxonomy_version_code="DC_TAXONOMY_FULL_V1",
+        date_from="2026-05-29",
+        date_to="2026-06-04",
+        taxonomy_csv_path=args[11],
+        watchlist_path=args[13],
+        backup_dir=args[15],
+        confirm_db=args[17],
+        confirm_ecosystem=args[19],
+        confirm_taxonomy_version=args[21],
+        reconcile_watchlist=True,
+    )
+
+    assert summary["status"] == "BACKFILL_SKIPPED"
+    assert summary["watchlist_reconciliation_status"] == "NO_CHANGE"
+    assert call_order == ["reconcile", "planner"]
+
+
+def test_backfill_reconciliation_failure_refuses_before_planner(tmp_path: Path, monkeypatch) -> None:
+    args = _base_args(tmp_path)
+    planner_called = False
+
+    monkeypatch.setattr(
+        cli,
+        "apply_datacenter_watchlist_reconciliation",
+        lambda **_: {
+            "watchlist_reconciliation_attempted": True,
+            "watchlist_reconciliation_status": "FAILED",
+            "watchlist_reconciliation_error": "invalid watchlist",
+        },
+    )
+
+    def fake_plan(**_):
+        nonlocal planner_called
+        planner_called = True
+        return _ready_backfill_plan()
+
+    monkeypatch.setattr(cli, "plan_ec_source_layer_backfill", fake_plan)
+
+    summary = cli.run_ec_source_layer_backfill(
+        db_path=args[1],
+        ecosystem_code="DATACENTER",
+        taxonomy_version_code="DC_TAXONOMY_FULL_V1",
+        date_from="2026-05-29",
+        date_to="2026-06-04",
+        taxonomy_csv_path=args[11],
+        watchlist_path=args[13],
+        backup_dir=args[15],
+        confirm_db=args[17],
+        confirm_ecosystem=args[19],
+        confirm_taxonomy_version=args[21],
+        reconcile_watchlist=True,
+    )
+
+    assert summary["status"] == "BACKFILL_REFUSED"
+    assert summary["watchlist_reconciliation_status"] == "FAILED"
+    assert planner_called is False
 
 
 def test_creates_backup_before_first_write(tmp_path: Path, monkeypatch) -> None:

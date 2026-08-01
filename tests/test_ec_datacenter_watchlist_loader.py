@@ -7,7 +7,9 @@ import pytest
 from rawcandle.ec_datacenter_taxonomy_loader import load_datacenter_taxonomy_to_ec_sidecar
 from rawcandle.ec_datacenter_watchlist_loader import (
     _parse_watchlist_tickers,
+    apply_datacenter_watchlist_reconciliation,
     load_datacenter_watchlist_to_ec_sidecar,
+    plan_datacenter_watchlist_reconciliation,
 )
 from rawcandle.ec_sidecar_migration import apply_ec_sidecar_migration
 
@@ -299,3 +301,138 @@ def test_watchlist_loader_fails_when_no_valid_tickers_found(tmp_path) -> None:
             db_path=str(db_path),
             watchlist_path=str(watchlist_path),
         )
+
+
+def _active_watchlist_tickers(conn: sqlite3.Connection) -> list[str]:
+    return [
+        row[0]
+        for row in conn.execute(
+            """
+            SELECT e.entity_code
+            FROM ec_watchlist_member wm
+            JOIN ec_entity e ON e.entity_id = wm.entity_id
+            WHERE wm.status = 'ACTIVE'
+            ORDER BY e.entity_code
+            """
+        ).fetchall()
+    ]
+
+
+def test_reconciliation_no_change_is_idempotent_and_does_not_audit(tmp_path) -> None:
+    db_path, _ = _setup_db_with_taxonomy(tmp_path)
+    watchlist_path = tmp_path / "watchlist.txt"
+    _write_watchlist(watchlist_path, ["NVDA", "AMD"])
+    load_datacenter_watchlist_to_ec_sidecar(str(db_path), str(watchlist_path))
+
+    first = apply_datacenter_watchlist_reconciliation(
+        db_path=str(db_path),
+        watchlist_path=str(watchlist_path),
+        invocation_source="TEST",
+    )
+    second = apply_datacenter_watchlist_reconciliation(
+        db_path=str(db_path),
+        watchlist_path=str(watchlist_path),
+        invocation_source="TEST",
+    )
+
+    conn = _connect(str(db_path))
+    try:
+        assert first["watchlist_reconciliation_status"] == "NO_CHANGE"
+        assert second["watchlist_reconciliation_status"] == "NO_CHANGE"
+        assert _active_watchlist_tickers(conn) == ["AMD", "NVDA"]
+        assert conn.execute("SELECT COUNT(*) FROM ec_watchlist_reconciliation_audit").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_reconciliation_applies_additions_removals_and_audit(tmp_path) -> None:
+    db_path, _ = _setup_db_with_taxonomy(tmp_path)
+    initial_path = tmp_path / "initial_watchlist.txt"
+    source_path = tmp_path / "watchlist.txt"
+    _write_watchlist(initial_path, ["NVDA", "AMD", "AVGO"])
+    _write_watchlist(source_path, ["AMD", "CRGY", "NVDA"])
+    load_datacenter_watchlist_to_ec_sidecar(str(db_path), str(initial_path))
+
+    plan = plan_datacenter_watchlist_reconciliation(db_path=str(db_path), watchlist_path=str(source_path))
+    summary = apply_datacenter_watchlist_reconciliation(
+        db_path=str(db_path),
+        watchlist_path=str(source_path),
+        invocation_source="TEST",
+    )
+
+    conn = _connect(str(db_path))
+    try:
+        assert plan["watchlist_reconciliation_status"] == "PLAN_READY"
+        assert plan["watchlist_added_tickers"] == ["CRGY"]
+        assert plan["watchlist_removed_tickers"] == ["AVGO"]
+        assert summary["watchlist_reconciliation_status"] == "APPLIED"
+        assert summary["watchlist_previous_member_count"] == 3
+        assert summary["watchlist_current_member_count"] == 3
+        assert summary["watchlist_added_tickers"] == ["CRGY"]
+        assert summary["watchlist_removed_tickers"] == ["AVGO"]
+        assert summary["watchlist_created_watchlist_only_tickers"] == ["CRGY"]
+        assert _active_watchlist_tickers(conn) == ["AMD", "CRGY", "NVDA"]
+        audit_row = conn.execute(
+            """
+            SELECT previous_member_count, new_member_count, added_count, removed_count,
+                   added_tickers_json, removed_tickers_json, invocation_source, status
+            FROM ec_watchlist_reconciliation_audit
+            """
+        ).fetchone()
+        assert audit_row == (3, 3, 1, 1, '["CRGY"]', '["AVGO"]', "TEST", "APPLIED")
+    finally:
+        conn.close()
+
+
+def test_reconciliation_invalid_file_fails_without_db_change(tmp_path) -> None:
+    db_path, _ = _setup_db_with_taxonomy(tmp_path)
+    initial_path = tmp_path / "initial_watchlist.txt"
+    invalid_path = tmp_path / "watchlist.txt"
+    _write_watchlist(initial_path, ["NVDA"])
+    _write_watchlist(invalid_path, ["NVDA", "bad ticker"])
+    load_datacenter_watchlist_to_ec_sidecar(str(db_path), str(initial_path))
+
+    summary = apply_datacenter_watchlist_reconciliation(
+        db_path=str(db_path),
+        watchlist_path=str(invalid_path),
+        invocation_source="TEST",
+    )
+
+    conn = _connect(str(db_path))
+    try:
+        assert summary["watchlist_reconciliation_status"] == "FAILED"
+        assert "Invalid watchlist ticker syntax" in str(summary["watchlist_reconciliation_error"])
+        assert _active_watchlist_tickers(conn) == ["NVDA"]
+        assert conn.execute("SELECT COUNT(*) FROM ec_watchlist_reconciliation_audit").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_reconciliation_rolls_back_when_entity_creation_fails(tmp_path, monkeypatch) -> None:
+    db_path, _ = _setup_db_with_taxonomy(tmp_path)
+    initial_path = tmp_path / "initial_watchlist.txt"
+    source_path = tmp_path / "watchlist.txt"
+    _write_watchlist(initial_path, ["NVDA", "AMD"])
+    _write_watchlist(source_path, ["NVDA", "CRGY"])
+    load_datacenter_watchlist_to_ec_sidecar(str(db_path), str(initial_path))
+
+    from rawcandle import ec_datacenter_watchlist_loader as loader
+
+    monkeypatch.setattr(
+        loader,
+        "_create_watchlist_only_ticker_entity",
+        lambda **_: (_ for _ in ()).throw(RuntimeError("entity create failed")),
+    )
+    summary = loader.apply_datacenter_watchlist_reconciliation(
+        db_path=str(db_path),
+        watchlist_path=str(source_path),
+        invocation_source="TEST",
+    )
+
+    conn = _connect(str(db_path))
+    try:
+        assert summary["watchlist_reconciliation_status"] == "FAILED"
+        assert _active_watchlist_tickers(conn) == ["AMD", "NVDA"]
+        assert conn.execute("SELECT COUNT(*) FROM ec_watchlist_reconciliation_audit").fetchone()[0] == 0
+    finally:
+        conn.close()

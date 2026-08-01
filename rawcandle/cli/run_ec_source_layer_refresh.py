@@ -9,6 +9,7 @@ from pathlib import Path
 
 from rawcandle.cli.ec_source_layer_watchlist_policy import extract_watchlist_membership_fields
 from rawcandle.cli.plan_ec_source_layer_refresh import plan_ec_source_layer_refresh
+from rawcandle.ec_datacenter_watchlist_loader import apply_datacenter_watchlist_reconciliation
 from rawcandle.ec_dc_coverage_audit import audit_dc_facts_against_ec_sidecar
 from rawcandle.ec_dc_fact_parity_audit import audit_dc_ec_fact_parity
 from rawcandle.ec_group_index_daily_loader import load_ec_group_index_daily_from_dc
@@ -41,6 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--signal-date", help="Optional explicit signal date in YYYY-MM-DD format")
     parser.add_argument("--allow-replace-date", action="store_true", help="Allow recurring refresh to replace an already loaded selected date")
+    parser.add_argument("--skip-watchlist-reconciliation", action="store_true", help="Internal scheduler use only: skip automatic watchlist reconciliation")
     parser.add_argument("--format", choices=("text",), default="text")
     return parser
 
@@ -189,6 +191,7 @@ def run_ec_source_layer_refresh(
     confirm_taxonomy_version: str,
     signal_date: str | None = None,
     allow_replace_date: bool = False,
+    reconcile_watchlist: bool = False,
 ) -> dict[str, object]:
     gate_errors: list[str] = []
     if confirm_db != db_path:
@@ -203,6 +206,37 @@ def run_ec_source_layer_refresh(
     except Exception as exc:
         gate_errors.append(str(exc))
         resolved_backup_dir = None
+
+    reconciliation_summary: dict[str, object] = {
+        "watchlist_reconciliation_attempted": False,
+        "watchlist_reconciliation_status": "SKIPPED",
+        "watchlist_source_reference": str(watchlist_path),
+        "watchlist_source_sha256": "NONE",
+        "watchlist_source_member_count": 0,
+        "watchlist_previous_member_count": 0,
+        "watchlist_current_member_count": 0,
+        "watchlist_added_count": 0,
+        "watchlist_removed_count": 0,
+        "watchlist_added_tickers": [],
+        "watchlist_removed_tickers": [],
+        "watchlist_reconciliation_error": None,
+    }
+    if reconcile_watchlist and not gate_errors:
+        reconciliation_summary = apply_datacenter_watchlist_reconciliation(
+            db_path=db_path,
+            watchlist_path=watchlist_path,
+            ecosystem_code=ecosystem_code,
+            taxonomy_version_code=taxonomy_version_code,
+            invocation_source="EC_LATEST_REFRESH",
+        )
+        if reconciliation_summary.get("watchlist_reconciliation_status") == "FAILED":
+            summary = _refresh_refused_summary(
+                status="REFRESH_REFUSED",
+                errors=[str(reconciliation_summary.get("watchlist_reconciliation_error") or "watchlist reconciliation failed")],
+                planner_summary=None,
+            )
+            summary.update(reconciliation_summary)
+            return summary
 
     planner_summary = plan_ec_source_layer_refresh(
         db_path=db_path,
@@ -223,6 +257,7 @@ def run_ec_source_layer_refresh(
             planner_summary=planner_summary,
         )
         summary.update(watchlist_membership_fields)
+        summary.update(reconciliation_summary)
         return summary
 
     if planner_status == "SKIP_UP_TO_DATE":
@@ -251,6 +286,7 @@ def run_ec_source_layer_refresh(
             "completed_steps": [],
             "failed_step": None,
             **watchlist_membership_fields,
+            **reconciliation_summary,
         }
 
     if planner_status not in READY_REFRESH_STATUSES:
@@ -262,6 +298,7 @@ def run_ec_source_layer_refresh(
             skipped_reason=reason if planner_status.startswith(BLOCKED_PREFIX) else None,
         )
         summary.update(watchlist_membership_fields)
+        summary.update(reconciliation_summary)
         return summary
 
     assert resolved_backup_dir is not None
@@ -275,6 +312,7 @@ def run_ec_source_layer_refresh(
             planner_summary=planner_summary,
         )
         summary.update(watchlist_membership_fields)
+        summary.update(reconciliation_summary)
         return summary
 
     try:
@@ -307,6 +345,7 @@ def run_ec_source_layer_refresh(
             "completed_steps": [],
             "failed_step": "backup",
             **watchlist_membership_fields,
+            **reconciliation_summary,
         }
 
     completed_steps: list[str] = []
@@ -460,6 +499,7 @@ def run_ec_source_layer_refresh(
             "coverage_audit_summary": coverage_audit_summary,
             "parity_audit_summary": parity_audit_summary,
             **watchlist_membership_fields,
+            **reconciliation_summary,
         }
     except Exception as exc:
         return {
@@ -484,6 +524,7 @@ def run_ec_source_layer_refresh(
             "failed_step": completed_steps[-1] if completed_steps else "backup",
             "warning": "Partial selected-date ec_ writes may exist; no automatic rollback was attempted",
             **watchlist_membership_fields,
+            **reconciliation_summary,
         }
 
 
@@ -511,6 +552,18 @@ def render_refresh_text(summary: dict[str, object]) -> str:
         selected_date_info = planner_summary.get("selected_date_info")
         if isinstance(selected_date_info, dict):
             lines.append(f"- selected_signal_date={selected_date_info.get('selected_signal_date')}")
+    lines.append(f"- watchlist_reconciliation_attempted={str(bool(summary.get('watchlist_reconciliation_attempted'))).lower()}")
+    lines.append(f"- watchlist_reconciliation_status={summary.get('watchlist_reconciliation_status')}")
+    lines.append(f"- watchlist_source_reference={summary.get('watchlist_source_reference')}")
+    lines.append(f"- watchlist_source_sha256={summary.get('watchlist_source_sha256')}")
+    lines.append(f"- watchlist_source_member_count={summary.get('watchlist_source_member_count')}")
+    lines.append(f"- watchlist_previous_member_count={summary.get('watchlist_previous_member_count')}")
+    lines.append(f"- watchlist_current_member_count={summary.get('watchlist_current_member_count')}")
+    lines.append(f"- watchlist_added_count={summary.get('watchlist_added_count')}")
+    lines.append(f"- watchlist_removed_count={summary.get('watchlist_removed_count')}")
+    lines.append(f"- watchlist_added_tickers={summary.get('watchlist_added_tickers')}")
+    lines.append(f"- watchlist_removed_tickers={summary.get('watchlist_removed_tickers')}")
+    lines.append(f"- watchlist_reconciliation_error={summary.get('watchlist_reconciliation_error')}")
     lines.append(f"- watchlist_membership_status={summary.get('watchlist_membership_status')}")
     lines.append(f"- watchlist_sync_required={str(bool(summary.get('watchlist_sync_required'))).lower()}")
     lines.append(f"- watchlist_missing_in_loaded_count={summary.get('watchlist_missing_in_loaded_count')}")
@@ -589,6 +642,7 @@ def main(argv: list[str] | None = None) -> int:
         confirm_taxonomy_version=args.confirm_taxonomy_version,
         signal_date=args.signal_date,
         allow_replace_date=args.allow_replace_date,
+        reconcile_watchlist=not args.skip_watchlist_reconciliation,
     )
     sys.stdout.write(render_refresh_text(summary) + "\n")
     return 0 if summary.get("status") == "REFRESH_COMPLETED" else 1

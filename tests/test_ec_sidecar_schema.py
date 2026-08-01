@@ -277,6 +277,7 @@ def test_ec_sidecar_migration_creates_tables_and_is_idempotent(tmp_path) -> None
             "ec_membership",
             "ec_watchlist",
             "ec_watchlist_member",
+            "ec_watchlist_reconciliation_audit",
             "ec_signal_run",
             "ec_signal_calendar",
         }
@@ -378,6 +379,28 @@ def test_ec_sidecar_schema_columns_indexes_and_foreign_keys(tmp_path) -> None:
             "created_at_utc",
         }.issubset(_table_columns(conn, "ec_watchlist_member"))
         assert {
+            "reconciliation_id",
+            "ecosystem_id",
+            "taxonomy_version_code",
+            "watchlist_id",
+            "watchlist_code",
+            "source_type",
+            "source_reference",
+            "source_sha256",
+            "source_member_count",
+            "previous_member_count",
+            "new_member_count",
+            "added_count",
+            "removed_count",
+            "added_tickers_json",
+            "removed_tickers_json",
+            "invocation_source",
+            "status",
+            "error",
+            "applied_at_utc",
+            "created_at_utc",
+        }.issubset(_table_columns(conn, "ec_watchlist_reconciliation_audit"))
+        assert {
             "run_id",
             "ecosystem_id",
             "taxonomy_version_id",
@@ -412,6 +435,9 @@ def test_ec_sidecar_schema_columns_indexes_and_foreign_keys(tmp_path) -> None:
             "idx_ec_membership_taxonomy_child",
         }.issubset(_index_names(conn, "ec_membership"))
         assert "idx_ec_watchlist_member_watchlist" in _index_names(conn, "ec_watchlist_member")
+        assert "idx_ec_watchlist_reconciliation_audit_lookup" in _index_names(
+            conn, "ec_watchlist_reconciliation_audit"
+        )
         assert "idx_ec_taxonomy_version_ecosystem_active" in _index_names(conn, "ec_taxonomy_version")
         assert {
             "idx_ec_signal_run_ecosystem_signal_date",
@@ -433,6 +459,10 @@ def test_ec_sidecar_schema_columns_indexes_and_foreign_keys(tmp_path) -> None:
         }
         assert _foreign_key_tables(conn, "ec_watchlist") == {"ec_ecosystem"}
         assert _foreign_key_tables(conn, "ec_watchlist_member") == {"ec_watchlist", "ec_entity"}
+        assert _foreign_key_tables(conn, "ec_watchlist_reconciliation_audit") == {
+            "ec_ecosystem",
+            "ec_watchlist",
+        }
         assert _foreign_key_tables(conn, "ec_signal_run") == {"ec_ecosystem", "ec_taxonomy_version"}
         assert _foreign_key_tables(conn, "ec_signal_calendar") == {"ec_ecosystem", "ec_signal_run"}
 

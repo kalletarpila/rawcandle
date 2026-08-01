@@ -215,7 +215,10 @@ def _collect_loaded_watchlist_tickers(conn, ecosystem_code: str) -> list[str]:
         JOIN ec_watchlist_member wm ON wm.watchlist_id = w.watchlist_id
         JOIN ec_entity e ON e.entity_id = wm.entity_id
         WHERE eco.ecosystem_code = ?
+          AND w.status = 'ACTIVE'
+          AND wm.status = 'ACTIVE'
           AND e.entity_type = 'TICKER'
+          AND e.status = 'ACTIVE'
         ORDER BY ticker
         """,
         (ecosystem_code,),
