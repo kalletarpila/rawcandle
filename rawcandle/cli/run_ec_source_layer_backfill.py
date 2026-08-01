@@ -7,6 +7,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
+from rawcandle.cli.ec_source_layer_watchlist_policy import extract_watchlist_membership_fields
 from rawcandle.cli.plan_ec_source_layer_backfill import plan_ec_source_layer_backfill
 from rawcandle.ec_dc_coverage_audit import audit_dc_facts_against_ec_sidecar
 from rawcandle.ec_dc_fact_parity_audit import audit_dc_ec_fact_parity
@@ -308,6 +309,7 @@ def run_ec_source_layer_backfill(
         allow_replace_existing=allow_replace_existing,
     )
     planner_status = str(planner_summary.get("status"))
+    watchlist_membership_fields = extract_watchlist_membership_fields(planner_summary)
 
     if gate_errors:
         summary = _backfill_refused_summary(
@@ -319,6 +321,7 @@ def run_ec_source_layer_backfill(
         )
         summary["ecosystem_code"] = ecosystem_code
         summary["taxonomy_version_code"] = taxonomy_version_code
+        summary.update(watchlist_membership_fields)
         return summary
 
     if planner_status == "SKIP_ALL_DATES_ALREADY_LOADED":
@@ -341,6 +344,7 @@ def run_ec_source_layer_backfill(
             "planner_summary": planner_summary,
             "skipped_reason": "planner reported SKIP_ALL_DATES_ALREADY_LOADED",
             **_watermark_not_run_summary(),
+            **watchlist_membership_fields,
         }
 
     if planner_status != "READY_BACKFILL_PLAN":
@@ -354,6 +358,7 @@ def run_ec_source_layer_backfill(
         )
         summary["ecosystem_code"] = ecosystem_code
         summary["taxonomy_version_code"] = taxonomy_version_code
+        summary.update(watchlist_membership_fields)
         return summary
 
     selected_dates = _extract_selected_dates(planner_summary)
@@ -378,6 +383,7 @@ def run_ec_source_layer_backfill(
             "planner_summary": planner_summary,
             "skipped_reason": "planner returned READY_BACKFILL_PLAN with zero eligible selected dates",
             **_watermark_not_run_summary(),
+            **watchlist_membership_fields,
         }
 
     assert resolved_backup_dir is not None
@@ -563,6 +569,7 @@ def run_ec_source_layer_backfill(
             "failed_date_completed_steps": list(completed_steps),
             "warning": "Partial selected-date ec_ writes may exist; no automatic rollback was attempted",
             **_watermark_not_run_summary(),
+            **watchlist_membership_fields,
         }
 
     try:
@@ -600,6 +607,7 @@ def run_ec_source_layer_backfill(
             "planner_summary": planner_summary,
             "warning": "Selected-date ec_ fact writes completed, but final watermark advancement failed; retry is required",
             **_watermark_not_run_summary(),
+            **watchlist_membership_fields,
         }
         failed_summary["watermark_candidate_latest_signal_date"] = max(completed_dates) if completed_dates else None
         failed_summary["watermark_advance_status"] = "FAILED"
@@ -623,6 +631,7 @@ def run_ec_source_layer_backfill(
         "errors": [],
         "planner_summary": planner_summary,
         "watermark_policy_note": "Historical backfill advanced canonical EC fact watermark heads once after successful coverage and fact parity validation.",
+        **watchlist_membership_fields,
     }
     return _merge_watermark_summary(completed_summary, watermark_summary)
 
@@ -648,6 +657,10 @@ def render_backfill_text(summary: dict[str, object]) -> str:
     lines.extend(["", "Planner Result"])
     if isinstance(planner_summary, dict):
         lines.append(f"- planner_status={planner_summary.get('status')}")
+    lines.append(f"- watchlist_membership_status={summary.get('watchlist_membership_status')}")
+    lines.append(f"- watchlist_sync_required={str(bool(summary.get('watchlist_sync_required'))).lower()}")
+    lines.append(f"- watchlist_missing_in_loaded_count={summary.get('watchlist_missing_in_loaded_count')}")
+    lines.append(f"- watchlist_loaded_only_count={summary.get('watchlist_loaded_only_count')}")
 
     lines.extend(["", "Backup"])
     lines.append(f"- backup_path={summary.get('backup_path')}")

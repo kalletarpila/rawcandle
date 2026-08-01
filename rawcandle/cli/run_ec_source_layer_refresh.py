@@ -7,6 +7,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
+from rawcandle.cli.ec_source_layer_watchlist_policy import extract_watchlist_membership_fields
 from rawcandle.cli.plan_ec_source_layer_refresh import plan_ec_source_layer_refresh
 from rawcandle.ec_dc_coverage_audit import audit_dc_facts_against_ec_sidecar
 from rawcandle.ec_dc_fact_parity_audit import audit_dc_ec_fact_parity
@@ -213,13 +214,16 @@ def run_ec_source_layer_refresh(
         allow_replace_date=allow_replace_date,
     )
     planner_status = str(planner_summary.get("status"))
+    watchlist_membership_fields = extract_watchlist_membership_fields(planner_summary)
 
     if gate_errors:
-        return _refresh_refused_summary(
+        summary = _refresh_refused_summary(
             status="REFRESH_REFUSED",
             errors=gate_errors,
             planner_summary=planner_summary,
         )
+        summary.update(watchlist_membership_fields)
+        return summary
 
     if planner_status == "SKIP_UP_TO_DATE":
         selected_date_info = planner_summary.get("selected_date_info", {})
@@ -246,27 +250,32 @@ def run_ec_source_layer_refresh(
             "planner_summary": planner_summary,
             "completed_steps": [],
             "failed_step": None,
+            **watchlist_membership_fields,
         }
 
     if planner_status not in READY_REFRESH_STATUSES:
         reason = f"planner gate did not pass: {planner_status}"
-        return _refresh_refused_summary(
+        summary = _refresh_refused_summary(
             status="REFRESH_REFUSED",
             errors=[reason],
             planner_summary=planner_summary,
             skipped_reason=reason if planner_status.startswith(BLOCKED_PREFIX) else None,
         )
+        summary.update(watchlist_membership_fields)
+        return summary
 
     assert resolved_backup_dir is not None
     selected_date_info = planner_summary.get("selected_date_info", {})
     assert isinstance(selected_date_info, dict)
     selected_signal_date = signal_date or selected_date_info.get("selected_signal_date")
     if not isinstance(selected_signal_date, str) or not selected_signal_date:
-        return _refresh_refused_summary(
+        summary = _refresh_refused_summary(
             status="REFRESH_REFUSED",
             errors=["planner did not provide a selected signal date"],
             planner_summary=planner_summary,
         )
+        summary.update(watchlist_membership_fields)
+        return summary
 
     try:
         backup_path = _create_backup(
@@ -297,6 +306,7 @@ def run_ec_source_layer_refresh(
             "planner_summary": planner_summary,
             "completed_steps": [],
             "failed_step": "backup",
+            **watchlist_membership_fields,
         }
 
     completed_steps: list[str] = []
@@ -449,6 +459,7 @@ def run_ec_source_layer_refresh(
             "pipeline_watermark_summary": pipeline_watermark_summary,
             "coverage_audit_summary": coverage_audit_summary,
             "parity_audit_summary": parity_audit_summary,
+            **watchlist_membership_fields,
         }
     except Exception as exc:
         return {
@@ -472,6 +483,7 @@ def run_ec_source_layer_refresh(
             "completed_steps": completed_steps,
             "failed_step": completed_steps[-1] if completed_steps else "backup",
             "warning": "Partial selected-date ec_ writes may exist; no automatic rollback was attempted",
+            **watchlist_membership_fields,
         }
 
 
@@ -499,6 +511,10 @@ def render_refresh_text(summary: dict[str, object]) -> str:
         selected_date_info = planner_summary.get("selected_date_info")
         if isinstance(selected_date_info, dict):
             lines.append(f"- selected_signal_date={selected_date_info.get('selected_signal_date')}")
+    lines.append(f"- watchlist_membership_status={summary.get('watchlist_membership_status')}")
+    lines.append(f"- watchlist_sync_required={str(bool(summary.get('watchlist_sync_required'))).lower()}")
+    lines.append(f"- watchlist_missing_in_loaded_count={summary.get('watchlist_missing_in_loaded_count')}")
+    lines.append(f"- watchlist_loaded_only_count={summary.get('watchlist_loaded_only_count')}")
 
     lines.extend(["", "Backup"])
     lines.append(f"- backup_path={summary.get('backup_path')}")

@@ -215,6 +215,7 @@ def _create_ec_schema(
     loaded_dates: dict[str, list[str]] | None = None,
     partial_mismatch_date: str | None = None,
     missing_group_l1_name: str | None = None,
+    loaded_watchlist_tickers: list[str] | None = None,
 ) -> None:
     if not include_ec_schema:
         return
@@ -339,7 +340,7 @@ def _create_ec_schema(
     )
     conn.execute("INSERT INTO ec_watchlist VALUES (1, 1, 'DATACENTER_WATCH')")
 
-    for member_index, ticker in enumerate(_watchlist_tickers(), start=1):
+    for member_index, ticker in enumerate(loaded_watchlist_tickers or _watchlist_tickers(), start=1):
         entity_row = conn.execute(
             "SELECT entity_id FROM ec_entity WHERE entity_code = ? AND entity_type = 'TICKER'",
             (ticker,),
@@ -379,6 +380,7 @@ def _create_fixture(
     partial_mismatch_date: str | None = None,
     omit_group_index_date: str | None = None,
     missing_group_l1_name: str | None = None,
+    loaded_watchlist_tickers: list[str] | None = None,
 ) -> tuple[Path, Path, Path]:
     db_path = tmp_path / "analysis.sqlite"
     taxonomy_path = tmp_path / "taxonomy.csv"
@@ -395,6 +397,7 @@ def _create_fixture(
             loaded_dates=loaded_dates,
             partial_mismatch_date=partial_mismatch_date,
             missing_group_l1_name=missing_group_l1_name,
+            loaded_watchlist_tickers=loaded_watchlist_tickers,
         )
         conn.commit()
     finally:
@@ -532,6 +535,55 @@ def test_partial_date_ready_with_replace(tmp_path: Path) -> None:
     )
     assert summary["status"] == "READY_BACKFILL_PLAN"
     assert {"date": "2026-06-04", "action": "REPLACE_PARTIAL"} in summary["loaded_state"]["candidate_dates"]
+
+
+def test_watchlist_membership_match_reports_match(tmp_path: Path) -> None:
+    db_path, taxonomy_path, watchlist_path = _create_fixture(tmp_path)
+    summary = plan_ec_source_layer_backfill(
+        db_path=str(db_path),
+        ecosystem_code="DATACENTER",
+        taxonomy_version_code=TAXONOMY_VERSION,
+        date_from=RANGE_START,
+        date_to=LATEST_SOURCE_DATE,
+        taxonomy_csv_path=str(taxonomy_path),
+        watchlist_path=str(watchlist_path),
+    )
+
+    assert summary["status"] == "READY_BACKFILL_PLAN"
+    compatibility = summary["compatibility_summary"]
+    assert compatibility["watchlist_membership_status"] == "MATCH"
+    assert compatibility["watchlist_sync_required"] is False
+    assert compatibility["watchlist_missing_in_loaded_count"] == 0
+    assert compatibility["watchlist_loaded_only_count"] == 0
+
+
+def test_watchlist_membership_drift_is_non_blocking_and_structured(tmp_path: Path) -> None:
+    loaded_watchlist = _watchlist_tickers()[:14] + ["TK016"]
+    db_path, taxonomy_path, watchlist_path = _create_fixture(
+        tmp_path,
+        loaded_watchlist_tickers=loaded_watchlist,
+    )
+    summary = plan_ec_source_layer_backfill(
+        db_path=str(db_path),
+        ecosystem_code="DATACENTER",
+        taxonomy_version_code=TAXONOMY_VERSION,
+        date_from=RANGE_START,
+        date_to=LATEST_SOURCE_DATE,
+        taxonomy_csv_path=str(taxonomy_path),
+        watchlist_path=str(watchlist_path),
+    )
+
+    assert summary["status"] == "READY_BACKFILL_PLAN"
+    compatibility = summary["compatibility_summary"]
+    assert compatibility["status"] == "OK"
+    assert compatibility["watchlist_membership_status"] == "DRIFT_DETECTED"
+    assert compatibility["watchlist_sync_required"] is True
+    assert compatibility["watchlist_source_member_count"] == 16
+    assert compatibility["watchlist_loaded_member_count"] == 15
+    assert compatibility["watchlist_missing_in_loaded_count"] == 2
+    assert compatibility["watchlist_loaded_only_count"] == 1
+    assert compatibility["watchlist_missing_in_loaded"] == ["CRGY", "TK015"]
+    assert compatibility["watchlist_loaded_only"] == ["TK016"]
 
 
 def test_missing_source_date_reported_and_not_aligned(tmp_path: Path) -> None:

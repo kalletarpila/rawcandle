@@ -2620,6 +2620,10 @@ def test_scheduler_runner_ec_source_layer_enabled_runs_after_legacy_success(
             "group_index_rows": 54,
             "watermark_rows": 15,
             "error": None,
+            "watchlist_membership_status": "DRIFT_DETECTED",
+            "watchlist_sync_required": True,
+            "watchlist_missing_in_loaded_count": 28,
+            "watchlist_loaded_only_count": 7,
         }
 
     monkeypatch.setattr("rawcandle.scheduler.runner.run_ec_source_layer_refresh", fake_refresh)
@@ -2636,6 +2640,10 @@ def test_scheduler_runner_ec_source_layer_enabled_runs_after_legacy_success(
     assert result.ec_bridge_required_start == "2026-06-05"
     assert result.ec_bridge_required_end == "2026-06-05"
     assert result.ec_bridge_watermark_refresh_performed is True
+    assert result.ec_bridge_watchlist_membership_status == "DRIFT_DETECTED"
+    assert result.ec_bridge_watchlist_sync_required is True
+    assert result.ec_bridge_watchlist_missing_in_loaded_count == 28
+    assert result.ec_bridge_watchlist_loaded_only_count == 7
     assert result.ec_source_layer_log_path.endswith(".txt")
     assert result.ec_source_layer_backup_path == "/tmp/backups/refresh.sqlite"
     assert result.ec_source_layer_ticker_rows == 236
@@ -2645,6 +2653,8 @@ def test_scheduler_runner_ec_source_layer_enabled_runs_after_legacy_success(
     assert "parity_status=OK_WITH_WARNINGS" in log_text
     assert "ec_bridge_mode=LATEST_REFRESH" in log_text
     assert "ec_bridge_status=OK" in log_text
+    assert "ec_bridge_watchlist_membership_status=DRIFT_DETECTED" in log_text
+    assert "ec_bridge_watchlist_sync_required=true" in log_text
     assert called_kwargs["db_path"] == str(analysis_db)
     assert called_kwargs["confirm_db"] == str(analysis_db)
     assert called_kwargs["allow_replace_date"] is False
@@ -2791,6 +2801,10 @@ def test_scheduler_runner_ec_bridge_multi_date_uses_backfill_only(
             "error": None,
             "watermark_refresh_performed": True,
             "watermark_advance_status": "OK",
+            "watchlist_membership_status": "DRIFT_DETECTED",
+            "watchlist_sync_required": True,
+            "watchlist_missing_in_loaded_count": 28,
+            "watchlist_loaded_only_count": 7,
         }
 
     monkeypatch.setattr("rawcandle.scheduler.runner.run_ec_source_layer_backfill", fake_backfill)
@@ -2813,9 +2827,14 @@ def test_scheduler_runner_ec_bridge_multi_date_uses_backfill_only(
     assert result.ec_bridge_coverage_status == "OK_WITH_WARNINGS"
     assert result.ec_bridge_parity_status == "OK"
     assert result.ec_bridge_watermark_refresh_performed is True
+    assert result.ec_bridge_watchlist_membership_status == "DRIFT_DETECTED"
+    assert result.ec_bridge_watchlist_sync_required is True
+    assert result.ec_bridge_watchlist_missing_in_loaded_count == 28
+    assert result.ec_bridge_watchlist_loaded_only_count == 7
     log_text = Path(result.ec_source_layer_log_path).read_text(encoding="utf-8")
     assert "ec_bridge_mode=HISTORICAL_BACKFILL" in log_text
     assert "ec_bridge_watermark_refresh_performed=true" in log_text
+    assert "ec_bridge_watchlist_membership_status=DRIFT_DETECTED" in log_text
 
 
 def test_scheduler_runner_ec_bridge_multi_date_failure_warns_and_records_retry_range(

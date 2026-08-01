@@ -70,10 +70,28 @@ def _base_args(tmp_path: Path) -> list[str]:
     ]
 
 
-def _ready_refresh_plan(signal_date: str = "2026-06-06", status: str = "READY_REFRESH_NEW_DATE") -> dict[str, object]:
+def _ready_refresh_plan(
+    signal_date: str = "2026-06-06",
+    status: str = "READY_REFRESH_NEW_DATE",
+    compatibility_summary: dict[str, object] | None = None,
+) -> dict[str, object]:
     return {
         "status": status,
         "selected_date_info": {"selected_signal_date": signal_date},
+    } | ({"compatibility_summary": compatibility_summary} if compatibility_summary else {})
+
+
+def _drift_compatibility_summary() -> dict[str, object]:
+    return {
+        "status": "OK",
+        "watchlist_membership_status": "DRIFT_DETECTED",
+        "watchlist_sync_required": True,
+        "watchlist_source_member_count": 37,
+        "watchlist_loaded_member_count": 16,
+        "watchlist_missing_in_loaded_count": 28,
+        "watchlist_loaded_only_count": 7,
+        "watchlist_missing_in_loaded": ["AAPL", "AMD"],
+        "watchlist_loaded_only": ["AEHR"],
     }
 
 
@@ -199,6 +217,56 @@ def test_creates_backup_before_first_write(tmp_path: Path, monkeypatch) -> None:
 
     assert summary["status"] == "REFRESH_COMPLETED"
     assert call_order == ["backup", "ticker"]
+
+
+def test_ready_refresh_with_watchlist_drift_executes_without_membership_write(tmp_path: Path, monkeypatch) -> None:
+    args = _base_args(tmp_path)
+    call_order: list[str] = []
+
+    monkeypatch.setattr(
+        cli,
+        "plan_ec_source_layer_refresh",
+        lambda **_: _ready_refresh_plan(compatibility_summary=_drift_compatibility_summary()),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_create_backup",
+        lambda **_: (call_order.append("backup") or (tmp_path / "backups" / "backup.sqlite")),
+    )
+    monkeypatch.setattr(cli, "load_ec_ticker_signal_daily_from_dc", lambda **_: (call_order.append("ticker") or {"status": "OK"}))
+    monkeypatch.setattr(cli, "load_ec_group_signal_daily_from_dc", lambda **_: {"status": "OK"})
+    monkeypatch.setattr(cli, "load_ec_group_synthetic_ohlc_daily_from_dc", lambda **_: {"status": "OK"})
+    monkeypatch.setattr(cli, "load_ec_group_index_daily_from_dc", lambda **_: {"status": "OK"})
+    monkeypatch.setattr(cli, "load_ec_pipeline_watermark_from_dc", lambda **_: {"status": "OK"})
+    monkeypatch.setattr(cli, "audit_dc_facts_against_ec_sidecar", lambda **_: {"status": "OK"})
+    monkeypatch.setattr(cli, "audit_dc_ec_fact_parity", lambda **_: {"status": "OK", "total_mismatch_count": 0})
+    monkeypatch.setattr(cli, "_selected_date_row_counts", lambda *_: {
+        "ticker_rows": 236,
+        "group_signal_rows": 54,
+        "synthetic_ohlc_rows": 53,
+        "group_index_rows": 54,
+        "watermark_rows": 15,
+    })
+
+    summary = cli.run_ec_source_layer_refresh(
+        db_path=args[1],
+        ecosystem_code="DATACENTER",
+        taxonomy_version_code="DC_TAXONOMY_FULL_V1",
+        taxonomy_csv_path=args[7],
+        watchlist_path=args[9],
+        backup_dir=args[11],
+        confirm_db=args[13],
+        confirm_ecosystem=args[15],
+        confirm_taxonomy_version=args[17],
+    )
+
+    assert summary["status"] == "REFRESH_COMPLETED"
+    assert summary["watchlist_membership_status"] == "DRIFT_DETECTED"
+    assert summary["watchlist_sync_required"] is True
+    assert summary["watchlist_missing_in_loaded_count"] == 28
+    assert summary["watchlist_loaded_only_count"] == 7
+    assert call_order == ["backup", "ticker"]
+    assert not hasattr(cli, "load_datacenter_watchlist_to_ec_sidecar")
 
 
 def test_runs_loaders_with_replace_existing_true_in_correct_order(tmp_path: Path, monkeypatch, capsys) -> None:

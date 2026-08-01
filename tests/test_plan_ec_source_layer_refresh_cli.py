@@ -210,6 +210,7 @@ def _create_ec_schema(
     include_selected_in_all: bool = False,
     include_selected_replace_date: str = LATEST_SOURCE_DATE,
     missing_group_l1_name: str | None = None,
+    loaded_watchlist_tickers: list[str] | None = None,
 ) -> None:
     if not include_ec_schema:
         return
@@ -344,7 +345,7 @@ def _create_ec_schema(
         (ecosystem_entity_id,),
     )
     conn.execute("INSERT INTO ec_watchlist VALUES (1, 1, 'DATACENTER_WATCH')")
-    watchlist_members = _watchlist_tickers()
+    watchlist_members = loaded_watchlist_tickers or _watchlist_tickers()
     for member_index, ticker in enumerate(watchlist_members, start=1):
         entity_code = ticker
         entity_row = conn.execute(
@@ -392,6 +393,7 @@ def _create_refresh_fixture(
     partial_selected_tables: set[str] | None = None,
     mismatched_synth_date: str | None = None,
     missing_group_l1_name: str | None = None,
+    loaded_watchlist_tickers: list[str] | None = None,
 ) -> tuple[Path, Path, Path]:
     db_path = tmp_path / "analysis.sqlite"
     taxonomy_path = tmp_path / "taxonomy.csv"
@@ -408,6 +410,7 @@ def _create_refresh_fixture(
             include_selected_in_all=include_selected_in_all,
             partial_selected_tables=partial_selected_tables,
             missing_group_l1_name=missing_group_l1_name,
+            loaded_watchlist_tickers=loaded_watchlist_tickers,
         )
         conn.commit()
     finally:
@@ -535,8 +538,37 @@ def test_watchlist_only_crgy_does_not_block(tmp_path: Path) -> None:
     )
     assert summary["status"] == "READY_REFRESH_NEW_DATE"
     compatibility = summary["compatibility_summary"]
+    assert compatibility["watchlist_membership_status"] == "MATCH"
+    assert compatibility["watchlist_sync_required"] is False
     assert compatibility["watchlist_missing_in_loaded"] == []
     assert compatibility["watchlist_loaded_only"] == []
+
+
+def test_watchlist_membership_drift_is_non_blocking_for_latest_refresh(tmp_path: Path) -> None:
+    loaded_watchlist = _watchlist_tickers()[:14] + ["TK016"]
+    db_path, taxonomy_path, watchlist_path = _create_refresh_fixture(
+        tmp_path,
+        loaded_watchlist_tickers=loaded_watchlist,
+    )
+    summary = plan_ec_source_layer_refresh(
+        db_path=str(db_path),
+        ecosystem_code="DATACENTER",
+        taxonomy_version_code=TAXONOMY_VERSION,
+        taxonomy_csv_path=str(taxonomy_path),
+        watchlist_path=str(watchlist_path),
+    )
+
+    assert summary["status"] == "READY_REFRESH_NEW_DATE"
+    compatibility = summary["compatibility_summary"]
+    assert compatibility["status"] == "OK"
+    assert compatibility["watchlist_membership_status"] == "DRIFT_DETECTED"
+    assert compatibility["watchlist_sync_required"] is True
+    assert compatibility["watchlist_source_member_count"] == 16
+    assert compatibility["watchlist_loaded_member_count"] == 15
+    assert compatibility["watchlist_missing_in_loaded_count"] == 2
+    assert compatibility["watchlist_loaded_only_count"] == 1
+    assert compatibility["watchlist_missing_in_loaded"] == ["CRGY", "TK015"]
+    assert compatibility["watchlist_loaded_only"] == ["TK016"]
 
 
 def test_blocks_when_group_mapping_missing(tmp_path: Path) -> None:

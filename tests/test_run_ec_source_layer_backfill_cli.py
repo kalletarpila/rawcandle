@@ -74,7 +74,11 @@ def _base_args(tmp_path: Path) -> list[str]:
     ]
 
 
-def _ready_backfill_plan(status: str = "READY_BACKFILL_PLAN", candidate_dates: list[dict[str, str]] | None = None) -> dict[str, object]:
+def _ready_backfill_plan(
+    status: str = "READY_BACKFILL_PLAN",
+    candidate_dates: list[dict[str, str]] | None = None,
+    compatibility_summary: dict[str, object] | None = None,
+) -> dict[str, object]:
     if candidate_dates is None:
         candidate_dates = [
             {"date": "2026-05-29", "action": "BACKFILL_MISSING"},
@@ -90,6 +94,20 @@ def _ready_backfill_plan(status: str = "READY_BACKFILL_PLAN", candidate_dates: l
             "already_loaded_dates": ["2026-06-04"],
             "partial_dates": [],
         },
+    } | ({"compatibility_summary": compatibility_summary} if compatibility_summary else {})
+
+
+def _drift_compatibility_summary() -> dict[str, object]:
+    return {
+        "status": "OK",
+        "watchlist_membership_status": "DRIFT_DETECTED",
+        "watchlist_sync_required": True,
+        "watchlist_source_member_count": 37,
+        "watchlist_loaded_member_count": 16,
+        "watchlist_missing_in_loaded_count": 28,
+        "watchlist_loaded_only_count": 7,
+        "watchlist_missing_in_loaded": ["AAPL", "AMD"],
+        "watchlist_loaded_only": ["AEHR"],
     }
 
 
@@ -242,6 +260,59 @@ def test_creates_backup_before_first_write(tmp_path: Path, monkeypatch) -> None:
 
     assert summary["status"] == "BACKFILL_COMPLETED"
     assert call_order == ["backup", "ticker"]
+
+
+def test_ready_backfill_with_watchlist_drift_executes_without_membership_write(tmp_path: Path, monkeypatch) -> None:
+    args = _base_args(tmp_path)
+    call_order: list[str] = []
+    _patch_successful_watermark_finalizer(monkeypatch)
+    monkeypatch.setattr(
+        cli,
+        "plan_ec_source_layer_backfill",
+        lambda **_: _ready_backfill_plan(
+            candidate_dates=[{"date": "2026-05-29", "action": "BACKFILL_MISSING"}],
+            compatibility_summary=_drift_compatibility_summary(),
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_create_backup",
+        lambda **_: (call_order.append("backup") or (tmp_path / "backups" / "backup.sqlite")),
+    )
+    monkeypatch.setattr(cli, "load_ec_ticker_signal_daily_from_dc", lambda **_: (call_order.append("ticker") or {"status": "OK"}))
+    monkeypatch.setattr(cli, "load_ec_group_signal_daily_from_dc", lambda **_: {"status": "OK"})
+    monkeypatch.setattr(cli, "load_ec_group_synthetic_ohlc_daily_from_dc", lambda **_: {"status": "OK"})
+    monkeypatch.setattr(cli, "load_ec_group_index_daily_from_dc", lambda **_: {"status": "OK"})
+    monkeypatch.setattr(cli, "audit_dc_facts_against_ec_sidecar", lambda **_: {"status": "OK"})
+    monkeypatch.setattr(cli, "audit_dc_ec_fact_parity", lambda **_: {"status": "OK", "total_mismatch_count": 0})
+    monkeypatch.setattr(cli, "_selected_date_row_counts", lambda *_: {
+        "ticker_rows": 236,
+        "group_signal_rows": 54,
+        "synthetic_ohlc_rows": 53,
+        "group_index_rows": 54,
+    })
+
+    summary = cli.run_ec_source_layer_backfill(
+        db_path=args[1],
+        ecosystem_code="DATACENTER",
+        taxonomy_version_code="DC_TAXONOMY_FULL_V1",
+        date_from="2026-05-29",
+        date_to="2026-06-04",
+        taxonomy_csv_path=args[11],
+        watchlist_path=args[13],
+        backup_dir=args[15],
+        confirm_db=args[17],
+        confirm_ecosystem=args[19],
+        confirm_taxonomy_version=args[21],
+    )
+
+    assert summary["status"] == "BACKFILL_COMPLETED"
+    assert summary["watchlist_membership_status"] == "DRIFT_DETECTED"
+    assert summary["watchlist_sync_required"] is True
+    assert summary["watchlist_missing_in_loaded_count"] == 28
+    assert summary["watchlist_loaded_only_count"] == 7
+    assert call_order == ["backup", "ticker"]
+    assert not hasattr(cli, "load_datacenter_watchlist_to_ec_sidecar")
 
 
 def test_uses_planner_selected_dates_not_independently_inferred_dates(tmp_path: Path, monkeypatch) -> None:

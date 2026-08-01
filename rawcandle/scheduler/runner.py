@@ -135,6 +135,10 @@ class ScheduledStockUpdateRunResult:
     ec_bridge_error: str = "NONE"
     ec_bridge_log: str = "NONE"
     ec_bridge_watermark_refresh_performed: bool = False
+    ec_bridge_watchlist_membership_status: str = "UNKNOWN"
+    ec_bridge_watchlist_sync_required: bool = False
+    ec_bridge_watchlist_missing_in_loaded_count: int = 0
+    ec_bridge_watchlist_loaded_only_count: int = 0
 
 
 class SchedulerAlreadyRunningError(RuntimeError):
@@ -263,6 +267,10 @@ class EcSourceLayerRefreshPostStepResult:
     bridge_error: str = "NONE"
     bridge_log: str = "NONE"
     bridge_watermark_refresh_performed: bool = False
+    bridge_watchlist_membership_status: str = "UNKNOWN"
+    bridge_watchlist_sync_required: bool = False
+    bridge_watchlist_missing_in_loaded_count: int = 0
+    bridge_watchlist_loaded_only_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -1318,6 +1326,13 @@ def _run_ec_source_layer_refresh_post_step(
             f"ec_bridge_log={result.bridge_log}",
             "ec_bridge_watermark_refresh_performed="
             f"{str(result.bridge_watermark_refresh_performed).lower()}",
+            f"ec_bridge_watchlist_membership_status={result.bridge_watchlist_membership_status}",
+            "ec_bridge_watchlist_sync_required="
+            f"{str(result.bridge_watchlist_sync_required).lower()}",
+            "ec_bridge_watchlist_missing_in_loaded_count="
+            f"{result.bridge_watchlist_missing_in_loaded_count}",
+            "ec_bridge_watchlist_loaded_only_count="
+            f"{result.bridge_watchlist_loaded_only_count}",
             f"analysis_db_path={config.analysis_db_path}",
         ]
         log_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
@@ -1351,6 +1366,10 @@ def _run_ec_source_layer_refresh_post_step(
             bridge_error=result.bridge_error,
             bridge_log=str(log_path),
             bridge_watermark_refresh_performed=result.bridge_watermark_refresh_performed,
+            bridge_watchlist_membership_status=result.bridge_watchlist_membership_status,
+            bridge_watchlist_sync_required=result.bridge_watchlist_sync_required,
+            bridge_watchlist_missing_in_loaded_count=result.bridge_watchlist_missing_in_loaded_count,
+            bridge_watchlist_loaded_only_count=result.bridge_watchlist_loaded_only_count,
         )
 
     if not config.ec_source_layer_enabled:
@@ -1503,6 +1522,18 @@ def _run_ec_source_layer_refresh_post_step(
                 bridge_exit_code=0 if bridge_ok else 1,
                 bridge_error="NONE" if bridge_ok else str(backfill_summary.get("error") or backfill_status),
                 bridge_watermark_refresh_performed=bridge_watermark_refresh_performed,
+                bridge_watchlist_membership_status=str(
+                    backfill_summary.get("watchlist_membership_status") or "UNKNOWN"
+                ),
+                bridge_watchlist_sync_required=_summary_bool(
+                    backfill_summary.get("watchlist_sync_required")
+                ),
+                bridge_watchlist_missing_in_loaded_count=int(
+                    backfill_summary.get("watchlist_missing_in_loaded_count") or 0
+                ),
+                bridge_watchlist_loaded_only_count=int(
+                    backfill_summary.get("watchlist_loaded_only_count") or 0
+                ),
             )
         )
 
@@ -1573,6 +1604,18 @@ def _run_ec_source_layer_refresh_post_step(
             bridge_exit_code=0 if bridge_status != "FAILED" else 1,
             bridge_error="NONE" if bridge_status != "FAILED" else str(refresh_summary.get("error") or refresh_status),
             bridge_watermark_refresh_performed=refresh_status == "REFRESH_COMPLETED",
+            bridge_watchlist_membership_status=str(
+                refresh_summary.get("watchlist_membership_status") or "UNKNOWN"
+            ),
+            bridge_watchlist_sync_required=_summary_bool(
+                refresh_summary.get("watchlist_sync_required")
+            ),
+            bridge_watchlist_missing_in_loaded_count=int(
+                refresh_summary.get("watchlist_missing_in_loaded_count") or 0
+            ),
+            bridge_watchlist_loaded_only_count=int(
+                refresh_summary.get("watchlist_loaded_only_count") or 0
+            ),
         )
     )
 
@@ -2030,6 +2073,18 @@ def run_scheduler_config(
                 ec_bridge_log=ec_source_layer_result.bridge_log,
                 ec_bridge_watermark_refresh_performed=(
                     ec_source_layer_result.bridge_watermark_refresh_performed
+                ),
+                ec_bridge_watchlist_membership_status=(
+                    ec_source_layer_result.bridge_watchlist_membership_status
+                ),
+                ec_bridge_watchlist_sync_required=(
+                    ec_source_layer_result.bridge_watchlist_sync_required
+                ),
+                ec_bridge_watchlist_missing_in_loaded_count=(
+                    ec_source_layer_result.bridge_watchlist_missing_in_loaded_count
+                ),
+                ec_bridge_watchlist_loaded_only_count=(
+                    ec_source_layer_result.bridge_watchlist_loaded_only_count
                 ),
             )
             _write_summary_json(config=config, run_started_at=run_started_at, result=result)

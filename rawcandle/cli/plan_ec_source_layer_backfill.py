@@ -23,6 +23,7 @@ from rawcandle.cli.plan_ec_source_layer_refresh import (
     EXPECTED_TAXONOMY_TICKER_COUNT,
     REQUIRED_REFRESH_EC_TABLES,
 )
+from rawcandle.cli.ec_source_layer_watchlist_policy import build_watchlist_membership_summary
 from rawcandle.ec_datacenter_taxonomy_loader import _compute_source_hash
 
 
@@ -292,21 +293,10 @@ def _check_taxonomy_watchlist_compatibility(
 
     source_watchlist_tickers = list(watchlist_summary.get("tickers", []))
     loaded_watchlist_tickers = _collect_loaded_watchlist_tickers(conn, ecosystem_code)
-    missing_from_loaded = sorted(set(source_watchlist_tickers) - set(loaded_watchlist_tickers))
-    loaded_only = sorted(set(loaded_watchlist_tickers) - set(source_watchlist_tickers))
-    if missing_from_loaded or loaded_only:
-        return {
-            "status": "BLOCKED_WATCHLIST_SOURCE",
-            "loaded_taxonomy": loaded_taxonomy,
-            "source_hash_match": True,
-            "loaded_source_hash": loaded_source_hash,
-            "source_hash": source_hash,
-            "loaded_watchlist_tickers": loaded_watchlist_tickers,
-            "source_watchlist_tickers": source_watchlist_tickers,
-            "watchlist_missing_in_loaded": missing_from_loaded,
-            "watchlist_loaded_only": loaded_only,
-            "error": "source watchlist differs from loaded ec_watchlist membership",
-        }
+    watchlist_membership_summary = build_watchlist_membership_summary(
+        source_watchlist_tickers=source_watchlist_tickers,
+        loaded_watchlist_tickers=loaded_watchlist_tickers,
+    )
 
     return {
         "status": "OK",
@@ -314,10 +304,7 @@ def _check_taxonomy_watchlist_compatibility(
         "source_hash_match": True,
         "loaded_source_hash": loaded_source_hash,
         "source_hash": source_hash,
-        "loaded_watchlist_tickers": loaded_watchlist_tickers,
-        "source_watchlist_tickers": source_watchlist_tickers,
-        "watchlist_missing_in_loaded": [],
-        "watchlist_loaded_only": [],
+        **watchlist_membership_summary,
     }
 
 
@@ -936,6 +923,12 @@ def render_plan_text(summary: dict[str, object]) -> str:
             [
                 f"- compatibility_status={compatibility_summary.get('status')}",
                 f"- source_hash_match={compatibility_summary.get('source_hash_match')}",
+                f"- watchlist_membership_status={compatibility_summary.get('watchlist_membership_status')}",
+                f"- watchlist_sync_required={str(bool(compatibility_summary.get('watchlist_sync_required'))).lower()}",
+                f"- watchlist_source_member_count={compatibility_summary.get('watchlist_source_member_count')}",
+                f"- watchlist_loaded_member_count={compatibility_summary.get('watchlist_loaded_member_count')}",
+                f"- watchlist_missing_in_loaded_count={compatibility_summary.get('watchlist_missing_in_loaded_count')}",
+                f"- watchlist_loaded_only_count={compatibility_summary.get('watchlist_loaded_only_count')}",
                 f"- watchlist_missing_in_loaded={compatibility_summary.get('watchlist_missing_in_loaded')}",
                 f"- watchlist_loaded_only={compatibility_summary.get('watchlist_loaded_only')}",
             ]
