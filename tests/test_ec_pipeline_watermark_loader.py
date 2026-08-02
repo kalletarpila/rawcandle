@@ -166,6 +166,8 @@ def test_loader_maps_known_components_and_existing_run_ids(tmp_path) -> None:
             "TICKER_SWING_BASE": "dc_ticker_swing_signal_daily",
         },
         "unknown_components": [],
+        "taxonomy_version_id": None,
+        "taxonomy_lineage_recorded": False,
         "empty_last_successful_run_id_count": 1,
         "unmatched_latest_run_ids": [],
         "warnings": [

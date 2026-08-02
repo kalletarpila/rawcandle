@@ -136,6 +136,7 @@ def test_loader_persists_expected_ec_sidecar_rows_and_summary(tmp_path) -> None:
             "multi_membership_ticker_count": 1,
             "alias_count": 1,
             "warnings": [],
+            "activation_status": "ACTIVE",
         }
     finally:
         conn.close()

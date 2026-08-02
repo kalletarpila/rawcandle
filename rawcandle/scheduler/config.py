@@ -3,13 +3,18 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List
+
+from analysis.datacenter_indices.taxonomy import load_datacenter_taxonomy_csv
 
 
 SUPPORTED_MARKETS = ("omxh", "omxs", "usa")
 DEFAULT_ENABLED_MARKETS = ["omxh", "omxs"]
 DEFAULT_RUN_TIME = "05:30"
 DEFAULT_TIMEZONE = "Europe/Helsinki"
+DEFAULT_DATACENTER_TAXONOMY_CSV = "data/datacenter_ecosystem_taxonomy_full_v1.csv"
+DEFAULT_DATACENTER_TAXONOMY_VERSION = "DC_TAXONOMY_FULL_V1"
 _RUN_TIME_PATTERN = re.compile(r"^\d{2}:\d{2}$")
 _REQUIRED_CONFIG_KEYS = {
     "enabled_markets",
@@ -29,6 +34,8 @@ _OPTIONAL_CONFIG_KEYS.update(
         "datacenter_dashboard_source_mode",
         "datacenter_enrichment_apply_migrations",
         "datacenter_enrichment_enabled",
+        "datacenter_taxonomy_csv",
+        "datacenter_taxonomy_version",
         "datacenter_stage2_incremental_enabled",
         "datacenter_stage2_overlap_trading_days",
         "datacenter_v3_reports_ecosystem",
@@ -67,6 +74,8 @@ class StockUpdateSchedulerConfig:
     datacenter_dashboard_source_mode: str = "reports"
     datacenter_enrichment_apply_migrations: bool = False
     datacenter_enrichment_enabled: bool = False
+    datacenter_taxonomy_csv: str = DEFAULT_DATACENTER_TAXONOMY_CSV
+    datacenter_taxonomy_version: str = DEFAULT_DATACENTER_TAXONOMY_VERSION
     datacenter_stage2_incremental_enabled: bool = False
     datacenter_stage2_overlap_trading_days: int = 5
     datacenter_v3_reports_ecosystem: str = "DATACENTER"
@@ -140,6 +149,17 @@ def validate_scheduler_config(
         raise ValueError("datacenter_enrichment_apply_migrations must be a bool")
     if type(config.datacenter_enrichment_enabled) is not bool:
         raise ValueError("datacenter_enrichment_enabled must be a bool")
+    if not config.datacenter_taxonomy_csv:
+        raise ValueError("datacenter_taxonomy_csv must be non-empty")
+    if not config.datacenter_taxonomy_version:
+        raise ValueError("datacenter_taxonomy_version must be non-empty")
+    taxonomy_csv_path = Path(config.datacenter_taxonomy_csv)
+    if not taxonomy_csv_path.exists() or not taxonomy_csv_path.is_file():
+        raise ValueError(f"datacenter_taxonomy_csv must exist and be a file: {config.datacenter_taxonomy_csv}")
+    load_datacenter_taxonomy_csv(
+        taxonomy_csv_path,
+        expected_taxonomy_version=config.datacenter_taxonomy_version,
+    )
     if type(config.datacenter_stage2_incremental_enabled) is not bool:
         raise ValueError("datacenter_stage2_incremental_enabled must be a bool")
     if type(config.datacenter_stage2_overlap_trading_days) is not int:
@@ -201,6 +221,8 @@ def validate_scheduler_config(
             config.datacenter_enrichment_apply_migrations
         ),
         datacenter_enrichment_enabled=config.datacenter_enrichment_enabled,
+        datacenter_taxonomy_csv=config.datacenter_taxonomy_csv,
+        datacenter_taxonomy_version=config.datacenter_taxonomy_version,
         datacenter_stage2_incremental_enabled=(
             config.datacenter_stage2_incremental_enabled
         ),
@@ -276,6 +298,12 @@ def scheduler_config_from_dict(data: Dict[str, Any]) -> StockUpdateSchedulerConf
             "datacenter_enrichment_apply_migrations", False
         ),
         datacenter_enrichment_enabled=data.get("datacenter_enrichment_enabled", False),
+        datacenter_taxonomy_csv=data.get(
+            "datacenter_taxonomy_csv", DEFAULT_DATACENTER_TAXONOMY_CSV
+        ),
+        datacenter_taxonomy_version=data.get(
+            "datacenter_taxonomy_version", DEFAULT_DATACENTER_TAXONOMY_VERSION
+        ),
         datacenter_stage2_incremental_enabled=data.get(
             "datacenter_stage2_incremental_enabled", False
         ),
@@ -344,6 +372,8 @@ def create_default_scheduler_config(
         datacenter_dashboard_source_mode="reports",
         datacenter_enrichment_apply_migrations=False,
         datacenter_enrichment_enabled=False,
+        datacenter_taxonomy_csv=DEFAULT_DATACENTER_TAXONOMY_CSV,
+        datacenter_taxonomy_version=DEFAULT_DATACENTER_TAXONOMY_VERSION,
         datacenter_stage2_incremental_enabled=False,
         datacenter_stage2_overlap_trading_days=5,
         datacenter_v3_reports_ecosystem="DATACENTER",

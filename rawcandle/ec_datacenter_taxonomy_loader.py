@@ -156,7 +156,10 @@ def _insert_taxonomy_version(
     taxonomy_name: str,
     source_reference: str,
     source_hash: str,
+    mark_active: bool = True,
 ) -> int:
+    status = "ACTIVE" if mark_active else "INACTIVE"
+    is_active = 1 if mark_active else 0
     cursor = conn.execute(
         """
         INSERT INTO ec_taxonomy_version (
@@ -177,8 +180,8 @@ def _insert_taxonomy_version(
             "CSV",
             source_reference,
             source_hash,
-            "ACTIVE",
-            1,
+            status,
+            is_active,
         ),
     )
     return int(cursor.lastrowid)
@@ -351,6 +354,7 @@ def load_datacenter_taxonomy_to_ec_sidecar(
     ecosystem_code: str = "DATACENTER",
     ecosystem_name: str = "Datacenter",
     replace_existing: bool = False,
+    mark_active: bool = True,
 ) -> dict[str, object]:
     normalized_taxonomy_version_code = _validate_target_taxonomy_version_code(taxonomy_version_code)
     if replace_existing:
@@ -392,6 +396,7 @@ def load_datacenter_taxonomy_to_ec_sidecar(
                 taxonomy_name=_build_taxonomy_name(normalized_taxonomy_version_code),
                 source_reference=str(csv_path),
                 source_hash=source_hash,
+                mark_active=mark_active,
             )
 
             ecosystem_entity_id = _ensure_entity(
@@ -505,6 +510,7 @@ def load_datacenter_taxonomy_to_ec_sidecar(
             "multi_membership_ticker_count": multi_membership_ticker_count,
             "alias_count": alias_count,
             "warnings": warnings,
+            "activation_status": "ACTIVE" if mark_active else "NOT_ACTIVE",
         }
         return summary
     finally:

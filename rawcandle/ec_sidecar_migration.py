@@ -13,12 +13,20 @@ MIGRATION_SQL_PATHS = (
     MIGRATIONS_DIR / "023_patch_ec_fact_schema_for_dc_parity.sql",
     MIGRATIONS_DIR / "024_patch_ec_group_index_counts.sql",
     MIGRATIONS_DIR / "025_create_ec_watchlist_reconciliation_audit.sql",
+    MIGRATIONS_DIR / "026_create_taxonomy_replacement_audit.sql",
 )
 
 
 def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
     rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
     return {str(row[1]) for row in rows}
+
+
+def _table_names(conn: sqlite3.Connection) -> set[str]:
+    return {
+        str(row[0])
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+    }
 
 
 def _rebuild_ec_entity_alias_if_needed(conn: sqlite3.Connection) -> None:
@@ -275,12 +283,23 @@ def _patch_ec_group_index_counts_if_needed(conn: sqlite3.Connection) -> None:
         _add_column_if_missing(conn, "ec_group_index_daily", column_name, column_sql)
 
 
+def _patch_taxonomy_replacement_schema_if_needed(conn: sqlite3.Connection) -> None:
+    if "ec_pipeline_watermark" in _table_names(conn):
+        _add_column_if_missing(
+            conn,
+            "ec_pipeline_watermark",
+            "taxonomy_version_id",
+            "taxonomy_version_id INTEGER NULL",
+        )
+
+
 def _apply_ec_sidecar_migration_to_connection(conn: sqlite3.Connection) -> None:
     for migration_sql_path in MIGRATION_SQL_PATHS:
         conn.executescript(migration_sql_path.read_text(encoding="utf-8"))
     _harden_ec_sidecar_schema(conn)
     _patch_ec_fact_schema_for_dc_parity_if_needed(conn)
     _patch_ec_group_index_counts_if_needed(conn)
+    _patch_taxonomy_replacement_schema_if_needed(conn)
 
 
 def apply_ec_sidecar_migration(db_path: str) -> None:

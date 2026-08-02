@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 import errno
 import fcntl
+import hashlib
 import io
 import json
 import sqlite3
@@ -424,13 +425,33 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def _resolve_datacenter_post_step_config(market: str) -> Optional[DatacenterPostStepConfig]:
+def _resolve_repo_path(path_value: str) -> Path:
+    path = Path(path_value)
+    return path if path.is_absolute() else _repo_root() / path
+
+
+def _file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _resolve_datacenter_post_step_config(
+    market: str,
+    config: StockUpdateSchedulerConfig | None = None,
+) -> Optional[DatacenterPostStepConfig]:
     if market != "usa":
         return None
     return DatacenterPostStepConfig(
         market="usa",
-        taxonomy_csv="data/datacenter_ecosystem_taxonomy_full_v1.csv",
-        taxonomy_version="DC_TAXONOMY_FULL_V1",
+        taxonomy_csv=(
+            config.datacenter_taxonomy_csv
+            if config is not None
+            else "data/datacenter_ecosystem_taxonomy_full_v1.csv"
+        ),
+        taxonomy_version=(
+            config.datacenter_taxonomy_version
+            if config is not None
+            else "DC_TAXONOMY_FULL_V1"
+        ),
         start_date="2025-08-01",
         index_base_date="2020-01-01",
         output_dir="/home/kalle/projects/rawcandle/swing_reports",
@@ -982,7 +1003,10 @@ def _run_technical_relevance_post_step(
             skip_reason="MARKET_UPDATE_FAILED",
         )
 
-    resolved = _resolve_datacenter_post_step_config(target_market)
+    try:
+        resolved = _resolve_datacenter_post_step_config(target_market, config)
+    except TypeError:
+        resolved = _resolve_datacenter_post_step_config(target_market)
     if resolved is None:
         return TechnicalRelevancePostStepResult(
             attempted=0,
@@ -1169,7 +1193,10 @@ def _run_datacenter_post_step(
     target_market: str,
     effective_today: str,
 ) -> DatacenterPostStepResult:
-    resolved = _resolve_datacenter_post_step_config(target_market)
+    try:
+        resolved = _resolve_datacenter_post_step_config(target_market, config)
+    except TypeError:
+        resolved = _resolve_datacenter_post_step_config(target_market)
     if resolved is None:
         return DatacenterPostStepResult(
             attempted=0,
@@ -1190,6 +1217,8 @@ def _run_datacenter_post_step(
         expected_ticker_count=resolved.expected_ticker_count,
     )
     signal_date = signal_date_resolution.signal_date
+    taxonomy_csv_path = _resolve_repo_path(resolved.taxonomy_csv)
+    taxonomy_source_sha256 = _file_sha256(taxonomy_csv_path)
     log_dir = Path(config.log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = _build_datacenter_log_path(log_dir, resolved.market, started_at)
@@ -1207,6 +1236,9 @@ def _run_datacenter_post_step(
             f"signal_date_candidate_count={signal_date_resolution.candidate_count}",
             f"ticker_valid_date_count={signal_date_resolution.ticker_valid_date_count}",
             f"group_valid_date_count={signal_date_resolution.group_valid_date_count}",
+            f"taxonomy_csv_path={taxonomy_csv_path}",
+            f"taxonomy_version={resolved.taxonomy_version}",
+            f"taxonomy_source_sha256={taxonomy_source_sha256}",
             f"osakedata_db_path={config.osakedata_db_path}",
             f"analysis_db_path={config.analysis_db_path}",
             f"skip_reason={signal_date_resolution.skip_reason}",
@@ -1283,6 +1315,9 @@ def _run_datacenter_post_step(
         f"signal_date_candidate_count={signal_date_resolution.candidate_count}",
         f"ticker_valid_date_count={signal_date_resolution.ticker_valid_date_count}",
         f"group_valid_date_count={signal_date_resolution.group_valid_date_count}",
+        f"taxonomy_csv_path={taxonomy_csv_path}",
+        f"taxonomy_version={resolved.taxonomy_version}",
+        f"taxonomy_source_sha256={taxonomy_source_sha256}",
         f"osakedata_db_path={config.osakedata_db_path}",
         f"analysis_db_path={config.analysis_db_path}",
         f"command={' '.join(command)}",

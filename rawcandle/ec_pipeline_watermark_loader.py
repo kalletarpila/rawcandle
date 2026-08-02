@@ -74,6 +74,31 @@ def _resolve_ecosystem_id(conn: sqlite3.Connection, ecosystem_code: str) -> int:
     return int(row[0])
 
 
+def _resolve_taxonomy_version_id(
+    conn: sqlite3.Connection,
+    *,
+    ecosystem_id: int,
+    taxonomy_version_code: str,
+) -> int | None:
+    if "ec_taxonomy_version" not in _table_names(conn):
+        return None
+    row = conn.execute(
+        """
+        SELECT taxonomy_version_id
+        FROM ec_taxonomy_version
+        WHERE ecosystem_id = ?
+          AND taxonomy_version_code = ?
+        """,
+        (ecosystem_id, taxonomy_version_code),
+    ).fetchone()
+    return int(row[0]) if row is not None else None
+
+
+def _has_watermark_taxonomy_lineage(conn: sqlite3.Connection) -> bool:
+    rows = conn.execute("PRAGMA table_info(ec_pipeline_watermark)").fetchall()
+    return any(str(row[1]) == "taxonomy_version_id" for row in rows)
+
+
 def _resolve_source_rows(
     conn: sqlite3.Connection,
     *,
@@ -175,6 +200,12 @@ def load_ec_pipeline_watermark_from_dc(
 
         source_rows = _resolve_source_rows(source_conn, taxonomy_version_code=taxonomy_version_code)
         ecosystem_id = _resolve_ecosystem_id(target_conn, ecosystem_code)
+        taxonomy_version_id = _resolve_taxonomy_version_id(
+            target_conn,
+            ecosystem_id=ecosystem_id,
+            taxonomy_version_code=taxonomy_version_code,
+        )
+        has_taxonomy_lineage = _has_watermark_taxonomy_lineage(target_conn)
         loader_timestamp_utc = _now_utc_iso()
         signal_run_table_exists = _has_signal_run_table(target_conn)
 
@@ -245,20 +276,49 @@ def load_ec_pipeline_watermark_from_dc(
                 replace_existing=replace_existing,
             )
             target_conn.executemany(
-                """
-                INSERT INTO ec_pipeline_watermark (
-                    ecosystem_id,
-                    pipeline_name,
-                    source_table,
-                    latest_signal_date,
-                    latest_run_id,
-                    status,
-                    created_at_utc,
-                    updated_at_utc
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
+                (
+                    """
+                    INSERT INTO ec_pipeline_watermark (
+                        ecosystem_id,
+                        pipeline_name,
+                        source_table,
+                        latest_signal_date,
+                        latest_run_id,
+                        status,
+                        created_at_utc,
+                        updated_at_utc,
+                        taxonomy_version_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """
+                    if has_taxonomy_lineage
+                    else
+                    """
+                    INSERT INTO ec_pipeline_watermark (
+                        ecosystem_id,
+                        pipeline_name,
+                        source_table,
+                        latest_signal_date,
+                        latest_run_id,
+                        status,
+                        created_at_utc,
+                        updated_at_utc
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """
+                ),
                 [
                     (
+                        ecosystem_id,
+                        pipeline_name,
+                        source_table,
+                        latest_signal_date,
+                        latest_run_id,
+                        status,
+                        created_at_utc,
+                        updated_at_utc,
+                        taxonomy_version_id,
+                    )
+                    if has_taxonomy_lineage
+                    else (
                         ecosystem_id,
                         pipeline_name,
                         source_table,
@@ -292,6 +352,8 @@ def load_ec_pipeline_watermark_from_dc(
             "component_count": len(component_name_to_source_table),
             "component_name_to_source_table": dict(sorted(component_name_to_source_table.items())),
             "unknown_components": sorted(unknown_components),
+            "taxonomy_version_id": taxonomy_version_id,
+            "taxonomy_lineage_recorded": bool(has_taxonomy_lineage and taxonomy_version_id is not None),
             "empty_last_successful_run_id_count": empty_last_successful_run_id_count,
             "unmatched_latest_run_ids": sorted(unmatched_latest_run_ids),
             "warnings": warnings,
@@ -316,6 +378,12 @@ def advance_ec_pipeline_watermarks_after_historical_backfill(
         _require_tables(target_conn, REQUIRED_TARGET_TABLES, "target")
 
         ecosystem_id = _resolve_ecosystem_id(target_conn, ecosystem_code)
+        taxonomy_version_id = _resolve_taxonomy_version_id(
+            target_conn,
+            ecosystem_id=ecosystem_id,
+            taxonomy_version_code=taxonomy_version_code,
+        )
+        has_taxonomy_lineage = _has_watermark_taxonomy_lineage(target_conn)
         loader_timestamp_utc = _now_utc_iso()
         rows_inserted = 0
         rows_updated = 0
@@ -334,55 +402,107 @@ def advance_ec_pipeline_watermarks_after_historical_backfill(
                     (ecosystem_id, pipeline_name, source_table),
                 ).fetchone()
                 if row is None:
-                    target_conn.execute(
-                        """
-                        INSERT INTO ec_pipeline_watermark (
-                            ecosystem_id,
-                            pipeline_name,
-                            source_table,
-                            latest_signal_date,
-                            latest_run_id,
-                            status,
-                            created_at_utc,
-                            updated_at_utc
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            ecosystem_id,
-                            pipeline_name,
-                            source_table,
-                            latest_signal_date,
-                            None,
-                            "OK",
-                            loader_timestamp_utc,
-                            loader_timestamp_utc,
-                        ),
-                    )
+                    if has_taxonomy_lineage:
+                        target_conn.execute(
+                            """
+                            INSERT INTO ec_pipeline_watermark (
+                                ecosystem_id,
+                                pipeline_name,
+                                source_table,
+                                latest_signal_date,
+                                latest_run_id,
+                                status,
+                                created_at_utc,
+                                updated_at_utc,
+                                taxonomy_version_id
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                ecosystem_id,
+                                pipeline_name,
+                                source_table,
+                                latest_signal_date,
+                                None,
+                                "OK",
+                                loader_timestamp_utc,
+                                loader_timestamp_utc,
+                                taxonomy_version_id,
+                            ),
+                        )
+                    else:
+                        target_conn.execute(
+                            """
+                            INSERT INTO ec_pipeline_watermark (
+                                ecosystem_id,
+                                pipeline_name,
+                                source_table,
+                                latest_signal_date,
+                                latest_run_id,
+                                status,
+                                created_at_utc,
+                                updated_at_utc
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                ecosystem_id,
+                                pipeline_name,
+                                source_table,
+                                latest_signal_date,
+                                None,
+                                "OK",
+                                loader_timestamp_utc,
+                                loader_timestamp_utc,
+                            ),
+                        )
                     rows_inserted += 1
                     continue
 
                 existing_latest_signal_date = _normalize_text(row[0])
                 if existing_latest_signal_date is None or existing_latest_signal_date < latest_signal_date:
-                    target_conn.execute(
-                        """
-                        UPDATE ec_pipeline_watermark
-                        SET latest_signal_date = ?,
-                            latest_run_id = NULL,
-                            status = ?,
-                            updated_at_utc = ?
-                        WHERE ecosystem_id = ?
-                          AND pipeline_name = ?
-                          AND source_table = ?
-                        """,
-                        (
-                            latest_signal_date,
-                            "OK",
-                            loader_timestamp_utc,
-                            ecosystem_id,
-                            pipeline_name,
-                            source_table,
-                        ),
-                    )
+                    if has_taxonomy_lineage:
+                        target_conn.execute(
+                            """
+                            UPDATE ec_pipeline_watermark
+                            SET latest_signal_date = ?,
+                                latest_run_id = NULL,
+                                status = ?,
+                                updated_at_utc = ?,
+                                taxonomy_version_id = ?
+                            WHERE ecosystem_id = ?
+                              AND pipeline_name = ?
+                              AND source_table = ?
+                            """,
+                            (
+                                latest_signal_date,
+                                "OK",
+                                loader_timestamp_utc,
+                                taxonomy_version_id,
+                                ecosystem_id,
+                                pipeline_name,
+                                source_table,
+                            ),
+                        )
+                    else:
+                        target_conn.execute(
+                            """
+                            UPDATE ec_pipeline_watermark
+                            SET latest_signal_date = ?,
+                                latest_run_id = NULL,
+                                status = ?,
+                                updated_at_utc = ?
+                            WHERE ecosystem_id = ?
+                              AND pipeline_name = ?
+                              AND source_table = ?
+                            """,
+                            (
+                                latest_signal_date,
+                                "OK",
+                                loader_timestamp_utc,
+                                ecosystem_id,
+                                pipeline_name,
+                                source_table,
+                            ),
+                        )
                     rows_updated += 1
                 else:
                     rows_unchanged += 1
@@ -401,6 +521,8 @@ def advance_ec_pipeline_watermarks_after_historical_backfill(
             "watermark_rows_unchanged": rows_unchanged,
             "watermark_rows_total": rows_total,
             "watermark_advance_status": "OK",
+            "taxonomy_version_id": taxonomy_version_id,
+            "taxonomy_lineage_recorded": bool(has_taxonomy_lineage and taxonomy_version_id is not None),
             "canonical_component_to_source_table": dict(HISTORICAL_BACKFILL_CANONICAL_FACT_WATERMARKS),
         }
     finally:
