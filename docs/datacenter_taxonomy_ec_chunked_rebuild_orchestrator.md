@@ -159,10 +159,47 @@ not be a WAL or SHM file
 open read-only as SQLite
 pass PRAGMA integrity_check
 contain expected critical EC and DC tables
-match the live DB schema fingerprint for critical tables
+pass structured schema compatibility checks against the live DB
 have an mtime no later than orchestrator start
 match --confirm-existing-backup-path after normalization
 ```
+
+Schema compatibility distinguishes exact matches from compatible additive
+operational drift. Canonical EC/DC facts, sidecar identity tables, and pipeline
+watermarks remain strictly validated: missing tables, removed columns, changed
+primary keys, changed uniqueness/index identity, changed required column
+definitions, or arbitrary additive columns in canonical tables are blocking.
+
+The pre-DC-rebuild restore point can still be valid when the live DB later gains
+nullable or safely defaulted operational/audit columns on
+`ec_taxonomy_change_deployment`. The current allowed live-only deployment
+columns are:
+
+```text
+prepared_at_utc
+validation_completed_at_utc
+rebuild_evidence_json
+rebuild_evidence_sha256
+validation_evidence_json
+validation_evidence_sha256
+last_error
+```
+
+These differences are reported as:
+
+```text
+backup_schema_compatibility_status=COMPATIBLE_ADDITIVE_DRIFT
+backup_schema_exact_match=false
+backup_schema_compatible_with_live=true
+backup_restore_requires_forward_schema_reapply=true
+```
+
+This means the backup is a valid rollback source, not that it already contains
+the later deployment/audit columns. A manual restore must restore the original
+backup, reapply the current forward schema preparation, verify schema and
+integrity, and then restore or reconstruct post-backup deployment evidence as
+appropriate. The orchestrator does not perform restore automatically and never
+creates a fallback backup when an existing backup fails validation.
 
 If validation fails, the orchestrator refuses before EC fact writes and does not
 silently create a fallback backup. The user must either provide a valid backup
@@ -179,6 +216,14 @@ backup_validation_status
 backup_size
 backup_mtime
 backup_sha256
+backup_schema_compatibility_status
+backup_schema_exact_match
+backup_schema_compatible_with_live
+backup_schema_critical_mismatch_count
+backup_schema_allowed_difference_count
+backup_schema_allowed_differences
+backup_schema_blocking_differences
+backup_restore_requires_forward_schema_reapply
 backup_error
 ```
 

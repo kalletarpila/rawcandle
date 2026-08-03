@@ -28,16 +28,49 @@ CRITICAL_BACKUP_TABLES = (
     "ec_ecosystem",
     "ec_taxonomy_version",
     "ec_taxonomy_change_deployment",
+    "ec_entity",
+    "ec_membership",
+    "ec_watchlist",
+    "ec_watchlist_member",
     "ec_pipeline_watermark",
     "ec_ticker_signal_daily",
     "ec_group_signal_daily",
     "ec_group_synthetic_ohlc_daily",
     "ec_group_index_daily",
+    "dc_pipeline_watermark",
     "dc_ticker_swing_signal_daily",
     "dc_group_swing_signal_daily",
     "dc_group_synthetic_ohlc_daily",
     "dc_group_index_daily",
 )
+EXACT_SCHEMA_BACKUP_TABLES = (
+    "ec_ecosystem",
+    "ec_taxonomy_version",
+    "ec_entity",
+    "ec_membership",
+    "ec_watchlist",
+    "ec_watchlist_member",
+    "ec_pipeline_watermark",
+    "ec_ticker_signal_daily",
+    "ec_group_signal_daily",
+    "ec_group_synthetic_ohlc_daily",
+    "ec_group_index_daily",
+    "dc_pipeline_watermark",
+    "dc_ticker_swing_signal_daily",
+    "dc_group_swing_signal_daily",
+    "dc_group_synthetic_ohlc_daily",
+    "dc_group_index_daily",
+)
+ADDITIVE_OPERATIONAL_SCHEMA_TABLES = ("ec_taxonomy_change_deployment",)
+KNOWN_DEPLOYMENT_AUDIT_COLUMNS = {
+    "prepared_at_utc",
+    "validation_completed_at_utc",
+    "rebuild_evidence_json",
+    "rebuild_evidence_sha256",
+    "validation_evidence_json",
+    "validation_evidence_sha256",
+    "last_error",
+}
 
 
 @dataclass(frozen=True)
@@ -208,9 +241,10 @@ def _backup_summary_from_path(
     backup_mode: str,
     backup_created_by_orchestrator: bool,
     backup_reused: bool,
+    schema_compatibility: dict[str, object] | None = None,
 ) -> dict[str, object]:
     stat = backup_path.stat()
-    return {
+    summary = {
         "backup_mode": backup_mode,
         "backup_path": str(backup_path),
         "backup_created_by_orchestrator": backup_created_by_orchestrator,
@@ -222,6 +256,10 @@ def _backup_summary_from_path(
         "backup_error": None,
         "backup_created_at": _iso_from_timestamp(stat.st_mtime),
     }
+    if schema_compatibility is None:
+        schema_compatibility = _exact_schema_compatibility()
+    summary.update(schema_compatibility)
+    return summary
 
 
 def _backup_error_summary(
@@ -229,8 +267,10 @@ def _backup_error_summary(
     backup_mode: str,
     backup_path: str | None,
     error: str,
+    backup_sha256: str | None = None,
+    schema_compatibility: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    return {
+    summary = {
         "backup_mode": backup_mode,
         "backup_path": backup_path,
         "backup_created_by_orchestrator": False,
@@ -238,9 +278,13 @@ def _backup_error_summary(
         "backup_validation_status": "FAILED",
         "backup_size": 0,
         "backup_mtime": None,
-        "backup_sha256": None,
+        "backup_sha256": backup_sha256,
         "backup_error": error,
     }
+    if schema_compatibility is None:
+        schema_compatibility = _failed_schema_compatibility(error)
+    summary.update(schema_compatibility)
+    return summary
 
 
 def _schema_fingerprint(conn: sqlite3.Connection, table_names: tuple[str, ...]) -> dict[str, list[dict[str, object]]]:
@@ -262,6 +306,183 @@ def _schema_fingerprint(conn: sqlite3.Connection, table_names: tuple[str, ...]) 
             for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
         ]
     return fingerprint
+
+
+def _index_fingerprint(conn: sqlite3.Connection, table_name: str) -> list[dict[str, object]]:
+    indexes: list[dict[str, object]] = []
+    for row in conn.execute(f"PRAGMA index_list({table_name})").fetchall():
+        index_name = str(row[1])
+        indexes.append(
+            {
+                "name": index_name,
+                "unique": int(row[2]),
+                "origin": str(row[3]),
+                "partial": int(row[4]),
+                "columns": [
+                    str(index_row[2])
+                    for index_row in conn.execute(f"PRAGMA index_info({index_name})").fetchall()
+                ],
+            }
+        )
+    return sorted(indexes, key=lambda item: (str(item["origin"]), str(item["name"])))
+
+
+def _schema_identity(conn: sqlite3.Connection, table_names: tuple[str, ...]) -> dict[str, dict[str, object]]:
+    table_info = _schema_fingerprint(conn, table_names)
+    return {
+        table_name: {
+            "columns": table_info[table_name],
+            "indexes": _index_fingerprint(conn, table_name) if table_info[table_name] else [],
+        }
+        for table_name in table_names
+    }
+
+
+def _exact_schema_compatibility() -> dict[str, object]:
+    return {
+        "backup_schema_compatibility_status": "EXACT_MATCH",
+        "backup_schema_exact_match": True,
+        "backup_schema_compatible_with_live": True,
+        "backup_schema_critical_mismatch_count": 0,
+        "backup_schema_allowed_difference_count": 0,
+        "backup_schema_allowed_differences": [],
+        "backup_schema_blocking_differences": [],
+        "backup_restore_requires_forward_schema_reapply": False,
+    }
+
+
+def _failed_schema_compatibility(error: str) -> dict[str, object]:
+    return {
+        "backup_schema_compatibility_status": "FAILED",
+        "backup_schema_exact_match": False,
+        "backup_schema_compatible_with_live": False,
+        "backup_schema_critical_mismatch_count": 1,
+        "backup_schema_allowed_difference_count": 0,
+        "backup_schema_allowed_differences": [],
+        "backup_schema_blocking_differences": [{"error": error}],
+        "backup_restore_requires_forward_schema_reapply": False,
+    }
+
+
+def _column_by_name(columns: list[dict[str, object]]) -> dict[str, dict[str, object]]:
+    return {str(column["name"]): column for column in columns}
+
+
+def _column_is_safe_addition(column: dict[str, object]) -> bool:
+    return int(column.get("pk") or 0) == 0 and (
+        int(column.get("notnull") or 0) == 0 or column.get("default") is not None
+    )
+
+
+def assess_backup_schema_compatibility(
+    *,
+    backup_conn: sqlite3.Connection,
+    live_conn: sqlite3.Connection,
+    table_names: tuple[str, ...] = CRITICAL_BACKUP_TABLES,
+) -> dict[str, object]:
+    backup_schema = _schema_identity(backup_conn, table_names)
+    live_schema = _schema_identity(live_conn, table_names)
+    if backup_schema == live_schema:
+        return _exact_schema_compatibility()
+
+    allowed: list[dict[str, object]] = []
+    blocking: list[dict[str, object]] = []
+    for table_name in table_names:
+        backup_table = backup_schema[table_name]
+        live_table = live_schema[table_name]
+        backup_columns = list(backup_table["columns"])
+        live_columns = list(live_table["columns"])
+        if not backup_columns:
+            blocking.append({"table": table_name, "difference": "MISSING_BACKUP_TABLE"})
+            continue
+        if not live_columns:
+            blocking.append({"table": table_name, "difference": "MISSING_LIVE_TABLE"})
+            continue
+        if table_name in EXACT_SCHEMA_BACKUP_TABLES:
+            if backup_table != live_table:
+                blocking.append({"table": table_name, "difference": "CANONICAL_SCHEMA_MISMATCH"})
+            continue
+
+        backup_by_name = _column_by_name(backup_columns)
+        live_by_name = _column_by_name(live_columns)
+        backup_only = sorted(set(backup_by_name) - set(live_by_name))
+        live_only = sorted(set(live_by_name) - set(backup_by_name))
+        common = sorted(set(backup_by_name) & set(live_by_name))
+        changed_common = [
+            column_name
+            for column_name in common
+            if backup_by_name[column_name] != live_by_name[column_name]
+        ]
+        if backup_only:
+            blocking.append(
+                {
+                    "table": table_name,
+                    "difference": "BACKUP_ONLY_COLUMNS",
+                    "columns": backup_only,
+                }
+            )
+        if changed_common:
+            blocking.append(
+                {
+                    "table": table_name,
+                    "difference": "COMMON_COLUMN_REDEFINED",
+                    "columns": changed_common,
+                }
+            )
+        if backup_table["indexes"] != live_table["indexes"]:
+            blocking.append({"table": table_name, "difference": "INDEX_OR_UNIQUENESS_MISMATCH"})
+        if not live_only:
+            continue
+        if table_name not in ADDITIVE_OPERATIONAL_SCHEMA_TABLES:
+            blocking.append(
+                {
+                    "table": table_name,
+                    "difference": "LIVE_ONLY_COLUMNS_IN_UNSUPPORTED_TABLE",
+                    "columns": live_only,
+                }
+            )
+            continue
+        unsafe_columns = [
+            column_name
+            for column_name in live_only
+            if not _column_is_safe_addition(live_by_name[column_name])
+        ]
+        if unsafe_columns:
+            blocking.append(
+                {
+                    "table": table_name,
+                    "difference": "UNSAFE_LIVE_ONLY_ADDITIVE_COLUMNS",
+                    "columns": unsafe_columns,
+                }
+            )
+            continue
+        for column_name in live_only:
+            allowed.append(
+                {
+                    "table": table_name,
+                    "difference": "LIVE_ONLY_ADDITIVE_COLUMNS",
+                    "column": column_name,
+                    "column_type": live_by_name[column_name].get("type"),
+                    "notnull": live_by_name[column_name].get("notnull"),
+                    "default": live_by_name[column_name].get("default"),
+                    "compatibility": "ALLOWED_ADDITIVE_OPERATIONAL_SCHEMA_DRIFT",
+                    "known_incident_column": column_name in KNOWN_DEPLOYMENT_AUDIT_COLUMNS,
+                }
+            )
+
+    allowed = sorted(allowed, key=lambda item: (str(item["table"]), str(item["column"])))
+    blocking = sorted(blocking, key=lambda item: (str(item.get("table")), str(item.get("difference"))))
+    compatible = not blocking
+    return {
+        "backup_schema_compatibility_status": "COMPATIBLE_ADDITIVE_DRIFT" if compatible else "INCOMPATIBLE_SCHEMA_DRIFT",
+        "backup_schema_exact_match": False,
+        "backup_schema_compatible_with_live": compatible,
+        "backup_schema_critical_mismatch_count": len(blocking),
+        "backup_schema_allowed_difference_count": len(allowed),
+        "backup_schema_allowed_differences": allowed,
+        "backup_schema_blocking_differences": blocking,
+        "backup_restore_requires_forward_schema_reapply": bool(allowed) and compatible,
+    }
 
 
 def validate_existing_backup(
@@ -302,10 +523,12 @@ def validate_existing_backup(
         stat = resolved.stat()
         if stat.st_size <= 0:
             return _backup_error_summary(backup_mode=backup_mode, backup_path=str(resolved), error="existing backup is empty")
+        backup_sha256 = _file_sha256(resolved)
         if datetime.fromtimestamp(stat.st_mtime, timezone.utc) > orchestrator_started_at_utc:
             return _backup_error_summary(
                 backup_mode=backup_mode,
                 backup_path=str(resolved),
+                backup_sha256=backup_sha256,
                 error="existing backup file is newer than orchestrator start time",
             )
         backup_conn = sqlite3.connect(f"file:{resolved}?mode=ro", uri=True)
@@ -315,6 +538,7 @@ def validate_existing_backup(
                 return _backup_error_summary(
                     backup_mode=backup_mode,
                     backup_path=str(resolved),
+                    backup_sha256=backup_sha256,
                     error=f"existing backup integrity_check failed: {integrity}",
                 )
             backup_tables = _table_names(backup_conn)
@@ -323,36 +547,42 @@ def validate_existing_backup(
                 return _backup_error_summary(
                     backup_mode=backup_mode,
                     backup_path=str(resolved),
+                    backup_sha256=backup_sha256,
                     error="existing backup missing critical tables: " + ", ".join(missing_tables),
                 )
-            backup_schema = _schema_fingerprint(backup_conn, CRITICAL_BACKUP_TABLES)
+            live_conn = _connect_readonly(db_path)
+            try:
+                live_tables = _table_names(live_conn)
+                missing_live_tables = [table_name for table_name in CRITICAL_BACKUP_TABLES if table_name not in live_tables]
+                if missing_live_tables:
+                    return _backup_error_summary(
+                        backup_mode=backup_mode,
+                        backup_path=str(resolved),
+                        backup_sha256=backup_sha256,
+                        error="live DB missing critical tables: " + ", ".join(missing_live_tables),
+                    )
+                schema_compatibility = assess_backup_schema_compatibility(
+                    backup_conn=backup_conn,
+                    live_conn=live_conn,
+                )
+            finally:
+                live_conn.close()
         finally:
             backup_conn.close()
-
-        live_conn = _connect_readonly(db_path)
-        try:
-            live_tables = _table_names(live_conn)
-            missing_live_tables = [table_name for table_name in CRITICAL_BACKUP_TABLES if table_name not in live_tables]
-            if missing_live_tables:
-                return _backup_error_summary(
-                    backup_mode=backup_mode,
-                    backup_path=str(resolved),
-                    error="live DB missing critical tables: " + ", ".join(missing_live_tables),
-                )
-            live_schema = _schema_fingerprint(live_conn, CRITICAL_BACKUP_TABLES)
-        finally:
-            live_conn.close()
-        if backup_schema != live_schema:
+        if not schema_compatibility["backup_schema_compatible_with_live"]:
             return _backup_error_summary(
                 backup_mode=backup_mode,
                 backup_path=str(resolved),
-                error="existing backup schema fingerprint does not match live production DB",
+                backup_sha256=backup_sha256,
+                error="existing backup schema is incompatible with live production DB",
+                schema_compatibility=schema_compatibility,
             )
         return _backup_summary_from_path(
             resolved,
             backup_mode=backup_mode,
             backup_created_by_orchestrator=False,
             backup_reused=True,
+            schema_compatibility=schema_compatibility,
         )
     except Exception as exc:
         return _backup_error_summary(
@@ -374,6 +604,14 @@ def _backup_fields(backup_summary: dict[str, object] | None) -> dict[str, object
         "backup_mtime": backup_summary.get("backup_mtime"),
         "backup_sha256": backup_summary.get("backup_sha256"),
         "backup_error": backup_summary.get("backup_error"),
+        "backup_schema_compatibility_status": backup_summary.get("backup_schema_compatibility_status"),
+        "backup_schema_exact_match": backup_summary.get("backup_schema_exact_match"),
+        "backup_schema_compatible_with_live": backup_summary.get("backup_schema_compatible_with_live"),
+        "backup_schema_critical_mismatch_count": backup_summary.get("backup_schema_critical_mismatch_count"),
+        "backup_schema_allowed_difference_count": backup_summary.get("backup_schema_allowed_difference_count"),
+        "backup_schema_allowed_differences": backup_summary.get("backup_schema_allowed_differences"),
+        "backup_schema_blocking_differences": backup_summary.get("backup_schema_blocking_differences"),
+        "backup_restore_requires_forward_schema_reapply": backup_summary.get("backup_restore_requires_forward_schema_reapply"),
     }
 
 
@@ -944,7 +1182,26 @@ def run_ec_taxonomy_full_rebuild(
                 "backup_summary": previous_progress.get("backup_summary"),
                 **_backup_fields(previous_progress.get("backup_summary") if isinstance(previous_progress.get("backup_summary"), dict) else None),
             }
-        backup_summary = dict(previous_progress.get("backup_summary") or {})
+        if existing_backup_path is not None:
+            backup_summary = validate_existing_backup(
+                existing_backup_path=existing_backup_path,
+                confirm_existing_backup_path=confirm_existing_backup_path or "",
+                db_path=db_path,
+                repo_root=repo_root,
+                orchestrator_started_at_utc=orchestrator_started_at_utc,
+            )
+            if backup_summary["backup_validation_status"] != "OK":
+                return {
+                    "overall_status": "BLOCKED_BEFORE_WRITES",
+                    "retry_required": False,
+                    "watermark_finalization_performed": False,
+                    "backup_summary": backup_summary,
+                    "plan": plan,
+                    "blocking_errors": [str(backup_summary["backup_error"])],
+                    **_backup_fields(backup_summary),
+                }
+        else:
+            backup_summary = dict(previous_progress.get("backup_summary") or {})
         for completed in previous_progress.get("completed_chunks", []):
             chunk = RebuildChunk(
                 chunk_index=int(completed["chunk_index"]),
@@ -1277,6 +1534,14 @@ def render_run_text(summary: dict[str, object]) -> str:
         lines.append(f"backup_size={backup.get('backup_size')}")
         lines.append(f"backup_mtime={backup.get('backup_mtime')}")
         lines.append(f"backup_sha256={backup.get('backup_sha256')}")
+        lines.append(f"backup_schema_compatibility_status={backup.get('backup_schema_compatibility_status')}")
+        lines.append(f"backup_schema_exact_match={backup.get('backup_schema_exact_match')}")
+        lines.append(f"backup_schema_compatible_with_live={backup.get('backup_schema_compatible_with_live')}")
+        lines.append(f"backup_schema_critical_mismatch_count={backup.get('backup_schema_critical_mismatch_count')}")
+        lines.append(f"backup_schema_allowed_difference_count={backup.get('backup_schema_allowed_difference_count')}")
+        lines.append(
+            f"backup_restore_requires_forward_schema_reapply={backup.get('backup_restore_requires_forward_schema_reapply')}"
+        )
         lines.append(f"backup_error={backup.get('backup_error')}")
     if summary.get("progress_path"):
         lines.append(f"progress_path={summary.get('progress_path')}")

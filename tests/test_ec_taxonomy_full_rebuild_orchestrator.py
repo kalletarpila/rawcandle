@@ -4,13 +4,16 @@ import csv
 import hashlib
 import sqlite3
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 
 from rawcandle.datacenter_taxonomy_replacement import ensure_taxonomy_replacement_schema
 from rawcandle.ec_taxonomy_full_rebuild_orchestrator import (
+    KNOWN_DEPLOYMENT_AUDIT_COLUMNS,
     build_ec_taxonomy_rebuild_chunks,
     plan_ec_taxonomy_full_rebuild,
     run_ec_taxonomy_full_rebuild,
+    validate_existing_backup,
 )
 
 
@@ -60,6 +63,11 @@ def _db(tmp_path: Path, *, active_v2: bool = False, source_hash: str | None = No
             """
         )
         conn.execute("CREATE TABLE ec_pipeline_watermark (ecosystem_id INTEGER, pipeline_name TEXT, source_table TEXT, latest_signal_date TEXT, status TEXT, taxonomy_version_id INTEGER)")
+        conn.execute("CREATE TABLE dc_pipeline_watermark (component_name TEXT, taxonomy_version TEXT, market TEXT, start_date TEXT, end_date TEXT, status TEXT)")
+        conn.execute("CREATE TABLE ec_entity (entity_id INTEGER PRIMARY KEY, ecosystem_id INTEGER NOT NULL, entity_type TEXT NOT NULL, entity_code TEXT NOT NULL, ticker TEXT NULL, status TEXT)")
+        conn.execute("CREATE TABLE ec_membership (membership_id INTEGER PRIMARY KEY, ecosystem_id INTEGER NOT NULL, taxonomy_version_id INTEGER NOT NULL, parent_entity_id INTEGER NOT NULL, child_entity_id INTEGER NOT NULL, membership_type TEXT)")
+        conn.execute("CREATE TABLE ec_watchlist (watchlist_id INTEGER PRIMARY KEY, ecosystem_id INTEGER NOT NULL, watchlist_code TEXT NOT NULL)")
+        conn.execute("CREATE TABLE ec_watchlist_member (watchlist_member_id INTEGER PRIMARY KEY, watchlist_id INTEGER NOT NULL, entity_id INTEGER NOT NULL)")
         for table in (
             "ec_ticker_signal_daily",
             "ec_group_signal_daily",
@@ -127,6 +135,27 @@ def _existing_backup(paths: dict[str, str], name: str = "existing.sqlite") -> Pa
     backup_path = Path(paths["backup_dir"]) / name
     shutil.copy2(paths["db"], backup_path)
     return backup_path
+
+
+def _drop_backup_columns(backup_path: Path, table_name: str, columns: set[str]) -> None:
+    conn = sqlite3.connect(backup_path)
+    try:
+        existing = {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})")}
+        for column_name in sorted(columns & existing):
+            conn.execute(f"ALTER TABLE {table_name} DROP COLUMN {column_name}")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _validate_backup(paths: dict[str, str], backup_path: Path) -> dict[str, object]:
+    return validate_existing_backup(
+        existing_backup_path=str(backup_path),
+        confirm_existing_backup_path=str(backup_path.resolve()),
+        db_path=paths["db"],
+        repo_root=paths["repo_root"],
+        orchestrator_started_at_utc=datetime.now(timezone.utc),
+    )
 
 
 def _successful_backfill_calls() -> tuple[list[dict[str, object]], object]:
@@ -369,6 +398,204 @@ def test_valid_existing_backup_is_reused_and_passed_to_every_chunk(tmp_path, mon
     progress = (Path(paths["evidence_root"]) / "ec_taxonomy_full_rebuild_progress.json").read_text(encoding="utf-8")
     assert str(backup_path.resolve()) in progress
     assert summary["backup_sha256"] in progress
+    assert summary["backup_schema_compatibility_status"] == "EXACT_MATCH"
+    assert summary["backup_schema_exact_match"] is True
+    assert summary["backup_schema_compatible_with_live"] is True
+
+
+def test_existing_backup_accepts_known_live_only_deployment_audit_columns(tmp_path, monkeypatch) -> None:
+    paths = _paths(tmp_path)
+    backup_path = _existing_backup(paths)
+    _drop_backup_columns(backup_path, "ec_taxonomy_change_deployment", KNOWN_DEPLOYMENT_AUDIT_COLUMNS)
+    calls, fake_backfill_runner = _successful_backfill_calls()
+    _patch_success_finalizers(monkeypatch)
+
+    summary = run_ec_taxonomy_full_rebuild(
+        **_plan_args(
+            paths,
+            date_from="2026-07-01",
+            date_to="2026-07-05",
+            confirm_date_from="2026-07-01",
+            confirm_date_to="2026-07-05",
+            existing_backup_path=str(backup_path),
+            confirm_existing_backup_path=str(backup_path),
+        ),
+        backfill_runner=fake_backfill_runner,
+    )
+
+    assert summary["overall_status"] == "REBUILD_COMPLETED"
+    assert calls
+    assert summary["backup_validation_status"] == "OK"
+    assert summary["backup_schema_compatibility_status"] == "COMPATIBLE_ADDITIVE_DRIFT"
+    assert summary["backup_schema_exact_match"] is False
+    assert summary["backup_schema_compatible_with_live"] is True
+    assert summary["backup_schema_critical_mismatch_count"] == 0
+    assert summary["backup_schema_allowed_difference_count"] == 7
+    assert summary["backup_restore_requires_forward_schema_reapply"] is True
+    assert [item["column"] for item in summary["backup_schema_allowed_differences"]] == sorted(KNOWN_DEPLOYMENT_AUDIT_COLUMNS)
+    assert {item["compatibility"] for item in summary["backup_schema_allowed_differences"]} == {
+        "ALLOWED_ADDITIVE_OPERATIONAL_SCHEMA_DRIFT"
+    }
+    progress = (Path(paths["evidence_root"]) / "ec_taxonomy_full_rebuild_progress.json").read_text(encoding="utf-8")
+    assert "COMPATIBLE_ADDITIVE_DRIFT" in progress
+    assert summary["backup_sha256"] in progress
+
+
+def test_existing_backup_accepts_generic_nullable_deployment_audit_column(tmp_path) -> None:
+    paths = _paths(tmp_path)
+    backup_path = _existing_backup(paths)
+    conn = sqlite3.connect(paths["db"])
+    try:
+        conn.execute("ALTER TABLE ec_taxonomy_change_deployment ADD COLUMN operator_note TEXT")
+        conn.commit()
+    finally:
+        conn.close()
+
+    summary = _validate_backup(paths, backup_path)
+
+    assert summary["backup_validation_status"] == "OK"
+    assert summary["backup_schema_compatibility_status"] == "COMPATIBLE_ADDITIVE_DRIFT"
+    assert summary["backup_schema_allowed_difference_count"] == 1
+    assert summary["backup_schema_allowed_differences"][0]["column"] == "operator_note"
+    assert summary["backup_schema_allowed_differences"][0]["known_incident_column"] is False
+
+
+def test_existing_backup_blocks_arbitrary_additive_canonical_column(tmp_path) -> None:
+    paths = _paths(tmp_path)
+    backup_path = _existing_backup(paths)
+    conn = sqlite3.connect(paths["db"])
+    try:
+        conn.execute("ALTER TABLE ec_ticker_signal_daily ADD COLUMN debug_note TEXT")
+        conn.commit()
+    finally:
+        conn.close()
+
+    summary = _validate_backup(paths, backup_path)
+
+    assert summary["backup_validation_status"] == "FAILED"
+    assert summary["backup_schema_compatibility_status"] == "INCOMPATIBLE_SCHEMA_DRIFT"
+    assert summary["backup_schema_compatible_with_live"] is False
+    assert summary["backup_schema_critical_mismatch_count"] == 1
+    assert summary["backup_schema_blocking_differences"] == [
+        {"table": "ec_ticker_signal_daily", "difference": "CANONICAL_SCHEMA_MISMATCH"}
+    ]
+
+
+def test_existing_backup_blocks_destructive_deployment_audit_change(tmp_path) -> None:
+    paths = _paths(tmp_path)
+    backup_path = _existing_backup(paths)
+    conn = sqlite3.connect(paths["db"])
+    try:
+        conn.execute("ALTER TABLE ec_taxonomy_change_deployment RENAME COLUMN status TO deployment_status")
+        conn.commit()
+    finally:
+        conn.close()
+
+    summary = _validate_backup(paths, backup_path)
+
+    assert summary["backup_validation_status"] == "FAILED"
+    differences = summary["backup_schema_blocking_differences"]
+    assert {"table": "ec_taxonomy_change_deployment", "difference": "BACKUP_ONLY_COLUMNS", "columns": ["status"]} in differences
+    assert {
+        "table": "ec_taxonomy_change_deployment",
+        "difference": "LIVE_ONLY_ADDITIVE_COLUMNS",
+        "columns": ["deployment_status"],
+    } not in differences
+
+
+def test_existing_backup_blocks_changed_canonical_column_definition(tmp_path) -> None:
+    paths = _paths(tmp_path)
+    backup_path = _existing_backup(paths)
+    conn = sqlite3.connect(paths["db"])
+    try:
+        conn.execute("ALTER TABLE ec_pipeline_watermark RENAME TO ec_pipeline_watermark_old")
+        conn.execute(
+            "CREATE TABLE ec_pipeline_watermark (ecosystem_id TEXT, pipeline_name TEXT, source_table TEXT, latest_signal_date TEXT, status TEXT, taxonomy_version_id INTEGER)"
+        )
+        conn.execute(
+            "INSERT INTO ec_pipeline_watermark SELECT ecosystem_id, pipeline_name, source_table, latest_signal_date, status, taxonomy_version_id FROM ec_pipeline_watermark_old"
+        )
+        conn.execute("DROP TABLE ec_pipeline_watermark_old")
+        conn.commit()
+    finally:
+        conn.close()
+
+    summary = _validate_backup(paths, backup_path)
+
+    assert summary["backup_validation_status"] == "FAILED"
+    assert summary["backup_schema_blocking_differences"] == [
+        {"table": "ec_pipeline_watermark", "difference": "CANONICAL_SCHEMA_MISMATCH"}
+    ]
+
+
+def test_existing_backup_blocks_changed_canonical_primary_key(tmp_path) -> None:
+    paths = _paths(tmp_path)
+    backup_path = _existing_backup(paths)
+    conn = sqlite3.connect(paths["db"])
+    try:
+        conn.execute("ALTER TABLE ec_entity RENAME TO ec_entity_old")
+        conn.execute(
+            "CREATE TABLE ec_entity (entity_id INTEGER, ecosystem_id INTEGER NOT NULL, entity_type TEXT NOT NULL, entity_code TEXT NOT NULL, ticker TEXT NULL, status TEXT)"
+        )
+        conn.execute("DROP TABLE ec_entity_old")
+        conn.commit()
+    finally:
+        conn.close()
+
+    summary = _validate_backup(paths, backup_path)
+
+    assert summary["backup_validation_status"] == "FAILED"
+    assert summary["backup_schema_blocking_differences"] == [
+        {"table": "ec_entity", "difference": "CANONICAL_SCHEMA_MISMATCH"}
+    ]
+
+
+def test_existing_backup_schema_failure_executes_zero_chunks_and_no_watermarks(tmp_path, monkeypatch) -> None:
+    paths = _paths(tmp_path)
+    backup_path = _existing_backup(paths)
+    conn = sqlite3.connect(paths["db"])
+    try:
+        conn.execute("DROP TABLE dc_pipeline_watermark")
+        conn.commit()
+    finally:
+        conn.close()
+    calls: list[dict[str, object]] = []
+    watermark_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "rawcandle.ec_taxonomy_full_rebuild_orchestrator.advance_ec_pipeline_watermarks_after_historical_backfill",
+        lambda **kwargs: watermark_calls.append(kwargs),
+    )
+
+    summary = run_ec_taxonomy_full_rebuild(
+        **_plan_args(
+            paths,
+            date_from="2026-07-01",
+            date_to="2026-07-05",
+            confirm_date_from="2026-07-01",
+            confirm_date_to="2026-07-05",
+            existing_backup_path=str(backup_path),
+            confirm_existing_backup_path=str(backup_path),
+        ),
+        backfill_runner=lambda **kwargs: calls.append(kwargs),
+    )
+
+    assert summary["overall_status"] == "BLOCKED_BEFORE_WRITES"
+    assert "live DB missing critical tables: dc_pipeline_watermark" in summary["backup_error"]
+    assert calls == []
+    assert watermark_calls == []
+
+
+def test_incident_backup_shape_is_accepted_in_isolated_fixture(tmp_path) -> None:
+    paths = _paths(tmp_path)
+    backup_path = _existing_backup(paths)
+    _drop_backup_columns(backup_path, "ec_taxonomy_change_deployment", KNOWN_DEPLOYMENT_AUDIT_COLUMNS)
+
+    summary = _validate_backup(paths, backup_path)
+
+    assert summary["backup_validation_status"] == "OK"
+    assert summary["backup_schema_compatibility_status"] == "COMPATIBLE_ADDITIVE_DRIFT"
+    assert summary["backup_schema_allowed_difference_count"] == 7
+    assert summary["backup_restore_requires_forward_schema_reapply"] is True
 
 
 def test_existing_backup_validation_failures_block_before_chunks(tmp_path, monkeypatch) -> None:
@@ -567,3 +794,50 @@ def test_resume_accepts_same_backup_and_rejects_changed_path_or_sha(tmp_path, mo
     )
     assert changed_sha["overall_status"] == "BLOCKED_BEFORE_WRITES"
     assert "backup SHA-256" in "; ".join(changed_sha["blocking_errors"])
+
+
+def test_resume_rejects_newly_blocking_schema_difference(tmp_path, monkeypatch) -> None:
+    paths = _paths(tmp_path)
+    backup_path = _existing_backup(paths)
+    calls, fake_backfill_runner = _successful_backfill_calls()
+    _patch_success_finalizers(monkeypatch)
+    monkeypatch.setattr("rawcandle.ec_taxonomy_full_rebuild_orchestrator._verify_completed_chunk", lambda **_: {"status": "OK"})
+
+    first = run_ec_taxonomy_full_rebuild(
+        **_plan_args(
+            paths,
+            date_from="2026-07-01",
+            date_to="2026-07-05",
+            confirm_date_from="2026-07-01",
+            confirm_date_to="2026-07-05",
+            existing_backup_path=str(backup_path),
+            confirm_existing_backup_path=str(backup_path),
+        ),
+        backfill_runner=fake_backfill_runner,
+    )
+    assert first["overall_status"] == "REBUILD_COMPLETED"
+    calls.clear()
+    conn = sqlite3.connect(paths["db"])
+    try:
+        conn.execute("ALTER TABLE dc_ticker_swing_signal_daily ADD COLUMN incompatible_debug TEXT")
+        conn.commit()
+    finally:
+        conn.close()
+
+    resumed = run_ec_taxonomy_full_rebuild(
+        **_plan_args(
+            paths,
+            date_from="2026-07-01",
+            date_to="2026-07-05",
+            confirm_date_from="2026-07-01",
+            confirm_date_to="2026-07-05",
+            existing_backup_path=str(backup_path),
+            confirm_existing_backup_path=str(backup_path),
+            resume=True,
+        ),
+        backfill_runner=fake_backfill_runner,
+    )
+
+    assert resumed["overall_status"] == "BLOCKED_BEFORE_WRITES"
+    assert resumed["backup_schema_compatibility_status"] == "INCOMPATIBLE_SCHEMA_DRIFT"
+    assert calls == []

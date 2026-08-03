@@ -61,6 +61,12 @@ backup_mode=EXISTING_BACKUP | ORCHESTRATOR_CREATED
 backup_created_by_orchestrator=true|false
 backup_reused=true|false
 backup_validation_status=OK
+backup_schema_compatibility_status=EXACT_MATCH|COMPATIBLE_ADDITIVE_DRIFT
+backup_schema_exact_match=true|false
+backup_schema_compatible_with_live=true|false
+backup_schema_critical_mismatch_count
+backup_schema_allowed_difference_count
+backup_restore_requires_forward_schema_reapply=true|false
 requested_start
 requested_end
 chunk_count
@@ -92,6 +98,34 @@ orchestrator either creates exactly one full DB backup before the first chunk or
 reuses the pre-existing full DB backup created before the DC rebuild. In the
 controlled V2 production sequence, the backup is created before the first DC
 write and passed to the EC orchestrator with `--existing-backup-path`.
+
+The existing-backup validator treats that file as a pre-DC-rebuild restore
+point. It must pass path, confirmation, mtime, SHA-256 recording, read-only
+SQLite open, `PRAGMA integrity_check`, critical table presence, and structured
+schema compatibility checks. Canonical EC/DC facts, sidecar identity tables, and
+pipeline watermarks require exact compatible identity. Additive columns in those
+canonical structures are blocking.
+
+The validator can accept later live-only nullable/defaulted operational columns
+on `ec_taxonomy_change_deployment`, including:
+
+```text
+prepared_at_utc
+validation_completed_at_utc
+rebuild_evidence_json
+rebuild_evidence_sha256
+validation_evidence_json
+validation_evidence_sha256
+last_error
+```
+
+That result is reported as `COMPATIBLE_ADDITIVE_DRIFT` and
+`backup_restore_requires_forward_schema_reapply=true`. A manual restore must
+therefore restore the original backup, reapply the current forward schema
+preparation, verify schema and integrity, and then restore or reconstruct any
+post-backup deployment evidence. The orchestrator does not restore
+automatically, does not mutate the original backup, and does not create a
+fallback full backup when an existing backup is rejected.
 
 ## EC Watermark Lineage
 
