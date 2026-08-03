@@ -9,11 +9,13 @@ import pytest
 
 from rawcandle.datacenter_taxonomy_replacement import (
     DEFAULT_DATACENTER_REBUILD_START_DATE,
+    apply_datacenter_taxonomy_rebuild_evidence,
     apply_datacenter_taxonomy_activation,
     apply_datacenter_taxonomy_version,
     ensure_taxonomy_replacement_schema,
     plan_datacenter_taxonomy_activation,
     plan_datacenter_taxonomy_change,
+    prepare_datacenter_taxonomy_rebuild,
     validate_no_stale_taxonomy_rows,
 )
 from rawcandle.ec_datacenter_taxonomy_loader import load_datacenter_taxonomy_to_ec_sidecar
@@ -26,6 +28,8 @@ from rawcandle.scheduler.config import (
     DEFAULT_DATACENTER_TAXONOMY_VERSION,
     StockUpdateSchedulerConfig,
     scheduler_config_from_dict,
+    write_scheduler_config,
+    read_scheduler_config,
     validate_scheduler_config,
 )
 
@@ -311,6 +315,119 @@ def test_ec_watermark_lineage_is_recorded_and_scoped_to_ecosystem(tmp_path) -> N
         conn.close()
 
 
+def test_dc_rebuild_preparation_is_idempotent_and_does_not_inherit_v1_watermark(tmp_path) -> None:
+    current_csv = _write_csv(tmp_path / "current.csv", _base_rows())
+    proposed_csv = _write_csv(tmp_path / "proposed.csv", _base_rows("DC_TAXONOMY_FULL_V2"))
+    db_path = _db_with_active_v1(tmp_path, current_csv)
+    apply_datacenter_taxonomy_version(
+        analysis_db=db_path,
+        current_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        current_taxonomy_csv=current_csv,
+        proposed_taxonomy_version="DC_TAXONOMY_FULL_V2",
+        proposed_taxonomy_csv=proposed_csv,
+        confirm_proposed_taxonomy_version="DC_TAXONOMY_FULL_V2",
+    )
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE dc_pipeline_watermark (
+                component_name TEXT,
+                taxonomy_version TEXT,
+                market TEXT,
+                signal_version TEXT,
+                calc_version TEXT,
+                start_date TEXT,
+                end_date TEXT,
+                row_count INTEGER,
+                status TEXT,
+                last_successful_run_id TEXT,
+                last_successful_at_utc TEXT,
+                notes TEXT
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO dc_pipeline_watermark VALUES ('TICKER_SWING_BASE', 'DC_TAXONOMY_FULL_V1', 'usa', 'DC_SWING_SIGNAL_V1', '', '2025-08-01', '2026-07-31', 2, 'OK', NULL, NULL, NULL)"
+        )
+        conn.commit()
+        deployment_id = conn.execute(
+            "SELECT taxonomy_change_id FROM ec_taxonomy_change_deployment WHERE proposed_taxonomy_version='DC_TAXONOMY_FULL_V2'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    first = prepare_datacenter_taxonomy_rebuild(
+        analysis_db=db_path,
+        ecosystem_code="DATACENTER",
+        proposed_taxonomy_version="DC_TAXONOMY_FULL_V2",
+        proposed_taxonomy_csv=proposed_csv,
+        deployment_id=deployment_id,
+        expected_active_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        confirm_proposed_taxonomy_version="DC_TAXONOMY_FULL_V2",
+    )
+    second = prepare_datacenter_taxonomy_rebuild(
+        analysis_db=db_path,
+        ecosystem_code="DATACENTER",
+        proposed_taxonomy_version="DC_TAXONOMY_FULL_V2",
+        proposed_taxonomy_csv=proposed_csv,
+        deployment_id=deployment_id,
+        expected_active_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        confirm_proposed_taxonomy_version="DC_TAXONOMY_FULL_V2",
+    )
+
+    assert first["prepare_status"] == "REBUILD_IN_PROGRESS"
+    assert second["prepare_status"] == "REBUILD_IN_PROGRESS"
+    assert first["previous_dc_watermark_count"] == 1
+    assert first["proposed_dc_watermark_count"] == 0
+
+
+def test_rebuild_evidence_blocks_manual_ok_when_facts_missing(tmp_path) -> None:
+    db_path, csv_path = _activation_db(tmp_path, complete=False)
+    summary = apply_datacenter_taxonomy_rebuild_evidence(
+        analysis_db=db_path,
+        ecosystem_code="DATACENTER",
+        proposed_taxonomy_version="DC_TAXONOMY_FULL_V2",
+        proposed_taxonomy_csv=csv_path,
+        deployment_id=1,
+        required_signal_date="2026-07-31",
+        coverage_status="OK",
+        parity_status="OK",
+        total_mismatch_count=0,
+    )
+
+    assert summary["status_update"] == "FAILED"
+    assert summary["ready_to_activate"] is False
+    assert "DC fact head incomplete for dc_ticker_swing_signal_daily" in summary["evidence"]["blocking_errors"]
+
+
+def test_successful_rebuild_evidence_moves_deployment_ready_to_activate(tmp_path) -> None:
+    db_path, csv_path = _activation_db(tmp_path, complete=True)
+    summary = apply_datacenter_taxonomy_rebuild_evidence(
+        analysis_db=db_path,
+        ecosystem_code="DATACENTER",
+        proposed_taxonomy_version="DC_TAXONOMY_FULL_V2",
+        proposed_taxonomy_csv=csv_path,
+        deployment_id=1,
+        required_signal_date="2026-07-31",
+    )
+
+    assert summary["status_update"] == "READY_TO_ACTIVATE"
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            """
+            SELECT status, dc_rebuild_status, ec_rebuild_status, coverage_status,
+                   parity_status, validation_evidence_sha256
+            FROM ec_taxonomy_change_deployment
+            WHERE taxonomy_change_id = 1
+            """
+        ).fetchone()
+        assert row[:5] == ("READY_TO_ACTIVATE", "OK", "OK", "OK", "OK")
+        assert row[5]
+    finally:
+        conn.close()
+
 def _activation_db(tmp_path: Path, *, complete: bool = True, wrong_lineage: bool = False) -> tuple[Path, Path]:
     tmp_path.mkdir(parents=True, exist_ok=True)
     db_path = tmp_path / "activation.db"
@@ -381,7 +498,15 @@ def _activation_db(tmp_path: Path, *, complete: bool = True, wrong_lineage: bool
             ),
         )
         lineage = 1 if wrong_lineage else 2
-        conn.execute("INSERT INTO ec_pipeline_watermark VALUES (1, 'TICKER_SWING_BASE', 'dc_ticker_swing_signal_daily', '2026-07-31', 'OK', ?)", (lineage,))
+        conn.executemany(
+            "INSERT INTO ec_pipeline_watermark VALUES (1, ?, ?, '2026-07-31', 'OK', ?)",
+            [
+                ('TICKER_SWING_BASE', 'dc_ticker_swing_signal_daily', lineage),
+                ('GROUP_SWING_BASE', 'dc_group_swing_signal_daily', lineage),
+                ('SYNTHETIC_OHLC_BASE', 'dc_group_synthetic_ohlc_daily', lineage),
+                ('GROUP_INDEX', 'dc_group_index_daily', lineage),
+            ],
+        )
         conn.commit()
         return db_path, csv_path
     finally:
@@ -466,6 +591,117 @@ def test_activation_apply_marks_new_taxonomy_active_after_complete_evidence(tmp_
         assert deployment == ("ACTIVE", "ACTIVE")
     finally:
         conn.close()
+
+
+def test_activation_updates_scheduler_config_and_creates_backup(tmp_path) -> None:
+    db_path, csv_path = _activation_db(tmp_path / "db", complete=True)
+    current_csv = _write_csv(tmp_path / "current.csv", _base_rows("DC_TAXONOMY_FULL_V1"))
+    config_path = tmp_path / "scheduler_config.json"
+    write_scheduler_config(
+        str(config_path),
+        StockUpdateSchedulerConfig(
+            enabled_markets=["usa"],
+            osakedata_db_path="/tmp/osakedata.db",
+            analysis_db_path="/tmp/analysis.db",
+            log_dir="/tmp/logs",
+            datacenter_taxonomy_csv=str(current_csv),
+            datacenter_taxonomy_version="DC_TAXONOMY_FULL_V1",
+            ec_source_layer_enabled=True,
+            ec_source_layer_ecosystem="DATACENTER",
+            ec_source_layer_taxonomy_csv=str(current_csv),
+            ec_source_layer_taxonomy_version="DC_TAXONOMY_FULL_V1",
+            ec_source_layer_watchlist=str(tmp_path / "watchlist.txt"),
+            ec_source_layer_backup_dir=str(tmp_path),
+        ),
+    )
+    (tmp_path / "watchlist.txt").write_text("AAA\n", encoding="utf-8")
+
+    summary = apply_datacenter_taxonomy_activation(
+        analysis_db=db_path,
+        ecosystem_code="DATACENTER",
+        proposed_taxonomy_version="DC_TAXONOMY_FULL_V2",
+        proposed_taxonomy_csv=csv_path,
+        required_signal_date="2026-07-31",
+        confirm_activate_taxonomy_version="DC_TAXONOMY_FULL_V2",
+        expected_scheduler_taxonomy_version="DC_TAXONOMY_FULL_V2",
+        expected_scheduler_taxonomy_csv=csv_path,
+        scheduler_config_path=config_path,
+        expected_current_scheduler_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        expected_current_scheduler_taxonomy_csv=current_csv,
+        target_scheduler_taxonomy_csv=csv_path,
+        config_backup_dir=tmp_path / "backups",
+    )
+
+    loaded = read_scheduler_config(str(config_path))
+    assert summary["activation_apply_status"] == "ACTIVE"
+    assert summary["config_activation"]["config_update_status"] == "OK"
+    assert Path(summary["config_activation"]["config_backup_path"]).exists()
+    assert loaded.datacenter_taxonomy_version == "DC_TAXONOMY_FULL_V2"
+    assert loaded.ec_source_layer_taxonomy_version == "DC_TAXONOMY_FULL_V2"
+
+
+def test_activation_rolls_back_db_if_config_write_fails(tmp_path, monkeypatch) -> None:
+    db_path, csv_path = _activation_db(tmp_path / "db", complete=True)
+    current_csv = _write_csv(tmp_path / "current.csv", _base_rows("DC_TAXONOMY_FULL_V1"))
+    config_path = tmp_path / "scheduler_config.json"
+    watchlist_path = tmp_path / "watchlist.txt"
+    watchlist_path.write_text("AAA\n", encoding="utf-8")
+    write_scheduler_config(
+        str(config_path),
+        StockUpdateSchedulerConfig(
+            enabled_markets=["usa"],
+            osakedata_db_path="/tmp/osakedata.db",
+            analysis_db_path="/tmp/analysis.db",
+            log_dir="/tmp/logs",
+            datacenter_taxonomy_csv=str(current_csv),
+            datacenter_taxonomy_version="DC_TAXONOMY_FULL_V1",
+            ec_source_layer_enabled=True,
+            ec_source_layer_ecosystem="DATACENTER",
+            ec_source_layer_taxonomy_csv=str(current_csv),
+            ec_source_layer_taxonomy_version="DC_TAXONOMY_FULL_V1",
+            ec_source_layer_watchlist=str(watchlist_path),
+            ec_source_layer_backup_dir=str(tmp_path),
+        ),
+    )
+
+    def fail_write(*_args, **_kwargs):
+        raise RuntimeError("config write failed")
+
+    monkeypatch.setattr("rawcandle.scheduler.config.write_scheduler_config", fail_write)
+    with pytest.raises(RuntimeError, match="config write failed"):
+        apply_datacenter_taxonomy_activation(
+            analysis_db=db_path,
+            ecosystem_code="DATACENTER",
+            proposed_taxonomy_version="DC_TAXONOMY_FULL_V2",
+            proposed_taxonomy_csv=csv_path,
+            required_signal_date="2026-07-31",
+            confirm_activate_taxonomy_version="DC_TAXONOMY_FULL_V2",
+            expected_scheduler_taxonomy_version="DC_TAXONOMY_FULL_V2",
+            expected_scheduler_taxonomy_csv=csv_path,
+            scheduler_config_path=config_path,
+            expected_current_scheduler_taxonomy_version="DC_TAXONOMY_FULL_V1",
+            expected_current_scheduler_taxonomy_csv=current_csv,
+            target_scheduler_taxonomy_csv=csv_path,
+            config_backup_dir=tmp_path / "backups",
+        )
+
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT taxonomy_version_code, status, is_active FROM ec_taxonomy_version ORDER BY taxonomy_version_code"
+        ).fetchall()
+        deployment = conn.execute(
+            "SELECT status, activation_status FROM ec_taxonomy_change_deployment WHERE taxonomy_change_id = 1"
+        ).fetchone()
+    finally:
+        conn.close()
+    loaded = read_scheduler_config(str(config_path))
+    assert rows == [
+        ("DC_TAXONOMY_FULL_V1", "ACTIVE", 1),
+        ("DC_TAXONOMY_FULL_V2", "INACTIVE", 0),
+    ]
+    assert deployment == ("READY_TO_ACTIVATE", "NOT_ACTIVE")
+    assert loaded.datacenter_taxonomy_version == "DC_TAXONOMY_FULL_V1"
 
 
 def test_scheduler_defaults_and_validates_configured_taxonomy(tmp_path) -> None:

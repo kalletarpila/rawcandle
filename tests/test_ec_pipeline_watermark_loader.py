@@ -354,6 +354,99 @@ def test_historical_backfill_watermark_noops_when_canonical_heads_are_newer(tmp_
     assert latest_dates == ["2026-07-30", "2026-07-30", "2026-07-30", "2026-07-30"]
 
 
+def test_historical_backfill_rejects_old_lineage_outside_taxonomy_rebuild(tmp_path) -> None:
+    target_db = _setup_target_db(tmp_path)
+    with _connect(str(target_db)) as conn:
+        conn.execute(
+            """
+            INSERT INTO ec_taxonomy_version (
+                taxonomy_version_id, ecosystem_id, taxonomy_version_code, taxonomy_name,
+                status, is_active
+            ) VALUES (1, 1, 'DC_TAXONOMY_FULL_V1', 'V1', 'ACTIVE', 1)
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO ec_taxonomy_version (
+                taxonomy_version_id, ecosystem_id, taxonomy_version_code, taxonomy_name,
+                status, is_active
+            ) VALUES (2, 1, 'DC_TAXONOMY_FULL_V2', 'V2', 'INACTIVE', 0)
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO ec_pipeline_watermark (
+                ecosystem_id, pipeline_name, source_table, latest_signal_date,
+                latest_run_id, status, created_at_utc, updated_at_utc, taxonomy_version_id
+            ) VALUES (1, 'TICKER_SWING_BASE', 'dc_ticker_swing_signal_daily',
+                      '2026-07-31', NULL, 'OK', '2026-07-31T00:00:00Z',
+                      '2026-07-31T00:00:00Z', 1)
+            """
+        )
+        conn.commit()
+
+    with pytest.raises(ValueError, match="use explicit taxonomy rebuild mode"):
+        advance_ec_pipeline_watermarks_after_historical_backfill(
+            target_db_path=str(target_db),
+            taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+            latest_signal_date="2026-07-31",
+        )
+
+
+def test_taxonomy_rebuild_updates_equal_date_when_lineage_changes(tmp_path) -> None:
+    target_db = _setup_target_db(tmp_path)
+    canonical_rows = [
+        ("TICKER_SWING_BASE", "dc_ticker_swing_signal_daily"),
+        ("GROUP_SWING_BASE", "dc_group_swing_signal_daily"),
+        ("SYNTHETIC_OHLC_BASE", "dc_group_synthetic_ohlc_daily"),
+        ("GROUP_INDEX", "dc_group_index_daily"),
+    ]
+    with _connect(str(target_db)) as conn:
+        conn.execute(
+            """
+            INSERT INTO ec_taxonomy_version (
+                taxonomy_version_id, ecosystem_id, taxonomy_version_code, taxonomy_name,
+                status, is_active
+            ) VALUES (1, 1, 'DC_TAXONOMY_FULL_V1', 'V1', 'ACTIVE', 1)
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO ec_taxonomy_version (
+                taxonomy_version_id, ecosystem_id, taxonomy_version_code, taxonomy_name,
+                status, is_active
+            ) VALUES (2, 1, 'DC_TAXONOMY_FULL_V2', 'V2', 'INACTIVE', 0)
+            """
+        )
+        conn.executemany(
+            """
+            INSERT INTO ec_pipeline_watermark (
+                ecosystem_id, pipeline_name, source_table, latest_signal_date,
+                latest_run_id, status, created_at_utc, updated_at_utc, taxonomy_version_id
+            ) VALUES (1, ?, ?, '2026-07-31', NULL, 'OK',
+                      '2026-07-31T00:00:00Z', '2026-07-31T00:00:00Z', 1)
+            """,
+            canonical_rows,
+        )
+        conn.commit()
+
+    summary = advance_ec_pipeline_watermarks_after_historical_backfill(
+        target_db_path=str(target_db),
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+        latest_signal_date="2026-07-31",
+        taxonomy_rebuild=True,
+    )
+
+    with _connect(str(target_db)) as conn:
+        lineage = conn.execute(
+            "SELECT DISTINCT taxonomy_version_id FROM ec_pipeline_watermark ORDER BY taxonomy_version_id"
+        ).fetchall()
+
+    assert summary["watermark_rows_updated"] == 4
+    assert summary["watermark_rows_unchanged"] == 0
+    assert lineage == [(2,)]
+
+
 def test_loader_duplicate_scope_requires_replace_existing_and_replace_is_scoped(tmp_path) -> None:
     source_db = tmp_path / "source_replace.db"
     target_db = _setup_target_db(tmp_path)

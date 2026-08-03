@@ -369,6 +369,7 @@ def advance_ec_pipeline_watermarks_after_historical_backfill(
     ecosystem_code: str = "DATACENTER",
     taxonomy_version_code: str = "DC_TAXONOMY_FULL_V1",
     latest_signal_date: str,
+    taxonomy_rebuild: bool = False,
 ) -> dict[str, object]:
     if not _normalize_text(latest_signal_date):
         raise ValueError("latest_signal_date is required for historical backfill watermark advancement")
@@ -393,7 +394,7 @@ def advance_ec_pipeline_watermarks_after_historical_backfill(
             for pipeline_name, source_table in HISTORICAL_BACKFILL_CANONICAL_FACT_WATERMARKS:
                 row = target_conn.execute(
                     """
-                    SELECT latest_signal_date
+                    SELECT latest_signal_date, taxonomy_version_id
                     FROM ec_pipeline_watermark
                     WHERE ecosystem_id = ?
                       AND pipeline_name = ?
@@ -458,7 +459,22 @@ def advance_ec_pipeline_watermarks_after_historical_backfill(
                     continue
 
                 existing_latest_signal_date = _normalize_text(row[0])
-                if existing_latest_signal_date is None or existing_latest_signal_date < latest_signal_date:
+                existing_taxonomy_version_id = row[1] if has_taxonomy_lineage else taxonomy_version_id
+                lineage_differs = (
+                    has_taxonomy_lineage
+                    and taxonomy_version_id is not None
+                    and existing_taxonomy_version_id != taxonomy_version_id
+                )
+                if lineage_differs and not taxonomy_rebuild:
+                    raise ValueError(
+                        "EC pipeline watermark lineage does not match requested taxonomy; "
+                        "use explicit taxonomy rebuild mode to replace lineage"
+                    )
+                if (
+                    existing_latest_signal_date is None
+                    or existing_latest_signal_date < latest_signal_date
+                    or lineage_differs
+                ):
                     if has_taxonomy_lineage:
                         target_conn.execute(
                             """
@@ -523,6 +539,7 @@ def advance_ec_pipeline_watermarks_after_historical_backfill(
             "watermark_advance_status": "OK",
             "taxonomy_version_id": taxonomy_version_id,
             "taxonomy_lineage_recorded": bool(has_taxonomy_lineage and taxonomy_version_id is not None),
+            "taxonomy_rebuild": taxonomy_rebuild,
             "canonical_component_to_source_table": dict(HISTORICAL_BACKFILL_CANONICAL_FACT_WATERMARKS),
         }
     finally:

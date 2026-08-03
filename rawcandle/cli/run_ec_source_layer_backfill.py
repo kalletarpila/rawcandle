@@ -21,7 +21,7 @@ from rawcandle.ec_ticker_signal_daily_loader import load_ec_ticker_signal_daily_
 
 SUCCESS_PARITY_STATUSES = {"OK", "OK_WITH_WARNINGS"}
 SUCCESS_COVERAGE_STATUSES = {"OK", "OK_WITH_WARNINGS"}
-REPLACE_ACTIONS = {"REPLACE_PARTIAL", "REPLACE_EXISTING"}
+REPLACE_ACTIONS = {"REPLACE_PARTIAL", "REPLACE_EXISTING", "TAXONOMY_REBUILD_REPLACE"}
 WATERMARK_POLICY = "ADVANCE_CANONICAL_FACT_HEADS_AFTER_VALIDATED_BACKFILL"
 
 
@@ -43,6 +43,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Must exactly match --taxonomy-version before any write",
     )
     parser.add_argument("--allow-replace-existing", action="store_true", help="Allow planner-approved replacement of partial or fully loaded dates")
+    parser.add_argument("--taxonomy-rebuild", action="store_true", help="Explicit DATACENTER taxonomy full rebuild mode; allows full range and performs scoped EC replacement")
+    parser.add_argument("--deployment-id", type=int, default=None, help="Required with --taxonomy-rebuild")
+    parser.add_argument("--confirm-rebuild-start", default=None, help="Required with --taxonomy-rebuild; must exactly match --date-from")
+    parser.add_argument("--confirm-rebuild-end", default=None, help="Required with --taxonomy-rebuild; must exactly match --date-to")
     parser.add_argument("--skip-watchlist-reconciliation", action="store_true", help="Internal scheduler use only: skip automatic watchlist reconciliation")
     parser.add_argument("--format", choices=("text",), default="text")
     return parser
@@ -134,6 +138,109 @@ def _selected_date_row_counts(db_path: str, selected_signal_date: str) -> dict[s
         }
     finally:
         conn.close()
+
+
+def _resolve_rebuild_ecosystem_and_taxonomy(
+    conn: sqlite3.Connection,
+    *,
+    ecosystem_code: str,
+    taxonomy_version_code: str,
+) -> tuple[int, int]:
+    row = conn.execute(
+        """
+        SELECT e.ecosystem_id, tv.taxonomy_version_id
+        FROM ec_ecosystem e
+        JOIN ec_taxonomy_version tv ON tv.ecosystem_id = e.ecosystem_id
+        WHERE e.ecosystem_code = ?
+          AND tv.taxonomy_version_code = ?
+        """,
+        (ecosystem_code, taxonomy_version_code),
+    ).fetchone()
+    if row is None:
+        raise ValueError("target ecosystem/taxonomy metadata not found")
+    return int(row[0]), int(row[1])
+
+
+def _delete_rows_if_table_has_scope(
+    conn: sqlite3.Connection,
+    *,
+    table_name: str,
+    date_column: str,
+    ecosystem_id: int,
+    date_from: str,
+    date_to: str,
+) -> int:
+    columns = {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+    if "ecosystem_id" not in columns:
+        raise ValueError(f"{table_name} does not have ecosystem_id; refusing scoped taxonomy rebuild delete")
+    cursor = conn.execute(
+        f"""
+        DELETE FROM {table_name}
+        WHERE ecosystem_id = ?
+          AND {date_column} >= ?
+          AND {date_column} <= ?
+        """,
+        (ecosystem_id, date_from, date_to),
+    )
+    return int(cursor.rowcount or 0)
+
+
+def _prepare_taxonomy_rebuild_ec_scope(
+    *,
+    db_path: str,
+    ecosystem_code: str,
+    taxonomy_version_code: str,
+    date_from: str,
+    date_to: str,
+) -> dict[str, object]:
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        ecosystem_id, taxonomy_version_id = _resolve_rebuild_ecosystem_and_taxonomy(
+            conn,
+            ecosystem_code=ecosystem_code,
+            taxonomy_version_code=taxonomy_version_code,
+        )
+        deleted: dict[str, int] = {}
+        with conn:
+            deleted["ec_ticker_signal_daily"] = _delete_rows_if_table_has_scope(
+                conn,
+                table_name="ec_ticker_signal_daily",
+                date_column="signal_date",
+                ecosystem_id=ecosystem_id,
+                date_from=date_from,
+                date_to=date_to,
+            )
+            deleted["ec_group_signal_daily"] = _delete_rows_if_table_has_scope(
+                conn,
+                table_name="ec_group_signal_daily",
+                date_column="signal_date",
+                ecosystem_id=ecosystem_id,
+                date_from=date_from,
+                date_to=date_to,
+            )
+            deleted["ec_group_synthetic_ohlc_daily"] = _delete_rows_if_table_has_scope(
+                conn,
+                table_name="ec_group_synthetic_ohlc_daily",
+                date_column="signal_date",
+                ecosystem_id=ecosystem_id,
+                date_from=date_from,
+                date_to=date_to,
+            )
+            deleted["ec_group_index_daily"] = _delete_rows_if_table_has_scope(
+                conn,
+                table_name="ec_group_index_daily",
+                date_column="signal_date",
+                ecosystem_id=ecosystem_id,
+                date_from=date_from,
+                date_to=date_to,
+            )
+        return {
+            "status": "OK",
+            "ecosystem_id": ecosystem_id,
+            "taxonomy_version_id": taxonomy_version_id,
+            "deleted_rows": deleted,
+            "deleted_row_count": sum(deleted.values()),
+        }
 
 
 def _backfill_refused_summary(
@@ -285,6 +392,10 @@ def run_ec_source_layer_backfill(
     confirm_ecosystem: str,
     confirm_taxonomy_version: str,
     allow_replace_existing: bool = False,
+    taxonomy_rebuild: bool = False,
+    deployment_id: int | None = None,
+    confirm_rebuild_start: str | None = None,
+    confirm_rebuild_end: str | None = None,
     reconcile_watchlist: bool = False,
 ) -> dict[str, object]:
     gate_errors: list[str] = []
@@ -294,6 +405,15 @@ def run_ec_source_layer_backfill(
         gate_errors.append("--confirm-ecosystem must exactly match --ecosystem")
     if confirm_taxonomy_version != taxonomy_version_code:
         gate_errors.append("--confirm-taxonomy-version must exactly match --taxonomy-version")
+    if taxonomy_rebuild:
+        if ecosystem_code != "DATACENTER":
+            gate_errors.append("--taxonomy-rebuild is restricted to ecosystem DATACENTER")
+        if deployment_id is None:
+            gate_errors.append("--deployment-id is required with --taxonomy-rebuild")
+        if confirm_rebuild_start != date_from:
+            gate_errors.append("--confirm-rebuild-start must exactly match --date-from")
+        if confirm_rebuild_end != date_to:
+            gate_errors.append("--confirm-rebuild-end must exactly match --date-to")
 
     try:
         resolved_backup_dir = _ensure_backup_dir(backup_dir)
@@ -333,6 +453,8 @@ def run_ec_source_layer_backfill(
             )
             summary["ecosystem_code"] = ecosystem_code
             summary["taxonomy_version_code"] = taxonomy_version_code
+            summary["rebuild_mode"] = "TAXONOMY_FULL_REBUILD" if taxonomy_rebuild else "ORDINARY_BACKFILL"
+            summary["deployment_id"] = deployment_id
             summary.update(reconciliation_summary)
             return summary
 
@@ -345,6 +467,8 @@ def run_ec_source_layer_backfill(
         taxonomy_csv_path=taxonomy_csv_path,
         watchlist_path=watchlist_path,
         allow_replace_existing=allow_replace_existing,
+        taxonomy_rebuild=taxonomy_rebuild,
+        deployment_id=deployment_id,
     )
     planner_status = str(planner_summary.get("status"))
     watchlist_membership_fields = extract_watchlist_membership_fields(planner_summary)
@@ -359,6 +483,8 @@ def run_ec_source_layer_backfill(
         )
         summary["ecosystem_code"] = ecosystem_code
         summary["taxonomy_version_code"] = taxonomy_version_code
+        summary["rebuild_mode"] = "TAXONOMY_FULL_REBUILD" if taxonomy_rebuild else "ORDINARY_BACKFILL"
+        summary["deployment_id"] = deployment_id
         summary.update(watchlist_membership_fields)
         summary.update(reconciliation_summary)
         return summary
@@ -368,6 +494,10 @@ def run_ec_source_layer_backfill(
             "status": "BACKFILL_SKIPPED",
             "ecosystem_code": ecosystem_code,
             "taxonomy_version_code": taxonomy_version_code,
+            "rebuild_mode": "TAXONOMY_FULL_REBUILD" if taxonomy_rebuild else "ORDINARY_BACKFILL",
+            "deployment_id": deployment_id,
+            "rebuild_mode": "TAXONOMY_FULL_REBUILD" if taxonomy_rebuild else "ORDINARY_BACKFILL",
+            "deployment_id": deployment_id,
             "date_from": date_from,
             "date_to": date_to,
             "selected_dates": [],
@@ -387,7 +517,10 @@ def run_ec_source_layer_backfill(
             **reconciliation_summary,
         }
 
-    if planner_status != "READY_BACKFILL_PLAN":
+    accepted_planner_statuses = {"READY_BACKFILL_PLAN"}
+    if taxonomy_rebuild:
+        accepted_planner_statuses.add("READY_TAXONOMY_REBUILD_PLAN")
+    if planner_status not in accepted_planner_statuses:
         reason = f"planner gate did not pass: {planner_status}"
         summary = _backfill_refused_summary(
             status="BACKFILL_REFUSED",
@@ -398,6 +531,8 @@ def run_ec_source_layer_backfill(
         )
         summary["ecosystem_code"] = ecosystem_code
         summary["taxonomy_version_code"] = taxonomy_version_code
+        summary["rebuild_mode"] = "TAXONOMY_FULL_REBUILD" if taxonomy_rebuild else "ORDINARY_BACKFILL"
+        summary["deployment_id"] = deployment_id
         summary.update(watchlist_membership_fields)
         summary.update(reconciliation_summary)
         return summary
@@ -409,6 +544,10 @@ def run_ec_source_layer_backfill(
             "status": "BACKFILL_SKIPPED",
             "ecosystem_code": ecosystem_code,
             "taxonomy_version_code": taxonomy_version_code,
+            "rebuild_mode": "TAXONOMY_FULL_REBUILD" if taxonomy_rebuild else "ORDINARY_BACKFILL",
+            "deployment_id": deployment_id,
+            "rebuild_mode": "TAXONOMY_FULL_REBUILD" if taxonomy_rebuild else "ORDINARY_BACKFILL",
+            "deployment_id": deployment_id,
             "date_from": date_from,
             "date_to": date_to,
             "selected_dates": [],
@@ -462,8 +601,17 @@ def run_ec_source_layer_backfill(
     per_date_results: list[dict[str, object]] = []
     completed_dates: list[str] = []
     total_mismatch_count = 0
+    rebuild_scope_summary: dict[str, object] | None = None
 
     try:
+        if taxonomy_rebuild:
+            rebuild_scope_summary = _prepare_taxonomy_rebuild_ec_scope(
+                db_path=db_path,
+                ecosystem_code=ecosystem_code,
+                taxonomy_version_code=taxonomy_version_code,
+                date_from=date_from,
+                date_to=date_to,
+            )
         for selected in selected_dates:
             current_date = selected["date"]
             action = selected["action"]
@@ -595,6 +743,8 @@ def run_ec_source_layer_backfill(
             "status": "BACKFILL_FAILED",
             "ecosystem_code": ecosystem_code,
             "taxonomy_version_code": taxonomy_version_code,
+            "rebuild_mode": "TAXONOMY_FULL_REBUILD" if taxonomy_rebuild else "ORDINARY_BACKFILL",
+            "deployment_id": deployment_id,
             "date_from": date_from,
             "date_to": date_to,
             "selected_dates": selected_dates,
@@ -608,6 +758,7 @@ def run_ec_source_layer_backfill(
             "error": str(exc),
             "errors": [str(exc)],
             "planner_summary": planner_summary,
+            "taxonomy_rebuild_ec_scope_summary": rebuild_scope_summary,
             "failed_date_completed_steps": list(completed_steps),
             "warning": "Partial selected-date ec_ writes may exist; no automatic rollback was attempted",
             **_watermark_not_run_summary(),
@@ -622,6 +773,7 @@ def run_ec_source_layer_backfill(
             ecosystem_code=ecosystem_code,
             taxonomy_version_code=taxonomy_version_code,
             latest_signal_date=watermark_candidate_latest_signal_date,
+            taxonomy_rebuild=taxonomy_rebuild,
         )
         watermark_advance_status = str(
             watermark_summary.get("watermark_advance_status")
@@ -635,6 +787,8 @@ def run_ec_source_layer_backfill(
             "status": "BACKFILL_FAILED",
             "ecosystem_code": ecosystem_code,
             "taxonomy_version_code": taxonomy_version_code,
+            "rebuild_mode": "TAXONOMY_FULL_REBUILD" if taxonomy_rebuild else "ORDINARY_BACKFILL",
+            "deployment_id": deployment_id,
             "date_from": date_from,
             "date_to": date_to,
             "selected_dates": selected_dates,
@@ -648,6 +802,7 @@ def run_ec_source_layer_backfill(
             "error": str(exc),
             "errors": [str(exc)],
             "planner_summary": planner_summary,
+            "taxonomy_rebuild_ec_scope_summary": rebuild_scope_summary,
             "warning": "Selected-date ec_ fact writes completed, but final watermark advancement failed; retry is required",
             **_watermark_not_run_summary(),
             **watchlist_membership_fields,
@@ -661,6 +816,12 @@ def run_ec_source_layer_backfill(
         "status": "BACKFILL_COMPLETED",
         "ecosystem_code": ecosystem_code,
         "taxonomy_version_code": taxonomy_version_code,
+        "rebuild_mode": "TAXONOMY_FULL_REBUILD" if taxonomy_rebuild else "ORDINARY_BACKFILL",
+        "deployment_id": deployment_id,
+        "taxonomy_version_id": planner_summary.get("taxonomy_version_id"),
+        "requested_start": date_from,
+        "requested_end": date_to,
+        "selected_date_count": len(selected_dates),
         "date_from": date_from,
         "date_to": date_to,
         "selected_dates": selected_dates,
@@ -674,6 +835,7 @@ def run_ec_source_layer_backfill(
         "error": None,
         "errors": [],
         "planner_summary": planner_summary,
+        "taxonomy_rebuild_ec_scope_summary": rebuild_scope_summary,
         "watermark_policy_note": "Historical backfill advanced canonical EC fact watermark heads once after successful coverage and fact parity validation.",
         **watchlist_membership_fields,
         **reconciliation_summary,
@@ -697,11 +859,19 @@ def render_backfill_text(summary: dict[str, object]) -> str:
         lines.append("- confirm-db matched --db")
         lines.append("- confirm-ecosystem matched --ecosystem")
         lines.append("- confirm-taxonomy-version matched --taxonomy-version")
+        if summary.get("rebuild_mode") == "TAXONOMY_FULL_REBUILD":
+            lines.append("- taxonomy rebuild confirmations matched requested range")
 
     planner_summary = summary.get("planner_summary")
     lines.extend(["", "Planner Result"])
     if isinstance(planner_summary, dict):
         lines.append(f"- planner_status={planner_summary.get('status')}")
+    lines.append(f"- rebuild_mode={summary.get('rebuild_mode', 'ORDINARY_BACKFILL')}")
+    lines.append(f"- deployment_id={summary.get('deployment_id')}")
+    lines.append(f"- taxonomy_version_id={summary.get('taxonomy_version_id')}")
+    lines.append(f"- requested_start={summary.get('requested_start')}")
+    lines.append(f"- requested_end={summary.get('requested_end')}")
+    lines.append(f"- selected_date_count={summary.get('selected_date_count')}")
     lines.append(f"- watchlist_reconciliation_attempted={str(bool(summary.get('watchlist_reconciliation_attempted'))).lower()}")
     lines.append(f"- watchlist_reconciliation_status={summary.get('watchlist_reconciliation_status')}")
     lines.append(f"- watchlist_source_reference={summary.get('watchlist_source_reference')}")
@@ -721,6 +891,19 @@ def render_backfill_text(summary: dict[str, object]) -> str:
 
     lines.extend(["", "Backup"])
     lines.append(f"- backup_path={summary.get('backup_path')}")
+
+    rebuild_scope_summary = summary.get("taxonomy_rebuild_ec_scope_summary")
+    if isinstance(rebuild_scope_summary, dict):
+        lines.extend(
+            [
+                "",
+                "Taxonomy Rebuild EC Replacement",
+                f"- status={rebuild_scope_summary.get('status')}",
+                f"- ecosystem_id={rebuild_scope_summary.get('ecosystem_id')}",
+                f"- taxonomy_version_id={rebuild_scope_summary.get('taxonomy_version_id')}",
+                f"- deleted_rows={rebuild_scope_summary.get('deleted_rows')}",
+            ]
+        )
 
     lines.extend(["", "Selected Dates"])
     lines.append(f"- date_from={summary.get('date_from')}")
@@ -816,6 +999,10 @@ def main(argv: list[str] | None = None) -> int:
         confirm_ecosystem=args.confirm_ecosystem,
         confirm_taxonomy_version=args.confirm_taxonomy_version,
         allow_replace_existing=args.allow_replace_existing,
+        taxonomy_rebuild=args.taxonomy_rebuild,
+        deployment_id=args.deployment_id,
+        confirm_rebuild_start=args.confirm_rebuild_start,
+        confirm_rebuild_end=args.confirm_rebuild_end,
         reconcile_watchlist=not args.skip_watchlist_reconciliation,
     )
     sys.stdout.write(render_backfill_text(summary) + "\n")

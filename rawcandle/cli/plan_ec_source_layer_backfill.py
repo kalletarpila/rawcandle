@@ -29,7 +29,11 @@ from rawcandle.ec_datacenter_taxonomy_loader import _compute_source_hash
 
 MAX_RANGE_DAYS = 60
 SOURCE_FACT_TABLES = tuple((table_name, date_column) for table_name, date_column in REQUIRED_SOURCE_TABLES if date_column)
-SUCCESS_EXIT_STATUSES = {"READY_BACKFILL_PLAN", "SKIP_ALL_DATES_ALREADY_LOADED"}
+SUCCESS_EXIT_STATUSES = {
+    "READY_BACKFILL_PLAN",
+    "READY_TAXONOMY_REBUILD_PLAN",
+    "SKIP_ALL_DATES_ALREADY_LOADED",
+}
 
 PLANNED_BACKFILL_SEQUENCE = (
     "1. Backup production analysis.db",
@@ -64,11 +68,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--taxonomy-csv", required=True, help="Path to the source taxonomy CSV")
     parser.add_argument("--watchlist", required=True, help="Path to the source watchlist TXT")
     parser.add_argument("--allow-replace-existing", action="store_true", help="Allow planner to mark already loaded or partially loaded dates as replace-ready")
+    parser.add_argument("--taxonomy-rebuild", action="store_true", help="Explicitly plan a full taxonomy replacement rebuild; bypasses the ordinary 60-day backfill range limit")
+    parser.add_argument("--deployment-id", type=int, default=None, help="Required with --taxonomy-rebuild; ec_taxonomy_change_deployment.taxonomy_change_id")
     parser.add_argument("--format", choices=("text",), default="text")
     return parser
 
 
-def _parse_date_range(date_from_text: str, date_to_text: str) -> dict[str, object]:
+def _parse_date_range(
+    date_from_text: str,
+    date_to_text: str,
+    *,
+    allow_full_rebuild_range: bool = False,
+) -> dict[str, object]:
     try:
         start_date = date.fromisoformat(date_from_text)
         end_date = date.fromisoformat(date_to_text)
@@ -83,7 +94,7 @@ def _parse_date_range(date_from_text: str, date_to_text: str) -> dict[str, objec
             "error": "date_from must be less than or equal to date_to",
         }
     day_count = (end_date - start_date).days + 1
-    if day_count > MAX_RANGE_DAYS:
+    if day_count > MAX_RANGE_DAYS and not allow_full_rebuild_range:
         return {
             "status": "BLOCKED_INVALID_DATE_RANGE",
             "error": f"requested range exceeds max supported length of {MAX_RANGE_DAYS} calendar days",
@@ -131,12 +142,84 @@ def _grouped_counts_by_date(conn, table_name: str, date_column: str, date_from: 
     return {str(row["fact_date"]): int(row["row_count"]) for row in rows}
 
 
-def _collect_source_date_availability(conn, date_range: dict[str, object]) -> dict[str, object]:
+def _grouped_source_counts_by_date(
+    conn,
+    table_name: str,
+    date_column: str,
+    date_from: str,
+    date_to: str,
+    taxonomy_version_code: str,
+) -> dict[str, int]:
+    rows = conn.execute(
+        f"""
+        SELECT {date_column} AS fact_date, COUNT(*) AS row_count
+        FROM {table_name}
+        WHERE {date_column} >= ? AND {date_column} <= ?
+          AND taxonomy_version = ?
+        GROUP BY {date_column}
+        ORDER BY {date_column}
+        """,
+        (date_from, date_to, taxonomy_version_code),
+    ).fetchall()
+    return {str(row["fact_date"]): int(row["row_count"]) for row in rows}
+
+
+def _table_columns(conn, table_name: str) -> set[str]:
+    if not _table_exists(conn, table_name):
+        return set()
+    return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+
+
+def _grouped_ec_counts_by_date(
+    conn,
+    table_name: str,
+    date_column: str,
+    date_from: str,
+    date_to: str,
+    *,
+    ecosystem_id: int | None,
+    taxonomy_version_id: int | None,
+) -> dict[str, int]:
+    columns = _table_columns(conn, table_name)
+    predicates = [f"{date_column} >= ?", f"{date_column} <= ?"]
+    params: list[object] = [date_from, date_to]
+    if ecosystem_id is not None and "ecosystem_id" in columns:
+        predicates.append("ecosystem_id = ?")
+        params.append(ecosystem_id)
+    if taxonomy_version_id is not None and "taxonomy_version_id" in columns:
+        predicates.append("taxonomy_version_id = ?")
+        params.append(taxonomy_version_id)
+    rows = conn.execute(
+        f"""
+        SELECT {date_column} AS fact_date, COUNT(*) AS row_count
+        FROM {table_name}
+        WHERE {" AND ".join(predicates)}
+        GROUP BY {date_column}
+        ORDER BY {date_column}
+        """,
+        tuple(params),
+    ).fetchall()
+    return {str(row["fact_date"]): int(row["row_count"]) for row in rows}
+
+
+def _collect_source_date_availability(
+    conn,
+    date_range: dict[str, object],
+    *,
+    taxonomy_version_code: str,
+) -> dict[str, object]:
     dates = list(date_range["dates"])
     date_from = str(date_range["date_from"])
     date_to = str(date_range["date_to"])
     per_table_counts = {
-        table_name: _grouped_counts_by_date(conn, table_name, date_column, date_from, date_to)
+        table_name: _grouped_source_counts_by_date(
+            conn,
+            table_name,
+            date_column,
+            date_from,
+            date_to,
+            taxonomy_version_code,
+        )
         for table_name, date_column in SOURCE_FACT_TABLES
     }
     watermark_present = _table_exists(conn, "dc_pipeline_watermark")
@@ -224,18 +307,24 @@ def _fetch_loaded_taxonomy_state(conn, ecosystem_code: str, taxonomy_version_cod
 
 
 def _collect_loaded_watchlist_tickers(conn, ecosystem_code: str) -> list[str]:
+    watchlist_columns = _table_columns(conn, "ec_watchlist")
+    watchlist_member_columns = _table_columns(conn, "ec_watchlist_member")
+    entity_columns = _table_columns(conn, "ec_entity")
+    watchlist_status_sql = "AND w.status = 'ACTIVE'" if "status" in watchlist_columns else ""
+    member_status_sql = "AND wm.status = 'ACTIVE'" if "status" in watchlist_member_columns else ""
+    entity_status_sql = "AND e.status = 'ACTIVE'" if "status" in entity_columns else ""
     rows = conn.execute(
-        """
+        f"""
         SELECT DISTINCT UPPER(e.entity_code) AS ticker
         FROM ec_watchlist w
         JOIN ec_ecosystem eco ON eco.ecosystem_id = w.ecosystem_id
         JOIN ec_watchlist_member wm ON wm.watchlist_id = w.watchlist_id
         JOIN ec_entity e ON e.entity_id = wm.entity_id
         WHERE eco.ecosystem_code = ?
-          AND w.status = 'ACTIVE'
-          AND wm.status = 'ACTIVE'
           AND e.entity_type = 'TICKER'
-          AND e.status = 'ACTIVE'
+          {watchlist_status_sql}
+          {member_status_sql}
+          {entity_status_sql}
         ORDER BY ticker
         """,
         (ecosystem_code,),
@@ -311,14 +400,19 @@ def _check_taxonomy_watchlist_compatibility(
     }
 
 
-def _compare_universe_and_groups(conn, fact_date: str, taxonomy_version_id: int) -> dict[str, object]:
+def _compare_universe_and_groups(
+    conn,
+    fact_date: str,
+    taxonomy_version_id: int,
+    taxonomy_version_code: str,
+) -> dict[str, object]:
     source_tickers = set(
         _distinct_values(
             conn,
             "dc_ticker_swing_signal_daily",
             "ticker",
-            "signal_date = ?",
-            (fact_date,),
+            "signal_date = ? AND taxonomy_version = ?",
+            (fact_date, taxonomy_version_code),
         )
     )
     ec_ticker_entities = set(
@@ -374,8 +468,8 @@ def _compare_universe_and_groups(conn, fact_date: str, taxonomy_version_id: int)
             conn,
             "dc_group_swing_signal_daily",
             "group_name",
-            "signal_date = ? AND group_type = 'layer'",
-            (fact_date,),
+            "signal_date = ? AND taxonomy_version = ? AND group_type = 'layer'",
+            (fact_date, taxonomy_version_code),
         )
     )
     group_signal_subindustries = set(
@@ -383,8 +477,8 @@ def _compare_universe_and_groups(conn, fact_date: str, taxonomy_version_id: int)
             conn,
             "dc_group_swing_signal_daily",
             "group_name",
-            "signal_date = ? AND group_type = 'subindustry'",
-            (fact_date,),
+            "signal_date = ? AND taxonomy_version = ? AND group_type = 'subindustry'",
+            (fact_date, taxonomy_version_code),
         )
     )
     group_signal_ecosystem = set(
@@ -392,8 +486,8 @@ def _compare_universe_and_groups(conn, fact_date: str, taxonomy_version_id: int)
             conn,
             "dc_group_swing_signal_daily",
             "group_name",
-            "signal_date = ? AND group_type = 'ecosystem'",
-            (fact_date,),
+            "signal_date = ? AND taxonomy_version = ? AND group_type = 'ecosystem'",
+            (fact_date, taxonomy_version_code),
         )
     )
     synth_layers = set(
@@ -401,8 +495,8 @@ def _compare_universe_and_groups(conn, fact_date: str, taxonomy_version_id: int)
             conn,
             "dc_group_synthetic_ohlc_daily",
             "group_name",
-            "ohlc_date = ? AND group_type = 'layer'",
-            (fact_date,),
+            "ohlc_date = ? AND taxonomy_version = ? AND group_type = 'layer'",
+            (fact_date, taxonomy_version_code),
         )
     )
     synth_subindustries = set(
@@ -410,8 +504,8 @@ def _compare_universe_and_groups(conn, fact_date: str, taxonomy_version_id: int)
             conn,
             "dc_group_synthetic_ohlc_daily",
             "group_name",
-            "ohlc_date = ? AND group_type = 'subindustry'",
-            (fact_date,),
+            "ohlc_date = ? AND taxonomy_version = ? AND group_type = 'subindustry'",
+            (fact_date, taxonomy_version_code),
         )
     )
     index_layers = set(
@@ -419,8 +513,8 @@ def _compare_universe_and_groups(conn, fact_date: str, taxonomy_version_id: int)
             conn,
             "dc_group_index_daily",
             "group_name",
-            "index_date = ? AND group_type = 'layer'",
-            (fact_date,),
+            "index_date = ? AND taxonomy_version = ? AND group_type = 'layer'",
+            (fact_date, taxonomy_version_code),
         )
     )
     index_subindustries = set(
@@ -428,8 +522,8 @@ def _compare_universe_and_groups(conn, fact_date: str, taxonomy_version_id: int)
             conn,
             "dc_group_index_daily",
             "group_name",
-            "index_date = ? AND group_type = 'subindustry'",
-            (fact_date,),
+            "index_date = ? AND taxonomy_version = ? AND group_type = 'subindustry'",
+            (fact_date, taxonomy_version_code),
         )
     )
     index_ecosystem = set(
@@ -437,8 +531,8 @@ def _compare_universe_and_groups(conn, fact_date: str, taxonomy_version_id: int)
             conn,
             "dc_group_index_daily",
             "group_name",
-            "index_date = ? AND group_type = 'ecosystem'",
-            (fact_date,),
+            "index_date = ? AND taxonomy_version = ? AND group_type = 'ecosystem'",
+            (fact_date, taxonomy_version_code),
         )
     )
 
@@ -468,7 +562,16 @@ def _compare_universe_and_groups(conn, fact_date: str, taxonomy_version_id: int)
     }
 
 
-def _collect_loaded_ec_state(conn, aligned_dates: list[str], source_date_availability: dict[str, object], allow_replace_existing: bool) -> dict[str, object]:
+def _collect_loaded_ec_state(
+    conn,
+    aligned_dates: list[str],
+    source_date_availability: dict[str, object],
+    allow_replace_existing: bool,
+    *,
+    ecosystem_id: int | None = None,
+    taxonomy_version_id: int | None = None,
+    taxonomy_rebuild: bool = False,
+) -> dict[str, object]:
     if not aligned_dates:
         return {
             "latest_loaded_fact_date": None,
@@ -484,7 +587,15 @@ def _collect_loaded_ec_state(conn, aligned_dates: list[str], source_date_availab
     earliest_aligned_date = min(aligned_dates)
     latest_aligned_date = max(aligned_dates)
     ec_counts_by_table = {
-        table_name: _grouped_counts_by_date(conn, table_name, date_column, earliest_aligned_date, latest_aligned_date)
+        table_name: _grouped_ec_counts_by_date(
+            conn,
+            table_name,
+            date_column,
+            earliest_aligned_date,
+            latest_aligned_date,
+            ecosystem_id=ecosystem_id,
+            taxonomy_version_id=taxonomy_version_id,
+        )
         for table_name, date_column in EC_FACT_TABLES
     }
     latest_loaded_dates = {
@@ -531,19 +642,34 @@ def _collect_loaded_ec_state(conn, aligned_dates: list[str], source_date_availab
         if len(zero_ec_tables) == len(EC_FACT_TABLES):
             classification = "MISSING_IN_EC"
             missing_dates.append(fact_date)
-            candidate_dates.append({"date": fact_date, "action": "BACKFILL_MISSING"})
+            candidate_dates.append(
+                {
+                    "date": fact_date,
+                    "action": "TAXONOMY_REBUILD_REPLACE" if taxonomy_rebuild else "BACKFILL_MISSING",
+                }
+            )
         elif not mismatched_tables:
             classification = "FULLY_LOADED_IN_EC"
             fully_loaded_dates.append(fact_date)
-            if allow_replace_existing:
-                candidate_dates.append({"date": fact_date, "action": "REPLACE_EXISTING"})
+            if allow_replace_existing or taxonomy_rebuild:
+                candidate_dates.append(
+                    {
+                        "date": fact_date,
+                        "action": "TAXONOMY_REBUILD_REPLACE" if taxonomy_rebuild else "REPLACE_EXISTING",
+                    }
+                )
             else:
                 already_loaded_dates.append(fact_date)
         else:
             classification = "PARTIALLY_LOADED_IN_EC"
             partial_dates.append(fact_date)
-            if allow_replace_existing:
-                candidate_dates.append({"date": fact_date, "action": "REPLACE_PARTIAL"})
+            if allow_replace_existing or taxonomy_rebuild:
+                candidate_dates.append(
+                    {
+                        "date": fact_date,
+                        "action": "TAXONOMY_REBUILD_REPLACE" if taxonomy_rebuild else "REPLACE_PARTIAL",
+                    }
+                )
 
         per_date.append(
             {
@@ -597,6 +723,7 @@ def _decide_plan_status(
     aligned_dates: list[str],
     loaded_state: dict[str, object],
     allow_replace_existing: bool,
+    taxonomy_rebuild: bool = False,
 ) -> tuple[str, str | None]:
     if not aligned_dates:
         return (
@@ -608,6 +735,8 @@ def _decide_plan_status(
     missing_dates = list(loaded_state.get("missing_dates", []))
     candidate_dates = list(loaded_state.get("candidate_dates", []))
 
+    if taxonomy_rebuild:
+        return ("READY_TAXONOMY_REBUILD_PLAN", None)
     if partial_dates and not allow_replace_existing:
         return (
             "BLOCKED_PARTIAL_EXISTING_DATES_WITHOUT_REPLACE",
@@ -630,6 +759,8 @@ def _build_future_command(
     taxonomy_csv_path: str,
     watchlist_path: str,
     allow_replace_existing: bool,
+    taxonomy_rebuild: bool = False,
+    deployment_id: int | None = None,
 ) -> str:
     command_parts = [
         "PYTHONPATH=. python3 -m rawcandle.cli.run_ec_source_layer_backfill",
@@ -644,7 +775,71 @@ def _build_future_command(
     ]
     if allow_replace_existing:
         command_parts.append("--allow-replace-existing")
+    if taxonomy_rebuild:
+        command_parts.append("--taxonomy-rebuild")
+        if deployment_id is not None:
+            command_parts.append(f"--deployment-id {deployment_id}")
     return " \\\n  ".join(command_parts)
+
+
+def _fetch_taxonomy_rebuild_deployment(
+    conn,
+    *,
+    deployment_id: int | None,
+    ecosystem_code: str,
+    taxonomy_version_code: str,
+) -> dict[str, object]:
+    if deployment_id is None:
+        return {
+            "status": "BLOCKED_TAXONOMY_REBUILD_DEPLOYMENT",
+            "error": "--deployment-id is required with --taxonomy-rebuild",
+        }
+    if not _table_exists(conn, "ec_taxonomy_change_deployment"):
+        return {
+            "status": "BLOCKED_TAXONOMY_REBUILD_DEPLOYMENT",
+            "error": "ec_taxonomy_change_deployment table is missing",
+        }
+    row = conn.execute(
+        """
+        SELECT *
+        FROM ec_taxonomy_change_deployment
+        WHERE taxonomy_change_id = ?
+        """,
+        (deployment_id,),
+    ).fetchone()
+    if row is None:
+        return {
+            "status": "BLOCKED_TAXONOMY_REBUILD_DEPLOYMENT",
+            "deployment_id": deployment_id,
+            "error": "taxonomy deployment row not found",
+        }
+    deployment = {str(key): row[key] for key in row.keys()}
+    errors: list[str] = []
+    if str(deployment.get("ecosystem_code")) != ecosystem_code:
+        errors.append("deployment ecosystem does not match requested ecosystem")
+    if str(deployment.get("proposed_taxonomy_version")) != taxonomy_version_code:
+        errors.append("deployment proposed taxonomy does not match requested taxonomy")
+    if str(deployment.get("status")) not in {
+        "LOADED_NOT_ACTIVE",
+        "REBUILD_IN_PROGRESS",
+        "VALIDATION_REQUIRED",
+        "READY_TO_ACTIVATE",
+    }:
+        errors.append("deployment status is not an approved taxonomy rebuild state")
+    if str(deployment.get("activation_status")) == "ACTIVE":
+        errors.append("deployment is already active")
+    if errors:
+        return {
+            "status": "BLOCKED_TAXONOMY_REBUILD_DEPLOYMENT",
+            "deployment_id": deployment_id,
+            "deployment": deployment,
+            "error": "; ".join(errors),
+        }
+    return {
+        "status": "OK",
+        "deployment_id": deployment_id,
+        "deployment": deployment,
+    }
 
 
 def plan_ec_source_layer_backfill(
@@ -657,13 +852,21 @@ def plan_ec_source_layer_backfill(
     taxonomy_csv_path: str,
     watchlist_path: str,
     allow_replace_existing: bool = False,
+    taxonomy_rebuild: bool = False,
+    deployment_id: int | None = None,
 ) -> dict[str, object]:
-    date_range = _parse_date_range(date_from, date_to)
+    date_range = _parse_date_range(
+        date_from,
+        date_to,
+        allow_full_rebuild_range=taxonomy_rebuild,
+    )
     if date_range["status"] != "OK":
         return {
             "status": "BLOCKED_INVALID_DATE_RANGE",
             "ecosystem_code": ecosystem_code,
             "taxonomy_version_code": taxonomy_version_code,
+            "rebuild_mode": "TAXONOMY_FULL_REBUILD" if taxonomy_rebuild else "ORDINARY_BACKFILL",
+            "deployment_id": deployment_id,
             "date_range": date_range,
         }
 
@@ -673,6 +876,8 @@ def plan_ec_source_layer_backfill(
             "status": "BLOCKED_TAXONOMY_SOURCE",
             "ecosystem_code": ecosystem_code,
             "taxonomy_version_code": taxonomy_version_code,
+            "rebuild_mode": "TAXONOMY_FULL_REBUILD" if taxonomy_rebuild else "ORDINARY_BACKFILL",
+            "deployment_id": deployment_id,
             "date_range": date_range,
             "taxonomy_summary": taxonomy_summary,
         }
@@ -683,22 +888,61 @@ def plan_ec_source_layer_backfill(
             "status": "BLOCKED_WATCHLIST_SOURCE",
             "ecosystem_code": ecosystem_code,
             "taxonomy_version_code": taxonomy_version_code,
+            "rebuild_mode": "TAXONOMY_FULL_REBUILD" if taxonomy_rebuild else "ORDINARY_BACKFILL",
+            "deployment_id": deployment_id,
             "date_range": date_range,
             "taxonomy_summary": taxonomy_summary,
             "watchlist_summary": watchlist_summary,
         }
 
     with open_readonly_sqlite(db_path) as conn:
+        deployment_summary: dict[str, object] | None = None
+        if taxonomy_rebuild:
+            if ecosystem_code != "DATACENTER":
+                return {
+                    "status": "BLOCKED_TAXONOMY_REBUILD_DEPLOYMENT",
+                    "ecosystem_code": ecosystem_code,
+                    "taxonomy_version_code": taxonomy_version_code,
+                    "rebuild_mode": "TAXONOMY_FULL_REBUILD",
+                    "deployment_id": deployment_id,
+                    "date_range": date_range,
+                    "taxonomy_summary": taxonomy_summary,
+                    "watchlist_summary": watchlist_summary,
+                    "error": "taxonomy rebuild mode is currently restricted to ecosystem DATACENTER",
+                }
+            deployment_summary = _fetch_taxonomy_rebuild_deployment(
+                conn,
+                deployment_id=deployment_id,
+                ecosystem_code=ecosystem_code,
+                taxonomy_version_code=taxonomy_version_code,
+            )
+            if deployment_summary["status"] != "OK":
+                return {
+                    "status": deployment_summary["status"],
+                    "ecosystem_code": ecosystem_code,
+                    "taxonomy_version_code": taxonomy_version_code,
+                    "rebuild_mode": "TAXONOMY_FULL_REBUILD",
+                    "deployment_id": deployment_id,
+                    "date_range": date_range,
+                    "taxonomy_summary": taxonomy_summary,
+                    "watchlist_summary": watchlist_summary,
+                    "deployment_summary": deployment_summary,
+                    "error": deployment_summary.get("error"),
+                }
+
         schema_state = _collect_schema_state(conn)
         if schema_state["required_ec_missing"]:
             return {
                 "status": "BLOCKED_EC_SCHEMA_MISSING",
                 "ecosystem_code": ecosystem_code,
                 "taxonomy_version_code": taxonomy_version_code,
+                "rebuild_mode": "TAXONOMY_FULL_REBUILD" if taxonomy_rebuild else "ORDINARY_BACKFILL",
+                "deployment_id": deployment_id,
                 "date_range": date_range,
                 "schema_state": schema_state,
                 "taxonomy_summary": taxonomy_summary,
                 "watchlist_summary": watchlist_summary,
+                "deployment_summary": deployment_summary,
             }
 
         source_readiness = {
@@ -718,14 +962,21 @@ def plan_ec_source_layer_backfill(
                 "status": "BLOCKED_MISSING_SOURCE",
                 "ecosystem_code": ecosystem_code,
                 "taxonomy_version_code": taxonomy_version_code,
+                "rebuild_mode": "TAXONOMY_FULL_REBUILD" if taxonomy_rebuild else "ORDINARY_BACKFILL",
+                "deployment_id": deployment_id,
                 "date_range": date_range,
                 "schema_state": schema_state,
                 "source_readiness": source_readiness,
                 "taxonomy_summary": taxonomy_summary,
                 "watchlist_summary": watchlist_summary,
+                "deployment_summary": deployment_summary,
             }
 
-        source_date_availability = _collect_source_date_availability(conn, date_range)
+        source_date_availability = _collect_source_date_availability(
+            conn,
+            date_range,
+            taxonomy_version_code=taxonomy_version_code,
+        )
         compatibility_summary = _check_taxonomy_watchlist_compatibility(
             conn,
             ecosystem_code=ecosystem_code,
@@ -733,17 +984,34 @@ def plan_ec_source_layer_backfill(
             taxonomy_summary=taxonomy_summary,
             watchlist_summary=watchlist_summary,
         )
+        loaded_taxonomy_for_state = compatibility_summary.get("loaded_taxonomy", {})
+        ecosystem_id = (
+            int(loaded_taxonomy_for_state["ecosystem_id"])
+            if isinstance(loaded_taxonomy_for_state, dict) and loaded_taxonomy_for_state.get("ecosystem_id") is not None
+            else None
+        )
+        taxonomy_version_id_for_state = (
+            int(loaded_taxonomy_for_state["taxonomy_version_id"])
+            if isinstance(loaded_taxonomy_for_state, dict)
+            and loaded_taxonomy_for_state.get("taxonomy_version_id") is not None
+            else None
+        )
         loaded_state = _collect_loaded_ec_state(
             conn,
             list(source_date_availability["aligned_dates"]),
             source_date_availability,
             allow_replace_existing,
+            ecosystem_id=ecosystem_id,
+            taxonomy_version_id=taxonomy_version_id_for_state,
+            taxonomy_rebuild=taxonomy_rebuild,
         )
         if compatibility_summary["status"] != "OK":
             return {
                 "status": compatibility_summary["status"],
                 "ecosystem_code": ecosystem_code,
                 "taxonomy_version_code": taxonomy_version_code,
+                "rebuild_mode": "TAXONOMY_FULL_REBUILD" if taxonomy_rebuild else "ORDINARY_BACKFILL",
+                "deployment_id": deployment_id,
                 "date_range": date_range,
                 "schema_state": schema_state,
                 "source_readiness": source_readiness,
@@ -752,19 +1020,48 @@ def plan_ec_source_layer_backfill(
                 "taxonomy_summary": taxonomy_summary,
                 "watchlist_summary": watchlist_summary,
                 "compatibility_summary": compatibility_summary,
+                "deployment_summary": deployment_summary,
             }
 
         loaded_taxonomy = compatibility_summary["loaded_taxonomy"]
         assert isinstance(loaded_taxonomy, dict)
         taxonomy_version_id = int(loaded_taxonomy["taxonomy_version_id"])
+        if taxonomy_rebuild and int(loaded_taxonomy.get("is_active", 0)) == 1:
+            return {
+                "status": "BLOCKED_TAXONOMY_REBUILD_DEPLOYMENT",
+                "ecosystem_code": ecosystem_code,
+                "taxonomy_version_code": taxonomy_version_code,
+                "rebuild_mode": "TAXONOMY_FULL_REBUILD",
+                "deployment_id": deployment_id,
+                "date_range": date_range,
+                "schema_state": schema_state,
+                "source_readiness": source_readiness,
+                "source_date_availability": source_date_availability,
+                "loaded_state": loaded_state,
+                "taxonomy_summary": taxonomy_summary,
+                "watchlist_summary": watchlist_summary,
+                "compatibility_summary": compatibility_summary,
+                "deployment_summary": deployment_summary,
+                "error": "proposed taxonomy is already active",
+            }
         mapping_summary = _aggregate_mapping_results(
-            [_compare_universe_and_groups(conn, fact_date, taxonomy_version_id) for fact_date in source_date_availability["aligned_dates"]]
+            [
+                _compare_universe_and_groups(
+                    conn,
+                    fact_date,
+                    taxonomy_version_id,
+                    taxonomy_version_code,
+                )
+                for fact_date in source_date_availability["aligned_dates"]
+            ]
         )
         if not mapping_summary["mapping_clear"]:
             return {
                 "status": "BLOCKED_UNCLEAR_MAPPING",
                 "ecosystem_code": ecosystem_code,
                 "taxonomy_version_code": taxonomy_version_code,
+                "rebuild_mode": "TAXONOMY_FULL_REBUILD" if taxonomy_rebuild else "ORDINARY_BACKFILL",
+                "deployment_id": deployment_id,
                 "date_range": date_range,
                 "schema_state": schema_state,
                 "source_readiness": source_readiness,
@@ -774,17 +1071,25 @@ def plan_ec_source_layer_backfill(
                 "watchlist_summary": watchlist_summary,
                 "compatibility_summary": compatibility_summary,
                 "mapping_summary": mapping_summary,
+                "deployment_summary": deployment_summary,
             }
 
     status, decision_error = _decide_plan_status(
         aligned_dates=list(source_date_availability["aligned_dates"]),
         loaded_state=loaded_state,
         allow_replace_existing=allow_replace_existing,
+        taxonomy_rebuild=taxonomy_rebuild,
     )
     return {
         "status": status,
         "ecosystem_code": ecosystem_code,
         "taxonomy_version_code": taxonomy_version_code,
+        "rebuild_mode": "TAXONOMY_FULL_REBUILD" if taxonomy_rebuild else "ORDINARY_BACKFILL",
+        "deployment_id": deployment_id,
+        "taxonomy_version_id": taxonomy_version_id,
+        "requested_start": str(date_range["date_from"]),
+        "requested_end": str(date_range["date_to"]),
+        "selected_date_count": len(loaded_state.get("candidate_dates", [])),
         "allow_replace_existing": allow_replace_existing,
         "date_range": date_range,
         "schema_state": schema_state,
@@ -795,6 +1100,7 @@ def plan_ec_source_layer_backfill(
         "watchlist_summary": watchlist_summary,
         "compatibility_summary": compatibility_summary,
         "mapping_summary": mapping_summary,
+        "deployment_summary": deployment_summary,
         "planned_backfill_sequence": list(PLANNED_BACKFILL_SEQUENCE),
         "watermark_policy_notes": list(WATERMARK_POLICY_NOTES),
         "future_command": _build_future_command(
@@ -806,6 +1112,8 @@ def plan_ec_source_layer_backfill(
             taxonomy_csv_path=taxonomy_csv_path,
             watchlist_path=watchlist_path,
             allow_replace_existing=allow_replace_existing,
+            taxonomy_rebuild=taxonomy_rebuild,
+            deployment_id=deployment_id,
         ),
     } | ({"decision_error": decision_error} if decision_error else {})
 
@@ -816,7 +1124,18 @@ def render_plan_text(summary: dict[str, object]) -> str:
         f"ecosystem_code={summary.get('ecosystem_code', '')}",
         f"taxonomy_version_code={summary.get('taxonomy_version_code', '')}",
         "mode=NO_WRITE_BACKFILL_PLAN",
+        f"rebuild_mode={summary.get('rebuild_mode', 'ORDINARY_BACKFILL')}",
     ]
+    if summary.get("deployment_id") is not None:
+        lines.append(f"deployment_id={summary.get('deployment_id')}")
+    if summary.get("taxonomy_version_id") is not None:
+        lines.append(f"taxonomy_version_id={summary.get('taxonomy_version_id')}")
+    if summary.get("requested_start") is not None:
+        lines.append(f"requested_start={summary.get('requested_start')}")
+    if summary.get("requested_end") is not None:
+        lines.append(f"requested_end={summary.get('requested_end')}")
+    if summary.get("selected_date_count") is not None:
+        lines.append(f"selected_date_count={summary.get('selected_date_count')}")
 
     schema_state = summary.get("schema_state", {})
     if isinstance(schema_state, dict):
@@ -844,6 +1163,18 @@ def render_plan_text(summary: dict[str, object]) -> str:
         )
         if date_range.get("error"):
             lines.append(f"- error={date_range.get('error')}")
+
+    deployment_summary = summary.get("deployment_summary")
+    if isinstance(deployment_summary, dict):
+        lines.extend(
+            [
+                "",
+                "Taxonomy Rebuild Deployment",
+                f"- status={deployment_summary.get('status')}",
+                f"- deployment_id={deployment_summary.get('deployment_id')}",
+                f"- error={deployment_summary.get('error')}",
+            ]
+        )
 
     source_date_availability = summary.get("source_date_availability")
     if isinstance(source_date_availability, dict):
@@ -996,6 +1327,8 @@ def main(argv: list[str] | None = None) -> int:
         taxonomy_csv_path=args.taxonomy_csv,
         watchlist_path=args.watchlist,
         allow_replace_existing=args.allow_replace_existing,
+        taxonomy_rebuild=args.taxonomy_rebuild,
+        deployment_id=args.deployment_id,
     )
     sys.stdout.write(render_plan_text(summary) + "\n")
     return 0 if summary["status"] in SUCCESS_EXIT_STATUSES else 2

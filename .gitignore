@@ -58,6 +58,8 @@ data/yf_cache/
 # Large data files
 *.csv
 !data/results.csv
+!data/datacenter_ecosystem_taxonomy_full_v1.csv
+!data/datacenter_taxonomy_full_v2.csv
 otherlisted.txt
 nyse_tickers.txt
 

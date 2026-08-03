@@ -202,3 +202,23 @@ def test_insufficient_history_keeps_partial_values_and_missing_long_metrics_safe
     assert metrics.ma10 is None
     assert metrics.ema10 is None
     assert metrics.highest_close_20d is None
+
+
+def test_rebuild_accepts_pre_listing_date_as_missing_as_of_without_fabricating_rows():
+    rows = _series([100.0, 101.0], start=date(2026, 5, 14))
+
+    metrics = calculate_ticker_swing_metrics(rows, "2026-05-13")
+
+    assert metrics.price_data_status == "MISSING_AS_OF_DATE"
+    assert metrics.close is None
+    assert metrics.return_5d is None
+
+
+def test_rebuild_accepts_cbrs_short_history_without_fatal_status():
+    rows = _series([100.0 + float(index) for index in range(54)], start=date(2026, 5, 14))
+
+    metrics = calculate_ticker_swing_metrics(rows, "2026-07-06")
+
+    assert metrics.price_data_status == "OK"
+    assert metrics.return_20d is not None
+    assert metrics.return_60d is None

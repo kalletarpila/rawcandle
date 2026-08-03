@@ -27,6 +27,11 @@ def main(argv: list[str] | None = None) -> int:
         confirm_activate_taxonomy_version=args.confirm_activate_taxonomy_version,
         expected_scheduler_taxonomy_version=args.expected_scheduler_taxonomy_version,
         expected_scheduler_taxonomy_csv=args.expected_scheduler_taxonomy_csv,
+        scheduler_config_path=args.scheduler_config,
+        expected_current_scheduler_taxonomy_version=args.expected_current_scheduler_taxonomy_version,
+        expected_current_scheduler_taxonomy_csv=args.expected_current_scheduler_taxonomy_csv,
+        target_scheduler_taxonomy_csv=args.target_scheduler_taxonomy_csv,
+        config_backup_dir=args.config_backup_dir,
     )
     print_json(summary)
     return 0 if summary["activation_apply_status"] == "ACTIVE" else 1

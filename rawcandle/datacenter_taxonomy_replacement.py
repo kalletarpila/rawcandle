@@ -5,8 +5,10 @@ import csv
 import hashlib
 import json
 import re
+import shutil
 import sqlite3
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -61,6 +63,18 @@ CANONICAL_EC_FACT_TABLES = (
     "ec_group_synthetic_ohlc_daily",
     "ec_group_index_daily",
 )
+CANONICAL_EC_WATERMARK_SCOPES = (
+    ("TICKER_SWING_BASE", "dc_ticker_swing_signal_daily"),
+    ("GROUP_SWING_BASE", "dc_group_swing_signal_daily"),
+    ("SYNTHETIC_OHLC_BASE", "dc_group_synthetic_ohlc_daily"),
+    ("GROUP_INDEX", "dc_group_index_daily"),
+)
+DEPLOYMENT_READY_STATUSES = {
+    "LOADED_NOT_ACTIVE",
+    "REBUILD_IN_PROGRESS",
+    "VALIDATION_REQUIRED",
+    "READY_TO_ACTIVATE",
+}
 _ENTITY_CODE_RE = re.compile(r"[^A-Z0-9]+")
 
 
@@ -106,6 +120,14 @@ def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
 
 def _sha256(path: str | Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _json_sha256(payload: object) -> str:
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _normalize_group_entity_code(name: str) -> str:
@@ -218,6 +240,124 @@ def _fetch_loaded_taxonomy(
         (ecosystem_code, taxonomy_version_code),
     ).fetchone()
     return dict(row) if row is not None else None
+
+
+def _fetch_active_taxonomy(conn: sqlite3.Connection, *, ecosystem_code: str) -> dict[str, object] | None:
+    if "ec_taxonomy_version" not in _table_names(conn) or "ec_ecosystem" not in _table_names(conn):
+        return None
+    row = conn.execute(
+        """
+        SELECT tv.taxonomy_version_id, tv.taxonomy_version_code, tv.source_hash,
+               tv.source_reference, tv.status, tv.is_active
+        FROM ec_taxonomy_version tv
+        JOIN ec_ecosystem e ON e.ecosystem_id = tv.ecosystem_id
+        WHERE e.ecosystem_code = ?
+          AND tv.is_active = 1
+        ORDER BY tv.taxonomy_version_id DESC
+        LIMIT 1
+        """,
+        (ecosystem_code,),
+    ).fetchone()
+    return dict(row) if row is not None else None
+
+
+def _fetch_deployment_by_id(
+    conn: sqlite3.Connection,
+    *,
+    deployment_id: int,
+    ecosystem_code: str,
+    proposed_taxonomy_version: str,
+) -> dict[str, object] | None:
+    if "ec_taxonomy_change_deployment" not in _table_names(conn):
+        return None
+    row = conn.execute(
+        """
+        SELECT *
+        FROM ec_taxonomy_change_deployment
+        WHERE taxonomy_change_id = ?
+          AND ecosystem_code = ?
+          AND proposed_taxonomy_version = ?
+        """,
+        (deployment_id, ecosystem_code, proposed_taxonomy_version),
+    ).fetchone()
+    return dict(row) if row is not None else None
+
+
+def _dc_watermark_evidence(conn: sqlite3.Connection, *, taxonomy_version: str) -> list[dict[str, object]]:
+    if "dc_pipeline_watermark" not in _table_names(conn):
+        return []
+    rows = conn.execute(
+        """
+        SELECT component_name, taxonomy_version, market, signal_version, calc_version,
+               start_date, end_date, row_count, status, last_successful_run_id,
+               last_successful_at_utc, notes
+        FROM dc_pipeline_watermark
+        WHERE taxonomy_version = ?
+        ORDER BY component_name, market, signal_version, calc_version
+        """,
+        (taxonomy_version,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _dc_fact_heads(conn: sqlite3.Connection, *, taxonomy_version: str) -> dict[str, str | None]:
+    heads: dict[str, str | None] = {}
+    for table_name, date_column in CANONICAL_DC_FACT_TABLES:
+        if table_name not in _table_names(conn):
+            heads[table_name] = None
+            continue
+        row = conn.execute(
+            f"SELECT MAX({date_column}) FROM {table_name} WHERE taxonomy_version = ?",
+            (taxonomy_version,),
+        ).fetchone()
+        heads[table_name] = None if row is None or row[0] is None else str(row[0])
+    return heads
+
+
+def _ec_fact_heads(
+    conn: sqlite3.Connection,
+    *,
+    ecosystem_id: int,
+    taxonomy_version_id: int,
+) -> dict[str, str | None]:
+    heads: dict[str, str | None] = {}
+    for table_name in CANONICAL_EC_FACT_TABLES:
+        if table_name not in _table_names(conn):
+            heads[table_name] = None
+            continue
+        columns = _table_columns(conn, table_name)
+        predicates = ["taxonomy_version_id = ?"]
+        params: list[object] = [taxonomy_version_id]
+        if "ecosystem_id" in columns:
+            predicates.append("ecosystem_id = ?")
+            params.append(ecosystem_id)
+        row = conn.execute(
+            f"SELECT MAX(signal_date) FROM {table_name} WHERE {' AND '.join(predicates)}",
+            tuple(params),
+        ).fetchone()
+        heads[table_name] = None if row is None or row[0] is None else str(row[0])
+    return heads
+
+
+def _ec_watermark_lineage_evidence(
+    conn: sqlite3.Connection,
+    *,
+    ecosystem_id: int,
+) -> list[dict[str, object]]:
+    if "ec_pipeline_watermark" not in _table_names(conn):
+        return []
+    columns = _table_columns(conn, "ec_pipeline_watermark")
+    lineage_select = "taxonomy_version_id" if "taxonomy_version_id" in columns else "NULL AS taxonomy_version_id"
+    rows = conn.execute(
+        f"""
+        SELECT pipeline_name, source_table, latest_signal_date, status, {lineage_select}
+        FROM ec_pipeline_watermark
+        WHERE ecosystem_id = ?
+        ORDER BY pipeline_name, source_table
+        """,
+        (ecosystem_id,),
+    ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def _fetch_active_taxonomy(
@@ -486,6 +626,21 @@ def ensure_taxonomy_replacement_schema(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    deployment_columns = _table_columns(conn, "ec_taxonomy_change_deployment")
+    optional_columns = {
+        "prepared_at_utc": "TEXT NULL",
+        "validation_completed_at_utc": "TEXT NULL",
+        "rebuild_evidence_json": "TEXT NULL",
+        "rebuild_evidence_sha256": "TEXT NULL",
+        "validation_evidence_json": "TEXT NULL",
+        "validation_evidence_sha256": "TEXT NULL",
+        "last_error": "TEXT NULL",
+    }
+    for column_name, column_sql in optional_columns.items():
+        if column_name not in deployment_columns:
+            conn.execute(
+                f"ALTER TABLE ec_taxonomy_change_deployment ADD COLUMN {column_name} {column_sql}"
+            )
 
 
 def _fetch_taxonomy_version_id(
@@ -845,6 +1000,438 @@ def apply_datacenter_taxonomy_version(
         conn.close()
 
 
+def prepare_datacenter_taxonomy_rebuild(
+    *,
+    analysis_db: str | Path,
+    ecosystem_code: str,
+    proposed_taxonomy_version: str,
+    proposed_taxonomy_csv: str | Path,
+    deployment_id: int,
+    expected_active_taxonomy_version: str,
+    confirm_proposed_taxonomy_version: str,
+) -> dict[str, object]:
+    if confirm_proposed_taxonomy_version != proposed_taxonomy_version:
+        return {
+            "prepare_status": "BLOCKED",
+            "blocking_errors": ["confirm_proposed_taxonomy_version must match proposed_taxonomy_version"],
+        }
+    proposed_summary = summarize_taxonomy_csv(proposed_taxonomy_csv, proposed_taxonomy_version)
+    blocking_errors: list[str] = []
+    conn = _connect_readwrite(analysis_db)
+    try:
+        with conn:
+            ensure_taxonomy_replacement_schema(conn)
+            deployment = _fetch_deployment_by_id(
+                conn,
+                deployment_id=deployment_id,
+                ecosystem_code=ecosystem_code,
+                proposed_taxonomy_version=proposed_taxonomy_version,
+            )
+            loaded = _fetch_loaded_taxonomy(
+                conn,
+                ecosystem_code=ecosystem_code,
+                taxonomy_version_code=proposed_taxonomy_version,
+            )
+            active = _fetch_active_taxonomy(conn, ecosystem_code=ecosystem_code)
+            if deployment is None:
+                blocking_errors.append("taxonomy deployment row not found")
+            elif str(deployment.get("status")) not in {
+                "LOADED_NOT_ACTIVE",
+                "REBUILD_IN_PROGRESS",
+                "VALIDATION_REQUIRED",
+                "FAILED",
+            }:
+                blocking_errors.append("deployment status is not preparable")
+            if loaded is None:
+                blocking_errors.append("proposed taxonomy metadata is not loaded")
+            elif str(loaded.get("source_hash") or "") != proposed_summary.source_sha256:
+                blocking_errors.append("loaded taxonomy hash does not match proposed source")
+            if active is None:
+                blocking_errors.append("active taxonomy is missing")
+            elif str(active.get("taxonomy_version_code")) != expected_active_taxonomy_version:
+                blocking_errors.append("active taxonomy version does not match expected current taxonomy")
+            elif str(active.get("taxonomy_version_code")) == proposed_taxonomy_version:
+                blocking_errors.append("proposed taxonomy is already active")
+            if blocking_errors:
+                return {
+                    "prepare_status": "BLOCKED",
+                    "deployment_id": deployment_id,
+                    "ecosystem_code": ecosystem_code,
+                    "taxonomy_version_code": proposed_taxonomy_version,
+                    "blocking_errors": sorted(set(blocking_errors)),
+                }
+
+            assert deployment is not None
+            previous_taxonomy_version = str(deployment["previous_taxonomy_version"])
+            evidence = {
+                "prepared_at_utc": _utc_now(),
+                "deployment_id": deployment_id,
+                "ecosystem_code": ecosystem_code,
+                "previous_taxonomy_version": previous_taxonomy_version,
+                "proposed_taxonomy_version": proposed_taxonomy_version,
+                "source_sha256": proposed_summary.source_sha256,
+                "rebuild_start_date": deployment["rebuild_start_date"],
+                "affected_components": list(TAXONOMY_REPLACEMENT_COMPONENTS),
+                "previous_dc_watermarks": _dc_watermark_evidence(
+                    conn,
+                    taxonomy_version=previous_taxonomy_version,
+                ),
+                "proposed_dc_watermarks": _dc_watermark_evidence(
+                    conn,
+                    taxonomy_version=proposed_taxonomy_version,
+                ),
+            }
+            evidence_json = json.dumps(evidence, sort_keys=True, default=str)
+            evidence_sha = _json_sha256(evidence)
+            conn.execute(
+                """
+                UPDATE ec_taxonomy_change_deployment
+                SET status = 'REBUILD_IN_PROGRESS',
+                    dc_rebuild_status = CASE
+                        WHEN dc_rebuild_status = 'OK' THEN dc_rebuild_status
+                        ELSE 'IN_PROGRESS'
+                    END,
+                    updated_at_utc = CURRENT_TIMESTAMP,
+                    prepared_at_utc = COALESCE(prepared_at_utc, CURRENT_TIMESTAMP),
+                    rebuild_evidence_json = ?,
+                    rebuild_evidence_sha256 = ?,
+                    last_error = NULL
+                WHERE taxonomy_change_id = ?
+                """,
+                (evidence_json, evidence_sha, deployment_id),
+            )
+        return {
+            "prepare_status": "REBUILD_IN_PROGRESS",
+            "deployment_id": deployment_id,
+            "ecosystem_code": ecosystem_code,
+            "taxonomy_version_code": proposed_taxonomy_version,
+            "taxonomy_source_sha256": proposed_summary.source_sha256,
+            "rebuild_start_date": evidence["rebuild_start_date"],
+            "affected_components": list(TAXONOMY_REPLACEMENT_COMPONENTS),
+            "previous_dc_watermark_count": len(evidence["previous_dc_watermarks"]),
+            "proposed_dc_watermark_count": len(evidence["proposed_dc_watermarks"]),
+            "rebuild_evidence_sha256": evidence_sha,
+            "blocking_errors": [],
+        }
+    finally:
+        conn.close()
+
+
+def validate_datacenter_taxonomy_rebuild_evidence(
+    *,
+    analysis_db: str | Path,
+    ecosystem_code: str,
+    proposed_taxonomy_version: str,
+    proposed_taxonomy_csv: str | Path,
+    deployment_id: int,
+    required_signal_date: str,
+    coverage_status: str = "OK",
+    parity_status: str = "OK",
+    total_mismatch_count: int = 0,
+) -> dict[str, object]:
+    proposed_summary = summarize_taxonomy_csv(proposed_taxonomy_csv, proposed_taxonomy_version)
+    blocking_errors: list[str] = []
+    conn = _connect_readonly(analysis_db)
+    try:
+        deployment = _fetch_deployment_by_id(
+            conn,
+            deployment_id=deployment_id,
+            ecosystem_code=ecosystem_code,
+            proposed_taxonomy_version=proposed_taxonomy_version,
+        )
+        loaded = _fetch_loaded_taxonomy(
+            conn,
+            ecosystem_code=ecosystem_code,
+            taxonomy_version_code=proposed_taxonomy_version,
+        )
+        if deployment is None:
+            blocking_errors.append("taxonomy deployment row not found")
+        elif str(deployment.get("activation_status")) == "ACTIVE":
+            blocking_errors.append("deployment already active")
+        if loaded is None:
+            blocking_errors.append("proposed taxonomy metadata is not loaded")
+            taxonomy_version_id = None
+            ecosystem_id = None
+        else:
+            taxonomy_version_id = int(loaded["taxonomy_version_id"])
+            if str(loaded.get("source_hash") or "") != proposed_summary.source_sha256:
+                blocking_errors.append("loaded taxonomy hash does not match proposed source")
+            eco_row = conn.execute(
+                "SELECT ecosystem_id FROM ec_ecosystem WHERE ecosystem_code = ?",
+                (ecosystem_code,),
+            ).fetchone()
+            ecosystem_id = int(eco_row[0]) if eco_row is not None else None
+        if coverage_status != "OK":
+            blocking_errors.append("coverage is not accepted")
+        if parity_status != "OK" or int(total_mismatch_count) != 0:
+            blocking_errors.append("parity is not accepted")
+
+        dc_heads = _dc_fact_heads(conn, taxonomy_version=proposed_taxonomy_version)
+        for table_name, head in dc_heads.items():
+            if head is None or head < required_signal_date:
+                blocking_errors.append(f"DC fact head incomplete for {table_name}")
+
+        ec_heads: dict[str, str | None] = {}
+        watermark_rows: list[dict[str, object]] = []
+        stale_summary = {
+            "stale_validation_status": "NOT_RUN",
+            "stale_dc_rows": {},
+            "stale_ec_rows": {},
+        }
+        if taxonomy_version_id is not None and ecosystem_id is not None:
+            ec_heads = _ec_fact_heads(
+                conn,
+                ecosystem_id=ecosystem_id,
+                taxonomy_version_id=taxonomy_version_id,
+            )
+            for table_name, head in ec_heads.items():
+                if head is None or head < required_signal_date:
+                    blocking_errors.append(f"EC fact head incomplete for {table_name}")
+            watermark_rows = _ec_watermark_lineage_evidence(conn, ecosystem_id=ecosystem_id)
+            watermark_by_scope = {
+                (str(row["pipeline_name"]), str(row["source_table"])): row
+                for row in watermark_rows
+            }
+            for scope in CANONICAL_EC_WATERMARK_SCOPES:
+                row = watermark_by_scope.get(scope)
+                if row is None:
+                    blocking_errors.append(f"missing EC canonical watermark scope: {scope[0]}")
+                    continue
+                if row.get("taxonomy_version_id") != taxonomy_version_id:
+                    blocking_errors.append("EC watermark lineage does not belong to proposed taxonomy")
+                latest = row.get("latest_signal_date")
+                if latest is None or str(latest) < required_signal_date:
+                    blocking_errors.append(f"EC watermark head incomplete for {scope[0]}")
+                if str(row.get("status")) != "OK":
+                    blocking_errors.append(f"EC watermark status is not OK for {scope[0]}")
+            stale_summary = validate_rebuild_stale_rows(
+                conn,
+                ecosystem_id=ecosystem_id,
+                taxonomy_version_id=taxonomy_version_id,
+                taxonomy_version_code=proposed_taxonomy_version,
+                date_from=str(deployment["rebuild_start_date"]) if deployment is not None else "0000-00-00",
+                date_to=required_signal_date,
+                taxonomy_rows=proposed_summary.rows,
+            )
+            if stale_summary["stale_validation_status"] != "OK":
+                blocking_errors.append("stale rows block readiness")
+    finally:
+        conn.close()
+
+    ready = not blocking_errors
+    return {
+        "evidence_status": "READY_TO_ACTIVATE" if ready else "BLOCKED",
+        "deployment_id": deployment_id,
+        "ecosystem_code": ecosystem_code,
+        "taxonomy_version_code": proposed_taxonomy_version,
+        "taxonomy_version_id": taxonomy_version_id,
+        "required_signal_date": required_signal_date,
+        "coverage_status": coverage_status,
+        "parity_status": parity_status,
+        "total_mismatch_count": int(total_mismatch_count),
+        "dc_fact_heads": dc_heads,
+        "ec_fact_heads": ec_heads,
+        "ec_watermark_lineage": watermark_rows,
+        "stale_row_validation": stale_summary,
+        "blocking_errors": sorted(set(blocking_errors)),
+        "evidence_sha256": _json_sha256(
+            {
+                "required_signal_date": required_signal_date,
+                "coverage_status": coverage_status,
+                "parity_status": parity_status,
+                "total_mismatch_count": int(total_mismatch_count),
+                "dc_fact_heads": dc_heads,
+                "ec_fact_heads": ec_heads,
+                "ec_watermark_lineage": watermark_rows,
+                "stale_row_validation": stale_summary,
+            }
+        ),
+    }
+
+
+def apply_datacenter_taxonomy_rebuild_evidence(
+    *,
+    analysis_db: str | Path,
+    ecosystem_code: str,
+    proposed_taxonomy_version: str,
+    proposed_taxonomy_csv: str | Path,
+    deployment_id: int,
+    required_signal_date: str,
+    coverage_status: str = "OK",
+    parity_status: str = "OK",
+    total_mismatch_count: int = 0,
+) -> dict[str, object]:
+    evidence = validate_datacenter_taxonomy_rebuild_evidence(
+        analysis_db=analysis_db,
+        ecosystem_code=ecosystem_code,
+        proposed_taxonomy_version=proposed_taxonomy_version,
+        proposed_taxonomy_csv=proposed_taxonomy_csv,
+        deployment_id=deployment_id,
+        required_signal_date=required_signal_date,
+        coverage_status=coverage_status,
+        parity_status=parity_status,
+        total_mismatch_count=total_mismatch_count,
+    )
+    conn = _connect_readwrite(analysis_db)
+    try:
+        with conn:
+            ensure_taxonomy_replacement_schema(conn)
+            if evidence["evidence_status"] != "READY_TO_ACTIVATE":
+                conn.execute(
+                    """
+                    UPDATE ec_taxonomy_change_deployment
+                    SET status = 'FAILED',
+                        last_error = ?,
+                        validation_evidence_json = ?,
+                        validation_evidence_sha256 = ?,
+                        updated_at_utc = CURRENT_TIMESTAMP
+                    WHERE taxonomy_change_id = ?
+                    """,
+                    (
+                        "; ".join(evidence["blocking_errors"]),
+                        json.dumps(evidence, sort_keys=True, default=str),
+                        evidence["evidence_sha256"],
+                        deployment_id,
+                    ),
+                )
+                return {
+                    "status_update": "FAILED",
+                    "deployment_id": deployment_id,
+                    "ready_to_activate": False,
+                    "evidence": evidence,
+                }
+            conn.execute(
+                """
+                UPDATE ec_taxonomy_change_deployment
+                SET status = 'READY_TO_ACTIVATE',
+                    dc_rebuild_status = 'OK',
+                    ec_rebuild_status = 'OK',
+                    coverage_status = 'OK',
+                    parity_status = 'OK',
+                    validation_completed_at_utc = CURRENT_TIMESTAMP,
+                    validation_evidence_json = ?,
+                    validation_evidence_sha256 = ?,
+                    last_error = NULL,
+                    updated_at_utc = CURRENT_TIMESTAMP
+                WHERE taxonomy_change_id = ?
+                """,
+                (
+                    json.dumps(evidence, sort_keys=True, default=str),
+                    evidence["evidence_sha256"],
+                    deployment_id,
+                ),
+            )
+        return {
+            "status_update": "READY_TO_ACTIVATE",
+            "deployment_id": deployment_id,
+            "ready_to_activate": True,
+            "evidence": evidence,
+        }
+    finally:
+        conn.close()
+
+
+def validate_rebuild_stale_rows(
+    conn: sqlite3.Connection,
+    *,
+    ecosystem_id: int,
+    taxonomy_version_id: int,
+    taxonomy_version_code: str,
+    date_from: str,
+    date_to: str,
+    taxonomy_rows: tuple[DatacenterTaxonomyRow, ...],
+) -> dict[str, object]:
+    taxonomy_tickers = {row.ticker for row in taxonomy_rows}
+    taxonomy_layers = {row.layer for row in taxonomy_rows}
+    taxonomy_subindustries = {row.subindustry for row in taxonomy_rows}
+    stale_dc: dict[str, object] = {}
+    stale_ec: dict[str, int] = {}
+
+    if (
+        "dc_ticker_swing_signal_daily" in _table_names(conn)
+        and {"ticker", "taxonomy_version", "signal_date"}.issubset(
+            _table_columns(conn, "dc_ticker_swing_signal_daily")
+        )
+    ):
+        rows = conn.execute(
+            """
+            SELECT DISTINCT ticker
+            FROM dc_ticker_swing_signal_daily
+            WHERE taxonomy_version = ?
+              AND signal_date >= ?
+              AND signal_date <= ?
+            ORDER BY ticker
+            """,
+            (taxonomy_version_code, date_from, date_to),
+        ).fetchall()
+        stale_tickers = sorted({str(row[0]) for row in rows} - taxonomy_tickers)
+        if stale_tickers:
+            stale_dc["dc_ticker_swing_signal_daily"] = stale_tickers
+
+    group_checks = (
+        ("dc_group_swing_signal_daily", "signal_date"),
+        ("dc_group_synthetic_ohlc_daily", "ohlc_date"),
+        ("dc_group_index_daily", "index_date"),
+    )
+    allowed_by_group_type = {
+        "ecosystem": {"DC_ECOSYSTEM_TOTAL"},
+        "layer": taxonomy_layers,
+        "subindustry": taxonomy_subindustries,
+    }
+    for table_name, date_column in group_checks:
+        if table_name not in _table_names(conn):
+            continue
+        if not {"group_type", "group_name", "taxonomy_version", date_column}.issubset(
+            _table_columns(conn, table_name)
+        ):
+            continue
+        rows = conn.execute(
+            f"""
+            SELECT DISTINCT group_type, group_name
+            FROM {table_name}
+            WHERE taxonomy_version = ?
+              AND {date_column} >= ?
+              AND {date_column} <= ?
+            ORDER BY group_type, group_name
+            """,
+            (taxonomy_version_code, date_from, date_to),
+        ).fetchall()
+        invalid = [
+            [str(row["group_type"]), str(row["group_name"])]
+            for row in rows
+            if str(row["group_name"]) not in allowed_by_group_type.get(str(row["group_type"]), set())
+        ]
+        if invalid:
+            stale_dc[table_name] = invalid
+
+    for table_name in CANONICAL_EC_FACT_TABLES:
+        if table_name not in _table_names(conn):
+            continue
+        columns = _table_columns(conn, table_name)
+        if "ecosystem_id" not in columns or "taxonomy_version_id" not in columns:
+            continue
+        row = conn.execute(
+            f"""
+            SELECT COUNT(*)
+            FROM {table_name}
+            WHERE ecosystem_id = ?
+              AND taxonomy_version_id <> ?
+              AND signal_date >= ?
+              AND signal_date <= ?
+            """,
+            (ecosystem_id, taxonomy_version_id, date_from, date_to),
+        ).fetchone()
+        count = int(row[0])
+        if count:
+            stale_ec[table_name] = count
+
+    return {
+        "stale_validation_status": "OK" if not stale_dc and not stale_ec else "BLOCKED_STALE_ROWS",
+        "stale_dc_rows": stale_dc,
+        "stale_ec_rows": stale_ec,
+    }
+
+
 def plan_datacenter_taxonomy_activation(
     *,
     analysis_db: str | Path,
@@ -927,18 +1514,34 @@ def plan_datacenter_taxonomy_activation(
                     blocking_errors.append(f"EC fact head incomplete for {table_name}")
 
             if "ec_pipeline_watermark" in _table_names(conn) and "taxonomy_version_id" in _table_columns(conn, "ec_pipeline_watermark"):
-                mismatched = conn.execute(
-                    """
-                    SELECT COUNT(*)
-                    FROM ec_pipeline_watermark w
-                    JOIN ec_ecosystem e ON e.ecosystem_id = w.ecosystem_id
-                    WHERE e.ecosystem_code = ?
-                      AND w.taxonomy_version_id IS NOT ?
-                    """,
-                    (ecosystem_code, taxonomy_version_id),
-                ).fetchone()[0]
-                if int(mismatched) > 0:
-                    blocking_errors.append("EC watermark lineage does not belong to proposed taxonomy")
+                ecosystem_row = conn.execute(
+                    "SELECT ecosystem_id FROM ec_ecosystem WHERE ecosystem_code = ?",
+                    (ecosystem_code,),
+                ).fetchone()
+                ecosystem_id = int(ecosystem_row[0]) if ecosystem_row is not None else None
+                if ecosystem_id is None:
+                    blocking_errors.append(f"ecosystem not found: {ecosystem_code}")
+                else:
+                    for pipeline_name, source_table in CANONICAL_EC_WATERMARK_SCOPES:
+                        row = conn.execute(
+                            """
+                            SELECT latest_signal_date, status, taxonomy_version_id
+                            FROM ec_pipeline_watermark
+                            WHERE ecosystem_id = ?
+                              AND pipeline_name = ?
+                              AND source_table = ?
+                            """,
+                            (ecosystem_id, pipeline_name, source_table),
+                        ).fetchone()
+                        if row is None:
+                            blocking_errors.append(f"missing EC canonical watermark scope: {pipeline_name}")
+                            continue
+                        if row["taxonomy_version_id"] != taxonomy_version_id:
+                            blocking_errors.append("EC watermark lineage does not belong to proposed taxonomy")
+                        if row["latest_signal_date"] is None or str(row["latest_signal_date"]) < required_signal_date:
+                            blocking_errors.append(f"EC watermark head incomplete for {pipeline_name}")
+                        if str(row["status"]) != "OK":
+                            blocking_errors.append(f"EC watermark status is not OK for {pipeline_name}")
             else:
                 blocking_errors.append("EC watermark taxonomy lineage field is missing")
 
@@ -971,6 +1574,11 @@ def apply_datacenter_taxonomy_activation(
     confirm_activate_taxonomy_version: str,
     expected_scheduler_taxonomy_version: str | None = None,
     expected_scheduler_taxonomy_csv: str | Path | None = None,
+    scheduler_config_path: str | Path | None = None,
+    expected_current_scheduler_taxonomy_version: str | None = None,
+    expected_current_scheduler_taxonomy_csv: str | Path | None = None,
+    target_scheduler_taxonomy_csv: str | Path | None = None,
+    config_backup_dir: str | Path = "temp",
 ) -> dict[str, object]:
     if confirm_activate_taxonomy_version != proposed_taxonomy_version:
         return {
@@ -995,6 +1603,97 @@ def apply_datacenter_taxonomy_activation(
             "activation_performed": False,
             "blocking_errors": plan["blocking_errors"],
             "plan": plan,
+        }
+
+    config_summary: dict[str, object] = {
+        "config_update_requested": scheduler_config_path is not None,
+        "config_update_status": "NOT_REQUESTED",
+    }
+    updated_config = None
+    backup_path: Path | None = None
+    if scheduler_config_path is not None:
+        from rawcandle.scheduler.config import (
+            StockUpdateSchedulerConfig,
+            read_scheduler_config,
+            validate_scheduler_config,
+            write_scheduler_config,
+        )
+
+        config_path = Path(scheduler_config_path)
+        backup_dir_path = Path(config_backup_dir)
+        backup_dir_path.mkdir(parents=True, exist_ok=True)
+        current_config = read_scheduler_config(str(config_path))
+        if expected_current_scheduler_taxonomy_version is not None:
+            if current_config.datacenter_taxonomy_version != expected_current_scheduler_taxonomy_version:
+                return {
+                    "activation_apply_status": "BLOCKED",
+                    "activation_performed": False,
+                    "blocking_errors": ["current scheduler datacenter taxonomy version is unexpected"],
+                    "plan": plan,
+                }
+            if current_config.ec_source_layer_taxonomy_version != expected_current_scheduler_taxonomy_version:
+                return {
+                    "activation_apply_status": "BLOCKED",
+                    "activation_performed": False,
+                    "blocking_errors": ["current scheduler EC taxonomy version is unexpected"],
+                    "plan": plan,
+                }
+        if expected_current_scheduler_taxonomy_csv is not None:
+            expected_current_hash = _sha256(expected_current_scheduler_taxonomy_csv)
+            if _sha256(current_config.datacenter_taxonomy_csv) != expected_current_hash:
+                return {
+                    "activation_apply_status": "BLOCKED",
+                    "activation_performed": False,
+                    "blocking_errors": ["current scheduler datacenter taxonomy CSV is unexpected"],
+                    "plan": plan,
+                }
+            if current_config.ec_source_layer_taxonomy_csv is not None and _sha256(current_config.ec_source_layer_taxonomy_csv) != expected_current_hash:
+                return {
+                    "activation_apply_status": "BLOCKED",
+                    "activation_performed": False,
+                    "blocking_errors": ["current scheduler EC taxonomy CSV is unexpected"],
+                    "plan": plan,
+                }
+        target_csv = str(target_scheduler_taxonomy_csv or proposed_taxonomy_csv)
+        updated_config = StockUpdateSchedulerConfig(
+            **{
+                **current_config.__dict__,
+                "datacenter_taxonomy_csv": target_csv,
+                "datacenter_taxonomy_version": proposed_taxonomy_version,
+                "ec_source_layer_taxonomy_csv": target_csv,
+                "ec_source_layer_taxonomy_version": proposed_taxonomy_version,
+            }
+        )
+        validate_scheduler_config(updated_config)
+        changed_keys = {
+            key
+            for key, value in current_config.__dict__.items()
+            if getattr(updated_config, key) != value
+        }
+        expected_changed = {
+            "datacenter_taxonomy_csv",
+            "datacenter_taxonomy_version",
+            "ec_source_layer_taxonomy_csv",
+            "ec_source_layer_taxonomy_version",
+        }
+        unexpected_changed = sorted(changed_keys - expected_changed)
+        if unexpected_changed:
+            return {
+                "activation_apply_status": "BLOCKED",
+                "activation_performed": False,
+                "blocking_errors": ["unexpected scheduler config changed keys: " + ", ".join(unexpected_changed)],
+                "plan": plan,
+            }
+        backup_path = backup_dir_path / (
+            f"{config_path.name}.before_taxonomy_activation_{_utc_now().replace(':', '').replace('-', '')}.json"
+        )
+        shutil.copy2(config_path, backup_path)
+        config_summary = {
+            "config_update_requested": True,
+            "config_update_status": "VALIDATED_PENDING_DB",
+            "config_backup_path": str(backup_path),
+            "changed_keys": sorted(changed_keys),
+            "unexpected_changed_keys": "NONE",
         }
 
     conn = _connect_readwrite(analysis_db)
@@ -1049,6 +1748,17 @@ def apply_datacenter_taxonomy_activation(
                 """,
                 (ecosystem_code, proposed_taxonomy_version),
             )
+            if scheduler_config_path is not None and updated_config is not None:
+                try:
+                    write_scheduler_config(str(scheduler_config_path), updated_config)
+                    from rawcandle.scheduler.config import read_scheduler_config
+
+                    read_scheduler_config(str(scheduler_config_path))
+                    config_summary["config_update_status"] = "OK"
+                except Exception:
+                    if backup_path is not None:
+                        shutil.copy2(backup_path, scheduler_config_path)
+                    raise
 
         return {
             "activation_apply_status": "ACTIVE",
@@ -1057,6 +1767,7 @@ def apply_datacenter_taxonomy_activation(
             "taxonomy_version_id": taxonomy_version_id,
             "taxonomy_version_code": proposed_taxonomy_version,
             "plan": plan,
+            "config_activation": config_summary,
         }
     finally:
         conn.close()
@@ -1163,4 +1874,9 @@ def build_apply_activation_parser() -> argparse.ArgumentParser:
     parser = build_activation_plan_parser()
     parser.description = "Guarded Datacenter taxonomy activation boundary"
     parser.add_argument("--confirm-activate-taxonomy-version", required=True)
+    parser.add_argument("--scheduler-config")
+    parser.add_argument("--expected-current-scheduler-taxonomy-version")
+    parser.add_argument("--expected-current-scheduler-taxonomy-csv")
+    parser.add_argument("--target-scheduler-taxonomy-csv")
+    parser.add_argument("--config-backup-dir", default="temp")
     return parser

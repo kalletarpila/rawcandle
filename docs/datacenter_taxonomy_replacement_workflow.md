@@ -41,12 +41,12 @@ The controlled replacement sequence is:
 2. Assign a new immutable taxonomy version code.
 3. Run read-only taxonomy change plan.
 4. Load proposed taxonomy metadata as not active.
-5. Stop affected Datacenter and EC production execution.
-6. Back up production database and scheduler config.
-7. Reset affected DC and EC rebuild state for the ecosystem.
+5. Prepare the taxonomy rebuild deployment.
+6. Stop affected Datacenter and EC production execution.
+7. Back up production database and scheduler config.
 8. Rebuild DC facts from the configured historical start.
-9. Rebuild EC facts for the affected ecosystem.
-10. Run coverage, parity, and replacement validation.
+9. Rebuild DATACENTER EC facts with explicit taxonomy-rebuild mode.
+10. Apply verified rebuild evidence.
 11. Plan activation.
 12. Activate taxonomy and guarded scheduler config in a separate deployment.
 13. Resume scheduler.
@@ -155,6 +155,23 @@ This supports one active watermark set per ecosystem while proving which
 taxonomy produced the current progress. Resetting `DATACENTER` watermarks must
 not affect another ecosystem.
 
+Historical backfill keeps the ordinary 60 calendar day protection. A longer
+range is accepted only through explicit taxonomy-rebuild mode with deployment
+and range confirmations. During taxonomy replacement, EC watermark finalization
+compares both latest date and taxonomy lineage. An equal latest date still
+updates the canonical watermark rows when the lineage changes from V1/NULL to
+V2. Ordinary backfill refuses old or NULL lineage instead of silently replacing
+it.
+
+Canonical EC watermark scopes are:
+
+```text
+TICKER_SWING_BASE -> dc_ticker_swing_signal_daily
+GROUP_SWING_BASE -> dc_group_swing_signal_daily
+SYNTHETIC_OHLC_BASE -> dc_group_synthetic_ohlc_daily
+GROUP_INDEX -> dc_group_index_daily
+```
+
 ## Scheduler Configuration
 
 The active Datacenter taxonomy is configurable with:
@@ -193,12 +210,92 @@ the same gates before marking the proposed taxonomy active, marking the previous
 taxonomy inactive for that ecosystem, and recording activation evidence. It must
 only be run during a separately confirmed deployment step.
 
+When `--scheduler-config` is supplied, activation also updates only these
+taxonomy keys after verifying the config still has the expected V1 state:
+
+```text
+datacenter_taxonomy_csv
+datacenter_taxonomy_version
+ec_source_layer_taxonomy_csv
+ec_source_layer_taxonomy_version
+```
+
+A scheduler config backup is written under `temp/` or the supplied backup
+directory. If config write or validation fails, the database activation
+transaction is rolled back and the config file is restored from the backup.
+
+## Rebuild Preparation and Evidence
+
+The rebuild preparation CLI is:
+
+```bash
+python3 -m rawcandle.cli.prepare_datacenter_taxonomy_rebuild \
+  --analysis-db ... \
+  --ecosystem DATACENTER \
+  --proposed-taxonomy-version DC_TAXONOMY_FULL_V2 \
+  --proposed-taxonomy-csv data/datacenter_taxonomy_full_v2.csv \
+  --deployment-id ... \
+  --expected-active-taxonomy-version DC_TAXONOMY_FULL_V1 \
+  --confirm-proposed-taxonomy-version DC_TAXONOMY_FULL_V2
+```
+
+It records current V1 DC watermark evidence, confirms V2 has not inherited V1
+watermark progress, marks the deployment `REBUILD_IN_PROGRESS`, and does not run
+the Datacenter pipeline.
+
+The evidence CLI is:
+
+```bash
+python3 -m rawcandle.cli.apply_datacenter_taxonomy_rebuild_evidence \
+  --analysis-db ... \
+  --ecosystem DATACENTER \
+  --proposed-taxonomy-version DC_TAXONOMY_FULL_V2 \
+  --proposed-taxonomy-csv data/datacenter_taxonomy_full_v2.csv \
+  --deployment-id ... \
+  --required-signal-date ...
+```
+
+It verifies DC fact heads, EC fact heads, canonical EC watermark lineage,
+coverage status, parity status, mismatch count, and stale-row gates before
+moving the deployment to `READY_TO_ACTIVATE`. Supplied OK values are not trusted
+without matching database evidence.
+
 ## Canonical Replacement Validation
 
 Replacement validation rejects stale taxonomy rows in canonical DC or EC fact
 tables. After replacement, reports must not mix old and new taxonomy rows, group
 rows removed from the new taxonomy must be absent for the affected range, and
 ticker/group counts must match the new taxonomy.
+
+For Datacenter taxonomy replacement, V1 and V2 DC facts may coexist before
+activation because DC fact primary keys include `taxonomy_version`. EC
+DATACENTER facts are a replacement range: old DATACENTER rows in the rebuilt
+range are deleted before V2 rows are loaded, while other ecosystems are left
+untouched.
+
+Known source-data special cases are accepted explicitly:
+
+```text
+CBRS first source date = 2026-05-14
+WYFI first source date = 2025-08-07
+```
+
+No rows are fabricated before the first available source date. Pre-listing or
+short-history dates are not fatal by themselves; Stage 2 uses the established
+`MISSING_AS_OF_DATE` and `INSUFFICIENT_HISTORY` contracts. Unexpected missing
+latest-date source data remains blocking.
+
+## Durable CSV Policy
+
+The repository ignores generated CSVs broadly, but taxonomy source CSV files are
+durable source artifacts. `.gitignore` keeps a narrow exception for:
+
+```text
+data/datacenter_ecosystem_taxonomy_full_v1.csv
+data/datacenter_taxonomy_full_v2.csv
+```
+
+This does not unignore report, export, backup, or generated CSV files.
 
 ## Future UI Contract
 

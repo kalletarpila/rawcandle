@@ -177,6 +177,31 @@ def test_refuses_when_confirm_taxonomy_mismatches(tmp_path: Path, monkeypatch, c
     assert "--confirm-taxonomy-version must exactly match --taxonomy-version" in output
 
 
+def test_taxonomy_rebuild_requires_deployment_and_range_confirmations(tmp_path: Path, monkeypatch) -> None:
+    args = _base_args(tmp_path)
+    monkeypatch.setattr(cli, "plan_ec_source_layer_backfill", lambda **_: _ready_backfill_plan(status="READY_TAXONOMY_REBUILD_PLAN"))
+
+    summary = cli.run_ec_source_layer_backfill(
+        db_path=args[1],
+        ecosystem_code="DATACENTER",
+        taxonomy_version_code="DC_TAXONOMY_FULL_V1",
+        date_from="2026-05-29",
+        date_to="2026-06-04",
+        taxonomy_csv_path=args[11],
+        watchlist_path=args[13],
+        backup_dir=args[15],
+        confirm_db=args[17],
+        confirm_ecosystem=args[19],
+        confirm_taxonomy_version=args[21],
+        taxonomy_rebuild=True,
+    )
+
+    assert summary["status"] == "BACKFILL_REFUSED"
+    assert "--deployment-id is required with --taxonomy-rebuild" in summary["errors"]
+    assert "--confirm-rebuild-start must exactly match --date-from" in summary["errors"]
+    assert "--confirm-rebuild-end must exactly match --date-to" in summary["errors"]
+
+
 def test_refuses_when_backup_dir_missing(tmp_path: Path, monkeypatch, capsys) -> None:
     args = _base_args(tmp_path)
     missing_dir = tmp_path / "missing-backups"
@@ -341,6 +366,103 @@ def test_creates_backup_before_first_write(tmp_path: Path, monkeypatch) -> None:
 
     assert summary["status"] == "BACKFILL_COMPLETED"
     assert call_order == ["backup", "ticker"]
+
+
+def test_taxonomy_rebuild_replacement_is_scoped_to_datacenter(tmp_path: Path, monkeypatch) -> None:
+    args = _base_args(tmp_path)
+    db_path = Path(args[1])
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("DROP TABLE IF EXISTS ec_ecosystem")
+        conn.execute("CREATE TABLE ec_ecosystem (ecosystem_id INTEGER PRIMARY KEY, ecosystem_code TEXT NOT NULL)")
+        conn.execute("CREATE TABLE ec_taxonomy_version (taxonomy_version_id INTEGER PRIMARY KEY, ecosystem_id INTEGER, taxonomy_version_code TEXT)")
+        for table_name in [
+            "ec_ticker_signal_daily",
+            "ec_group_signal_daily",
+            "ec_group_synthetic_ohlc_daily",
+            "ec_group_index_daily",
+        ]:
+            conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+            conn.execute(
+                f"""
+                CREATE TABLE {table_name} (
+                    ecosystem_id INTEGER,
+                    taxonomy_version_id INTEGER,
+                    signal_date TEXT,
+                    marker TEXT
+                )
+                """
+            )
+            conn.executemany(
+                f"INSERT INTO {table_name} VALUES (?, ?, ?, ?)",
+                [
+                    (1, 1, "2026-05-29", "old-datacenter"),
+                    (2, 1, "2026-05-29", "other-ecosystem"),
+                    (1, 1, "2026-01-01", "outside-range"),
+                ],
+            )
+        conn.execute("INSERT INTO ec_ecosystem VALUES (1, 'DATACENTER')")
+        conn.execute("INSERT INTO ec_ecosystem VALUES (2, 'ENERGY')")
+        conn.execute("INSERT INTO ec_taxonomy_version VALUES (2, 1, 'DC_TAXONOMY_FULL_V2')")
+        conn.commit()
+    finally:
+        conn.close()
+
+    monkeypatch.setattr(
+        cli,
+        "plan_ec_source_layer_backfill",
+        lambda **_: _ready_backfill_plan(
+            status="READY_TAXONOMY_REBUILD_PLAN",
+            candidate_dates=[{"date": "2026-05-29", "action": "TAXONOMY_REBUILD_REPLACE"}],
+        ) | {"taxonomy_version_id": 2},
+    )
+    monkeypatch.setattr(cli, "_create_backup", lambda **_: tmp_path / "backups" / "backup.sqlite")
+    monkeypatch.setattr(cli, "load_ec_ticker_signal_daily_from_dc", lambda **_: {"status": "OK"})
+    monkeypatch.setattr(cli, "load_ec_group_signal_daily_from_dc", lambda **_: {"status": "OK"})
+    monkeypatch.setattr(cli, "load_ec_group_synthetic_ohlc_daily_from_dc", lambda **_: {"status": "OK"})
+    monkeypatch.setattr(cli, "load_ec_group_index_daily_from_dc", lambda **_: {"status": "OK"})
+    monkeypatch.setattr(cli, "audit_dc_facts_against_ec_sidecar", lambda **_: {"status": "OK"})
+    monkeypatch.setattr(cli, "audit_dc_ec_fact_parity", lambda **_: {"status": "OK", "total_mismatch_count": 0})
+    monkeypatch.setattr(cli, "_selected_date_row_counts", lambda *_: {
+        "ticker_rows": 0,
+        "group_signal_rows": 0,
+        "synthetic_ohlc_rows": 0,
+        "group_index_rows": 0,
+    })
+    _patch_successful_watermark_finalizer(monkeypatch)
+
+    summary = cli.run_ec_source_layer_backfill(
+        db_path=args[1],
+        ecosystem_code="DATACENTER",
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+        date_from="2026-05-29",
+        date_to="2026-06-04",
+        taxonomy_csv_path=args[11],
+        watchlist_path=args[13],
+        backup_dir=args[15],
+        confirm_db=args[17],
+        confirm_ecosystem=args[19],
+        confirm_taxonomy_version="DC_TAXONOMY_FULL_V2",
+        taxonomy_rebuild=True,
+        deployment_id=7,
+        confirm_rebuild_start="2026-05-29",
+        confirm_rebuild_end="2026-06-04",
+    )
+
+    assert summary["status"] == "BACKFILL_COMPLETED"
+    assert summary["taxonomy_rebuild_ec_scope_summary"]["deleted_row_count"] == 4
+    conn = sqlite3.connect(db_path)
+    try:
+        for table_name in [
+            "ec_ticker_signal_daily",
+            "ec_group_signal_daily",
+            "ec_group_synthetic_ohlc_daily",
+            "ec_group_index_daily",
+        ]:
+            rows = conn.execute(f"SELECT ecosystem_id, marker FROM {table_name} ORDER BY ecosystem_id, marker").fetchall()
+            assert rows == [(1, "outside-range"), (2, "other-ecosystem")]
+    finally:
+        conn.close()
 
 
 def test_ready_backfill_with_watchlist_drift_executes_without_membership_write(tmp_path: Path, monkeypatch) -> None:

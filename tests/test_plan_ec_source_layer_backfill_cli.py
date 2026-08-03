@@ -454,6 +454,106 @@ def test_invalid_date_range_blocks(tmp_path: Path) -> None:
     assert summary["status"] == "BLOCKED_INVALID_DATE_RANGE"
 
 
+def test_normal_backfill_blocks_ranges_over_60_days(tmp_path: Path) -> None:
+    db_path, taxonomy_path, watchlist_path = _create_fixture(tmp_path)
+    summary = plan_ec_source_layer_backfill(
+        db_path=str(db_path),
+        ecosystem_code="DATACENTER",
+        taxonomy_version_code=TAXONOMY_VERSION,
+        date_from="2026-01-01",
+        date_to=LATEST_SOURCE_DATE,
+        taxonomy_csv_path=str(taxonomy_path),
+        watchlist_path=str(watchlist_path),
+    )
+
+    assert summary["status"] == "BLOCKED_INVALID_DATE_RANGE"
+    assert summary["rebuild_mode"] == "ORDINARY_BACKFILL"
+
+
+def test_taxonomy_rebuild_plan_accepts_full_range_with_deployment(tmp_path: Path) -> None:
+    db_path, taxonomy_path, watchlist_path = _create_fixture(tmp_path)
+    v2_path = tmp_path / "taxonomy_v2.csv"
+    text = taxonomy_path.read_text(encoding="utf-8").replace(TAXONOMY_VERSION, "DC_TAXONOMY_FULL_V2")
+    v2_path.write_text(text, encoding="utf-8")
+    source_hash = _compute_source_hash(v2_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        for table_name in [
+            "dc_ticker_swing_signal_daily",
+            "dc_group_swing_signal_daily",
+            "dc_group_synthetic_ohlc_daily",
+            "dc_group_index_daily",
+        ]:
+            conn.execute(f"UPDATE {table_name} SET taxonomy_version = 'DC_TAXONOMY_FULL_V2'")
+        conn.execute(
+            "INSERT INTO ec_taxonomy_version VALUES (?, 1, ?, ?, ?, 'INACTIVE', 0)",
+            (2, "DC_TAXONOMY_FULL_V2", str(v2_path), source_hash),
+        )
+        conn.execute(
+            """
+            CREATE TABLE ec_taxonomy_change_deployment (
+                taxonomy_change_id INTEGER PRIMARY KEY,
+                ecosystem_code TEXT NOT NULL,
+                previous_taxonomy_version TEXT NOT NULL,
+                proposed_taxonomy_version TEXT NOT NULL,
+                source_reference TEXT NOT NULL,
+                source_sha256 TEXT NOT NULL,
+                change_summary TEXT NOT NULL,
+                added_ticker_count INTEGER NOT NULL,
+                removed_ticker_count INTEGER NOT NULL,
+                membership_change_count INTEGER NOT NULL,
+                group_change_count INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                rebuild_required INTEGER NOT NULL,
+                rebuild_start_date TEXT NOT NULL,
+                activation_status TEXT NOT NULL DEFAULT 'NOT_ACTIVE'
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO ec_taxonomy_change_deployment (
+                taxonomy_change_id, ecosystem_code, previous_taxonomy_version,
+                proposed_taxonomy_version, source_reference, source_sha256,
+                change_summary, added_ticker_count, removed_ticker_count,
+                membership_change_count, group_change_count, status,
+                rebuild_required, rebuild_start_date
+            ) VALUES (7, 'DATACENTER', ?, 'DC_TAXONOMY_FULL_V2', ?, ?,
+                      '{}', 0, 0, 0, 0, 'LOADED_NOT_ACTIVE', 1, '2025-08-01')
+            """,
+            (TAXONOMY_VERSION, str(v2_path), source_hash),
+        )
+        conn.execute(
+            """
+            INSERT INTO ec_membership (
+                taxonomy_version_id, parent_entity_id, child_entity_id, membership_type, is_primary
+            )
+            SELECT 2, parent_entity_id, child_entity_id, membership_type, is_primary
+            FROM ec_membership
+            WHERE taxonomy_version_id = 1
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    summary = plan_ec_source_layer_backfill(
+        db_path=str(db_path),
+        ecosystem_code="DATACENTER",
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+        date_from="2026-01-01",
+        date_to=LATEST_SOURCE_DATE,
+        taxonomy_csv_path=str(v2_path),
+        watchlist_path=str(watchlist_path),
+        taxonomy_rebuild=True,
+        deployment_id=7,
+    )
+
+    assert summary["status"] == "READY_TAXONOMY_REBUILD_PLAN"
+    assert summary["rebuild_mode"] == "TAXONOMY_FULL_REBUILD"
+    assert summary["deployment_id"] == 7
+
+
 def test_aligned_missing_dates_produce_ready_plan(tmp_path: Path, capsys) -> None:
     db_path, taxonomy_path, watchlist_path = _create_fixture(tmp_path)
     exit_code = main(_base_args(db_path, taxonomy_path, watchlist_path))
