@@ -59,6 +59,59 @@ def _write_taxonomy_csv(path: Path) -> None:
         writer.writerows(_taxonomy_rows())
 
 
+def _write_taxonomy_csv_for_counts(
+    path: Path,
+    *,
+    taxonomy_version: str,
+    ticker_count: int,
+    secondary_count: int,
+) -> None:
+    layers = _layers()
+    subindustries = _subindustries()
+    rows: list[list[object]] = []
+    for index in range(ticker_count):
+        rows.append(
+            [
+                taxonomy_version,
+                _ticker(index + 1),
+                layers[index % len(layers)],
+                subindustries[index % len(subindustries)],
+                "CORE",
+                1,
+                1.0,
+                "",
+            ]
+        )
+    for index in range(secondary_count):
+        rows.append(
+            [
+                taxonomy_version,
+                _ticker(index + 1),
+                layers[(index + 5) % len(layers)],
+                subindustries[(index + 7) % len(subindustries)],
+                "SECONDARY",
+                0,
+                0.5,
+                "",
+            ]
+        )
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(
+            [
+                "taxonomy_version",
+                "ticker",
+                "layer",
+                "subindustry",
+                "report_group_status",
+                "is_primary",
+                "role_weight",
+                "notes",
+            ]
+        )
+        writer.writerows(rows)
+
+
 def _watchlist_tickers() -> list[str]:
     return [_ticker(index + 1) for index in range(15)] + ["CRGY"]
 
@@ -405,6 +458,139 @@ def _create_fixture(
     return db_path, taxonomy_path, watchlist_path
 
 
+def _install_proposed_taxonomy_rebuild_fixture(
+    db_path: Path,
+    taxonomy_path: Path,
+    *,
+    taxonomy_version: str,
+    deployment_id: int,
+    ticker_count: int,
+    secondary_count: int,
+    deployment_status: str = "VALIDATION_REQUIRED",
+    activation_status: str = "NOT_ACTIVE",
+) -> Path:
+    proposed_path = taxonomy_path.parent / f"{taxonomy_version.lower()}.csv"
+    _write_taxonomy_csv_for_counts(
+        proposed_path,
+        taxonomy_version=taxonomy_version,
+        ticker_count=ticker_count,
+        secondary_count=secondary_count,
+    )
+    source_hash = _compute_source_hash(proposed_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO ec_taxonomy_version VALUES (?, 1, ?, ?, ?, 'INACTIVE', 0)",
+            (2, taxonomy_version, str(proposed_path), source_hash),
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ec_taxonomy_change_deployment (
+                taxonomy_change_id INTEGER PRIMARY KEY,
+                ecosystem_code TEXT NOT NULL,
+                previous_taxonomy_version TEXT NOT NULL,
+                proposed_taxonomy_version TEXT NOT NULL,
+                source_reference TEXT NOT NULL,
+                source_sha256 TEXT NOT NULL,
+                change_summary TEXT NOT NULL,
+                added_ticker_count INTEGER NOT NULL,
+                removed_ticker_count INTEGER NOT NULL,
+                membership_change_count INTEGER NOT NULL,
+                group_change_count INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                rebuild_required INTEGER NOT NULL,
+                rebuild_start_date TEXT NOT NULL,
+                activation_status TEXT NOT NULL DEFAULT 'NOT_ACTIVE',
+                dc_rebuild_status TEXT NOT NULL DEFAULT 'OK',
+                ec_rebuild_status TEXT NOT NULL DEFAULT 'FAILED'
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO ec_taxonomy_change_deployment (
+                taxonomy_change_id, ecosystem_code, previous_taxonomy_version,
+                proposed_taxonomy_version, source_reference, source_sha256,
+                change_summary, added_ticker_count, removed_ticker_count,
+                membership_change_count, group_change_count, status,
+                rebuild_required, rebuild_start_date, activation_status
+            ) VALUES (?, 'DATACENTER', ?, ?, ?, ?, '{}', 0, 0, 0, 0, ?, 1,
+                      '2025-08-01', ?)
+            """,
+            (deployment_id, TAXONOMY_VERSION, taxonomy_version, str(proposed_path), source_hash, deployment_status, activation_status),
+        )
+        conn.execute(
+            """
+            INSERT INTO ec_membership (
+                taxonomy_version_id, parent_entity_id, child_entity_id, membership_type, is_primary
+            )
+            SELECT 2, parent_entity_id, child_entity_id, membership_type, is_primary
+            FROM ec_membership
+            WHERE taxonomy_version_id = 1
+              AND child_entity_id IN (
+                  SELECT entity_id FROM ec_entity WHERE entity_type = 'GROUP_L2'
+              )
+            """
+        )
+        next_entity_id = int(conn.execute("SELECT COALESCE(MAX(entity_id), 0) + 1 FROM ec_entity").fetchone()[0])
+        subindustry_ids = {
+            str(row[0]): int(row[1])
+            for row in conn.execute("SELECT entity_name, entity_id FROM ec_entity WHERE entity_type = 'GROUP_L2'")
+        }
+        subindustries = _subindustries()
+        for index in range(ticker_count):
+            entity_id = next_entity_id + index
+            ticker = _ticker(index + 1)
+            conn.execute(
+                "INSERT INTO ec_entity VALUES (?, 1, 'TICKER', ?, ?, ?, 'ACTIVE')",
+                (entity_id, ticker, ticker, ticker),
+            )
+            primary_subindustry = subindustries[index % len(subindustries)]
+            conn.execute(
+                "INSERT INTO ec_membership VALUES (NULL, 2, ?, ?, 'CONTAINS', 1)",
+                (subindustry_ids[primary_subindustry], entity_id),
+            )
+            if index < secondary_count:
+                secondary_subindustry = subindustries[(index + 7) % len(subindustries)]
+                conn.execute(
+                    "INSERT INTO ec_membership VALUES (NULL, 2, ?, ?, 'CONTAINS', 0)",
+                    (subindustry_ids[secondary_subindustry], entity_id),
+                )
+        layers = _layers()
+        for fact_date in [LATEST_SOURCE_DATE]:
+            conn.executemany(
+                "INSERT INTO dc_ticker_swing_signal_daily VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (
+                        fact_date,
+                        taxonomy_version,
+                        _ticker(index + 1),
+                        layers[index % len(layers)],
+                        subindustries[index % len(subindustries)],
+                        "DC_SWING_SIGNAL_V1",
+                        "RUN_TICKER_V2",
+                        "2026-06-07T00:00:00Z",
+                    )
+                    for index in range(ticker_count)
+                ],
+            )
+            group_rows = [(fact_date, taxonomy_version, "ecosystem", "DC_ECOSYSTEM_TOTAL", "DC_SWING_SIGNAL_V1", "RUN_GROUP_V2", "2026-06-07T00:00:00Z")]
+            group_rows.extend((fact_date, taxonomy_version, "layer", layer, "DC_SWING_SIGNAL_V1", "RUN_GROUP_V2", "2026-06-07T00:00:00Z") for layer in layers)
+            group_rows.extend((fact_date, taxonomy_version, "subindustry", subindustry, "DC_SWING_SIGNAL_V1", "RUN_GROUP_V2", "2026-06-07T00:00:00Z") for subindustry in subindustries)
+            conn.executemany("INSERT INTO dc_group_swing_signal_daily VALUES (?, ?, ?, ?, ?, ?, ?)", group_rows)
+            synth_rows = [(fact_date, taxonomy_version, "layer", layer, "DC_SWING_OHLC_V1", "RUN_SYNTH_V2", "2026-06-07T00:00:00Z") for layer in layers]
+            synth_rows.extend((fact_date, taxonomy_version, "subindustry", subindustry, "DC_SWING_OHLC_V1", "RUN_SYNTH_V2", "2026-06-07T00:00:00Z") for subindustry in subindustries)
+            conn.executemany("INSERT INTO dc_group_synthetic_ohlc_daily VALUES (?, ?, ?, ?, ?, ?, ?)", synth_rows)
+            index_rows = [(fact_date, taxonomy_version, "ecosystem", "DC_ECOSYSTEM_TOTAL", "DC_INDEX_CALC_V1", "RUN_INDEX_V2", "2026-06-07T00:00:00Z")]
+            index_rows.extend((fact_date, taxonomy_version, "layer", layer, "DC_INDEX_CALC_V1", "RUN_INDEX_V2", "2026-06-07T00:00:00Z") for layer in layers)
+            index_rows.extend((fact_date, taxonomy_version, "subindustry", subindustry, "DC_INDEX_CALC_V1", "RUN_INDEX_V2", "2026-06-07T00:00:00Z") for subindustry in subindustries)
+            conn.executemany("INSERT INTO dc_group_index_daily VALUES (?, ?, ?, ?, ?, ?, ?)", index_rows)
+        conn.commit()
+    finally:
+        conn.close()
+    return proposed_path
+
+
 def _base_args(db_path: Path, taxonomy_path: Path, watchlist_path: Path) -> list[str]:
     return [
         "--db",
@@ -552,6 +738,310 @@ def test_taxonomy_rebuild_plan_accepts_full_range_with_deployment(tmp_path: Path
     assert summary["status"] == "READY_TAXONOMY_REBUILD_PLAN"
     assert summary["rebuild_mode"] == "TAXONOMY_FULL_REBUILD"
     assert summary["deployment_id"] == 7
+
+
+def test_taxonomy_rebuild_uses_proposed_v2_counts_not_active_v1_counts(tmp_path: Path) -> None:
+    db_path, taxonomy_path, watchlist_path = _create_fixture(tmp_path)
+    v2_path = _install_proposed_taxonomy_rebuild_fixture(
+        db_path,
+        taxonomy_path,
+        taxonomy_version="DC_TAXONOMY_FULL_V2",
+        deployment_id=7,
+        ticker_count=257,
+        secondary_count=93,
+    )
+
+    summary = plan_ec_source_layer_backfill(
+        db_path=str(db_path),
+        ecosystem_code="DATACENTER",
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+        date_from=LATEST_SOURCE_DATE,
+        date_to=LATEST_SOURCE_DATE,
+        taxonomy_csv_path=str(v2_path),
+        watchlist_path=str(watchlist_path),
+        taxonomy_rebuild=True,
+        deployment_id=7,
+    )
+
+    assert summary["status"] == "READY_TAXONOMY_REBUILD_PLAN"
+    compatibility = summary["compatibility_summary"]
+    assert compatibility["taxonomy_validation_mode"] == "PROPOSED_TAXONOMY_REBUILD"
+    assert compatibility["taxonomy_expected_source"] == "LOADED_PROPOSED_TAXONOMY"
+    assert compatibility["taxonomy_expected_version"] == "DC_TAXONOMY_FULL_V2"
+    assert compatibility["taxonomy_expected_row_count"] == 350
+    assert compatibility["taxonomy_actual_row_count"] == 350
+    assert compatibility["taxonomy_expected_ticker_count"] == 257
+    assert compatibility["taxonomy_actual_ticker_count"] == 257
+    assert compatibility["taxonomy_expected_layer_count"] == 16
+    assert compatibility["taxonomy_actual_layer_count"] == 16
+    assert compatibility["taxonomy_expected_subindustry_count"] == 37
+    assert compatibility["taxonomy_actual_subindustry_count"] == 37
+    assert compatibility["taxonomy_expected_primary_membership_count"] == 257
+    assert compatibility["taxonomy_expected_secondary_membership_count"] == 93
+    assert compatibility["taxonomy_source_match"] is True
+    assert compatibility["taxonomy_source_error"] == "NONE"
+
+
+def test_ordinary_backfill_still_blocks_v2_counts_against_active_v1_policy(tmp_path: Path) -> None:
+    db_path, taxonomy_path, watchlist_path = _create_fixture(tmp_path)
+    v2_path = _install_proposed_taxonomy_rebuild_fixture(
+        db_path,
+        taxonomy_path,
+        taxonomy_version="DC_TAXONOMY_FULL_V2",
+        deployment_id=7,
+        ticker_count=257,
+        secondary_count=93,
+    )
+
+    summary = plan_ec_source_layer_backfill(
+        db_path=str(db_path),
+        ecosystem_code="DATACENTER",
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+        date_from=LATEST_SOURCE_DATE,
+        date_to=LATEST_SOURCE_DATE,
+        taxonomy_csv_path=str(v2_path),
+        watchlist_path=str(watchlist_path),
+    )
+
+    assert summary["status"] == "BLOCKED_TAXONOMY_SOURCE"
+    compatibility = summary["compatibility_summary"]
+    assert compatibility["taxonomy_validation_mode"] == "ACTIVE_TAXONOMY"
+    assert compatibility["taxonomy_expected_row_count"] == 329
+    assert compatibility["taxonomy_actual_row_count"] == 350
+    assert compatibility["taxonomy_expected_ticker_count"] == 236
+    assert compatibility["taxonomy_actual_ticker_count"] == 257
+
+
+def test_taxonomy_rebuild_future_counts_are_derived_dynamically(tmp_path: Path) -> None:
+    db_path, taxonomy_path, watchlist_path = _create_fixture(tmp_path)
+    v3_path = _install_proposed_taxonomy_rebuild_fixture(
+        db_path,
+        taxonomy_path,
+        taxonomy_version="DC_TAXONOMY_FULL_V3",
+        deployment_id=8,
+        ticker_count=240,
+        secondary_count=10,
+    )
+
+    summary = plan_ec_source_layer_backfill(
+        db_path=str(db_path),
+        ecosystem_code="DATACENTER",
+        taxonomy_version_code="DC_TAXONOMY_FULL_V3",
+        date_from=LATEST_SOURCE_DATE,
+        date_to=LATEST_SOURCE_DATE,
+        taxonomy_csv_path=str(v3_path),
+        watchlist_path=str(watchlist_path),
+        taxonomy_rebuild=True,
+        deployment_id=8,
+    )
+
+    assert summary["status"] == "READY_TAXONOMY_REBUILD_PLAN"
+    compatibility = summary["compatibility_summary"]
+    assert compatibility["taxonomy_expected_row_count"] == 250
+    assert compatibility["taxonomy_actual_row_count"] == 250
+    assert compatibility["taxonomy_expected_ticker_count"] == 240
+    assert compatibility["taxonomy_actual_ticker_count"] == 240
+    assert compatibility["taxonomy_expected_secondary_membership_count"] == 10
+
+
+def test_taxonomy_rebuild_source_hash_mismatch_blocks(tmp_path: Path) -> None:
+    db_path, taxonomy_path, watchlist_path = _create_fixture(tmp_path)
+    v2_path = _install_proposed_taxonomy_rebuild_fixture(
+        db_path,
+        taxonomy_path,
+        taxonomy_version="DC_TAXONOMY_FULL_V2",
+        deployment_id=7,
+        ticker_count=257,
+        secondary_count=93,
+    )
+    rows = list(csv.reader(v2_path.open("r", encoding="utf-8", newline="")))
+    rows[1][-1] = "changed hash without changing counts"
+    with v2_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerows(rows)
+
+    summary = plan_ec_source_layer_backfill(
+        db_path=str(db_path),
+        ecosystem_code="DATACENTER",
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+        date_from=LATEST_SOURCE_DATE,
+        date_to=LATEST_SOURCE_DATE,
+        taxonomy_csv_path=str(v2_path),
+        watchlist_path=str(watchlist_path),
+        taxonomy_rebuild=True,
+        deployment_id=7,
+    )
+
+    assert summary["status"] == "BLOCKED_TAXONOMY_SOURCE"
+    assert summary["compatibility_summary"]["taxonomy_source_match"] is False
+    assert "source taxonomy hash differs" in summary["compatibility_summary"]["taxonomy_source_error"]
+
+
+def test_taxonomy_rebuild_loaded_metadata_count_mismatch_blocks(tmp_path: Path) -> None:
+    db_path, taxonomy_path, watchlist_path = _create_fixture(tmp_path)
+    v2_path = _install_proposed_taxonomy_rebuild_fixture(
+        db_path,
+        taxonomy_path,
+        taxonomy_version="DC_TAXONOMY_FULL_V2",
+        deployment_id=7,
+        ticker_count=257,
+        secondary_count=93,
+    )
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            DELETE FROM ec_membership
+            WHERE taxonomy_version_id = 2
+              AND child_entity_id IN (
+                  SELECT entity_id FROM ec_entity WHERE entity_type = 'TICKER'
+              )
+              AND is_primary = 0
+              AND rowid = (
+                  SELECT MIN(rowid)
+                  FROM ec_membership
+                  WHERE taxonomy_version_id = 2 AND is_primary = 0
+              )
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    summary = plan_ec_source_layer_backfill(
+        db_path=str(db_path),
+        ecosystem_code="DATACENTER",
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+        date_from=LATEST_SOURCE_DATE,
+        date_to=LATEST_SOURCE_DATE,
+        taxonomy_csv_path=str(v2_path),
+        watchlist_path=str(watchlist_path),
+        taxonomy_rebuild=True,
+        deployment_id=7,
+    )
+
+    assert summary["status"] == "BLOCKED_TAXONOMY_SOURCE"
+    assert "secondary_membership_count" in summary["compatibility_summary"]["taxonomy_source_error"]
+
+
+def test_taxonomy_rebuild_deployment_version_mismatch_blocks(tmp_path: Path) -> None:
+    db_path, taxonomy_path, watchlist_path = _create_fixture(tmp_path)
+    v2_path = _install_proposed_taxonomy_rebuild_fixture(
+        db_path,
+        taxonomy_path,
+        taxonomy_version="DC_TAXONOMY_FULL_V2",
+        deployment_id=7,
+        ticker_count=257,
+        secondary_count=93,
+    )
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "UPDATE ec_taxonomy_change_deployment SET proposed_taxonomy_version = 'DC_TAXONOMY_FULL_OTHER' WHERE taxonomy_change_id = 7"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    summary = plan_ec_source_layer_backfill(
+        db_path=str(db_path),
+        ecosystem_code="DATACENTER",
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+        date_from=LATEST_SOURCE_DATE,
+        date_to=LATEST_SOURCE_DATE,
+        taxonomy_csv_path=str(v2_path),
+        watchlist_path=str(watchlist_path),
+        taxonomy_rebuild=True,
+        deployment_id=7,
+    )
+
+    assert summary["status"] == "BLOCKED_TAXONOMY_REBUILD_DEPLOYMENT"
+    assert "deployment proposed taxonomy does not match" in summary["error"]
+
+
+def test_taxonomy_rebuild_missing_deployment_blocks(tmp_path: Path) -> None:
+    db_path, taxonomy_path, watchlist_path = _create_fixture(tmp_path)
+    v2_path = _install_proposed_taxonomy_rebuild_fixture(
+        db_path,
+        taxonomy_path,
+        taxonomy_version="DC_TAXONOMY_FULL_V2",
+        deployment_id=7,
+        ticker_count=257,
+        secondary_count=93,
+    )
+
+    summary = plan_ec_source_layer_backfill(
+        db_path=str(db_path),
+        ecosystem_code="DATACENTER",
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+        date_from=LATEST_SOURCE_DATE,
+        date_to=LATEST_SOURCE_DATE,
+        taxonomy_csv_path=str(v2_path),
+        watchlist_path=str(watchlist_path),
+        taxonomy_rebuild=True,
+        deployment_id=99,
+    )
+
+    assert summary["status"] == "BLOCKED_TAXONOMY_REBUILD_DEPLOYMENT"
+    assert "taxonomy deployment row not found" in summary["error"]
+
+
+def test_taxonomy_rebuild_retry_from_failed_deployment_is_accepted(tmp_path: Path) -> None:
+    db_path, taxonomy_path, watchlist_path = _create_fixture(tmp_path)
+    v2_path = _install_proposed_taxonomy_rebuild_fixture(
+        db_path,
+        taxonomy_path,
+        taxonomy_version="DC_TAXONOMY_FULL_V2",
+        deployment_id=7,
+        ticker_count=257,
+        secondary_count=93,
+        deployment_status="VALIDATION_REQUIRED",
+        activation_status="NOT_ACTIVE",
+    )
+
+    summary = plan_ec_source_layer_backfill(
+        db_path=str(db_path),
+        ecosystem_code="DATACENTER",
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+        date_from=LATEST_SOURCE_DATE,
+        date_to=LATEST_SOURCE_DATE,
+        taxonomy_csv_path=str(v2_path),
+        watchlist_path=str(watchlist_path),
+        taxonomy_rebuild=True,
+        deployment_id=7,
+    )
+
+    assert summary["status"] == "READY_TAXONOMY_REBUILD_PLAN"
+    assert summary["deployment_summary"]["deployment"]["ec_rebuild_status"] == "FAILED"
+
+
+def test_taxonomy_rebuild_active_deployment_is_rejected(tmp_path: Path) -> None:
+    db_path, taxonomy_path, watchlist_path = _create_fixture(tmp_path)
+    v2_path = _install_proposed_taxonomy_rebuild_fixture(
+        db_path,
+        taxonomy_path,
+        taxonomy_version="DC_TAXONOMY_FULL_V2",
+        deployment_id=7,
+        ticker_count=257,
+        secondary_count=93,
+        deployment_status="READY_TO_ACTIVATE",
+        activation_status="ACTIVE",
+    )
+
+    summary = plan_ec_source_layer_backfill(
+        db_path=str(db_path),
+        ecosystem_code="DATACENTER",
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+        date_from=LATEST_SOURCE_DATE,
+        date_to=LATEST_SOURCE_DATE,
+        taxonomy_csv_path=str(v2_path),
+        watchlist_path=str(watchlist_path),
+        taxonomy_rebuild=True,
+        deployment_id=7,
+    )
+
+    assert summary["status"] == "BLOCKED_TAXONOMY_REBUILD_DEPLOYMENT"
+    assert "deployment is already active" in summary["error"]
 
 
 def test_aligned_missing_dates_produce_ready_plan(tmp_path: Path, capsys) -> None:

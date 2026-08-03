@@ -306,6 +306,99 @@ def _fetch_loaded_taxonomy_state(conn, ecosystem_code: str, taxonomy_version_cod
     }
 
 
+def _loaded_taxonomy_source_counts(
+    conn,
+    *,
+    ecosystem_id: int,
+    taxonomy_version_id: int,
+) -> dict[str, int]:
+    membership_columns = _table_columns(conn, "ec_membership")
+    ecosystem_predicate = "AND m.ecosystem_id = ?" if "ecosystem_id" in membership_columns else ""
+    params: tuple[object, ...] = (
+        (taxonomy_version_id, ecosystem_id)
+        if "ecosystem_id" in membership_columns
+        else (taxonomy_version_id,)
+    )
+    rows = conn.execute(
+        f"""
+        SELECT
+            COUNT(*) AS row_count,
+            COUNT(DISTINCT child.entity_code) AS distinct_ticker_count,
+            COUNT(DISTINCT parent_l1.entity_name) AS distinct_layer_count,
+            COUNT(DISTINCT parent_l2.entity_name) AS distinct_subindustry_count,
+            SUM(CASE WHEN COALESCE(m.is_primary, 0) = 1 THEN 1 ELSE 0 END) AS primary_membership_count,
+            SUM(CASE WHEN COALESCE(m.is_primary, 0) = 0 THEN 1 ELSE 0 END) AS secondary_membership_count
+        FROM ec_membership m
+        JOIN ec_entity child ON child.entity_id = m.child_entity_id
+        JOIN ec_entity parent_l2 ON parent_l2.entity_id = m.parent_entity_id
+        JOIN ec_membership layer_membership
+          ON layer_membership.child_entity_id = parent_l2.entity_id
+         AND layer_membership.taxonomy_version_id = m.taxonomy_version_id
+        JOIN ec_entity parent_l1 ON parent_l1.entity_id = layer_membership.parent_entity_id
+        WHERE m.taxonomy_version_id = ?
+          {ecosystem_predicate}
+          AND child.entity_type = 'TICKER'
+          AND parent_l2.entity_type = 'GROUP_L2'
+          AND parent_l1.entity_type = 'GROUP_L1'
+        """,
+        params,
+    ).fetchone()
+    return {
+        "row_count": int(rows["row_count"] or 0),
+        "distinct_ticker_count": int(rows["distinct_ticker_count"] or 0),
+        "distinct_layer_count": int(rows["distinct_layer_count"] or 0),
+        "distinct_subindustry_count": int(rows["distinct_subindustry_count"] or 0),
+        "primary_membership_count": int(rows["primary_membership_count"] or 0),
+        "secondary_membership_count": int(rows["secondary_membership_count"] or 0),
+    }
+
+
+def _taxonomy_summary_counts(taxonomy_summary: dict[str, object]) -> dict[str, int]:
+    return {
+        "row_count": int(taxonomy_summary.get("row_count", 0) or 0),
+        "distinct_ticker_count": int(taxonomy_summary.get("distinct_ticker_count", 0) or 0),
+        "distinct_layer_count": int(taxonomy_summary.get("distinct_layer_count", 0) or 0),
+        "distinct_subindustry_count": int(taxonomy_summary.get("distinct_subindustry_count", 0) or 0),
+        "primary_membership_count": int(taxonomy_summary.get("primary_membership_count", 0) or 0),
+        "secondary_membership_count": int(taxonomy_summary.get("secondary_membership_count", 0) or 0),
+    }
+
+
+def _taxonomy_source_diagnostics(
+    *,
+    validation_mode: str,
+    expected_source: str,
+    expected_version: str,
+    expected_sha256: str | None,
+    expected_counts: dict[str, int],
+    actual_counts: dict[str, int],
+    source_hash: str,
+    source_match: bool,
+    source_error: str | None,
+) -> dict[str, object]:
+    return {
+        "taxonomy_validation_mode": validation_mode,
+        "taxonomy_expected_source": expected_source,
+        "taxonomy_expected_version": expected_version,
+        "taxonomy_expected_sha256": expected_sha256,
+        "taxonomy_actual_sha256": source_hash,
+        "taxonomy_expected_row_count": expected_counts.get("row_count"),
+        "taxonomy_actual_row_count": actual_counts.get("row_count"),
+        "taxonomy_expected_ticker_count": expected_counts.get("distinct_ticker_count"),
+        "taxonomy_actual_ticker_count": actual_counts.get("distinct_ticker_count"),
+        "taxonomy_expected_layer_count": expected_counts.get("distinct_layer_count"),
+        "taxonomy_actual_layer_count": actual_counts.get("distinct_layer_count"),
+        "taxonomy_expected_subindustry_count": expected_counts.get("distinct_subindustry_count"),
+        "taxonomy_actual_subindustry_count": actual_counts.get("distinct_subindustry_count"),
+        "taxonomy_expected_primary_membership_count": expected_counts.get("primary_membership_count"),
+        "taxonomy_actual_primary_membership_count": actual_counts.get("primary_membership_count"),
+        "taxonomy_expected_secondary_membership_count": expected_counts.get("secondary_membership_count"),
+        "taxonomy_actual_secondary_membership_count": actual_counts.get("secondary_membership_count"),
+        "taxonomy_source_match": source_match,
+        "taxonomy_source_error": source_error or "NONE",
+    }
+
+
 def _collect_loaded_watchlist_tickers(conn, ecosystem_code: str) -> list[str]:
     watchlist_columns = _table_columns(conn, "ec_watchlist")
     watchlist_member_columns = _table_columns(conn, "ec_watchlist_member")
@@ -339,6 +432,8 @@ def _check_taxonomy_watchlist_compatibility(
     taxonomy_version_code: str,
     taxonomy_summary: dict[str, object],
     watchlist_summary: dict[str, object],
+    taxonomy_rebuild: bool = False,
+    deployment_summary: dict[str, object] | None = None,
 ) -> dict[str, object]:
     loaded_taxonomy = _fetch_loaded_taxonomy_state(conn, ecosystem_code, taxonomy_version_code)
     if not loaded_taxonomy.get("present"):
@@ -348,22 +443,103 @@ def _check_taxonomy_watchlist_compatibility(
             "error": f"loaded ec_taxonomy_version missing for ecosystem {ecosystem_code!r} and taxonomy_version {taxonomy_version_code!r}",
         }
 
+    source_hash = _compute_source_hash(Path(str(taxonomy_summary["path"])))
+    actual_counts = _taxonomy_summary_counts(taxonomy_summary)
+    if taxonomy_rebuild:
+        deployment = (
+            deployment_summary.get("deployment", {})
+            if isinstance(deployment_summary, dict)
+            else {}
+        )
+        loaded_counts = _loaded_taxonomy_source_counts(
+            conn,
+            ecosystem_id=int(loaded_taxonomy["ecosystem_id"]),
+            taxonomy_version_id=int(loaded_taxonomy["taxonomy_version_id"]),
+        )
+        expected_source = "LOADED_PROPOSED_TAXONOMY"
+        expected_sha = str(loaded_taxonomy.get("source_hash") or "")
+        errors: list[str] = []
+        if str(loaded_taxonomy.get("taxonomy_version_code")) != taxonomy_version_code:
+            errors.append("loaded proposed taxonomy version does not match requested taxonomy")
+        if deployment:
+            if str(deployment.get("proposed_taxonomy_version")) != taxonomy_version_code:
+                errors.append("deployment proposed taxonomy does not match requested taxonomy")
+            if str(deployment.get("source_sha256") or "") != expected_sha:
+                errors.append("deployment source SHA-256 does not match loaded proposed taxonomy")
+        if expected_sha and expected_sha != source_hash:
+            errors.append("source taxonomy hash differs from loaded proposed ec_taxonomy_version.source_hash")
+        for key, expected_value in loaded_counts.items():
+            actual_value = actual_counts.get(key)
+            if actual_value != expected_value:
+                errors.append(
+                    f"taxonomy {key} expected {expected_value} but got {actual_value}"
+                )
+        diagnostics = _taxonomy_source_diagnostics(
+            validation_mode="PROPOSED_TAXONOMY_REBUILD",
+            expected_source=expected_source,
+            expected_version=taxonomy_version_code,
+            expected_sha256=expected_sha or None,
+            expected_counts=loaded_counts,
+            actual_counts=actual_counts,
+            source_hash=source_hash,
+            source_match=not errors,
+            source_error="; ".join(errors) if errors else None,
+        )
+        if errors:
+            return {
+                "status": "BLOCKED_TAXONOMY_SOURCE",
+                "loaded_taxonomy": loaded_taxonomy,
+                "source_hash_match": expected_sha == source_hash if expected_sha else None,
+                "loaded_source_hash": expected_sha or None,
+                "source_hash": source_hash,
+                "error": "; ".join(errors),
+                **diagnostics,
+            }
+    else:
+        expected_counts = {
+            "row_count": EXPECTED_TAXONOMY_ROW_COUNT,
+            "distinct_ticker_count": EXPECTED_TAXONOMY_TICKER_COUNT,
+            "distinct_layer_count": EXPECTED_TAXONOMY_LAYER_COUNT,
+            "distinct_subindustry_count": EXPECTED_TAXONOMY_SUBINDUSTRY_COUNT,
+            "primary_membership_count": actual_counts.get("primary_membership_count", 0),
+            "secondary_membership_count": actual_counts.get("secondary_membership_count", 0),
+        }
+        errors: list[str] = []
+        if actual_counts["row_count"] != EXPECTED_TAXONOMY_ROW_COUNT:
+            errors.append(f"taxonomy row_count expected {EXPECTED_TAXONOMY_ROW_COUNT} but got {taxonomy_summary.get('row_count')}")
+        if actual_counts["distinct_ticker_count"] != EXPECTED_TAXONOMY_TICKER_COUNT:
+            errors.append(
+                f"taxonomy distinct_ticker_count expected {EXPECTED_TAXONOMY_TICKER_COUNT} but got {taxonomy_summary.get('distinct_ticker_count')}"
+            )
+        if actual_counts["distinct_layer_count"] != EXPECTED_TAXONOMY_LAYER_COUNT:
+            errors.append(
+                f"taxonomy distinct_layer_count expected {EXPECTED_TAXONOMY_LAYER_COUNT} but got {taxonomy_summary.get('distinct_layer_count')}"
+            )
+        if actual_counts["distinct_subindustry_count"] != EXPECTED_TAXONOMY_SUBINDUSTRY_COUNT:
+            errors.append(
+                "taxonomy distinct_subindustry_count expected "
+                f"{EXPECTED_TAXONOMY_SUBINDUSTRY_COUNT} but got {taxonomy_summary.get('distinct_subindustry_count')}"
+            )
+        diagnostics = _taxonomy_source_diagnostics(
+            validation_mode="ACTIVE_TAXONOMY",
+            expected_source="ACTIVE_TAXONOMY_CONSTANTS",
+            expected_version=taxonomy_version_code,
+            expected_sha256=str(loaded_taxonomy.get("source_hash") or "") or None,
+            expected_counts=expected_counts,
+            actual_counts=actual_counts,
+            source_hash=source_hash,
+            source_match=not errors,
+            source_error="; ".join(errors) if errors else None,
+        )
+        if errors:
+            return {
+                "status": "BLOCKED_TAXONOMY_SOURCE",
+                "loaded_taxonomy": loaded_taxonomy,
+                "error": "; ".join(errors),
+                **diagnostics,
+            }
+
     count_errors: list[str] = []
-    if int(taxonomy_summary.get("row_count", 0)) != EXPECTED_TAXONOMY_ROW_COUNT:
-        count_errors.append(f"taxonomy row_count expected {EXPECTED_TAXONOMY_ROW_COUNT} but got {taxonomy_summary.get('row_count')}")
-    if int(taxonomy_summary.get("distinct_ticker_count", 0)) != EXPECTED_TAXONOMY_TICKER_COUNT:
-        count_errors.append(
-            f"taxonomy distinct_ticker_count expected {EXPECTED_TAXONOMY_TICKER_COUNT} but got {taxonomy_summary.get('distinct_ticker_count')}"
-        )
-    if int(taxonomy_summary.get("distinct_layer_count", 0)) != EXPECTED_TAXONOMY_LAYER_COUNT:
-        count_errors.append(
-            f"taxonomy distinct_layer_count expected {EXPECTED_TAXONOMY_LAYER_COUNT} but got {taxonomy_summary.get('distinct_layer_count')}"
-        )
-    if int(taxonomy_summary.get("distinct_subindustry_count", 0)) != EXPECTED_TAXONOMY_SUBINDUSTRY_COUNT:
-        count_errors.append(
-            "taxonomy distinct_subindustry_count expected "
-            f"{EXPECTED_TAXONOMY_SUBINDUSTRY_COUNT} but got {taxonomy_summary.get('distinct_subindustry_count')}"
-        )
     if count_errors:
         return {
             "status": "BLOCKED_TAXONOMY_SOURCE",
@@ -371,7 +547,6 @@ def _check_taxonomy_watchlist_compatibility(
             "error": "; ".join(count_errors),
         }
 
-    source_hash = _compute_source_hash(Path(str(taxonomy_summary["path"])))
     loaded_source_hash = loaded_taxonomy.get("source_hash")
     if loaded_source_hash and str(loaded_source_hash) != source_hash:
         return {
@@ -381,6 +556,19 @@ def _check_taxonomy_watchlist_compatibility(
             "loaded_source_hash": loaded_source_hash,
             "source_hash": source_hash,
             "error": "source taxonomy hash differs from loaded ec_taxonomy_version.source_hash",
+            **(
+                _taxonomy_source_diagnostics(
+                    validation_mode="PROPOSED_TAXONOMY_REBUILD" if taxonomy_rebuild else "ACTIVE_TAXONOMY",
+                    expected_source="LOADED_PROPOSED_TAXONOMY" if taxonomy_rebuild else "ACTIVE_TAXONOMY_CONSTANTS",
+                    expected_version=taxonomy_version_code,
+                    expected_sha256=str(loaded_source_hash),
+                    expected_counts=actual_counts,
+                    actual_counts=actual_counts,
+                    source_hash=source_hash,
+                    source_match=False,
+                    source_error="source taxonomy hash differs from loaded ec_taxonomy_version.source_hash",
+                )
+            ),
         }
 
     source_watchlist_tickers = list(watchlist_summary.get("tickers", []))
@@ -396,6 +584,7 @@ def _check_taxonomy_watchlist_compatibility(
         "source_hash_match": True,
         "loaded_source_hash": loaded_source_hash,
         "source_hash": source_hash,
+        **diagnostics,
         **watchlist_membership_summary,
     }
 
@@ -983,6 +1172,8 @@ def plan_ec_source_layer_backfill(
             taxonomy_version_code=taxonomy_version_code,
             taxonomy_summary=taxonomy_summary,
             watchlist_summary=watchlist_summary,
+            taxonomy_rebuild=taxonomy_rebuild,
+            deployment_summary=deployment_summary,
         )
         loaded_taxonomy_for_state = compatibility_summary.get("loaded_taxonomy", {})
         ecosystem_id = (

@@ -80,6 +80,37 @@ Each chunk is then executed through `run_ec_source_layer_backfill` with
 `--taxonomy-rebuild` semantics, no per-chunk DB backup, and deferred watermark
 finalization.
 
+In ordinary source-layer refresh/backfill, taxonomy-source validation uses the
+active configured taxonomy. A taxonomy rebuild is intentionally different:
+active production taxonomy can still be V1 while the selected rebuild taxonomy
+is a loaded, inactive V2. In rebuild mode the chunk planner validates the source
+CSV against the proposed taxonomy identity:
+
+```text
+taxonomy_rebuild=true
+deployment_id=<taxonomy_change_id>
+taxonomy_version=DC_TAXONOMY_FULL_V2
+taxonomy_csv=data/datacenter_taxonomy_full_v2.csv
+```
+
+The expected values are derived from the loaded proposed taxonomy, the matching
+deployment row, and the parsed proposed CSV. The V1 and V2 counts can
+legitimately differ, for example:
+
+```text
+V1 rows=329 tickers=236
+V2 rows=350 tickers=257
+```
+
+The planner reports the rebuild validation as
+`taxonomy_validation_mode=PROPOSED_TAXONOMY_REBUILD`. It reports ordinary
+validation as `taxonomy_validation_mode=ACTIVE_TAXONOMY`.
+
+If a controlled EC rebuild fails before completion, a later retry is allowed
+from `ec_rebuild_status=FAILED` only when the deployment ID, proposed taxonomy
+version, source hash, rebuild range, inactive V2 state, accepted DC evidence,
+and V1 scheduler configuration still match the guarded request.
+
 ## DATACENTER EC Replacement
 
 In taxonomy-rebuild mode, the chunk runner deletes old DATACENTER canonical EC

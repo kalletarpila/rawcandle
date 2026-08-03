@@ -206,19 +206,31 @@ def _fetch_loaded_taxonomy_state(conn, ecosystem_code: str, taxonomy_version_cod
     }
 
 
+def _table_columns(conn, table_name: str) -> set[str]:
+    if not _table_exists(conn, table_name):
+        return set()
+    return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+
+
 def _collect_loaded_watchlist_tickers(conn, ecosystem_code: str) -> list[str]:
+    watchlist_columns = _table_columns(conn, "ec_watchlist")
+    watchlist_member_columns = _table_columns(conn, "ec_watchlist_member")
+    entity_columns = _table_columns(conn, "ec_entity")
+    watchlist_status_sql = "AND w.status = 'ACTIVE'" if "status" in watchlist_columns else ""
+    member_status_sql = "AND wm.status = 'ACTIVE'" if "status" in watchlist_member_columns else ""
+    entity_status_sql = "AND e.status = 'ACTIVE'" if "status" in entity_columns else ""
     rows = conn.execute(
-        """
+        f"""
         SELECT DISTINCT UPPER(e.entity_code) AS ticker
         FROM ec_watchlist w
         JOIN ec_ecosystem eco ON eco.ecosystem_id = w.ecosystem_id
         JOIN ec_watchlist_member wm ON wm.watchlist_id = w.watchlist_id
         JOIN ec_entity e ON e.entity_id = wm.entity_id
         WHERE eco.ecosystem_code = ?
-          AND w.status = 'ACTIVE'
-          AND wm.status = 'ACTIVE'
           AND e.entity_type = 'TICKER'
-          AND e.status = 'ACTIVE'
+          {watchlist_status_sql}
+          {member_status_sql}
+          {entity_status_sql}
         ORDER BY ticker
         """,
         (ecosystem_code,),

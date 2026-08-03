@@ -142,6 +142,7 @@ def _read_taxonomy_csv(path: str, taxonomy_version_code: str) -> dict[str, objec
     layers = [str(row["layer"]).strip() for row in rows if str(row["layer"]).strip()]
     subindustries = [str(row["subindustry"]).strip() for row in rows if str(row["subindustry"]).strip()]
     primary_count = sum(1 for row in rows if str(row["is_primary"]).strip() in {"1", "true", "TRUE", "True"})
+    secondary_count = len(rows) - primary_count
 
     return {
         "status": "OK",
@@ -151,6 +152,7 @@ def _read_taxonomy_csv(path: str, taxonomy_version_code: str) -> dict[str, objec
         "distinct_layer_count": len(set(layers)),
         "distinct_subindustry_count": len(set(subindustries)),
         "primary_membership_count": primary_count,
+        "secondary_membership_count": secondary_count,
         "versions": versions,
         "columns_present": list(fieldnames),
         "tickers": sorted(set(tickers)),

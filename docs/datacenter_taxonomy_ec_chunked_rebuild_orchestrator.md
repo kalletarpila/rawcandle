@@ -141,6 +141,48 @@ watchlist and taxonomy source files exist
 
 Any precondition failure returns `BLOCKED_BEFORE_WRITES`.
 
+## Taxonomy Source Validation
+
+Ordinary EC refresh and ordinary historical backfill continue to validate the
+taxonomy source against the active configured taxonomy. In that mode, active
+taxonomy counts, active loaded source hash, and source CSV contents must agree;
+unexpected source drift remains blocking.
+
+Taxonomy full-rebuild chunks use a different validation mode. When
+`taxonomy_rebuild=true`, `deployment_id`, `taxonomy_version`, and `taxonomy_csv`
+are explicitly supplied, the single-range planner validates the source against
+the loaded proposed taxonomy and its deployment row, not against the active V1
+taxonomy. This allows the expected transition state:
+
+```text
+active taxonomy=DC_TAXONOMY_FULL_V1
+proposed rebuild taxonomy=DC_TAXONOMY_FULL_V2
+```
+
+The proposed source validation derives expected counts from loaded
+`ec_taxonomy_version` metadata and the sidecar membership/entity graph, confirms
+the deployment proposed version and source hash, and then compares the proposed
+CSV row, ticker, layer, subindustry, primary membership, and secondary
+membership counts. The planner reports this mode as:
+
+```text
+taxonomy_validation_mode=PROPOSED_TAXONOMY_REBUILD
+taxonomy_expected_source=LOADED_PROPOSED_TAXONOMY
+taxonomy_source_match=true|false
+taxonomy_source_error=NONE|<reason>
+```
+
+This is intentionally different from ordinary mode:
+
+```text
+taxonomy_validation_mode=ACTIVE_TAXONOMY
+```
+
+If a chunk fails before writes and the deployment remains the same proposed
+taxonomy with V2 inactive and scheduler taxonomy still V1, a later guarded
+retry may start from `ec_rebuild_status=FAILED`. Active, superseded, or
+mismatched deployments remain blocking.
+
 ## Backup Policy
 
 Without `--existing-backup-path`, the orchestrator creates exactly one
