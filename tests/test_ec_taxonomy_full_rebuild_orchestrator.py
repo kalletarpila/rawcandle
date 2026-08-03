@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import sqlite3
+import shutil
 from pathlib import Path
 
 from rawcandle.datacenter_taxonomy_replacement import ensure_taxonomy_replacement_schema
@@ -121,6 +123,36 @@ def _paths(tmp_path: Path) -> dict[str, str]:
     }
 
 
+def _existing_backup(paths: dict[str, str], name: str = "existing.sqlite") -> Path:
+    backup_path = Path(paths["backup_dir"]) / name
+    shutil.copy2(paths["db"], backup_path)
+    return backup_path
+
+
+def _successful_backfill_calls() -> tuple[list[dict[str, object]], object]:
+    calls: list[dict[str, object]] = []
+
+    def fake_backfill_runner(**kwargs):
+        calls.append(kwargs)
+        return {
+            "status": "BACKFILL_COMPLETED",
+            "selected_dates": [{"date": kwargs["date_from"], "action": "TAXONOMY_REBUILD_REPLACE"}],
+            "completed_dates": [kwargs["date_from"]],
+            "skipped_dates": [],
+            "per_date_results": [{"coverage_status": "OK", "parity_status": "OK", "total_mismatch_count": 0}],
+            "total_mismatch_count": 0,
+            "error": None,
+        }
+
+    return calls, fake_backfill_runner
+
+
+def _patch_success_finalizers(monkeypatch) -> None:
+    monkeypatch.setattr("rawcandle.ec_taxonomy_full_rebuild_orchestrator._validate_whole_range", lambda **_: {"whole_range_validation_status": "OK", "coverage_status": "OK", "parity_status": "OK", "total_mismatch_count": 0, "blocking_errors": []})
+    monkeypatch.setattr("rawcandle.ec_taxonomy_full_rebuild_orchestrator.advance_ec_pipeline_watermarks_after_historical_backfill", lambda **_: {"status": "OK", "watermark_advance_status": "OK", "watermark_rows_updated": 4})
+    monkeypatch.setattr("rawcandle.ec_taxonomy_full_rebuild_orchestrator.apply_datacenter_taxonomy_rebuild_evidence", lambda **_: {"status_update": "READY_TO_ACTIVATE", "ready_to_activate": True})
+
+
 def _plan_args(paths: dict[str, str], **overrides):
     args = {
         "db_path": paths["db"],
@@ -201,23 +233,8 @@ def test_plan_blocks_missing_deployment_wrong_hash_and_active_taxonomy(tmp_path)
 
 def test_run_creates_one_backup_executes_chunks_sequentially_and_defers_chunk_watermarks(tmp_path, monkeypatch) -> None:
     paths = _paths(tmp_path)
-    calls: list[dict[str, object]] = []
-
-    def fake_backfill_runner(**kwargs):
-        calls.append(kwargs)
-        return {
-            "status": "BACKFILL_COMPLETED",
-            "selected_dates": [{"date": kwargs["date_from"], "action": "TAXONOMY_REBUILD_REPLACE"}],
-            "completed_dates": [kwargs["date_from"]],
-            "skipped_dates": [],
-            "per_date_results": [{"coverage_status": "OK", "parity_status": "OK", "total_mismatch_count": 0}],
-            "total_mismatch_count": 0,
-            "error": None,
-        }
-
-    monkeypatch.setattr("rawcandle.ec_taxonomy_full_rebuild_orchestrator._validate_whole_range", lambda **_: {"whole_range_validation_status": "OK", "coverage_status": "OK", "parity_status": "OK", "total_mismatch_count": 0, "blocking_errors": []})
-    monkeypatch.setattr("rawcandle.ec_taxonomy_full_rebuild_orchestrator.advance_ec_pipeline_watermarks_after_historical_backfill", lambda **_: {"status": "OK", "watermark_advance_status": "OK", "watermark_rows_updated": 4})
-    monkeypatch.setattr("rawcandle.ec_taxonomy_full_rebuild_orchestrator.apply_datacenter_taxonomy_rebuild_evidence", lambda **_: {"status_update": "READY_TO_ACTIVATE", "ready_to_activate": True})
+    calls, fake_backfill_runner = _successful_backfill_calls()
+    _patch_success_finalizers(monkeypatch)
 
     summary = run_ec_taxonomy_full_rebuild(
         **_plan_args(paths, date_from="2026-07-01", date_to="2026-09-10", confirm_date_from="2026-07-01", confirm_date_to="2026-09-10"),
@@ -225,6 +242,9 @@ def test_run_creates_one_backup_executes_chunks_sequentially_and_defers_chunk_wa
     )
 
     assert summary["overall_status"] == "REBUILD_COMPLETED"
+    assert summary["backup_mode"] == "ORCHESTRATOR_CREATED"
+    assert summary["backup_created_by_orchestrator"] is True
+    assert summary["backup_reused"] is False
     assert len(list(Path(paths["backup_dir"]).glob("*.sqlite"))) == 1
     assert [call["date_from"] for call in calls] == ["2026-07-01", "2026-08-30"]
     assert all(call["create_backup"] is False for call in calls)
@@ -317,3 +337,233 @@ def test_whole_range_failure_blocks_finalization(tmp_path, monkeypatch) -> None:
     assert summary["overall_status"] == "FAILED"
     assert summary["watermark_finalization_performed"] is False
     assert watermark_calls == []
+
+
+def test_valid_existing_backup_is_reused_and_passed_to_every_chunk(tmp_path, monkeypatch) -> None:
+    paths = _paths(tmp_path)
+    backup_path = _existing_backup(paths)
+    calls, fake_backfill_runner = _successful_backfill_calls()
+    _patch_success_finalizers(monkeypatch)
+
+    summary = run_ec_taxonomy_full_rebuild(
+        **_plan_args(
+            paths,
+            date_from="2026-07-01",
+            date_to="2026-09-10",
+            confirm_date_from="2026-07-01",
+            confirm_date_to="2026-09-10",
+            existing_backup_path=str(backup_path),
+            confirm_existing_backup_path=str(backup_path.resolve()),
+        ),
+        backfill_runner=fake_backfill_runner,
+    )
+
+    assert summary["overall_status"] == "REBUILD_COMPLETED"
+    assert summary["backup_mode"] == "EXISTING_BACKUP"
+    assert summary["backup_created_by_orchestrator"] is False
+    assert summary["backup_reused"] is True
+    assert summary["backup_validation_status"] == "OK"
+    assert summary["backup_sha256"] == hashlib.sha256(backup_path.read_bytes()).hexdigest()
+    assert len(list(Path(paths["backup_dir"]).glob("*.sqlite"))) == 1
+    assert all(call["existing_backup_path"] == str(backup_path.resolve()) for call in calls)
+    progress = (Path(paths["evidence_root"]) / "ec_taxonomy_full_rebuild_progress.json").read_text(encoding="utf-8")
+    assert str(backup_path.resolve()) in progress
+    assert summary["backup_sha256"] in progress
+
+
+def test_existing_backup_validation_failures_block_before_chunks(tmp_path, monkeypatch) -> None:
+    cases: list[tuple[str, Path, str | None]] = []
+
+    outside_paths = _paths(tmp_path / "outside")
+    outside_backup = tmp_path / "outside.sqlite"
+    shutil.copy2(outside_paths["db"], outside_backup)
+    cases.append(("outside temp", outside_backup, "path must be under repository temp/"))
+
+    live_paths = _paths(tmp_path / "live")
+    live_db = Path(live_paths["repo_root"]) / "temp" / "analysis.db"
+    shutil.copy2(live_paths["db"], live_db)
+    live_paths["db"] = str(live_db)
+    cases.append(("live db", live_db, "must not be the live production DB"))
+
+    missing_paths = _paths(tmp_path / "missing")
+    cases.append(("missing", Path(missing_paths["backup_dir"]) / "missing.sqlite", "does not exist"))
+
+    empty_paths = _paths(tmp_path / "empty")
+    empty_backup = Path(empty_paths["backup_dir"]) / "empty.sqlite"
+    empty_backup.write_bytes(b"")
+    cases.append(("empty", empty_backup, "existing backup is empty"))
+
+    invalid_paths = _paths(tmp_path / "invalid")
+    invalid_backup = Path(invalid_paths["backup_dir"]) / "invalid.sqlite"
+    invalid_backup.write_text("not sqlite", encoding="utf-8")
+    cases.append(("invalid", invalid_backup, "file is not a database"))
+
+    missing_schema_paths = _paths(tmp_path / "schema")
+    missing_schema_backup = Path(missing_schema_paths["backup_dir"]) / "missing_schema.sqlite"
+    conn = sqlite3.connect(missing_schema_backup)
+    try:
+        conn.execute("CREATE TABLE not_enough (id INTEGER)")
+        conn.commit()
+    finally:
+        conn.close()
+    cases.append(("missing schema", missing_schema_backup, "missing critical tables"))
+
+    mismatch_paths = _paths(tmp_path / "confirm")
+    mismatch_backup = _existing_backup(mismatch_paths)
+    calls: list[dict[str, object]] = []
+    for label, backup_path, expected in cases:
+        paths = {
+            "outside temp": outside_paths,
+            "live db": live_paths,
+            "missing": missing_paths,
+            "empty": empty_paths,
+            "invalid": invalid_paths,
+            "missing schema": missing_schema_paths,
+        }[label]
+        summary = run_ec_taxonomy_full_rebuild(
+            **_plan_args(
+                paths,
+                date_from="2026-07-01",
+                date_to="2026-07-05",
+                confirm_date_from="2026-07-01",
+                confirm_date_to="2026-07-05",
+                existing_backup_path=str(backup_path),
+                confirm_existing_backup_path=str(backup_path),
+            ),
+            backfill_runner=lambda **kwargs: calls.append(kwargs),
+        )
+        assert summary["overall_status"] == "BLOCKED_BEFORE_WRITES", label
+        assert summary["backup_validation_status"] == "FAILED", label
+        assert expected in summary["backup_error"], label
+
+    mismatch = run_ec_taxonomy_full_rebuild(
+        **_plan_args(
+            mismatch_paths,
+            date_from="2026-07-01",
+            date_to="2026-07-05",
+            confirm_date_from="2026-07-01",
+            confirm_date_to="2026-07-05",
+            existing_backup_path=str(mismatch_backup),
+            confirm_existing_backup_path=str(Path(mismatch_paths["backup_dir"]) / "other.sqlite"),
+        ),
+        backfill_runner=lambda **kwargs: calls.append(kwargs),
+    )
+    assert mismatch["overall_status"] == "BLOCKED_BEFORE_WRITES"
+    assert mismatch["backup_validation_status"] == "FAILED"
+    assert "confirm-existing-backup-path" in mismatch["backup_error"]
+    assert calls == []
+
+
+def test_failed_integrity_check_blocks_before_chunks(tmp_path, monkeypatch) -> None:
+    paths = _paths(tmp_path)
+    backup_path = _existing_backup(paths)
+    calls: list[dict[str, object]] = []
+    real_connect = sqlite3.connect
+
+    class FakeBackupConnection:
+        def execute(self, sql):
+            assert sql == "PRAGMA integrity_check"
+            return self
+
+        def fetchone(self):
+            return ("database disk image is malformed",)
+
+        def close(self):
+            return None
+
+    def fake_connect(target, *args, **kwargs):
+        if str(backup_path.resolve()) in str(target):
+            return FakeBackupConnection()
+        return real_connect(target, *args, **kwargs)
+
+    monkeypatch.setattr("rawcandle.ec_taxonomy_full_rebuild_orchestrator.sqlite3.connect", fake_connect)
+
+    summary = run_ec_taxonomy_full_rebuild(
+        **_plan_args(
+            paths,
+            date_from="2026-07-01",
+            date_to="2026-07-05",
+            confirm_date_from="2026-07-01",
+            confirm_date_to="2026-07-05",
+            existing_backup_path=str(backup_path),
+            confirm_existing_backup_path=str(backup_path),
+        ),
+        backfill_runner=lambda **kwargs: calls.append(kwargs),
+    )
+
+    assert summary["overall_status"] == "BLOCKED_BEFORE_WRITES"
+    assert "integrity_check failed" in summary["backup_error"]
+    assert calls == []
+
+
+def test_resume_accepts_same_backup_and_rejects_changed_path_or_sha(tmp_path, monkeypatch) -> None:
+    paths = _paths(tmp_path)
+    backup_path = _existing_backup(paths)
+    calls, fake_backfill_runner = _successful_backfill_calls()
+    _patch_success_finalizers(monkeypatch)
+    monkeypatch.setattr("rawcandle.ec_taxonomy_full_rebuild_orchestrator._verify_completed_chunk", lambda **_: {"status": "OK", "verified_dates": ["2026-07-01"]})
+
+    first = run_ec_taxonomy_full_rebuild(
+        **_plan_args(
+            paths,
+            date_from="2026-07-01",
+            date_to="2026-07-05",
+            confirm_date_from="2026-07-01",
+            confirm_date_to="2026-07-05",
+            existing_backup_path=str(backup_path),
+            confirm_existing_backup_path=str(backup_path),
+        ),
+        backfill_runner=fake_backfill_runner,
+    )
+    assert first["overall_status"] == "REBUILD_COMPLETED"
+    calls.clear()
+
+    same = run_ec_taxonomy_full_rebuild(
+        **_plan_args(
+            paths,
+            date_from="2026-07-01",
+            date_to="2026-07-05",
+            confirm_date_from="2026-07-01",
+            confirm_date_to="2026-07-05",
+            existing_backup_path=str(backup_path),
+            confirm_existing_backup_path=str(backup_path),
+            resume=True,
+        ),
+        backfill_runner=fake_backfill_runner,
+    )
+    assert same["overall_status"] == "REBUILD_COMPLETED"
+    assert calls == []
+
+    other_backup = _existing_backup(paths, "other.sqlite")
+    changed_path = run_ec_taxonomy_full_rebuild(
+        **_plan_args(
+            paths,
+            date_from="2026-07-01",
+            date_to="2026-07-05",
+            confirm_date_from="2026-07-01",
+            confirm_date_to="2026-07-05",
+            existing_backup_path=str(other_backup),
+            confirm_existing_backup_path=str(other_backup),
+            resume=True,
+        ),
+        backfill_runner=fake_backfill_runner,
+    )
+    assert changed_path["overall_status"] == "BLOCKED_BEFORE_WRITES"
+    assert "backup path does not match" in "; ".join(changed_path["blocking_errors"])
+
+    backup_path.write_bytes(backup_path.read_bytes() + b"changed")
+    changed_sha = run_ec_taxonomy_full_rebuild(
+        **_plan_args(
+            paths,
+            date_from="2026-07-01",
+            date_to="2026-07-05",
+            confirm_date_from="2026-07-01",
+            confirm_date_to="2026-07-05",
+            existing_backup_path=str(backup_path),
+            confirm_existing_backup_path=str(backup_path),
+            resume=True,
+        ),
+        backfill_runner=fake_backfill_runner,
+    )
+    assert changed_sha["overall_status"] == "BLOCKED_BEFORE_WRITES"
+    assert "backup SHA-256" in "; ".join(changed_sha["blocking_errors"])

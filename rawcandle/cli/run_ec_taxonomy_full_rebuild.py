@@ -27,6 +27,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--confirm-deployment-id", required=True, type=int)
     parser.add_argument("--confirm-date-from", required=True)
     parser.add_argument("--confirm-date-to", required=True)
+    parser.add_argument("--existing-backup-path")
+    parser.add_argument("--confirm-existing-backup-path")
     parser.add_argument("--expected-active-taxonomy-version")
     parser.add_argument("--scheduler-config")
     parser.add_argument("--repo-root", default=".")
@@ -54,6 +56,8 @@ def main(argv: list[str] | None = None) -> int:
         confirm_deployment_id=args.confirm_deployment_id,
         confirm_date_from=args.confirm_date_from,
         confirm_date_to=args.confirm_date_to,
+        existing_backup_path=args.existing_backup_path,
+        confirm_existing_backup_path=args.confirm_existing_backup_path,
         expected_active_taxonomy_version=args.expected_active_taxonomy_version,
         scheduler_config_path=args.scheduler_config,
         resume=args.resume,

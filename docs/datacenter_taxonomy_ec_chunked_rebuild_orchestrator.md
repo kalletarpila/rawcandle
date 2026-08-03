@@ -22,7 +22,7 @@ explicit opt-in orchestrator:
 ```text
 full requested range
 -> deterministic bounded chunk plan
--> one SQLite-consistent backup
+-> one SQLite-consistent backup or validated pre-existing rebuild backup
 -> sequential guarded chunk execution
 -> stop on first failure
 -> whole-range validation
@@ -71,6 +71,16 @@ Run:
 ```bash
 python3 -m rawcandle.cli.run_ec_taxonomy_full_rebuild \
   <same arguments as the plan command>
+```
+
+Run while reusing the production backup already created before DC rebuild
+writes:
+
+```bash
+python3 -m rawcandle.cli.run_ec_taxonomy_full_rebuild \
+  <same guarded arguments> \
+  --existing-backup-path /home/kalle/projects/rawcandle/temp/<run>/analysis_before_v2_rebuild.sqlite \
+  --confirm-existing-backup-path /home/kalle/projects/rawcandle/temp/<run>/analysis_before_v2_rebuild.sqlite
 ```
 
 Resume after a diagnosed failure:
@@ -133,14 +143,43 @@ Any precondition failure returns `BLOCKED_BEFORE_WRITES`.
 
 ## Backup Policy
 
-The orchestrator creates exactly one SQLite-consistent DB backup before the
-first chunk. The backup evidence includes:
+Without `--existing-backup-path`, the orchestrator creates exactly one
+SQLite-consistent DB backup before the first chunk. With
+`--existing-backup-path`, it validates and records the supplied backup and
+creates no new full DB backup.
+
+The supplied backup must:
 
 ```text
+exist
+be a regular non-empty file
+resolve under repository temp/
+not be the live DB
+not be a WAL or SHM file
+open read-only as SQLite
+pass PRAGMA integrity_check
+contain expected critical EC and DC tables
+match the live DB schema fingerprint for critical tables
+have an mtime no later than orchestrator start
+match --confirm-existing-backup-path after normalization
+```
+
+If validation fails, the orchestrator refuses before EC fact writes and does not
+silently create a fallback backup. The user must either provide a valid backup
+or rerun without the existing-backup option.
+
+The backup evidence includes:
+
+```text
+backup_mode
 backup_path
+backup_created_by_orchestrator
+backup_reused
+backup_validation_status
 backup_size
+backup_mtime
 backup_sha256
-backup_created_at
+backup_error
 ```
 
 Per-chunk execution reuses this backup reference and does not create another
@@ -198,10 +237,14 @@ taxonomy_source_sha256
 requested_start
 requested_end
 chunk_plan_hash
+backup_path
+backup_sha256
 ```
 
 Already completed chunks are skipped only after verification against current DB
-state. Changed ranges, source hashes, or chunk boundaries block resume.
+state. Changed ranges, source hashes, chunk boundaries, backup paths, or backup
+SHA-256 values block resume. If the original run used an existing backup, resume
+also requires the same `--existing-backup-path` and confirmation path.
 
 ## Whole-Range Validation
 

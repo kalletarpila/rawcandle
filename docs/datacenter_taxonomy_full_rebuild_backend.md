@@ -47,13 +47,20 @@ python3 -m rawcandle.cli.plan_ec_taxonomy_full_rebuild \
 Execution uses the same arguments with:
 
 ```bash
-python3 -m rawcandle.cli.run_ec_taxonomy_full_rebuild <same guarded arguments>
+python3 -m rawcandle.cli.run_ec_taxonomy_full_rebuild \
+  <same guarded arguments> \
+  --existing-backup-path temp/<controlled-run>/backups/analysis_before_v2_rebuild.sqlite \
+  --confirm-existing-backup-path temp/<controlled-run>/backups/analysis_before_v2_rebuild.sqlite
 ```
 
 The orchestrator emits:
 
 ```text
 rebuild_mode=TAXONOMY_FULL_REBUILD
+backup_mode=EXISTING_BACKUP | ORCHESTRATOR_CREATED
+backup_created_by_orchestrator=true|false
+backup_reused=true|false
+backup_validation_status=OK
 requested_start
 requested_end
 chunk_count
@@ -81,7 +88,10 @@ ec_group_index_daily
 ```
 
 Other ecosystems are not touched. V2 is not activated by this step. The
-orchestrator creates exactly one full DB backup before the first chunk.
+orchestrator either creates exactly one full DB backup before the first chunk or
+reuses the pre-existing full DB backup created before the DC rebuild. In the
+controlled V2 production sequence, the backup is created before the first DC
+write and passed to the EC orchestrator with `--existing-backup-path`.
 
 ## EC Watermark Lineage
 
@@ -188,11 +198,12 @@ Run one controlled production replacement sequence:
 
 ```text
 1. Confirm scheduler is paused or guarded.
-2. Create production DB and scheduler-config backups.
+2. Create one production DB backup and scheduler-config backup.
 3. Run prepare_datacenter_taxonomy_rebuild.
 4. Run full DC pipeline for DC_TAXONOMY_FULL_V2 from 2025-08-01.
 5. Run plan_ec_taxonomy_full_rebuild.
-6. Run run_ec_taxonomy_full_rebuild.
+6. Run run_ec_taxonomy_full_rebuild with --existing-backup-path pointing to the
+   pre-DC-write backup.
 7. Run plan_datacenter_taxonomy_activation.
 8. Run apply_datacenter_taxonomy_activation with --scheduler-config.
 9. Verify active taxonomy, config keys, fact heads, watermarks, coverage, parity,

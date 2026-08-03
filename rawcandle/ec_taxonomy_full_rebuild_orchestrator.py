@@ -22,6 +22,22 @@ from rawcandle.ec_pipeline_watermark_loader import advance_ec_pipeline_watermark
 REBUILD_MODE = "TAXONOMY_FULL_REBUILD"
 PROGRESS_FILENAME = "ec_taxonomy_full_rebuild_progress.json"
 SUCCESS_CHUNK_STATUSES = {"BACKFILL_COMPLETED", "BACKFILL_SKIPPED"}
+BACKUP_MODE_ORCHESTRATOR_CREATED = "ORCHESTRATOR_CREATED"
+BACKUP_MODE_EXISTING = "EXISTING_BACKUP"
+CRITICAL_BACKUP_TABLES = (
+    "ec_ecosystem",
+    "ec_taxonomy_version",
+    "ec_taxonomy_change_deployment",
+    "ec_pipeline_watermark",
+    "ec_ticker_signal_daily",
+    "ec_group_signal_daily",
+    "ec_group_synthetic_ohlc_daily",
+    "ec_group_index_daily",
+    "dc_ticker_swing_signal_daily",
+    "dc_group_swing_signal_daily",
+    "dc_group_synthetic_ohlc_daily",
+    "dc_group_index_daily",
+)
 
 
 @dataclass(frozen=True)
@@ -42,6 +58,10 @@ def _json_sha256(payload: object) -> str:
 
 def _file_sha256(path: str | Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _iso_from_timestamp(timestamp: float) -> str:
+    return datetime.fromtimestamp(timestamp, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _parse_iso_date(value: str, field_name: str) -> date:
@@ -106,6 +126,13 @@ def _connect_readwrite(db_path: str | Path) -> sqlite3.Connection:
 
 def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
     return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+
+
+def _table_names(conn: sqlite3.Connection) -> set[str]:
+    return {
+        str(row[0])
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+    }
 
 
 def _fetch_deployment(
@@ -173,6 +200,181 @@ def _resolve_temp_path(path: str | Path, *, repo_root: str | Path) -> Path:
     except ValueError as exc:
         raise ValueError(f"path must be under repository temp/: {resolved}") from exc
     return resolved
+
+
+def _backup_summary_from_path(
+    backup_path: Path,
+    *,
+    backup_mode: str,
+    backup_created_by_orchestrator: bool,
+    backup_reused: bool,
+) -> dict[str, object]:
+    stat = backup_path.stat()
+    return {
+        "backup_mode": backup_mode,
+        "backup_path": str(backup_path),
+        "backup_created_by_orchestrator": backup_created_by_orchestrator,
+        "backup_reused": backup_reused,
+        "backup_validation_status": "OK",
+        "backup_size": stat.st_size,
+        "backup_mtime": _iso_from_timestamp(stat.st_mtime),
+        "backup_sha256": _file_sha256(backup_path),
+        "backup_error": None,
+        "backup_created_at": _iso_from_timestamp(stat.st_mtime),
+    }
+
+
+def _backup_error_summary(
+    *,
+    backup_mode: str,
+    backup_path: str | None,
+    error: str,
+) -> dict[str, object]:
+    return {
+        "backup_mode": backup_mode,
+        "backup_path": backup_path,
+        "backup_created_by_orchestrator": False,
+        "backup_reused": backup_mode == BACKUP_MODE_EXISTING,
+        "backup_validation_status": "FAILED",
+        "backup_size": 0,
+        "backup_mtime": None,
+        "backup_sha256": None,
+        "backup_error": error,
+    }
+
+
+def _schema_fingerprint(conn: sqlite3.Connection, table_names: tuple[str, ...]) -> dict[str, list[dict[str, object]]]:
+    fingerprint: dict[str, list[dict[str, object]]] = {}
+    existing_tables = _table_names(conn)
+    for table_name in table_names:
+        if table_name not in existing_tables:
+            fingerprint[table_name] = []
+            continue
+        fingerprint[table_name] = [
+            {
+                "cid": int(row[0]),
+                "name": str(row[1]),
+                "type": str(row[2]),
+                "notnull": int(row[3]),
+                "default": row[4],
+                "pk": int(row[5]),
+            }
+            for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        ]
+    return fingerprint
+
+
+def validate_existing_backup(
+    *,
+    existing_backup_path: str,
+    confirm_existing_backup_path: str,
+    db_path: str,
+    repo_root: str | Path,
+    orchestrator_started_at_utc: datetime,
+) -> dict[str, object]:
+    backup_mode = BACKUP_MODE_EXISTING
+    try:
+        resolved = _resolve_temp_path(existing_backup_path, repo_root=repo_root)
+        confirmed = Path(confirm_existing_backup_path).resolve()
+        if confirmed != resolved:
+            return _backup_error_summary(
+                backup_mode=backup_mode,
+                backup_path=str(resolved),
+                error="--confirm-existing-backup-path must exactly match normalized --existing-backup-path",
+            )
+        live_db = Path(db_path).resolve()
+        if resolved == live_db:
+            return _backup_error_summary(
+                backup_mode=backup_mode,
+                backup_path=str(resolved),
+                error="existing backup path must not be the live production DB",
+            )
+        if resolved.name.endswith(("-wal", "-shm")):
+            return _backup_error_summary(
+                backup_mode=backup_mode,
+                backup_path=str(resolved),
+                error="existing backup path must not be a WAL or SHM file",
+            )
+        if not resolved.exists():
+            return _backup_error_summary(backup_mode=backup_mode, backup_path=str(resolved), error="existing backup path does not exist")
+        if not resolved.is_file():
+            return _backup_error_summary(backup_mode=backup_mode, backup_path=str(resolved), error="existing backup path is not a regular file")
+        stat = resolved.stat()
+        if stat.st_size <= 0:
+            return _backup_error_summary(backup_mode=backup_mode, backup_path=str(resolved), error="existing backup is empty")
+        if datetime.fromtimestamp(stat.st_mtime, timezone.utc) > orchestrator_started_at_utc:
+            return _backup_error_summary(
+                backup_mode=backup_mode,
+                backup_path=str(resolved),
+                error="existing backup file is newer than orchestrator start time",
+            )
+        backup_conn = sqlite3.connect(f"file:{resolved}?mode=ro", uri=True)
+        try:
+            integrity = str(backup_conn.execute("PRAGMA integrity_check").fetchone()[0])
+            if integrity.lower() != "ok":
+                return _backup_error_summary(
+                    backup_mode=backup_mode,
+                    backup_path=str(resolved),
+                    error=f"existing backup integrity_check failed: {integrity}",
+                )
+            backup_tables = _table_names(backup_conn)
+            missing_tables = [table_name for table_name in CRITICAL_BACKUP_TABLES if table_name not in backup_tables]
+            if missing_tables:
+                return _backup_error_summary(
+                    backup_mode=backup_mode,
+                    backup_path=str(resolved),
+                    error="existing backup missing critical tables: " + ", ".join(missing_tables),
+                )
+            backup_schema = _schema_fingerprint(backup_conn, CRITICAL_BACKUP_TABLES)
+        finally:
+            backup_conn.close()
+
+        live_conn = _connect_readonly(db_path)
+        try:
+            live_tables = _table_names(live_conn)
+            missing_live_tables = [table_name for table_name in CRITICAL_BACKUP_TABLES if table_name not in live_tables]
+            if missing_live_tables:
+                return _backup_error_summary(
+                    backup_mode=backup_mode,
+                    backup_path=str(resolved),
+                    error="live DB missing critical tables: " + ", ".join(missing_live_tables),
+                )
+            live_schema = _schema_fingerprint(live_conn, CRITICAL_BACKUP_TABLES)
+        finally:
+            live_conn.close()
+        if backup_schema != live_schema:
+            return _backup_error_summary(
+                backup_mode=backup_mode,
+                backup_path=str(resolved),
+                error="existing backup schema fingerprint does not match live production DB",
+            )
+        return _backup_summary_from_path(
+            resolved,
+            backup_mode=backup_mode,
+            backup_created_by_orchestrator=False,
+            backup_reused=True,
+        )
+    except Exception as exc:
+        return _backup_error_summary(
+            backup_mode=backup_mode,
+            backup_path=str(Path(existing_backup_path).resolve()) if existing_backup_path else None,
+            error=str(exc),
+        )
+
+
+def _backup_fields(backup_summary: dict[str, object] | None) -> dict[str, object]:
+    backup_summary = backup_summary or {}
+    return {
+        "backup_mode": backup_summary.get("backup_mode"),
+        "backup_path": backup_summary.get("backup_path"),
+        "backup_created_by_orchestrator": backup_summary.get("backup_created_by_orchestrator"),
+        "backup_reused": backup_summary.get("backup_reused"),
+        "backup_validation_status": backup_summary.get("backup_validation_status"),
+        "backup_size": backup_summary.get("backup_size"),
+        "backup_mtime": backup_summary.get("backup_mtime"),
+        "backup_sha256": backup_summary.get("backup_sha256"),
+        "backup_error": backup_summary.get("backup_error"),
+    }
 
 
 def _read_scheduler_taxonomy(config_path: str | Path | None) -> dict[str, object]:
@@ -434,13 +636,12 @@ def _create_sqlite_backup(
             target.close()
     finally:
         source.close()
-    stat = backup_path.stat()
-    return {
-        "backup_path": str(backup_path),
-        "backup_size": stat.st_size,
-        "backup_sha256": _file_sha256(backup_path),
-        "backup_created_at": _utc_now(),
-    }
+    return _backup_summary_from_path(
+        backup_path,
+        backup_mode=BACKUP_MODE_ORCHESTRATOR_CREATED,
+        backup_created_by_orchestrator=True,
+        backup_reused=False,
+    )
 
 
 def _progress_path(evidence_output_root: str | Path) -> Path:
@@ -618,11 +819,39 @@ def _validate_whole_range(
     }
 
 
-def _assert_resume_matches(progress: dict[str, object], plan: dict[str, object]) -> list[str]:
+def _assert_resume_matches(
+    progress: dict[str, object],
+    plan: dict[str, object],
+    *,
+    existing_backup_path: str | None,
+    confirm_existing_backup_path: str | None,
+) -> list[str]:
     errors: list[str] = []
     for field in ("deployment_id", "taxonomy_version", "requested_start", "requested_end", "chunk_plan_hash", "taxonomy_source_sha256"):
         if progress.get(field) != plan.get(field):
             errors.append(f"resume state {field} does not match requested plan")
+    backup_summary = progress.get("backup_summary")
+    if not isinstance(backup_summary, dict):
+        errors.append("resume state backup_summary is missing")
+        return errors
+    backup_path = str(backup_summary.get("backup_path") or "")
+    backup_sha = str(backup_summary.get("backup_sha256") or "")
+    backup_mode = str(backup_summary.get("backup_mode") or "")
+    if backup_mode == BACKUP_MODE_EXISTING:
+        if existing_backup_path is None:
+            errors.append("resume of existing-backup run requires --existing-backup-path")
+        elif Path(existing_backup_path).resolve() != Path(backup_path).resolve():
+            errors.append("resume existing backup path does not match original backup path")
+        if confirm_existing_backup_path is None:
+            errors.append("resume of existing-backup run requires --confirm-existing-backup-path")
+        elif Path(confirm_existing_backup_path).resolve() != Path(backup_path).resolve():
+            errors.append("resume existing backup confirmation path does not match original backup path")
+    if not backup_path:
+        errors.append("resume state backup_path is missing")
+    elif not Path(backup_path).exists():
+        errors.append("resume backup path does not exist")
+    elif _file_sha256(backup_path) != backup_sha:
+        errors.append("resume backup SHA-256 does not match original backup")
     return errors
 
 
@@ -644,12 +873,15 @@ def run_ec_taxonomy_full_rebuild(
     confirm_deployment_id: int,
     confirm_date_from: str,
     confirm_date_to: str,
+    existing_backup_path: str | None = None,
+    confirm_existing_backup_path: str | None = None,
     expected_active_taxonomy_version: str | None = None,
     scheduler_config_path: str | None = None,
     resume: bool = False,
     repo_root: str | Path = ".",
     backfill_runner: Callable[..., dict[str, object]] = run_ec_source_layer_backfill,
 ) -> dict[str, object]:
+    orchestrator_started_at_utc = datetime.now(timezone.utc)
     plan = plan_ec_taxonomy_full_rebuild(
         db_path=db_path,
         ecosystem_code=ecosystem_code,
@@ -678,6 +910,7 @@ def run_ec_taxonomy_full_rebuild(
             "watermark_finalization_performed": False,
             "plan": plan,
             "blocking_errors": plan["blocking_errors"],
+            **_backup_fields(None),
         }
 
     evidence_root = Path(str(plan["preconditions"]["evidence_output_root"]))
@@ -690,11 +923,17 @@ def run_ec_taxonomy_full_rebuild(
             "watermark_finalization_performed": False,
             "plan": plan,
             "blocking_errors": ["progress file already exists; use resume to continue guarded rebuild"],
+            **_backup_fields(None),
         }
     completed_chunks: list[dict[str, object]] = []
     backup_summary: dict[str, object]
     if previous_progress is not None:
-        resume_errors = _assert_resume_matches(previous_progress, plan)
+        resume_errors = _assert_resume_matches(
+            previous_progress,
+            plan,
+            existing_backup_path=existing_backup_path,
+            confirm_existing_backup_path=confirm_existing_backup_path,
+        )
         if resume_errors:
             return {
                 "overall_status": "BLOCKED_BEFORE_WRITES",
@@ -702,6 +941,8 @@ def run_ec_taxonomy_full_rebuild(
                 "watermark_finalization_performed": False,
                 "plan": plan,
                 "blocking_errors": resume_errors,
+                "backup_summary": previous_progress.get("backup_summary"),
+                **_backup_fields(previous_progress.get("backup_summary") if isinstance(previous_progress.get("backup_summary"), dict) else None),
             }
         backup_summary = dict(previous_progress.get("backup_summary") or {})
         for completed in previous_progress.get("completed_chunks", []):
@@ -728,17 +969,45 @@ def run_ec_taxonomy_full_rebuild(
                     "plan": plan,
                     "blocking_errors": [f"completed chunk {chunk.chunk_index} failed resume verification"],
                     "resume_verification": verified,
+                    "backup_summary": backup_summary,
+                    **_backup_fields(backup_summary),
                 }
             completed_chunks.append({**completed, "resume_verification": verified, "skipped_by_resume": True})
     else:
-        backup_summary = _create_sqlite_backup(
-            db_path=db_path,
-            backup_dir=str(plan["preconditions"]["backup_dir"]),
-            ecosystem_code=ecosystem_code,
-            taxonomy_version_code=taxonomy_version_code,
-            date_from=date_from,
-            date_to=date_to,
-        )
+        if existing_backup_path is not None:
+            if confirm_existing_backup_path is None:
+                backup_summary = _backup_error_summary(
+                    backup_mode=BACKUP_MODE_EXISTING,
+                    backup_path=str(Path(existing_backup_path).resolve()),
+                    error="--confirm-existing-backup-path is required with --existing-backup-path",
+                )
+            else:
+                backup_summary = validate_existing_backup(
+                    existing_backup_path=existing_backup_path,
+                    confirm_existing_backup_path=confirm_existing_backup_path,
+                    db_path=db_path,
+                    repo_root=repo_root,
+                    orchestrator_started_at_utc=orchestrator_started_at_utc,
+                )
+            if backup_summary["backup_validation_status"] != "OK":
+                return {
+                    "overall_status": "BLOCKED_BEFORE_WRITES",
+                    "retry_required": False,
+                    "watermark_finalization_performed": False,
+                    "backup_summary": backup_summary,
+                    "plan": plan,
+                    "blocking_errors": [str(backup_summary["backup_error"])],
+                    **_backup_fields(backup_summary),
+                }
+        else:
+            backup_summary = _create_sqlite_backup(
+                db_path=db_path,
+                backup_dir=str(plan["preconditions"]["backup_dir"]),
+                ecosystem_code=ecosystem_code,
+                taxonomy_version_code=taxonomy_version_code,
+                date_from=date_from,
+                date_to=date_to,
+            )
         _mark_deployment_ec_status(
             db_path=db_path,
             deployment_id=deployment_id,
@@ -863,6 +1132,7 @@ def run_ec_taxonomy_full_rebuild(
                 "progress_path": str(progress_file),
                 "chunk_results": completed_chunks + [chunk_result],
                 "plan": plan,
+                **_backup_fields(backup_summary),
             }
         completed_chunks.append(chunk_result)
         progress["completed_chunks"] = completed_chunks
@@ -906,6 +1176,7 @@ def run_ec_taxonomy_full_rebuild(
             "chunk_results": completed_chunks,
             "whole_range_validation": whole_range_validation,
             "plan": plan,
+            **_backup_fields(backup_summary),
         }
 
     watermark_summary = advance_ec_pipeline_watermarks_after_historical_backfill(
@@ -951,6 +1222,7 @@ def run_ec_taxonomy_full_rebuild(
         "watermark_summary": watermark_summary,
         "deployment_evidence_summary": evidence_summary,
         "plan": plan,
+        **_backup_fields(backup_summary),
     }
 
 
@@ -997,8 +1269,15 @@ def render_run_text(summary: dict[str, object]) -> str:
         lines.append(f"chunk_count={plan.get('chunk_count')}")
     backup = summary.get("backup_summary")
     if isinstance(backup, dict):
+        lines.append(f"backup_mode={backup.get('backup_mode')}")
         lines.append(f"backup_path={backup.get('backup_path')}")
+        lines.append(f"backup_created_by_orchestrator={backup.get('backup_created_by_orchestrator')}")
+        lines.append(f"backup_reused={backup.get('backup_reused')}")
+        lines.append(f"backup_validation_status={backup.get('backup_validation_status')}")
+        lines.append(f"backup_size={backup.get('backup_size')}")
+        lines.append(f"backup_mtime={backup.get('backup_mtime')}")
         lines.append(f"backup_sha256={backup.get('backup_sha256')}")
+        lines.append(f"backup_error={backup.get('backup_error')}")
     if summary.get("progress_path"):
         lines.append(f"progress_path={summary.get('progress_path')}")
     for chunk in summary.get("chunk_results", []):
