@@ -319,6 +319,60 @@ target key, null target keys, and SQL insert failures return structured
 `FAILED` summaries. The single-range backfill and chunked orchestrator preserve
 `synthetic_loader_summary` and `group_index_loader_summary` in failure evidence.
 
+## Coverage And Parity Audit Taxonomy Scope
+
+The chunk runner passes the requested taxonomy version through to both
+post-load audits:
+
+```text
+audit_dc_facts_against_ec_sidecar
+audit_dc_ec_fact_parity
+```
+
+During a V2 rebuild, the active scheduler taxonomy can still be
+`DC_TAXONOMY_FULL_V1`, while the requested audit taxonomy is
+`DC_TAXONOMY_FULL_V2`. Audit source queries must therefore scope DC rows by:
+
+```text
+taxonomy_version
+signal_date
+signal_version or calc_version where applicable
+```
+
+Coverage remains a sidecar-readiness check: it validates entity, membership,
+hierarchy, source presence, and expected metadata readiness. Parity remains a
+canonical fact-equivalence check: it compares DC and EC fact rows and fields.
+Expected non-OK source rows, such as `MISSING_AS_OF_DATE` ticker rows and
+`TOO_SMALL` group rows, are valid coverage inputs when the rows exist and map
+correctly.
+
+The rebuild must not infer audit source scope from the active taxonomy,
+scheduler config, unfiltered date-level source rows, or hardcoded expected
+counts. This prevents active V1 rows from entering a proposed V2 coverage or
+parity decision when both versions exist for the same date.
+
+## Chunk Audit Status Aggregation
+
+Chunk-level audit status is derived from completed per-date audit results only
+when the backfill chunk itself completed. If a backfill chunk fails before a
+valid per-date result is available, coverage and parity cannot be reported as
+`OK` merely because the result list is empty.
+
+Failure progress distinguishes:
+
+```text
+coverage_status
+coverage_execution_status
+coverage_status_source
+parity_status
+parity_execution_status
+parity_status_source
+```
+
+For example, a coverage failure before parity runs records parity as
+`NOT_RUN_COVERAGE_FAILED` instead of implying a successful zero-mismatch
+parity pass.
+
 The current canonical loaders still commit independently. A group failure after
 successful upstream loaders can therefore leave a partial selected date. The
 required minimum retry contract is idempotent delete-and-replace for each

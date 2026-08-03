@@ -62,12 +62,22 @@ def _require_columns(conn: sqlite3.Connection, table_name: str, columns: tuple[s
         raise ValueError(f"Missing required columns for {label} table {table_name}: {missing}")
 
 
-def _resolve_signal_date(conn: sqlite3.Connection, signal_date: str | None) -> str:
+def _resolve_signal_date(conn: sqlite3.Connection, signal_date: str | None, taxonomy_version_code: str) -> str:
     if signal_date:
         return signal_date
-    row = conn.execute("SELECT MAX(signal_date) FROM dc_ticker_swing_signal_daily").fetchone()
+    row = conn.execute(
+        """
+        SELECT MAX(signal_date)
+        FROM dc_ticker_swing_signal_daily
+        WHERE taxonomy_version = ?
+        """,
+        (taxonomy_version_code,),
+    ).fetchone()
     if row is None or row[0] is None:
-        raise ValueError("Could not resolve latest signal_date from dc_ticker_swing_signal_daily")
+        raise ValueError(
+            "Could not resolve latest signal_date from dc_ticker_swing_signal_daily "
+            f"for taxonomy_version={taxonomy_version_code!r}"
+        )
     return str(row[0])
 
 
@@ -76,10 +86,16 @@ def _resolve_matching_date(
     table_name: str,
     date_column: str,
     selected_date: str,
+    taxonomy_version_code: str,
 ) -> str | None:
     row = conn.execute(
-        f"SELECT MAX({date_column}) FROM {table_name} WHERE {date_column} = ?",
-        (selected_date,),
+        f"""
+        SELECT MAX({date_column})
+        FROM {table_name}
+        WHERE {date_column} = ?
+          AND taxonomy_version = ?
+        """,
+        (selected_date, taxonomy_version_code),
     ).fetchone()
     return None if row is None or row[0] is None else str(row[0])
 
@@ -153,15 +169,16 @@ def _parse_watchlist_source(path: str | Path) -> list[str]:
     return tickers
 
 
-def _fetch_dc_tickers(conn: sqlite3.Connection, selected_date: str) -> set[str]:
+def _fetch_dc_tickers(conn: sqlite3.Connection, selected_date: str, taxonomy_version_code: str) -> set[str]:
     rows = conn.execute(
         """
         SELECT DISTINCT ticker
         FROM dc_ticker_swing_signal_daily
         WHERE signal_date = ?
+          AND taxonomy_version = ?
         ORDER BY ticker
         """,
-        (selected_date,),
+        (selected_date, taxonomy_version_code),
     ).fetchall()
     return {str(row[0]) for row in rows}
 
@@ -231,15 +248,17 @@ def _audit_group_table(
     table_name: str,
     date_column: str,
     selected_date: str,
+    taxonomy_version_code: str,
 ) -> dict[str, object]:
     rows = analysis_conn.execute(
         f"""
         SELECT DISTINCT group_type, group_name
         FROM {table_name}
         WHERE {date_column} = ?
+          AND taxonomy_version = ?
         ORDER BY group_type, group_name
         """,
-        (selected_date,),
+        (selected_date, taxonomy_version_code),
     ).fetchall()
 
     missing_rows: list[dict[str, str]] = []
@@ -295,6 +314,7 @@ def _audit_group_index_table(
     *,
     ecosystem_id: int,
     selected_date: str,
+    taxonomy_version_code: str,
 ) -> dict[str, object]:
     existing_tables = _table_names(analysis_conn)
     if "dc_group_index_daily" not in existing_tables:
@@ -310,9 +330,10 @@ def _audit_group_index_table(
         SELECT DISTINCT group_type, group_name
         FROM dc_group_index_daily
         WHERE index_date = ?
+          AND taxonomy_version = ?
         ORDER BY group_type, group_name
         """,
-        (selected_date,),
+        (selected_date, taxonomy_version_code),
     ).fetchall()
     if not rows:
         return {
@@ -329,6 +350,7 @@ def _audit_group_index_table(
         table_name="dc_group_index_daily",
         date_column="index_date",
         selected_date=selected_date,
+        taxonomy_version_code=taxonomy_version_code,
     )
     result["status"] = "CHECKED"
     return result
@@ -486,18 +508,20 @@ def audit_dc_facts_against_ec_sidecar(
             "analysis",
         )
 
-        selected_signal_date = _resolve_signal_date(analysis_conn, signal_date)
+        selected_signal_date = _resolve_signal_date(analysis_conn, signal_date, taxonomy_version_code)
         selected_synthetic_date = _resolve_matching_date(
             analysis_conn,
             "dc_group_synthetic_ohlc_daily",
             "ohlc_date",
             selected_signal_date,
+            taxonomy_version_code,
         )
         selected_group_index_date = _resolve_matching_date(
             analysis_conn,
             "dc_group_index_daily",
             "index_date",
             selected_signal_date,
+            taxonomy_version_code,
         ) if "dc_group_index_daily" in _table_names(analysis_conn) else None
 
         ecosystem_id, taxonomy_version_id = _fetch_ec_context(
@@ -506,7 +530,7 @@ def audit_dc_facts_against_ec_sidecar(
             taxonomy_version_code=taxonomy_version_code,
         )
 
-        dc_tickers = _fetch_dc_tickers(analysis_conn, selected_signal_date)
+        dc_tickers = _fetch_dc_tickers(analysis_conn, selected_signal_date, taxonomy_version_code)
         ec_tickers = _fetch_ec_ticker_codes(ec_conn, ecosystem_id)
         taxonomy_tickers = _fetch_taxonomy_tickers(
             ec_conn,
@@ -515,6 +539,7 @@ def audit_dc_facts_against_ec_sidecar(
         matched_tickers = sorted(dc_tickers & ec_tickers)
         missing_in_ec_tickers = sorted(dc_tickers - ec_tickers)
         ec_only_tickers = sorted(ec_tickers - dc_tickers)
+        unexpected_dc_tickers = sorted(dc_tickers - taxonomy_tickers)
 
         watchlist_member_tickers, watchlist_sources = _fetch_ec_watchlist_members(ec_conn, ecosystem_id)
         watchlist_missing_tickers: list[str] = []
@@ -536,6 +561,7 @@ def audit_dc_facts_against_ec_sidecar(
             table_name="dc_group_swing_signal_daily",
             date_column="signal_date",
             selected_date=selected_signal_date,
+            taxonomy_version_code=taxonomy_version_code,
         )
         synthetic_result = _audit_group_table(
             analysis_conn,
@@ -544,12 +570,14 @@ def audit_dc_facts_against_ec_sidecar(
             table_name="dc_group_synthetic_ohlc_daily",
             date_column="ohlc_date",
             selected_date=selected_synthetic_date or selected_signal_date,
+            taxonomy_version_code=taxonomy_version_code,
         )
         group_index_result = _audit_group_index_table(
             analysis_conn,
             ec_conn,
             ecosystem_id=ecosystem_id,
             selected_date=selected_group_index_date or selected_signal_date,
+            taxonomy_version_code=taxonomy_version_code,
         )
         membership_result = _primary_membership_checks(
             ec_conn,
@@ -559,6 +587,7 @@ def audit_dc_facts_against_ec_sidecar(
 
         failures = (
             bool(missing_in_ec_tickers)
+            or bool(unexpected_dc_tickers)
             or bool(group_result["missing_rows"])
             or bool(synthetic_result["missing_rows"])
             or (
@@ -586,6 +615,9 @@ def audit_dc_facts_against_ec_sidecar(
             "status": status,
             "ecosystem_code": ecosystem_code,
             "taxonomy_version_code": taxonomy_version_code,
+            "requested_taxonomy_version": taxonomy_version_code,
+            "dc_source_taxonomy_version": taxonomy_version_code,
+            "dc_source_taxonomy_match": not unexpected_dc_tickers,
             "selected_signal_date": selected_signal_date,
             "selected_synthetic_date": selected_synthetic_date,
             "selected_group_index_date": selected_group_index_date,
@@ -597,6 +629,7 @@ def audit_dc_facts_against_ec_sidecar(
             "matched_ticker_count": len(matched_tickers),
             "missing_in_ec_tickers": missing_in_ec_tickers,
             "ec_only_tickers": ec_only_tickers,
+            "unexpected_dc_tickers": unexpected_dc_tickers,
             "watchlist_member_count": len(watchlist_member_tickers),
             "watchlist_only_tickers": watchlist_only_tickers,
             "watchlist_without_taxonomy_membership_tickers": watchlist_without_taxonomy_membership_tickers,
@@ -614,6 +647,8 @@ def audit_dc_facts_against_ec_sidecar(
             "matched_group_index_count": int(group_index_result["matched_count"]),
             "missing_group_index_rows": group_index_result["missing_rows"],
             "ticker_primary_membership_ok": membership_result["ticker_primary_membership_ok"],
+            "required_primary_membership_ticker_count": membership_result["required_ticker_count"],
+            "missing_primary_membership_tickers": membership_result["tickers_without_primary_group_l2"],
             "tickers_without_primary_group_l2": membership_result["tickers_without_primary_group_l2"],
             "tickers_with_multiple_primary_group_l2": membership_result["tickers_with_multiple_primary_group_l2"],
             "group_l2_without_parent_group_l1": membership_result["group_l2_without_parent_group_l1"],

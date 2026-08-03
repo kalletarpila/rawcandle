@@ -515,7 +515,9 @@ def _build_date_result(
         "parity_audit_summary": parity_audit_summary,
         "row_counts": row_counts,
         "coverage_status": coverage_audit_summary.get("status"),
+        "coverage_execution_status": "COMPLETED",
         "parity_status": parity_audit_summary.get("status"),
+        "parity_execution_status": "COMPLETED",
         "total_mismatch_count": int(parity_audit_summary.get("total_mismatch_count", 0)),
     }
 
@@ -774,6 +776,8 @@ def run_ec_source_layer_backfill(
             group_signal_summary = None
             synthetic_summary = None
             group_index_summary = None
+            coverage_audit_summary = None
+            parity_audit_summary = None
 
             ticker_summary = _run_step(
                 step_name="load_ec_ticker_signal_daily_from_dc",
@@ -916,6 +920,18 @@ def run_ec_source_layer_backfill(
     except Exception as exc:
         failed_date = selected_dates[len(completed_dates)]["date"] if len(completed_dates) < len(selected_dates) else None
         failed_step = completed_steps[-1] if completed_steps else "backup"
+        coverage_execution_status = "NOT_RUN"
+        coverage_status = None
+        parity_execution_status = "NOT_RUN"
+        parity_status = None
+        if coverage_audit_summary is not None:
+            coverage_execution_status = "COMPLETED"
+            coverage_status = coverage_audit_summary.get("status")
+            if str(coverage_status) not in SUCCESS_COVERAGE_STATUSES and parity_audit_summary is None:
+                parity_execution_status = "NOT_RUN_COVERAGE_FAILED"
+        if parity_audit_summary is not None:
+            parity_execution_status = "COMPLETED"
+            parity_status = parity_audit_summary.get("status")
         return {
             "status": "BACKFILL_FAILED",
             "ecosystem_code": ecosystem_code,
@@ -932,6 +948,12 @@ def run_ec_source_layer_backfill(
             "backup_path": str(backup_path) if backup_path is not None else None,
             "per_date_results": per_date_results,
             "total_mismatch_count": total_mismatch_count,
+            "coverage_status": coverage_status,
+            "coverage_execution_status": coverage_execution_status,
+            "coverage_audit_summary": coverage_audit_summary,
+            "parity_status": parity_status,
+            "parity_execution_status": parity_execution_status,
+            "parity_audit_summary": parity_audit_summary,
             "error": str(exc),
             "errors": [str(exc)],
             "planner_summary": planner_summary,

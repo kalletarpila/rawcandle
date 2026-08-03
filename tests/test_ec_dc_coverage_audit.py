@@ -38,6 +38,51 @@ def _write_watchlist(path: Path, lines: list[str]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _write_taxonomy_version_csv(path: Path, version: str, tickers: tuple[str, ...]) -> None:
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(
+            [
+                "taxonomy_version",
+                "ticker",
+                "layer",
+                "subindustry",
+                "report_group_status",
+                "is_primary",
+                "role_weight",
+                "notes",
+            ]
+        )
+        for ticker in tickers:
+            writer.writerow([version, ticker, "Compute silicon", "GPUs", "CORE", 1, 1.0, ""])
+
+
+def _setup_multi_taxonomy_ec_db(tmp_path, watchlist_lines: list[str]) -> Path:
+    ec_db_path = tmp_path / "ec_multi.db"
+    taxonomy_v1_path = tmp_path / "taxonomy_v1.csv"
+    taxonomy_v2_path = tmp_path / "taxonomy_v2.csv"
+    watchlist_path = tmp_path / "watchlist_multi.txt"
+    apply_ec_sidecar_migration(str(ec_db_path))
+    _write_taxonomy_version_csv(taxonomy_v1_path, "DC_TAXONOMY_FULL_V1", ("NVDA", "AMD", "ABB"))
+    _write_taxonomy_version_csv(taxonomy_v2_path, "DC_TAXONOMY_FULL_V2", ("NVDA", "AMD", "CBRS"))
+    load_datacenter_taxonomy_to_ec_sidecar(
+        db_path=str(ec_db_path),
+        taxonomy_csv_path=str(taxonomy_v1_path),
+        taxonomy_version_code="DC_TAXONOMY_FULL_V1",
+    )
+    load_datacenter_taxonomy_to_ec_sidecar(
+        db_path=str(ec_db_path),
+        taxonomy_csv_path=str(taxonomy_v2_path),
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+    )
+    _write_watchlist(watchlist_path, watchlist_lines)
+    load_datacenter_watchlist_to_ec_sidecar(
+        db_path=str(ec_db_path),
+        watchlist_path=str(watchlist_path),
+    )
+    return ec_db_path
+
+
 def _create_analysis_db(path: Path, *, ticker_rows: list[tuple[str, str]], group_rows: list[tuple[str, str]], synthetic_rows: list[tuple[str, str]], index_rows: list[tuple[str, str]] | None = None, signal_date: str = "2026-06-05") -> None:
     conn = sqlite3.connect(path)
     try:
@@ -364,3 +409,105 @@ def test_audit_resolves_latest_signal_date_when_not_provided(tmp_path) -> None:
 
     assert summary["selected_signal_date"] == "2026-06-05"
     assert summary["selected_synthetic_date"] == "2026-06-05"
+
+
+def test_v2_coverage_scopes_dc_sources_by_requested_taxonomy(tmp_path) -> None:
+    analysis_db = tmp_path / "analysis_multi.db"
+    ec_db = _setup_multi_taxonomy_ec_db(tmp_path, ["NVDA"])
+    conn = sqlite3.connect(analysis_db)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE dc_ticker_swing_signal_daily (
+                signal_date TEXT NOT NULL,
+                taxonomy_version TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                price_data_status TEXT NULL
+            );
+            CREATE TABLE dc_group_swing_signal_daily (
+                signal_date TEXT NOT NULL,
+                taxonomy_version TEXT NOT NULL,
+                group_type TEXT NOT NULL,
+                group_name TEXT NOT NULL,
+                data_quality_status TEXT NULL
+            );
+            CREATE TABLE dc_group_synthetic_ohlc_daily (
+                ohlc_date TEXT NOT NULL,
+                taxonomy_version TEXT NOT NULL,
+                group_type TEXT NOT NULL,
+                group_name TEXT NOT NULL,
+                data_quality_status TEXT NULL
+            );
+            CREATE TABLE dc_group_index_daily (
+                index_date TEXT NOT NULL,
+                taxonomy_version TEXT NOT NULL,
+                group_type TEXT NOT NULL,
+                group_name TEXT NOT NULL,
+                data_quality_status TEXT NULL
+            );
+            """
+        )
+        for version, tickers in (
+            ("DC_TAXONOMY_FULL_V1", ("NVDA", "AMD", "ABB")),
+            ("DC_TAXONOMY_FULL_V2", ("NVDA", "AMD", "CBRS")),
+        ):
+            conn.executemany(
+                "INSERT INTO dc_ticker_swing_signal_daily VALUES ('2025-08-01', ?, ?, ?)",
+                [(version, ticker, "MISSING_AS_OF_DATE" if ticker == "CBRS" else "OK") for ticker in tickers],
+            )
+            conn.execute(
+                "INSERT INTO dc_group_swing_signal_daily VALUES ('2025-08-01', ?, 'ecosystem', 'DC_ECOSYSTEM_TOTAL', 'OK')",
+                (version,),
+            )
+            conn.execute(
+                "INSERT INTO dc_group_swing_signal_daily VALUES ('2025-08-01', ?, 'layer', 'Compute silicon', 'OK')",
+                (version,),
+            )
+            conn.execute(
+                "INSERT INTO dc_group_swing_signal_daily VALUES ('2025-08-01', ?, 'subindustry', 'GPUs', 'TOO_SMALL')",
+                (version,),
+            )
+            conn.execute(
+                "INSERT INTO dc_group_synthetic_ohlc_daily VALUES ('2025-08-01', ?, 'layer', 'Compute silicon', 'OK')",
+                (version,),
+            )
+            conn.execute(
+                "INSERT INTO dc_group_synthetic_ohlc_daily VALUES ('2025-08-01', ?, 'subindustry', 'GPUs', 'TOO_SMALL')",
+                (version,),
+            )
+            conn.execute(
+                "INSERT INTO dc_group_index_daily VALUES ('2025-08-01', ?, 'ecosystem', 'DC_ECOSYSTEM_TOTAL', 'OK')",
+                (version,),
+            )
+            conn.execute(
+                "INSERT INTO dc_group_index_daily VALUES ('2025-08-01', ?, 'layer', 'Compute silicon', 'OK')",
+                (version,),
+            )
+            conn.execute(
+                "INSERT INTO dc_group_index_daily VALUES ('2025-08-01', ?, 'subindustry', 'GPUs', 'TOO_SMALL')",
+                (version,),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    summary = audit_dc_facts_against_ec_sidecar(
+        str(analysis_db),
+        str(ec_db),
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+        signal_date="2025-08-01",
+    )
+
+    assert summary["status"] in {"OK", "OK_WITH_WARNINGS"}
+    assert summary["requested_taxonomy_version"] == "DC_TAXONOMY_FULL_V2"
+    assert summary["dc_source_taxonomy_match"] is True
+    assert summary["taxonomy_ticker_count"] == 3
+    assert summary["dc_ticker_count"] == 3
+    assert summary["required_primary_membership_ticker_count"] == 3
+    assert summary["unexpected_dc_tickers"] == []
+    assert summary["missing_primary_membership_tickers"] == []
+    assert summary["tickers_without_primary_group_l2"] == []
+    assert "ABB" not in summary["missing_primary_membership_tickers"]
+    assert summary["dc_group_count"] == 3
+    assert summary["dc_synthetic_group_count"] == 2
+    assert summary["dc_group_index_count"] == 3

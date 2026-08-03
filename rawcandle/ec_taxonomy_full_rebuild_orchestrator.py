@@ -1057,6 +1057,77 @@ def _validate_whole_range(
     }
 
 
+def _aggregate_chunk_audit_statuses(chunk_summary: dict[str, object]) -> dict[str, str]:
+    chunk_status = str(chunk_summary.get("status") or "UNKNOWN")
+    per_date_results = [
+        result
+        for result in chunk_summary.get("per_date_results", [])
+        if isinstance(result, dict)
+    ]
+    if chunk_status not in SUCCESS_CHUNK_STATUSES:
+        if not per_date_results:
+            error = str(chunk_summary.get("error") or "")
+            parity_status = "NOT_RUN_COVERAGE_FAILED" if "Coverage audit" in error else "NOT_COMPLETED"
+            return {
+                "coverage_status": "FAILED",
+                "parity_status": parity_status,
+                "coverage_execution_status": "FAILED_BEFORE_ACCEPTED_DATE_RESULT",
+                "parity_execution_status": parity_status,
+                "coverage_status_source": "chunk_failure_no_per_date_results",
+                "parity_status_source": "chunk_failure_no_per_date_results",
+            }
+        coverage_failed = any(
+            str(result.get("coverage_status")) not in {"OK", "OK_WITH_WARNINGS"}
+            for result in per_date_results
+        )
+        parity_failed = any(
+            str(result.get("parity_status")) not in {"OK", "OK_WITH_WARNINGS"}
+            or int(result.get("total_mismatch_count") or 0) != 0
+            for result in per_date_results
+        )
+        return {
+            "coverage_status": "FAILED" if coverage_failed else "NOT_COMPLETED",
+            "parity_status": "FAILED" if parity_failed else "NOT_COMPLETED",
+            "coverage_execution_status": "FAILED",
+            "parity_execution_status": "FAILED" if parity_failed else "NOT_COMPLETED",
+            "coverage_status_source": "chunk_failure_per_date_results",
+            "parity_status_source": "chunk_failure_per_date_results",
+        }
+
+    if not per_date_results:
+        return {
+            "coverage_status": "NOT_COMPLETED",
+            "parity_status": "NOT_COMPLETED",
+            "coverage_execution_status": "NOT_COMPLETED",
+            "parity_execution_status": "NOT_COMPLETED",
+            "coverage_status_source": "empty_per_date_results",
+            "parity_status_source": "empty_per_date_results",
+        }
+
+    coverage_status = (
+        "OK"
+        if all(str(result.get("coverage_status")) in {"OK", "OK_WITH_WARNINGS"} for result in per_date_results)
+        else "FAILED"
+    )
+    parity_status = (
+        "OK"
+        if all(
+            str(result.get("parity_status")) in {"OK", "OK_WITH_WARNINGS"}
+            and int(result.get("total_mismatch_count") or 0) == 0
+            for result in per_date_results
+        )
+        else "FAILED"
+    )
+    return {
+        "coverage_status": coverage_status,
+        "parity_status": parity_status,
+        "coverage_execution_status": "COMPLETED",
+        "parity_execution_status": "COMPLETED",
+        "coverage_status_source": "per_date_results",
+        "parity_status_source": "per_date_results",
+    }
+
+
 def _assert_resume_matches(
     progress: dict[str, object],
     plan: dict[str, object],
@@ -1329,6 +1400,7 @@ def run_ec_taxonomy_full_rebuild(
                 "total_mismatch_count": 0,
             }
         finished_at = _utc_now()
+        audit_statuses = _aggregate_chunk_audit_statuses(chunk_summary)
         chunk_result = {
             **chunk_dict,
             "started_at_utc": started_at,
@@ -1337,20 +1409,7 @@ def run_ec_taxonomy_full_rebuild(
             "selected_dates": chunk_summary.get("selected_dates", []),
             "completed_dates": chunk_summary.get("completed_dates", []),
             "skipped_dates": chunk_summary.get("skipped_dates", []),
-            "coverage_status": "OK"
-            if all(
-                str(result.get("coverage_status")) in {"OK", "OK_WITH_WARNINGS"}
-                for result in chunk_summary.get("per_date_results", [])
-                if isinstance(result, dict)
-            )
-            else "FAILED",
-            "parity_status": "OK"
-            if all(
-                str(result.get("parity_status")) in {"OK", "OK_WITH_WARNINGS"} and int(result.get("total_mismatch_count") or 0) == 0
-                for result in chunk_summary.get("per_date_results", [])
-                if isinstance(result, dict)
-            )
-            else "FAILED",
+            **audit_statuses,
             "total_mismatch_count": int(chunk_summary.get("total_mismatch_count") or 0),
             "error": chunk_summary.get("error"),
             "summary": chunk_summary,

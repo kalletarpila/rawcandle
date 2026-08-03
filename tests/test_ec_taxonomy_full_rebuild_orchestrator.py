@@ -221,6 +221,45 @@ def test_chunk_plan_is_deterministic_bounded_gapless_and_non_overlapping() -> No
         assert right.chunk_start > left.chunk_end
 
 
+def test_failed_backfill_with_empty_per_date_results_never_aggregates_audits_as_ok(tmp_path) -> None:
+    paths = _paths(tmp_path)
+    backup_path = _existing_backup(paths)
+
+    def failed_backfill_runner(**_):
+        return {
+            "status": "BACKFILL_FAILED",
+            "selected_dates": [{"date": "2025-08-01", "action": "TAXONOMY_REBUILD_REPLACE"}],
+            "completed_dates": [],
+            "skipped_dates": [],
+            "per_date_results": [],
+            "total_mismatch_count": 0,
+            "error": "Coverage audit returned non-success status: FAILED",
+        }
+
+    summary = run_ec_taxonomy_full_rebuild(
+        **_plan_args(
+            paths,
+            date_from="2025-08-01",
+            date_to="2025-08-01",
+            confirm_date_from="2025-08-01",
+            confirm_date_to="2025-08-01",
+            existing_backup_path=str(backup_path),
+            confirm_existing_backup_path=str(backup_path),
+        ),
+        backfill_runner=failed_backfill_runner,
+    )
+
+    failed_chunk = summary["chunk_results"][-1]
+    assert summary["overall_status"] == "FAILED"
+    assert failed_chunk["status"] == "BACKFILL_FAILED"
+    assert failed_chunk["coverage_status"] == "FAILED"
+    assert failed_chunk["parity_status"] == "NOT_RUN_COVERAGE_FAILED"
+    assert failed_chunk["coverage_execution_status"] == "FAILED_BEFORE_ACCEPTED_DATE_RESULT"
+    assert failed_chunk["parity_execution_status"] == "NOT_RUN_COVERAGE_FAILED"
+    assert failed_chunk["coverage_status_source"] == "chunk_failure_no_per_date_results"
+    assert failed_chunk["parity_status_source"] == "chunk_failure_no_per_date_results"
+
+
 def test_short_range_produces_one_chunk_and_reversed_range_is_blocked() -> None:
     chunks = build_ec_taxonomy_rebuild_chunks(date_from="2026-07-01", date_to="2026-07-05")
     assert len(chunks) == 1

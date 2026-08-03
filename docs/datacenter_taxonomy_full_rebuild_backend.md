@@ -187,6 +187,27 @@ including source row counts, duplicate source groups, unexpected taxonomy or
 calc-version counts, duplicate target-key counts, unresolved groups, and the
 deepest loader error text.
 
+Coverage and parity audits follow the same explicit taxonomy contract as the
+loaders. For a proposed V2 rebuild, every DC source query used by
+`audit_dc_facts_against_ec_sidecar` and `audit_dc_ec_fact_parity` is scoped by
+the requested `taxonomy_version` and date before comparing it to the EC target
+scope. This is required because active V1 and proposed V2 source rows can
+coexist for the same date. The audits must not derive source scope from the
+active scheduler taxonomy, unfiltered date-level rows, or hardcoded expected
+counts.
+
+Coverage and parity remain separate checks. Coverage verifies sidecar entity,
+membership, hierarchy, source presence, and metadata readiness. Parity verifies
+DC-vs-EC fact-row and field equivalence. Expected non-OK source rows, including
+pre-listing `MISSING_AS_OF_DATE` ticker rows and `TOO_SMALL` group rows, remain
+valid when they are present and mapped consistently.
+
+The chunked orchestrator also avoids misleading audit aggregation. If a chunk
+fails before a completed per-date audit result exists, chunk coverage/parity
+cannot be reported as `OK` from an empty result list. A coverage failure before
+parity runs is represented with a parity execution state such as
+`NOT_RUN_COVERAGE_FAILED`.
+
 If a controlled EC rebuild fails before completion, a later retry is allowed
 from `ec_rebuild_status=FAILED` only when the deployment ID, proposed taxonomy
 version, source hash, rebuild range, inactive V2 state, accepted DC evidence,

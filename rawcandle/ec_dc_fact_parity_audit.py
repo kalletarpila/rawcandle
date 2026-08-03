@@ -61,47 +61,71 @@ KNOWN_COMPONENT_SOURCE_TABLES = {
 }
 
 
-def _fetch_latest_dates(conn: sqlite3.Connection) -> dict[str, str | None]:
+def _fetch_latest_dates(conn: sqlite3.Connection, taxonomy_version_code: str) -> dict[str, str | None]:
     return {
         "dc_ticker_swing_signal_daily": conn.execute(
-            "SELECT MAX(signal_date) FROM dc_ticker_swing_signal_daily"
+            "SELECT MAX(signal_date) FROM dc_ticker_swing_signal_daily WHERE taxonomy_version = ?",
+            (taxonomy_version_code,),
         ).fetchone()[0],
         "dc_group_swing_signal_daily": conn.execute(
-            "SELECT MAX(signal_date) FROM dc_group_swing_signal_daily"
+            "SELECT MAX(signal_date) FROM dc_group_swing_signal_daily WHERE taxonomy_version = ?",
+            (taxonomy_version_code,),
         ).fetchone()[0],
         "dc_group_synthetic_ohlc_daily": conn.execute(
-            "SELECT MAX(ohlc_date) FROM dc_group_synthetic_ohlc_daily"
+            "SELECT MAX(ohlc_date) FROM dc_group_synthetic_ohlc_daily WHERE taxonomy_version = ?",
+            (taxonomy_version_code,),
         ).fetchone()[0],
         "dc_group_index_daily": conn.execute(
-            "SELECT MAX(index_date) FROM dc_group_index_daily"
+            "SELECT MAX(index_date) FROM dc_group_index_daily WHERE taxonomy_version = ?",
+            (taxonomy_version_code,),
         ).fetchone()[0],
     }
 
 
-def _fetch_explicit_date_source_counts(conn: sqlite3.Connection, signal_date: str) -> dict[str, int]:
+def _fetch_explicit_date_source_counts(conn: sqlite3.Connection, signal_date: str, taxonomy_version_code: str) -> dict[str, int]:
     return {
         "dc_ticker_swing_signal_daily": int(
             conn.execute(
-                "SELECT COUNT(*) FROM dc_ticker_swing_signal_daily WHERE signal_date = ?",
-                (signal_date,),
+                """
+                SELECT COUNT(*)
+                FROM dc_ticker_swing_signal_daily
+                WHERE signal_date = ?
+                  AND taxonomy_version = ?
+                """,
+                (signal_date, taxonomy_version_code),
             ).fetchone()[0]
         ),
         "dc_group_swing_signal_daily": int(
             conn.execute(
-                "SELECT COUNT(*) FROM dc_group_swing_signal_daily WHERE signal_date = ?",
-                (signal_date,),
+                """
+                SELECT COUNT(*)
+                FROM dc_group_swing_signal_daily
+                WHERE signal_date = ?
+                  AND taxonomy_version = ?
+                """,
+                (signal_date, taxonomy_version_code),
             ).fetchone()[0]
         ),
         "dc_group_synthetic_ohlc_daily": int(
             conn.execute(
-                "SELECT COUNT(*) FROM dc_group_synthetic_ohlc_daily WHERE ohlc_date = ?",
-                (signal_date,),
+                """
+                SELECT COUNT(*)
+                FROM dc_group_synthetic_ohlc_daily
+                WHERE ohlc_date = ?
+                  AND taxonomy_version = ?
+                """,
+                (signal_date, taxonomy_version_code),
             ).fetchone()[0]
         ),
         "dc_group_index_daily": int(
             conn.execute(
-                "SELECT COUNT(*) FROM dc_group_index_daily WHERE index_date = ?",
-                (signal_date,),
+                """
+                SELECT COUNT(*)
+                FROM dc_group_index_daily
+                WHERE index_date = ?
+                  AND taxonomy_version = ?
+                """,
+                (signal_date, taxonomy_version_code),
             ).fetchone()[0]
         ),
     }
@@ -110,10 +134,11 @@ def _fetch_explicit_date_source_counts(conn: sqlite3.Connection, signal_date: st
 def _resolve_aligned_signal_date(
     conn: sqlite3.Connection,
     signal_date: str | None,
+    taxonomy_version_code: str,
 ) -> tuple[str | None, dict[str, str | None], str]:
-    latest_dates = _fetch_latest_dates(conn)
+    latest_dates = _fetch_latest_dates(conn, taxonomy_version_code)
     if signal_date is not None:
-        explicit_counts = _fetch_explicit_date_source_counts(conn, signal_date)
+        explicit_counts = _fetch_explicit_date_source_counts(conn, signal_date, taxonomy_version_code)
         if all(row_count > 0 for row_count in explicit_counts.values()):
             return signal_date, latest_dates, "EXPLICIT_DATE_ALIGNED"
         return None, latest_dates, "EXPLICIT_DATE_MISSING_SOURCE_ROWS"
@@ -305,15 +330,16 @@ def _lineage_checker(expected_source_table: str, source_run_field: str = "run_id
     ]
 
 
-def _fetch_ticker_source_rows(conn: sqlite3.Connection, signal_date: str) -> dict[tuple[object, ...], sqlite3.Row]:
+def _fetch_ticker_source_rows(conn: sqlite3.Connection, signal_date: str, taxonomy_version_code: str) -> dict[tuple[object, ...], sqlite3.Row]:
     rows = conn.execute(
         """
         SELECT *
         FROM dc_ticker_swing_signal_daily
         WHERE signal_date = ?
+          AND taxonomy_version = ?
         ORDER BY ticker, signal_version
         """,
-        (signal_date,),
+        (signal_date, taxonomy_version_code),
     ).fetchall()
     key_fields = ("ticker", "signal_date", "signal_version")
     return {_row_key(row, key_fields): row for row in rows}
@@ -341,15 +367,16 @@ def _fetch_ticker_target_rows(
     return {_row_key(row, key_fields): row for row in rows}
 
 
-def _fetch_group_signal_source_rows(conn: sqlite3.Connection, signal_date: str) -> dict[tuple[object, ...], sqlite3.Row]:
+def _fetch_group_signal_source_rows(conn: sqlite3.Connection, signal_date: str, taxonomy_version_code: str) -> dict[tuple[object, ...], sqlite3.Row]:
     rows = conn.execute(
         """
         SELECT *
         FROM dc_group_swing_signal_daily
         WHERE signal_date = ?
+          AND taxonomy_version = ?
         ORDER BY group_type, group_name, signal_version
         """,
-        (signal_date,),
+        (signal_date, taxonomy_version_code),
     ).fetchall()
     key_fields = ("group_type", "group_name", "signal_date", "signal_version")
     return {_row_key(row, key_fields): row for row in rows}
@@ -391,15 +418,16 @@ def _fetch_group_signal_target_rows(
     return {_row_key(row, key_fields): row for row in rows}
 
 
-def _fetch_synth_source_rows(conn: sqlite3.Connection, signal_date: str) -> dict[tuple[object, ...], sqlite3.Row]:
+def _fetch_synth_source_rows(conn: sqlite3.Connection, signal_date: str, taxonomy_version_code: str) -> dict[tuple[object, ...], sqlite3.Row]:
     rows = conn.execute(
         """
         SELECT *
         FROM dc_group_synthetic_ohlc_daily
         WHERE ohlc_date = ?
+          AND taxonomy_version = ?
         ORDER BY group_type, group_name, calc_version
         """,
-        (signal_date,),
+        (signal_date, taxonomy_version_code),
     ).fetchall()
     key_fields = ("group_type", "group_name", "ohlc_date", "calc_version")
     return {_row_key(row, key_fields): row for row in rows}
@@ -435,15 +463,16 @@ def _fetch_synth_target_rows(
     return {_row_key(row, key_fields): row for row in rows}
 
 
-def _fetch_group_index_source_rows(conn: sqlite3.Connection, signal_date: str) -> dict[tuple[object, ...], sqlite3.Row]:
+def _fetch_group_index_source_rows(conn: sqlite3.Connection, signal_date: str, taxonomy_version_code: str) -> dict[tuple[object, ...], sqlite3.Row]:
     rows = conn.execute(
         """
         SELECT *
         FROM dc_group_index_daily
         WHERE index_date = ?
+          AND taxonomy_version = ?
         ORDER BY group_type, group_name, calc_version
         """,
-        (signal_date,),
+        (signal_date, taxonomy_version_code),
     ).fetchall()
     key_fields = ("group_type", "group_name", "index_date", "calc_version")
     return {_row_key(row, key_fields): row for row in rows}
@@ -529,10 +558,11 @@ def _ticker_parity(
     *,
     ecosystem_id: int,
     taxonomy_version_id: int,
+    taxonomy_version_code: str,
     signal_date: str,
     numeric_tolerance: float,
 ) -> dict[str, object]:
-    source_rows = _fetch_ticker_source_rows(source_conn, signal_date)
+    source_rows = _fetch_ticker_source_rows(source_conn, signal_date, taxonomy_version_code)
     target_rows = _fetch_ticker_target_rows(
         target_conn,
         ecosystem_id=ecosystem_id,
@@ -619,10 +649,11 @@ def _group_signal_parity(
     *,
     ecosystem_id: int,
     taxonomy_version_id: int,
+    taxonomy_version_code: str,
     signal_date: str,
     numeric_tolerance: float,
 ) -> dict[str, object]:
-    source_rows = _fetch_group_signal_source_rows(source_conn, signal_date)
+    source_rows = _fetch_group_signal_source_rows(source_conn, signal_date, taxonomy_version_code)
     target_rows = _fetch_group_signal_target_rows(
         target_conn,
         ecosystem_id=ecosystem_id,
@@ -688,10 +719,11 @@ def _synthetic_ohlc_parity(
     *,
     ecosystem_id: int,
     taxonomy_version_id: int,
+    taxonomy_version_code: str,
     signal_date: str,
     numeric_tolerance: float,
 ) -> dict[str, object]:
-    source_rows = _fetch_synth_source_rows(source_conn, signal_date)
+    source_rows = _fetch_synth_source_rows(source_conn, signal_date, taxonomy_version_code)
     target_rows = _fetch_synth_target_rows(
         target_conn,
         ecosystem_id=ecosystem_id,
@@ -761,10 +793,11 @@ def _group_index_parity(
     *,
     ecosystem_id: int,
     taxonomy_version_id: int,
+    taxonomy_version_code: str,
     signal_date: str,
     numeric_tolerance: float,
 ) -> dict[str, object]:
-    source_rows = _fetch_group_index_source_rows(source_conn, signal_date)
+    source_rows = _fetch_group_index_source_rows(source_conn, signal_date, taxonomy_version_code)
     target_rows = _fetch_group_index_target_rows(
         target_conn,
         ecosystem_id=ecosystem_id,
@@ -898,10 +931,14 @@ def audit_dc_ec_fact_parity(
         _require_tables(target_conn, REQUIRED_TARGET_TABLES, "target")
         _require_table(target_conn, "ec_signal_run", "target")
 
-        selected_signal_date, latest_dates, date_alignment = _resolve_aligned_signal_date(source_conn, signal_date)
+        selected_signal_date, latest_dates, date_alignment = _resolve_aligned_signal_date(
+            source_conn,
+            signal_date,
+            taxonomy_version_code,
+        )
         if selected_signal_date is None:
             explicit_date_source_counts = (
-                _fetch_explicit_date_source_counts(source_conn, signal_date)
+                _fetch_explicit_date_source_counts(source_conn, signal_date, taxonomy_version_code)
                 if signal_date is not None
                 else None
             )
@@ -934,6 +971,7 @@ def audit_dc_ec_fact_parity(
             target_conn,
             ecosystem_id=ecosystem_id,
             taxonomy_version_id=taxonomy_version_id,
+            taxonomy_version_code=taxonomy_version_code,
             signal_date=selected_signal_date,
             numeric_tolerance=numeric_tolerance,
         )
@@ -942,6 +980,7 @@ def audit_dc_ec_fact_parity(
             target_conn,
             ecosystem_id=ecosystem_id,
             taxonomy_version_id=taxonomy_version_id,
+            taxonomy_version_code=taxonomy_version_code,
             signal_date=selected_signal_date,
             numeric_tolerance=numeric_tolerance,
         )
@@ -950,6 +989,7 @@ def audit_dc_ec_fact_parity(
             target_conn,
             ecosystem_id=ecosystem_id,
             taxonomy_version_id=taxonomy_version_id,
+            taxonomy_version_code=taxonomy_version_code,
             signal_date=selected_signal_date,
             numeric_tolerance=numeric_tolerance,
         )
@@ -958,6 +998,7 @@ def audit_dc_ec_fact_parity(
             target_conn,
             ecosystem_id=ecosystem_id,
             taxonomy_version_id=taxonomy_version_id,
+            taxonomy_version_code=taxonomy_version_code,
             signal_date=selected_signal_date,
             numeric_tolerance=numeric_tolerance,
         )
@@ -1023,6 +1064,9 @@ def audit_dc_ec_fact_parity(
         return {
             "status": status,
             "signal_date": selected_signal_date,
+            "taxonomy_version_code": taxonomy_version_code,
+            "requested_taxonomy_version": taxonomy_version_code,
+            "taxonomy_version_id": taxonomy_version_id,
             "date_alignment": date_alignment,
             "latest_dates": latest_dates,
             "ticker_parity": ticker_parity,

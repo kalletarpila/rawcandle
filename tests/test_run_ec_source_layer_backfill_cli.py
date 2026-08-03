@@ -572,6 +572,7 @@ def test_runs_four_fact_loaders_per_date_in_correct_order(tmp_path: Path, monkey
     args = _base_args(tmp_path)
     call_order: list[str] = []
     loader_kwargs: dict[str, object] = {}
+    audit_kwargs: dict[str, object] = {}
     planner_dates = [
         {"date": "2026-05-29", "action": "BACKFILL_MISSING"},
         {"date": "2026-06-01", "action": "REPLACE_PARTIAL"},
@@ -605,8 +606,18 @@ def test_runs_four_fact_loaders_per_date_in_correct_order(tmp_path: Path, monkey
     monkeypatch.setattr(cli, "load_ec_group_signal_daily_from_dc", group_signal_loader)
     monkeypatch.setattr(cli, "load_ec_group_synthetic_ohlc_daily_from_dc", synthetic_loader)
     monkeypatch.setattr(cli, "load_ec_group_index_daily_from_dc", group_index_loader)
-    monkeypatch.setattr(cli, "audit_dc_facts_against_ec_sidecar", lambda **kwargs: (call_order.append(f"coverage:{kwargs['signal_date']}") or {"status": "OK_WITH_WARNINGS"}))
-    monkeypatch.setattr(cli, "audit_dc_ec_fact_parity", lambda **kwargs: (call_order.append(f"parity:{kwargs['signal_date']}") or {"status": "OK_WITH_WARNINGS", "total_mismatch_count": 0}))
+    def coverage_audit(**kwargs):
+        call_order.append(f"coverage:{kwargs['signal_date']}")
+        audit_kwargs[f"coverage:{kwargs['signal_date']}"] = kwargs
+        return {"status": "OK_WITH_WARNINGS"}
+
+    def parity_audit(**kwargs):
+        call_order.append(f"parity:{kwargs['signal_date']}")
+        audit_kwargs[f"parity:{kwargs['signal_date']}"] = kwargs
+        return {"status": "OK_WITH_WARNINGS", "total_mismatch_count": 0}
+
+    monkeypatch.setattr(cli, "audit_dc_facts_against_ec_sidecar", coverage_audit)
+    monkeypatch.setattr(cli, "audit_dc_ec_fact_parity", parity_audit)
     monkeypatch.setattr(cli, "_selected_date_row_counts", lambda *_: {
         "ticker_rows": 236,
         "group_signal_rows": 54,
@@ -635,6 +646,10 @@ def test_runs_four_fact_loaders_per_date_in_correct_order(tmp_path: Path, monkey
     ]
     assert loader_kwargs["ticker:2026-05-29"]["replace_existing"] is False
     assert loader_kwargs["ticker:2026-06-01"]["replace_existing"] is True
+    assert audit_kwargs["coverage:2026-05-29"]["taxonomy_version_code"] == "DC_TAXONOMY_FULL_V1"
+    assert audit_kwargs["parity:2026-05-29"]["taxonomy_version_code"] == "DC_TAXONOMY_FULL_V1"
+    assert audit_kwargs["coverage:2026-06-01"]["taxonomy_version_code"] == "DC_TAXONOMY_FULL_V1"
+    assert audit_kwargs["parity:2026-06-01"]["taxonomy_version_code"] == "DC_TAXONOMY_FULL_V1"
     assert "Backfill Status: BACKFILL_COMPLETED" in output
 
 
@@ -852,6 +867,57 @@ def test_runs_coverage_and_parity_audits_per_date(tmp_path: Path, monkeypatch) -
     assert summary["status"] == "BACKFILL_COMPLETED"
     assert called == {"coverage": 2, "parity": 2}
     assert parity_include_pipeline_watermark_values == [False, False]
+
+
+def test_coverage_failure_marks_parity_not_run(tmp_path: Path, monkeypatch) -> None:
+    args = _base_args(tmp_path)
+    called = {"coverage": 0, "parity": 0}
+    _patch_successful_watermark_finalizer(monkeypatch)
+    monkeypatch.setattr(
+        cli,
+        "plan_ec_source_layer_backfill",
+        lambda **_: _ready_backfill_plan(candidate_dates=[{"date": "2025-08-01", "action": "REPLACE_PARTIAL"}]),
+    )
+    monkeypatch.setattr(cli, "_create_backup", lambda **_: tmp_path / "backups" / "backup.sqlite")
+    monkeypatch.setattr(cli, "load_ec_ticker_signal_daily_from_dc", lambda **_: {"status": "OK"})
+    monkeypatch.setattr(cli, "load_ec_group_signal_daily_from_dc", lambda **_: {"status": "OK"})
+    monkeypatch.setattr(cli, "load_ec_group_synthetic_ohlc_daily_from_dc", lambda **_: {"status": "OK"})
+    monkeypatch.setattr(cli, "load_ec_group_index_daily_from_dc", lambda **_: {"status": "OK"})
+
+    def coverage(**kwargs):
+        called["coverage"] += 1
+        assert kwargs["taxonomy_version_code"] == "DC_TAXONOMY_FULL_V2"
+        return {"status": "FAILED", "coverage_failure_reasons": ["missing_primary_membership_tickers"]}
+
+    def parity(**_):
+        called["parity"] += 1
+        return {"status": "OK", "total_mismatch_count": 0}
+
+    monkeypatch.setattr(cli, "audit_dc_facts_against_ec_sidecar", coverage)
+    monkeypatch.setattr(cli, "audit_dc_ec_fact_parity", parity)
+
+    summary = cli.run_ec_source_layer_backfill(
+        db_path=args[1],
+        ecosystem_code="DATACENTER",
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+        date_from="2025-08-01",
+        date_to="2025-08-01",
+        taxonomy_csv_path=args[11],
+        watchlist_path=args[13],
+        backup_dir=args[15],
+        confirm_db=args[17],
+        confirm_ecosystem=args[19],
+        confirm_taxonomy_version="DC_TAXONOMY_FULL_V2",
+        allow_replace_existing=True,
+    )
+
+    assert summary["status"] == "BACKFILL_FAILED"
+    assert called == {"coverage": 1, "parity": 0}
+    assert summary["coverage_status"] == "FAILED"
+    assert summary["coverage_execution_status"] == "COMPLETED"
+    assert summary["parity_status"] is None
+    assert summary["parity_execution_status"] == "NOT_RUN_COVERAGE_FAILED"
+    assert summary["total_mismatch_count"] == 0
 
 
 def test_stops_on_ticker_loader_failure_and_reports_backup_path(tmp_path: Path, monkeypatch, capsys) -> None:

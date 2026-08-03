@@ -41,6 +41,24 @@ def _write_watchlist_txt(path: Path) -> None:
     path.write_text("NVDA\nCRGY\n", encoding="utf-8")
 
 
+def _write_taxonomy_version_csv(path: Path, version: str, tickers: tuple[str, ...]) -> None:
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(
+            [
+                "taxonomy_version",
+                "ticker",
+                "layer",
+                "subindustry",
+                "report_group_status",
+                "is_primary",
+                "role_weight",
+                "notes",
+            ]
+        )
+        for ticker in tickers:
+            writer.writerow([version, ticker, "Compute silicon", "GPUs", "CORE", 1, 1.0, ""])
+
 def _insert_source_rows_for_date(
     conn: sqlite3.Connection,
     *,
@@ -401,6 +419,94 @@ def _build_target(
     return source_db, target_db
 
 
+def _build_v2_target_with_same_date_v1_source_rows(tmp_path) -> tuple[Path, Path]:
+    source_db = tmp_path / "source_multi.db"
+    target_db = tmp_path / "target_multi.db"
+    taxonomy_v1_csv = tmp_path / "taxonomy_v1_multi.csv"
+    taxonomy_v2_csv = tmp_path / "taxonomy_v2_multi.csv"
+    watchlist_txt = tmp_path / "watchlist_multi.txt"
+
+    _create_source_db(source_db)
+    with _connect(str(source_db)) as conn:
+        for table, date_column in (
+            ("dc_ticker_swing_signal_daily", "signal_date"),
+            ("dc_group_swing_signal_daily", "signal_date"),
+            ("dc_group_synthetic_ohlc_daily", "ohlc_date"),
+            ("dc_group_index_daily", "index_date"),
+        ):
+            columns = [row[1] for row in conn.execute(f"PRAGMA table_info({table})")]
+            select_exprs = [
+                "'DC_TAXONOMY_FULL_V2'" if column == "taxonomy_version" else column
+                for column in columns
+            ]
+            conn.execute(
+                f"""
+                INSERT INTO {table} ({', '.join(columns)})
+                SELECT {', '.join(select_exprs)}
+                FROM {table}
+                WHERE {date_column} = '2026-06-05'
+                  AND taxonomy_version = 'DC_TAXONOMY_FULL_V1'
+                """
+            )
+        ticker_columns = [row[1] for row in conn.execute("PRAGMA table_info(dc_ticker_swing_signal_daily)")]
+        ticker_select_exprs = [
+            "'ABB'" if column == "ticker" else column
+            for column in ticker_columns
+        ]
+        conn.execute(
+            f"""
+            INSERT INTO dc_ticker_swing_signal_daily ({', '.join(ticker_columns)})
+            SELECT {', '.join(ticker_select_exprs)}
+            FROM dc_ticker_swing_signal_daily
+            WHERE signal_date = '2026-06-05'
+              AND taxonomy_version = 'DC_TAXONOMY_FULL_V1'
+              AND ticker = 'NVDA'
+            """
+        )
+        conn.commit()
+
+    apply_ec_sidecar_migration(str(target_db))
+    _write_taxonomy_version_csv(taxonomy_v1_csv, "DC_TAXONOMY_FULL_V1", ("NVDA", "ABB"))
+    _write_taxonomy_version_csv(taxonomy_v2_csv, "DC_TAXONOMY_FULL_V2", ("NVDA",))
+    _write_watchlist_txt(watchlist_txt)
+    load_datacenter_taxonomy_to_ec_sidecar(
+        db_path=str(target_db),
+        taxonomy_csv_path=str(taxonomy_v1_csv),
+        taxonomy_version_code="DC_TAXONOMY_FULL_V1",
+    )
+    load_datacenter_taxonomy_to_ec_sidecar(
+        db_path=str(target_db),
+        taxonomy_csv_path=str(taxonomy_v2_csv),
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+    )
+    load_datacenter_watchlist_to_ec_sidecar(str(target_db), str(watchlist_txt))
+    load_ec_ticker_signal_daily_from_dc(
+        str(source_db),
+        str(target_db),
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+        signal_date="2026-06-05",
+    )
+    load_ec_group_signal_daily_from_dc(
+        str(source_db),
+        str(target_db),
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+        signal_date="2026-06-05",
+    )
+    load_ec_group_synthetic_ohlc_daily_from_dc(
+        str(source_db),
+        str(target_db),
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+        signal_date="2026-06-05",
+    )
+    load_ec_group_index_daily_from_dc(
+        str(source_db),
+        str(target_db),
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+        signal_date="2026-06-05",
+    )
+    return source_db, target_db
+
+
 def test_parity_audit_succeeds_for_small_fixture_build(tmp_path) -> None:
     source_db, target_db = _build_target(tmp_path)
     summary = audit_dc_ec_fact_parity(str(source_db), str(target_db), signal_date="2026-06-05")
@@ -416,6 +522,30 @@ def test_parity_audit_succeeds_for_small_fixture_build(tmp_path) -> None:
         "member_count" in warning or "eligible_count" in warning
         for warning in summary["group_index_parity"]["warnings"]
     )
+
+
+def test_v2_parity_scopes_dc_sources_by_requested_taxonomy(tmp_path) -> None:
+    source_db, target_db = _build_v2_target_with_same_date_v1_source_rows(tmp_path)
+
+    summary = audit_dc_ec_fact_parity(
+        str(source_db),
+        str(target_db),
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+        signal_date="2026-06-05",
+        include_pipeline_watermark=False,
+    )
+
+    assert summary["status"] == "OK_WITH_WARNINGS"
+    assert summary["requested_taxonomy_version"] == "DC_TAXONOMY_FULL_V2"
+    assert summary["taxonomy_version_id"] == 2
+    assert summary["total_mismatch_count"] == 0
+    assert summary["ticker_parity"]["source_row_count"] == 1
+    assert summary["ticker_parity"]["target_row_count"] == 1
+    assert summary["ticker_parity"]["missing_in_target"] == []
+    assert summary["ticker_parity"]["extra_in_target"] == []
+    assert summary["group_signal_parity"]["source_row_count"] == 3
+    assert summary["synthetic_ohlc_parity"]["source_row_count"] == 2
+    assert summary["group_index_parity"]["source_row_count"] == 3
 
 
 def test_parity_audit_numeric_tolerance_allows_small_difference(tmp_path) -> None:
