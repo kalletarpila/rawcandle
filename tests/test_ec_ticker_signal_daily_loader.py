@@ -16,7 +16,12 @@ def _connect(db_path: str) -> sqlite3.Connection:
     return conn
 
 
-def _write_taxonomy_csv(path: Path) -> None:
+def _write_taxonomy_csv(
+    path: Path,
+    *,
+    taxonomy_version: str = "DC_TAXONOMY_FULL_V1",
+    tickers: tuple[str, ...] = ("NVDA", "AMD"),
+) -> None:
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(
@@ -31,11 +36,22 @@ def _write_taxonomy_csv(path: Path) -> None:
                 "notes",
             ]
         )
-        writer.writerow(["DC_TAXONOMY_FULL_V1", "NVDA", "Compute silicon", "GPUs", "CORE", 1, 1.0, ""])
-        writer.writerow(["DC_TAXONOMY_FULL_V1", "AMD", "Compute silicon", "GPUs", "WATCH_ONLY", 1, 0.7, ""])
+        for index, ticker in enumerate(tickers):
+            writer.writerow(
+                [
+                    taxonomy_version,
+                    ticker,
+                    "Compute silicon",
+                    "GPUs",
+                    "CORE" if index == 0 else "WATCH_ONLY",
+                    1,
+                    1.0 if index == 0 else 0.7,
+                    "",
+                ]
+            )
 
 
-def _create_source_db(path: Path, rows: list[dict[str, object]]) -> None:
+def _create_source_db(path: Path, rows: list[dict[str, object]], *, primary_key: bool = True) -> None:
     if path.exists():
         path.unlink()
     conn = sqlite3.connect(path)
@@ -102,10 +118,16 @@ def _create_source_db(path: Path, rows: list[dict[str, object]]) -> None:
                 latest_reset_confirmed_as_of_date TEXT NULL,
                 latest_reset_reason TEXT NULL,
                 latest_reset_age_trading_days INTEGER NULL,
-                latest_reset_freshness TEXT NULL,
-                PRIMARY KEY (signal_date, taxonomy_version, ticker, signal_version)
+                latest_reset_freshness TEXT NULL
+                {primary_key_clause}
             )
-            """
+            """.format(
+                primary_key_clause=(
+                    ", PRIMARY KEY (signal_date, taxonomy_version, ticker, signal_version)"
+                    if primary_key
+                    else ""
+                )
+            )
         )
         columns = list(rows[0].keys()) if rows else []
         placeholders = ", ".join("?" for _ in columns)
@@ -121,6 +143,7 @@ def _create_source_db(path: Path, rows: list[dict[str, object]]) -> None:
 def _source_row(
     *,
     ticker: str = "NVDA",
+    taxonomy_version: str = "DC_TAXONOMY_FULL_V1",
     signal_date: str = "2026-06-05",
     signal_version: str = "DC_SWING_SIGNAL_V1",
     run_id: str = "DC_TICKER_SWING_20260605_DC_SWING_SIGNAL_V1",
@@ -128,7 +151,7 @@ def _source_row(
 ) -> dict[str, object]:
     return {
         "signal_date": signal_date,
-        "taxonomy_version": "DC_TAXONOMY_FULL_V1",
+        "taxonomy_version": taxonomy_version,
         "ticker": ticker,
         "primary_layer": "Compute silicon",
         "primary_subindustry": "GPUs",
@@ -202,6 +225,17 @@ def _setup_target_db(tmp_path) -> tuple[Path, Path]:
         taxonomy_version_code="DC_TAXONOMY_FULL_V1",
     )
     return target_db, taxonomy_path
+
+
+def _load_taxonomy_version(target_db: Path, tmp_path: Path, version: str, tickers: tuple[str, ...]) -> Path:
+    taxonomy_path = tmp_path / f"taxonomy_{version}.csv"
+    _write_taxonomy_csv(taxonomy_path, taxonomy_version=version, tickers=tickers)
+    load_datacenter_taxonomy_to_ec_sidecar(
+        db_path=str(target_db),
+        taxonomy_csv_path=str(taxonomy_path),
+        taxonomy_version_code=version,
+    )
+    return taxonomy_path
 
 
 def test_loader_persists_ticker_fact_rows_lineage_and_signal_run(tmp_path) -> None:
@@ -280,37 +314,84 @@ def test_loader_persists_ticker_fact_rows_lineage_and_signal_run(tmp_path) -> No
             "2026-06-07T03:48:05Z",
         )
 
-        assert summary == {
+        assert {
+            key: summary[key]
+            for key in (
+                "status",
+                "loader_status",
+                "loader_error_code",
+                "loader_error",
+                "ecosystem_code",
+                "taxonomy_version_code",
+                "requested_taxonomy_version",
+                "source_taxonomy_version",
+                "source_taxonomy_match",
+                "signal_date",
+                "signal_version",
+                "source_table",
+                "source_row_count",
+                "source_distinct_ticker_count",
+                "duplicate_source_ticker_count",
+                "unexpected_taxonomy_version_count",
+                "loaded_row_count",
+                "failed_row_count",
+                "mapped_row_count",
+                "unresolved_membership_count",
+                "unresolved_tickers",
+                "duplicate_target_key_count",
+                "null_target_key_count",
+                "missing_ticker_entities",
+                "missing_primary_memberships",
+                "multiple_primary_memberships",
+                "source_run_ids",
+                "created_signal_run_count",
+                "reused_signal_run_count",
+            )
+        } == {
             "status": "OK_WITH_WARNINGS",
+            "loader_status": "OK_WITH_WARNINGS",
+            "loader_error_code": "NONE",
+            "loader_error": None,
             "ecosystem_code": "DATACENTER",
             "taxonomy_version_code": "DC_TAXONOMY_FULL_V1",
+            "requested_taxonomy_version": "DC_TAXONOMY_FULL_V1",
+            "source_taxonomy_version": "DC_TAXONOMY_FULL_V1",
+            "source_taxonomy_match": True,
             "signal_date": "2026-06-05",
             "signal_version": "DC_SWING_SIGNAL_V1",
             "source_table": "dc_ticker_swing_signal_daily",
             "source_row_count": 1,
+            "source_distinct_ticker_count": 1,
+            "duplicate_source_ticker_count": 0,
+            "unexpected_taxonomy_version_count": 0,
             "loaded_row_count": 1,
             "failed_row_count": 0,
-            "unmapped_source_columns": [
-                "fast_ema10_pullback_signal",
-                "conservative_ema20_pullback_signal",
-            ],
-            "unmapped_target_columns": [
-                "return_1d",
-                "distance_to_sma50_pct",
-                "distance_to_sma200_pct",
-                "data_quality_status",
-            ],
+            "mapped_row_count": 1,
+            "unresolved_membership_count": 0,
+            "unresolved_tickers": [],
+            "duplicate_target_key_count": 0,
+            "null_target_key_count": 0,
             "missing_ticker_entities": [],
             "missing_primary_memberships": [],
             "multiple_primary_memberships": [],
             "source_run_ids": ["DC_TICKER_SWING_20260605_DC_SWING_SIGNAL_V1"],
             "created_signal_run_count": 1,
             "reused_signal_run_count": 0,
-            "warnings": [
-                "Source columns not loaded into ec_ticker_signal_daily: fast_ema10_pullback_signal, conservative_ema20_pullback_signal",
-                "Target columns left NULL because current dc source has no values: return_1d, distance_to_sma50_pct, distance_to_sma200_pct, data_quality_status",
-            ],
         }
+        assert summary["unmapped_source_columns"] == [
+            "fast_ema10_pullback_signal",
+            "conservative_ema20_pullback_signal",
+        ]
+        assert summary["unmapped_target_columns"] == [
+            "return_1d",
+            "distance_to_sma50_pct",
+            "distance_to_sma200_pct",
+            "data_quality_status",
+        ]
+        assert summary["warnings"] == [
+            "Source columns not loaded into ec_ticker_signal_daily: fast_ema10_pullback_signal, conservative_ema20_pullback_signal",
+            "Target columns left NULL because current dc source has no values: return_1d, distance_to_sma50_pct, distance_to_sma200_pct, data_quality_status",
+        ]
     finally:
         conn.close()
 
@@ -500,3 +581,258 @@ def test_loader_source_row_hash_is_deterministic(tmp_path) -> None:
         hash_a = conn_a.execute("SELECT source_row_hash FROM ec_ticker_signal_daily").fetchone()[0]
         hash_b = conn_b.execute("SELECT source_row_hash FROM ec_ticker_signal_daily").fetchone()[0]
         assert hash_a == hash_b
+
+
+def test_loader_scopes_v2_source_rows_by_requested_taxonomy(tmp_path) -> None:
+    source_db = tmp_path / "source_mixed_v1_v2.db"
+    target_db, _ = _setup_target_db(tmp_path)
+    _load_taxonomy_version(target_db, tmp_path, "DC_TAXONOMY_FULL_V2", ("NVDA", "AMD"))
+    rows = [
+        _source_row(ticker="NVDA", taxonomy_version="DC_TAXONOMY_FULL_V1", run_id="RUN_V1"),
+        _source_row(ticker="AMD", taxonomy_version="DC_TAXONOMY_FULL_V1", run_id="RUN_V1", close=101.0),
+        _source_row(ticker="BLD", taxonomy_version="DC_TAXONOMY_FULL_V1", run_id="RUN_V1", close=102.0),
+        _source_row(ticker="NVDA", taxonomy_version="DC_TAXONOMY_FULL_V2", run_id="RUN_V2", close=201.0),
+        _source_row(ticker="AMD", taxonomy_version="DC_TAXONOMY_FULL_V2", run_id="RUN_V2", close=202.0),
+    ]
+    _create_source_db(source_db, rows)
+
+    summary = load_ec_ticker_signal_daily_from_dc(
+        source_db_path=str(source_db),
+        target_db_path=str(target_db),
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+    )
+
+    assert summary["status"] == "OK_WITH_WARNINGS"
+    assert summary["requested_taxonomy_version"] == "DC_TAXONOMY_FULL_V2"
+    assert summary["source_taxonomy_version"] == "DC_TAXONOMY_FULL_V2"
+    assert summary["source_taxonomy_match"] is True
+    assert summary["source_row_count"] == 2
+    assert summary["source_distinct_ticker_count"] == 2
+    assert summary["duplicate_source_ticker_count"] == 0
+    assert summary["unexpected_taxonomy_version_count"] == 0
+    assert summary["mapped_row_count"] == 2
+    assert summary["unresolved_membership_count"] == 0
+    assert summary["duplicate_target_key_count"] == 0
+    assert summary["null_target_key_count"] == 0
+    assert summary["source_run_ids"] == ["RUN_V2"]
+
+    with _connect(str(target_db)) as conn:
+        loaded = conn.execute(
+            """
+            SELECT ticker, close, taxonomy_version_id
+            FROM ec_ticker_signal_daily
+            ORDER BY ticker
+            """
+        ).fetchall()
+    assert loaded == [("AMD", 202.0, 2), ("NVDA", 201.0, 2)]
+
+
+def test_loader_scopes_v1_ordinary_source_rows_by_requested_taxonomy(tmp_path) -> None:
+    source_db = tmp_path / "source_v1_ordinary.db"
+    target_db, _ = _setup_target_db(tmp_path)
+    _load_taxonomy_version(target_db, tmp_path, "DC_TAXONOMY_FULL_V2", ("NVDA", "AMD", "CRGY"))
+    rows = [
+        _source_row(ticker="NVDA", taxonomy_version="DC_TAXONOMY_FULL_V1", run_id="RUN_V1"),
+        _source_row(ticker="AMD", taxonomy_version="DC_TAXONOMY_FULL_V1", run_id="RUN_V1", close=101.0),
+        _source_row(ticker="CRGY", taxonomy_version="DC_TAXONOMY_FULL_V2", run_id="RUN_V2", close=202.0),
+    ]
+    _create_source_db(source_db, rows)
+
+    summary = load_ec_ticker_signal_daily_from_dc(
+        source_db_path=str(source_db),
+        target_db_path=str(target_db),
+        taxonomy_version_code="DC_TAXONOMY_FULL_V1",
+    )
+
+    assert summary["status"] == "OK_WITH_WARNINGS"
+    assert summary["source_taxonomy_version"] == "DC_TAXONOMY_FULL_V1"
+    assert summary["source_row_count"] == 2
+    assert summary["source_run_ids"] == ["RUN_V1"]
+
+    with _connect(str(target_db)) as conn:
+        loaded = conn.execute("SELECT ticker, taxonomy_version_id FROM ec_ticker_signal_daily ORDER BY ticker").fetchall()
+    assert loaded == [("AMD", 1), ("NVDA", 1)]
+
+
+def test_loader_known_incident_shape_selects_257_v2_rows_only(tmp_path) -> None:
+    source_db = tmp_path / "source_known_incident.db"
+    target_db, _ = _setup_target_db(tmp_path)
+    overlap = tuple(f"T{i:03d}" for i in range(221))
+    v1_only = tuple(f"OLD{i:03d}" for i in range(15))
+    v2_added = tuple(f"NEW{i:03d}" for i in range(36))
+    v1_tickers = overlap + v1_only
+    v2_tickers = overlap + v2_added
+    _load_taxonomy_version(target_db, tmp_path, "DC_TAXONOMY_FULL_V2", v2_tickers)
+    rows = [
+        _source_row(ticker=ticker, taxonomy_version="DC_TAXONOMY_FULL_V1", run_id="RUN_V1", close=100.0 + idx)
+        for idx, ticker in enumerate(v1_tickers)
+    ] + [
+        _source_row(ticker=ticker, taxonomy_version="DC_TAXONOMY_FULL_V2", run_id="RUN_V2", close=200.0 + idx)
+        for idx, ticker in enumerate(v2_tickers)
+    ]
+    _create_source_db(source_db, rows)
+
+    summary = load_ec_ticker_signal_daily_from_dc(
+        source_db_path=str(source_db),
+        target_db_path=str(target_db),
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+    )
+
+    assert summary["status"] == "OK_WITH_WARNINGS"
+    assert summary["source_row_count"] == 257
+    assert summary["source_distinct_ticker_count"] == 257
+    assert summary["mapped_row_count"] == 257
+    assert summary["unresolved_membership_count"] == 0
+    assert summary["duplicate_target_key_count"] == 0
+    assert summary["missing_primary_memberships"] == []
+    assert summary["source_run_ids"] == ["RUN_V2"]
+    with _connect(str(target_db)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM ec_ticker_signal_daily WHERE taxonomy_version_id = 2").fetchone()[0] == 257
+        assert conn.execute(
+            "SELECT COUNT(*) FROM ec_ticker_signal_daily WHERE taxonomy_version_id = 2 AND ticker LIKE 'OLD%'"
+        ).fetchone()[0] == 0
+
+
+def test_loader_missing_requested_taxonomy_rows_returns_structured_failure(tmp_path) -> None:
+    source_db = tmp_path / "source_missing_requested_taxonomy.db"
+    target_db, _ = _setup_target_db(tmp_path)
+    _load_taxonomy_version(target_db, tmp_path, "DC_TAXONOMY_FULL_V2", ("NVDA",))
+    _create_source_db(source_db, [_source_row(taxonomy_version="DC_TAXONOMY_FULL_V1")])
+
+    summary = load_ec_ticker_signal_daily_from_dc(
+        source_db_path=str(source_db),
+        target_db_path=str(target_db),
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+    )
+
+    assert summary["status"] == "FAILED"
+    assert summary["loader_error_code"] == "SOURCE_SCOPE_UNAVAILABLE"
+    assert summary["requested_taxonomy_version"] == "DC_TAXONOMY_FULL_V2"
+    assert summary["source_row_count"] == 0
+    assert summary["source_taxonomy_match"] is False
+    with _connect(str(target_db)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM ec_ticker_signal_daily").fetchone()[0] == 0
+
+
+def test_loader_auto_signal_version_resolution_is_taxonomy_scoped_and_ambiguous_within_scope_blocks(tmp_path) -> None:
+    source_db = tmp_path / "source_signal_versions.db"
+    target_db, _ = _setup_target_db(tmp_path)
+    _load_taxonomy_version(target_db, tmp_path, "DC_TAXONOMY_FULL_V2", ("NVDA",))
+    _create_source_db(
+        source_db,
+        [
+            _source_row(taxonomy_version="DC_TAXONOMY_FULL_V1", signal_version="V1_ONLY", run_id="RUN_V1"),
+            _source_row(taxonomy_version="DC_TAXONOMY_FULL_V2", signal_version="V2_A", run_id="RUN_V2_A"),
+            _source_row(taxonomy_version="DC_TAXONOMY_FULL_V2", signal_version="V2_B", run_id="RUN_V2_B"),
+        ],
+    )
+
+    summary = load_ec_ticker_signal_daily_from_dc(
+        source_db_path=str(source_db),
+        target_db_path=str(target_db),
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+    )
+
+    assert summary["status"] == "FAILED"
+    assert summary["loader_error_code"] == "SOURCE_SCOPE_UNAVAILABLE"
+    assert "Multiple signal_version values found for selected taxonomy/date scope" in summary["loader_error"]
+
+
+def test_loader_duplicate_tickers_inside_requested_taxonomy_block_before_writes(tmp_path) -> None:
+    source_db = tmp_path / "source_duplicate_ticker.db"
+    target_db, _ = _setup_target_db(tmp_path)
+    _create_source_db(
+        source_db,
+        [
+            _source_row(ticker="NVDA", close=100.0),
+            _source_row(ticker="NVDA", close=101.0, run_id="RUN_DUP"),
+        ],
+        primary_key=False,
+    )
+
+    summary = load_ec_ticker_signal_daily_from_dc(
+        source_db_path=str(source_db),
+        target_db_path=str(target_db),
+    )
+
+    assert summary["status"] == "FAILED"
+    assert summary["loader_error_code"] == "SOURCE_SCOPE_INVALID"
+    assert summary["duplicate_source_ticker_count"] == 1
+    assert summary["duplicate_source_tickers"] == ["NVDA"]
+    with _connect(str(target_db)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM ec_ticker_signal_daily").fetchone()[0] == 0
+
+
+def test_loader_missing_v2_membership_reports_sorted_unresolved_tickers(tmp_path) -> None:
+    source_db = tmp_path / "source_missing_v2_membership.db"
+    target_db, _ = _setup_target_db(tmp_path)
+    _load_taxonomy_version(target_db, tmp_path, "DC_TAXONOMY_FULL_V2", ("NVDA", "AMD"))
+    _create_source_db(
+        source_db,
+        [
+            _source_row(ticker="NVDA", taxonomy_version="DC_TAXONOMY_FULL_V2", run_id="RUN_V2"),
+            _source_row(ticker="AMD", taxonomy_version="DC_TAXONOMY_FULL_V2", run_id="RUN_V2"),
+        ],
+    )
+    with _connect(str(target_db)) as conn:
+        conn.execute(
+            """
+            DELETE FROM ec_membership
+            WHERE taxonomy_version_id = 2
+              AND child_entity_id = (
+                SELECT entity_id FROM ec_entity WHERE entity_type='TICKER' AND entity_code='AMD'
+              )
+            """
+        )
+        conn.commit()
+
+    summary = load_ec_ticker_signal_daily_from_dc(
+        source_db_path=str(source_db),
+        target_db_path=str(target_db),
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+    )
+
+    assert summary["status"] == "FAILED"
+    assert summary["loader_error_code"] == "TARGET_MAPPING_UNRESOLVED"
+    assert summary["source_row_count"] == 2
+    assert summary["mapped_row_count"] == 1
+    assert summary["unresolved_membership_count"] == 1
+    assert summary["unresolved_tickers"] == ["AMD"]
+    assert summary["missing_primary_memberships"] == ["AMD"]
+    with _connect(str(target_db)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM ec_ticker_signal_daily").fetchone()[0] == 0
+
+
+def test_loader_rolls_back_partial_insert_after_insert_exception(tmp_path, monkeypatch) -> None:
+    import rawcandle.ec_ticker_signal_daily_loader as loader
+
+    source_db = tmp_path / "source_insert_exception.db"
+    target_db, _ = _setup_target_db(tmp_path)
+    _create_source_db(
+        source_db,
+        [
+            _source_row(ticker="NVDA", run_id="RUN_ROLLBACK"),
+            _source_row(ticker="AMD", run_id="RUN_ROLLBACK", close=101.0),
+        ],
+    )
+    original_insert = loader._insert_target_row
+    calls = 0
+
+    def fail_on_second_insert(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise sqlite3.IntegrityError("injected insert failure")
+        return original_insert(*args, **kwargs)
+
+    monkeypatch.setattr(loader, "_insert_target_row", fail_on_second_insert)
+
+    with pytest.raises(sqlite3.IntegrityError, match="injected insert failure"):
+        load_ec_ticker_signal_daily_from_dc(
+            source_db_path=str(source_db),
+            target_db_path=str(target_db),
+        )
+
+    with _connect(str(target_db)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM ec_ticker_signal_daily").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM ec_signal_run WHERE run_id='RUN_ROLLBACK'").fetchone()[0] == 0

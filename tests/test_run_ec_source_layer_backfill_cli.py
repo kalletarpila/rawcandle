@@ -732,7 +732,21 @@ def test_stops_on_ticker_loader_failure_and_reports_backup_path(tmp_path: Path, 
     backup_path = tmp_path / "backups" / "backup.sqlite"
     monkeypatch.setattr(cli, "plan_ec_source_layer_backfill", lambda **_: _ready_backfill_plan(candidate_dates=[{"date": "2026-05-29", "action": "BACKFILL_MISSING"}]))
     monkeypatch.setattr(cli, "_create_backup", lambda **_: backup_path)
-    monkeypatch.setattr(cli, "load_ec_ticker_signal_daily_from_dc", lambda **_: {"status": "FAILED"})
+    ticker_summary = {
+        "status": "FAILED",
+        "loader_status": "FAILED",
+        "loader_error_code": "TARGET_MAPPING_UNRESOLVED",
+        "loader_error": "Ticker rows could not be resolved to one V2 primary EC membership",
+        "source_taxonomy_version": "DC_TAXONOMY_FULL_V2",
+        "source_row_count": 257,
+        "source_distinct_ticker_count": 257,
+        "unexpected_taxonomy_version_count": 0,
+        "unresolved_membership_count": 1,
+        "unresolved_tickers": ["AMD"],
+        "duplicate_source_ticker_count": 0,
+        "duplicate_target_key_count": 0,
+    }
+    monkeypatch.setattr(cli, "load_ec_ticker_signal_daily_from_dc", lambda **_: ticker_summary)
 
     exit_code = cli.main(args)
     output = capsys.readouterr().out
@@ -740,7 +754,57 @@ def test_stops_on_ticker_loader_failure_and_reports_backup_path(tmp_path: Path, 
     assert exit_code == 1
     assert "Backfill Status: BACKFILL_FAILED" in output
     assert "backup.sqlite" in output
-    assert "Ticker fact loader returned FAILED" in output
+    assert "Ticker fact loader returned FAILED: Ticker rows could not be resolved" in output
+    assert "loader_error_code=TARGET_MAPPING_UNRESOLVED" in output
+    assert "source_taxonomy_version=DC_TAXONOMY_FULL_V2" in output
+    assert "source_row_count=257" in output
+    assert "unresolved_tickers=['AMD']" in output
+
+
+def test_single_range_backfill_preserves_ticker_loader_summary(tmp_path: Path, monkeypatch) -> None:
+    args = _base_args(tmp_path)
+    backup_path = tmp_path / "backups" / "backup.sqlite"
+    ticker_summary = {
+        "status": "FAILED",
+        "loader_status": "FAILED",
+        "loader_error_code": "SOURCE_SCOPE_INVALID",
+        "loader_error": "Source rows failed taxonomy scope validation",
+        "source_taxonomy_version": None,
+        "source_row_count": 493,
+        "source_distinct_ticker_count": 272,
+        "unexpected_taxonomy_version_count": 236,
+        "unresolved_membership_count": 0,
+        "unresolved_tickers": [],
+        "duplicate_source_ticker_count": 0,
+        "duplicate_target_key_count": 221,
+    }
+    monkeypatch.setattr(cli, "plan_ec_source_layer_backfill", lambda **_: _ready_backfill_plan(candidate_dates=[{"date": "2026-05-29", "action": "BACKFILL_MISSING"}]))
+    monkeypatch.setattr(cli, "_create_backup", lambda **_: backup_path)
+    monkeypatch.setattr(cli, "load_ec_ticker_signal_daily_from_dc", lambda **_: ticker_summary)
+
+    summary = cli.run_ec_source_layer_backfill(
+        db_path=args[1],
+        ecosystem_code="DATACENTER",
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+        date_from="2026-05-29",
+        date_to="2026-05-29",
+        taxonomy_csv_path=args[11],
+        watchlist_path=args[13],
+        backup_dir=args[15],
+        confirm_db=args[17],
+        confirm_ecosystem=args[19],
+        confirm_taxonomy_version="DC_TAXONOMY_FULL_V2",
+    )
+
+    assert summary["status"] == "BACKFILL_FAILED"
+    assert summary["failed_date"] == "2026-05-29"
+    assert summary["failed_step"] == "load_ec_ticker_signal_daily_from_dc"
+    assert summary["loader_error_code"] == "SOURCE_SCOPE_INVALID"
+    assert summary["loader_error"] == "Source rows failed taxonomy scope validation"
+    assert summary["source_row_count"] == 493
+    assert summary["source_distinct_ticker_count"] == 272
+    assert summary["duplicate_target_key_count"] == 221
+    assert summary["ticker_loader_summary"] == ticker_summary
 
 
 def test_stops_on_parity_mismatch_and_reports_failed_date(tmp_path: Path, monkeypatch, capsys) -> None:

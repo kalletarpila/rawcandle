@@ -346,6 +346,44 @@ def _run_step(
     return summary
 
 
+def _ticker_loader_failure_fields(ticker_summary: dict[str, object] | None) -> dict[str, object]:
+    if not isinstance(ticker_summary, dict):
+        return {}
+    unresolved_tickers = ticker_summary.get("unresolved_tickers")
+    if not isinstance(unresolved_tickers, list):
+        unresolved_tickers = sorted(
+            {
+                str(ticker)
+                for key in (
+                    "missing_ticker_entities",
+                    "missing_primary_memberships",
+                    "multiple_primary_memberships",
+                )
+                for ticker in (ticker_summary.get(key) or [])
+            }
+        )
+    loader_error = (
+        ticker_summary.get("loader_error")
+        or ticker_summary.get("ticker_loader_error")
+        or ticker_summary.get("error")
+        or "Ticker fact loader returned FAILED"
+    )
+    return {
+        "loader_status": ticker_summary.get("loader_status") or ticker_summary.get("status"),
+        "loader_error": loader_error,
+        "loader_error_code": ticker_summary.get("loader_error_code"),
+        "source_taxonomy_version": ticker_summary.get("source_taxonomy_version"),
+        "source_row_count": ticker_summary.get("source_row_count"),
+        "source_distinct_ticker_count": ticker_summary.get("source_distinct_ticker_count"),
+        "unexpected_taxonomy_version_count": ticker_summary.get("unexpected_taxonomy_version_count"),
+        "unresolved_membership_count": ticker_summary.get("unresolved_membership_count"),
+        "unresolved_tickers": unresolved_tickers,
+        "duplicate_source_ticker_count": ticker_summary.get("duplicate_source_ticker_count"),
+        "duplicate_target_key_count": ticker_summary.get("duplicate_target_key_count"),
+        "ticker_loader_summary": ticker_summary,
+    }
+
+
 def _build_date_result(
     *,
     date_value: str,
@@ -636,9 +674,14 @@ def run_ec_source_layer_backfill(
                     "signal_date": current_date,
                     "replace_existing": replace_existing,
                 },
-            )
+                )
             if ticker_summary.get("status") == "FAILED":
-                raise RuntimeError("Ticker fact loader returned FAILED")
+                loader_error = (
+                    ticker_summary.get("loader_error")
+                    or ticker_summary.get("ticker_loader_error")
+                    or "Ticker fact loader returned FAILED"
+                )
+                raise RuntimeError(f"Ticker fact loader returned FAILED: {loader_error}")
 
             group_signal_summary = _run_step(
                 step_name="load_ec_group_signal_daily_from_dc",
@@ -767,6 +810,11 @@ def run_ec_source_layer_backfill(
             "taxonomy_rebuild_ec_scope_summary": rebuild_scope_summary,
             "failed_date_completed_steps": list(completed_steps),
             "warning": "Partial selected-date ec_ writes may exist; no automatic rollback was attempted",
+            **(
+                _ticker_loader_failure_fields(ticker_summary)
+                if completed_steps and completed_steps[-1] == "load_ec_ticker_signal_daily_from_dc"
+                else {}
+            ),
             **_watermark_not_run_summary(),
             **watchlist_membership_fields,
             **reconciliation_summary,
@@ -939,6 +987,18 @@ def render_backfill_text(summary: dict[str, object]) -> str:
         lines.append(f"- failed_step={summary.get('failed_step')}")
         if summary.get("failed_date_completed_steps") is not None:
             lines.append(f"- failed_date_completed_steps={summary.get('failed_date_completed_steps')}")
+        if summary.get("ticker_loader_summary") is not None:
+            lines.append(f"- loader_status={summary.get('loader_status')}")
+            lines.append(f"- loader_error_code={summary.get('loader_error_code')}")
+            lines.append(f"- loader_error={summary.get('loader_error')}")
+            lines.append(f"- source_taxonomy_version={summary.get('source_taxonomy_version')}")
+            lines.append(f"- source_row_count={summary.get('source_row_count')}")
+            lines.append(f"- source_distinct_ticker_count={summary.get('source_distinct_ticker_count')}")
+            lines.append(f"- unexpected_taxonomy_version_count={summary.get('unexpected_taxonomy_version_count')}")
+            lines.append(f"- unresolved_membership_count={summary.get('unresolved_membership_count')}")
+            lines.append(f"- unresolved_tickers={summary.get('unresolved_tickers')}")
+            lines.append(f"- duplicate_source_ticker_count={summary.get('duplicate_source_ticker_count')}")
+            lines.append(f"- duplicate_target_key_count={summary.get('duplicate_target_key_count')}")
 
     lines.extend(["", "Per-Date Loader Summaries"])
     for date_result in summary.get("per_date_results", []):

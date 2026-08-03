@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import json
 import sqlite3
 import shutil
 from datetime import datetime, timezone
@@ -312,6 +313,71 @@ def test_chunk_failure_stops_later_chunks_without_retry_or_watermark_finalizatio
     assert summary["watermark_finalization_performed"] is False
     assert calls == ["2026-07-01", "2026-08-30"]
     assert watermark_calls == []
+
+
+def test_failed_chunk_progress_preserves_ticker_loader_diagnostics(tmp_path, monkeypatch) -> None:
+    paths = _paths(tmp_path)
+    ticker_summary = {
+        "status": "FAILED",
+        "loader_status": "FAILED",
+        "loader_error_code": "TARGET_MAPPING_UNRESOLVED",
+        "loader_error": "Ticker rows could not be resolved to one V2 primary EC membership",
+        "source_taxonomy_version": "DC_TAXONOMY_FULL_V2",
+        "source_row_count": 257,
+        "source_distinct_ticker_count": 257,
+        "unexpected_taxonomy_version_count": 0,
+        "unresolved_membership_count": 1,
+        "unresolved_tickers": ["AMD"],
+        "duplicate_source_ticker_count": 0,
+        "duplicate_target_key_count": 0,
+    }
+
+    def fake_backfill_runner(**kwargs):
+        return {
+            "status": "BACKFILL_FAILED",
+            "date_from": kwargs["date_from"],
+            "date_to": kwargs["date_to"],
+            "selected_dates": [{"date": kwargs["date_from"], "action": "TAXONOMY_REBUILD_REPLACE"}],
+            "completed_dates": [],
+            "skipped_dates": [],
+            "failed_date": kwargs["date_from"],
+            "failed_step": "load_ec_ticker_signal_daily_from_dc",
+            "per_date_results": [],
+            "total_mismatch_count": 0,
+            "error": "Ticker fact loader returned FAILED: Ticker rows could not be resolved to one V2 primary EC membership",
+            "ticker_loader_summary": ticker_summary,
+            **{key: value for key, value in ticker_summary.items() if key != "status"},
+        }
+
+    watermark_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "rawcandle.ec_taxonomy_full_rebuild_orchestrator.advance_ec_pipeline_watermarks_after_historical_backfill",
+        lambda **kwargs: watermark_calls.append(kwargs),
+    )
+
+    summary = run_ec_taxonomy_full_rebuild(
+        **_plan_args(
+            paths,
+            date_from="2026-07-01",
+            date_to="2026-09-10",
+            confirm_date_from="2026-07-01",
+            confirm_date_to="2026-09-10",
+        ),
+        backfill_runner=fake_backfill_runner,
+    )
+
+    progress = json.loads((Path(paths["evidence_root"]) / "ec_taxonomy_full_rebuild_progress.json").read_text())
+    failed_summary = progress["failed_chunk"]["summary"]
+
+    assert summary["overall_status"] == "FAILED"
+    assert summary["failed_chunk_index"] == 1
+    assert summary["watermark_finalization_performed"] is False
+    assert watermark_calls == []
+    assert failed_summary["loader_error_code"] == "TARGET_MAPPING_UNRESOLVED"
+    assert failed_summary["loader_error"] == "Ticker rows could not be resolved to one V2 primary EC membership"
+    assert failed_summary["source_row_count"] == 257
+    assert failed_summary["unresolved_tickers"] == ["AMD"]
+    assert failed_summary["ticker_loader_summary"] == ticker_summary
 
 
 def test_resume_rejects_changed_range_hash_and_plan(tmp_path, monkeypatch) -> None:

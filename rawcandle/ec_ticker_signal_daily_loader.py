@@ -215,25 +215,48 @@ def _resolve_signal_version(
     conn: sqlite3.Connection,
     *,
     signal_date: str,
+    taxonomy_version_code: str,
     signal_version: str | None,
 ) -> str:
     if signal_version is not None:
+        row_count = int(
+            conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM dc_ticker_swing_signal_daily
+                WHERE signal_date = ?
+                  AND signal_version = ?
+                  AND taxonomy_version = ?
+                """,
+                (signal_date, signal_version, taxonomy_version_code),
+            ).fetchone()[0]
+        )
+        if row_count == 0:
+            raise ValueError(
+                "No source rows found for requested taxonomy/signal scope: "
+                f"signal_date={signal_date!r}, signal_version={signal_version!r}, "
+                f"taxonomy_version={taxonomy_version_code!r}"
+            )
         return signal_version
     rows = conn.execute(
         """
         SELECT DISTINCT signal_version
         FROM dc_ticker_swing_signal_daily
         WHERE signal_date = ?
+          AND taxonomy_version = ?
         ORDER BY signal_version
         """,
-        (signal_date,),
+        (signal_date, taxonomy_version_code),
     ).fetchall()
     versions = [str(row[0]) for row in rows if row[0] is not None]
     if not versions:
-        raise ValueError(f"No source rows found for signal_date {signal_date!r}")
+        raise ValueError(
+            "No source rows found for requested taxonomy/date scope: "
+            f"signal_date={signal_date!r}, taxonomy_version={taxonomy_version_code!r}"
+        )
     if len(versions) > 1:
         raise ValueError(
-            "Multiple signal_version values found for selected signal_date; "
+            "Multiple signal_version values found for selected taxonomy/date scope; "
             "signal_version must be provided explicitly"
         )
     return versions[0]
@@ -268,6 +291,7 @@ def _resolve_source_rows(
     *,
     signal_date: str,
     signal_version: str,
+    taxonomy_version_code: str,
 ) -> list[sqlite3.Row]:
     rows = conn.execute(
         """
@@ -275,16 +299,128 @@ def _resolve_source_rows(
         FROM dc_ticker_swing_signal_daily
         WHERE signal_date = ?
           AND signal_version = ?
+          AND taxonomy_version = ?
         ORDER BY ticker
         """,
-        (signal_date, signal_version),
+        (signal_date, signal_version, taxonomy_version_code),
     ).fetchall()
     if not rows:
         raise ValueError(
             "No source rows found for "
-            f"signal_date={signal_date!r}, signal_version={signal_version!r}"
+            f"signal_date={signal_date!r}, signal_version={signal_version!r}, "
+            f"taxonomy_version={taxonomy_version_code!r}"
         )
     return rows
+
+
+def _source_validation_summary(
+    rows: list[sqlite3.Row],
+    *,
+    requested_taxonomy_version: str,
+) -> dict[str, object]:
+    source_taxonomy_versions = sorted({str(row["taxonomy_version"]) for row in rows})
+    ticker_counts = {
+        ticker: count
+        for ticker, count in {
+            ticker: sum(1 for row in rows if str(row["ticker"]) == ticker)
+            for ticker in sorted({str(row["ticker"]) for row in rows})
+        }.items()
+        if count > 1
+    }
+    unexpected_rows = [
+        str(row["ticker"])
+        for row in rows
+        if str(row["taxonomy_version"]) != requested_taxonomy_version
+    ]
+    duplicate_source_tickers = sorted(ticker_counts)
+    return {
+        "requested_taxonomy_version": requested_taxonomy_version,
+        "source_taxonomy_version": source_taxonomy_versions[0] if len(source_taxonomy_versions) == 1 else None,
+        "source_taxonomy_versions": source_taxonomy_versions,
+        "source_taxonomy_match": source_taxonomy_versions == [requested_taxonomy_version],
+        "source_row_count": len(rows),
+        "source_distinct_ticker_count": len({str(row["ticker"]) for row in rows}),
+        "duplicate_source_ticker_count": len(duplicate_source_tickers),
+        "duplicate_source_tickers": duplicate_source_tickers,
+        "unexpected_taxonomy_version_count": len(unexpected_rows),
+        "unexpected_taxonomy_version_tickers": sorted(set(unexpected_rows)),
+    }
+
+
+def _target_key_validation_summary(
+    target_keys: list[tuple[int | None, int | None, str | None, int | None, str | None]],
+) -> dict[str, object]:
+    key_counts: dict[tuple[int | None, int | None, str | None, int | None, str | None], int] = {}
+    for key in target_keys:
+        key_counts[key] = key_counts.get(key, 0) + 1
+    duplicate_keys = [
+        {
+            "ecosystem_id": key[0],
+            "taxonomy_version_id": key[1],
+            "signal_date": key[2],
+            "entity_id": key[3],
+            "signal_version": key[4],
+            "count": count,
+        }
+        for key, count in sorted(key_counts.items(), key=lambda item: tuple("" if part is None else str(part) for part in item[0]))
+        if count > 1
+    ]
+    null_keys = [key for key in target_keys if any(part is None for part in key)]
+    return {
+        "duplicate_target_key_count": len(duplicate_keys),
+        "duplicate_target_keys": duplicate_keys,
+        "null_target_key_count": len(null_keys),
+    }
+
+
+def _source_scope_failed_summary(
+    *,
+    ecosystem_code: str,
+    taxonomy_version_code: str,
+    signal_date: str,
+    signal_version: str | None,
+    error_code: str,
+    error: str,
+) -> dict[str, object]:
+    return {
+        "status": "FAILED",
+        "loader_status": "FAILED",
+        "loader_error_code": error_code,
+        "loader_error": error,
+        "ticker_loader_error": error,
+        "ecosystem_code": ecosystem_code,
+        "taxonomy_version_code": taxonomy_version_code,
+        "requested_taxonomy_version": taxonomy_version_code,
+        "signal_date": signal_date,
+        "signal_version": signal_version,
+        "source_table": REQUIRED_SOURCE_TABLE,
+        "source_taxonomy_version": None,
+        "source_taxonomy_versions": [],
+        "source_taxonomy_match": False,
+        "source_row_count": 0,
+        "source_distinct_ticker_count": 0,
+        "duplicate_source_ticker_count": 0,
+        "duplicate_source_tickers": [],
+        "unexpected_taxonomy_version_count": 0,
+        "unexpected_taxonomy_version_tickers": [],
+        "loaded_row_count": 0,
+        "failed_row_count": 0,
+        "mapped_row_count": 0,
+        "unresolved_membership_count": 0,
+        "unresolved_tickers": [],
+        "missing_ticker_entities": [],
+        "missing_primary_memberships": [],
+        "multiple_primary_memberships": [],
+        "duplicate_target_key_count": 0,
+        "duplicate_target_keys": [],
+        "null_target_key_count": 0,
+        "source_run_ids": [],
+        "created_signal_run_count": 0,
+        "reused_signal_run_count": 0,
+        "unmapped_source_columns": list(EXPECTED_UNMAPPED_SOURCE_COLUMNS),
+        "unmapped_target_columns": list(EXPECTED_UNMAPPED_TARGET_COLUMNS),
+        "warnings": [],
+    }
 
 
 def _now_utc_iso() -> str:
@@ -667,16 +803,67 @@ def load_ec_ticker_signal_daily_from_dc(
         _require_tables(target_conn, REQUIRED_TARGET_TABLES, "target")
 
         selected_signal_date = _resolve_signal_date(source_conn, signal_date)
-        selected_signal_version = _resolve_signal_version(
-            source_conn,
-            signal_date=selected_signal_date,
-            signal_version=signal_version,
-        )
+        try:
+            selected_signal_version = _resolve_signal_version(
+                source_conn,
+                signal_date=selected_signal_date,
+                taxonomy_version_code=taxonomy_version_code,
+                signal_version=signal_version,
+            )
+        except ValueError as exc:
+            return _source_scope_failed_summary(
+                ecosystem_code=ecosystem_code,
+                taxonomy_version_code=taxonomy_version_code,
+                signal_date=selected_signal_date,
+                signal_version=signal_version,
+                error_code="SOURCE_SCOPE_UNAVAILABLE",
+                error=str(exc),
+            )
         rows = _resolve_source_rows(
             source_conn,
             signal_date=selected_signal_date,
             signal_version=selected_signal_version,
+            taxonomy_version_code=taxonomy_version_code,
         )
+        source_validation = _source_validation_summary(
+            rows,
+            requested_taxonomy_version=taxonomy_version_code,
+        )
+        if (
+            not source_validation["source_taxonomy_match"]
+            or int(source_validation["duplicate_source_ticker_count"]) > 0
+            or int(source_validation["unexpected_taxonomy_version_count"]) > 0
+        ):
+            return {
+                "status": "FAILED",
+                "loader_status": "FAILED",
+                "loader_error_code": "SOURCE_SCOPE_INVALID",
+                "loader_error": "Source rows failed taxonomy scope validation",
+                "ticker_loader_error": "Source rows failed taxonomy scope validation",
+                "ecosystem_code": ecosystem_code,
+                "taxonomy_version_code": taxonomy_version_code,
+                "signal_date": selected_signal_date,
+                "signal_version": selected_signal_version,
+                "source_table": REQUIRED_SOURCE_TABLE,
+                **source_validation,
+                "loaded_row_count": 0,
+                "failed_row_count": int(source_validation["source_row_count"]),
+                "mapped_row_count": 0,
+                "unresolved_membership_count": 0,
+                "unresolved_tickers": [],
+                "missing_ticker_entities": [],
+                "missing_primary_memberships": [],
+                "multiple_primary_memberships": [],
+                "duplicate_target_key_count": 0,
+                "duplicate_target_keys": [],
+                "null_target_key_count": 0,
+                "source_run_ids": [],
+                "created_signal_run_count": 0,
+                "reused_signal_run_count": 0,
+                "unmapped_source_columns": list(EXPECTED_UNMAPPED_SOURCE_COLUMNS),
+                "unmapped_target_columns": list(EXPECTED_UNMAPPED_TARGET_COLUMNS),
+                "warnings": [],
+            }
         ecosystem_id, taxonomy_version_id = _resolve_target_context(
             target_conn,
             ecosystem_code=ecosystem_code,
@@ -705,6 +892,7 @@ def load_ec_ticker_signal_daily_from_dc(
             reused_signal_run_count = 0
             seen_source_runs: set[str] = set()
             pending_rows: list[tuple[sqlite3.Row, int, int, int, str, str]] = []
+            target_keys: list[tuple[int | None, int | None, str | None, int | None, str | None]] = []
 
             for row in rows:
                 ticker = str(row["ticker"])
@@ -757,24 +945,80 @@ def load_ec_ticker_signal_daily_from_dc(
                 pending_rows.append(
                     (row, entity_id, int(group_l1_id), int(group_l2_id), str(group_l1_code), str(group_l2_code))
                 )
+                target_keys.append(
+                    (
+                        ecosystem_id,
+                        taxonomy_version_id,
+                        str(row["signal_date"]) if row["signal_date"] is not None else None,
+                        entity_id,
+                        str(row["signal_version"]) if row["signal_version"] is not None else None,
+                    )
+                )
 
+            target_key_validation = _target_key_validation_summary(target_keys)
+            unresolved_tickers = sorted(
+                set(missing_ticker_entities)
+                | set(missing_primary_memberships)
+                | set(multiple_primary_memberships)
+            )
             if failed_row_count > 0:
                 target_conn.rollback()
                 return {
                     "status": "FAILED",
+                    "loader_status": "FAILED",
+                    "loader_error_code": "TARGET_MAPPING_UNRESOLVED",
+                    "loader_error": "Ticker rows could not be resolved to one V2 primary EC membership",
+                    "ticker_loader_error": "Ticker rows could not be resolved to one V2 primary EC membership",
                     "ecosystem_code": ecosystem_code,
                     "taxonomy_version_code": taxonomy_version_code,
                     "signal_date": selected_signal_date,
                     "signal_version": selected_signal_version,
                     "source_table": REQUIRED_SOURCE_TABLE,
-                    "source_row_count": len(rows),
+                    **source_validation,
                     "loaded_row_count": 0,
                     "failed_row_count": failed_row_count,
+                    "mapped_row_count": len(pending_rows),
+                    "unresolved_membership_count": len(unresolved_tickers),
+                    "unresolved_tickers": unresolved_tickers,
+                    **target_key_validation,
                     "unmapped_source_columns": list(EXPECTED_UNMAPPED_SOURCE_COLUMNS),
                     "unmapped_target_columns": list(EXPECTED_UNMAPPED_TARGET_COLUMNS),
                     "missing_ticker_entities": sorted(missing_ticker_entities),
                     "missing_primary_memberships": sorted(missing_primary_memberships),
                     "multiple_primary_memberships": sorted(multiple_primary_memberships),
+                    "source_run_ids": source_run_ids,
+                    "created_signal_run_count": 0,
+                    "reused_signal_run_count": 0,
+                    "warnings": warnings,
+                }
+            if (
+                int(target_key_validation["duplicate_target_key_count"]) > 0
+                or int(target_key_validation["null_target_key_count"]) > 0
+            ):
+                target_conn.rollback()
+                return {
+                    "status": "FAILED",
+                    "loader_status": "FAILED",
+                    "loader_error_code": "TARGET_KEY_INVALID",
+                    "loader_error": "Ticker rows produced duplicate or null EC target keys",
+                    "ticker_loader_error": "Ticker rows produced duplicate or null EC target keys",
+                    "ecosystem_code": ecosystem_code,
+                    "taxonomy_version_code": taxonomy_version_code,
+                    "signal_date": selected_signal_date,
+                    "signal_version": selected_signal_version,
+                    "source_table": REQUIRED_SOURCE_TABLE,
+                    **source_validation,
+                    "loaded_row_count": 0,
+                    "failed_row_count": len(rows),
+                    "mapped_row_count": len(pending_rows),
+                    "unresolved_membership_count": 0,
+                    "unresolved_tickers": [],
+                    **target_key_validation,
+                    "unmapped_source_columns": list(EXPECTED_UNMAPPED_SOURCE_COLUMNS),
+                    "unmapped_target_columns": list(EXPECTED_UNMAPPED_TARGET_COLUMNS),
+                    "missing_ticker_entities": [],
+                    "missing_primary_memberships": [],
+                    "multiple_primary_memberships": [],
                     "source_run_ids": source_run_ids,
                     "created_signal_run_count": 0,
                     "reused_signal_run_count": 0,
@@ -811,14 +1055,24 @@ def load_ec_ticker_signal_daily_from_dc(
         status = "OK_WITH_WARNINGS" if (unmapped_source_columns or unmapped_target_columns) else "OK"
         return {
             "status": status,
+            "loader_status": status,
+            "loader_error_code": "NONE",
+            "loader_error": None,
+            "ticker_loader_error": None,
             "ecosystem_code": ecosystem_code,
             "taxonomy_version_code": taxonomy_version_code,
             "signal_date": selected_signal_date,
             "signal_version": selected_signal_version,
             "source_table": REQUIRED_SOURCE_TABLE,
-            "source_row_count": len(rows),
+            **source_validation,
             "loaded_row_count": len(rows),
             "failed_row_count": 0,
+            "mapped_row_count": len(rows),
+            "unresolved_membership_count": 0,
+            "unresolved_tickers": [],
+            "duplicate_target_key_count": 0,
+            "duplicate_target_keys": [],
+            "null_target_key_count": 0,
             "unmapped_source_columns": unmapped_source_columns,
             "unmapped_target_columns": unmapped_target_columns,
             "missing_ticker_entities": [],

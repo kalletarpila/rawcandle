@@ -183,6 +183,46 @@ taxonomy with V2 inactive and scheduler taxonomy still V1, a later guarded
 retry may start from `ec_rebuild_status=FAILED`. Active, superseded, or
 mismatched deployments remain blocking.
 
+## Ticker Source Scope
+
+Chunk execution must preserve the same explicit taxonomy context all the way
+into the canonical EC loaders. In particular, `ec_ticker_signal_daily` loading
+selects `dc_ticker_swing_signal_daily` rows by:
+
+```text
+signal_date
+signal_version
+taxonomy_version
+```
+
+This is required because active V1 and proposed V2 Datacenter facts can coexist
+for the same signal date and signal version during a controlled rebuild. The
+loader must not infer source rows from the active taxonomy, scheduler config, or
+unscoped `signal_version` lookup when `taxonomy_rebuild=true` supplies an
+inactive proposed taxonomy.
+
+Ticker-loader summaries include deterministic source and mapping diagnostics:
+
+```text
+requested_taxonomy_version
+source_taxonomy_version
+source_taxonomy_match
+source_row_count
+source_distinct_ticker_count
+duplicate_source_ticker_count
+unexpected_taxonomy_version_count
+mapped_row_count
+unresolved_membership_count
+unresolved_tickers
+duplicate_target_key_count
+null_target_key_count
+```
+
+If a chunk fails in the ticker loader, the single-range backfill summary and the
+orchestrator progress JSON preserve the structured loader summary. The rendered
+error remains backward compatible but includes the deepest loader error where
+available.
+
 ## Backup Policy
 
 Without `--existing-backup-path`, the orchestrator creates exactly one

@@ -106,6 +106,25 @@ The planner reports the rebuild validation as
 `taxonomy_validation_mode=PROPOSED_TAXONOMY_REBUILD`. It reports ordinary
 validation as `taxonomy_validation_mode=ACTIVE_TAXONOMY`.
 
+The same explicit taxonomy identity must also reach the EC fact loaders. The
+ticker fact loader scopes `dc_ticker_swing_signal_daily` source rows by:
+
+```text
+signal_date
+signal_version
+taxonomy_version
+```
+
+Signal-version auto-resolution is taxonomy-scoped as well. This prevents a V2
+taxonomy rebuild from mixing active V1 and proposed V2 Datacenter source rows
+when both versions exist for the same date and signal version.
+
+Ticker-loader failure summaries preserve source and mapping diagnostics,
+including source row counts, duplicate source ticker counts, unresolved
+membership tickers, duplicate target-key counts, and the structured
+`ticker_loader_summary` that is propagated through backfill and orchestrator
+progress evidence.
+
 If a controlled EC rebuild fails before completion, a later retry is allowed
 from `ec_rebuild_status=FAILED` only when the deployment ID, proposed taxonomy
 version, source hash, rebuild range, inactive V2 state, accepted DC evidence,

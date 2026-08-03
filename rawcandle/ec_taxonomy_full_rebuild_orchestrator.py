@@ -1552,6 +1552,15 @@ def render_run_text(summary: dict[str, object]) -> str:
                 f"range={chunk.get('chunk_start')}..{chunk.get('chunk_end')} "
                 f"mismatch={chunk.get('total_mismatch_count')}"
             )
+            chunk_summary = chunk.get("summary")
+            if isinstance(chunk_summary, dict) and chunk_summary.get("ticker_loader_summary") is not None:
+                lines.append(f"chunk {chunk.get('chunk_index')} loader_error_code={chunk_summary.get('loader_error_code')}")
+                lines.append(f"chunk {chunk.get('chunk_index')} loader_error={chunk_summary.get('loader_error')}")
+                lines.append(f"chunk {chunk.get('chunk_index')} source_row_count={chunk_summary.get('source_row_count')}")
+                lines.append(
+                    f"chunk {chunk.get('chunk_index')} duplicate_target_key_count="
+                    f"{chunk_summary.get('duplicate_target_key_count')}"
+                )
     if summary.get("blocking_errors"):
         lines.append("blocking_errors:")
         for error in summary["blocking_errors"]:
