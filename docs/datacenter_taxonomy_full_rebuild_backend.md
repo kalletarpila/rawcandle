@@ -164,6 +164,29 @@ signal_version
 The group loader uses the same target delete scope. This does not touch V1 rows
 or other ecosystems.
 
+The synthetic OHLC and group index loaders use the same explicit taxonomy
+contract. During a V2 rebuild, V1 and V2 group rows can coexist for the same
+date and `calc_version`, so both loaders scope calc-version auto-resolution and
+source selection by:
+
+```text
+signal date
+calc_version
+taxonomy_version
+```
+
+For synthetic OHLC, the source date column is `ohlc_date`; for group index it
+is `index_date`. Caller-supplied calc versions are validated inside the
+requested taxonomy/date scope. Missing, ambiguous, mixed-taxonomy, duplicate
+source, unresolved mapping, duplicate target-key, and SQL insert failures return
+structured summaries before the rebuild can continue.
+
+Backfill and orchestrator failed summaries now preserve
+`synthetic_loader_summary` and `group_index_loader_summary` diagnostics,
+including source row counts, duplicate source groups, unexpected taxonomy or
+calc-version counts, duplicate target-key counts, unresolved groups, and the
+deepest loader error text.
+
 If a controlled EC rebuild fails before completion, a later retry is allowed
 from `ec_rebuild_status=FAILED` only when the deployment ID, proposed taxonomy
 version, source hash, rebuild range, inactive V2 state, accepted DC evidence,
@@ -173,7 +196,7 @@ and V1 scheduler configuration still match the guarded request.
 
 In taxonomy-rebuild mode, the chunk runner deletes old DATACENTER canonical EC
 facts for that chunk before loading V2 rows. The delete predicate is scoped by
-`ecosystem_id` and `signal_date` for:
+`ecosystem_id`, `taxonomy_version_id`, and `signal_date` for:
 
 ```text
 ec_ticker_signal_daily
@@ -182,7 +205,8 @@ ec_group_synthetic_ohlc_daily
 ec_group_index_daily
 ```
 
-Other ecosystems are not touched. V2 is not activated by this step. The
+Other ecosystems are not touched. Active V1 taxonomy rows are not touched by a
+V2 replacement pass. V2 is not activated by this step. The
 orchestrator either creates exactly one full DB backup before the first chunk or
 reuses the pre-existing full DB backup created before the DC rebuild. In the
 controlled V2 production sequence, the backup is created before the first DC

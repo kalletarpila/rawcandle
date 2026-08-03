@@ -396,9 +396,10 @@ def test_taxonomy_rebuild_replacement_is_scoped_to_datacenter(tmp_path: Path, mo
             conn.executemany(
                 f"INSERT INTO {table_name} VALUES (?, ?, ?, ?)",
                 [
-                    (1, 1, "2026-05-29", "old-datacenter"),
+                    (1, 1, "2026-05-29", "old-datacenter-v1"),
+                    (1, 2, "2026-05-29", "old-datacenter-v2"),
                     (2, 1, "2026-05-29", "other-ecosystem"),
-                    (1, 1, "2026-01-01", "outside-range"),
+                    (1, 2, "2026-01-01", "outside-range"),
                 ],
             )
         conn.execute("INSERT INTO ec_ecosystem VALUES (1, 'DATACENTER')")
@@ -459,8 +460,12 @@ def test_taxonomy_rebuild_replacement_is_scoped_to_datacenter(tmp_path: Path, mo
             "ec_group_synthetic_ohlc_daily",
             "ec_group_index_daily",
         ]:
-            rows = conn.execute(f"SELECT ecosystem_id, marker FROM {table_name} ORDER BY ecosystem_id, marker").fetchall()
-            assert rows == [(1, "outside-range"), (2, "other-ecosystem")]
+            rows = conn.execute(f"SELECT ecosystem_id, taxonomy_version_id, marker FROM {table_name} ORDER BY ecosystem_id, taxonomy_version_id, marker").fetchall()
+            assert rows == [
+                (1, 1, "old-datacenter-v1"),
+                (1, 2, "outside-range"),
+                (2, 1, "other-ecosystem"),
+            ]
     finally:
         conn.close()
 
@@ -691,6 +696,70 @@ def test_partial_taxonomy_retry_passes_replace_existing_for_existing_ticker_rows
     assert summary["per_date_results"][0]["row_counts"]["group_signal_rows"] == 54
 
 
+def test_taxonomy_rebuild_ec_scope_delete_is_taxonomy_and_ecosystem_scoped(tmp_path: Path) -> None:
+    db_path = tmp_path / "scope.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE ec_ecosystem (ecosystem_id INTEGER PRIMARY KEY, ecosystem_code TEXT)")
+        conn.execute("CREATE TABLE ec_taxonomy_version (taxonomy_version_id INTEGER PRIMARY KEY, ecosystem_id INTEGER, taxonomy_version_code TEXT)")
+        conn.execute("INSERT INTO ec_ecosystem VALUES (1, 'DATACENTER')")
+        conn.execute("INSERT INTO ec_ecosystem VALUES (2, 'OTHER')")
+        conn.execute("INSERT INTO ec_taxonomy_version VALUES (1, 1, 'DC_TAXONOMY_FULL_V1')")
+        conn.execute("INSERT INTO ec_taxonomy_version VALUES (2, 1, 'DC_TAXONOMY_FULL_V2')")
+        for table in (
+            "ec_ticker_signal_daily",
+            "ec_group_signal_daily",
+            "ec_group_synthetic_ohlc_daily",
+            "ec_group_index_daily",
+        ):
+            conn.execute(
+                f"""
+                CREATE TABLE {table} (
+                    ecosystem_id INTEGER,
+                    taxonomy_version_id INTEGER,
+                    signal_date TEXT
+                )
+                """
+            )
+            conn.executemany(
+                f"INSERT INTO {table} VALUES (?, ?, ?)",
+                [
+                    (1, 1, "2025-08-01"),
+                    (1, 2, "2025-08-01"),
+                    (2, 2, "2025-08-01"),
+                    (1, 2, "2025-07-31"),
+                ],
+            )
+        conn.commit()
+
+    summary = cli._prepare_taxonomy_rebuild_ec_scope(
+        db_path=str(db_path),
+        ecosystem_code="DATACENTER",
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+        date_from="2025-08-01",
+        date_to="2025-08-01",
+    )
+
+    assert summary["deleted_rows"] == {
+        "ec_ticker_signal_daily": 1,
+        "ec_group_signal_daily": 1,
+        "ec_group_synthetic_ohlc_daily": 1,
+        "ec_group_index_daily": 1,
+    }
+    with sqlite3.connect(db_path) as conn:
+        for table in (
+            "ec_ticker_signal_daily",
+            "ec_group_signal_daily",
+            "ec_group_synthetic_ohlc_daily",
+            "ec_group_index_daily",
+        ):
+            rows = conn.execute(f"SELECT ecosystem_id, taxonomy_version_id, signal_date FROM {table} ORDER BY 1, 2, 3").fetchall()
+            assert rows == [
+                (1, 1, "2025-08-01"),
+                (1, 2, "2025-07-31"),
+                (2, 2, "2025-08-01"),
+            ]
+
+
 def test_does_not_run_pipeline_watermark_per_historical_date(tmp_path: Path, monkeypatch) -> None:
     args = _base_args(tmp_path)
     watermark_calls = _patch_successful_watermark_finalizer(monkeypatch)
@@ -919,6 +988,68 @@ def test_single_range_backfill_preserves_group_loader_summary(tmp_path: Path, mo
     assert summary["duplicate_target_key_count"] == 54
     assert summary["unresolved_groups"] == []
     assert summary["group_loader_summary"] == group_summary
+
+
+def test_single_range_backfill_preserves_synthetic_loader_summary_and_stops_index(tmp_path: Path, monkeypatch) -> None:
+    args = _base_args(tmp_path)
+    backup_path = tmp_path / "backups" / "backup.sqlite"
+    synthetic_summary = {
+        "status": "FAILED",
+        "loader_status": "FAILED",
+        "loader_error_code": "TARGET_KEY_INVALID",
+        "loader_error": "Synthetic OHLC rows produced duplicate or null EC target keys",
+        "requested_taxonomy_version": "DC_TAXONOMY_FULL_V2",
+        "source_taxonomy_version": "DC_TAXONOMY_FULL_V2",
+        "source_row_count": 53,
+        "source_distinct_group_count": 53,
+        "duplicate_source_group_count": 0,
+        "unexpected_taxonomy_version_count": 0,
+        "unexpected_calc_version_count": 0,
+        "null_required_source_key_count": 0,
+        "mapped_row_count": 106,
+        "distinct_target_key_count": 53,
+        "duplicate_target_key_count": 53,
+        "null_target_key_count": 0,
+        "unresolved_group_count": 0,
+        "unresolved_groups": [],
+        "multiple_source_to_same_target_count": 53,
+    }
+    index_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(cli, "plan_ec_source_layer_backfill", lambda **_: _ready_backfill_plan(candidate_dates=[{"date": "2026-05-29", "action": "BACKFILL_MISSING"}]))
+    monkeypatch.setattr(cli, "_create_backup", lambda **_: backup_path)
+    monkeypatch.setattr(cli, "load_ec_ticker_signal_daily_from_dc", lambda **_: {"status": "OK"})
+    monkeypatch.setattr(cli, "load_ec_group_signal_daily_from_dc", lambda **_: {"status": "OK"})
+    monkeypatch.setattr(cli, "load_ec_group_synthetic_ohlc_daily_from_dc", lambda **_: synthetic_summary)
+    monkeypatch.setattr(cli, "load_ec_group_index_daily_from_dc", lambda **kwargs: index_calls.append(kwargs) or {"status": "OK"})
+
+    summary = cli.run_ec_source_layer_backfill(
+        db_path=args[1],
+        ecosystem_code="DATACENTER",
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+        date_from="2026-05-29",
+        date_to="2026-05-29",
+        taxonomy_csv_path=args[11],
+        watchlist_path=args[13],
+        backup_dir=args[15],
+        confirm_db=args[17],
+        confirm_ecosystem=args[19],
+        confirm_taxonomy_version="DC_TAXONOMY_FULL_V2",
+    )
+
+    assert summary["status"] == "BACKFILL_FAILED"
+    assert summary["failed_date"] == "2026-05-29"
+    assert summary["failed_step"] == "load_ec_group_synthetic_ohlc_daily_from_dc"
+    assert summary["failed_date_completed_steps"] == [
+        "load_ec_ticker_signal_daily_from_dc",
+        "load_ec_group_signal_daily_from_dc",
+        "load_ec_group_synthetic_ohlc_daily_from_dc",
+    ]
+    assert summary["loader_error_code"] == "TARGET_KEY_INVALID"
+    assert summary["loader_error"] == "Synthetic OHLC rows produced duplicate or null EC target keys"
+    assert summary["duplicate_target_key_count"] == 53
+    assert summary["synthetic_loader_summary"] == synthetic_summary
+    assert summary["watermark_advance_status"] == "NOT_RUN"
+    assert index_calls == []
 
 
 def test_stops_on_parity_mismatch_and_reports_failed_date(tmp_path: Path, monkeypatch, capsys) -> None:

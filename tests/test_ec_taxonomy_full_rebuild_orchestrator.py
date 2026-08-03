@@ -450,6 +450,77 @@ def test_failed_chunk_progress_preserves_group_loader_diagnostics(tmp_path, monk
     assert failed_summary["group_loader_summary"] == group_summary
 
 
+def test_failed_chunk_progress_preserves_synthetic_loader_diagnostics(tmp_path, monkeypatch) -> None:
+    paths = _paths(tmp_path)
+    synthetic_summary = {
+        "status": "FAILED",
+        "loader_status": "FAILED",
+        "loader_error_code": "TARGET_KEY_INVALID",
+        "loader_error": "Synthetic OHLC rows produced duplicate or null EC target keys",
+        "requested_taxonomy_version": "DC_TAXONOMY_FULL_V2",
+        "source_taxonomy_version": "DC_TAXONOMY_FULL_V2",
+        "source_row_count": 53,
+        "source_distinct_group_count": 53,
+        "duplicate_source_group_count": 0,
+        "unexpected_taxonomy_version_count": 0,
+        "unexpected_calc_version_count": 0,
+        "mapped_row_count": 106,
+        "distinct_target_key_count": 53,
+        "duplicate_target_key_count": 53,
+        "null_target_key_count": 0,
+        "unresolved_group_count": 0,
+        "unresolved_groups": [],
+        "multiple_source_to_same_target_count": 53,
+    }
+
+    def fake_backfill_runner(**kwargs):
+        return {
+            "status": "BACKFILL_FAILED",
+            "date_from": kwargs["date_from"],
+            "date_to": kwargs["date_to"],
+            "selected_dates": [{"date": kwargs["date_from"], "action": "TAXONOMY_REBUILD_REPLACE"}],
+            "completed_dates": [],
+            "skipped_dates": [],
+            "failed_date": kwargs["date_from"],
+            "failed_step": "load_ec_group_synthetic_ohlc_daily_from_dc",
+            "per_date_results": [],
+            "total_mismatch_count": 0,
+            "error": "Synthetic OHLC fact loader returned FAILED: Synthetic OHLC rows produced duplicate or null EC target keys",
+            "synthetic_loader_summary": synthetic_summary,
+            **{key: value for key, value in synthetic_summary.items() if key != "status"},
+        }
+
+    watermark_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "rawcandle.ec_taxonomy_full_rebuild_orchestrator.advance_ec_pipeline_watermarks_after_historical_backfill",
+        lambda **kwargs: watermark_calls.append(kwargs),
+    )
+
+    summary = run_ec_taxonomy_full_rebuild(
+        **_plan_args(
+            paths,
+            date_from="2026-07-01",
+            date_to="2026-09-10",
+            confirm_date_from="2026-07-01",
+            confirm_date_to="2026-09-10",
+        ),
+        backfill_runner=fake_backfill_runner,
+    )
+
+    progress = json.loads((Path(paths["evidence_root"]) / "ec_taxonomy_full_rebuild_progress.json").read_text())
+    failed_summary = progress["failed_chunk"]["summary"]
+
+    assert summary["overall_status"] == "FAILED"
+    assert summary["failed_chunk_index"] == 1
+    assert summary["watermark_finalization_performed"] is False
+    assert watermark_calls == []
+    assert failed_summary["loader_error_code"] == "TARGET_KEY_INVALID"
+    assert failed_summary["loader_error"] == "Synthetic OHLC rows produced duplicate or null EC target keys"
+    assert failed_summary["source_row_count"] == 53
+    assert failed_summary["duplicate_target_key_count"] == 53
+    assert failed_summary["synthetic_loader_summary"] == synthetic_summary
+
+
 def test_resume_rejects_changed_range_hash_and_plan(tmp_path, monkeypatch) -> None:
     paths = _paths(tmp_path)
     progress_path = Path(paths["evidence_root"]) / "ec_taxonomy_full_rebuild_progress.json"

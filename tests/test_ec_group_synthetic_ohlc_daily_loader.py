@@ -16,7 +16,7 @@ def _connect(db_path: str) -> sqlite3.Connection:
     return conn
 
 
-def _write_taxonomy_csv(path: Path) -> None:
+def _write_taxonomy_csv(path: Path, *, version: str = "DC_TAXONOMY_FULL_V1") -> None:
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(
@@ -31,11 +31,11 @@ def _write_taxonomy_csv(path: Path) -> None:
                 "notes",
             ]
         )
-        writer.writerow(["DC_TAXONOMY_FULL_V1", "NVDA", "Compute silicon", "GPUs", "CORE", 1, 1.0, ""])
-        writer.writerow(["DC_TAXONOMY_FULL_V1", "AVGO", "Networking", "Switch silicon", "CORE", 1, 1.0, ""])
+        writer.writerow([version, "NVDA", "Compute silicon", "GPUs", "CORE", 1, 1.0, ""])
+        writer.writerow([version, "AVGO", "Networking", "Switch silicon", "CORE", 1, 1.0, ""])
 
 
-def _create_source_db(path: Path, rows: list[dict[str, object]]) -> None:
+def _create_source_db(path: Path, rows: list[dict[str, object]], *, primary_key: bool = True) -> None:
     if path.exists():
         path.unlink()
     conn = sqlite3.connect(path)
@@ -91,10 +91,16 @@ def _create_source_db(path: Path, rows: list[dict[str, object]]) -> None:
                 latest_reset_confirmed_as_of_date TEXT NULL,
                 latest_reset_reason TEXT NULL,
                 latest_reset_age_trading_days INTEGER NULL,
-                latest_reset_freshness TEXT NULL,
-                PRIMARY KEY (ohlc_date, taxonomy_version, group_type, group_name, calc_version)
+                latest_reset_freshness TEXT NULL
+                {primary_key_clause}
             )
-            """
+            """.format(
+                primary_key_clause=(
+                    ", PRIMARY KEY (ohlc_date, taxonomy_version, group_type, group_name, calc_version)"
+                    if primary_key
+                    else ""
+                )
+            )
         )
         columns = list(rows[0].keys()) if rows else []
         placeholders = ", ".join("?" for _ in columns)
@@ -114,10 +120,11 @@ def _source_row(
     ohlc_date: str = "2026-06-05",
     calc_version: str = "DC_SWING_OHLC_V1",
     run_id: str = "DC_GROUP_SYNTH_OHLC_20250801_20260605_DC_SWING_OHLC_V1",
+    taxonomy_version: str = "DC_TAXONOMY_FULL_V1",
 ) -> dict[str, object]:
     return {
         "ohlc_date": ohlc_date,
-        "taxonomy_version": "DC_TAXONOMY_FULL_V1",
+        "taxonomy_version": taxonomy_version,
         "group_type": group_type,
         "group_name": group_name,
         "member_count": 11,
@@ -182,6 +189,21 @@ def _setup_target_db(tmp_path) -> tuple[Path, Path]:
     return target_db, taxonomy_path
 
 
+def _setup_target_db_with_versions(tmp_path, versions: tuple[str, ...]) -> Path:
+    Path(tmp_path).mkdir(parents=True, exist_ok=True)
+    target_db = tmp_path / "target.db"
+    apply_ec_sidecar_migration(str(target_db))
+    for version in versions:
+        taxonomy_path = tmp_path / f"{version}.csv"
+        _write_taxonomy_csv(taxonomy_path, version=version)
+        load_datacenter_taxonomy_to_ec_sidecar(
+            db_path=str(target_db),
+            taxonomy_csv_path=str(taxonomy_path),
+            taxonomy_version_code=version,
+        )
+    return target_db
+
+
 def test_loader_persists_synthetic_ohlc_rows_lineage_and_signal_run(tmp_path) -> None:
     source_db = tmp_path / "source.db"
     target_db, _ = _setup_target_db(tmp_path)
@@ -243,38 +265,50 @@ def test_loader_persists_synthetic_ohlc_rows_lineage_and_signal_run(tmp_path) ->
             "2026-06-07T03:48:00Z",
         )
 
-        assert summary == {
-            "status": "OK_WITH_WARNINGS",
-            "ecosystem_code": "DATACENTER",
-            "taxonomy_version_code": "DC_TAXONOMY_FULL_V1",
-            "signal_date": "2026-06-05",
-            "ohlc_calc_version": "DC_SWING_OHLC_V1",
-            "source_table": "dc_group_synthetic_ohlc_daily",
-            "source_row_count": 3,
-            "loaded_row_count": 3,
-            "failed_row_count": 0,
-            "unmapped_source_columns": [],
-            "unmapped_target_columns": [
-                "latest_structure_date",
-                "structure_state",
-                "relative_strength_5d",
-                "relative_strength_20d",
-            ],
-            "missing_group_entities": [],
-            "missing_group_aliases": [],
-            "multiple_group_matches": [],
-            "source_run_ids": ["DC_GROUP_SYNTH_OHLC_20250801_20260605_DC_SWING_OHLC_V1"],
-            "created_signal_run_count": 1,
-            "reused_signal_run_count": 0,
-            "group_count_by_type": {
-                "ecosystem": 1,
-                "layer": 1,
-                "subindustry": 1,
-            },
-            "warnings": [
-                "Target columns left NULL because current dc source has no values: latest_structure_date, structure_state, relative_strength_5d, relative_strength_20d"
-            ],
-        }
+        assert summary["status"] == "OK_WITH_WARNINGS"
+        assert summary["loader_status"] == "OK_WITH_WARNINGS"
+        assert summary["loader_error_code"] == "NONE"
+        assert summary["ecosystem_code"] == "DATACENTER"
+        assert summary["taxonomy_version_code"] == "DC_TAXONOMY_FULL_V1"
+        assert summary["requested_taxonomy_version"] == "DC_TAXONOMY_FULL_V1"
+        assert summary["source_taxonomy_version"] == "DC_TAXONOMY_FULL_V1"
+        assert summary["source_taxonomy_match"] is True
+        assert summary["signal_date"] == "2026-06-05"
+        assert summary["ohlc_calc_version"] == "DC_SWING_OHLC_V1"
+        assert summary["source_table"] == "dc_group_synthetic_ohlc_daily"
+        assert summary["source_row_count"] == 3
+        assert summary["source_distinct_group_count"] == 3
+        assert summary["duplicate_source_group_count"] == 0
+        assert summary["unexpected_taxonomy_version_count"] == 0
+        assert summary["unexpected_calc_version_count"] == 0
+        assert summary["null_required_source_key_count"] == 0
+        assert summary["loaded_row_count"] == 3
+        assert summary["failed_row_count"] == 0
+        assert summary["mapped_row_count"] == 3
+        assert summary["distinct_target_key_count"] == 3
+        assert summary["duplicate_target_key_count"] == 0
+        assert summary["null_target_key_count"] == 0
+        assert summary["unresolved_group_count"] == 0
+        assert summary["multiple_source_to_same_target_count"] == 0
+        assert summary["unmapped_source_columns"] == []
+        assert summary["unmapped_target_columns"] == [
+            "latest_structure_date",
+            "structure_state",
+            "relative_strength_5d",
+            "relative_strength_20d",
+        ]
+        assert summary["missing_group_entities"] == []
+        assert summary["missing_group_aliases"] == []
+        assert summary["multiple_group_matches"] == []
+        assert summary["source_run_ids"] == ["DC_GROUP_SYNTH_OHLC_20250801_20260605_DC_SWING_OHLC_V1"]
+        assert summary["created_signal_run_count"] == 1
+        assert summary["reused_signal_run_count"] == 0
+        assert summary["group_count_by_type"] == {"ecosystem": 1, "layer": 1, "subindustry": 1}
+        assert summary["group_type_counts"] == {"ecosystem": 1, "layer": 1, "subindustry": 1}
+        assert summary["data_quality_status_counts"] == {"OK": 3}
+        assert summary["warnings"] == [
+            "Target columns left NULL because current dc source has no values: latest_structure_date, structure_state, relative_strength_5d, relative_strength_20d"
+        ]
     finally:
         conn.close()
 
@@ -434,3 +468,110 @@ def test_loader_source_row_hash_is_deterministic(tmp_path) -> None:
         hash_a = conn_a.execute("SELECT source_row_hash FROM ec_group_synthetic_ohlc_daily").fetchone()[0]
         hash_b = conn_b.execute("SELECT source_row_hash FROM ec_group_synthetic_ohlc_daily").fetchone()[0]
         assert hash_a == hash_b
+
+
+def test_loader_selects_only_requested_taxonomy_when_v1_and_v2_share_date_and_calc_version(tmp_path) -> None:
+    source_db = tmp_path / "source_mixed_taxonomy.db"
+    target_db = _setup_target_db_with_versions(tmp_path, ("DC_TAXONOMY_FULL_V1", "DC_TAXONOMY_FULL_V2"))
+    _create_source_db(
+        source_db,
+        [
+            _source_row(group_type="layer", group_name="Compute silicon", taxonomy_version="DC_TAXONOMY_FULL_V1", run_id="v1-synth-run"),
+            _source_row(group_type="subindustry", group_name="GPUs", taxonomy_version="DC_TAXONOMY_FULL_V1", run_id="v1-synth-run"),
+            _source_row(group_type="layer", group_name="Compute silicon", taxonomy_version="DC_TAXONOMY_FULL_V2", run_id="v2-synth-run"),
+            _source_row(group_type="subindustry", group_name="GPUs", taxonomy_version="DC_TAXONOMY_FULL_V2", run_id="v2-synth-run"),
+        ],
+    )
+
+    summary = load_ec_group_synthetic_ohlc_daily_from_dc(
+        source_db_path=str(source_db),
+        target_db_path=str(target_db),
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+    )
+
+    assert summary["status"] == "OK_WITH_WARNINGS"
+    assert summary["requested_taxonomy_version"] == "DC_TAXONOMY_FULL_V2"
+    assert summary["source_taxonomy_version"] == "DC_TAXONOMY_FULL_V2"
+    assert summary["source_taxonomy_match"] is True
+    assert summary["source_row_count"] == 2
+    assert summary["source_distinct_group_count"] == 2
+    assert summary["duplicate_target_key_count"] == 0
+    assert summary["source_run_ids"] == ["v2-synth-run"]
+
+    with _connect(str(target_db)) as conn:
+        rows = conn.execute(
+            """
+            SELECT taxonomy_version_id, source_run_id, count(*)
+            FROM ec_group_synthetic_ohlc_daily
+            GROUP BY taxonomy_version_id, source_run_id
+            """
+        ).fetchall()
+    assert rows == [(2, "v2-synth-run", 2)]
+
+
+def test_loader_rejects_explicit_calc_version_outside_requested_taxonomy_scope(tmp_path) -> None:
+    source_db = tmp_path / "source_wrong_scope.db"
+    target_db = _setup_target_db_with_versions(tmp_path, ("DC_TAXONOMY_FULL_V1", "DC_TAXONOMY_FULL_V2"))
+    _create_source_db(
+        source_db,
+        [_source_row(group_type="layer", group_name="Compute silicon", taxonomy_version="DC_TAXONOMY_FULL_V1")],
+    )
+
+    summary = load_ec_group_synthetic_ohlc_daily_from_dc(
+        source_db_path=str(source_db),
+        target_db_path=str(target_db),
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+        ohlc_calc_version="DC_SWING_OHLC_V1",
+    )
+
+    assert summary["status"] == "FAILED"
+    assert summary["loader_error_code"] == "SOURCE_SCOPE_UNAVAILABLE"
+    assert summary["requested_taxonomy_version"] == "DC_TAXONOMY_FULL_V2"
+    assert summary["source_row_count"] == 0
+
+
+def test_loader_blocks_ambiguous_calc_version_within_requested_taxonomy_scope(tmp_path) -> None:
+    source_db = tmp_path / "source_ambiguous_calc.db"
+    target_db = _setup_target_db_with_versions(tmp_path, ("DC_TAXONOMY_FULL_V2",))
+    _create_source_db(
+        source_db,
+        [
+            _source_row(group_type="layer", group_name="Compute silicon", taxonomy_version="DC_TAXONOMY_FULL_V2", calc_version="CALC_A", run_id="run-a"),
+            _source_row(group_type="subindustry", group_name="GPUs", taxonomy_version="DC_TAXONOMY_FULL_V2", calc_version="CALC_B", run_id="run-b"),
+        ],
+    )
+
+    summary = load_ec_group_synthetic_ohlc_daily_from_dc(
+        source_db_path=str(source_db),
+        target_db_path=str(target_db),
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+    )
+
+    assert summary["status"] == "FAILED"
+    assert summary["loader_error_code"] == "SOURCE_CALC_VERSION_AMBIGUOUS"
+    assert "Multiple calc_version" in str(summary["loader_error"])
+
+
+def test_loader_blocks_duplicate_source_group_before_insert(tmp_path) -> None:
+    source_db = tmp_path / "source_duplicate.db"
+    target_db = _setup_target_db_with_versions(tmp_path, ("DC_TAXONOMY_FULL_V2",))
+    _create_source_db(
+        source_db,
+        [
+            _source_row(group_type="layer", group_name="Compute silicon", taxonomy_version="DC_TAXONOMY_FULL_V2", run_id="run-a"),
+            _source_row(group_type="layer", group_name="Compute silicon", taxonomy_version="DC_TAXONOMY_FULL_V2", run_id="run-b"),
+        ],
+        primary_key=False,
+    )
+
+    summary = load_ec_group_synthetic_ohlc_daily_from_dc(
+        source_db_path=str(source_db),
+        target_db_path=str(target_db),
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+    )
+
+    assert summary["status"] == "FAILED"
+    assert summary["loader_error_code"] == "SOURCE_SCOPE_INVALID"
+    assert summary["duplicate_source_group_count"] == 1
+    with _connect(str(target_db)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM ec_group_synthetic_ohlc_daily").fetchone()[0] == 0

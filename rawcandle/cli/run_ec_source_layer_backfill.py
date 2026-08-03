@@ -167,20 +167,24 @@ def _delete_rows_if_table_has_scope(
     table_name: str,
     date_column: str,
     ecosystem_id: int,
+    taxonomy_version_id: int,
     date_from: str,
     date_to: str,
 ) -> int:
     columns = {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
     if "ecosystem_id" not in columns:
         raise ValueError(f"{table_name} does not have ecosystem_id; refusing scoped taxonomy rebuild delete")
+    if "taxonomy_version_id" not in columns:
+        raise ValueError(f"{table_name} does not have taxonomy_version_id; refusing scoped taxonomy rebuild delete")
     cursor = conn.execute(
         f"""
         DELETE FROM {table_name}
         WHERE ecosystem_id = ?
+          AND taxonomy_version_id = ?
           AND {date_column} >= ?
           AND {date_column} <= ?
         """,
-        (ecosystem_id, date_from, date_to),
+        (ecosystem_id, taxonomy_version_id, date_from, date_to),
     )
     return int(cursor.rowcount or 0)
 
@@ -207,6 +211,7 @@ def _prepare_taxonomy_rebuild_ec_scope(
                 table_name="ec_ticker_signal_daily",
                 date_column="signal_date",
                 ecosystem_id=ecosystem_id,
+                taxonomy_version_id=taxonomy_version_id,
                 date_from=date_from,
                 date_to=date_to,
             )
@@ -215,6 +220,7 @@ def _prepare_taxonomy_rebuild_ec_scope(
                 table_name="ec_group_signal_daily",
                 date_column="signal_date",
                 ecosystem_id=ecosystem_id,
+                taxonomy_version_id=taxonomy_version_id,
                 date_from=date_from,
                 date_to=date_to,
             )
@@ -223,6 +229,7 @@ def _prepare_taxonomy_rebuild_ec_scope(
                 table_name="ec_group_synthetic_ohlc_daily",
                 date_column="signal_date",
                 ecosystem_id=ecosystem_id,
+                taxonomy_version_id=taxonomy_version_id,
                 date_from=date_from,
                 date_to=date_to,
             )
@@ -231,6 +238,7 @@ def _prepare_taxonomy_rebuild_ec_scope(
                 table_name="ec_group_index_daily",
                 date_column="signal_date",
                 ecosystem_id=ecosystem_id,
+                taxonomy_version_id=taxonomy_version_id,
                 date_from=date_from,
                 date_to=date_to,
             )
@@ -413,6 +421,70 @@ def _group_loader_failure_fields(group_summary: dict[str, object] | None) -> dic
         "unresolved_groups": group_summary.get("unresolved_groups") or [],
         "multiple_source_to_same_target_count": group_summary.get("multiple_source_to_same_target_count"),
         "group_loader_summary": group_summary,
+    }
+
+
+def _synthetic_loader_failure_fields(synthetic_summary: dict[str, object] | None) -> dict[str, object]:
+    if not isinstance(synthetic_summary, dict):
+        return {}
+    loader_error = (
+        synthetic_summary.get("loader_error")
+        or synthetic_summary.get("synthetic_loader_error")
+        or synthetic_summary.get("error")
+        or "Synthetic OHLC fact loader returned FAILED"
+    )
+    return {
+        "loader_status": synthetic_summary.get("loader_status") or synthetic_summary.get("status"),
+        "loader_error": loader_error,
+        "loader_error_code": synthetic_summary.get("loader_error_code"),
+        "requested_taxonomy_version": synthetic_summary.get("requested_taxonomy_version"),
+        "source_taxonomy_version": synthetic_summary.get("source_taxonomy_version"),
+        "source_row_count": synthetic_summary.get("source_row_count"),
+        "source_distinct_group_count": synthetic_summary.get("source_distinct_group_count"),
+        "duplicate_source_group_count": synthetic_summary.get("duplicate_source_group_count"),
+        "unexpected_taxonomy_version_count": synthetic_summary.get("unexpected_taxonomy_version_count"),
+        "unexpected_calc_version_count": synthetic_summary.get("unexpected_calc_version_count"),
+        "null_required_source_key_count": synthetic_summary.get("null_required_source_key_count"),
+        "mapped_row_count": synthetic_summary.get("mapped_row_count"),
+        "distinct_target_key_count": synthetic_summary.get("distinct_target_key_count"),
+        "duplicate_target_key_count": synthetic_summary.get("duplicate_target_key_count"),
+        "null_target_key_count": synthetic_summary.get("null_target_key_count"),
+        "unresolved_group_count": synthetic_summary.get("unresolved_group_count"),
+        "unresolved_groups": synthetic_summary.get("unresolved_groups") or [],
+        "multiple_source_to_same_target_count": synthetic_summary.get("multiple_source_to_same_target_count"),
+        "synthetic_loader_summary": synthetic_summary,
+    }
+
+
+def _group_index_loader_failure_fields(group_index_summary: dict[str, object] | None) -> dict[str, object]:
+    if not isinstance(group_index_summary, dict):
+        return {}
+    loader_error = (
+        group_index_summary.get("loader_error")
+        or group_index_summary.get("group_index_loader_error")
+        or group_index_summary.get("error")
+        or "Group index fact loader returned FAILED"
+    )
+    return {
+        "loader_status": group_index_summary.get("loader_status") or group_index_summary.get("status"),
+        "loader_error": loader_error,
+        "loader_error_code": group_index_summary.get("loader_error_code"),
+        "requested_taxonomy_version": group_index_summary.get("requested_taxonomy_version"),
+        "source_taxonomy_version": group_index_summary.get("source_taxonomy_version"),
+        "source_row_count": group_index_summary.get("source_row_count"),
+        "source_distinct_group_count": group_index_summary.get("source_distinct_group_count"),
+        "duplicate_source_group_count": group_index_summary.get("duplicate_source_group_count"),
+        "unexpected_taxonomy_version_count": group_index_summary.get("unexpected_taxonomy_version_count"),
+        "unexpected_calc_version_count": group_index_summary.get("unexpected_calc_version_count"),
+        "null_required_source_key_count": group_index_summary.get("null_required_source_key_count"),
+        "mapped_row_count": group_index_summary.get("mapped_row_count"),
+        "distinct_target_key_count": group_index_summary.get("distinct_target_key_count"),
+        "duplicate_target_key_count": group_index_summary.get("duplicate_target_key_count"),
+        "null_target_key_count": group_index_summary.get("null_target_key_count"),
+        "unresolved_group_count": group_index_summary.get("unresolved_group_count"),
+        "unresolved_groups": group_index_summary.get("unresolved_groups") or [],
+        "multiple_source_to_same_target_count": group_index_summary.get("multiple_source_to_same_target_count"),
+        "group_index_loader_summary": group_index_summary,
     }
 
 
@@ -681,6 +753,8 @@ def run_ec_source_layer_backfill(
     completed_steps: list[str] = []
     ticker_summary: dict[str, object] | None = None
     group_signal_summary: dict[str, object] | None = None
+    synthetic_summary: dict[str, object] | None = None
+    group_index_summary: dict[str, object] | None = None
 
     try:
         if taxonomy_rebuild:
@@ -698,6 +772,8 @@ def run_ec_source_layer_backfill(
             completed_steps = []
             ticker_summary = None
             group_signal_summary = None
+            synthetic_summary = None
+            group_index_summary = None
 
             ticker_summary = _run_step(
                 step_name="load_ec_ticker_signal_daily_from_dc",
@@ -755,7 +831,12 @@ def run_ec_source_layer_backfill(
                 },
             )
             if synthetic_summary.get("status") == "FAILED":
-                raise RuntimeError("Synthetic OHLC fact loader returned FAILED")
+                loader_error = (
+                    synthetic_summary.get("loader_error")
+                    or synthetic_summary.get("synthetic_loader_error")
+                    or "Synthetic OHLC fact loader returned FAILED"
+                )
+                raise RuntimeError(f"Synthetic OHLC fact loader returned FAILED: {loader_error}")
 
             group_index_summary = _run_step(
                 step_name="load_ec_group_index_daily_from_dc",
@@ -771,7 +852,12 @@ def run_ec_source_layer_backfill(
                 },
             )
             if group_index_summary.get("status") == "FAILED":
-                raise RuntimeError("Group index fact loader returned FAILED")
+                loader_error = (
+                    group_index_summary.get("loader_error")
+                    or group_index_summary.get("group_index_loader_error")
+                    or "Group index fact loader returned FAILED"
+                )
+                raise RuntimeError(f"Group index fact loader returned FAILED: {loader_error}")
 
             coverage_audit_summary = _run_step(
                 step_name="audit_dc_facts_against_ec_sidecar",
@@ -860,6 +946,16 @@ def run_ec_source_layer_backfill(
             **(
                 _group_loader_failure_fields(group_signal_summary)
                 if completed_steps and completed_steps[-1] == "load_ec_group_signal_daily_from_dc"
+                else {}
+            ),
+            **(
+                _synthetic_loader_failure_fields(synthetic_summary)
+                if completed_steps and completed_steps[-1] == "load_ec_group_synthetic_ohlc_daily_from_dc"
+                else {}
+            ),
+            **(
+                _group_index_loader_failure_fields(group_index_summary)
+                if completed_steps and completed_steps[-1] == "load_ec_group_index_daily_from_dc"
                 else {}
             ),
             **_watermark_not_run_summary(),
@@ -1057,6 +1153,48 @@ def render_backfill_text(summary: dict[str, object]) -> str:
             lines.append(f"- duplicate_source_group_count={summary.get('duplicate_source_group_count')}")
             lines.append(f"- unexpected_taxonomy_version_count={summary.get('unexpected_taxonomy_version_count')}")
             lines.append(f"- unexpected_signal_version_count={summary.get('unexpected_signal_version_count')}")
+            lines.append(f"- null_required_source_key_count={summary.get('null_required_source_key_count')}")
+            lines.append(f"- mapped_row_count={summary.get('mapped_row_count')}")
+            lines.append(f"- distinct_target_key_count={summary.get('distinct_target_key_count')}")
+            lines.append(f"- duplicate_target_key_count={summary.get('duplicate_target_key_count')}")
+            lines.append(f"- null_target_key_count={summary.get('null_target_key_count')}")
+            lines.append(f"- unresolved_group_count={summary.get('unresolved_group_count')}")
+            lines.append(f"- unresolved_groups={summary.get('unresolved_groups')}")
+            lines.append(
+                f"- multiple_source_to_same_target_count={summary.get('multiple_source_to_same_target_count')}"
+            )
+        if summary.get("synthetic_loader_summary") is not None:
+            lines.append(f"- loader_status={summary.get('loader_status')}")
+            lines.append(f"- loader_error_code={summary.get('loader_error_code')}")
+            lines.append(f"- loader_error={summary.get('loader_error')}")
+            lines.append(f"- requested_taxonomy_version={summary.get('requested_taxonomy_version')}")
+            lines.append(f"- source_taxonomy_version={summary.get('source_taxonomy_version')}")
+            lines.append(f"- source_row_count={summary.get('source_row_count')}")
+            lines.append(f"- source_distinct_group_count={summary.get('source_distinct_group_count')}")
+            lines.append(f"- duplicate_source_group_count={summary.get('duplicate_source_group_count')}")
+            lines.append(f"- unexpected_taxonomy_version_count={summary.get('unexpected_taxonomy_version_count')}")
+            lines.append(f"- unexpected_calc_version_count={summary.get('unexpected_calc_version_count')}")
+            lines.append(f"- null_required_source_key_count={summary.get('null_required_source_key_count')}")
+            lines.append(f"- mapped_row_count={summary.get('mapped_row_count')}")
+            lines.append(f"- distinct_target_key_count={summary.get('distinct_target_key_count')}")
+            lines.append(f"- duplicate_target_key_count={summary.get('duplicate_target_key_count')}")
+            lines.append(f"- null_target_key_count={summary.get('null_target_key_count')}")
+            lines.append(f"- unresolved_group_count={summary.get('unresolved_group_count')}")
+            lines.append(f"- unresolved_groups={summary.get('unresolved_groups')}")
+            lines.append(
+                f"- multiple_source_to_same_target_count={summary.get('multiple_source_to_same_target_count')}"
+            )
+        if summary.get("group_index_loader_summary") is not None:
+            lines.append(f"- loader_status={summary.get('loader_status')}")
+            lines.append(f"- loader_error_code={summary.get('loader_error_code')}")
+            lines.append(f"- loader_error={summary.get('loader_error')}")
+            lines.append(f"- requested_taxonomy_version={summary.get('requested_taxonomy_version')}")
+            lines.append(f"- source_taxonomy_version={summary.get('source_taxonomy_version')}")
+            lines.append(f"- source_row_count={summary.get('source_row_count')}")
+            lines.append(f"- source_distinct_group_count={summary.get('source_distinct_group_count')}")
+            lines.append(f"- duplicate_source_group_count={summary.get('duplicate_source_group_count')}")
+            lines.append(f"- unexpected_taxonomy_version_count={summary.get('unexpected_taxonomy_version_count')}")
+            lines.append(f"- unexpected_calc_version_count={summary.get('unexpected_calc_version_count')}")
             lines.append(f"- null_required_source_key_count={summary.get('null_required_source_key_count')}")
             lines.append(f"- mapped_row_count={summary.get('mapped_row_count')}")
             lines.append(f"- distinct_target_key_count={summary.get('distinct_target_key_count')}")

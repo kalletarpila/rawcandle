@@ -270,12 +270,69 @@ target key, null target keys, and SQL insert failures produce structured
 `group_loader_summary` in failure evidence so the deepest group-loader reason is
 visible in progress JSON and rendered output.
 
+## Synthetic And Index Source Scope
+
+`ec_group_synthetic_ohlc_daily` and `ec_group_index_daily` also require explicit
+taxonomy scope. During a proposed V2 rebuild, V1 and V2 source rows can coexist
+for the same group, date, and `calc_version`. Both loaders therefore resolve
+the automatic calc version and select source rows by:
+
+```text
+source date
+calc_version
+taxonomy_version
+```
+
+For synthetic OHLC the source date column is `ohlc_date`. For group index the
+source date column is `index_date`. Caller-supplied calc versions are validated
+inside the requested taxonomy/date scope, so a V2 rebuild cannot resolve or
+accept a calc version only present in active V1 rows.
+
+Both loaders validate source groups before mapping:
+
+```text
+requested_taxonomy_version
+source_taxonomy_version
+source_taxonomy_match
+source_row_count
+source_distinct_group_count
+duplicate_source_group_count
+unexpected_taxonomy_version_count
+unexpected_calc_version_count
+null_required_source_key_count
+group_type_counts
+data_quality_status_counts
+```
+
+Before insert, both loaders validate the target key:
+
+```text
+ecosystem_id
+taxonomy_version_id
+signal_date
+entity_id
+calc_version
+```
+
+Duplicate source groups, unresolved groups, multiple source rows mapping to one
+target key, null target keys, and SQL insert failures return structured
+`FAILED` summaries. The single-range backfill and chunked orchestrator preserve
+`synthetic_loader_summary` and `group_index_loader_summary` in failure evidence.
+
 The current canonical loaders still commit independently. A group failure after
-successful ticker loading can therefore leave a partial ticker-only date. The
+successful upstream loaders can therefore leave a partial selected date. The
 required minimum retry contract is idempotent delete-and-replace for each
-canonical loader scope. A future hardening step is per-date atomicity across
-ticker, group, synthetic OHLC, and group index loaders, but that is intentionally
-separate from the group taxonomy-scope fix.
+canonical loader scope, including the taxonomy-rebuild predelete scope:
+
+```text
+ecosystem_id
+taxonomy_version_id
+signal_date
+```
+
+A future hardening step is per-date atomicity across ticker, group, synthetic
+OHLC, and group index loaders, but that requires shared transaction support and
+is intentionally separate from this taxonomy-scope fix.
 
 ## Backup Policy
 
