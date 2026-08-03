@@ -16,6 +16,7 @@ from analysis.datacenter_indices.taxonomy import (
     DatacenterTaxonomyRow,
     load_datacenter_taxonomy_csv,
 )
+from rawcandle.scheduler.config import read_scheduler_config
 from rawcandle.ec_datacenter_taxonomy_loader import (
     _build_taxonomy_name,
     _compute_source_hash,
@@ -68,6 +69,16 @@ CANONICAL_EC_WATERMARK_SCOPES = (
     ("GROUP_SWING_BASE", "dc_group_swing_signal_daily"),
     ("SYNTHETIC_OHLC_BASE", "dc_group_synthetic_ohlc_daily"),
     ("GROUP_INDEX", "dc_group_index_daily"),
+)
+DC_REBUILD_REPORT_FILES = (
+    "datacenter_daily_{date}_*_full.md",
+    "datacenter_daily_{date}_*_full.csv",
+    "datacenter_rolling_30_{date}_*_full.md",
+    "datacenter_rolling_30_{date}_*_full.csv",
+    "datacenter_rolling_5_{date}_*_full.md",
+    "datacenter_rolling_5_{date}_*_full.csv",
+    "datacenter_rolling_2_{date}_*_full.md",
+    "datacenter_rolling_2_{date}_*_full.csv",
 )
 DEPLOYMENT_READY_STATUSES = {
     "LOADED_NOT_ACTIVE",
@@ -1247,6 +1258,475 @@ def validate_datacenter_taxonomy_rebuild_evidence(
             }
         ),
     }
+
+
+def _dc_duplicate_key_counts(conn: sqlite3.Connection, *, taxonomy_version: str) -> dict[str, int]:
+    duplicate_counts: dict[str, int] = {}
+    key_candidates = {
+        "dc_ticker_swing_signal_daily": ("signal_date", "taxonomy_version", "ticker", "signal_version"),
+        "dc_group_swing_signal_daily": (
+            "signal_date",
+            "taxonomy_version",
+            "group_type",
+            "group_name",
+            "signal_version",
+        ),
+        "dc_group_synthetic_ohlc_daily": (
+            "ohlc_date",
+            "taxonomy_version",
+            "group_type",
+            "group_name",
+            "calc_version",
+        ),
+        "dc_group_index_daily": ("index_date", "taxonomy_version", "group_type", "group_name"),
+    }
+    fallback_date_columns = {
+        "dc_ticker_swing_signal_daily": "signal_date",
+        "dc_group_swing_signal_daily": "signal_date",
+        "dc_group_synthetic_ohlc_daily": "ohlc_date",
+        "dc_group_index_daily": "index_date",
+    }
+    for table_name, candidate_columns in key_candidates.items():
+        if table_name not in _table_names(conn):
+            duplicate_counts[table_name] = 0
+            continue
+        columns = _table_columns(conn, table_name)
+        key_columns = (
+            candidate_columns
+            if set(candidate_columns).issubset(columns)
+            else (fallback_date_columns[table_name], "taxonomy_version")
+        )
+        key_sql = ", ".join(key_columns)
+        row = conn.execute(
+            f"""
+            SELECT COUNT(*)
+            FROM (
+                SELECT {key_sql}, COUNT(*) AS row_count
+                FROM {table_name}
+                WHERE taxonomy_version = ?
+                GROUP BY {key_sql}
+                HAVING row_count > 1
+            )
+            """,
+            (taxonomy_version,),
+        ).fetchone()
+        duplicate_counts[table_name] = int(row[0]) if row is not None else 0
+    return duplicate_counts
+
+
+def _dc_fact_coverage(
+    conn: sqlite3.Connection,
+    *,
+    taxonomy_version: str,
+    required_signal_date: str,
+    expected_ticker_rows: int,
+    expected_group_rows: int,
+    expected_synthetic_rows: int,
+    expected_index_rows: int,
+) -> dict[str, dict[str, object]]:
+    expected_final_rows = {
+        "dc_ticker_swing_signal_daily": expected_ticker_rows,
+        "dc_group_swing_signal_daily": expected_group_rows,
+        "dc_group_synthetic_ohlc_daily": expected_synthetic_rows,
+        "dc_group_index_daily": expected_index_rows,
+    }
+    coverage: dict[str, dict[str, object]] = {}
+    for table_name, date_column in CANONICAL_DC_FACT_TABLES:
+        if table_name not in _table_names(conn):
+            coverage[table_name] = {
+                "status": "MISSING_TABLE",
+                "total_rows": 0,
+                "distinct_dates": 0,
+                "min_date": None,
+                "max_date": None,
+                "final_date_rows": 0,
+                "expected_final_date_rows": expected_final_rows[table_name],
+                "taxonomy_version_count": 0,
+            }
+            continue
+        row = conn.execute(
+            f"""
+            SELECT COUNT(*) AS total_rows,
+                   COUNT(DISTINCT {date_column}) AS distinct_dates,
+                   MIN({date_column}) AS min_date,
+                   MAX({date_column}) AS max_date,
+                   SUM(CASE WHEN {date_column} = ? THEN 1 ELSE 0 END) AS final_date_rows,
+                   COUNT(DISTINCT taxonomy_version) AS taxonomy_version_count
+            FROM {table_name}
+            WHERE taxonomy_version = ?
+            """,
+            (required_signal_date, taxonomy_version),
+        ).fetchone()
+        final_rows = int(row["final_date_rows"] or 0)
+        max_date = None if row["max_date"] is None else str(row["max_date"])
+        coverage[table_name] = {
+            "status": "OK"
+            if max_date == required_signal_date and final_rows == expected_final_rows[table_name]
+            else "BLOCKED",
+            "total_rows": int(row["total_rows"] or 0),
+            "distinct_dates": int(row["distinct_dates"] or 0),
+            "min_date": row["min_date"],
+            "max_date": max_date,
+            "final_date_rows": final_rows,
+            "expected_final_date_rows": expected_final_rows[table_name],
+            "taxonomy_version_count": int(row["taxonomy_version_count"] or 0),
+        }
+    return coverage
+
+
+def _dc_required_watermark_status(
+    conn: sqlite3.Connection,
+    *,
+    taxonomy_version: str,
+    required_signal_date: str,
+) -> dict[str, object]:
+    rows = _dc_watermark_evidence(conn, taxonomy_version=taxonomy_version)
+    by_component = {str(row["component_name"]): row for row in rows}
+    missing: list[str] = []
+    incomplete: list[str] = []
+    failed: list[str] = []
+    for component in TAXONOMY_REPLACEMENT_COMPONENTS:
+        row = by_component.get(component)
+        if row is None:
+            missing.append(component)
+            continue
+        if str(row.get("status")) != "OK":
+            failed.append(component)
+        end_date = row.get("end_date")
+        if end_date is None or str(end_date) < required_signal_date:
+            incomplete.append(component)
+    return {
+        "status": "OK" if not missing and not incomplete and not failed else "BLOCKED",
+        "rows": rows,
+        "required_components": list(TAXONOMY_REPLACEMENT_COMPONENTS),
+        "missing_components": missing,
+        "incomplete_components": incomplete,
+        "failed_components": failed,
+    }
+
+
+def _dc_report_artifacts(evidence_dir: str | Path, *, required_signal_date: str) -> dict[str, object]:
+    report_dir = Path(evidence_dir) / "dc_reports"
+    artifacts: list[dict[str, object]] = []
+    missing_patterns: list[str] = []
+    for pattern_template in DC_REBUILD_REPORT_FILES:
+        pattern = pattern_template.format(date=required_signal_date)
+        matches = sorted(report_dir.glob(pattern))
+        if len(matches) != 1:
+            missing_patterns.append(pattern)
+            continue
+        path = matches[0]
+        artifacts.append(
+            {
+                "path": str(path),
+                "size": path.stat().st_size,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+        )
+    return {
+        "status": "OK" if len(artifacts) == len(DC_REBUILD_REPORT_FILES) and not missing_patterns else "BLOCKED",
+        "report_dir": str(report_dir),
+        "artifacts": artifacts,
+        "missing_patterns": missing_patterns,
+    }
+
+
+def _dc_stage_evidence(
+    evidence_dir: str | Path,
+    *,
+    windows_copy_status: str,
+    windows_copy_required: bool,
+) -> dict[str, object]:
+    log_dir = Path(evidence_dir) / "logs"
+    stdout_path = log_dir / "datacenter_v2_full_rebuild.stdout"
+    stderr_path = log_dir / "datacenter_v2_full_rebuild.stderr"
+    stdout = stdout_path.read_text(encoding="utf-8") if stdout_path.exists() else ""
+    stderr = stderr_path.read_text(encoding="utf-8") if stderr_path.exists() else ""
+    stage_headings = [line.strip() for line in stdout.splitlines() if line.startswith("=== Stage ")]
+    required_stage_names = [
+        "Datacenter base index",
+        "Ticker swing base snapshots",
+        "Group swing base metrics",
+        "Synthetic OHLC base",
+        "Relative OHLC20",
+        "Group structure / BOS / RESET",
+        "Group timing states",
+        "Group overheat risk",
+        "Ticker scanners",
+        "Pipeline audit",
+        "Automatic technical relevance",
+        "Daily report",
+        "Rolling 30 report",
+        "Rolling 5 report",
+        "Rolling 2 report",
+    ]
+    missing_stages = [
+        stage_name
+        for stage_name in required_stage_names
+        if not any(stage_name in heading for heading in stage_headings)
+    ]
+    windows_copy_failure_is_expected = (
+        windows_copy_status == "FAILED_OPTIONAL"
+        and not windows_copy_required
+        and "Read-only file system" in stderr
+        and "swing_reports" in stderr
+    )
+    return {
+        "status": "OK" if not missing_stages and windows_copy_failure_is_expected else "BLOCKED",
+        "stdout_path": str(stdout_path),
+        "stderr_path": str(stderr_path),
+        "stage_headings": stage_headings,
+        "missing_required_stages": missing_stages,
+        "windows_copy_failure_is_expected": windows_copy_failure_is_expected,
+        "windows_copy_error": stderr.strip(),
+    }
+
+
+def validate_datacenter_taxonomy_dc_rebuild_acceptance(
+    *,
+    analysis_db: str | Path,
+    ecosystem_code: str,
+    proposed_taxonomy_version: str,
+    proposed_taxonomy_csv: str | Path,
+    deployment_id: int,
+    required_start_date: str,
+    required_signal_date: str,
+    evidence_dir: str | Path,
+    scheduler_config: str | Path,
+    expected_scheduler_taxonomy_version: str,
+    expected_ticker_rows: int,
+    expected_group_rows: int,
+    expected_synthetic_rows: int,
+    expected_index_rows: int,
+    windows_copy_status: str,
+    windows_copy_required: bool,
+) -> dict[str, object]:
+    proposed_summary = summarize_taxonomy_csv(proposed_taxonomy_csv, proposed_taxonomy_version)
+    blocking_errors: list[str] = []
+    scheduler = read_scheduler_config(str(scheduler_config))
+    if scheduler.datacenter_taxonomy_version != expected_scheduler_taxonomy_version:
+        blocking_errors.append("scheduler Datacenter taxonomy version is not expected V1")
+    if scheduler.ec_source_layer_taxonomy_version != expected_scheduler_taxonomy_version:
+        blocking_errors.append("scheduler EC taxonomy version is not expected V1")
+
+    conn = _connect_readonly(analysis_db)
+    try:
+        deployment = _fetch_deployment_by_id(
+            conn,
+            deployment_id=deployment_id,
+            ecosystem_code=ecosystem_code,
+            proposed_taxonomy_version=proposed_taxonomy_version,
+        )
+        loaded = _fetch_loaded_taxonomy(
+            conn,
+            ecosystem_code=ecosystem_code,
+            taxonomy_version_code=proposed_taxonomy_version,
+        )
+        active = _fetch_active_taxonomy(conn, ecosystem_code=ecosystem_code)
+        if deployment is None:
+            blocking_errors.append("taxonomy deployment row not found")
+        else:
+            if str(deployment.get("rebuild_start_date")) != required_start_date:
+                blocking_errors.append("deployment rebuild_start_date does not match required range")
+            if str(deployment.get("activation_status")) == "ACTIVE":
+                blocking_errors.append("deployment already active")
+            if str(deployment.get("ec_rebuild_status")) != "NOT_STARTED":
+                blocking_errors.append("EC rebuild status is not NOT_STARTED")
+            if str(deployment.get("coverage_status")) != "NOT_STARTED":
+                blocking_errors.append("coverage status is not NOT_STARTED")
+            if str(deployment.get("parity_status")) != "NOT_STARTED":
+                blocking_errors.append("parity status is not NOT_STARTED")
+        taxonomy_version_id = None
+        if loaded is None:
+            blocking_errors.append("proposed taxonomy metadata is not loaded")
+        else:
+            taxonomy_version_id = int(loaded["taxonomy_version_id"])
+            if int(loaded.get("is_active") or 0) != 0:
+                blocking_errors.append("proposed taxonomy is already active")
+            if str(loaded.get("source_hash") or "") != proposed_summary.source_sha256:
+                blocking_errors.append("loaded taxonomy hash does not match proposed source")
+        if active is None:
+            blocking_errors.append("active taxonomy is missing")
+        elif str(active.get("taxonomy_version_code")) == proposed_taxonomy_version:
+            blocking_errors.append("proposed taxonomy is active unexpectedly")
+        eco_row = conn.execute(
+            "SELECT ecosystem_id FROM ec_ecosystem WHERE ecosystem_code = ?",
+            (ecosystem_code,),
+        ).fetchone()
+        ecosystem_id = int(eco_row[0]) if eco_row is not None else 0
+
+        fact_coverage = _dc_fact_coverage(
+            conn,
+            taxonomy_version=proposed_taxonomy_version,
+            required_signal_date=required_signal_date,
+            expected_ticker_rows=expected_ticker_rows,
+            expected_group_rows=expected_group_rows,
+            expected_synthetic_rows=expected_synthetic_rows,
+            expected_index_rows=expected_index_rows,
+        )
+        for table_name, coverage in fact_coverage.items():
+            if coverage["status"] != "OK":
+                blocking_errors.append(f"DC fact coverage incomplete for {table_name}")
+            if int(coverage["taxonomy_version_count"]) > 1:
+                blocking_errors.append(f"taxonomy version impurity detected for {table_name}")
+
+        duplicate_counts = _dc_duplicate_key_counts(conn, taxonomy_version=proposed_taxonomy_version)
+        for table_name, duplicate_count in duplicate_counts.items():
+            if duplicate_count:
+                blocking_errors.append(f"duplicate DC keys detected for {table_name}")
+
+        dc_watermarks = _dc_required_watermark_status(
+            conn,
+            taxonomy_version=proposed_taxonomy_version,
+            required_signal_date=required_signal_date,
+        )
+        if dc_watermarks["status"] != "OK":
+            blocking_errors.append("required DC watermark coverage is incomplete")
+
+        stale_summary = {
+            "stale_validation_status": "NOT_RUN",
+            "stale_dc_rows": {},
+            "stale_ec_rows": {},
+        }
+        if taxonomy_version_id is not None:
+            stale_summary = validate_rebuild_stale_rows(
+                conn,
+                ecosystem_id=ecosystem_id,
+                taxonomy_version_id=taxonomy_version_id,
+                taxonomy_version_code=proposed_taxonomy_version,
+                date_from=required_start_date,
+                date_to=required_signal_date,
+                taxonomy_rows=proposed_summary.rows,
+            )
+            stale_dc_rows = stale_summary.get("stale_dc_rows", {})
+            if any(int(value) for value in stale_dc_rows.values()):
+                blocking_errors.append("stale V1 rows exist under V2 DC scope")
+            else:
+                stale_summary = {
+                    **stale_summary,
+                    "stale_validation_status": "OK_DC_SCOPE",
+                    "ec_stale_rows_ignored_for_dc_only_acceptance": True,
+                }
+    finally:
+        conn.close()
+
+    report_artifacts = _dc_report_artifacts(evidence_dir, required_signal_date=required_signal_date)
+    if report_artifacts["status"] != "OK":
+        blocking_errors.append("required generated report artifacts are missing")
+    stage_evidence = _dc_stage_evidence(
+        evidence_dir,
+        windows_copy_status=windows_copy_status,
+        windows_copy_required=windows_copy_required,
+    )
+    if stage_evidence["status"] != "OK":
+        blocking_errors.append("Stage 1-15 success and optional copy-only failure evidence is incomplete")
+    if windows_copy_required:
+        blocking_errors.append("Windows report copy was required")
+    if windows_copy_status != "FAILED_OPTIONAL":
+        blocking_errors.append("Windows report copy status is not accepted as FAILED_OPTIONAL")
+
+    accepted = not blocking_errors
+    evidence_payload = {
+        "dc_rebuild_acceptance_status": "ACCEPTED" if accepted else "BLOCKED",
+        "dc_rebuild_canonical_status": "OK" if not any("DC fact" in e for e in blocking_errors) else "BLOCKED",
+        "dc_rebuild_report_generation_status": report_artifacts["status"],
+        "dc_rebuild_windows_copy_status": windows_copy_status,
+        "dc_rebuild_windows_copy_required": windows_copy_required,
+        "dc_rebuild_windows_copy_error": stage_evidence["windows_copy_error"],
+        "dc_rebuild_accepted_with_noncanonical_warning": bool(accepted and windows_copy_status == "FAILED_OPTIONAL"),
+        "dc_rebuild_evidence_path": str(evidence_dir),
+        "deployment_id": deployment_id,
+        "ecosystem_code": ecosystem_code,
+        "taxonomy_version_code": proposed_taxonomy_version,
+        "required_start_date": required_start_date,
+        "required_signal_date": required_signal_date,
+        "fact_coverage": fact_coverage,
+        "duplicate_key_counts": duplicate_counts,
+        "dc_watermark_status": dc_watermarks,
+        "stale_row_validation": stale_summary,
+        "report_artifacts": report_artifacts,
+        "stage_evidence": stage_evidence,
+        "blocking_errors": sorted(set(blocking_errors)),
+    }
+    evidence_sha = _json_sha256(evidence_payload)
+    evidence_payload["dc_rebuild_evidence_sha256"] = evidence_sha
+    return evidence_payload
+
+
+def apply_datacenter_taxonomy_dc_rebuild_acceptance(
+    *,
+    analysis_db: str | Path,
+    ecosystem_code: str,
+    proposed_taxonomy_version: str,
+    proposed_taxonomy_csv: str | Path,
+    deployment_id: int,
+    required_start_date: str,
+    required_signal_date: str,
+    evidence_dir: str | Path,
+    scheduler_config: str | Path,
+    expected_scheduler_taxonomy_version: str,
+    expected_ticker_rows: int,
+    expected_group_rows: int,
+    expected_synthetic_rows: int,
+    expected_index_rows: int,
+    windows_copy_status: str,
+    windows_copy_required: bool,
+) -> dict[str, object]:
+    evidence = validate_datacenter_taxonomy_dc_rebuild_acceptance(
+        analysis_db=analysis_db,
+        ecosystem_code=ecosystem_code,
+        proposed_taxonomy_version=proposed_taxonomy_version,
+        proposed_taxonomy_csv=proposed_taxonomy_csv,
+        deployment_id=deployment_id,
+        required_start_date=required_start_date,
+        required_signal_date=required_signal_date,
+        evidence_dir=evidence_dir,
+        scheduler_config=scheduler_config,
+        expected_scheduler_taxonomy_version=expected_scheduler_taxonomy_version,
+        expected_ticker_rows=expected_ticker_rows,
+        expected_group_rows=expected_group_rows,
+        expected_synthetic_rows=expected_synthetic_rows,
+        expected_index_rows=expected_index_rows,
+        windows_copy_status=windows_copy_status,
+        windows_copy_required=windows_copy_required,
+    )
+    conn = _connect_readwrite(analysis_db)
+    try:
+        with conn:
+            ensure_taxonomy_replacement_schema(conn)
+            if evidence["dc_rebuild_acceptance_status"] != "ACCEPTED":
+                return {
+                    "status_update": "BLOCKED",
+                    "deployment_id": deployment_id,
+                    "dc_rebuild_accepted": False,
+                    "evidence": evidence,
+                }
+            conn.execute(
+                """
+                UPDATE ec_taxonomy_change_deployment
+                SET status = 'VALIDATION_REQUIRED',
+                    dc_rebuild_status = 'OK',
+                    validation_evidence_json = ?,
+                    validation_evidence_sha256 = ?,
+                    last_error = ?,
+                    updated_at_utc = CURRENT_TIMESTAMP
+                WHERE taxonomy_change_id = ?
+                """,
+                (
+                    json.dumps(evidence, sort_keys=True, default=str),
+                    evidence["dc_rebuild_evidence_sha256"],
+                    "DC rebuild accepted with noncanonical optional Windows report-copy failure",
+                    deployment_id,
+                ),
+            )
+        return {
+            "status_update": "VALIDATION_REQUIRED",
+            "deployment_id": deployment_id,
+            "dc_rebuild_accepted": True,
+            "evidence": evidence,
+        }
+    finally:
+        conn.close()
 
 
 def apply_datacenter_taxonomy_rebuild_evidence(

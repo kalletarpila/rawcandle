@@ -56,6 +56,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--skip-index", action="store_true", help="Skip the datacenter base index stage")
     parser.add_argument("--skip-audit", action="store_true", help="Skip the read-only pipeline audit stage")
     parser.add_argument("--skip-reports", action="store_true", help="Skip daily and weekly report generation")
+    parser.add_argument(
+        "--windows-report-copy",
+        dest="windows_report_copy",
+        action="store_true",
+        default=True,
+        help="Copy generated report files to the Windows report directory after report generation",
+    )
+    parser.add_argument(
+        "--no-windows-report-copy",
+        dest="windows_report_copy",
+        action="store_false",
+        help="Disable the optional Windows report-copy stage while keeping report generation enabled",
+    )
     parser.add_argument("--audit-strict", action="store_true", help="Upgrade audit count/window warnings to FAIL")
     parser.add_argument("--dry-run", action="store_true", help="Print the planned stages without writing any rows or reports")
     return parser.parse_args(argv)
@@ -147,6 +160,7 @@ def main(argv: list[str] | None = None) -> int:
             profile_ticker_swing_snapshots=args.profile_ticker_swing_snapshots,
             stage2_incremental=args.stage2_incremental,
             stage2_overlap_trading_days=args.stage2_overlap_trading_days,
+            windows_report_copy_enabled=args.windows_report_copy,
             skip_index=args.skip_index,
             skip_audit=args.skip_audit,
             skip_reports=args.skip_reports,

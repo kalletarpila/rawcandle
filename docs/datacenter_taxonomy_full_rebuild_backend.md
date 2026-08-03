@@ -136,7 +136,40 @@ It does not run the pipeline and does not delete facts.
 
 ## Evidence Status
 
-The evidence command verifies database state before changing deployment status:
+The DC-only acceptance path verifies that a Datacenter rebuild completed through
+canonical facts, downstream materializations, DC watermarks, and report
+generation, while allowing an explicitly classified optional Windows report-copy
+failure:
+
+```bash
+python3 -m rawcandle.cli.apply_datacenter_taxonomy_rebuild_evidence \
+  --accept-dc-only \
+  --analysis-db /home/kalle/projects/rawcandle/data/analysis.db \
+  --ecosystem DATACENTER \
+  --proposed-taxonomy-version DC_TAXONOMY_FULL_V2 \
+  --proposed-taxonomy-csv data/datacenter_taxonomy_full_v2.csv \
+  --deployment-id <taxonomy_change_id> \
+  --required-start-date 2025-08-01 \
+  --required-signal-date <required-head-date> \
+  --evidence-dir temp/<controlled-run> \
+  --scheduler-config scheduler_config.json \
+  --expected-scheduler-taxonomy-version DC_TAXONOMY_FULL_V1 \
+  --windows-copy-status FAILED_OPTIONAL
+```
+
+This mode writes only DC rebuild acceptance evidence:
+
+```text
+status=VALIDATION_REQUIRED
+dc_rebuild_status=OK
+ec_rebuild_status unchanged
+coverage_status unchanged
+parity_status unchanged
+activation_status=NOT_ACTIVE
+```
+
+The full evidence command is used only after EC rebuild and parity have also
+completed:
 
 ```bash
 python3 -m rawcandle.cli.apply_datacenter_taxonomy_rebuild_evidence \
@@ -151,6 +184,28 @@ python3 -m rawcandle.cli.apply_datacenter_taxonomy_rebuild_evidence \
 It checks DC fact heads, EC fact heads, canonical EC watermark lineage, coverage,
 parity, mismatch count, and stale rows. It writes `READY_TO_ACTIVATE` only when
 all activation prerequisites pass.
+
+## Windows Report Copy Policy
+
+Generated Markdown/CSV report files under `--output-dir` are part of controlled
+taxonomy rebuild evidence. Copying those files to `/mnt/d/swing_reports` is not
+part of canonical Datacenter fact correctness.
+
+The general Datacenter pipeline keeps the historical default:
+
+```text
+windows_report_copy_enabled=true
+```
+
+Controlled taxonomy rebuild commands must opt out explicitly:
+
+```bash
+python3 run_datacenter_swing_pipeline.py ... --no-windows-report-copy
+```
+
+With copy disabled, report generation still runs and the pipeline summary records
+the Windows copy as disabled/skipped. If copying is enabled and the destination is
+read-only or unavailable, the copy failure remains fatal.
 
 ## Activation and Config
 

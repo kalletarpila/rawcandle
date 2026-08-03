@@ -86,6 +86,38 @@ def test_pipeline_cli_passes_stage2_incremental_flags_to_orchestrator(tmp_path, 
     assert "SUMMARY stage2_plan_mode=INCREMENTAL" in lines
 
 
+def test_pipeline_cli_passes_windows_report_copy_disabled_to_orchestrator(tmp_path, monkeypatch):
+    calls: list[dict[str, object]] = []
+
+    def _run_pipeline(**kwargs):
+        calls.append(dict(kwargs))
+        return {"summary": {"pipeline_status": "OK"}}
+
+    monkeypatch.setattr(pipeline_cli, "run_datacenter_swing_pipeline", _run_pipeline)
+
+    exit_code = run_datacenter_swing_pipeline_main(
+        _base_args(tmp_path) + ["--no-windows-report-copy"]
+    )
+
+    assert exit_code == 0
+    assert calls[0]["windows_report_copy_enabled"] is False
+
+
+def test_pipeline_cli_keeps_windows_report_copy_enabled_by_default(tmp_path, monkeypatch):
+    calls: list[dict[str, object]] = []
+
+    def _run_pipeline(**kwargs):
+        calls.append(dict(kwargs))
+        return {"summary": {"pipeline_status": "OK"}}
+
+    monkeypatch.setattr(pipeline_cli, "run_datacenter_swing_pipeline", _run_pipeline)
+
+    exit_code = run_datacenter_swing_pipeline_main(_base_args(tmp_path))
+
+    assert exit_code == 0
+    assert calls[0]["windows_report_copy_enabled"] is True
+
+
 def test_pipeline_cli_rejects_negative_stage2_overlap(tmp_path, capsys):
     exit_code = run_datacenter_swing_pipeline_main(
         _base_args(tmp_path)

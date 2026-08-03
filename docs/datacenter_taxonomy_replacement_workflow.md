@@ -44,7 +44,8 @@ The controlled replacement sequence is:
 5. Prepare the taxonomy rebuild deployment.
 6. Stop affected Datacenter and EC production execution.
 7. Back up production database and scheduler config.
-8. Rebuild DC facts from the configured historical start.
+8. Rebuild DC facts from the configured historical start with Windows report
+   copy disabled for controlled rebuild evidence.
 9. Rebuild DATACENTER EC facts with explicit taxonomy-rebuild mode.
 10. Apply verified rebuild evidence.
 11. Plan activation.
@@ -243,7 +244,38 @@ It records current V1 DC watermark evidence, confirms V2 has not inherited V1
 watermark progress, marks the deployment `REBUILD_IN_PROGRESS`, and does not run
 the Datacenter pipeline.
 
-The evidence CLI is:
+After the DC rebuild, but before EC rebuild, a DC-only acceptance can be applied
+if canonical DC facts, downstream fields, DC watermarks, and generated reports
+are complete and any Windows copy failure is explicitly noncanonical:
+
+```bash
+python3 -m rawcandle.cli.apply_datacenter_taxonomy_rebuild_evidence \
+  --accept-dc-only \
+  --analysis-db ... \
+  --ecosystem DATACENTER \
+  --proposed-taxonomy-version DC_TAXONOMY_FULL_V2 \
+  --proposed-taxonomy-csv data/datacenter_taxonomy_full_v2.csv \
+  --deployment-id ... \
+  --required-start-date 2025-08-01 \
+  --required-signal-date ... \
+  --evidence-dir temp/<controlled-run> \
+  --scheduler-config scheduler_config.json \
+  --expected-scheduler-taxonomy-version DC_TAXONOMY_FULL_V1 \
+  --windows-copy-status FAILED_OPTIONAL
+```
+
+This moves only the DC rebuild state forward:
+
+```text
+status=VALIDATION_REQUIRED
+dc_rebuild_status=OK
+ec_rebuild_status=NOT_STARTED
+activation_status=NOT_ACTIVE
+```
+
+It does not mark EC coverage, parity, or activation readiness complete.
+
+The final evidence CLI is:
 
 ```bash
 python3 -m rawcandle.cli.apply_datacenter_taxonomy_rebuild_evidence \
@@ -259,6 +291,19 @@ It verifies DC fact heads, EC fact heads, canonical EC watermark lineage,
 coverage status, parity status, mismatch count, and stale-row gates before
 moving the deployment to `READY_TO_ACTIVATE`. Supplied OK values are not trusted
 without matching database evidence.
+
+## Windows Report Copy Policy
+
+Report generation under the requested `--output-dir` is required for taxonomy
+rebuild evidence. The Windows report-copy stage is not canonical and should be
+disabled for controlled taxonomy rebuilds:
+
+```bash
+python3 run_datacenter_swing_pipeline.py ... --no-windows-report-copy
+```
+
+Normal scheduled production runs keep the existing default copy behavior. A copy
+failure remains fatal when copying is enabled.
 
 ## Canonical Replacement Validation
 

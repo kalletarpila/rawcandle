@@ -69,6 +69,10 @@ FINAL_PIPELINE_SUMMARY_ORDER = (
     "technical_relevance.status",
     "technical_relevance_run_id",
     "pipeline_output_dir",
+    "windows_report_copy.enabled",
+    "windows_report_copy.destination_dir",
+    "windows_report_copy.execution_status",
+    "windows_report_copy.skip_reason",
     "pipeline_stage_count",
     "pipeline_completed_stage_count",
     "pipeline.total_duration_seconds",
@@ -642,6 +646,7 @@ def run_datacenter_swing_pipeline(
     audit_strict: bool = False,
     stage2_incremental: bool = False,
     stage2_overlap_trading_days: int = DEFAULT_STAGE2_INCREMENTAL_OVERLAP_TRADING_DAYS,
+    windows_report_copy_enabled: bool = True,
     dry_run: bool = False,
     generated_at_utc: str | None = None,
 ) -> dict[str, object]:
@@ -1478,26 +1483,27 @@ def run_datacenter_swing_pipeline(
             "--source-report",
             str(rolling_2_output_csv),
         ]
-        stages.append(
-            PipelineStage(
-                stage_key="windows_report_copy",
-                heading="Windows report copy",
-                argv=windows_report_copy_argv,
-                runner=lambda: _copy_generated_report_files(
-                    destination_dir=WINDOWS_REPORT_COPY_DIR,
-                    source_paths=[
-                        Path(daily_report_path),
-                        Path(daily_report_csv_path),
-                        Path(rolling_30_report_path),
-                        Path(rolling_30_report_csv_path),
-                        Path(rolling_5_report_path),
-                        Path(rolling_5_report_csv_path),
-                        Path(rolling_2_report_path),
-                        Path(rolling_2_report_csv_path),
-                    ],
-                ),
+        if windows_report_copy_enabled:
+            stages.append(
+                PipelineStage(
+                    stage_key="windows_report_copy",
+                    heading="Windows report copy",
+                    argv=windows_report_copy_argv,
+                    runner=lambda: _copy_generated_report_files(
+                        destination_dir=WINDOWS_REPORT_COPY_DIR,
+                        source_paths=[
+                            Path(daily_report_path),
+                            Path(daily_report_csv_path),
+                            Path(rolling_30_report_path),
+                            Path(rolling_30_report_csv_path),
+                            Path(rolling_5_report_path),
+                            Path(rolling_5_report_csv_path),
+                            Path(rolling_2_report_path),
+                            Path(rolling_2_report_csv_path),
+                        ],
+                    ),
+                )
             )
-        )
 
     if dry_run:
         if profile_technical_relevance:
@@ -1535,6 +1541,14 @@ def run_datacenter_swing_pipeline(
                 "technical_relevance.status": technical_relevance_status,
                 "technical_relevance_run_id": resolved_technical_relevance_run_id or "NONE",
                 "pipeline_output_dir": str(output_dir),
+                "windows_report_copy.enabled": "true" if windows_report_copy_enabled else "false",
+                "windows_report_copy.destination_dir": str(WINDOWS_REPORT_COPY_DIR),
+                "windows_report_copy.execution_status": (
+                    "DRY_RUN" if windows_report_copy_enabled and not skip_reports else "SKIPPED"
+                ),
+                "windows_report_copy.skip_reason": (
+                    "" if windows_report_copy_enabled and not skip_reports else "disabled"
+                ),
                 "pipeline_stage_count": len(stages),
                 "pipeline_completed_stage_count": 0,
                 "pipeline.total_duration_seconds": _format_duration_seconds(perf_counter() - total_start),
@@ -1641,6 +1655,14 @@ def run_datacenter_swing_pipeline(
                         "technical_relevance.status": technical_relevance_status,
                         "technical_relevance_run_id": resolved_technical_relevance_run_id or "NONE",
                         "pipeline_output_dir": str(output_dir),
+                        "windows_report_copy.enabled": "true" if windows_report_copy_enabled else "false",
+                        "windows_report_copy.destination_dir": str(WINDOWS_REPORT_COPY_DIR),
+                        "windows_report_copy.execution_status": (
+                            "EXECUTED" if windows_report_copy_enabled and not skip_reports else "SKIPPED"
+                        ),
+                        "windows_report_copy.skip_reason": (
+                            "" if windows_report_copy_enabled and not skip_reports else "disabled"
+                        ),
                         "pipeline_stage_count": len(stages),
                         "pipeline_completed_stage_count": completed_stage_count,
                         "pipeline.total_duration_seconds": _format_duration_seconds(perf_counter() - total_start),
@@ -1735,6 +1757,14 @@ def run_datacenter_swing_pipeline(
                 else {}
             ),
             "pipeline_output_dir": str(output_dir),
+            "windows_report_copy.enabled": "true" if windows_report_copy_enabled else "false",
+            "windows_report_copy.destination_dir": str(WINDOWS_REPORT_COPY_DIR),
+            "windows_report_copy.execution_status": (
+                "EXECUTED" if windows_report_copy_enabled and not skip_reports else "SKIPPED"
+            ),
+            "windows_report_copy.skip_reason": (
+                "" if windows_report_copy_enabled and not skip_reports else "disabled"
+            ),
             "pipeline_stage_count": len(stages),
             "pipeline_completed_stage_count": completed_stage_count,
             "pipeline.total_duration_seconds": _format_duration_seconds(perf_counter() - total_start),

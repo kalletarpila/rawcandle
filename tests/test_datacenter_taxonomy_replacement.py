@@ -9,6 +9,8 @@ import pytest
 
 from rawcandle.datacenter_taxonomy_replacement import (
     DEFAULT_DATACENTER_REBUILD_START_DATE,
+    TAXONOMY_REPLACEMENT_COMPONENTS,
+    apply_datacenter_taxonomy_dc_rebuild_acceptance,
     apply_datacenter_taxonomy_rebuild_evidence,
     apply_datacenter_taxonomy_activation,
     apply_datacenter_taxonomy_version,
@@ -427,6 +429,248 @@ def test_successful_rebuild_evidence_moves_deployment_ready_to_activate(tmp_path
         assert row[5]
     finally:
         conn.close()
+
+
+def _dc_acceptance_fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
+    db_path, csv_path = _activation_db(tmp_path, complete=True)
+    current_csv = _write_csv(tmp_path / "current.csv", _base_rows("DC_TAXONOMY_FULL_V1"))
+    config_path = tmp_path / "scheduler_config.json"
+    write_scheduler_config(
+        str(config_path),
+        StockUpdateSchedulerConfig(
+            enabled_markets=["usa"],
+            osakedata_db_path=str(tmp_path / "osakedata.db"),
+            analysis_db_path=str(db_path),
+            log_dir=str(tmp_path / "logs"),
+            datacenter_taxonomy_version="DC_TAXONOMY_FULL_V1",
+            datacenter_taxonomy_csv=str(current_csv),
+            ec_source_layer_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        ),
+    )
+    evidence_dir = tmp_path / "evidence"
+    report_dir = evidence_dir / "dc_reports"
+    log_dir = evidence_dir / "logs"
+    report_dir.mkdir(parents=True)
+    log_dir.mkdir(parents=True)
+    for prefix in (
+        "datacenter_daily",
+        "datacenter_rolling_30",
+        "datacenter_rolling_5",
+        "datacenter_rolling_2",
+    ):
+        for suffix in ("md", "csv"):
+            (report_dir / f"{prefix}_2026-07-31_1200_full.{suffix}").write_text(
+                f"{prefix}-{suffix}",
+                encoding="utf-8",
+            )
+    stage_names = [
+        "Datacenter base index",
+        "Ticker swing base snapshots",
+        "Group swing base metrics",
+        "Synthetic OHLC base",
+        "Relative OHLC20",
+        "Group structure / BOS / RESET",
+        "Group timing states",
+        "Group overheat risk",
+        "Ticker scanners",
+        "Pipeline audit",
+        "Automatic technical relevance",
+        "Daily report",
+        "Rolling 30 report",
+        "Rolling 5 report",
+        "Rolling 2 report",
+        "Windows report copy",
+    ]
+    (log_dir / "datacenter_v2_full_rebuild.stdout").write_text(
+        "\n".join(f"=== Stage {index}/16: {name} ===" for index, name in enumerate(stage_names, start=1)),
+        encoding="utf-8",
+    )
+    (log_dir / "datacenter_v2_full_rebuild.stderr").write_text(
+        "ERROR [Errno 30] Read-only file system: '/mnt/d/swing_reports/report.md'\n",
+        encoding="utf-8",
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE dc_pipeline_watermark (
+                component_name TEXT,
+                taxonomy_version TEXT,
+                market TEXT,
+                signal_version TEXT,
+                calc_version TEXT,
+                start_date TEXT,
+                end_date TEXT,
+                row_count INTEGER,
+                status TEXT,
+                last_successful_run_id TEXT,
+                last_successful_at_utc TEXT,
+                notes TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            UPDATE ec_taxonomy_change_deployment
+            SET status='REBUILD_IN_PROGRESS',
+                dc_rebuild_status='IN_PROGRESS',
+                ec_rebuild_status='NOT_STARTED',
+                coverage_status='NOT_STARTED',
+                parity_status='NOT_STARTED',
+                activation_status='NOT_ACTIVE'
+            WHERE taxonomy_change_id=1
+            """
+        )
+        for component in TAXONOMY_REPLACEMENT_COMPONENTS:
+            conn.execute(
+                """
+                INSERT INTO dc_pipeline_watermark (
+                    component_name, taxonomy_version, market, signal_version, calc_version,
+                    start_date, end_date, row_count, status, last_successful_run_id,
+                    last_successful_at_utc, notes
+                ) VALUES (?, 'DC_TAXONOMY_FULL_V2', '', 'DC_SWING_SIGNAL_V1', '',
+                          '2025-08-01', '2026-07-31', NULL, 'OK', NULL,
+                          '2026-08-03T10:40:00Z', NULL)
+                """,
+                (component,),
+            )
+        conn.commit()
+    return db_path, csv_path, evidence_dir, config_path
+
+
+def _apply_dc_acceptance(
+    db_path: Path,
+    csv_path: Path,
+    evidence_dir: Path,
+    config_path: Path,
+    **overrides: object,
+) -> dict[str, object]:
+    params = {
+        "analysis_db": db_path,
+        "ecosystem_code": "DATACENTER",
+        "proposed_taxonomy_version": "DC_TAXONOMY_FULL_V2",
+        "proposed_taxonomy_csv": csv_path,
+        "deployment_id": 1,
+        "required_start_date": "2025-08-01",
+        "required_signal_date": "2026-07-31",
+        "evidence_dir": evidence_dir,
+        "scheduler_config": config_path,
+        "expected_scheduler_taxonomy_version": "DC_TAXONOMY_FULL_V1",
+        "expected_ticker_rows": 1,
+        "expected_group_rows": 1,
+        "expected_synthetic_rows": 1,
+        "expected_index_rows": 1,
+        "windows_copy_status": "FAILED_OPTIONAL",
+        "windows_copy_required": False,
+    }
+    params.update(overrides)
+    return apply_datacenter_taxonomy_dc_rebuild_acceptance(**params)
+
+
+def test_dc_rebuild_acceptance_records_optional_copy_failure_without_ready_to_activate(tmp_path) -> None:
+    db_path, csv_path, evidence_dir, config_path = _dc_acceptance_fixture(tmp_path)
+
+    summary = _apply_dc_acceptance(db_path, csv_path, evidence_dir, config_path)
+
+    assert summary["status_update"] == "VALIDATION_REQUIRED"
+    assert summary["dc_rebuild_accepted"] is True
+    evidence = summary["evidence"]
+    assert evidence["dc_rebuild_acceptance_status"] == "ACCEPTED"
+    assert evidence["dc_rebuild_windows_copy_status"] == "FAILED_OPTIONAL"
+    assert evidence["dc_rebuild_windows_copy_required"] is False
+    assert evidence["dc_rebuild_accepted_with_noncanonical_warning"] is True
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT status, dc_rebuild_status, ec_rebuild_status, coverage_status,
+                   parity_status, activation_status, validation_evidence_sha256
+            FROM ec_taxonomy_change_deployment
+            WHERE taxonomy_change_id = 1
+            """
+        ).fetchone()
+        assert row[:6] == (
+            "VALIDATION_REQUIRED",
+            "OK",
+            "NOT_STARTED",
+            "NOT_STARTED",
+            "NOT_STARTED",
+            "NOT_ACTIVE",
+        )
+        assert row[6]
+        versions = conn.execute(
+            "SELECT taxonomy_version_code, is_active FROM ec_taxonomy_version ORDER BY taxonomy_version_code"
+        ).fetchall()
+        assert versions == [("DC_TAXONOMY_FULL_V1", 1), ("DC_TAXONOMY_FULL_V2", 0)]
+
+
+def test_dc_rebuild_acceptance_refuses_missing_canonical_head(tmp_path) -> None:
+    db_path, csv_path, evidence_dir, config_path = _dc_acceptance_fixture(tmp_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DELETE FROM dc_ticker_swing_signal_daily")
+        conn.commit()
+
+    summary = _apply_dc_acceptance(db_path, csv_path, evidence_dir, config_path)
+
+    assert summary["status_update"] == "BLOCKED"
+    assert "DC fact coverage incomplete for dc_ticker_swing_signal_daily" in summary["evidence"]["blocking_errors"]
+
+
+def test_dc_rebuild_acceptance_refuses_missing_watermark(tmp_path) -> None:
+    db_path, csv_path, evidence_dir, config_path = _dc_acceptance_fixture(tmp_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DELETE FROM dc_pipeline_watermark WHERE component_name='TICKER_SWING_BASE'")
+        conn.commit()
+
+    summary = _apply_dc_acceptance(db_path, csv_path, evidence_dir, config_path)
+
+    assert summary["status_update"] == "BLOCKED"
+    assert "required DC watermark coverage is incomplete" in summary["evidence"]["blocking_errors"]
+
+
+def test_dc_rebuild_acceptance_refuses_failed_stage15(tmp_path) -> None:
+    db_path, csv_path, evidence_dir, config_path = _dc_acceptance_fixture(tmp_path)
+    stdout_path = evidence_dir / "logs" / "datacenter_v2_full_rebuild.stdout"
+    stdout_path.write_text(stdout_path.read_text(encoding="utf-8").replace("=== Stage 15/16: Rolling 2 report ===", ""), encoding="utf-8")
+
+    summary = _apply_dc_acceptance(db_path, csv_path, evidence_dir, config_path)
+
+    assert summary["status_update"] == "BLOCKED"
+    assert "Stage 1-15 success and optional copy-only failure evidence is incomplete" in summary["evidence"]["blocking_errors"]
+
+
+def test_dc_rebuild_acceptance_refuses_missing_report_artifact(tmp_path) -> None:
+    db_path, csv_path, evidence_dir, config_path = _dc_acceptance_fixture(tmp_path)
+    next((evidence_dir / "dc_reports").glob("datacenter_rolling_5_*.csv")).unlink()
+
+    summary = _apply_dc_acceptance(db_path, csv_path, evidence_dir, config_path)
+
+    assert summary["status_update"] == "BLOCKED"
+    assert "required generated report artifacts are missing" in summary["evidence"]["blocking_errors"]
+
+
+def test_dc_rebuild_acceptance_refuses_required_copy_failure(tmp_path) -> None:
+    db_path, csv_path, evidence_dir, config_path = _dc_acceptance_fixture(tmp_path)
+
+    summary = _apply_dc_acceptance(
+        db_path,
+        csv_path,
+        evidence_dir,
+        config_path,
+        windows_copy_required=True,
+    )
+
+    assert summary["status_update"] == "BLOCKED"
+    assert "Windows report copy was required" in summary["evidence"]["blocking_errors"]
+
+
+def test_dc_rebuild_acceptance_is_idempotent(tmp_path) -> None:
+    db_path, csv_path, evidence_dir, config_path = _dc_acceptance_fixture(tmp_path)
+
+    first = _apply_dc_acceptance(db_path, csv_path, evidence_dir, config_path)
+    second = _apply_dc_acceptance(db_path, csv_path, evidence_dir, config_path)
+
+    assert first["status_update"] == "VALIDATION_REQUIRED"
+    assert second["status_update"] == "VALIDATION_REQUIRED"
+
 
 def _activation_db(tmp_path: Path, *, complete: bool = True, wrong_lineage: bool = False) -> tuple[Path, Path]:
     tmp_path.mkdir(parents=True, exist_ok=True)

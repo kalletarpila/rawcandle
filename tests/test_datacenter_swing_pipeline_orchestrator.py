@@ -1193,3 +1193,105 @@ def test_windows_report_copy_stage_fails_when_active_report_file_is_missing(tmp_
 
     with pytest.raises(RuntimeError, match="windows report copy stage missing source files"):
         orchestrator.run_datacenter_swing_pipeline(**_base_kwargs(tmp_path))
+
+
+def test_windows_report_copy_disabled_skips_copy_and_pipeline_succeeds(tmp_path, monkeypatch):
+    _create_analysis_db(tmp_path / "analysis.db")
+    copy_called = False
+
+    def _runner(argv: list[str]) -> int:
+        return 0
+
+    def _audit(**kwargs):
+        return {"summary": {"validation_status": "OK"}}
+
+    def _auto(**kwargs):
+        return _fake_technical_relevance_summary()
+
+    def _report(**kwargs):
+        kwargs["output_md"].parent.mkdir(parents=True, exist_ok=True)
+        kwargs["output_md"].write_text("report", encoding="utf-8")
+        kwargs["output_csv"].write_text("report", encoding="utf-8")
+        return {
+            "summary": {
+                "output_markdown": str(kwargs["output_md"]),
+                "output_csv": str(kwargs["output_csv"]),
+                "validation_status": "OK",
+                "window_start_date": kwargs.get("end_date", kwargs.get("signal_date")),
+            }
+        }
+
+    def _copy(**kwargs):
+        nonlocal copy_called
+        copy_called = True
+        raise AssertionError("Windows report copy should not be called")
+
+    monkeypatch.setattr(orchestrator, "run_datacenter_indices_main", _runner)
+    monkeypatch.setattr(orchestrator, "run_datacenter_ticker_swing_signals_main", _runner)
+    monkeypatch.setattr(orchestrator, "run_datacenter_group_swing_signals_main", _runner)
+    monkeypatch.setattr(orchestrator, "run_datacenter_group_synthetic_ohlc_main", _runner)
+    monkeypatch.setattr(orchestrator, "load_swing_pipeline_audit", _audit)
+    monkeypatch.setattr(orchestrator, "_run_automatic_technical_relevance_stage", _auto)
+    monkeypatch.setattr(orchestrator, "write_daily_swing_signal_report", _report)
+    monkeypatch.setattr(orchestrator, "write_weekly_swing_report", _report)
+    monkeypatch.setattr(orchestrator, "_copy_generated_report_files", _copy)
+    monkeypatch.setattr(orchestrator, "format_swing_pipeline_audit_summary_lines", lambda summary: [])
+    monkeypatch.setattr(orchestrator, "format_daily_swing_report_summary_lines", lambda summary: [])
+    monkeypatch.setattr(orchestrator, "format_weekly_swing_report_summary_lines", lambda summary: [])
+
+    result = orchestrator.run_datacenter_swing_pipeline(
+        **_base_kwargs(tmp_path),
+        windows_report_copy_enabled=False,
+    )
+
+    assert result["summary"]["pipeline_status"] == "OK"
+    assert result["summary"]["windows_report_copy.enabled"] == "false"
+    assert result["summary"]["windows_report_copy.execution_status"] == "SKIPPED"
+    assert result["summary"]["windows_report_copy.skip_reason"] == "disabled"
+    assert result["summary"]["pipeline_stage_count"] == 15
+    assert copy_called is False
+
+
+def test_windows_report_copy_enabled_failure_still_fails_pipeline(tmp_path, monkeypatch):
+    _create_analysis_db(tmp_path / "analysis.db")
+
+    def _runner(argv: list[str]) -> int:
+        return 0
+
+    def _audit(**kwargs):
+        return {"summary": {"validation_status": "OK"}}
+
+    def _auto(**kwargs):
+        return _fake_technical_relevance_summary()
+
+    def _report(**kwargs):
+        kwargs["output_md"].parent.mkdir(parents=True, exist_ok=True)
+        kwargs["output_md"].write_text("report", encoding="utf-8")
+        kwargs["output_csv"].write_text("report", encoding="utf-8")
+        return {
+            "summary": {
+                "output_markdown": str(kwargs["output_md"]),
+                "output_csv": str(kwargs["output_csv"]),
+                "validation_status": "OK",
+                "window_start_date": kwargs.get("end_date", kwargs.get("signal_date")),
+            }
+        }
+
+    def _copy(**kwargs):
+        raise RuntimeError("Read-only file system")
+
+    monkeypatch.setattr(orchestrator, "run_datacenter_indices_main", _runner)
+    monkeypatch.setattr(orchestrator, "run_datacenter_ticker_swing_signals_main", _runner)
+    monkeypatch.setattr(orchestrator, "run_datacenter_group_swing_signals_main", _runner)
+    monkeypatch.setattr(orchestrator, "run_datacenter_group_synthetic_ohlc_main", _runner)
+    monkeypatch.setattr(orchestrator, "load_swing_pipeline_audit", _audit)
+    monkeypatch.setattr(orchestrator, "_run_automatic_technical_relevance_stage", _auto)
+    monkeypatch.setattr(orchestrator, "write_daily_swing_signal_report", _report)
+    monkeypatch.setattr(orchestrator, "write_weekly_swing_report", _report)
+    monkeypatch.setattr(orchestrator, "_copy_generated_report_files", _copy)
+    monkeypatch.setattr(orchestrator, "format_swing_pipeline_audit_summary_lines", lambda summary: [])
+    monkeypatch.setattr(orchestrator, "format_daily_swing_report_summary_lines", lambda summary: [])
+    monkeypatch.setattr(orchestrator, "format_weekly_swing_report_summary_lines", lambda summary: [])
+
+    with pytest.raises(RuntimeError, match="Read-only file system"):
+        orchestrator.run_datacenter_swing_pipeline(**_base_kwargs(tmp_path))
