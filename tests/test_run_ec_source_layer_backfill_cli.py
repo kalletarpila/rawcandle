@@ -633,6 +633,64 @@ def test_runs_four_fact_loaders_per_date_in_correct_order(tmp_path: Path, monkey
     assert "Backfill Status: BACKFILL_COMPLETED" in output
 
 
+def test_partial_taxonomy_retry_passes_replace_existing_for_existing_ticker_rows(tmp_path: Path, monkeypatch) -> None:
+    args = _base_args(tmp_path)
+    loader_kwargs: dict[str, object] = {}
+    _patch_successful_watermark_finalizer(monkeypatch)
+    monkeypatch.setattr(
+        cli,
+        "plan_ec_source_layer_backfill",
+        lambda **_: _ready_backfill_plan(
+            candidate_dates=[{"date": "2025-08-01", "action": "REPLACE_PARTIAL"}],
+        ),
+    )
+    monkeypatch.setattr(cli, "_create_backup", lambda **_: tmp_path / "backups" / "backup.sqlite")
+
+    def ticker_loader(**kwargs):
+        loader_kwargs["ticker"] = kwargs
+        return {"status": "OK", "loaded_row_count": 257}
+
+    def group_loader(**kwargs):
+        loader_kwargs["group"] = kwargs
+        return {"status": "OK", "loaded_row_count": 54}
+
+    monkeypatch.setattr(cli, "load_ec_ticker_signal_daily_from_dc", ticker_loader)
+    monkeypatch.setattr(cli, "load_ec_group_signal_daily_from_dc", group_loader)
+    monkeypatch.setattr(cli, "load_ec_group_synthetic_ohlc_daily_from_dc", lambda **kwargs: {"status": "OK"})
+    monkeypatch.setattr(cli, "load_ec_group_index_daily_from_dc", lambda **kwargs: {"status": "OK"})
+    monkeypatch.setattr(cli, "audit_dc_facts_against_ec_sidecar", lambda **kwargs: {"status": "OK"})
+    monkeypatch.setattr(cli, "audit_dc_ec_fact_parity", lambda **kwargs: {"status": "OK", "total_mismatch_count": 0})
+    monkeypatch.setattr(cli, "_selected_date_row_counts", lambda *_: {
+        "ticker_rows": 257,
+        "group_signal_rows": 54,
+        "synthetic_ohlc_rows": 53,
+        "group_index_rows": 54,
+    })
+
+    summary = cli.run_ec_source_layer_backfill(
+        db_path=args[1],
+        ecosystem_code="DATACENTER",
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+        date_from="2025-08-01",
+        date_to="2025-08-01",
+        taxonomy_csv_path=args[11],
+        watchlist_path=args[13],
+        backup_dir=args[15],
+        confirm_db=args[17],
+        confirm_ecosystem=args[19],
+        confirm_taxonomy_version="DC_TAXONOMY_FULL_V2",
+        allow_replace_existing=True,
+    )
+
+    assert summary["status"] == "BACKFILL_COMPLETED"
+    assert loader_kwargs["ticker"]["signal_date"] == "2025-08-01"
+    assert loader_kwargs["ticker"]["taxonomy_version_code"] == "DC_TAXONOMY_FULL_V2"
+    assert loader_kwargs["ticker"]["replace_existing"] is True
+    assert loader_kwargs["group"]["replace_existing"] is True
+    assert summary["per_date_results"][0]["row_counts"]["ticker_rows"] == 257
+    assert summary["per_date_results"][0]["row_counts"]["group_signal_rows"] == 54
+
+
 def test_does_not_run_pipeline_watermark_per_historical_date(tmp_path: Path, monkeypatch) -> None:
     args = _base_args(tmp_path)
     watermark_calls = _patch_successful_watermark_finalizer(monkeypatch)
@@ -805,6 +863,62 @@ def test_single_range_backfill_preserves_ticker_loader_summary(tmp_path: Path, m
     assert summary["source_distinct_ticker_count"] == 272
     assert summary["duplicate_target_key_count"] == 221
     assert summary["ticker_loader_summary"] == ticker_summary
+
+
+def test_single_range_backfill_preserves_group_loader_summary(tmp_path: Path, monkeypatch) -> None:
+    args = _base_args(tmp_path)
+    backup_path = tmp_path / "backups" / "backup.sqlite"
+    group_summary = {
+        "status": "FAILED",
+        "loader_status": "FAILED",
+        "loader_error_code": "TARGET_KEY_INVALID",
+        "loader_error": "Group rows produced duplicate or null EC target keys",
+        "requested_taxonomy_version": "DC_TAXONOMY_FULL_V2",
+        "source_taxonomy_version": "DC_TAXONOMY_FULL_V2",
+        "source_row_count": 54,
+        "source_distinct_group_count": 54,
+        "duplicate_source_group_count": 0,
+        "unexpected_taxonomy_version_count": 0,
+        "unexpected_signal_version_count": 0,
+        "null_required_source_key_count": 0,
+        "mapped_row_count": 108,
+        "distinct_target_key_count": 54,
+        "duplicate_target_key_count": 54,
+        "null_target_key_count": 0,
+        "unresolved_group_count": 0,
+        "unresolved_groups": [],
+        "multiple_source_to_same_target_count": 54,
+    }
+    monkeypatch.setattr(cli, "plan_ec_source_layer_backfill", lambda **_: _ready_backfill_plan(candidate_dates=[{"date": "2026-05-29", "action": "BACKFILL_MISSING"}]))
+    monkeypatch.setattr(cli, "_create_backup", lambda **_: backup_path)
+    monkeypatch.setattr(cli, "load_ec_ticker_signal_daily_from_dc", lambda **_: {"status": "OK"})
+    monkeypatch.setattr(cli, "load_ec_group_signal_daily_from_dc", lambda **_: group_summary)
+
+    summary = cli.run_ec_source_layer_backfill(
+        db_path=args[1],
+        ecosystem_code="DATACENTER",
+        taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+        date_from="2026-05-29",
+        date_to="2026-05-29",
+        taxonomy_csv_path=args[11],
+        watchlist_path=args[13],
+        backup_dir=args[15],
+        confirm_db=args[17],
+        confirm_ecosystem=args[19],
+        confirm_taxonomy_version="DC_TAXONOMY_FULL_V2",
+    )
+
+    assert summary["status"] == "BACKFILL_FAILED"
+    assert summary["failed_date"] == "2026-05-29"
+    assert summary["failed_step"] == "load_ec_group_signal_daily_from_dc"
+    assert summary["loader_error_code"] == "TARGET_KEY_INVALID"
+    assert summary["loader_error"] == "Group rows produced duplicate or null EC target keys"
+    assert summary["requested_taxonomy_version"] == "DC_TAXONOMY_FULL_V2"
+    assert summary["source_row_count"] == 54
+    assert summary["source_distinct_group_count"] == 54
+    assert summary["duplicate_target_key_count"] == 54
+    assert summary["unresolved_groups"] == []
+    assert summary["group_loader_summary"] == group_summary
 
 
 def test_stops_on_parity_mismatch_and_reports_failed_date(tmp_path: Path, monkeypatch, capsys) -> None:

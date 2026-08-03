@@ -1561,6 +1561,19 @@ def render_run_text(summary: dict[str, object]) -> str:
                     f"chunk {chunk.get('chunk_index')} duplicate_target_key_count="
                     f"{chunk_summary.get('duplicate_target_key_count')}"
                 )
+            if isinstance(chunk_summary, dict) and chunk_summary.get("group_loader_summary") is not None:
+                lines.append(f"chunk {chunk.get('chunk_index')} group_loader_error_code={chunk_summary.get('loader_error_code')}")
+                lines.append(f"chunk {chunk.get('chunk_index')} group_loader_error={chunk_summary.get('loader_error')}")
+                lines.append(f"chunk {chunk.get('chunk_index')} group_source_row_count={chunk_summary.get('source_row_count')}")
+                lines.append(
+                    f"chunk {chunk.get('chunk_index')} group_duplicate_source_group_count="
+                    f"{chunk_summary.get('duplicate_source_group_count')}"
+                )
+                lines.append(
+                    f"chunk {chunk.get('chunk_index')} group_duplicate_target_key_count="
+                    f"{chunk_summary.get('duplicate_target_key_count')}"
+                )
+                lines.append(f"chunk {chunk.get('chunk_index')} group_unresolved_groups={chunk_summary.get('unresolved_groups')}")
     if summary.get("blocking_errors"):
         lines.append("blocking_errors:")
         for error in summary["blocking_errors"]:

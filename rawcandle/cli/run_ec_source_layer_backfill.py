@@ -384,6 +384,38 @@ def _ticker_loader_failure_fields(ticker_summary: dict[str, object] | None) -> d
     }
 
 
+def _group_loader_failure_fields(group_summary: dict[str, object] | None) -> dict[str, object]:
+    if not isinstance(group_summary, dict):
+        return {}
+    loader_error = (
+        group_summary.get("loader_error")
+        or group_summary.get("group_loader_error")
+        or group_summary.get("error")
+        or "Group signal fact loader returned FAILED"
+    )
+    return {
+        "loader_status": group_summary.get("loader_status") or group_summary.get("status"),
+        "loader_error": loader_error,
+        "loader_error_code": group_summary.get("loader_error_code"),
+        "requested_taxonomy_version": group_summary.get("requested_taxonomy_version"),
+        "source_taxonomy_version": group_summary.get("source_taxonomy_version"),
+        "source_row_count": group_summary.get("source_row_count"),
+        "source_distinct_group_count": group_summary.get("source_distinct_group_count"),
+        "duplicate_source_group_count": group_summary.get("duplicate_source_group_count"),
+        "unexpected_taxonomy_version_count": group_summary.get("unexpected_taxonomy_version_count"),
+        "unexpected_signal_version_count": group_summary.get("unexpected_signal_version_count"),
+        "null_required_source_key_count": group_summary.get("null_required_source_key_count"),
+        "mapped_row_count": group_summary.get("mapped_row_count"),
+        "distinct_target_key_count": group_summary.get("distinct_target_key_count"),
+        "duplicate_target_key_count": group_summary.get("duplicate_target_key_count"),
+        "null_target_key_count": group_summary.get("null_target_key_count"),
+        "unresolved_group_count": group_summary.get("unresolved_group_count"),
+        "unresolved_groups": group_summary.get("unresolved_groups") or [],
+        "multiple_source_to_same_target_count": group_summary.get("multiple_source_to_same_target_count"),
+        "group_loader_summary": group_summary,
+    }
+
+
 def _build_date_result(
     *,
     date_value: str,
@@ -646,6 +678,9 @@ def run_ec_source_layer_backfill(
     completed_dates: list[str] = []
     total_mismatch_count = 0
     rebuild_scope_summary: dict[str, object] | None = None
+    completed_steps: list[str] = []
+    ticker_summary: dict[str, object] | None = None
+    group_signal_summary: dict[str, object] | None = None
 
     try:
         if taxonomy_rebuild:
@@ -660,7 +695,9 @@ def run_ec_source_layer_backfill(
             current_date = selected["date"]
             action = selected["action"]
             replace_existing = action in REPLACE_ACTIONS
-            completed_steps: list[str] = []
+            completed_steps = []
+            ticker_summary = None
+            group_signal_summary = None
 
             ticker_summary = _run_step(
                 step_name="load_ec_ticker_signal_daily_from_dc",
@@ -697,7 +734,12 @@ def run_ec_source_layer_backfill(
                 },
             )
             if group_signal_summary.get("status") == "FAILED":
-                raise RuntimeError("Group signal fact loader returned FAILED")
+                loader_error = (
+                    group_signal_summary.get("loader_error")
+                    or group_signal_summary.get("group_loader_error")
+                    or "Group signal fact loader returned FAILED"
+                )
+                raise RuntimeError(f"Group signal fact loader returned FAILED: {loader_error}")
 
             synthetic_summary = _run_step(
                 step_name="load_ec_group_synthetic_ohlc_daily_from_dc",
@@ -813,6 +855,11 @@ def run_ec_source_layer_backfill(
             **(
                 _ticker_loader_failure_fields(ticker_summary)
                 if completed_steps and completed_steps[-1] == "load_ec_ticker_signal_daily_from_dc"
+                else {}
+            ),
+            **(
+                _group_loader_failure_fields(group_signal_summary)
+                if completed_steps and completed_steps[-1] == "load_ec_group_signal_daily_from_dc"
                 else {}
             ),
             **_watermark_not_run_summary(),
@@ -999,6 +1046,27 @@ def render_backfill_text(summary: dict[str, object]) -> str:
             lines.append(f"- unresolved_tickers={summary.get('unresolved_tickers')}")
             lines.append(f"- duplicate_source_ticker_count={summary.get('duplicate_source_ticker_count')}")
             lines.append(f"- duplicate_target_key_count={summary.get('duplicate_target_key_count')}")
+        if summary.get("group_loader_summary") is not None:
+            lines.append(f"- loader_status={summary.get('loader_status')}")
+            lines.append(f"- loader_error_code={summary.get('loader_error_code')}")
+            lines.append(f"- loader_error={summary.get('loader_error')}")
+            lines.append(f"- requested_taxonomy_version={summary.get('requested_taxonomy_version')}")
+            lines.append(f"- source_taxonomy_version={summary.get('source_taxonomy_version')}")
+            lines.append(f"- source_row_count={summary.get('source_row_count')}")
+            lines.append(f"- source_distinct_group_count={summary.get('source_distinct_group_count')}")
+            lines.append(f"- duplicate_source_group_count={summary.get('duplicate_source_group_count')}")
+            lines.append(f"- unexpected_taxonomy_version_count={summary.get('unexpected_taxonomy_version_count')}")
+            lines.append(f"- unexpected_signal_version_count={summary.get('unexpected_signal_version_count')}")
+            lines.append(f"- null_required_source_key_count={summary.get('null_required_source_key_count')}")
+            lines.append(f"- mapped_row_count={summary.get('mapped_row_count')}")
+            lines.append(f"- distinct_target_key_count={summary.get('distinct_target_key_count')}")
+            lines.append(f"- duplicate_target_key_count={summary.get('duplicate_target_key_count')}")
+            lines.append(f"- null_target_key_count={summary.get('null_target_key_count')}")
+            lines.append(f"- unresolved_group_count={summary.get('unresolved_group_count')}")
+            lines.append(f"- unresolved_groups={summary.get('unresolved_groups')}")
+            lines.append(
+                f"- multiple_source_to_same_target_count={summary.get('multiple_source_to_same_target_count')}"
+            )
 
     lines.extend(["", "Per-Date Loader Summaries"])
     for date_result in summary.get("per_date_results", []):

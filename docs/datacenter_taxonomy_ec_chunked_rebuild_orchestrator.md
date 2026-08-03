@@ -223,6 +223,60 @@ orchestrator progress JSON preserve the structured loader summary. The rendered
 error remains backward compatible but includes the deepest loader error where
 available.
 
+## Group Source Scope
+
+`ec_group_signal_daily` uses the same explicit taxonomy contract as the ticker
+loader. During a proposed taxonomy rebuild, V1 and V2 group facts can coexist
+for the same date and `signal_version`. Group signal-version resolution and
+source row selection must therefore both be scoped by:
+
+```text
+signal_date
+signal_version
+taxonomy_version
+```
+
+The loader must not resolve the signal version from active V1 rows when a V2
+rebuild explicitly requests `DC_TAXONOMY_FULL_V2`. It also validates the
+selected group source rows before mapping and reports deterministic diagnostics:
+
+```text
+requested_taxonomy_version
+source_taxonomy_version
+source_taxonomy_match
+source_row_count
+source_distinct_group_count
+duplicate_source_group_count
+unexpected_taxonomy_version_count
+unexpected_signal_version_count
+null_required_source_key_count
+group_type_counts
+data_quality_status_counts
+```
+
+Before insert, the loader validates the target key:
+
+```text
+ecosystem_id
+taxonomy_version_id
+signal_date
+entity_id
+signal_version
+```
+
+Duplicate source groups, unresolved groups, multiple source rows mapping to one
+target key, null target keys, and SQL insert failures produce structured
+`FAILED` summaries. The single-range backfill and chunked orchestrator preserve
+`group_loader_summary` in failure evidence so the deepest group-loader reason is
+visible in progress JSON and rendered output.
+
+The current canonical loaders still commit independently. A group failure after
+successful ticker loading can therefore leave a partial ticker-only date. The
+required minimum retry contract is idempotent delete-and-replace for each
+canonical loader scope. A future hardening step is per-date atomicity across
+ticker, group, synthetic OHLC, and group index loaders, but that is intentionally
+separate from the group taxonomy-scope fix.
+
 ## Backup Policy
 
 Without `--existing-backup-path`, the orchestrator creates exactly one

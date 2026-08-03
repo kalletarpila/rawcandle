@@ -125,6 +125,45 @@ membership tickers, duplicate target-key counts, and the structured
 `ticker_loader_summary` that is propagated through backfill and orchestrator
 progress evidence.
 
+The group signal fact loader follows the same taxonomy-scope contract. It
+resolves `signal_version` and selects `dc_group_swing_signal_daily` source rows
+by:
+
+```text
+signal_date
+signal_version
+taxonomy_version
+```
+
+This prevents a V2 rebuild from loading both V1 and V2 group facts for the same
+date and signal version into the V2 `ec_group_signal_daily` target scope. Before
+mapping, the loader reports source diagnostics such as source row count,
+distinct group count, duplicate source group count, unexpected taxonomy count,
+unexpected signal-version count, null source-key count, group type counts, and
+data-quality counts. Before insert, it validates mapped target keys and blocks
+duplicate or null EC target keys before SQLite primary-key enforcement.
+
+Group-loader failures now return structured summaries and the single-range
+backfill propagates `group_loader_summary`, `loader_error_code`,
+`duplicate_source_group_count`, `duplicate_target_key_count`, and
+`unresolved_groups` through to the chunked orchestrator progress JSON. The
+top-level error remains backward compatible but preserves the deepest loader
+error text.
+
+The known partial ticker state from a failed group load is safe to retry without
+cleanup when using the guarded taxonomy rebuild path, because the ticker loader
+delete-and-replace scope is:
+
+```text
+ecosystem_id
+taxonomy_version_id
+signal_date
+signal_version
+```
+
+The group loader uses the same target delete scope. This does not touch V1 rows
+or other ecosystems.
+
 If a controlled EC rebuild fails before completion, a later retry is allowed
 from `ec_rebuild_status=FAILED` only when the deployment ID, proposed taxonomy
 version, source hash, rebuild range, inactive V2 state, accepted DC evidence,
