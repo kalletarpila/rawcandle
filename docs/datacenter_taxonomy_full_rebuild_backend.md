@@ -10,55 +10,68 @@ database write, or watermark update occurred as part of this implementation.
 ## Final Backend Classification
 
 ```text
-DATACENTER_V2_REBUILD_BACKEND_READY
+DATACENTER_EC_TAXONOMY_REBUILD_ORCHESTRATOR_IMPLEMENTED
 ```
 
-The next step is a controlled production replacement run, not another backend
-change.
+The next step is a controlled production replacement run using the chunked EC
+taxonomy full-rebuild orchestrator, not another backend change.
 
 ## Full-Range EC Rebuild
 
 Ordinary historical EC backfill keeps the existing 60 calendar day range limit.
-A full taxonomy range is accepted only with explicit taxonomy-rebuild mode:
+A full taxonomy range is handled only by the high-level chunked orchestrator:
 
 ```bash
-python3 -m rawcandle.cli.run_ec_source_layer_backfill \
+python3 -m rawcandle.cli.plan_ec_taxonomy_full_rebuild \
   --db /home/kalle/projects/rawcandle/data/analysis.db \
   --ecosystem DATACENTER \
   --taxonomy-version DC_TAXONOMY_FULL_V2 \
-  --date-from 2025-08-01 \
-  --date-to <required-head-date> \
   --taxonomy-csv data/datacenter_taxonomy_full_v2.csv \
   --watchlist watchlists/datacenter_watchlist.txt \
+  --deployment-id <taxonomy_change_id> \
+  --date-from 2025-08-01 \
+  --date-to <required-head-date> \
   --backup-dir temp/<controlled-run>/backups \
+  --evidence-output-root temp/<controlled-run>/evidence \
   --confirm-db /home/kalle/projects/rawcandle/data/analysis.db \
   --confirm-ecosystem DATACENTER \
   --confirm-taxonomy-version DC_TAXONOMY_FULL_V2 \
-  --taxonomy-rebuild \
-  --deployment-id <taxonomy_change_id> \
-  --confirm-rebuild-start 2025-08-01 \
-  --confirm-rebuild-end <required-head-date> \
-  --allow-replace-existing \
-  --skip-watchlist-reconciliation
+  --confirm-deployment-id <taxonomy_change_id> \
+  --confirm-date-from 2025-08-01 \
+  --confirm-date-to <required-head-date> \
+  --expected-active-taxonomy-version DC_TAXONOMY_FULL_V1 \
+  --scheduler-config scheduler_config.json \
+  --repo-root /home/kalle/projects/rawcandle
 ```
 
-The planner emits:
+Execution uses the same arguments with:
+
+```bash
+python3 -m rawcandle.cli.run_ec_taxonomy_full_rebuild <same guarded arguments>
+```
+
+The orchestrator emits:
 
 ```text
 rebuild_mode=TAXONOMY_FULL_REBUILD
-deployment_id
-taxonomy_version_id
-taxonomy_version_code
 requested_start
 requested_end
-selected_date_count
+chunk_count
+chunk_plan_hash
+deployment_id
+taxonomy_version
+taxonomy_version_id
 ```
+
+Each chunk is then executed through `run_ec_source_layer_backfill` with
+`--taxonomy-rebuild` semantics, no per-chunk DB backup, and deferred watermark
+finalization.
 
 ## DATACENTER EC Replacement
 
-In taxonomy-rebuild mode, the runner creates a backup first and then deletes old
-DATACENTER canonical EC facts in the requested range before loading V2 rows.
-The delete predicate is scoped by `ecosystem_id` and `signal_date` for:
+In taxonomy-rebuild mode, the chunk runner deletes old DATACENTER canonical EC
+facts for that chunk before loading V2 rows. The delete predicate is scoped by
+`ecosystem_id` and `signal_date` for:
 
 ```text
 ec_ticker_signal_daily
@@ -67,7 +80,8 @@ ec_group_synthetic_ohlc_daily
 ec_group_index_daily
 ```
 
-Other ecosystems are not touched. V2 is not activated by this step.
+Other ecosystems are not touched. V2 is not activated by this step. The
+orchestrator creates exactly one full DB backup before the first chunk.
 
 ## EC Watermark Lineage
 
@@ -85,7 +99,8 @@ The lineage field is:
 taxonomy_version_id
 ```
 
-Taxonomy-rebuild mode updates canonical DATACENTER watermark rows to V2 even
+Taxonomy-rebuild mode updates canonical DATACENTER watermark rows to V2 only
+after all chunks and whole-range validation succeed. It updates lineage even
 when the latest date equals the previous V1 latest date. Ordinary same-taxonomy
 backfill remains idempotent. Ordinary backfill refuses old or NULL lineage when
 the requested taxonomy differs.
@@ -176,8 +191,8 @@ Run one controlled production replacement sequence:
 2. Create production DB and scheduler-config backups.
 3. Run prepare_datacenter_taxonomy_rebuild.
 4. Run full DC pipeline for DC_TAXONOMY_FULL_V2 from 2025-08-01.
-5. Run run_ec_source_layer_backfill with --taxonomy-rebuild.
-6. Run apply_datacenter_taxonomy_rebuild_evidence.
+5. Run plan_ec_taxonomy_full_rebuild.
+6. Run run_ec_taxonomy_full_rebuild.
 7. Run plan_datacenter_taxonomy_activation.
 8. Run apply_datacenter_taxonomy_activation with --scheduler-config.
 9. Verify active taxonomy, config keys, fact heads, watermarks, coverage, parity,

@@ -397,6 +397,9 @@ def run_ec_source_layer_backfill(
     confirm_rebuild_start: str | None = None,
     confirm_rebuild_end: str | None = None,
     reconcile_watchlist: bool = False,
+    create_backup: bool = True,
+    existing_backup_path: str | None = None,
+    advance_watermark: bool = True,
 ) -> dict[str, object]:
     gate_errors: list[str] = []
     if confirm_db != db_path:
@@ -568,35 +571,38 @@ def run_ec_source_layer_backfill(
         }
 
     assert resolved_backup_dir is not None
-    try:
-        backup_path = _create_backup(
-            db_path=db_path,
-            backup_dir=resolved_backup_dir,
-            ecosystem_code=ecosystem_code,
-            taxonomy_version_code=taxonomy_version_code,
-            date_from=date_from,
-            date_to=date_to,
-        )
-    except Exception as exc:
-        return {
-            "status": "BACKFILL_FAILED_BEFORE_WRITE",
-            "ecosystem_code": ecosystem_code,
-            "taxonomy_version_code": taxonomy_version_code,
-            "date_from": date_from,
-            "date_to": date_to,
-            "selected_dates": selected_dates,
-            "completed_dates": [],
-            "skipped_dates": skipped_dates,
-            "failed_date": None,
-            "failed_step": "backup",
-            "backup_path": None,
-            "per_date_results": [],
-            "total_mismatch_count": 0,
-            "error": str(exc),
-            "errors": [str(exc)],
-            "planner_summary": planner_summary,
-            **_watermark_not_run_summary(),
-        }
+    if create_backup:
+        try:
+            backup_path = _create_backup(
+                db_path=db_path,
+                backup_dir=resolved_backup_dir,
+                ecosystem_code=ecosystem_code,
+                taxonomy_version_code=taxonomy_version_code,
+                date_from=date_from,
+                date_to=date_to,
+            )
+        except Exception as exc:
+            return {
+                "status": "BACKFILL_FAILED_BEFORE_WRITE",
+                "ecosystem_code": ecosystem_code,
+                "taxonomy_version_code": taxonomy_version_code,
+                "date_from": date_from,
+                "date_to": date_to,
+                "selected_dates": selected_dates,
+                "completed_dates": [],
+                "skipped_dates": skipped_dates,
+                "failed_date": None,
+                "failed_step": "backup",
+                "backup_path": None,
+                "per_date_results": [],
+                "total_mismatch_count": 0,
+                "error": str(exc),
+                "errors": [str(exc)],
+                "planner_summary": planner_summary,
+                **_watermark_not_run_summary(),
+            }
+    else:
+        backup_path = Path(existing_backup_path) if existing_backup_path else None
 
     per_date_results: list[dict[str, object]] = []
     completed_dates: list[str] = []
@@ -752,7 +758,7 @@ def run_ec_source_layer_backfill(
             "skipped_dates": skipped_dates,
             "failed_date": failed_date,
             "failed_step": failed_step,
-            "backup_path": str(backup_path),
+            "backup_path": str(backup_path) if backup_path is not None else None,
             "per_date_results": per_date_results,
             "total_mismatch_count": total_mismatch_count,
             "error": str(exc),
@@ -766,51 +772,53 @@ def run_ec_source_layer_backfill(
             **reconciliation_summary,
         }
 
-    try:
-        watermark_candidate_latest_signal_date = max(completed_dates)
-        watermark_summary = advance_ec_pipeline_watermarks_after_historical_backfill(
-            target_db_path=db_path,
-            ecosystem_code=ecosystem_code,
-            taxonomy_version_code=taxonomy_version_code,
-            latest_signal_date=watermark_candidate_latest_signal_date,
-            taxonomy_rebuild=taxonomy_rebuild,
-        )
-        watermark_advance_status = str(
-            watermark_summary.get("watermark_advance_status")
-            or watermark_summary.get("status")
-            or "UNKNOWN"
-        )
-        if watermark_advance_status != "OK":
-            raise RuntimeError(f"Historical backfill watermark advancement returned {watermark_advance_status}")
-    except Exception as exc:
-        failed_summary = {
-            "status": "BACKFILL_FAILED",
-            "ecosystem_code": ecosystem_code,
-            "taxonomy_version_code": taxonomy_version_code,
-            "rebuild_mode": "TAXONOMY_FULL_REBUILD" if taxonomy_rebuild else "ORDINARY_BACKFILL",
-            "deployment_id": deployment_id,
-            "date_from": date_from,
-            "date_to": date_to,
-            "selected_dates": selected_dates,
-            "completed_dates": completed_dates,
-            "skipped_dates": skipped_dates,
-            "failed_date": None,
-            "failed_step": "advance_ec_pipeline_watermarks_after_historical_backfill",
-            "backup_path": str(backup_path),
-            "per_date_results": per_date_results,
-            "total_mismatch_count": total_mismatch_count,
-            "error": str(exc),
-            "errors": [str(exc)],
-            "planner_summary": planner_summary,
-            "taxonomy_rebuild_ec_scope_summary": rebuild_scope_summary,
-            "warning": "Selected-date ec_ fact writes completed, but final watermark advancement failed; retry is required",
-            **_watermark_not_run_summary(),
-            **watchlist_membership_fields,
-            **reconciliation_summary,
-        }
-        failed_summary["watermark_candidate_latest_signal_date"] = max(completed_dates) if completed_dates else None
-        failed_summary["watermark_advance_status"] = "FAILED"
-        return failed_summary
+    watermark_summary: dict[str, object] | None = None
+    if advance_watermark:
+        try:
+            watermark_candidate_latest_signal_date = max(completed_dates)
+            watermark_summary = advance_ec_pipeline_watermarks_after_historical_backfill(
+                target_db_path=db_path,
+                ecosystem_code=ecosystem_code,
+                taxonomy_version_code=taxonomy_version_code,
+                latest_signal_date=watermark_candidate_latest_signal_date,
+                taxonomy_rebuild=taxonomy_rebuild,
+            )
+            watermark_advance_status = str(
+                watermark_summary.get("watermark_advance_status")
+                or watermark_summary.get("status")
+                or "UNKNOWN"
+            )
+            if watermark_advance_status != "OK":
+                raise RuntimeError(f"Historical backfill watermark advancement returned {watermark_advance_status}")
+        except Exception as exc:
+            failed_summary = {
+                "status": "BACKFILL_FAILED",
+                "ecosystem_code": ecosystem_code,
+                "taxonomy_version_code": taxonomy_version_code,
+                "rebuild_mode": "TAXONOMY_FULL_REBUILD" if taxonomy_rebuild else "ORDINARY_BACKFILL",
+                "deployment_id": deployment_id,
+                "date_from": date_from,
+                "date_to": date_to,
+                "selected_dates": selected_dates,
+                "completed_dates": completed_dates,
+                "skipped_dates": skipped_dates,
+                "failed_date": None,
+                "failed_step": "advance_ec_pipeline_watermarks_after_historical_backfill",
+                "backup_path": str(backup_path) if backup_path is not None else None,
+                "per_date_results": per_date_results,
+                "total_mismatch_count": total_mismatch_count,
+                "error": str(exc),
+                "errors": [str(exc)],
+                "planner_summary": planner_summary,
+                "taxonomy_rebuild_ec_scope_summary": rebuild_scope_summary,
+                "warning": "Selected-date ec_ fact writes completed, but final watermark advancement failed; retry is required",
+                **_watermark_not_run_summary(),
+                **watchlist_membership_fields,
+                **reconciliation_summary,
+            }
+            failed_summary["watermark_candidate_latest_signal_date"] = max(completed_dates) if completed_dates else None
+            failed_summary["watermark_advance_status"] = "FAILED"
+            return failed_summary
 
     completed_summary = {
         "status": "BACKFILL_COMPLETED",
@@ -829,17 +837,26 @@ def run_ec_source_layer_backfill(
         "skipped_dates": skipped_dates,
         "failed_date": None,
         "failed_step": None,
-        "backup_path": str(backup_path),
+        "backup_path": str(backup_path) if backup_path is not None else None,
         "per_date_results": per_date_results,
         "total_mismatch_count": total_mismatch_count,
         "error": None,
         "errors": [],
         "planner_summary": planner_summary,
         "taxonomy_rebuild_ec_scope_summary": rebuild_scope_summary,
-        "watermark_policy_note": "Historical backfill advanced canonical EC fact watermark heads once after successful coverage and fact parity validation.",
+        "watermark_policy_note": (
+            "Historical backfill advanced canonical EC fact watermark heads once after successful coverage and fact parity validation."
+            if advance_watermark
+            else "Watermark finalization deferred to EC taxonomy full-rebuild orchestrator whole-range validation."
+        ),
         **watchlist_membership_fields,
         **reconciliation_summary,
     }
+    if watermark_summary is None:
+        deferred_summary = dict(completed_summary)
+        deferred_summary.update(_watermark_not_run_summary())
+        deferred_summary["watermark_advance_status"] = "DEFERRED_BY_TAXONOMY_FULL_REBUILD_ORCHESTRATOR"
+        return deferred_summary
     return _merge_watermark_summary(completed_summary, watermark_summary)
 
 
