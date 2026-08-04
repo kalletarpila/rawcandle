@@ -27,14 +27,18 @@ prepare
 -> verify status
 ```
 
-Version 1 supports only:
+The orchestrator supports explicit full and delta modes, plus an automatic
+planner selection mode:
 
 ```text
 rebuild_mode=FULL_REBUILD
+rebuild_mode=DELTA_REBUILD
+rebuild_mode=AUTO
 ```
 
-`DELTA_REBUILD` is part of the interface but intentionally returns an explicit
-unsupported-mode error.
+`AUTO` is not persisted as an execution mode. It resolves to either
+`FULL_REBUILD` or `DELTA_REBUILD` in the plan, and state-changing execution must
+confirm the selected explicit mode and plan hash.
 
 ## Backend Facade
 
@@ -83,6 +87,7 @@ python3 -m rawcandle.cli.prepare_datacenter_taxonomy_change \
   --scheduler-config scheduler_config.json \
   --watchlist watchlists/datacenter_watchlist.txt \
   --evidence-root temp/datacenter_taxonomy_change_<timestamp> \
+  --rebuild-mode auto \
   --format json
 ```
 
@@ -112,7 +117,7 @@ python3 -m rawcandle.cli.run_datacenter_taxonomy_change \
   --confirm-proposed-source-hash <sha256> \
   --confirm-date-from <date> \
   --confirm-date-to <date> \
-  --confirm-rebuild-mode FULL_REBUILD \
+  --confirm-rebuild-mode FULL_REBUILD|DELTA_REBUILD \
   --confirm-plan-hash <plan_hash> \
   --format json
 ```
@@ -179,7 +184,7 @@ Preparation is read-only first. It:
 4. Rejects reuse of the active taxonomy version.
 5. Computes current and proposed source hashes.
 6. Builds a taxonomy diff.
-7. Derives the full rebuild range.
+7. Derives the full and delta rebuild ranges.
 8. Validates scheduler config still points coherently to the active taxonomy.
 9. Produces a deterministic plan hash.
 10. Creates or reuses one deployment only after validation gates pass.
@@ -202,6 +207,10 @@ secondary_membership_removals
 scope_flag_changes
 affected_tickers
 affected_groups
+delta_scope_summary
+dependency_map
+estimated_delta_work
+estimated_full_work
 ```
 
 It also detects structural changes:
@@ -216,16 +225,16 @@ renamed_subindustries
 structural_change_detected
 ```
 
-Normal monthly workflow requires:
+Normal monthly delta workflow requires:
 
 ```text
 structural_change_detected=false
 ```
 
-If layers or subindustries are added or removed, the normal workflow is blocked
-with a structural-change error. Rename detection is represented as an explicit
-future field; version 1 reports renames as empty and blocks based on added or
-removed structures.
+If layers or subindustries are added or removed, explicit delta is blocked and
+`AUTO` selects the existing full rebuild path. Rename detection is represented
+as an explicit future field; version 1 reports renames as empty and treats added
+or removed structures as delta blockers.
 
 ## Plan Hash
 
@@ -236,10 +245,16 @@ deployment_id
 ecosystem
 current taxonomy version/source/hash
 proposed taxonomy version/source/hash
+requested_rebuild_mode
+recommended_rebuild_mode
+selected_rebuild_mode
 rebuild_mode
 date_from
 date_to
 taxonomy_diff
+delta_scope_summary
+dependency_map
+estimated_delta_work
 expected_counts
 backup_policy
 phase_sequence
@@ -259,9 +274,48 @@ plan hash
 A changed CSV, date range, active taxonomy, rebuild mode, deployment identity, or
 plan invalidates the confirmation.
 
-## Full-Rebuild Phase Order
+## Delta Rebuild Backend
 
-The unified execution facade represents this order:
+Delta mode is intended for ordinary monthly taxonomy changes where layers and
+subindustries are unchanged. Supported delta-scoped changes are:
+
+```text
+added ticker
+removed ticker
+primary membership change
+secondary membership add/remove
+scope flag change
+```
+
+Structural changes block explicit delta and make `AUTO` recommend full rebuild:
+
+```text
+added or removed layer
+added or removed subindustry
+renamed layer or subindustry
+semantic group incompatibility
+```
+
+The delta plan derives deterministic affected ticker and group lists. A group is
+affected by added/removed ticker membership and primary/secondary membership
+changes. A scope-only change affects the ticker classification but does not by
+itself dirty group histories.
+
+Ticker technical history is treated as taxonomy-independent except for embedded
+taxonomy metadata. Safe carry-forward copies active-version ticker rows to the
+proposed taxonomy and rewrites `taxonomy_version`, `primary_layer`, and
+`primary_subindustry` from the proposed primary membership. Added tickers are
+rebuilt, removed tickers are omitted, and affected groups are recalculated.
+
+The backend exposes `copy_delta_carry_forward` for safe DC fact copies in test
+or controlled execution databases. EC construction remains the existing
+canonical DC-to-EC loading path from the completed proposed DC state. This keeps
+EC taxonomy-scoped and complete without making the current DC-to-EC bridge a
+long-term EC architecture.
+
+## Rebuild Phase Order
+
+The unified execution facade represents this full rebuild order:
 
 ```text
 1. Rerun plan and confirmation checks.
@@ -286,6 +340,12 @@ must be wired deliberately through the existing verified services in a controlle
 run task.
 
 Activation is not automatic.
+
+For delta plans, the execution facade inserts a `DELTA_CARRY_FORWARD` phase
+after backup validation and before the injected DC rebuild service. Affected
+ticker/group rebuilds, EC loading, coverage, parity, cleanup, watermark
+finalization, and activation planning still use the same injected service and
+validation boundaries as full rebuilds.
 
 ## Resume And Idempotency
 

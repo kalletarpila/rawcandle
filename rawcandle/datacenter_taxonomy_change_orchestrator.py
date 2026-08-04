@@ -31,7 +31,18 @@ from rawcandle.scheduler.config import read_scheduler_config, validate_scheduler
 
 REBUILD_MODE_FULL = "FULL_REBUILD"
 REBUILD_MODE_DELTA = "DELTA_REBUILD"
-SUPPORTED_REBUILD_MODES = {REBUILD_MODE_FULL}
+REBUILD_MODE_AUTO = "AUTO"
+SUPPORTED_REBUILD_MODES = {REBUILD_MODE_FULL, REBUILD_MODE_DELTA}
+REBUILD_MODE_ALIASES = {
+    "auto": REBUILD_MODE_AUTO,
+    "AUTO": REBUILD_MODE_AUTO,
+    "full": REBUILD_MODE_FULL,
+    "FULL": REBUILD_MODE_FULL,
+    "FULL_REBUILD": REBUILD_MODE_FULL,
+    "delta": REBUILD_MODE_DELTA,
+    "DELTA": REBUILD_MODE_DELTA,
+    "DELTA_REBUILD": REBUILD_MODE_DELTA,
+}
 SCHEDULER_TAXONOMY_KEYS = {
     "datacenter_taxonomy_csv",
     "datacenter_taxonomy_version",
@@ -93,6 +104,12 @@ def _table_names(conn: sqlite3.Connection) -> set[str]:
         str(row[0])
         for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
     }
+
+
+def _table_columns(conn: sqlite3.Connection, table_name: str) -> list[str]:
+    if table_name not in _table_names(conn):
+        return []
+    return [str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()]
 
 
 def _active_taxonomy(conn: sqlite3.Connection, *, ecosystem_code: str) -> dict[str, object] | None:
@@ -178,6 +195,280 @@ def _taxonomy_version_from_csv(path: str | Path) -> str:
 
 def _membership_key(row: DatacenterTaxonomyRow) -> tuple[str, str, str]:
     return (row.ticker, row.layer, row.subindustry)
+
+
+def _group_keys(row: DatacenterTaxonomyRow) -> tuple[str, str]:
+    return (f"layer:{row.layer}", f"subindustry:{row.subindustry}")
+
+
+def _primary_by_ticker(rows: list[DatacenterTaxonomyRow]) -> dict[str, DatacenterTaxonomyRow]:
+    return {row.ticker: row for row in rows if row.is_primary}
+
+
+def _secondary_groups_by_ticker(rows: list[DatacenterTaxonomyRow]) -> dict[str, list[str]]:
+    result: dict[str, set[str]] = {}
+    for row in rows:
+        if not row.is_primary:
+            result.setdefault(row.ticker, set()).update(_group_keys(row))
+    return {ticker: sorted(groups) for ticker, groups in sorted(result.items())}
+
+
+def _all_groups(rows: list[DatacenterTaxonomyRow]) -> set[str]:
+    groups: set[str] = set()
+    for row in rows:
+        groups.update(_group_keys(row))
+    groups.add("ecosystem:DATACENTER")
+    return groups
+
+
+def _normalize_rebuild_mode(value: str) -> str:
+    try:
+        return REBUILD_MODE_ALIASES[value]
+    except KeyError as exc:
+        raise ValueError(f"unsupported rebuild mode: {value}") from exc
+
+
+def _range_payload(date_from: str, date_to: str) -> dict[str, str]:
+    return {"date_from": date_from, "date_to": date_to}
+
+
+def _compute_delta_safety(diff: dict[str, object]) -> dict[str, object]:
+    reasons = list(diff["structural_change_blocking_errors"])
+    if diff.get("renamed_layers"):
+        reasons.append("renamed layers require full structural rebuild")
+    if diff.get("renamed_subindustries"):
+        reasons.append("renamed subindustries require full structural rebuild")
+    return {
+        "delta_safe": not reasons,
+        "delta_blocking_reasons": sorted(set(str(reason) for reason in reasons)),
+        "recommended_rebuild_mode": REBUILD_MODE_DELTA if not reasons else REBUILD_MODE_FULL,
+    }
+
+
+def _ticker_classifications(
+    *,
+    current_rows: list[DatacenterTaxonomyRow],
+    proposed_rows: list[DatacenterTaxonomyRow],
+    diff: dict[str, object],
+) -> list[dict[str, object]]:
+    current_primary = _primary_by_ticker(current_rows)
+    proposed_primary = _primary_by_ticker(proposed_rows)
+    current_secondary = _secondary_groups_by_ticker(current_rows)
+    proposed_secondary = _secondary_groups_by_ticker(proposed_rows)
+    added = set(diff["added_tickers"])
+    removed = set(diff["removed_tickers"])
+    primary_changed = {str(item["ticker"]) for item in diff["primary_membership_changes"]}
+    secondary_added = {str(item["ticker"]) for item in diff["secondary_membership_additions"]}
+    secondary_removed = {str(item["ticker"]) for item in diff["secondary_membership_removals"]}
+    scope_changed = {str(item["ticker"]) for item in diff["scope_flag_changes"]}
+    affected_groups_by_ticker: dict[str, set[str]] = {}
+    for ticker in added:
+        row = proposed_primary.get(ticker)
+        if row is not None:
+            affected_groups_by_ticker.setdefault(ticker, set()).update(_group_keys(row))
+    for ticker in removed:
+        row = current_primary.get(ticker)
+        if row is not None:
+            affected_groups_by_ticker.setdefault(ticker, set()).update(_group_keys(row))
+    for item in diff["primary_membership_changes"]:
+        ticker = str(item["ticker"])
+        for key in (current_primary.get(ticker), proposed_primary.get(ticker)):
+            if key is not None:
+                affected_groups_by_ticker.setdefault(ticker, set()).update(_group_keys(key))
+    for item in list(diff["secondary_membership_additions"]) + list(diff["secondary_membership_removals"]):
+        ticker = str(item["ticker"])
+        affected_groups_by_ticker.setdefault(ticker, set()).update(
+            (f"layer:{item['layer']}", f"subindustry:{item['subindustry']}")
+        )
+
+    classifications: list[dict[str, object]] = []
+    for ticker in sorted(set(current_primary) | set(proposed_primary) | added | removed):
+        change_types: list[str] = []
+        if ticker in added:
+            change_types.append("ADDED_TICKER")
+        if ticker in removed:
+            change_types.append("REMOVED_TICKER")
+        if ticker in primary_changed:
+            change_types.append("PRIMARY_MEMBERSHIP_CHANGED")
+        if ticker in secondary_added:
+            change_types.append("SECONDARY_MEMBERSHIP_ADDED")
+        if ticker in secondary_removed:
+            change_types.append("SECONDARY_MEMBERSHIP_REMOVED")
+        if ticker in scope_changed:
+            change_types.append("SCOPE_FLAG_CHANGED")
+        if not change_types:
+            change_types.append("UNCHANGED")
+        old_primary = current_primary.get(ticker)
+        new_primary = proposed_primary.get(ticker)
+        if ticker in added:
+            action = "REBUILD_NEW_TICKER"
+        elif ticker in removed:
+            action = "OMIT_REMOVED_TICKER"
+        else:
+            action = "COPY_UNCHANGED_TICKER_HISTORY"
+        classifications.append(
+            {
+                "ticker": ticker,
+                "change_types": change_types,
+                "old_scope_flag": old_primary.report_group_status if old_primary else None,
+                "new_scope_flag": new_primary.report_group_status if new_primary else None,
+                "old_primary_group": (
+                    {"layer": old_primary.layer, "subindustry": old_primary.subindustry}
+                    if old_primary
+                    else None
+                ),
+                "new_primary_group": (
+                    {"layer": new_primary.layer, "subindustry": new_primary.subindustry}
+                    if new_primary
+                    else None
+                ),
+                "old_secondary_groups": current_secondary.get(ticker, []),
+                "new_secondary_groups": proposed_secondary.get(ticker, []),
+                "affected_groups": sorted(affected_groups_by_ticker.get(ticker, set())),
+                "ticker_history_action": action,
+            }
+        )
+    return classifications
+
+
+def _build_delta_scope(
+    *,
+    current_rows: list[DatacenterTaxonomyRow],
+    proposed_rows: list[DatacenterTaxonomyRow],
+    diff: dict[str, object],
+) -> dict[str, object]:
+    current_groups = _all_groups(current_rows)
+    proposed_groups = _all_groups(proposed_rows)
+    affected_groups: set[str] = set()
+    added = set(diff["added_tickers"])
+    removed = set(diff["removed_tickers"])
+    current_primary = _primary_by_ticker(current_rows)
+    proposed_primary = _primary_by_ticker(proposed_rows)
+    for ticker in added:
+        row = proposed_primary.get(ticker)
+        if row is not None:
+            affected_groups.update(_group_keys(row))
+    for ticker in removed:
+        row = current_primary.get(ticker)
+        if row is not None:
+            affected_groups.update(_group_keys(row))
+    for item in diff["primary_membership_changes"]:
+        ticker = str(item["ticker"])
+        for row in (current_primary.get(ticker), proposed_primary.get(ticker)):
+            if row is not None:
+                affected_groups.update(_group_keys(row))
+    for item in list(diff["secondary_membership_additions"]) + list(diff["secondary_membership_removals"]):
+        affected_groups.update((f"layer:{item['layer']}", f"subindustry:{item['subindustry']}"))
+    if added or removed or diff["primary_membership_changes"] or diff["secondary_membership_additions"] or diff["secondary_membership_removals"]:
+        affected_groups.add("ecosystem:DATACENTER")
+    affected_tickers = set(diff["affected_tickers"])
+    return {
+        "ticker_classifications": _ticker_classifications(
+            current_rows=current_rows,
+            proposed_rows=proposed_rows,
+            diff=diff,
+        ),
+        "affected_tickers": sorted(affected_tickers),
+        "unaffected_tickers": sorted(set(diff["unchanged_tickers"]) - affected_tickers),
+        "affected_groups": sorted(affected_groups),
+        "unaffected_groups": sorted((current_groups | proposed_groups) - affected_groups),
+        "added_tickers": diff["added_tickers"],
+        "removed_tickers": diff["removed_tickers"],
+        "membership_changed_tickers": sorted(
+            {
+                str(item["ticker"])
+                for item in list(diff["primary_membership_changes"])
+                + list(diff["secondary_membership_additions"])
+                + list(diff["secondary_membership_removals"])
+            }
+        ),
+        "scope_flag_changed_tickers": sorted({str(item["ticker"]) for item in diff["scope_flag_changes"]}),
+    }
+
+
+def _build_dependency_map(delta_scope: dict[str, object]) -> dict[str, object]:
+    affected_groups = list(delta_scope["affected_groups"])
+    affected_tickers = list(delta_scope["affected_tickers"])
+    return {
+        "dc_ticker_swing_signal_daily": {
+            "component": "TICKER_SWING_BASE",
+            "classification": "REBUILD_AFFECTED_TICKERS",
+            "copy_scope": "unchanged and membership-only ticker technical rows may be carried forward with target taxonomy metadata",
+            "evidence_status": "CONFIRMED_FROM_CODE",
+            "affected_tickers": affected_tickers,
+        },
+        "dc_group_swing_signal_daily": {
+            "component": "GROUP_SWING_BASE",
+            "classification": "REBUILD_AFFECTED_GROUPS",
+            "evidence_status": "CONFIRMED_FROM_CODE",
+            "affected_groups": affected_groups,
+        },
+        "dc_group_synthetic_ohlc_daily": {
+            "component": "SYNTHETIC_OHLC_BASE",
+            "classification": "REBUILD_AFFECTED_GROUPS",
+            "evidence_status": "CONFIRMED_FROM_CODE",
+            "affected_groups": affected_groups,
+        },
+        "dc_group_index_daily": {
+            "component": "GROUP_INDEX",
+            "classification": "REBUILD_AFFECTED_GROUPS",
+            "evidence_status": "CONFIRMED_FROM_CODE",
+            "affected_groups": affected_groups,
+        },
+        "derived_group_components_stage5_to_stage9": {
+            "classification": "REBUILD_AFFECTED_GROUPS",
+            "evidence_status": "INFERRED_FROM_FLOW",
+            "affected_groups": affected_groups,
+        },
+        "technical_relevance_and_reports": {
+            "classification": "REBUILD_FULL_DATE",
+            "evidence_status": "INFERRED_FROM_FLOW",
+            "reason": "artifact/report context depends on canonical proposed-version outputs",
+        },
+        "ec_canonical_tables": {
+            "classification": "REBUILD_FROM_COMPLETE_PROPOSED_DC_STATE",
+            "evidence_status": "CONFIRMED_FROM_CODE",
+            "target_tables": list(CANONICAL_EC_FACT_TABLES),
+        },
+        "coverage_parity_watermarks": {
+            "classification": "REVALIDATE_ONLY",
+            "evidence_status": "CONFIRMED_FROM_CODE",
+        },
+    }
+
+
+def _build_work_estimate(
+    *,
+    current_rows: list[DatacenterTaxonomyRow],
+    proposed_rows: list[DatacenterTaxonomyRow],
+    delta_scope: dict[str, object],
+    date_from: str,
+    date_to: str,
+) -> dict[str, object]:
+    total_tickers = len({row.ticker for row in proposed_rows})
+    total_groups = len(_all_groups(proposed_rows))
+    affected_ticker_count = len(delta_scope["affected_tickers"])
+    affected_group_count = len(delta_scope["affected_groups"])
+    copied_ticker_count = max(0, total_tickers - len(delta_scope["added_tickers"]))
+    copied_group_count = max(0, total_groups - affected_group_count)
+    estimated_full = max(1, total_tickers + total_groups)
+    estimated_rebuild = len(delta_scope["added_tickers"]) + affected_group_count
+    estimated_copy = copied_ticker_count + copied_group_count
+    return {
+        "total_tickers": total_tickers,
+        "affected_ticker_count": affected_ticker_count,
+        "copied_ticker_count": copied_ticker_count,
+        "rebuilt_ticker_count": len(delta_scope["added_tickers"]),
+        "total_groups": total_groups,
+        "affected_group_count": affected_group_count,
+        "copied_group_count": copied_group_count,
+        "rebuild_date_count": {"date_from": date_from, "date_to": date_to},
+        "estimated_copy_row_count": estimated_copy,
+        "estimated_rebuild_row_count": estimated_rebuild,
+        "estimated_full_rebuild_row_count": estimated_full,
+        "estimated_work_reduction_pct": round(max(0.0, 100.0 * (1.0 - (estimated_rebuild / estimated_full))), 2),
+        "estimate_basis": "relative component scope, not wall-clock runtime",
+    }
 
 
 def build_taxonomy_diff(
@@ -267,7 +558,10 @@ def build_taxonomy_diff(
     affected_tickers.update(item["ticker"] for item in secondary_removals)
     affected_tickers.update(item["ticker"] for item in scope_flag_changes)
     affected_groups = set(added_layers) | set(removed_layers) | set(added_subindustries) | set(removed_subindustries)
-    for item in secondary_additions + secondary_removals + scope_flag_changes:
+    for key in added_keys + removed_keys:
+        affected_groups.add(str(key[1]))
+        affected_groups.add(str(key[2]))
+    for item in secondary_additions + secondary_removals:
         affected_groups.add(str(item["layer"]))
         affected_groups.add(str(item["subindustry"]))
     for item in primary_changes:
@@ -325,6 +619,7 @@ def build_taxonomy_change_plan(
     rebuild_mode: str = REBUILD_MODE_FULL,
     backup_policy: str = "ONE_FULL_BACKUP_PER_DEPLOYMENT",
 ) -> dict[str, object]:
+    requested_rebuild_mode = _normalize_rebuild_mode(rebuild_mode)
     current_summary = summarize_taxonomy_csv(current_taxonomy_csv, current_taxonomy_version)
     proposed_summary = summarize_taxonomy_csv(proposed_taxonomy_csv, proposed_taxonomy_version)
     diff = build_taxonomy_diff(
@@ -333,11 +628,36 @@ def build_taxonomy_change_plan(
         proposed_taxonomy_csv=proposed_taxonomy_csv,
         proposed_taxonomy_version=proposed_taxonomy_version,
     )
-    blocking_errors = list(diff["structural_change_blocking_errors"])
-    if rebuild_mode not in {REBUILD_MODE_FULL, REBUILD_MODE_DELTA}:
-        blocking_errors.append(f"unsupported rebuild mode: {rebuild_mode}")
-    elif rebuild_mode not in SUPPORTED_REBUILD_MODES:
-        blocking_errors.append(f"rebuild mode is not supported yet: {rebuild_mode}")
+    delta_safety = _compute_delta_safety(diff)
+    selected_rebuild_mode = (
+        delta_safety["recommended_rebuild_mode"]
+        if requested_rebuild_mode == REBUILD_MODE_AUTO
+        else requested_rebuild_mode
+    )
+    blocking_errors: list[str] = []
+    if selected_rebuild_mode == REBUILD_MODE_DELTA and not delta_safety["delta_safe"]:
+        blocking_errors.extend(str(reason) for reason in delta_safety["delta_blocking_reasons"])
+    elif selected_rebuild_mode not in SUPPORTED_REBUILD_MODES:
+        blocking_errors.append(f"unsupported rebuild mode: {selected_rebuild_mode}")
+    delta_scope = _build_delta_scope(
+        current_rows=list(current_summary.rows),
+        proposed_rows=list(proposed_summary.rows),
+        diff=diff,
+    )
+    dependency_map = _build_dependency_map(delta_scope)
+    work_estimate = _build_work_estimate(
+        current_rows=list(current_summary.rows),
+        proposed_rows=list(proposed_summary.rows),
+        delta_scope=delta_scope,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    date_ranges = {
+        "ticker_history_range": _range_payload(date_from, date_to),
+        "group_history_range": _range_payload(date_from, date_to),
+        "downstream_history_range": _range_payload(date_from, date_to),
+        "validation_range": _range_payload(date_from, date_to),
+    }
     plan_payload = {
         "deployment_id": deployment_id,
         "ecosystem_code": ecosystem_code,
@@ -347,15 +667,35 @@ def build_taxonomy_change_plan(
         "proposed_taxonomy_version": proposed_taxonomy_version,
         "proposed_source_sha256": proposed_summary.source_sha256,
         "proposed_source_reference": str(proposed_taxonomy_csv),
-        "rebuild_mode": rebuild_mode,
+        "requested_rebuild_mode": requested_rebuild_mode,
+        "recommended_rebuild_mode": delta_safety["recommended_rebuild_mode"],
+        "selected_rebuild_mode": selected_rebuild_mode,
+        "rebuild_mode": selected_rebuild_mode,
         "date_from": date_from,
         "date_to": date_to,
         "taxonomy_diff": diff,
+        "delta_safe": delta_safety["delta_safe"],
+        "delta_blocking_reasons": delta_safety["delta_blocking_reasons"],
+        "delta_scope_summary": delta_scope,
+        "full_rebuild_scope_summary": {
+            "ticker_count": proposed_summary.ticker_count,
+            "layer_count": proposed_summary.layer_count,
+            "subindustry_count": proposed_summary.subindustry_count,
+            "date_range": _range_payload(date_from, date_to),
+        },
+        "date_ranges": date_ranges,
+        "dependency_map": dependency_map,
+        "estimated_delta_work": work_estimate,
+        "estimated_full_work": {
+            "total_tickers": proposed_summary.ticker_count,
+            "total_groups": proposed_summary.layer_count + proposed_summary.subindustry_count + 1,
+            "date_range": _range_payload(date_from, date_to),
+        },
         "expected_counts": _expected_counts(proposed_taxonomy_csv, proposed_taxonomy_version),
         "backup_policy": backup_policy,
         "phase_sequence": list(PHASE_SEQUENCE),
         "full_rebuild_supported": True,
-        "delta_rebuild_supported": False,
+        "delta_rebuild_supported": True,
     }
     plan_payload["plan_hash"] = _json_hash(plan_payload)
     plan_payload["plan_status"] = "READY" if not blocking_errors else "BLOCKED"
@@ -737,6 +1077,7 @@ def execute_taxonomy_rebuild(
     deployment = inspection["deployment"]
     current_version = str(deployment["previous_taxonomy_version"])
     current_csv = _current_source_from_db(analysis_db, ecosystem_code=str(deployment["ecosystem_code"]), taxonomy_version=current_version)
+    normalized_confirm_rebuild_mode = _normalize_rebuild_mode(confirm_rebuild_mode)
     plan = build_taxonomy_change_plan(
         deployment_id=deployment_id,
         ecosystem_code=str(deployment["ecosystem_code"]),
@@ -746,7 +1087,7 @@ def execute_taxonomy_rebuild(
         proposed_taxonomy_csv=proposed_taxonomy_csv,
         date_from=str(deployment["rebuild_start_date"]),
         date_to=date_to,
-        rebuild_mode=confirm_rebuild_mode,
+        rebuild_mode=normalized_confirm_rebuild_mode,
     )
     confirmation_errors = _verify_confirmation(
         plan=plan,
@@ -755,7 +1096,7 @@ def execute_taxonomy_rebuild(
         confirm_proposed_source_hash=confirm_proposed_source_hash,
         confirm_date_from=confirm_date_from,
         confirm_date_to=confirm_date_to,
-        confirm_rebuild_mode=confirm_rebuild_mode,
+        confirm_rebuild_mode=normalized_confirm_rebuild_mode,
         confirm_plan_hash=confirm_plan_hash,
     )
     if confirmation_errors or plan["blocking_errors"]:
@@ -786,6 +1127,11 @@ def execute_taxonomy_rebuild(
             return _failure("REBUILDING", "ACTIVE_WRITER", str(writer), completed, "REBUILDING", True)
         _call_phase(services.ensure_backup, "backup", deployment_id=deployment_id)
         completed.append("BACKUP")
+        if plan["selected_rebuild_mode"] == REBUILD_MODE_DELTA:
+            carry_forward = copy_delta_carry_forward(analysis_db=analysis_db, plan=plan)
+            if carry_forward.get("carry_forward_status") != "OK":
+                return _failure("REBUILDING", "DELTA_CARRY_FORWARD", str(carry_forward), completed, "REBUILDING", True)
+            completed.append("DELTA_CARRY_FORWARD")
         _call_phase(services.run_dc_rebuild, "dc_rebuild", plan=plan)
         completed.append("DC_REBUILD")
         _call_phase(services.run_ec_rebuild, "ec_rebuild", plan=plan)
@@ -905,9 +1251,264 @@ def _failure(
         "retry_safe": True,
         "restore_required": False,
         "cleanup_required": failed_phase in {"VALIDATING"},
+        "failed_component": None,
+        "failed_ticker_or_group": None,
+        "target_partial_state": "UNKNOWN",
+        "full_fallback_available": True,
+        "full_fallback_requires_new_plan": True,
         "current_taxonomy_remains_active": True,
         "scheduler_guard_restored": scheduler_guard_restored,
     }
+
+
+def _sql_identifier(name: str) -> str:
+    if not name.replace("_", "").isalnum():
+        raise ValueError(f"unsafe SQL identifier: {name}")
+    return f'"{name}"'
+
+
+def _pk_columns(conn: sqlite3.Connection, table_name: str) -> list[str]:
+    rows = conn.execute(f"PRAGMA table_info({_sql_identifier(table_name)})").fetchall()
+    ordered = sorted((int(row[5]), str(row[1])) for row in rows if int(row[5]) > 0)
+    return [name for _pos, name in ordered]
+
+
+def _proposed_primary_metadata(proposed_taxonomy_csv: str | Path, proposed_taxonomy_version: str) -> dict[str, dict[str, str]]:
+    rows = load_datacenter_taxonomy_csv(
+        proposed_taxonomy_csv,
+        expected_taxonomy_version=proposed_taxonomy_version,
+    )
+    return {
+        row.ticker: {"primary_layer": row.layer, "primary_subindustry": row.subindustry}
+        for row in rows
+        if row.is_primary
+    }
+
+
+def _split_group_identity(value: str) -> tuple[str, str] | None:
+    if ":" not in value:
+        return None
+    group_type, group_name = value.split(":", 1)
+    if group_type not in {"layer", "subindustry", "ecosystem"}:
+        return None
+    return group_type, group_name
+
+
+def _rows_hash(rows: list[dict[str, object]]) -> str:
+    return _json_hash(rows)
+
+
+def _copy_rows_to_taxonomy(
+    conn: sqlite3.Connection,
+    *,
+    table_name: str,
+    date_column: str,
+    current_taxonomy_version: str,
+    proposed_taxonomy_version: str,
+    date_from: str,
+    date_to: str,
+    ticker_allowlist: list[str] | None = None,
+    group_allowlist: list[str] | None = None,
+    proposed_primary_meta: dict[str, dict[str, str]] | None = None,
+) -> dict[str, object]:
+    if table_name not in _table_names(conn):
+        return {"table": table_name, "status": "SKIPPED_TABLE_MISSING", "copied_row_count": 0}
+    columns = _table_columns(conn, table_name)
+    required = {"taxonomy_version", date_column}
+    if not required.issubset(columns):
+        return {
+            "table": table_name,
+            "status": "SKIPPED_UNSUPPORTED_SCHEMA",
+            "missing_columns": sorted(required - set(columns)),
+            "copied_row_count": 0,
+        }
+    clauses = ["taxonomy_version = ?", f"{_sql_identifier(date_column)} BETWEEN ? AND ?"]
+    params: list[object] = [current_taxonomy_version, date_from, date_to]
+    if ticker_allowlist is not None:
+        if "ticker" not in columns:
+            return {"table": table_name, "status": "SKIPPED_TICKER_COLUMN_MISSING", "copied_row_count": 0}
+        if not ticker_allowlist:
+            return {"table": table_name, "status": "OK", "copied_row_count": 0, "source_row_count": 0}
+        placeholders = ", ".join("?" for _ in ticker_allowlist)
+        clauses.append(f"ticker IN ({placeholders})")
+        params.extend(ticker_allowlist)
+        target_delete_clause = f"taxonomy_version = ? AND {_sql_identifier(date_column)} BETWEEN ? AND ? AND ticker IN ({placeholders})"
+        target_delete_params: list[object] = [proposed_taxonomy_version, date_from, date_to, *ticker_allowlist]
+    elif group_allowlist is not None:
+        if not {"group_type", "group_name"}.issubset(columns):
+            return {"table": table_name, "status": "SKIPPED_GROUP_COLUMNS_MISSING", "copied_row_count": 0}
+        group_pairs = [pair for value in group_allowlist if (pair := _split_group_identity(value)) is not None]
+        if not group_pairs:
+            return {"table": table_name, "status": "OK", "copied_row_count": 0, "source_row_count": 0}
+        group_clauses = []
+        for group_type, group_name in group_pairs:
+            group_clauses.append("(group_type = ? AND group_name = ?)")
+            params.extend([group_type, group_name])
+        clauses.append("(" + " OR ".join(group_clauses) + ")")
+        target_delete_clause = (
+            f"taxonomy_version = ? AND {_sql_identifier(date_column)} BETWEEN ? AND ? AND ("
+            + " OR ".join(group_clauses)
+            + ")"
+        )
+        target_delete_params = [proposed_taxonomy_version, date_from, date_to]
+        for group_type, group_name in group_pairs:
+            target_delete_params.extend([group_type, group_name])
+    else:
+        raise ValueError("ticker_allowlist or group_allowlist is required")
+
+    select_sql = (
+        f"SELECT {', '.join(_sql_identifier(column) for column in columns)} "
+        f"FROM {_sql_identifier(table_name)} WHERE {' AND '.join(clauses)} "
+        f"ORDER BY {', '.join(_sql_identifier(column) for column in columns)}"
+    )
+    source_rows = [dict(row) for row in conn.execute(select_sql, params).fetchall()]
+    pk_columns = _pk_columns(conn, table_name)
+    if pk_columns:
+        projected_keys = []
+        for row in source_rows:
+            target = dict(row)
+            target["taxonomy_version"] = proposed_taxonomy_version
+            projected_keys.append(tuple(target[column] for column in pk_columns))
+        if len(projected_keys) != len(set(projected_keys)):
+            return {
+                "table": table_name,
+                "status": "BLOCKED_DUPLICATE_PROJECTED_TARGET_KEYS",
+                "copied_row_count": 0,
+                "source_row_count": len(source_rows),
+            }
+
+    delete_sql = f"DELETE FROM {_sql_identifier(table_name)} WHERE {target_delete_clause}"
+    deleted_count = conn.execute(delete_sql, target_delete_params).rowcount
+    insert_sql = (
+        f"INSERT INTO {_sql_identifier(table_name)} ({', '.join(_sql_identifier(column) for column in columns)}) "
+        f"VALUES ({', '.join('?' for _ in columns)})"
+    )
+    target_rows: list[dict[str, object]] = []
+    for row in source_rows:
+        target = dict(row)
+        target["taxonomy_version"] = proposed_taxonomy_version
+        ticker = str(target.get("ticker") or "")
+        if proposed_primary_meta is not None and ticker in proposed_primary_meta:
+            if "primary_layer" in target:
+                target["primary_layer"] = proposed_primary_meta[ticker]["primary_layer"]
+            if "primary_subindustry" in target:
+                target["primary_subindustry"] = proposed_primary_meta[ticker]["primary_subindustry"]
+        conn.execute(insert_sql, [target[column] for column in columns])
+        target_rows.append(target)
+    return {
+        "table": table_name,
+        "status": "OK",
+        "source_taxonomy_version": current_taxonomy_version,
+        "target_taxonomy_version": proposed_taxonomy_version,
+        "date_from": date_from,
+        "date_to": date_to,
+        "deleted_target_row_count": deleted_count,
+        "source_row_count": len(source_rows),
+        "copied_row_count": len(target_rows),
+        "target_rows_hash": _rows_hash(target_rows),
+        "primary_taxonomy_metadata_rewritten": proposed_primary_meta is not None,
+    }
+
+
+def copy_delta_carry_forward(
+    *,
+    analysis_db: str | Path,
+    plan: dict[str, object],
+) -> dict[str, object]:
+    """Copy safely reusable active-taxonomy DC facts into the proposed taxonomy.
+
+    This helper is intentionally scoped to DC fact tables with explicit
+    taxonomy_version lineage. EC construction remains delegated to the existing
+    canonical DC-to-EC loaders after proposed DC state is complete.
+    """
+    if plan.get("selected_rebuild_mode") != REBUILD_MODE_DELTA and plan.get("rebuild_mode") != REBUILD_MODE_DELTA:
+        return {"carry_forward_status": "SKIPPED_NON_DELTA_PLAN", "table_results": []}
+    delta_scope = dict(plan["delta_scope_summary"])
+    ticker_allowlist = sorted(
+        set(delta_scope.get("unaffected_tickers", []))
+        | (
+            set(delta_scope.get("membership_changed_tickers", []))
+            - set(delta_scope.get("added_tickers", []))
+            - set(delta_scope.get("removed_tickers", []))
+        )
+        | (
+            set(delta_scope.get("scope_flag_changed_tickers", []))
+            - set(delta_scope.get("added_tickers", []))
+            - set(delta_scope.get("removed_tickers", []))
+        )
+    )
+    group_allowlist = list(delta_scope.get("unaffected_groups", []))
+    proposed_primary_meta = _proposed_primary_metadata(
+        str(plan["proposed_source_reference"]),
+        str(plan["proposed_taxonomy_version"]),
+    )
+    conn = _connect_readwrite(analysis_db)
+    table_results: list[dict[str, object]] = []
+    try:
+        try:
+            with conn:
+                table_results = [
+                    _copy_rows_to_taxonomy(
+                        conn,
+                        table_name="dc_ticker_swing_signal_daily",
+                        date_column="signal_date",
+                        current_taxonomy_version=str(plan["current_taxonomy_version"]),
+                        proposed_taxonomy_version=str(plan["proposed_taxonomy_version"]),
+                        date_from=str(plan["date_from"]),
+                        date_to=str(plan["date_to"]),
+                        ticker_allowlist=ticker_allowlist,
+                        proposed_primary_meta=proposed_primary_meta,
+                    ),
+                    _copy_rows_to_taxonomy(
+                        conn,
+                        table_name="dc_group_swing_signal_daily",
+                        date_column="signal_date",
+                        current_taxonomy_version=str(plan["current_taxonomy_version"]),
+                        proposed_taxonomy_version=str(plan["proposed_taxonomy_version"]),
+                        date_from=str(plan["date_from"]),
+                        date_to=str(plan["date_to"]),
+                        group_allowlist=group_allowlist,
+                    ),
+                    _copy_rows_to_taxonomy(
+                        conn,
+                        table_name="dc_group_synthetic_ohlc_daily",
+                        date_column="ohlc_date",
+                        current_taxonomy_version=str(plan["current_taxonomy_version"]),
+                        proposed_taxonomy_version=str(plan["proposed_taxonomy_version"]),
+                        date_from=str(plan["date_from"]),
+                        date_to=str(plan["date_to"]),
+                        group_allowlist=group_allowlist,
+                    ),
+                    _copy_rows_to_taxonomy(
+                        conn,
+                        table_name="dc_group_index_daily",
+                        date_column="index_date",
+                        current_taxonomy_version=str(plan["current_taxonomy_version"]),
+                        proposed_taxonomy_version=str(plan["proposed_taxonomy_version"]),
+                        date_from=str(plan["date_from"]),
+                        date_to=str(plan["date_to"]),
+                        group_allowlist=group_allowlist,
+                    ),
+                ]
+                blocked = [row for row in table_results if str(row["status"]).startswith("BLOCKED")]
+                if blocked:
+                    raise RuntimeError("delta carry-forward blocked")
+        except RuntimeError as exc:
+            return {
+                "carry_forward_status": "BLOCKED",
+                "failure_message": str(exc),
+                "table_results": table_results,
+                "copied_ticker_count": 0,
+                "copied_group_count": 0,
+            }
+        return {
+            "carry_forward_status": "OK",
+            "table_results": table_results,
+            "copied_ticker_count": len(ticker_allowlist),
+            "copied_group_count": len(group_allowlist),
+        }
+    finally:
+        conn.close()
 
 
 def plan_taxonomy_activation(**kwargs: object) -> dict[str, object]:
@@ -928,7 +1529,7 @@ def build_prepare_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scheduler-config")
     parser.add_argument("--watchlist")
     parser.add_argument("--evidence-root", default="temp")
-    parser.add_argument("--rebuild-mode", default=REBUILD_MODE_FULL)
+    parser.add_argument("--rebuild-mode", default=REBUILD_MODE_FULL, choices=("auto", "full", "delta", REBUILD_MODE_AUTO, REBUILD_MODE_FULL, REBUILD_MODE_DELTA))
     parser.add_argument("--plan-only", action="store_true")
     parser.add_argument("--format", choices=("json",), default="json")
     return parser
@@ -957,7 +1558,7 @@ def build_run_parser() -> argparse.ArgumentParser:
     parser.add_argument("--confirm-proposed-source-hash", required=True)
     parser.add_argument("--confirm-date-from", required=True)
     parser.add_argument("--confirm-date-to", required=True)
-    parser.add_argument("--confirm-rebuild-mode", required=True)
+    parser.add_argument("--confirm-rebuild-mode", required=True, choices=("full", "delta", REBUILD_MODE_FULL, REBUILD_MODE_DELTA))
     parser.add_argument("--confirm-plan-hash", required=True)
     parser.add_argument("--format", choices=("json",), default="json")
     return parser

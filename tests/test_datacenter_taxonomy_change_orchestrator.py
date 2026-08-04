@@ -5,11 +5,13 @@ import sqlite3
 from pathlib import Path
 
 from rawcandle.datacenter_taxonomy_change_orchestrator import (
+    REBUILD_MODE_AUTO,
     REBUILD_MODE_DELTA,
     REBUILD_MODE_FULL,
     TaxonomyChangeServices,
     build_taxonomy_change_plan,
     build_taxonomy_diff,
+    copy_delta_carry_forward,
     execute_taxonomy_rebuild,
     inspect_taxonomy_change,
     prepare_taxonomy_change,
@@ -199,7 +201,7 @@ def test_plan_hash_is_deterministic_and_changes_with_inputs(tmp_path) -> None:
     assert first["plan_hash"] != changed["plan_hash"]
 
 
-def test_delta_rebuild_is_explicitly_unsupported(tmp_path) -> None:
+def test_delta_rebuild_is_supported_for_safe_monthly_change(tmp_path) -> None:
     current_csv = _write_csv(tmp_path / "current.csv", _rows("DC_TAXONOMY_FULL_V1"))
     proposed_csv = _write_csv(tmp_path / "proposed.csv", _rows("DC_TAXONOMY_FULL_V2"))
 
@@ -215,8 +217,69 @@ def test_delta_rebuild_is_explicitly_unsupported(tmp_path) -> None:
         rebuild_mode=REBUILD_MODE_DELTA,
     )
 
+    assert plan["plan_status"] == "READY"
+    assert plan["selected_rebuild_mode"] == REBUILD_MODE_DELTA
+    assert plan["delta_rebuild_supported"] is True
+    assert plan["delta_safe"] is True
+    assert plan["blocking_errors"] == []
+
+
+def test_auto_selects_delta_for_safe_change_and_full_for_structural_change(tmp_path) -> None:
+    current_csv = _write_csv(tmp_path / "current.csv", _rows("DC_TAXONOMY_FULL_V1"))
+    proposed_csv = _write_csv(tmp_path / "proposed.csv", _rows("DC_TAXONOMY_FULL_V2"))
+    safe = build_taxonomy_change_plan(
+        deployment_id=None,
+        ecosystem_code="DATACENTER",
+        current_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        current_taxonomy_csv=current_csv,
+        proposed_taxonomy_version="DC_TAXONOMY_FULL_V2",
+        proposed_taxonomy_csv=proposed_csv,
+        date_from="2025-08-01",
+        date_to="2026-07-31",
+        rebuild_mode=REBUILD_MODE_AUTO,
+    )
+    assert safe["selected_rebuild_mode"] == REBUILD_MODE_DELTA
+
+    structural_rows = _rows("DC_TAXONOMY_FULL_V3")
+    structural_rows[0][2] = "NewLayer"
+    structural_csv = _write_csv(tmp_path / "structural.csv", structural_rows)
+    structural = build_taxonomy_change_plan(
+        deployment_id=None,
+        ecosystem_code="DATACENTER",
+        current_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        current_taxonomy_csv=current_csv,
+        proposed_taxonomy_version="DC_TAXONOMY_FULL_V3",
+        proposed_taxonomy_csv=structural_csv,
+        date_from="2025-08-01",
+        date_to="2026-07-31",
+        rebuild_mode=REBUILD_MODE_AUTO,
+    )
+    assert structural["selected_rebuild_mode"] == REBUILD_MODE_FULL
+    assert structural["delta_safe"] is False
+    assert structural["plan_status"] == "READY"
+
+
+def test_explicit_delta_blocks_when_structural_change_is_unsafe(tmp_path) -> None:
+    current_csv = _write_csv(tmp_path / "current.csv", _rows("DC_TAXONOMY_FULL_V1"))
+    proposed = _rows("DC_TAXONOMY_FULL_V2")
+    proposed[0][3] = "NewSubindustry"
+    proposed_csv = _write_csv(tmp_path / "proposed.csv", proposed)
+
+    plan = build_taxonomy_change_plan(
+        deployment_id=None,
+        ecosystem_code="DATACENTER",
+        current_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        current_taxonomy_csv=current_csv,
+        proposed_taxonomy_version="DC_TAXONOMY_FULL_V2",
+        proposed_taxonomy_csv=proposed_csv,
+        date_from="2025-08-01",
+        date_to="2026-07-31",
+        rebuild_mode=REBUILD_MODE_DELTA,
+    )
+
     assert plan["plan_status"] == "BLOCKED"
-    assert "rebuild mode is not supported yet: DELTA_REBUILD" in plan["blocking_errors"]
+    assert plan["selected_rebuild_mode"] == REBUILD_MODE_DELTA
+    assert plan["delta_safe"] is False
 
 
 def test_prepare_creates_and_reuses_one_deployment(tmp_path) -> None:
@@ -344,6 +407,126 @@ def test_run_calls_injected_rebuild_services_in_order(tmp_path, monkeypatch) -> 
     assert summary["run_status"] == "READY_TO_ACTIVATE"
     assert summary["activation_executed"] is False
     assert calls == ["guard:True", "writer", "backup", "dc", "ec", "guard:False"]
+
+
+def _create_carry_forward_fact_tables(db_path: Path) -> None:
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE dc_ticker_swing_signal_daily (
+                signal_date TEXT NOT NULL,
+                taxonomy_version TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                primary_layer TEXT NOT NULL,
+                primary_subindustry TEXT NOT NULL,
+                close REAL,
+                signal_version TEXT NOT NULL,
+                PRIMARY KEY (signal_date, taxonomy_version, ticker, signal_version)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE dc_group_swing_signal_daily (
+                signal_date TEXT NOT NULL,
+                taxonomy_version TEXT NOT NULL,
+                group_type TEXT NOT NULL,
+                group_name TEXT NOT NULL,
+                member_count INTEGER,
+                signal_version TEXT NOT NULL,
+                PRIMARY KEY (signal_date, taxonomy_version, group_type, group_name, signal_version)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE dc_group_synthetic_ohlc_daily (
+                ohlc_date TEXT NOT NULL,
+                taxonomy_version TEXT NOT NULL,
+                group_type TEXT NOT NULL,
+                group_name TEXT NOT NULL,
+                close REAL,
+                calc_version TEXT NOT NULL,
+                PRIMARY KEY (ohlc_date, taxonomy_version, group_type, group_name, calc_version)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE dc_group_index_daily (
+                index_date TEXT NOT NULL,
+                taxonomy_version TEXT NOT NULL,
+                group_type TEXT NOT NULL,
+                group_name TEXT NOT NULL,
+                close REAL,
+                PRIMARY KEY (index_date, taxonomy_version, group_type, group_name)
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO dc_ticker_swing_signal_daily VALUES ('2026-07-31','DC_TAXONOMY_FULL_V1','AAA','Compute','GPU',100.0,'v1')"
+        )
+        conn.execute(
+            "INSERT INTO dc_ticker_swing_signal_daily VALUES ('2026-07-31','DC_TAXONOMY_FULL_V1','BBB','Power','UPS',50.0,'v1')"
+        )
+        for table, date_col, version_col in [
+            ("dc_group_swing_signal_daily", "signal_date", "signal_version"),
+            ("dc_group_synthetic_ohlc_daily", "ohlc_date", "calc_version"),
+        ]:
+            conn.execute(
+                f"INSERT INTO {table} VALUES ('2026-07-31','DC_TAXONOMY_FULL_V1','layer','Power',2,'v1')"
+            )
+        conn.execute(
+            "INSERT INTO dc_group_index_daily VALUES ('2026-07-31','DC_TAXONOMY_FULL_V1','layer','Power',10.0)"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_delta_carry_forward_copies_safe_rows_and_is_idempotent(tmp_path) -> None:
+    current_csv = _write_csv(tmp_path / "current.csv", _rows("DC_TAXONOMY_FULL_V1"))
+    proposed = _rows("DC_TAXONOMY_FULL_V2")
+    proposed[0][2] = "Power"
+    proposed[0][3] = "UPS"
+    proposed_csv = _write_csv(tmp_path / "proposed.csv", proposed)
+    db_path = tmp_path / "facts.db"
+    _create_carry_forward_fact_tables(db_path)
+    plan = build_taxonomy_change_plan(
+        deployment_id=None,
+        ecosystem_code="DATACENTER",
+        current_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        current_taxonomy_csv=current_csv,
+        proposed_taxonomy_version="DC_TAXONOMY_FULL_V2",
+        proposed_taxonomy_csv=proposed_csv,
+        date_from="2026-07-31",
+        date_to="2026-07-31",
+        rebuild_mode=REBUILD_MODE_DELTA,
+    )
+
+    first = copy_delta_carry_forward(analysis_db=db_path, plan=plan)
+    second = copy_delta_carry_forward(analysis_db=db_path, plan=plan)
+
+    assert first["carry_forward_status"] == "OK"
+    assert second["carry_forward_status"] == "OK"
+    conn = sqlite3.connect(db_path)
+    try:
+        active_count = conn.execute(
+            "SELECT COUNT(*) FROM dc_ticker_swing_signal_daily WHERE taxonomy_version='DC_TAXONOMY_FULL_V1'"
+        ).fetchone()[0]
+        proposed_rows = conn.execute(
+            """
+            SELECT ticker, primary_layer, primary_subindustry
+            FROM dc_ticker_swing_signal_daily
+            WHERE taxonomy_version='DC_TAXONOMY_FULL_V2'
+            ORDER BY ticker
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+    assert active_count == 2
+    assert proposed_rows == [("AAA", "Power", "UPS"), ("BBB", "Power", "UPS")]
 
 
 def test_ready_to_activate_and_active_are_idempotent(tmp_path) -> None:
