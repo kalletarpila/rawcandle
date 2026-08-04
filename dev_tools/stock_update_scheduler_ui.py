@@ -393,6 +393,44 @@ def taxonomy_rebuild_action_state(
     return {"run_disabled": not enabled}
 
 
+def taxonomy_activation_confirmation_key(plan: dict[str, Any]) -> tuple[Any, ...]:
+    changed_keys = plan.get("scheduler_changed_keys", [])
+    blocking_errors = plan.get("blocking_errors", [])
+    return (
+        plan.get("deployment_id"),
+        plan.get("current_taxonomy_version"),
+        plan.get("proposed_taxonomy_version"),
+        plan.get("proposed_source_sha256"),
+        plan.get("required_signal_date"),
+        plan.get("current_db_taxonomy_status"),
+        plan.get("current_scheduler_taxonomy_status"),
+        plan.get("proposed_scheduler_taxonomy_status"),
+        tuple(changed_keys) if isinstance(changed_keys, list) else changed_keys,
+        tuple(blocking_errors) if isinstance(blocking_errors, list) else blocking_errors,
+        plan.get("safe_to_activate"),
+    )
+
+
+def taxonomy_activation_action_state(
+    *,
+    orchestration_status: str,
+    activation_plan_status: str,
+    safe_to_activate: bool,
+    confirmation_valid: bool,
+    blocking_errors: list[str],
+    operation_active: bool = False,
+) -> dict[str, bool]:
+    enabled = (
+        orchestration_status == "READY_TO_ACTIVATE"
+        and activation_plan_status == "READY_TO_ACTIVATE"
+        and safe_to_activate
+        and confirmation_valid
+        and not blocking_errors
+        and not operation_active
+    )
+    return {"activate_disabled": not enabled}
+
+
 def start_taxonomy_background_operation(page: Any, target: Any, *args: Any, **kwargs: Any) -> threading.Thread:
     thread = threading.Thread(target=target, args=args, kwargs=kwargs, daemon=True)
     thread.start()
@@ -975,12 +1013,24 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
         "prepared_plan_key": None,
         "plan_key": None,
         "activation_plan": None,
+        "prepared_activation_key": None,
         "activation_key": None,
+        "orchestration_status": "",
     }
 
     def _selected_deployment_id() -> int | None:
         value = str(taxonomy_deployment_id_field.value or "").strip()
         return int(value) if value else None
+
+    def _taxonomy_operation_active() -> bool:
+        thread = getattr(page, "taxonomy_job_thread", None)
+        return bool(thread is not None and thread.is_alive())
+
+    def _activation_plan_with_current_file_hash(plan: dict[str, Any]) -> dict[str, Any]:
+        return {
+            **plan,
+            "proposed_source_sha256": _sha256_if_file(taxonomy_proposed_csv_field.value),
+        }
 
     def refresh_taxonomy_state(deployment_id: int | None = None) -> dict[str, Any]:
         state = inspect_scheduler_taxonomy_state(
@@ -1000,8 +1050,12 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
                     f"activation_readiness={json.dumps(inspection.get('activation_readiness', {}), sort_keys=True)}",
                 ]
             )
+            taxonomy_confirmation_state["orchestration_status"] = normalized_status
             taxonomy_plan_activation_button.disabled = normalized_status != "READY_TO_ACTIVATE"
             taxonomy_activate_button.disabled = True
+            if normalized_status != "READY_TO_ACTIVATE":
+                taxonomy_confirmation_state["prepared_activation_key"] = None
+                taxonomy_confirmation_state["activation_key"] = None
         taxonomy_operations_column.controls = [
             ft.Text(
                 f"{operation.get('operation_type')} {operation.get('started_at_utc')} "
@@ -1040,7 +1094,11 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
             taxonomy_confirmation_state["summary"] = summary
             taxonomy_confirmation_state["prepared_plan_key"] = taxonomy_confirmation_key(summary.get("plan", {}))
             taxonomy_confirmation_state["plan_key"] = None
+            taxonomy_confirmation_state["activation_plan"] = None
+            taxonomy_confirmation_state["prepared_activation_key"] = None
+            taxonomy_confirmation_state["activation_key"] = None
             taxonomy_run_rebuild_button.disabled = True
+            taxonomy_activate_button.disabled = True
             taxonomy_plan_field.value = format_taxonomy_plan_lines(summary)
             if summary.get("deployment_id"):
                 taxonomy_deployment_id_field.value = str(summary["deployment_id"])
@@ -1164,6 +1222,7 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
                     confirm_date_to=str(plan["date_to"]),
                     confirm_rebuild_mode=str(plan["selected_rebuild_mode"]),
                     confirm_plan_hash=str(plan["plan_hash"]),
+                    services=getattr(page, "taxonomy_rebuild_services", None),
                 )
                 operation = create_taxonomy_change_operation(
                     deployment_id=summary["deployment_id"],
@@ -1204,17 +1263,120 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
                     expected_scheduler_taxonomy_version=str(plan["current_taxonomy_version"]),
                     expected_scheduler_taxonomy_csv=str(plan["current_source_reference"]),
                 )
+                activation_plan = _activation_plan_with_current_file_hash(activation_plan)
                 taxonomy_confirmation_state["activation_plan"] = activation_plan
-                taxonomy_confirmation_state["activation_key"] = (
-                    activation_plan.get("deployment_id"),
-                    activation_plan.get("target_taxonomy_version"),
-                    activation_plan.get("required_signal_date"),
-                    activation_plan.get("safe_to_activate"),
+                taxonomy_confirmation_state["prepared_activation_key"] = (
+                    taxonomy_activation_confirmation_key(activation_plan)
                 )
+                taxonomy_confirmation_state["activation_key"] = None
                 taxonomy_status_field.value = json.dumps(activation_plan, indent=2, sort_keys=True, default=str)
                 taxonomy_activate_button.disabled = True
         except Exception as exc:
             taxonomy_status_field.value = f"Activation planning failed: {exc}"
+        if hasattr(page, "update"):
+            page.update()
+
+    def on_taxonomy_confirm_activation(_e: Any) -> None:
+        activation_plan = _activation_plan_with_current_file_hash(
+            taxonomy_confirmation_state.get("activation_plan") or {}
+        )
+        current_key = taxonomy_activation_confirmation_key(activation_plan)
+        action = taxonomy_activation_action_state(
+            orchestration_status=str(taxonomy_confirmation_state.get("orchestration_status") or ""),
+            activation_plan_status=str(activation_plan.get("activation_plan_status") or ""),
+            safe_to_activate=bool(activation_plan.get("safe_to_activate")),
+            confirmation_valid=current_key == taxonomy_confirmation_state.get("prepared_activation_key"),
+            blocking_errors=list(activation_plan.get("blocking_errors", [])),
+            operation_active=_taxonomy_operation_active(),
+        )
+        taxonomy_confirmation_state["activation_key"] = (
+            current_key if not action["activate_disabled"] else None
+        )
+        taxonomy_activate_button.disabled = action["activate_disabled"]
+        taxonomy_status_field.value = (
+            "Activation confirmation recorded for current activation plan."
+            if not action["activate_disabled"]
+            else "Activation confirmation blocked by current activation plan."
+        )
+        if hasattr(page, "update"):
+            page.update()
+
+    def on_taxonomy_activate(_e: Any) -> None:
+        try:
+            summary = taxonomy_confirmation_state.get("summary") or {}
+            plan = summary.get("plan") or {}
+            activation_plan = _activation_plan_with_current_file_hash(
+                taxonomy_confirmation_state.get("activation_plan") or {}
+            )
+            if taxonomy_confirmation_state.get("activation_key") != taxonomy_activation_confirmation_key(activation_plan):
+                taxonomy_status_field.value = "Activation blocked: activation confirmation is stale."
+            else:
+                action = taxonomy_activation_action_state(
+                    orchestration_status=str(taxonomy_confirmation_state.get("orchestration_status") or ""),
+                    activation_plan_status=str(activation_plan.get("activation_plan_status") or ""),
+                    safe_to_activate=bool(activation_plan.get("safe_to_activate")),
+                    confirmation_valid=True,
+                    blocking_errors=list(activation_plan.get("blocking_errors", [])),
+                    operation_active=_taxonomy_operation_active(),
+                )
+                if action["activate_disabled"]:
+                    taxonomy_status_field.value = "Activation blocked: guarded activation plan is not safe."
+                else:
+                    activation_summary = activate_taxonomy_change(
+                        analysis_db=analysis_db_field.value,
+                        ecosystem_code=DATACENTER_ECOSYSTEM_CODE,
+                        deployment_id=int(summary["deployment_id"]),
+                        current_taxonomy_version=str(plan["current_taxonomy_version"]),
+                        current_taxonomy_csv=str(plan["current_source_reference"]),
+                        proposed_taxonomy_version=str(plan["proposed_taxonomy_version"]),
+                        proposed_taxonomy_csv=taxonomy_proposed_csv_field.value,
+                        required_signal_date=str(plan["date_to"]),
+                        confirm_activate_taxonomy_version=str(plan["proposed_taxonomy_version"]),
+                        expected_scheduler_taxonomy_version=str(plan["proposed_taxonomy_version"]),
+                        expected_scheduler_taxonomy_csv=taxonomy_proposed_csv_field.value,
+                        scheduler_config_path=config_path,
+                        expected_current_scheduler_taxonomy_version=str(plan["current_taxonomy_version"]),
+                        expected_current_scheduler_taxonomy_csv=str(plan["current_source_reference"]),
+                        target_scheduler_taxonomy_csv=taxonomy_proposed_csv_field.value,
+                        config_backup_dir=Path(_TAXONOMY_EVIDENCE_ROOT) / "activation_config_backups",
+                    )
+                    operation = create_taxonomy_change_operation(
+                        deployment_id=summary["deployment_id"],
+                        operation_type="ACTIVATE",
+                        evidence_root=_TAXONOMY_EVIDENCE_ROOT,
+                    )
+                    write_taxonomy_operation_artifact(
+                        operation,
+                        relative_name="activation_result.json",
+                        payload=activation_summary,
+                    )
+                    complete_taxonomy_change_operation(
+                        operation,
+                        status=(
+                            "OK"
+                            if activation_summary.get("activation_apply_status") in {"ACTIVE", "NO_CHANGE"}
+                            else "FAILED"
+                        ),
+                        failed_phase=(
+                            None
+                            if activation_summary.get("activation_apply_status") in {"ACTIVE", "NO_CHANGE"}
+                            else "ACTIVATION"
+                        ),
+                    )
+                    activation_status_text = json.dumps(
+                        activation_summary,
+                        indent=2,
+                        sort_keys=True,
+                        default=str,
+                    )
+                    taxonomy_confirmation_state["activation_plan"] = None
+                    taxonomy_confirmation_state["prepared_activation_key"] = None
+                    taxonomy_confirmation_state["activation_key"] = None
+                    taxonomy_activate_button.disabled = True
+                    refresh_taxonomy_state(int(summary["deployment_id"]))
+                    taxonomy_status_field.value = activation_status_text
+        except Exception as exc:
+            taxonomy_status_field.value = f"Activation failed: {exc}"
         if hasattr(page, "update"):
             page.update()
 
@@ -1225,7 +1387,8 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
     taxonomy_resume_button = ft.ElevatedButton("Jatka epäonnistuneesta vaiheesta", disabled=True)
     taxonomy_validate_button = ft.ElevatedButton("Validoi ja viimeistele", disabled=True)
     taxonomy_plan_activation_button = ft.ElevatedButton("Suunnittele aktivointi", on_click=on_taxonomy_plan_activation, disabled=True)
-    taxonomy_activate_button = ft.ElevatedButton("Aktivoi", disabled=True)
+    taxonomy_confirm_activation_button = ft.ElevatedButton("Vahvista aktivointi", on_click=on_taxonomy_confirm_activation)
+    taxonomy_activate_button = ft.ElevatedButton("Aktivoi", on_click=on_taxonomy_activate, disabled=True)
     taxonomy_show_log_button = ft.ElevatedButton("Näytä loki", on_click=on_taxonomy_show_log)
     taxonomy_download_log_button = ft.ElevatedButton("Lataa loki", on_click=on_taxonomy_download_log)
     taxonomy_download_evidence_button = ft.ElevatedButton("Lataa evidence-paketti", on_click=on_taxonomy_download_evidence)
@@ -1278,6 +1441,7 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
                     taxonomy_resume_button,
                     taxonomy_validate_button,
                     taxonomy_plan_activation_button,
+                    taxonomy_confirm_activation_button,
                     taxonomy_activate_button,
                 ]
             ),
@@ -1337,10 +1501,12 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
     page.taxonomy_resume_button = taxonomy_resume_button
     page.taxonomy_validate_button = taxonomy_validate_button
     page.taxonomy_plan_activation_button = taxonomy_plan_activation_button
+    page.taxonomy_confirm_activation_button = taxonomy_confirm_activation_button
     page.taxonomy_activate_button = taxonomy_activate_button
     page.taxonomy_show_log_button = taxonomy_show_log_button
     page.taxonomy_download_log_button = taxonomy_download_log_button
     page.taxonomy_download_evidence_button = taxonomy_download_evidence_button
+    page.taxonomy_confirmation_state = taxonomy_confirmation_state
 
     page.add(
         ft.Tabs(

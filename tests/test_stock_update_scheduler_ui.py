@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import csv
+import hashlib
 import json
+import sqlite3
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -21,6 +24,8 @@ from dev_tools.stock_update_scheduler_ui import (
     find_datacenter_generated_reports,
     format_run_now_error_message,
     format_systemd_on_calendar,
+    taxonomy_activation_action_state,
+    taxonomy_activation_confirmation_key,
     launch_browser_url,
     list_scheduler_log_files,
     load_latest_scheduler_summary,
@@ -36,6 +41,7 @@ from dev_tools.stock_update_scheduler_ui import (
     scheduler_skip_next_run_label,
     update_systemd_timer_on_calendar,
 )
+from rawcandle.datacenter_taxonomy_replacement import ensure_taxonomy_replacement_schema
 from rawcandle.scheduler.config import (
     StockUpdateSchedulerConfig,
     read_scheduler_config,
@@ -61,6 +67,17 @@ _LEGACY_DASHBOARD_CONFIG_KEYS = {
     "datacenter_v3_reports_output_dir": "/home/kalle/projects/rawcandle/swing_reports/v3",
     "datacenter_v3_reports_taxonomy_version": "DC_TAXONOMY_FULL_V1",
 }
+
+_TAXONOMY_HEADER = [
+    "taxonomy_version",
+    "ticker",
+    "layer",
+    "subindustry",
+    "report_group_status",
+    "is_primary",
+    "role_weight",
+    "notes",
+]
 
 
 class _FakePage:
@@ -102,6 +119,132 @@ def _write_config(path: Path, *, skip_next_run: bool = False) -> None:
         ),
         encoding="utf-8",
     )
+
+
+def _write_taxonomy_csv(path: Path, version: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows = [
+        [version, "AAA", "Compute", "GPU", "CORE", 1, 1.0, ""],
+        [version, "BBB", "Power", "UPS", "EXTENDED", 1, 0.8, ""],
+    ]
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(_TAXONOMY_HEADER)
+        writer.writerows(rows)
+    return path
+
+
+def _write_taxonomy_ui_config(path: Path, *, db_path: Path, current_csv: Path) -> None:
+    watchlist = path.parent / "watchlist_test.txt"
+    watchlist.write_text("AAA\n", encoding="utf-8")
+    write_scheduler_config(
+        str(path),
+        StockUpdateSchedulerConfig(
+            enabled_markets=["usa"],
+            osakedata_db_path=str(path.parent / "osakedata_test.sqlite"),
+            analysis_db_path=str(db_path),
+            log_dir=str(path.parent / "logs"),
+            run_time="05:30",
+            timezone="Europe/Helsinki",
+            datacenter_taxonomy_csv=str(current_csv),
+            datacenter_taxonomy_version="DC_TAXONOMY_FULL_V1",
+            ec_source_layer_enabled=True,
+            ec_source_layer_ecosystem="DATACENTER",
+            ec_source_layer_taxonomy_csv=str(current_csv),
+            ec_source_layer_taxonomy_version="DC_TAXONOMY_FULL_V1",
+            ec_source_layer_watchlist=str(watchlist),
+            ec_source_layer_backup_dir=str(path.parent / "backups"),
+        ),
+    )
+
+
+def _create_ready_taxonomy_activation_db(tmp_path: Path, proposed_csv: Path) -> Path:
+    db_path = tmp_path / "analysis_test.sqlite"
+    source_hash = hashlib.sha256(proposed_csv.read_bytes()).hexdigest()
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "CREATE TABLE ec_ecosystem (ecosystem_id INTEGER PRIMARY KEY, ecosystem_code TEXT, ecosystem_name TEXT, status TEXT)"
+        )
+        conn.execute(
+            """
+            CREATE TABLE ec_taxonomy_version (
+                taxonomy_version_id INTEGER PRIMARY KEY,
+                ecosystem_id INTEGER,
+                taxonomy_version_code TEXT,
+                source_hash TEXT,
+                source_reference TEXT,
+                status TEXT,
+                is_active INTEGER,
+                active_from TEXT,
+                active_to TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE ec_pipeline_watermark (
+                ecosystem_id INTEGER,
+                pipeline_name TEXT,
+                source_table TEXT,
+                latest_signal_date TEXT,
+                status TEXT,
+                taxonomy_version_id INTEGER
+            )
+            """
+        )
+        ensure_taxonomy_replacement_schema(conn)
+        conn.execute("INSERT INTO ec_ecosystem VALUES (1, 'DATACENTER', 'Datacenter', 'ACTIVE')")
+        conn.execute(
+            "INSERT INTO ec_taxonomy_version VALUES (1, 1, 'DC_TAXONOMY_FULL_V1', '', '', 'ACTIVE', 1, '2026-01-01', NULL)"
+        )
+        conn.execute(
+            "INSERT INTO ec_taxonomy_version VALUES (2, 1, 'DC_TAXONOMY_FULL_V2', ?, ?, 'INACTIVE', 0, NULL, NULL)",
+            (source_hash, str(proposed_csv)),
+        )
+        for table, date_col in [
+            ("dc_ticker_swing_signal_daily", "signal_date"),
+            ("dc_group_swing_signal_daily", "signal_date"),
+            ("dc_group_synthetic_ohlc_daily", "ohlc_date"),
+            ("dc_group_index_daily", "index_date"),
+        ]:
+            conn.execute(f"CREATE TABLE {table} ({date_col} TEXT, taxonomy_version TEXT)")
+            conn.execute(f"INSERT INTO {table} VALUES ('2026-07-31', 'DC_TAXONOMY_FULL_V2')")
+        for table in [
+            "ec_ticker_signal_daily",
+            "ec_group_signal_daily",
+            "ec_group_synthetic_ohlc_daily",
+            "ec_group_index_daily",
+        ]:
+            conn.execute(f"CREATE TABLE {table} (signal_date TEXT, taxonomy_version_id INTEGER)")
+            conn.execute(f"INSERT INTO {table} VALUES ('2026-07-31', 2)")
+        conn.execute(
+            """
+            INSERT INTO ec_taxonomy_change_deployment (
+                ecosystem_code, previous_taxonomy_version, proposed_taxonomy_version,
+                source_reference, source_sha256, change_summary, added_ticker_count,
+                removed_ticker_count, membership_change_count, group_change_count,
+                status, rebuild_required, rebuild_start_date, dc_rebuild_status,
+                ec_rebuild_status, coverage_status, parity_status, activation_status
+            ) VALUES ('DATACENTER', 'DC_TAXONOMY_FULL_V1', 'DC_TAXONOMY_FULL_V2',
+                      ?, ?, '{}', 1, 0, 0, 0, 'READY_TO_ACTIVATE', 1,
+                      '2025-08-01', 'OK', 'OK', 'OK', 'OK', 'NOT_ACTIVE')
+            """,
+            (str(proposed_csv), source_hash),
+        )
+        conn.executemany(
+            "INSERT INTO ec_pipeline_watermark VALUES (1, ?, ?, '2026-07-31', 'OK', 2)",
+            [
+                ("TICKER_SWING_BASE", "dc_ticker_swing_signal_daily"),
+                ("GROUP_SWING_BASE", "dc_group_swing_signal_daily"),
+                ("SYNTHETIC_OHLC_BASE", "dc_group_synthetic_ohlc_daily"),
+                ("GROUP_INDEX", "dc_group_index_daily"),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return db_path
 
 
 def test_load_latest_scheduler_summary_picks_newest_by_filename_timestamp(tmp_path):
@@ -630,3 +773,123 @@ def test_config_write_read_roundtrip_through_existing_config_module(tmp_path):
     write_scheduler_config(str(path), config)
 
     assert read_scheduler_config(str(path)) == config
+
+
+def test_taxonomy_activation_button_requires_ready_guard_and_current_confirmation():
+    ready_plan = {
+        "deployment_id": 1,
+        "current_taxonomy_version": "DC_TAXONOMY_FULL_V1",
+        "proposed_taxonomy_version": "DC_TAXONOMY_FULL_V2",
+        "proposed_source_sha256": "abc",
+        "required_signal_date": "2026-07-31",
+        "current_db_taxonomy_status": "EXPECTED_CURRENT",
+        "current_scheduler_taxonomy_status": "EXPECTED_CURRENT_V1",
+        "proposed_scheduler_taxonomy_status": "VALID",
+        "scheduler_changed_keys": [
+            "datacenter_taxonomy_csv",
+            "datacenter_taxonomy_version",
+            "ec_source_layer_taxonomy_csv",
+            "ec_source_layer_taxonomy_version",
+        ],
+        "blocking_errors": [],
+        "safe_to_activate": True,
+    }
+    changed_plan = {**ready_plan, "required_signal_date": "2026-08-03"}
+    changed_csv_plan = {**ready_plan, "proposed_source_sha256": "def"}
+
+    assert taxonomy_activation_confirmation_key(ready_plan) != taxonomy_activation_confirmation_key(changed_plan)
+    assert taxonomy_activation_confirmation_key(ready_plan) != taxonomy_activation_confirmation_key(changed_csv_plan)
+    assert taxonomy_activation_action_state(
+        orchestration_status="READY_TO_ACTIVATE",
+        activation_plan_status="READY_TO_ACTIVATE",
+        safe_to_activate=True,
+        confirmation_valid=True,
+        blocking_errors=[],
+    ) == {"activate_disabled": False}
+    assert taxonomy_activation_action_state(
+        orchestration_status="READY_TO_ACTIVATE",
+        activation_plan_status="BLOCKED",
+        safe_to_activate=False,
+        confirmation_valid=True,
+        blocking_errors=["coverage is not accepted"],
+    ) == {"activate_disabled": True}
+
+
+def test_taxonomy_ui_activation_uses_guarded_backend_and_is_idempotent(tmp_path, monkeypatch):
+    current_csv = _write_taxonomy_csv(tmp_path / "active_taxonomy_v1.csv", "DC_TAXONOMY_FULL_V1")
+    proposed_csv = _write_taxonomy_csv(tmp_path / "proposed_taxonomy_v2.csv", "DC_TAXONOMY_FULL_V2")
+    db_path = _create_ready_taxonomy_activation_db(tmp_path, proposed_csv)
+    config_path = tmp_path / "scheduler_config_test.json"
+    _write_taxonomy_ui_config(config_path, db_path=db_path, current_csv=current_csv)
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui._TAXONOMY_EVIDENCE_ROOT",
+        str(tmp_path / "temp" / "datacenter_taxonomy_ui_e2e_dry_run" / "evidence"),
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
+        lambda: {
+            "installed": False,
+            "status_summary": "missing",
+            "on_calendar": None,
+            "timer_path": "x",
+            "error": None,
+        },
+    )
+
+    page = _FakePage()
+    run_app(page, str(config_path))
+    page.analysis_db_field.value = str(db_path)
+    page.taxonomy_proposed_csv_field.value = str(proposed_csv)
+    page.taxonomy_deployment_id_field.value = "1"
+    page.taxonomy_confirmation_state["summary"] = {
+        "deployment_id": 1,
+        "plan": {
+            "current_taxonomy_version": "DC_TAXONOMY_FULL_V1",
+            "current_source_reference": str(current_csv),
+            "proposed_taxonomy_version": "DC_TAXONOMY_FULL_V2",
+            "proposed_source_sha256": hashlib.sha256(proposed_csv.read_bytes()).hexdigest(),
+            "date_from": "2025-08-01",
+            "date_to": "2026-07-31",
+            "selected_rebuild_mode": "DELTA_REBUILD",
+            "plan_hash": "fixture-plan",
+        },
+    }
+
+    page.taxonomy_refresh_button.on_click(None)
+    assert page.taxonomy_plan_activation_button.disabled is False
+
+    page.taxonomy_plan_activation_button.on_click(None)
+    assert page.taxonomy_activate_button.disabled is True
+    original_proposed_csv = proposed_csv.read_bytes()
+    proposed_csv.write_bytes(original_proposed_csv + b"\n")
+    page.taxonomy_confirm_activation_button.on_click(None)
+    assert page.taxonomy_activate_button.disabled is True
+    proposed_csv.write_bytes(original_proposed_csv)
+    page.taxonomy_plan_activation_button.on_click(None)
+    page.taxonomy_confirm_activation_button.on_click(None)
+    assert page.taxonomy_activate_button.disabled is False
+
+    page.taxonomy_activate_button.on_click(None)
+    loaded = read_scheduler_config(str(config_path))
+    assert loaded.datacenter_taxonomy_version == "DC_TAXONOMY_FULL_V2"
+    assert loaded.ec_source_layer_taxonomy_version == "DC_TAXONOMY_FULL_V2"
+    assert "activation_apply_status" in page.taxonomy_status_field.value
+    assert "ACTIVE" in page.taxonomy_status_field.value
+
+    conn = sqlite3.connect(db_path)
+    try:
+        active = conn.execute(
+            "SELECT taxonomy_version_code FROM ec_taxonomy_version WHERE is_active = 1"
+        ).fetchone()[0]
+        activation_status = conn.execute(
+            "SELECT status, activation_status FROM ec_taxonomy_change_deployment WHERE taxonomy_change_id = 1"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert active == "DC_TAXONOMY_FULL_V2"
+    assert activation_status == ("ACTIVE", "ACTIVE")
+
+    page.taxonomy_plan_activation_button.on_click(None)
+    assert '"activation_plan_status": "ALREADY_ACTIVE"' in page.taxonomy_status_field.value
+    page.taxonomy_confirm_activation_button.on_click(None)
+    assert page.taxonomy_activate_button.disabled is True

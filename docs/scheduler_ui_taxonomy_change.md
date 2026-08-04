@@ -164,10 +164,46 @@ per_phase_status
 activation_readiness
 ```
 
-The UI keeps disabled placeholders for resume, validation/finalization,
-activation planning, and activation until backend-approved gates are wired for a
-specific deployment state. These actions are intentionally not inferred from UI
-counts alone.
+The UI keeps disabled placeholders for resume and validation/finalization until
+backend-approved gates are wired for those states.
+
+Activation planning is available only when backend inspection reports:
+
+```text
+normalized_orchestration_status=READY_TO_ACTIVATE
+```
+
+The activation confirmation binds to the guarded activation backend plan:
+
+```text
+deployment ID
+current taxonomy version
+proposed taxonomy version
+required signal date
+DB taxonomy status
+Scheduler taxonomy status
+proposed Scheduler taxonomy status
+expected Scheduler changed keys
+blocking errors
+safe_to_activate
+```
+
+`Aktivoi` is enabled only when:
+
+```text
+orchestration_status=READY_TO_ACTIVATE
+activation_plan_status=READY_TO_ACTIVATE
+safe_to_activate=true
+blocking_errors=[]
+activation confirmation matches the current activation plan
+no taxonomy operation is active
+```
+
+The visible activation action calls the unified guarded
+`activate_taxonomy_change` backend. It does not write taxonomy state directly.
+The backend updates the DB active taxonomy state and the four Scheduler taxonomy
+config keys only after the plan is safe, validates the scheduler transition, and
+rolls back DB/config changes on activation failure.
 
 `READY_TO_ACTIVATE` and `ACTIVE` remain backend states. Duplicate rebuild and
 activation are disabled by default unless a different proposed taxonomy is
@@ -331,5 +367,4 @@ mocked or injected rebuild services
 ```
 
 That dry-run should not touch production DB, production config, Scheduler,
-Datacenter pipeline, Stage 2, EC work, activation, cleanup, or production
-backups.
+Datacenter pipeline, Stage 2, EC work, cleanup, or production backups.
