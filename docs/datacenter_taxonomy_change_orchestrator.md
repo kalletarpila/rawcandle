@@ -69,11 +69,19 @@ The facade exposes JSON-compatible operations:
 prepare_taxonomy_change
 build_taxonomy_change_plan
 execute_taxonomy_rebuild
-finalize_ec_taxonomy_rebuild_validation delegation
+resume_taxonomy_rebuild
+validate_and_finalize_taxonomy_rebuild
 plan_taxonomy_activation
 activate_taxonomy_change
 inspect_taxonomy_change
 ```
+
+State-changing production execution uses `build_production_taxonomy_change_services`
+to bind the facade to the same Datacenter and EC rebuild backends used by the
+production scheduler/rebuild tooling. A missing service set is still a testable
+blocked state for isolated callers, but the Scheduler UI and unified run CLI now
+construct production services from `scheduler_config.json` instead of returning
+`EXECUTION_SERVICES_NOT_CONFIGURED` on the normal production path.
 
 ## CLI Facades
 
@@ -122,6 +130,15 @@ python3 -m rawcandle.cli.run_datacenter_taxonomy_change \
   --format json
 ```
 
+Resume uses the same guarded arguments plus:
+
+```bash
+python3 -m rawcandle.cli.run_datacenter_taxonomy_change \
+  <same guarded arguments> \
+  --resume \
+  --format json
+```
+
 Activation facade:
 
 ```bash
@@ -130,6 +147,11 @@ python3 -m rawcandle.cli.activate_datacenter_taxonomy_change ...
 
 The activation facade delegates to the existing guarded activation backend. It
 does not add a second activation implementation.
+
+State-changing CLI facades create a durable taxonomy operation log entry before
+execution and acquire a cross-process taxonomy operation lock. The lock prevents
+concurrent rebuild/resume/activation attempts and can recover a stale lock left
+by a dead process.
 
 ## Deployment Lifecycle
 
@@ -396,6 +418,12 @@ scheduler_guard_restored
 
 The full production DB backup is not restored automatically by the orchestrator.
 
+Validation-only recovery is available when rebuilt facts already exist but
+cleanup, watermark finalization, or rebuild evidence finalization did not reach
+`READY_TO_ACTIVATE`. It applies the existing guarded EC cleanup when safe and
+then calls the existing whole-range validation/evidence/watermark finalizer
+without rerunning DC or EC loaders.
+
 ## Backup Policy
 
 The policy is:
@@ -431,3 +459,8 @@ documented in:
 ```text
 docs/scheduler_ui_taxonomy_change.md
 ```
+
+The UI rebuild, resume, validate/finalize, and activation actions are guarded by
+the same operation lock used by the CLI facades. Rebuild and resume use the
+production service factory by default, while tests can still inject service
+doubles through the page object.

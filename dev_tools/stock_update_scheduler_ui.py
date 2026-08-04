@@ -34,19 +34,24 @@ from rawcandle.datacenter_taxonomy_change_orchestrator import (
     REBUILD_MODE_DELTA,
     REBUILD_MODE_FULL,
     activate_taxonomy_change,
+    build_production_taxonomy_change_services,
     execute_taxonomy_rebuild,
     inspect_taxonomy_change,
     plan_taxonomy_activation,
     prepare_taxonomy_change,
+    resume_taxonomy_rebuild,
+    validate_and_finalize_taxonomy_rebuild,
 )
 from rawcandle.datacenter_taxonomy_operation_log import (
     complete_taxonomy_change_operation,
     create_taxonomy_change_operation,
     inspect_taxonomy_change_artifacts,
+    inspect_taxonomy_operation_lock,
     list_taxonomy_change_operations,
     prepare_taxonomy_change_evidence_package,
     prepare_taxonomy_change_log_download,
     read_taxonomy_change_log,
+    taxonomy_operation_lock_context,
     write_taxonomy_operation_artifact,
 )
 
@@ -1024,7 +1029,20 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
 
     def _taxonomy_operation_active() -> bool:
         thread = getattr(page, "taxonomy_job_thread", None)
-        return bool(thread is not None and thread.is_alive())
+        if thread is not None and thread.is_alive():
+            return True
+        lock = inspect_taxonomy_operation_lock(evidence_root=_TAXONOMY_EVIDENCE_ROOT)
+        return bool(lock.get("lock_active") and not lock.get("stale"))
+
+    def _taxonomy_services(*, resume: bool = False) -> Any:
+        injected = getattr(page, "taxonomy_rebuild_services", None)
+        if injected is not None:
+            return injected
+        return build_production_taxonomy_change_services(
+            scheduler_config_path=config_path,
+            evidence_root=_TAXONOMY_EVIDENCE_ROOT,
+            resume=resume,
+        )
 
     def _activation_plan_with_current_file_hash(plan: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -1051,11 +1069,17 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
                 ]
             )
             taxonomy_confirmation_state["orchestration_status"] = normalized_status
+            safe_next_action = str(inspection.get("safe_next_action", ""))
             taxonomy_plan_activation_button.disabled = normalized_status != "READY_TO_ACTIVATE"
+            taxonomy_resume_button.disabled = safe_next_action != "resume_from_failed_phase"
+            taxonomy_validate_button.disabled = safe_next_action != "validation_only_recovery"
             taxonomy_activate_button.disabled = True
             if normalized_status != "READY_TO_ACTIVATE":
                 taxonomy_confirmation_state["prepared_activation_key"] = None
                 taxonomy_confirmation_state["activation_key"] = None
+        else:
+            taxonomy_resume_button.disabled = True
+            taxonomy_validate_button.disabled = True
         taxonomy_operations_column.controls = [
             ft.Text(
                 f"{operation.get('operation_type')} {operation.get('started_at_utc')} "
@@ -1207,28 +1231,34 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
             if taxonomy_confirmation_state.get("plan_key") != taxonomy_confirmation_key(plan):
                 taxonomy_status_field.value = "Rebuild blocked: plan confirmation is stale."
             else:
-                run_summary = execute_taxonomy_rebuild(
-                    analysis_db=analysis_db_field.value,
-                    deployment_id=int(summary["deployment_id"]),
-                    proposed_taxonomy_csv=taxonomy_proposed_csv_field.value,
-                    date_to=str(plan["date_to"]),
-                    scheduler_config_path=config_path,
-                    watchlist_path=config.ec_source_layer_watchlist,
-                    evidence_root=_TAXONOMY_EVIDENCE_ROOT,
-                    confirm_deployment_id=int(summary["deployment_id"]),
-                    confirm_proposed_taxonomy_version=str(plan["proposed_taxonomy_version"]),
-                    confirm_proposed_source_hash=str(plan["proposed_source_sha256"]),
-                    confirm_date_from=str(plan["date_from"]),
-                    confirm_date_to=str(plan["date_to"]),
-                    confirm_rebuild_mode=str(plan["selected_rebuild_mode"]),
-                    confirm_plan_hash=str(plan["plan_hash"]),
-                    services=getattr(page, "taxonomy_rebuild_services", None),
-                )
                 operation = create_taxonomy_change_operation(
                     deployment_id=summary["deployment_id"],
                     operation_type="REBUILD",
                     evidence_root=_TAXONOMY_EVIDENCE_ROOT,
                 )
+                with taxonomy_operation_lock_context(
+                    deployment_id=summary["deployment_id"],
+                    operation_type="REBUILD",
+                    operation_id=operation.operation_id,
+                    evidence_root=_TAXONOMY_EVIDENCE_ROOT,
+                ):
+                    run_summary = execute_taxonomy_rebuild(
+                        analysis_db=analysis_db_field.value,
+                        deployment_id=int(summary["deployment_id"]),
+                        proposed_taxonomy_csv=taxonomy_proposed_csv_field.value,
+                        date_to=str(plan["date_to"]),
+                        scheduler_config_path=config_path,
+                        watchlist_path=config.ec_source_layer_watchlist,
+                        evidence_root=_TAXONOMY_EVIDENCE_ROOT,
+                        confirm_deployment_id=int(summary["deployment_id"]),
+                        confirm_proposed_taxonomy_version=str(plan["proposed_taxonomy_version"]),
+                        confirm_proposed_source_hash=str(plan["proposed_source_sha256"]),
+                        confirm_date_from=str(plan["date_from"]),
+                        confirm_date_to=str(plan["date_to"]),
+                        confirm_rebuild_mode=str(plan["selected_rebuild_mode"]),
+                        confirm_plan_hash=str(plan["plan_hash"]),
+                        services=_taxonomy_services(),
+                    )
                 write_taxonomy_operation_artifact(operation, relative_name="run_summary.json", payload=run_summary)
                 complete_taxonomy_change_operation(
                     operation,
@@ -1240,6 +1270,95 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
                 refresh_taxonomy_state(int(summary["deployment_id"]))
         except Exception as exc:
             taxonomy_status_field.value = f"Rebuild failed: {exc}"
+        if hasattr(page, "update"):
+            page.update()
+
+    def on_taxonomy_resume(_e: Any) -> None:
+        try:
+            summary = taxonomy_confirmation_state.get("summary") or {}
+            plan = summary.get("plan") or {}
+            deployment_id = int(summary.get("deployment_id") or _selected_deployment_id() or 0)
+            if not deployment_id or not plan:
+                taxonomy_status_field.value = "Resume blocked: current UI session has no prepared plan."
+            else:
+                operation = create_taxonomy_change_operation(
+                    deployment_id=deployment_id,
+                    operation_type="RESUME",
+                    evidence_root=_TAXONOMY_EVIDENCE_ROOT,
+                )
+                with taxonomy_operation_lock_context(
+                    deployment_id=deployment_id,
+                    operation_type="RESUME",
+                    operation_id=operation.operation_id,
+                    evidence_root=_TAXONOMY_EVIDENCE_ROOT,
+                ):
+                    run_summary = resume_taxonomy_rebuild(
+                        analysis_db=analysis_db_field.value,
+                        deployment_id=deployment_id,
+                        proposed_taxonomy_csv=taxonomy_proposed_csv_field.value,
+                        date_to=str(plan["date_to"]),
+                        scheduler_config_path=config_path,
+                        watchlist_path=config.ec_source_layer_watchlist,
+                        evidence_root=_TAXONOMY_EVIDENCE_ROOT,
+                        confirm_deployment_id=deployment_id,
+                        confirm_proposed_taxonomy_version=str(plan["proposed_taxonomy_version"]),
+                        confirm_proposed_source_hash=str(plan["proposed_source_sha256"]),
+                        confirm_date_from=str(plan["date_from"]),
+                        confirm_date_to=str(plan["date_to"]),
+                        confirm_rebuild_mode=str(plan["selected_rebuild_mode"]),
+                        confirm_plan_hash=str(plan["plan_hash"]),
+                        services=_taxonomy_services(resume=True),
+                    )
+                write_taxonomy_operation_artifact(operation, relative_name="resume_summary.json", payload=run_summary)
+                complete_taxonomy_change_operation(
+                    operation,
+                    status="OK" if run_summary.get("run_status") in {"READY_TO_ACTIVATE", "NO_CHANGE_READY_TO_ACTIVATE", "ALREADY_ACTIVE"} else "FAILED",
+                    failed_phase=run_summary.get("failed_phase"),
+                    resume_from_phase=run_summary.get("resume_from_phase"),
+                )
+                taxonomy_status_field.value = json.dumps(run_summary, indent=2, sort_keys=True, default=str)
+                refresh_taxonomy_state(deployment_id)
+        except Exception as exc:
+            taxonomy_status_field.value = f"Resume failed: {exc}"
+        if hasattr(page, "update"):
+            page.update()
+
+    def on_taxonomy_validate_finalize(_e: Any) -> None:
+        try:
+            summary = taxonomy_confirmation_state.get("summary") or {}
+            plan = summary.get("plan") or {}
+            deployment_id = int(summary.get("deployment_id") or _selected_deployment_id() or 0)
+            if not deployment_id or not plan:
+                taxonomy_status_field.value = "Validation blocked: current UI session has no prepared plan."
+            else:
+                operation = create_taxonomy_change_operation(
+                    deployment_id=deployment_id,
+                    operation_type="VALIDATE_FINALIZE",
+                    evidence_root=_TAXONOMY_EVIDENCE_ROOT,
+                )
+                with taxonomy_operation_lock_context(
+                    deployment_id=deployment_id,
+                    operation_type="VALIDATE_FINALIZE",
+                    operation_id=operation.operation_id,
+                    evidence_root=_TAXONOMY_EVIDENCE_ROOT,
+                ):
+                    finalize_summary = validate_and_finalize_taxonomy_rebuild(
+                        analysis_db=analysis_db_field.value,
+                        deployment_id=deployment_id,
+                        proposed_taxonomy_csv=taxonomy_proposed_csv_field.value,
+                        date_to=str(plan["date_to"]),
+                        scheduler_config_path=config_path,
+                    )
+                write_taxonomy_operation_artifact(operation, relative_name="finalize_summary.json", payload=finalize_summary)
+                complete_taxonomy_change_operation(
+                    operation,
+                    status="OK" if finalize_summary.get("finalize_status") == "READY_TO_ACTIVATE" else "FAILED",
+                    failed_phase=None if finalize_summary.get("finalize_status") == "READY_TO_ACTIVATE" else "VALIDATING",
+                )
+                taxonomy_status_field.value = json.dumps(finalize_summary, indent=2, sort_keys=True, default=str)
+                refresh_taxonomy_state(deployment_id)
+        except Exception as exc:
+            taxonomy_status_field.value = f"Validation failed: {exc}"
         if hasattr(page, "update"):
             page.update()
 
@@ -1384,8 +1503,8 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
     taxonomy_refresh_button = ft.ElevatedButton("Päivitä tila", on_click=on_taxonomy_refresh)
     taxonomy_confirm_plan_button = ft.ElevatedButton("Vahvista suunnitelma", on_click=on_taxonomy_confirm_plan)
     taxonomy_run_rebuild_button = ft.ElevatedButton("Käynnistä rebuild", on_click=on_taxonomy_run_rebuild, disabled=True)
-    taxonomy_resume_button = ft.ElevatedButton("Jatka epäonnistuneesta vaiheesta", disabled=True)
-    taxonomy_validate_button = ft.ElevatedButton("Validoi ja viimeistele", disabled=True)
+    taxonomy_resume_button = ft.ElevatedButton("Jatka epäonnistuneesta vaiheesta", on_click=on_taxonomy_resume, disabled=True)
+    taxonomy_validate_button = ft.ElevatedButton("Validoi ja viimeistele", on_click=on_taxonomy_validate_finalize, disabled=True)
     taxonomy_plan_activation_button = ft.ElevatedButton("Suunnittele aktivointi", on_click=on_taxonomy_plan_activation, disabled=True)
     taxonomy_confirm_activation_button = ft.ElevatedButton("Vahvista aktivointi", on_click=on_taxonomy_confirm_activation)
     taxonomy_activate_button = ft.ElevatedButton("Aktivoi", on_click=on_taxonomy_activate, disabled=True)

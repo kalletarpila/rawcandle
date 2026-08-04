@@ -8,13 +8,17 @@ import pytest
 
 from rawcandle.datacenter_taxonomy_operation_log import (
     append_taxonomy_operation_log,
+    acquire_taxonomy_operation_lock,
     complete_taxonomy_change_operation,
     create_taxonomy_change_operation,
+    inspect_taxonomy_operation_lock,
     inspect_taxonomy_change_artifacts,
     list_taxonomy_change_operations,
     prepare_taxonomy_change_evidence_package,
     prepare_taxonomy_change_log_download,
     read_taxonomy_change_log,
+    release_taxonomy_operation_lock,
+    taxonomy_operation_lock_context,
     write_taxonomy_operation_artifact,
 )
 
@@ -63,6 +67,58 @@ def test_failed_and_resumed_taxonomy_operations_keep_separate_logs(tmp_path):
 
     assert {operation["operation_type"] for operation in operations} == {"REBUILD", "RESUME"}
     assert len({operation["primary_log_path"] for operation in operations}) == 2
+
+
+def test_taxonomy_operation_lock_blocks_concurrent_writer_and_releases(tmp_path):
+    root = tmp_path / "repo" / "temp" / "datacenter_taxonomy_changes"
+    lock = acquire_taxonomy_operation_lock(
+        deployment_id=7,
+        operation_type="REBUILD",
+        operation_id="op1",
+        evidence_root=root,
+    )
+
+    active = inspect_taxonomy_operation_lock(evidence_root=root)
+    assert active["lock_active"] is True
+    assert active["metadata"]["operation_id"] == "op1"
+    with pytest.raises(RuntimeError):
+        acquire_taxonomy_operation_lock(
+            deployment_id=7,
+            operation_type="RESUME",
+            operation_id="op2",
+            evidence_root=root,
+        )
+
+    release_taxonomy_operation_lock(lock)
+    assert inspect_taxonomy_operation_lock(evidence_root=root)["lock_active"] is False
+
+
+def test_taxonomy_operation_lock_recovers_dead_pid(tmp_path):
+    root = tmp_path / "repo" / "temp" / "datacenter_taxonomy_changes"
+    root.mkdir(parents=True)
+    lock_path = root / "taxonomy_operation.lock"
+    lock_path.write_text(
+        json.dumps(
+            {
+                "deployment_id": "7",
+                "operation_type": "REBUILD",
+                "operation_id": "dead",
+                "acquired_at_utc": "2026-01-01T000000Z",
+                "pid": 99999999,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with taxonomy_operation_lock_context(
+        deployment_id=7,
+        operation_type="RESUME",
+        operation_id="op2",
+        evidence_root=root,
+    ) as lock:
+        assert lock.operation_id == "op2"
+
+    assert inspect_taxonomy_operation_lock(evidence_root=root)["lock_active"] is False
 
 
 def test_taxonomy_log_download_and_bounded_read_use_operation_lookup(tmp_path):

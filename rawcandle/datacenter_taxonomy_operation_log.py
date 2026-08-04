@@ -6,10 +6,11 @@ import os
 import shutil
 import uuid
 import zipfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -18,6 +19,7 @@ PRIMARY_LOG_NAME = "taxonomy_change.log"
 OPERATION_MANIFEST_NAME = "operation.json"
 ARTIFACT_MANIFEST_NAME = "artifact_manifest.json"
 PACKAGE_MANIFEST_NAME = "package_manifest.json"
+LOCK_FILE_NAME = "taxonomy_operation.lock"
 MAX_EVIDENCE_PACKAGE_BYTES = 50 * 1024 * 1024
 EXCLUDED_SUFFIXES = {".db", ".sqlite", ".sqlite3", ".wal", ".shm"}
 EXCLUDED_NAME_PARTS = {"backup", "scheduler_config"}
@@ -53,6 +55,26 @@ class TaxonomyOperation:
         }
 
 
+@dataclass(frozen=True)
+class TaxonomyOperationLock:
+    lock_path: str
+    deployment_id: str
+    operation_type: str
+    operation_id: str | None
+    acquired_at_utc: str
+    pid: int
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "lock_path": self.lock_path,
+            "deployment_id": self.deployment_id,
+            "operation_type": self.operation_type,
+            "operation_id": self.operation_id,
+            "acquired_at_utc": self.acquired_at_utc,
+            "pid": self.pid,
+        }
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")
 
@@ -81,6 +103,111 @@ def _deployment_dir(deployment_id: str | int, *, root: str | Path | None = None)
     if not safe_id.replace("_", "").replace("-", "").isalnum():
         raise ValueError("invalid deployment_id")
     return _approved_root(root) / f"deployment_{safe_id}"
+
+
+def _lock_path(*, evidence_root: str | Path | None = None) -> Path:
+    return _approved_root(evidence_root) / LOCK_FILE_NAME
+
+
+def _pid_is_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def inspect_taxonomy_operation_lock(
+    *,
+    evidence_root: str | Path | None = None,
+) -> dict[str, Any]:
+    path = _lock_path(evidence_root=evidence_root)
+    if not path.exists():
+        return {
+            "lock_active": False,
+            "lock_path": str(path),
+            "metadata": None,
+            "stale": False,
+        }
+    try:
+        metadata = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        metadata = {"read_error": str(exc)}
+    pid = int(metadata.get("pid") or 0) if isinstance(metadata, dict) else 0
+    stale = not _pid_is_alive(pid)
+    return {
+        "lock_active": True,
+        "lock_path": str(path),
+        "metadata": metadata,
+        "stale": stale,
+    }
+
+
+def acquire_taxonomy_operation_lock(
+    *,
+    deployment_id: str | int,
+    operation_type: str,
+    operation_id: str | None = None,
+    evidence_root: str | Path | None = None,
+) -> TaxonomyOperationLock:
+    path = _lock_path(evidence_root=evidence_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    metadata = {
+        "deployment_id": str(deployment_id),
+        "operation_type": operation_type,
+        "operation_id": operation_id,
+        "acquired_at_utc": utc_now(),
+        "pid": os.getpid(),
+    }
+    try:
+        fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        current = inspect_taxonomy_operation_lock(evidence_root=evidence_root)
+        if current.get("stale"):
+            path.unlink(missing_ok=True)
+            fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        else:
+            raise RuntimeError(f"taxonomy operation lock is active: {path}")
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(metadata, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    return TaxonomyOperationLock(lock_path=str(path), **metadata)
+
+
+def release_taxonomy_operation_lock(lock: TaxonomyOperationLock) -> None:
+    path = Path(lock.lock_path)
+    if not path.exists():
+        return
+    try:
+        metadata = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        metadata = {}
+    if metadata.get("pid") == lock.pid and metadata.get("operation_id") == lock.operation_id:
+        path.unlink(missing_ok=True)
+
+
+@contextmanager
+def taxonomy_operation_lock_context(
+    *,
+    deployment_id: str | int,
+    operation_type: str,
+    operation_id: str | None = None,
+    evidence_root: str | Path | None = None,
+) -> Iterator[TaxonomyOperationLock]:
+    lock = acquire_taxonomy_operation_lock(
+        deployment_id=deployment_id,
+        operation_type=operation_type,
+        operation_id=operation_id,
+        evidence_root=evidence_root,
+    )
+    try:
+        yield lock
+    finally:
+        release_taxonomy_operation_lock(lock)
 
 
 def _resolve_under_root(path: str | Path, root: Path) -> Path:

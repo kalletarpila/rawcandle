@@ -4,11 +4,14 @@ import argparse
 import hashlib
 import json
 import sqlite3
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from analysis.datacenter_indices.swing_pipeline_orchestrator import run_datacenter_swing_pipeline
 from analysis.datacenter_indices.taxonomy import DatacenterTaxonomyRow, load_datacenter_taxonomy_csv
+from rawcandle.ec_taxonomy_full_rebuild_orchestrator import run_ec_taxonomy_full_rebuild
 from rawcandle.datacenter_taxonomy_replacement import (
     CANONICAL_DC_FACT_TABLES,
     CANONICAL_EC_FACT_TABLES,
@@ -27,6 +30,7 @@ from rawcandle.datacenter_taxonomy_replacement import (
     summarize_taxonomy_csv,
 )
 from rawcandle.scheduler.config import read_scheduler_config, validate_scheduler_config, write_scheduler_config
+from rawcandle.scheduler.runner import read_scheduler_status, _resolve_datacenter_post_step_config
 
 
 REBUILD_MODE_FULL = "FULL_REBUILD"
@@ -74,6 +78,155 @@ class TaxonomyChangeServices:
     ensure_backup: Callable[..., dict[str, object]] | None = None
     run_dc_rebuild: Callable[..., dict[str, object]] | None = None
     run_ec_rebuild: Callable[..., dict[str, object]] | None = None
+
+
+def _utc_operation_timestamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def build_production_taxonomy_change_services(
+    *,
+    scheduler_config_path: str | Path,
+    evidence_root: str | Path = "temp",
+    resume: bool = False,
+    dc_pipeline_runner: Callable[..., dict[str, object]] = run_datacenter_swing_pipeline,
+    ec_rebuild_runner: Callable[..., dict[str, object]] = run_ec_taxonomy_full_rebuild,
+) -> TaxonomyChangeServices:
+    config_path = str(scheduler_config_path)
+    previous_skip_next_run: list[bool | None] = [None]
+    backup_summary: dict[str, object] = {}
+
+    def _set_scheduler_guard(*, enabled: bool) -> dict[str, object]:
+        config = read_scheduler_config(config_path)
+        if previous_skip_next_run[0] is None:
+            previous_skip_next_run[0] = bool(config.skip_next_run)
+        config.skip_next_run = True if enabled else bool(previous_skip_next_run[0])
+        write_scheduler_config(config_path, config)
+        return {
+            "status": "OK",
+            "guard_enabled": enabled,
+            "skip_next_run": config.skip_next_run,
+            "restored_previous_value": (not enabled),
+        }
+
+    def _verify_active_writer(**_kwargs: object) -> dict[str, object]:
+        config = read_scheduler_config(config_path)
+        status = read_scheduler_status(config.log_dir)
+        if status and bool(status.get("is_running")):
+            return {
+                "status": "ACTIVE_WRITER",
+                "scheduler_status": status,
+            }
+        return {
+            "status": "NO_ACTIVE_WRITER",
+            "scheduler_status": status,
+        }
+
+    def _ensure_backup(*, deployment_id: int, **_kwargs: object) -> dict[str, object]:
+        if backup_summary:
+            return {"status": "OK", "backup_reused": True, **backup_summary}
+        config = read_scheduler_config(config_path)
+        backup_dir = Path(config.ec_source_layer_backup_dir or evidence_root) / "taxonomy_change_backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        source_db = Path(config.analysis_db_path)
+        backup_path = backup_dir / (
+            f"analysis_taxonomy_change_{deployment_id}_{_utc_operation_timestamp()}.sqlite"
+        )
+        src = sqlite3.connect(str(source_db))
+        try:
+            dst = sqlite3.connect(str(backup_path))
+            try:
+                src.backup(dst)
+            finally:
+                dst.close()
+        finally:
+            src.close()
+        backup_summary.update(
+            {
+                "backup_path": str(backup_path),
+                "backup_sha256": _sha256(backup_path),
+                "backup_mode": "SQLITE_BACKUP",
+            }
+        )
+        return {"status": "OK", "backup_reused": False, **backup_summary}
+
+    def _run_dc_rebuild(*, plan: dict[str, object], **_kwargs: object) -> dict[str, object]:
+        config = read_scheduler_config(config_path)
+        resolved = _resolve_datacenter_post_step_config("usa", config)
+        if resolved is None:
+            return {"status": "FAILED", "error": "Datacenter post-step config is unavailable"}
+        expected = dict(plan.get("expected_counts") or {})
+        result = dc_pipeline_runner(
+            price_db=Path(config.osakedata_db_path),
+            analysis_db=Path(config.analysis_db_path),
+            taxonomy_csv=Path(str(plan["proposed_source_reference"])),
+            taxonomy_version=str(plan["proposed_taxonomy_version"]),
+            market=resolved.market,
+            signal_date=str(plan["date_to"]),
+            start_date=str(plan["date_from"]),
+            index_base_date=resolved.index_base_date,
+            output_dir=Path(resolved.output_dir),
+            expected_ticker_count=int(expected.get("ticker_rows") or resolved.expected_ticker_count),
+            expected_group_count=int(expected.get("group_rows") or resolved.expected_group_count),
+            expected_synthetic_ohlc_count=int(
+                expected.get("synthetic_ohlc_rows") or resolved.expected_synthetic_ohlc_count
+            ),
+            watchlist_file=Path(config.ec_source_layer_watchlist or resolved.watchlist_file),
+            skip_reports=True,
+            windows_report_copy_enabled=False,
+            no_technical_relevance=True,
+            stage2_incremental=False,
+        )
+        summary = dict(result.get("summary") or {})
+        status = "OK" if summary.get("pipeline_status") == "OK" else "FAILED"
+        return {
+            "status": status,
+            "pipeline_status": summary.get("pipeline_status"),
+            "audit_validation_status": summary.get("audit_validation_status"),
+            "summary": summary,
+        }
+
+    def _run_ec_rebuild(*, plan: dict[str, object], **_kwargs: object) -> dict[str, object]:
+        config = read_scheduler_config(config_path)
+        existing_backup_path = str(backup_summary.get("backup_path") or "")
+        result = ec_rebuild_runner(
+            db_path=config.analysis_db_path,
+            ecosystem_code=str(plan["ecosystem_code"]),
+            taxonomy_version_code=str(plan["proposed_taxonomy_version"]),
+            taxonomy_csv_path=str(plan["proposed_source_reference"]),
+            watchlist_path=str(config.ec_source_layer_watchlist or ""),
+            deployment_id=int(plan["deployment_id"]),
+            date_from=str(plan["date_from"]),
+            date_to=str(plan["date_to"]),
+            backup_dir=str(config.ec_source_layer_backup_dir or Path(evidence_root) / "backups"),
+            evidence_output_root=str(Path(evidence_root) / "ec_taxonomy_full_rebuild"),
+            confirm_db=config.analysis_db_path,
+            confirm_ecosystem=str(plan["ecosystem_code"]),
+            confirm_taxonomy_version=str(plan["proposed_taxonomy_version"]),
+            confirm_deployment_id=int(plan["deployment_id"]),
+            confirm_date_from=str(plan["date_from"]),
+            confirm_date_to=str(plan["date_to"]),
+            existing_backup_path=existing_backup_path or None,
+            confirm_existing_backup_path=existing_backup_path or None,
+            expected_active_taxonomy_version=str(plan["current_taxonomy_version"]),
+            scheduler_config_path=config_path,
+            resume=resume,
+        )
+        return {
+            "status": "OK" if result.get("overall_status") == "REBUILD_COMPLETED" else "FAILED",
+            "overall_status": result.get("overall_status"),
+            "retry_required": result.get("retry_required"),
+            "watermark_finalization_performed": result.get("watermark_finalization_performed"),
+            "summary": result,
+        }
+
+    return TaxonomyChangeServices(
+        set_scheduler_guard=_set_scheduler_guard,
+        verify_active_writer=_verify_active_writer,
+        ensure_backup=_ensure_backup,
+        run_dc_rebuild=_run_dc_rebuild,
+        run_ec_rebuild=_run_ec_rebuild,
+    )
 
 
 def _sha256(path: str | Path) -> str:
@@ -1178,9 +1331,131 @@ def execute_taxonomy_rebuild(
             "cleanup_plan": cleanup,
             "validation": validation,
         }
+    except Exception as exc:
+        return _failure(
+            failed_phase="REBUILDING",
+            failure_code="PHASE_FAILED",
+            failure_message=str(exc),
+            completed_phases=completed,
+            resume_from_phase="REBUILDING",
+            scheduler_guard_restored=True,
+        )
     finally:
         if services.set_scheduler_guard is not None:
             services.set_scheduler_guard(enabled=False)
+
+
+def resume_taxonomy_rebuild(
+    *,
+    analysis_db: str | Path,
+    deployment_id: int,
+    proposed_taxonomy_csv: str | Path,
+    date_to: str,
+    scheduler_config_path: str | Path | None = None,
+    watchlist_path: str | Path | None = None,
+    evidence_root: str | Path = "temp",
+    confirm_deployment_id: int,
+    confirm_proposed_taxonomy_version: str,
+    confirm_proposed_source_hash: str,
+    confirm_date_from: str,
+    confirm_date_to: str,
+    confirm_rebuild_mode: str,
+    confirm_plan_hash: str,
+    services: TaxonomyChangeServices | None = None,
+) -> dict[str, object]:
+    if services is None and scheduler_config_path is not None:
+        services = build_production_taxonomy_change_services(
+            scheduler_config_path=scheduler_config_path,
+            evidence_root=evidence_root,
+            resume=True,
+        )
+    summary = execute_taxonomy_rebuild(
+        analysis_db=analysis_db,
+        deployment_id=deployment_id,
+        proposed_taxonomy_csv=proposed_taxonomy_csv,
+        date_to=date_to,
+        scheduler_config_path=scheduler_config_path,
+        watchlist_path=watchlist_path,
+        evidence_root=evidence_root,
+        confirm_deployment_id=confirm_deployment_id,
+        confirm_proposed_taxonomy_version=confirm_proposed_taxonomy_version,
+        confirm_proposed_source_hash=confirm_proposed_source_hash,
+        confirm_date_from=confirm_date_from,
+        confirm_date_to=confirm_date_to,
+        confirm_rebuild_mode=confirm_rebuild_mode,
+        confirm_plan_hash=confirm_plan_hash,
+        services=services,
+    )
+    return {"resume_attempted": True, **summary}
+
+
+def validate_and_finalize_taxonomy_rebuild(
+    *,
+    analysis_db: str | Path,
+    deployment_id: int,
+    proposed_taxonomy_csv: str | Path,
+    date_to: str,
+    scheduler_config_path: str | Path | None = None,
+) -> dict[str, object]:
+    inspection = inspect_taxonomy_change(
+        analysis_db=analysis_db,
+        deployment_id=deployment_id,
+        scheduler_config_path=scheduler_config_path,
+    )
+    deployment = inspection["deployment"]
+    current_version = str(deployment["previous_taxonomy_version"])
+    cleanup = plan_ec_taxonomy_replacement_cleanup(
+        db=analysis_db,
+        ecosystem=str(deployment["ecosystem_code"]),
+        target_taxonomy_version=str(deployment["proposed_taxonomy_version"]),
+        deployment_id=deployment_id,
+        date_from=str(deployment["rebuild_start_date"]),
+        date_to=date_to,
+        scheduler_config=scheduler_config_path,
+        expected_scheduler_taxonomy_version=current_version,
+    )
+    cleanup_apply: dict[str, object] = {"cleanup_apply_status": "NOT_RUN"}
+    if cleanup.get("safe_to_apply"):
+        cleanup_apply = apply_ec_taxonomy_replacement_cleanup(
+            db=analysis_db,
+            ecosystem=str(deployment["ecosystem_code"]),
+            target_taxonomy_version=str(deployment["proposed_taxonomy_version"]),
+            deployment_id=deployment_id,
+            date_from=str(deployment["rebuild_start_date"]),
+            date_to=date_to,
+            confirm_db=analysis_db,
+            confirm_ecosystem=str(deployment["ecosystem_code"]),
+            confirm_target_taxonomy_version=str(deployment["proposed_taxonomy_version"]),
+            confirm_deployment_id=deployment_id,
+            confirm_date_from=str(deployment["rebuild_start_date"]),
+            confirm_date_to=date_to,
+            confirm_delete_candidate_hash=str(cleanup["delete_candidate_hash"]),
+            scheduler_config=scheduler_config_path,
+            expected_scheduler_taxonomy_version=current_version,
+            invocation_source="UNIFIED_TAXONOMY_CHANGE_VALIDATE_FINALIZE",
+        )
+    validation = finalize_ec_taxonomy_rebuild_validation(
+        db=analysis_db,
+        ecosystem=str(deployment["ecosystem_code"]),
+        target_taxonomy_version=str(deployment["proposed_taxonomy_version"]),
+        taxonomy_csv=proposed_taxonomy_csv,
+        deployment_id=deployment_id,
+        date_from=str(deployment["rebuild_start_date"]),
+        date_to=date_to,
+        finalize_watermarks=True,
+        update_deployment_evidence=True,
+    )
+    return {
+        "finalize_status": (
+            "READY_TO_ACTIVATE"
+            if validation.get("finalization_status") == "OK"
+            else "VALIDATION_FAILED"
+        ),
+        "cleanup_plan": cleanup,
+        "cleanup_apply": cleanup_apply,
+        "validation": validation,
+        "activation_executed": False,
+    }
 
 
 def _current_source_from_db(
@@ -1560,6 +1835,7 @@ def build_run_parser() -> argparse.ArgumentParser:
     parser.add_argument("--confirm-date-to", required=True)
     parser.add_argument("--confirm-rebuild-mode", required=True, choices=("full", "delta", REBUILD_MODE_FULL, REBUILD_MODE_DELTA))
     parser.add_argument("--confirm-plan-hash", required=True)
+    parser.add_argument("--resume", action="store_true")
     parser.add_argument("--format", choices=("json",), default="json")
     return parser
 

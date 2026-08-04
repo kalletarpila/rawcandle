@@ -9,6 +9,7 @@ from rawcandle.datacenter_taxonomy_change_orchestrator import (
     REBUILD_MODE_DELTA,
     REBUILD_MODE_FULL,
     TaxonomyChangeServices,
+    build_production_taxonomy_change_services,
     build_taxonomy_change_plan,
     build_taxonomy_diff,
     copy_delta_carry_forward,
@@ -18,6 +19,7 @@ from rawcandle.datacenter_taxonomy_change_orchestrator import (
 )
 from rawcandle.ec_datacenter_taxonomy_loader import load_datacenter_taxonomy_to_ec_sidecar
 from rawcandle.ec_sidecar_migration import apply_ec_sidecar_migration
+from rawcandle.scheduler.runner import write_scheduler_status
 from rawcandle.scheduler.config import StockUpdateSchedulerConfig, write_scheduler_config
 
 
@@ -407,6 +409,87 @@ def test_run_calls_injected_rebuild_services_in_order(tmp_path, monkeypatch) -> 
     assert summary["run_status"] == "READY_TO_ACTIVATE"
     assert summary["activation_executed"] is False
     assert calls == ["guard:True", "writer", "backup", "dc", "ec", "guard:False"]
+
+
+def test_production_taxonomy_services_guard_backup_and_rebuild_runners(tmp_path) -> None:
+    db_path, config_path, _proposed_csv, prepared = _prepared(tmp_path)
+    config_before = StockUpdateSchedulerConfig(
+        enabled_markets=["usa"],
+        osakedata_db_path=str(tmp_path / "prices.db"),
+        analysis_db_path=str(db_path),
+        log_dir=str(tmp_path / "logs"),
+        datacenter_taxonomy_csv=str(tmp_path / "current.csv"),
+        datacenter_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        ec_source_layer_enabled=True,
+        ec_source_layer_taxonomy_csv=str(tmp_path / "current.csv"),
+        ec_source_layer_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        ec_source_layer_watchlist=str(tmp_path / "watchlist.txt"),
+        ec_source_layer_backup_dir=str(tmp_path / "backups"),
+        skip_next_run=False,
+    )
+    write_scheduler_config(str(config_path), config_before)
+    dc_calls: list[dict[str, object]] = []
+    ec_calls: list[dict[str, object]] = []
+
+    def fake_dc_runner(**kwargs):
+        dc_calls.append(kwargs)
+        return {"summary": {"pipeline_status": "OK", "audit_validation_status": "OK"}}
+
+    def fake_ec_runner(**kwargs):
+        ec_calls.append(kwargs)
+        return {
+            "overall_status": "REBUILD_COMPLETED",
+            "retry_required": False,
+            "watermark_finalization_performed": True,
+        }
+
+    services = build_production_taxonomy_change_services(
+        scheduler_config_path=config_path,
+        evidence_root=tmp_path / "repo" / "temp" / "taxonomy",
+        dc_pipeline_runner=fake_dc_runner,
+        ec_rebuild_runner=fake_ec_runner,
+    )
+    assert services.set_scheduler_guard is not None
+    assert services.verify_active_writer is not None
+    assert services.ensure_backup is not None
+    assert services.run_dc_rebuild is not None
+    assert services.run_ec_rebuild is not None
+
+    assert services.set_scheduler_guard(enabled=True)["skip_next_run"] is True
+    assert services.verify_active_writer()["status"] == "NO_ACTIVE_WRITER"
+    backup = services.ensure_backup(deployment_id=prepared["deployment_id"])
+    assert backup["status"] == "OK"
+    assert Path(str(backup["backup_path"])).exists()
+    dc = services.run_dc_rebuild(plan=prepared["plan"])
+    ec = services.run_ec_rebuild(plan=prepared["plan"])
+    assert dc["status"] == "OK"
+    assert ec["status"] == "OK"
+    assert dc_calls[0]["skip_reports"] is True
+    assert dc_calls[0]["windows_report_copy_enabled"] is False
+    assert dc_calls[0]["stage2_incremental"] is False
+    assert ec_calls[0]["existing_backup_path"] == backup["backup_path"]
+    assert services.set_scheduler_guard(enabled=False)["skip_next_run"] is False
+
+
+def test_production_taxonomy_services_block_active_scheduler_writer(tmp_path) -> None:
+    _db_path, config_path, _proposed_csv, _prepared_summary = _prepared(tmp_path)
+    write_scheduler_status(
+        log_dir=str(tmp_path / "logs"),
+        is_running=True,
+        started_at_utc="2026-08-01T00:00:00Z",
+        finished_at_utc=None,
+        current_market="usa",
+        last_status="RUNNING",
+        summary_json_path=None,
+        error=None,
+    )
+    services = build_production_taxonomy_change_services(
+        scheduler_config_path=config_path,
+        evidence_root=tmp_path / "repo" / "temp" / "taxonomy",
+    )
+
+    assert services.verify_active_writer is not None
+    assert services.verify_active_writer()["status"] == "ACTIVE_WRITER"
 
 
 def _create_carry_forward_fact_tables(db_path: Path) -> None:

@@ -39,6 +39,7 @@ from dev_tools.stock_update_scheduler_ui import (
     scheduler_running_state,
     scheduler_skip_button_state,
     scheduler_skip_next_run_label,
+    taxonomy_confirmation_key,
     update_systemd_timer_on_calendar,
 )
 from rawcandle.datacenter_taxonomy_replacement import ensure_taxonomy_replacement_schema
@@ -893,3 +894,104 @@ def test_taxonomy_ui_activation_uses_guarded_backend_and_is_idempotent(tmp_path,
     assert '"activation_plan_status": "ALREADY_ACTIVE"' in page.taxonomy_status_field.value
     page.taxonomy_confirm_activation_button.on_click(None)
     assert page.taxonomy_activate_button.disabled is True
+
+
+def test_taxonomy_ui_rebuild_uses_production_services_and_operation_lock(tmp_path, monkeypatch):
+    current_csv = _write_taxonomy_csv(tmp_path / "active_taxonomy_v1.csv", "DC_TAXONOMY_FULL_V1")
+    proposed_csv = _write_taxonomy_csv(tmp_path / "proposed_taxonomy_v2.csv", "DC_TAXONOMY_FULL_V2")
+    db_path = _create_ready_taxonomy_activation_db(tmp_path, proposed_csv)
+    config_path = tmp_path / "scheduler_config_test.json"
+    evidence_root = tmp_path / "temp" / "datacenter_taxonomy_ui_rebuild"
+    service_sentinel = object()
+    captured: dict[str, object] = {}
+    _write_taxonomy_ui_config(config_path, db_path=db_path, current_csv=current_csv)
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui._TAXONOMY_EVIDENCE_ROOT", str(evidence_root))
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
+        lambda: {
+            "installed": False,
+            "status_summary": "missing",
+            "on_calendar": None,
+            "timer_path": "x",
+            "error": None,
+        },
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.build_production_taxonomy_change_services",
+        lambda **_kwargs: service_sentinel,
+    )
+
+    def fake_execute(**kwargs):
+        captured.update(kwargs)
+        return {"run_status": "READY_TO_ACTIVATE", "completed_phases": ["PLANNED", "DC_REBUILD", "EC_REBUILD"]}
+
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.execute_taxonomy_rebuild", fake_execute)
+
+    page = _FakePage()
+    run_app(page, str(config_path))
+    plan = {
+        "current_taxonomy_version": "DC_TAXONOMY_FULL_V1",
+        "current_source_reference": str(current_csv),
+        "proposed_taxonomy_version": "DC_TAXONOMY_FULL_V2",
+        "proposed_source_sha256": hashlib.sha256(proposed_csv.read_bytes()).hexdigest(),
+        "date_from": "2025-08-01",
+        "date_to": "2026-07-31",
+        "selected_rebuild_mode": "FULL_REBUILD",
+        "plan_hash": "fixture-plan",
+    }
+    page.analysis_db_field.value = str(db_path)
+    page.taxonomy_proposed_csv_field.value = str(proposed_csv)
+    page.taxonomy_confirmation_state["summary"] = {"deployment_id": 1, "plan": plan}
+    page.taxonomy_confirmation_state["prepared_plan_key"] = taxonomy_confirmation_key(plan)
+    page.taxonomy_confirmation_state["plan_key"] = taxonomy_confirmation_key(plan)
+
+    page.taxonomy_run_rebuild_button.on_click(None)
+
+    assert captured["services"] is service_sentinel
+    operations = page.taxonomy_operations_column.controls
+    assert any("REBUILD" in row.value and "status=OK" in row.value for row in operations)
+    assert not (evidence_root / "taxonomy_operation.lock").exists()
+
+
+def test_taxonomy_refresh_enables_resume_and_validate_actions(tmp_path, monkeypatch):
+    config_path = tmp_path / "scheduler.json"
+    _write_config(config_path)
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
+        lambda: {"installed": False, "status_summary": "missing"},
+    )
+
+    page = _FakePage()
+    run_app(page, str(config_path))
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.inspect_scheduler_taxonomy_state",
+        lambda **_kwargs: {
+            "inspect": {
+                "normalized_orchestration_status": "REBUILD_FAILED",
+                "safe_next_action": "resume_from_failed_phase",
+                "per_phase_status": {},
+                "activation_readiness": {},
+            },
+            "operations": [],
+        },
+    )
+    page.taxonomy_deployment_id_field.value = "1"
+    page.taxonomy_refresh_button.on_click(None)
+    assert page.taxonomy_resume_button.disabled is False
+    assert page.taxonomy_validate_button.disabled is True
+
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.inspect_scheduler_taxonomy_state",
+        lambda **_kwargs: {
+            "inspect": {
+                "normalized_orchestration_status": "VALIDATION_FAILED",
+                "safe_next_action": "validation_only_recovery",
+                "per_phase_status": {},
+                "activation_readiness": {},
+            },
+            "operations": [],
+        },
+    )
+    page.taxonomy_refresh_button.on_click(None)
+    assert page.taxonomy_resume_button.disabled is True
+    assert page.taxonomy_validate_button.disabled is False

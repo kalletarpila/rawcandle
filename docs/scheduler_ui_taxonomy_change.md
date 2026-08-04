@@ -164,8 +164,21 @@ per_phase_status
 activation_readiness
 ```
 
-The UI keeps disabled placeholders for resume and validation/finalization until
-backend-approved gates are wired for those states.
+Resume is enabled when inspection reports:
+
+```text
+safe_next_action=resume_from_failed_phase
+```
+
+Validation/finalization is enabled when inspection reports:
+
+```text
+safe_next_action=validation_only_recovery
+```
+
+Both actions call the unified backend and are protected by the durable taxonomy
+operation lock. They do not invoke individual Datacenter or EC phase commands
+from UI code.
 
 Activation planning is available only when backend inspection reports:
 
@@ -247,6 +260,11 @@ artifact_manifest_path
 
 Failed and resumed attempts are separate operations with separate logs.
 Automatic deletion is disabled.
+
+A single cross-process taxonomy operation lock is stored under the same evidence
+root. Rebuild, resume, validation/finalization, and activation acquire the lock
+before state-changing work. A live lock disables competing operations; a stale
+dead-process lock can be recovered by the lock backend.
 
 ## Log Viewing And Downloads
 
