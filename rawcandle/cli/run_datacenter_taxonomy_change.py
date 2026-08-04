@@ -5,6 +5,11 @@ from rawcandle.datacenter_taxonomy_change_orchestrator import (
     execute_taxonomy_rebuild,
     print_json,
 )
+from rawcandle.datacenter_taxonomy_operation_log import (
+    complete_taxonomy_change_operation,
+    create_taxonomy_change_operation,
+    write_taxonomy_operation_artifact,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -24,6 +29,19 @@ def main(argv: list[str] | None = None) -> int:
         confirm_date_to=args.confirm_date_to,
         confirm_rebuild_mode=args.confirm_rebuild_mode,
         confirm_plan_hash=args.confirm_plan_hash,
+    )
+    operation_type = "RESUME" if summary.get("run_status") == "FAILED" and summary.get("resume_from_phase") else "REBUILD"
+    operation = create_taxonomy_change_operation(
+        deployment_id=args.deployment_id,
+        operation_type=operation_type,
+        evidence_root=args.evidence_root,
+    )
+    write_taxonomy_operation_artifact(operation, relative_name="run_summary.json", payload=summary)
+    complete_taxonomy_change_operation(
+        operation,
+        status="OK" if summary.get("run_status") in {"READY_TO_ACTIVATE", "NO_CHANGE_READY_TO_ACTIVATE", "ALREADY_ACTIVE"} else "FAILED",
+        failed_phase=summary.get("failed_phase"),
+        resume_from_phase=summary.get("resume_from_phase"),
     )
     print_json(summary)
     return 0 if summary.get("run_status") in {"READY_TO_ACTIVATE", "NO_CHANGE_READY_TO_ACTIVATE", "ALREADY_ACTIVE"} else 1

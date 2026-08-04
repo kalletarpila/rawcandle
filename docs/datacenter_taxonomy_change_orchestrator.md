@@ -413,15 +413,21 @@ temp/
 A resumed run must reuse the deployment's existing verified backup. Config
 backups used by activation remain separate and small.
 
-## Future Delta Rebuild
+## Delta Rebuild
 
-`DELTA_REBUILD` is now a named rebuild mode, but it is unsupported in version 1.
-The taxonomy diff already exposes affected tickers and groups so the next phase
-can implement delta planning and execution without changing the deployment
-contract.
+`DELTA_REBUILD` is a supported planner and execution-backend mode for ordinary
+monthly taxonomy changes that pass delta safety gates. Details are documented in:
 
-## Future Scheduler UI
+```text
+docs/datacenter_taxonomy_delta_rebuild.md
+```
 
-The new JSON-compatible prepare and inspect outputs are suitable for a future
-Scheduler UI workflow. This phase does not modify Scheduler UI and does not
-remove the existing Datacenter UI tab.
+## Scheduler UI
+
+The Scheduler UI now exposes the unified taxonomy-change workflow through a
+`Taxonomy` tab and removes the obsolete visible `Datacenter` tab. Details are
+documented in:
+
+```text
+docs/scheduler_ui_taxonomy_change.md
+```

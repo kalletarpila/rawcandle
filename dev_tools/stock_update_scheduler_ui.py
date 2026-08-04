@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import inspect
 import json
 import os
 import re
 import subprocess
+import threading
 from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
@@ -25,6 +27,27 @@ from rawcandle.scheduler.runner import (
     SchedulerAlreadyRunningError,
     read_scheduler_status,
     run_scheduler_config,
+)
+from rawcandle.datacenter_taxonomy_change_orchestrator import (
+    DATACENTER_ECOSYSTEM_CODE,
+    REBUILD_MODE_AUTO,
+    REBUILD_MODE_DELTA,
+    REBUILD_MODE_FULL,
+    activate_taxonomy_change,
+    execute_taxonomy_rebuild,
+    inspect_taxonomy_change,
+    plan_taxonomy_activation,
+    prepare_taxonomy_change,
+)
+from rawcandle.datacenter_taxonomy_operation_log import (
+    complete_taxonomy_change_operation,
+    create_taxonomy_change_operation,
+    inspect_taxonomy_change_artifacts,
+    list_taxonomy_change_operations,
+    prepare_taxonomy_change_evidence_package,
+    prepare_taxonomy_change_log_download,
+    read_taxonomy_change_log,
+    write_taxonomy_operation_artifact,
 )
 
 
@@ -54,6 +77,7 @@ _EC_SOURCE_LAYER_LOG_FILENAME_RE = re.compile(
     r"^ec_source_layer_([a-z0-9_]+)_(\d{8}T\d{4,6}Z)(?:_(\d+))?\.(txt|log)$"
 )
 _TIMER_PATH = Path.home() / ".config/systemd/user/stock-update-scheduler.timer"
+_TAXONOMY_EVIDENCE_ROOT = "temp/datacenter_taxonomy_changes"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -152,6 +176,229 @@ def list_scheduler_log_files(log_dir: str, limit: int = 10) -> list[dict[str, An
 
 def build_text_log_browser_url(path: str) -> str:
     return f"/{quote(Path(path).name)}"
+
+
+def _sha256_if_file(path: str | None) -> str | None:
+    if not path or not Path(path).is_file():
+        return None
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _connect_taxonomy_db_readonly(db_path: str):
+    import sqlite3
+
+    conn = sqlite3.connect(f"file:{Path(db_path).resolve()}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _taxonomy_table_names(conn: Any) -> set[str]:
+    return {str(row[0]) for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+
+
+def inspect_scheduler_taxonomy_state(
+    *,
+    config_path: str,
+    deployment_id: int | None = None,
+    evidence_root: str = _TAXONOMY_EVIDENCE_ROOT,
+) -> dict[str, Any]:
+    config = read_scheduler_config(config_path)
+    state: dict[str, Any] = {
+        "status": "OK",
+        "scheduler_datacenter_taxonomy_version": config.datacenter_taxonomy_version,
+        "scheduler_ec_taxonomy_version": config.ec_source_layer_taxonomy_version,
+        "analysis_db_path": config.analysis_db_path,
+        "active_taxonomy": {},
+        "fact_heads": {},
+        "watermark_heads": {},
+        "db_config_consistency_status": "UNKNOWN",
+        "deployment": None,
+        "inspect": None,
+        "operations": [],
+        "blocking_errors": [],
+    }
+    conn = _connect_taxonomy_db_readonly(config.analysis_db_path)
+    try:
+        tables = _taxonomy_table_names(conn)
+        active = None
+        if {"ec_taxonomy_version", "ec_ecosystem"}.issubset(tables):
+            active_row = conn.execute(
+                """
+                SELECT tv.*, e.ecosystem_code
+                FROM ec_taxonomy_version tv
+                JOIN ec_ecosystem e ON e.ecosystem_id = tv.ecosystem_id
+                WHERE e.ecosystem_code = ? AND tv.is_active = 1
+                ORDER BY tv.taxonomy_version_id DESC
+                LIMIT 1
+                """,
+                (DATACENTER_ECOSYSTEM_CODE,),
+            ).fetchone()
+            active = dict(active_row) if active_row is not None else None
+        if active:
+            active_version = str(active.get("taxonomy_version_code") or "")
+            source_reference = str(active.get("source_reference") or "")
+            state["active_taxonomy"] = {
+                "version": active_version,
+                "csv_path": source_reference,
+                "sha256": active.get("source_hash") or _sha256_if_file(source_reference),
+                "deployment_id": active.get("activated_by_taxonomy_change_id"),
+                "status": "ACTIVE" if active.get("is_active") else active.get("status"),
+                "ticker_count": None,
+                "group_count": None,
+                "synthetic_group_count": None,
+            }
+            if "ec_membership" in tables:
+                row = conn.execute(
+                    "SELECT COUNT(DISTINCT entity_id) FROM ec_membership WHERE taxonomy_version_id = ?",
+                    (active.get("taxonomy_version_id"),),
+                ).fetchone()
+                state["active_taxonomy"]["ticker_count"] = row[0] if row else None
+            for table, date_col in [
+                ("dc_ticker_swing_signal_daily", "signal_date"),
+                ("dc_group_swing_signal_daily", "signal_date"),
+                ("dc_group_synthetic_ohlc_daily", "ohlc_date"),
+                ("dc_group_index_daily", "index_date"),
+            ]:
+                if table in tables:
+                    row = conn.execute(
+                        f"SELECT MAX({date_col}) FROM {table} WHERE taxonomy_version = ?",
+                        (active_version,),
+                    ).fetchone()
+                    state["fact_heads"][table] = row[0] if row else None
+            if "ec_pipeline_watermark" in tables:
+                rows = conn.execute(
+                    """
+                    SELECT source_table, MAX(latest_signal_date) AS head
+                    FROM ec_pipeline_watermark
+                    GROUP BY source_table
+                    ORDER BY source_table
+                    """
+                ).fetchall()
+                state["watermark_heads"] = {str(row["source_table"]): row["head"] for row in rows}
+            if active_version == config.datacenter_taxonomy_version == config.ec_source_layer_taxonomy_version:
+                state["db_config_consistency_status"] = "OK"
+            else:
+                state["db_config_consistency_status"] = "BLOCKED_MIXED_DB_CONFIG_STATE"
+                state["blocking_errors"].append("scheduler taxonomy config does not match active DB taxonomy")
+        else:
+            state["db_config_consistency_status"] = "BLOCKED_NO_ACTIVE_TAXONOMY"
+            state["blocking_errors"].append("active taxonomy not found")
+    finally:
+        conn.close()
+    if deployment_id is not None:
+        inspection = inspect_taxonomy_change(
+            analysis_db=config.analysis_db_path,
+            deployment_id=deployment_id,
+            scheduler_config_path=config_path,
+        )
+        state["inspect"] = inspection
+        state["deployment"] = inspection.get("deployment")
+        state["operations"] = list_taxonomy_change_operations(
+            deployment_id=deployment_id,
+            evidence_root=evidence_root,
+        )
+    return state
+
+
+def format_taxonomy_state_lines(state: dict[str, Any]) -> str:
+    active = state.get("active_taxonomy", {})
+    fact_heads = state.get("fact_heads", {})
+    watermark_heads = state.get("watermark_heads", {})
+    return "\n".join(
+        [
+            f"active_taxonomy_version={active.get('version', '')}",
+            f"active_taxonomy_csv={active.get('csv_path', '')}",
+            f"active_taxonomy_sha256={active.get('sha256', '')}",
+            f"active_deployment_id={active.get('deployment_id', '')}",
+            f"active_deployment_status={active.get('status', '')}",
+            f"ticker_count={active.get('ticker_count', '')}",
+            f"group_count={active.get('group_count', '')}",
+            f"synthetic_group_count={active.get('synthetic_group_count', '')}",
+            f"dc_fact_head={max([value for value in fact_heads.values() if value] or [''])}",
+            f"ec_fact_head={state.get('ec_fact_head', '')}",
+            f"dc_watermark_head={max([value for value in watermark_heads.values() if value] or [''])}",
+            f"ec_watermark_head={max([value for value in watermark_heads.values() if value] or [''])}",
+            f"scheduler_datacenter_taxonomy_version={state.get('scheduler_datacenter_taxonomy_version', '')}",
+            f"scheduler_ec_taxonomy_version={state.get('scheduler_ec_taxonomy_version', '')}",
+            f"db_config_consistency_status={state.get('db_config_consistency_status', '')}",
+            "blocking_errors=" + "; ".join(state.get("blocking_errors", [])),
+        ]
+    )
+
+
+def format_taxonomy_plan_lines(summary: dict[str, Any]) -> str:
+    plan = summary.get("plan", {}) if isinstance(summary.get("plan"), dict) else {}
+    diff = plan.get("taxonomy_diff", {}) if isinstance(plan.get("taxonomy_diff"), dict) else {}
+    scope = plan.get("delta_scope_summary", {}) if isinstance(plan.get("delta_scope_summary"), dict) else {}
+    estimate = plan.get("estimated_delta_work", {}) if isinstance(plan.get("estimated_delta_work"), dict) else {}
+    return "\n".join(
+        [
+            f"deployment_id={summary.get('deployment_id', '')}",
+            f"current_taxonomy_version={plan.get('current_taxonomy_version', '')}",
+            f"current_taxonomy_hash={plan.get('current_source_sha256', '')}",
+            f"proposed_taxonomy_version={plan.get('proposed_taxonomy_version', '')}",
+            f"proposed_taxonomy_hash={plan.get('proposed_source_sha256', '')}",
+            f"date_range={plan.get('date_from', '')}..{plan.get('date_to', '')}",
+            f"recommended_rebuild_mode={plan.get('recommended_rebuild_mode', '')}",
+            f"selected_rebuild_mode={plan.get('selected_rebuild_mode', plan.get('rebuild_mode', ''))}",
+            f"plan_hash={plan.get('plan_hash', '')}",
+            f"delta_safe={plan.get('delta_safe', '')}",
+            "delta_blocking_reasons=" + "; ".join(plan.get("delta_blocking_reasons", [])),
+            f"added_tickers={len(diff.get('added_tickers', []))}",
+            f"removed_tickers={len(diff.get('removed_tickers', []))}",
+            f"primary_membership_changes={len(diff.get('primary_membership_changes', []))}",
+            f"secondary_membership_additions={len(diff.get('secondary_membership_additions', []))}",
+            f"secondary_membership_removals={len(diff.get('secondary_membership_removals', []))}",
+            f"scope_flag_changes={len(diff.get('scope_flag_changes', []))}",
+            f"affected_tickers={len(scope.get('affected_tickers', diff.get('affected_tickers', [])))}",
+            f"affected_groups={len(scope.get('affected_groups', diff.get('affected_groups', [])))}",
+            f"unaffected_tickers={len(scope.get('unaffected_tickers', []))}",
+            f"unaffected_groups={len(scope.get('unaffected_groups', []))}",
+            f"total_tickers={estimate.get('total_tickers', '')}",
+            f"affected_ticker_count={estimate.get('affected_ticker_count', '')}",
+            f"copied_ticker_count={estimate.get('copied_ticker_count', '')}",
+            f"rebuilt_ticker_count={estimate.get('rebuilt_ticker_count', '')}",
+            f"total_groups={estimate.get('total_groups', '')}",
+            f"affected_group_count={estimate.get('affected_group_count', '')}",
+            f"copied_group_count={estimate.get('copied_group_count', '')}",
+            f"estimated_copy_row_count={estimate.get('estimated_copy_row_count', '')}",
+            f"estimated_rebuild_row_count={estimate.get('estimated_rebuild_row_count', '')}",
+            f"estimated_full_rebuild_row_count={estimate.get('estimated_full_rebuild_row_count', '')}",
+            f"estimated_work_reduction_pct={estimate.get('estimated_work_reduction_pct', '')}",
+            "blocking_errors=" + "; ".join(summary.get("blocking_errors", plan.get("blocking_errors", []))),
+        ]
+    )
+
+
+def taxonomy_confirmation_key(plan: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        plan.get("deployment_id"),
+        plan.get("proposed_taxonomy_version"),
+        plan.get("proposed_source_sha256"),
+        plan.get("date_from"),
+        plan.get("date_to"),
+        plan.get("selected_rebuild_mode", plan.get("rebuild_mode")),
+        plan.get("plan_hash"),
+    )
+
+
+def taxonomy_rebuild_action_state(
+    *,
+    status: str,
+    safe_to_run: bool,
+    confirmation_valid: bool,
+    blocking_errors: list[str],
+) -> dict[str, bool]:
+    enabled = status in {"PLANNED", "REBUILD_FAILED"} and safe_to_run and confirmation_valid and not blocking_errors
+    return {"run_disabled": not enabled}
+
+
+def start_taxonomy_background_operation(page: Any, target: Any, *args: Any, **kwargs: Any) -> threading.Thread:
+    thread = threading.Thread(target=target, args=args, kwargs=kwargs, daemon=True)
+    thread.start()
+    if hasattr(page, "taxonomy_job_thread"):
+        page.taxonomy_job_thread = thread
+    return thread
 
 
 def launch_browser_url(page: Any, url: str) -> None:
@@ -705,97 +952,283 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
     )
     refresh_logs_button = ft.ElevatedButton("Refresh logs", on_click=on_refresh_logs)
 
-    datacenter_price_db_field = ft.TextField(label="price_db", value=DEFAULT_DATACENTER_PRICE_DB)
-    datacenter_analysis_db_field = ft.TextField(label="analysis_db", value=DEFAULT_DATACENTER_ANALYSIS_DB)
-    datacenter_taxonomy_csv_field = ft.TextField(label="taxonomy_csv", value=DEFAULT_DATACENTER_TAXONOMY_CSV)
-    datacenter_taxonomy_version_field = ft.TextField(label="taxonomy_version", value=DEFAULT_DATACENTER_TAXONOMY_VERSION)
-    datacenter_market_field = ft.TextField(label="market", value=DEFAULT_DATACENTER_MARKET)
-    datacenter_signal_date_field = ft.TextField(label="signal_date", value=DEFAULT_DATACENTER_SIGNAL_DATE)
-    datacenter_start_date_field = ft.TextField(label="start_date", value=DEFAULT_DATACENTER_START_DATE)
-    datacenter_index_base_date_field = ft.TextField(label="index_base_date", value=DEFAULT_DATACENTER_INDEX_BASE_DATE)
-    datacenter_output_dir_field = ft.TextField(label="output_dir", value=DEFAULT_DATACENTER_OUTPUT_DIR)
-    datacenter_expected_ticker_count_field = ft.TextField(label="expected_ticker_count", value=DEFAULT_DATACENTER_EXPECTED_TICKER_COUNT)
-    datacenter_expected_group_count_field = ft.TextField(label="expected_group_count", value=DEFAULT_DATACENTER_EXPECTED_GROUP_COUNT)
-    datacenter_expected_synthetic_ohlc_count_field = ft.TextField(label="expected_synthetic_ohlc_count", value=DEFAULT_DATACENTER_EXPECTED_SYNTHETIC_OHLC_COUNT)
-    datacenter_rolling_window_size_field = ft.TextField(label="rolling_window_size", value=DEFAULT_DATACENTER_ROLLING_WINDOW_SIZE)
-    datacenter_watchlist_file_field = ft.TextField(label="watchlist_file", value=DEFAULT_DATACENTER_WATCHLIST_FILE)
-    datacenter_status_field = ft.TextField(label="Datacenter status", read_only=True)
-    datacenter_log_field = ft.TextField(label="Datacenter command", read_only=True)
-    datacenter_reports_column = ft.Column(spacing=8)
+    taxonomy_proposed_csv_field = ft.TextField(label="Ehdotettu taxonomy CSV")
+    taxonomy_rebuild_mode_dropdown = ft.Dropdown(
+        label="Rebuild mode",
+        value=REBUILD_MODE_AUTO,
+        options=[
+            ft.dropdown.Option(REBUILD_MODE_AUTO),
+            ft.dropdown.Option(REBUILD_MODE_DELTA),
+            ft.dropdown.Option(REBUILD_MODE_FULL),
+        ],
+    )
+    taxonomy_date_from_field = ft.TextField(label="date_from", value=DEFAULT_DATACENTER_START_DATE)
+    taxonomy_date_to_field = ft.TextField(label="date_to", value=DEFAULT_DATACENTER_SIGNAL_DATE)
+    taxonomy_deployment_id_field = ft.TextField(label="deployment_id")
+    taxonomy_active_field = ft.TextField(label="Aktiivinen taxonomy", read_only=True, multiline=True, min_lines=8)
+    taxonomy_plan_field = ft.TextField(label="Muutokset ja suunnitelma", read_only=True, multiline=True, min_lines=14)
+    taxonomy_status_field = ft.TextField(label="Toteutuksen tila", read_only=True, multiline=True, min_lines=8)
+    taxonomy_log_field = ft.TextField(label="Taxonomy loki", read_only=True, multiline=True, min_lines=10)
+    taxonomy_operations_column = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO)
+    taxonomy_confirmation_state: dict[str, Any] = {
+        "summary": None,
+        "prepared_plan_key": None,
+        "plan_key": None,
+        "activation_plan": None,
+        "activation_key": None,
+    }
 
-    def _pipeline_command(*, dry_run: bool) -> list[str]:
-        return build_datacenter_pipeline_command(
-            price_db=datacenter_price_db_field.value,
-            analysis_db=datacenter_analysis_db_field.value,
-            taxonomy_csv=datacenter_taxonomy_csv_field.value,
-            taxonomy_version=datacenter_taxonomy_version_field.value,
-            market=datacenter_market_field.value,
-            signal_date=datacenter_signal_date_field.value,
-            start_date=datacenter_start_date_field.value,
-            index_base_date=datacenter_index_base_date_field.value,
-            output_dir=datacenter_output_dir_field.value,
-            expected_ticker_count=datacenter_expected_ticker_count_field.value,
-            expected_group_count=datacenter_expected_group_count_field.value,
-            expected_synthetic_ohlc_count=datacenter_expected_synthetic_ohlc_count_field.value,
-            rolling_window_size=datacenter_rolling_window_size_field.value,
-            watchlist_file=datacenter_watchlist_file_field.value,
-            dry_run=dry_run,
+    def _selected_deployment_id() -> int | None:
+        value = str(taxonomy_deployment_id_field.value or "").strip()
+        return int(value) if value else None
+
+    def refresh_taxonomy_state(deployment_id: int | None = None) -> dict[str, Any]:
+        state = inspect_scheduler_taxonomy_state(
+            config_path=config_path,
+            deployment_id=deployment_id,
+            evidence_root=_TAXONOMY_EVIDENCE_ROOT,
         )
+        taxonomy_active_field.value = format_taxonomy_state_lines(state)
+        inspection = state.get("inspect") or {}
+        if inspection:
+            normalized_status = str(inspection.get("normalized_orchestration_status", ""))
+            taxonomy_status_field.value = "\n".join(
+                [
+                    f"normalized_orchestration_status={normalized_status}",
+                    f"safe_next_action={inspection.get('safe_next_action', '')}",
+                    f"per_phase_status={json.dumps(inspection.get('per_phase_status', {}), sort_keys=True)}",
+                    f"activation_readiness={json.dumps(inspection.get('activation_readiness', {}), sort_keys=True)}",
+                ]
+            )
+            taxonomy_plan_activation_button.disabled = normalized_status != "READY_TO_ACTIVATE"
+            taxonomy_activate_button.disabled = True
+        taxonomy_operations_column.controls = [
+            ft.Text(
+                f"{operation.get('operation_type')} {operation.get('started_at_utc')} "
+                f"status={operation.get('status')} operation_id={operation.get('operation_id')}"
+            )
+            for operation in state.get("operations", [])
+        ]
+        return state
 
-    datacenter_plan_button = ft.ElevatedButton(
-        "Plan Datacenter",
-        on_click=lambda e: run_datacenter_ui_command(
-            page=page,
-            title="Plan Datacenter",
-            command=_pipeline_command(dry_run=True),
-            log_field=datacenter_log_field,
-            status_field=datacenter_status_field,
-            output_dir=datacenter_output_dir_field.value,
-            reports_column=datacenter_reports_column,
-        ),
-    )
-    datacenter_run_full_chain_button = ft.ElevatedButton(
-        "Run Datacenter Pipeline",
-        on_click=lambda e: run_datacenter_ui_command(
-            page=page,
-            title="Run Datacenter Pipeline",
-            command=_pipeline_command(dry_run=False),
-            log_field=datacenter_log_field,
-            status_field=datacenter_status_field,
-            output_dir=datacenter_output_dir_field.value,
-            reports_column=datacenter_reports_column,
-        ),
-    )
-    datacenter_audit_button = ft.ElevatedButton(
-        "Run Audit",
-        on_click=lambda e: run_datacenter_ui_command(
-            page=page,
-            title="Run Audit",
-            command=build_datacenter_audit_command(
-                analysis_db=datacenter_analysis_db_field.value,
-                signal_date=datacenter_signal_date_field.value,
-                taxonomy_version=datacenter_taxonomy_version_field.value,
-                expected_ticker_count=datacenter_expected_ticker_count_field.value,
-                expected_group_count=datacenter_expected_group_count_field.value,
-                expected_synthetic_ohlc_count=datacenter_expected_synthetic_ohlc_count_field.value,
-                rolling_window_size=datacenter_rolling_window_size_field.value,
-            ),
-            log_field=datacenter_log_field,
-            status_field=datacenter_status_field,
-        ),
-    )
-    datacenter_watermarks_button = ft.ElevatedButton(
-        "Watermarks",
-        on_click=lambda e: run_datacenter_ui_command(
-            page=page,
-            title="Watermarks",
-            command=build_datacenter_watermark_command(
-                analysis_db=datacenter_analysis_db_field.value
-            ),
-            log_field=datacenter_log_field,
-            status_field=datacenter_status_field,
-        ),
-    )
+    def on_taxonomy_prepare(_e: Any) -> None:
+        try:
+            summary = prepare_taxonomy_change(
+                analysis_db=analysis_db_field.value,
+                proposed_taxonomy_csv=taxonomy_proposed_csv_field.value,
+                date_from=taxonomy_date_from_field.value or DEFAULT_DATACENTER_START_DATE,
+                date_to=taxonomy_date_to_field.value,
+                scheduler_config_path=config_path,
+                watchlist_path=config.ec_source_layer_watchlist,
+                evidence_root=_TAXONOMY_EVIDENCE_ROOT,
+                rebuild_mode=taxonomy_rebuild_mode_dropdown.value or REBUILD_MODE_AUTO,
+            )
+            deployment_id = summary.get("deployment_id") or "prepare_blocked"
+            operation = create_taxonomy_change_operation(
+                deployment_id=deployment_id,
+                operation_type="PREPARE",
+                evidence_root=_TAXONOMY_EVIDENCE_ROOT,
+            )
+            write_taxonomy_operation_artifact(operation, relative_name="prepare.json", payload=summary)
+            if isinstance(summary.get("plan"), dict):
+                write_taxonomy_operation_artifact(operation, relative_name="plan.json", payload=summary["plan"])
+            complete_taxonomy_change_operation(
+                operation,
+                status="OK" if summary.get("prepare_status") in {"READY_TO_REBUILD", "PLAN_READY"} else "FAILED",
+                failed_phase=None if summary.get("prepare_status") in {"READY_TO_REBUILD", "PLAN_READY"} else "PREPARE",
+            )
+            taxonomy_confirmation_state["summary"] = summary
+            taxonomy_confirmation_state["prepared_plan_key"] = taxonomy_confirmation_key(summary.get("plan", {}))
+            taxonomy_confirmation_state["plan_key"] = None
+            taxonomy_run_rebuild_button.disabled = True
+            taxonomy_plan_field.value = format_taxonomy_plan_lines(summary)
+            if summary.get("deployment_id"):
+                taxonomy_deployment_id_field.value = str(summary["deployment_id"])
+                refresh_taxonomy_state(int(summary["deployment_id"]))
+        except Exception as exc:
+            taxonomy_status_field.value = f"Prepare failed: {exc}"
+        if hasattr(page, "update"):
+            page.update()
+
+    def on_taxonomy_refresh(_e: Any) -> None:
+        try:
+            refresh_taxonomy_state(_selected_deployment_id())
+        except Exception as exc:
+            taxonomy_status_field.value = f"Refresh failed: {exc}"
+        if hasattr(page, "update"):
+            page.update()
+
+    def _latest_taxonomy_operation() -> tuple[int | None, dict[str, Any] | None]:
+        deployment_id = _selected_deployment_id()
+        if deployment_id is None:
+            return None, None
+        operations = list_taxonomy_change_operations(
+            deployment_id=deployment_id,
+            evidence_root=_TAXONOMY_EVIDENCE_ROOT,
+        )
+        return deployment_id, operations[0] if operations else None
+
+    def on_taxonomy_show_log(_e: Any) -> None:
+        try:
+            deployment_id, operation = _latest_taxonomy_operation()
+            if deployment_id is None or operation is None:
+                taxonomy_log_field.value = "No taxonomy operation logs found."
+            else:
+                log = read_taxonomy_change_log(
+                    deployment_id=deployment_id,
+                    operation_id=operation["operation_id"],
+                    limit=65536,
+                    evidence_root=_TAXONOMY_EVIDENCE_ROOT,
+                )
+                taxonomy_log_field.value = (
+                    f"path={log.get('path')}\nmodified_at={log.get('modified_at')}\n\n"
+                    f"{log.get('text', '')}"
+                )
+        except Exception as exc:
+            taxonomy_log_field.value = f"Log read failed: {exc}"
+        if hasattr(page, "update"):
+            page.update()
+
+    def on_taxonomy_download_log(_e: Any) -> None:
+        try:
+            deployment_id, operation = _latest_taxonomy_operation()
+            if deployment_id is None or operation is None:
+                taxonomy_status_field.value = "No downloadable taxonomy log."
+            else:
+                download = prepare_taxonomy_change_log_download(
+                    deployment_id=deployment_id,
+                    operation_id=operation["operation_id"],
+                    evidence_root=_TAXONOMY_EVIDENCE_ROOT,
+                )
+                taxonomy_status_field.value = json.dumps(download, sort_keys=True)
+                if download.get("status") == "OK":
+                    launch_browser_url(page, build_text_log_browser_url(download["path"]))
+        except Exception as exc:
+            taxonomy_status_field.value = f"Log download failed: {exc}"
+        if hasattr(page, "update"):
+            page.update()
+
+    def on_taxonomy_download_evidence(_e: Any) -> None:
+        try:
+            deployment_id, operation = _latest_taxonomy_operation()
+            if deployment_id is None or operation is None:
+                taxonomy_status_field.value = "No evidence package available."
+            else:
+                package = prepare_taxonomy_change_evidence_package(
+                    deployment_id=deployment_id,
+                    operation_id=operation["operation_id"],
+                    evidence_root=_TAXONOMY_EVIDENCE_ROOT,
+                )
+                taxonomy_status_field.value = json.dumps(package, sort_keys=True, default=str)
+                launch_browser_url(page, build_text_log_browser_url(package["path"]))
+        except Exception as exc:
+            taxonomy_status_field.value = f"Evidence package failed: {exc}"
+        if hasattr(page, "update"):
+            page.update()
+
+    def on_taxonomy_confirm_plan(_e: Any) -> None:
+        summary = taxonomy_confirmation_state.get("summary") or {}
+        plan = summary.get("plan") or {}
+        current_key = taxonomy_confirmation_key(plan)
+        taxonomy_confirmation_state["plan_key"] = current_key
+        action = taxonomy_rebuild_action_state(
+            status="PLANNED",
+            safe_to_run=summary.get("prepare_status") in {"READY_TO_REBUILD", "PLAN_READY"},
+            confirmation_valid=current_key == taxonomy_confirmation_state.get("prepared_plan_key"),
+            blocking_errors=list(summary.get("blocking_errors", plan.get("blocking_errors", []))),
+        )
+        taxonomy_run_rebuild_button.disabled = action["run_disabled"]
+        taxonomy_status_field.value = "Plan confirmation recorded for current plan hash."
+        if hasattr(page, "update"):
+            page.update()
+
+    def on_taxonomy_run_rebuild(_e: Any) -> None:
+        try:
+            summary = taxonomy_confirmation_state.get("summary") or {}
+            plan = summary.get("plan") or {}
+            if taxonomy_confirmation_state.get("plan_key") != taxonomy_confirmation_key(plan):
+                taxonomy_status_field.value = "Rebuild blocked: plan confirmation is stale."
+            else:
+                run_summary = execute_taxonomy_rebuild(
+                    analysis_db=analysis_db_field.value,
+                    deployment_id=int(summary["deployment_id"]),
+                    proposed_taxonomy_csv=taxonomy_proposed_csv_field.value,
+                    date_to=str(plan["date_to"]),
+                    scheduler_config_path=config_path,
+                    watchlist_path=config.ec_source_layer_watchlist,
+                    evidence_root=_TAXONOMY_EVIDENCE_ROOT,
+                    confirm_deployment_id=int(summary["deployment_id"]),
+                    confirm_proposed_taxonomy_version=str(plan["proposed_taxonomy_version"]),
+                    confirm_proposed_source_hash=str(plan["proposed_source_sha256"]),
+                    confirm_date_from=str(plan["date_from"]),
+                    confirm_date_to=str(plan["date_to"]),
+                    confirm_rebuild_mode=str(plan["selected_rebuild_mode"]),
+                    confirm_plan_hash=str(plan["plan_hash"]),
+                )
+                operation = create_taxonomy_change_operation(
+                    deployment_id=summary["deployment_id"],
+                    operation_type="REBUILD",
+                    evidence_root=_TAXONOMY_EVIDENCE_ROOT,
+                )
+                write_taxonomy_operation_artifact(operation, relative_name="run_summary.json", payload=run_summary)
+                complete_taxonomy_change_operation(
+                    operation,
+                    status="OK" if run_summary.get("run_status") in {"READY_TO_ACTIVATE", "NO_CHANGE_READY_TO_ACTIVATE", "ALREADY_ACTIVE"} else "FAILED",
+                    failed_phase=run_summary.get("failed_phase"),
+                    resume_from_phase=run_summary.get("resume_from_phase"),
+                )
+                taxonomy_status_field.value = json.dumps(run_summary, indent=2, sort_keys=True, default=str)
+                refresh_taxonomy_state(int(summary["deployment_id"]))
+        except Exception as exc:
+            taxonomy_status_field.value = f"Rebuild failed: {exc}"
+        if hasattr(page, "update"):
+            page.update()
+
+    def on_taxonomy_plan_activation(_e: Any) -> None:
+        try:
+            summary = taxonomy_confirmation_state.get("summary") or {}
+            plan = summary.get("plan") or {}
+            if not plan:
+                taxonomy_status_field.value = "Activation planning requires a prepared plan in the current UI session."
+            else:
+                activation_plan = plan_taxonomy_activation(
+                    analysis_db=analysis_db_field.value,
+                    ecosystem_code=DATACENTER_ECOSYSTEM_CODE,
+                    deployment_id=int(summary["deployment_id"]),
+                    current_taxonomy_version=str(plan["current_taxonomy_version"]),
+                    current_taxonomy_csv=str(plan["current_source_reference"]),
+                    proposed_taxonomy_version=str(plan["proposed_taxonomy_version"]),
+                    proposed_taxonomy_csv=taxonomy_proposed_csv_field.value,
+                    required_signal_date=str(plan["date_to"]),
+                    scheduler_config_path=config_path,
+                    expected_scheduler_taxonomy_version=str(plan["current_taxonomy_version"]),
+                    expected_scheduler_taxonomy_csv=str(plan["current_source_reference"]),
+                )
+                taxonomy_confirmation_state["activation_plan"] = activation_plan
+                taxonomy_confirmation_state["activation_key"] = (
+                    activation_plan.get("deployment_id"),
+                    activation_plan.get("target_taxonomy_version"),
+                    activation_plan.get("required_signal_date"),
+                    activation_plan.get("safe_to_activate"),
+                )
+                taxonomy_status_field.value = json.dumps(activation_plan, indent=2, sort_keys=True, default=str)
+                taxonomy_activate_button.disabled = True
+        except Exception as exc:
+            taxonomy_status_field.value = f"Activation planning failed: {exc}"
+        if hasattr(page, "update"):
+            page.update()
+
+    taxonomy_prepare_button = ft.ElevatedButton("Valmistele", on_click=on_taxonomy_prepare)
+    taxonomy_refresh_button = ft.ElevatedButton("Päivitä tila", on_click=on_taxonomy_refresh)
+    taxonomy_confirm_plan_button = ft.ElevatedButton("Vahvista suunnitelma", on_click=on_taxonomy_confirm_plan)
+    taxonomy_run_rebuild_button = ft.ElevatedButton("Käynnistä rebuild", on_click=on_taxonomy_run_rebuild, disabled=True)
+    taxonomy_resume_button = ft.ElevatedButton("Jatka epäonnistuneesta vaiheesta", disabled=True)
+    taxonomy_validate_button = ft.ElevatedButton("Validoi ja viimeistele", disabled=True)
+    taxonomy_plan_activation_button = ft.ElevatedButton("Suunnittele aktivointi", on_click=on_taxonomy_plan_activation, disabled=True)
+    taxonomy_activate_button = ft.ElevatedButton("Aktivoi", disabled=True)
+    taxonomy_show_log_button = ft.ElevatedButton("Näytä loki", on_click=on_taxonomy_show_log)
+    taxonomy_download_log_button = ft.ElevatedButton("Lataa loki", on_click=on_taxonomy_download_log)
+    taxonomy_download_evidence_button = ft.ElevatedButton("Lataa evidence-paketti", on_click=on_taxonomy_download_evidence)
 
     scheduler_content = ft.Column(
         [
@@ -826,41 +1259,44 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
         spacing=12,
         expand=True,
     )
-    datacenter_content = ft.Column(
+    taxonomy_content = ft.Column(
         [
-            datacenter_price_db_field,
-            datacenter_analysis_db_field,
-            datacenter_taxonomy_csv_field,
-            datacenter_taxonomy_version_field,
-            ft.Row([datacenter_market_field, datacenter_signal_date_field]),
-            ft.Row([datacenter_start_date_field, datacenter_index_base_date_field]),
-            datacenter_output_dir_field,
+            taxonomy_active_field,
+            taxonomy_proposed_csv_field,
+            ft.Row([taxonomy_rebuild_mode_dropdown, taxonomy_date_from_field, taxonomy_date_to_field]),
+            taxonomy_deployment_id_field,
             ft.Row(
                 [
-                    datacenter_expected_ticker_count_field,
-                    datacenter_expected_group_count_field,
-                    datacenter_expected_synthetic_ohlc_count_field,
-                    datacenter_rolling_window_size_field,
+                    taxonomy_prepare_button,
+                    taxonomy_refresh_button,
+                    taxonomy_confirm_plan_button,
                 ]
             ),
-            datacenter_watchlist_file_field,
             ft.Row(
                 [
-                    datacenter_plan_button,
-                    datacenter_run_full_chain_button,
-                    datacenter_audit_button,
-                    datacenter_watermarks_button,
+                    taxonomy_run_rebuild_button,
+                    taxonomy_resume_button,
+                    taxonomy_validate_button,
+                    taxonomy_plan_activation_button,
+                    taxonomy_activate_button,
                 ]
             ),
-            datacenter_status_field,
-            datacenter_reports_column,
-            datacenter_log_field,
+            taxonomy_plan_field,
+            taxonomy_status_field,
+            ft.Text("Operaatiot"),
+            taxonomy_operations_column,
+            ft.Row([taxonomy_show_log_button, taxonomy_download_log_button, taxonomy_download_evidence_button]),
+            taxonomy_log_field,
         ],
         spacing=12,
         expand=True,
     )
 
     refresh_logs_view(config.log_dir)
+    try:
+        refresh_taxonomy_state(None)
+    except Exception as exc:
+        taxonomy_active_field.value = f"Taxonomy inspect failed: {exc}"
 
     page.osakedata_db_field = osakedata_db_field
     page.analysis_db_field = analysis_db_field
@@ -882,35 +1318,35 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
     page.timer_status_field = timer_status_field
     page.running_status_text = running_status_text
     page.logs_column = logs_column
-    page.datacenter_price_db_field = datacenter_price_db_field
-    page.datacenter_analysis_db_field = datacenter_analysis_db_field
-    page.datacenter_taxonomy_csv_field = datacenter_taxonomy_csv_field
-    page.datacenter_taxonomy_version_field = datacenter_taxonomy_version_field
-    page.datacenter_market_field = datacenter_market_field
-    page.datacenter_signal_date_field = datacenter_signal_date_field
-    page.datacenter_start_date_field = datacenter_start_date_field
-    page.datacenter_index_base_date_field = datacenter_index_base_date_field
-    page.datacenter_output_dir_field = datacenter_output_dir_field
-    page.datacenter_expected_ticker_count_field = datacenter_expected_ticker_count_field
-    page.datacenter_expected_group_count_field = datacenter_expected_group_count_field
-    page.datacenter_expected_synthetic_ohlc_count_field = datacenter_expected_synthetic_ohlc_count_field
-    page.datacenter_rolling_window_size_field = datacenter_rolling_window_size_field
-    page.datacenter_watchlist_file_field = datacenter_watchlist_file_field
-    page.datacenter_plan_button = datacenter_plan_button
-    page.datacenter_run_full_chain_button = datacenter_run_full_chain_button
-    page.datacenter_audit_button = datacenter_audit_button
-    page.datacenter_watermarks_button = datacenter_watermarks_button
-    page.datacenter_status_field = datacenter_status_field
-    page.datacenter_log_field = datacenter_log_field
-    page.datacenter_reports_column = datacenter_reports_column
     page.scheduler_content = scheduler_content
-    page.datacenter_content = datacenter_content
+    page.taxonomy_content = taxonomy_content
+    page.taxonomy_proposed_csv_field = taxonomy_proposed_csv_field
+    page.taxonomy_rebuild_mode_dropdown = taxonomy_rebuild_mode_dropdown
+    page.taxonomy_date_from_field = taxonomy_date_from_field
+    page.taxonomy_date_to_field = taxonomy_date_to_field
+    page.taxonomy_deployment_id_field = taxonomy_deployment_id_field
+    page.taxonomy_active_field = taxonomy_active_field
+    page.taxonomy_plan_field = taxonomy_plan_field
+    page.taxonomy_status_field = taxonomy_status_field
+    page.taxonomy_log_field = taxonomy_log_field
+    page.taxonomy_operations_column = taxonomy_operations_column
+    page.taxonomy_prepare_button = taxonomy_prepare_button
+    page.taxonomy_refresh_button = taxonomy_refresh_button
+    page.taxonomy_confirm_plan_button = taxonomy_confirm_plan_button
+    page.taxonomy_run_rebuild_button = taxonomy_run_rebuild_button
+    page.taxonomy_resume_button = taxonomy_resume_button
+    page.taxonomy_validate_button = taxonomy_validate_button
+    page.taxonomy_plan_activation_button = taxonomy_plan_activation_button
+    page.taxonomy_activate_button = taxonomy_activate_button
+    page.taxonomy_show_log_button = taxonomy_show_log_button
+    page.taxonomy_download_log_button = taxonomy_download_log_button
+    page.taxonomy_download_evidence_button = taxonomy_download_evidence_button
 
     page.add(
         ft.Tabs(
             tabs=[
                 ft.Tab(text="Scheduler", content=scheduler_content),
-                ft.Tab(text="Datacenter", content=datacenter_content),
+                ft.Tab(text="Taxonomy", content=taxonomy_content),
             ],
             expand=True,
         )

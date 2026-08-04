@@ -434,7 +434,7 @@ def test_run_datacenter_ui_command_updates_fields(tmp_path):
     assert page.update_count == 1
 
 
-def test_run_app_exposes_scheduler_and_datacenter_controls(tmp_path, monkeypatch):
+def test_run_app_exposes_scheduler_and_taxonomy_controls_without_old_datacenter_tab(tmp_path, monkeypatch):
     config_path = tmp_path / "scheduler.json"
     _write_config(config_path)
     monkeypatch.setattr(
@@ -447,7 +447,10 @@ def test_run_app_exposes_scheduler_and_datacenter_controls(tmp_path, monkeypatch
 
     assert page.title == "RawCandle stock update scheduler"
     assert page.technical_relevance_checkbox.value is False
-    assert page.datacenter_plan_button is not None
+    tabs = page.controls[0].tabs
+    assert [tab.text for tab in tabs] == ["Scheduler", "Taxonomy"]
+    assert page.taxonomy_prepare_button is not None
+    assert not hasattr(page, "datacenter_plan_button")
     assert not hasattr(page, "datacenter_dashboard_content")
     assert page.running_status_text.value == "Scheduler status: not running"
 

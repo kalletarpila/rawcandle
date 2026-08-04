@@ -5,6 +5,11 @@ from rawcandle.datacenter_taxonomy_replacement import (
     build_apply_activation_parser,
     print_json,
 )
+from rawcandle.datacenter_taxonomy_operation_log import (
+    complete_taxonomy_change_operation,
+    create_taxonomy_change_operation,
+    write_taxonomy_operation_artifact,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -26,6 +31,16 @@ def main(argv: list[str] | None = None) -> int:
         expected_current_scheduler_taxonomy_csv=args.expected_current_scheduler_taxonomy_csv,
         target_scheduler_taxonomy_csv=args.target_scheduler_taxonomy_csv,
         config_backup_dir=args.config_backup_dir,
+    )
+    operation = create_taxonomy_change_operation(
+        deployment_id=args.deployment_id,
+        operation_type="ACTIVATE",
+    )
+    write_taxonomy_operation_artifact(operation, relative_name="activation_result.json", payload=summary)
+    complete_taxonomy_change_operation(
+        operation,
+        status="OK" if summary["activation_apply_status"] in {"ACTIVE", "NO_CHANGE"} else "FAILED",
+        failed_phase=None if summary["activation_apply_status"] in {"ACTIVE", "NO_CHANGE"} else "ACTIVATION",
     )
     print_json(summary)
     return 0 if summary["activation_apply_status"] in {"ACTIVE", "NO_CHANGE"} else 1
