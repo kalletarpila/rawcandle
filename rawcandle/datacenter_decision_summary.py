@@ -4,7 +4,7 @@ import argparse
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Sequence
 
 
 class DecisionSummaryError(ValueError):
@@ -165,6 +165,56 @@ ROLLING5_PULLBACK_ALERT_FIELDS = [
     "latest_bearish_relevance_class",
     "primary_reason",
     "next_action",
+]
+
+ROLLING5_BREAKOUT_FIELDS = [
+    "ticker",
+    "breakout_days",
+    "first_signal_date",
+    "last_signal_date",
+    "last_primary_layer",
+    "last_primary_subindustry",
+    "last_close",
+    "last_return_5d",
+    "last_return_10d",
+    "last_volume_vs_avg20",
+    "last_latest_structure_label",
+    "last_ticker_trend_state",
+    "last_latest_bos_event_type",
+    "last_latest_bos_freshness",
+    "last_latest_reset_reason",
+    "last_latest_reset_freshness",
+    "last_price_data_status",
+    "latest_bullish_relevance_class",
+    "latest_bullish_relevance_reason",
+    "latest_bearish_relevance_class",
+    "latest_bearish_relevance_reason",
+]
+
+ROLLING5_PULLBACK_FIELDS = [
+    "ticker",
+    "pullback_days",
+    "fast_ema10_pullback_days",
+    "conservative_ema20_pullback_days",
+    "first_signal_date",
+    "last_signal_date",
+    "last_primary_layer",
+    "last_primary_subindustry",
+    "last_close",
+    "last_return_5d",
+    "last_return_20d",
+    "last_return_60d",
+    "last_latest_structure_label",
+    "last_ticker_trend_state",
+    "last_latest_bos_event_type",
+    "last_latest_bos_freshness",
+    "last_latest_reset_reason",
+    "last_latest_reset_freshness",
+    "last_price_data_status",
+    "latest_bullish_relevance_class",
+    "latest_bullish_relevance_reason",
+    "latest_bearish_relevance_class",
+    "latest_bearish_relevance_reason",
 ]
 
 ROLLING30_BUY_FIELDS = [
@@ -630,10 +680,10 @@ def _scanner_section(
     lines.append("### B. Daily Pullback Ticker Scanner")
     lines.extend(render_table(daily_pullbacks, DAILY_PULLBACK_FIELDS))
     lines.append("### C. Rolling 5 repeated breakout tickers")
-    lines.extend(render_table(rolling5_breakouts, _prefixed_fields(rolling5_breakouts, DAILY_BREAKOUT_FIELDS, prefix="last_")))
+    lines.extend(render_table(rolling5_breakouts, ROLLING5_BREAKOUT_FIELDS))
     lines.append("### D. Rolling 5 pullback alerts")
     alert_rows = rolling5_alerts if rolling5_alerts else rolling5_pullbacks
-    alert_fields = ROLLING5_PULLBACK_ALERT_FIELDS if rolling5_alerts else _prefixed_fields(rolling5_pullbacks, DAILY_PULLBACK_FIELDS, prefix="last_")
+    alert_fields = ROLLING5_PULLBACK_ALERT_FIELDS if rolling5_alerts else ROLLING5_PULLBACK_FIELDS
     lines.extend(render_table(alert_rows, alert_fields))
     lines.append("### E. Rolling 30 buy filter and watch-zone")
     lines.extend(render_table(rolling30_buy, ROLLING30_BUY_FIELDS))
@@ -665,7 +715,7 @@ def _action_summary_section(
     rows = [
         {
             "area": "watchlist_exit_risk",
-            "label": "CHECK_STOP_OR_REDUCE" if high_exit_count > 0 else "MONITOR",
+            "label": "REVIEW_EXIT_RISK" if high_exit_count > 0 else "MONITOR",
             "basis": f"watchlist_high_exit_risk_count={metrics.get('watchlist_high_exit_risk_count', '')}",
         },
         {
@@ -690,7 +740,7 @@ def _action_summary_section(
         },
         {
             "area": "exit_risk_focus",
-            "label": "CHECK_STOP_OR_REDUCE" if daily_exits or rolling30_exit else "MONITOR",
+            "label": "REVIEW_EXIT_RISK" if daily_exits or rolling30_exit else "MONITOR",
             "basis": f"daily_exit_rows={len(daily_exits)}; rolling30_exit_rows={len(rolling30_exit)}",
         },
     ]
@@ -789,17 +839,6 @@ def _classify_numeric_change(value: str) -> str:
     if num < 0:
         return "WEAKENED"
     return "UNCHANGED"
-
-
-def _prefixed_fields(rows: Sequence[dict[str, str]], fields: Sequence[str], *, prefix: str) -> list[str]:
-    if not rows:
-        return [prefix + field for field in fields]
-    sample_keys = set().union(*(row.keys() for row in rows))
-    result = []
-    for field in fields:
-        prefixed = prefix + field
-        result.append(prefixed if prefixed in sample_keys else field)
-    return result
 
 
 def _ticker_list(rows: Sequence[dict[str, str]], limit: int = 12) -> str:

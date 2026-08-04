@@ -173,6 +173,8 @@ def test_build_summary_contains_required_headers_and_no_rows(tmp_path: Path) -> 
     assert "### B. Daily Pullback Ticker Scanner\nNo rows." in text
     assert "### Not in Datacenter taxonomy" in text
     assert "| POET | NOT_PART_OF_DATACENTER_ECOSYSTEM | NO |  |" in text
+    assert "| daily_breakouts | MONITOR_BREAKOUT_CONFIRMATION | AMZN |" in text
+    assert "| watchlist_exit_risk | REVIEW_EXIT_RISK | watchlist_high_exit_risk_count=1 |" in text
 
 
 def test_cli_requires_inputs(tmp_path: Path) -> None:
