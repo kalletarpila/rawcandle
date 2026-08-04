@@ -47,6 +47,12 @@ from rawcandle.technical_signal_relevance_persistence import (
     apply_technical_signal_relevance_migration,
     read_relevance_run,
 )
+from rawcandle.datacenter_decision_summary import (
+    DecisionSummaryError,
+    build_decision_summary,
+    extract_section,
+    parse_metadata,
+)
 
 
 WINDOWS_REPORT_COPY_DIR = Path("/mnt/d/swing_reports")
@@ -87,7 +93,16 @@ FINAL_PIPELINE_SUMMARY_ORDER = (
     "rolling_5_report_csv_path",
     "rolling_2_report_path",
     "rolling_2_report_csv_path",
+    "decision_summary_report_path",
+    "decision_summary.status",
+    "decision_summary.execution_status",
+    "decision_summary.skip_reason",
+    "decision_summary.error",
     "pipeline_status",
+)
+
+DAILY_REPORT_FILENAME_RE = re.compile(
+    r"^datacenter_daily_(?P<signal_date>\d{4}-\d{2}-\d{2})(?:_(?P<hhmm>\d{4}))?_full\.md$"
 )
 
 PIPELINE_STAGE_KEYS = (
@@ -160,6 +175,132 @@ def _timestamp_output_path(path: Path, *, date_value: str, hhmm: str) -> Path:
         if token in stem:
             return path.with_name(f"{stem.replace(token, f'{token}_{hhmm}', 1)}{path.suffix}")
     return path.with_name(f"{stem}_{hhmm}{path.suffix}")
+
+
+def _build_decision_summary_output_path(
+    *,
+    output_dir: Path,
+    signal_date: str,
+    output_hhmm: str,
+) -> Path:
+    return _timestamp_output_path(
+        output_dir / f"datacenter_decision_summary_{signal_date}_full.md",
+        date_value=signal_date,
+        hhmm=output_hhmm,
+    )
+
+
+def _read_report_metadata(path: Path) -> dict[str, str]:
+    text = path.read_text(encoding="utf-8")
+    try:
+        return parse_metadata(extract_section(text, "1. Title and run metadata"))
+    except DecisionSummaryError:
+        return {}
+
+
+def _find_previous_daily_report(
+    *,
+    current_daily_report: Path,
+    current_signal_date: str,
+) -> Path | None:
+    current_metadata = _read_report_metadata(current_daily_report)
+    candidates: list[tuple[str, str, Path]] = []
+    for path in current_daily_report.parent.glob("datacenter_daily_*_full.md"):
+        if path.resolve() == current_daily_report.resolve():
+            continue
+        match = DAILY_REPORT_FILENAME_RE.match(path.name)
+        if match is None:
+            continue
+        candidate_signal_date = match.group("signal_date")
+        if candidate_signal_date >= current_signal_date:
+            continue
+        candidate_metadata = _read_report_metadata(path)
+        if not _daily_report_metadata_matches(current_metadata, candidate_metadata):
+            continue
+        candidates.append((candidate_signal_date, path.name, path))
+    if not candidates:
+        return None
+    return sorted(candidates)[-1][2]
+
+
+def _daily_report_metadata_matches(current: dict[str, str], candidate: dict[str, str]) -> bool:
+    for key in ("signal_version", "ohlc_calc_version", "taxonomy_version"):
+        if current.get(key) and candidate.get(key) != current[key]:
+            return False
+    return True
+
+
+def _generate_decision_summary_report(
+    *,
+    current_daily_report: Path,
+    current_rolling2_report: Path,
+    current_rolling5_report: Path,
+    current_rolling30_report: Path,
+    output_path: Path,
+    signal_date: str,
+) -> dict[str, object]:
+    required_sources = [
+        current_daily_report,
+        current_rolling2_report,
+        current_rolling5_report,
+        current_rolling30_report,
+    ]
+    missing_sources = [path for path in required_sources if not path.exists()]
+    if missing_sources:
+        reason = "missing_source_reports:" + ",".join(str(path) for path in missing_sources)
+        print(f"WARNING decision_summary skipped: {reason}")
+        return {
+            "status": "SKIPPED",
+            "execution_status": "SKIPPED",
+            "skip_reason": reason,
+            "error": "",
+            "output_markdown": "",
+            "previous_daily_report_path": "",
+        }
+    previous_daily_report = _find_previous_daily_report(
+        current_daily_report=current_daily_report,
+        current_signal_date=signal_date,
+    )
+    if previous_daily_report is None:
+        reason = "missing_previous_daily"
+        print(f"WARNING decision_summary skipped: {reason}")
+        return {
+            "status": "SKIPPED",
+            "execution_status": "SKIPPED",
+            "skip_reason": reason,
+            "error": "",
+            "output_markdown": "",
+            "previous_daily_report_path": "",
+        }
+    try:
+        build_decision_summary(
+            current_daily=current_daily_report,
+            previous_daily=previous_daily_report,
+            current_rolling2=current_rolling2_report,
+            current_rolling5=current_rolling5_report,
+            current_rolling30=current_rolling30_report,
+            output=output_path,
+        )
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        print(f"WARNING decision_summary failed: {error}")
+        return {
+            "status": "FAILED",
+            "execution_status": "FAILED",
+            "skip_reason": "",
+            "error": error,
+            "output_markdown": "",
+            "previous_daily_report_path": str(previous_daily_report),
+        }
+    print(f"SUMMARY decision_summary_report_path={output_path}")
+    return {
+        "status": "OK",
+        "execution_status": "EXECUTED",
+        "skip_reason": "",
+        "error": "",
+        "output_markdown": str(output_path),
+        "previous_daily_report_path": str(previous_daily_report),
+    }
 
 
 def format_pipeline_final_summary_lines(summary: dict[str, object]) -> list[str]:
@@ -761,6 +902,11 @@ def run_datacenter_swing_pipeline(
     rolling_2_output_md, rolling_2_output_csv = _build_timestamped_report_output_paths(
         output_dir=output_dir,
         prefix="datacenter_rolling_2",
+        signal_date=signal_date,
+        output_hhmm=output_hhmm,
+    )
+    decision_summary_output_md = _build_decision_summary_output_path(
+        output_dir=output_dir,
         signal_date=signal_date,
         output_hhmm=output_hhmm,
     )
@@ -1500,7 +1646,8 @@ def run_datacenter_swing_pipeline(
                             Path(rolling_5_report_csv_path),
                             Path(rolling_2_report_path),
                             Path(rolling_2_report_csv_path),
-                        ],
+                        ]
+                        + ([Path(decision_summary_report_path)] if decision_summary_report_path else []),
                     ),
                 )
             )
@@ -1563,6 +1710,11 @@ def run_datacenter_swing_pipeline(
                 "rolling_5_report_csv_path": "",
                 "rolling_2_report_path": "",
                 "rolling_2_report_csv_path": "",
+                "decision_summary_report_path": "",
+                "decision_summary.status": "SKIPPED",
+                "decision_summary.execution_status": "DRY_RUN",
+                "decision_summary.skip_reason": "dry_run",
+                "decision_summary.error": "",
                 "pipeline_status": "DRY_RUN",
                 **stage_duration_summary,
                 **stage2_summary,
@@ -1583,6 +1735,11 @@ def run_datacenter_swing_pipeline(
     rolling_5_report_csv_path = ""
     rolling_2_report_path = ""
     rolling_2_report_csv_path = ""
+    decision_summary_report_path = ""
+    decision_summary_status = "SKIPPED" if skip_reports else "NOT_RUN"
+    decision_summary_execution_status = "SKIPPED" if skip_reports else "NOT_RUN"
+    decision_summary_skip_reason = "reports_skipped" if skip_reports else ""
+    decision_summary_error = ""
     daily_report_result: dict[str, object] | None = None
     rolling_30_report_result: dict[str, object] | None = None
     rolling_5_report_result: dict[str, object] | None = None
@@ -1677,6 +1834,11 @@ def run_datacenter_swing_pipeline(
                         "rolling_5_report_csv_path": "",
                         "rolling_2_report_path": "",
                         "rolling_2_report_csv_path": "",
+                        "decision_summary_report_path": "",
+                        "decision_summary.status": "SKIPPED",
+                        "decision_summary.execution_status": "SKIPPED",
+                        "decision_summary.skip_reason": "audit_failed_before_reports_completed",
+                        "decision_summary.error": "",
                         "pipeline_status": "FAIL",
                         **stage_duration_summary,
                         **stage2_summary,
@@ -1723,6 +1885,19 @@ def run_datacenter_swing_pipeline(
             rolling_2_report_result = result
             rolling_2_report_path = str(result["summary"]["output_markdown"])
             rolling_2_report_csv_path = str(result["summary"]["output_csv"])
+            decision_summary_result = _generate_decision_summary_report(
+                current_daily_report=Path(daily_report_path),
+                current_rolling2_report=Path(rolling_2_report_path),
+                current_rolling5_report=Path(rolling_5_report_path),
+                current_rolling30_report=Path(rolling_30_report_path),
+                output_path=decision_summary_output_md,
+                signal_date=signal_date,
+            )
+            decision_summary_report_path = str(decision_summary_result["output_markdown"])
+            decision_summary_status = str(decision_summary_result["status"])
+            decision_summary_execution_status = str(decision_summary_result["execution_status"])
+            decision_summary_skip_reason = str(decision_summary_result["skip_reason"])
+            decision_summary_error = str(decision_summary_result["error"])
         elif stage.heading == "Windows report copy":
             copy_summary = result["summary"]
             for key, value in copy_summary.items():
@@ -1733,6 +1908,8 @@ def run_datacenter_swing_pipeline(
         pipeline_status = "WARN"
     if audit_validation_status == "FAIL":
         pipeline_status = "FAIL"
+    if pipeline_status == "OK" and decision_summary_status == "FAILED":
+        pipeline_status = "WARN"
 
     return {
         "summary": {
@@ -1779,6 +1956,11 @@ def run_datacenter_swing_pipeline(
             "rolling_5_report_csv_path": rolling_5_report_csv_path,
             "rolling_2_report_path": rolling_2_report_path,
             "rolling_2_report_csv_path": rolling_2_report_csv_path,
+            "decision_summary_report_path": decision_summary_report_path,
+            "decision_summary.status": decision_summary_status,
+            "decision_summary.execution_status": decision_summary_execution_status,
+            "decision_summary.skip_reason": decision_summary_skip_reason,
+            "decision_summary.error": decision_summary_error,
             "pipeline_status": pipeline_status,
             **stage_duration_summary,
             **stage2_summary,

@@ -19,6 +19,13 @@ from analysis.datacenter_indices.technical_relevance_context import (
     load_datacenter_pipeline_technical_relevance_tickers,
 )
 from rawcandle.technical_signal_relevance_persistence import apply_technical_signal_relevance_migration
+from tests.test_datacenter_decision_summary import (
+    CURRENT_DAILY,
+    PREVIOUS_DAILY,
+    ROLLING2,
+    ROLLING5,
+    ROLLING30,
+)
 
 
 def _create_analysis_db(path: Path) -> None:
@@ -168,6 +175,101 @@ def _stage2_plan(
         ],
         excluded_stage_plans=[],
     )
+
+
+def _patch_report_only_pipeline(monkeypatch) -> None:
+    def _runner(argv: list[str]) -> int:
+        return 0
+
+    def _audit(**kwargs):
+        return {"summary": {"validation_status": "OK"}}
+
+    monkeypatch.setattr(orchestrator, "run_datacenter_indices_main", _runner)
+    monkeypatch.setattr(orchestrator, "run_datacenter_ticker_swing_signals_main", _runner)
+    monkeypatch.setattr(orchestrator, "run_datacenter_group_swing_signals_main", _runner)
+    monkeypatch.setattr(orchestrator, "run_datacenter_group_synthetic_ohlc_main", _runner)
+    monkeypatch.setattr(orchestrator, "load_swing_pipeline_audit", _audit)
+    monkeypatch.setattr(orchestrator, "format_swing_pipeline_audit_summary_lines", lambda summary: [])
+    monkeypatch.setattr(orchestrator, "format_daily_swing_report_summary_lines", lambda summary: [])
+    monkeypatch.setattr(orchestrator, "format_weekly_swing_report_summary_lines", lambda summary: [])
+
+
+def _write_current_daily_report(**kwargs):
+    output_md = kwargs["output_md"]
+    output_csv = kwargs["output_csv"]
+    output_md.write_text(CURRENT_DAILY.replace("2026-08-03", kwargs["signal_date"]), encoding="utf-8")
+    output_csv.write_text("daily csv", encoding="utf-8")
+    return {"summary": {"output_markdown": str(output_md), "output_csv": str(output_csv)}}
+
+
+def _write_rolling_report(**kwargs):
+    output_md = kwargs["output_md"]
+    output_csv = kwargs["output_csv"]
+    content_by_window = {2: ROLLING2, 5: ROLLING5, 30: ROLLING30}
+    content = content_by_window.get(kwargs["window_size"], ROLLING30)
+    output_md.write_text(content.replace("2026-08-03", kwargs["end_date"]), encoding="utf-8")
+    output_csv.write_text("rolling csv", encoding="utf-8")
+    return {
+        "summary": {
+            "output_markdown": str(output_md),
+            "output_csv": str(output_csv),
+            "window_start_date": "2026-05-01",
+        }
+    }
+
+
+def test_pipeline_generates_decision_summary_when_previous_daily_exists(tmp_path, monkeypatch):
+    _create_analysis_db(tmp_path / "analysis.db")
+    _patch_report_only_pipeline(monkeypatch)
+    monkeypatch.setattr(orchestrator, "write_daily_swing_signal_report", _write_current_daily_report)
+    monkeypatch.setattr(orchestrator, "write_weekly_swing_report", _write_rolling_report)
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True)
+    previous_daily = reports_dir / "datacenter_daily_2026-05-14_0700_full.md"
+    previous_daily.write_text(
+        PREVIOUS_DAILY.replace("2026-07-31", "2026-05-14").replace("2026-08-03", "2026-05-15"),
+        encoding="utf-8",
+    )
+
+    result = orchestrator.run_datacenter_swing_pipeline(
+        **_base_kwargs(tmp_path),
+        no_technical_relevance=True,
+        windows_report_copy_enabled=False,
+        generated_at_utc="2026-05-16T08:00:00Z",
+    )
+
+    summary = result["summary"]
+    decision_summary_path = Path(str(summary["decision_summary_report_path"]))
+    assert summary["pipeline_status"] == "OK"
+    assert summary["decision_summary.status"] == "OK"
+    assert summary["decision_summary.execution_status"] == "EXECUTED"
+    assert decision_summary_path == reports_dir / "datacenter_decision_summary_2026-05-15_0800_full.md"
+    assert decision_summary_path.exists()
+    assert "# Datacenter Daily Decision Summary - 2026-05-15" in decision_summary_path.read_text(encoding="utf-8")
+    daily_path = reports_dir / "datacenter_daily_2026-05-15_0800_full.md"
+    assert "# Datacenter Daily Swing Signal Report" in daily_path.read_text(encoding="utf-8")
+
+
+def test_pipeline_skips_decision_summary_nonfatally_without_previous_daily(tmp_path, monkeypatch):
+    _create_analysis_db(tmp_path / "analysis.db")
+    _patch_report_only_pipeline(monkeypatch)
+    monkeypatch.setattr(orchestrator, "write_daily_swing_signal_report", _write_current_daily_report)
+    monkeypatch.setattr(orchestrator, "write_weekly_swing_report", _write_rolling_report)
+
+    result = orchestrator.run_datacenter_swing_pipeline(
+        **_base_kwargs(tmp_path),
+        no_technical_relevance=True,
+        windows_report_copy_enabled=False,
+        generated_at_utc="2026-05-16T08:00:00Z",
+    )
+
+    summary = result["summary"]
+    assert summary["pipeline_status"] == "OK"
+    assert summary["decision_summary_report_path"] == ""
+    assert summary["decision_summary.status"] == "SKIPPED"
+    assert summary["decision_summary.execution_status"] == "SKIPPED"
+    assert summary["decision_summary.skip_reason"] == "missing_previous_daily"
+    assert (tmp_path / "reports" / "datacenter_daily_2026-05-15_0800_full.md").exists()
 
 
 def _arg_value(argv: list[str], option: str) -> str:
