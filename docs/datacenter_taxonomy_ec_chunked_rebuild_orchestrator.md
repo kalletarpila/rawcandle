@@ -39,6 +39,23 @@ rawcandle.cli.run_ec_source_layer_backfill
 
 It does not duplicate canonical EC loader logic.
 
+If all chunks complete but whole-range validation fails only because old
+DATACENTER EC rows remain in the rebuilt range, the next step is not another
+full chunk run. Use the guarded replacement cleanup and validation-only
+finalization path:
+
+```text
+plan cleanup
+-> apply cleanup in one four-table transaction
+-> validate existing rebuilt facts
+-> finalize canonical EC watermark lineage
+-> update rebuild evidence
+```
+
+The validation-only path reports `loaders_rerun=false` and
+`chunks_rerun=false`; it exists specifically for the case where V2 facts are
+already complete and parity-clean.
+
 ## CLIs
 
 Read-only plan:

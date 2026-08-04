@@ -318,6 +318,33 @@ DATACENTER facts are a replacement range: old DATACENTER rows in the rebuilt
 range are deleted before V2 rows are loaded, while other ecosystems are left
 untouched.
 
+If a controlled EC taxonomy rebuild loads all V2 facts successfully but leaves
+old DATACENTER EC rows in the affected range, do not rerun the full chunked
+rebuild by default. Use the guarded cleanup and validation-only recovery path:
+
+```text
+plan_ec_taxonomy_replacement_cleanup
+-> apply_ec_taxonomy_replacement_cleanup
+-> finalize_ec_taxonomy_rebuild_validation --finalize-watermarks
+-> apply_datacenter_taxonomy_rebuild_evidence
+-> plan_datacenter_taxonomy_activation
+```
+
+The cleanup predicate is intentionally narrow:
+
+```text
+ecosystem_id = DATACENTER
+taxonomy_version_id <> proposed taxonomy_version_id
+signal_date between rebuild_start_date and required_signal_date
+canonical EC fact tables only
+```
+
+It must not touch V2 rows, another ecosystem, dates outside the confirmed range,
+DC facts, taxonomy metadata, watchlists, scheduler configuration, or noncanonical
+EC tables. Watermark finalization is delayed until validation-only recovery
+proves stale rows are gone, V2 fact heads are complete, and coverage/parity are
+accepted with zero mismatches.
+
 Known source-data special cases are accepted explicitly:
 
 ```text

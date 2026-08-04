@@ -215,15 +215,68 @@ and V1 scheduler configuration still match the guarded request.
 
 ## DATACENTER EC Replacement
 
-In taxonomy-rebuild mode, the chunk runner deletes old DATACENTER canonical EC
-facts for that chunk before loading V2 rows. The delete predicate is scoped by
-`ecosystem_id`, `taxonomy_version_id`, and `signal_date` for:
+In taxonomy-rebuild mode, canonical EC V2 rows are loaded into an explicit
+`ecosystem_id + taxonomy_version_id + signal_date` target scope. If a previous
+active taxonomy still has DATACENTER rows inside the rebuilt range after all
+V2 chunks succeed, those old rows are removed by the guarded replacement cleanup
+path, not by rerunning the seven chunks.
+
+The cleanup is planned read-only with:
+
+```bash
+python3 -m rawcandle.cli.plan_ec_taxonomy_replacement_cleanup \
+  --db data/analysis.db \
+  --ecosystem DATACENTER \
+  --target-taxonomy-version DC_TAXONOMY_FULL_V2 \
+  --deployment-id <taxonomy_change_id> \
+  --date-from 2025-08-01 \
+  --date-to <required-head-date>
+```
+
+The apply command requires the exact candidate hash returned by the plan:
+
+```bash
+python3 -m rawcandle.cli.apply_ec_taxonomy_replacement_cleanup \
+  <same scope arguments> \
+  --confirm-db data/analysis.db \
+  --confirm-ecosystem DATACENTER \
+  --confirm-target-taxonomy-version DC_TAXONOMY_FULL_V2 \
+  --confirm-deployment-id <taxonomy_change_id> \
+  --confirm-date-from 2025-08-01 \
+  --confirm-date-to <required-head-date> \
+  --confirm-delete-candidate-hash <plan hash>
+```
+
+The delete predicate is scoped by `ecosystem_id`, `taxonomy_version_id <> target`,
+and `signal_date` for:
 
 ```text
 ec_ticker_signal_daily
 ec_group_signal_daily
 ec_group_synthetic_ohlc_daily
 ec_group_index_daily
+```
+
+After cleanup, validation-only recovery uses existing facts and does not rerun
+loaders or chunks:
+
+```bash
+python3 -m rawcandle.cli.finalize_ec_taxonomy_rebuild_validation \
+  --db data/analysis.db \
+  --ecosystem DATACENTER \
+  --target-taxonomy-version DC_TAXONOMY_FULL_V2 \
+  --taxonomy-csv data/datacenter_taxonomy_full_v2.csv \
+  --deployment-id <taxonomy_change_id> \
+  --date-from 2025-08-01 \
+  --date-to <required-head-date> \
+  --finalize-watermarks \
+  --update-deployment-evidence
+```
+
+This path encodes:
+
+```text
+NO_REBUILD_RETRY_NEEDED_VALIDATION_ONLY_AFTER_FIX
 ```
 
 Other ecosystems are not touched. Active V1 taxonomy rows are not touched by a

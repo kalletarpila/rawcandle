@@ -64,6 +64,12 @@ CANONICAL_EC_FACT_TABLES = (
     "ec_group_synthetic_ohlc_daily",
     "ec_group_index_daily",
 )
+CANONICAL_EC_FACT_DATE_COLUMNS = {
+    "ec_ticker_signal_daily": "signal_date",
+    "ec_group_signal_daily": "signal_date",
+    "ec_group_synthetic_ohlc_daily": "signal_date",
+    "ec_group_index_daily": "signal_date",
+}
 CANONICAL_EC_WATERMARK_SCOPES = (
     ("TICKER_SWING_BASE", "dc_ticker_swing_signal_daily"),
     ("GROUP_SWING_BASE", "dc_group_swing_signal_daily"),
@@ -1809,6 +1815,702 @@ def apply_datacenter_taxonomy_rebuild_evidence(
         }
     finally:
         conn.close()
+
+
+def _resolve_ecosystem_id_for_code(conn: sqlite3.Connection, ecosystem_code: str) -> int | None:
+    if "ec_ecosystem" not in _table_names(conn):
+        return None
+    row = conn.execute(
+        "SELECT ecosystem_id FROM ec_ecosystem WHERE ecosystem_code = ?",
+        (ecosystem_code,),
+    ).fetchone()
+    return int(row[0]) if row is not None else None
+
+
+def _row_fingerprint_expr(conn: sqlite3.Connection, table_name: str) -> tuple[str, ...]:
+    preferred = (
+        "ecosystem_id",
+        "taxonomy_version_id",
+        "signal_date",
+        "entity_id",
+        "signal_version",
+        "ohlc_calc_version",
+        "calc_version",
+    )
+    columns = _table_columns(conn, table_name)
+    return tuple(column for column in preferred if column in columns)
+
+
+def _fact_scope_hash(
+    conn: sqlite3.Connection,
+    *,
+    table_name: str,
+    where_sql: str,
+    params: tuple[object, ...],
+) -> str:
+    columns = _row_fingerprint_expr(conn, table_name)
+    if not columns:
+        columns = ("rowid",)
+    select_list = ", ".join(columns)
+    rows = conn.execute(
+        f"SELECT {select_list} FROM {table_name} WHERE {where_sql} ORDER BY {select_list}",
+        params,
+    ).fetchall()
+    payload = {
+        "table_name": table_name,
+        "columns": columns,
+        "rows": [tuple(row[column] for column in columns) for row in rows],
+    }
+    return _json_sha256(payload)
+
+
+def _cleanup_table_plan(
+    conn: sqlite3.Connection,
+    *,
+    table_name: str,
+    ecosystem_id: int,
+    target_taxonomy_version_id: int,
+    date_from: str,
+    date_to: str,
+) -> dict[str, object]:
+    blocking_errors: list[str] = []
+    warnings: list[str] = []
+    if table_name not in _table_names(conn):
+        return {
+            "table_name": table_name,
+            "target_v2_row_count": 0,
+            "old_version_row_count": 0,
+            "old_version_taxonomy_ids": [],
+            "old_version_min_date": None,
+            "old_version_max_date": None,
+            "delete_candidate_count": 0,
+            "delete_candidate_key_hash": _json_sha256({"table_name": table_name, "rows": []}),
+            "unexpected_target_rows": 0,
+            "unexpected_other_ecosystem_rows": 0,
+            "safe_to_apply": False,
+            "blocking_errors": [f"missing canonical EC fact table: {table_name}"],
+            "warnings": warnings,
+        }
+    required_columns = {"ecosystem_id", "taxonomy_version_id", CANONICAL_EC_FACT_DATE_COLUMNS[table_name]}
+    missing = sorted(required_columns - _table_columns(conn, table_name))
+    if missing:
+        return {
+            "table_name": table_name,
+            "target_v2_row_count": 0,
+            "old_version_row_count": 0,
+            "old_version_taxonomy_ids": [],
+            "old_version_min_date": None,
+            "old_version_max_date": None,
+            "delete_candidate_count": 0,
+            "delete_candidate_key_hash": _json_sha256({"table_name": table_name, "rows": []}),
+            "unexpected_target_rows": 0,
+            "unexpected_other_ecosystem_rows": 0,
+            "safe_to_apply": False,
+            "blocking_errors": [f"{table_name} missing required cleanup columns: {missing}"],
+            "warnings": warnings,
+        }
+    date_column = CANONICAL_EC_FACT_DATE_COLUMNS[table_name]
+    target_row = conn.execute(
+        f"""
+        SELECT COUNT(*)
+        FROM {table_name}
+        WHERE ecosystem_id = ?
+          AND taxonomy_version_id = ?
+          AND {date_column} >= ?
+          AND {date_column} <= ?
+        """,
+        (ecosystem_id, target_taxonomy_version_id, date_from, date_to),
+    ).fetchone()
+    old_row = conn.execute(
+        f"""
+        SELECT COUNT(*), MIN({date_column}), MAX({date_column})
+        FROM {table_name}
+        WHERE ecosystem_id = ?
+          AND taxonomy_version_id <> ?
+          AND {date_column} >= ?
+          AND {date_column} <= ?
+        """,
+        (ecosystem_id, target_taxonomy_version_id, date_from, date_to),
+    ).fetchone()
+    old_ids = [
+        int(row[0])
+        for row in conn.execute(
+            f"""
+            SELECT DISTINCT taxonomy_version_id
+            FROM {table_name}
+            WHERE ecosystem_id = ?
+              AND taxonomy_version_id <> ?
+              AND {date_column} >= ?
+              AND {date_column} <= ?
+            ORDER BY taxonomy_version_id
+            """,
+            (ecosystem_id, target_taxonomy_version_id, date_from, date_to),
+        ).fetchall()
+        if row[0] is not None
+    ]
+    candidate_hash = _fact_scope_hash(
+        conn,
+        table_name=table_name,
+        where_sql=(
+            f"ecosystem_id = ? AND taxonomy_version_id <> ? "
+            f"AND {date_column} >= ? AND {date_column} <= ?"
+        ),
+        params=(ecosystem_id, target_taxonomy_version_id, date_from, date_to),
+    )
+    unexpected_target = conn.execute(
+        f"""
+        SELECT COUNT(*)
+        FROM {table_name}
+        WHERE ecosystem_id = ?
+          AND taxonomy_version_id = ?
+          AND ({date_column} < ? OR {date_column} > ?)
+        """,
+        (ecosystem_id, target_taxonomy_version_id, date_from, date_to),
+    ).fetchone()[0]
+    return {
+        "table_name": table_name,
+        "target_v2_row_count": int(target_row[0]),
+        "old_version_row_count": int(old_row[0]),
+        "old_version_taxonomy_ids": old_ids,
+        "old_version_min_date": old_row[1],
+        "old_version_max_date": old_row[2],
+        "delete_candidate_count": int(old_row[0]),
+        "delete_candidate_key_hash": candidate_hash,
+        "unexpected_target_rows": int(unexpected_target),
+        "unexpected_other_ecosystem_rows": 0,
+        "safe_to_apply": not blocking_errors,
+        "blocking_errors": blocking_errors,
+        "warnings": warnings,
+    }
+
+
+def plan_ec_taxonomy_replacement_cleanup(
+    *,
+    db: str | Path,
+    ecosystem: str,
+    target_taxonomy_version: str,
+    deployment_id: int,
+    date_from: str,
+    date_to: str,
+    scheduler_config: str | Path | None = None,
+    expected_scheduler_taxonomy_version: str | None = None,
+) -> dict[str, object]:
+    blocking_errors: list[str] = []
+    conn = _connect_readonly(db)
+    try:
+        ecosystem_id = _resolve_ecosystem_id_for_code(conn, ecosystem)
+        if ecosystem_id is None:
+            blocking_errors.append(f"ecosystem not found: {ecosystem}")
+            taxonomy = None
+        else:
+            taxonomy = _fetch_loaded_taxonomy(
+                conn,
+                ecosystem_code=ecosystem,
+                taxonomy_version_code=target_taxonomy_version,
+            )
+        if taxonomy is None:
+            blocking_errors.append("target taxonomy metadata is not loaded")
+            target_taxonomy_version_id = None
+        else:
+            target_taxonomy_version_id = int(taxonomy["taxonomy_version_id"])
+            if int(taxonomy.get("is_active") or 0) != 0:
+                blocking_errors.append("target taxonomy is already active")
+        active = _fetch_active_taxonomy(conn, ecosystem_code=ecosystem)
+        if active is None:
+            blocking_errors.append("active taxonomy is missing")
+        elif str(active.get("taxonomy_version_code")) == target_taxonomy_version:
+            blocking_errors.append("target taxonomy is active unexpectedly")
+        deployment = _fetch_deployment_by_id(
+            conn,
+            deployment_id=deployment_id,
+            ecosystem_code=ecosystem,
+            proposed_taxonomy_version=target_taxonomy_version,
+        )
+        if deployment is None:
+            blocking_errors.append("taxonomy deployment row not found")
+        else:
+            if str(deployment.get("dc_rebuild_status")) != "OK":
+                blocking_errors.append("DC rebuild status is not OK")
+            if str(deployment.get("activation_status")) == "ACTIVE":
+                blocking_errors.append("deployment already active")
+
+        table_plans: list[dict[str, object]] = []
+        if ecosystem_id is not None and target_taxonomy_version_id is not None:
+            for table_name in CANONICAL_EC_FACT_TABLES:
+                table_plan = _cleanup_table_plan(
+                    conn,
+                    table_name=table_name,
+                    ecosystem_id=ecosystem_id,
+                    target_taxonomy_version_id=target_taxonomy_version_id,
+                    date_from=date_from,
+                    date_to=date_to,
+                )
+                table_plans.append(table_plan)
+                blocking_errors.extend(str(error) for error in table_plan["blocking_errors"])
+        else:
+            table_plans = []
+    finally:
+        conn.close()
+
+    if scheduler_config is not None and expected_scheduler_taxonomy_version is not None:
+        scheduler = read_scheduler_config(str(scheduler_config))
+        if scheduler.datacenter_taxonomy_version != expected_scheduler_taxonomy_version:
+            blocking_errors.append("scheduler Datacenter taxonomy version is not expected active version")
+        if scheduler.ec_source_layer_taxonomy_version != expected_scheduler_taxonomy_version:
+            blocking_errors.append("scheduler EC taxonomy version is not expected active version")
+
+    plan_payload = {
+        "ecosystem_code": ecosystem,
+        "ecosystem_id": ecosystem_id,
+        "target_taxonomy_version": target_taxonomy_version,
+        "target_taxonomy_version_id": target_taxonomy_version_id,
+        "deployment_id": deployment_id,
+        "date_from": date_from,
+        "date_to": date_to,
+        "tables": table_plans,
+    }
+    cleanup_plan_hash = _json_sha256(plan_payload)
+    delete_candidate_hash = _json_sha256(
+        {
+            "cleanup_plan_hash": cleanup_plan_hash,
+            "tables": [
+                {
+                    "table_name": table["table_name"],
+                    "delete_candidate_count": table["delete_candidate_count"],
+                    "delete_candidate_key_hash": table["delete_candidate_key_hash"],
+                }
+                for table in table_plans
+            ],
+        }
+    )
+    return {
+        "cleanup_plan_status": "READY_TO_APPLY" if not blocking_errors else "BLOCKED",
+        "safe_to_apply": not blocking_errors,
+        "cleanup_plan_hash": cleanup_plan_hash,
+        "delete_candidate_hash": delete_candidate_hash,
+        "blocking_errors": sorted(set(blocking_errors)),
+        **plan_payload,
+    }
+
+
+def _ec_fact_table_hashes(
+    conn: sqlite3.Connection,
+    *,
+    ecosystem_id: int,
+    taxonomy_version_id: int,
+    date_from: str,
+    date_to: str,
+) -> dict[str, str]:
+    return {
+        table_name: _fact_scope_hash(
+            conn,
+            table_name=table_name,
+            where_sql=(
+                f"ecosystem_id = ? AND taxonomy_version_id = ? "
+                f"AND {CANONICAL_EC_FACT_DATE_COLUMNS[table_name]} >= ? "
+                f"AND {CANONICAL_EC_FACT_DATE_COLUMNS[table_name]} <= ?"
+            ),
+            params=(ecosystem_id, taxonomy_version_id, date_from, date_to),
+        )
+        for table_name in CANONICAL_EC_FACT_TABLES
+    }
+
+
+def _validate_v2_fact_state(
+    conn: sqlite3.Connection,
+    *,
+    ecosystem_id: int,
+    taxonomy_version_id: int,
+    required_signal_date: str,
+    date_from: str,
+    date_to: str,
+) -> tuple[dict[str, object], list[str]]:
+    blocking_errors: list[str] = []
+    heads = _ec_fact_heads(conn, ecosystem_id=ecosystem_id, taxonomy_version_id=taxonomy_version_id)
+    for table_name, head in heads.items():
+        if head is None or head < required_signal_date:
+            blocking_errors.append(f"V2 EC fact head incomplete for {table_name}")
+    outside_range: dict[str, int] = {}
+    duplicate_counts: dict[str, int] = {}
+    for table_name in CANONICAL_EC_FACT_TABLES:
+        date_column = CANONICAL_EC_FACT_DATE_COLUMNS[table_name]
+        outside = conn.execute(
+            f"""
+            SELECT COUNT(*)
+            FROM {table_name}
+            WHERE ecosystem_id = ?
+              AND taxonomy_version_id = ?
+              AND ({date_column} < ? OR {date_column} > ?)
+            """,
+            (ecosystem_id, taxonomy_version_id, date_from, date_to),
+        ).fetchone()[0]
+        outside_range[table_name] = int(outside)
+        if outside:
+            blocking_errors.append(f"V2 rows outside rebuild range for {table_name}")
+        columns = _row_fingerprint_expr(conn, table_name)
+        key_columns = [column for column in columns if column not in {"ecosystem_id", "taxonomy_version_id"}]
+        if key_columns:
+            group_by = ", ".join(key_columns)
+            duplicate = conn.execute(
+                f"""
+                SELECT COUNT(*)
+                FROM (
+                    SELECT {group_by}, COUNT(*) AS c
+                    FROM {table_name}
+                    WHERE ecosystem_id = ?
+                      AND taxonomy_version_id = ?
+                    GROUP BY {group_by}
+                    HAVING c > 1
+                )
+                """,
+                (ecosystem_id, taxonomy_version_id),
+            ).fetchone()[0]
+        else:
+            duplicate = 0
+        duplicate_counts[table_name] = int(duplicate)
+        if duplicate:
+            blocking_errors.append(f"V2 duplicate keys for {table_name}")
+    return {
+        "status": "OK" if not blocking_errors else "FAILED",
+        "ec_fact_heads": heads,
+        "outside_range_counts": outside_range,
+        "duplicate_key_counts": duplicate_counts,
+    }, blocking_errors
+
+
+def apply_ec_taxonomy_replacement_cleanup(
+    *,
+    db: str | Path,
+    ecosystem: str,
+    target_taxonomy_version: str,
+    deployment_id: int,
+    date_from: str,
+    date_to: str,
+    confirm_db: str | Path,
+    confirm_ecosystem: str,
+    confirm_target_taxonomy_version: str,
+    confirm_deployment_id: int,
+    confirm_date_from: str,
+    confirm_date_to: str,
+    confirm_delete_candidate_hash: str,
+    scheduler_config: str | Path | None = None,
+    expected_scheduler_taxonomy_version: str | None = None,
+    invocation_source: str = "APPLY_EC_TAXONOMY_REPLACEMENT_CLEANUP",
+) -> dict[str, object]:
+    blocking_errors: list[str] = []
+    if Path(db) != Path(confirm_db):
+        blocking_errors.append("confirm-db does not match db")
+    if ecosystem != confirm_ecosystem:
+        blocking_errors.append("confirm-ecosystem does not match ecosystem")
+    if target_taxonomy_version != confirm_target_taxonomy_version:
+        blocking_errors.append("confirm-target-taxonomy-version does not match target")
+    if deployment_id != confirm_deployment_id:
+        blocking_errors.append("confirm-deployment-id does not match deployment")
+    if date_from != confirm_date_from or date_to != confirm_date_to:
+        blocking_errors.append("confirmed date range does not match requested range")
+
+    plan = plan_ec_taxonomy_replacement_cleanup(
+        db=db,
+        ecosystem=ecosystem,
+        target_taxonomy_version=target_taxonomy_version,
+        deployment_id=deployment_id,
+        date_from=date_from,
+        date_to=date_to,
+        scheduler_config=scheduler_config,
+        expected_scheduler_taxonomy_version=expected_scheduler_taxonomy_version,
+    )
+    if not plan["safe_to_apply"]:
+        blocking_errors.extend(str(error) for error in plan["blocking_errors"])
+    if plan["delete_candidate_hash"] != confirm_delete_candidate_hash:
+        blocking_errors.append("delete candidate hash mismatch")
+
+    conn = _connect_readonly(db)
+    try:
+        ecosystem_id = plan.get("ecosystem_id")
+        taxonomy_version_id = plan.get("target_taxonomy_version_id")
+        deployment = _fetch_deployment_by_id(
+            conn,
+            deployment_id=deployment_id,
+            ecosystem_code=ecosystem,
+            proposed_taxonomy_version=target_taxonomy_version,
+        )
+        if deployment is None:
+            blocking_errors.append("taxonomy deployment row not found")
+        elif str(deployment.get("dc_rebuild_status")) != "OK":
+            blocking_errors.append("DC rebuild status is not OK")
+        if ecosystem_id is not None and taxonomy_version_id is not None:
+            fact_state, fact_errors = _validate_v2_fact_state(
+                conn,
+                ecosystem_id=int(ecosystem_id),
+                taxonomy_version_id=int(taxonomy_version_id),
+                required_signal_date=date_to,
+                date_from=date_from,
+                date_to=date_to,
+            )
+            blocking_errors.extend(fact_errors)
+            pre_hashes = _ec_fact_table_hashes(
+                conn,
+                ecosystem_id=int(ecosystem_id),
+                taxonomy_version_id=int(taxonomy_version_id),
+                date_from=date_from,
+                date_to=date_to,
+            )
+        else:
+            fact_state = {"status": "FAILED"}
+            pre_hashes = {}
+    finally:
+        conn.close()
+
+    if blocking_errors:
+        return {
+            "cleanup_apply_status": "BLOCKED",
+            "cleanup_applied": False,
+            "blocking_errors": sorted(set(blocking_errors)),
+            "plan": plan,
+            "fact_state": fact_state,
+        }
+
+    started_at = _utc_now()
+    deleted_counts: dict[str, int] = {}
+    conn = _connect_readwrite(db)
+    try:
+        with conn:
+            for table in plan["tables"]:
+                table_name = str(table["table_name"])
+                date_column = CANONICAL_EC_FACT_DATE_COLUMNS[table_name]
+                cursor = conn.execute(
+                    f"""
+                    DELETE FROM {table_name}
+                    WHERE ecosystem_id = ?
+                      AND taxonomy_version_id <> ?
+                      AND {date_column} >= ?
+                      AND {date_column} <= ?
+                    """,
+                    (int(plan["ecosystem_id"]), int(plan["target_taxonomy_version_id"]), date_from, date_to),
+                )
+                deleted_counts[table_name] = int(cursor.rowcount or 0)
+            post_hashes = _ec_fact_table_hashes(
+                conn,
+                ecosystem_id=int(plan["ecosystem_id"]),
+                taxonomy_version_id=int(plan["target_taxonomy_version_id"]),
+                date_from=date_from,
+                date_to=date_to,
+            )
+            if post_hashes != pre_hashes:
+                raise RuntimeError("V2 fact hashes changed during cleanup")
+            evidence = {
+                "deployment_id": deployment_id,
+                "ecosystem_code": ecosystem,
+                "target_taxonomy_version": target_taxonomy_version,
+                "target_taxonomy_version_id": plan["target_taxonomy_version_id"],
+                "date_from": date_from,
+                "date_to": date_to,
+                "cleanup_plan_hash": plan["cleanup_plan_hash"],
+                "delete_candidate_hash": plan["delete_candidate_hash"],
+                "started_at_utc": started_at,
+                "completed_at_utc": _utc_now(),
+                "status": "NO_CHANGE" if not any(deleted_counts.values()) else "APPLIED",
+                "per_table_candidate_counts": {
+                    str(table["table_name"]): int(table["delete_candidate_count"])
+                    for table in plan["tables"]
+                },
+                "per_table_deleted_counts": deleted_counts,
+                "old_taxonomy_ids": sorted(
+                    {
+                        int(taxonomy_id)
+                        for table in plan["tables"]
+                        for taxonomy_id in table["old_version_taxonomy_ids"]
+                    }
+                ),
+                "pre_cleanup_fact_hashes": pre_hashes,
+                "post_cleanup_fact_hashes": post_hashes,
+                "invocation_source": invocation_source,
+                "error": None,
+            }
+            if "ec_taxonomy_change_deployment" in _table_names(conn):
+                conn.execute(
+                    """
+                    UPDATE ec_taxonomy_change_deployment
+                    SET rebuild_evidence_json = ?,
+                        rebuild_evidence_sha256 = ?,
+                        updated_at_utc = CURRENT_TIMESTAMP
+                    WHERE taxonomy_change_id = ?
+                    """,
+                    (
+                        json.dumps(evidence, sort_keys=True, default=str),
+                        _json_sha256(evidence),
+                        deployment_id,
+                    ),
+                )
+    finally:
+        conn.close()
+
+    return {
+        "cleanup_apply_status": evidence["status"],
+        "cleanup_applied": any(deleted_counts.values()),
+        "deployment_id": deployment_id,
+        "deleted_counts": deleted_counts,
+        "evidence": evidence,
+        "plan": plan,
+    }
+
+
+def validate_ec_taxonomy_rebuild_existing_facts(
+    *,
+    db: str | Path,
+    ecosystem: str,
+    target_taxonomy_version: str,
+    taxonomy_csv: str | Path,
+    deployment_id: int,
+    date_from: str,
+    date_to: str,
+    coverage_status: str = "OK",
+    parity_status: str = "OK",
+    total_mismatch_count: int = 0,
+) -> dict[str, object]:
+    taxonomy_summary = summarize_taxonomy_csv(taxonomy_csv, target_taxonomy_version)
+    blocking_errors: list[str] = []
+    conn = _connect_readonly(db)
+    try:
+        ecosystem_id = _resolve_ecosystem_id_for_code(conn, ecosystem)
+        loaded = _fetch_loaded_taxonomy(
+            conn,
+            ecosystem_code=ecosystem,
+            taxonomy_version_code=target_taxonomy_version,
+        )
+        deployment = _fetch_deployment_by_id(
+            conn,
+            deployment_id=deployment_id,
+            ecosystem_code=ecosystem,
+            proposed_taxonomy_version=target_taxonomy_version,
+        )
+        if ecosystem_id is None:
+            blocking_errors.append(f"ecosystem not found: {ecosystem}")
+            taxonomy_version_id = None
+        elif loaded is None:
+            blocking_errors.append("target taxonomy metadata is not loaded")
+            taxonomy_version_id = None
+        else:
+            taxonomy_version_id = int(loaded["taxonomy_version_id"])
+            if str(loaded.get("source_hash") or "") != taxonomy_summary.source_sha256:
+                blocking_errors.append("loaded taxonomy hash does not match source CSV")
+        if deployment is None:
+            blocking_errors.append("taxonomy deployment row not found")
+        if coverage_status not in {"OK", "OK_WITH_WARNINGS"}:
+            blocking_errors.append("coverage is not accepted")
+        if parity_status not in {"OK", "OK_WITH_WARNINGS"} or int(total_mismatch_count) != 0:
+            blocking_errors.append("parity is not accepted")
+        if ecosystem_id is not None and taxonomy_version_id is not None:
+            fact_state, fact_errors = _validate_v2_fact_state(
+                conn,
+                ecosystem_id=ecosystem_id,
+                taxonomy_version_id=taxonomy_version_id,
+                required_signal_date=date_to,
+                date_from=date_from,
+                date_to=date_to,
+            )
+            blocking_errors.extend(fact_errors)
+            stale_summary = validate_rebuild_stale_rows(
+                conn,
+                ecosystem_id=ecosystem_id,
+                taxonomy_version_id=taxonomy_version_id,
+                taxonomy_version_code=target_taxonomy_version,
+                date_from=date_from,
+                date_to=date_to,
+                taxonomy_rows=taxonomy_summary.rows,
+            )
+            if stale_summary["stale_validation_status"] != "OK":
+                blocking_errors.append("stale rows block validation-only recovery")
+        else:
+            fact_state = {"status": "FAILED"}
+            stale_summary = {"stale_validation_status": "NOT_RUN", "stale_dc_rows": {}, "stale_ec_rows": {}}
+    finally:
+        conn.close()
+    return {
+        "validation_mode": "EXISTING_REBUILT_FACTS",
+        "validation_status": "OK" if not blocking_errors else "BLOCKED",
+        "whole_range_validation_status": "OK" if not blocking_errors else "FAILED",
+        "coverage_status": coverage_status,
+        "parity_status": parity_status,
+        "total_mismatch_count": int(total_mismatch_count),
+        "stale_row_validation": stale_summary,
+        "stale_row_count": sum(int(value) for value in (stale_summary.get("stale_ec_rows") or {}).values()),
+        "fact_state": fact_state,
+        "loaders_rerun": False,
+        "chunks_rerun": False,
+        "blocking_errors": sorted(set(blocking_errors)),
+    }
+
+
+def finalize_ec_taxonomy_rebuild_validation(
+    *,
+    db: str | Path,
+    ecosystem: str,
+    target_taxonomy_version: str,
+    taxonomy_csv: str | Path,
+    deployment_id: int,
+    date_from: str,
+    date_to: str,
+    coverage_status: str = "OK",
+    parity_status: str = "OK",
+    total_mismatch_count: int = 0,
+    finalize_watermarks: bool = False,
+    update_deployment_evidence: bool = False,
+) -> dict[str, object]:
+    validation = validate_ec_taxonomy_rebuild_existing_facts(
+        db=db,
+        ecosystem=ecosystem,
+        target_taxonomy_version=target_taxonomy_version,
+        taxonomy_csv=taxonomy_csv,
+        deployment_id=deployment_id,
+        date_from=date_from,
+        date_to=date_to,
+        coverage_status=coverage_status,
+        parity_status=parity_status,
+        total_mismatch_count=total_mismatch_count,
+    )
+    if validation["validation_status"] != "OK":
+        return {
+            "finalization_status": "BLOCKED",
+            "watermark_finalization_performed": False,
+            "deployment_evidence_updated": False,
+            "validation": validation,
+        }
+    watermark_summary = {"status": "NOT_REQUESTED"}
+    if finalize_watermarks:
+        from rawcandle.ec_pipeline_watermark_loader import (
+            advance_ec_pipeline_watermarks_after_historical_backfill,
+        )
+
+        watermark_summary = advance_ec_pipeline_watermarks_after_historical_backfill(
+            target_db_path=str(db),
+            ecosystem_code=ecosystem,
+            taxonomy_version_code=target_taxonomy_version,
+            latest_signal_date=date_to,
+            taxonomy_rebuild=True,
+        )
+    evidence_summary = {"status_update": "NOT_REQUESTED"}
+    if update_deployment_evidence:
+        evidence_summary = apply_datacenter_taxonomy_rebuild_evidence(
+            analysis_db=db,
+            ecosystem_code=ecosystem,
+            proposed_taxonomy_version=target_taxonomy_version,
+            proposed_taxonomy_csv=taxonomy_csv,
+            deployment_id=deployment_id,
+            required_signal_date=date_to,
+            coverage_status="OK" if coverage_status == "OK_WITH_WARNINGS" else coverage_status,
+            parity_status="OK" if parity_status == "OK_WITH_WARNINGS" else parity_status,
+            total_mismatch_count=total_mismatch_count,
+        )
+    return {
+        "finalization_status": "OK",
+        "watermark_finalization_performed": bool(finalize_watermarks),
+        "deployment_evidence_updated": bool(update_deployment_evidence),
+        "validation": validation,
+        "watermark_summary": watermark_summary,
+        "evidence_summary": evidence_summary,
+        "retry_policy": "NO_REBUILD_RETRY_NEEDED_VALIDATION_ONLY_AFTER_FIX",
+    }
 
 
 def validate_rebuild_stale_rows(
