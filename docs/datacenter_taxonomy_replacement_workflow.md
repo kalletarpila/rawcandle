@@ -6,6 +6,11 @@ Datacenter uses one active taxonomy at a time. A taxonomy content change is a
 controlled replacement and full rebuild, not a permanent parallel V1/V2 fact
 model.
 
+New monthly taxonomy changes should start from the unified backend facade
+documented in `docs/datacenter_taxonomy_change_orchestrator.md`. The lower-level
+commands in this document remain the verified building blocks behind that
+workflow.
+
 EC uses one active taxonomy per ecosystem. Multiple ecosystems can coexist later,
 for example `DATACENTER`, `ENERGY`, `DEFENCE`, and `HEALTHCARE`, but a single
 ecosystem does not need two active taxonomy fact sets at the same time.

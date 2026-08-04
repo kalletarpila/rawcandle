@@ -3,6 +3,11 @@
 This document describes the backend safety mechanisms added for the first full
 `DC_TAXONOMY_FULL_V2` Datacenter and DATACENTER EC rebuild.
 
+The unified taxonomy-change facade introduced later is documented in
+`docs/datacenter_taxonomy_change_orchestrator.md`. It reuses the backend
+services described here instead of replacing their validation, rebuild, cleanup,
+watermark, or activation logic.
+
 No production Datacenter pipeline, Stage 2 run, EC rebuild, taxonomy rebuild,
 activation, migration apply, scheduler run, scheduler config change, production
 database write, or watermark update occurred as part of this implementation.
