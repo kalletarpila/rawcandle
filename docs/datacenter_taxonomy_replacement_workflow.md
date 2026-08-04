@@ -196,15 +196,25 @@ Activation planning is read-only:
 ```bash
 python3 -m rawcandle.cli.plan_datacenter_taxonomy_activation \
   --analysis-db ... \
+  --deployment-id <taxonomy_change_id> \
+  --current-taxonomy-version DC_TAXONOMY_FULL_V1 \
+  --current-taxonomy-csv data/datacenter_ecosystem_taxonomy_full_v1.csv \
   --proposed-taxonomy-version DC_TAXONOMY_FULL_V2 \
-  --proposed-taxonomy-csv ... \
-  --required-signal-date ...
+  --proposed-taxonomy-csv data/datacenter_taxonomy_full_v2.csv \
+  --required-signal-date ... \
+  --scheduler-config scheduler_config.json
 ```
 
 Activation is refused unless the proposed metadata exists, source hashes match,
 DC and EC rebuild evidence is complete, fact heads reach the required date,
 watermarks belong to the proposed taxonomy, coverage and parity are accepted,
 and no unresolved rebuild debt remains.
+
+The scheduler configuration is checked as the expected current state. A coherent
+V1 Datacenter and EC scheduler configuration is a required safe precondition for
+a controlled V1 to V2 activation, not an activation error. The planner builds the
+proposed V2 scheduler configuration in memory, validates it with the real config
+loader, and confirms that exactly the four taxonomy keys would change.
 
 `apply_datacenter_taxonomy_activation` is a guarded write boundary. It verifies
 the same gates before marking the proposed taxonomy active, marking the previous
@@ -224,6 +234,9 @@ ec_source_layer_taxonomy_version
 A scheduler config backup is written under `temp/` or the supplied backup
 directory. If config write or validation fails, the database activation
 transaction is rolled back and the config file is restored from the backup.
+Mixed states are blocked rather than silently repaired through normal
+activation, including DB V2/config V1, DB V1/config V2, and Datacenter V2/EC V1
+scheduler splits.
 
 ## Rebuild Preparation and Evidence
 

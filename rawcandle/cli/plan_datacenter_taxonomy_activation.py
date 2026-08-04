@@ -12,9 +12,13 @@ def main(argv: list[str] | None = None) -> int:
     summary = plan_datacenter_taxonomy_activation(
         analysis_db=args.analysis_db,
         ecosystem_code=args.ecosystem,
+        deployment_id=args.deployment_id,
+        current_taxonomy_version=args.current_taxonomy_version,
+        current_taxonomy_csv=args.current_taxonomy_csv,
         proposed_taxonomy_version=args.proposed_taxonomy_version,
         proposed_taxonomy_csv=args.proposed_taxonomy_csv,
         required_signal_date=args.required_signal_date,
+        scheduler_config_path=args.scheduler_config,
         expected_scheduler_taxonomy_version=args.expected_scheduler_taxonomy_version,
         expected_scheduler_taxonomy_csv=args.expected_scheduler_taxonomy_csv,
     )

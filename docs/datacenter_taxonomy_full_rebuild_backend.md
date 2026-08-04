@@ -431,8 +431,11 @@ read-only or unavailable, the copy failure remains fatal.
 ## Activation and Config
 
 Activation remains blocked until rebuild evidence is complete. With
-`--scheduler-config`, activation also switches only the taxonomy config keys and
-creates a config backup:
+`--scheduler-config`, activation first verifies that the scheduler still points
+coherently to the current V1 Datacenter and EC taxonomy sources. That V1
+configuration is the expected pre-activation state. The planner then builds the
+proposed V2 scheduler config in memory and verifies that only the taxonomy keys
+would change:
 
 ```text
 datacenter_taxonomy_csv
@@ -441,8 +444,14 @@ ec_source_layer_taxonomy_csv
 ec_source_layer_taxonomy_version
 ```
 
-If config write or validation fails, database activation is rolled back and the
-config file is restored from backup. The scheduler is not started by activation.
+The guarded apply creates a scheduler config backup under `temp/` or the
+supplied backup directory, activates V2 in the database, writes those four config
+keys, validates the persisted config, and verifies final DB/config consistency.
+If config write, config validation, or final consistency verification fails, the
+activation command attempts compensating rollback so DB and config return to the
+verified V1 pre-activation state. The scheduler is not started by activation,
+and activation does not run the Datacenter pipeline, EC loaders, refresh,
+backfill, or rebuild.
 
 ## Source-Data Policy
 

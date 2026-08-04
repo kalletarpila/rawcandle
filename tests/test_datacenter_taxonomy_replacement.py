@@ -757,6 +757,37 @@ def _activation_db(tmp_path: Path, *, complete: bool = True, wrong_lineage: bool
         conn.close()
 
 
+def _write_activation_scheduler_config(
+    tmp_path: Path,
+    *,
+    config_path: Path,
+    current_csv: Path,
+    datacenter_version: str = "DC_TAXONOMY_FULL_V1",
+    ec_version: str = "DC_TAXONOMY_FULL_V1",
+    datacenter_csv: Path | None = None,
+    ec_csv: Path | None = None,
+) -> None:
+    watchlist_path = tmp_path / "watchlist.txt"
+    watchlist_path.write_text("AAA\n", encoding="utf-8")
+    write_scheduler_config(
+        str(config_path),
+        StockUpdateSchedulerConfig(
+            enabled_markets=["usa"],
+            osakedata_db_path="/tmp/osakedata.db",
+            analysis_db_path="/tmp/analysis.db",
+            log_dir="/tmp/logs",
+            datacenter_taxonomy_csv=str(datacenter_csv or current_csv),
+            datacenter_taxonomy_version=datacenter_version,
+            ec_source_layer_enabled=True,
+            ec_source_layer_ecosystem="DATACENTER",
+            ec_source_layer_taxonomy_csv=str(ec_csv or current_csv),
+            ec_source_layer_taxonomy_version=ec_version,
+            ec_source_layer_watchlist=str(watchlist_path),
+            ec_source_layer_backup_dir=str(tmp_path),
+        ),
+    )
+
+
 def test_activation_refuses_incomplete_rebuild_and_wrong_watermark_lineage(tmp_path) -> None:
     incomplete_db, csv_path = _activation_db(tmp_path / "incomplete", complete=False)
     incomplete = plan_datacenter_taxonomy_activation(
@@ -795,6 +826,112 @@ def test_activation_accepts_complete_isolated_evidence(tmp_path) -> None:
 
     assert summary["activation_plan_status"] == "READY_TO_ACTIVATE"
     assert summary["safe_to_activate"] is True
+
+
+def test_activation_plan_accepts_current_v1_scheduler_and_builds_v2_transition(tmp_path) -> None:
+    db_path, csv_path = _activation_db(tmp_path / "db", complete=True)
+    current_csv = _write_csv(tmp_path / "current.csv", _base_rows("DC_TAXONOMY_FULL_V1"))
+    config_path = tmp_path / "scheduler_config.json"
+    _write_activation_scheduler_config(
+        tmp_path,
+        config_path=config_path,
+        current_csv=current_csv,
+    )
+
+    summary = plan_datacenter_taxonomy_activation(
+        analysis_db=db_path,
+        ecosystem_code="DATACENTER",
+        deployment_id=1,
+        current_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        current_taxonomy_csv=current_csv,
+        proposed_taxonomy_version="DC_TAXONOMY_FULL_V2",
+        proposed_taxonomy_csv=csv_path,
+        required_signal_date="2026-07-31",
+        scheduler_config_path=config_path,
+    )
+    loaded = read_scheduler_config(str(config_path))
+
+    assert summary["activation_plan_status"] == "READY_TO_ACTIVATE"
+    assert summary["safe_to_activate"] is True
+    assert summary["blocking_errors"] == []
+    assert summary["current_db_taxonomy_status"] == "EXPECTED_CURRENT"
+    assert summary["current_scheduler_taxonomy_status"] == "EXPECTED_CURRENT_V1"
+    assert summary["current_scheduler_datacenter_version"] == "DC_TAXONOMY_FULL_V1"
+    assert summary["current_scheduler_ec_version"] == "DC_TAXONOMY_FULL_V1"
+    assert summary["current_scheduler_config_safe_to_transition"] is True
+    assert summary["proposed_scheduler_taxonomy_status"] == "VALID"
+    assert summary["proposed_scheduler_config_safe"] is True
+    assert summary["config_transition_required"] is True
+    assert summary["scheduler_changed_keys"] == [
+        "datacenter_taxonomy_csv",
+        "datacenter_taxonomy_version",
+        "ec_source_layer_taxonomy_csv",
+        "ec_source_layer_taxonomy_version",
+    ]
+    assert summary["scheduler_unexpected_changed_keys"] == []
+    assert loaded.datacenter_taxonomy_version == "DC_TAXONOMY_FULL_V1"
+    assert loaded.ec_source_layer_taxonomy_version == "DC_TAXONOMY_FULL_V1"
+
+
+def test_activation_plan_blocks_scheduler_mismatch_and_partial_transition(tmp_path) -> None:
+    db_path, csv_path = _activation_db(tmp_path / "db", complete=True)
+    current_csv = _write_csv(tmp_path / "current.csv", _base_rows("DC_TAXONOMY_FULL_V1"))
+    config_path = tmp_path / "scheduler_config.json"
+    _write_activation_scheduler_config(
+        tmp_path,
+        config_path=config_path,
+        current_csv=current_csv,
+        datacenter_version="DC_TAXONOMY_FULL_V1",
+        ec_version="DC_TAXONOMY_FULL_V2",
+        ec_csv=csv_path,
+    )
+
+    summary = plan_datacenter_taxonomy_activation(
+        analysis_db=db_path,
+        ecosystem_code="DATACENTER",
+        current_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        current_taxonomy_csv=current_csv,
+        proposed_taxonomy_version="DC_TAXONOMY_FULL_V2",
+        proposed_taxonomy_csv=csv_path,
+        required_signal_date="2026-07-31",
+        scheduler_config_path=config_path,
+    )
+
+    assert summary["activation_plan_status"] == "BLOCKED"
+    assert "scheduler Datacenter and EC taxonomy versions disagree" in summary["blocking_errors"]
+    assert "scheduler taxonomy configuration is partially transitioned or mixed" in summary["blocking_errors"]
+
+
+def test_activation_plan_blocks_db_config_mixed_states(tmp_path) -> None:
+    db_path, csv_path = _activation_db(tmp_path / "db", complete=True)
+    current_csv = _write_csv(tmp_path / "current.csv", _base_rows("DC_TAXONOMY_FULL_V1"))
+    config_path = tmp_path / "scheduler_config.json"
+    _write_activation_scheduler_config(
+        tmp_path,
+        config_path=config_path,
+        current_csv=current_csv,
+        datacenter_version="DC_TAXONOMY_FULL_V2",
+        ec_version="DC_TAXONOMY_FULL_V2",
+        datacenter_csv=csv_path,
+        ec_csv=csv_path,
+    )
+
+    summary = plan_datacenter_taxonomy_activation(
+        analysis_db=db_path,
+        ecosystem_code="DATACENTER",
+        current_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        current_taxonomy_csv=current_csv,
+        proposed_taxonomy_version="DC_TAXONOMY_FULL_V2",
+        proposed_taxonomy_csv=csv_path,
+        required_signal_date="2026-07-31",
+        scheduler_config_path=config_path,
+    )
+
+    assert summary["activation_plan_status"] == "BLOCKED"
+    assert (
+        "mixed state blocks activation: DB current taxonomy with scheduler proposed taxonomy"
+        in summary["blocking_errors"]
+    )
 
 
 def test_activation_apply_marks_new_taxonomy_active_after_complete_evidence(tmp_path) -> None:
@@ -912,22 +1049,21 @@ def test_activation_rolls_back_db_if_config_write_fails(tmp_path, monkeypatch) -
         raise RuntimeError("config write failed")
 
     monkeypatch.setattr("rawcandle.scheduler.config.write_scheduler_config", fail_write)
-    with pytest.raises(RuntimeError, match="config write failed"):
-        apply_datacenter_taxonomy_activation(
-            analysis_db=db_path,
-            ecosystem_code="DATACENTER",
-            proposed_taxonomy_version="DC_TAXONOMY_FULL_V2",
-            proposed_taxonomy_csv=csv_path,
-            required_signal_date="2026-07-31",
-            confirm_activate_taxonomy_version="DC_TAXONOMY_FULL_V2",
-            expected_scheduler_taxonomy_version="DC_TAXONOMY_FULL_V2",
-            expected_scheduler_taxonomy_csv=csv_path,
-            scheduler_config_path=config_path,
-            expected_current_scheduler_taxonomy_version="DC_TAXONOMY_FULL_V1",
-            expected_current_scheduler_taxonomy_csv=current_csv,
-            target_scheduler_taxonomy_csv=csv_path,
-            config_backup_dir=tmp_path / "backups",
-        )
+    summary = apply_datacenter_taxonomy_activation(
+        analysis_db=db_path,
+        ecosystem_code="DATACENTER",
+        proposed_taxonomy_version="DC_TAXONOMY_FULL_V2",
+        proposed_taxonomy_csv=csv_path,
+        required_signal_date="2026-07-31",
+        confirm_activate_taxonomy_version="DC_TAXONOMY_FULL_V2",
+        expected_scheduler_taxonomy_version="DC_TAXONOMY_FULL_V2",
+        expected_scheduler_taxonomy_csv=csv_path,
+        scheduler_config_path=config_path,
+        expected_current_scheduler_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        expected_current_scheduler_taxonomy_csv=current_csv,
+        target_scheduler_taxonomy_csv=csv_path,
+        config_backup_dir=tmp_path / "backups",
+    )
 
     conn = sqlite3.connect(db_path)
     try:
@@ -940,6 +1076,10 @@ def test_activation_rolls_back_db_if_config_write_fails(tmp_path, monkeypatch) -
     finally:
         conn.close()
     loaded = read_scheduler_config(str(config_path))
+    assert summary["activation_apply_status"] == "FAILED"
+    assert summary["activation_rollback_attempted"] is True
+    assert summary["activation_rollback_status"] == "CONFIG_RESTORED_DB_ROLLED_BACK"
+    assert summary["activation_error"] == "config write failed"
     assert rows == [
         ("DC_TAXONOMY_FULL_V1", "ACTIVE", 1),
         ("DC_TAXONOMY_FULL_V2", "INACTIVE", 0),

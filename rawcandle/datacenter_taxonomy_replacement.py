@@ -7,7 +7,7 @@ import json
 import re
 import shutil
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
@@ -145,6 +145,160 @@ def _json_sha256(payload: object) -> str:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+SCHEDULER_TAXONOMY_KEYS = (
+    "datacenter_taxonomy_csv",
+    "datacenter_taxonomy_version",
+    "ec_source_layer_taxonomy_csv",
+    "ec_source_layer_taxonomy_version",
+)
+
+
+def _scheduler_taxonomy_transition_plan(
+    *,
+    scheduler_config_path: str | Path | None,
+    current_taxonomy_version: str | None,
+    current_taxonomy_csv: str | Path | None,
+    proposed_taxonomy_version: str,
+    proposed_taxonomy_csv: str | Path,
+    loaded_current_source_hash: str | None,
+    loaded_proposed_source_hash: str | None,
+) -> tuple[dict[str, object], list[str]]:
+    summary: dict[str, object] = {
+        "current_scheduler_taxonomy_status": "NOT_CHECKED",
+        "current_scheduler_datacenter_version": None,
+        "current_scheduler_ec_version": None,
+        "current_scheduler_config_safe_to_transition": False,
+        "proposed_scheduler_taxonomy_status": "NOT_CHECKED",
+        "proposed_scheduler_config_safe": False,
+        "proposed_scheduler_config": None,
+        "config_transition_required": False,
+        "scheduler_changed_keys": [],
+        "scheduler_unexpected_changed_keys": [],
+    }
+    blocking_errors: list[str] = []
+    if scheduler_config_path is None:
+        return summary, blocking_errors
+
+    from rawcandle.scheduler.config import validate_scheduler_config
+
+    try:
+        current_config = read_scheduler_config(str(scheduler_config_path))
+        validate_scheduler_config(current_config)
+    except Exception as exc:
+        blocking_errors.append(f"scheduler config invalid: {exc}")
+        summary["current_scheduler_taxonomy_status"] = "BLOCKED"
+        summary["proposed_scheduler_taxonomy_status"] = "BLOCKED"
+        return summary, blocking_errors
+
+    dc_version = current_config.datacenter_taxonomy_version
+    ec_version = current_config.ec_source_layer_taxonomy_version
+    dc_csv = current_config.datacenter_taxonomy_csv
+    ec_csv = current_config.ec_source_layer_taxonomy_csv
+    summary["current_scheduler_datacenter_version"] = dc_version
+    summary["current_scheduler_ec_version"] = ec_version
+
+    if dc_version != ec_version:
+        blocking_errors.append("scheduler Datacenter and EC taxonomy versions disagree")
+    if not dc_csv or not Path(dc_csv).is_file():
+        blocking_errors.append("scheduler Datacenter taxonomy CSV is absent or unreadable")
+    if not ec_csv or not Path(ec_csv).is_file():
+        blocking_errors.append("scheduler EC taxonomy CSV is absent or unreadable")
+
+    current_hash: str | None = None
+    if current_taxonomy_version and dc_version == ec_version == current_taxonomy_version:
+        summary["current_scheduler_taxonomy_status"] = "EXPECTED_CURRENT_V1"
+        summary["current_scheduler_config_safe_to_transition"] = True
+    elif dc_version == ec_version == proposed_taxonomy_version:
+        summary["current_scheduler_taxonomy_status"] = "ALREADY_PROPOSED"
+    elif current_taxonomy_version and dc_version not in {current_taxonomy_version, proposed_taxonomy_version}:
+        summary["current_scheduler_taxonomy_status"] = "BLOCKED_UNEXPECTED_TAXONOMY"
+        blocking_errors.append("scheduler configuration points to an unexpected taxonomy")
+    else:
+        summary["current_scheduler_taxonomy_status"] = "BLOCKED_MIXED_TAXONOMY"
+        blocking_errors.append("scheduler taxonomy configuration is partially transitioned or mixed")
+
+    if dc_csv and ec_csv and _sha256(dc_csv) != _sha256(ec_csv):
+        blocking_errors.append("scheduler Datacenter and EC taxonomy CSV sources disagree")
+    current_status = str(summary["current_scheduler_taxonomy_status"])
+    if current_status == "EXPECTED_CURRENT_V1" and current_taxonomy_csv is not None and dc_csv and ec_csv:
+        try:
+            expected_current_hash = _sha256(current_taxonomy_csv)
+            current_hash = _sha256(dc_csv)
+            if current_hash != expected_current_hash or _sha256(ec_csv) != expected_current_hash:
+                blocking_errors.append("scheduler current taxonomy CSV does not match expected current source")
+        except Exception as exc:
+            blocking_errors.append(f"current taxonomy source invalid: {exc}")
+    if current_status == "EXPECTED_CURRENT_V1" and current_taxonomy_version and dc_csv:
+        try:
+            current_summary = summarize_taxonomy_csv(dc_csv, current_taxonomy_version)
+            current_hash = current_summary.source_sha256
+        except Exception as exc:
+            blocking_errors.append(f"scheduler current Datacenter taxonomy CSV version mismatch: {exc}")
+    if current_status == "EXPECTED_CURRENT_V1" and current_taxonomy_version and ec_csv:
+        try:
+            summarize_taxonomy_csv(ec_csv, current_taxonomy_version)
+        except Exception as exc:
+            blocking_errors.append(f"scheduler current EC taxonomy CSV version mismatch: {exc}")
+    if current_status == "EXPECTED_CURRENT_V1" and loaded_current_source_hash and current_hash and current_hash != loaded_current_source_hash:
+        blocking_errors.append("current source hash differs from loaded taxonomy metadata")
+
+    try:
+        proposed_summary = summarize_taxonomy_csv(proposed_taxonomy_csv, proposed_taxonomy_version)
+        if loaded_proposed_source_hash and proposed_summary.source_sha256 != loaded_proposed_source_hash:
+            blocking_errors.append("V2 source hash mismatch")
+    except Exception as exc:
+        blocking_errors.append(f"proposed scheduler taxonomy invalid: {exc}")
+        summary["proposed_scheduler_taxonomy_status"] = "BLOCKED"
+        return summary, blocking_errors
+
+    target_csv = str(proposed_taxonomy_csv)
+    proposed_config = replace(
+        current_config,
+        datacenter_taxonomy_csv=target_csv,
+        datacenter_taxonomy_version=proposed_taxonomy_version,
+        ec_source_layer_taxonomy_csv=target_csv,
+        ec_source_layer_taxonomy_version=proposed_taxonomy_version,
+    )
+    try:
+        validate_scheduler_config(proposed_config)
+    except Exception as exc:
+        blocking_errors.append(f"proposed scheduler config invalid: {exc}")
+        summary["proposed_scheduler_taxonomy_status"] = "BLOCKED"
+        return summary, blocking_errors
+
+    changed_keys = sorted(
+        key
+        for key in current_config.__dict__
+        if getattr(current_config, key) != getattr(proposed_config, key)
+    )
+    expected_changed = set(SCHEDULER_TAXONOMY_KEYS)
+    unexpected_changed = sorted(set(changed_keys) - expected_changed)
+    missing_changed = sorted(expected_changed - set(changed_keys))
+    summary["scheduler_changed_keys"] = changed_keys
+    summary["scheduler_unexpected_changed_keys"] = unexpected_changed
+    summary["config_transition_required"] = bool(changed_keys)
+    summary["proposed_scheduler_config"] = {
+        "datacenter_taxonomy_csv": proposed_config.datacenter_taxonomy_csv,
+        "datacenter_taxonomy_version": proposed_config.datacenter_taxonomy_version,
+        "ec_source_layer_taxonomy_csv": proposed_config.ec_source_layer_taxonomy_csv,
+        "ec_source_layer_taxonomy_version": proposed_config.ec_source_layer_taxonomy_version,
+    }
+    summary["proposed_scheduler_taxonomy_status"] = "VALID"
+    summary["proposed_scheduler_config_safe"] = not unexpected_changed and (
+        not changed_keys or not missing_changed
+    )
+
+    if unexpected_changed:
+        blocking_errors.append(
+            "unexpected scheduler config changed keys: " + ", ".join(unexpected_changed)
+        )
+    if changed_keys and missing_changed:
+        blocking_errors.append(
+            "scheduler taxonomy transition does not change exactly four taxonomy keys"
+        )
+    return summary, blocking_errors
 
 
 def _normalize_group_entity_code(name: str) -> str:
@@ -2621,10 +2775,28 @@ def plan_datacenter_taxonomy_activation(
     proposed_taxonomy_version: str,
     proposed_taxonomy_csv: str | Path,
     required_signal_date: str,
+    deployment_id: int | None = None,
+    current_taxonomy_version: str | None = None,
+    current_taxonomy_csv: str | Path | None = None,
+    scheduler_config_path: str | Path | None = None,
     expected_scheduler_taxonomy_version: str | None = None,
     expected_scheduler_taxonomy_csv: str | Path | None = None,
 ) -> dict[str, object]:
     blocking_errors: list[str] = []
+    warnings: list[str] = []
+    current_db_taxonomy_status = "UNKNOWN"
+    scheduler_summary: dict[str, object] = {
+        "current_scheduler_taxonomy_status": "NOT_CHECKED",
+        "current_scheduler_datacenter_version": None,
+        "current_scheduler_ec_version": None,
+        "current_scheduler_config_safe_to_transition": False,
+        "proposed_scheduler_taxonomy_status": "NOT_CHECKED",
+        "proposed_scheduler_config_safe": False,
+        "proposed_scheduler_config": None,
+        "config_transition_required": False,
+        "scheduler_changed_keys": [],
+        "scheduler_unexpected_changed_keys": [],
+    }
     proposed_summary: TaxonomySummary | None = None
     try:
         proposed_summary = summarize_taxonomy_csv(proposed_taxonomy_csv, proposed_taxonomy_version)
@@ -2638,6 +2810,7 @@ def plan_datacenter_taxonomy_activation(
             ecosystem_code=ecosystem_code,
             taxonomy_version_code=proposed_taxonomy_version,
         )
+        loaded_current = None
         if loaded is None:
             blocking_errors.append("proposed taxonomy metadata is not loaded")
             taxonomy_version_id = None
@@ -2650,18 +2823,33 @@ def plan_datacenter_taxonomy_activation(
             blocking_errors.append("taxonomy change deployment state table is missing")
             deployment = None
         else:
-            deployment = conn.execute(
-                """
-                SELECT *
-                FROM ec_taxonomy_change_deployment
-                WHERE ecosystem_code = ?
-                  AND proposed_taxonomy_version = ?
-                """,
-                (ecosystem_code, proposed_taxonomy_version),
-            ).fetchone()
+            if deployment_id is not None:
+                deployment = conn.execute(
+                    """
+                    SELECT *
+                    FROM ec_taxonomy_change_deployment
+                    WHERE taxonomy_change_id = ?
+                      AND ecosystem_code = ?
+                      AND proposed_taxonomy_version = ?
+                    """,
+                    (deployment_id, ecosystem_code, proposed_taxonomy_version),
+                ).fetchone()
+            else:
+                deployment = conn.execute(
+                    """
+                    SELECT *
+                    FROM ec_taxonomy_change_deployment
+                    WHERE ecosystem_code = ?
+                      AND proposed_taxonomy_version = ?
+                    """,
+                    (ecosystem_code, proposed_taxonomy_version),
+                ).fetchone()
             if deployment is None:
                 blocking_errors.append("taxonomy deployment state is missing")
             else:
+                current_taxonomy_version = current_taxonomy_version or str(
+                    deployment["previous_taxonomy_version"]
+                )
                 if str(deployment["dc_rebuild_status"]) != "OK":
                     blocking_errors.append("full DC rebuild is incomplete")
                 if str(deployment["ec_rebuild_status"]) != "OK":
@@ -2670,8 +2858,38 @@ def plan_datacenter_taxonomy_activation(
                     blocking_errors.append("coverage is not accepted")
                 if str(deployment["parity_status"]) != "OK":
                     blocking_errors.append("parity is not accepted")
-                if str(deployment["activation_status"]) == "ACTIVE":
-                    blocking_errors.append("taxonomy is already active")
+
+        if current_taxonomy_version:
+            loaded_current = _fetch_loaded_taxonomy(
+                conn,
+                ecosystem_code=ecosystem_code,
+                taxonomy_version_code=current_taxonomy_version,
+            )
+            if loaded_current is None:
+                blocking_errors.append("current taxonomy metadata is not loaded")
+
+        active_rows = []
+        if "ec_taxonomy_version" in _table_names(conn):
+            active_rows = conn.execute(
+                """
+                SELECT taxonomy_version_code
+                FROM ec_taxonomy_version
+                WHERE is_active = 1
+                ORDER BY taxonomy_version_code
+                """
+            ).fetchall()
+        active_versions = [str(row[0]) for row in active_rows]
+        current_db_taxonomy_status = "UNKNOWN"
+        if current_taxonomy_version and active_versions == [current_taxonomy_version]:
+            current_db_taxonomy_status = "EXPECTED_CURRENT"
+        elif active_versions == [proposed_taxonomy_version]:
+            current_db_taxonomy_status = "ALREADY_PROPOSED"
+        elif active_versions:
+            current_db_taxonomy_status = "BLOCKED_MIXED_OR_UNEXPECTED"
+            blocking_errors.append("database active taxonomy state is mixed or unexpected")
+        else:
+            current_db_taxonomy_status = "BLOCKED_NO_ACTIVE_TAXONOMY"
+            blocking_errors.append("database has no active taxonomy")
 
         if taxonomy_version_id is not None:
             for table_name, date_column in CANONICAL_DC_FACT_TABLES:
@@ -2727,22 +2945,56 @@ def plan_datacenter_taxonomy_activation(
             else:
                 blocking_errors.append("EC watermark taxonomy lineage field is missing")
 
-        if expected_scheduler_taxonomy_version and expected_scheduler_taxonomy_version != proposed_taxonomy_version:
-            blocking_errors.append("configured scheduler taxonomy version does not match proposed taxonomy")
-        if expected_scheduler_taxonomy_csv and proposed_summary is not None:
-            if _sha256(expected_scheduler_taxonomy_csv) != proposed_summary.source_sha256:
-                blocking_errors.append("configured scheduler taxonomy CSV does not match proposed taxonomy")
+        scheduler_current_version = current_taxonomy_version or expected_scheduler_taxonomy_version
+        scheduler_current_csv = current_taxonomy_csv or expected_scheduler_taxonomy_csv
+        scheduler_summary, scheduler_errors = _scheduler_taxonomy_transition_plan(
+            scheduler_config_path=scheduler_config_path,
+            current_taxonomy_version=scheduler_current_version,
+            current_taxonomy_csv=scheduler_current_csv,
+            proposed_taxonomy_version=proposed_taxonomy_version,
+            proposed_taxonomy_csv=proposed_taxonomy_csv,
+            loaded_current_source_hash=(
+                str(loaded_current["source_hash"])
+                if loaded_current is not None and loaded_current["source_hash"]
+                else None
+            ),
+            loaded_proposed_source_hash=(
+                str(loaded["source_hash"])
+                if loaded is not None and loaded["source_hash"]
+                else None
+            ),
+        )
+        blocking_errors.extend(scheduler_errors)
+        scheduler_status = str(scheduler_summary.get("current_scheduler_taxonomy_status"))
+        if current_db_taxonomy_status == "EXPECTED_CURRENT" and scheduler_status == "ALREADY_PROPOSED":
+            blocking_errors.append("mixed state blocks activation: DB current taxonomy with scheduler proposed taxonomy")
+        if current_db_taxonomy_status == "ALREADY_PROPOSED" and scheduler_status == "EXPECTED_CURRENT_V1":
+            blocking_errors.append("mixed state blocks activation: DB proposed taxonomy with scheduler current taxonomy")
     finally:
         conn.close()
 
-    ready = not blocking_errors
+    unique_errors = sorted(set(blocking_errors))
+    already_active = (
+        not unique_errors
+        and current_db_taxonomy_status == "ALREADY_PROPOSED"
+        and scheduler_summary.get("current_scheduler_taxonomy_status")
+        in {"ALREADY_PROPOSED", "NOT_CHECKED"}
+    )
+    ready = not unique_errors and not already_active
     return {
-        "activation_plan_status": "READY_TO_ACTIVATE" if ready else "BLOCKED",
+        "activation_plan_status": (
+            "ALREADY_ACTIVE" if already_active else "READY_TO_ACTIVATE" if ready else "BLOCKED"
+        ),
         "ecosystem_code": ecosystem_code,
+        "deployment_id": deployment_id,
+        "current_db_taxonomy_status": current_db_taxonomy_status,
+        "current_taxonomy_version": current_taxonomy_version,
         "proposed_taxonomy_version": proposed_taxonomy_version,
         "required_signal_date": required_signal_date,
         "safe_to_activate": ready,
-        "blocking_errors": sorted(set(blocking_errors)),
+        **scheduler_summary,
+        "blocking_errors": unique_errors,
+        "warnings": warnings,
     }
 
 
@@ -2754,6 +3006,9 @@ def apply_datacenter_taxonomy_activation(
     proposed_taxonomy_csv: str | Path,
     required_signal_date: str,
     confirm_activate_taxonomy_version: str,
+    deployment_id: int | None = None,
+    current_taxonomy_version: str | None = None,
+    current_taxonomy_csv: str | Path | None = None,
     expected_scheduler_taxonomy_version: str | None = None,
     expected_scheduler_taxonomy_csv: str | Path | None = None,
     scheduler_config_path: str | Path | None = None,
@@ -2773,16 +3028,40 @@ def apply_datacenter_taxonomy_activation(
     plan = plan_datacenter_taxonomy_activation(
         analysis_db=analysis_db,
         ecosystem_code=ecosystem_code,
+        deployment_id=deployment_id,
+        current_taxonomy_version=current_taxonomy_version
+        or expected_current_scheduler_taxonomy_version,
+        current_taxonomy_csv=current_taxonomy_csv or expected_current_scheduler_taxonomy_csv,
         proposed_taxonomy_version=proposed_taxonomy_version,
         proposed_taxonomy_csv=proposed_taxonomy_csv,
         required_signal_date=required_signal_date,
+        scheduler_config_path=scheduler_config_path,
         expected_scheduler_taxonomy_version=expected_scheduler_taxonomy_version,
         expected_scheduler_taxonomy_csv=expected_scheduler_taxonomy_csv,
     )
+    if plan["activation_plan_status"] == "ALREADY_ACTIVE":
+        return {
+            "activation_apply_status": "NO_CHANGE",
+            "activation_performed": False,
+            "activation_db_status": "ALREADY_ACTIVE",
+            "activation_config_status": "ALREADY_ACTIVE",
+            "activation_consistency_status": "OK",
+            "activation_rollback_attempted": False,
+            "activation_rollback_status": "NOT_NEEDED",
+            "activation_error": None,
+            "blocking_errors": [],
+            "plan": plan,
+        }
     if not plan["safe_to_activate"]:
         return {
             "activation_apply_status": "BLOCKED",
             "activation_performed": False,
+            "activation_db_status": "NOT_STARTED",
+            "activation_config_status": "NOT_STARTED",
+            "activation_consistency_status": "NOT_RUN",
+            "activation_rollback_attempted": False,
+            "activation_rollback_status": "NOT_NEEDED",
+            "activation_error": None,
             "blocking_errors": plan["blocking_errors"],
             "plan": plan,
         }
@@ -2795,7 +3074,6 @@ def apply_datacenter_taxonomy_activation(
     backup_path: Path | None = None
     if scheduler_config_path is not None:
         from rawcandle.scheduler.config import (
-            StockUpdateSchedulerConfig,
             read_scheduler_config,
             validate_scheduler_config,
             write_scheduler_config,
@@ -2805,46 +3083,13 @@ def apply_datacenter_taxonomy_activation(
         backup_dir_path = Path(config_backup_dir)
         backup_dir_path.mkdir(parents=True, exist_ok=True)
         current_config = read_scheduler_config(str(config_path))
-        if expected_current_scheduler_taxonomy_version is not None:
-            if current_config.datacenter_taxonomy_version != expected_current_scheduler_taxonomy_version:
-                return {
-                    "activation_apply_status": "BLOCKED",
-                    "activation_performed": False,
-                    "blocking_errors": ["current scheduler datacenter taxonomy version is unexpected"],
-                    "plan": plan,
-                }
-            if current_config.ec_source_layer_taxonomy_version != expected_current_scheduler_taxonomy_version:
-                return {
-                    "activation_apply_status": "BLOCKED",
-                    "activation_performed": False,
-                    "blocking_errors": ["current scheduler EC taxonomy version is unexpected"],
-                    "plan": plan,
-                }
-        if expected_current_scheduler_taxonomy_csv is not None:
-            expected_current_hash = _sha256(expected_current_scheduler_taxonomy_csv)
-            if _sha256(current_config.datacenter_taxonomy_csv) != expected_current_hash:
-                return {
-                    "activation_apply_status": "BLOCKED",
-                    "activation_performed": False,
-                    "blocking_errors": ["current scheduler datacenter taxonomy CSV is unexpected"],
-                    "plan": plan,
-                }
-            if current_config.ec_source_layer_taxonomy_csv is not None and _sha256(current_config.ec_source_layer_taxonomy_csv) != expected_current_hash:
-                return {
-                    "activation_apply_status": "BLOCKED",
-                    "activation_performed": False,
-                    "blocking_errors": ["current scheduler EC taxonomy CSV is unexpected"],
-                    "plan": plan,
-                }
         target_csv = str(target_scheduler_taxonomy_csv or proposed_taxonomy_csv)
-        updated_config = StockUpdateSchedulerConfig(
-            **{
-                **current_config.__dict__,
-                "datacenter_taxonomy_csv": target_csv,
-                "datacenter_taxonomy_version": proposed_taxonomy_version,
-                "ec_source_layer_taxonomy_csv": target_csv,
-                "ec_source_layer_taxonomy_version": proposed_taxonomy_version,
-            }
+        updated_config = replace(
+            current_config,
+            datacenter_taxonomy_csv=target_csv,
+            datacenter_taxonomy_version=proposed_taxonomy_version,
+            ec_source_layer_taxonomy_csv=target_csv,
+            ec_source_layer_taxonomy_version=proposed_taxonomy_version,
         )
         validate_scheduler_config(updated_config)
         changed_keys = {
@@ -2859,11 +3104,31 @@ def apply_datacenter_taxonomy_activation(
             "ec_source_layer_taxonomy_version",
         }
         unexpected_changed = sorted(changed_keys - expected_changed)
+        missing_changed = sorted(expected_changed - changed_keys)
         if unexpected_changed:
             return {
                 "activation_apply_status": "BLOCKED",
                 "activation_performed": False,
+                "activation_db_status": "NOT_STARTED",
+                "activation_config_status": "NOT_STARTED",
+                "activation_consistency_status": "NOT_RUN",
+                "activation_rollback_attempted": False,
+                "activation_rollback_status": "NOT_NEEDED",
+                "activation_error": None,
                 "blocking_errors": ["unexpected scheduler config changed keys: " + ", ".join(unexpected_changed)],
+                "plan": plan,
+            }
+        if missing_changed:
+            return {
+                "activation_apply_status": "BLOCKED",
+                "activation_performed": False,
+                "activation_db_status": "NOT_STARTED",
+                "activation_config_status": "NOT_STARTED",
+                "activation_consistency_status": "NOT_RUN",
+                "activation_rollback_attempted": False,
+                "activation_rollback_status": "NOT_NEEDED",
+                "activation_error": None,
+                "blocking_errors": ["scheduler taxonomy transition does not change exactly four taxonomy keys"],
                 "plan": plan,
             }
         backup_path = backup_dir_path / (
@@ -2879,75 +3144,204 @@ def apply_datacenter_taxonomy_activation(
         }
 
     conn = _connect_readwrite(analysis_db)
+    activation_db_status = "NOT_STARTED"
+    activation_config_status = config_summary["config_update_status"]
+    rollback_attempted = False
+    rollback_status = "NOT_NEEDED"
+    expected_current_version = current_taxonomy_version or expected_current_scheduler_taxonomy_version
     try:
-        with conn:
-            loaded = _fetch_loaded_taxonomy(
-                conn,
-                ecosystem_code=ecosystem_code,
-                taxonomy_version_code=proposed_taxonomy_version,
-            )
-            if loaded is None:
-                raise ValueError("proposed taxonomy metadata disappeared before activation")
-            ecosystem_row = conn.execute(
-                "SELECT ecosystem_id FROM ec_ecosystem WHERE ecosystem_code = ?",
-                (ecosystem_code,),
-            ).fetchone()
-            if ecosystem_row is None:
-                raise ValueError(f"ecosystem not found: {ecosystem_code}")
-            ecosystem_id = int(ecosystem_row[0])
-            taxonomy_version_id = int(loaded["taxonomy_version_id"])
-            conn.execute(
-                """
-                UPDATE ec_taxonomy_version
-                SET status = 'INACTIVE',
-                    is_active = 0,
-                    active_to = CURRENT_TIMESTAMP
-                WHERE ecosystem_id = ?
-                  AND taxonomy_version_id <> ?
-                """,
-                (ecosystem_id, taxonomy_version_id),
-            )
-            conn.execute(
-                """
-                UPDATE ec_taxonomy_version
-                SET status = 'ACTIVE',
-                    is_active = 1,
-                    active_from = COALESCE(active_from, CURRENT_TIMESTAMP),
-                    active_to = NULL
-                WHERE taxonomy_version_id = ?
-                """,
-                (taxonomy_version_id,),
-            )
-            conn.execute(
-                """
-                UPDATE ec_taxonomy_change_deployment
-                SET status = 'ACTIVE',
-                    activation_status = 'ACTIVE',
-                    activated_at_utc = CURRENT_TIMESTAMP,
-                    updated_at_utc = CURRENT_TIMESTAMP
-                WHERE ecosystem_code = ?
-                  AND proposed_taxonomy_version = ?
-                """,
-                (ecosystem_code, proposed_taxonomy_version),
-            )
-            if scheduler_config_path is not None and updated_config is not None:
-                try:
-                    write_scheduler_config(str(scheduler_config_path), updated_config)
-                    from rawcandle.scheduler.config import read_scheduler_config
+        try:
+            with conn:
+                activation_db_status = "IN_PROGRESS"
+                loaded = _fetch_loaded_taxonomy(
+                    conn,
+                    ecosystem_code=ecosystem_code,
+                    taxonomy_version_code=proposed_taxonomy_version,
+                )
+                if loaded is None:
+                    raise ValueError("proposed taxonomy metadata disappeared before activation")
+                ecosystem_row = conn.execute(
+                    "SELECT ecosystem_id FROM ec_ecosystem WHERE ecosystem_code = ?",
+                    (ecosystem_code,),
+                ).fetchone()
+                if ecosystem_row is None:
+                    raise ValueError(f"ecosystem not found: {ecosystem_code}")
+                ecosystem_id = int(ecosystem_row[0])
+                taxonomy_version_id = int(loaded["taxonomy_version_id"])
+                conn.execute(
+                    """
+                    UPDATE ec_taxonomy_version
+                    SET status = 'INACTIVE',
+                        is_active = 0,
+                        active_to = CURRENT_TIMESTAMP
+                    WHERE ecosystem_id = ?
+                      AND taxonomy_version_id <> ?
+                    """,
+                    (ecosystem_id, taxonomy_version_id),
+                )
+                conn.execute(
+                    """
+                    UPDATE ec_taxonomy_version
+                    SET status = 'ACTIVE',
+                        is_active = 1,
+                        active_from = COALESCE(active_from, CURRENT_TIMESTAMP),
+                        active_to = NULL
+                    WHERE taxonomy_version_id = ?
+                    """,
+                    (taxonomy_version_id,),
+                )
+                conn.execute(
+                    """
+                    UPDATE ec_taxonomy_change_deployment
+                    SET status = 'ACTIVE',
+                        activation_status = 'ACTIVE',
+                        activated_at_utc = CURRENT_TIMESTAMP,
+                        updated_at_utc = CURRENT_TIMESTAMP
+                    WHERE ecosystem_code = ?
+                      AND proposed_taxonomy_version = ?
+                    """,
+                    (ecosystem_code, proposed_taxonomy_version),
+                )
+                activation_db_status = "DB_WRITES_DONE_PENDING_COMMIT"
+                if scheduler_config_path is not None and updated_config is not None:
+                    try:
+                        write_scheduler_config(str(scheduler_config_path), updated_config)
+                        from rawcandle.scheduler.config import read_scheduler_config
 
-                    read_scheduler_config(str(scheduler_config_path))
-                    config_summary["config_update_status"] = "OK"
-                except Exception:
-                    if backup_path is not None:
-                        shutil.copy2(backup_path, scheduler_config_path)
-                    raise
+                        read_scheduler_config(str(scheduler_config_path))
+                        config_summary["config_update_status"] = "OK"
+                        activation_config_status = "OK"
+                    except Exception:
+                        rollback_attempted = True
+                        if backup_path is not None:
+                            shutil.copy2(backup_path, scheduler_config_path)
+                            rollback_status = "CONFIG_RESTORED_DB_ROLLED_BACK"
+                        else:
+                            rollback_status = "DB_ROLLED_BACK"
+                        raise
+            activation_db_status = "OK"
+        except Exception as exc:
+            activation_error = str(exc)
+            if rollback_status == "NOT_NEEDED":
+                rollback_attempted = True
+                rollback_status = "DB_ROLLED_BACK"
+            return {
+                "activation_apply_status": "FAILED",
+                "activation_performed": False,
+                "activation_db_status": "ROLLED_BACK",
+                "activation_config_status": activation_config_status,
+                "activation_consistency_status": "NOT_VERIFIED_AFTER_FAILURE",
+                "activation_rollback_attempted": rollback_attempted,
+                "activation_rollback_status": rollback_status,
+                "activation_error": activation_error,
+                "config_backup_path": str(backup_path) if backup_path is not None else None,
+                "blocking_errors": [activation_error],
+                "plan": plan,
+                "config_activation": config_summary,
+            }
+
+        consistency_plan = plan_datacenter_taxonomy_activation(
+            analysis_db=analysis_db,
+            ecosystem_code=ecosystem_code,
+            deployment_id=deployment_id,
+            current_taxonomy_version=expected_current_version,
+            current_taxonomy_csv=current_taxonomy_csv
+            or expected_current_scheduler_taxonomy_csv,
+            proposed_taxonomy_version=proposed_taxonomy_version,
+            proposed_taxonomy_csv=proposed_taxonomy_csv,
+            required_signal_date=required_signal_date,
+            scheduler_config_path=scheduler_config_path,
+        )
+        if consistency_plan["activation_plan_status"] != "ALREADY_ACTIVE":
+            raise RuntimeError("final activation consistency verification failed")
 
         return {
             "activation_apply_status": "ACTIVE",
             "activation_performed": True,
+            "activation_db_status": activation_db_status,
+            "activation_config_status": activation_config_status,
+            "activation_consistency_status": "OK",
+            "activation_rollback_attempted": False,
+            "activation_rollback_status": "NOT_NEEDED",
+            "activation_error": None,
+            "config_backup_path": str(backup_path) if backup_path is not None else None,
             "ecosystem_code": ecosystem_code,
             "taxonomy_version_id": taxonomy_version_id,
             "taxonomy_version_code": proposed_taxonomy_version,
+            "plan": plan,
+            "post_activation_plan": consistency_plan,
+            "config_activation": config_summary,
+        }
+    except Exception as exc:
+        if scheduler_config_path is not None and backup_path is not None:
+            rollback_attempted = True
+            shutil.copy2(backup_path, scheduler_config_path)
+            rollback_status = "CONFIG_RESTORED"
+        if activation_db_status == "OK" and expected_current_version is not None:
+            rollback_attempted = True
+            try:
+                with conn:
+                    ecosystem_row = conn.execute(
+                        "SELECT ecosystem_id FROM ec_ecosystem WHERE ecosystem_code = ?",
+                        (ecosystem_code,),
+                    ).fetchone()
+                    if ecosystem_row is None:
+                        raise ValueError(f"ecosystem not found: {ecosystem_code}")
+                    ecosystem_id = int(ecosystem_row[0])
+                    conn.execute(
+                        """
+                        UPDATE ec_taxonomy_version
+                        SET status = 'INACTIVE',
+                            is_active = 0,
+                            active_to = CURRENT_TIMESTAMP
+                        WHERE ecosystem_id = ?
+                          AND taxonomy_version_code = ?
+                        """,
+                        (ecosystem_id, proposed_taxonomy_version),
+                    )
+                    conn.execute(
+                        """
+                        UPDATE ec_taxonomy_version
+                        SET status = 'ACTIVE',
+                            is_active = 1,
+                            active_from = COALESCE(active_from, CURRENT_TIMESTAMP),
+                            active_to = NULL
+                        WHERE ecosystem_id = ?
+                          AND taxonomy_version_code = ?
+                        """,
+                        (ecosystem_id, expected_current_version),
+                    )
+                    conn.execute(
+                        """
+                        UPDATE ec_taxonomy_change_deployment
+                        SET status = 'READY_TO_ACTIVATE',
+                            activation_status = 'NOT_ACTIVE',
+                            activated_at_utc = NULL,
+                            updated_at_utc = CURRENT_TIMESTAMP
+                        WHERE ecosystem_code = ?
+                          AND proposed_taxonomy_version = ?
+                        """,
+                        (ecosystem_code, proposed_taxonomy_version),
+                    )
+                rollback_status = (
+                    "DB_AND_CONFIG_RESTORED"
+                    if rollback_status == "CONFIG_RESTORED"
+                    else "DB_RESTORED"
+                )
+                activation_db_status = "ROLLED_BACK"
+            except Exception as rollback_exc:
+                rollback_status = f"ROLLBACK_FAILED: {rollback_exc}"
+        return {
+            "activation_apply_status": "FAILED",
+            "activation_performed": False,
+            "activation_db_status": activation_db_status,
+            "activation_config_status": activation_config_status,
+            "activation_consistency_status": "FAILED",
+            "activation_rollback_attempted": rollback_attempted,
+            "activation_rollback_status": rollback_status,
+            "activation_error": str(exc),
+            "config_backup_path": str(backup_path) if backup_path is not None else None,
+            "blocking_errors": [str(exc)],
             "plan": plan,
             "config_activation": config_summary,
         }
@@ -3043,9 +3437,13 @@ def build_activation_plan_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Plan guarded activation of a rebuilt Datacenter taxonomy")
     parser.add_argument("--analysis-db", required=True)
     parser.add_argument("--ecosystem", default=DATACENTER_ECOSYSTEM_CODE)
+    parser.add_argument("--deployment-id", type=int)
+    parser.add_argument("--current-taxonomy-version")
+    parser.add_argument("--current-taxonomy-csv")
     parser.add_argument("--proposed-taxonomy-version", required=True)
     parser.add_argument("--proposed-taxonomy-csv", required=True)
     parser.add_argument("--required-signal-date", required=True)
+    parser.add_argument("--scheduler-config")
     parser.add_argument("--expected-scheduler-taxonomy-version")
     parser.add_argument("--expected-scheduler-taxonomy-csv")
     parser.add_argument("--format", choices=("json",), default="json")
@@ -3056,7 +3454,6 @@ def build_apply_activation_parser() -> argparse.ArgumentParser:
     parser = build_activation_plan_parser()
     parser.description = "Guarded Datacenter taxonomy activation boundary"
     parser.add_argument("--confirm-activate-taxonomy-version", required=True)
-    parser.add_argument("--scheduler-config")
     parser.add_argument("--expected-current-scheduler-taxonomy-version")
     parser.add_argument("--expected-current-scheduler-taxonomy-csv")
     parser.add_argument("--target-scheduler-taxonomy-csv")
