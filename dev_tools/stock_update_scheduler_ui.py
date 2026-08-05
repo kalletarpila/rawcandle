@@ -400,6 +400,7 @@ def format_taxonomy_plan_lines(summary: dict[str, Any]) -> str:
     plan = summary.get("plan", {}) if isinstance(summary.get("plan"), dict) else {}
     reconciliation = summary.get("plan_reconciliation", {}) if isinstance(summary.get("plan_reconciliation"), dict) else {}
     repair_plan = reconciliation.get("dc_repair_plan", {}) if isinstance(reconciliation.get("dc_repair_plan"), dict) else {}
+    ec_resume = summary.get("ec_resume_plan", {}) if isinstance(summary.get("ec_resume_plan"), dict) else {}
     diff = plan.get("taxonomy_diff", {}) if isinstance(plan.get("taxonomy_diff"), dict) else {}
     scope = plan.get("delta_scope_summary", {}) if isinstance(plan.get("delta_scope_summary"), dict) else {}
     estimate = plan.get("estimated_delta_work", {}) if isinstance(plan.get("estimated_delta_work"), dict) else {}
@@ -442,6 +443,14 @@ def format_taxonomy_plan_lines(summary: dict[str, Any]) -> str:
             f"repair_candidate_hash={repair_plan.get('repair_candidate_hash', '')}",
             f"repair_candidate_count={repair_plan.get('repair_candidate_count', '')}",
             f"ordinary_dc_recopy_required={repair_plan.get('ordinary_dc_recopy_required', '')}",
+            f"ec_resume_action={ec_resume.get('ec_resume_action', '')}",
+            f"ec_rebuild_required={ec_resume.get('ec_rebuild_required', '')}",
+            f"ec_loaders_required={ec_resume.get('ec_loaders_required', '')}",
+            f"ec_chunks_required={ec_resume.get('ec_chunks_required', '')}",
+            f"ec_revalidation_required={ec_resume.get('ec_revalidation_required', '')}",
+            "EC resume: existing V2.1 facts will be revalidated read-only"
+            if ec_resume.get("ec_resume_action") == "REVALIDATE_EXISTING_FACTS"
+            else "EC resume: action follows backend plan",
             f"delta_safe={plan.get('delta_safe', '')}",
             "delta_blocking_reasons=" + "; ".join(plan.get("delta_blocking_reasons", [])),
             f"added_tickers={len(diff.get('added_tickers', []))}",
@@ -473,6 +482,7 @@ def format_taxonomy_plan_lines(summary: dict[str, Any]) -> str:
 def taxonomy_confirmation_key(plan: dict[str, Any]) -> tuple[Any, ...]:
     reconciliation = plan.get("plan_reconciliation", {}) if isinstance(plan.get("plan_reconciliation"), dict) else {}
     repair_plan = reconciliation.get("dc_repair_plan", {}) if isinstance(reconciliation.get("dc_repair_plan"), dict) else {}
+    ec_resume = plan.get("ec_resume_plan", {}) if isinstance(plan.get("ec_resume_plan"), dict) else {}
     return (
         plan.get("deployment_id"),
         plan.get("proposed_taxonomy_version"),
@@ -485,6 +495,10 @@ def taxonomy_confirmation_key(plan: dict[str, Any]) -> tuple[Any, ...]:
         reconciliation.get("repair_amendment_hash"),
         repair_plan.get("dc_repair_scope"),
         repair_plan.get("repair_candidate_hash"),
+        ec_resume.get("ec_resume_action"),
+        ec_resume.get("ec_rebuild_required"),
+        ec_resume.get("ec_loaders_required"),
+        ec_resume.get("ec_chunks_required"),
     )
 
 
@@ -1175,10 +1189,13 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
                 prepared_plan = dict(inspection["plan"])
                 if isinstance(inspection.get("plan_reconciliation"), dict):
                     prepared_plan["plan_reconciliation"] = inspection["plan_reconciliation"]
+                if isinstance(inspection.get("ec_resume_plan"), dict):
+                    prepared_plan["ec_resume_plan"] = inspection["ec_resume_plan"]
                 taxonomy_confirmation_state["summary"] = {
                     "deployment_id": inspection.get("deployment_id"),
                     "plan": prepared_plan,
                     "plan_reconciliation": inspection.get("plan_reconciliation"),
+                    "ec_resume_plan": inspection.get("ec_resume_plan"),
                 }
             taxonomy_plan_activation_button.disabled = normalized_status != "READY_TO_ACTIVATE"
             taxonomy_resume_button.disabled = safe_next_action != "resume_from_failed_phase"

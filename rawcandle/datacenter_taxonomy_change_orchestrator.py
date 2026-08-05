@@ -13,6 +13,7 @@ from typing import Callable
 from analysis.datacenter_indices.swing_pipeline_orchestrator import run_datacenter_swing_pipeline
 from analysis.datacenter_indices.taxonomy import DatacenterTaxonomyRow, load_datacenter_taxonomy_csv
 from rawcandle.ec_taxonomy_full_rebuild_orchestrator import run_ec_taxonomy_full_rebuild
+from rawcandle.ec_dc_fact_parity_audit import audit_dc_ec_fact_parity
 from rawcandle.datacenter_taxonomy_replacement import (
     CANONICAL_DC_FACT_TABLES,
     CANONICAL_EC_FACT_TABLES,
@@ -42,6 +43,9 @@ CHANGE_EXECUTION_DELTA_REBUILD = "DELTA_REBUILD"
 CHANGE_EXECUTION_REPORT_STATUS_ONLY = "REPORT_STATUS_ONLY"
 DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY = "ECOSYSTEM_AGGREGATE_ONLY"
 PLAN_RECONCILIATION_REASON_AGGREGATE_SCOPE = "IMPLEMENTATION_CORRECTION_AGGREGATE_CARRY_FORWARD_SCOPE"
+EC_RESUME_ACTION_REBUILD_EC_FACTS = "REBUILD_EC_FACTS"
+EC_RESUME_ACTION_REVALIDATE_EXISTING_FACTS = "REVALIDATE_EXISTING_FACTS"
+EC_RESUME_ACTION_SKIP_ALREADY_VALIDATED = "SKIP_ALREADY_VALIDATED"
 TAXONOMY_FIELD_DEPENDENCIES = {
     "taxonomy_version": "IDENTITY",
     "ticker": "IDENTITY",
@@ -1314,6 +1318,7 @@ def inspect_taxonomy_change(
         }
     plan = None
     plan_reconciliation = None
+    ec_resume_plan = None
     proposed_source_reference = deployment.get("source_reference")
     date_to = _max_head(ec_heads) or deployment.get("rebuild_end_date") or deployment.get("rebuild_start_date")
     if proposed_source_reference and date_to:
@@ -1358,9 +1363,14 @@ def inspect_taxonomy_change(
                     analysis_db=analysis_db,
                     plan=reconciliation_plan,
                     original_plan_hash=original_plan_hash or str(plan.get("plan_hash") or ""),
-                    current_plan_hash=str(reconciliation_plan.get("plan_hash") or ""),
+                    expected_proposed_source_sha256=str(deployment.get("source_sha256") or ""),
                     existing_backup_path=str(backup.get("backup_path") or ""),
                     existing_backup_sha256=str(backup.get("backup_sha256") or ""),
+                )
+                ec_resume_plan = plan_ec_resume_action(
+                    analysis_db=analysis_db,
+                    plan=reconciliation_plan,
+                    deployment_id=deployment_id,
                 )
         except Exception as exc:
             plan = {
@@ -1373,6 +1383,7 @@ def inspect_taxonomy_change(
         "deployment": deployment,
         "plan": plan,
         "plan_reconciliation": plan_reconciliation,
+        "ec_resume_plan": ec_resume_plan,
         "normalized_orchestration_status": status,
         "active_taxonomy": active,
         "proposed_taxonomy": proposed,
@@ -1682,17 +1693,27 @@ def execute_taxonomy_rebuild(
                         "DC_FACTS_CARRIED_FORWARD",
                         True,
                     )
+                post_repair_validation = validate_dc_carry_forward_key_universe(
+                    analysis_db=analysis_db,
+                    plan=plan,
+                    ticker_allowlist=ticker_allowlist,
+                    group_allowlist=group_allowlist,
+                )
+                if post_repair_validation.get("validation_status") != "OK":
+                    return _failure(
+                        "DC_FACTS_CARRIED_FORWARD",
+                        "DC_AGGREGATE_REPAIR_VALIDATION_FAILED",
+                        str(post_repair_validation),
+                        completed,
+                        "DC_FACTS_CARRIED_FORWARD",
+                        True,
+                    )
                 carry_forward = {
                     "carry_forward_status": "OK",
                     "resume_skip": False,
                     "dc_repair_scope": DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY,
                     "aggregate_only_repair": carry_forward,
-                    "dc_key_universe_validation": validate_dc_carry_forward_key_universe(
-                        analysis_db=analysis_db,
-                        plan=plan,
-                        ticker_allowlist=ticker_allowlist,
-                        group_allowlist=group_allowlist,
-                    ),
+                    "dc_key_universe_validation": post_repair_validation,
                     "copied_ticker_count": 0,
                     "copied_group_count": 1,
                 }
@@ -1741,10 +1762,70 @@ def execute_taxonomy_rebuild(
                 },
             )
             completed.append("DC_FACTS_VALIDATED")
-        ec_rebuild = _call_phase(services.run_ec_rebuild, "ec_rebuild", plan=plan)
-        completed.append("EC_FACTS_CONSTRUCTED")
-        if str(ec_rebuild.get("overall_status")) in {"FACTS_CONSTRUCTED", "REBUILD_COMPLETED"}:
+        ec_resume_plan = (
+            plan_ec_resume_action(
+                analysis_db=analysis_db,
+                plan=plan,
+                deployment_id=deployment_id,
+            )
+            if resume and report_status_only
+            else {
+                "ec_resume_action": EC_RESUME_ACTION_REBUILD_EC_FACTS,
+                "ec_rebuild_required": True,
+                "ec_loaders_required": True,
+                "ec_chunks_required": True,
+                "ec_revalidation_required": False,
+            }
+        )
+        ec_action = str(ec_resume_plan.get("ec_resume_action"))
+        if ec_action == EC_RESUME_ACTION_REVALIDATE_EXISTING_FACTS:
+            ec_rebuild = {
+                "status": "OK",
+                "overall_status": "FACTS_REVALIDATED",
+                "ec_resume_action": ec_action,
+                "run_ec_rebuild_invoked": False,
+                "ec_loaders_invoked": False,
+                "ec_chunks_invoked": False,
+                "ec_revalidation_invoked": True,
+                "ec_revalidation": ec_resume_plan.get("ec_revalidation"),
+            }
+            completed.append("EC_FACTS_REVALIDATED")
             completed.append("COVERAGE_PARITY_VALIDATED")
+        elif ec_action == EC_RESUME_ACTION_SKIP_ALREADY_VALIDATED:
+            ec_rebuild = {
+                "status": "OK",
+                "overall_status": "FACTS_ALREADY_VALIDATED",
+                "ec_resume_action": ec_action,
+                "run_ec_rebuild_invoked": False,
+                "ec_loaders_invoked": False,
+                "ec_chunks_invoked": False,
+                "ec_revalidation_invoked": False,
+            }
+            completed.append("EC_FACTS_REVALIDATED")
+            completed.append("COVERAGE_PARITY_VALIDATED")
+        elif ec_action == EC_RESUME_ACTION_REBUILD_EC_FACTS:
+            if resume and report_status_only:
+                return _failure(
+                    "EC_FACTS_REVALIDATED",
+                    "EC_REVALIDATION_BLOCKED_REBUILD_REQUIRED",
+                    str(ec_resume_plan),
+                    completed,
+                    "EC_FACTS_REVALIDATED",
+                    True,
+                )
+            ec_rebuild = _call_phase(services.run_ec_rebuild, "ec_rebuild", plan=plan)
+            completed.append("EC_FACTS_CONSTRUCTED")
+            if str(ec_rebuild.get("overall_status")) in {"FACTS_CONSTRUCTED", "REBUILD_COMPLETED"}:
+                completed.append("COVERAGE_PARITY_VALIDATED")
+        else:
+            return _failure(
+                "EC_FACTS_REVALIDATED",
+                "EC_REVALIDATION_SERVICE_UNAVAILABLE",
+                str(ec_resume_plan),
+                completed,
+                "EC_FACTS_REVALIDATED",
+                True,
+            )
         cleanup = plan_ec_taxonomy_replacement_cleanup(
             db=analysis_db,
             ecosystem=str(deployment["ecosystem_code"]),
@@ -1832,6 +1913,8 @@ def execute_taxonomy_rebuild(
             "change_execution_class": change_execution_class,
             "report_status_only_execution": report_status_only,
             "dc_rebuild": dc_rebuild,
+            "ec_rebuild": ec_rebuild,
+            "ec_resume_plan": ec_resume_plan,
             **(_no_computation_evidence() if report_status_only else {}),
             "completed_phases": completed,
             "activation_plan": activation_plan,
@@ -2113,6 +2196,28 @@ DC_ECOSYSTEM_AGGREGATE_REPAIR_TABLES = (
     ("dc_group_swing_signal_daily", "signal_date"),
     ("dc_group_index_daily", "index_date"),
 )
+EC_FACT_TABLE_CONTRACTS = {
+    "ec_ticker_signal_daily": {
+        "source_table": "dc_ticker_swing_signal_daily",
+        "source_date_column": "signal_date",
+        "key_columns": ("ecosystem_id", "taxonomy_version_id", "signal_date", "ticker_id", "signal_version"),
+    },
+    "ec_group_signal_daily": {
+        "source_table": "dc_group_swing_signal_daily",
+        "source_date_column": "signal_date",
+        "key_columns": ("ecosystem_id", "taxonomy_version_id", "signal_date", "group_type", "group_name", "signal_version"),
+    },
+    "ec_group_synthetic_ohlc_daily": {
+        "source_table": "dc_group_synthetic_ohlc_daily",
+        "source_date_column": "ohlc_date",
+        "key_columns": ("ecosystem_id", "taxonomy_version_id", "signal_date", "group_type", "group_name", "calc_version"),
+    },
+    "ec_group_index_daily": {
+        "source_table": "dc_group_index_daily",
+        "source_date_column": "index_date",
+        "key_columns": ("ecosystem_id", "taxonomy_version_id", "signal_date", "group_type", "group_name"),
+    },
+}
 
 
 def _dc_ticker_allowlist(plan: dict[str, object]) -> list[str]:
@@ -2342,26 +2447,360 @@ def plan_dc_ecosystem_aggregate_repair(
     }
 
 
+def _target_ec_context(
+    conn: sqlite3.Connection,
+    *,
+    ecosystem_code: str,
+    target_taxonomy_version: str,
+) -> tuple[int | None, int | None, dict[str, object] | None, list[str]]:
+    errors: list[str] = []
+    ecosystem_id = None
+    taxonomy_version_id = None
+    taxonomy = _loaded_taxonomy(
+        conn,
+        ecosystem_code=ecosystem_code,
+        taxonomy_version_code=target_taxonomy_version,
+    )
+    if taxonomy is None:
+        errors.append("target taxonomy metadata is not loaded")
+    else:
+        ecosystem_id = int(taxonomy["ecosystem_id"])
+        taxonomy_version_id = int(taxonomy["taxonomy_version_id"])
+    return ecosystem_id, taxonomy_version_id, taxonomy, errors
+
+
+def _available_key_columns(conn: sqlite3.Connection, table_name: str, configured: tuple[str, ...]) -> tuple[str, ...]:
+    columns = set(_table_columns(conn, table_name))
+    return tuple(column for column in configured if column in columns)
+
+
+def _ec_fact_key_columns(conn: sqlite3.Connection, table_name: str) -> tuple[str, ...]:
+    primary_key_columns = tuple(_pk_columns(conn, table_name))
+    if primary_key_columns:
+        return primary_key_columns
+    return _available_key_columns(
+        conn,
+        table_name,
+        tuple(EC_FACT_TABLE_CONTRACTS[table_name]["key_columns"]),
+    )
+
+
+def _ec_duplicate_count(
+    conn: sqlite3.Connection,
+    *,
+    table_name: str,
+    ecosystem_id: int,
+    taxonomy_version_id: int,
+    date_from: str,
+    date_to: str,
+) -> int:
+    key_columns = _ec_fact_key_columns(conn, table_name)
+    if not key_columns:
+        return 0
+    sql = (
+        f"SELECT COUNT(*) FROM ("
+        f"SELECT {', '.join(_sql_identifier(column) for column in key_columns)} "
+        f"FROM {_sql_identifier(table_name)} "
+        "WHERE ecosystem_id = ? AND taxonomy_version_id = ? AND signal_date BETWEEN ? AND ? "
+        f"GROUP BY {', '.join(_sql_identifier(column) for column in key_columns)} "
+        "HAVING COUNT(*) > 1)"
+    )
+    row = conn.execute(sql, (ecosystem_id, taxonomy_version_id, date_from, date_to)).fetchone()
+    return int(row[0] or 0) if row is not None else 0
+
+
+def _ec_table_state(
+    conn: sqlite3.Connection,
+    *,
+    table_name: str,
+    ecosystem_id: int,
+    taxonomy_version_id: int,
+    taxonomy_version_code: str,
+    date_from: str,
+    date_to: str,
+) -> dict[str, object]:
+    if table_name not in _table_names(conn):
+        return {"table": table_name, "status": "MISSING_TABLE", "blocking_errors": [f"missing EC fact table: {table_name}"]}
+    contract = EC_FACT_TABLE_CONTRACTS[table_name]
+    source_table = str(contract["source_table"])
+    source_date_column = str(contract["source_date_column"])
+    if source_table not in _table_names(conn):
+        return {"table": table_name, "status": "MISSING_SOURCE_TABLE", "blocking_errors": [f"missing DC source table: {source_table}"]}
+    target_dates = {
+        str(row[0])
+        for row in conn.execute(
+            f"""
+            SELECT DISTINCT signal_date
+            FROM {_sql_identifier(table_name)}
+            WHERE ecosystem_id = ? AND taxonomy_version_id = ? AND signal_date BETWEEN ? AND ?
+            """,
+            (ecosystem_id, taxonomy_version_id, date_from, date_to),
+        ).fetchall()
+    }
+    source_dates = {
+        str(row[0])
+        for row in conn.execute(
+            f"""
+            SELECT DISTINCT {_sql_identifier(source_date_column)}
+            FROM {_sql_identifier(source_table)}
+            WHERE taxonomy_version = ? AND {_sql_identifier(source_date_column)} BETWEEN ? AND ?
+            """,
+            (taxonomy_version_code, date_from, date_to),
+        ).fetchall()
+    }
+    row = conn.execute(
+        f"""
+        SELECT COUNT(*) AS rows, MIN(signal_date) AS min_date, MAX(signal_date) AS max_date
+        FROM {_sql_identifier(table_name)}
+        WHERE ecosystem_id = ? AND taxonomy_version_id = ? AND signal_date BETWEEN ? AND ?
+        """,
+        (ecosystem_id, taxonomy_version_id, date_from, date_to),
+    ).fetchone()
+    duplicate_count = _ec_duplicate_count(
+        conn,
+        table_name=table_name,
+        ecosystem_id=ecosystem_id,
+        taxonomy_version_id=taxonomy_version_id,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    other_taxonomy_rows = 0
+    columns = set(_table_columns(conn, table_name))
+    if {"ecosystem_id", "taxonomy_version_id", "signal_date"}.issubset(columns):
+        other = conn.execute(
+            f"""
+            SELECT COUNT(*)
+            FROM {_sql_identifier(table_name)}
+            WHERE ecosystem_id = ? AND taxonomy_version_id <> ? AND signal_date BETWEEN ? AND ?
+            """,
+            (ecosystem_id, taxonomy_version_id, date_from, date_to),
+        ).fetchone()
+        other_taxonomy_rows = int(other[0] or 0) if other is not None else 0
+    missing_dates = sorted(source_dates - target_dates)
+    extra_dates = sorted(target_dates - source_dates)
+    blocking = []
+    if not source_dates:
+        blocking.append(f"{table_name}: source date set is empty")
+    if missing_dates:
+        blocking.append(f"{table_name}: missing target dates")
+    if extra_dates:
+        blocking.append(f"{table_name}: target dates absent from source")
+    if duplicate_count:
+        blocking.append(f"{table_name}: duplicate target keys")
+    return {
+        "table": table_name,
+        "status": "OK" if not blocking else "BLOCKED",
+        "source_table": source_table,
+        "target_row_count": int(row["rows"] or 0) if row is not None else 0,
+        "source_date_count": len(source_dates),
+        "target_date_count": len(target_dates),
+        "min_signal_date": row["min_date"] if row is not None else None,
+        "max_signal_date": row["max_date"] if row is not None else None,
+        "missing_dates": missing_dates,
+        "extra_dates": extra_dates,
+        "key_columns": list(_ec_fact_key_columns(conn, table_name)),
+        "duplicate_count": duplicate_count,
+        "other_taxonomy_rows_in_range": other_taxonomy_rows,
+        "blocking_errors": blocking,
+    }
+
+
+def revalidate_existing_ec_facts(
+    *,
+    analysis_db: str | Path,
+    ecosystem_code: str,
+    target_taxonomy_version: str,
+    taxonomy_csv: str | Path,
+    deployment_id: int,
+    date_from: str,
+    date_to: str,
+    parity_audit: Callable[..., dict[str, object]] = audit_dc_ec_fact_parity,
+) -> dict[str, object]:
+    blocking_errors: list[str] = []
+    warnings: list[str] = []
+    taxonomy_summary = summarize_taxonomy_csv(taxonomy_csv, target_taxonomy_version)
+    conn = _connect_readonly(analysis_db)
+    try:
+        ecosystem_id, taxonomy_version_id, taxonomy, context_errors = _target_ec_context(
+            conn,
+            ecosystem_code=ecosystem_code,
+            target_taxonomy_version=target_taxonomy_version,
+        )
+        blocking_errors.extend(context_errors)
+        if taxonomy is not None and str(taxonomy.get("source_hash") or "") != taxonomy_summary.source_sha256:
+            blocking_errors.append("loaded taxonomy hash does not match source CSV")
+        deployment = _deployment_by_id(conn, deployment_id=deployment_id)
+        if deployment is None:
+            blocking_errors.append("deployment not found")
+        elif str(deployment.get("proposed_taxonomy_version")) != target_taxonomy_version:
+            blocking_errors.append("deployment target taxonomy mismatch")
+        table_states = []
+        if ecosystem_id is not None and taxonomy_version_id is not None:
+            table_states = [
+                _ec_table_state(
+                    conn,
+                    table_name=table_name,
+                    ecosystem_id=ecosystem_id,
+                    taxonomy_version_id=taxonomy_version_id,
+                    taxonomy_version_code=target_taxonomy_version,
+                    date_from=date_from,
+                    date_to=date_to,
+                )
+                for table_name in EC_FACT_TABLE_CONTRACTS
+            ]
+            for state in table_states:
+                blocking_errors.extend(str(error) for error in state.get("blocking_errors", []))
+        else:
+            table_states = []
+    finally:
+        conn.close()
+
+    parity_summary: dict[str, object]
+    if not blocking_errors:
+        parity_summary = parity_audit(
+            source_db_path=str(analysis_db),
+            target_db_path=str(analysis_db),
+            ecosystem_code=ecosystem_code,
+            taxonomy_version_code=target_taxonomy_version,
+            signal_date=date_to,
+            include_pipeline_watermark=False,
+        )
+        parity_status = str(parity_summary.get("status") or "FAILED")
+        total_mismatch_count = int(parity_summary.get("total_mismatch_count") or 0)
+        if parity_status not in {"OK", "OK_WITH_WARNINGS"}:
+            blocking_errors.append(f"parity status is {parity_status}")
+        if total_mismatch_count != 0:
+            blocking_errors.append("total mismatch count is not zero")
+        warnings.extend(str(warning) for warning in parity_summary.get("warnings", []))
+    else:
+        parity_summary = {"status": "NOT_RUN", "total_mismatch_count": 0, "warnings": []}
+        parity_status = "NOT_RUN"
+        total_mismatch_count = 0
+
+    complete = not blocking_errors
+    return {
+        "ec_revalidation_status": "OK" if complete else "BLOCKED",
+        "ec_fact_state": "COMPLETE" if complete else "INCOMPLETE",
+        "taxonomy_purity_status": "OK" if not any("taxonomy" in error.lower() for error in blocking_errors) else "BLOCKED",
+        "duplicate_status": "OK" if not any("duplicate" in error.lower() for error in blocking_errors) else "BLOCKED",
+        "coverage_execution_status": "READ_ONLY_PARITY_AUDIT",
+        "coverage_status": "OK" if complete else "FAILED",
+        "parity_execution_status": "READ_ONLY_PARITY_AUDIT",
+        "parity_status": parity_status,
+        "total_mismatch_count": total_mismatch_count,
+        "stale_target_row_count": 0,
+        "ec_rebuild_required": False,
+        "ec_loaders_invoked": False,
+        "ec_chunks_invoked": False,
+        "run_ec_rebuild_invoked": False,
+        "safe_to_continue_to_cleanup": complete,
+        "table_states": table_states,
+        "parity_summary": parity_summary,
+        "blocking_errors": sorted(set(blocking_errors)),
+        "warnings": warnings,
+    }
+
+
+def plan_ec_resume_action(
+    *,
+    analysis_db: str | Path,
+    plan: dict[str, object],
+    deployment_id: int,
+    parity_audit: Callable[..., dict[str, object]] = audit_dc_ec_fact_parity,
+) -> dict[str, object]:
+    revalidation = revalidate_existing_ec_facts(
+        analysis_db=analysis_db,
+        ecosystem_code=str(plan["ecosystem_code"]),
+        target_taxonomy_version=str(plan["proposed_taxonomy_version"]),
+        taxonomy_csv=str(plan["proposed_source_reference"]),
+        deployment_id=deployment_id,
+        date_from=str(plan["date_from"]),
+        date_to=str(plan["date_to"]),
+        parity_audit=parity_audit,
+    )
+    if revalidation["safe_to_continue_to_cleanup"]:
+        action = EC_RESUME_ACTION_REVALIDATE_EXISTING_FACTS
+        reasons = ["TARGET_EC_FACTS_COMPLETE_AND_PARITY_ACCEPTED"]
+    else:
+        action = EC_RESUME_ACTION_REBUILD_EC_FACTS
+        reasons = list(revalidation.get("blocking_errors", []))
+    return {
+        "ec_resume_action": action,
+        "ec_rebuild_required": action == EC_RESUME_ACTION_REBUILD_EC_FACTS,
+        "ec_loaders_required": action == EC_RESUME_ACTION_REBUILD_EC_FACTS,
+        "ec_chunks_required": action == EC_RESUME_ACTION_REBUILD_EC_FACTS,
+        "ec_revalidation_required": action == EC_RESUME_ACTION_REVALIDATE_EXISTING_FACTS,
+        "ec_revalidation_reasons": reasons,
+        "ec_revalidation": revalidation,
+    }
+
+
 def plan_report_status_only_resume_reconciliation(
     *,
     analysis_db: str | Path,
     plan: dict[str, object],
     original_plan_hash: str,
     current_plan_hash: str | None = None,
+    expected_current_source_sha256: str | None = None,
+    expected_proposed_source_sha256: str | None = None,
     existing_backup_path: str | None = None,
     existing_backup_sha256: str | None = None,
 ) -> dict[str, object]:
     repair_plan = plan_dc_ecosystem_aggregate_repair(analysis_db=analysis_db, plan=plan)
+    backend_current_plan_hash = str(plan.get("plan_hash") or "")
+    current_plan_inputs = {
+        "deployment_id": plan.get("deployment_id"),
+        "ecosystem_code": plan.get("ecosystem_code"),
+        "current_taxonomy_version": plan.get("current_taxonomy_version"),
+        "current_source_sha256": plan.get("current_source_sha256"),
+        "proposed_taxonomy_version": plan.get("proposed_taxonomy_version"),
+        "proposed_source_sha256": plan.get("proposed_source_sha256"),
+        "date_from": plan.get("date_from"),
+        "date_to": plan.get("date_to"),
+        "selected_rebuild_mode": plan.get("selected_rebuild_mode"),
+        "change_execution_class": plan.get("change_execution_class"),
+        "dc_repair_scope": repair_plan.get("dc_repair_scope"),
+        "dc_repair_tables": repair_plan.get("dc_repair_tables"),
+        "dc_repair_key_classes": repair_plan.get("dc_repair_key_classes"),
+        "repair_candidate_hash": repair_plan.get("repair_candidate_hash"),
+    }
+    current_plan_inputs_hash = _json_hash(current_plan_inputs)
+    caller_current_hash_matches = current_plan_hash is None or str(current_plan_hash) == backend_current_plan_hash
+    source_inputs_unchanged = (
+        (expected_current_source_sha256 is None or str(plan.get("current_source_sha256") or "") == expected_current_source_sha256)
+        and (
+            expected_proposed_source_sha256 is None
+            or str(plan.get("proposed_source_sha256") or "") == expected_proposed_source_sha256
+        )
+    )
     business_inputs_unchanged = (
         str(plan.get("change_execution_class")) == CHANGE_EXECUTION_REPORT_STATUS_ONLY
         and str(plan.get("selected_rebuild_mode")) == REBUILD_MODE_DELTA
-        and str(plan.get("plan_hash")) == str(current_plan_hash or plan.get("plan_hash"))
+        and not bool(plan.get("computational_rebuild_required"))
+        and bool(repair_plan.get("ordinary_dc_recopy_required")) is False
+        and bool(repair_plan.get("computational_rebuild_required")) is False
     )
+    if str(plan.get("change_execution_class")) != CHANGE_EXECUTION_REPORT_STATUS_ONLY:
+        drift_classification = "EXECUTION_SCOPE_DRIFT"
+    elif str(repair_plan.get("dc_repair_scope")) != DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY:
+        drift_classification = "EXECUTION_SCOPE_DRIFT"
+    elif not caller_current_hash_matches:
+        drift_classification = "UNSUPPORTED_PLAN_DRIFT"
+    elif not source_inputs_unchanged:
+        drift_classification = "SOURCE_DRIFT"
+    elif not business_inputs_unchanged:
+        drift_classification = "BUSINESS_INPUT_DRIFT"
+    elif not repair_plan.get("safe_to_apply"):
+        drift_classification = "UNSUPPORTED_PLAN_DRIFT"
+    else:
+        drift_classification = "SAFE_IMPLEMENTATION_RECONCILIATION"
     amendment_identity = {
         "deployment_id": plan.get("deployment_id"),
         "original_plan_hash": original_plan_hash,
-        "current_recomputed_plan_hash": current_plan_hash or plan.get("plan_hash"),
+        "current_recomputed_plan_hash": backend_current_plan_hash,
+        "current_plan_inputs_hash": current_plan_inputs_hash,
         "reason": PLAN_RECONCILIATION_REASON_AGGREGATE_SCOPE,
+        "plan_drift_classification": drift_classification,
         "change_execution_class": plan.get("change_execution_class"),
         "repair_scope": DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY,
         "repair_candidate_hash": repair_plan["repair_candidate_hash"],
@@ -2374,16 +2813,22 @@ def plan_report_status_only_resume_reconciliation(
         "existing_backup_path": existing_backup_path,
         "existing_backup_sha256": existing_backup_sha256,
     }
-    safe = business_inputs_unchanged and bool(repair_plan.get("safe_to_apply"))
+    safe = drift_classification == "SAFE_IMPLEMENTATION_RECONCILIATION"
     return {
         "plan_reconciliation_status": "SAFE_AMENDMENT_READY" if safe else "BLOCKED",
         "original_plan_preserved": True,
         "business_inputs_unchanged": business_inputs_unchanged,
+        "source_inputs_unchanged": source_inputs_unchanged,
         "repair_scope_narrower_or_equal": True,
         "safe_to_resume_after_amendment": safe,
         "plan_reconciliation_reason": PLAN_RECONCILIATION_REASON_AGGREGATE_SCOPE,
+        "plan_drift_classification": drift_classification,
         "original_plan_hash": original_plan_hash,
-        "current_recomputed_plan_hash": current_plan_hash or plan.get("plan_hash"),
+        "caller_supplied_current_plan_hash": current_plan_hash,
+        "caller_current_hash_matches": caller_current_hash_matches,
+        "current_recomputed_plan_hash": backend_current_plan_hash,
+        "current_plan_recomputed_at_utc": _utc_operation_timestamp(),
+        "current_plan_inputs_hash": current_plan_inputs_hash,
         "repair_amendment_hash": _json_hash(amendment_identity),
         "repair_amendment_identity": amendment_identity,
         "dc_repair_plan": repair_plan,

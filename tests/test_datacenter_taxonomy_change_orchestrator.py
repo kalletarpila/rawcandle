@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import sqlite3
 from pathlib import Path
 
 from rawcandle.datacenter_taxonomy_change_orchestrator import (
     CHANGE_EXECUTION_REPORT_STATUS_ONLY,
     DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY,
+    EC_RESUME_ACTION_REBUILD_EC_FACTS,
+    EC_RESUME_ACTION_REVALIDATE_EXISTING_FACTS,
     REBUILD_MODE_AUTO,
     REBUILD_MODE_DELTA,
     REBUILD_MODE_FULL,
@@ -19,9 +22,11 @@ from rawcandle.datacenter_taxonomy_change_orchestrator import (
     execute_taxonomy_rebuild,
     inspect_taxonomy_change,
     apply_dc_ecosystem_aggregate_repair,
+    plan_ec_resume_action,
     plan_dc_ecosystem_aggregate_repair,
     plan_report_status_only_resume_reconciliation,
     prepare_taxonomy_change,
+    revalidate_existing_ec_facts,
 )
 from rawcandle.ec_datacenter_taxonomy_loader import load_datacenter_taxonomy_to_ec_sidecar
 from rawcandle.ec_sidecar_migration import apply_ec_sidecar_migration
@@ -1127,6 +1132,368 @@ def test_report_status_only_reconciliation_requires_aggregate_only_amendment(tmp
     assert reconciliation["safe_to_resume_after_amendment"] is True
     assert reconciliation["dc_repair_plan"]["dc_repair_scope"] == DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY
     assert reconciliation["dc_repair_plan"]["repair_candidate_count"] == 2
+
+
+def _create_ec_revalidation_fixture(tmp_path: Path) -> tuple[Path, Path, dict[str, object]]:
+    current_csv = _write_csv(tmp_path / "current.csv", _rows("DC_TAXONOMY_FULL_V1"))
+    proposed_csv = _write_csv(
+        tmp_path / "proposed.csv",
+        _report_status_only_rows("DC_TAXONOMY_FULL_V2_1"),
+    )
+    db_path = tmp_path / "ec_revalidation.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE ec_ecosystem (
+                ecosystem_id INTEGER PRIMARY KEY,
+                ecosystem_code TEXT NOT NULL
+            );
+            CREATE TABLE ec_taxonomy_version (
+                taxonomy_version_id INTEGER PRIMARY KEY,
+                ecosystem_id INTEGER NOT NULL,
+                taxonomy_version_code TEXT NOT NULL,
+                source_hash TEXT,
+                source_reference TEXT,
+                status TEXT,
+                is_active INTEGER
+            );
+            CREATE TABLE ec_taxonomy_change_deployment (
+                taxonomy_change_id INTEGER PRIMARY KEY,
+                ecosystem_code TEXT NOT NULL,
+                previous_taxonomy_version TEXT NOT NULL,
+                proposed_taxonomy_version TEXT NOT NULL,
+                source_reference TEXT NOT NULL,
+                source_sha256 TEXT NOT NULL,
+                change_summary TEXT NOT NULL,
+                added_ticker_count INTEGER NOT NULL,
+                removed_ticker_count INTEGER NOT NULL,
+                membership_change_count INTEGER NOT NULL,
+                group_change_count INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                rebuild_required INTEGER NOT NULL,
+                rebuild_start_date TEXT NOT NULL,
+                dc_rebuild_status TEXT DEFAULT 'NOT_STARTED',
+                ec_rebuild_status TEXT DEFAULT 'NOT_STARTED',
+                coverage_status TEXT DEFAULT 'NOT_STARTED',
+                parity_status TEXT DEFAULT 'NOT_STARTED',
+                activation_status TEXT DEFAULT 'NOT_ACTIVE',
+                rebuild_evidence_json TEXT,
+                rebuild_evidence_sha256 TEXT,
+                validation_evidence_json TEXT,
+                validation_evidence_sha256 TEXT,
+                last_error TEXT,
+                updated_at_utc TEXT
+            );
+            CREATE TABLE dc_ticker_swing_signal_daily (
+                signal_date TEXT,
+                taxonomy_version TEXT,
+                ticker TEXT,
+                signal_version TEXT
+            );
+            CREATE TABLE dc_group_swing_signal_daily (
+                signal_date TEXT,
+                taxonomy_version TEXT,
+                group_type TEXT,
+                group_name TEXT,
+                signal_version TEXT
+            );
+            CREATE TABLE dc_group_synthetic_ohlc_daily (
+                ohlc_date TEXT,
+                taxonomy_version TEXT,
+                group_type TEXT,
+                group_name TEXT,
+                calc_version TEXT
+            );
+            CREATE TABLE dc_group_index_daily (
+                index_date TEXT,
+                taxonomy_version TEXT,
+                group_type TEXT,
+                group_name TEXT
+            );
+            CREATE TABLE ec_ticker_signal_daily (
+                ecosystem_id INTEGER,
+                taxonomy_version_id INTEGER,
+                signal_date TEXT,
+                ticker_id INTEGER,
+                signal_version TEXT
+            );
+            CREATE TABLE ec_group_signal_daily (
+                ecosystem_id INTEGER,
+                taxonomy_version_id INTEGER,
+                signal_date TEXT,
+                group_type TEXT,
+                group_name TEXT,
+                signal_version TEXT
+            );
+            CREATE TABLE ec_group_synthetic_ohlc_daily (
+                ecosystem_id INTEGER,
+                taxonomy_version_id INTEGER,
+                signal_date TEXT,
+                group_type TEXT,
+                group_name TEXT,
+                calc_version TEXT
+            );
+            CREATE TABLE ec_group_index_daily (
+                ecosystem_id INTEGER,
+                taxonomy_version_id INTEGER,
+                signal_date TEXT,
+                group_type TEXT,
+                group_name TEXT
+            );
+            """
+        )
+        conn.execute("INSERT INTO ec_ecosystem VALUES (1, 'DATACENTER')")
+        conn.execute(
+            "INSERT INTO ec_taxonomy_version VALUES (1,1,'DC_TAXONOMY_FULL_V1',?,?, 'ACTIVE', 1)",
+            (hashlib.sha256(current_csv.read_bytes()).hexdigest(), str(current_csv)),
+        )
+        conn.execute(
+            "INSERT INTO ec_taxonomy_version VALUES (2,1,'DC_TAXONOMY_FULL_V2_1',?,?, 'INACTIVE', 0)",
+            (hashlib.sha256(proposed_csv.read_bytes()).hexdigest(), str(proposed_csv)),
+        )
+        conn.execute(
+            """
+            INSERT INTO ec_taxonomy_change_deployment (
+                taxonomy_change_id, ecosystem_code, previous_taxonomy_version,
+                proposed_taxonomy_version, source_reference, source_sha256,
+                change_summary, added_ticker_count, removed_ticker_count,
+                membership_change_count, group_change_count, status,
+                rebuild_required, rebuild_start_date
+            ) VALUES (2,'DATACENTER','DC_TAXONOMY_FULL_V1','DC_TAXONOMY_FULL_V2_1',?,?, '{}',0,0,0,0,'LOADED_NOT_ACTIVE',1,'2026-07-31')
+            """,
+            (str(proposed_csv), hashlib.sha256(proposed_csv.read_bytes()).hexdigest()),
+        )
+        for date_value in ["2026-07-31", "2026-08-03"]:
+            conn.execute("INSERT INTO dc_group_swing_signal_daily VALUES (?, 'DC_TAXONOMY_FULL_V1', 'ecosystem', 'DC_ECOSYSTEM_TOTAL', 'v1')", (date_value,))
+            conn.execute("INSERT INTO dc_group_index_daily VALUES (?, 'DC_TAXONOMY_FULL_V1', 'ecosystem', 'DC_ECOSYSTEM_TOTAL')", (date_value,))
+            conn.execute("INSERT INTO dc_ticker_swing_signal_daily VALUES (?, 'DC_TAXONOMY_FULL_V2_1', 'AAA', 'v1')", (date_value,))
+            conn.execute("INSERT INTO dc_group_swing_signal_daily VALUES (?, 'DC_TAXONOMY_FULL_V2_1', 'ecosystem', 'DC_ECOSYSTEM_TOTAL', 'v1')", (date_value,))
+            conn.execute("INSERT INTO dc_group_synthetic_ohlc_daily VALUES (?, 'DC_TAXONOMY_FULL_V2_1', 'ecosystem', 'DC_ECOSYSTEM_TOTAL', 'v1')", (date_value,))
+            conn.execute("INSERT INTO dc_group_index_daily VALUES (?, 'DC_TAXONOMY_FULL_V2_1', 'ecosystem', 'DC_ECOSYSTEM_TOTAL')", (date_value,))
+            conn.execute("INSERT INTO ec_ticker_signal_daily VALUES (1,2,?,1,'v1')", (date_value,))
+            conn.execute("INSERT INTO ec_group_signal_daily VALUES (1,2,?,'ecosystem','DC_ECOSYSTEM_TOTAL','v1')", (date_value,))
+            conn.execute("INSERT INTO ec_group_synthetic_ohlc_daily VALUES (1,2,?,'ecosystem','DC_ECOSYSTEM_TOTAL','v1')", (date_value,))
+            conn.execute("INSERT INTO ec_group_index_daily VALUES (1,2,?,'ecosystem','DC_ECOSYSTEM_TOTAL')", (date_value,))
+        conn.commit()
+    finally:
+        conn.close()
+    plan = build_taxonomy_change_plan(
+        deployment_id=2,
+        ecosystem_code="DATACENTER",
+        current_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        current_taxonomy_csv=current_csv,
+        proposed_taxonomy_version="DC_TAXONOMY_FULL_V2_1",
+        proposed_taxonomy_csv=proposed_csv,
+        date_from="2026-07-31",
+        date_to="2026-08-03",
+        rebuild_mode=REBUILD_MODE_DELTA,
+    )
+    return db_path, proposed_csv, plan
+
+
+def _ok_parity(**_kwargs):
+    return {"status": "OK", "total_mismatch_count": 0, "warnings": []}
+
+
+def test_complete_target_ec_facts_select_read_only_revalidation(tmp_path) -> None:
+    db_path, proposed_csv, plan = _create_ec_revalidation_fixture(tmp_path)
+
+    result = plan_ec_resume_action(
+        analysis_db=db_path,
+        plan=plan,
+        deployment_id=2,
+        parity_audit=_ok_parity,
+    )
+
+    assert result["ec_resume_action"] == EC_RESUME_ACTION_REVALIDATE_EXISTING_FACTS
+    assert result["ec_rebuild_required"] is False
+    assert result["ec_loaders_required"] is False
+    assert result["ec_chunks_required"] is False
+    assert result["ec_revalidation_required"] is True
+    assert proposed_csv.exists()
+
+
+def test_missing_target_ec_row_does_not_select_read_only_revalidation(tmp_path) -> None:
+    db_path, _proposed_csv, plan = _create_ec_revalidation_fixture(tmp_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("DELETE FROM ec_group_index_daily WHERE signal_date='2026-08-03'")
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = plan_ec_resume_action(analysis_db=db_path, plan=plan, deployment_id=2, parity_audit=_ok_parity)
+
+    assert result["ec_resume_action"] == EC_RESUME_ACTION_REBUILD_EC_FACTS
+    assert result["ec_revalidation"]["safe_to_continue_to_cleanup"] is False
+
+
+def test_duplicate_target_ec_row_blocks_revalidation(tmp_path) -> None:
+    db_path, _proposed_csv, plan = _create_ec_revalidation_fixture(tmp_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("INSERT INTO ec_group_index_daily VALUES (1,2,'2026-08-03','ecosystem','DC_ECOSYSTEM_TOTAL')")
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = revalidate_existing_ec_facts(
+        analysis_db=db_path,
+        ecosystem_code="DATACENTER",
+        target_taxonomy_version="DC_TAXONOMY_FULL_V2_1",
+        taxonomy_csv=plan["proposed_source_reference"],
+        deployment_id=2,
+        date_from="2026-07-31",
+        date_to="2026-08-03",
+        parity_audit=_ok_parity,
+    )
+
+    assert result["duplicate_status"] == "BLOCKED"
+    assert result["safe_to_continue_to_cleanup"] is False
+
+
+def test_taxonomy_hash_mismatch_blocks_ec_revalidation(tmp_path) -> None:
+    db_path, _proposed_csv, plan = _create_ec_revalidation_fixture(tmp_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("UPDATE ec_taxonomy_version SET source_hash='stale' WHERE taxonomy_version_code='DC_TAXONOMY_FULL_V2_1'")
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = plan_ec_resume_action(analysis_db=db_path, plan=plan, deployment_id=2, parity_audit=_ok_parity)
+
+    assert result["ec_resume_action"] == EC_RESUME_ACTION_REBUILD_EC_FACTS
+    assert result["ec_revalidation"]["taxonomy_purity_status"] == "BLOCKED"
+
+
+def test_parity_mismatch_blocks_continuation(tmp_path) -> None:
+    db_path, _proposed_csv, plan = _create_ec_revalidation_fixture(tmp_path)
+
+    def bad_parity(**_kwargs):
+        return {"status": "FAILED", "total_mismatch_count": 1, "warnings": []}
+
+    result = plan_ec_resume_action(analysis_db=db_path, plan=plan, deployment_id=2, parity_audit=bad_parity)
+
+    assert result["ec_resume_action"] == EC_RESUME_ACTION_REBUILD_EC_FACTS
+    assert result["ec_revalidation"]["total_mismatch_count"] == 1
+
+
+def test_current_plan_hash_is_backend_derived_and_stale_supplied_hash_blocks(tmp_path) -> None:
+    db_path, _proposed_csv, plan = _create_ec_revalidation_fixture(tmp_path)
+
+    safe = plan_report_status_only_resume_reconciliation(
+        analysis_db=db_path,
+        plan=plan,
+        original_plan_hash="original",
+    )
+    stale = plan_report_status_only_resume_reconciliation(
+        analysis_db=db_path,
+        plan=plan,
+        original_plan_hash="original",
+        current_plan_hash="stale-current-hash",
+    )
+
+    assert safe["plan_drift_classification"] == "SAFE_IMPLEMENTATION_RECONCILIATION"
+    assert safe["current_recomputed_plan_hash"] == plan["plan_hash"]
+    assert safe["current_plan_inputs_hash"]
+    assert stale["plan_reconciliation_status"] == "BLOCKED"
+    assert stale["plan_drift_classification"] == "UNSUPPORTED_PLAN_DRIFT"
+    assert stale["original_plan_hash"] == "original"
+
+
+def test_source_hash_drift_blocks_report_status_only_reconciliation(tmp_path) -> None:
+    db_path, _proposed_csv, plan = _create_ec_revalidation_fixture(tmp_path)
+
+    result = plan_report_status_only_resume_reconciliation(
+        analysis_db=db_path,
+        plan=plan,
+        original_plan_hash="original",
+        expected_proposed_source_sha256="stale-source-hash",
+    )
+
+    assert result["plan_reconciliation_status"] == "BLOCKED"
+    assert result["plan_drift_classification"] == "SOURCE_DRIFT"
+    assert result["source_inputs_unchanged"] is False
+
+
+def test_report_status_only_resume_revalidation_dispatch_invokes_no_ec_rebuild(tmp_path, monkeypatch) -> None:
+    db_path, _proposed_csv, plan = _create_ec_revalidation_fixture(tmp_path)
+    ec_rebuild_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        "rawcandle.datacenter_taxonomy_change_orchestrator.validate_dc_carry_forward_key_universe",
+        lambda **_kwargs: {"validation_status": "OK"},
+    )
+    monkeypatch.setattr(
+        "rawcandle.datacenter_taxonomy_change_orchestrator.plan_ec_resume_action",
+        lambda **_kwargs: {
+            "ec_resume_action": EC_RESUME_ACTION_REVALIDATE_EXISTING_FACTS,
+            "ec_rebuild_required": False,
+            "ec_loaders_required": False,
+            "ec_chunks_required": False,
+            "ec_revalidation_required": True,
+            "ec_revalidation": {
+                "safe_to_continue_to_cleanup": True,
+                "total_mismatch_count": 0,
+                "ec_revalidation_status": "OK",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "rawcandle.datacenter_taxonomy_change_orchestrator.plan_ec_taxonomy_replacement_cleanup",
+        lambda **_kwargs: {"safe_to_apply": True, "delete_candidate_hash": "cleanup-hash"},
+    )
+    monkeypatch.setattr(
+        "rawcandle.datacenter_taxonomy_change_orchestrator.apply_ec_taxonomy_replacement_cleanup",
+        lambda **_kwargs: {"cleanup_apply_status": "NO_CHANGE"},
+    )
+    monkeypatch.setattr(
+        "rawcandle.datacenter_taxonomy_change_orchestrator.finalize_ec_taxonomy_rebuild_validation",
+        lambda **_kwargs: {"finalization_status": "OK", "total_mismatch_count": 0},
+    )
+    monkeypatch.setattr(
+        "rawcandle.datacenter_taxonomy_change_orchestrator._plan_activation",
+        lambda **_kwargs: {"safe_to_activate": True, "activation_plan_status": "READY_TO_ACTIVATE"},
+    )
+
+    def forbidden_ec_rebuild(**kwargs):
+        ec_rebuild_calls.append(kwargs)
+        raise AssertionError("EC rebuild must not be invoked for read-only revalidation")
+
+    services = TaxonomyChangeServices(
+        set_scheduler_guard=lambda **_kwargs: {"status": "OK"},
+        verify_active_writer=lambda **_kwargs: {"status": "NO_ACTIVE_WRITER"},
+        ensure_backup=lambda **_kwargs: {"status": "OK", "backup_reused": True},
+        run_dc_rebuild=lambda **_kwargs: {"status": "OK"},
+        run_ec_rebuild=forbidden_ec_rebuild,
+    )
+
+    summary = execute_taxonomy_rebuild(
+        analysis_db=db_path,
+        deployment_id=2,
+        proposed_taxonomy_csv=str(plan["proposed_source_reference"]),
+        date_to=str(plan["date_to"]),
+        confirm_deployment_id=2,
+        confirm_proposed_taxonomy_version=str(plan["proposed_taxonomy_version"]),
+        confirm_proposed_source_hash=str(plan["proposed_source_sha256"]),
+        confirm_date_from=str(plan["date_from"]),
+        confirm_date_to=str(plan["date_to"]),
+        confirm_rebuild_mode=REBUILD_MODE_DELTA,
+        confirm_plan_hash=str(plan["plan_hash"]),
+        confirm_dc_repair_scope=DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY,
+        confirm_repair_candidate_hash=str(plan_dc_ecosystem_aggregate_repair(analysis_db=db_path, plan=plan)["repair_candidate_hash"]),
+        services=services,
+        resume=True,
+    )
+
+    assert summary["run_status"] == "READY_TO_ACTIVATE"
+    assert "EC_FACTS_REVALIDATED" in summary["completed_phases"]
+    assert summary["ec_rebuild"]["run_ec_rebuild_invoked"] is False
+    assert summary["ec_rebuild"]["ec_loaders_invoked"] is False
+    assert summary["ec_rebuild"]["ec_chunks_invoked"] is False
+    assert ec_rebuild_calls == []
 
 
 def test_ready_to_activate_and_active_are_idempotent(tmp_path) -> None:

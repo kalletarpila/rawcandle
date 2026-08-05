@@ -173,6 +173,21 @@ existing_backup_path when present
 
 The UI does not compute or apply the repair itself.
 
+The same prepared plan also includes the backend-derived EC resume action:
+
+```text
+ec_resume_action
+ec_rebuild_required
+ec_loaders_required
+ec_chunks_required
+ec_revalidation_required
+```
+
+When the backend selects `REVALIDATE_EXISTING_FACTS`, the UI shows that existing
+V2.1 EC facts will be revalidated read-only. The confirmation key includes the
+EC resume action and rebuild/load/chunk requirement flags so a stale UI
+confirmation cannot silently change between EC revalidation and EC rebuild.
+
 For `REPORT_STATUS_ONLY` plans, the UI explicitly shows:
 
 ```text
@@ -183,6 +198,10 @@ Stage 2: ei
 DC-faktat: kopioidaan uudelle lineagelle
 EC-faktat: muodostetaan uudelle lineagelle
 ```
+
+On failed report-status-only resumes this EC line is supplemented by the
+derived resume action, for example read-only revalidation of already materialized
+target EC facts.
 
 The visible rebuild action calls the unified `execute_taxonomy_rebuild`
 function. It does not call individual DC rebuild commands, EC rebuild commands,

@@ -1032,3 +1032,52 @@ operation lock, change Scheduler guard state, run Scheduler, run Datacenter
 pipeline, run Stage 2, run EC rebuild/backfill/loaders, apply aggregate repair,
 apply EC cleanup, finalize watermarks, activate V2.1, modify production
 configuration, or write production databases.
+
+## 2026-08-05 EC Revalidation Resume Fix
+
+Final implementation classification:
+
+```text
+DATACENTER_RSO_EC_REVALIDATION_RESUME_AND_DYNAMIC_PLAN_RECONCILIATION_FIXED
+```
+
+The resume planner now distinguishes EC rebuild from read-only EC fact
+revalidation. For deployment 2, a read-only preflight selected:
+
+```text
+ec_resume_action=REVALIDATE_EXISTING_FACTS
+ec_rebuild_required=false
+ec_loaders_required=false
+ec_chunks_required=false
+ec_revalidation_required=true
+ec_revalidation_status=OK
+duplicate_status=OK
+coverage_status=OK
+parity_status=OK_WITH_WARNINGS
+total_mismatch_count=0
+run_ec_rebuild_invoked=false
+```
+
+The preflight evidence was written under:
+
+```text
+temp/datacenter_v2_1_rso_ec_revalidation_preflight/
+```
+
+Plan reconciliation now derives the current plan hash inside the backend and
+keeps the original plan hash immutable:
+
+```text
+plan_reconciliation_status=SAFE_AMENDMENT_READY
+plan_drift_classification=SAFE_IMPLEMENTATION_RECONCILIATION
+current_recomputed_plan_hash=d68c48797aca7013b5911c99f78fcac1c6570d826f1769b0298dcbebb03547b6
+current_plan_inputs_hash=3666c0bff44bd36d2d3ca7cc5def0a2a4da471eb408536ab3641cc89024213eb
+business_inputs_unchanged=true
+safe_to_resume_after_amendment=true
+```
+
+This implementation task did not resume deployment 2, acquire the production
+operation lock, change Scheduler guard state, run Scheduler, run Datacenter
+pipeline, run Stage 2, run EC rebuild/backfill/loaders/chunks, apply aggregate
+repair, apply EC cleanup, finalize watermarks, activate V2.1, modify production
+configuration, create a production backup, or write production databases.

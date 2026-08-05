@@ -367,6 +367,30 @@ repair_candidate_hash=<aggregate candidate hash>
 State-changing resume requires confirmation of the amendment hash, repair
 scope, and repair candidate hash before any DC repair write occurs.
 
+After aggregate repair planning, failed `REPORT_STATUS_ONLY` resumes derive an
+explicit EC resume action:
+
+```text
+REBUILD_EC_FACTS
+REVALIDATE_EXISTING_FACTS
+SKIP_ALREADY_VALIDATED
+```
+
+`REVALIDATE_EXISTING_FACTS` is selected only when the target EC fact tables
+already contain the requested range, duplicate-key checks pass using each EC
+table's real primary key, and read-only DC/EC parity reports zero mismatches.
+That path records `EC_FACTS_REVALIDATED` and does not call `run_ec_rebuild`,
+EC loaders, or EC chunk construction. If existing EC facts are incomplete or
+fail parity, a report-status-only resume blocks with rebuild-required evidence
+instead of silently rebuilding.
+
+Plan reconciliation keeps the original production plan hash immutable. The
+backend recomputes the current plan hash from current code and exposes it as
+`current_recomputed_plan_hash`; caller-supplied current hashes are treated only
+as confirmation inputs. Drift is classified as safe implementation
+reconciliation, business input drift, source drift, execution scope drift, or
+unsupported plan drift.
+
 Detailed contract notes live in:
 
 ```text

@@ -88,7 +88,7 @@ BACKUP_VERIFIED
 TARGET_TAXONOMY_METADATA_LOADED
 DC_FACTS_CARRIED_FORWARD
 DC_FACTS_VALIDATED
-EC_FACTS_CONSTRUCTED
+EC_FACTS_CONSTRUCTED or EC_FACTS_REVALIDATED
 COVERAGE_PARITY_VALIDATED
 OLD_EC_CLEANED
 WHOLE_RANGE_VALIDATED
@@ -185,6 +185,35 @@ existing_backup_path when supplied
 Safe reconciliation is reported only when business inputs are unchanged, the
 repair scope is narrower or equal to the original intent, and the aggregate-only
 repair planner is safe to apply.
+
+For failed `REPORT_STATUS_ONLY` resumes, EC target facts are not rebuilt
+silently. The resume planner chooses an explicit EC action:
+
+```text
+REBUILD_EC_FACTS
+REVALIDATE_EXISTING_FACTS
+SKIP_ALREADY_VALIDATED
+```
+
+When target EC facts already cover the requested range and read-only parity
+accepts them, resume uses `REVALIDATE_EXISTING_FACTS`. That path records
+`EC_FACTS_REVALIDATED`, does not call `run_ec_rebuild`, and does not invoke EC
+loaders or chunk builders. If validation shows incomplete or mismatching target
+facts, a `REPORT_STATUS_ONLY` resume is blocked as rebuild-required rather than
+quietly rebuilding facts under a stale recovery assumption.
+
+Current plan reconciliation is backend-derived. Callers may supply an expected
+current hash for confirmation, but the orchestrator recomputes and exposes the
+current plan hash separately from the immutable original plan hash. Drift is
+classified as one of:
+
+```text
+SAFE_IMPLEMENTATION_RECONCILIATION
+BUSINESS_INPUT_DRIFT
+SOURCE_DRIFT
+EXECUTION_SCOPE_DRIFT
+UNSUPPORTED_PLAN_DRIFT
+```
 
 The path records no-computation evidence:
 
