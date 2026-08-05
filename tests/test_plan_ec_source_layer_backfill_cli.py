@@ -782,7 +782,7 @@ def test_taxonomy_rebuild_uses_proposed_v2_counts_not_active_v1_counts(tmp_path:
     assert compatibility["taxonomy_source_error"] == "NONE"
 
 
-def test_ordinary_backfill_still_blocks_v2_counts_against_active_v1_policy(tmp_path: Path) -> None:
+def test_ordinary_backfill_accepts_v2_counts_from_loaded_taxonomy(tmp_path: Path) -> None:
     db_path, taxonomy_path, watchlist_path = _create_fixture(tmp_path)
     v2_path = _install_proposed_taxonomy_rebuild_fixture(
         db_path,
@@ -803,13 +803,15 @@ def test_ordinary_backfill_still_blocks_v2_counts_against_active_v1_policy(tmp_p
         watchlist_path=str(watchlist_path),
     )
 
-    assert summary["status"] == "BLOCKED_TAXONOMY_SOURCE"
+    assert summary["status"] == "READY_BACKFILL_PLAN"
     compatibility = summary["compatibility_summary"]
     assert compatibility["taxonomy_validation_mode"] == "ACTIVE_TAXONOMY"
-    assert compatibility["taxonomy_expected_row_count"] == 329
+    assert compatibility["taxonomy_expected_source"] == "LOADED_ACTIVE_TAXONOMY"
+    assert compatibility["taxonomy_expected_row_count"] == 350
     assert compatibility["taxonomy_actual_row_count"] == 350
-    assert compatibility["taxonomy_expected_ticker_count"] == 236
+    assert compatibility["taxonomy_expected_ticker_count"] == 257
     assert compatibility["taxonomy_actual_ticker_count"] == 257
+    assert compatibility["taxonomy_source_match"] is True
 
 
 def test_taxonomy_rebuild_future_counts_are_derived_dynamically(tmp_path: Path) -> None:
@@ -1236,8 +1238,9 @@ def test_missing_group_mapping_blocks(tmp_path: Path) -> None:
         taxonomy_csv_path=str(taxonomy_path),
         watchlist_path=str(watchlist_path),
     )
-    assert summary["status"] == "BLOCKED_UNCLEAR_MAPPING"
-    assert "Layer 03" in summary["mapping_summary"]["missing_group_l1_entities"]
+    assert summary["status"] == "BLOCKED_TAXONOMY_SOURCE"
+    assert summary["compatibility_summary"]["taxonomy_source_match"] is False
+    assert "taxonomy row_count expected" in summary["compatibility_summary"]["error"]
 
 
 def test_planner_does_not_write_db_state(tmp_path: Path) -> None:

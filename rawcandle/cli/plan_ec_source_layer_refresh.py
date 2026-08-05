@@ -9,21 +9,18 @@ from rawcandle.cli.plan_ec_source_layer_build import (
     _collect_source_readiness,
     _distinct_values,
     _glob_table_names,
+    _loaded_taxonomy_source_counts,
     _read_taxonomy_csv,
     _read_watchlist,
     _resolve_selected_signal_date,
     _scalar,
     _table_exists,
+    _taxonomy_summary_counts,
     open_readonly_sqlite,
 )
 from rawcandle.cli.ec_source_layer_watchlist_policy import build_watchlist_membership_summary
 from rawcandle.ec_datacenter_taxonomy_loader import _compute_source_hash
 
-
-EXPECTED_TAXONOMY_ROW_COUNT = 329
-EXPECTED_TAXONOMY_TICKER_COUNT = 236
-EXPECTED_TAXONOMY_LAYER_COUNT = 16
-EXPECTED_TAXONOMY_SUBINDUSTRY_COUNT = 37
 
 REQUIRED_REFRESH_EC_TABLES = (
     "ec_ecosystem",
@@ -254,26 +251,36 @@ def _check_taxonomy_watchlist_compatibility(
             "error": f"loaded ec_taxonomy_version missing for ecosystem {ecosystem_code!r} and taxonomy_version {taxonomy_version_code!r}",
         }
 
-    count_errors: list[str] = []
-    if int(taxonomy_summary.get("row_count", 0)) != EXPECTED_TAXONOMY_ROW_COUNT:
-        count_errors.append(f"taxonomy row_count expected {EXPECTED_TAXONOMY_ROW_COUNT} but got {taxonomy_summary.get('row_count')}")
-    if int(taxonomy_summary.get("distinct_ticker_count", 0)) != EXPECTED_TAXONOMY_TICKER_COUNT:
-        count_errors.append(
-            f"taxonomy distinct_ticker_count expected {EXPECTED_TAXONOMY_TICKER_COUNT} but got {taxonomy_summary.get('distinct_ticker_count')}"
+    expected_counts = _loaded_taxonomy_source_counts(
+        conn,
+        ecosystem_id=int(loaded_taxonomy["ecosystem_id"]),
+        taxonomy_version_id=int(loaded_taxonomy["taxonomy_version_id"]),
+    )
+    if expected_counts.get("status") != "OK":
+        return {
+            "status": "BLOCKED_TAXONOMY_SOURCE",
+            "loaded_taxonomy": loaded_taxonomy,
+            "error": expected_counts.get("error"),
+            "taxonomy_expected_counts": expected_counts,
+        }
+    actual_counts = _taxonomy_summary_counts(taxonomy_summary)
+    count_errors = [
+        f"taxonomy {key} expected {expected_counts.get(key)} but got {actual_counts.get(key)}"
+        for key in (
+            "row_count",
+            "distinct_ticker_count",
+            "primary_membership_count",
+            "secondary_membership_count",
         )
-    if int(taxonomy_summary.get("distinct_layer_count", 0)) != EXPECTED_TAXONOMY_LAYER_COUNT:
-        count_errors.append(
-            f"taxonomy distinct_layer_count expected {EXPECTED_TAXONOMY_LAYER_COUNT} but got {taxonomy_summary.get('distinct_layer_count')}"
-        )
-    if int(taxonomy_summary.get("distinct_subindustry_count", 0)) != EXPECTED_TAXONOMY_SUBINDUSTRY_COUNT:
-        count_errors.append(
-            "taxonomy distinct_subindustry_count expected "
-            f"{EXPECTED_TAXONOMY_SUBINDUSTRY_COUNT} but got {taxonomy_summary.get('distinct_subindustry_count')}"
-        )
+        if actual_counts.get(key) != expected_counts.get(key)
+    ]
     if count_errors:
         return {
             "status": "BLOCKED_TAXONOMY_SOURCE",
             "loaded_taxonomy": loaded_taxonomy,
+            "taxonomy_expected_counts": expected_counts,
+            "taxonomy_actual_counts": actual_counts,
+            "taxonomy_source_match": False,
             "error": "; ".join(count_errors),
         }
 
@@ -299,6 +306,14 @@ def _check_taxonomy_watchlist_compatibility(
     return {
         "status": "OK",
         "loaded_taxonomy": loaded_taxonomy,
+        "taxonomy_source_status": "OK",
+        "taxonomy_expected_counts": expected_counts,
+        "taxonomy_actual_counts": actual_counts,
+        "taxonomy_row_count": actual_counts["row_count"],
+        "taxonomy_ticker_count": actual_counts["distinct_ticker_count"],
+        "taxonomy_layer_count": actual_counts["distinct_layer_count"],
+        "taxonomy_subindustry_count": actual_counts["distinct_subindustry_count"],
+        "taxonomy_source_match": True,
         "source_hash_match": True,
         "loaded_source_hash": loaded_source_hash,
         "source_hash": source_hash,

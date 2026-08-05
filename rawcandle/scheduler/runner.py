@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 from main import RawCandleApp, _today_exclusive_end_date
 from rawcandle.cli.run_ec_source_layer_backfill import run_ec_source_layer_backfill
 from rawcandle.cli.run_ec_source_layer_refresh import run_ec_source_layer_refresh
+from rawcandle.cli.plan_ec_source_layer_build import _read_taxonomy_csv
 from rawcandle.scheduler.config import (
     StockUpdateSchedulerConfig,
     read_scheduler_config,
@@ -96,6 +97,13 @@ class ScheduledStockUpdateRunResult:
     datacenter_pipeline_signal_date_source: str = "NONE"
     datacenter_pipeline_signal_date_resolution: str = "NONE"
     datacenter_pipeline_requested_calendar_signal_date: str = "NONE"
+    datacenter_pipeline_configured_taxonomy_version: str = ""
+    datacenter_pipeline_configured_taxonomy_csv: str = ""
+    datacenter_pipeline_configured_taxonomy_sha256: str = ""
+    datacenter_pipeline_derived_taxonomy_row_count: int = 0
+    datacenter_pipeline_derived_ticker_count: int = 0
+    datacenter_pipeline_derived_group_count: int = 0
+    datacenter_pipeline_derived_synthetic_group_count: int = 0
     datacenter_pipeline_daily_report_path: Optional[str] = None
     datacenter_pipeline_daily_report_csv_path: Optional[str] = None
     datacenter_pipeline_rolling_30_report_path: Optional[str] = None
@@ -152,6 +160,12 @@ class ScheduledStockUpdateRunResult:
     ec_bridge_watchlist_sync_required: bool = False
     ec_bridge_watchlist_missing_in_loaded_count: int = 0
     ec_bridge_watchlist_loaded_only_count: int = 0
+    datacenter_dc_status: str = "SKIPPED"
+    datacenter_ec_status: str = "SKIPPED"
+    datacenter_ec_retry_required: bool = False
+    datacenter_taxonomy_version: str = ""
+    datacenter_failed_component: str = "NONE"
+    datacenter_safe_next_action: str = "NONE"
 
 
 class SchedulerAlreadyRunningError(RuntimeError):
@@ -208,6 +222,13 @@ class DatacenterPostStepResult:
     signal_date_source: str = "NONE"
     signal_date_resolution: str = "NONE"
     requested_calendar_signal_date: Optional[str] = None
+    configured_taxonomy_version: str = ""
+    configured_taxonomy_csv: str = ""
+    configured_taxonomy_sha256: str = ""
+    derived_taxonomy_row_count: int = 0
+    derived_ticker_count: int = 0
+    derived_group_count: int = 0
+    derived_synthetic_group_count: int = 0
     daily_report_path: Optional[str] = None
     daily_report_csv_path: Optional[str] = None
     rolling_30_report_path: Optional[str] = None
@@ -440,24 +461,41 @@ def _resolve_datacenter_post_step_config(
 ) -> Optional[DatacenterPostStepConfig]:
     if market != "usa":
         return None
+    taxonomy_csv = (
+        config.datacenter_taxonomy_csv
+        if config is not None
+        else "data/datacenter_ecosystem_taxonomy_full_v1.csv"
+    )
+    taxonomy_version = (
+        config.datacenter_taxonomy_version
+        if config is not None
+        else "DC_TAXONOMY_FULL_V1"
+    )
+    expected_ticker_count = 236
+    expected_group_count = 54
+    expected_synthetic_ohlc_count = 53
+    if config is not None:
+        taxonomy_summary = _read_taxonomy_csv(
+            str(_resolve_repo_path(taxonomy_csv)),
+            taxonomy_version,
+        )
+        if taxonomy_summary.get("status") != "OK":
+            raise ValueError(str(taxonomy_summary.get("error") or "invalid datacenter taxonomy source"))
+        expected_ticker_count = int(taxonomy_summary["distinct_ticker_count"])
+        distinct_layer_count = int(taxonomy_summary["distinct_layer_count"])
+        distinct_subindustry_count = int(taxonomy_summary["distinct_subindustry_count"])
+        expected_group_count = 1 + distinct_layer_count + distinct_subindustry_count
+        expected_synthetic_ohlc_count = distinct_layer_count + distinct_subindustry_count
     return DatacenterPostStepConfig(
         market="usa",
-        taxonomy_csv=(
-            config.datacenter_taxonomy_csv
-            if config is not None
-            else "data/datacenter_ecosystem_taxonomy_full_v1.csv"
-        ),
-        taxonomy_version=(
-            config.datacenter_taxonomy_version
-            if config is not None
-            else "DC_TAXONOMY_FULL_V1"
-        ),
+        taxonomy_csv=taxonomy_csv,
+        taxonomy_version=taxonomy_version,
         start_date="2025-08-01",
         index_base_date="2020-01-01",
         output_dir="/home/kalle/projects/rawcandle/swing_reports",
-        expected_ticker_count=236,
-        expected_group_count=54,
-        expected_synthetic_ohlc_count=53,
+        expected_ticker_count=expected_ticker_count,
+        expected_group_count=expected_group_count,
+        expected_synthetic_ohlc_count=expected_synthetic_ohlc_count,
         watchlist_file="watchlists/datacenter_watchlist.txt",
     )
 
@@ -1219,6 +1257,20 @@ def _run_datacenter_post_step(
     signal_date = signal_date_resolution.signal_date
     taxonomy_csv_path = _resolve_repo_path(resolved.taxonomy_csv)
     taxonomy_source_sha256 = _file_sha256(taxonomy_csv_path)
+    taxonomy_summary = _read_taxonomy_csv(str(taxonomy_csv_path), resolved.taxonomy_version)
+    if taxonomy_summary.get("status") != "OK":
+        raise ValueError(str(taxonomy_summary.get("error") or "invalid datacenter taxonomy source"))
+    derived_taxonomy_row_count = int(taxonomy_summary["row_count"])
+    derived_ticker_count = int(taxonomy_summary["distinct_ticker_count"])
+    derived_group_count = (
+        1
+        + int(taxonomy_summary["distinct_layer_count"])
+        + int(taxonomy_summary["distinct_subindustry_count"])
+    )
+    derived_synthetic_group_count = (
+        int(taxonomy_summary["distinct_layer_count"])
+        + int(taxonomy_summary["distinct_subindustry_count"])
+    )
     log_dir = Path(config.log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = _build_datacenter_log_path(log_dir, resolved.market, started_at)
@@ -1239,6 +1291,10 @@ def _run_datacenter_post_step(
             f"taxonomy_csv_path={taxonomy_csv_path}",
             f"taxonomy_version={resolved.taxonomy_version}",
             f"taxonomy_source_sha256={taxonomy_source_sha256}",
+            f"derived_taxonomy_row_count={derived_taxonomy_row_count}",
+            f"derived_ticker_count={derived_ticker_count}",
+            f"derived_group_count={derived_group_count}",
+            f"derived_synthetic_group_count={derived_synthetic_group_count}",
             f"osakedata_db_path={config.osakedata_db_path}",
             f"analysis_db_path={config.analysis_db_path}",
             f"skip_reason={signal_date_resolution.skip_reason}",
@@ -1254,6 +1310,13 @@ def _run_datacenter_post_step(
             signal_date_source=signal_date_resolution.signal_date_source,
             signal_date_resolution=signal_date_resolution.signal_date_resolution,
             requested_calendar_signal_date=requested_calendar_signal_date,
+            configured_taxonomy_version=resolved.taxonomy_version,
+            configured_taxonomy_csv=str(taxonomy_csv_path),
+            configured_taxonomy_sha256=taxonomy_source_sha256,
+            derived_taxonomy_row_count=derived_taxonomy_row_count,
+            derived_ticker_count=derived_ticker_count,
+            derived_group_count=derived_group_count,
+            derived_synthetic_group_count=derived_synthetic_group_count,
             error=signal_date_resolution.skip_reason,
         )
     command = [
@@ -1318,6 +1381,10 @@ def _run_datacenter_post_step(
         f"taxonomy_csv_path={taxonomy_csv_path}",
         f"taxonomy_version={resolved.taxonomy_version}",
         f"taxonomy_source_sha256={taxonomy_source_sha256}",
+        f"derived_taxonomy_row_count={derived_taxonomy_row_count}",
+        f"derived_ticker_count={derived_ticker_count}",
+        f"derived_group_count={derived_group_count}",
+        f"derived_synthetic_group_count={derived_synthetic_group_count}",
         f"osakedata_db_path={config.osakedata_db_path}",
         f"analysis_db_path={config.analysis_db_path}",
         f"command={' '.join(command)}",
@@ -1345,6 +1412,13 @@ def _run_datacenter_post_step(
             signal_date_source=signal_date_resolution.signal_date_source,
             signal_date_resolution=signal_date_resolution.signal_date_resolution,
             requested_calendar_signal_date=requested_calendar_signal_date,
+            configured_taxonomy_version=resolved.taxonomy_version,
+            configured_taxonomy_csv=str(taxonomy_csv_path),
+            configured_taxonomy_sha256=taxonomy_source_sha256,
+            derived_taxonomy_row_count=derived_taxonomy_row_count,
+            derived_ticker_count=derived_ticker_count,
+            derived_group_count=derived_group_count,
+            derived_synthetic_group_count=derived_synthetic_group_count,
             daily_report_path=parsed_report_paths["daily_report_path"],
             daily_report_csv_path=parsed_report_paths["daily_report_csv_path"],
             rolling_30_report_path=parsed_report_paths["rolling_30_report_path"],
@@ -1369,6 +1443,13 @@ def _run_datacenter_post_step(
         signal_date_source=signal_date_resolution.signal_date_source,
         signal_date_resolution=signal_date_resolution.signal_date_resolution,
         requested_calendar_signal_date=requested_calendar_signal_date,
+        configured_taxonomy_version=resolved.taxonomy_version,
+        configured_taxonomy_csv=str(taxonomy_csv_path),
+        configured_taxonomy_sha256=taxonomy_source_sha256,
+        derived_taxonomy_row_count=derived_taxonomy_row_count,
+        derived_ticker_count=derived_ticker_count,
+        derived_group_count=derived_group_count,
+        derived_synthetic_group_count=derived_synthetic_group_count,
         daily_report_path=parsed_report_paths["daily_report_path"],
         daily_report_csv_path=parsed_report_paths["daily_report_csv_path"],
         rolling_30_report_path=parsed_report_paths["rolling_30_report_path"],
@@ -2086,6 +2167,24 @@ def run_scheduler_config(
                 )
             ):
                 overall_status = STATUS_OK_WITH_WARNINGS
+            ec_failed = (
+                ec_source_layer_result.status in _bridge_failure_statuses()
+                or ec_source_layer_result.bridge_status == "FAILED"
+            )
+            datacenter_failed_component = (
+                "DATACENTER_PIPELINE"
+                if datacenter_result.status == "FAILED"
+                else "EC_BRIDGE"
+                if ec_failed
+                else "NONE"
+            )
+            datacenter_safe_next_action = (
+                "RUN_CONTROLLED_EC_BRIDGE_RECOVERY"
+                if ec_source_layer_result.bridge_retry_required
+                else "INSPECT_DATACENTER_PIPELINE_FAILURE"
+                if datacenter_result.status == "FAILED"
+                else "NONE"
+            )
 
             log_dir = Path(config.log_dir)
             log_dir.mkdir(parents=True, exist_ok=True)
@@ -2139,6 +2238,27 @@ def run_scheduler_config(
                 datacenter_pipeline_signal_date_resolution=datacenter_result.signal_date_resolution,
                 datacenter_pipeline_requested_calendar_signal_date=(
                     datacenter_result.requested_calendar_signal_date or "NONE"
+                ),
+                datacenter_pipeline_configured_taxonomy_version=(
+                    datacenter_result.configured_taxonomy_version
+                ),
+                datacenter_pipeline_configured_taxonomy_csv=(
+                    datacenter_result.configured_taxonomy_csv
+                ),
+                datacenter_pipeline_configured_taxonomy_sha256=(
+                    datacenter_result.configured_taxonomy_sha256
+                ),
+                datacenter_pipeline_derived_taxonomy_row_count=(
+                    datacenter_result.derived_taxonomy_row_count
+                ),
+                datacenter_pipeline_derived_ticker_count=(
+                    datacenter_result.derived_ticker_count
+                ),
+                datacenter_pipeline_derived_group_count=(
+                    datacenter_result.derived_group_count
+                ),
+                datacenter_pipeline_derived_synthetic_group_count=(
+                    datacenter_result.derived_synthetic_group_count
                 ),
                 datacenter_pipeline_daily_report_path=datacenter_result.daily_report_path,
                 datacenter_pipeline_daily_report_csv_path=datacenter_result.daily_report_csv_path,
@@ -2210,6 +2330,18 @@ def run_scheduler_config(
                 ec_bridge_watchlist_loaded_only_count=(
                     ec_source_layer_result.bridge_watchlist_loaded_only_count
                 ),
+                datacenter_dc_status=datacenter_result.status,
+                datacenter_ec_status=ec_source_layer_result.bridge_status
+                or ec_source_layer_result.status,
+                datacenter_ec_retry_required=(
+                    ec_source_layer_result.bridge_retry_required
+                ),
+                datacenter_taxonomy_version=(
+                    datacenter_result.configured_taxonomy_version
+                    or config.datacenter_taxonomy_version
+                ),
+                datacenter_failed_component=datacenter_failed_component,
+                datacenter_safe_next_action=datacenter_safe_next_action,
             )
             _write_summary_json(config=config, run_started_at=run_started_at, result=result)
             write_scheduler_status(

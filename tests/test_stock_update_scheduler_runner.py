@@ -139,6 +139,60 @@ def _build_datacenter_signal_date_resolution(
     )
 
 
+def test_datacenter_post_step_config_derives_expected_counts_from_taxonomy_csv(tmp_path: Path) -> None:
+    taxonomy_path = tmp_path / "taxonomy_v2.csv"
+    _write_taxonomy_csv(
+        taxonomy_path,
+        [
+            ("DC_TAXONOMY_FULL_V2", "AAA", "LayerA", "SubA", "CORE", 1, 1.0, ""),
+            ("DC_TAXONOMY_FULL_V2", "BBB", "LayerA", "SubB", "CORE", 1, 1.0, ""),
+            ("DC_TAXONOMY_FULL_V2", "CCC", "LayerB", "SubC", "CORE", 1, 1.0, ""),
+            ("DC_TAXONOMY_FULL_V2", "AAA", "LayerB", "SubC", "EXTENDED", 0, 0.5, ""),
+        ],
+    )
+    config = create_default_scheduler_config(
+        osakedata_db_path=str(tmp_path / "osakedata.sqlite"),
+        analysis_db_path=str(tmp_path / "analysis.sqlite"),
+        log_dir=str(tmp_path / "logs"),
+    )
+    config.datacenter_taxonomy_csv = str(taxonomy_path)
+    config.datacenter_taxonomy_version = "DC_TAXONOMY_FULL_V2"
+
+    resolved = scheduler_runner._resolve_datacenter_post_step_config("usa", config)
+
+    assert resolved is not None
+    assert resolved.expected_ticker_count == 3
+    assert resolved.expected_group_count == 6
+    assert resolved.expected_synthetic_ohlc_count == 5
+
+
+def test_datacenter_post_step_config_accepts_future_taxonomy_counts(tmp_path: Path) -> None:
+    taxonomy_path = tmp_path / "taxonomy_v3.csv"
+    _write_taxonomy_csv(
+        taxonomy_path,
+        [
+            ("DC_TAXONOMY_FULL_V3", "AAA", "LayerA", "SubA", "CORE", 1, 1.0, ""),
+            ("DC_TAXONOMY_FULL_V3", "BBB", "LayerB", "SubB", "CORE", 1, 1.0, ""),
+            ("DC_TAXONOMY_FULL_V3", "CCC", "LayerC", "SubC", "CORE", 1, 1.0, ""),
+            ("DC_TAXONOMY_FULL_V3", "DDD", "LayerC", "SubD", "CORE", 1, 1.0, ""),
+        ],
+    )
+    config = create_default_scheduler_config(
+        osakedata_db_path=str(tmp_path / "osakedata.sqlite"),
+        analysis_db_path=str(tmp_path / "analysis.sqlite"),
+        log_dir=str(tmp_path / "logs"),
+    )
+    config.datacenter_taxonomy_csv = str(taxonomy_path)
+    config.datacenter_taxonomy_version = "DC_TAXONOMY_FULL_V3"
+
+    resolved = scheduler_runner._resolve_datacenter_post_step_config("usa", config)
+
+    assert resolved is not None
+    assert resolved.expected_ticker_count == 4
+    assert resolved.expected_group_count == 8
+    assert resolved.expected_synthetic_ohlc_count == 7
+
+
 def _build_technical_relevance_end_date_resolution(
     *,
     end_date: str | None,

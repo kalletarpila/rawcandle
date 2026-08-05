@@ -580,8 +580,9 @@ def test_blocks_when_group_mapping_missing(tmp_path: Path) -> None:
         taxonomy_csv_path=str(taxonomy_path),
         watchlist_path=str(watchlist_path),
     )
-    assert summary["status"] == "BLOCKED_UNCLEAR_MAPPING"
-    assert "Layer 03" in summary["mapping_summary"]["missing_group_l1_entities"]
+    assert summary["status"] == "BLOCKED_TAXONOMY_SOURCE"
+    assert summary["compatibility_summary"]["taxonomy_source_match"] is False
+    assert "taxonomy row_count expected" in summary["compatibility_summary"]["error"]
 
 
 def test_eco_tables_do_not_count_as_ec_schema(tmp_path: Path) -> None:

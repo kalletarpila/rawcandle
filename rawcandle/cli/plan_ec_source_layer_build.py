@@ -143,6 +143,34 @@ def _read_taxonomy_csv(path: str, taxonomy_version_code: str) -> dict[str, objec
     subindustries = [str(row["subindustry"]).strip() for row in rows if str(row["subindustry"]).strip()]
     primary_count = sum(1 for row in rows if str(row["is_primary"]).strip() in {"1", "true", "TRUE", "True"})
     secondary_count = len(rows) - primary_count
+    membership_keys: set[tuple[str, str, str]] = set()
+    duplicate_membership_keys: set[tuple[str, str, str]] = set()
+    primary_by_ticker: dict[str, int] = {}
+    for row in rows:
+        ticker = str(row["ticker"]).strip().upper()
+        layer = str(row["layer"]).strip()
+        subindustry = str(row["subindustry"]).strip()
+        key = (ticker, layer, subindustry)
+        if key in membership_keys:
+            duplicate_membership_keys.add(key)
+        membership_keys.add(key)
+        if str(row["is_primary"]).strip() in {"1", "true", "TRUE", "True"}:
+            primary_by_ticker[ticker] = primary_by_ticker.get(ticker, 0) + 1
+    invalid_primary_tickers = sorted(
+        ticker for ticker in set(tickers) if primary_by_ticker.get(ticker, 0) != 1
+    )
+    if duplicate_membership_keys:
+        return {
+            "status": "BLOCKED_TAXONOMY_SOURCE",
+            "error": "taxonomy file contains duplicate membership keys",
+            "duplicate_membership_keys": sorted("|".join(key) for key in duplicate_membership_keys),
+        }
+    if invalid_primary_tickers:
+        return {
+            "status": "BLOCKED_TAXONOMY_SOURCE",
+            "error": "taxonomy file must contain exactly one primary membership per ticker",
+            "invalid_primary_tickers": invalid_primary_tickers,
+        }
 
     return {
         "status": "OK",
@@ -158,6 +186,78 @@ def _read_taxonomy_csv(path: str, taxonomy_version_code: str) -> dict[str, objec
         "tickers": sorted(set(tickers)),
         "layers": sorted(set(layers)),
         "subindustries": sorted(set(subindustries)),
+    }
+
+
+def _taxonomy_summary_counts(taxonomy_summary: dict[str, object]) -> dict[str, int]:
+    return {
+        "row_count": int(taxonomy_summary.get("row_count", 0) or 0),
+        "distinct_ticker_count": int(taxonomy_summary.get("distinct_ticker_count", 0) or 0),
+        "distinct_layer_count": int(taxonomy_summary.get("distinct_layer_count", 0) or 0),
+        "distinct_subindustry_count": int(taxonomy_summary.get("distinct_subindustry_count", 0) or 0),
+        "primary_membership_count": int(taxonomy_summary.get("primary_membership_count", 0) or 0),
+        "secondary_membership_count": int(taxonomy_summary.get("secondary_membership_count", 0) or 0),
+    }
+
+
+def _loaded_taxonomy_source_counts(
+    conn: sqlite3.Connection,
+    *,
+    ecosystem_id: int,
+    taxonomy_version_id: int,
+) -> dict[str, object]:
+    membership_columns = {
+        str(row[1]) for row in conn.execute("PRAGMA table_info(ec_membership)").fetchall()
+    }
+    required_columns = {"parent_entity_id", "child_entity_id", "taxonomy_version_id"}
+    missing_columns = sorted(required_columns - membership_columns)
+    if missing_columns:
+        return {
+            "status": "BLOCKED_MEMBERSHIP_SCHEMA",
+            "schema_policy": "CURRENT_SCHEMA_ONLY",
+            "error": "ec_membership missing required current-schema columns: "
+            + ", ".join(missing_columns),
+        }
+
+    ecosystem_predicate = "AND m.ecosystem_id = ?" if "ecosystem_id" in membership_columns else ""
+    params: tuple[object, ...] = (
+        (taxonomy_version_id, ecosystem_id)
+        if "ecosystem_id" in membership_columns
+        else (taxonomy_version_id,)
+    )
+    row = conn.execute(
+        f"""
+        SELECT
+            COUNT(*) AS row_count,
+            COUNT(DISTINCT child.entity_code) AS distinct_ticker_count,
+            COUNT(DISTINCT parent_l1.entity_name) AS distinct_layer_count,
+            COUNT(DISTINCT parent_l2.entity_name) AS distinct_subindustry_count,
+            SUM(CASE WHEN COALESCE(m.is_primary, 0) = 1 THEN 1 ELSE 0 END) AS primary_membership_count,
+            SUM(CASE WHEN COALESCE(m.is_primary, 0) = 0 THEN 1 ELSE 0 END) AS secondary_membership_count
+        FROM ec_membership m
+        JOIN ec_entity child ON child.entity_id = m.child_entity_id
+        JOIN ec_entity parent_l2 ON parent_l2.entity_id = m.parent_entity_id
+        JOIN ec_membership layer_membership
+          ON layer_membership.child_entity_id = parent_l2.entity_id
+         AND layer_membership.taxonomy_version_id = m.taxonomy_version_id
+        JOIN ec_entity parent_l1 ON parent_l1.entity_id = layer_membership.parent_entity_id
+        WHERE m.taxonomy_version_id = ?
+          {ecosystem_predicate}
+          AND child.entity_type = 'TICKER'
+          AND parent_l2.entity_type = 'GROUP_L2'
+          AND parent_l1.entity_type = 'GROUP_L1'
+        """,
+        params,
+    ).fetchone()
+    return {
+        "status": "OK",
+        "schema_policy": "CURRENT_SCHEMA_ONLY",
+        "row_count": int(row["row_count"] or 0),
+        "distinct_ticker_count": int(row["distinct_ticker_count"] or 0),
+        "distinct_layer_count": int(row["distinct_layer_count"] or 0),
+        "distinct_subindustry_count": int(row["distinct_subindustry_count"] or 0),
+        "primary_membership_count": int(row["primary_membership_count"] or 0),
+        "secondary_membership_count": int(row["secondary_membership_count"] or 0),
     }
 
 

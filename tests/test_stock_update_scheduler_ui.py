@@ -31,6 +31,7 @@ from dev_tools.stock_update_scheduler_ui import (
     load_latest_scheduler_summary,
     main,
     get_systemd_user_timer_path,
+    inspect_scheduler_taxonomy_state,
     read_systemd_timer_on_calendar,
     read_systemd_user_timer_status,
     run_app,
@@ -814,6 +815,124 @@ def test_taxonomy_activation_button_requires_ready_guard_and_current_confirmatio
         confirmation_valid=True,
         blocking_errors=["coverage is not accepted"],
     ) == {"activate_disabled": True}
+
+
+def test_taxonomy_inspect_uses_current_membership_child_entity_schema(tmp_path):
+    current_csv = _write_taxonomy_csv(tmp_path / "active_taxonomy_v1.csv", "DC_TAXONOMY_FULL_V1")
+    db_path = tmp_path / "analysis_test.sqlite"
+    config_path = tmp_path / "scheduler_config_test.json"
+    _write_taxonomy_ui_config(config_path, db_path=db_path, current_csv=current_csv)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("CREATE TABLE ec_ecosystem (ecosystem_id INTEGER PRIMARY KEY, ecosystem_code TEXT, ecosystem_name TEXT, status TEXT)")
+        conn.execute(
+            """
+            CREATE TABLE ec_taxonomy_version (
+                taxonomy_version_id INTEGER PRIMARY KEY,
+                ecosystem_id INTEGER,
+                taxonomy_version_code TEXT,
+                taxonomy_name TEXT,
+                source_type TEXT,
+                source_reference TEXT,
+                source_hash TEXT,
+                status TEXT,
+                is_active INTEGER,
+                active_from TEXT,
+                active_to TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE ec_entity (
+                entity_id INTEGER PRIMARY KEY,
+                ecosystem_id INTEGER,
+                entity_type TEXT,
+                entity_code TEXT,
+                entity_name TEXT,
+                ticker TEXT,
+                status TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE ec_membership (
+                membership_id INTEGER PRIMARY KEY,
+                ecosystem_id INTEGER,
+                taxonomy_version_id INTEGER,
+                parent_entity_id INTEGER,
+                child_entity_id INTEGER,
+                membership_type TEXT,
+                is_primary INTEGER
+            )
+            """
+        )
+        for table, date_col in [
+            ("dc_ticker_swing_signal_daily", "signal_date"),
+            ("dc_group_swing_signal_daily", "signal_date"),
+            ("dc_group_synthetic_ohlc_daily", "ohlc_date"),
+            ("dc_group_index_daily", "index_date"),
+        ]:
+            conn.execute(f"CREATE TABLE {table} ({date_col} TEXT, taxonomy_version TEXT)")
+            conn.execute(f"INSERT INTO {table} VALUES ('2026-07-31', 'DC_TAXONOMY_FULL_V1')")
+        for table in [
+            "ec_ticker_signal_daily",
+            "ec_group_signal_daily",
+            "ec_group_synthetic_ohlc_daily",
+            "ec_group_index_daily",
+        ]:
+            conn.execute(f"CREATE TABLE {table} (signal_date TEXT, taxonomy_version_id INTEGER)")
+            conn.execute(f"INSERT INTO {table} VALUES ('2026-07-31', 1)")
+        conn.execute(
+            """
+            CREATE TABLE ec_pipeline_watermark (
+                ecosystem_id INTEGER,
+                pipeline_name TEXT,
+                source_table TEXT,
+                latest_signal_date TEXT,
+                status TEXT,
+                taxonomy_version_id INTEGER
+            )
+            """
+        )
+        conn.execute("INSERT INTO ec_ecosystem VALUES (1, 'DATACENTER', 'Datacenter', 'ACTIVE')")
+        conn.execute(
+            "INSERT INTO ec_taxonomy_version VALUES (1, 1, 'DC_TAXONOMY_FULL_V1', 'V1', 'CSV', ?, 'hash', 'ACTIVE', 1, '2026-01-01', NULL)",
+            (str(current_csv),),
+        )
+        conn.executemany(
+            "INSERT INTO ec_entity VALUES (?, 1, ?, ?, ?, ?, 'ACTIVE')",
+            [
+                (1, "ECOSYSTEM", "DATACENTER", "Datacenter", None),
+                (2, "GROUP_L1", "LAYER_A", "Layer A", None),
+                (3, "GROUP_L2", "SUB_A", "Sub A", None),
+                (4, "TICKER", "AAA", "AAA", "AAA"),
+            ],
+        )
+        conn.executemany(
+            "INSERT INTO ec_membership VALUES (?, 1, 1, ?, ?, 'CONTAINS', ?)",
+            [
+                (1, 1, 2, 1),
+                (2, 2, 3, 1),
+                (3, 3, 4, 1),
+            ],
+        )
+        conn.execute(
+            "INSERT INTO ec_pipeline_watermark VALUES (1, 'TICKER_SWING_BASE', 'dc_ticker_swing_signal_daily', '2026-07-31', 'OK', 1)"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    state = inspect_scheduler_taxonomy_state(config_path=str(config_path))
+
+    assert state["active_taxonomy"]["ticker_count"] == 1
+    assert state["active_taxonomy"]["group_count"] == 3
+    assert state["active_taxonomy"]["synthetic_group_count"] == 2
+    assert state["ec_fact_head"] == "2026-07-31"
+    assert state["db_config_consistency_status"] == "OK"
+    assert state["blocking_errors"] == []
 
 
 def test_taxonomy_ui_activation_uses_guarded_backend_and_is_idempotent(tmp_path, monkeypatch):

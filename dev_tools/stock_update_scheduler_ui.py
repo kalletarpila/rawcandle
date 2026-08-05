@@ -225,6 +225,16 @@ def inspect_scheduler_taxonomy_state(
     conn = _connect_taxonomy_db_readonly(config.analysis_db_path)
     try:
         tables = _taxonomy_table_names(conn)
+        table_columns: dict[str, set[str]] = {}
+
+        def _columns(table_name: str) -> set[str]:
+            if table_name not in table_columns:
+                table_columns[table_name] = {
+                    str(row[1])
+                    for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+                }
+            return table_columns[table_name]
+
         active = None
         if {"ec_taxonomy_version", "ec_ecosystem"}.issubset(tables):
             active_row = conn.execute(
@@ -253,11 +263,51 @@ def inspect_scheduler_taxonomy_state(
                 "synthetic_group_count": None,
             }
             if "ec_membership" in tables:
-                row = conn.execute(
-                    "SELECT COUNT(DISTINCT entity_id) FROM ec_membership WHERE taxonomy_version_id = ?",
-                    (active.get("taxonomy_version_id"),),
-                ).fetchone()
-                state["active_taxonomy"]["ticker_count"] = row[0] if row else None
+                membership_columns = _columns("ec_membership")
+                required_membership_columns = {
+                    "parent_entity_id",
+                    "child_entity_id",
+                    "taxonomy_version_id",
+                }
+                missing_membership_columns = sorted(
+                    required_membership_columns - membership_columns
+                )
+                if missing_membership_columns:
+                    state["blocking_errors"].append(
+                        "ec_membership missing current-schema columns: "
+                        + ", ".join(missing_membership_columns)
+                    )
+                elif "ec_entity" not in tables:
+                    state["blocking_errors"].append("ec_entity table missing")
+                else:
+                    ticker_row = conn.execute(
+                        """
+                        SELECT COUNT(DISTINCT child.entity_id)
+                        FROM ec_membership m
+                        JOIN ec_entity child ON child.entity_id = m.child_entity_id
+                        WHERE m.taxonomy_version_id = ?
+                          AND child.entity_type = 'TICKER'
+                        """,
+                        (active.get("taxonomy_version_id"),),
+                    ).fetchone()
+                    group_row = conn.execute(
+                        """
+                        SELECT
+                            COUNT(DISTINCT CASE WHEN child.entity_type = 'GROUP_L1' THEN child.entity_id END)
+                                AS group_l1_count,
+                            COUNT(DISTINCT CASE WHEN child.entity_type = 'GROUP_L2' THEN child.entity_id END)
+                                AS group_l2_count
+                        FROM ec_membership m
+                        JOIN ec_entity child ON child.entity_id = m.child_entity_id
+                        WHERE m.taxonomy_version_id = ?
+                        """,
+                        (active.get("taxonomy_version_id"),),
+                    ).fetchone()
+                    state["active_taxonomy"]["ticker_count"] = ticker_row[0] if ticker_row else None
+                    group_l1_count = int(group_row["group_l1_count"] or 0) if group_row else 0
+                    group_l2_count = int(group_row["group_l2_count"] or 0) if group_row else 0
+                    state["active_taxonomy"]["group_count"] = 1 + group_l1_count + group_l2_count
+                    state["active_taxonomy"]["synthetic_group_count"] = group_l1_count + group_l2_count
             for table, date_col in [
                 ("dc_ticker_swing_signal_daily", "signal_date"),
                 ("dc_group_swing_signal_daily", "signal_date"),
@@ -280,6 +330,21 @@ def inspect_scheduler_taxonomy_state(
                     """
                 ).fetchall()
                 state["watermark_heads"] = {str(row["source_table"]): row["head"] for row in rows}
+            ec_fact_heads: dict[str, str | None] = {}
+            for table in (
+                "ec_ticker_signal_daily",
+                "ec_group_signal_daily",
+                "ec_group_synthetic_ohlc_daily",
+                "ec_group_index_daily",
+            ):
+                if table in tables:
+                    row = conn.execute(
+                        f"SELECT MAX(signal_date) FROM {table} WHERE taxonomy_version_id = ?",
+                        (active.get("taxonomy_version_id"),),
+                    ).fetchone()
+                    ec_fact_heads[table] = row[0] if row else None
+            state["ec_fact_heads"] = ec_fact_heads
+            state["ec_fact_head"] = max([value for value in ec_fact_heads.values() if value] or [""])
             if active_version == config.datacenter_taxonomy_version == config.ec_source_layer_taxonomy_version:
                 state["db_config_consistency_status"] = "OK"
             else:

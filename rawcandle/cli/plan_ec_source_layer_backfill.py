@@ -9,18 +9,16 @@ from rawcandle.cli.plan_ec_source_layer_build import (
     REQUIRED_SOURCE_TABLES,
     _distinct_values,
     _glob_table_names,
+    _loaded_taxonomy_source_counts,
     _read_taxonomy_csv,
     _read_watchlist,
     _scalar,
     _table_exists,
+    _taxonomy_summary_counts,
     open_readonly_sqlite,
 )
 from rawcandle.cli.plan_ec_source_layer_refresh import (
     EC_FACT_TABLES,
-    EXPECTED_TAXONOMY_LAYER_COUNT,
-    EXPECTED_TAXONOMY_ROW_COUNT,
-    EXPECTED_TAXONOMY_SUBINDUSTRY_COUNT,
-    EXPECTED_TAXONOMY_TICKER_COUNT,
     REQUIRED_REFRESH_EC_TABLES,
 )
 from rawcandle.cli.ec_source_layer_watchlist_policy import build_watchlist_membership_summary
@@ -496,33 +494,27 @@ def _check_taxonomy_watchlist_compatibility(
                 **diagnostics,
             }
     else:
-        expected_counts = {
-            "row_count": EXPECTED_TAXONOMY_ROW_COUNT,
-            "distinct_ticker_count": EXPECTED_TAXONOMY_TICKER_COUNT,
-            "distinct_layer_count": EXPECTED_TAXONOMY_LAYER_COUNT,
-            "distinct_subindustry_count": EXPECTED_TAXONOMY_SUBINDUSTRY_COUNT,
-            "primary_membership_count": actual_counts.get("primary_membership_count", 0),
-            "secondary_membership_count": actual_counts.get("secondary_membership_count", 0),
-        }
+        expected_counts = _loaded_taxonomy_source_counts(
+            conn,
+            ecosystem_id=int(loaded_taxonomy["ecosystem_id"]),
+            taxonomy_version_id=int(loaded_taxonomy["taxonomy_version_id"]),
+        )
         errors: list[str] = []
-        if actual_counts["row_count"] != EXPECTED_TAXONOMY_ROW_COUNT:
-            errors.append(f"taxonomy row_count expected {EXPECTED_TAXONOMY_ROW_COUNT} but got {taxonomy_summary.get('row_count')}")
-        if actual_counts["distinct_ticker_count"] != EXPECTED_TAXONOMY_TICKER_COUNT:
-            errors.append(
-                f"taxonomy distinct_ticker_count expected {EXPECTED_TAXONOMY_TICKER_COUNT} but got {taxonomy_summary.get('distinct_ticker_count')}"
-            )
-        if actual_counts["distinct_layer_count"] != EXPECTED_TAXONOMY_LAYER_COUNT:
-            errors.append(
-                f"taxonomy distinct_layer_count expected {EXPECTED_TAXONOMY_LAYER_COUNT} but got {taxonomy_summary.get('distinct_layer_count')}"
-            )
-        if actual_counts["distinct_subindustry_count"] != EXPECTED_TAXONOMY_SUBINDUSTRY_COUNT:
-            errors.append(
-                "taxonomy distinct_subindustry_count expected "
-                f"{EXPECTED_TAXONOMY_SUBINDUSTRY_COUNT} but got {taxonomy_summary.get('distinct_subindustry_count')}"
-            )
+        for key in (
+            "row_count",
+            "distinct_ticker_count",
+            "primary_membership_count",
+            "secondary_membership_count",
+        ):
+            expected_value = expected_counts[key]
+            actual_value = actual_counts.get(key)
+            if actual_value != expected_value:
+                errors.append(
+                    f"taxonomy {key} expected {expected_value} but got {actual_value}"
+                )
         diagnostics = _taxonomy_source_diagnostics(
             validation_mode="ACTIVE_TAXONOMY",
-            expected_source="ACTIVE_TAXONOMY_CONSTANTS",
+            expected_source="LOADED_ACTIVE_TAXONOMY",
             expected_version=taxonomy_version_code,
             expected_sha256=str(loaded_taxonomy.get("source_hash") or "") or None,
             expected_counts=expected_counts,
@@ -581,6 +573,11 @@ def _check_taxonomy_watchlist_compatibility(
     return {
         "status": "OK",
         "loaded_taxonomy": loaded_taxonomy,
+        "taxonomy_source_status": "OK",
+        "taxonomy_row_count": actual_counts["row_count"],
+        "taxonomy_ticker_count": actual_counts["distinct_ticker_count"],
+        "taxonomy_layer_count": actual_counts["distinct_layer_count"],
+        "taxonomy_subindustry_count": actual_counts["distinct_subindustry_count"],
         "source_hash_match": True,
         "loaded_source_hash": loaded_source_hash,
         "source_hash": source_hash,
@@ -787,10 +784,23 @@ def _collect_loaded_ec_state(
         )
         for table_name, date_column in EC_FACT_TABLES
     }
-    latest_loaded_dates = {
-        table_name: _scalar(conn, f"SELECT MAX({date_column}) FROM {table_name}")
-        for table_name, date_column in EC_FACT_TABLES
-    }
+    latest_loaded_dates: dict[str, object | None] = {}
+    for table_name, date_column in EC_FACT_TABLES:
+        table_columns = _table_columns(conn, table_name)
+        predicates: list[str] = []
+        params: list[object] = []
+        if ecosystem_id is not None and "ecosystem_id" in table_columns:
+            predicates.append("ecosystem_id = ?")
+            params.append(ecosystem_id)
+        if taxonomy_version_id is not None and "taxonomy_version_id" in table_columns:
+            predicates.append("taxonomy_version_id = ?")
+            params.append(taxonomy_version_id)
+        where_sql = " WHERE " + " AND ".join(predicates) if predicates else ""
+        latest_loaded_dates[table_name] = _scalar(
+            conn,
+            f"SELECT MAX({date_column}) FROM {table_name}{where_sql}",
+            tuple(params),
+        )
     latest_loaded_fact_date = max(
         [str(value) for value in latest_loaded_dates.values() if value is not None],
         default=None,
