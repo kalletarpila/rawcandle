@@ -166,7 +166,21 @@ def test_taxonomy_plan_lines_and_confirmation_include_execution_class() -> None:
         "blocking_errors": [],
     }
 
-    rendered = format_taxonomy_plan_lines({"deployment_id": 7, "plan": base_plan, "blocking_errors": []})
+    reconciliation = {
+        "plan_reconciliation_status": "SAFE_AMENDMENT_READY",
+        "original_plan_hash": "old-plan",
+        "current_recomputed_plan_hash": "hash-rso",
+        "repair_amendment_hash": "amendment-hash",
+        "dc_repair_plan": {
+            "dc_repair_scope": "ECOSYSTEM_AGGREGATE_ONLY",
+            "repair_candidate_hash": "candidate-hash",
+            "repair_candidate_count": 506,
+            "ordinary_dc_recopy_required": False,
+        },
+    }
+    rendered = format_taxonomy_plan_lines(
+        {"deployment_id": 7, "plan": base_plan, "plan_reconciliation": reconciliation, "blocking_errors": []}
+    )
 
     assert "change_execution_class=REPORT_STATUS_ONLY" in rendered
     assert "report_status_only_safe=True" in rendered
@@ -174,8 +188,20 @@ def test_taxonomy_plan_lines_and_confirmation_include_execution_class() -> None:
     assert "Datacenter pipeline: ei" in rendered
     assert "Stage 2: ei" in rendered
     assert "DC-faktat: kopioidaan uudelle lineagelle" in rendered
+    assert "plan_reconciliation_status=SAFE_AMENDMENT_READY" in rendered
+    assert "dc_repair_scope=ECOSYSTEM_AGGREGATE_ONLY" in rendered
+    assert "repair_candidate_count=506" in rendered
     assert taxonomy_confirmation_key(base_plan) != taxonomy_confirmation_key(
         {**base_plan, "change_execution_class": "DELTA_REBUILD"}
+    )
+    assert taxonomy_confirmation_key({**base_plan, "plan_reconciliation": reconciliation}) != taxonomy_confirmation_key(
+        {
+            **base_plan,
+            "plan_reconciliation": {
+                **reconciliation,
+                "repair_amendment_hash": "changed-amendment",
+            },
+        }
     )
 
 

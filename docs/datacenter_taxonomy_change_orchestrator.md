@@ -141,6 +141,11 @@ Resume uses the same guarded arguments plus:
 ```bash
 python3 -m rawcandle.cli.run_datacenter_taxonomy_change \
   <same guarded arguments> \
+  --confirm-repair-amendment-hash <amendment_hash_if_required> \
+  --confirm-dc-repair-scope ECOSYSTEM_AGGREGATE_ONLY \
+  --confirm-repair-candidate-hash <candidate_hash_if_required> \
+  --confirm-existing-backup-path <backup_path_if_required> \
+  --confirm-existing-backup-sha256 <backup_sha256_if_required> \
   --resume \
   --format json
 ```
@@ -322,11 +327,45 @@ The field dependency registry treats `ticker`, `layer`, `subindustry`, and
 computational fields, `report_group_status` as reporting-only, and `notes` as
 documentation-only. Unknown CSV columns block the specialized path.
 
-The execution path carries forward the complete reusable DC canonical fact
-slice into the target taxonomy lineage and then runs existing EC construction
-from that completed target DC state. It does not run
+The normal execution path carries forward the complete reusable DC canonical
+fact slice into the target taxonomy lineage and then runs existing EC
+construction from that completed target DC state. It does not run
 `run_datacenter_swing_pipeline`, Stage 2 planning, ticker/group/synthetic/index
 calculations, downstream calculations, report generation, or external fetches.
+
+Failed `REPORT_STATUS_ONLY` resumes have an additional guarded repair path for
+the case where the target lineage is otherwise complete but the Datacenter
+ecosystem aggregate rows are missing. That repair is explicitly scoped to:
+
+```text
+dc_repair_scope=ECOSYSTEM_AGGREGATE_ONLY
+tables:
+  dc_group_swing_signal_daily
+  dc_group_index_daily
+key class:
+  ECOSYSTEM_AGGREGATE
+ordinary_dc_recopy_required=false
+computational_rebuild_required=false
+```
+
+The repair inserts only missing `ecosystem:DC_ECOSYSTEM_TOTAL` rows. It does
+not copy ticker rows, synthetic rows, ordinary group rows, EC rows, watermarks,
+or scheduler configuration.
+
+If the approved production plan hash no longer matches because implementation
+scope was corrected, inspect/resume exposes a plan-reconciliation amendment:
+
+```text
+plan_reconciliation_status=SAFE_AMENDMENT_READY
+plan_reconciliation_reason=IMPLEMENTATION_CORRECTION_AGGREGATE_CARRY_FORWARD_SCOPE
+original_plan_hash=<preserved original>
+current_recomputed_plan_hash=<current hash>
+repair_amendment_hash=<deterministic amendment hash>
+repair_candidate_hash=<aggregate candidate hash>
+```
+
+State-changing resume requires confirmation of the amendment hash, repair
+scope, and repair candidate hash before any DC repair write occurs.
 
 Detailed contract notes live in:
 

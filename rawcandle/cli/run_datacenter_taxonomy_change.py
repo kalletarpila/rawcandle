@@ -54,6 +54,11 @@ def main(argv: list[str] | None = None) -> int:
             confirm_date_to=args.confirm_date_to,
             confirm_rebuild_mode=args.confirm_rebuild_mode,
             confirm_plan_hash=args.confirm_plan_hash,
+            confirm_repair_amendment_hash=args.confirm_repair_amendment_hash,
+            confirm_dc_repair_scope=args.confirm_dc_repair_scope,
+            confirm_repair_candidate_hash=args.confirm_repair_candidate_hash,
+            confirm_existing_backup_path=args.confirm_existing_backup_path,
+            confirm_existing_backup_sha256=args.confirm_existing_backup_sha256,
             services=services,
         )
     write_taxonomy_operation_artifact(operation, relative_name="run_summary.json", payload=summary)

@@ -40,6 +40,8 @@ REBUILD_MODE_AUTO = "AUTO"
 CHANGE_EXECUTION_FULL_REBUILD = "FULL_REBUILD"
 CHANGE_EXECUTION_DELTA_REBUILD = "DELTA_REBUILD"
 CHANGE_EXECUTION_REPORT_STATUS_ONLY = "REPORT_STATUS_ONLY"
+DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY = "ECOSYSTEM_AGGREGATE_ONLY"
+PLAN_RECONCILIATION_REASON_AGGREGATE_SCOPE = "IMPLEMENTATION_CORRECTION_AGGREGATE_CARRY_FORWARD_SCOPE"
 TAXONOMY_FIELD_DEPENDENCIES = {
     "taxonomy_version": "IDENTITY",
     "ticker": "IDENTITY",
@@ -147,6 +149,35 @@ def build_production_taxonomy_change_services(
         config = read_scheduler_config(config_path)
         backup_dir = Path(config.ec_source_layer_backup_dir or evidence_root) / "taxonomy_change_backups"
         backup_dir.mkdir(parents=True, exist_ok=True)
+        if resume:
+            candidates = sorted(
+                backup_dir.glob(f"analysis_taxonomy_change_{deployment_id}_*.sqlite"),
+                key=lambda path: path.stat().st_mtime,
+                reverse=True,
+            )
+            if candidates:
+                existing = candidates[0]
+                validation = sqlite3.connect(str(existing))
+                try:
+                    quick_check = validation.execute("PRAGMA quick_check").fetchone()
+                finally:
+                    validation.close()
+                if quick_check and str(quick_check[0]).lower() == "ok":
+                    backup_summary.update(
+                        {
+                            "backup_path": str(existing),
+                            "backup_sha256": _sha256(existing),
+                            "backup_mode": "EXISTING_SQLITE_BACKUP",
+                            "backup_validation_status": "OK",
+                        }
+                    )
+                    return {"status": "OK", "backup_reused": True, **backup_summary}
+                return {
+                    "status": "FAILED",
+                    "backup_reused": False,
+                    "backup_path": str(existing),
+                    "backup_validation_status": "FAILED_QUICK_CHECK",
+                }
         source_db = Path(config.analysis_db_path)
         backup_path = backup_dir / (
             f"analysis_taxonomy_change_{deployment_id}_{_utc_operation_timestamp()}.sqlite"
@@ -941,7 +972,7 @@ def build_taxonomy_change_plan(
     change_execution_class = (
         CHANGE_EXECUTION_REPORT_STATUS_ONLY
         if (
-            requested_rebuild_mode == REBUILD_MODE_AUTO
+            requested_rebuild_mode in {REBUILD_MODE_AUTO, REBUILD_MODE_DELTA}
             and report_status_classification["report_status_only_safe"]
         )
         else selected_rebuild_mode
@@ -1281,10 +1312,67 @@ def inspect_taxonomy_change(
             "datacenter_taxonomy_version": config.datacenter_taxonomy_version,
             "ec_source_layer_taxonomy_version": config.ec_source_layer_taxonomy_version,
         }
+    plan = None
+    plan_reconciliation = None
+    proposed_source_reference = deployment.get("source_reference")
+    date_to = _max_head(ec_heads) or deployment.get("rebuild_end_date") or deployment.get("rebuild_start_date")
+    if proposed_source_reference and date_to:
+        try:
+            current_csv = _current_source_from_db(
+                analysis_db,
+                ecosystem_code=str(deployment["ecosystem_code"]),
+                taxonomy_version=str(deployment["previous_taxonomy_version"]),
+            )
+            plan = build_taxonomy_change_plan(
+                deployment_id=deployment_id,
+                ecosystem_code=str(deployment["ecosystem_code"]),
+                current_taxonomy_version=str(deployment["previous_taxonomy_version"]),
+                current_taxonomy_csv=current_csv,
+                proposed_taxonomy_version=str(deployment["proposed_taxonomy_version"]),
+                proposed_taxonomy_csv=str(proposed_source_reference),
+                date_from=str(deployment["rebuild_start_date"]),
+                date_to=str(date_to),
+                rebuild_mode=REBUILD_MODE_AUTO,
+            )
+            evidence = deployment.get("plan_json")
+            original_plan_hash = None
+            if evidence:
+                try:
+                    original_plan_hash = str(json.loads(str(evidence)).get("plan_hash") or "")
+                except json.JSONDecodeError:
+                    original_plan_hash = None
+            backup = _backup_state(deployment)
+            if plan.get("change_execution_class") == CHANGE_EXECUTION_REPORT_STATUS_ONLY:
+                reconciliation_plan = build_taxonomy_change_plan(
+                    deployment_id=deployment_id,
+                    ecosystem_code=str(deployment["ecosystem_code"]),
+                    current_taxonomy_version=str(deployment["previous_taxonomy_version"]),
+                    current_taxonomy_csv=current_csv,
+                    proposed_taxonomy_version=str(deployment["proposed_taxonomy_version"]),
+                    proposed_taxonomy_csv=str(proposed_source_reference),
+                    date_from=str(deployment["rebuild_start_date"]),
+                    date_to=str(date_to),
+                    rebuild_mode=str(plan.get("selected_rebuild_mode") or REBUILD_MODE_DELTA),
+                )
+                plan_reconciliation = plan_report_status_only_resume_reconciliation(
+                    analysis_db=analysis_db,
+                    plan=reconciliation_plan,
+                    original_plan_hash=original_plan_hash or str(plan.get("plan_hash") or ""),
+                    current_plan_hash=str(reconciliation_plan.get("plan_hash") or ""),
+                    existing_backup_path=str(backup.get("backup_path") or ""),
+                    existing_backup_sha256=str(backup.get("backup_sha256") or ""),
+                )
+        except Exception as exc:
+            plan = {
+                "plan_status": "INSPECT_PLAN_UNAVAILABLE",
+                "blocking_errors": [str(exc)],
+            }
     return {
         "inspect_status": "OK",
         "deployment_id": deployment_id,
         "deployment": deployment,
+        "plan": plan,
+        "plan_reconciliation": plan_reconciliation,
         "normalized_orchestration_status": status,
         "active_taxonomy": active,
         "proposed_taxonomy": proposed,
@@ -1328,6 +1416,7 @@ def _backup_state(deployment: dict[str, object]) -> dict[str, object]:
     return {
         "backup_status": payload.get("backup_validation_status", "UNKNOWN"),
         "backup_path": payload.get("backup_path"),
+        "backup_sha256": payload.get("backup_sha256"),
     }
 
 
@@ -1390,6 +1479,11 @@ def execute_taxonomy_rebuild(
     confirm_date_to: str,
     confirm_rebuild_mode: str,
     confirm_plan_hash: str,
+    confirm_repair_amendment_hash: str | None = None,
+    confirm_dc_repair_scope: str | None = None,
+    confirm_repair_candidate_hash: str | None = None,
+    confirm_existing_backup_path: str | None = None,
+    confirm_existing_backup_sha256: str | None = None,
     services: TaxonomyChangeServices | None = None,
     resume: bool = False,
 ) -> dict[str, object]:
@@ -1420,7 +1514,11 @@ def execute_taxonomy_rebuild(
         date_to=date_to,
         rebuild_mode=normalized_confirm_rebuild_mode,
     )
-    if normalized_confirm_rebuild_mode in SUPPORTED_REBUILD_MODES and plan.get("plan_hash") != confirm_plan_hash:
+    if (
+        not resume
+        and normalized_confirm_rebuild_mode in SUPPORTED_REBUILD_MODES
+        and plan.get("plan_hash") != confirm_plan_hash
+    ):
         auto_plan = build_taxonomy_change_plan(
             deployment_id=deployment_id,
             ecosystem_code=str(deployment["ecosystem_code"]),
@@ -1437,6 +1535,10 @@ def execute_taxonomy_rebuild(
             and auto_plan.get("plan_hash") == confirm_plan_hash
         ):
             plan = auto_plan
+    change_execution_class = str(plan.get("change_execution_class") or plan.get("selected_rebuild_mode"))
+    report_status_only = change_execution_class == CHANGE_EXECUTION_REPORT_STATUS_ONLY
+    backup_state = _backup_state(deployment)
+    plan_reconciliation: dict[str, object] | None = None
     confirmation_errors = _verify_confirmation(
         plan=plan,
         confirm_deployment_id=confirm_deployment_id,
@@ -1447,10 +1549,44 @@ def execute_taxonomy_rebuild(
         confirm_rebuild_mode=normalized_confirm_rebuild_mode,
         confirm_plan_hash=confirm_plan_hash,
     )
-    change_execution_class = str(plan.get("change_execution_class") or plan.get("selected_rebuild_mode"))
-    report_status_only = change_execution_class == CHANGE_EXECUTION_REPORT_STATUS_ONLY
+    if (
+        resume
+        and report_status_only
+        and confirmation_errors == ["confirmation mismatch: plan_hash"]
+    ):
+        plan_reconciliation = plan_report_status_only_resume_reconciliation(
+            analysis_db=analysis_db,
+            plan=plan,
+            original_plan_hash=confirm_plan_hash,
+            current_plan_hash=str(plan["plan_hash"]),
+            existing_backup_path=str(backup_state.get("backup_path") or confirm_existing_backup_path or ""),
+            existing_backup_sha256=str(backup_state.get("backup_sha256") or confirm_existing_backup_sha256 or ""),
+        )
+        reconciliation_errors = []
+        if not plan_reconciliation.get("safe_to_resume_after_amendment"):
+            reconciliation_errors.append("plan reconciliation is not safe")
+        if confirm_repair_amendment_hash != plan_reconciliation.get("repair_amendment_hash"):
+            reconciliation_errors.append("confirmation mismatch: repair_amendment_hash")
+        repair_plan = dict(plan_reconciliation.get("dc_repair_plan") or {})
+        if confirm_dc_repair_scope != repair_plan.get("dc_repair_scope"):
+            reconciliation_errors.append("confirmation mismatch: dc_repair_scope")
+        if confirm_repair_candidate_hash != repair_plan.get("repair_candidate_hash"):
+            reconciliation_errors.append("confirmation mismatch: repair_candidate_hash")
+        if (
+            confirm_existing_backup_path
+            and backup_state.get("backup_path")
+            and confirm_existing_backup_path != backup_state.get("backup_path")
+        ):
+            reconciliation_errors.append("confirmation mismatch: existing_backup_path")
+        if (
+            confirm_existing_backup_sha256
+            and backup_state.get("backup_sha256")
+            and confirm_existing_backup_sha256 != backup_state.get("backup_sha256")
+        ):
+            reconciliation_errors.append("confirmation mismatch: existing_backup_sha256")
+        confirmation_errors = reconciliation_errors
     if confirmation_errors or plan["blocking_errors"]:
-        return _failure(
+        failure = _failure(
             failed_phase="PLANNED",
             failure_code="CONFIRMATION_FAILED",
             failure_message="; ".join(confirmation_errors + list(plan["blocking_errors"])),
@@ -1458,6 +1594,9 @@ def execute_taxonomy_rebuild(
             resume_from_phase="PLANNED",
             scheduler_guard_restored=True,
         )
+        if plan_reconciliation is not None:
+            failure["plan_reconciliation"] = plan_reconciliation
+        return failure
     if report_status_only and not plan.get("report_status_only_safe"):
         return _failure(
             failed_phase="PLANNED",
@@ -1508,6 +1647,55 @@ def execute_taxonomy_rebuild(
                     "copied_ticker_count": 0,
                     "copied_group_count": 0,
                 }
+            elif resume and report_status_only:
+                repair_plan = plan_dc_ecosystem_aggregate_repair(analysis_db=analysis_db, plan=plan)
+                if repair_plan.get("dc_repair_scope") != DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY:
+                    return _failure(
+                        "DC_FACTS_CARRIED_FORWARD",
+                        "AGGREGATE_ONLY_REPAIR_SERVICE_UNAVAILABLE",
+                        str(repair_plan),
+                        completed,
+                        "DC_FACTS_CARRIED_FORWARD",
+                        True,
+                    )
+                if not repair_plan.get("safe_to_apply"):
+                    return _failure(
+                        "DC_FACTS_CARRIED_FORWARD",
+                        "DC_AGGREGATE_REPAIR_BLOCKED",
+                        str(repair_plan),
+                        completed,
+                        "DC_FACTS_CARRIED_FORWARD",
+                        True,
+                    )
+                carry_forward = apply_dc_ecosystem_aggregate_repair(
+                    analysis_db=analysis_db,
+                    plan=plan,
+                    confirm_dc_repair_scope=confirm_dc_repair_scope or "",
+                    confirm_repair_candidate_hash=confirm_repair_candidate_hash or "",
+                )
+                if carry_forward.get("dc_repair_apply_status") not in {"APPLIED", "NO_CHANGE"}:
+                    return _failure(
+                        "DC_FACTS_CARRIED_FORWARD",
+                        "DC_AGGREGATE_REPAIR_FAILED",
+                        str(carry_forward),
+                        completed,
+                        "DC_FACTS_CARRIED_FORWARD",
+                        True,
+                    )
+                carry_forward = {
+                    "carry_forward_status": "OK",
+                    "resume_skip": False,
+                    "dc_repair_scope": DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY,
+                    "aggregate_only_repair": carry_forward,
+                    "dc_key_universe_validation": validate_dc_carry_forward_key_universe(
+                        analysis_db=analysis_db,
+                        plan=plan,
+                        ticker_allowlist=ticker_allowlist,
+                        group_allowlist=group_allowlist,
+                    ),
+                    "copied_ticker_count": 0,
+                    "copied_group_count": 1,
+                }
             else:
                 carry_forward = copy_delta_carry_forward(analysis_db=analysis_db, plan=plan)
             if carry_forward.get("carry_forward_status") != "OK":
@@ -1526,10 +1714,11 @@ def execute_taxonomy_rebuild(
                     deployment_id=deployment_id,
                     evidence={
                         "phase": "DC_FACTS_VALIDATED",
-                        "change_execution_class": CHANGE_EXECUTION_REPORT_STATUS_ONLY,
-                        "carry_forward": carry_forward,
-                    },
-                )
+                            "change_execution_class": CHANGE_EXECUTION_REPORT_STATUS_ONLY,
+                            "carry_forward": carry_forward,
+                            "plan_reconciliation": plan_reconciliation,
+                        },
+                    )
                 completed.append("DC_FACTS_VALIDATED")
         if report_status_only:
             dc_rebuild = {
@@ -1649,6 +1838,7 @@ def execute_taxonomy_rebuild(
             "cleanup_plan": cleanup,
             "cleanup_apply": cleanup_apply,
             "validation": validation,
+            "plan_reconciliation": plan_reconciliation,
         }
     except Exception as exc:
         return _failure(
@@ -1680,6 +1870,11 @@ def resume_taxonomy_rebuild(
     confirm_date_to: str,
     confirm_rebuild_mode: str,
     confirm_plan_hash: str,
+    confirm_repair_amendment_hash: str | None = None,
+    confirm_dc_repair_scope: str | None = None,
+    confirm_repair_candidate_hash: str | None = None,
+    confirm_existing_backup_path: str | None = None,
+    confirm_existing_backup_sha256: str | None = None,
     services: TaxonomyChangeServices | None = None,
 ) -> dict[str, object]:
     if services is None and scheduler_config_path is not None:
@@ -1703,6 +1898,11 @@ def resume_taxonomy_rebuild(
         confirm_date_to=confirm_date_to,
         confirm_rebuild_mode=confirm_rebuild_mode,
         confirm_plan_hash=confirm_plan_hash,
+        confirm_repair_amendment_hash=confirm_repair_amendment_hash,
+        confirm_dc_repair_scope=confirm_dc_repair_scope,
+        confirm_repair_candidate_hash=confirm_repair_candidate_hash,
+        confirm_existing_backup_path=confirm_existing_backup_path,
+        confirm_existing_backup_sha256=confirm_existing_backup_sha256,
         services=services,
         resume=True,
     )
@@ -1909,6 +2109,10 @@ def _rows_hash(rows: list[dict[str, object]]) -> str:
 
 
 DC_GROUP_ECOSYSTEM_AGGREGATE_KEY = "ecosystem:DC_ECOSYSTEM_TOTAL"
+DC_ECOSYSTEM_AGGREGATE_REPAIR_TABLES = (
+    ("dc_group_swing_signal_daily", "signal_date"),
+    ("dc_group_index_daily", "index_date"),
+)
 
 
 def _dc_ticker_allowlist(plan: dict[str, object]) -> list[str]:
@@ -1934,6 +2138,347 @@ def _dc_group_allowlist(plan: dict[str, object]) -> list[str]:
     if plan.get("change_execution_class") == CHANGE_EXECUTION_REPORT_STATUS_ONLY:
         groups.add(DC_GROUP_ECOSYSTEM_AGGREGATE_KEY)
     return sorted(groups)
+
+
+def _ecosystem_aggregate_key_columns(table_name: str, columns: list[str], date_column: str) -> tuple[str, ...]:
+    required = {date_column, "taxonomy_version", "group_type", "group_name"}
+    if table_name == "dc_group_swing_signal_daily" and "signal_version" in columns:
+        return (date_column, "group_type", "group_name", "signal_version")
+    return (date_column, "group_type", "group_name")
+
+
+def _select_ecosystem_aggregate_rows(
+    conn: sqlite3.Connection,
+    *,
+    table_name: str,
+    date_column: str,
+    taxonomy_version: str,
+    date_from: str,
+    date_to: str,
+) -> list[dict[str, object]]:
+    columns = _table_columns(conn, table_name)
+    select_sql = (
+        f"SELECT {', '.join(_sql_identifier(column) for column in columns)} "
+        f"FROM {_sql_identifier(table_name)} "
+        f"WHERE taxonomy_version = ? "
+        f"AND {_sql_identifier(date_column)} BETWEEN ? AND ? "
+        "AND group_type = 'ecosystem' "
+        "AND group_name = 'DC_ECOSYSTEM_TOTAL' "
+        f"ORDER BY {', '.join(_sql_identifier(column) for column in _ecosystem_aggregate_key_columns(table_name, columns, date_column))}"
+    )
+    return [dict(row) for row in conn.execute(select_sql, (taxonomy_version, date_from, date_to)).fetchall()]
+
+
+def _keyed_ecosystem_aggregate_rows(
+    rows: list[dict[str, object]],
+    *,
+    key_columns: tuple[str, ...],
+) -> tuple[dict[tuple[object, ...], dict[str, object]], int]:
+    keyed: dict[tuple[object, ...], dict[str, object]] = {}
+    duplicate_count = 0
+    for row in rows:
+        key = tuple(row.get(column) for column in key_columns)
+        if key in keyed:
+            duplicate_count += 1
+        keyed[key] = row
+    return keyed, duplicate_count
+
+
+def _plan_ecosystem_aggregate_table_repair(
+    conn: sqlite3.Connection,
+    *,
+    table_name: str,
+    date_column: str,
+    current_taxonomy_version: str,
+    proposed_taxonomy_version: str,
+    date_from: str,
+    date_to: str,
+) -> dict[str, object]:
+    if table_name not in _table_names(conn):
+        return {
+            "table": table_name,
+            "date_column": date_column,
+            "status": "BLOCKED_TABLE_MISSING",
+            "safe_to_apply": False,
+            "candidate_row_count": 0,
+        }
+    columns = _table_columns(conn, table_name)
+    required = {date_column, "taxonomy_version", "group_type", "group_name"}
+    missing_columns = sorted(required - set(columns))
+    if missing_columns:
+        return {
+            "table": table_name,
+            "date_column": date_column,
+            "status": "BLOCKED_UNSUPPORTED_SCHEMA",
+            "missing_columns": missing_columns,
+            "safe_to_apply": False,
+            "candidate_row_count": 0,
+        }
+    key_columns = _ecosystem_aggregate_key_columns(table_name, columns, date_column)
+    source_rows = _select_ecosystem_aggregate_rows(
+        conn,
+        table_name=table_name,
+        date_column=date_column,
+        taxonomy_version=current_taxonomy_version,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    target_rows = _select_ecosystem_aggregate_rows(
+        conn,
+        table_name=table_name,
+        date_column=date_column,
+        taxonomy_version=proposed_taxonomy_version,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    source_by_key, source_duplicate_count = _keyed_ecosystem_aggregate_rows(source_rows, key_columns=key_columns)
+    target_by_key, target_duplicate_count = _keyed_ecosystem_aggregate_rows(target_rows, key_columns=key_columns)
+    missing_keys = sorted(set(source_by_key) - set(target_by_key))
+    extra_keys = sorted(set(target_by_key) - set(source_by_key))
+    mismatches = []
+    for key in sorted(set(source_by_key) & set(target_by_key)):
+        if _semantic_payload(source_by_key[key], columns=set(columns), table_name=table_name) != _semantic_payload(
+            target_by_key[key],
+            columns=set(columns),
+            table_name=table_name,
+        ):
+            mismatches.append({"table": table_name, "key": list(key)})
+    candidate_rows = []
+    for key in missing_keys:
+        row = dict(source_by_key[key])
+        row["taxonomy_version"] = proposed_taxonomy_version
+        candidate_rows.append(row)
+    blocking_reasons = []
+    if not source_rows:
+        blocking_reasons.append("source aggregate rows missing")
+    if source_duplicate_count or target_duplicate_count:
+        blocking_reasons.append("duplicate aggregate keys")
+    if extra_keys:
+        blocking_reasons.append("target contains aggregate keys absent from source")
+    if mismatches:
+        blocking_reasons.append("existing target aggregate rows differ semantically")
+    safe = not blocking_reasons
+    return {
+        "table": table_name,
+        "date_column": date_column,
+        "status": "OK" if safe else "BLOCKED",
+        "safe_to_apply": safe,
+        "key_columns": list(key_columns),
+        "source_aggregate_row_count": len(source_rows),
+        "target_aggregate_row_count": len(target_rows),
+        "candidate_row_count": len(candidate_rows),
+        "missing_target_row_count": len(missing_keys),
+        "extra_target_row_count": len(extra_keys),
+        "duplicate_key_count": source_duplicate_count + target_duplicate_count,
+        "semantic_mismatch_count": len(mismatches),
+        "missing_dates": sorted({str(source_by_key[key].get(date_column)) for key in missing_keys}),
+        "extra_dates": sorted({str(target_by_key[key].get(date_column)) for key in extra_keys}),
+        "candidate_key_hash": _json_hash([list(key) for key in missing_keys]),
+        "source_semantic_hash": _json_hash(
+            [_semantic_payload(row, columns=set(columns), table_name=table_name) for row in source_rows]
+        ),
+        "candidate_rows_hash": _rows_hash(candidate_rows),
+        "blocking_reasons": blocking_reasons,
+    }
+
+
+def plan_dc_ecosystem_aggregate_repair(
+    *,
+    analysis_db: str | Path,
+    plan: dict[str, object],
+) -> dict[str, object]:
+    conn = _connect_readonly(analysis_db)
+    try:
+        table_results = [
+            _plan_ecosystem_aggregate_table_repair(
+                conn,
+                table_name=table_name,
+                date_column=date_column,
+                current_taxonomy_version=str(plan["current_taxonomy_version"]),
+                proposed_taxonomy_version=str(plan["proposed_taxonomy_version"]),
+                date_from=str(plan["date_from"]),
+                date_to=str(plan["date_to"]),
+            )
+            for table_name, date_column in DC_ECOSYSTEM_AGGREGATE_REPAIR_TABLES
+        ]
+    finally:
+        conn.close()
+    safe = all(bool(row.get("safe_to_apply")) for row in table_results)
+    candidate_count = sum(int(row.get("candidate_row_count") or 0) for row in table_results)
+    payload = {
+        "deployment_id": plan.get("deployment_id"),
+        "current_taxonomy_version": plan.get("current_taxonomy_version"),
+        "proposed_taxonomy_version": plan.get("proposed_taxonomy_version"),
+        "date_from": plan.get("date_from"),
+        "date_to": plan.get("date_to"),
+        "scope": DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY,
+        "tables": [
+            {
+                "table": row.get("table"),
+                "candidate_key_hash": row.get("candidate_key_hash"),
+                "source_semantic_hash": row.get("source_semantic_hash"),
+                "candidate_rows_hash": row.get("candidate_rows_hash"),
+            }
+            for row in table_results
+        ],
+    }
+    return {
+        "dc_repair_plan_status": "READY" if safe else "BLOCKED",
+        "dc_repair_required": candidate_count > 0,
+        "dc_repair_scope": DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY,
+        "dc_repair_tables": [table for table, _date_column in DC_ECOSYSTEM_AGGREGATE_REPAIR_TABLES],
+        "dc_repair_key_classes": ["ECOSYSTEM_AGGREGATE"],
+        "ordinary_dc_recopy_required": False,
+        "computational_rebuild_required": False,
+        "repair_candidate_count": candidate_count,
+        "safe_to_apply": safe,
+        "table_results": table_results,
+        "repair_candidate_hash": _json_hash(payload),
+        "blocking_reasons": [
+            f"{row.get('table')}: {reason}"
+            for row in table_results
+            for reason in row.get("blocking_reasons", [])
+        ],
+    }
+
+
+def plan_report_status_only_resume_reconciliation(
+    *,
+    analysis_db: str | Path,
+    plan: dict[str, object],
+    original_plan_hash: str,
+    current_plan_hash: str | None = None,
+    existing_backup_path: str | None = None,
+    existing_backup_sha256: str | None = None,
+) -> dict[str, object]:
+    repair_plan = plan_dc_ecosystem_aggregate_repair(analysis_db=analysis_db, plan=plan)
+    business_inputs_unchanged = (
+        str(plan.get("change_execution_class")) == CHANGE_EXECUTION_REPORT_STATUS_ONLY
+        and str(plan.get("selected_rebuild_mode")) == REBUILD_MODE_DELTA
+        and str(plan.get("plan_hash")) == str(current_plan_hash or plan.get("plan_hash"))
+    )
+    amendment_identity = {
+        "deployment_id": plan.get("deployment_id"),
+        "original_plan_hash": original_plan_hash,
+        "current_recomputed_plan_hash": current_plan_hash or plan.get("plan_hash"),
+        "reason": PLAN_RECONCILIATION_REASON_AGGREGATE_SCOPE,
+        "change_execution_class": plan.get("change_execution_class"),
+        "repair_scope": DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY,
+        "repair_candidate_hash": repair_plan["repair_candidate_hash"],
+        "current_taxonomy_version": plan.get("current_taxonomy_version"),
+        "current_source_sha256": plan.get("current_source_sha256"),
+        "proposed_taxonomy_version": plan.get("proposed_taxonomy_version"),
+        "proposed_source_sha256": plan.get("proposed_source_sha256"),
+        "date_from": plan.get("date_from"),
+        "date_to": plan.get("date_to"),
+        "existing_backup_path": existing_backup_path,
+        "existing_backup_sha256": existing_backup_sha256,
+    }
+    safe = business_inputs_unchanged and bool(repair_plan.get("safe_to_apply"))
+    return {
+        "plan_reconciliation_status": "SAFE_AMENDMENT_READY" if safe else "BLOCKED",
+        "original_plan_preserved": True,
+        "business_inputs_unchanged": business_inputs_unchanged,
+        "repair_scope_narrower_or_equal": True,
+        "safe_to_resume_after_amendment": safe,
+        "plan_reconciliation_reason": PLAN_RECONCILIATION_REASON_AGGREGATE_SCOPE,
+        "original_plan_hash": original_plan_hash,
+        "current_recomputed_plan_hash": current_plan_hash or plan.get("plan_hash"),
+        "repair_amendment_hash": _json_hash(amendment_identity),
+        "repair_amendment_identity": amendment_identity,
+        "dc_repair_plan": repair_plan,
+    }
+
+
+def apply_dc_ecosystem_aggregate_repair(
+    *,
+    analysis_db: str | Path,
+    plan: dict[str, object],
+    confirm_dc_repair_scope: str,
+    confirm_repair_candidate_hash: str,
+    inject_failure_after_table: str | None = None,
+) -> dict[str, object]:
+    repair_plan = plan_dc_ecosystem_aggregate_repair(analysis_db=analysis_db, plan=plan)
+    confirmation_errors = []
+    if confirm_dc_repair_scope != DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY:
+        confirmation_errors.append("confirmation mismatch: dc_repair_scope")
+    if confirm_repair_candidate_hash != repair_plan["repair_candidate_hash"]:
+        confirmation_errors.append("confirmation mismatch: repair_candidate_hash")
+    if confirmation_errors:
+        return {
+            "dc_repair_apply_status": "BLOCKED_CONFIRMATION_FAILED",
+            "confirmation_errors": confirmation_errors,
+            "dc_repair_plan": repair_plan,
+        }
+    if not repair_plan.get("safe_to_apply"):
+        return {"dc_repair_apply_status": "BLOCKED", "dc_repair_plan": repair_plan}
+    if int(repair_plan.get("repair_candidate_count") or 0) == 0:
+        return {"dc_repair_apply_status": "NO_CHANGE", "dc_repair_plan": repair_plan, "table_results": []}
+
+    conn = _connect_readwrite(analysis_db)
+    table_results: list[dict[str, object]] = []
+    try:
+        with conn:
+            for table_name, date_column in DC_ECOSYSTEM_AGGREGATE_REPAIR_TABLES:
+                columns = _table_columns(conn, table_name)
+                key_columns = _ecosystem_aggregate_key_columns(table_name, columns, date_column)
+                source_rows = _select_ecosystem_aggregate_rows(
+                    conn,
+                    table_name=table_name,
+                    date_column=date_column,
+                    taxonomy_version=str(plan["current_taxonomy_version"]),
+                    date_from=str(plan["date_from"]),
+                    date_to=str(plan["date_to"]),
+                )
+                target_rows = _select_ecosystem_aggregate_rows(
+                    conn,
+                    table_name=table_name,
+                    date_column=date_column,
+                    taxonomy_version=str(plan["proposed_taxonomy_version"]),
+                    date_from=str(plan["date_from"]),
+                    date_to=str(plan["date_to"]),
+                )
+                source_by_key, _source_duplicates = _keyed_ecosystem_aggregate_rows(source_rows, key_columns=key_columns)
+                target_by_key, _target_duplicates = _keyed_ecosystem_aggregate_rows(target_rows, key_columns=key_columns)
+                missing_keys = sorted(set(source_by_key) - set(target_by_key))
+                insert_sql = (
+                    f"INSERT INTO {_sql_identifier(table_name)} ({', '.join(_sql_identifier(column) for column in columns)}) "
+                    f"VALUES ({', '.join('?' for _ in columns)})"
+                )
+                inserted = 0
+                target_rows_inserted = []
+                for key in missing_keys:
+                    target = dict(source_by_key[key])
+                    target["taxonomy_version"] = str(plan["proposed_taxonomy_version"])
+                    conn.execute(insert_sql, [target[column] for column in columns])
+                    inserted += 1
+                    target_rows_inserted.append(target)
+                table_results.append(
+                    {
+                        "table": table_name,
+                        "status": "OK",
+                        "inserted_row_count": inserted,
+                        "target_rows_hash": _rows_hash(target_rows_inserted),
+                    }
+                )
+                if inject_failure_after_table == table_name:
+                    raise RuntimeError(f"injected failure after {table_name}")
+        post = plan_dc_ecosystem_aggregate_repair(analysis_db=analysis_db, plan=plan)
+        return {
+            "dc_repair_apply_status": "APPLIED" if any(row["inserted_row_count"] for row in table_results) else "NO_CHANGE",
+            "dc_repair_scope": DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY,
+            "table_results": table_results,
+            "post_repair_plan": post,
+        }
+    except Exception as exc:
+        return {
+            "dc_repair_apply_status": "FAILED",
+            "failure_message": str(exc),
+            "dc_repair_scope": DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY,
+            "table_results": table_results,
+        }
+    finally:
+        conn.close()
 
 
 def _dc_key_contract(
@@ -2449,6 +2994,11 @@ def build_run_parser() -> argparse.ArgumentParser:
     parser.add_argument("--confirm-date-to", required=True)
     parser.add_argument("--confirm-rebuild-mode", required=True, choices=("full", "delta", REBUILD_MODE_FULL, REBUILD_MODE_DELTA))
     parser.add_argument("--confirm-plan-hash", required=True)
+    parser.add_argument("--confirm-repair-amendment-hash")
+    parser.add_argument("--confirm-dc-repair-scope")
+    parser.add_argument("--confirm-repair-candidate-hash")
+    parser.add_argument("--confirm-existing-backup-path")
+    parser.add_argument("--confirm-existing-backup-sha256")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--format", choices=("json",), default="json")
     return parser

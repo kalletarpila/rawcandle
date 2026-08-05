@@ -6,6 +6,7 @@ from pathlib import Path
 
 from rawcandle.datacenter_taxonomy_change_orchestrator import (
     CHANGE_EXECUTION_REPORT_STATUS_ONLY,
+    DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY,
     REBUILD_MODE_AUTO,
     REBUILD_MODE_DELTA,
     REBUILD_MODE_FULL,
@@ -17,6 +18,9 @@ from rawcandle.datacenter_taxonomy_change_orchestrator import (
     copy_delta_carry_forward,
     execute_taxonomy_rebuild,
     inspect_taxonomy_change,
+    apply_dc_ecosystem_aggregate_repair,
+    plan_dc_ecosystem_aggregate_repair,
+    plan_report_status_only_resume_reconciliation,
     prepare_taxonomy_change,
 )
 from rawcandle.ec_datacenter_taxonomy_loader import load_datacenter_taxonomy_to_ec_sidecar
@@ -292,7 +296,7 @@ def test_auto_plan_selects_report_status_only_for_safe_metadata_change(tmp_path)
     assert auto["computational_rebuild_required"] is False
     assert auto["datacenter_pipeline_required"] is False
     assert auto["stage2_required"] is False
-    assert explicit_delta["change_execution_class"] == REBUILD_MODE_DELTA
+    assert explicit_delta["change_execution_class"] == CHANGE_EXECUTION_REPORT_STATUS_ONLY
     assert auto["plan_hash"] != explicit_delta["plan_hash"]
 
 
@@ -768,6 +772,37 @@ def test_production_taxonomy_services_block_active_scheduler_writer(tmp_path) ->
     assert services.verify_active_writer()["status"] == "ACTIVE_WRITER"
 
 
+def test_resume_production_services_reuse_existing_taxonomy_change_backup(tmp_path) -> None:
+    db_path, config_path, _proposed_csv, prepared = _prepared(tmp_path)
+    backup_dir = tmp_path / "backups" / "taxonomy_change_backups"
+    backup_dir.mkdir(parents=True)
+    existing_backup = backup_dir / (
+        f"analysis_taxonomy_change_{prepared['deployment_id']}_20260805T000000Z.sqlite"
+    )
+    src = sqlite3.connect(db_path)
+    try:
+        dst = sqlite3.connect(existing_backup)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+    finally:
+        src.close()
+    services = build_production_taxonomy_change_services(
+        scheduler_config_path=config_path,
+        evidence_root=tmp_path / "repo" / "temp" / "taxonomy",
+        resume=True,
+    )
+
+    backup = services.ensure_backup(deployment_id=prepared["deployment_id"])
+
+    assert backup["status"] == "OK"
+    assert backup["backup_reused"] is True
+    assert backup["backup_path"] == str(existing_backup)
+    assert backup["backup_mode"] == "EXISTING_SQLITE_BACKUP"
+    assert backup["backup_validation_status"] == "OK"
+
+
 def _create_carry_forward_fact_tables(db_path: Path) -> None:
     conn = sqlite3.connect(db_path)
     try:
@@ -940,6 +975,158 @@ def test_report_status_only_carry_forward_copies_complete_dc_slice(tmp_path) -> 
     assert proposed_ticker_count == 2
     assert proposed_group_rows == 2
     assert proposed_index_rows == [("ecosystem", "DC_ECOSYSTEM_TOTAL"), ("layer", "Power")]
+
+
+def test_report_status_only_aggregate_repair_copies_only_ecosystem_rows(tmp_path) -> None:
+    current_csv = _write_csv(tmp_path / "current.csv", _rows("DC_TAXONOMY_FULL_V1"))
+    proposed_csv = _write_csv(
+        tmp_path / "proposed.csv",
+        _report_status_only_rows("DC_TAXONOMY_FULL_V2_1"),
+    )
+    db_path = tmp_path / "facts.db"
+    _create_carry_forward_fact_tables(db_path)
+    plan = build_taxonomy_change_plan(
+        deployment_id=2,
+        ecosystem_code="DATACENTER",
+        current_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        current_taxonomy_csv=current_csv,
+        proposed_taxonomy_version="DC_TAXONOMY_FULL_V2_1",
+        proposed_taxonomy_csv=proposed_csv,
+        date_from="2026-07-31",
+        date_to="2026-07-31",
+        rebuild_mode=REBUILD_MODE_AUTO,
+    )
+
+    repair_plan = plan_dc_ecosystem_aggregate_repair(analysis_db=db_path, plan=plan)
+    applied = apply_dc_ecosystem_aggregate_repair(
+        analysis_db=db_path,
+        plan=plan,
+        confirm_dc_repair_scope=DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY,
+        confirm_repair_candidate_hash=str(repair_plan["repair_candidate_hash"]),
+    )
+    second = apply_dc_ecosystem_aggregate_repair(
+        analysis_db=db_path,
+        plan=plan,
+        confirm_dc_repair_scope=DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY,
+        confirm_repair_candidate_hash=str(applied["post_repair_plan"]["repair_candidate_hash"]),
+    )
+
+    assert repair_plan["dc_repair_scope"] == DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY
+    assert repair_plan["repair_candidate_count"] == 2
+    assert repair_plan["ordinary_dc_recopy_required"] is False
+    assert applied["dc_repair_apply_status"] == "APPLIED"
+    assert second["dc_repair_apply_status"] == "NO_CHANGE"
+    conn = sqlite3.connect(db_path)
+    try:
+        proposed_ticker_count = conn.execute(
+            "SELECT COUNT(*) FROM dc_ticker_swing_signal_daily WHERE taxonomy_version='DC_TAXONOMY_FULL_V2_1'"
+        ).fetchone()[0]
+        proposed_synthetic_count = conn.execute(
+            "SELECT COUNT(*) FROM dc_group_synthetic_ohlc_daily WHERE taxonomy_version='DC_TAXONOMY_FULL_V2_1'"
+        ).fetchone()[0]
+        proposed_group_rows = conn.execute(
+            """
+            SELECT group_type, group_name
+            FROM dc_group_swing_signal_daily
+            WHERE taxonomy_version='DC_TAXONOMY_FULL_V2_1'
+            ORDER BY group_type, group_name
+            """
+        ).fetchall()
+        proposed_index_rows = conn.execute(
+            """
+            SELECT group_type, group_name
+            FROM dc_group_index_daily
+            WHERE taxonomy_version='DC_TAXONOMY_FULL_V2_1'
+            ORDER BY group_type, group_name
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+    assert proposed_ticker_count == 0
+    assert proposed_synthetic_count == 0
+    assert proposed_group_rows == [("ecosystem", "DC_ECOSYSTEM_TOTAL")]
+    assert proposed_index_rows == [("ecosystem", "DC_ECOSYSTEM_TOTAL")]
+
+
+def test_report_status_only_aggregate_repair_rolls_back_partial_failure(tmp_path) -> None:
+    current_csv = _write_csv(tmp_path / "current.csv", _rows("DC_TAXONOMY_FULL_V1"))
+    proposed_csv = _write_csv(
+        tmp_path / "proposed.csv",
+        _report_status_only_rows("DC_TAXONOMY_FULL_V2_1"),
+    )
+    db_path = tmp_path / "facts.db"
+    _create_carry_forward_fact_tables(db_path)
+    plan = build_taxonomy_change_plan(
+        deployment_id=2,
+        ecosystem_code="DATACENTER",
+        current_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        current_taxonomy_csv=current_csv,
+        proposed_taxonomy_version="DC_TAXONOMY_FULL_V2_1",
+        proposed_taxonomy_csv=proposed_csv,
+        date_from="2026-07-31",
+        date_to="2026-07-31",
+        rebuild_mode=REBUILD_MODE_AUTO,
+    )
+    repair_plan = plan_dc_ecosystem_aggregate_repair(analysis_db=db_path, plan=plan)
+
+    failed = apply_dc_ecosystem_aggregate_repair(
+        analysis_db=db_path,
+        plan=plan,
+        confirm_dc_repair_scope=DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY,
+        confirm_repair_candidate_hash=str(repair_plan["repair_candidate_hash"]),
+        inject_failure_after_table="dc_group_swing_signal_daily",
+    )
+
+    assert failed["dc_repair_apply_status"] == "FAILED"
+    conn = sqlite3.connect(db_path)
+    try:
+        proposed_group_count = conn.execute(
+            "SELECT COUNT(*) FROM dc_group_swing_signal_daily WHERE taxonomy_version='DC_TAXONOMY_FULL_V2_1'"
+        ).fetchone()[0]
+        proposed_index_count = conn.execute(
+            "SELECT COUNT(*) FROM dc_group_index_daily WHERE taxonomy_version='DC_TAXONOMY_FULL_V2_1'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert proposed_group_count == 0
+    assert proposed_index_count == 0
+
+
+def test_report_status_only_reconciliation_requires_aggregate_only_amendment(tmp_path) -> None:
+    current_csv = _write_csv(tmp_path / "current.csv", _rows("DC_TAXONOMY_FULL_V1"))
+    proposed_csv = _write_csv(
+        tmp_path / "proposed.csv",
+        _report_status_only_rows("DC_TAXONOMY_FULL_V2_1"),
+    )
+    db_path = tmp_path / "facts.db"
+    _create_carry_forward_fact_tables(db_path)
+    plan = build_taxonomy_change_plan(
+        deployment_id=2,
+        ecosystem_code="DATACENTER",
+        current_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        current_taxonomy_csv=current_csv,
+        proposed_taxonomy_version="DC_TAXONOMY_FULL_V2_1",
+        proposed_taxonomy_csv=proposed_csv,
+        date_from="2026-07-31",
+        date_to="2026-07-31",
+        rebuild_mode=REBUILD_MODE_AUTO,
+    )
+
+    reconciliation = plan_report_status_only_resume_reconciliation(
+        analysis_db=db_path,
+        plan=plan,
+        original_plan_hash="old-plan-hash",
+        current_plan_hash=str(plan["plan_hash"]),
+        existing_backup_path=str(tmp_path / "backup.sqlite"),
+        existing_backup_sha256="backup-sha",
+    )
+
+    assert reconciliation["plan_reconciliation_status"] == "SAFE_AMENDMENT_READY"
+    assert reconciliation["original_plan_preserved"] is True
+    assert reconciliation["repair_scope_narrower_or_equal"] is True
+    assert reconciliation["safe_to_resume_after_amendment"] is True
+    assert reconciliation["dc_repair_plan"]["dc_repair_scope"] == DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY
+    assert reconciliation["dc_repair_plan"]["repair_candidate_count"] == 2
 
 
 def test_ready_to_activate_and_active_are_idempotent(tmp_path) -> None:

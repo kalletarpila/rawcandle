@@ -3,7 +3,7 @@
 ## Classification
 
 ```text
-DATACENTER_RSO_CLEANUP_ORDER_AND_AGGREGATE_CARRY_FORWARD_FIXED
+DATACENTER_RSO_AGGREGATE_ONLY_REPAIR_AND_PLAN_RECONCILIATION_IMPLEMENTED
 ```
 
 This document describes the guarded execution path for taxonomy changes where
@@ -113,8 +113,8 @@ whole_range_validation_status=BLOCKED_CLEANUP_NOT_COMPLETED
 Whole-range validation must not infer cleanup success only from current zero
 candidates.
 
-The DC carry-forward is idempotent delete/replace into the target taxonomy
-lineage for the canonical DC fact tables:
+The normal DC carry-forward is idempotent delete/replace into the target
+taxonomy lineage for the canonical DC fact tables:
 
 ```text
 dc_ticker_swing_signal_daily
@@ -146,6 +146,45 @@ Unexpected sentinel keys are not copied. Target validation reports ordinary
 keys, ecosystem aggregate keys, unexpected keys, duplicate keys, and semantic
 mismatches separately. EC construction cannot start unless required DC
 carry-forward validation is OK.
+
+For a failed `REPORT_STATUS_ONLY` resume where ordinary DC lineage already
+exists but the Datacenter ecosystem aggregate keys are missing, the resume path
+does not fall back to broad delta carry-forward. It uses an explicit guarded
+repair scope:
+
+```text
+dc_repair_scope=ECOSYSTEM_AGGREGATE_ONLY
+affected tables:
+  dc_group_swing_signal_daily
+  dc_group_index_daily
+affected key:
+  group_type=ecosystem
+  group_name=DC_ECOSYSTEM_TOTAL
+ordinary_dc_recopy_required=false
+computational_rebuild_required=false
+```
+
+The aggregate-only repair inserts only missing target-taxonomy aggregate rows
+whose active-taxonomy source keys and semantic payloads validate cleanly. It
+does not copy ticker rows, synthetic OHLC rows, ordinary layer/subindustry group
+rows, reports, EC rows, watermarks, or scheduler configuration. The two-table
+repair is transactional and idempotent.
+
+If a previously approved production plan hash no longer matches because the
+implementation was corrected, resume requires a separate plan-reconciliation
+amendment. The original plan hash is preserved and the caller must confirm:
+
+```text
+repair_amendment_hash
+dc_repair_scope
+repair_candidate_hash
+existing_backup_sha256 when supplied
+existing_backup_path when supplied
+```
+
+Safe reconciliation is reported only when business inputs are unchanged, the
+repair scope is narrower or equal to the original intent, and the aggregate-only
+repair planner is safe to apply.
 
 The path records no-computation evidence:
 

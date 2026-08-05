@@ -398,6 +398,8 @@ def format_taxonomy_state_lines(state: dict[str, Any]) -> str:
 
 def format_taxonomy_plan_lines(summary: dict[str, Any]) -> str:
     plan = summary.get("plan", {}) if isinstance(summary.get("plan"), dict) else {}
+    reconciliation = summary.get("plan_reconciliation", {}) if isinstance(summary.get("plan_reconciliation"), dict) else {}
+    repair_plan = reconciliation.get("dc_repair_plan", {}) if isinstance(reconciliation.get("dc_repair_plan"), dict) else {}
     diff = plan.get("taxonomy_diff", {}) if isinstance(plan.get("taxonomy_diff"), dict) else {}
     scope = plan.get("delta_scope_summary", {}) if isinstance(plan.get("delta_scope_summary"), dict) else {}
     estimate = plan.get("estimated_delta_work", {}) if isinstance(plan.get("estimated_delta_work"), dict) else {}
@@ -432,6 +434,14 @@ def format_taxonomy_plan_lines(summary: dict[str, Any]) -> str:
             else "DC-faktat: lasketaan valitun rebuild-moodin mukaisesti",
             "EC-faktat: muodostetaan uudelle lineagelle",
             f"plan_hash={plan.get('plan_hash', '')}",
+            f"plan_reconciliation_status={reconciliation.get('plan_reconciliation_status', '')}",
+            f"original_plan_hash={reconciliation.get('original_plan_hash', '')}",
+            f"current_recomputed_plan_hash={reconciliation.get('current_recomputed_plan_hash', '')}",
+            f"repair_amendment_hash={reconciliation.get('repair_amendment_hash', '')}",
+            f"dc_repair_scope={repair_plan.get('dc_repair_scope', '')}",
+            f"repair_candidate_hash={repair_plan.get('repair_candidate_hash', '')}",
+            f"repair_candidate_count={repair_plan.get('repair_candidate_count', '')}",
+            f"ordinary_dc_recopy_required={repair_plan.get('ordinary_dc_recopy_required', '')}",
             f"delta_safe={plan.get('delta_safe', '')}",
             "delta_blocking_reasons=" + "; ".join(plan.get("delta_blocking_reasons", [])),
             f"added_tickers={len(diff.get('added_tickers', []))}",
@@ -461,6 +471,8 @@ def format_taxonomy_plan_lines(summary: dict[str, Any]) -> str:
 
 
 def taxonomy_confirmation_key(plan: dict[str, Any]) -> tuple[Any, ...]:
+    reconciliation = plan.get("plan_reconciliation", {}) if isinstance(plan.get("plan_reconciliation"), dict) else {}
+    repair_plan = reconciliation.get("dc_repair_plan", {}) if isinstance(reconciliation.get("dc_repair_plan"), dict) else {}
     return (
         plan.get("deployment_id"),
         plan.get("proposed_taxonomy_version"),
@@ -470,6 +482,9 @@ def taxonomy_confirmation_key(plan: dict[str, Any]) -> tuple[Any, ...]:
         plan.get("selected_rebuild_mode", plan.get("rebuild_mode")),
         plan.get("change_execution_class"),
         plan.get("plan_hash"),
+        reconciliation.get("repair_amendment_hash"),
+        repair_plan.get("dc_repair_scope"),
+        repair_plan.get("repair_candidate_hash"),
     )
 
 
@@ -1156,6 +1171,15 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
             )
             taxonomy_confirmation_state["orchestration_status"] = normalized_status
             safe_next_action = str(inspection.get("safe_next_action", ""))
+            if safe_next_action == "resume_from_failed_phase" and isinstance(inspection.get("plan"), dict):
+                prepared_plan = dict(inspection["plan"])
+                if isinstance(inspection.get("plan_reconciliation"), dict):
+                    prepared_plan["plan_reconciliation"] = inspection["plan_reconciliation"]
+                taxonomy_confirmation_state["summary"] = {
+                    "deployment_id": inspection.get("deployment_id"),
+                    "plan": prepared_plan,
+                    "plan_reconciliation": inspection.get("plan_reconciliation"),
+                }
             taxonomy_plan_activation_button.disabled = normalized_status != "READY_TO_ACTIVATE"
             taxonomy_resume_button.disabled = safe_next_action != "resume_from_failed_phase"
             taxonomy_validate_button.disabled = safe_next_action != "validation_only_recovery"
@@ -1367,6 +1391,8 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
             if not deployment_id or not plan:
                 taxonomy_status_field.value = "Resume blocked: current UI session has no prepared plan."
             else:
+                reconciliation = summary.get("plan_reconciliation", {}) if isinstance(summary.get("plan_reconciliation"), dict) else {}
+                repair_plan = reconciliation.get("dc_repair_plan", {}) if isinstance(reconciliation.get("dc_repair_plan"), dict) else {}
                 operation = create_taxonomy_change_operation(
                     deployment_id=deployment_id,
                     operation_type="RESUME",
@@ -1392,7 +1418,34 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
                         confirm_date_from=str(plan["date_from"]),
                         confirm_date_to=str(plan["date_to"]),
                         confirm_rebuild_mode=str(plan["selected_rebuild_mode"]),
-                        confirm_plan_hash=str(plan["plan_hash"]),
+                        confirm_plan_hash=str(reconciliation.get("original_plan_hash") or plan["plan_hash"]),
+                        confirm_repair_amendment_hash=(
+                            str(reconciliation["repair_amendment_hash"])
+                            if reconciliation.get("repair_amendment_hash")
+                            else None
+                        ),
+                        confirm_dc_repair_scope=(
+                            str(repair_plan["dc_repair_scope"])
+                            if repair_plan.get("dc_repair_scope")
+                            else None
+                        ),
+                        confirm_repair_candidate_hash=(
+                            str(repair_plan["repair_candidate_hash"])
+                            if repair_plan.get("repair_candidate_hash")
+                            else None
+                        ),
+                        confirm_existing_backup_path=(
+                            str(reconciliation.get("repair_amendment_identity", {}).get("existing_backup_path"))
+                            if isinstance(reconciliation.get("repair_amendment_identity"), dict)
+                            and reconciliation.get("repair_amendment_identity", {}).get("existing_backup_path")
+                            else None
+                        ),
+                        confirm_existing_backup_sha256=(
+                            str(reconciliation.get("repair_amendment_identity", {}).get("existing_backup_sha256"))
+                            if isinstance(reconciliation.get("repair_amendment_identity"), dict)
+                            and reconciliation.get("repair_amendment_identity", {}).get("existing_backup_sha256")
+                            else None
+                        ),
                         services=_taxonomy_services(resume=True),
                     )
                 write_taxonomy_operation_artifact(operation, relative_name="resume_summary.json", payload=run_summary)

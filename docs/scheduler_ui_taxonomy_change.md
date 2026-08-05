@@ -122,6 +122,9 @@ execution class
 report-status-only safety
 Datacenter pipeline / Stage 2 required flags
 plan hash
+plan reconciliation status when present
+repair amendment hash when present
+aggregate-only repair scope and candidate hash when present
 delta safety
 blocking reasons
 diff counts
@@ -145,12 +148,30 @@ date_to
 selected rebuild mode
 execution class
 plan hash
+repair amendment hash when present
+aggregate-only repair scope when present
+aggregate repair candidate hash when present
 ```
 
 Changing the prepared plan invalidates the confirmation and disables rebuild
 until the current plan is confirmed again. This includes changes between
 ordinary delta/full execution and the specialized `REPORT_STATUS_ONLY`
 execution class.
+
+For failed `REPORT_STATUS_ONLY` resumes that require implementation
+reconciliation, the UI displays the backend-provided amendment and
+aggregate-only repair fields. Resume passes those fields back to the guarded
+backend:
+
+```text
+repair_amendment_hash
+dc_repair_scope=ECOSYSTEM_AGGREGATE_ONLY
+repair_candidate_hash
+existing_backup_sha256 when present
+existing_backup_path when present
+```
+
+The UI does not compute or apply the repair itself.
 
 For `REPORT_STATUS_ONLY` plans, the UI explicitly shows:
 

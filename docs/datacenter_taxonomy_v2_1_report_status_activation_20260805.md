@@ -980,3 +980,55 @@ Required next implementation before a controlled resume:
 4. Reconcile or intentionally accept the actual plan hash before production
    writes.
 ```
+
+## 2026-08-05 Aggregate-Only Repair Implementation
+
+Final implementation classification:
+
+```text
+DATACENTER_RSO_AGGREGATE_ONLY_REPAIR_AND_PLAN_RECONCILIATION_IMPLEMENTED
+```
+
+The required backend guard now exists. `REPORT_STATUS_ONLY` resume no longer
+falls through to the broad general delta carry-forward path when the missing DC
+state is limited to Datacenter ecosystem aggregate rows.
+
+Implemented repair scope:
+
+```text
+dc_repair_scope=ECOSYSTEM_AGGREGATE_ONLY
+tables:
+  dc_group_swing_signal_daily
+  dc_group_index_daily
+key:
+  group_type=ecosystem
+  group_name=DC_ECOSYSTEM_TOTAL
+ordinary_dc_recopy_required=false
+computational_rebuild_required=false
+```
+
+The repair planner and apply path are deterministic, idempotent, and
+transactional. They insert only missing target-taxonomy aggregate rows from
+validated active-taxonomy source rows. They do not copy ticker rows, synthetic
+OHLC rows, ordinary group rows, EC rows, watermarks, scheduler config, taxonomy
+CSVs, watchlists, reports, or production backups.
+
+Plan reconciliation is also explicit. A stale approved production plan hash can
+be reconciled only through a separate amendment with:
+
+```text
+plan_reconciliation_reason=IMPLEMENTATION_CORRECTION_AGGREGATE_CARRY_FORWARD_SCOPE
+original_plan_hash=<preserved original>
+current_recomputed_plan_hash=<current corrected-code plan hash>
+repair_amendment_hash=<deterministic amendment hash>
+repair_candidate_hash=<aggregate candidate hash>
+```
+
+State-changing resume requires confirmation of the amendment hash, repair
+scope, and repair candidate hash before any DC repair write can occur.
+
+This implementation task did not resume deployment 2, acquire the production
+operation lock, change Scheduler guard state, run Scheduler, run Datacenter
+pipeline, run Stage 2, run EC rebuild/backfill/loaders, apply aggregate repair,
+apply EC cleanup, finalize watermarks, activate V2.1, modify production
+configuration, or write production databases.
