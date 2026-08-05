@@ -411,6 +411,26 @@ def format_taxonomy_plan_lines(summary: dict[str, Any]) -> str:
             f"date_range={plan.get('date_from', '')}..{plan.get('date_to', '')}",
             f"recommended_rebuild_mode={plan.get('recommended_rebuild_mode', '')}",
             f"selected_rebuild_mode={plan.get('selected_rebuild_mode', plan.get('rebuild_mode', ''))}",
+            f"change_execution_class={plan.get('change_execution_class', '')}",
+            f"report_status_only_safe={plan.get('report_status_only_safe', '')}",
+            f"report_status_only_changed_row_count={plan.get('report_status_only_changed_row_count', '')}",
+            f"report_status_only_changed_ticker_count={plan.get('report_status_only_changed_ticker_count', '')}",
+            "report_status_only_changed_fields="
+            + ", ".join(plan.get("report_status_only_changed_fields", [])),
+            "report_status_only_blocking_reasons="
+            + "; ".join(plan.get("report_status_only_blocking_reasons", [])),
+            f"computational_rebuild_required={plan.get('computational_rebuild_required', '')}",
+            f"datacenter_pipeline_required={plan.get('datacenter_pipeline_required', '')}",
+            f"stage2_required={plan.get('stage2_required', '')}",
+            f"Muutosluokka: {plan.get('change_execution_class', '')}",
+            "Laskennallinen rebuild: "
+            + ("ei" if plan.get("computational_rebuild_required") is False else "kyllä"),
+            "Datacenter pipeline: " + ("ei" if plan.get("datacenter_pipeline_required") is False else "kyllä"),
+            "Stage 2: " + ("ei" if plan.get("stage2_required") is False else "kyllä"),
+            "DC-faktat: kopioidaan uudelle lineagelle"
+            if plan.get("change_execution_class") == "REPORT_STATUS_ONLY"
+            else "DC-faktat: lasketaan valitun rebuild-moodin mukaisesti",
+            "EC-faktat: muodostetaan uudelle lineagelle",
             f"plan_hash={plan.get('plan_hash', '')}",
             f"delta_safe={plan.get('delta_safe', '')}",
             "delta_blocking_reasons=" + "; ".join(plan.get("delta_blocking_reasons", [])),
@@ -448,6 +468,7 @@ def taxonomy_confirmation_key(plan: dict[str, Any]) -> tuple[Any, ...]:
         plan.get("date_from"),
         plan.get("date_to"),
         plan.get("selected_rebuild_mode", plan.get("rebuild_mode")),
+        plan.get("change_execution_class"),
         plan.get("plan_hash"),
     )
 

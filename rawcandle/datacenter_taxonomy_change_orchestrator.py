@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import sqlite3
@@ -36,6 +37,24 @@ from rawcandle.scheduler.runner import read_scheduler_status, _resolve_datacente
 REBUILD_MODE_FULL = "FULL_REBUILD"
 REBUILD_MODE_DELTA = "DELTA_REBUILD"
 REBUILD_MODE_AUTO = "AUTO"
+CHANGE_EXECUTION_FULL_REBUILD = "FULL_REBUILD"
+CHANGE_EXECUTION_DELTA_REBUILD = "DELTA_REBUILD"
+CHANGE_EXECUTION_REPORT_STATUS_ONLY = "REPORT_STATUS_ONLY"
+TAXONOMY_FIELD_DEPENDENCIES = {
+    "taxonomy_version": "IDENTITY",
+    "ticker": "IDENTITY",
+    "layer": "IDENTITY",
+    "subindustry": "IDENTITY",
+    "is_primary": "COMPUTATIONAL",
+    "role_weight": "COMPUTATIONAL",
+    "report_group_status": "REPORTING_ONLY",
+    "notes": "DOCUMENTATION_ONLY",
+}
+REPORT_STATUS_ONLY_ALLOWED_CHANGED_FIELDS = {
+    "taxonomy_version",
+    "report_group_status",
+    "notes",
+}
 SUPPORTED_REBUILD_MODES = {REBUILD_MODE_FULL, REBUILD_MODE_DELTA}
 REBUILD_MODE_ALIASES = {
     "auto": REBUILD_MODE_AUTO,
@@ -151,6 +170,13 @@ def build_production_taxonomy_change_services(
         return {"status": "OK", "backup_reused": False, **backup_summary}
 
     def _run_dc_rebuild(*, plan: dict[str, object], **_kwargs: object) -> dict[str, object]:
+        if plan.get("change_execution_class") == CHANGE_EXECUTION_REPORT_STATUS_ONLY:
+            return {
+                "status": "OK",
+                "dc_rebuild_skipped": True,
+                "skip_reason": CHANGE_EXECUTION_REPORT_STATUS_ONLY,
+                **_no_computation_evidence(),
+            }
         config = read_scheduler_config(config_path)
         resolved = _resolve_datacenter_post_step_config("usa", config)
         if resolved is None:
@@ -395,6 +421,120 @@ def _compute_delta_safety(diff: dict[str, object]) -> dict[str, object]:
         "delta_safe": not reasons,
         "delta_blocking_reasons": sorted(set(str(reason) for reason in reasons)),
         "recommended_rebuild_mode": REBUILD_MODE_DELTA if not reasons else REBUILD_MODE_FULL,
+    }
+
+
+def _raw_taxonomy_rows_by_membership_key(
+    taxonomy_csv: str | Path,
+) -> tuple[list[str], dict[tuple[str, str, str, str], dict[str, str]]]:
+    with Path(taxonomy_csv).open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        fieldnames = list(reader.fieldnames or [])
+        rows: dict[tuple[str, str, str, str], dict[str, str]] = {}
+        for raw in reader:
+            key = (
+                str(raw.get("ticker") or "").strip().upper(),
+                str(raw.get("layer") or "").strip(),
+                str(raw.get("subindustry") or "").strip(),
+                str(raw.get("is_primary") or "").strip(),
+            )
+            rows[key] = {field: str(raw.get(field) or "").strip() for field in fieldnames}
+    return fieldnames, rows
+
+
+def classify_report_status_only_change(
+    *,
+    current_taxonomy_csv: str | Path,
+    current_taxonomy_version: str,
+    proposed_taxonomy_csv: str | Path,
+    proposed_taxonomy_version: str,
+    diff: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Classify whether a taxonomy diff is safe for metadata-only execution."""
+    diff = diff or build_taxonomy_diff(
+        current_taxonomy_csv=current_taxonomy_csv,
+        current_taxonomy_version=current_taxonomy_version,
+        proposed_taxonomy_csv=proposed_taxonomy_csv,
+        proposed_taxonomy_version=proposed_taxonomy_version,
+    )
+    current_fields, current_rows = _raw_taxonomy_rows_by_membership_key(current_taxonomy_csv)
+    proposed_fields, proposed_rows = _raw_taxonomy_rows_by_membership_key(proposed_taxonomy_csv)
+    blocking: list[str] = []
+    if current_fields != proposed_fields:
+        blocking.append("taxonomy schema changed")
+    unknown_fields = sorted((set(current_fields) | set(proposed_fields)) - set(TAXONOMY_FIELD_DEPENDENCIES))
+    if unknown_fields:
+        blocking.append("unknown taxonomy columns present: " + ", ".join(unknown_fields))
+    added_keys = sorted(set(proposed_rows) - set(current_rows))
+    removed_keys = sorted(set(current_rows) - set(proposed_rows))
+    if added_keys:
+        blocking.append("membership rows added")
+    if removed_keys:
+        blocking.append("membership rows removed")
+    structural_checks = {
+        "added_tickers": "tickers added",
+        "removed_tickers": "tickers removed",
+        "added_layers": "layers added",
+        "removed_layers": "layers removed",
+        "renamed_layers": "layers renamed",
+        "added_subindustries": "subindustries added",
+        "removed_subindustries": "subindustries removed",
+        "renamed_subindustries": "subindustries renamed",
+        "primary_membership_changes": "primary memberships changed",
+        "secondary_membership_additions": "secondary memberships added",
+        "secondary_membership_removals": "secondary memberships removed",
+    }
+    for key, reason in structural_checks.items():
+        if diff.get(key):
+            blocking.append(reason)
+
+    changed_fields: set[str] = set()
+    changed_rows: list[dict[str, object]] = []
+    for key in sorted(set(current_rows) & set(proposed_rows)):
+        current = current_rows[key]
+        proposed = proposed_rows[key]
+        row_fields = sorted(
+            field
+            for field in set(current) | set(proposed)
+            if str(current.get(field) or "") != str(proposed.get(field) or "")
+        )
+        if row_fields:
+            changed_fields.update(row_fields)
+            changed_rows.append(
+                {
+                    "ticker": key[0],
+                    "layer": key[1],
+                    "subindustry": key[2],
+                    "is_primary": key[3],
+                    "changed_fields": row_fields,
+                }
+            )
+    disallowed_changed = sorted(changed_fields - REPORT_STATUS_ONLY_ALLOWED_CHANGED_FIELDS)
+    if disallowed_changed:
+        blocking.append("computational or unknown fields changed: " + ", ".join(disallowed_changed))
+    changed_unknown = sorted(changed_fields - set(TAXONOMY_FIELD_DEPENDENCIES))
+    if changed_unknown:
+        blocking.append("unknown changed fields: " + ", ".join(changed_unknown))
+    changed_computational = sorted(
+        field
+        for field in changed_fields
+        if TAXONOMY_FIELD_DEPENDENCIES.get(field) in {"COMPUTATIONAL", "UNKNOWN"}
+    )
+    if changed_computational:
+        blocking.append("computational fields changed: " + ", ".join(changed_computational))
+
+    safe = not blocking
+    return {
+        "change_execution_class": (
+            CHANGE_EXECUTION_REPORT_STATUS_ONLY if safe else CHANGE_EXECUTION_DELTA_REBUILD
+        ),
+        "report_status_only_safe": safe,
+        "report_status_only_blocking_reasons": sorted(set(blocking)),
+        "report_status_only_changed_row_count": len(changed_rows),
+        "report_status_only_changed_ticker_count": len({str(row["ticker"]) for row in changed_rows}),
+        "report_status_only_changed_fields": sorted(changed_fields),
+        "report_status_only_changed_rows": changed_rows,
+        "taxonomy_field_dependencies": dict(TAXONOMY_FIELD_DEPENDENCIES),
     }
 
 
@@ -782,10 +922,25 @@ def build_taxonomy_change_plan(
         proposed_taxonomy_version=proposed_taxonomy_version,
     )
     delta_safety = _compute_delta_safety(diff)
+    report_status_classification = classify_report_status_only_change(
+        current_taxonomy_csv=current_taxonomy_csv,
+        current_taxonomy_version=current_taxonomy_version,
+        proposed_taxonomy_csv=proposed_taxonomy_csv,
+        proposed_taxonomy_version=proposed_taxonomy_version,
+        diff=diff,
+    )
     selected_rebuild_mode = (
         delta_safety["recommended_rebuild_mode"]
         if requested_rebuild_mode == REBUILD_MODE_AUTO
         else requested_rebuild_mode
+    )
+    change_execution_class = (
+        CHANGE_EXECUTION_REPORT_STATUS_ONLY
+        if (
+            requested_rebuild_mode == REBUILD_MODE_AUTO
+            and report_status_classification["report_status_only_safe"]
+        )
+        else selected_rebuild_mode
     )
     blocking_errors: list[str] = []
     if selected_rebuild_mode == REBUILD_MODE_DELTA and not delta_safety["delta_safe"]:
@@ -824,6 +979,24 @@ def build_taxonomy_change_plan(
         "recommended_rebuild_mode": delta_safety["recommended_rebuild_mode"],
         "selected_rebuild_mode": selected_rebuild_mode,
         "rebuild_mode": selected_rebuild_mode,
+        "change_execution_class": change_execution_class,
+        "report_status_only_safe": report_status_classification["report_status_only_safe"],
+        "report_status_only_changed_row_count": report_status_classification[
+            "report_status_only_changed_row_count"
+        ],
+        "report_status_only_changed_ticker_count": report_status_classification[
+            "report_status_only_changed_ticker_count"
+        ],
+        "report_status_only_changed_fields": report_status_classification[
+            "report_status_only_changed_fields"
+        ],
+        "report_status_only_blocking_reasons": report_status_classification[
+            "report_status_only_blocking_reasons"
+        ],
+        "taxonomy_field_dependencies": report_status_classification["taxonomy_field_dependencies"],
+        "computational_rebuild_required": change_execution_class != CHANGE_EXECUTION_REPORT_STATUS_ONLY,
+        "datacenter_pipeline_required": change_execution_class != CHANGE_EXECUTION_REPORT_STATUS_ONLY,
+        "stage2_required": change_execution_class != CHANGE_EXECUTION_REPORT_STATUS_ONLY,
         "date_from": date_from,
         "date_to": date_to,
         "taxonomy_diff": diff,
@@ -1242,6 +1415,23 @@ def execute_taxonomy_rebuild(
         date_to=date_to,
         rebuild_mode=normalized_confirm_rebuild_mode,
     )
+    if normalized_confirm_rebuild_mode in SUPPORTED_REBUILD_MODES and plan.get("plan_hash") != confirm_plan_hash:
+        auto_plan = build_taxonomy_change_plan(
+            deployment_id=deployment_id,
+            ecosystem_code=str(deployment["ecosystem_code"]),
+            current_taxonomy_version=current_version,
+            current_taxonomy_csv=current_csv,
+            proposed_taxonomy_version=str(deployment["proposed_taxonomy_version"]),
+            proposed_taxonomy_csv=proposed_taxonomy_csv,
+            date_from=str(deployment["rebuild_start_date"]),
+            date_to=date_to,
+            rebuild_mode=REBUILD_MODE_AUTO,
+        )
+        if (
+            auto_plan.get("selected_rebuild_mode") == normalized_confirm_rebuild_mode
+            and auto_plan.get("plan_hash") == confirm_plan_hash
+        ):
+            plan = auto_plan
     confirmation_errors = _verify_confirmation(
         plan=plan,
         confirm_deployment_id=confirm_deployment_id,
@@ -1252,11 +1442,22 @@ def execute_taxonomy_rebuild(
         confirm_rebuild_mode=normalized_confirm_rebuild_mode,
         confirm_plan_hash=confirm_plan_hash,
     )
+    change_execution_class = str(plan.get("change_execution_class") or plan.get("selected_rebuild_mode"))
+    report_status_only = change_execution_class == CHANGE_EXECUTION_REPORT_STATUS_ONLY
     if confirmation_errors or plan["blocking_errors"]:
         return _failure(
             failed_phase="PLANNED",
             failure_code="CONFIRMATION_FAILED",
             failure_message="; ".join(confirmation_errors + list(plan["blocking_errors"])),
+            completed_phases=[],
+            resume_from_phase="PLANNED",
+            scheduler_guard_restored=True,
+        )
+    if report_status_only and not plan.get("report_status_only_safe"):
+        return _failure(
+            failed_phase="PLANNED",
+            failure_code="REPORT_STATUS_ONLY_BLOCKED",
+            failure_message="; ".join(str(reason) for reason in plan.get("report_status_only_blocking_reasons", [])),
             completed_phases=[],
             resume_from_phase="PLANNED",
             scheduler_guard_restored=True,
@@ -1285,8 +1486,17 @@ def execute_taxonomy_rebuild(
             if carry_forward.get("carry_forward_status") != "OK":
                 return _failure("REBUILDING", "DELTA_CARRY_FORWARD", str(carry_forward), completed, "REBUILDING", True)
             completed.append("DELTA_CARRY_FORWARD")
-        _call_phase(services.run_dc_rebuild, "dc_rebuild", plan=plan)
-        completed.append("DC_REBUILD")
+        if report_status_only:
+            dc_rebuild = {
+                "status": "OK",
+                "dc_rebuild_skipped": True,
+                "skip_reason": CHANGE_EXECUTION_REPORT_STATUS_ONLY,
+                **_no_computation_evidence(),
+            }
+            completed.append("DC_REBUILD_SKIPPED_REPORT_STATUS_ONLY")
+        else:
+            dc_rebuild = _call_phase(services.run_dc_rebuild, "dc_rebuild", plan=plan)
+            completed.append("DC_REBUILD")
         _call_phase(services.run_ec_rebuild, "ec_rebuild", plan=plan)
         completed.append("EC_REBUILD")
         cleanup = plan_ec_taxonomy_replacement_cleanup(
@@ -1326,6 +1536,10 @@ def execute_taxonomy_rebuild(
         return {
             "run_status": "READY_TO_ACTIVATE" if activation_plan.get("safe_to_activate") else "VALIDATION_FAILED",
             "activation_executed": False,
+            "change_execution_class": change_execution_class,
+            "report_status_only_execution": report_status_only,
+            "dc_rebuild": dc_rebuild,
+            **(_no_computation_evidence() if report_status_only else {}),
             "completed_phases": completed,
             "activation_plan": activation_plan,
             "cleanup_plan": cleanup,
@@ -1498,6 +1712,21 @@ def _call_phase(func: Callable[..., dict[str, object]] | None, phase: str, **kwa
     if result.get("status") not in {"OK", "NO_ACTIVE_WRITER", "NO_CHANGE"}:
         raise RuntimeError(f"phase failed: {phase}: {result}")
     return result
+
+
+def _no_computation_evidence() -> dict[str, object]:
+    return {
+        "datacenter_pipeline_called": False,
+        "stage2_planner_called": False,
+        "stage2_called": False,
+        "ticker_calculation_called": False,
+        "group_calculation_called": False,
+        "synthetic_ohlc_calculation_called": False,
+        "group_index_calculation_called": False,
+        "downstream_calculation_called": False,
+        "report_generation_called": False,
+        "external_fetch_called": False,
+    }
 
 
 def _resume_from_status(status: str) -> str:

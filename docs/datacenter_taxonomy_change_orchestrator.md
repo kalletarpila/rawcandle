@@ -40,6 +40,12 @@ rebuild_mode=AUTO
 `FULL_REBUILD` or `DELTA_REBUILD` in the plan, and state-changing execution must
 confirm the selected explicit mode and plan hash.
 
+`AUTO` can also resolve to the specialized execution class
+`REPORT_STATUS_ONLY` when the taxonomy membership graph is unchanged and only
+`taxonomy_version`, `report_group_status`, and `notes` changed. In that case the
+selected rebuild mode remains delta-compatible, but the execution dispatcher
+uses a separate report-status-only path that skips Datacenter calculation.
+
 ## Backend Facade
 
 The facade lives in:
@@ -271,6 +277,15 @@ requested_rebuild_mode
 recommended_rebuild_mode
 selected_rebuild_mode
 rebuild_mode
+change_execution_class
+report_status_only_safe
+report_status_only_changed_row_count
+report_status_only_changed_ticker_count
+report_status_only_changed_fields
+report_status_only_blocking_reasons
+computational_rebuild_required
+datacenter_pipeline_required
+stage2_required
 date_from
 date_to
 taxonomy_diff
@@ -293,8 +308,31 @@ rebuild mode
 plan hash
 ```
 
-A changed CSV, date range, active taxonomy, rebuild mode, deployment identity, or
-plan invalidates the confirmation.
+A changed CSV, date range, active taxonomy, rebuild mode, execution class,
+deployment identity, or plan invalidates the confirmation. The plan hash includes
+`change_execution_class`, so a plan prepared as `REPORT_STATUS_ONLY` cannot be
+silently executed later as ordinary delta or full rebuild under the same hash.
+
+## Report Status Only Execution
+
+`REPORT_STATUS_ONLY` is for taxonomy revisions that only alter reporting
+membership status or notes while preserving all computational membership fields.
+The field dependency registry treats `ticker`, `layer`, `subindustry`, and
+`taxonomy_version` as identity fields, `is_primary` and `role_weight` as
+computational fields, `report_group_status` as reporting-only, and `notes` as
+documentation-only. Unknown CSV columns block the specialized path.
+
+The execution path carries forward the complete reusable DC canonical fact
+slice into the target taxonomy lineage and then runs existing EC construction
+from that completed target DC state. It does not run
+`run_datacenter_swing_pipeline`, Stage 2 planning, ticker/group/synthetic/index
+calculations, downstream calculations, report generation, or external fetches.
+
+Detailed contract notes live in:
+
+```text
+docs/datacenter_taxonomy_report_status_only_execution.md
+```
 
 ## Delta Rebuild Backend
 
@@ -368,6 +406,11 @@ after backup validation and before the injected DC rebuild service. Affected
 ticker/group rebuilds, EC loading, coverage, parity, cleanup, watermark
 finalization, and activation planning still use the same injected service and
 validation boundaries as full rebuilds.
+
+For report-status-only plans, `DELTA_CARRY_FORWARD` still runs, but the DC
+rebuild phase is recorded as `DC_REBUILD_SKIPPED_REPORT_STATUS_ONLY`. EC loading,
+cleanup, validation, and activation planning continue through the existing
+guarded phase boundaries.
 
 ## Resume And Idempotency
 

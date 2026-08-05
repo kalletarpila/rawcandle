@@ -22,6 +22,7 @@ from dev_tools.stock_update_scheduler_ui import (
     build_skip_next_run_config,
     build_text_log_browser_url,
     find_datacenter_generated_reports,
+    format_taxonomy_plan_lines,
     format_run_now_error_message,
     format_systemd_on_calendar,
     taxonomy_activation_action_state,
@@ -134,6 +135,48 @@ def _write_taxonomy_csv(path: Path, version: str) -> Path:
         writer.writerow(_TAXONOMY_HEADER)
         writer.writerows(rows)
     return path
+
+
+def test_taxonomy_plan_lines_and_confirmation_include_execution_class() -> None:
+    base_plan = {
+        "deployment_id": 7,
+        "current_taxonomy_version": "DC_TAXONOMY_FULL_V2",
+        "current_source_sha256": "oldhash",
+        "proposed_taxonomy_version": "DC_TAXONOMY_FULL_V2_1",
+        "proposed_source_sha256": "newhash",
+        "date_from": "2025-08-01",
+        "date_to": "2026-07-31",
+        "recommended_rebuild_mode": "DELTA_REBUILD",
+        "selected_rebuild_mode": "DELTA_REBUILD",
+        "change_execution_class": "REPORT_STATUS_ONLY",
+        "report_status_only_safe": True,
+        "report_status_only_changed_row_count": 12,
+        "report_status_only_changed_ticker_count": 8,
+        "report_status_only_changed_fields": ["report_group_status", "taxonomy_version"],
+        "report_status_only_blocking_reasons": [],
+        "computational_rebuild_required": False,
+        "datacenter_pipeline_required": False,
+        "stage2_required": False,
+        "plan_hash": "hash-rso",
+        "delta_safe": True,
+        "delta_blocking_reasons": [],
+        "taxonomy_diff": {"scope_flag_changes": [{}]},
+        "delta_scope_summary": {},
+        "estimated_delta_work": {},
+        "blocking_errors": [],
+    }
+
+    rendered = format_taxonomy_plan_lines({"deployment_id": 7, "plan": base_plan, "blocking_errors": []})
+
+    assert "change_execution_class=REPORT_STATUS_ONLY" in rendered
+    assert "report_status_only_safe=True" in rendered
+    assert "computational_rebuild_required=False" in rendered
+    assert "Datacenter pipeline: ei" in rendered
+    assert "Stage 2: ei" in rendered
+    assert "DC-faktat: kopioidaan uudelle lineagelle" in rendered
+    assert taxonomy_confirmation_key(base_plan) != taxonomy_confirmation_key(
+        {**base_plan, "change_execution_class": "DELTA_REBUILD"}
+    )
 
 
 def _write_taxonomy_ui_config(path: Path, *, db_path: Path, current_csv: Path) -> None:

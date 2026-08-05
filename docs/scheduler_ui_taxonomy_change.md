@@ -118,6 +118,9 @@ current/proposed taxonomy versions
 current/proposed hashes
 date range
 recommended and selected rebuild mode
+execution class
+report-status-only safety
+Datacenter pipeline / Stage 2 required flags
 plan hash
 delta safety
 blocking reasons
@@ -140,11 +143,25 @@ proposed source hash
 date_from
 date_to
 selected rebuild mode
+execution class
 plan hash
 ```
 
 Changing the prepared plan invalidates the confirmation and disables rebuild
-until the current plan is confirmed again.
+until the current plan is confirmed again. This includes changes between
+ordinary delta/full execution and the specialized `REPORT_STATUS_ONLY`
+execution class.
+
+For `REPORT_STATUS_ONLY` plans, the UI explicitly shows:
+
+```text
+Muutosluokka: REPORT_STATUS_ONLY
+Laskennallinen rebuild: ei
+Datacenter pipeline: ei
+Stage 2: ei
+DC-faktat: kopioidaan uudelle lineagelle
+EC-faktat: muodostetaan uudelle lineagelle
+```
 
 The visible rebuild action calls the unified `execute_taxonomy_rebuild`
 function. It does not call individual DC rebuild commands, EC rebuild commands,

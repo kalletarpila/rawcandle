@@ -5,6 +5,7 @@ import sqlite3
 from pathlib import Path
 
 from rawcandle.datacenter_taxonomy_change_orchestrator import (
+    CHANGE_EXECUTION_REPORT_STATUS_ONLY,
     REBUILD_MODE_AUTO,
     REBUILD_MODE_DELTA,
     REBUILD_MODE_FULL,
@@ -12,6 +13,7 @@ from rawcandle.datacenter_taxonomy_change_orchestrator import (
     build_production_taxonomy_change_services,
     build_taxonomy_change_plan,
     build_taxonomy_diff,
+    classify_report_status_only_change,
     copy_delta_carry_forward,
     execute_taxonomy_rebuild,
     inspect_taxonomy_change,
@@ -50,6 +52,13 @@ def _rows(version: str) -> list[list[object]]:
         [version, "BBB", "Power", "UPS", "EXTENDED", 1, 0.8, ""],
         [version, "BBB", "Compute", "GPU", "WATCH_ONLY", 0, 0.2, ""],
     ]
+
+
+def _report_status_only_rows(version: str) -> list[list[object]]:
+    rows = _rows(version)
+    rows[1][4] = "CORE"
+    rows[1][7] = "report status update"
+    return rows
 
 
 def _db(tmp_path: Path, current_csv: Path) -> Path:
@@ -180,6 +189,50 @@ def test_taxonomy_diff_blocks_structural_changes(tmp_path) -> None:
     assert diff["structural_change_blocking_errors"]
 
 
+def test_report_status_only_classifier_allows_only_reporting_and_notes(tmp_path) -> None:
+    current_csv = _write_csv(tmp_path / "current.csv", _rows("DC_TAXONOMY_FULL_V1"))
+    proposed_csv = _write_csv(
+        tmp_path / "proposed.csv",
+        _report_status_only_rows("DC_TAXONOMY_FULL_V2_1"),
+    )
+
+    classification = classify_report_status_only_change(
+        current_taxonomy_csv=current_csv,
+        current_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        proposed_taxonomy_csv=proposed_csv,
+        proposed_taxonomy_version="DC_TAXONOMY_FULL_V2_1",
+    )
+
+    assert classification["change_execution_class"] == CHANGE_EXECUTION_REPORT_STATUS_ONLY
+    assert classification["report_status_only_safe"] is True
+    assert classification["report_status_only_changed_fields"] == [
+        "notes",
+        "report_group_status",
+        "taxonomy_version",
+    ]
+    assert classification["report_status_only_changed_row_count"] == 3
+    assert classification["report_status_only_changed_ticker_count"] == 2
+    assert classification["report_status_only_blocking_reasons"] == []
+
+
+def test_report_status_only_classifier_blocks_computational_and_unknown_fields(tmp_path) -> None:
+    current_csv = _write_csv(tmp_path / "current.csv", _rows("DC_TAXONOMY_FULL_V1"))
+    proposed = _rows("DC_TAXONOMY_FULL_V2_1")
+    proposed[0][6] = 0.9
+    proposed_csv = _write_csv(tmp_path / "proposed.csv", proposed)
+
+    classification = classify_report_status_only_change(
+        current_taxonomy_csv=current_csv,
+        current_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        proposed_taxonomy_csv=proposed_csv,
+        proposed_taxonomy_version="DC_TAXONOMY_FULL_V2_1",
+    )
+
+    assert classification["report_status_only_safe"] is False
+    assert classification["change_execution_class"] == REBUILD_MODE_DELTA
+    assert "computational fields changed: role_weight" in classification["report_status_only_blocking_reasons"]
+
+
 def test_plan_hash_is_deterministic_and_changes_with_inputs(tmp_path) -> None:
     current_csv = _write_csv(tmp_path / "current.csv", _rows("DC_TAXONOMY_FULL_V1"))
     proposed_csv = _write_csv(tmp_path / "proposed.csv", _rows("DC_TAXONOMY_FULL_V2"))
@@ -201,6 +254,46 @@ def test_plan_hash_is_deterministic_and_changes_with_inputs(tmp_path) -> None:
 
     assert first["plan_hash"] == second["plan_hash"]
     assert first["plan_hash"] != changed["plan_hash"]
+
+
+def test_auto_plan_selects_report_status_only_for_safe_metadata_change(tmp_path) -> None:
+    current_csv = _write_csv(tmp_path / "current.csv", _rows("DC_TAXONOMY_FULL_V1"))
+    proposed_csv = _write_csv(
+        tmp_path / "proposed.csv",
+        _report_status_only_rows("DC_TAXONOMY_FULL_V2_1"),
+    )
+
+    auto = build_taxonomy_change_plan(
+        deployment_id=None,
+        ecosystem_code="DATACENTER",
+        current_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        current_taxonomy_csv=current_csv,
+        proposed_taxonomy_version="DC_TAXONOMY_FULL_V2_1",
+        proposed_taxonomy_csv=proposed_csv,
+        date_from="2025-08-01",
+        date_to="2026-07-31",
+        rebuild_mode=REBUILD_MODE_AUTO,
+    )
+    explicit_delta = build_taxonomy_change_plan(
+        deployment_id=None,
+        ecosystem_code="DATACENTER",
+        current_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        current_taxonomy_csv=current_csv,
+        proposed_taxonomy_version="DC_TAXONOMY_FULL_V2_1",
+        proposed_taxonomy_csv=proposed_csv,
+        date_from="2025-08-01",
+        date_to="2026-07-31",
+        rebuild_mode=REBUILD_MODE_DELTA,
+    )
+
+    assert auto["selected_rebuild_mode"] == REBUILD_MODE_DELTA
+    assert auto["change_execution_class"] == CHANGE_EXECUTION_REPORT_STATUS_ONLY
+    assert auto["report_status_only_safe"] is True
+    assert auto["computational_rebuild_required"] is False
+    assert auto["datacenter_pipeline_required"] is False
+    assert auto["stage2_required"] is False
+    assert explicit_delta["change_execution_class"] == REBUILD_MODE_DELTA
+    assert auto["plan_hash"] != explicit_delta["plan_hash"]
 
 
 def test_delta_rebuild_is_supported_for_safe_monthly_change(tmp_path) -> None:
@@ -411,6 +504,77 @@ def test_run_calls_injected_rebuild_services_in_order(tmp_path, monkeypatch) -> 
     assert calls == ["guard:True", "writer", "backup", "dc", "ec", "guard:False"]
 
 
+def test_report_status_only_execution_skips_datacenter_rebuild(tmp_path, monkeypatch) -> None:
+    current_csv = _write_csv(tmp_path / "current.csv", _rows("DC_TAXONOMY_FULL_V1"))
+    proposed_csv = _write_csv(
+        tmp_path / "proposed.csv",
+        _report_status_only_rows("DC_TAXONOMY_FULL_V2_1"),
+    )
+    db_path = _db(tmp_path, current_csv)
+    config_path = _config(tmp_path, current_csv)
+    prepared = prepare_taxonomy_change(
+        analysis_db=db_path,
+        proposed_taxonomy_csv=proposed_csv,
+        date_to="2026-07-31",
+        scheduler_config_path=config_path,
+        watchlist_path=tmp_path / "watchlist.txt",
+        evidence_root=tmp_path / "evidence",
+        rebuild_mode=REBUILD_MODE_AUTO,
+    )
+    plan = prepared["plan"]
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        "rawcandle.datacenter_taxonomy_change_orchestrator.plan_ec_taxonomy_replacement_cleanup",
+        lambda **_kwargs: {"safe_to_apply": True, "cleanup_plan_status": "READY_TO_APPLY"},
+    )
+    monkeypatch.setattr(
+        "rawcandle.datacenter_taxonomy_change_orchestrator.finalize_ec_taxonomy_rebuild_validation",
+        lambda **_kwargs: {"finalization_status": "OK"},
+    )
+    monkeypatch.setattr(
+        "rawcandle.datacenter_taxonomy_change_orchestrator._plan_activation",
+        lambda **_kwargs: {"safe_to_activate": True, "activation_plan_status": "READY_TO_ACTIVATE"},
+    )
+
+    def fail_dc(**_kwargs):
+        raise AssertionError("Datacenter rebuild must not run for REPORT_STATUS_ONLY")
+
+    services = TaxonomyChangeServices(
+        set_scheduler_guard=lambda **kwargs: calls.append(f"guard:{kwargs['enabled']}") or {"status": "OK"},
+        verify_active_writer=lambda **_kwargs: calls.append("writer") or {"status": "NO_ACTIVE_WRITER"},
+        ensure_backup=lambda **_kwargs: calls.append("backup") or {"status": "OK"},
+        run_dc_rebuild=fail_dc,
+        run_ec_rebuild=lambda **_kwargs: calls.append("ec") or {"status": "OK"},
+    )
+
+    summary = execute_taxonomy_rebuild(
+        analysis_db=db_path,
+        deployment_id=prepared["deployment_id"],
+        proposed_taxonomy_csv=proposed_csv,
+        date_to="2026-07-31",
+        scheduler_config_path=config_path,
+        confirm_deployment_id=prepared["deployment_id"],
+        confirm_proposed_taxonomy_version="DC_TAXONOMY_FULL_V2_1",
+        confirm_proposed_source_hash=plan["proposed_source_sha256"],
+        confirm_date_from="2025-08-01",
+        confirm_date_to="2026-07-31",
+        confirm_rebuild_mode=REBUILD_MODE_DELTA,
+        confirm_plan_hash=plan["plan_hash"],
+        services=services,
+    )
+
+    assert summary["run_status"] == "READY_TO_ACTIVATE"
+    assert summary["change_execution_class"] == CHANGE_EXECUTION_REPORT_STATUS_ONLY
+    assert summary["report_status_only_execution"] is True
+    assert summary["dc_rebuild"]["dc_rebuild_skipped"] is True
+    assert summary["datacenter_pipeline_called"] is False
+    assert summary["stage2_called"] is False
+    assert summary["external_fetch_called"] is False
+    assert calls == ["guard:True", "writer", "backup", "ec", "guard:False"]
+    assert "DC_REBUILD_SKIPPED_REPORT_STATUS_ONLY" in summary["completed_phases"]
+
+
 def test_production_taxonomy_services_guard_backup_and_rebuild_runners(tmp_path) -> None:
     db_path, config_path, _proposed_csv, prepared = _prepared(tmp_path)
     config_before = StockUpdateSchedulerConfig(
@@ -469,6 +633,40 @@ def test_production_taxonomy_services_guard_backup_and_rebuild_runners(tmp_path)
     assert dc_calls[0]["stage2_incremental"] is False
     assert ec_calls[0]["existing_backup_path"] == backup["backup_path"]
     assert services.set_scheduler_guard(enabled=False)["skip_next_run"] is False
+
+
+def test_production_services_skip_dc_runner_for_report_status_only_plan(tmp_path) -> None:
+    db_path, config_path, _proposed_csv, _prepared_summary = _prepared(tmp_path)
+    dc_calls: list[dict[str, object]] = []
+
+    def fake_dc_runner(**kwargs):
+        dc_calls.append(kwargs)
+        return {"summary": {"pipeline_status": "OK"}}
+
+    services = build_production_taxonomy_change_services(
+        scheduler_config_path=config_path,
+        evidence_root=tmp_path / "repo" / "temp" / "taxonomy",
+        dc_pipeline_runner=fake_dc_runner,
+    )
+    assert services.run_dc_rebuild is not None
+    skipped = services.run_dc_rebuild(
+        plan={
+            "change_execution_class": CHANGE_EXECUTION_REPORT_STATUS_ONLY,
+            "deployment_id": 1,
+            "proposed_source_reference": str(tmp_path / "proposed.csv"),
+            "proposed_taxonomy_version": "DC_TAXONOMY_FULL_V2_1",
+            "date_to": "2026-07-31",
+            "date_from": "2025-08-01",
+            "expected_counts": {},
+        }
+    )
+
+    assert db_path.exists()
+    assert skipped["status"] == "OK"
+    assert skipped["dc_rebuild_skipped"] is True
+    assert skipped["datacenter_pipeline_called"] is False
+    assert skipped["stage2_called"] is False
+    assert dc_calls == []
 
 
 def test_production_taxonomy_services_block_active_scheduler_writer(tmp_path) -> None:
@@ -610,6 +808,44 @@ def test_delta_carry_forward_copies_safe_rows_and_is_idempotent(tmp_path) -> Non
         conn.close()
     assert active_count == 2
     assert proposed_rows == [("AAA", "Power", "UPS"), ("BBB", "Power", "UPS")]
+
+
+def test_report_status_only_carry_forward_copies_complete_dc_slice(tmp_path) -> None:
+    current_csv = _write_csv(tmp_path / "current.csv", _rows("DC_TAXONOMY_FULL_V1"))
+    proposed_csv = _write_csv(
+        tmp_path / "proposed.csv",
+        _report_status_only_rows("DC_TAXONOMY_FULL_V2_1"),
+    )
+    db_path = tmp_path / "facts.db"
+    _create_carry_forward_fact_tables(db_path)
+    plan = build_taxonomy_change_plan(
+        deployment_id=None,
+        ecosystem_code="DATACENTER",
+        current_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        current_taxonomy_csv=current_csv,
+        proposed_taxonomy_version="DC_TAXONOMY_FULL_V2_1",
+        proposed_taxonomy_csv=proposed_csv,
+        date_from="2026-07-31",
+        date_to="2026-07-31",
+        rebuild_mode=REBUILD_MODE_AUTO,
+    )
+
+    result = copy_delta_carry_forward(analysis_db=db_path, plan=plan)
+
+    assert plan["change_execution_class"] == CHANGE_EXECUTION_REPORT_STATUS_ONLY
+    assert result["carry_forward_status"] == "OK"
+    conn = sqlite3.connect(db_path)
+    try:
+        proposed_ticker_count = conn.execute(
+            "SELECT COUNT(*) FROM dc_ticker_swing_signal_daily WHERE taxonomy_version='DC_TAXONOMY_FULL_V2_1'"
+        ).fetchone()[0]
+        proposed_group_count = conn.execute(
+            "SELECT COUNT(*) FROM dc_group_swing_signal_daily WHERE taxonomy_version='DC_TAXONOMY_FULL_V2_1'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert proposed_ticker_count == 2
+    assert proposed_group_count == 1
 
 
 def test_ready_to_activate_and_active_are_idempotent(tmp_path) -> None:
