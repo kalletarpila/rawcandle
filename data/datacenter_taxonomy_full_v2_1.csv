@@ -1,0 +1,351 @@
+taxonomy_version,ticker,layer,subindustry,report_group_status,is_primary,role_weight,notes
+DC_TAXONOMY_FULL_V2_1,FCX,Upstream materials,Copper,EXTENDED,1,1.0,v2.1_review: commodity/material input exposure; relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,SCCO,Upstream materials,Copper,EXTENDED,1,1.0,v2.1_review: commodity/material input exposure; relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,TECK,Upstream materials,Copper,EXTENDED,1,1.0,v2.1_review: commodity/material input exposure; relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,BHP,Upstream materials,Copper,EXTENDED,1,1.0,v2.1_review: commodity/material input exposure; relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,RIO,Upstream materials,Copper,EXTENDED,1,1.0,v2.1_review: commodity/material input exposure; relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,HBM,Upstream materials,Copper,EXTENDED,1,1.0,v2.1_review: commodity/material input exposure; relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,ERO,Upstream materials,Copper,EXTENDED,1,1.0,v2.1_review: commodity/material input exposure; relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,PAAS,Upstream materials,Silver,EXTENDED,1,1.0,v2.1_review: commodity/material input exposure; relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,HL,Upstream materials,Silver,EXTENDED,1,1.0,v2.1_review: commodity/material input exposure; relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,CDE,Upstream materials,Silver,EXTENDED,1,1.0,v2.1_review: commodity/material input exposure; relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,AG,Upstream materials,Silver,EXTENDED,1,1.0,v2.1_review: commodity/material input exposure; relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,WPM,Upstream materials,Silver,EXTENDED,1,1.0,v2.1_review: commodity/material input exposure; relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,GLW,Upstream materials,Glass / optical materials / specialty glass,CORE,1,1.0,v2.1_review: direct optical glass/photonic materials or optical platform exposure for data/AI connectivity
+DC_TAXONOMY_FULL_V2_1,COHR,Upstream materials,Glass / optical materials / specialty glass,CORE,1,1.0,v2.1_review: direct optical glass/photonic materials or optical platform exposure for data/AI connectivity
+DC_TAXONOMY_FULL_V2_1,FN,Upstream materials,Glass / optical materials / specialty glass,CORE,1,1.0,v2.1_review: direct optical glass/photonic materials or optical platform exposure for data/AI connectivity
+DC_TAXONOMY_FULL_V2_1,APD,Upstream materials,Glass / optical materials / specialty glass,EXTENDED,1,1.0,v2.1_review: materials/gases/substrates exposure is relevant but diversified or indirect
+DC_TAXONOMY_FULL_V2_1,ATI,Upstream materials,Glass / optical materials / specialty glass,EXTENDED,1,1.0,v2.1_review: materials/gases/substrates exposure is relevant but diversified or indirect
+DC_TAXONOMY_FULL_V2_1,AXTI,Upstream materials,Glass / optical materials / specialty glass,EXTENDED,1,1.0,v2.1_review: materials/gases/substrates exposure is relevant but diversified or indirect
+DC_TAXONOMY_FULL_V2_1,LIN,Upstream materials,Glass / optical materials / specialty glass,EXTENDED,1,1.0,v2.1_review: materials/gases/substrates exposure is relevant but diversified or indirect
+DC_TAXONOMY_FULL_V2_1,AA,Upstream materials,Aluminum and steel,EXTENDED,1,1.0,v2.1_review: commodity/material input exposure; relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,MT,Upstream materials,Aluminum and steel,EXTENDED,1,1.0,v2.1_review: commodity/material input exposure; relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,NUE,Upstream materials,Aluminum and steel,EXTENDED,1,1.0,v2.1_review: commodity/material input exposure; relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,STLD,Upstream materials,Aluminum and steel,EXTENDED,1,1.0,v2.1_review: commodity/material input exposure; relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,PKX,Upstream materials,Aluminum and steel,EXTENDED,1,1.0,v2.1_review: commodity/material input exposure; relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,CENX,Upstream materials,Aluminum and steel,EXTENDED,1,1.0,v2.1_review: commodity/material input exposure; relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,MP,Upstream materials,Specialty metals,EXTENDED,1,1.0,v2.1_review: specialty metals/minerals input exposure; relevant but indirect
+DC_TAXONOMY_FULL_V2_1,UUUU,Upstream materials,Specialty metals,WATCH_ONLY,1,1.0,"v2.1_review: speculative or nuclear/materials adjacency; monitor separately, not a clean datacenter operating proxy"
+DC_TAXONOMY_FULL_V2_1,NB,Upstream materials,Specialty metals,WATCH_ONLY,1,1.0,"v2.1_review: speculative or nuclear/materials adjacency; monitor separately, not a clean datacenter operating proxy"
+DC_TAXONOMY_FULL_V2_1,IPX,Upstream materials,Specialty metals,WATCH_ONLY,1,1.0,"v2.1_review: speculative or nuclear/materials adjacency; monitor separately, not a clean datacenter operating proxy"
+DC_TAXONOMY_FULL_V2_1,USAR,Upstream materials,Specialty metals,WATCH_ONLY,1,1.0,"v2.1_review: speculative or nuclear/materials adjacency; monitor separately, not a clean datacenter operating proxy"
+DC_TAXONOMY_FULL_V2_1,ATI,Upstream materials,Specialty metals,EXTENDED,0,1.0,v2.1_review: specialty metals/minerals input exposure; relevant but indirect
+DC_TAXONOMY_FULL_V2_1,HWM,Upstream materials,Specialty metals,EXTENDED,1,1.0,v2.1_review: specialty metals/minerals input exposure; relevant but indirect
+DC_TAXONOMY_FULL_V2_1,CRS,Upstream materials,Specialty metals,EXTENDED,1,1.0,v2.1_review: specialty metals/minerals input exposure; relevant but indirect
+DC_TAXONOMY_FULL_V2_1,ALOY,Upstream materials,Specialty metals,EXTENDED,1,1.0,v2.1_review: specialty metals/minerals input exposure; relevant but indirect
+DC_TAXONOMY_FULL_V2_1,ASPI,Upstream materials,Specialty metals,WATCH_ONLY,1,1.0,"v2.1_review: speculative or nuclear/materials adjacency; monitor separately, not a clean datacenter operating proxy"
+DC_TAXONOMY_FULL_V2_1,CCJ,Upstream materials,Specialty metals,WATCH_ONLY,1,1.0,"v2.1_review: speculative or nuclear/materials adjacency; monitor separately, not a clean datacenter operating proxy"
+DC_TAXONOMY_FULL_V2_1,LEU,Upstream materials,Specialty metals,WATCH_ONLY,1,1.0,"v2.1_review: speculative or nuclear/materials adjacency; monitor separately, not a clean datacenter operating proxy"
+DC_TAXONOMY_FULL_V2_1,NVDA,Compute silicon,GPU / AI accelerators / custom silicon,CORE,1,1.0,"v2.1_review: direct AI/datacenter accelerator, custom silicon, CPU IP, or advanced manufacturing exposure"
+DC_TAXONOMY_FULL_V2_1,AMD,Compute silicon,GPU / AI accelerators / custom silicon,CORE,1,1.0,"v2.1_review: direct AI/datacenter accelerator, custom silicon, CPU IP, or advanced manufacturing exposure"
+DC_TAXONOMY_FULL_V2_1,AVGO,Compute silicon,GPU / AI accelerators / custom silicon,CORE,1,1.0,"v2.1_review: direct AI/datacenter accelerator, custom silicon, CPU IP, or advanced manufacturing exposure"
+DC_TAXONOMY_FULL_V2_1,MRVL,Compute silicon,GPU / AI accelerators / custom silicon,CORE,1,1.0,"v2.1_review: direct AI/datacenter accelerator, custom silicon, CPU IP, or advanced manufacturing exposure"
+DC_TAXONOMY_FULL_V2_1,QCOM,Compute silicon,GPU / AI accelerators / custom silicon,EXTENDED,1,1.0,v2.1_review: AI silicon exposure exists but datacenter is not the primary demand driver
+DC_TAXONOMY_FULL_V2_1,ARM,Compute silicon,GPU / AI accelerators / custom silicon,CORE,1,1.0,"v2.1_review: direct AI/datacenter accelerator, custom silicon, CPU IP, or advanced manufacturing exposure"
+DC_TAXONOMY_FULL_V2_1,INTC,Compute silicon,GPU / AI accelerators / custom silicon,CORE,1,1.0,"v2.1_review: direct AI/datacenter accelerator, custom silicon, CPU IP, or advanced manufacturing exposure"
+DC_TAXONOMY_FULL_V2_1,TSM,Compute silicon,GPU / AI accelerators / custom silicon,CORE,1,1.0,"v2.1_review: direct AI/datacenter accelerator, custom silicon, CPU IP, or advanced manufacturing exposure"
+DC_TAXONOMY_FULL_V2_1,CBRS,Compute silicon,GPU / AI accelerators / custom silicon,CORE,1,1.0,"v2.1_review: direct AI/datacenter accelerator, custom silicon, CPU IP, or advanced manufacturing exposure"
+DC_TAXONOMY_FULL_V2_1,AMD,Compute silicon,CPUs,CORE,0,1.0,v2.1_review: direct datacenter CPU/platform exposure
+DC_TAXONOMY_FULL_V2_1,INTC,Compute silicon,CPUs,CORE,0,1.0,v2.1_review: direct datacenter CPU/platform exposure
+DC_TAXONOMY_FULL_V2_1,QCOM,Compute silicon,CPUs,EXTENDED,0,1.0,v2.1_review: CPU exposure is relevant but datacenter role is secondary or emerging
+DC_TAXONOMY_FULL_V2_1,ARM,Compute silicon,CPUs,CORE,0,1.0,v2.1_review: direct datacenter CPU/platform exposure
+DC_TAXONOMY_FULL_V2_1,NVDA,Compute silicon,CPUs,CORE,0,1.0,v2.1_review: direct datacenter CPU/platform exposure
+DC_TAXONOMY_FULL_V2_1,MU,Compute silicon,Memory / HBM / DRAM / NAND / SSD,CORE,1,1.0,v2.1_review: direct AI/datacenter memory or memory-interface exposure
+DC_TAXONOMY_FULL_V2_1,RMBS,Compute silicon,Memory / HBM / DRAM / NAND / SSD,CORE,1,1.0,v2.1_review: direct AI/datacenter memory or memory-interface exposure
+DC_TAXONOMY_FULL_V2_1,WDC,Compute silicon,Memory / HBM / DRAM / NAND / SSD,EXTENDED,1,1.0,v2.1_review: storage/NAND/controller exposure relevant to datacenters but broader than AI/HBM core
+DC_TAXONOMY_FULL_V2_1,STX,Compute silicon,Memory / HBM / DRAM / NAND / SSD,EXTENDED,1,1.0,v2.1_review: storage/NAND/controller exposure relevant to datacenters but broader than AI/HBM core
+DC_TAXONOMY_FULL_V2_1,SNDK,Compute silicon,Memory / HBM / DRAM / NAND / SSD,EXTENDED,1,1.0,v2.1_review: storage/NAND/controller exposure relevant to datacenters but broader than AI/HBM core
+DC_TAXONOMY_FULL_V2_1,SIMO,Compute silicon,Memory / HBM / DRAM / NAND / SSD,EXTENDED,1,1.0,v2.1_review: storage/NAND/controller exposure relevant to datacenters but broader than AI/HBM core
+DC_TAXONOMY_FULL_V2_1,MPWR,Compute silicon,"Analog, power IC, embedded, specialty semis",CORE,1,1.0,v2.1_review: power conversion / power semiconductor exposure is directly relevant to AI/datacenter power density
+DC_TAXONOMY_FULL_V2_1,ADI,Compute silicon,"Analog, power IC, embedded, specialty semis",EXTENDED,1,1.0,v2.1_review: broad analog/embedded/specialty semis exposure; relevant but diversified
+DC_TAXONOMY_FULL_V2_1,TXN,Compute silicon,"Analog, power IC, embedded, specialty semis",EXTENDED,1,1.0,v2.1_review: broad analog/embedded/specialty semis exposure; relevant but diversified
+DC_TAXONOMY_FULL_V2_1,NXPI,Compute silicon,"Analog, power IC, embedded, specialty semis",EXTENDED,1,1.0,v2.1_review: broad analog/embedded/specialty semis exposure; relevant but diversified
+DC_TAXONOMY_FULL_V2_1,MCHP,Compute silicon,"Analog, power IC, embedded, specialty semis",EXTENDED,1,1.0,v2.1_review: broad analog/embedded/specialty semis exposure; relevant but diversified
+DC_TAXONOMY_FULL_V2_1,LSCC,Compute silicon,"Analog, power IC, embedded, specialty semis",EXTENDED,1,1.0,v2.1_review: broad analog/embedded/specialty semis exposure; relevant but diversified
+DC_TAXONOMY_FULL_V2_1,STM,Compute silicon,"Analog, power IC, embedded, specialty semis",EXTENDED,1,1.0,v2.1_review: broad analog/embedded/specialty semis exposure; relevant but diversified
+DC_TAXONOMY_FULL_V2_1,ON,Compute silicon,"Analog, power IC, embedded, specialty semis",CORE,1,1.0,v2.1_review: power conversion / power semiconductor exposure is directly relevant to AI/datacenter power density
+DC_TAXONOMY_FULL_V2_1,POWI,Compute silicon,"Analog, power IC, embedded, specialty semis",CORE,1,1.0,v2.1_review: power conversion / power semiconductor exposure is directly relevant to AI/datacenter power density
+DC_TAXONOMY_FULL_V2_1,VSH,Compute silicon,"Analog, power IC, embedded, specialty semis",EXTENDED,1,1.0,v2.1_review: broad analog/embedded/specialty semis exposure; relevant but diversified
+DC_TAXONOMY_FULL_V2_1,DIOD,Compute silicon,"Analog, power IC, embedded, specialty semis",EXTENDED,1,1.0,v2.1_review: broad analog/embedded/specialty semis exposure; relevant but diversified
+DC_TAXONOMY_FULL_V2_1,ALGM,Compute silicon,"Analog, power IC, embedded, specialty semis",EXTENDED,1,1.0,v2.1_review: broad analog/embedded/specialty semis exposure; relevant but diversified
+DC_TAXONOMY_FULL_V2_1,SITM,Compute silicon,"Analog, power IC, embedded, specialty semis",EXTENDED,1,1.0,v2.1_review: broad analog/embedded/specialty semis exposure; relevant but diversified
+DC_TAXONOMY_FULL_V2_1,TSEM,Compute silicon,"Analog, power IC, embedded, specialty semis",EXTENDED,1,1.0,v2.1_review: broad analog/embedded/specialty semis exposure; relevant but diversified
+DC_TAXONOMY_FULL_V2_1,SYNA,Compute silicon,"Analog, power IC, embedded, specialty semis",EXTENDED,1,1.0,v2.1_review: broad analog/embedded/specialty semis exposure; relevant but diversified
+DC_TAXONOMY_FULL_V2_1,SWKS,Compute silicon,"Analog, power IC, embedded, specialty semis",EXTENDED,1,1.0,v2.1_review: broad analog/embedded/specialty semis exposure; relevant but diversified
+DC_TAXONOMY_FULL_V2_1,QRVO,Compute silicon,"Analog, power IC, embedded, specialty semis",EXTENDED,1,1.0,v2.1_review: broad analog/embedded/specialty semis exposure; relevant but diversified
+DC_TAXONOMY_FULL_V2_1,SLAB,Compute silicon,"Analog, power IC, embedded, specialty semis",EXTENDED,1,1.0,v2.1_review: broad analog/embedded/specialty semis exposure; relevant but diversified
+DC_TAXONOMY_FULL_V2_1,CRUS,Compute silicon,"Analog, power IC, embedded, specialty semis",EXTENDED,1,1.0,v2.1_review: broad analog/embedded/specialty semis exposure; relevant but diversified
+DC_TAXONOMY_FULL_V2_1,AMBA,Compute silicon,"Analog, power IC, embedded, specialty semis",EXTENDED,1,1.0,v2.1_review: broad analog/embedded/specialty semis exposure; relevant but diversified
+DC_TAXONOMY_FULL_V2_1,AOSL,Compute silicon,"Analog, power IC, embedded, specialty semis",CORE,1,1.0,v2.1_review: power conversion / power semiconductor exposure is directly relevant to AI/datacenter power density
+DC_TAXONOMY_FULL_V2_1,NVTS,Compute silicon,"Analog, power IC, embedded, specialty semis",CORE,1,1.0,v2.1_review: power conversion / power semiconductor exposure is directly relevant to AI/datacenter power density
+DC_TAXONOMY_FULL_V2_1,VICR,Compute silicon,"Analog, power IC, embedded, specialty semis",CORE,0,1.0,v2.1_review: power conversion / power semiconductor exposure is directly relevant to AI/datacenter power density
+DC_TAXONOMY_FULL_V2_1,TSM,Semiconductor manufacturing,Foundry & packaging / OSAT,CORE,0,1.0,v2.1_review: direct foundry/advanced packaging or OSAT capacity exposure for AI/datacenter chips
+DC_TAXONOMY_FULL_V2_1,GFS,Semiconductor manufacturing,Foundry & packaging / OSAT,CORE,1,1.0,v2.1_review: direct foundry/advanced packaging or OSAT capacity exposure for AI/datacenter chips
+DC_TAXONOMY_FULL_V2_1,INTC,Semiconductor manufacturing,Foundry & packaging / OSAT,CORE,0,1.0,v2.1_review: direct foundry/advanced packaging or OSAT capacity exposure for AI/datacenter chips
+DC_TAXONOMY_FULL_V2_1,ASX,Semiconductor manufacturing,Foundry & packaging / OSAT,EXTENDED,1,1.0,v2.1_review: foundry/OSAT exposure relevant but less directly tied to leading datacenter AI silicon
+DC_TAXONOMY_FULL_V2_1,AMKR,Semiconductor manufacturing,Foundry & packaging / OSAT,CORE,1,1.0,v2.1_review: direct foundry/advanced packaging or OSAT capacity exposure for AI/datacenter chips
+DC_TAXONOMY_FULL_V2_1,UMC,Semiconductor manufacturing,Foundry & packaging / OSAT,EXTENDED,1,1.0,v2.1_review: foundry/OSAT exposure relevant but less directly tied to leading datacenter AI silicon
+DC_TAXONOMY_FULL_V2_1,ASML,Semiconductor manufacturing,Semiconductor equipment / semicap,CORE,1,1.0,v2.1_review: direct semicap/process equipment exposure to advanced semiconductor capacity
+DC_TAXONOMY_FULL_V2_1,AMAT,Semiconductor manufacturing,Semiconductor equipment / semicap,CORE,1,1.0,v2.1_review: direct semicap/process equipment exposure to advanced semiconductor capacity
+DC_TAXONOMY_FULL_V2_1,LRCX,Semiconductor manufacturing,Semiconductor equipment / semicap,CORE,1,1.0,v2.1_review: direct semicap/process equipment exposure to advanced semiconductor capacity
+DC_TAXONOMY_FULL_V2_1,KLAC,Semiconductor manufacturing,Semiconductor equipment / semicap,CORE,1,1.0,v2.1_review: direct semicap/process equipment exposure to advanced semiconductor capacity
+DC_TAXONOMY_FULL_V2_1,MKSI,Semiconductor manufacturing,Semiconductor equipment / semicap,CORE,1,1.0,v2.1_review: direct semicap/process equipment exposure to advanced semiconductor capacity
+DC_TAXONOMY_FULL_V2_1,ENTG,Semiconductor manufacturing,Semiconductor equipment / semicap,CORE,1,1.0,v2.1_review: direct semicap/process equipment exposure to advanced semiconductor capacity
+DC_TAXONOMY_FULL_V2_1,NVMI,Semiconductor manufacturing,Semiconductor equipment / semicap,CORE,1,1.0,v2.1_review: direct semicap/process equipment exposure to advanced semiconductor capacity
+DC_TAXONOMY_FULL_V2_1,VECO,Semiconductor manufacturing,Semiconductor equipment / semicap,CORE,1,1.0,v2.1_review: direct semicap/process equipment exposure to advanced semiconductor capacity
+DC_TAXONOMY_FULL_V2_1,ONTO,Semiconductor manufacturing,Semiconductor equipment / semicap,CORE,1,1.0,v2.1_review: direct semicap/process equipment exposure to advanced semiconductor capacity
+DC_TAXONOMY_FULL_V2_1,CAMT,Semiconductor manufacturing,Semiconductor equipment / semicap,CORE,1,1.0,v2.1_review: direct semicap/process equipment exposure to advanced semiconductor capacity
+DC_TAXONOMY_FULL_V2_1,ACLS,Semiconductor manufacturing,Semiconductor equipment / semicap,CORE,1,1.0,v2.1_review: direct semicap/process equipment exposure to advanced semiconductor capacity
+DC_TAXONOMY_FULL_V2_1,ICHR,Semiconductor manufacturing,Semiconductor equipment / semicap,CORE,1,1.0,v2.1_review: direct semicap/process equipment exposure to advanced semiconductor capacity
+DC_TAXONOMY_FULL_V2_1,UCTT,Semiconductor manufacturing,Semiconductor equipment / semicap,CORE,1,1.0,v2.1_review: direct semicap/process equipment exposure to advanced semiconductor capacity
+DC_TAXONOMY_FULL_V2_1,KLIC,Semiconductor manufacturing,Semiconductor equipment / semicap,CORE,1,1.0,v2.1_review: direct semicap/process equipment exposure to advanced semiconductor capacity
+DC_TAXONOMY_FULL_V2_1,PLAB,Semiconductor manufacturing,Semiconductor equipment / semicap,EXTENDED,1,1.0,v2.1_review: semicap-adjacent exposure; relevant but less direct
+DC_TAXONOMY_FULL_V2_1,IPGP,Semiconductor manufacturing,Semiconductor equipment / semicap,EXTENDED,1,1.0,v2.1_review: semicap-adjacent exposure; relevant but less direct
+DC_TAXONOMY_FULL_V2_1,ACMR,Semiconductor manufacturing,Semiconductor equipment / semicap,CORE,1,1.0,v2.1_review: direct semicap/process equipment exposure to advanced semiconductor capacity
+DC_TAXONOMY_FULL_V2_1,TER,Semiconductor manufacturing,Test and process control,CORE,1,1.0,v2.1_review: direct semiconductor test/process-control exposure
+DC_TAXONOMY_FULL_V2_1,COHU,Semiconductor manufacturing,Test and process control,CORE,1,1.0,v2.1_review: direct semiconductor test/process-control exposure
+DC_TAXONOMY_FULL_V2_1,FORM,Semiconductor manufacturing,Test and process control,CORE,1,1.0,v2.1_review: direct semiconductor test/process-control exposure
+DC_TAXONOMY_FULL_V2_1,NVMI,Semiconductor manufacturing,Test and process control,CORE,0,1.0,v2.1_review: direct semiconductor test/process-control exposure
+DC_TAXONOMY_FULL_V2_1,KLAC,Semiconductor manufacturing,Test and process control,CORE,0,1.0,v2.1_review: direct semiconductor test/process-control exposure
+DC_TAXONOMY_FULL_V2_1,ONTO,Semiconductor manufacturing,Test and process control,CORE,0,1.0,v2.1_review: direct semiconductor test/process-control exposure
+DC_TAXONOMY_FULL_V2_1,CAMT,Semiconductor manufacturing,Test and process control,CORE,0,1.0,v2.1_review: direct semiconductor test/process-control exposure
+DC_TAXONOMY_FULL_V2_1,KLIC,Semiconductor manufacturing,Test and process control,CORE,0,1.0,v2.1_review: direct semiconductor test/process-control exposure
+DC_TAXONOMY_FULL_V2_1,AEHR,Semiconductor manufacturing,Test and process control,EXTENDED,1,1.0,v2.1_review: test/process exposure relevant but less directly tied to AI/datacenter cycle
+DC_TAXONOMY_FULL_V2_1,DELL,IT hardware,Servers / ODM / EMS,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,HPE,IT hardware,Servers / ODM / EMS,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,SMCI,IT hardware,Servers / ODM / EMS,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,SANM,IT hardware,Servers / ODM / EMS,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,JBL,IT hardware,Servers / ODM / EMS,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,CLS,IT hardware,Servers / ODM / EMS,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,FLEX,IT hardware,Servers / ODM / EMS,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,PLXS,IT hardware,Servers / ODM / EMS,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,TTMI,IT hardware,Servers / ODM / EMS,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,BHE,IT hardware,Servers / ODM / EMS,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,CTS,IT hardware,Servers / ODM / EMS,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,NTAP,IT hardware,Storage,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,P,IT hardware,Storage,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,WDC,IT hardware,Storage,CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,STX,IT hardware,Storage,CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,MU,IT hardware,Storage,CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,SNDK,IT hardware,Storage,CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,ZBRA,IT hardware,Broad hardware / indirect exposure,EXTENDED,1,1.0,v2.1_review: broad hardware/automation exposure; intentionally indirect
+DC_TAXONOMY_FULL_V2_1,ANET,Networking,"Switches, NICs, DPUs, switch ASICs",CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,CSCO,Networking,"Switches, NICs, DPUs, switch ASICs",CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,NVDA,Networking,"Switches, NICs, DPUs, switch ASICs",CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,AVGO,Networking,"Switches, NICs, DPUs, switch ASICs",CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,MRVL,Networking,"Switches, NICs, DPUs, switch ASICs",CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,HPE,Networking,"Switches, NICs, DPUs, switch ASICs",CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,EXTR,Networking,"Switches, NICs, DPUs, switch ASICs",CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,CIEN,Networking,"Switches, NICs, DPUs, switch ASICs",CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,NOK,Networking,"Switches, NICs, DPUs, switch ASICs",CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,COHR,Networking,Optics / photonics / high-speed connectivity,CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,LITE,Networking,Optics / photonics / high-speed connectivity,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,FN,Networking,Optics / photonics / high-speed connectivity,CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,AAOI,Networking,Optics / photonics / high-speed connectivity,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,MTSI,Networking,Optics / photonics / high-speed connectivity,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,SMTC,Networking,Optics / photonics / high-speed connectivity,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,CRDO,Networking,Optics / photonics / high-speed connectivity,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,ALAB,Networking,Optics / photonics / high-speed connectivity,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,CIEN,Networking,Optics / photonics / high-speed connectivity,CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,POET,Networking,Optics / photonics / high-speed connectivity,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,APH,Networking,Connectivity / components / EMS,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,TEL,Networking,Connectivity / components / EMS,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,BDC,Networking,Connectivity / components / EMS,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,BELFB,Networking,Connectivity / components / EMS,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,ROG,Networking,Connectivity / components / EMS,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,LFUS,Networking,Connectivity / components / EMS,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,KN,Networking,Connectivity / components / EMS,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,SANM,Networking,Connectivity / components / EMS,CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,FLEX,Networking,Connectivity / components / EMS,CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,JBL,Networking,Connectivity / components / EMS,CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,PLXS,Networking,Connectivity / components / EMS,CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,TTMI,Networking,Connectivity / components / EMS,CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,BHE,Networking,Connectivity / components / EMS,CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,CTS,Networking,Connectivity / components / EMS,CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,CLS,Networking,Connectivity / components / EMS,CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,GLW,Cables & connectivity,"Fiber, copper, connectors, structured cabling",CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,BDC,Cables & connectivity,"Fiber, copper, connectors, structured cabling",CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,APH,Cables & connectivity,"Fiber, copper, connectors, structured cabling",CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,TEL,Cables & connectivity,"Fiber, copper, connectors, structured cabling",CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,BELFB,Cables & connectivity,"Fiber, copper, connectors, structured cabling",CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,LFUS,Cables & connectivity,"Fiber, copper, connectors, structured cabling",CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,ROG,Cables & connectivity,"Fiber, copper, connectors, structured cabling",CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,KN,Cables & connectivity,"Fiber, copper, connectors, structured cabling",CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,VRT,Electrical & power systems,"UPS, switchgear, PDU",CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,ETN,Electrical & power systems,"UPS, switchgear, PDU",CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,NVT,Electrical & power systems,"UPS, switchgear, PDU",CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,HUBB,Electrical & power systems,"UPS, switchgear, PDU",CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,POWL,Electrical & power systems,"UPS, switchgear, PDU",CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,GEV,Electrical & power systems,"UPS, switchgear, PDU",CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,ETN,Electrical & power systems,Electrical components & controls,CORE,0,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,HUBB,Electrical & power systems,Electrical components & controls,CORE,0,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,NVT,Electrical & power systems,Electrical components & controls,CORE,0,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,ROK,Electrical & power systems,Electrical components & controls,CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,EMR,Electrical & power systems,Electrical components & controls,CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,DOV,Electrical & power systems,Electrical components & controls,CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,AEIS,Electrical & power systems,Electrical components & controls,CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,PH,Electrical & power systems,Electrical components & controls,CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,NPO,Electrical & power systems,Electrical components & controls,CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,IEX,Electrical & power systems,Electrical components & controls,CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,NDSN,Electrical & power systems,Electrical components & controls,CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,ITT,Electrical & power systems,Electrical components & controls,CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,GGG,Electrical & power systems,Electrical components & controls,CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,RRX,Electrical & power systems,Electrical components & controls,CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,CR,Electrical & power systems,Electrical components & controls,CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,PNR,Electrical & power systems,Electrical components & controls,CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,IR,Electrical & power systems,Electrical components & controls,CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,FLS,Electrical & power systems,Electrical components & controls,CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,AME,Electrical & power systems,Electrical components & controls,CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,CSW,Electrical & power systems,Electrical components & controls,CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,JCI,Electrical & power systems,Electrical components & controls,CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,SPXC,Electrical & power systems,Electrical components & controls,CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,FELE,Electrical & power systems,Electrical components & controls,CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,ATKR,Electrical & power systems,Electrical components & controls,CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,AEIS,Electrical & power systems,Power conversion & precision power,CORE,0,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,MPWR,Electrical & power systems,Power conversion & precision power,CORE,0,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,ADI,Electrical & power systems,Power conversion & precision power,CORE,0,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,TXN,Electrical & power systems,Power conversion & precision power,CORE,0,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,VRT,Electrical & power systems,Power conversion & precision power,CORE,0,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,ETN,Electrical & power systems,Power conversion & precision power,CORE,0,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,POWL,Electrical & power systems,Power conversion & precision power,CORE,0,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,GNRC,Electrical & power systems,Power conversion & precision power,CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,AMSC,Electrical & power systems,Power conversion & precision power,CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,VICR,Electrical & power systems,Power conversion & precision power,CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,AOSL,Electrical & power systems,Power conversion & precision power,CORE,0,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,NVTS,Electrical & power systems,Power conversion & precision power,CORE,0,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,DCI,Electrical & power systems,Industrial systems / flow control / adjacent,EXTENDED,1,1.0,v2.1_review: industrial flow/control exposure is relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,ITW,Electrical & power systems,Industrial systems / flow control / adjacent,EXTENDED,1,1.0,v2.1_review: industrial flow/control exposure is relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,WTS,Electrical & power systems,Industrial systems / flow control / adjacent,EXTENDED,1,1.0,v2.1_review: industrial flow/control exposure is relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,KAI,Electrical & power systems,Industrial systems / flow control / adjacent,EXTENDED,1,1.0,v2.1_review: industrial flow/control exposure is relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,XYL,Electrical & power systems,Industrial systems / flow control / adjacent,EXTENDED,1,1.0,v2.1_review: industrial flow/control exposure is relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,AOS,Electrical & power systems,Industrial systems / flow control / adjacent,EXTENDED,1,1.0,v2.1_review: industrial flow/control exposure is relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,ENS,Electrical & power systems,Industrial systems / flow control / adjacent,EXTENDED,1,1.0,v2.1_review: industrial flow/control exposure is relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,AYI,Electrical & power systems,Industrial systems / flow control / adjacent,EXTENDED,1,1.0,v2.1_review: industrial flow/control exposure is relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,CARR,Electrical & power systems,Industrial systems / flow control / adjacent,EXTENDED,1,1.0,v2.1_review: industrial flow/control exposure is relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,LII,Electrical & power systems,Industrial systems / flow control / adjacent,EXTENDED,1,1.0,v2.1_review: industrial flow/control exposure is relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,CSL,Electrical & power systems,Industrial systems / flow control / adjacent,EXTENDED,1,1.0,v2.1_review: industrial flow/control exposure is relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,MWA,Electrical & power systems,Industrial systems / flow control / adjacent,EXTENDED,1,1.0,v2.1_review: industrial flow/control exposure is relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,HLIO,Electrical & power systems,Industrial systems / flow control / adjacent,EXTENDED,1,1.0,v2.1_review: industrial flow/control exposure is relevant but not datacenter-specific
+DC_TAXONOMY_FULL_V2_1,CAT,Backup power,"Generators, engines, fuel cells, BESS",CORE,1,1.0,v2.1_review: direct backup/onsite power exposure for datacenter power resilience
+DC_TAXONOMY_FULL_V2_1,CMI,Backup power,"Generators, engines, fuel cells, BESS",CORE,1,1.0,v2.1_review: direct backup/onsite power exposure for datacenter power resilience
+DC_TAXONOMY_FULL_V2_1,GNRC,Backup power,"Generators, engines, fuel cells, BESS",CORE,0,1.0,v2.1_review: direct backup/onsite power exposure for datacenter power resilience
+DC_TAXONOMY_FULL_V2_1,GEV,Backup power,"Generators, engines, fuel cells, BESS",CORE,0,1.0,v2.1_review: direct backup/onsite power exposure for datacenter power resilience
+DC_TAXONOMY_FULL_V2_1,BE,Backup power,"Generators, engines, fuel cells, BESS",CORE,1,1.0,v2.1_review: direct backup/onsite power exposure for datacenter power resilience
+DC_TAXONOMY_FULL_V2_1,PLUG,Backup power,"Generators, engines, fuel cells, BESS",WATCH_ONLY,1,1.0,v2.1_review: early/speculative fuel-cell or battery exposure; monitor separately
+DC_TAXONOMY_FULL_V2_1,FLNC,Backup power,"Generators, engines, fuel cells, BESS",EXTENDED,1,1.0,v2.1_review: energy storage exposure relevant but diversified
+DC_TAXONOMY_FULL_V2_1,FCEL,Backup power,"Generators, engines, fuel cells, BESS",WATCH_ONLY,1,1.0,v2.1_review: early/speculative fuel-cell or battery exposure; monitor separately
+DC_TAXONOMY_FULL_V2_1,EOSE,Backup power,"Generators, engines, fuel cells, BESS",WATCH_ONLY,1,1.0,v2.1_review: early/speculative fuel-cell or battery exposure; monitor separately
+DC_TAXONOMY_FULL_V2_1,CEG,Power generation / utilities,Power generation and utility exposure,CORE,1,1.0,v2.1_review: direct power generation / large-load datacenter power exposure
+DC_TAXONOMY_FULL_V2_1,VST,Power generation / utilities,Power generation and utility exposure,CORE,1,1.0,v2.1_review: direct power generation / large-load datacenter power exposure
+DC_TAXONOMY_FULL_V2_1,NEE,Power generation / utilities,Power generation and utility exposure,CORE,1,1.0,v2.1_review: direct power generation / large-load datacenter power exposure
+DC_TAXONOMY_FULL_V2_1,TLN,Power generation / utilities,Power generation and utility exposure,CORE,1,1.0,v2.1_review: direct power generation / large-load datacenter power exposure
+DC_TAXONOMY_FULL_V2_1,NRG,Power generation / utilities,Power generation and utility exposure,CORE,1,1.0,v2.1_review: direct power generation / large-load datacenter power exposure
+DC_TAXONOMY_FULL_V2_1,PEG,Power generation / utilities,Power generation and utility exposure,EXTENDED,1,1.0,"v2.1_review: regulated utility exposure to datacenter load growth, but diversified rate-base business"
+DC_TAXONOMY_FULL_V2_1,AEP,Power generation / utilities,Power generation and utility exposure,EXTENDED,1,1.0,"v2.1_review: regulated utility exposure to datacenter load growth, but diversified rate-base business"
+DC_TAXONOMY_FULL_V2_1,DUK,Power generation / utilities,Power generation and utility exposure,EXTENDED,1,1.0,"v2.1_review: regulated utility exposure to datacenter load growth, but diversified rate-base business"
+DC_TAXONOMY_FULL_V2_1,SO,Power generation / utilities,Power generation and utility exposure,EXTENDED,1,1.0,"v2.1_review: regulated utility exposure to datacenter load growth, but diversified rate-base business"
+DC_TAXONOMY_FULL_V2_1,PPL,Power generation / utilities,Power generation and utility exposure,EXTENDED,1,1.0,"v2.1_review: regulated utility exposure to datacenter load growth, but diversified rate-base business"
+DC_TAXONOMY_FULL_V2_1,ETR,Power generation / utilities,Power generation and utility exposure,EXTENDED,1,1.0,"v2.1_review: regulated utility exposure to datacenter load growth, but diversified rate-base business"
+DC_TAXONOMY_FULL_V2_1,FE,Power generation / utilities,Power generation and utility exposure,EXTENDED,1,1.0,"v2.1_review: regulated utility exposure to datacenter load growth, but diversified rate-base business"
+DC_TAXONOMY_FULL_V2_1,OKLO,Power generation / utilities,Power generation and utility exposure,WATCH_ONLY,1,1.0,v2.1_review: advanced nuclear / early-stage power theme; important to monitor but not a mature datacenter proxy
+DC_TAXONOMY_FULL_V2_1,SMR,Power generation / utilities,Power generation and utility exposure,WATCH_ONLY,1,1.0,v2.1_review: advanced nuclear / early-stage power theme; important to monitor but not a mature datacenter proxy
+DC_TAXONOMY_FULL_V2_1,NNE,Power generation / utilities,Power generation and utility exposure,WATCH_ONLY,1,1.0,v2.1_review: advanced nuclear / early-stage power theme; important to monitor but not a mature datacenter proxy
+DC_TAXONOMY_FULL_V2_1,VRT,Cooling,Air and liquid cooling,CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,MOD,Cooling,Air and liquid cooling,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,NVT,Cooling,Air and liquid cooling,CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,JCI,Cooling,Air and liquid cooling,CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,TT,Cooling,Air and liquid cooling,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,CARR,Cooling,Air and liquid cooling,CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,LII,Cooling,Air and liquid cooling,CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,AAON,Cooling,Air and liquid cooling,CORE,1,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,CARR,Building & thermal systems,"HVAC, filtration, water, lighting",EXTENDED,0,1.0,v2.1_review: building/thermal systems exposure relevant but diversified outside datacenters
+DC_TAXONOMY_FULL_V2_1,LII,Building & thermal systems,"HVAC, filtration, water, lighting",EXTENDED,0,1.0,v2.1_review: building/thermal systems exposure relevant but diversified outside datacenters
+DC_TAXONOMY_FULL_V2_1,AOS,Building & thermal systems,"HVAC, filtration, water, lighting",EXTENDED,0,1.0,v2.1_review: building/thermal systems exposure relevant but diversified outside datacenters
+DC_TAXONOMY_FULL_V2_1,WMS,Building & thermal systems,"HVAC, filtration, water, lighting",EXTENDED,1,1.0,v2.1_review: building/thermal systems exposure relevant but diversified outside datacenters
+DC_TAXONOMY_FULL_V2_1,AYI,Building & thermal systems,"HVAC, filtration, water, lighting",EXTENDED,0,1.0,v2.1_review: building/thermal systems exposure relevant but diversified outside datacenters
+DC_TAXONOMY_FULL_V2_1,DCI,Building & thermal systems,"HVAC, filtration, water, lighting",EXTENDED,0,1.0,v2.1_review: building/thermal systems exposure relevant but diversified outside datacenters
+DC_TAXONOMY_FULL_V2_1,XYL,Building & thermal systems,"HVAC, filtration, water, lighting",EXTENDED,0,1.0,v2.1_review: building/thermal systems exposure relevant but diversified outside datacenters
+DC_TAXONOMY_FULL_V2_1,ITW,Building & thermal systems,"HVAC, filtration, water, lighting",EXTENDED,0,1.0,v2.1_review: building/thermal systems exposure relevant but diversified outside datacenters
+DC_TAXONOMY_FULL_V2_1,ENS,Building & thermal systems,"HVAC, filtration, water, lighting",EXTENDED,0,1.0,v2.1_review: building/thermal systems exposure relevant but diversified outside datacenters
+DC_TAXONOMY_FULL_V2_1,CSL,Building & thermal systems,"HVAC, filtration, water, lighting",EXTENDED,0,1.0,v2.1_review: building/thermal systems exposure relevant but diversified outside datacenters
+DC_TAXONOMY_FULL_V2_1,MWA,Building & thermal systems,"HVAC, filtration, water, lighting",EXTENDED,0,1.0,v2.1_review: building/thermal systems exposure relevant but diversified outside datacenters
+DC_TAXONOMY_FULL_V2_1,HLIO,Building & thermal systems,"HVAC, filtration, water, lighting",EXTENDED,0,1.0,v2.1_review: building/thermal systems exposure relevant but diversified outside datacenters
+DC_TAXONOMY_FULL_V2_1,AWI,Building & thermal systems,"HVAC, filtration, water, lighting",EXTENDED,1,1.0,v2.1_review: building/thermal systems exposure relevant but diversified outside datacenters
+DC_TAXONOMY_FULL_V2_1,AAON,Building & thermal systems,"HVAC, filtration, water, lighting",EXTENDED,0,1.0,v2.1_review: building/thermal systems exposure relevant but diversified outside datacenters
+DC_TAXONOMY_FULL_V2_1,VRT,Mechanical infrastructure,"Racks, cabinets, enclosures",CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,ETN,Mechanical infrastructure,"Racks, cabinets, enclosures",CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,NVT,Mechanical infrastructure,"Racks, cabinets, enclosures",CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,DELL,Mechanical infrastructure,"Racks, cabinets, enclosures",CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,HPE,Mechanical infrastructure,"Racks, cabinets, enclosures",CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,HUBB,Mechanical infrastructure,"Racks, cabinets, enclosures",CORE,0,1.0,v2.1_review: direct datacenter physical infrastructure or interconnect exposure
+DC_TAXONOMY_FULL_V2_1,ACM,Construction,"EPC, MEP, engineering",CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,J,Construction,"EPC, MEP, engineering",CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,FLR,Construction,"EPC, MEP, engineering",CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,EME,Construction,"EPC, MEP, engineering",CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,FIX,Construction,"EPC, MEP, engineering",CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,PWR,Construction,"EPC, MEP, engineering",CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,DY,Construction,"EPC, MEP, engineering",CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,MTZ,Construction,"EPC, MEP, engineering",CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,STRL,Construction,"EPC, MEP, engineering",CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,PRIM,Construction,"EPC, MEP, engineering",CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,IESC,Construction,"EPC, MEP, engineering",CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,ACA,Construction,"EPC, MEP, engineering",CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,ECG,Construction,"EPC, MEP, engineering",CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,MYRG,Construction,"EPC, MEP, engineering",CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,APG,Construction,"EPC, MEP, engineering",CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,QXO,Construction,Building products / broad construction beta,EXTENDED,1,1.0,v2.1_review: construction-material/building-products beta; relevant but broad and indirect
+DC_TAXONOMY_FULL_V2_1,FBIN,Construction,Building products / broad construction beta,EXTENDED,1,1.0,v2.1_review: construction-material/building-products beta; relevant but broad and indirect
+DC_TAXONOMY_FULL_V2_1,MAS,Construction,Building products / broad construction beta,EXTENDED,1,1.0,v2.1_review: construction-material/building-products beta; relevant but broad and indirect
+DC_TAXONOMY_FULL_V2_1,OC,Construction,Building products / broad construction beta,EXTENDED,1,1.0,v2.1_review: construction-material/building-products beta; relevant but broad and indirect
+DC_TAXONOMY_FULL_V2_1,BLDR,Construction,Building products / broad construction beta,EXTENDED,1,1.0,v2.1_review: construction-material/building-products beta; relevant but broad and indirect
+DC_TAXONOMY_FULL_V2_1,ROCK,Construction,Building products / broad construction beta,EXTENDED,1,1.0,v2.1_review: construction-material/building-products beta; relevant but broad and indirect
+DC_TAXONOMY_FULL_V2_1,TREX,Construction,Building products / broad construction beta,EXTENDED,1,1.0,v2.1_review: construction-material/building-products beta; relevant but broad and indirect
+DC_TAXONOMY_FULL_V2_1,LPX,Construction,Building products / broad construction beta,EXTENDED,1,1.0,v2.1_review: construction-material/building-products beta; relevant but broad and indirect
+DC_TAXONOMY_FULL_V2_1,GFF,Construction,Building products / broad construction beta,EXTENDED,1,1.0,v2.1_review: construction-material/building-products beta; relevant but broad and indirect
+DC_TAXONOMY_FULL_V2_1,AWI,Construction,Building products / broad construction beta,EXTENDED,0,1.0,v2.1_review: construction-material/building-products beta; relevant but broad and indirect
+DC_TAXONOMY_FULL_V2_1,EQIX,Real estate,Colocation / datacenter REIT,CORE,1,1.0,v2.1_review: direct colocation/datacenter real-estate/operator exposure
+DC_TAXONOMY_FULL_V2_1,DLR,Real estate,Colocation / datacenter REIT,CORE,1,1.0,v2.1_review: direct colocation/datacenter real-estate/operator exposure
+DC_TAXONOMY_FULL_V2_1,GDS,Real estate,Colocation / datacenter REIT,CORE,1,1.0,v2.1_review: direct colocation/datacenter real-estate/operator exposure
+DC_TAXONOMY_FULL_V2_1,VNET,Real estate,Colocation / datacenter REIT,CORE,1,1.0,v2.1_review: direct colocation/datacenter real-estate/operator exposure
+DC_TAXONOMY_FULL_V2_1,IRM,Real estate,Colocation / datacenter REIT,CORE,1,1.0,v2.1_review: direct colocation/datacenter real-estate/operator exposure
+DC_TAXONOMY_FULL_V2_1,AMT,Real estate,Colocation / datacenter REIT,EXTENDED,1,1.0,v2.1_review: adjacent real-estate/tower/digital infrastructure exposure
+DC_TAXONOMY_FULL_V2_1,APLD,Real estate,Colocation / datacenter REIT,EXTENDED,1,1.0,v2.1_review: data-center/HPC/crypto infrastructure exposure but business model is less mature or mixed
+DC_TAXONOMY_FULL_V2_1,CORZ,Real estate,Colocation / datacenter REIT,EXTENDED,1,1.0,v2.1_review: data-center/HPC/crypto infrastructure exposure but business model is less mature or mixed
+DC_TAXONOMY_FULL_V2_1,WULF,Real estate,Colocation / datacenter REIT,EXTENDED,1,1.0,v2.1_review: data-center/HPC/crypto infrastructure exposure but business model is less mature or mixed
+DC_TAXONOMY_FULL_V2_1,WYFI,Real estate,Colocation / datacenter REIT,EXTENDED,0,1.0,v2.1_review: adjacent real-estate/tower/digital infrastructure exposure
+DC_TAXONOMY_FULL_V2_1,MSFT,Cloud,Hyperscalers / cloud demand owners,CORE,1,1.0,v2.1_review: direct cloud/datacenter capex demand owner
+DC_TAXONOMY_FULL_V2_1,AMZN,Cloud,Hyperscalers / cloud demand owners,CORE,1,1.0,v2.1_review: direct cloud/datacenter capex demand owner
+DC_TAXONOMY_FULL_V2_1,GOOGL,Cloud,Hyperscalers / cloud demand owners,CORE,1,1.0,v2.1_review: direct cloud/datacenter capex demand owner
+DC_TAXONOMY_FULL_V2_1,META,Cloud,Hyperscalers / cloud demand owners,CORE,1,1.0,v2.1_review: direct cloud/datacenter capex demand owner
+DC_TAXONOMY_FULL_V2_1,ORCL,Cloud,Hyperscalers / cloud demand owners,CORE,1,1.0,v2.1_review: direct cloud/datacenter capex demand owner
+DC_TAXONOMY_FULL_V2_1,BABA,Cloud,Hyperscalers / cloud demand owners,CORE,1,1.0,v2.1_review: direct cloud/datacenter capex demand owner
+DC_TAXONOMY_FULL_V2_1,BIDU,Cloud,Hyperscalers / cloud demand owners,CORE,1,1.0,v2.1_review: direct cloud/datacenter capex demand owner
+DC_TAXONOMY_FULL_V2_1,NBIS,Cloud,AI cloud / neocloud infrastructure,CORE,1,1.0,v2.1_review: direct AI cloud / GPU compute / datacenter infrastructure exposure
+DC_TAXONOMY_FULL_V2_1,CRWV,Cloud,AI cloud / neocloud infrastructure,CORE,1,1.0,v2.1_review: direct AI cloud / GPU compute / datacenter infrastructure exposure
+DC_TAXONOMY_FULL_V2_1,IREN,Cloud,AI cloud / neocloud infrastructure,CORE,1,1.0,v2.1_review: direct AI cloud / GPU compute / datacenter infrastructure exposure
+DC_TAXONOMY_FULL_V2_1,HUT,Cloud,AI cloud / neocloud infrastructure,CORE,1,1.0,v2.1_review: direct AI cloud / GPU compute / datacenter infrastructure exposure
+DC_TAXONOMY_FULL_V2_1,APLD,Cloud,AI cloud / neocloud infrastructure,CORE,0,1.0,v2.1_review: direct AI cloud / GPU compute / datacenter infrastructure exposure
+DC_TAXONOMY_FULL_V2_1,WYFI,Cloud,AI cloud / neocloud infrastructure,WATCH_ONLY,1,1.0,v2.1_review: early or less-proven neocloud/datacenter infrastructure exposure
+DC_TAXONOMY_FULL_V2_1,JCI,Operations,DCIM / BMS / building automation,CORE,0,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,HON,Operations,DCIM / BMS / building automation,CORE,1,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,VRT,Operations,DCIM / BMS / building automation,CORE,0,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,EMR,Operations,DCIM / BMS / building automation,CORE,0,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,ROK,Operations,DCIM / BMS / building automation,CORE,0,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,HUBB,Operations,DCIM / BMS / building automation,CORE,0,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,ETN,Operations,DCIM / BMS / building automation,CORE,0,1.0,"v2.1_review: direct datacenter power, controls, automation, or build-out exposure"
+DC_TAXONOMY_FULL_V2_1,CSCO,Operations,Networking and cybersecurity,CORE,0,1.0,"v2.1_review: direct datacenter/cloud operations, security, observability, or virtualization software exposure"
+DC_TAXONOMY_FULL_V2_1,PANW,Operations,Networking and cybersecurity,CORE,1,1.0,"v2.1_review: direct datacenter/cloud operations, security, observability, or virtualization software exposure"
+DC_TAXONOMY_FULL_V2_1,FTNT,Operations,Networking and cybersecurity,CORE,1,1.0,"v2.1_review: direct datacenter/cloud operations, security, observability, or virtualization software exposure"
+DC_TAXONOMY_FULL_V2_1,CRWD,Operations,Networking and cybersecurity,CORE,1,1.0,"v2.1_review: direct datacenter/cloud operations, security, observability, or virtualization software exposure"
+DC_TAXONOMY_FULL_V2_1,FFIV,Operations,Networking and cybersecurity,CORE,1,1.0,"v2.1_review: direct datacenter/cloud operations, security, observability, or virtualization software exposure"
+DC_TAXONOMY_FULL_V2_1,DDOG,Operations,Observability / ITSM / data platform,CORE,1,1.0,"v2.1_review: direct datacenter/cloud operations, security, observability, or virtualization software exposure"
+DC_TAXONOMY_FULL_V2_1,DT,Operations,Observability / ITSM / data platform,CORE,1,1.0,"v2.1_review: direct datacenter/cloud operations, security, observability, or virtualization software exposure"
+DC_TAXONOMY_FULL_V2_1,NOW,Operations,Observability / ITSM / data platform,CORE,1,1.0,"v2.1_review: direct datacenter/cloud operations, security, observability, or virtualization software exposure"
+DC_TAXONOMY_FULL_V2_1,SNOW,Operations,Observability / ITSM / data platform,CORE,1,1.0,"v2.1_review: direct datacenter/cloud operations, security, observability, or virtualization software exposure"
+DC_TAXONOMY_FULL_V2_1,ESTC,Operations,Observability / ITSM / data platform,CORE,1,1.0,"v2.1_review: direct datacenter/cloud operations, security, observability, or virtualization software exposure"
+DC_TAXONOMY_FULL_V2_1,AVGO,Operations,Virtualization / cloud software,CORE,0,1.0,"v2.1_review: direct datacenter/cloud operations, security, observability, or virtualization software exposure"
+DC_TAXONOMY_FULL_V2_1,ORCL,Operations,Virtualization / cloud software,CORE,0,1.0,"v2.1_review: direct datacenter/cloud operations, security, observability, or virtualization software exposure"
+DC_TAXONOMY_FULL_V2_1,MSFT,Operations,Virtualization / cloud software,CORE,0,1.0,"v2.1_review: direct datacenter/cloud operations, security, observability, or virtualization software exposure"
+DC_TAXONOMY_FULL_V2_1,AMZN,Operations,Virtualization / cloud software,CORE,0,1.0,"v2.1_review: direct datacenter/cloud operations, security, observability, or virtualization software exposure"
+DC_TAXONOMY_FULL_V2_1,GOOGL,Operations,Virtualization / cloud software,CORE,0,1.0,"v2.1_review: direct datacenter/cloud operations, security, observability, or virtualization software exposure"
+DC_TAXONOMY_FULL_V2_1,NTNX,Operations,Virtualization / cloud software,CORE,1,1.0,"v2.1_review: direct datacenter/cloud operations, security, observability, or virtualization software exposure"
