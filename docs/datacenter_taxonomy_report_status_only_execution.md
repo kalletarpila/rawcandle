@@ -3,7 +3,7 @@
 ## Classification
 
 ```text
-DATACENTER_REPORT_STATUS_ONLY_EXECUTION_IMPLEMENTED
+DATACENTER_RSO_CLEANUP_ORDER_AND_AGGREGATE_CARRY_FORWARD_FIXED
 ```
 
 This document describes the guarded execution path for taxonomy changes where
@@ -80,18 +80,38 @@ The plan hash includes `change_execution_class`. A plan prepared as
 The execution dispatcher handles `REPORT_STATUS_ONLY` before ordinary delta or
 full rebuild execution.
 
-The guarded path:
+The corrected guarded path:
 
 ```text
-1. validates the prepared plan and confirmation hash
-2. enables the scheduler guard
-3. verifies no active writer is present
-4. creates or reuses the required backup
-5. copies complete reusable DC canonical fact slices to the target taxonomy
-6. skips Datacenter rebuild execution
-7. runs EC construction from the complete target-taxonomy DC state
-8. runs existing cleanup, validation, and activation planning gates
+REPORT_STATUS_SCOPE_VALIDATED
+BACKUP_VERIFIED
+TARGET_TAXONOMY_METADATA_LOADED
+DC_FACTS_CARRIED_FORWARD
+DC_FACTS_VALIDATED
+EC_FACTS_CONSTRUCTED
+COVERAGE_PARITY_VALIDATED
+OLD_EC_CLEANED
+WHOLE_RANGE_VALIDATED
+WATERMARKS_FINALIZED
+READY_TO_ACTIVATE
 ```
+
+The cleanup-before-stale invariant is mandatory:
+
+```text
+whole-range stale-row validation is valid only after old-version EC cleanup
+has APPLIED or NO_CHANGE evidence for the same deployment, ecosystem, target
+taxonomy, target taxonomy ID, and replacement date range.
+```
+
+If that evidence is missing or stale:
+
+```text
+whole_range_validation_status=BLOCKED_CLEANUP_NOT_COMPLETED
+```
+
+Whole-range validation must not infer cleanup success only from current zero
+candidates.
 
 The DC carry-forward is idempotent delete/replace into the target taxonomy
 lineage for the canonical DC fact tables:
@@ -102,6 +122,30 @@ dc_group_swing_signal_daily
 dc_group_synthetic_ohlc_daily
 dc_group_index_daily
 ```
+
+The complete DC key-universe contract is table-specific:
+
+```text
+dc_ticker_swing_signal_daily:
+  ordinary ticker keys
+
+dc_group_swing_signal_daily:
+  ordinary layer/subindustry group keys
+  ecosystem aggregate key ecosystem:DC_ECOSYSTEM_TOTAL
+
+dc_group_synthetic_ohlc_daily:
+  ordinary layer/subindustry group keys
+  ecosystem aggregate key only if present in the active source slice
+
+dc_group_index_daily:
+  ordinary layer/subindustry group keys
+  ecosystem aggregate key ecosystem:DC_ECOSYSTEM_TOTAL
+```
+
+Unexpected sentinel keys are not copied. Target validation reports ordinary
+keys, ecosystem aggregate keys, unexpected keys, duplicate keys, and semantic
+mismatches separately. EC construction cannot start unless required DC
+carry-forward validation is OK.
 
 The path records no-computation evidence:
 

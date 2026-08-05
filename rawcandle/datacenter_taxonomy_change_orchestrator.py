@@ -237,9 +237,13 @@ def build_production_taxonomy_change_services(
             expected_active_taxonomy_version=str(plan["current_taxonomy_version"]),
             scheduler_config_path=config_path,
             resume=resume,
+            finalize_after_rebuild=False,
+            require_cleanup_evidence_for_whole_range=True,
         )
         return {
-            "status": "OK" if result.get("overall_status") == "REBUILD_COMPLETED" else "FAILED",
+            "status": "OK"
+            if result.get("overall_status") in {"REBUILD_COMPLETED", "FACTS_CONSTRUCTED"}
+            else "FAILED",
             "overall_status": result.get("overall_status"),
             "retry_required": result.get("retry_required"),
             "watermark_finalization_performed": result.get("watermark_finalization_performed"),
@@ -1387,6 +1391,7 @@ def execute_taxonomy_rebuild(
     confirm_rebuild_mode: str,
     confirm_plan_hash: str,
     services: TaxonomyChangeServices | None = None,
+    resume: bool = False,
 ) -> dict[str, object]:
     services = services or TaxonomyChangeServices()
     inspection = inspect_taxonomy_change(
@@ -1482,10 +1487,50 @@ def execute_taxonomy_rebuild(
         _call_phase(services.ensure_backup, "backup", deployment_id=deployment_id)
         completed.append("BACKUP")
         if plan["selected_rebuild_mode"] == REBUILD_MODE_DELTA:
-            carry_forward = copy_delta_carry_forward(analysis_db=analysis_db, plan=plan)
+            ticker_allowlist = _dc_ticker_allowlist(plan)
+            group_allowlist = _dc_group_allowlist(plan)
+            existing_dc_validation = (
+                validate_dc_carry_forward_key_universe(
+                    analysis_db=analysis_db,
+                    plan=plan,
+                    ticker_allowlist=ticker_allowlist,
+                    group_allowlist=group_allowlist,
+                )
+                if resume
+                else {"validation_status": "NOT_CHECKED"}
+            )
+            if existing_dc_validation["validation_status"] == "OK":
+                carry_forward = {
+                    "carry_forward_status": "OK",
+                    "resume_skip": True,
+                    "dc_key_universe_validation": existing_dc_validation,
+                    "table_results": [],
+                    "copied_ticker_count": 0,
+                    "copied_group_count": 0,
+                }
+            else:
+                carry_forward = copy_delta_carry_forward(analysis_db=analysis_db, plan=plan)
             if carry_forward.get("carry_forward_status") != "OK":
-                return _failure("REBUILDING", "DELTA_CARRY_FORWARD", str(carry_forward), completed, "REBUILDING", True)
+                return _failure(
+                    "DC_FACTS_CARRIED_FORWARD",
+                    "DELTA_CARRY_FORWARD",
+                    str(carry_forward),
+                    completed,
+                    "DC_FACTS_CARRIED_FORWARD",
+                    True,
+                )
             completed.append("DELTA_CARRY_FORWARD")
+            if report_status_only:
+                _mark_dc_facts_validated_for_rso(
+                    analysis_db=analysis_db,
+                    deployment_id=deployment_id,
+                    evidence={
+                        "phase": "DC_FACTS_VALIDATED",
+                        "change_execution_class": CHANGE_EXECUTION_REPORT_STATUS_ONLY,
+                        "carry_forward": carry_forward,
+                    },
+                )
+                completed.append("DC_FACTS_VALIDATED")
         if report_status_only:
             dc_rebuild = {
                 "status": "OK",
@@ -1497,8 +1542,20 @@ def execute_taxonomy_rebuild(
         else:
             dc_rebuild = _call_phase(services.run_dc_rebuild, "dc_rebuild", plan=plan)
             completed.append("DC_REBUILD")
-        _call_phase(services.run_ec_rebuild, "ec_rebuild", plan=plan)
-        completed.append("EC_REBUILD")
+            _mark_dc_facts_validated_for_rso(
+                analysis_db=analysis_db,
+                deployment_id=deployment_id,
+                evidence={
+                    "phase": "DC_FACTS_VALIDATED",
+                    "change_execution_class": change_execution_class,
+                    "dc_rebuild": dc_rebuild,
+                },
+            )
+            completed.append("DC_FACTS_VALIDATED")
+        ec_rebuild = _call_phase(services.run_ec_rebuild, "ec_rebuild", plan=plan)
+        completed.append("EC_FACTS_CONSTRUCTED")
+        if str(ec_rebuild.get("overall_status")) in {"FACTS_CONSTRUCTED", "REBUILD_COMPLETED"}:
+            completed.append("COVERAGE_PARITY_VALIDATED")
         cleanup = plan_ec_taxonomy_replacement_cleanup(
             db=analysis_db,
             ecosystem=str(deployment["ecosystem_code"]),
@@ -1510,6 +1567,43 @@ def execute_taxonomy_rebuild(
             expected_scheduler_taxonomy_version=current_version,
         )
         completed.append("CLEANUP_PLANNED" if cleanup.get("safe_to_apply") else "CLEANUP_BLOCKED")
+        if not cleanup.get("safe_to_apply"):
+            return _failure(
+                "OLD_EC_CLEANED",
+                "CLEANUP_BLOCKED",
+                str(cleanup),
+                completed,
+                "OLD_EC_CLEANED",
+                True,
+            )
+        cleanup_apply = apply_ec_taxonomy_replacement_cleanup(
+            db=analysis_db,
+            ecosystem=str(deployment["ecosystem_code"]),
+            target_taxonomy_version=str(deployment["proposed_taxonomy_version"]),
+            deployment_id=deployment_id,
+            date_from=str(deployment["rebuild_start_date"]),
+            date_to=date_to,
+            confirm_db=analysis_db,
+            confirm_ecosystem=str(deployment["ecosystem_code"]),
+            confirm_target_taxonomy_version=str(deployment["proposed_taxonomy_version"]),
+            confirm_deployment_id=deployment_id,
+            confirm_date_from=str(deployment["rebuild_start_date"]),
+            confirm_date_to=date_to,
+            confirm_delete_candidate_hash=str(cleanup["delete_candidate_hash"]),
+            scheduler_config=scheduler_config_path,
+            expected_scheduler_taxonomy_version=current_version,
+            invocation_source="UNIFIED_TAXONOMY_CHANGE_REBUILD",
+        )
+        if cleanup_apply.get("cleanup_apply_status") not in {"APPLIED", "NO_CHANGE"}:
+            return _failure(
+                "OLD_EC_CLEANED",
+                "CLEANUP_FAILED",
+                str(cleanup_apply),
+                completed,
+                "OLD_EC_CLEANED",
+                True,
+            )
+        completed.append("OLD_EC_CLEANED")
         validation = finalize_ec_taxonomy_rebuild_validation(
             db=analysis_db,
             ecosystem=str(deployment["ecosystem_code"]),
@@ -1518,10 +1612,20 @@ def execute_taxonomy_rebuild(
             deployment_id=deployment_id,
             date_from=str(deployment["rebuild_start_date"]),
             date_to=date_to,
-            finalize_watermarks=False,
-            update_deployment_evidence=False,
+            finalize_watermarks=True,
+            update_deployment_evidence=True,
         )
-        completed.append("VALIDATED" if validation.get("finalization_status") == "OK" else "VALIDATION_BLOCKED")
+        completed.append("WHOLE_RANGE_VALIDATED" if validation.get("finalization_status") == "OK" else "VALIDATION_BLOCKED")
+        if validation.get("finalization_status") != "OK":
+            return _failure(
+                "WHOLE_RANGE_VALIDATED",
+                "VALIDATION_BLOCKED",
+                str(validation),
+                completed,
+                "WHOLE_RANGE_VALIDATED",
+                True,
+            )
+        completed.append("WATERMARKS_FINALIZED")
         activation_plan = _plan_activation(
             analysis_db=analysis_db,
             ecosystem_code=str(deployment["ecosystem_code"]),
@@ -1543,6 +1647,7 @@ def execute_taxonomy_rebuild(
             "completed_phases": completed,
             "activation_plan": activation_plan,
             "cleanup_plan": cleanup,
+            "cleanup_apply": cleanup_apply,
             "validation": validation,
         }
     except Exception as exc:
@@ -1599,6 +1704,7 @@ def resume_taxonomy_rebuild(
         confirm_rebuild_mode=confirm_rebuild_mode,
         confirm_plan_hash=confirm_plan_hash,
         services=services,
+        resume=True,
     )
     return {"resume_attempted": True, **summary}
 
@@ -1802,6 +1908,282 @@ def _rows_hash(rows: list[dict[str, object]]) -> str:
     return _json_hash(rows)
 
 
+DC_GROUP_ECOSYSTEM_AGGREGATE_KEY = "ecosystem:DC_ECOSYSTEM_TOTAL"
+
+
+def _dc_ticker_allowlist(plan: dict[str, object]) -> list[str]:
+    delta_scope = dict(plan["delta_scope_summary"])
+    return sorted(
+        set(delta_scope.get("unaffected_tickers", []))
+        | (
+            set(delta_scope.get("membership_changed_tickers", []))
+            - set(delta_scope.get("added_tickers", []))
+            - set(delta_scope.get("removed_tickers", []))
+        )
+        | (
+            set(delta_scope.get("scope_flag_changed_tickers", []))
+            - set(delta_scope.get("added_tickers", []))
+            - set(delta_scope.get("removed_tickers", []))
+        )
+    )
+
+
+def _dc_group_allowlist(plan: dict[str, object]) -> list[str]:
+    delta_scope = dict(plan["delta_scope_summary"])
+    groups = set(str(value) for value in delta_scope.get("unaffected_groups", []))
+    if plan.get("change_execution_class") == CHANGE_EXECUTION_REPORT_STATUS_ONLY:
+        groups.add(DC_GROUP_ECOSYSTEM_AGGREGATE_KEY)
+    return sorted(groups)
+
+
+def _dc_key_contract(
+    table_name: str,
+    *,
+    available_columns: set[str],
+    date_column: str,
+) -> tuple[str, ...]:
+    candidates = {
+        "dc_ticker_swing_signal_daily": ("ticker", "signal_version"),
+        "dc_group_swing_signal_daily": ("group_type", "group_name", "signal_version"),
+        "dc_group_synthetic_ohlc_daily": ("group_type", "group_name", "calc_version"),
+        "dc_group_index_daily": ("group_type", "group_name"),
+    }[table_name]
+    return (date_column, *(column for column in candidates if column in available_columns))
+
+
+def _dc_key_class(table_name: str, row: dict[str, object], allowed_keys: set[str]) -> str:
+    if table_name == "dc_ticker_swing_signal_daily":
+        return "ordinary" if str(row.get("ticker") or "") in allowed_keys else "unexpected"
+    group_key = f"{row.get('group_type')}:{row.get('group_name')}"
+    if group_key == DC_GROUP_ECOSYSTEM_AGGREGATE_KEY and group_key in allowed_keys:
+        return "ecosystem_aggregate"
+    if group_key in allowed_keys:
+        return "ordinary"
+    return "unexpected"
+
+
+def _semantic_payload(
+    row: dict[str, object],
+    *,
+    columns: set[str],
+    table_name: str,
+) -> tuple[tuple[str, object], ...]:
+    ignored = {"taxonomy_version", "created_at_utc", "updated_at_utc", "loaded_at_utc"}
+    if table_name == "dc_ticker_swing_signal_daily":
+        ignored.update({"primary_layer", "primary_subindustry"})
+    return tuple(
+        (column, row.get(column))
+        for column in sorted(columns)
+        if column not in ignored
+    )
+
+
+def _validate_carry_forward_table(
+    conn: sqlite3.Connection,
+    *,
+    table_name: str,
+    date_column: str,
+    current_taxonomy_version: str,
+    proposed_taxonomy_version: str,
+    date_from: str,
+    date_to: str,
+    allowed_keys: set[str],
+) -> dict[str, object]:
+    if table_name not in _table_names(conn):
+        return {
+            "table": table_name,
+            "validation_status": "SKIPPED_TABLE_MISSING",
+            "missing_target_ordinary_keys": 0,
+            "missing_target_ecosystem_aggregate_keys": 0,
+            "extra_target_keys": 0,
+            "duplicate_keys": 0,
+            "semantic_mismatch_count": 0,
+            "unexpected_source_keys": [],
+            "unexpected_target_keys": [],
+            "mismatches": [],
+        }
+    columns = _table_columns(conn, table_name)
+    key_columns = _dc_key_contract(table_name, available_columns=columns, date_column=date_column)
+    select_sql = (
+        f"SELECT {', '.join(_sql_identifier(column) for column in columns)} "
+        f"FROM {_sql_identifier(table_name)} "
+        f"WHERE taxonomy_version = ? AND {_sql_identifier(date_column)} BETWEEN ? AND ? "
+        f"ORDER BY {', '.join(_sql_identifier(column) for column in key_columns)}"
+    )
+    source_rows = [
+        dict(row)
+        for row in conn.execute(select_sql, (current_taxonomy_version, date_from, date_to)).fetchall()
+    ]
+    target_rows = [
+        dict(row)
+        for row in conn.execute(select_sql, (proposed_taxonomy_version, date_from, date_to)).fetchall()
+    ]
+
+    def keyed(rows: list[dict[str, object]]) -> tuple[dict[tuple[object, ...], dict[str, object]], dict[str, int], list[dict[str, object]]]:
+        result: dict[tuple[object, ...], dict[str, object]] = {}
+        duplicate_counts: dict[str, int] = {}
+        unexpected: list[dict[str, object]] = []
+        seen: set[tuple[object, ...]] = set()
+        for row in rows:
+            key = tuple(row.get(column) for column in key_columns)
+            key_class = _dc_key_class(table_name, row, allowed_keys)
+            if key_class == "unexpected":
+                unexpected.append({"key": list(key), "row_class": key_class})
+                continue
+            if key in seen:
+                duplicate_counts[str(list(key))] = duplicate_counts.get(str(list(key)), 1) + 1
+            seen.add(key)
+            result[key] = row
+        return result, duplicate_counts, unexpected
+
+    source_by_key, source_duplicates, unexpected_source = keyed(source_rows)
+    target_by_key, target_duplicates, unexpected_target = keyed(target_rows)
+    missing_keys = sorted(set(source_by_key) - set(target_by_key))
+    extra_keys = sorted(set(target_by_key) - set(source_by_key))
+    semantic_mismatches = []
+    for key in sorted(set(source_by_key) & set(target_by_key)):
+        if _semantic_payload(source_by_key[key], columns=columns, table_name=table_name) != _semantic_payload(
+            target_by_key[key],
+            columns=columns,
+            table_name=table_name,
+        ):
+            semantic_mismatches.append({"key": list(key), "table": table_name})
+    missing_ordinary = [
+        key
+        for key in missing_keys
+        if _dc_key_class(table_name, source_by_key[key], allowed_keys) == "ordinary"
+    ]
+    missing_ecosystem = [
+        key
+        for key in missing_keys
+        if _dc_key_class(table_name, source_by_key[key], allowed_keys) == "ecosystem_aggregate"
+    ]
+    duplicate_total = sum(source_duplicates.values()) + sum(target_duplicates.values())
+    ok = (
+        not missing_ordinary
+        and not missing_ecosystem
+        and not extra_keys
+        and duplicate_total == 0
+        and not semantic_mismatches
+        and not unexpected_target
+    )
+    return {
+        "table": table_name,
+        "validation_status": "OK" if ok else "BLOCKED",
+        "key_columns": list(key_columns),
+        "ordinary_key_count": sum(
+            1 for row in source_by_key.values() if _dc_key_class(table_name, row, allowed_keys) == "ordinary"
+        ),
+        "ecosystem_aggregate_key_count": sum(
+            1
+            for row in source_by_key.values()
+            if _dc_key_class(table_name, row, allowed_keys) == "ecosystem_aggregate"
+        ),
+        "missing_target_ordinary_keys": len(missing_ordinary),
+        "missing_target_ecosystem_aggregate_keys": len(missing_ecosystem),
+        "extra_target_keys": len(extra_keys) + len(unexpected_target),
+        "duplicate_keys": duplicate_total,
+        "semantic_mismatch_count": len(semantic_mismatches),
+        "unexpected_source_keys": unexpected_source,
+        "unexpected_target_keys": unexpected_target + [{"key": list(key), "row_class": "extra"} for key in extra_keys],
+        "mismatches": semantic_mismatches[:20],
+    }
+
+
+def validate_dc_carry_forward_key_universe(
+    *,
+    analysis_db: str | Path,
+    plan: dict[str, object],
+    ticker_allowlist: list[str],
+    group_allowlist: list[str],
+) -> dict[str, object]:
+    conn = _connect_readonly(analysis_db)
+    try:
+        table_results = [
+            _validate_carry_forward_table(
+                conn,
+                table_name="dc_ticker_swing_signal_daily",
+                date_column="signal_date",
+                current_taxonomy_version=str(plan["current_taxonomy_version"]),
+                proposed_taxonomy_version=str(plan["proposed_taxonomy_version"]),
+                date_from=str(plan["date_from"]),
+                date_to=str(plan["date_to"]),
+                allowed_keys=set(ticker_allowlist),
+            ),
+            _validate_carry_forward_table(
+                conn,
+                table_name="dc_group_swing_signal_daily",
+                date_column="signal_date",
+                current_taxonomy_version=str(plan["current_taxonomy_version"]),
+                proposed_taxonomy_version=str(plan["proposed_taxonomy_version"]),
+                date_from=str(plan["date_from"]),
+                date_to=str(plan["date_to"]),
+                allowed_keys=set(group_allowlist),
+            ),
+            _validate_carry_forward_table(
+                conn,
+                table_name="dc_group_synthetic_ohlc_daily",
+                date_column="ohlc_date",
+                current_taxonomy_version=str(plan["current_taxonomy_version"]),
+                proposed_taxonomy_version=str(plan["proposed_taxonomy_version"]),
+                date_from=str(plan["date_from"]),
+                date_to=str(plan["date_to"]),
+                allowed_keys=set(group_allowlist),
+            ),
+            _validate_carry_forward_table(
+                conn,
+                table_name="dc_group_index_daily",
+                date_column="index_date",
+                current_taxonomy_version=str(plan["current_taxonomy_version"]),
+                proposed_taxonomy_version=str(plan["proposed_taxonomy_version"]),
+                date_from=str(plan["date_from"]),
+                date_to=str(plan["date_to"]),
+                allowed_keys=set(group_allowlist),
+            ),
+        ]
+    finally:
+        conn.close()
+    return {
+        "validation_status": "OK" if all(row["validation_status"] in {"OK", "SKIPPED_TABLE_MISSING"} for row in table_results) else "BLOCKED",
+        "tables": table_results,
+        "missing_target_ordinary_keys": sum(int(row["missing_target_ordinary_keys"]) for row in table_results),
+        "missing_target_ecosystem_aggregate_keys": sum(
+            int(row["missing_target_ecosystem_aggregate_keys"]) for row in table_results
+        ),
+        "extra_target_keys": sum(int(row["extra_target_keys"]) for row in table_results),
+        "duplicate_keys": sum(int(row["duplicate_keys"]) for row in table_results),
+        "semantic_mismatch_count": sum(int(row["semantic_mismatch_count"]) for row in table_results),
+    }
+
+
+def _mark_dc_facts_validated_for_rso(
+    *,
+    analysis_db: str | Path,
+    deployment_id: int,
+    evidence: dict[str, object],
+) -> None:
+    conn = _connect_readwrite(analysis_db)
+    try:
+        with conn:
+            if "ec_taxonomy_change_deployment" not in _table_names(conn):
+                return
+            conn.execute(
+                """
+                UPDATE ec_taxonomy_change_deployment
+                SET status = 'VALIDATION_REQUIRED',
+                    dc_rebuild_status = 'OK',
+                    validation_evidence_json = ?,
+                    validation_evidence_sha256 = ?,
+                    last_error = NULL,
+                    updated_at_utc = CURRENT_TIMESTAMP
+                WHERE taxonomy_change_id = ?
+                """,
+                (json.dumps(evidence, sort_keys=True, default=str), _json_hash(evidence), deployment_id),
+            )
+    finally:
+        conn.close()
+
+
 def _copy_rows_to_taxonomy(
     conn: sqlite3.Connection,
     *,
@@ -1927,21 +2309,8 @@ def copy_delta_carry_forward(
     """
     if plan.get("selected_rebuild_mode") != REBUILD_MODE_DELTA and plan.get("rebuild_mode") != REBUILD_MODE_DELTA:
         return {"carry_forward_status": "SKIPPED_NON_DELTA_PLAN", "table_results": []}
-    delta_scope = dict(plan["delta_scope_summary"])
-    ticker_allowlist = sorted(
-        set(delta_scope.get("unaffected_tickers", []))
-        | (
-            set(delta_scope.get("membership_changed_tickers", []))
-            - set(delta_scope.get("added_tickers", []))
-            - set(delta_scope.get("removed_tickers", []))
-        )
-        | (
-            set(delta_scope.get("scope_flag_changed_tickers", []))
-            - set(delta_scope.get("added_tickers", []))
-            - set(delta_scope.get("removed_tickers", []))
-        )
-    )
-    group_allowlist = list(delta_scope.get("unaffected_groups", []))
+    ticker_allowlist = _dc_ticker_allowlist(plan)
+    group_allowlist = _dc_group_allowlist(plan)
     proposed_primary_meta = _proposed_primary_metadata(
         str(plan["proposed_source_reference"]),
         str(plan["proposed_taxonomy_version"]),
@@ -2005,9 +2374,25 @@ def copy_delta_carry_forward(
                 "copied_ticker_count": 0,
                 "copied_group_count": 0,
             }
+        validation = validate_dc_carry_forward_key_universe(
+            analysis_db=analysis_db,
+            plan=plan,
+            ticker_allowlist=ticker_allowlist,
+            group_allowlist=group_allowlist,
+        )
+        if validation["validation_status"] != "OK":
+            return {
+                "carry_forward_status": "BLOCKED",
+                "failure_message": "DC carry-forward key-universe validation failed",
+                "table_results": table_results,
+                "dc_key_universe_validation": validation,
+                "copied_ticker_count": len(ticker_allowlist),
+                "copied_group_count": len(group_allowlist),
+            }
         return {
             "carry_forward_status": "OK",
             "table_results": table_results,
+            "dc_key_universe_validation": validation,
             "copied_ticker_count": len(ticker_allowlist),
             "copied_group_count": len(group_allowlist),
         }

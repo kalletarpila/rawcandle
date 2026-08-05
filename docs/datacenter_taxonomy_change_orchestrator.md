@@ -408,9 +408,34 @@ finalization, and activation planning still use the same injected service and
 validation boundaries as full rebuilds.
 
 For report-status-only plans, `DELTA_CARRY_FORWARD` still runs, but the DC
-rebuild phase is recorded as `DC_REBUILD_SKIPPED_REPORT_STATUS_ONLY`. EC loading,
-cleanup, validation, and activation planning continue through the existing
-guarded phase boundaries.
+rebuild phase is recorded as `DC_REBUILD_SKIPPED_REPORT_STATUS_ONLY`.
+Carry-forward validation covers the complete required key universe, including
+ordinary ticker/group keys and the explicit Datacenter ecosystem aggregate key
+`ecosystem:DC_ECOSYSTEM_TOTAL` where that key is part of the canonical table
+contract.
+
+The corrected report-status-only execution order is:
+
+```text
+REPORT_STATUS_SCOPE_VALIDATED
+BACKUP_VERIFIED
+TARGET_TAXONOMY_METADATA_LOADED
+DC_FACTS_CARRIED_FORWARD
+DC_FACTS_VALIDATED
+EC_FACTS_CONSTRUCTED
+COVERAGE_PARITY_VALIDATED
+OLD_EC_CLEANED
+WHOLE_RANGE_VALIDATED
+WATERMARKS_FINALIZED
+READY_TO_ACTIVATE
+```
+
+The EC rebuild service constructs target facts and validates chunk-level
+coverage/parity, but whole-range stale-row validation and canonical EC
+watermark finalization are owned by the outer taxonomy-change orchestrator.
+That split guarantees old-version EC cleanup runs before stale-row validation.
+If cleanup fails, the run stops at `OLD_EC_CLEANED` and resumes from that phase;
+`WHOLE_RANGE_VALIDATED` is not attempted.
 
 ## Resume And Idempotency
 

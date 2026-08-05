@@ -465,7 +465,11 @@ def test_run_calls_injected_rebuild_services_in_order(tmp_path, monkeypatch) -> 
 
     monkeypatch.setattr(
         "rawcandle.datacenter_taxonomy_change_orchestrator.plan_ec_taxonomy_replacement_cleanup",
-        lambda **_kwargs: {"safe_to_apply": True, "cleanup_plan_status": "READY_TO_APPLY"},
+        lambda **_kwargs: {"safe_to_apply": True, "cleanup_plan_status": "READY_TO_APPLY", "delete_candidate_hash": "hash"},
+    )
+    monkeypatch.setattr(
+        "rawcandle.datacenter_taxonomy_change_orchestrator.apply_ec_taxonomy_replacement_cleanup",
+        lambda **_kwargs: {"cleanup_apply_status": "NO_CHANGE"},
     )
     monkeypatch.setattr(
         "rawcandle.datacenter_taxonomy_change_orchestrator.finalize_ec_taxonomy_rebuild_validation",
@@ -502,6 +506,7 @@ def test_run_calls_injected_rebuild_services_in_order(tmp_path, monkeypatch) -> 
     assert summary["run_status"] == "READY_TO_ACTIVATE"
     assert summary["activation_executed"] is False
     assert calls == ["guard:True", "writer", "backup", "dc", "ec", "guard:False"]
+    assert summary["completed_phases"].index("OLD_EC_CLEANED") < summary["completed_phases"].index("WHOLE_RANGE_VALIDATED")
 
 
 def test_report_status_only_execution_skips_datacenter_rebuild(tmp_path, monkeypatch) -> None:
@@ -526,7 +531,11 @@ def test_report_status_only_execution_skips_datacenter_rebuild(tmp_path, monkeyp
 
     monkeypatch.setattr(
         "rawcandle.datacenter_taxonomy_change_orchestrator.plan_ec_taxonomy_replacement_cleanup",
-        lambda **_kwargs: {"safe_to_apply": True, "cleanup_plan_status": "READY_TO_APPLY"},
+        lambda **_kwargs: {"safe_to_apply": True, "cleanup_plan_status": "READY_TO_APPLY", "delete_candidate_hash": "hash"},
+    )
+    monkeypatch.setattr(
+        "rawcandle.datacenter_taxonomy_change_orchestrator.apply_ec_taxonomy_replacement_cleanup",
+        lambda **_kwargs: {"cleanup_apply_status": "APPLIED"},
     )
     monkeypatch.setattr(
         "rawcandle.datacenter_taxonomy_change_orchestrator.finalize_ec_taxonomy_rebuild_validation",
@@ -573,6 +582,75 @@ def test_report_status_only_execution_skips_datacenter_rebuild(tmp_path, monkeyp
     assert summary["external_fetch_called"] is False
     assert calls == ["guard:True", "writer", "backup", "ec", "guard:False"]
     assert "DC_REBUILD_SKIPPED_REPORT_STATUS_ONLY" in summary["completed_phases"]
+    assert summary["completed_phases"].index("OLD_EC_CLEANED") < summary["completed_phases"].index("WHOLE_RANGE_VALIDATED")
+
+
+def test_report_status_only_cleanup_failure_prevents_whole_range_validation(tmp_path, monkeypatch) -> None:
+    current_csv = _write_csv(tmp_path / "current.csv", _rows("DC_TAXONOMY_FULL_V1"))
+    proposed_csv = _write_csv(
+        tmp_path / "proposed.csv",
+        _report_status_only_rows("DC_TAXONOMY_FULL_V2_1"),
+    )
+    db_path = _db(tmp_path, current_csv)
+    config_path = _config(tmp_path, current_csv)
+    prepared = prepare_taxonomy_change(
+        analysis_db=db_path,
+        proposed_taxonomy_csv=proposed_csv,
+        date_to="2026-07-31",
+        scheduler_config_path=config_path,
+        watchlist_path=tmp_path / "watchlist.txt",
+        evidence_root=tmp_path / "evidence",
+        rebuild_mode=REBUILD_MODE_AUTO,
+    )
+    plan = prepared["plan"]
+    finalized = False
+
+    monkeypatch.setattr(
+        "rawcandle.datacenter_taxonomy_change_orchestrator.plan_ec_taxonomy_replacement_cleanup",
+        lambda **_kwargs: {"safe_to_apply": True, "cleanup_plan_status": "READY_TO_APPLY", "delete_candidate_hash": "hash"},
+    )
+    monkeypatch.setattr(
+        "rawcandle.datacenter_taxonomy_change_orchestrator.apply_ec_taxonomy_replacement_cleanup",
+        lambda **_kwargs: {"cleanup_apply_status": "BLOCKED", "blocking_errors": ["simulated cleanup failure"]},
+    )
+
+    def fail_finalization(**_kwargs):
+        nonlocal finalized
+        finalized = True
+        raise AssertionError("whole-range validation must not run after cleanup failure")
+
+    monkeypatch.setattr(
+        "rawcandle.datacenter_taxonomy_change_orchestrator.finalize_ec_taxonomy_rebuild_validation",
+        fail_finalization,
+    )
+    services = TaxonomyChangeServices(
+        set_scheduler_guard=lambda **_kwargs: {"status": "OK"},
+        verify_active_writer=lambda **_kwargs: {"status": "NO_ACTIVE_WRITER"},
+        ensure_backup=lambda **_kwargs: {"status": "OK"},
+        run_dc_rebuild=lambda **_kwargs: {"status": "OK"},
+        run_ec_rebuild=lambda **_kwargs: {"status": "OK", "overall_status": "FACTS_CONSTRUCTED"},
+    )
+
+    summary = execute_taxonomy_rebuild(
+        analysis_db=db_path,
+        deployment_id=prepared["deployment_id"],
+        proposed_taxonomy_csv=proposed_csv,
+        date_to="2026-07-31",
+        scheduler_config_path=config_path,
+        confirm_deployment_id=prepared["deployment_id"],
+        confirm_proposed_taxonomy_version="DC_TAXONOMY_FULL_V2_1",
+        confirm_proposed_source_hash=plan["proposed_source_sha256"],
+        confirm_date_from="2025-08-01",
+        confirm_date_to="2026-07-31",
+        confirm_rebuild_mode=REBUILD_MODE_DELTA,
+        confirm_plan_hash=plan["plan_hash"],
+        services=services,
+    )
+
+    assert summary["run_status"] == "FAILED"
+    assert summary["failed_phase"] == "OLD_EC_CLEANED"
+    assert summary["resume_from_phase"] == "OLD_EC_CLEANED"
+    assert finalized is False
 
 
 def test_production_taxonomy_services_guard_backup_and_rebuild_runners(tmp_path) -> None:
@@ -759,7 +837,19 @@ def _create_carry_forward_fact_tables(db_path: Path) -> None:
                 f"INSERT INTO {table} VALUES ('2026-07-31','DC_TAXONOMY_FULL_V1','layer','Power',2,'v1')"
             )
         conn.execute(
+            "INSERT INTO dc_group_swing_signal_daily VALUES ('2026-07-31','DC_TAXONOMY_FULL_V1','ecosystem','DC_ECOSYSTEM_TOTAL',2,'v1')"
+        )
+        conn.execute(
+            "INSERT INTO dc_group_swing_signal_daily VALUES ('2026-07-31','DC_TAXONOMY_FULL_V1','sentinel','BAD_SENTINEL',2,'v1')"
+        )
+        conn.execute(
             "INSERT INTO dc_group_index_daily VALUES ('2026-07-31','DC_TAXONOMY_FULL_V1','layer','Power',10.0)"
+        )
+        conn.execute(
+            "INSERT INTO dc_group_index_daily VALUES ('2026-07-31','DC_TAXONOMY_FULL_V1','ecosystem','DC_ECOSYSTEM_TOTAL',10.0)"
+        )
+        conn.execute(
+            "INSERT INTO dc_group_index_daily VALUES ('2026-07-31','DC_TAXONOMY_FULL_V1','sentinel','BAD_SENTINEL',10.0)"
         )
         conn.commit()
     finally:
@@ -839,13 +929,17 @@ def test_report_status_only_carry_forward_copies_complete_dc_slice(tmp_path) -> 
         proposed_ticker_count = conn.execute(
             "SELECT COUNT(*) FROM dc_ticker_swing_signal_daily WHERE taxonomy_version='DC_TAXONOMY_FULL_V2_1'"
         ).fetchone()[0]
-        proposed_group_count = conn.execute(
+        proposed_group_rows = conn.execute(
             "SELECT COUNT(*) FROM dc_group_swing_signal_daily WHERE taxonomy_version='DC_TAXONOMY_FULL_V2_1'"
         ).fetchone()[0]
+        proposed_index_rows = conn.execute(
+            "SELECT group_type, group_name FROM dc_group_index_daily WHERE taxonomy_version='DC_TAXONOMY_FULL_V2_1' ORDER BY group_type, group_name"
+        ).fetchall()
     finally:
         conn.close()
     assert proposed_ticker_count == 2
-    assert proposed_group_count == 1
+    assert proposed_group_rows == 2
+    assert proposed_index_rows == [("ecosystem", "DC_ECOSYSTEM_TOTAL"), ("layer", "Power")]
 
 
 def test_ready_to_activate_and_active_are_idempotent(tmp_path) -> None:

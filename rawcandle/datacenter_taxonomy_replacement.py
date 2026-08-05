@@ -1349,6 +1349,7 @@ def validate_datacenter_taxonomy_rebuild_evidence(
             "stale_dc_rows": {},
             "stale_ec_rows": {},
         }
+        cleanup_evidence = {"cleanup_evidence_status": "NOT_RUN"}
         if taxonomy_version_id is not None and ecosystem_id is not None:
             ec_heads = _ec_fact_heads(
                 conn,
@@ -1375,17 +1376,33 @@ def validate_datacenter_taxonomy_rebuild_evidence(
                     blocking_errors.append(f"EC watermark head incomplete for {scope[0]}")
                 if str(row.get("status")) != "OK":
                     blocking_errors.append(f"EC watermark status is not OK for {scope[0]}")
-            stale_summary = validate_rebuild_stale_rows(
+            cleanup_evidence = _cleanup_evidence_status(
                 conn,
-                ecosystem_id=ecosystem_id,
-                taxonomy_version_id=taxonomy_version_id,
-                taxonomy_version_code=proposed_taxonomy_version,
+                deployment_id=deployment_id,
+                ecosystem_code=ecosystem_code,
+                target_taxonomy_version=proposed_taxonomy_version,
+                target_taxonomy_version_id=taxonomy_version_id,
                 date_from=str(deployment["rebuild_start_date"]) if deployment is not None else "0000-00-00",
                 date_to=required_signal_date,
-                taxonomy_rows=proposed_summary.rows,
             )
-            if stale_summary["stale_validation_status"] != "OK":
-                blocking_errors.append("stale rows block readiness")
+            if cleanup_evidence["cleanup_evidence_status"] != "OK":
+                stale_summary = {
+                    "stale_validation_status": "BLOCKED_CLEANUP_NOT_COMPLETED",
+                    "cleanup_evidence": cleanup_evidence,
+                }
+                blocking_errors.append("cleanup evidence is required before stale-row readiness validation")
+            else:
+                stale_summary = validate_rebuild_stale_rows(
+                    conn,
+                    ecosystem_id=ecosystem_id,
+                    taxonomy_version_id=taxonomy_version_id,
+                    taxonomy_version_code=proposed_taxonomy_version,
+                    date_from=str(deployment["rebuild_start_date"]) if deployment is not None else "0000-00-00",
+                    date_to=required_signal_date,
+                    taxonomy_rows=proposed_summary.rows,
+                )
+                if stale_summary["stale_validation_status"] != "OK":
+                    blocking_errors.append("stale rows block readiness")
     finally:
         conn.close()
 
@@ -1404,6 +1421,7 @@ def validate_datacenter_taxonomy_rebuild_evidence(
         "ec_fact_heads": ec_heads,
         "ec_watermark_lineage": watermark_rows,
         "stale_row_validation": stale_summary,
+        "cleanup_evidence": cleanup_evidence,
         "blocking_errors": sorted(set(blocking_errors)),
         "evidence_sha256": _json_sha256(
             {
@@ -2332,6 +2350,55 @@ def _validate_v2_fact_state(
     }, blocking_errors
 
 
+def _cleanup_evidence_status(
+    conn: sqlite3.Connection,
+    *,
+    deployment_id: int,
+    ecosystem_code: str,
+    target_taxonomy_version: str,
+    target_taxonomy_version_id: int,
+    date_from: str,
+    date_to: str,
+) -> dict[str, object]:
+    if "ec_taxonomy_change_deployment" not in _table_names(conn):
+        return {"cleanup_evidence_status": "MISSING", "blocking_errors": ["deployment table is missing"]}
+    row = conn.execute(
+        """
+        SELECT rebuild_evidence_json
+        FROM ec_taxonomy_change_deployment
+        WHERE taxonomy_change_id = ?
+          AND ecosystem_code = ?
+          AND proposed_taxonomy_version = ?
+        """,
+        (deployment_id, ecosystem_code, target_taxonomy_version),
+    ).fetchone()
+    if row is None or row[0] is None:
+        return {"cleanup_evidence_status": "MISSING", "blocking_errors": ["cleanup evidence is missing"]}
+    try:
+        evidence = json.loads(str(row[0]))
+    except json.JSONDecodeError:
+        return {"cleanup_evidence_status": "INVALID", "blocking_errors": ["cleanup evidence is not valid JSON"]}
+    errors: list[str] = []
+    if evidence.get("status") not in {"APPLIED", "NO_CHANGE"}:
+        errors.append("cleanup status is not APPLIED or NO_CHANGE")
+    if int(evidence.get("deployment_id") or -1) != deployment_id:
+        errors.append("cleanup deployment id mismatch")
+    if evidence.get("ecosystem_code") != ecosystem_code:
+        errors.append("cleanup ecosystem mismatch")
+    if evidence.get("target_taxonomy_version") != target_taxonomy_version:
+        errors.append("cleanup target taxonomy mismatch")
+    if int(evidence.get("target_taxonomy_version_id") or -1) != target_taxonomy_version_id:
+        errors.append("cleanup target taxonomy id mismatch")
+    if evidence.get("date_from") != date_from or evidence.get("date_to") != date_to:
+        errors.append("cleanup date range mismatch")
+    return {
+        "cleanup_evidence_status": "OK" if not errors else "BLOCKED",
+        "cleanup_status": evidence.get("status"),
+        "blocking_errors": errors,
+        "evidence": evidence if not errors else None,
+    }
+
+
 def apply_ec_taxonomy_replacement_cleanup(
     *,
     db: str | Path,
@@ -2564,19 +2631,36 @@ def validate_ec_taxonomy_rebuild_existing_facts(
                 date_to=date_to,
             )
             blocking_errors.extend(fact_errors)
-            stale_summary = validate_rebuild_stale_rows(
+            cleanup_evidence = _cleanup_evidence_status(
                 conn,
-                ecosystem_id=ecosystem_id,
-                taxonomy_version_id=taxonomy_version_id,
-                taxonomy_version_code=target_taxonomy_version,
+                deployment_id=deployment_id,
+                ecosystem_code=ecosystem,
+                target_taxonomy_version=target_taxonomy_version,
+                target_taxonomy_version_id=taxonomy_version_id,
                 date_from=date_from,
                 date_to=date_to,
-                taxonomy_rows=taxonomy_summary.rows,
             )
-            if stale_summary["stale_validation_status"] != "OK":
-                blocking_errors.append("stale rows block validation-only recovery")
+            if cleanup_evidence["cleanup_evidence_status"] != "OK":
+                stale_summary = {
+                    "stale_validation_status": "BLOCKED_CLEANUP_NOT_COMPLETED",
+                    "cleanup_evidence": cleanup_evidence,
+                }
+                blocking_errors.append("cleanup evidence is required before whole-range stale validation")
+            else:
+                stale_summary = validate_rebuild_stale_rows(
+                    conn,
+                    ecosystem_id=ecosystem_id,
+                    taxonomy_version_id=taxonomy_version_id,
+                    taxonomy_version_code=target_taxonomy_version,
+                    date_from=date_from,
+                    date_to=date_to,
+                    taxonomy_rows=taxonomy_summary.rows,
+                )
+                if stale_summary["stale_validation_status"] != "OK":
+                    blocking_errors.append("stale rows block validation-only recovery")
         else:
             fact_state = {"status": "FAILED"}
+            cleanup_evidence = {"cleanup_evidence_status": "NOT_RUN"}
             stale_summary = {"stale_validation_status": "NOT_RUN", "stale_dc_rows": {}, "stale_ec_rows": {}}
     finally:
         conn.close()
@@ -2588,6 +2672,7 @@ def validate_ec_taxonomy_rebuild_existing_facts(
         "parity_status": parity_status,
         "total_mismatch_count": int(total_mismatch_count),
         "stale_row_validation": stale_summary,
+        "cleanup_evidence": cleanup_evidence,
         "stale_row_count": sum(int(value) for value in (stale_summary.get("stale_ec_rows") or {}).values()),
         "fact_state": fact_state,
         "loaders_rerun": False,

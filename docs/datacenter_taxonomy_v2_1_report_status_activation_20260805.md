@@ -769,3 +769,116 @@ Add focused tests for:
 17. No Datacenter pipeline or Stage 2 runs during resume.
 18. Existing normal delta/full workflows remain unchanged.
 ```
+
+## Code Fix Status
+
+Final code classification:
+
+```text
+DATACENTER_RSO_CLEANUP_ORDER_AND_AGGREGATE_CARRY_FORWARD_FIXED
+```
+
+The implementation corrected the generic report-status-only execution contract:
+
+```text
+coverage/parity success
+-> old-version EC cleanup
+-> whole-range stale-row validation
+-> watermark finalization
+```
+
+The EC full-rebuild runner can now construct target EC facts and defer
+whole-range validation/finalization to the outer taxonomy-change orchestrator.
+For taxonomy replacement finalization, stale-row validation is blocked unless
+cleanup evidence exists for the same:
+
+```text
+deployment_id
+ecosystem_code
+target_taxonomy_version
+target_taxonomy_version_id
+date_from
+date_to
+```
+
+Valid cleanup evidence status is:
+
+```text
+APPLIED
+NO_CHANGE
+```
+
+Otherwise validation reports:
+
+```text
+stale_validation_status=BLOCKED_CLEANUP_NOT_COMPLETED
+```
+
+### Aggregate Carry-Forward Contract
+
+The corrected DC carry-forward validation compares the complete explicit key
+universe for the copied scope, not only taxonomy CSV group codes.
+
+Affected required aggregate keys:
+
+```text
+dc_group_swing_signal_daily:
+  group_type=ecosystem
+  group_name=DC_ECOSYSTEM_TOTAL
+
+dc_group_index_daily:
+  group_type=ecosystem
+  group_name=DC_ECOSYSTEM_TOTAL
+```
+
+Observed production gap remains unchanged because this task did not resume or
+repair deployment 2:
+
+```text
+dc_group_swing_signal_daily missing_target_ecosystem_aggregate_keys=253
+dc_group_index_daily missing_target_ecosystem_aggregate_keys=253
+total_missing_target_ecosystem_aggregate_keys=506
+```
+
+Ticker rows and ordinary layer/subindustry group rows validate cleanly. The
+synthetic OHLC table had no source ecosystem aggregate rows in the current
+production slice and remains clean under the validated contract.
+
+### Deployment 2 Read-Only Resume Plan After Fix
+
+Read-only artifact:
+
+```text
+temp/datacenter_v2_1_rso_fix_validation/deployment_2_read_only_resume_plan.json
+```
+
+Result:
+
+```text
+safe_to_resume=false
+resume_from_phase=DC_FACTS_CARRIED_FORWARD
+DC_recopy_required=true
+EC_rebuild_required=false
+cleanup_required=true
+restore_required=false
+backup_reuse_required=true
+```
+
+Existing backup to reuse:
+
+```text
+temp/taxonomy_change_backups/analysis_taxonomy_change_2_20260805T124226Z.sqlite
+sha256=7b00488c4f713c53641920fa270c5c35ede6d6fca89bc531e4a9d2d1430b2721
+```
+
+The earliest safe controlled production resume is not `OLD_EC_CLEANED` yet,
+because the corrected DC key-universe validation proves the current target DC
+lineage is still missing required aggregate rows. A later controlled resume
+should first run the deterministic idempotent DC carry-forward repair for the
+missing aggregate rows, then apply old-version EC cleanup, then run whole-range
+validation and watermark finalization. EC target construction should not be
+rerun unless a fresh validation shows EC facts changed or are incomplete.
+
+No production resume, cleanup, activation, Scheduler run, Datacenter pipeline,
+Stage 2, EC work, DB write, config write, backup creation, restore, migration,
+or unrelated cleanup occurred during this code-fix task.

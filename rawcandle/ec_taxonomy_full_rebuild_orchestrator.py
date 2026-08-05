@@ -1009,6 +1009,8 @@ def _validate_whole_range(
     date_from: str,
     date_to: str,
     chunks: list[dict[str, object]],
+    require_cleanup_evidence: bool = False,
+    deployment_id: int | None = None,
 ) -> dict[str, object]:
     errors: list[str] = []
     total_mismatch_count = sum(int(chunk.get("total_mismatch_count") or 0) for chunk in chunks)
@@ -1033,6 +1035,36 @@ def _validate_whole_range(
             if str(taxonomy.get("source_hash") or "") != taxonomy_summary.source_sha256:
                 errors.append("loaded taxonomy hash does not match taxonomy CSV")
             taxonomy_rows = taxonomy_summary.rows
+            cleanup_summary = None
+            if require_cleanup_evidence:
+                cleanup_summary = _cleanup_evidence_from_deployment(
+                    conn,
+                    deployment_id=deployment_id,
+                    ecosystem_code=ecosystem_code,
+                    target_taxonomy_version=taxonomy_version_code,
+                    target_taxonomy_version_id=int(taxonomy["taxonomy_version_id"]),
+                    date_from=date_from,
+                    date_to=date_to,
+                )
+                if cleanup_summary["cleanup_evidence_status"] != "OK":
+                    stale_summary = {
+                        "stale_validation_status": "BLOCKED_CLEANUP_NOT_COMPLETED",
+                        "cleanup_evidence": cleanup_summary,
+                    }
+                    errors.append("cleanup evidence is required before whole-range stale validation")
+                    return {
+                        "whole_range_validation_status": "FAILED",
+                        "coverage_status": "OK"
+                        if not any("coverage" in error for error in errors)
+                        else "FAILED",
+                        "parity_status": "OK"
+                        if total_mismatch_count == 0 and not any("parity" in error for error in errors)
+                        else "FAILED",
+                        "total_mismatch_count": total_mismatch_count,
+                        "stale_row_validation": stale_summary,
+                        "cleanup_evidence": cleanup_summary,
+                        "blocking_errors": sorted(set(errors)),
+                    }
             stale_summary = validate_rebuild_stale_rows(
                 conn,
                 ecosystem_id=int(taxonomy["ecosystem_id"]),
@@ -1054,6 +1086,55 @@ def _validate_whole_range(
         "total_mismatch_count": total_mismatch_count,
         "stale_row_validation": stale_summary,
         "blocking_errors": sorted(set(errors)),
+    }
+
+
+def _cleanup_evidence_from_deployment(
+    conn: sqlite3.Connection,
+    *,
+    deployment_id: int | None,
+    ecosystem_code: str,
+    target_taxonomy_version: str,
+    target_taxonomy_version_id: int,
+    date_from: str,
+    date_to: str,
+) -> dict[str, object]:
+    if deployment_id is None or "ec_taxonomy_change_deployment" not in _table_names(conn):
+        return {"cleanup_evidence_status": "MISSING", "blocking_errors": ["deployment evidence is unavailable"]}
+    row = conn.execute(
+        """
+        SELECT rebuild_evidence_json
+        FROM ec_taxonomy_change_deployment
+        WHERE taxonomy_change_id = ?
+          AND ecosystem_code = ?
+          AND proposed_taxonomy_version = ?
+        """,
+        (deployment_id, ecosystem_code, target_taxonomy_version),
+    ).fetchone()
+    if row is None or row[0] is None:
+        return {"cleanup_evidence_status": "MISSING", "blocking_errors": ["cleanup evidence is missing"]}
+    try:
+        evidence = json.loads(str(row[0]))
+    except json.JSONDecodeError:
+        return {"cleanup_evidence_status": "INVALID", "blocking_errors": ["cleanup evidence is not valid JSON"]}
+    errors: list[str] = []
+    if evidence.get("status") not in {"APPLIED", "NO_CHANGE"}:
+        errors.append("cleanup status is not APPLIED or NO_CHANGE")
+    if int(evidence.get("deployment_id") or -1) != deployment_id:
+        errors.append("cleanup deployment id mismatch")
+    if evidence.get("ecosystem_code") != ecosystem_code:
+        errors.append("cleanup ecosystem mismatch")
+    if evidence.get("target_taxonomy_version") != target_taxonomy_version:
+        errors.append("cleanup target taxonomy mismatch")
+    if int(evidence.get("target_taxonomy_version_id") or -1) != target_taxonomy_version_id:
+        errors.append("cleanup target taxonomy id mismatch")
+    if evidence.get("date_from") != date_from or evidence.get("date_to") != date_to:
+        errors.append("cleanup date range mismatch")
+    return {
+        "cleanup_evidence_status": "OK" if not errors else "BLOCKED",
+        "cleanup_status": evidence.get("status"),
+        "blocking_errors": errors,
+        "evidence": evidence if not errors else None,
     }
 
 
@@ -1189,6 +1270,8 @@ def run_ec_taxonomy_full_rebuild(
     resume: bool = False,
     repo_root: str | Path = ".",
     backfill_runner: Callable[..., dict[str, object]] = run_ec_source_layer_backfill,
+    finalize_after_rebuild: bool = True,
+    require_cleanup_evidence_for_whole_range: bool = False,
 ) -> dict[str, object]:
     orchestrator_started_at_utc = datetime.now(timezone.utc)
     plan = plan_ec_taxonomy_full_rebuild(
@@ -1455,6 +1538,30 @@ def run_ec_taxonomy_full_rebuild(
         progress["updated_at_utc"] = _utc_now()
         _write_progress(progress_file, progress)
 
+    if not finalize_after_rebuild:
+        progress.update(
+            {
+                "overall_status": "FACTS_CONSTRUCTED",
+                "whole_range_validation_status": "DEFERRED",
+                "watermark_finalization_status": "DEFERRED",
+                "retry_required": False,
+                "updated_at_utc": _utc_now(),
+            }
+        )
+        _write_progress(progress_file, progress)
+        return {
+            "overall_status": "FACTS_CONSTRUCTED",
+            "retry_required": False,
+            "watermark_finalization_performed": False,
+            "backup_summary": backup_summary,
+            "progress_path": str(progress_file),
+            "chunk_results": completed_chunks,
+            "whole_range_validation_status": "DEFERRED",
+            "watermark_finalization_status": "DEFERRED",
+            "plan": plan,
+            **_backup_fields(backup_summary),
+        }
+
     whole_range_validation = _validate_whole_range(
         db_path=db_path,
         ecosystem_code=ecosystem_code,
@@ -1463,6 +1570,8 @@ def run_ec_taxonomy_full_rebuild(
         date_from=date_from,
         date_to=date_to,
         chunks=completed_chunks,
+        require_cleanup_evidence=require_cleanup_evidence_for_whole_range,
+        deployment_id=deployment_id,
     )
     if whole_range_validation["whole_range_validation_status"] != "OK":
         progress.update(

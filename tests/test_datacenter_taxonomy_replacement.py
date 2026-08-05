@@ -405,6 +405,26 @@ def test_rebuild_evidence_blocks_manual_ok_when_facts_missing(tmp_path) -> None:
 
 def test_successful_rebuild_evidence_moves_deployment_ready_to_activate(tmp_path) -> None:
     db_path, csv_path = _activation_db(tmp_path, complete=True)
+    cleanup_evidence = {
+        "deployment_id": 1,
+        "ecosystem_code": "DATACENTER",
+        "target_taxonomy_version": "DC_TAXONOMY_FULL_V2",
+        "target_taxonomy_version_id": 2,
+        "date_from": "2025-08-01",
+        "date_to": "2026-07-31",
+        "status": "NO_CHANGE",
+    }
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE ec_taxonomy_change_deployment
+            SET rebuild_evidence_json = ?,
+                rebuild_evidence_sha256 = ?
+            WHERE taxonomy_change_id = 1
+            """,
+            (json.dumps(cleanup_evidence, sort_keys=True), "cleanup-sha"),
+        )
+        conn.commit()
     summary = apply_datacenter_taxonomy_rebuild_evidence(
         analysis_db=db_path,
         ecosystem_code="DATACENTER",
