@@ -882,3 +882,101 @@ rerun unless a fresh validation shows EC facts changed or are incomplete.
 No production resume, cleanup, activation, Scheduler run, Datacenter pipeline,
 Stage 2, EC work, DB write, config write, backup creation, restore, migration,
 or unrelated cleanup occurred during this code-fix task.
+
+## Resume Preflight Blocked Before Writes
+
+Resume attempt classification:
+
+```text
+DATACENTER_V2_1_RSO_RESUME_BLOCKED_BEFORE_WRITES
+```
+
+Evidence root:
+
+```text
+temp/datacenter_taxonomy_v2_1_rso_resume_20260805T173523Z/
+```
+
+Preflight artifact:
+
+```text
+temp/datacenter_taxonomy_v2_1_rso_resume_20260805T173523Z/blocked_before_writes_preflight.json
+```
+
+Repository and source verification:
+
+```text
+HEAD=ff4ee9a00d9f8e4fe58f500bb9471ad8d43c3c2f
+origin/chore/ignore-backups=ff4ee9a00d9f8e4fe58f500bb9471ad8d43c3c2f
+V2 CSV sha256=178de3b56891a37b7472748b3f05b77625cc5c9dde4637cb63be50aed807e2e1
+V2.1 CSV sha256=2e27c6e68aa22c53c04e123f79744058b39a6a22b465634fda7510971c3159ef
+existing backup sha256=7b00488c4f713c53641920fa270c5c35ede6d6fca89bc531e4a9d2d1430b2721
+```
+
+The resume was blocked before acquiring the operation lock, before changing the
+Scheduler guard, and before any production database write.
+
+Blocking reasons:
+
+```text
+expected_plan_hash=a58c27c005bea5cc488d035649857988825ee8bff71120b1e2b7c6c8367a216f
+actual_plan_hash=b7ac763c26e58d97592319aab07577c2890683705af032ebb67a4612d5cb58ad
+plan_hash_matches=false
+```
+
+The actual plan still classified correctly as:
+
+```text
+change_execution_class=REPORT_STATUS_ONLY
+```
+
+The current `ff4ee9a` resume fallback also remains too broad for the requested
+production repair. After DC key-universe validation fails, the available
+backend path would call general delta carry-forward for the allowlist scope,
+not a narrow repair restricted to the two missing ecosystem aggregate scopes.
+That would violate the resume task constraint:
+
+```text
+DC_repair_scope_required=ECOSYSTEM_AGGREGATE_ONLY
+current_backend_write_scope=GENERAL_DELTA_CARRY_FORWARD_ALLOWLIST
+```
+
+Read-only missing aggregate inventory remains:
+
+```text
+dc_group_swing_signal_daily missing_target_ecosystem_aggregate_keys=253
+dc_group_index_daily missing_target_ecosystem_aggregate_keys=253
+total_missing_target_ecosystem_aggregate_keys=506
+```
+
+Read-only cleanup candidate counts remain:
+
+```text
+ec_ticker_signal_daily=65257
+ec_group_signal_daily=13716
+ec_group_synthetic_ohlc_daily=13462
+ec_group_index_daily=13716
+```
+
+Because the task required a narrow aggregate-only repair and exact durable plan
+identity verification, the correct action was to stop before writes.
+
+No production resume, operation lock acquisition, Scheduler guard change,
+Datacenter pipeline, Stage 2, computational calculation, broad DC recopy,
+aggregate repair, EC cleanup, EC rebuild, EC loader, whole-range validation,
+watermark finalization, activation, migration, external fetch, new full backup,
+automatic restore, config write, taxonomy CSV write, watchlist write, or
+unrelated cleanup occurred during this blocked preflight.
+
+Required next implementation before a controlled resume:
+
+```text
+1. Add an explicit aggregate-only DC repair phase for REPORT_STATUS_ONLY resume.
+2. Ensure the phase can repair only:
+   - dc_group_swing_signal_daily ecosystem:DC_ECOSYSTEM_TOTAL
+   - dc_group_index_daily ecosystem:DC_ECOSYSTEM_TOTAL
+3. Ensure the resume planner reports that narrow scope instead of falling back
+   to general delta carry-forward.
+4. Reconcile or intentionally accept the actual plan hash before production
+   writes.
+```
