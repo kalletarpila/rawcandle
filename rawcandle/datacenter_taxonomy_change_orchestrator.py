@@ -13,7 +13,11 @@ from typing import Callable
 from analysis.datacenter_indices.swing_pipeline_orchestrator import run_datacenter_swing_pipeline
 from analysis.datacenter_indices.taxonomy import DatacenterTaxonomyRow, load_datacenter_taxonomy_csv
 from rawcandle.ec_taxonomy_full_rebuild_orchestrator import run_ec_taxonomy_full_rebuild
-from rawcandle.ec_dc_fact_parity_audit import audit_dc_ec_fact_parity
+from rawcandle.ec_dc_fact_parity_audit import (
+    PARITY_FIELD_POLICY_VERSION,
+    PARITY_POLICY_RSO_REVALIDATION_METADATA,
+    audit_dc_ec_fact_parity,
+)
 from rawcandle.datacenter_taxonomy_replacement import (
     CANONICAL_DC_FACT_TABLES,
     CANONICAL_EC_FACT_TABLES,
@@ -43,6 +47,7 @@ CHANGE_EXECUTION_DELTA_REBUILD = "DELTA_REBUILD"
 CHANGE_EXECUTION_REPORT_STATUS_ONLY = "REPORT_STATUS_ONLY"
 DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY = "ECOSYSTEM_AGGREGATE_ONLY"
 PLAN_RECONCILIATION_REASON_AGGREGATE_SCOPE = "IMPLEMENTATION_CORRECTION_AGGREGATE_CARRY_FORWARD_SCOPE"
+REPORT_STATUS_ONLY_PARITY_POLICY = PARITY_POLICY_RSO_REVALIDATION_METADATA
 EC_RESUME_ACTION_REBUILD_EC_FACTS = "REBUILD_EC_FACTS"
 EC_RESUME_ACTION_REVALIDATE_EXISTING_FACTS = "REVALIDATE_EXISTING_FACTS"
 EC_RESUME_ACTION_SKIP_ALREADY_VALIDATED = "SKIP_ALREADY_VALIDATED"
@@ -2664,20 +2669,28 @@ def revalidate_existing_ec_facts(
             taxonomy_version_code=target_taxonomy_version,
             signal_date=date_to,
             include_pipeline_watermark=False,
+            parity_policy=REPORT_STATUS_ONLY_PARITY_POLICY,
         )
         parity_status = str(parity_summary.get("status") or "FAILED")
         total_mismatch_count = int(parity_summary.get("total_mismatch_count") or 0)
+        total_blocking_mismatch_count = (
+            int(parity_summary["total_blocking_mismatch_count"])
+            if "total_blocking_mismatch_count" in parity_summary
+            else total_mismatch_count
+        )
         if parity_status not in {"OK", "OK_WITH_WARNINGS"}:
             blocking_errors.append(f"parity status is {parity_status}")
-        if total_mismatch_count != 0:
-            blocking_errors.append("total mismatch count is not zero")
+        if total_blocking_mismatch_count != 0:
+            blocking_errors.append("total blocking mismatch count is not zero")
         warnings.extend(str(warning) for warning in parity_summary.get("warnings", []))
     else:
         parity_summary = {"status": "NOT_RUN", "total_mismatch_count": 0, "warnings": []}
         parity_status = "NOT_RUN"
         total_mismatch_count = 0
+        total_blocking_mismatch_count = 0
 
     complete = not blocking_errors
+    metadata_drift_warnings = list(parity_summary.get("metadata_drift_warnings", []))
     return {
         "ec_revalidation_status": "OK" if complete else "BLOCKED",
         "ec_fact_state": "COMPLETE" if complete else "INCOMPLETE",
@@ -2688,6 +2701,14 @@ def revalidate_existing_ec_facts(
         "parity_execution_status": "READ_ONLY_PARITY_AUDIT",
         "parity_status": parity_status,
         "total_mismatch_count": total_mismatch_count,
+        "semantic_field_mismatch_count": int(parity_summary.get("semantic_field_mismatch_count") or 0),
+        "required_lineage_mismatch_count": int(parity_summary.get("required_lineage_mismatch_count") or 0),
+        "operational_metadata_drift_count": int(parity_summary.get("operational_metadata_drift_count") or 0),
+        "ignored_diagnostic_difference_count": int(parity_summary.get("ignored_diagnostic_difference_count") or 0),
+        "total_blocking_mismatch_count": total_blocking_mismatch_count,
+        "metadata_drift_warnings": metadata_drift_warnings,
+        "ec_revalidation_parity_policy": REPORT_STATUS_ONLY_PARITY_POLICY,
+        "parity_field_policy_version": PARITY_FIELD_POLICY_VERSION,
         "stale_target_row_count": 0,
         "ec_rebuild_required": False,
         "ec_loaders_invoked": False,
@@ -2763,6 +2784,8 @@ def plan_report_status_only_resume_reconciliation(
         "dc_repair_tables": repair_plan.get("dc_repair_tables"),
         "dc_repair_key_classes": repair_plan.get("dc_repair_key_classes"),
         "repair_candidate_hash": repair_plan.get("repair_candidate_hash"),
+        "ec_revalidation_parity_policy": REPORT_STATUS_ONLY_PARITY_POLICY,
+        "parity_field_policy_version": PARITY_FIELD_POLICY_VERSION,
     }
     current_plan_inputs_hash = _json_hash(current_plan_inputs)
     caller_current_hash_matches = current_plan_hash is None or str(current_plan_hash) == backend_current_plan_hash
@@ -2801,6 +2824,8 @@ def plan_report_status_only_resume_reconciliation(
         "current_plan_inputs_hash": current_plan_inputs_hash,
         "reason": PLAN_RECONCILIATION_REASON_AGGREGATE_SCOPE,
         "plan_drift_classification": drift_classification,
+        "ec_revalidation_parity_policy": REPORT_STATUS_ONLY_PARITY_POLICY,
+        "parity_field_policy_version": PARITY_FIELD_POLICY_VERSION,
         "change_execution_class": plan.get("change_execution_class"),
         "repair_scope": DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY,
         "repair_candidate_hash": repair_plan["repair_candidate_hash"],
@@ -2829,6 +2854,8 @@ def plan_report_status_only_resume_reconciliation(
         "current_recomputed_plan_hash": backend_current_plan_hash,
         "current_plan_recomputed_at_utc": _utc_operation_timestamp(),
         "current_plan_inputs_hash": current_plan_inputs_hash,
+        "ec_revalidation_parity_policy": REPORT_STATUS_ONLY_PARITY_POLICY,
+        "parity_field_policy_version": PARITY_FIELD_POLICY_VERSION,
         "repair_amendment_hash": _json_hash(amendment_identity),
         "repair_amendment_identity": amendment_identity,
         "dc_repair_plan": repair_plan,

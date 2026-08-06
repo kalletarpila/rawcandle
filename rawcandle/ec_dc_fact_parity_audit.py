@@ -7,6 +7,14 @@ from rawcandle.ec_ticker_signal_daily_loader import _connect_readonly, _require_
 
 
 MAX_EXAMPLES = 20
+PARITY_POLICY_STRICT = "GLOBAL_STRICT_PARITY_POLICY"
+PARITY_POLICY_RSO_REVALIDATION_METADATA = "RSO_REVALIDATION_METADATA_POLICY_V1"
+FIELD_CLASS_KEY = "KEY"
+FIELD_CLASS_SEMANTIC = "SEMANTIC"
+FIELD_CLASS_REQUIRED_LINEAGE = "REQUIRED_LINEAGE"
+FIELD_CLASS_OPERATIONAL_METADATA = "OPERATIONAL_METADATA"
+FIELD_CLASS_IGNORED_DIAGNOSTIC = "IGNORED_DIAGNOSTIC"
+PARITY_FIELD_POLICY_VERSION = PARITY_POLICY_RSO_REVALIDATION_METADATA
 REQUIRED_SOURCE_TABLES = (
     "dc_ticker_swing_signal_daily",
     "dc_group_swing_signal_daily",
@@ -59,6 +67,38 @@ KNOWN_COMPONENT_SOURCE_TABLES = {
     "SYNTHETIC_OHLC_RELATIVE": "dc_group_synthetic_ohlc_daily",
     "GROUP_INDEX": "dc_group_index_daily",
 }
+SECTION_TARGET_TABLES = {
+    "ticker": "ec_ticker_signal_daily",
+    "group_signal": "ec_group_signal_daily",
+    "synthetic_ohlc": "ec_group_synthetic_ohlc_daily",
+    "group_index": "ec_group_index_daily",
+    "pipeline_watermark": "ec_pipeline_watermark",
+}
+RSO_OPERATIONAL_METADATA_FIELDS = {
+    ("ec_group_signal_daily", "source_run_id"),
+    ("ec_group_synthetic_ohlc_daily", "source_run_id"),
+}
+
+
+def classify_parity_field(
+    *,
+    section_name: str,
+    field_name: str,
+    comparison_kind: str,
+    parity_policy: str = PARITY_POLICY_STRICT,
+) -> str:
+    if comparison_kind == FIELD_CLASS_KEY:
+        return FIELD_CLASS_KEY
+    target_table = SECTION_TARGET_TABLES.get(section_name)
+    if (
+        parity_policy == PARITY_POLICY_RSO_REVALIDATION_METADATA
+        and target_table is not None
+        and (target_table, field_name) in RSO_OPERATIONAL_METADATA_FIELDS
+    ):
+        return FIELD_CLASS_OPERATIONAL_METADATA
+    if comparison_kind in {FIELD_CLASS_SEMANTIC, FIELD_CLASS_REQUIRED_LINEAGE, FIELD_CLASS_IGNORED_DIAGNOSTIC}:
+        return comparison_kind
+    raise ValueError(f"unknown parity field class for {section_name}.{field_name}: {comparison_kind}")
 
 
 def _fetch_latest_dates(conn: sqlite3.Connection, taxonomy_version_code: str) -> dict[str, str | None]:
@@ -187,6 +227,7 @@ def _build_section_result(
     extra_checks: list[tuple[str, callable]],
     accepted_unmapped_target_fields: list[str],
     numeric_tolerance: float,
+    parity_policy: str = PARITY_POLICY_STRICT,
 ) -> dict[str, object]:
     source_keys = set(source_rows)
     target_keys = set(target_rows)
@@ -211,16 +252,42 @@ def _build_section_result(
             skipped_target_fields.append(target_field)
 
     field_mismatch_examples: list[dict[str, object]] = []
-    field_mismatch_count = 0
+    semantic_field_mismatch_count = 0
+    required_lineage_mismatch_count = 0
+    operational_metadata_drift_count = 0
+    ignored_diagnostic_difference_count = 0
+    operational_metadata_drift_by_field: dict[tuple[str, str], int] = {}
 
-    def add_mismatch(key: tuple[object, ...], field: str, source_value: object, target_value: object) -> None:
-        nonlocal field_mismatch_count
-        field_mismatch_count += 1
+    def add_mismatch(
+        key: tuple[object, ...],
+        field: str,
+        source_value: object,
+        target_value: object,
+        field_class: str,
+    ) -> None:
+        nonlocal semantic_field_mismatch_count
+        nonlocal required_lineage_mismatch_count
+        nonlocal operational_metadata_drift_count
+        nonlocal ignored_diagnostic_difference_count
+        if field_class == FIELD_CLASS_SEMANTIC:
+            semantic_field_mismatch_count += 1
+        elif field_class == FIELD_CLASS_REQUIRED_LINEAGE:
+            required_lineage_mismatch_count += 1
+        elif field_class == FIELD_CLASS_OPERATIONAL_METADATA:
+            operational_metadata_drift_count += 1
+            target_table = SECTION_TARGET_TABLES.get(section_name, section_name)
+            key_tuple = (target_table, field)
+            operational_metadata_drift_by_field[key_tuple] = operational_metadata_drift_by_field.get(key_tuple, 0) + 1
+        elif field_class == FIELD_CLASS_IGNORED_DIAGNOSTIC:
+            ignored_diagnostic_difference_count += 1
+        else:
+            raise ValueError(f"unknown mismatch field class: {field_class}")
         if len(field_mismatch_examples) < MAX_EXAMPLES:
             field_mismatch_examples.append(
                 {
                     "key": _to_key_dict(key_fields, key),
                     "field": field,
+                    "field_class": field_class,
                     "source": source_value,
                     "target": target_value,
                 }
@@ -237,7 +304,18 @@ def _build_section_result(
                 numeric_tolerance=numeric_tolerance,
                 is_numeric=True,
             ):
-                add_mismatch(key, target_field, source_row[source_field], target_row[target_field])
+                add_mismatch(
+                    key,
+                    target_field,
+                    source_row[source_field],
+                    target_row[target_field],
+                    classify_parity_field(
+                        section_name=section_name,
+                        field_name=target_field,
+                        comparison_kind=FIELD_CLASS_SEMANTIC,
+                        parity_policy=parity_policy,
+                    ),
+                )
 
         for source_field, target_field in filtered_text_fields:
             if not _compare_value(
@@ -246,12 +324,36 @@ def _build_section_result(
                 numeric_tolerance=numeric_tolerance,
                 is_numeric=False,
             ):
-                add_mismatch(key, target_field, source_row[source_field], target_row[target_field])
+                add_mismatch(
+                    key,
+                    target_field,
+                    source_row[source_field],
+                    target_row[target_field],
+                    classify_parity_field(
+                        section_name=section_name,
+                        field_name=target_field,
+                        comparison_kind=FIELD_CLASS_SEMANTIC,
+                        parity_policy=parity_policy,
+                    ),
+                )
 
-        for field_name, checker in extra_checks:
+        for check in extra_checks:
+            field_name, checker = check[0], check[1]
+            comparison_kind = check[2] if len(check) > 2 else FIELD_CLASS_REQUIRED_LINEAGE
             source_value, target_value, ok = checker(source_row, target_row)
             if not ok:
-                add_mismatch(key, field_name, source_value, target_value)
+                add_mismatch(
+                    key,
+                    field_name,
+                    source_value,
+                    target_value,
+                    classify_parity_field(
+                        section_name=section_name,
+                        field_name=field_name,
+                        comparison_kind=comparison_kind,
+                        parity_policy=parity_policy,
+                    ),
+                )
 
     warnings = []
     if accepted_unmapped_target_fields:
@@ -264,7 +366,18 @@ def _build_section_result(
             + ", ".join(sorted(set(skipped_target_fields)))
         )
 
-    status = "FAILED" if (missing_in_target or extra_in_target or field_mismatch_count) else (
+    key_mismatch_count = len(missing_in_target) + len(extra_in_target)
+    total_blocking_mismatch_count = key_mismatch_count + semantic_field_mismatch_count + required_lineage_mismatch_count
+    if operational_metadata_drift_count:
+        warnings.append(
+            "Accepted operational metadata drift: "
+            + ", ".join(
+                f"{table}.{field}={count}"
+                for (table, field), count in sorted(operational_metadata_drift_by_field.items())
+            )
+        )
+
+    status = "FAILED" if total_blocking_mismatch_count else (
         "OK_WITH_WARNINGS" if warnings else "OK"
     )
 
@@ -274,8 +387,17 @@ def _build_section_result(
         "target_row_count": len(target_rows),
         "missing_in_target": [_to_key_dict(key_fields, key) for key in missing_in_target[:MAX_EXAMPLES]],
         "extra_in_target": [_to_key_dict(key_fields, key) for key in extra_in_target[:MAX_EXAMPLES]],
-        "field_mismatch_count": field_mismatch_count,
+        "field_mismatch_count": total_blocking_mismatch_count,
+        "semantic_field_mismatch_count": semantic_field_mismatch_count,
+        "required_lineage_mismatch_count": required_lineage_mismatch_count,
+        "operational_metadata_drift_count": operational_metadata_drift_count,
+        "ignored_diagnostic_difference_count": ignored_diagnostic_difference_count,
+        "total_blocking_mismatch_count": total_blocking_mismatch_count,
         "field_mismatch_examples": field_mismatch_examples,
+        "operational_metadata_drift": [
+            {"table": table, "field": field, "difference_count": count}
+            for (table, field), count in sorted(operational_metadata_drift_by_field.items())
+        ],
         "accepted_unmapped_target_fields": accepted_unmapped_target_fields,
         "warnings": warnings,
     }
@@ -302,6 +424,7 @@ def _lineage_checker(expected_source_table: str, source_run_field: str = "run_id
                 target_row["source_table"],
                 target_row["source_table"] == expected_source_table,
             ),
+            FIELD_CLASS_REQUIRED_LINEAGE,
         ),
         (
             "source_pk_json",
@@ -310,6 +433,7 @@ def _lineage_checker(expected_source_table: str, source_run_field: str = "run_id
                 target_row["source_pk_json"],
                 _non_empty(target_row["source_pk_json"]),
             ),
+            FIELD_CLASS_REQUIRED_LINEAGE,
         ),
         (
             "source_row_hash",
@@ -318,6 +442,7 @@ def _lineage_checker(expected_source_table: str, source_run_field: str = "run_id
                 target_row["source_row_hash"],
                 _non_empty(target_row["source_row_hash"]),
             ),
+            FIELD_CLASS_REQUIRED_LINEAGE,
         ),
         (
             "source_run_id",
@@ -326,6 +451,7 @@ def _lineage_checker(expected_source_table: str, source_run_field: str = "run_id
                 target_row["source_run_id"],
                 source_row[source_run_field] == target_row["source_run_id"],
             ),
+            FIELD_CLASS_REQUIRED_LINEAGE,
         ),
     ]
 
@@ -561,6 +687,7 @@ def _ticker_parity(
     taxonomy_version_code: str,
     signal_date: str,
     numeric_tolerance: float,
+    parity_policy: str,
 ) -> dict[str, object]:
     source_rows = _fetch_ticker_source_rows(source_conn, signal_date, taxonomy_version_code)
     target_rows = _fetch_ticker_target_rows(
@@ -640,6 +767,7 @@ def _ticker_parity(
         ],
         accepted_unmapped_target_fields=TICKER_ACCEPTED_UNMAPPED_TARGET_FIELDS,
         numeric_tolerance=numeric_tolerance,
+        parity_policy=parity_policy,
     )
 
 
@@ -652,6 +780,7 @@ def _group_signal_parity(
     taxonomy_version_code: str,
     signal_date: str,
     numeric_tolerance: float,
+    parity_policy: str,
 ) -> dict[str, object]:
     source_rows = _fetch_group_signal_source_rows(source_conn, signal_date, taxonomy_version_code)
     target_rows = _fetch_group_signal_target_rows(
@@ -689,6 +818,7 @@ def _group_signal_parity(
         extra_checks=_lineage_checker("dc_group_swing_signal_daily"),
         accepted_unmapped_target_fields=GROUP_SIGNAL_ACCEPTED_UNMAPPED_TARGET_FIELDS,
         numeric_tolerance=numeric_tolerance,
+        parity_policy=parity_policy,
     )
     source_type_counts: dict[str, int] = {}
     target_type_counts: dict[str, int] = {}
@@ -700,11 +830,14 @@ def _group_signal_parity(
     result["target_group_type_counts"] = target_type_counts
     if source_type_counts != target_type_counts:
         result["field_mismatch_count"] += 1
+        result["semantic_field_mismatch_count"] += 1
+        result["total_blocking_mismatch_count"] += 1
         if len(result["field_mismatch_examples"]) < MAX_EXAMPLES:
             result["field_mismatch_examples"].append(
                 {
                     "key": {"section": "group_type_counts"},
                     "field": "group_type_counts",
+                    "field_class": FIELD_CLASS_SEMANTIC,
                     "source": source_type_counts,
                     "target": target_type_counts,
                 }
@@ -722,6 +855,7 @@ def _synthetic_ohlc_parity(
     taxonomy_version_code: str,
     signal_date: str,
     numeric_tolerance: float,
+    parity_policy: str,
 ) -> dict[str, object]:
     source_rows = _fetch_synth_source_rows(source_conn, signal_date, taxonomy_version_code)
     target_rows = _fetch_synth_target_rows(
@@ -784,6 +918,7 @@ def _synthetic_ohlc_parity(
         extra_checks=_lineage_checker("dc_group_synthetic_ohlc_daily"),
         accepted_unmapped_target_fields=SYNTH_ACCEPTED_UNMAPPED_TARGET_FIELDS,
         numeric_tolerance=numeric_tolerance,
+        parity_policy=parity_policy,
     )
 
 
@@ -796,6 +931,7 @@ def _group_index_parity(
     taxonomy_version_code: str,
     signal_date: str,
     numeric_tolerance: float,
+    parity_policy: str,
 ) -> dict[str, object]:
     source_rows = _fetch_group_index_source_rows(source_conn, signal_date, taxonomy_version_code)
     target_rows = _fetch_group_index_target_rows(
@@ -834,6 +970,7 @@ def _group_index_parity(
         extra_checks=_lineage_checker("dc_group_index_daily"),
         accepted_unmapped_target_fields=GROUP_INDEX_ACCEPTED_UNMAPPED_TARGET_FIELDS,
         numeric_tolerance=numeric_tolerance,
+        parity_policy=parity_policy,
     )
 
 
@@ -923,7 +1060,10 @@ def audit_dc_ec_fact_parity(
     signal_date: str | None = None,
     numeric_tolerance: float = 1e-9,
     include_pipeline_watermark: bool = True,
+    parity_policy: str = PARITY_POLICY_STRICT,
 ) -> dict[str, object]:
+    if parity_policy not in {PARITY_POLICY_STRICT, PARITY_POLICY_RSO_REVALIDATION_METADATA}:
+        raise ValueError(f"unsupported parity policy: {parity_policy}")
     source_conn = _connect_readonly(source_db_path)
     target_conn = _connect_readonly(target_db_path)
     try:
@@ -947,6 +1087,8 @@ def audit_dc_ec_fact_parity(
                 warning = "Explicit signal_date is missing rows in one or more dc_ source tables"
             return {
                 "status": "FAILED",
+                "parity_policy": parity_policy,
+                "parity_field_policy_version": PARITY_FIELD_POLICY_VERSION,
                 "signal_date": signal_date,
                 "date_alignment": date_alignment,
                 "latest_dates": latest_dates,
@@ -957,6 +1099,12 @@ def audit_dc_ec_fact_parity(
                 "group_index_parity": None,
                 "pipeline_watermark_parity": None,
                 "total_mismatch_count": 1,
+                "semantic_field_mismatch_count": 0,
+                "required_lineage_mismatch_count": 0,
+                "operational_metadata_drift_count": 0,
+                "ignored_diagnostic_difference_count": 0,
+                "total_blocking_mismatch_count": 1,
+                "metadata_drift_warnings": [],
                 "warnings": [warning],
             }
 
@@ -974,6 +1122,7 @@ def audit_dc_ec_fact_parity(
             taxonomy_version_code=taxonomy_version_code,
             signal_date=selected_signal_date,
             numeric_tolerance=numeric_tolerance,
+            parity_policy=parity_policy,
         )
         group_signal_parity = _group_signal_parity(
             source_conn,
@@ -983,6 +1132,7 @@ def audit_dc_ec_fact_parity(
             taxonomy_version_code=taxonomy_version_code,
             signal_date=selected_signal_date,
             numeric_tolerance=numeric_tolerance,
+            parity_policy=parity_policy,
         )
         synthetic_ohlc_parity = _synthetic_ohlc_parity(
             source_conn,
@@ -992,6 +1142,7 @@ def audit_dc_ec_fact_parity(
             taxonomy_version_code=taxonomy_version_code,
             signal_date=selected_signal_date,
             numeric_tolerance=numeric_tolerance,
+            parity_policy=parity_policy,
         )
         group_index_parity = _group_index_parity(
             source_conn,
@@ -1001,6 +1152,7 @@ def audit_dc_ec_fact_parity(
             taxonomy_version_code=taxonomy_version_code,
             signal_date=selected_signal_date,
             numeric_tolerance=numeric_tolerance,
+            parity_policy=parity_policy,
         )
         pipeline_watermark_parity = (
             _pipeline_watermark_parity(
@@ -1037,6 +1189,16 @@ def audit_dc_ec_fact_parity(
             len(section["missing_in_target"]) + len(section["extra_in_target"]) + int(section["field_mismatch_count"])
             for section in sections
         )
+        semantic_field_mismatch_count = sum(int(section.get("semantic_field_mismatch_count") or 0) for section in sections)
+        required_lineage_mismatch_count = sum(int(section.get("required_lineage_mismatch_count") or 0) for section in sections)
+        operational_metadata_drift_count = sum(int(section.get("operational_metadata_drift_count") or 0) for section in sections)
+        ignored_diagnostic_difference_count = sum(int(section.get("ignored_diagnostic_difference_count") or 0) for section in sections)
+        total_blocking_mismatch_count = sum(int(section.get("total_blocking_mismatch_count") or 0) for section in sections)
+        operational_metadata_drift: dict[tuple[str, str], int] = {}
+        for section in sections:
+            for drift in section.get("operational_metadata_drift", []):
+                key = (str(drift["table"]), str(drift["field"]))
+                operational_metadata_drift[key] = operational_metadata_drift.get(key, 0) + int(drift["difference_count"])
         warnings = [
             f"ticker: {warning}"
             for warning in ticker_parity["warnings"]
@@ -1053,6 +1215,15 @@ def audit_dc_ec_fact_parity(
             f"pipeline_watermark: {warning}"
             for warning in pipeline_watermark_parity["warnings"]
         ]
+        metadata_drift_summary = [
+            {"table": table, "field": field, "difference_count": count}
+            for (table, field), count in sorted(operational_metadata_drift.items())
+        ]
+        if metadata_drift_summary:
+            warnings.append(
+                "EC_OPERATIONAL_METADATA_DRIFT: "
+                + ", ".join(f"{row['table']}.{row['field']}={row['difference_count']}" for row in metadata_drift_summary)
+            )
 
         if any(section["status"] == "FAILED" for section in sections):
             status = "FAILED"
@@ -1063,6 +1234,8 @@ def audit_dc_ec_fact_parity(
 
         return {
             "status": status,
+            "parity_policy": parity_policy,
+            "parity_field_policy_version": PARITY_FIELD_POLICY_VERSION,
             "signal_date": selected_signal_date,
             "taxonomy_version_code": taxonomy_version_code,
             "requested_taxonomy_version": taxonomy_version_code,
@@ -1075,6 +1248,22 @@ def audit_dc_ec_fact_parity(
             "group_index_parity": group_index_parity,
             "pipeline_watermark_parity": pipeline_watermark_parity,
             "total_mismatch_count": total_mismatch_count,
+            "semantic_field_mismatch_count": semantic_field_mismatch_count,
+            "required_lineage_mismatch_count": required_lineage_mismatch_count,
+            "operational_metadata_drift_count": operational_metadata_drift_count,
+            "ignored_diagnostic_difference_count": ignored_diagnostic_difference_count,
+            "total_blocking_mismatch_count": total_blocking_mismatch_count,
+            "metadata_drift_warnings": [
+                {
+                    "warning_code": "EC_OPERATIONAL_METADATA_DRIFT",
+                    "field": row["field"],
+                    "affected_table": row["table"],
+                    "difference_count": row["difference_count"],
+                    "data_correctness_affected": False,
+                    "ec_rebuild_required": False,
+                }
+                for row in metadata_drift_summary
+            ],
             "warnings": warnings,
         }
     finally:

@@ -378,11 +378,14 @@ SKIP_ALREADY_VALIDATED
 
 `REVALIDATE_EXISTING_FACTS` is selected only when the target EC fact tables
 already contain the requested range, duplicate-key checks pass using each EC
-table's real primary key, and read-only DC/EC parity reports zero mismatches.
-That path records `EC_FACTS_REVALIDATED` and does not call `run_ec_rebuild`,
-EC loaders, or EC chunk construction. If existing EC facts are incomplete or
-fail parity, a report-status-only resume blocks with rebuild-required evidence
-instead of silently rebuilding.
+table's real primary key, and read-only DC/EC parity reports zero blocking
+semantic or required-lineage mismatches. Under the explicit
+`RSO_REVALIDATION_METADATA_POLICY_V1` contract, documented operational metadata
+drift such as group `source_run_id` differences is reported as a warning and
+does not require EC rebuild. That path records `EC_FACTS_REVALIDATED` and does
+not call `run_ec_rebuild`, EC loaders, or EC chunk construction. If existing EC
+facts are incomplete or fail blocking parity, a report-status-only resume blocks
+with rebuild-required evidence instead of silently rebuilding.
 
 Plan reconciliation keeps the original production plan hash immutable. The
 backend recomputes the current plan hash from current code and exposes it as
@@ -395,6 +398,7 @@ Detailed contract notes live in:
 
 ```text
 docs/datacenter_taxonomy_report_status_only_execution.md
+docs/ec_fact_parity_field_policy.md
 ```
 
 ## Delta Rebuild Backend

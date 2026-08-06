@@ -1269,3 +1269,83 @@ already materialized V2.1 EC facts, or whether EC facts must be rebuilt by a
 separate explicitly approved recovery task. Do not resume deployment 2 until
 the backend again derives a safe `REVALIDATE_EXISTING_FACTS` action or an
 explicit EC rebuild recovery has been approved.
+
+## 2026-08-06 Source Run ID Parity Policy Fix
+
+Final policy classification:
+
+```text
+DATACENTER_RSO_SOURCE_RUN_ID_METADATA_PARITY_POLICY_FIXED
+```
+
+The `source_run_id` policy was traced from schema, writer paths, readers, and
+read-only production comparison. In ordinary successful V2 DC/EC rows,
+`source_run_id` equals the DC `run_id`. In deployment 2, the only differences
+were newer DC V2.1 group `run_id` values after V2.1 EC facts had already been
+materialized. Semantic payloads, keys, taxonomy lineage, and required lineage
+presence checks matched.
+
+The selected policy is deliberately scoped:
+
+```text
+policy=RSO_REVALIDATION_METADATA_POLICY_V1
+scope=REPORT_STATUS_ONLY EC revalidation only
+accepted operational metadata:
+  ec_group_signal_daily.source_run_id
+  ec_group_synthetic_ohlc_daily.source_run_id
+```
+
+Strict global parity remains unchanged unless this policy is explicitly passed.
+Semantic mismatches and required-lineage mismatches remain blocking.
+
+Read-only deployment 2 preflight after the policy fix:
+
+```text
+plan_reconciliation_status=SAFE_AMENDMENT_READY
+plan_drift_classification=SAFE_IMPLEMENTATION_RECONCILIATION
+current_recomputed_plan_hash=d68c48797aca7013b5911c99f78fcac1c6570d826f1769b0298dcbebb03547b6
+current_plan_inputs_hash=ba233114f7a3f711b2a286dc863b80b9d3addc80a7fc15680e9d29b0a3384c69
+repair_amendment_hash=b09368682a4efd1047f9c2282bab52d05dece7927649c23a5b00441f1eefacea
+repair_candidate_hash=27790b87e296d95e7989395f4d7e7ff459306bbd2036625c44619fc2c7259d49
+
+dc_repair_scope=ECOSYSTEM_AGGREGATE_ONLY
+repair_candidate_count=506
+ordinary_dc_recopy_required=false
+
+ec_resume_action=REVALIDATE_EXISTING_FACTS
+ec_rebuild_required=false
+ec_loaders_required=false
+ec_chunks_required=false
+ec_revalidation_required=true
+parity_status=OK_WITH_WARNINGS
+semantic_field_mismatch_count=0
+required_lineage_mismatch_count=0
+operational_metadata_drift_count=106
+total_blocking_mismatch_count=0
+```
+
+Structured operational metadata drift warnings:
+
+```text
+ec_group_signal_daily.source_run_id=53
+ec_group_synthetic_ohlc_daily.source_run_id=53
+data_correctness_affected=false
+ec_rebuild_required=false
+```
+
+Evidence was written under:
+
+```text
+temp/datacenter_v2_1_source_run_id_policy_preflight/
+```
+
+This implementation task did not resume deployment 2, acquire the production
+operation lock, change Scheduler guard state, run Scheduler, run Datacenter
+pipeline, run Stage 2, run EC rebuild/backfill/loaders/chunks, apply aggregate
+repair, apply EC cleanup, finalize watermarks, activate V2.1, modify production
+configuration, create a production backup, restore a backup, or write production
+databases.
+
+Required next controlled task: resume deployment 2 using the newly derived
+`repair_amendment_hash` and `REVALIDATE_EXISTING_FACTS` action, then stop at
+`READY_TO_ACTIVATE` without activating V2.1.

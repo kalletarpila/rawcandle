@@ -196,15 +196,29 @@ SKIP_ALREADY_VALIDATED
 ```
 
 When target EC facts already cover the requested range and read-only parity
-accepts them, resume uses `REVALIDATE_EXISTING_FACTS`. That path records
-`EC_FACTS_REVALIDATED`, does not call `run_ec_rebuild`, and does not invoke EC
-loaders or chunk builders. If validation shows incomplete or mismatching target
-facts, a `REPORT_STATUS_ONLY` resume is blocked as rebuild-required rather than
-quietly rebuilding facts under a stale recovery assumption.
+accepts them, resume uses `REVALIDATE_EXISTING_FACTS`. Acceptance means key
+coverage, taxonomy lineage, semantic fields, and required lineage fields match.
+Under `RSO_REVALIDATION_METADATA_POLICY_V1`, documented operational metadata
+drift is allowed only as an explicit warning:
+
+```text
+warning_code=EC_OPERATIONAL_METADATA_DRIFT
+field=source_run_id
+data_correctness_affected=false
+ec_rebuild_required=false
+```
+
+That path records `EC_FACTS_REVALIDATED`, does not call `run_ec_rebuild`, and
+does not invoke EC loaders or chunk builders. If validation shows incomplete
+facts, semantic mismatches, or required-lineage mismatches, a
+`REPORT_STATUS_ONLY` resume is blocked as rebuild-required rather than quietly
+rebuilding facts under a stale recovery assumption.
 
 Current plan reconciliation is backend-derived. Callers may supply an expected
 current hash for confirmation, but the orchestrator recomputes and exposes the
-current plan hash separately from the immutable original plan hash. Drift is
+current plan hash separately from the immutable original plan hash. The current
+plan-input hash and repair amendment hash include the EC revalidation parity
+policy identity, so a policy change invalidates stale confirmations. Drift is
 classified as one of:
 
 ```text

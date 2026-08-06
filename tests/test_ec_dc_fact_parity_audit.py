@@ -4,7 +4,12 @@ from pathlib import Path
 
 from rawcandle.ec_datacenter_taxonomy_loader import load_datacenter_taxonomy_to_ec_sidecar
 from rawcandle.ec_datacenter_watchlist_loader import load_datacenter_watchlist_to_ec_sidecar
-from rawcandle.ec_dc_fact_parity_audit import audit_dc_ec_fact_parity
+from rawcandle.ec_dc_fact_parity_audit import (
+    PARITY_POLICY_RSO_REVALIDATION_METADATA,
+    PARITY_POLICY_STRICT,
+    audit_dc_ec_fact_parity,
+    classify_parity_field,
+)
 from rawcandle.ec_group_index_daily_loader import load_ec_group_index_daily_from_dc
 from rawcandle.ec_group_signal_daily_loader import load_ec_group_signal_daily_from_dc
 from rawcandle.ec_group_synthetic_ohlc_daily_loader import load_ec_group_synthetic_ohlc_daily_from_dc
@@ -567,6 +572,133 @@ def test_parity_audit_text_mismatch_fails(tmp_path) -> None:
     assert summary["status"] == "FAILED"
     assert summary["ticker_parity"]["status"] == "FAILED"
     assert summary["ticker_parity"]["field_mismatch_count"] >= 1
+    assert summary["semantic_field_mismatch_count"] >= 1
+
+
+def test_parity_field_policy_classifies_source_run_id_for_rso_metadata_policy() -> None:
+    assert (
+        classify_parity_field(
+            section_name="group_signal",
+            field_name="source_run_id",
+            comparison_kind="REQUIRED_LINEAGE",
+            parity_policy=PARITY_POLICY_STRICT,
+        )
+        == "REQUIRED_LINEAGE"
+    )
+    assert (
+        classify_parity_field(
+            section_name="group_signal",
+            field_name="source_run_id",
+            comparison_kind="REQUIRED_LINEAGE",
+            parity_policy=PARITY_POLICY_RSO_REVALIDATION_METADATA,
+        )
+        == "OPERATIONAL_METADATA"
+    )
+    assert (
+        classify_parity_field(
+            section_name="synthetic_ohlc",
+            field_name="source_run_id",
+            comparison_kind="REQUIRED_LINEAGE",
+            parity_policy=PARITY_POLICY_RSO_REVALIDATION_METADATA,
+        )
+        == "OPERATIONAL_METADATA"
+    )
+    assert (
+        classify_parity_field(
+            section_name="ticker",
+            field_name="source_run_id",
+            comparison_kind="REQUIRED_LINEAGE",
+            parity_policy=PARITY_POLICY_RSO_REVALIDATION_METADATA,
+        )
+        == "REQUIRED_LINEAGE"
+    )
+
+
+def test_parity_field_policy_rejects_unknown_comparison_class() -> None:
+    try:
+        classify_parity_field(
+            section_name="group_signal",
+            field_name="new_field",
+            comparison_kind="UNKNOWN_CLASS",
+            parity_policy=PARITY_POLICY_RSO_REVALIDATION_METADATA,
+        )
+    except ValueError as exc:
+        assert "unknown parity field class" in str(exc)
+    else:
+        raise AssertionError("unknown parity field class must fail")
+
+
+def test_rso_metadata_policy_reports_source_run_id_drift_without_blocking(tmp_path) -> None:
+    source_db, target_db = _build_target(tmp_path)
+    with _connect(str(source_db)) as conn:
+        conn.execute("UPDATE dc_group_swing_signal_daily SET run_id = run_id || '_NEW'")
+        conn.execute("UPDATE dc_group_synthetic_ohlc_daily SET run_id = run_id || '_NEW'")
+        conn.commit()
+
+    strict = audit_dc_ec_fact_parity(
+        str(source_db),
+        str(target_db),
+        signal_date="2026-06-05",
+        include_pipeline_watermark=False,
+    )
+    relaxed = audit_dc_ec_fact_parity(
+        str(source_db),
+        str(target_db),
+        signal_date="2026-06-05",
+        include_pipeline_watermark=False,
+        parity_policy=PARITY_POLICY_RSO_REVALIDATION_METADATA,
+    )
+
+    assert strict["status"] == "FAILED"
+    assert strict["required_lineage_mismatch_count"] == 5
+    assert strict["operational_metadata_drift_count"] == 0
+    assert relaxed["status"] == "OK_WITH_WARNINGS"
+    assert relaxed["total_mismatch_count"] == 0
+    assert relaxed["total_blocking_mismatch_count"] == 0
+    assert relaxed["semantic_field_mismatch_count"] == 0
+    assert relaxed["required_lineage_mismatch_count"] == 0
+    assert relaxed["operational_metadata_drift_count"] == 5
+    assert relaxed["metadata_drift_warnings"] == [
+        {
+            "warning_code": "EC_OPERATIONAL_METADATA_DRIFT",
+            "field": "source_run_id",
+            "affected_table": "ec_group_signal_daily",
+            "difference_count": 3,
+            "data_correctness_affected": False,
+            "ec_rebuild_required": False,
+        },
+        {
+            "warning_code": "EC_OPERATIONAL_METADATA_DRIFT",
+            "field": "source_run_id",
+            "affected_table": "ec_group_synthetic_ohlc_daily",
+            "difference_count": 2,
+            "data_correctness_affected": False,
+            "ec_rebuild_required": False,
+        },
+    ]
+
+
+def test_rso_metadata_policy_still_blocks_semantic_drift(tmp_path) -> None:
+    source_db, target_db = _build_target(tmp_path)
+    with _connect(str(source_db)) as conn:
+        conn.execute("UPDATE dc_group_swing_signal_daily SET run_id = run_id || '_NEW'")
+        conn.commit()
+    with _connect(str(target_db)) as conn:
+        conn.execute("UPDATE ec_group_signal_daily SET member_count = member_count + 1 WHERE entity_type = 'GROUP_L1'")
+        conn.commit()
+
+    summary = audit_dc_ec_fact_parity(
+        str(source_db),
+        str(target_db),
+        signal_date="2026-06-05",
+        include_pipeline_watermark=False,
+        parity_policy=PARITY_POLICY_RSO_REVALIDATION_METADATA,
+    )
+
+    assert summary["status"] == "FAILED"
+    assert summary["semantic_field_mismatch_count"] == 1
+    assert summary["operational_metadata_drift_count"] == 3
+    assert summary["total_blocking_mismatch_count"] == 1
 
 
 def test_parity_audit_missing_target_row_fails(tmp_path) -> None:

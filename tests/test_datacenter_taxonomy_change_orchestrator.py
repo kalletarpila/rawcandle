@@ -10,9 +10,11 @@ from rawcandle.datacenter_taxonomy_change_orchestrator import (
     DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY,
     EC_RESUME_ACTION_REBUILD_EC_FACTS,
     EC_RESUME_ACTION_REVALIDATE_EXISTING_FACTS,
+    PARITY_FIELD_POLICY_VERSION,
     REBUILD_MODE_AUTO,
     REBUILD_MODE_DELTA,
     REBUILD_MODE_FULL,
+    REPORT_STATUS_ONLY_PARITY_POLICY,
     TaxonomyChangeServices,
     build_production_taxonomy_change_services,
     build_taxonomy_change_plan,
@@ -1380,6 +1382,67 @@ def test_parity_mismatch_blocks_continuation(tmp_path) -> None:
     assert result["ec_revalidation"]["total_mismatch_count"] == 1
 
 
+def test_rso_revalidation_accepts_only_operational_metadata_drift(tmp_path) -> None:
+    db_path, _proposed_csv, plan = _create_ec_revalidation_fixture(tmp_path)
+
+    def metadata_drift_parity(**kwargs):
+        assert kwargs["parity_policy"] == REPORT_STATUS_ONLY_PARITY_POLICY
+        return {
+            "status": "OK_WITH_WARNINGS",
+            "total_mismatch_count": 0,
+            "semantic_field_mismatch_count": 0,
+            "required_lineage_mismatch_count": 0,
+            "operational_metadata_drift_count": 2,
+            "ignored_diagnostic_difference_count": 0,
+            "total_blocking_mismatch_count": 0,
+            "metadata_drift_warnings": [
+                {
+                    "warning_code": "EC_OPERATIONAL_METADATA_DRIFT",
+                    "field": "source_run_id",
+                    "affected_table": "ec_group_signal_daily",
+                    "difference_count": 2,
+                    "data_correctness_affected": False,
+                    "ec_rebuild_required": False,
+                }
+            ],
+            "warnings": ["EC_OPERATIONAL_METADATA_DRIFT: ec_group_signal_daily.source_run_id=2"],
+        }
+
+    result = plan_ec_resume_action(analysis_db=db_path, plan=plan, deployment_id=2, parity_audit=metadata_drift_parity)
+
+    assert result["ec_resume_action"] == EC_RESUME_ACTION_REVALIDATE_EXISTING_FACTS
+    assert result["ec_rebuild_required"] is False
+    assert result["ec_loaders_required"] is False
+    assert result["ec_chunks_required"] is False
+    assert result["ec_revalidation"]["operational_metadata_drift_count"] == 2
+    assert result["ec_revalidation"]["total_blocking_mismatch_count"] == 0
+    assert result["ec_revalidation"]["metadata_drift_warnings"][0]["warning_code"] == "EC_OPERATIONAL_METADATA_DRIFT"
+
+
+def test_rso_revalidation_rejects_semantic_drift_even_with_metadata_drift(tmp_path) -> None:
+    db_path, _proposed_csv, plan = _create_ec_revalidation_fixture(tmp_path)
+
+    def semantic_drift_parity(**_kwargs):
+        return {
+            "status": "FAILED",
+            "total_mismatch_count": 1,
+            "semantic_field_mismatch_count": 1,
+            "required_lineage_mismatch_count": 0,
+            "operational_metadata_drift_count": 2,
+            "ignored_diagnostic_difference_count": 0,
+            "total_blocking_mismatch_count": 1,
+            "metadata_drift_warnings": [],
+            "warnings": [],
+        }
+
+    result = plan_ec_resume_action(analysis_db=db_path, plan=plan, deployment_id=2, parity_audit=semantic_drift_parity)
+
+    assert result["ec_resume_action"] == EC_RESUME_ACTION_REBUILD_EC_FACTS
+    assert result["ec_revalidation"]["safe_to_continue_to_cleanup"] is False
+    assert result["ec_revalidation"]["semantic_field_mismatch_count"] == 1
+    assert "total blocking mismatch count is not zero" in result["ec_revalidation"]["blocking_errors"]
+
+
 def test_current_plan_hash_is_backend_derived_and_stale_supplied_hash_blocks(tmp_path) -> None:
     db_path, _proposed_csv, plan = _create_ec_revalidation_fixture(tmp_path)
 
@@ -1398,6 +1461,9 @@ def test_current_plan_hash_is_backend_derived_and_stale_supplied_hash_blocks(tmp
     assert safe["plan_drift_classification"] == "SAFE_IMPLEMENTATION_RECONCILIATION"
     assert safe["current_recomputed_plan_hash"] == plan["plan_hash"]
     assert safe["current_plan_inputs_hash"]
+    assert safe["ec_revalidation_parity_policy"] == REPORT_STATUS_ONLY_PARITY_POLICY
+    assert safe["parity_field_policy_version"] == PARITY_FIELD_POLICY_VERSION
+    assert safe["repair_amendment_identity"]["ec_revalidation_parity_policy"] == REPORT_STATUS_ONLY_PARITY_POLICY
     assert stale["plan_reconciliation_status"] == "BLOCKED"
     assert stale["plan_drift_classification"] == "UNSUPPORTED_PLAN_DRIFT"
     assert stale["original_plan_hash"] == "original"
