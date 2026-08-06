@@ -8,6 +8,7 @@ from pathlib import Path
 from rawcandle.datacenter_taxonomy_change_orchestrator import (
     CHANGE_EXECUTION_REPORT_STATUS_ONLY,
     DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY,
+    DC_REPAIR_SCOPE_SEMANTIC_ROW_ONLY,
     EC_RESUME_ACTION_REBUILD_EC_FACTS,
     EC_RESUME_ACTION_REVALIDATE_EXISTING_FACTS,
     PARITY_FIELD_POLICY_VERSION,
@@ -24,11 +25,17 @@ from rawcandle.datacenter_taxonomy_change_orchestrator import (
     execute_taxonomy_rebuild,
     inspect_taxonomy_change,
     apply_dc_ecosystem_aggregate_repair,
+    apply_dc_semantic_row_repair,
+    classify_dc_carry_forward_field,
+    dc_carry_forward_field_policy,
     plan_ec_resume_action,
     plan_dc_ecosystem_aggregate_repair,
+    plan_dc_semantic_row_repair,
     plan_report_status_only_resume_reconciliation,
     prepare_taxonomy_change,
     revalidate_existing_ec_facts,
+    validate_complete_dc_target,
+    validate_dc_aggregate_only_repair,
 )
 from rawcandle.ec_datacenter_taxonomy_loader import load_datacenter_taxonomy_to_ec_sidecar
 from rawcandle.ec_sidecar_migration import apply_ec_sidecar_migration
@@ -1097,6 +1104,226 @@ def test_report_status_only_aggregate_repair_rolls_back_partial_failure(tmp_path
         conn.close()
     assert proposed_group_count == 0
     assert proposed_index_count == 0
+
+
+def _semantic_repair_fixture(tmp_path: Path) -> tuple[Path, dict[str, object]]:
+    current_csv = _write_csv(
+        tmp_path / "current_semantic.csv",
+        [
+            ["DC_TAXONOMY_FULL_V1", "WMS", "Compute", "GPU", "CORE", 1, 1.0, ""],
+            ["DC_TAXONOMY_FULL_V1", "AAA", "Compute", "GPU", "CORE", 1, 1.0, ""],
+        ],
+    )
+    proposed_csv = _write_csv(
+        tmp_path / "proposed_semantic.csv",
+        [
+            ["DC_TAXONOMY_FULL_V2_1", "WMS", "Compute", "GPU", "EXTENDED", 1, 1.0, "rso"],
+            ["DC_TAXONOMY_FULL_V2_1", "AAA", "Compute", "GPU", "CORE", 1, 1.0, ""],
+        ],
+    )
+    db_path = tmp_path / "semantic.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE dc_ticker_swing_signal_daily (
+                signal_date TEXT NOT NULL,
+                taxonomy_version TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                primary_layer TEXT,
+                primary_subindustry TEXT,
+                bullish_divergence_signal INTEGER,
+                run_id TEXT,
+                signal_version TEXT NOT NULL,
+                PRIMARY KEY (signal_date, taxonomy_version, ticker, signal_version)
+            );
+            CREATE TABLE dc_group_swing_signal_daily (
+                signal_date TEXT NOT NULL,
+                taxonomy_version TEXT NOT NULL,
+                group_type TEXT NOT NULL,
+                group_name TEXT NOT NULL,
+                member_count INTEGER,
+                run_id TEXT,
+                signal_version TEXT NOT NULL,
+                PRIMARY KEY (signal_date, taxonomy_version, group_type, group_name, signal_version)
+            );
+            CREATE TABLE dc_group_synthetic_ohlc_daily (
+                ohlc_date TEXT NOT NULL,
+                taxonomy_version TEXT NOT NULL,
+                group_type TEXT NOT NULL,
+                group_name TEXT NOT NULL,
+                close REAL,
+                run_id TEXT,
+                calc_version TEXT NOT NULL,
+                PRIMARY KEY (ohlc_date, taxonomy_version, group_type, group_name, calc_version)
+            );
+            CREATE TABLE dc_group_index_daily (
+                index_date TEXT NOT NULL,
+                taxonomy_version TEXT NOT NULL,
+                group_type TEXT NOT NULL,
+                group_name TEXT NOT NULL,
+                close REAL,
+                run_id TEXT,
+                PRIMARY KEY (index_date, taxonomy_version, group_type, group_name)
+            );
+            """
+        )
+        for taxonomy_version, ticker_run, group_run, bull in [
+            ("DC_TAXONOMY_FULL_V1", "ticker-source-run", "group-source-run", 1),
+            ("DC_TAXONOMY_FULL_V2_1", "ticker-target-run", "group-target-run", 0),
+        ]:
+            for ticker in ["AAA", "WMS"]:
+                ticker_bull = bull if ticker == "WMS" else 0
+                conn.execute(
+                    """
+                    INSERT INTO dc_ticker_swing_signal_daily
+                    VALUES ('2026-08-04',?,?,?,?,?,?, 'v1')
+                    """,
+                    (taxonomy_version, ticker, "Compute", "GPU", ticker_bull, ticker_run),
+                )
+            for group_type, group_name in [
+                ("layer", "Compute"),
+                ("subindustry", "GPU"),
+                ("ecosystem", "DC_ECOSYSTEM_TOTAL"),
+            ]:
+                conn.execute(
+                    "INSERT INTO dc_group_swing_signal_daily VALUES ('2026-08-04',?,?,?,?,?, 'v1')",
+                    (taxonomy_version, group_type, group_name, 2, group_run),
+                )
+                conn.execute(
+                    "INSERT INTO dc_group_synthetic_ohlc_daily VALUES ('2026-08-04',?,?,?,?,?, 'calc1')",
+                    (taxonomy_version, group_type, group_name, 10.0, group_run),
+                )
+                conn.execute(
+                    "INSERT INTO dc_group_index_daily VALUES ('2026-08-04',?,?,?,?,?)",
+                    (taxonomy_version, group_type, group_name, 10.0, group_run),
+                )
+        conn.commit()
+    finally:
+        conn.close()
+    plan = build_taxonomy_change_plan(
+        deployment_id=2,
+        ecosystem_code="DATACENTER",
+        current_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        current_taxonomy_csv=current_csv,
+        proposed_taxonomy_version="DC_TAXONOMY_FULL_V2_1",
+        proposed_taxonomy_csv=proposed_csv,
+        date_from="2026-08-04",
+        date_to="2026-08-04",
+        rebuild_mode=REBUILD_MODE_DELTA,
+    )
+    return db_path, plan
+
+
+def test_aggregate_scope_validation_ignores_ticker_semantic_mismatch(tmp_path) -> None:
+    db_path, plan = _semantic_repair_fixture(tmp_path)
+
+    aggregate = validate_dc_aggregate_only_repair(analysis_db=db_path, plan=plan)
+    complete = validate_complete_dc_target(analysis_db=db_path, plan=plan)
+
+    assert aggregate["repair_scope_validation_status"] == "OK"
+    assert aggregate["missing_target_rows"] == 0
+    assert aggregate["aggregate_semantic_mismatch_count"] == 0
+    assert complete["complete_target_key_universe_status"] == "OK"
+    assert complete["complete_target_semantic_status"] == "BLOCKED"
+    assert complete["operational_metadata_drift_count"] == 11
+    assert complete["blocking_semantic_mismatch_count"] == 1
+    assert complete["blocking_semantic_mismatches"][0]["field"] == "bullish_divergence_signal"
+
+
+def test_dc_run_id_policy_is_operational_metadata_not_semantic(tmp_path) -> None:
+    db_path, plan = _semantic_repair_fixture(tmp_path)
+
+    complete = validate_complete_dc_target(analysis_db=db_path, plan=plan)
+    policy = dc_carry_forward_field_policy(
+        table_name="dc_ticker_swing_signal_daily",
+        columns={"signal_date", "taxonomy_version", "ticker", "run_id", "signal_version", "bullish_divergence_signal"},
+        key_columns=("signal_date", "ticker", "signal_version"),
+    )
+
+    assert classify_dc_carry_forward_field(
+        table_name="dc_ticker_swing_signal_daily",
+        field_name="run_id",
+        key_columns=("signal_date", "ticker", "signal_version"),
+    ) == "OPERATIONAL_METADATA"
+    assert policy["signal_version"] == "KEY"
+    assert policy["taxonomy_version"] == "REQUIRED_LINEAGE"
+    assert policy["bullish_divergence_signal"] == "SEMANTIC"
+    assert complete["operational_metadata_drift"][0]["field"] == "run_id"
+
+
+def test_semantic_row_repair_plans_exact_wms_like_key_and_column(tmp_path) -> None:
+    db_path, plan = _semantic_repair_fixture(tmp_path)
+    complete = validate_complete_dc_target(analysis_db=db_path, plan=plan)
+
+    repair = plan_dc_semantic_row_repair(
+        analysis_db=db_path,
+        plan=plan,
+        complete_target_validation=complete,
+    )
+
+    assert repair["repair_scope"] == DC_REPAIR_SCOPE_SEMANTIC_ROW_ONLY
+    assert repair["semantic_row_repair_plan_status"] == "READY"
+    assert repair["candidate_count"] == 1
+    candidate = repair["repair_candidates"][0]
+    assert candidate["repair_table"] == "dc_ticker_swing_signal_daily"
+    assert candidate["repair_key"] == {
+        "signal_date": "2026-08-04",
+        "ticker": "WMS",
+        "signal_version": "v1",
+    }
+    assert candidate["repair_columns"] == ["bullish_divergence_signal"]
+    assert candidate["source_values"] == {"bullish_divergence_signal": 1}
+    assert candidate["target_values"] == {"bullish_divergence_signal": 0}
+
+
+def test_semantic_row_repair_is_atomic_idempotent_and_narrow(tmp_path) -> None:
+    db_path, plan = _semantic_repair_fixture(tmp_path)
+    repair = plan_dc_semantic_row_repair(analysis_db=db_path, plan=plan)
+
+    applied = apply_dc_semantic_row_repair(
+        analysis_db=db_path,
+        plan=plan,
+        confirm_repair_scope=DC_REPAIR_SCOPE_SEMANTIC_ROW_ONLY,
+        confirm_candidate_hash=str(repair["candidate_hash"]),
+    )
+    second = apply_dc_semantic_row_repair(
+        analysis_db=db_path,
+        plan=plan,
+        confirm_repair_scope=DC_REPAIR_SCOPE_SEMANTIC_ROW_ONLY,
+        confirm_candidate_hash=str(applied["post_repair_plan"]["candidate_hash"]),
+    )
+
+    assert applied["semantic_row_repair_status"] == "APPLIED"
+    assert second["semantic_row_repair_status"] == "NO_CHANGE"
+    conn = sqlite3.connect(db_path)
+    try:
+        wms = conn.execute(
+            """
+            SELECT bullish_divergence_signal, run_id
+            FROM dc_ticker_swing_signal_daily
+            WHERE taxonomy_version='DC_TAXONOMY_FULL_V2_1'
+              AND signal_date='2026-08-04'
+              AND ticker='WMS'
+            """
+        ).fetchone()
+        aaa = conn.execute(
+            """
+            SELECT bullish_divergence_signal, run_id
+            FROM dc_ticker_swing_signal_daily
+            WHERE taxonomy_version='DC_TAXONOMY_FULL_V2_1'
+              AND signal_date='2026-08-04'
+              AND ticker='AAA'
+            """
+        ).fetchone()
+        group_count = conn.execute(
+            "SELECT COUNT(*) FROM dc_group_index_daily WHERE taxonomy_version='DC_TAXONOMY_FULL_V2_1'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert wms == (1, "ticker-target-run")
+    assert aaa == (0, "ticker-target-run")
+    assert group_count == 3
 
 
 def test_report_status_only_reconciliation_requires_aggregate_only_amendment(tmp_path) -> None:

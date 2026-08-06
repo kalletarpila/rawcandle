@@ -164,6 +164,45 @@ execution and acquire a cross-process taxonomy operation lock. The lock prevents
 concurrent rebuild/resume/activation attempts and can recover a stale lock left
 by a dead process.
 
+## Validation Contracts
+
+The orchestrator keeps three DC validation contracts separate:
+
+```text
+REPAIR_SCOPE_VALIDATION
+COMPLETE_TARGET_KEY_UNIVERSE_VALIDATION
+COMPLETE_TARGET_SEMANTIC_VALIDATION
+```
+
+`REPAIR_SCOPE_VALIDATION` answers whether the narrowly authorized repair wrote
+exactly the intended rows. For the report-status-only aggregate repair, this is
+limited to `ecosystem:DC_ECOSYSTEM_TOTAL` rows in:
+
+```text
+dc_group_swing_signal_daily
+dc_group_index_daily
+```
+
+`COMPLETE_TARGET_KEY_UNIVERSE_VALIDATION` answers whether the proposed taxonomy
+target contains all required canonical DC keys and no unexpected or duplicate
+keys.
+
+`COMPLETE_TARGET_SEMANTIC_VALIDATION` answers whether corresponding active and
+target taxonomy fact values match after excluding explicitly classified lineage,
+operational metadata, and diagnostic fields. `run_id` and `source_run_id` are
+operation-level provenance and are reported as operational metadata drift, not
+blocking semantic mismatches. Real signal fields remain semantic and blocking.
+
+The resume phase model can therefore represent:
+
+```text
+DC_AGGREGATE_REPAIR=APPLIED|NO_CHANGE
+DC_AGGREGATE_REPAIR_VALIDATION=OK
+COMPLETE_DC_TARGET_VALIDATION=BLOCKED_SEMANTIC_MISMATCH
+```
+
+without losing the evidence that the narrow repair itself succeeded.
+
 ## Deployment Lifecycle
 
 One taxonomy change uses one durable row in:

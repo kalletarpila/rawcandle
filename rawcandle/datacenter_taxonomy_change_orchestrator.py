@@ -46,11 +46,17 @@ CHANGE_EXECUTION_FULL_REBUILD = "FULL_REBUILD"
 CHANGE_EXECUTION_DELTA_REBUILD = "DELTA_REBUILD"
 CHANGE_EXECUTION_REPORT_STATUS_ONLY = "REPORT_STATUS_ONLY"
 DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY = "ECOSYSTEM_AGGREGATE_ONLY"
+DC_REPAIR_SCOPE_SEMANTIC_ROW_ONLY = "SEMANTIC_ROW_ONLY"
 PLAN_RECONCILIATION_REASON_AGGREGATE_SCOPE = "IMPLEMENTATION_CORRECTION_AGGREGATE_CARRY_FORWARD_SCOPE"
 REPORT_STATUS_ONLY_PARITY_POLICY = PARITY_POLICY_RSO_REVALIDATION_METADATA
 EC_RESUME_ACTION_REBUILD_EC_FACTS = "REBUILD_EC_FACTS"
 EC_RESUME_ACTION_REVALIDATE_EXISTING_FACTS = "REVALIDATE_EXISTING_FACTS"
 EC_RESUME_ACTION_SKIP_ALREADY_VALIDATED = "SKIP_ALREADY_VALIDATED"
+DC_FIELD_CLASS_KEY = "KEY"
+DC_FIELD_CLASS_SEMANTIC = "SEMANTIC"
+DC_FIELD_CLASS_REQUIRED_LINEAGE = "REQUIRED_LINEAGE"
+DC_FIELD_CLASS_OPERATIONAL_METADATA = "OPERATIONAL_METADATA"
+DC_FIELD_CLASS_IGNORED_DIAGNOSTIC = "IGNORED_DIAGNOSTIC"
 TAXONOMY_FIELD_DEPENDENCIES = {
     "taxonomy_version": "IDENTITY",
     "ticker": "IDENTITY",
@@ -1645,7 +1651,7 @@ def execute_taxonomy_rebuild(
             ticker_allowlist = _dc_ticker_allowlist(plan)
             group_allowlist = _dc_group_allowlist(plan)
             existing_dc_validation = (
-                validate_dc_carry_forward_key_universe(
+                validate_complete_dc_target(
                     analysis_db=analysis_db,
                     plan=plan,
                     ticker_allowlist=ticker_allowlist,
@@ -1654,11 +1660,11 @@ def execute_taxonomy_rebuild(
                 if resume
                 else {"validation_status": "NOT_CHECKED"}
             )
-            if existing_dc_validation["validation_status"] == "OK":
+            if existing_dc_validation.get("complete_target_validation_status") == "OK":
                 carry_forward = {
                     "carry_forward_status": "OK",
                     "resume_skip": True,
-                    "dc_key_universe_validation": existing_dc_validation,
+                    "complete_target_validation": existing_dc_validation,
                     "table_results": [],
                     "copied_ticker_count": 0,
                     "copied_group_count": 0,
@@ -1698,27 +1704,63 @@ def execute_taxonomy_rebuild(
                         "DC_FACTS_CARRIED_FORWARD",
                         True,
                     )
-                post_repair_validation = validate_dc_carry_forward_key_universe(
+                scoped_repair_validation = validate_dc_aggregate_only_repair(
+                    analysis_db=analysis_db,
+                    plan=plan,
+                    confirm_dc_repair_scope=DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY,
+                )
+                completed.append("DC_AGGREGATE_REPAIR")
+                if scoped_repair_validation.get("repair_scope_validation_status") != "OK":
+                    failure = _failure(
+                        "DC_AGGREGATE_REPAIR_VALIDATION",
+                        "DC_AGGREGATE_REPAIR_VALIDATION_FAILED",
+                        str(scoped_repair_validation),
+                        completed,
+                        "DC_FACTS_CARRIED_FORWARD",
+                        True,
+                    )
+                    failure["aggregate_only_repair"] = carry_forward
+                    failure["aggregate_scope_validation"] = scoped_repair_validation
+                    return failure
+                completed.append("DC_AGGREGATE_REPAIR_VALIDATION")
+                complete_target_validation = validate_complete_dc_target(
                     analysis_db=analysis_db,
                     plan=plan,
                     ticker_allowlist=ticker_allowlist,
                     group_allowlist=group_allowlist,
                 )
-                if post_repair_validation.get("validation_status") != "OK":
-                    return _failure(
-                        "DC_FACTS_CARRIED_FORWARD",
-                        "DC_AGGREGATE_REPAIR_VALIDATION_FAILED",
-                        str(post_repair_validation),
+                if complete_target_validation.get("complete_target_validation_status") != "OK":
+                    semantic_repair_plan = plan_dc_semantic_row_repair(
+                        analysis_db=analysis_db,
+                        plan=plan,
+                        complete_target_validation=complete_target_validation,
+                    )
+                    resume_phase = (
+                        "DC_SEMANTIC_ROW_REPAIR"
+                        if int(semantic_repair_plan.get("candidate_count") or 0) > 0
+                        else "DC_FACTS_CARRIED_FORWARD"
+                    )
+                    failure = _failure(
+                        "COMPLETE_DC_TARGET_VALIDATION",
+                        "DC_COMPLETE_TARGET_VALIDATION_FAILED",
+                        str(complete_target_validation),
                         completed,
-                        "DC_FACTS_CARRIED_FORWARD",
+                        resume_phase,
                         True,
                     )
+                    failure["aggregate_only_repair"] = carry_forward
+                    failure["aggregate_scope_validation"] = scoped_repair_validation
+                    failure["complete_target_validation"] = complete_target_validation
+                    failure["semantic_row_repair_plan"] = semantic_repair_plan
+                    return failure
                 carry_forward = {
                     "carry_forward_status": "OK",
                     "resume_skip": False,
                     "dc_repair_scope": DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY,
                     "aggregate_only_repair": carry_forward,
-                    "dc_key_universe_validation": post_repair_validation,
+                    "aggregate_scope_validation": scoped_repair_validation,
+                    "complete_target_validation": complete_target_validation,
+                    "dc_key_universe_validation": complete_target_validation.get("dc_key_universe_validation"),
                     "copied_ticker_count": 0,
                     "copied_group_count": 1,
                 }
@@ -2452,6 +2494,360 @@ def plan_dc_ecosystem_aggregate_repair(
     }
 
 
+def validate_dc_aggregate_only_repair(
+    *,
+    analysis_db: str | Path,
+    plan: dict[str, object],
+    confirm_dc_repair_scope: str = DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY,
+) -> dict[str, object]:
+    if confirm_dc_repair_scope != DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY:
+        return {
+            "repair_scope_validation_status": "BLOCKED",
+            "repair_scope": confirm_dc_repair_scope,
+            "blocking_errors": ["confirmation mismatch: dc_repair_scope"],
+        }
+    repair_plan = plan_dc_ecosystem_aggregate_repair(analysis_db=analysis_db, plan=plan)
+    table_results = list(repair_plan.get("table_results") or [])
+    missing_target_rows = sum(int(row.get("missing_target_row_count") or 0) for row in table_results)
+    extra_target_rows = sum(int(row.get("extra_target_row_count") or 0) for row in table_results)
+    duplicate_rows = sum(int(row.get("duplicate_key_count") or 0) for row in table_results)
+    aggregate_semantic_mismatch_count = sum(int(row.get("semantic_mismatch_count") or 0) for row in table_results)
+    blocking_errors = [
+        error
+        for error in [
+            "missing aggregate target rows" if missing_target_rows else "",
+            "extra aggregate target rows" if extra_target_rows else "",
+            "duplicate aggregate keys" if duplicate_rows else "",
+            "aggregate semantic mismatches" if aggregate_semantic_mismatch_count else "",
+        ]
+        if error
+    ]
+    status = "OK" if not blocking_errors else "BLOCKED"
+    return {
+        "repair_scope_validation_status": status,
+        "repair_scope": DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY,
+        "deployment_id": plan.get("deployment_id"),
+        "source_taxonomy_version": plan.get("current_taxonomy_version"),
+        "target_taxonomy_version": plan.get("proposed_taxonomy_version"),
+        "date_from": plan.get("date_from"),
+        "date_to": plan.get("date_to"),
+        "repair_tables": list(repair_plan.get("dc_repair_tables") or []),
+        "repair_key_classes": list(repair_plan.get("dc_repair_key_classes") or []),
+        "repair_candidate_hash": repair_plan.get("repair_candidate_hash"),
+        "repair_candidate_count": int(repair_plan.get("repair_candidate_count") or 0),
+        "missing_target_rows": missing_target_rows,
+        "extra_target_rows": extra_target_rows,
+        "duplicate_source_rows": 0,
+        "duplicate_target_rows": duplicate_rows,
+        "aggregate_semantic_mismatch_count": aggregate_semantic_mismatch_count,
+        "table_results": table_results,
+        "blocking_errors": blocking_errors,
+    }
+
+
+def validate_complete_dc_target(
+    *,
+    analysis_db: str | Path,
+    plan: dict[str, object],
+    ticker_allowlist: list[str] | None = None,
+    group_allowlist: list[str] | None = None,
+) -> dict[str, object]:
+    ticker_keys = _dc_ticker_allowlist(plan) if ticker_allowlist is None else ticker_allowlist
+    group_keys = _dc_group_allowlist(plan) if group_allowlist is None else group_allowlist
+    validation = validate_dc_carry_forward_key_universe(
+        analysis_db=analysis_db,
+        plan=plan,
+        ticker_allowlist=ticker_keys,
+        group_allowlist=group_keys,
+    )
+    key_universe_blocking = any(
+        int(validation.get(key) or 0)
+        for key in [
+            "missing_target_ordinary_keys",
+            "missing_target_ecosystem_aggregate_keys",
+            "extra_target_keys",
+            "duplicate_keys",
+        ]
+    )
+    blocking_semantic_mismatch_count = int(validation.get("blocking_semantic_mismatch_count") or 0)
+    required_lineage_mismatch_count = int(validation.get("required_lineage_mismatch_count") or 0)
+    complete_target_semantic_status = (
+        "OK" if blocking_semantic_mismatch_count == 0 and required_lineage_mismatch_count == 0 else "BLOCKED"
+    )
+    return {
+        "complete_target_validation_status": (
+            "OK" if not key_universe_blocking and complete_target_semantic_status == "OK" else "BLOCKED"
+        ),
+        "complete_target_key_universe_status": "OK" if not key_universe_blocking else "BLOCKED",
+        "complete_target_semantic_status": complete_target_semantic_status,
+        "missing_target_ordinary_keys": int(validation.get("missing_target_ordinary_keys") or 0),
+        "missing_target_ecosystem_aggregate_keys": int(validation.get("missing_target_ecosystem_aggregate_keys") or 0),
+        "extra_target_keys": int(validation.get("extra_target_keys") or 0),
+        "duplicate_keys": int(validation.get("duplicate_keys") or 0),
+        "operational_metadata_drift_count": int(validation.get("operational_metadata_drift_count") or 0),
+        "blocking_semantic_mismatch_count": blocking_semantic_mismatch_count,
+        "required_lineage_mismatch_count": required_lineage_mismatch_count,
+        "ignored_diagnostic_difference_count": int(validation.get("ignored_diagnostic_difference_count") or 0),
+        "blocking_semantic_mismatches": list(validation.get("blocking_semantic_mismatches") or []),
+        "operational_metadata_drift": list(validation.get("operational_metadata_drift") or []),
+        "dc_key_universe_validation": validation,
+    }
+
+
+def _dc_table_date_column(table_name: str) -> str:
+    return {
+        "dc_ticker_swing_signal_daily": "signal_date",
+        "dc_group_swing_signal_daily": "signal_date",
+        "dc_group_synthetic_ohlc_daily": "ohlc_date",
+        "dc_group_index_daily": "index_date",
+    }[table_name]
+
+
+def _row_by_dc_key(
+    conn: sqlite3.Connection,
+    *,
+    table_name: str,
+    taxonomy_version: str,
+    key_columns: tuple[str, ...],
+    key_values: list[object],
+) -> dict[str, object] | None:
+    columns = _table_columns(conn, table_name)
+    where = " AND ".join([f"{_sql_identifier(column)} = ?" for column in ("taxonomy_version", *key_columns)])
+    row = conn.execute(
+        f"SELECT {', '.join(_sql_identifier(column) for column in columns)} "
+        f"FROM {_sql_identifier(table_name)} WHERE {where}",
+        [taxonomy_version, *key_values],
+    ).fetchone()
+    return dict(row) if row is not None else None
+
+
+def plan_dc_semantic_row_repair(
+    *,
+    analysis_db: str | Path,
+    plan: dict[str, object],
+    complete_target_validation: dict[str, object] | None = None,
+) -> dict[str, object]:
+    if plan.get("change_execution_class") != CHANGE_EXECUTION_REPORT_STATUS_ONLY:
+        return {
+            "repair_scope": DC_REPAIR_SCOPE_SEMANTIC_ROW_ONLY,
+            "semantic_row_repair_plan_status": "BLOCKED",
+            "safe_to_apply": False,
+            "candidate_count": 0,
+            "blocking_errors": ["semantic row repair is only supported for REPORT_STATUS_ONLY"],
+        }
+    validation = complete_target_validation or validate_complete_dc_target(analysis_db=analysis_db, plan=plan)
+    mismatches = list(validation.get("blocking_semantic_mismatches") or [])
+    conn = _connect_readonly(analysis_db)
+    candidates: list[dict[str, object]] = []
+    blocking_errors: list[str] = []
+    try:
+        for mismatch in mismatches:
+            table_name = str(mismatch.get("table") or "")
+            if table_name not in _table_names(conn):
+                blocking_errors.append(f"missing table: {table_name}")
+                continue
+            columns = set(_table_columns(conn, table_name))
+            date_column = _dc_table_date_column(table_name)
+            key_columns = _dc_key_contract(table_name, available_columns=columns, date_column=date_column)
+            key_values = list(mismatch.get("key") or [])
+            if len(key_values) != len(key_columns):
+                blocking_errors.append(f"{table_name}: mismatch key does not match key contract")
+                continue
+            field_name = str(mismatch.get("field") or "")
+            field_policy = dc_carry_forward_field_policy(
+                table_name=table_name,
+                columns=columns,
+                key_columns=key_columns,
+            )
+            if field_policy.get(field_name) != DC_FIELD_CLASS_SEMANTIC:
+                blocking_errors.append(f"{table_name}: field is not semantic: {field_name}")
+                continue
+            source = _row_by_dc_key(
+                conn,
+                table_name=table_name,
+                taxonomy_version=str(plan["current_taxonomy_version"]),
+                key_columns=key_columns,
+                key_values=key_values,
+            )
+            target = _row_by_dc_key(
+                conn,
+                table_name=table_name,
+                taxonomy_version=str(plan["proposed_taxonomy_version"]),
+                key_columns=key_columns,
+                key_values=key_values,
+            )
+            if source is None:
+                blocking_errors.append(f"{table_name}: source row missing")
+                continue
+            if target is None:
+                blocking_errors.append(f"{table_name}: target row missing")
+                continue
+            candidate_key = {
+                column: key_values[index]
+                for index, column in enumerate(key_columns)
+            }
+            candidates.append(
+                {
+                    "repair_table": table_name,
+                    "repair_key": candidate_key,
+                    "key_columns": list(key_columns),
+                    "repair_columns": [field_name],
+                    "source_values": {field_name: source.get(field_name)},
+                    "target_values": {field_name: target.get(field_name)},
+                    "source_semantic_hash": _json_hash(
+                        {
+                            column: source.get(column)
+                            for column, field_class in field_policy.items()
+                            if field_class == DC_FIELD_CLASS_SEMANTIC
+                        }
+                    ),
+                    "target_semantic_hash": _json_hash(
+                        {
+                            column: target.get(column)
+                            for column, field_class in field_policy.items()
+                            if field_class == DC_FIELD_CLASS_SEMANTIC
+                        }
+                    ),
+                }
+            )
+    finally:
+        conn.close()
+    normalized_candidates = sorted(
+        candidates,
+        key=lambda row: (
+            str(row["repair_table"]),
+            json.dumps(row["repair_key"], sort_keys=True, default=str),
+            ",".join(row["repair_columns"]),
+        ),
+    )
+    payload = {
+        "deployment_id": plan.get("deployment_id"),
+        "repair_scope": DC_REPAIR_SCOPE_SEMANTIC_ROW_ONLY,
+        "current_taxonomy_version": plan.get("current_taxonomy_version"),
+        "proposed_taxonomy_version": plan.get("proposed_taxonomy_version"),
+        "date_from": plan.get("date_from"),
+        "date_to": plan.get("date_to"),
+        "candidates": normalized_candidates,
+    }
+    return {
+        "repair_scope": DC_REPAIR_SCOPE_SEMANTIC_ROW_ONLY,
+        "semantic_row_repair_plan_status": "READY" if not blocking_errors else "BLOCKED",
+        "safe_to_apply": not blocking_errors,
+        "candidate_count": len(normalized_candidates),
+        "candidate_hash": _json_hash(payload),
+        "repair_candidates": normalized_candidates,
+        "blocking_errors": blocking_errors,
+        "ordinary_dc_recopy_required": False,
+        "computational_rebuild_required": False,
+        "pipeline_required": False,
+        "stage2_required": False,
+    }
+
+
+def apply_dc_semantic_row_repair(
+    *,
+    analysis_db: str | Path,
+    plan: dict[str, object],
+    confirm_repair_scope: str,
+    confirm_candidate_hash: str,
+) -> dict[str, object]:
+    repair_plan = plan_dc_semantic_row_repair(analysis_db=analysis_db, plan=plan)
+    confirmation_errors = []
+    if confirm_repair_scope != DC_REPAIR_SCOPE_SEMANTIC_ROW_ONLY:
+        confirmation_errors.append("confirmation mismatch: repair_scope")
+    if confirm_candidate_hash != repair_plan.get("candidate_hash"):
+        confirmation_errors.append("confirmation mismatch: candidate_hash")
+    if confirmation_errors:
+        return {
+            "semantic_row_repair_status": "BLOCKED_CONFIRMATION_FAILED",
+            "confirmation_errors": confirmation_errors,
+            "semantic_row_repair_plan": repair_plan,
+        }
+    if not repair_plan.get("safe_to_apply"):
+        return {"semantic_row_repair_status": "BLOCKED", "semantic_row_repair_plan": repair_plan}
+    if int(repair_plan.get("candidate_count") or 0) == 0:
+        return {"semantic_row_repair_status": "NO_CHANGE", "semantic_row_repair_plan": repair_plan}
+
+    conn = _connect_readwrite(analysis_db)
+    applied: list[dict[str, object]] = []
+    try:
+        try:
+            with conn:
+                for candidate in repair_plan["repair_candidates"]:
+                    table_name = str(candidate["repair_table"])
+                    key_columns = tuple(str(column) for column in candidate["key_columns"])
+                    key_values = [candidate["repair_key"][column] for column in key_columns]
+                    set_columns = [str(column) for column in candidate["repair_columns"]]
+                    set_sql = ", ".join(f"{_sql_identifier(column)} = ?" for column in set_columns)
+                    where_sql = " AND ".join(
+                        f"{_sql_identifier(column)} = ?" for column in ("taxonomy_version", *key_columns)
+                    )
+                    params = [
+                        candidate["source_values"][column]
+                        for column in set_columns
+                    ] + [str(plan["proposed_taxonomy_version"]), *key_values]
+                    updated = conn.execute(
+                        f"UPDATE {_sql_identifier(table_name)} SET {set_sql} WHERE {where_sql}",
+                        params,
+                    ).rowcount
+                    if updated != 1:
+                        raise RuntimeError(f"{table_name}: expected one target row update, got {updated}")
+                    source = _row_by_dc_key(
+                        conn,
+                        table_name=table_name,
+                        taxonomy_version=str(plan["current_taxonomy_version"]),
+                        key_columns=key_columns,
+                        key_values=key_values,
+                    )
+                    target = _row_by_dc_key(
+                        conn,
+                        table_name=table_name,
+                        taxonomy_version=str(plan["proposed_taxonomy_version"]),
+                        key_columns=key_columns,
+                        key_values=key_values,
+                    )
+                    if source is None or target is None:
+                        raise RuntimeError(f"{table_name}: source or target row missing after update")
+                    columns = set(_table_columns(conn, table_name))
+                    field_policy = dc_carry_forward_field_policy(
+                        table_name=table_name,
+                        columns=columns,
+                        key_columns=key_columns,
+                    )
+                    differences = _dc_payload_differences(source, target, field_policy=field_policy)
+                    remaining = [
+                        item
+                        for item in differences[DC_FIELD_CLASS_SEMANTIC]
+                        if item["field"] in set_columns
+                    ]
+                    if remaining:
+                        raise RuntimeError(f"{table_name}: semantic row repair validation failed")
+                    applied.append(
+                        {
+                            "repair_table": table_name,
+                            "repair_key": candidate["repair_key"],
+                            "repair_columns": set_columns,
+                            "updated_row_count": updated,
+                        }
+                    )
+        except Exception as exc:
+            return {
+                "semantic_row_repair_status": "FAILED",
+                "failure_message": str(exc),
+                "applied_before_rollback": applied,
+                "semantic_row_repair_plan": repair_plan,
+            }
+        post_plan = plan_dc_semantic_row_repair(analysis_db=analysis_db, plan=plan)
+        return {
+            "semantic_row_repair_status": "APPLIED",
+            "applied": applied,
+            "semantic_row_repair_plan": repair_plan,
+            "post_repair_plan": post_plan,
+        }
+    finally:
+        conn.close()
+
+
 def _target_ec_context(
     conn: sqlite3.Connection,
     *,
@@ -2768,6 +3164,13 @@ def plan_report_status_only_resume_reconciliation(
     existing_backup_sha256: str | None = None,
 ) -> dict[str, object]:
     repair_plan = plan_dc_ecosystem_aggregate_repair(analysis_db=analysis_db, plan=plan)
+    aggregate_revalidation = validate_dc_aggregate_only_repair(analysis_db=analysis_db, plan=plan)
+    complete_target_validation = validate_complete_dc_target(analysis_db=analysis_db, plan=plan)
+    semantic_repair_plan = plan_dc_semantic_row_repair(
+        analysis_db=analysis_db,
+        plan=plan,
+        complete_target_validation=complete_target_validation,
+    )
     backend_current_plan_hash = str(plan.get("plan_hash") or "")
     current_plan_inputs = {
         "deployment_id": plan.get("deployment_id"),
@@ -2784,6 +3187,13 @@ def plan_report_status_only_resume_reconciliation(
         "dc_repair_tables": repair_plan.get("dc_repair_tables"),
         "dc_repair_key_classes": repair_plan.get("dc_repair_key_classes"),
         "repair_candidate_hash": repair_plan.get("repair_candidate_hash"),
+        "aggregate_repair_required": bool(repair_plan.get("dc_repair_required")),
+        "aggregate_repair_revalidation_status": aggregate_revalidation.get("repair_scope_validation_status"),
+        "complete_target_key_universe_status": complete_target_validation.get("complete_target_key_universe_status"),
+        "complete_target_semantic_status": complete_target_validation.get("complete_target_semantic_status"),
+        "dc_semantic_repair_scope": semantic_repair_plan.get("repair_scope"),
+        "dc_semantic_repair_candidate_count": semantic_repair_plan.get("candidate_count"),
+        "dc_semantic_repair_candidate_hash": semantic_repair_plan.get("candidate_hash"),
         "ec_revalidation_parity_policy": REPORT_STATUS_ONLY_PARITY_POLICY,
         "parity_field_policy_version": PARITY_FIELD_POLICY_VERSION,
     }
@@ -2859,6 +3269,25 @@ def plan_report_status_only_resume_reconciliation(
         "repair_amendment_hash": _json_hash(amendment_identity),
         "repair_amendment_identity": amendment_identity,
         "dc_repair_plan": repair_plan,
+        "aggregate_repair_required": bool(repair_plan.get("dc_repair_required")),
+        "aggregate_repair_revalidation_required": True,
+        "aggregate_repair_revalidation": aggregate_revalidation,
+        "complete_target_validation": complete_target_validation,
+        "dc_semantic_repair_required": int(semantic_repair_plan.get("candidate_count") or 0) > 0,
+        "dc_semantic_repair_scope": semantic_repair_plan.get("repair_scope"),
+        "dc_semantic_repair_candidate_count": semantic_repair_plan.get("candidate_count"),
+        "dc_semantic_repair_plan": semantic_repair_plan,
+        "ordinary_dc_recopy_required": False,
+        "EC_rebuild_required": False,
+        "EC_revalidation_required": True,
+        "cleanup_required": True,
+        "restore_required": False,
+        "backup_reuse_required": True,
+        "resume_from_phase": (
+            "DC_SEMANTIC_ROW_REPAIR"
+            if int(semantic_repair_plan.get("candidate_count") or 0) > 0
+            else "DC_FACTS_VALIDATED"
+        ),
     }
 
 
@@ -2985,14 +3414,109 @@ def _semantic_payload(
     columns: set[str],
     table_name: str,
 ) -> tuple[tuple[str, object], ...]:
-    ignored = {"taxonomy_version", "created_at_utc", "updated_at_utc", "loaded_at_utc"}
-    if table_name == "dc_ticker_swing_signal_daily":
-        ignored.update({"primary_layer", "primary_subindustry"})
+    date_column = {
+        "dc_ticker_swing_signal_daily": "signal_date",
+        "dc_group_swing_signal_daily": "signal_date",
+        "dc_group_synthetic_ohlc_daily": "ohlc_date",
+        "dc_group_index_daily": "index_date",
+    }.get(table_name, "")
+    key_columns = _dc_key_contract(table_name, available_columns=columns, date_column=date_column) if date_column else ()
+    field_policy = dc_carry_forward_field_policy(
+        table_name=table_name,
+        columns=columns,
+        key_columns=key_columns,
+    )
     return tuple(
         (column, row.get(column))
         for column in sorted(columns)
-        if column not in ignored
+        if field_policy.get(column) == DC_FIELD_CLASS_SEMANTIC
     )
+
+
+def classify_dc_carry_forward_field(
+    *,
+    table_name: str,
+    field_name: str,
+    key_columns: tuple[str, ...],
+) -> str:
+    if field_name in key_columns:
+        return DC_FIELD_CLASS_KEY
+    if field_name == "taxonomy_version":
+        return DC_FIELD_CLASS_REQUIRED_LINEAGE
+    if field_name in {"run_id", "source_run_id"}:
+        return DC_FIELD_CLASS_OPERATIONAL_METADATA
+    if field_name in {"created_at_utc", "updated_at_utc", "loaded_at_utc"}:
+        return DC_FIELD_CLASS_IGNORED_DIAGNOSTIC
+    if table_name == "dc_ticker_swing_signal_daily" and field_name in {"primary_layer", "primary_subindustry"}:
+        return DC_FIELD_CLASS_IGNORED_DIAGNOSTIC
+    return DC_FIELD_CLASS_SEMANTIC
+
+
+def dc_carry_forward_field_policy(
+    *,
+    table_name: str,
+    columns: set[str],
+    key_columns: tuple[str, ...],
+) -> dict[str, str]:
+    return {
+        column: classify_dc_carry_forward_field(
+            table_name=table_name,
+            field_name=column,
+            key_columns=key_columns,
+        )
+        for column in sorted(columns)
+    }
+
+
+def _dc_payload_differences(
+    source: dict[str, object],
+    target: dict[str, object],
+    *,
+    field_policy: dict[str, str],
+) -> dict[str, list[dict[str, object]]]:
+    differences: dict[str, list[dict[str, object]]] = {
+        DC_FIELD_CLASS_SEMANTIC: [],
+        DC_FIELD_CLASS_OPERATIONAL_METADATA: [],
+        DC_FIELD_CLASS_REQUIRED_LINEAGE: [],
+        DC_FIELD_CLASS_IGNORED_DIAGNOSTIC: [],
+    }
+    for column, field_class in field_policy.items():
+        if field_class == DC_FIELD_CLASS_KEY:
+            continue
+        if field_class == DC_FIELD_CLASS_REQUIRED_LINEAGE:
+            continue
+        if source.get(column) == target.get(column):
+            continue
+        item = {"field": column, "source": source.get(column), "target": target.get(column)}
+        if field_class in differences:
+            differences[field_class].append(item)
+        else:
+            differences[DC_FIELD_CLASS_SEMANTIC].append(item)
+    return differences
+
+
+def _extend_difference_examples(
+    examples: list[dict[str, object]],
+    *,
+    key: tuple[object, ...],
+    table_name: str,
+    differences: list[dict[str, object]],
+    field_class: str,
+    limit: int = 20,
+) -> None:
+    for difference in differences:
+        if len(examples) >= limit:
+            return
+        examples.append(
+            {
+                "table": table_name,
+                "key": list(key),
+                "field": difference["field"],
+                "field_class": field_class,
+                "source": difference.get("source"),
+                "target": difference.get("target"),
+            }
+        )
 
 
 def _validate_carry_forward_table(
@@ -3057,14 +3581,58 @@ def _validate_carry_forward_table(
     target_by_key, target_duplicates, unexpected_target = keyed(target_rows)
     missing_keys = sorted(set(source_by_key) - set(target_by_key))
     extra_keys = sorted(set(target_by_key) - set(source_by_key))
-    semantic_mismatches = []
+    field_policy = dc_carry_forward_field_policy(
+        table_name=table_name,
+        columns=columns,
+        key_columns=key_columns,
+    )
+    semantic_mismatch_count = 0
+    operational_metadata_drift_count = 0
+    required_lineage_mismatch_count = 0
+    ignored_diagnostic_difference_count = 0
+    semantic_mismatches: list[dict[str, object]] = []
+    operational_metadata_drift: list[dict[str, object]] = []
+    required_lineage_mismatches: list[dict[str, object]] = []
+    ignored_diagnostic_differences: list[dict[str, object]] = []
     for key in sorted(set(source_by_key) & set(target_by_key)):
-        if _semantic_payload(source_by_key[key], columns=columns, table_name=table_name) != _semantic_payload(
+        differences = _dc_payload_differences(
+            source_by_key[key],
             target_by_key[key],
-            columns=columns,
+            field_policy=field_policy,
+        )
+        if differences[DC_FIELD_CLASS_SEMANTIC]:
+            semantic_mismatch_count += 1
+        operational_metadata_drift_count += len(differences[DC_FIELD_CLASS_OPERATIONAL_METADATA])
+        required_lineage_mismatch_count += len(differences[DC_FIELD_CLASS_REQUIRED_LINEAGE])
+        ignored_diagnostic_difference_count += len(differences[DC_FIELD_CLASS_IGNORED_DIAGNOSTIC])
+        _extend_difference_examples(
+            semantic_mismatches,
+            key=key,
             table_name=table_name,
-        ):
-            semantic_mismatches.append({"key": list(key), "table": table_name})
+            differences=differences[DC_FIELD_CLASS_SEMANTIC],
+            field_class=DC_FIELD_CLASS_SEMANTIC,
+        )
+        _extend_difference_examples(
+            operational_metadata_drift,
+            key=key,
+            table_name=table_name,
+            differences=differences[DC_FIELD_CLASS_OPERATIONAL_METADATA],
+            field_class=DC_FIELD_CLASS_OPERATIONAL_METADATA,
+        )
+        _extend_difference_examples(
+            required_lineage_mismatches,
+            key=key,
+            table_name=table_name,
+            differences=differences[DC_FIELD_CLASS_REQUIRED_LINEAGE],
+            field_class=DC_FIELD_CLASS_REQUIRED_LINEAGE,
+        )
+        _extend_difference_examples(
+            ignored_diagnostic_differences,
+            key=key,
+            table_name=table_name,
+            differences=differences[DC_FIELD_CLASS_IGNORED_DIAGNOSTIC],
+            field_class=DC_FIELD_CLASS_IGNORED_DIAGNOSTIC,
+        )
     missing_ordinary = [
         key
         for key in missing_keys
@@ -3081,13 +3649,15 @@ def _validate_carry_forward_table(
         and not missing_ecosystem
         and not extra_keys
         and duplicate_total == 0
-        and not semantic_mismatches
+        and semantic_mismatch_count == 0
+        and required_lineage_mismatch_count == 0
         and not unexpected_target
     )
     return {
         "table": table_name,
         "validation_status": "OK" if ok else "BLOCKED",
         "key_columns": list(key_columns),
+        "field_policy": field_policy,
         "ordinary_key_count": sum(
             1 for row in source_by_key.values() if _dc_key_class(table_name, row, allowed_keys) == "ordinary"
         ),
@@ -3100,10 +3670,18 @@ def _validate_carry_forward_table(
         "missing_target_ecosystem_aggregate_keys": len(missing_ecosystem),
         "extra_target_keys": len(extra_keys) + len(unexpected_target),
         "duplicate_keys": duplicate_total,
-        "semantic_mismatch_count": len(semantic_mismatches),
+        "semantic_mismatch_count": semantic_mismatch_count,
+        "blocking_semantic_mismatch_count": semantic_mismatch_count,
+        "required_lineage_mismatch_count": required_lineage_mismatch_count,
+        "operational_metadata_drift_count": operational_metadata_drift_count,
+        "ignored_diagnostic_difference_count": ignored_diagnostic_difference_count,
         "unexpected_source_keys": unexpected_source,
         "unexpected_target_keys": unexpected_target + [{"key": list(key), "row_class": "extra"} for key in extra_keys],
         "mismatches": semantic_mismatches[:20],
+        "blocking_semantic_mismatches": semantic_mismatches[:20],
+        "required_lineage_mismatches": required_lineage_mismatches[:20],
+        "operational_metadata_drift": operational_metadata_drift[:20],
+        "ignored_diagnostic_differences": ignored_diagnostic_differences[:20],
     }
 
 
@@ -3170,6 +3748,28 @@ def validate_dc_carry_forward_key_universe(
         "extra_target_keys": sum(int(row["extra_target_keys"]) for row in table_results),
         "duplicate_keys": sum(int(row["duplicate_keys"]) for row in table_results),
         "semantic_mismatch_count": sum(int(row["semantic_mismatch_count"]) for row in table_results),
+        "blocking_semantic_mismatch_count": sum(
+            int(row.get("blocking_semantic_mismatch_count") or row["semantic_mismatch_count"]) for row in table_results
+        ),
+        "required_lineage_mismatch_count": sum(
+            int(row.get("required_lineage_mismatch_count") or 0) for row in table_results
+        ),
+        "operational_metadata_drift_count": sum(
+            int(row.get("operational_metadata_drift_count") or 0) for row in table_results
+        ),
+        "ignored_diagnostic_difference_count": sum(
+            int(row.get("ignored_diagnostic_difference_count") or 0) for row in table_results
+        ),
+        "blocking_semantic_mismatches": [
+            mismatch
+            for row in table_results
+            for mismatch in list(row.get("blocking_semantic_mismatches") or [])[:20]
+        ][:20],
+        "operational_metadata_drift": [
+            drift
+            for row in table_results
+            for drift in list(row.get("operational_metadata_drift") or [])[:20]
+        ][:20],
     }
 
 

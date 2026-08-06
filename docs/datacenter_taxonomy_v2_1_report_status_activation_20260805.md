@@ -1914,3 +1914,112 @@ backup not restored
 migrations not applied
 network not used
 ```
+
+## 2026-08-06 Scoped Validation And Semantic Repair Policy Fix
+
+Final implementation classification:
+
+```text
+DATACENTER_RSO_SCOPED_POST_VALIDATION_AND_SEMANTIC_REPAIR_POLICY_FIXED
+```
+
+The orchestrator now separates:
+
+```text
+REPAIR_SCOPE_VALIDATION
+COMPLETE_TARGET_KEY_UNIVERSE_VALIDATION
+COMPLETE_TARGET_SEMANTIC_VALIDATION
+```
+
+The `ECOSYSTEM_AGGREGATE_ONLY` post-repair success gate validates only:
+
+```text
+dc_group_swing_signal_daily ecosystem:DC_ECOSYSTEM_TOTAL
+dc_group_index_daily ecosystem:DC_ECOSYSTEM_TOTAL
+```
+
+It no longer runs full-universe DC carry-forward semantic validation as the
+aggregate transaction success gate.
+
+The complete-target validator remains separate and still blocks real semantic
+differences. The DC carry-forward field policy now classifies:
+
+```text
+run_id=OPERATIONAL_METADATA
+source_run_id=OPERATIONAL_METADATA
+taxonomy_version=REQUIRED_LINEAGE
+created_at/updated_at=IGNORED_DIAGNOSTIC
+signal_version/calc_version=KEY when participating in the table key
+```
+
+Read-only deployment 2 scoped-validation preflight:
+
+```text
+artifact_root=temp/datacenter_v2_1_scoped_validation_preflight/
+
+aggregate_repair_required=false
+aggregate_repair_revalidation_status=OK
+
+complete_target_key_universe_status=OK
+complete_target_semantic_status=BLOCKED
+operational_metadata_drift_count=14694
+blocking_semantic_mismatch_count=1
+
+blocking mismatch:
+  table=dc_ticker_swing_signal_daily
+  key=(2026-08-04, WMS, DC_SWING_SIGNAL_V1)
+  field=bullish_divergence_signal
+  source=1
+  target=0
+
+dc_semantic_repair_scope=SEMANTIC_ROW_ONLY
+dc_semantic_repair_candidate_count=1
+resume_from_phase=DC_SEMANTIC_ROW_REPAIR
+ordinary_dc_recopy_required=false
+EC_rebuild_required=false
+EC_revalidation_required=true
+cleanup_required=true
+restore_required=false
+backup_reuse_required=true
+```
+
+The WMS row is classified as a real semantic target mismatch, not operational
+metadata drift. The implemented generic repair contract is `SEMANTIC_ROW_ONLY`:
+it plans and can apply only exact listed semantic fields for exact DC fact keys,
+transactionally and idempotently. This implementation task did not apply that
+repair in production.
+
+Corrected remaining deployment 2 recovery sequence:
+
+```text
+AGGREGATE_REPAIR_ALREADY_APPLIED
+-> AGGREGATE_REPAIR_SCOPE_REVALIDATED
+-> SEMANTIC_ROW_ONLY repair
+-> COMPLETE_DC_TARGET_VALIDATED
+-> EC_FACTS_REVALIDATED
+-> OLD_EC_CLEANED
+-> WHOLE_RANGE_VALIDATED
+-> WATERMARKS_FINALIZED
+-> READY_TO_ACTIVATE
+```
+
+Explicit non-actions in this implementation task:
+
+```text
+production resume not retried
+semantic row repair not applied in production
+production operation lock not acquired
+Scheduler guard not changed
+EC cleanup not run
+watermarks not finalized
+V2.1 not activated
+Scheduler not run
+Datacenter pipeline not run
+Stage 2 not run
+EC rebuild/loaders/chunks not run
+production backup not created
+backup not restored
+production migrations not applied
+taxonomy CSVs unchanged
+watchlist unchanged
+```

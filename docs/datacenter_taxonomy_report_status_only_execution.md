@@ -170,6 +170,62 @@ does not copy ticker rows, synthetic OHLC rows, ordinary layer/subindustry group
 rows, reports, EC rows, watermarks, or scheduler configuration. The two-table
 repair is transactional and idempotent.
 
+The aggregate-only repair has its own post-validation contract. The success gate
+for `ECOSYSTEM_AGGREGATE_ONLY` checks only:
+
+```text
+dc_group_swing_signal_daily ecosystem:DC_ECOSYSTEM_TOTAL
+dc_group_index_daily ecosystem:DC_ECOSYSTEM_TOTAL
+```
+
+It reports:
+
+```text
+repair_scope_validation_status
+missing_target_rows
+extra_target_rows
+duplicate_source_rows
+duplicate_target_rows
+aggregate_semantic_mismatch_count
+```
+
+This repair-scope validation is intentionally separate from complete target
+validation. A pre-existing ordinary ticker or ordinary group mismatch cannot
+make the aggregate transaction itself fail if the authorized aggregate rows are
+correct.
+
+After aggregate-scope validation succeeds, the orchestrator exposes complete DC
+target validation separately:
+
+```text
+complete_target_key_universe_status
+complete_target_semantic_status
+operational_metadata_drift_count
+blocking_semantic_mismatch_count
+blocking_semantic_mismatches
+```
+
+Complete target semantic validation still blocks real signal differences. If a
+real ordinary-row semantic mismatch remains, resume stops before EC
+revalidation and reports `DC_SEMANTIC_ROW_REPAIR` as the next phase.
+
+The narrow generic semantic-row repair contract is:
+
+```text
+repair_scope=SEMANTIC_ROW_ONLY
+repair_table=<canonical DC fact table>
+repair_keys=<exact primary/contract key>
+repair_columns=<semantic mismatch fields only>
+candidate_count
+candidate_hash
+source_semantic_hash
+target_semantic_hash
+```
+
+It is deterministic, idempotent, transactional, and must not perform broad
+ticker/date-range recopy, Datacenter calculations, Stage 2, EC loaders, EC
+cleanup, watermark finalization, or activation.
+
 If a previously approved production plan hash no longer matches because the
 implementation was corrected, resume requires a separate plan-reconciliation
 amendment. The original plan hash is preserved and the caller must confirm:
