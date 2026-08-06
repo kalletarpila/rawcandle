@@ -248,6 +248,7 @@ silently. The resume planner chooses an explicit EC action:
 ```text
 REBUILD_EC_FACTS
 REVALIDATE_EXISTING_FACTS
+COPY_POST_DEPLOYMENT_SOURCE_ADVANCE
 SKIP_ALREADY_VALIDATED
 ```
 
@@ -269,6 +270,13 @@ does not invoke EC loaders or chunk builders. If validation shows incomplete
 facts, semantic mismatches, or required-lineage mismatches, a
 `REPORT_STATUS_ONLY` resume is blocked as rebuild-required rather than quietly
 rebuilding facts under a stale recovery assumption.
+
+If the only missing EC facts are exact post-deployment source-advance dates and
+the new source-advance planner is safe, resume chooses
+`COPY_POST_DEPLOYMENT_SOURCE_ADVANCE` instead of `REBUILD_EC_FACTS`. That path
+copies already accepted active EC facts to the proposed taxonomy lineage for the
+derived source-advance trading dates only. It does not call EC rebuild, loaders,
+or chunks.
 
 Current plan reconciliation is backend-derived. Callers may supply an expected
 current hash for confirmation, but the orchestrator recomputes and exposes the
@@ -299,6 +307,10 @@ downstream_calculation_called=false
 report_generation_called=false
 external_fetch_called=false
 ```
+
+The source-advance scope is separate from `SEMANTIC_ROW_ONLY`. A real semantic
+row mismatch, such as the deployment-2 WMS row, must still be repaired and
+validated independently before source-advance catch-up proceeds.
 
 ## Scheduler UI
 

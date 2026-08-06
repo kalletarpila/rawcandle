@@ -422,6 +422,31 @@ available log/package actions
 
 The durable deployment state and operation manifests are the source of truth.
 
+## Source-Advance Resume Display
+
+For `REPORT_STATUS_ONLY` deployments, the UI should expose source-advance
+planner output when the active source taxonomy is ahead of the proposed target:
+
+```text
+active source head
+target head
+required activation head
+source-advance policy
+source-advance required
+source-advance date range
+DC candidate counts
+EC candidate counts
+semantic-row repair candidate count
+execution scopes
+blocking errors
+safe next action
+```
+
+The confirmation copy must state that only the semantic target row and the
+post-deployment source-advance dates will be copied to the proposed taxonomy
+lineage, and that no Datacenter pipeline, Stage 2, calculations, EC rebuild,
+loaders, or chunks will run.
+
 ## Background Execution
 
 The UI provides a reusable `start_taxonomy_background_operation` helper for

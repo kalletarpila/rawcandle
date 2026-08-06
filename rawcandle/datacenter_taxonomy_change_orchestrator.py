@@ -47,10 +47,12 @@ CHANGE_EXECUTION_DELTA_REBUILD = "DELTA_REBUILD"
 CHANGE_EXECUTION_REPORT_STATUS_ONLY = "REPORT_STATUS_ONLY"
 DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY = "ECOSYSTEM_AGGREGATE_ONLY"
 DC_REPAIR_SCOPE_SEMANTIC_ROW_ONLY = "SEMANTIC_ROW_ONLY"
+DC_REPAIR_SCOPE_POST_DEPLOYMENT_SOURCE_ADVANCE_ONLY = "POST_DEPLOYMENT_SOURCE_ADVANCE_ONLY"
 PLAN_RECONCILIATION_REASON_AGGREGATE_SCOPE = "IMPLEMENTATION_CORRECTION_AGGREGATE_CARRY_FORWARD_SCOPE"
 REPORT_STATUS_ONLY_PARITY_POLICY = PARITY_POLICY_RSO_REVALIDATION_METADATA
 EC_RESUME_ACTION_REBUILD_EC_FACTS = "REBUILD_EC_FACTS"
 EC_RESUME_ACTION_REVALIDATE_EXISTING_FACTS = "REVALIDATE_EXISTING_FACTS"
+EC_RESUME_ACTION_COPY_POST_DEPLOYMENT_SOURCE_ADVANCE = "COPY_POST_DEPLOYMENT_SOURCE_ADVANCE"
 EC_RESUME_ACTION_SKIP_ALREADY_VALIDATED = "SKIP_ALREADY_VALIDATED"
 DC_FIELD_CLASS_KEY = "KEY"
 DC_FIELD_CLASS_SEMANTIC = "SEMANTIC"
@@ -2265,6 +2267,129 @@ EC_FACT_TABLE_CONTRACTS = {
         "key_columns": ("ecosystem_id", "taxonomy_version_id", "signal_date", "group_type", "group_name"),
     },
 }
+DC_SOURCE_ADVANCE_TABLES = (
+    ("dc_ticker_swing_signal_daily", "signal_date", "ticker"),
+    ("dc_group_swing_signal_daily", "signal_date", "group"),
+    ("dc_group_synthetic_ohlc_daily", "ohlc_date", "group"),
+    ("dc_group_index_daily", "index_date", "group"),
+)
+EC_SOURCE_ADVANCE_TABLES = tuple(EC_FACT_TABLE_CONTRACTS)
+
+
+def _canonical_dc_date_sets(
+    conn: sqlite3.Connection,
+    *,
+    taxonomy_version: str,
+    after_date: str | None = None,
+) -> dict[str, list[str]]:
+    result: dict[str, list[str]] = {}
+    for table_name, date_column, _row_scope in DC_SOURCE_ADVANCE_TABLES:
+        if table_name not in _table_names(conn):
+            result[table_name] = []
+            continue
+        clauses = ["taxonomy_version = ?"]
+        params: list[object] = [taxonomy_version]
+        if after_date is not None:
+            clauses.append(f"{_sql_identifier(date_column)} > ?")
+            params.append(after_date)
+        rows = conn.execute(
+            f"""
+            SELECT DISTINCT {_sql_identifier(date_column)}
+            FROM {_sql_identifier(table_name)}
+            WHERE {' AND '.join(clauses)}
+            ORDER BY {_sql_identifier(date_column)}
+            """,
+            params,
+        ).fetchall()
+        result[table_name] = [str(row[0]) for row in rows]
+    return result
+
+
+def _canonical_ec_date_sets(
+    conn: sqlite3.Connection,
+    *,
+    ecosystem_id: int,
+    taxonomy_version_id: int,
+    after_date: str | None = None,
+) -> dict[str, list[str]]:
+    result: dict[str, list[str]] = {}
+    for table_name in EC_SOURCE_ADVANCE_TABLES:
+        if table_name not in _table_names(conn):
+            result[table_name] = []
+            continue
+        clauses = ["ecosystem_id = ?", "taxonomy_version_id = ?"]
+        params: list[object] = [ecosystem_id, taxonomy_version_id]
+        if after_date is not None:
+            clauses.append("signal_date > ?")
+            params.append(after_date)
+        rows = conn.execute(
+            f"""
+            SELECT DISTINCT signal_date
+            FROM {_sql_identifier(table_name)}
+            WHERE {' AND '.join(clauses)}
+            ORDER BY signal_date
+            """,
+            params,
+        ).fetchall()
+        result[table_name] = [str(row[0]) for row in rows]
+    return result
+
+
+def _common_date_set(date_sets: dict[str, list[str]]) -> tuple[list[str], list[str]]:
+    values = [set(dates) for dates in date_sets.values()]
+    if not values:
+        return [], []
+    first = values[0]
+    mismatched = [
+        table_name
+        for table_name, dates in date_sets.items()
+        if set(dates) != first
+    ]
+    return sorted(first), mismatched
+
+
+def _max_date_from_sets(date_sets: dict[str, list[str]]) -> str | None:
+    dates = [date for values in date_sets.values() for date in values]
+    return max(dates) if dates else None
+
+
+def _source_advance_context(
+    conn: sqlite3.Connection,
+    *,
+    ecosystem_code: str,
+    current_taxonomy_version: str,
+    proposed_taxonomy_version: str,
+) -> tuple[int | None, int | None, int | None, list[str]]:
+    errors: list[str] = []
+    ecosystem_row = conn.execute(
+        "SELECT ecosystem_id FROM ec_ecosystem WHERE ecosystem_code = ?",
+        (ecosystem_code,),
+    ).fetchone()
+    ecosystem_id = int(ecosystem_row[0]) if ecosystem_row is not None else None
+    if ecosystem_id is None:
+        errors.append(f"ecosystem not found: {ecosystem_code}")
+        return None, None, None, errors
+    current = _loaded_taxonomy(
+        conn,
+        ecosystem_code=ecosystem_code,
+        taxonomy_version_code=current_taxonomy_version,
+    )
+    proposed = _loaded_taxonomy(
+        conn,
+        ecosystem_code=ecosystem_code,
+        taxonomy_version_code=proposed_taxonomy_version,
+    )
+    current_taxonomy_version_id = int(current["taxonomy_version_id"]) if current is not None else None
+    proposed_taxonomy_version_id = int(proposed["taxonomy_version_id"]) if proposed is not None else None
+    if current is None:
+        errors.append("current taxonomy metadata is not loaded")
+    elif int(current.get("is_active") or 0) != 1:
+        errors.append("current source taxonomy is not active")
+    if proposed is None:
+        errors.append("proposed taxonomy metadata is not loaded")
+    elif int(proposed.get("is_active") or 0) != 0:
+        errors.append("proposed taxonomy is not inactive")
+    return ecosystem_id, current_taxonomy_version_id, proposed_taxonomy_version_id, errors
 
 
 def _dc_ticker_allowlist(plan: dict[str, object]) -> list[str]:
@@ -2290,6 +2415,297 @@ def _dc_group_allowlist(plan: dict[str, object]) -> list[str]:
     if plan.get("change_execution_class") == CHANGE_EXECUTION_REPORT_STATUS_ONLY:
         groups.add(DC_GROUP_ECOSYSTEM_AGGREGATE_KEY)
     return sorted(groups)
+
+
+def _source_advance_candidate_dates(
+    *,
+    source_dates: list[str],
+    target_dates: list[str],
+) -> list[str]:
+    target_head = max(target_dates) if target_dates else None
+    if target_head is None:
+        return sorted(source_dates)
+    return [date for date in sorted(source_dates) if date > target_head]
+
+
+def _project_dc_target_row(
+    row: dict[str, object],
+    *,
+    proposed_taxonomy_version: str,
+    proposed_primary_meta: dict[str, dict[str, str]] | None,
+) -> dict[str, object]:
+    target = dict(row)
+    target["taxonomy_version"] = proposed_taxonomy_version
+    ticker = str(target.get("ticker") or "")
+    if proposed_primary_meta is not None and ticker in proposed_primary_meta:
+        if "primary_layer" in target:
+            target["primary_layer"] = proposed_primary_meta[ticker]["primary_layer"]
+        if "primary_subindustry" in target:
+            target["primary_subindustry"] = proposed_primary_meta[ticker]["primary_subindustry"]
+    return target
+
+
+def _dc_source_advance_table_plan(
+    conn: sqlite3.Connection,
+    *,
+    plan: dict[str, object],
+    table_name: str,
+    date_column: str,
+    row_scope: str,
+    candidate_dates: list[str],
+) -> dict[str, object]:
+    if table_name not in _table_names(conn):
+        return {
+            "table": table_name,
+            "status": "MISSING_TABLE",
+            "safe_to_apply": False,
+            "blocking_errors": [f"missing DC table: {table_name}"],
+        }
+    columns = _table_columns(conn, table_name)
+    key_columns = _dc_key_contract(table_name, available_columns=columns, date_column=date_column)
+    allowed = set(_dc_ticker_allowlist(plan) if row_scope == "ticker" else _dc_group_allowlist(plan))
+    proposed_primary_meta = (
+        _proposed_primary_metadata(
+            str(plan["proposed_source_reference"]),
+            str(plan["proposed_taxonomy_version"]),
+        )
+        if row_scope == "ticker"
+        else None
+    )
+    if not candidate_dates:
+        empty_hash = _json_hash([])
+        return {
+            "table": table_name,
+            "status": "NO_CHANGE",
+            "safe_to_apply": True,
+            "source_row_count": 0,
+            "target_row_count": 0,
+            "missing_target_count": 0,
+            "conflicting_target_count": 0,
+            "duplicate_source_count": 0,
+            "duplicate_target_count": 0,
+            "candidate_dates": [],
+            "candidate_key_hash": empty_hash,
+            "source_semantic_hash": empty_hash,
+            "blocking_errors": [],
+        }
+    placeholders = ", ".join("?" for _ in candidate_dates)
+    select_sql = (
+        f"SELECT {', '.join(_sql_identifier(column) for column in columns)} "
+        f"FROM {_sql_identifier(table_name)} "
+        f"WHERE taxonomy_version = ? AND {_sql_identifier(date_column)} IN ({placeholders}) "
+        f"ORDER BY {', '.join(_sql_identifier(column) for column in key_columns)}"
+    )
+    source_rows = [
+        dict(row)
+        for row in conn.execute(
+            select_sql,
+            [str(plan["current_taxonomy_version"]), *candidate_dates],
+        ).fetchall()
+    ]
+    target_rows = [
+        dict(row)
+        for row in conn.execute(
+            select_sql,
+            [str(plan["proposed_taxonomy_version"]), *candidate_dates],
+        ).fetchall()
+    ]
+
+    def keyed(rows: list[dict[str, object]]) -> tuple[dict[tuple[object, ...], dict[str, object]], int, list[dict[str, object]]]:
+        result: dict[tuple[object, ...], dict[str, object]] = {}
+        duplicate_count = 0
+        unexpected: list[dict[str, object]] = []
+        seen: set[tuple[object, ...]] = set()
+        for row in rows:
+            key = tuple(row.get(column) for column in key_columns)
+            key_class = _dc_key_class(table_name, row, allowed)
+            if key_class == "unexpected":
+                unexpected.append({"key": list(key), "row_class": key_class})
+                continue
+            if key in seen:
+                duplicate_count += 1
+            seen.add(key)
+            result[key] = row
+        return result, duplicate_count, unexpected
+
+    source_by_key, source_duplicates, unexpected_source = keyed(source_rows)
+    target_by_key, target_duplicates, unexpected_target = keyed(target_rows)
+    missing_keys = sorted(set(source_by_key) - set(target_by_key))
+    extra_keys = sorted(set(target_by_key) - set(source_by_key))
+    field_policy = dc_carry_forward_field_policy(
+        table_name=table_name,
+        columns=columns,
+        key_columns=key_columns,
+    )
+    conflict_count = 0
+    for key in sorted(set(source_by_key) & set(target_by_key)):
+        projected = _project_dc_target_row(
+            source_by_key[key],
+            proposed_taxonomy_version=str(plan["proposed_taxonomy_version"]),
+            proposed_primary_meta=proposed_primary_meta,
+        )
+        differences = _dc_payload_differences(projected, target_by_key[key], field_policy=field_policy)
+        if differences[DC_FIELD_CLASS_SEMANTIC] or differences[DC_FIELD_CLASS_REQUIRED_LINEAGE]:
+            conflict_count += 1
+    blocking_errors = []
+    if source_duplicates:
+        blocking_errors.append("duplicate source keys")
+    if target_duplicates:
+        blocking_errors.append("duplicate target keys")
+    if unexpected_target or extra_keys:
+        blocking_errors.append("unexpected target keys")
+    if conflict_count:
+        blocking_errors.append("conflicting target rows")
+    candidate_rows = [
+        _project_dc_target_row(
+            source_by_key[key],
+            proposed_taxonomy_version=str(plan["proposed_taxonomy_version"]),
+            proposed_primary_meta=proposed_primary_meta,
+        )
+        for key in missing_keys
+    ]
+    semantic_payload = [
+        {
+            column: row.get(column)
+            for column, field_class in field_policy.items()
+            if field_class in {DC_FIELD_CLASS_KEY, DC_FIELD_CLASS_SEMANTIC, DC_FIELD_CLASS_REQUIRED_LINEAGE}
+        }
+        for row in candidate_rows
+    ]
+    return {
+        "table": table_name,
+        "status": "READY" if not blocking_errors else "BLOCKED",
+        "safe_to_apply": not blocking_errors,
+        "source_row_count": len(source_by_key),
+        "target_row_count": len(target_by_key),
+        "missing_target_count": len(missing_keys),
+        "conflicting_target_count": conflict_count,
+        "duplicate_source_count": source_duplicates,
+        "duplicate_target_count": target_duplicates,
+        "candidate_dates": sorted(candidate_dates),
+        "candidate_key_hash": _json_hash({"table": table_name, "keys": [list(key) for key in missing_keys]}),
+        "source_semantic_hash": _json_hash(semantic_payload),
+        "unexpected_source_keys": unexpected_source[:20],
+        "unexpected_target_keys": (unexpected_target + [{"key": list(key), "row_class": "extra"} for key in extra_keys])[:20],
+        "blocking_errors": blocking_errors,
+    }
+
+
+def _ec_source_advance_table_plan(
+    conn: sqlite3.Connection,
+    *,
+    ecosystem_id: int,
+    source_taxonomy_version_id: int,
+    target_taxonomy_version_id: int,
+    table_name: str,
+    candidate_dates: list[str],
+) -> dict[str, object]:
+    if table_name not in _table_names(conn):
+        return {
+            "table": table_name,
+            "status": "MISSING_TABLE",
+            "safe_to_apply": False,
+            "blocking_errors": [f"missing EC table: {table_name}"],
+        }
+    columns = _table_columns(conn, table_name)
+    key_columns = _ec_fact_key_columns(conn, table_name)
+    if not candidate_dates:
+        empty_hash = _json_hash([])
+        return {
+            "table": table_name,
+            "status": "NO_CHANGE",
+            "safe_to_apply": True,
+            "source_row_count": 0,
+            "target_row_count": 0,
+            "missing_target_count": 0,
+            "conflicting_target_count": 0,
+            "duplicate_source_count": 0,
+            "duplicate_target_count": 0,
+            "candidate_dates": [],
+            "candidate_key_hash": empty_hash,
+            "source_semantic_hash": empty_hash,
+            "blocking_errors": [],
+        }
+    placeholders = ", ".join("?" for _ in candidate_dates)
+    select_sql = (
+        f"SELECT {', '.join(_sql_identifier(column) for column in columns)} "
+        f"FROM {_sql_identifier(table_name)} "
+        f"WHERE ecosystem_id = ? AND taxonomy_version_id = ? AND signal_date IN ({placeholders}) "
+        f"ORDER BY {', '.join(_sql_identifier(column) for column in key_columns)}"
+    )
+    source_rows = [
+        dict(row)
+        for row in conn.execute(
+            select_sql,
+            [ecosystem_id, source_taxonomy_version_id, *candidate_dates],
+        ).fetchall()
+    ]
+    target_rows = [
+        dict(row)
+        for row in conn.execute(
+            select_sql,
+            [ecosystem_id, target_taxonomy_version_id, *candidate_dates],
+        ).fetchall()
+    ]
+
+    def project(row: dict[str, object]) -> dict[str, object]:
+        projected = dict(row)
+        projected["taxonomy_version_id"] = target_taxonomy_version_id
+        return projected
+
+    def keyed(rows: list[dict[str, object]], *, projected: bool) -> tuple[dict[tuple[object, ...], dict[str, object]], int]:
+        result: dict[tuple[object, ...], dict[str, object]] = {}
+        duplicate_count = 0
+        seen: set[tuple[object, ...]] = set()
+        for row in rows:
+            comparable = project(row) if projected else row
+            key = tuple(comparable.get(column) for column in key_columns)
+            if key in seen:
+                duplicate_count += 1
+            seen.add(key)
+            result[key] = comparable
+        return result, duplicate_count
+
+    source_by_key, source_duplicates = keyed(source_rows, projected=True)
+    target_by_key, target_duplicates = keyed(target_rows, projected=False)
+    missing_keys = sorted(set(source_by_key) - set(target_by_key))
+    extra_keys = sorted(set(target_by_key) - set(source_by_key))
+    comparable_columns = [
+        column
+        for column in columns
+        if column not in {"created_at_utc", "updated_at_utc"}
+    ]
+    conflict_count = 0
+    for key in sorted(set(source_by_key) & set(target_by_key)):
+        source = source_by_key[key]
+        target = target_by_key[key]
+        if any(source.get(column) != target.get(column) for column in comparable_columns):
+            conflict_count += 1
+    blocking_errors = []
+    if source_duplicates:
+        blocking_errors.append("duplicate source keys")
+    if target_duplicates:
+        blocking_errors.append("duplicate target keys")
+    if extra_keys:
+        blocking_errors.append("unexpected target keys")
+    if conflict_count:
+        blocking_errors.append("conflicting target rows")
+    candidate_rows = [source_by_key[key] for key in missing_keys]
+    return {
+        "table": table_name,
+        "status": "READY" if not blocking_errors else "BLOCKED",
+        "safe_to_apply": not blocking_errors,
+        "source_row_count": len(source_by_key),
+        "target_row_count": len(target_by_key),
+        "missing_target_count": len(missing_keys),
+        "conflicting_target_count": conflict_count,
+        "duplicate_source_count": source_duplicates,
+        "duplicate_target_count": target_duplicates,
+        "candidate_dates": sorted(candidate_dates),
+        "candidate_key_hash": _json_hash({"table": table_name, "keys": [list(key) for key in missing_keys]}),
+        "source_semantic_hash": _rows_hash(candidate_rows),
+        "blocking_errors": blocking_errors,
+    }
 
 
 def _ecosystem_aggregate_key_columns(table_name: str, columns: list[str], date_column: str) -> tuple[str, ...]:
@@ -3125,6 +3541,7 @@ def plan_ec_resume_action(
     deployment_id: int,
     parity_audit: Callable[..., dict[str, object]] = audit_dc_ec_fact_parity,
 ) -> dict[str, object]:
+    source_advance = plan_post_deployment_source_advance(analysis_db=analysis_db, plan=plan)
     revalidation = revalidate_existing_ec_facts(
         analysis_db=analysis_db,
         ecosystem_code=str(plan["ecosystem_code"]),
@@ -3138,6 +3555,9 @@ def plan_ec_resume_action(
     if revalidation["safe_to_continue_to_cleanup"]:
         action = EC_RESUME_ACTION_REVALIDATE_EXISTING_FACTS
         reasons = ["TARGET_EC_FACTS_COMPLETE_AND_PARITY_ACCEPTED"]
+    elif source_advance.get("source_advance_catchup_required") and source_advance.get("safe_to_apply"):
+        action = EC_RESUME_ACTION_COPY_POST_DEPLOYMENT_SOURCE_ADVANCE
+        reasons = ["POST_DEPLOYMENT_SOURCE_ADVANCE_ONLY_READY"]
     else:
         action = EC_RESUME_ACTION_REBUILD_EC_FACTS
         reasons = list(revalidation.get("blocking_errors", []))
@@ -3149,6 +3569,12 @@ def plan_ec_resume_action(
         "ec_revalidation_required": action == EC_RESUME_ACTION_REVALIDATE_EXISTING_FACTS,
         "ec_revalidation_reasons": reasons,
         "ec_revalidation": revalidation,
+        "source_advance_plan": source_advance,
+        "source_advance_catchup_required": bool(source_advance.get("source_advance_catchup_required")),
+        "source_advance_date_from": source_advance.get("source_advance_date_from"),
+        "source_advance_date_to": source_advance.get("source_advance_date_to"),
+        "dc_source_advance_candidate_count": source_advance.get("dc_source_advance_candidate_count"),
+        "ec_source_advance_candidate_count": source_advance.get("ec_source_advance_candidate_count"),
     }
 
 
@@ -3171,6 +3597,7 @@ def plan_report_status_only_resume_reconciliation(
         plan=plan,
         complete_target_validation=complete_target_validation,
     )
+    source_advance_plan = plan_post_deployment_source_advance(analysis_db=analysis_db, plan=plan)
     backend_current_plan_hash = str(plan.get("plan_hash") or "")
     current_plan_inputs = {
         "deployment_id": plan.get("deployment_id"),
@@ -3194,6 +3621,12 @@ def plan_report_status_only_resume_reconciliation(
         "dc_semantic_repair_scope": semantic_repair_plan.get("repair_scope"),
         "dc_semantic_repair_candidate_count": semantic_repair_plan.get("candidate_count"),
         "dc_semantic_repair_candidate_hash": semantic_repair_plan.get("candidate_hash"),
+        "source_advance_catchup_required": source_advance_plan.get("source_advance_catchup_required"),
+        "source_advance_date_from": source_advance_plan.get("source_advance_date_from"),
+        "source_advance_date_to": source_advance_plan.get("source_advance_date_to"),
+        "source_advance_candidate_hash": source_advance_plan.get("candidate_hash"),
+        "dc_source_advance_candidate_count": source_advance_plan.get("dc_source_advance_candidate_count"),
+        "ec_source_advance_candidate_count": source_advance_plan.get("ec_source_advance_candidate_count"),
         "ec_revalidation_parity_policy": REPORT_STATUS_ONLY_PARITY_POLICY,
         "parity_field_policy_version": PARITY_FIELD_POLICY_VERSION,
     }
@@ -3225,6 +3658,8 @@ def plan_report_status_only_resume_reconciliation(
         drift_classification = "BUSINESS_INPUT_DRIFT"
     elif not repair_plan.get("safe_to_apply"):
         drift_classification = "UNSUPPORTED_PLAN_DRIFT"
+    elif source_advance_plan.get("source_advance_plan_status") == "BLOCKED":
+        drift_classification = "UNSUPPORTED_PLAN_DRIFT"
     else:
         drift_classification = "SAFE_IMPLEMENTATION_RECONCILIATION"
     amendment_identity = {
@@ -3239,6 +3674,12 @@ def plan_report_status_only_resume_reconciliation(
         "change_execution_class": plan.get("change_execution_class"),
         "repair_scope": DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY,
         "repair_candidate_hash": repair_plan["repair_candidate_hash"],
+        "source_advance_repair_scope": DC_REPAIR_SCOPE_POST_DEPLOYMENT_SOURCE_ADVANCE_ONLY,
+        "source_advance_candidate_hash": source_advance_plan.get("candidate_hash"),
+        "active_source_advance_policy": source_advance_plan.get("active_source_advance_policy"),
+        "required_activation_head": source_advance_plan.get("required_activation_head"),
+        "source_advance_date_from": source_advance_plan.get("source_advance_date_from"),
+        "source_advance_date_to": source_advance_plan.get("source_advance_date_to"),
         "current_taxonomy_version": plan.get("current_taxonomy_version"),
         "current_source_sha256": plan.get("current_source_sha256"),
         "proposed_taxonomy_version": plan.get("proposed_taxonomy_version"),
@@ -3277,15 +3718,36 @@ def plan_report_status_only_resume_reconciliation(
         "dc_semantic_repair_scope": semantic_repair_plan.get("repair_scope"),
         "dc_semantic_repair_candidate_count": semantic_repair_plan.get("candidate_count"),
         "dc_semantic_repair_plan": semantic_repair_plan,
+        "source_advance_catchup_required": bool(source_advance_plan.get("source_advance_catchup_required")),
+        "source_advance_date_from": source_advance_plan.get("source_advance_date_from"),
+        "source_advance_date_to": source_advance_plan.get("source_advance_date_to"),
+        "source_advance_repair_scope": DC_REPAIR_SCOPE_POST_DEPLOYMENT_SOURCE_ADVANCE_ONLY,
+        "source_advance_repair_plan": source_advance_plan,
+        "dc_source_advance_candidate_count": source_advance_plan.get("dc_source_advance_candidate_count"),
+        "ec_source_advance_candidate_count": source_advance_plan.get("ec_source_advance_candidate_count"),
         "ordinary_dc_recopy_required": False,
+        "ordinary_historical_recopy_required": False,
+        "computational_rebuild_required": False,
+        "ec_resume_action": (
+            EC_RESUME_ACTION_COPY_POST_DEPLOYMENT_SOURCE_ADVANCE
+            if source_advance_plan.get("source_advance_catchup_required")
+            else EC_RESUME_ACTION_REVALIDATE_EXISTING_FACTS
+        ),
         "EC_rebuild_required": False,
-        "EC_revalidation_required": True,
+        "ec_rebuild_required": False,
+        "ec_loaders_required": False,
+        "ec_chunks_required": False,
+        "EC_revalidation_required": not bool(source_advance_plan.get("source_advance_catchup_required")),
         "cleanup_required": True,
+        "whole_range_validation_required": True,
+        "watermark_finalization_required": True,
         "restore_required": False,
         "backup_reuse_required": True,
         "resume_from_phase": (
             "DC_SEMANTIC_ROW_REPAIR"
             if int(semantic_repair_plan.get("candidate_count") or 0) > 0
+            else "POST_DEPLOYMENT_SOURCE_ADVANCE_REPAIR"
+            if bool(source_advance_plan.get("source_advance_catchup_required"))
             else "DC_FACTS_VALIDATED"
         ),
     }
@@ -4012,6 +4474,381 @@ def copy_delta_carry_forward(
             "dc_key_universe_validation": validation,
             "copied_ticker_count": len(ticker_allowlist),
             "copied_group_count": len(group_allowlist),
+        }
+    finally:
+        conn.close()
+
+
+def plan_post_deployment_source_advance(
+    *,
+    analysis_db: str | Path,
+    plan: dict[str, object],
+) -> dict[str, object]:
+    """Plan exact-date RSO catch-up after the active source taxonomy advances.
+
+    This is deliberately narrower than the normal delta carry-forward: it only
+    considers canonical dates that exist in all active source DC/EC tables after
+    the proposed target head.
+    """
+    blocking_errors: list[str] = []
+    if plan.get("change_execution_class") != CHANGE_EXECUTION_REPORT_STATUS_ONLY:
+        blocking_errors.append("source advance is only supported for REPORT_STATUS_ONLY")
+    if plan.get("selected_rebuild_mode") != REBUILD_MODE_DELTA and plan.get("rebuild_mode") != REBUILD_MODE_DELTA:
+        blocking_errors.append("source advance requires delta-compatible execution")
+    if bool(plan.get("computational_rebuild_required")):
+        blocking_errors.append("computational recalculation is required")
+    conn = _connect_readonly(analysis_db)
+    try:
+        if not {"ec_ecosystem", "ec_taxonomy_version"}.issubset(_table_names(conn)):
+            empty_hash = _json_hash(
+                {
+                    "deployment_id": plan.get("deployment_id"),
+                    "repair_scope": DC_REPAIR_SCOPE_POST_DEPLOYMENT_SOURCE_ADVANCE_ONLY,
+                    "status": "SIDE_CAR_UNAVAILABLE_NO_SOURCE_ADVANCE",
+                }
+            )
+            return {
+                "source_advance_plan_status": "READY",
+                "safe_to_apply": True,
+                "active_source_advance_policy": "TARGET_MUST_CATCH_UP_BEFORE_ACTIVATION",
+                "source_advance_catchup_required": False,
+                "source_advance_date_from": None,
+                "source_advance_date_to": None,
+                "source_advance_trading_dates": [],
+                "source_advance_date_count": 0,
+                "deployment_original_date_to": plan.get("date_to"),
+                "active_source_dc_head": None,
+                "active_source_ec_head": None,
+                "proposed_target_dc_head": None,
+                "proposed_target_ec_head": None,
+                "required_activation_head": None,
+                "dc_source_advance_candidate_count": 0,
+                "ec_source_advance_candidate_count": 0,
+                "dc_tables": [],
+                "ec_tables": [],
+                "candidate_hash": empty_hash,
+                "candidate_payload": {},
+                "ordinary_historical_recopy_required": False,
+                "computational_rebuild_required": False,
+                "pipeline_required": False,
+                "stage2_required": False,
+                "ec_rebuild_required": False,
+                "ec_loaders_required": False,
+                "ec_chunks_required": False,
+                "blocking_errors": [],
+            }
+        ecosystem_id, source_taxonomy_version_id, target_taxonomy_version_id, context_errors = _source_advance_context(
+            conn,
+            ecosystem_code=str(plan["ecosystem_code"]),
+            current_taxonomy_version=str(plan["current_taxonomy_version"]),
+            proposed_taxonomy_version=str(plan["proposed_taxonomy_version"]),
+        )
+        blocking_errors.extend(context_errors)
+        target_dc_dates = _canonical_dc_date_sets(conn, taxonomy_version=str(plan["proposed_taxonomy_version"]))
+        target_ec_dates = (
+            _canonical_ec_date_sets(
+                conn,
+                ecosystem_id=int(ecosystem_id or 0),
+                taxonomy_version_id=int(target_taxonomy_version_id or 0),
+            )
+            if ecosystem_id is not None and target_taxonomy_version_id is not None
+            else {}
+        )
+        proposed_dc_head = _max_date_from_sets(target_dc_dates)
+        proposed_ec_head = _max_date_from_sets(target_ec_dates)
+        target_head = min(date for date in [proposed_dc_head, proposed_ec_head] if date) if (proposed_dc_head or proposed_ec_head) else None
+        source_dc_new = _canonical_dc_date_sets(
+            conn,
+            taxonomy_version=str(plan["current_taxonomy_version"]),
+            after_date=target_head,
+        )
+        source_ec_new = (
+            _canonical_ec_date_sets(
+                conn,
+                ecosystem_id=int(ecosystem_id or 0),
+                taxonomy_version_id=int(source_taxonomy_version_id or 0),
+                after_date=target_head,
+            )
+            if ecosystem_id is not None and source_taxonomy_version_id is not None
+            else {}
+        )
+        dc_dates, dc_mismatched = _common_date_set(source_dc_new)
+        ec_dates, ec_mismatched = _common_date_set(source_ec_new)
+        if dc_mismatched:
+            blocking_errors.append("active source DC dates are inconsistent across canonical tables")
+        if ec_mismatched:
+            blocking_errors.append("active source EC dates are inconsistent across canonical tables")
+        if set(dc_dates) != set(ec_dates):
+            blocking_errors.append("active source DC/EC date sets differ")
+        candidate_dates = sorted(set(dc_dates) & set(ec_dates))
+        active_source_dc_head = max(dc_dates) if dc_dates else proposed_dc_head
+        active_source_ec_head = max(ec_dates) if ec_dates else proposed_ec_head
+        required_activation_head = max(candidate_dates) if candidate_dates else target_head
+        dc_tables = [
+            _dc_source_advance_table_plan(
+                conn,
+                plan=plan,
+                table_name=table_name,
+                date_column=date_column,
+                row_scope=row_scope,
+                candidate_dates=candidate_dates,
+            )
+            for table_name, date_column, row_scope in DC_SOURCE_ADVANCE_TABLES
+        ]
+        ec_tables = [
+            _ec_source_advance_table_plan(
+                conn,
+                ecosystem_id=int(ecosystem_id or 0),
+                source_taxonomy_version_id=int(source_taxonomy_version_id or 0),
+                target_taxonomy_version_id=int(target_taxonomy_version_id or 0),
+                table_name=table_name,
+                candidate_dates=candidate_dates,
+            )
+            for table_name in EC_SOURCE_ADVANCE_TABLES
+        ] if ecosystem_id is not None and source_taxonomy_version_id is not None and target_taxonomy_version_id is not None else []
+        for row in [*dc_tables, *ec_tables]:
+            blocking_errors.extend(f"{row['table']}: {error}" for error in row.get("blocking_errors", []))
+        catchup_required = bool(candidate_dates)
+        dc_candidate_count = sum(int(row.get("missing_target_count") or 0) for row in dc_tables)
+        ec_candidate_count = sum(int(row.get("missing_target_count") or 0) for row in ec_tables)
+        if catchup_required and dc_candidate_count == 0 and ec_candidate_count == 0:
+            catchup_required = False
+        candidate_payload = {
+            "deployment_id": plan.get("deployment_id"),
+            "repair_scope": DC_REPAIR_SCOPE_POST_DEPLOYMENT_SOURCE_ADVANCE_ONLY,
+            "ec_resume_action": EC_RESUME_ACTION_COPY_POST_DEPLOYMENT_SOURCE_ADVANCE,
+            "active_source_advance_policy": "TARGET_MUST_CATCH_UP_BEFORE_ACTIVATION",
+            "current_taxonomy_version": plan.get("current_taxonomy_version"),
+            "proposed_taxonomy_version": plan.get("proposed_taxonomy_version"),
+            "target_head": target_head,
+            "required_activation_head": required_activation_head,
+            "candidate_dates": candidate_dates,
+            "dc_table_hashes": {row["table"]: row.get("candidate_key_hash") for row in dc_tables},
+            "ec_table_hashes": {row["table"]: row.get("candidate_key_hash") for row in ec_tables},
+        }
+        status = "READY" if not blocking_errors else "BLOCKED"
+        return {
+            "source_advance_plan_status": status,
+            "safe_to_apply": status == "READY",
+            "active_source_advance_policy": "TARGET_MUST_CATCH_UP_BEFORE_ACTIVATION",
+            "source_advance_catchup_required": catchup_required,
+            "source_advance_date_from": candidate_dates[0] if candidate_dates else None,
+            "source_advance_date_to": candidate_dates[-1] if candidate_dates else None,
+            "source_advance_trading_dates": candidate_dates,
+            "source_advance_date_count": len(candidate_dates),
+            "deployment_original_date_to": plan.get("date_to"),
+            "active_source_dc_head": active_source_dc_head,
+            "active_source_ec_head": active_source_ec_head,
+            "proposed_target_dc_head": proposed_dc_head,
+            "proposed_target_ec_head": proposed_ec_head,
+            "required_activation_head": required_activation_head,
+            "dc_source_advance_candidate_count": dc_candidate_count,
+            "ec_source_advance_candidate_count": ec_candidate_count,
+            "dc_tables": dc_tables,
+            "ec_tables": ec_tables,
+            "candidate_hash": _json_hash(candidate_payload),
+            "candidate_payload": candidate_payload,
+            "ordinary_historical_recopy_required": False,
+            "computational_rebuild_required": False,
+            "pipeline_required": False,
+            "stage2_required": False,
+            "ec_rebuild_required": False,
+            "ec_loaders_required": False,
+            "ec_chunks_required": False,
+            "blocking_errors": sorted(set(blocking_errors)),
+        }
+    finally:
+        conn.close()
+
+
+def apply_dc_post_deployment_source_advance(
+    *,
+    analysis_db: str | Path,
+    plan: dict[str, object],
+    confirm_repair_scope: str,
+    confirm_candidate_hash: str,
+) -> dict[str, object]:
+    source_plan = plan_post_deployment_source_advance(analysis_db=analysis_db, plan=plan)
+    confirmation_errors = []
+    if confirm_repair_scope != DC_REPAIR_SCOPE_POST_DEPLOYMENT_SOURCE_ADVANCE_ONLY:
+        confirmation_errors.append("confirmation mismatch: repair_scope")
+    if confirm_candidate_hash != source_plan.get("candidate_hash"):
+        confirmation_errors.append("confirmation mismatch: candidate_hash")
+    if confirmation_errors:
+        return {
+            "dc_source_advance_apply_status": "BLOCKED_CONFIRMATION_FAILED",
+            "confirmation_errors": confirmation_errors,
+            "source_advance_plan": source_plan,
+        }
+    if not source_plan.get("safe_to_apply"):
+        return {"dc_source_advance_apply_status": "BLOCKED", "source_advance_plan": source_plan}
+    if int(source_plan.get("dc_source_advance_candidate_count") or 0) == 0:
+        return {"dc_source_advance_apply_status": "NO_CHANGE", "source_advance_plan": source_plan, "table_results": []}
+    conn = _connect_readwrite(analysis_db)
+    table_results: list[dict[str, object]] = []
+    candidate_dates = list(source_plan.get("source_advance_trading_dates") or [])
+    try:
+        try:
+            with conn:
+                ticker_allowlist = _dc_ticker_allowlist(plan)
+                group_allowlist = _dc_group_allowlist(plan)
+                proposed_primary_meta = _proposed_primary_metadata(
+                    str(plan["proposed_source_reference"]),
+                    str(plan["proposed_taxonomy_version"]),
+                )
+                for table_name, date_column, row_scope in DC_SOURCE_ADVANCE_TABLES:
+                    if not candidate_dates:
+                        continue
+                    if row_scope == "ticker":
+                        result = _copy_rows_to_taxonomy(
+                            conn,
+                            table_name=table_name,
+                            date_column=date_column,
+                            current_taxonomy_version=str(plan["current_taxonomy_version"]),
+                            proposed_taxonomy_version=str(plan["proposed_taxonomy_version"]),
+                            date_from=candidate_dates[0],
+                            date_to=candidate_dates[-1],
+                            ticker_allowlist=ticker_allowlist,
+                            proposed_primary_meta=proposed_primary_meta,
+                        )
+                    else:
+                        result = _copy_rows_to_taxonomy(
+                            conn,
+                            table_name=table_name,
+                            date_column=date_column,
+                            current_taxonomy_version=str(plan["current_taxonomy_version"]),
+                            proposed_taxonomy_version=str(plan["proposed_taxonomy_version"]),
+                            date_from=candidate_dates[0],
+                            date_to=candidate_dates[-1],
+                            group_allowlist=group_allowlist,
+                        )
+                    table_results.append(result)
+                    if str(result.get("status")).startswith("BLOCKED"):
+                        raise RuntimeError("DC source advance blocked")
+        except Exception as exc:
+            return {
+                "dc_source_advance_apply_status": "FAILED",
+                "failure_message": str(exc),
+                "source_advance_plan": source_plan,
+                "table_results": table_results,
+            }
+        post = plan_post_deployment_source_advance(analysis_db=analysis_db, plan=plan)
+        return {
+            "dc_source_advance_apply_status": "APPLIED",
+            "repair_scope": DC_REPAIR_SCOPE_POST_DEPLOYMENT_SOURCE_ADVANCE_ONLY,
+            "source_advance_plan": source_plan,
+            "table_results": table_results,
+            "post_apply_plan": post,
+        }
+    finally:
+        conn.close()
+
+
+def apply_ec_post_deployment_source_advance(
+    *,
+    analysis_db: str | Path,
+    plan: dict[str, object],
+    confirm_ec_resume_action: str,
+    confirm_candidate_hash: str,
+) -> dict[str, object]:
+    source_plan = plan_post_deployment_source_advance(analysis_db=analysis_db, plan=plan)
+    confirmation_errors = []
+    if confirm_ec_resume_action != EC_RESUME_ACTION_COPY_POST_DEPLOYMENT_SOURCE_ADVANCE:
+        confirmation_errors.append("confirmation mismatch: ec_resume_action")
+    if confirm_candidate_hash != source_plan.get("candidate_hash"):
+        confirmation_errors.append("confirmation mismatch: candidate_hash")
+    if confirmation_errors:
+        return {
+            "ec_source_advance_apply_status": "BLOCKED_CONFIRMATION_FAILED",
+            "confirmation_errors": confirmation_errors,
+            "source_advance_plan": source_plan,
+        }
+    if not source_plan.get("safe_to_apply"):
+        return {"ec_source_advance_apply_status": "BLOCKED", "source_advance_plan": source_plan}
+    if int(source_plan.get("ec_source_advance_candidate_count") or 0) == 0:
+        return {"ec_source_advance_apply_status": "NO_CHANGE", "source_advance_plan": source_plan, "table_results": []}
+    conn = _connect_readwrite(analysis_db)
+    table_results: list[dict[str, object]] = []
+    candidate_dates = list(source_plan.get("source_advance_trading_dates") or [])
+    try:
+        ecosystem_id, source_taxonomy_version_id, target_taxonomy_version_id, context_errors = _source_advance_context(
+            conn,
+            ecosystem_code=str(plan["ecosystem_code"]),
+            current_taxonomy_version=str(plan["current_taxonomy_version"]),
+            proposed_taxonomy_version=str(plan["proposed_taxonomy_version"]),
+        )
+        if context_errors or ecosystem_id is None or source_taxonomy_version_id is None or target_taxonomy_version_id is None:
+            return {
+                "ec_source_advance_apply_status": "BLOCKED",
+                "blocking_errors": context_errors,
+                "source_advance_plan": source_plan,
+            }
+        try:
+            with conn:
+                for table_name in EC_SOURCE_ADVANCE_TABLES:
+                    columns = _table_columns(conn, table_name)
+                    placeholders = ", ".join("?" for _ in candidate_dates)
+                    select_sql = (
+                        f"SELECT {', '.join(_sql_identifier(column) for column in columns)} "
+                        f"FROM {_sql_identifier(table_name)} "
+                        f"WHERE ecosystem_id = ? AND taxonomy_version_id = ? AND signal_date IN ({placeholders}) "
+                        f"ORDER BY {', '.join(_sql_identifier(column) for column in _ec_fact_key_columns(conn, table_name))}"
+                    )
+                    source_rows = [
+                        dict(row)
+                        for row in conn.execute(
+                            select_sql,
+                            [ecosystem_id, source_taxonomy_version_id, *candidate_dates],
+                        ).fetchall()
+                    ]
+                    delete_sql = (
+                        f"DELETE FROM {_sql_identifier(table_name)} "
+                        f"WHERE ecosystem_id = ? AND taxonomy_version_id = ? AND signal_date IN ({placeholders})"
+                    )
+                    deleted = conn.execute(
+                        delete_sql,
+                        [ecosystem_id, target_taxonomy_version_id, *candidate_dates],
+                    ).rowcount
+                    insert_sql = (
+                        f"INSERT INTO {_sql_identifier(table_name)} ({', '.join(_sql_identifier(column) for column in columns)}) "
+                        f"VALUES ({', '.join('?' for _ in columns)})"
+                    )
+                    inserted = 0
+                    target_rows = []
+                    for row in source_rows:
+                        target = dict(row)
+                        target["taxonomy_version_id"] = target_taxonomy_version_id
+                        conn.execute(insert_sql, [target[column] for column in columns])
+                        inserted += 1
+                        target_rows.append(target)
+                    table_results.append(
+                        {
+                            "table": table_name,
+                            "status": "OK",
+                            "deleted_target_row_count": deleted,
+                            "source_row_count": len(source_rows),
+                            "copied_row_count": inserted,
+                            "target_rows_hash": _rows_hash(target_rows),
+                            "source": "ACTIVE_EC_FACTS_WITH_TARGET_TAXONOMY_LINEAGE",
+                        }
+                    )
+        except Exception as exc:
+            return {
+                "ec_source_advance_apply_status": "FAILED",
+                "failure_message": str(exc),
+                "source_advance_plan": source_plan,
+                "table_results": table_results,
+            }
+        post = plan_post_deployment_source_advance(analysis_db=analysis_db, plan=plan)
+        return {
+            "ec_source_advance_apply_status": "APPLIED",
+            "ec_resume_action": EC_RESUME_ACTION_COPY_POST_DEPLOYMENT_SOURCE_ADVANCE,
+            "source_advance_plan": source_plan,
+            "table_results": table_results,
+            "post_apply_plan": post,
+            "run_ec_rebuild_invoked": False,
+            "ec_loaders_invoked": False,
+            "ec_chunks_invoked": False,
         }
     finally:
         conn.close()

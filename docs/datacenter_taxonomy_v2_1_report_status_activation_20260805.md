@@ -2251,3 +2251,54 @@ active-source dates without Scheduler, pipeline, Stage 2, calculations, EC
 rebuild/loaders/chunks, or broad historical recopy. Only after focused tests and
 read-only preflight should deployment 2 repair be retried.
 ```
+
+## 2026-08-06 Post-Deployment Source-Advance Backend
+
+Final implementation classification:
+
+```text
+DATACENTER_RSO_POST_DEPLOYMENT_SOURCE_ADVANCE_BACKEND_IMPLEMENTED
+```
+
+The backend now has an explicit source-advance scope:
+
+```text
+DC_REPAIR_SCOPE=POST_DEPLOYMENT_SOURCE_ADVANCE_ONLY
+EC_RESUME_ACTION=COPY_POST_DEPLOYMENT_SOURCE_ADVANCE
+active_source_advance_policy=TARGET_MUST_CATCH_UP_BEFORE_ACTIVATION
+```
+
+This scope is separate from the existing `SEMANTIC_ROW_ONLY` WMS repair and the
+previous `ECOSYSTEM_AGGREGATE_ONLY` aggregate repair.
+
+Read-only deployment 2 preflight evidence:
+
+```text
+temp/datacenter_v2_1_source_advance_preflight/source_advance_preflight.json
+```
+
+Derived result:
+
+```text
+semantic_row_repair_required=true
+semantic_row_candidate_count=1
+source_advance_catchup_required=true
+source_advance_date_from=2026-08-05
+source_advance_date_to=2026-08-05
+dc_source_advance_candidate_count=418
+ec_source_advance_candidate_count=418
+ec_resume_action=COPY_POST_DEPLOYMENT_SOURCE_ADVANCE
+ec_rebuild_required=false
+ec_loaders_required=false
+ec_chunks_required=false
+safe_to_resume=true
+```
+
+No production resume was performed. No WMS semantic repair, source catch-up, EC
+cleanup, watermark finalization, activation, Scheduler run, Datacenter pipeline,
+Stage 2, calculation, EC rebuild, EC loader, EC chunk, production DB write,
+config change, backup, restore, migration, taxonomy CSV modification, or
+watchlist modification occurred during this implementation task.
+
+The next controlled deployment-2 resume should use the new source-advance
+contract after reconfirming the same preflight and candidate hashes.

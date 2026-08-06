@@ -8,7 +8,9 @@ from pathlib import Path
 from rawcandle.datacenter_taxonomy_change_orchestrator import (
     CHANGE_EXECUTION_REPORT_STATUS_ONLY,
     DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY,
+    DC_REPAIR_SCOPE_POST_DEPLOYMENT_SOURCE_ADVANCE_ONLY,
     DC_REPAIR_SCOPE_SEMANTIC_ROW_ONLY,
+    EC_RESUME_ACTION_COPY_POST_DEPLOYMENT_SOURCE_ADVANCE,
     EC_RESUME_ACTION_REBUILD_EC_FACTS,
     EC_RESUME_ACTION_REVALIDATE_EXISTING_FACTS,
     PARITY_FIELD_POLICY_VERSION,
@@ -25,12 +27,15 @@ from rawcandle.datacenter_taxonomy_change_orchestrator import (
     execute_taxonomy_rebuild,
     inspect_taxonomy_change,
     apply_dc_ecosystem_aggregate_repair,
+    apply_dc_post_deployment_source_advance,
     apply_dc_semantic_row_repair,
+    apply_ec_post_deployment_source_advance,
     classify_dc_carry_forward_field,
     dc_carry_forward_field_policy,
     plan_ec_resume_action,
     plan_dc_ecosystem_aggregate_repair,
     plan_dc_semantic_row_repair,
+    plan_post_deployment_source_advance,
     plan_report_status_only_resume_reconciliation,
     prepare_taxonomy_change,
     revalidate_existing_ec_facts,
@@ -1361,6 +1366,347 @@ def test_report_status_only_reconciliation_requires_aggregate_only_amendment(tmp
     assert reconciliation["safe_to_resume_after_amendment"] is True
     assert reconciliation["dc_repair_plan"]["dc_repair_scope"] == DC_REPAIR_SCOPE_ECOSYSTEM_AGGREGATE_ONLY
     assert reconciliation["dc_repair_plan"]["repair_candidate_count"] == 2
+
+
+def _source_advance_fixture(tmp_path: Path, *, target_already_caught_up: bool = False) -> tuple[Path, dict[str, object]]:
+    current_csv = _write_csv(tmp_path / "current_source_advance.csv", _rows("DC_TAXONOMY_FULL_V1"))
+    proposed_csv = _write_csv(
+        tmp_path / "proposed_source_advance.csv",
+        _report_status_only_rows("DC_TAXONOMY_FULL_V2_1"),
+    )
+    db_path = tmp_path / "source_advance.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE ec_ecosystem (
+                ecosystem_id INTEGER PRIMARY KEY,
+                ecosystem_code TEXT NOT NULL
+            );
+            CREATE TABLE ec_taxonomy_version (
+                taxonomy_version_id INTEGER PRIMARY KEY,
+                ecosystem_id INTEGER NOT NULL,
+                taxonomy_version_code TEXT NOT NULL,
+                source_hash TEXT,
+                source_reference TEXT,
+                status TEXT,
+                is_active INTEGER
+            );
+            CREATE TABLE ec_taxonomy_change_deployment (
+                taxonomy_change_id INTEGER PRIMARY KEY,
+                ecosystem_code TEXT NOT NULL,
+                previous_taxonomy_version TEXT NOT NULL,
+                proposed_taxonomy_version TEXT NOT NULL,
+                source_reference TEXT NOT NULL,
+                source_sha256 TEXT NOT NULL,
+                change_summary TEXT NOT NULL,
+                added_ticker_count INTEGER NOT NULL,
+                removed_ticker_count INTEGER NOT NULL,
+                membership_change_count INTEGER NOT NULL,
+                group_change_count INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                rebuild_required INTEGER NOT NULL,
+                rebuild_start_date TEXT NOT NULL,
+                dc_rebuild_status TEXT DEFAULT 'NOT_STARTED',
+                ec_rebuild_status TEXT DEFAULT 'NOT_STARTED',
+                coverage_status TEXT DEFAULT 'NOT_STARTED',
+                parity_status TEXT DEFAULT 'NOT_STARTED',
+                activation_status TEXT DEFAULT 'NOT_ACTIVE'
+            );
+            CREATE TABLE dc_ticker_swing_signal_daily (
+                signal_date TEXT NOT NULL,
+                taxonomy_version TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                primary_layer TEXT NOT NULL,
+                primary_subindustry TEXT NOT NULL,
+                close REAL,
+                run_id TEXT,
+                signal_version TEXT NOT NULL,
+                PRIMARY KEY (signal_date, taxonomy_version, ticker, signal_version)
+            );
+            CREATE TABLE dc_group_swing_signal_daily (
+                signal_date TEXT NOT NULL,
+                taxonomy_version TEXT NOT NULL,
+                group_type TEXT NOT NULL,
+                group_name TEXT NOT NULL,
+                member_count INTEGER,
+                run_id TEXT,
+                signal_version TEXT NOT NULL,
+                PRIMARY KEY (signal_date, taxonomy_version, group_type, group_name, signal_version)
+            );
+            CREATE TABLE dc_group_synthetic_ohlc_daily (
+                ohlc_date TEXT NOT NULL,
+                taxonomy_version TEXT NOT NULL,
+                group_type TEXT NOT NULL,
+                group_name TEXT NOT NULL,
+                close REAL,
+                run_id TEXT,
+                calc_version TEXT NOT NULL,
+                PRIMARY KEY (ohlc_date, taxonomy_version, group_type, group_name, calc_version)
+            );
+            CREATE TABLE dc_group_index_daily (
+                index_date TEXT NOT NULL,
+                taxonomy_version TEXT NOT NULL,
+                group_type TEXT NOT NULL,
+                group_name TEXT NOT NULL,
+                close REAL,
+                run_id TEXT,
+                calc_version TEXT NOT NULL,
+                PRIMARY KEY (index_date, taxonomy_version, group_type, group_name, calc_version)
+            );
+            CREATE TABLE ec_ticker_signal_daily (
+                ecosystem_id INTEGER NOT NULL,
+                taxonomy_version_id INTEGER NOT NULL,
+                signal_date TEXT NOT NULL,
+                entity_id INTEGER NOT NULL,
+                ticker TEXT NOT NULL,
+                signal_version TEXT NOT NULL,
+                close REAL,
+                source_table TEXT NOT NULL,
+                source_pk_json TEXT NOT NULL,
+                source_row_hash TEXT NOT NULL,
+                source_run_id TEXT NOT NULL,
+                PRIMARY KEY (ecosystem_id, taxonomy_version_id, signal_date, entity_id, signal_version)
+            );
+            CREATE TABLE ec_group_signal_daily (
+                ecosystem_id INTEGER NOT NULL,
+                taxonomy_version_id INTEGER NOT NULL,
+                signal_date TEXT NOT NULL,
+                entity_id INTEGER NOT NULL,
+                entity_type TEXT NOT NULL,
+                signal_version TEXT NOT NULL,
+                member_count INTEGER,
+                source_table TEXT NOT NULL,
+                source_pk_json TEXT NOT NULL,
+                source_row_hash TEXT NOT NULL,
+                source_run_id TEXT NOT NULL,
+                PRIMARY KEY (ecosystem_id, taxonomy_version_id, signal_date, entity_id, signal_version)
+            );
+            CREATE TABLE ec_group_synthetic_ohlc_daily (
+                ecosystem_id INTEGER NOT NULL,
+                taxonomy_version_id INTEGER NOT NULL,
+                signal_date TEXT NOT NULL,
+                entity_id INTEGER NOT NULL,
+                entity_type TEXT NOT NULL,
+                ohlc_calc_version TEXT NOT NULL,
+                synthetic_close REAL,
+                source_table TEXT NOT NULL,
+                source_pk_json TEXT NOT NULL,
+                source_row_hash TEXT NOT NULL,
+                source_run_id TEXT NOT NULL,
+                PRIMARY KEY (ecosystem_id, taxonomy_version_id, signal_date, entity_id, ohlc_calc_version)
+            );
+            CREATE TABLE ec_group_index_daily (
+                ecosystem_id INTEGER NOT NULL,
+                taxonomy_version_id INTEGER NOT NULL,
+                signal_date TEXT NOT NULL,
+                entity_id INTEGER NOT NULL,
+                entity_type TEXT NOT NULL,
+                calc_version TEXT NOT NULL,
+                index_value REAL,
+                source_table TEXT NOT NULL,
+                source_pk_json TEXT NOT NULL,
+                source_row_hash TEXT NOT NULL,
+                source_run_id TEXT NOT NULL,
+                PRIMARY KEY (ecosystem_id, taxonomy_version_id, signal_date, entity_id, calc_version)
+            );
+            """
+        )
+        conn.execute("INSERT INTO ec_ecosystem VALUES (1, 'DATACENTER')")
+        conn.execute(
+            "INSERT INTO ec_taxonomy_version VALUES (1,1,'DC_TAXONOMY_FULL_V1',?,?, 'ACTIVE', 1)",
+            (hashlib.sha256(current_csv.read_bytes()).hexdigest(), str(current_csv)),
+        )
+        conn.execute(
+            "INSERT INTO ec_taxonomy_version VALUES (2,1,'DC_TAXONOMY_FULL_V2_1',?,?, 'INACTIVE', 0)",
+            (hashlib.sha256(proposed_csv.read_bytes()).hexdigest(), str(proposed_csv)),
+        )
+        conn.execute(
+            """
+            INSERT INTO ec_taxonomy_change_deployment (
+                taxonomy_change_id, ecosystem_code, previous_taxonomy_version,
+                proposed_taxonomy_version, source_reference, source_sha256,
+                change_summary, added_ticker_count, removed_ticker_count,
+                membership_change_count, group_change_count, status,
+                rebuild_required, rebuild_start_date
+            ) VALUES (2,'DATACENTER','DC_TAXONOMY_FULL_V1','DC_TAXONOMY_FULL_V2_1',?,?, '{}',0,0,0,0,'LOADED_NOT_ACTIVE',1,'2026-08-04')
+            """,
+            (str(proposed_csv), hashlib.sha256(proposed_csv.read_bytes()).hexdigest()),
+        )
+        dc_groups = [
+            ("layer", "Compute", 10),
+            ("layer", "Power", 11),
+            ("subindustry", "GPU", 12),
+            ("subindustry", "UPS", 13),
+            ("ecosystem", "DC_ECOSYSTEM_TOTAL", 14),
+        ]
+        for date_value in ["2026-08-04", "2026-08-05"]:
+            for taxonomy in ["DC_TAXONOMY_FULL_V1"] + (["DC_TAXONOMY_FULL_V2_1"] if date_value == "2026-08-04" or target_already_caught_up else []):
+                conn.execute(
+                    "INSERT INTO dc_ticker_swing_signal_daily VALUES (?, ?, 'AAA', 'Compute', 'GPU', 100.0, 'dc-run', 'v1')",
+                    (date_value, taxonomy),
+                )
+                conn.execute(
+                    "INSERT INTO dc_ticker_swing_signal_daily VALUES (?, ?, 'BBB', 'Power', 'UPS', 50.0, 'dc-run', 'v1')",
+                    (date_value, taxonomy),
+                )
+                for group_type, group_name, _entity_id in dc_groups:
+                    conn.execute(
+                        "INSERT INTO dc_group_swing_signal_daily VALUES (?, ?, ?, ?, 2, 'dc-run', 'v1')",
+                        (date_value, taxonomy, group_type, group_name),
+                    )
+                    conn.execute(
+                        "INSERT INTO dc_group_synthetic_ohlc_daily VALUES (?, ?, ?, ?, 10.0, 'dc-run', 'calc1')",
+                        (date_value, taxonomy, group_type, group_name),
+                    )
+                    conn.execute(
+                        "INSERT INTO dc_group_index_daily VALUES (?, ?, ?, ?, 10.0, 'dc-run', 'calc1')",
+                        (date_value, taxonomy, group_type, group_name),
+                    )
+            for taxonomy_id in [1] + ([2] if date_value == "2026-08-04" or target_already_caught_up else []):
+                for entity_id, ticker, close in [(100, "AAA", 100.0), (101, "BBB", 50.0)]:
+                    conn.execute(
+                        "INSERT INTO ec_ticker_signal_daily VALUES (1, ?, ?, ?, ?, 'v1', ?, 'dc_ticker_swing_signal_daily', '{}', 'hash', 'source-run')",
+                        (taxonomy_id, date_value, entity_id, ticker, close),
+                    )
+                for group_type, group_name, entity_id in dc_groups:
+                    entity_type = {"layer": "GROUP_L1", "subindustry": "GROUP_L2", "ecosystem": "ECOSYSTEM"}[group_type]
+                    conn.execute(
+                        "INSERT INTO ec_group_signal_daily VALUES (1, ?, ?, ?, ?, 'v1', 2, 'dc_group_swing_signal_daily', '{}', 'hash', 'source-run')",
+                        (taxonomy_id, date_value, entity_id, entity_type),
+                    )
+                    conn.execute(
+                        "INSERT INTO ec_group_synthetic_ohlc_daily VALUES (1, ?, ?, ?, ?, 'calc1', 10.0, 'dc_group_synthetic_ohlc_daily', '{}', 'hash', 'source-run')",
+                        (taxonomy_id, date_value, entity_id, entity_type),
+                    )
+                    conn.execute(
+                        "INSERT INTO ec_group_index_daily VALUES (1, ?, ?, ?, ?, 'calc1', 10.0, 'dc_group_index_daily', '{}', 'hash', 'source-run')",
+                        (taxonomy_id, date_value, entity_id, entity_type),
+                    )
+        conn.execute(
+            "INSERT INTO dc_group_swing_signal_daily VALUES ('2026-08-05','DC_TAXONOMY_FULL_V1','sentinel','BAD_SENTINEL',1,'dc-run','v1')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    plan = build_taxonomy_change_plan(
+        deployment_id=2,
+        ecosystem_code="DATACENTER",
+        current_taxonomy_version="DC_TAXONOMY_FULL_V1",
+        current_taxonomy_csv=current_csv,
+        proposed_taxonomy_version="DC_TAXONOMY_FULL_V2_1",
+        proposed_taxonomy_csv=proposed_csv,
+        date_from="2026-08-04",
+        date_to="2026-08-05",
+        rebuild_mode=REBUILD_MODE_DELTA,
+    )
+    return db_path, plan
+
+
+def test_post_deployment_source_advance_plans_exact_active_source_date(tmp_path) -> None:
+    db_path, plan = _source_advance_fixture(tmp_path)
+
+    result = plan_post_deployment_source_advance(analysis_db=db_path, plan=plan)
+
+    assert result["source_advance_plan_status"] == "READY"
+    assert result["source_advance_catchup_required"] is True
+    assert result["source_advance_date_from"] == "2026-08-05"
+    assert result["source_advance_date_to"] == "2026-08-05"
+    assert result["source_advance_date_count"] == 1
+    assert result["dc_source_advance_candidate_count"] == 17
+    assert result["ec_source_advance_candidate_count"] == 17
+    assert result["pipeline_required"] is False
+    assert result["stage2_required"] is False
+    assert result["ec_rebuild_required"] is False
+    assert result["ec_loaders_required"] is False
+    assert result["ec_chunks_required"] is False
+
+
+def test_post_deployment_source_advance_noops_when_heads_are_equal(tmp_path) -> None:
+    db_path, plan = _source_advance_fixture(tmp_path, target_already_caught_up=True)
+
+    result = plan_post_deployment_source_advance(analysis_db=db_path, plan=plan)
+
+    assert result["source_advance_plan_status"] == "READY"
+    assert result["source_advance_catchup_required"] is False
+    assert result["dc_source_advance_candidate_count"] == 0
+    assert result["ec_source_advance_candidate_count"] == 0
+
+
+def test_dc_and_ec_source_advance_apply_are_idempotent_and_narrow(tmp_path) -> None:
+    db_path, plan = _source_advance_fixture(tmp_path)
+    source_plan = plan_post_deployment_source_advance(analysis_db=db_path, plan=plan)
+
+    dc_first = apply_dc_post_deployment_source_advance(
+        analysis_db=db_path,
+        plan=plan,
+        confirm_repair_scope=DC_REPAIR_SCOPE_POST_DEPLOYMENT_SOURCE_ADVANCE_ONLY,
+        confirm_candidate_hash=str(source_plan["candidate_hash"]),
+    )
+    ec_first = apply_ec_post_deployment_source_advance(
+        analysis_db=db_path,
+        plan=plan,
+        confirm_ec_resume_action=EC_RESUME_ACTION_COPY_POST_DEPLOYMENT_SOURCE_ADVANCE,
+        confirm_candidate_hash=str(dc_first["post_apply_plan"]["candidate_hash"]),
+    )
+    second_plan = plan_post_deployment_source_advance(analysis_db=db_path, plan=plan)
+    dc_second = apply_dc_post_deployment_source_advance(
+        analysis_db=db_path,
+        plan=plan,
+        confirm_repair_scope=DC_REPAIR_SCOPE_POST_DEPLOYMENT_SOURCE_ADVANCE_ONLY,
+        confirm_candidate_hash=str(second_plan["candidate_hash"]),
+    )
+    ec_second = apply_ec_post_deployment_source_advance(
+        analysis_db=db_path,
+        plan=plan,
+        confirm_ec_resume_action=EC_RESUME_ACTION_COPY_POST_DEPLOYMENT_SOURCE_ADVANCE,
+        confirm_candidate_hash=str(second_plan["candidate_hash"]),
+    )
+
+    assert dc_first["dc_source_advance_apply_status"] == "APPLIED"
+    assert ec_first["ec_source_advance_apply_status"] == "APPLIED"
+    assert dc_second["dc_source_advance_apply_status"] == "NO_CHANGE"
+    assert ec_second["ec_source_advance_apply_status"] == "NO_CHANGE"
+    assert ec_first["run_ec_rebuild_invoked"] is False
+    assert ec_first["ec_loaders_invoked"] is False
+    assert ec_first["ec_chunks_invoked"] is False
+    conn = sqlite3.connect(db_path)
+    try:
+        historical_count = conn.execute(
+            "SELECT COUNT(*) FROM dc_ticker_swing_signal_daily WHERE taxonomy_version='DC_TAXONOMY_FULL_V2_1' AND signal_date='2026-08-04'"
+        ).fetchone()[0]
+        catchup_count = conn.execute(
+            "SELECT COUNT(*) FROM dc_ticker_swing_signal_daily WHERE taxonomy_version='DC_TAXONOMY_FULL_V2_1' AND signal_date='2026-08-05'"
+        ).fetchone()[0]
+        sentinel_count = conn.execute(
+            "SELECT COUNT(*) FROM dc_group_swing_signal_daily WHERE taxonomy_version='DC_TAXONOMY_FULL_V2_1' AND group_name='BAD_SENTINEL'"
+        ).fetchone()[0]
+        ec_catchup_count = conn.execute(
+            "SELECT COUNT(*) FROM ec_ticker_signal_daily WHERE taxonomy_version_id=2 AND signal_date='2026-08-05'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert historical_count == 2
+    assert catchup_count == 2
+    assert sentinel_count == 0
+    assert ec_catchup_count == 2
+
+
+def test_source_advance_resume_action_prevents_ec_rebuild_fallback(tmp_path) -> None:
+    db_path, plan = _source_advance_fixture(tmp_path)
+
+    result = plan_ec_resume_action(
+        analysis_db=db_path,
+        plan=plan,
+        deployment_id=2,
+        parity_audit=lambda **_kwargs: {"status": "FAILED", "total_mismatch_count": 1},
+    )
+
+    assert result["ec_resume_action"] == EC_RESUME_ACTION_COPY_POST_DEPLOYMENT_SOURCE_ADVANCE
+    assert result["ec_rebuild_required"] is False
+    assert result["ec_loaders_required"] is False
+    assert result["ec_chunks_required"] is False
+    assert result["source_advance_catchup_required"] is True
 
 
 def _create_ec_revalidation_fixture(tmp_path: Path) -> tuple[Path, Path, dict[str, object]]:

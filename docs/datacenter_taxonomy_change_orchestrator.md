@@ -624,6 +624,28 @@ monthly taxonomy changes that pass delta safety gates. Details are documented in
 docs/datacenter_taxonomy_delta_rebuild.md
 ```
 
+## Post-Deployment Source Advance
+
+`REPORT_STATUS_ONLY` deployments can now plan a guarded
+`POST_DEPLOYMENT_SOURCE_ADVANCE_ONLY` catch-up when the active source taxonomy
+advances after the proposed taxonomy has been materialized but before
+activation. The planner requires the proposed taxonomy to catch up to the active
+source head before cleanup, watermark finalization, `READY_TO_ACTIVATE`, or
+activation.
+
+The corresponding EC action is:
+
+```text
+COPY_POST_DEPLOYMENT_SOURCE_ADVANCE
+```
+
+This action does not call the Datacenter pipeline, Stage 2, calculations, EC
+rebuild orchestration, EC loaders, or EC chunks. Details are documented in:
+
+```text
+docs/datacenter_taxonomy_post_deployment_source_advance.md
+```
+
 ## Scheduler UI
 
 The Scheduler UI now exposes the unified taxonomy-change workflow through a
