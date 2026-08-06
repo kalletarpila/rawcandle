@@ -1555,3 +1555,362 @@ Required next work before activation: diagnose the DC aggregate repair
 validation contract and the EC group-table ecosystem aggregate mapping. Do not
 activate V2.1 from deployment 2 while `ec_rebuild_status=FAILED` and
 `activation_status=NOT_ACTIVE`.
+
+## 2026-08-06 Aggregate Repair Failure Read-Only Diagnosis
+
+Final diagnostic classification:
+
+```text
+DATACENTER_V2_1_AGGREGATE_REPAIR_FAILURE_ROOT_CAUSE_CONFIRMED
+repair_state=AGGREGATE_REPAIR_FULLY_APPLIED_VALIDATION_FALSE_NEGATIVE
+safe_next_action=CODE_FIX_THEN_REVALIDATE_ONLY
+root_cause_classification=MULTIPLE_CAUSES
+primary_root_cause=AGGREGATE_SEMANTIC_COMPARISON_TOO_STRICT
+secondary_root_cause=TRANSACTION_OR_STATUS_PROPAGATION_BUG
+```
+
+The diagnosis was strictly read-only for production state. Temporary diagnostic
+artifacts were written only under:
+
+```text
+temp/datacenter_v2_1_aggregate_repair_failure_diagnostic/
+```
+
+Repository and production preflight:
+
+```text
+branch=chore/ignore-backups
+HEAD=a7b8458a1c622b51a6217ea1de35e6d2b0a29b9a
+origin/chore/ignore-backups=a7b8458a1c622b51a6217ea1de35e6d2b0a29b9a
+working_tree_initial_status=clean
+
+DC_TAXONOMY_FULL_V2 status=ACTIVE is_active=1
+DC_TAXONOMY_FULL_V2_1 status=INACTIVE is_active=0
+deployment_id=2
+deployment_status=LOADED_NOT_ACTIVE
+activation_status=NOT_ACTIVE
+ec_rebuild_status=FAILED
+skip_next_run=false
+datacenter_taxonomy_version=DC_TAXONOMY_FULL_V2
+ec_source_layer_taxonomy_version=DC_TAXONOMY_FULL_V2
+taxonomy_operation_lock_active=false
+```
+
+Source and backup hashes:
+
+```text
+data/datacenter_taxonomy_full_v2.csv sha256=178de3b56891a37b7472748b3f05b77625cc5c9dde4637cb63be50aed807e2e1
+data/datacenter_taxonomy_full_v2_1.csv sha256=2e27c6e68aa22c53c04e123f79744058b39a6a22b465634fda7510971c3159ef
+scheduler_config.json sha256=f3ecdc488c0b08bea7ce22d757056bfb7539723fee994589c27989ba33c83089
+backup sha256=7b00488c4f713c53641920fa270c5c35ede6d6fca89bc531e4a9d2d1430b2721
+```
+
+Failed operation evidence:
+
+```text
+operation_id=resume_2026-08-06T082643Z_15682905
+evidence_root=temp/datacenter_taxonomy_v2_1_rso_resume_20260806T082257Z/deployment_2/operation_resume_2026-08-06T082643Z_15682905/
+started_at_utc=2026-08-06T082643Z
+completed_at_utc=2026-08-06T082948Z
+run_status=FAILED
+failed_phase=DC_FACTS_CARRIED_FORWARD
+failure_code=DC_AGGREGATE_REPAIR_VALIDATION_FAILED
+completed_phases=PLANNED,BACKUP
+restore_required=false
+cleanup_required=false
+scheduler_guard_restored=true
+current_taxonomy_remains_active=true
+```
+
+The operation summary did not persist a dedicated aggregate apply table-result
+artifact because the later validation failure returned before the successful
+`carry_forward` object was added to the run summary. The current DB state and
+the code path still prove the aggregate apply committed:
+
+```text
+current_repair_candidate_count=0
+current_repair_plan_status=READY
+current_missing_aggregate_rows=0
+current_duplicate_aggregate_keys=0
+current_extra_aggregate_keys=0
+current_aggregate_semantic_mismatch_count=0
+```
+
+Current aggregate inventory, restricted to
+`ecosystem:DC_ECOSYSTEM_TOTAL`:
+
+```text
+dc_group_swing_signal_daily:
+  key=(signal_date, group_type, group_name, signal_version)
+  V2 source rows=253
+  V2.1 target rows=253
+  distinct_dates=253
+  date_range=2025-08-01..2026-08-04
+  signal_version=DC_SWING_SIGNAL_V1
+  duplicate_count=0
+  missing_in_V2_1=0
+  extra_in_V2_1=0
+  semantic_mismatch_count=0
+
+dc_group_index_daily:
+  key=(index_date, group_type, group_name)
+  V2 source rows=253
+  V2.1 target rows=253
+  distinct_dates=253
+  date_range=2025-08-01..2026-08-04
+  calc_version=DC_INDEX_CALC_V1
+  duplicate_count=0
+  missing_in_V2_1=0
+  extra_in_V2_1=0
+  semantic_mismatch_count=0
+```
+
+Therefore the prior 253+253 missing aggregate rows no longer remain missing.
+The aggregate-only repair did not partially apply; it fully applied both target
+tables.
+
+Call path and transaction behavior confirmed from code:
+
+```text
+rawcandle/datacenter_taxonomy_change_orchestrator.py
+
+resume/execute path:
+  _execute_taxonomy_rebuild_impl lines 1568-1715
+  report-status-only resume enters aggregate repair at lines 1666-1686
+  apply status is checked at lines 1692-1700
+  broad post-repair validation runs at lines 1701-1707
+  DC_AGGREGATE_REPAIR_VALIDATION_FAILED returned at lines 1708-1715
+
+aggregate repair contract:
+  DC_GROUP_ECOSYSTEM_AGGREGATE_KEY lines 2199-2203
+  aggregate key columns lines 2253-2257
+  source/target aggregate SELECT predicate lines 2260-2279
+  aggregate planner lines 2297-2452
+
+aggregate apply:
+  apply_dc_ecosystem_aggregate_repair lines 2865-2953
+  confirmation gate lines 2873-2888
+  single sqlite transaction starts at with conn: line 2893
+  both aggregate tables loop under the same transaction lines 2894-2937
+  post-plan is computed after the with-block at line 2938
+
+broad validation:
+  _dc_key_contract lines 2956-2968
+  _semantic_payload lines 2982-2995
+  _validate_carry_forward_table lines 2998-3107
+  validate_dc_carry_forward_key_universe lines 3110-3173
+```
+
+The important transaction boundary is that `with conn:` commits before
+`post = plan_dc_ecosystem_aggregate_repair(...)` and before
+`validate_dc_carry_forward_key_universe(...)`. A validation failure after that
+point does not roll back the aggregate inserts. This explains why the operation
+failed while the aggregate rows remained committed.
+
+Exact failed post-apply validation:
+
+```text
+validation_status=BLOCKED
+missing_target_ordinary_keys=0
+missing_target_ecosystem_aggregate_keys=0
+extra_target_keys=0
+duplicate_keys=0
+semantic_mismatch_count=14694
+
+dc_ticker_swing_signal_daily:
+  validation_status=BLOCKED
+  key=(signal_date, ticker, signal_version)
+  ordinary_key_count=65021
+  ecosystem_aggregate_key_count=0
+  missing_target_ordinary_keys=0
+  missing_target_ecosystem_aggregate_keys=0
+  extra_target_keys=0
+  duplicate_keys=0
+  semantic_mismatch_count=1285
+
+dc_group_swing_signal_daily:
+  validation_status=OK
+  key=(signal_date, group_type, group_name, signal_version)
+  ordinary_key_count=13409
+  ecosystem_aggregate_key_count=253
+  missing_target_ordinary_keys=0
+  missing_target_ecosystem_aggregate_keys=0
+  extra_target_keys=0
+  duplicate_keys=0
+  semantic_mismatch_count=0
+
+dc_group_synthetic_ohlc_daily:
+  validation_status=OK
+  key=(ohlc_date, group_type, group_name, calc_version)
+  ordinary_key_count=13409
+  ecosystem_aggregate_key_count=0
+  missing_target_ordinary_keys=0
+  missing_target_ecosystem_aggregate_keys=0
+  extra_target_keys=0
+  duplicate_keys=0
+  semantic_mismatch_count=0
+
+dc_group_index_daily:
+  validation_status=BLOCKED
+  key=(index_date, group_type, group_name)
+  ordinary_key_count=13409
+  ecosystem_aggregate_key_count=253
+  missing_target_ordinary_keys=0
+  missing_target_ecosystem_aggregate_keys=0
+  extra_target_keys=0
+  duplicate_keys=0
+  semantic_mismatch_count=13409
+```
+
+Semantic mismatch details:
+
+```text
+dc_group_index_daily:
+  mismatching_field=run_id
+  affected_keys=13409
+  source_example=DC_INDEX_DC_TAXONOMY_FULL_V2_BASE20200101_20200101_20260805
+  target_example=DC_INDEX_DC_TAXONOMY_FULL_V2_BASE20200101_20200101_20260804
+
+dc_ticker_swing_signal_daily:
+  mismatching_field=run_id
+  affected_keys=1285
+  source_example=DC_TICKER_SWING_20260805_DC_SWING_SIGNAL_V1
+  target_example=DC_TICKER_SWING_20260804_DC_SWING_SIGNAL_V1
+
+dc_ticker_swing_signal_daily:
+  mismatching_field=bullish_divergence_signal
+  affected_keys=1
+  example_key=(2026-08-04, WMS, DC_SWING_SIGNAL_V1)
+  source_value=1
+  target_value=0
+```
+
+The aggregate repair itself is not missing rows, extra rows, duplicate rows, or
+wrong target lineage. The aggregate tables now match for the intended
+`ecosystem:DC_ECOSYSTEM_TOTAL` scope. The failure is caused by the post-repair
+validator checking the full DC carry-forward universe after a deliberately
+narrow aggregate-only repair. That broad validator also treats `run_id` as
+semantic data, even though the RSO metadata policy had already accepted
+operational source-run drift for EC revalidation. There is also one non-run-id
+ticker semantic difference (`WMS` bullish divergence), but that row is outside
+the aggregate-only repair scope and should not be used to decide whether the
+aggregate repair succeeded.
+
+Current EC V2.1 group target shape remains relevant for later activation work:
+
+```text
+ec_group_signal_daily V2.1:
+  GROUP_L1 rows=4048
+  GROUP_L2 rows=9361
+  ecosystem rows=0
+
+ec_group_synthetic_ohlc_daily V2.1:
+  GROUP_L1 rows=4048
+  GROUP_L2 rows=9361
+  ecosystem rows=0
+
+ec_group_index_daily V2.1:
+  GROUP_L1 rows=4048
+  GROUP_L2 rows=9361
+  ecosystem rows=0
+
+ec_ticker_signal_daily V2.1:
+  rows=65021
+```
+
+This diagnosis does not conclude that V2.1 is ready to activate. It concludes
+only that the aggregate-only DC repair failure is now explained and that the
+aggregate repair no longer needs another write.
+
+Idempotency and safe next phase:
+
+```text
+aggregate_repair_required=false
+aggregate_repair_candidate_count=0
+ordinary_dc_recopy_required=false
+EC_rebuild_required=false for this diagnosis
+EC_revalidation_required=true after code fix
+cleanup_required=false before revalidation
+restore_required=false
+backup_reuse_required=true
+
+safe_resume_phase_after_fix=DC_FACTS_VALIDATED
+earliest_safe_resume_phase=DC_FACTS_VALIDATED
+```
+
+Minimal required fix before retry:
+
+```text
+1. Do not run full validate_dc_carry_forward_key_universe as the success gate
+   for an aggregate-only RSO repair.
+2. Add a scope-specific post-aggregate validation that checks only:
+   dc_group_swing_signal_daily ecosystem:DC_ECOSYSTEM_TOTAL
+   dc_group_index_daily ecosystem:DC_ECOSYSTEM_TOTAL
+3. Treat run_id/source-run provenance as explicit operational metadata in RSO
+   revalidation policy, not as silent semantic payload.
+4. Preserve blocking behavior for real semantic differences inside the active
+   validation scope.
+5. Because current aggregate candidates are now zero, the next controlled path
+   should revalidate-only and advance to the next phase if validation passes.
+```
+
+Recommended focused tests:
+
+```text
+1. Aggregate planner and apply use identical uniqueness keys.
+2. Aggregate apply writes all expected ecosystem rows.
+3. Both aggregate table writes are atomic.
+4. Apply-time failure rolls back both table writes.
+5. Post-commit validation failure is not reported as an uncommitted apply.
+6. Scope-specific aggregate validation ignores ordinary ticker rows.
+7. Scope-specific aggregate validation ignores ordinary group rows outside the
+   ecosystem aggregate key.
+8. run_id/source-run metadata differences are classified by explicit policy.
+9. Real semantic mismatch inside ecosystem aggregate scope remains blocking.
+10. Target lineage is V2.1 after aggregate copy.
+11. Candidate hash remains deterministic before apply.
+12. Candidate count becomes zero after successful apply.
+13. No-op second apply succeeds.
+14. Partial prior aggregate state is repaired idempotently.
+15. Failure diagnostics expose exact fields and keys.
+16. Resume starts from DC_FACTS_VALIDATED when aggregate rows are already
+   fully present and validated by aggregate scope.
+17. EC revalidation remains read-only.
+18. No broad DC recopy, Datacenter pipeline, Stage 2, EC rebuild/loaders/chunks,
+   cleanup, watermark finalization, or activation occurs in the repair path.
+```
+
+No diagnostic writes detected:
+
+```text
+analysis.db size_before=8224133120
+analysis.db mtime_before=1786004984
+analysis.db size_after=8224133120
+analysis.db mtime_after=1786004984
+
+deployment_changed=false
+facts_changed=false
+watermarks_changed=false
+scheduler_config_changed=false
+taxonomy_csv_changed=false
+diagnostic_db_write_detected=false
+taxonomy_operation_lock_active=false
+```
+
+Explicit non-actions in this diagnosis:
+
+```text
+resume not retried
+aggregate repair not applied
+EC cleanup not run
+watermarks not finalized
+V2.1 not activated
+Scheduler not run
+Datacenter pipeline not run
+Stage 2 not run
+EC rebuild/loaders/chunks not run
+production backup not created
+backup not restored
+migrations not applied
+network not used
+```
