@@ -3,14 +3,16 @@
 ## Final Classification
 
 ```text
-DATACENTER_V2_1_RSO_RESUME_FAILED_V2_REMAINS_ACTIVE
+DATACENTER_V2_1_POST_RUN_REPAIR_BLOCKED_BEFORE_WRITES
 ```
 
 The controlled `REPORT_STATUS_ONLY` production execution and later guarded RSO
 resume attempts were performed for `DC_TAXONOMY_FULL_V2_1`, but activation was
-not performed. The latest state-changing resume stopped before activation
-because DC aggregate repair validation failed. `DC_TAXONOMY_FULL_V2` remains the
-only active Datacenter taxonomy.
+not performed. A later read-only post-run rebaseline after the overnight active
+V2 run found that activation now requires an explicit catch-up to signal date
+`2026-08-05`, but no backend-confirmed narrow EC catch-up scope exists for that
+state. The post-run repair therefore stopped before production writes.
+`DC_TAXONOMY_FULL_V2` remains the only active Datacenter taxonomy.
 
 ## Repository And Sources
 
@@ -2022,4 +2024,230 @@ backup not restored
 production migrations not applied
 taxonomy CSVs unchanged
 watchlist unchanged
+```
+
+## 2026-08-06 Post-Run Rebaseline
+
+Final post-run repair classification:
+
+```text
+DATACENTER_V2_1_POST_RUN_REPAIR_BLOCKED_BEFORE_WRITES
+```
+
+Evidence root:
+
+```text
+temp/datacenter_taxonomy_v2_1_post_run_repair_20260806T091014Z/
+```
+
+Key evidence files:
+
+```text
+baseline_fact_inventory.json
+baseline_fact_summary.json
+current_inspect.json
+post_run_rebaseline_preflight_summary.json
+```
+
+Repository and source verification:
+
+```text
+branch=chore/ignore-backups
+implementation_commit=141fed7
+local_HEAD_before_rebaseline=141fed746f9898bc20f61628ed8d441d0de90838
+remote_HEAD_before_rebaseline=141fed746f9898bc20f61628ed8d441d0de90838
+
+V2 CSV sha256=178de3b56891a37b7472748b3f05b77625cc5c9dde4637cb63be50aed807e2e1
+V2.1 CSV sha256=2e27c6e68aa22c53c04e123f79744058b39a6a22b465634fda7510971c3159ef
+existing backup sha256=7b00488c4f713c53641920fa270c5c35ede6d6fca89bc531e4a9d2d1430b2721
+```
+
+Overnight active-V2 scheduler evidence:
+
+```text
+summary_json_path=/home/kalle/projects/rawcandle/logs/stock_update_scheduler_summary_20260806T023003Z.json
+started_at_utc=2026-08-06T02:30:03Z
+finished_at_utc=2026-08-06T05:19:13Z
+overall_status=OK
+datacenter_pipeline_status=OK
+datacenter_taxonomy_version=DC_TAXONOMY_FULL_V2
+datacenter_pipeline_signal_date=2026-08-05
+ec_bridge_mode=HISTORICAL_BACKFILL
+ec_bridge_required_start=2026-07-29
+ec_bridge_required_end=2026-08-05
+ec_bridge_status=OK
+ec_bridge_load_status=BACKFILL_COMPLETED
+ec_bridge_coverage_status=OK_WITH_WARNINGS
+ec_bridge_parity_status=OK_WITH_WARNINGS
+ec_source_layer_total_mismatch_count=0
+ec_bridge_watermark_refresh_performed=true
+```
+
+Deployment 2 remained inactive and not ready:
+
+```text
+status=LOADED_NOT_ACTIVE
+dc_rebuild_status=NOT_STARTED
+ec_rebuild_status=FAILED
+coverage_status=NOT_STARTED
+parity_status=NOT_STARTED
+activation_status=NOT_ACTIVE
+rebuild_start_date=2025-08-01
+last_error=stale rows block whole-range validation
+```
+
+The deployment's originally confirmed replacement range remains:
+
+```text
+deployment confirmed date_from=2025-08-01
+deployment confirmed date_to=2026-08-04
+```
+
+Current canonical heads after the overnight V2 run:
+
+| layer | table | V2 head | V2.1 head | V2 rows on 2026-08-05 | V2.1 rows on 2026-08-05 |
+| --- | --- | --- | --- | ---: | ---: |
+| DC | `dc_ticker_swing_signal_daily` | 2026-08-05 | 2026-08-04 | 257 | 0 |
+| DC | `dc_group_swing_signal_daily` | 2026-08-05 | 2026-08-04 | 54 | 0 |
+| DC | `dc_group_synthetic_ohlc_daily` | 2026-08-05 | 2026-08-04 | 53 | 0 |
+| DC | `dc_group_index_daily` | 2026-08-05 | 2026-08-04 | 54 | 0 |
+| EC | `ec_ticker_signal_daily` | 2026-08-05 | 2026-08-04 | 257 | 0 |
+| EC | `ec_group_signal_daily` | 2026-08-05 | 2026-08-04 | 54 | 0 |
+| EC | `ec_group_synthetic_ohlc_daily` | 2026-08-05 | 2026-08-04 | 53 | 0 |
+| EC | `ec_group_index_daily` | 2026-08-05 | 2026-08-04 | 54 | 0 |
+
+Duplicate counts were zero for all listed canonical DC and EC tables under both
+the active V2 and proposed V2.1 lineages.
+
+Active-source advance policy:
+
+```text
+active_source_advance_policy=TARGET_MUST_CATCH_UP_BEFORE_ACTIVATION
+source_advance_catchup_required=true
+source_advance_date_from=2026-08-05
+source_advance_date_to=2026-08-05
+```
+
+Code evidence:
+
+```text
+plan_datacenter_taxonomy_activation requires each canonical DC fact head,
+canonical EC fact head, and canonical EC watermark head to be at least
+required_signal_date.
+
+tests/test_datacenter_taxonomy_replacement.py includes activation tests that
+block incomplete rebuild evidence and accept activation only after complete
+isolated evidence.
+```
+
+Post-deployment source-advance candidate counts for `2026-08-05`:
+
+| layer | table | missing V2.1 target rows |
+| --- | --- | ---: |
+| DC | `dc_ticker_swing_signal_daily` | 257 |
+| DC | `dc_group_swing_signal_daily` | 54 |
+| DC | `dc_group_synthetic_ohlc_daily` | 53 |
+| DC | `dc_group_index_daily` | 54 |
+| EC | `ec_ticker_signal_daily` | 257 |
+| EC | `ec_group_signal_daily` | 54 |
+| EC | `ec_group_synthetic_ohlc_daily` | 53 |
+| EC | `ec_group_index_daily` | 54 |
+
+The existing backend does not expose a proven
+`POST_DEPLOYMENT_SOURCE_ADVANCE_ONLY` EC catch-up/apply scope. The current
+read-only EC resume planner for required date `2026-08-05` returned:
+
+```text
+ec_resume_action=REBUILD_EC_FACTS
+ec_rebuild_required=true
+ec_loaders_required=true
+ec_chunks_required=true
+ec_revalidation_status=BLOCKED
+ec_fact_state=INCOMPLETE
+parity_status=FAILED
+total_blocking_mismatch_count=1
+safe_to_continue_to_cleanup=false
+```
+
+Because the task explicitly disallowed EC rebuild/loaders/chunks and broad
+recopy, the safe outcome was to stop before writes.
+
+Aggregate repair revalidation at the original deployment head remains OK:
+
+```text
+required_signal_date=2026-08-04
+repair_scope=ECOSYSTEM_AGGREGATE_ONLY
+repair_scope_validation_status=OK
+aggregate_repair_required=false
+```
+
+WMS semantic mismatch remains present at the original deployment head:
+
+```text
+key=(2026-08-04, WMS, DC_SWING_SIGNAL_V1)
+field=bullish_divergence_signal
+V2 source=1
+V2.1 target=0
+dc_semantic_repair_scope=SEMANTIC_ROW_ONLY
+dc_semantic_repair_candidate_count=1
+candidate_hash=1bffbef1efe2dacf554327ff0a67d2b87a600ca34a7c2a2bd8af0c259331502b
+```
+
+For `2026-08-05`, V2 has WMS but V2.1 does not:
+
+```text
+wms_20260805_source_present=true
+wms_20260805_target_present=false
+```
+
+No production writes were performed during this post-run rebaseline. Therefore:
+
+```text
+WMS semantic repair result=NOT_APPLIED_BLOCKED_BEFORE_WRITES
+source-advance repair result=NOT_APPLIED_NO_PROVEN_NARROW_EC_SCOPE
+runtime amendment identity=NOT_CREATED_BLOCKED_BEFORE_WRITES
+existing backup reuse=VERIFIED_NOT_USED_FOR_WRITES
+complete DC validation=NOT_RUN_AFTER_BLOCKER
+EC cleanup result=NOT_RUN_AFTER_BLOCKER
+whole-range validation=NOT_RUN_AFTER_BLOCKER
+watermark finalization=NOT_RUN_AFTER_BLOCKER
+deployment READY_TO_ACTIVATE=false
+activation_plan_status=BLOCKED
+V2 remains active=true
+V2.1 remains inactive=true
+guard restoration required=false
+lock release required=false
+failure_resume_point=POST_DEPLOYMENT_SOURCE_ADVANCE_REPAIR_DESIGN_REQUIRED
+```
+
+Explicit non-actions in this post-run rebaseline:
+
+```text
+Scheduler not run
+Datacenter pipeline not run
+Stage 2 not run
+ticker/group/synthetic/index calculations not run
+EC rebuild/loaders/chunks not run
+old-version EC cleanup not run
+watermarks not finalized
+deployment evidence not updated to READY_TO_ACTIVATE
+activation not run
+taxonomy CSVs unchanged
+watchlist unchanged
+production backup not created
+existing backup unchanged
+backup not restored
+migrations not applied
+network not used
+unrelated cleanup not performed
+```
+
+Recommended next controlled task:
+
+```text
+Design and implement a backend-confirmed POST_DEPLOYMENT_SOURCE_ADVANCE_ONLY
+contract that can advance V2.1 DC and EC canonical facts for post-deployment
+active-source dates without Scheduler, pipeline, Stage 2, calculations, EC
+rebuild/loaders/chunks, or broad historical recopy. Only after focused tests and
+read-only preflight should deployment 2 repair be retried.
 ```
