@@ -14,6 +14,11 @@ The standalone CLI remains available for manual use. The Datacenter scheduler
 report workflow also attempts to generate this summary automatically after the
 daily, rolling 2, rolling 5, and rolling 30 markdown reports have been produced.
 
+Sections 2 through 10 include short static descriptions that explain what the
+section contains and how an occasional reader should use it. These descriptions
+do not change the parsed source data, deterministic labels, tables, or scanner
+logic.
+
 ## Required Inputs
 
 The CLI requires all source reports explicitly:

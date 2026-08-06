@@ -8,6 +8,7 @@ import pytest
 
 from rawcandle.datacenter_decision_summary import (
     DecisionSummaryError,
+    SECTION_DESCRIPTIONS,
     build_decision_summary,
     compare_watchlist_status,
     extract_section,
@@ -175,6 +176,23 @@ def test_build_summary_contains_required_headers_and_no_rows(tmp_path: Path) -> 
     assert "| POET | NOT_PART_OF_DATACENTER_ECOSYSTEM | NO |  |" in text
     assert "| daily_breakouts | MONITOR_BREAKOUT_CONFIRMATION | AMZN |" in text
     assert "| watchlist_exit_risk | REVIEW_EXIT_RISK | watchlist_high_exit_risk_count=1 |" in text
+
+
+def test_section_descriptions_are_inserted_under_sections_2_through_10(tmp_path: Path) -> None:
+    paths = _write_fixture_set(tmp_path)
+    output = tmp_path / "datacenter_decision_summary_2026-08-03_0813_full.md"
+    build_decision_summary(output=output, **paths)
+    text = output.read_text(encoding="utf-8")
+
+    for section, description in SECTION_DESCRIPTIONS.items():
+        heading = f"## {section}"
+        assert f"{heading}\n\n{description}\n\n" in text
+
+    assert "## 1. Title and run metadata\n\nThis section" not in text
+    assert "## 1. Title and run metadata\n| field | value |" in text
+    assert "| signal | value |" in text
+    assert "| metric | previous_value | current_value | change |" in text
+    assert "| area | label | basis |" in text
 
 
 def test_cli_requires_inputs(tmp_path: Path) -> None:

@@ -34,6 +34,70 @@ WATCHLIST_METRICS = [
     "watchlist_medium_exit_risk_count",
 ]
 
+SECTION_DESCRIPTIONS = {
+    "2. Executive signal": (
+        "This section summarizes the most important daily decision signals in one place. "
+        "It shows the overall ecosystem timing state, whether the short-term rolling window improved or weakened, "
+        "how many watchlist tickers have breakout or pullback signals, how many remain in high exit-risk status, "
+        "and which subindustries are currently in Buy Zone. Use this section as the first read to understand "
+        "whether the report is broadly constructive, cautious, or defensive."
+    ),
+    "3. Ecosystem dashboard change": (
+        "This section compares the current ecosystem dashboard against the previous daily report. "
+        "It shows how short-term and medium-term returns, breadth above key moving averages, trend breadth, "
+        "weakness breadth, overheat risk, and data quality changed from one signal date to the next. "
+        "Use this section to see whether the overall datacenter ecosystem is strengthening or weakening, "
+        "even if the headline timing state has not changed."
+    ),
+    "4. Watchlist summary and change": (
+        "This section summarizes the user watchlist and compares it with the previous daily report. "
+        "It shows how many watchlist tickers are part of the datacenter taxonomy, how many have missing price data, "
+        "how many have subindustry or layer context risk, and how many show breakout, pullback, high exit-risk, "
+        "or medium exit-risk conditions. Use this section to understand whether the watchlist is becoming healthier "
+        "or riskier as a group."
+    ),
+    "5. Ticker-level watchlist status changes": (
+        "This section highlights only the watchlist tickers whose status or key signal changed since the previous daily report. "
+        "Improved statuses show tickers moving to a less risky or more constructive state. Deteriorated statuses show "
+        "tickers moving to a weaker or riskier state. Changed watchlist signals show specific signal changes, such as "
+        "breakout signals appearing or disappearing, or exit-risk severity changing."
+    ),
+    "6. Rotation map": (
+        "This section shows where strength and weakness are located inside the datacenter ecosystem by subindustry. "
+        "Buy-Zone subindustries are the most constructive areas for new watchlist attention. Add-On Pullback and "
+        "Trim/Watch sections appear when those setups exist. Exit-Zone subindustries are areas where risk remains "
+        "elevated or market structure is still weak. Use this section to decide which parts of the ecosystem deserve "
+        "new attention and which areas should be treated cautiously."
+    ),
+    "7. Watchlist ticker decision table": (
+        "This section gives the current status of each ticker on the user watchlist. For tickers inside the datacenter "
+        "taxonomy, it shows the primary layer and subindustry, recent returns, distance to EMA20, Dow-style structure "
+        "labels, break-of-structure events, breakout and pullback signals, exit-risk severity, and the status of the "
+        "related subindustry and layer. Tickers outside the datacenter taxonomy are listed separately and should not be "
+        "interpreted using the datacenter-specific signals in this report."
+    ),
+    "8. Scanner output": (
+        "This section lists tickers found by the daily and rolling scanners. The breakout scanner highlights tickers "
+        "with current breakout-type behavior. The pullback scanner highlights potential pullback setups near key moving "
+        "averages. Rolling 5 repeated breakout tickers show names that have triggered breakout behavior during the recent "
+        "5-day window. Rolling 5 pullback alerts classify pullback candidates and failed setups. The rolling 30 buy filter "
+        "shows longer-window watch-zone candidates that may still be blocked by historical exit-risk or mixed structure."
+    ),
+    "9. Exit risk focus": (
+        "This section concentrates on the weakest or riskiest tickers in the ecosystem. The daily high exit-risk scanner "
+        "shows current high-risk tickers based on recent returns, moving-average position, structure labels, trend state, "
+        "and exit-risk reasons. The rolling 30 exit prefilter highlights tickers with persistent or severe exit-risk "
+        "patterns over the longer window. Use this section to identify names that may require stop review, risk reduction, "
+        "or extra caution before considering new exposure."
+    ),
+    "10. Action summary": (
+        "This section converts the report's deterministic signals into a compact action-oriented summary. It does not give "
+        "buy or sell recommendations, but it points to the main areas requiring attention: watchlist exit risk, daily "
+        "breakout confirmation, pullback confirmation, Buy-Zone subindustries, rolling 30 watch-zone candidates, and "
+        "exit-risk focus. Use this section as the final checklist after reading the detailed sections above."
+    ),
+}
+
 ECOSYSTEM_CHANGE_METRICS = [
     "return_5d",
     "return_10d",
@@ -520,6 +584,14 @@ def render_table(rows: Sequence[dict[str, str]], fields: Sequence[str], *, limit
     return lines
 
 
+def _section_heading(title: str) -> list[str]:
+    lines = [f"## {title}"]
+    description = SECTION_DESCRIPTIONS.get(title)
+    if description:
+        lines.extend(["", description, ""])
+    return lines
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build Datacenter daily decision summary from markdown reports.")
     parser.add_argument("--current-daily", required=True, type=Path)
@@ -592,7 +664,7 @@ def _executive_signal_section(
     previous_total = previous_metrics.get("watchlist_tickers_total", "")
     current_total = current_metrics.get("watchlist_tickers_total", "")
     rows.append({"signal": "watchlist_total_change", "value": f"{previous_total} -> {current_total}"})
-    lines = ["## 2. Executive signal"]
+    lines = _section_heading("2. Executive signal")
     lines.extend(render_table(rows, ["signal", "value"]))
     return lines
 
@@ -610,7 +682,7 @@ def _ecosystem_change_section(rows: Sequence[dict[str, str]]) -> list[str]:
                 "change": value_for(row, "change"),
             }
         )
-    lines = ["## 3. Ecosystem dashboard change"]
+    lines = _section_heading("3. Ecosystem dashboard change")
     lines.extend(render_table(rendered, ["metric", "previous_value", "current_value", "change"]))
     return lines
 
@@ -621,7 +693,7 @@ def _watchlist_summary_section(current: dict[str, str], previous: dict[str, str]
         prev = previous.get(metric, "")
         curr = current.get(metric, "")
         rows.append({"metric": metric, "previous_value": prev, "current_value": curr, "change": _delta(prev, curr)})
-    lines = ["## 4. Watchlist summary and change"]
+    lines = _section_heading("4. Watchlist summary and change")
     lines.extend(render_table(rows, ["metric", "previous_value", "current_value", "change"]))
     return lines
 
@@ -630,7 +702,8 @@ def _watchlist_status_change_section(
     status_changes: dict[str, list[dict[str, str]]],
     signal_changes: Sequence[dict[str, str]],
 ) -> list[str]:
-    lines = ["## 5. Ticker-level watchlist status changes", "### Improved statuses"]
+    lines = _section_heading("5. Ticker-level watchlist status changes")
+    lines.append("### Improved statuses")
     lines.extend(render_table(status_changes["improved"], ["ticker", "previous_status", "current_status", "previous_rank", "current_rank"]))
     lines.append("### Deteriorated statuses")
     lines.extend(render_table(status_changes["deteriorated"], ["ticker", "previous_status", "current_status", "previous_rank", "current_rank"]))
@@ -645,7 +718,8 @@ def _rotation_map_section(
     trim_watch: Sequence[dict[str, str]],
     exit_zone: Sequence[dict[str, str]],
 ) -> list[str]:
-    lines = ["## 6. Rotation map", "### Buy-Zone Subindustries"]
+    lines = _section_heading("6. Rotation map")
+    lines.append("### Buy-Zone Subindustries")
     lines.extend(render_table(buy_zone, GROUP_FIELDS))
     lines.append("### Add-On Pullback Subindustries")
     lines.extend(render_table(add_on, GROUP_FIELDS))
@@ -660,7 +734,8 @@ def _watchlist_decision_section(
     in_taxonomy: Sequence[dict[str, str]],
     not_in_taxonomy: Sequence[dict[str, str]],
 ) -> list[str]:
-    lines = ["## 7. Watchlist ticker decision table", "### In Datacenter taxonomy"]
+    lines = _section_heading("7. Watchlist ticker decision table")
+    lines.append("### In Datacenter taxonomy")
     lines.extend(render_table(in_taxonomy, WATCHLIST_FIELDS))
     lines.append("### Not in Datacenter taxonomy")
     lines.extend(render_table(not_in_taxonomy, ["ticker", "watchlist_status", "in_datacenter_ecosystem", "price_data_status"]))
@@ -675,7 +750,8 @@ def _scanner_section(
     rolling5_alerts: Sequence[dict[str, str]],
     rolling30_buy: Sequence[dict[str, str]],
 ) -> list[str]:
-    lines = ["## 8. Scanner output", "### A. Daily Breakout Ticker Scanner"]
+    lines = _section_heading("8. Scanner output")
+    lines.append("### A. Daily Breakout Ticker Scanner")
     lines.extend(render_table(daily_breakouts, DAILY_BREAKOUT_FIELDS))
     lines.append("### B. Daily Pullback Ticker Scanner")
     lines.extend(render_table(daily_pullbacks, DAILY_PULLBACK_FIELDS))
@@ -694,7 +770,8 @@ def _exit_risk_section(
     daily_exits: Sequence[dict[str, str]],
     rolling30_exit: Sequence[dict[str, str]],
 ) -> list[str]:
-    lines = ["## 9. Exit risk focus", "### A. Daily high exit-risk scanner top 20"]
+    lines = _section_heading("9. Exit risk focus")
+    lines.append("### A. Daily high exit-risk scanner top 20")
     high_daily = [row for row in daily_exits if value_for(row, "exit_risk_severity").upper() == "HIGH"]
     lines.extend(render_table(high_daily or daily_exits, DAILY_EXIT_FIELDS, limit=20))
     lines.append("### B. Rolling 30 Exit Prefilter top 20")
@@ -744,7 +821,7 @@ def _action_summary_section(
             "basis": f"daily_exit_rows={len(daily_exits)}; rolling30_exit_rows={len(rolling30_exit)}",
         },
     ]
-    lines = ["## 10. Action summary"]
+    lines = _section_heading("10. Action summary")
     lines.extend(render_table(rows, ["area", "label", "basis"]))
     lines.append("Labels are deterministic report-derived states, not buy/sell recommendations.")
     lines.append("")
